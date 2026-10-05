@@ -380,6 +380,7 @@
           detail: sessionIdLabel(sessionId),
           value,
           cost: finiteNumber(session?.costUsd),
+          ...(session?.unpricedTokens > 0 ? { unpricedTokens: finiteNumber(session.unpricedTokens) } : {}),
           color: colors[client] || (modelLabel && colorForModel ? colorForModel(modelLabel) : stable(key, palette)),
           stale: false,
           archived: archived || undefined,

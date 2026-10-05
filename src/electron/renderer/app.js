@@ -1293,7 +1293,10 @@ function compactMonthLabel(label) {
     .format(new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1)));
 }
 function currentCurrency() { return currencyApi.normalizeCurrency(state.settings?.currency); }
-function formatCost(value) { return currencyApi.formatCurrencyFromUsd(value, currentCurrency()); }
+function formatCost(value, unpricedTokens) {
+  return usageAttributionRowsApi.usageCostLabel(value, unpricedTokens,
+    (cost) => currencyApi.formatCurrencyFromUsd(cost, currentCurrency()), formatNumber, t('usage.unpricedTokens'));
+}
 function applyEffectiveCurrencyRates() {
   if (state.settings?.currencyRatesEffective) currencyApi.configureRates(state.settings.currencyRatesEffective);
 }
@@ -2328,7 +2331,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2421,7 +2424,11 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
-  row.querySelector('.row-cost').textContent = tokenDataUnavailable === true ? '' : formatCost(cost || 0);
+  const costEl = row.querySelector('.row-cost');
+  const costLabelText = formatCost(cost || 0, unpricedTokens);
+  costEl.textContent = tokenDataUnavailable === true ? ''
+    : unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText;
+  costEl.title = tokenDataUnavailable === true ? '' : costLabelText;
   // The row builder already applied the shared gate (recent enough to have a
   // reading), so this draws whatever arrived rather than re-deciding from
   // `running` - that second gate is exactly what made the dock card and this
@@ -2496,7 +2503,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   const tokenLabel = tokenDataUnavailable === true
     ? (t('detailTokenUnavailable') || 'Unavailable')
     : formatNumber(value);
-  const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0)}`;
+  const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0, unpricedTokens)}`;
   sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
     interactive,
     hasAccordion,
@@ -2764,17 +2771,18 @@ function attributionComponent(period, field, key) {
   );
 }
 
-function periodAttributionRows(period, values, costs) {
+function periodAttributionRows(period, values, costs, unpricedTokens) {
   const rows = usageAttributionRowsApi.attributionRows(values, costs, {
     totalValue: period?.totalTokens,
-    totalCost: period?.costUsd
+    totalCost: period?.costUsd,
+    unpricedTokens
   });
   return usageAttributionRowsApi.visibleAttributionRows(rows, formatCost);
 }
 
 function toolRowsForPeriod(period) {
-  const clientRows = periodAttributionRows(period, period?.clients, period?.clientCosts)
-    .map(({ key: client, value, cost }) => ({ key: client, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client), modelRows: toolDetailsApi.visibleModelRowsForTool(period, client, formatCost) }));
+  const clientRows = periodAttributionRows(period, period?.clients, period?.clientCosts, period?.clientUnpricedTokens)
+    .map(({ key: client, value, cost, unpricedTokens }) => ({ key: client, unpricedTokens, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client), modelRows: toolDetailsApi.visibleModelRowsForTool(period, client, formatCost) }));
   if (clientRows.length > 0) {
     const usageSortedRows = clientRows.sort((a, b) => b.value - a.value);
     return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, state.settings?.clientDisplayOrder, state.settings?.hiddenClients, KNOWN_CLIENTS, state.settings?.pinnedClients);
@@ -2784,8 +2792,9 @@ function toolRowsForPeriod(period) {
 }
 
 function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRankingMetric) {
-  const modelRows = periodAttributionRows(period, period?.models, period?.modelCosts).map(({ key: model, value, cost, unattributed }) => ({
+  const modelRows = periodAttributionRows(period, period?.models, period?.modelCosts, period?.modelUnpricedTokens).map(({ key: model, value, cost, unpricedTokens, unattributed }) => ({
     key: model,
+    unpricedTokens,
     name: model === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : model,
     value,
     cost,
@@ -4764,7 +4773,7 @@ function backgroundReviewRunNode(row, max, parent) {
   }
   wrap.querySelector('.detail-ex-sub').textContent = row.detail || '';
   wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
-  wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0);
+  wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0, row.unpricedTokens);
   applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
   const open = () => openSessionDetail({
     client: row.client,
@@ -4857,7 +4866,7 @@ function exchangeNode(row, max) {
   wrap.querySelector('.detail-ex-value').textContent = tokensAvailable
     ? formatNumber(row.value)
     : (t('detailTokenUnavailable') || 'Unavailable');
-  wrap.querySelector('.detail-ex-cost').textContent = tokensAvailable ? formatCost(row.cost) : '';
+  wrap.querySelector('.detail-ex-cost').textContent = tokensAvailable ? formatCost(row.cost, row.unpricedTokens) : '';
   applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
 
   const turnsEl = wrap.querySelector('.detail-turns');
@@ -5756,7 +5765,7 @@ function renderHomeModelModule(period) {
 }
 
 function homeToolSourceRows(period) {
-  return periodAttributionRows(period, period?.clients, period?.clientCosts).map(({ key: client, value }) => ({
+  return periodAttributionRows(period, period?.clients, period?.clientCosts, period?.clientUnpricedTokens).map(({ key: client, value }) => ({
     key: client,
     name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client,
     value: Number(value || 0),
@@ -6527,7 +6536,7 @@ function render() {
     cancelNumberAnimation();
     els.totalTokens.textContent = fixedUnavailable ? '—' : formatNumber(Number(period.totalTokens || 0));
     updateTotalCompact(fixedUnavailable ? 0 : Number(period.totalTokens || 0));
-    els.cost.textContent = fixedUnavailable ? '' : formatCost(period.costUsd || 0);
+    els.cost.textContent = fixedUnavailable ? '' : formatCost(period.costUsd || 0, period.unpricedTokens);
     state.currentTotal = fixedUnavailable ? 0 : Number(period.totalTokens || 0);
     hidePeriodContentForMessage(fixedPeriodMessage(state.fixedPeriodSnapshot, detailUnavailable ? state.breakdown : ''));
     renderFloatingBubbleContent();
@@ -6561,7 +6570,7 @@ function render() {
     updateTotalCompact(nextTotal);
   }
   state.currentTotal = nextTotal;
-  els.cost.textContent = formatCost(period.costUsd || 0);
+  els.cost.textContent = formatCost(period.costUsd || 0, period.unpricedTokens);
   renderTokenRate();
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');

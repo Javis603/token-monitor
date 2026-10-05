@@ -5,14 +5,14 @@ const { localDayKey } = require('../../history');
 const { createLocalUsageStore } = require('./localUsageStore');
 
 function estimatedCost(usage, pricing) {
-  if (!pricing) return 0;
+  if (!pricing) return null;
   let cost = 0;
   for (const [field, rate] of [
     ['input', 'inputCostPerToken'], ['cacheRead', 'cacheReadInputTokenCost'],
     ['cacheWrite', 'cacheCreationInputTokenCost'], ['output', 'outputCostPerToken']
   ]) {
     if (!usage[field]) continue;
-    if (!Number.isFinite(pricing[rate]) || pricing[rate] < 0) return 0;
+    if (!Number.isFinite(pricing[rate]) || pricing[rate] < 0) return null;
     cost += usage[field] * pricing[rate];
   }
   return cost;
@@ -35,11 +35,12 @@ function buildLocalUsageView(rows, options = {}) {
     if (nativeIds.has(row.threadId) || row.nativeBacked === true) continue;
     const at = Date.parse(row.observedAt);
     if (!Number.isFinite(at) || at > now.getTime()) continue;
-    const cost = estimatedCost(row.usage, options.pricingByModel?.[row.model.toLowerCase()]);
+    const estimate = estimatedCost(row.usage, row.model === 'unknown' ? null : options.pricingByModel?.[row.model.toLowerCase()]);
+    const cost = estimate ?? 0;
     const entry = {
       client: 'codex', provider: 'openai', sessionId: row.threadId, model: row.model,
       ...row.usage, output: row.usage.output - row.usage.reasoning,
-      cost, messageCount: 1, sessionTitle: row.title,
+      cost, ...(estimate === null ? { unpricedTokens: row.usage.total } : {}), messageCount: 1, sessionTitle: row.title,
       startedAt: row.observedAt, lastUsedAt: row.observedAt,
       ...(options.projectsEnabled !== false ? options.projectIdentity(row.cwd) : {})
     };
@@ -59,6 +60,7 @@ function buildLocalUsageView(rows, options = {}) {
     for (const key of Object.keys(model.tokens)) model.tokens[key] += key === 'output'
       ? row.usage.output - row.usage.reasoning : row.usage[key];
     model.cost += cost;
+    if (estimate === null) model.unpricedTokens = (model.unpricedTokens || 0) + row.usage.total;
     model.messages += 1;
   }
   function period(start) {
@@ -96,6 +98,7 @@ async function resolveLocalUsagePricing(rows, options = {}) {
   const result = {};
   const models = [...new Set(rows.map((row) => row.model.toLowerCase()))];
   for (const model of models) {
+    if (model === 'unknown') { result[model] = null; continue; }
     const key = `${options.pricingRevision || ''}:${model}`;
     let cached = pricingCache.get(key);
     if (!cached || cached.until <= Date.now()) {

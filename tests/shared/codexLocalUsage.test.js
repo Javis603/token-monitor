@@ -465,8 +465,9 @@ test('live model attribution requires a turn-linked event rather than the thread
   notify('baseline', TOTAL);
   socket.notify('model/rerouted', { threadId: ID, toModel: 'unscoped-model' });
   const next = addCounters(TOTAL, LAST);
+  socket.notify('turn/started', { threadId: ID, turn: { id: 'turn-unknown', model: 'unsupported-field' } });
   notify('turn-unknown', next);
-  socket.notify('turn/started', { threadId: ID, turn: { id: 'turn-known', model: 'confirmed-model' } });
+  socket.notify('model/rerouted', { threadId: ID, turnId: 'turn-known', fromModel: 'original-model', toModel: 'confirmed-model', reason: 'modelCapacity' });
   notify('turn-known', addCounters(next, LAST));
   assert.deepEqual(store.rows().map((row) => row.model), ['unknown', 'confirmed-model']);
 });
@@ -487,4 +488,30 @@ test('native replacement removes previously observed Dots usage from retained da
   });
   assert.equal(replacement.today.totalTokens, 20);
   assert.equal(replacement.history.daily[0].tokens, 20, 'generic archive must not resurrect the old Dots maximum');
+});
+
+
+test('missing model or rates remain explicit across period/session/project normalization and display', () => {
+  const { mergePeriods, applyProjectRollups } = require('../../src/shared/usage');
+  const usage = { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 110 };
+  const rows = ['unknown', 'priced', 'missing-rate', 'free'].map((model, index) => ({
+    threadId: ID + index, model, usage, observedAt: AT, cwd: '/work/project', title: model
+  }));
+  const pricing = (rate) => ({ inputCostPerToken: rate, outputCostPerToken: rate });
+  const view = buildLocalUsageView(rows, {
+    now: AT, projectIdentity,
+    pricingByModel: { unknown: pricing(1), priced: pricing(0.01), 'missing-rate': { inputCostPerToken: 0.01 }, free: pricing(0) }
+  });
+  applyProjectRollups(view);
+  const normalized = normalizeDeviceRecord({ periods: { today: view.today } }).periods.today;
+  assert.equal(normalized.totalTokens, 440);
+  assert.equal(normalized.unpricedTokens, 220);
+  assert.equal(normalized.costUsd, 1.1);
+  assert.equal(normalized.sessions['codex:' + ID + '0'].unpricedTokens, 110);
+  assert.equal(normalized.clientUnpricedTokens.codex, 220);
+  assert.equal(normalized.modelUnpricedTokens.unknown, 110);
+  assert.equal(Object.values(normalized.projects)[0].unpricedTokens, 220);
+  assert.equal(sessionRowsForPeriod(normalized).find((row) => row.key === 'session:codex:' + ID + '0').unpricedTokens, 110);
+  assert.equal(projectRowsForPeriod(normalized)[0].unpricedTokens, 220);
+  assert.equal(mergePeriods(normalized, normalized).unpricedTokens, 440);
 });

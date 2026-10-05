@@ -180,8 +180,10 @@ function createLocalUsageSource(options = {}, deps = {}) {
     if (!entry || !localThreadEnvironment(entry.thread, executorIds)) return;
     const accountKey = hashAccountKey(context.accountId);
     const turnId = params.turnId || params.turn?.id;
-    const reportedModel = message.method === 'model/rerouted' ? params.toModel
-      : message.method === 'turn/started' ? params.turn?.model || params.model : null;
+    // The desktop schema's Turn has no model. Thread.model and resume.model
+    // are current configuration, not per-turn execution telemetry. Only an
+    // explicit turn-linked reroute identifies the execution model here.
+    const reportedModel = message.method === 'model/rerouted' ? params.toModel : null;
     if (turnId && typeof reportedModel === 'string' && reportedModel.trim()) {
       entry.turnModels.set(turnId, reportedModel.trim());
       if (entry.turnModels.size > 32) entry.turnModels.delete(entry.turnModels.keys().next().value);

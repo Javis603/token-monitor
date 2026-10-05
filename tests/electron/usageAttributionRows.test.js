@@ -174,8 +174,8 @@ test('Tool and Model breakdowns consume the shared token-or-cost rows', () => {
   const index = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   assert.ok(index.indexOf('usageAttributionRows.js') < index.indexOf('app.js'));
-  assert.match(app, /periodAttributionRows\(period, period\?\.clients, period\?\.clientCosts\)/);
-  assert.match(app, /periodAttributionRows\(period, period\?\.models, period\?\.modelCosts\)/);
+  assert.match(app, /periodAttributionRows\(period, period\?\.clients, period\?\.clientCosts, period\?\.clientUnpricedTokens\)/);
+  assert.match(app, /periodAttributionRows\(period, period\?\.models, period\?\.modelCosts, period\?\.modelUnpricedTokens\)/);
   assert.match(app, /visibleAttributionRows\(rows, formatCost\)/);
   assert.match(app, /attributionValue\(/);
 });
@@ -204,4 +204,15 @@ test('Model rows use the selected ranking metric for order and bar scale', () =>
   assert.match(app, /const width = rowWidth\(barValue, max\)/);
   assert.match(app, /const max = barScaleMax\(rows\)/);
   assert.match(app, /homeModelRows\(modelRowsForPeriod\(period, 'tokens'\), period\?\.totalTokens, 5\)/);
+});
+
+
+test('unknown prices show a missing subtotal instead of a free cost', () => {
+  const { usageCostLabel } = require('../../src/electron/renderer/usageAttributionRows');
+  const money = (value) => `$${value.toFixed(2)}`;
+  const tokens = (value) => String(value);
+  assert.equal(usageCostLabel(0, 200, money, tokens, 'unpriced tokens'), '— (200 unpriced tokens)');
+  assert.equal(usageCostLabel(1.5, 200, money, tokens, 'unpriced tokens'), '$1.50 + 200 unpriced tokens');
+  assert.equal(usageCostLabel(0, 0, money, tokens, 'unpriced tokens'), '$0.00');
+  assert.equal(attributionRows({ unknown: 200 }, {}, { unpricedTokens: { unknown: 200 } })[0].unpricedTokens, 200);
 });

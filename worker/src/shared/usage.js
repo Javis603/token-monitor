@@ -316,6 +316,38 @@ function emptyProject(label = '') {
   };
 }
 
+// costUsd remains the known subtotal. Missing prices are explicit token counts,
+// never inferred from a zero cost (which can be a valid rate).
+function addUnpricedTokens(target, source, maximum = Infinity) {
+  const count = Math.min(maximum, Math.max(0, Math.round(asNumber(source?.unpricedTokens))));
+  if (count > 0) target.unpricedTokens = (target.unpricedTokens || 0) + count;
+}
+
+function mergeUnpricedMaps(target, source) {
+  for (const field of ['clientUnpricedTokens', 'modelUnpricedTokens']) {
+    for (const [rawKey, value] of Object.entries(source[field] || {})) {
+      const key = field === 'clientUnpricedTokens' ? normalizeClientName(rawKey) : normalizeModelName(rawKey);
+      if (!key) continue;
+      const count = Math.min(target.unpricedTokens || 0, Math.max(0, Math.round(asNumber(value))));
+      if (!count) continue;
+      const map = target[field] ||= Object.create(null);
+      map[key] = (map[key] || 0) + count;
+    }
+  }
+  for (const [rawClient, models] of Object.entries(source.clientModelUnpricedTokens || {})) {
+    const client = normalizeClientName(rawClient);
+    if (!client) continue;
+    for (const [rawModel, value] of Object.entries(models || {})) {
+      const model = normalizeModelNameForClient(rawModel, client);
+      if (!model) continue;
+      const count = Math.min(target.unpricedTokens || 0, Math.max(0, Math.round(asNumber(value))));
+      if (!count) continue;
+      const map = (target.clientModelUnpricedTokens ||= Object.create(null))[client] ||= Object.create(null);
+      map[model] = (map[model] || 0) + count;
+    }
+  }
+}
+
 function addProjectInto(projects, rawKey, source) {
   if (!source || typeof source !== 'object') return;
   const label = String(source.label || rawKey || '').trim().normalize('NFC');
@@ -326,6 +358,7 @@ function addProjectInto(projects, rawKey, source) {
   target.label = deterministicProjectLabel(target.label, label || rawKey);
   target.tokens += Math.max(0, Math.round(asNumber(source.tokens ?? source.totalTokens)));
   target.costUsd += asNumber(source.costUsd ?? source.cost);
+  addUnpricedTokens(target, source, Math.max(0, asNumber(source.tokens ?? source.totalTokens)));
   for (const [client, tokens] of Object.entries(source.clients || {})) {
     const clientKey = normalizeClientName(client);
     if (!clientKey) continue;
@@ -354,6 +387,7 @@ function projectRollupFromSessions(sessions) {
     const tokens = Math.max(0, Math.round(asNumber(session.totalTokens)));
     project.tokens += tokens;
     project.costUsd += asNumber(session.costUsd);
+    addUnpricedTokens(project, session, tokens);
     const client = normalizeClientName(session.client);
     if (client && tokens > 0) {
       project.clients[client] = (hasOwn(project.clients, client) ? project.clients[client] : 0) + tokens;
@@ -537,6 +571,7 @@ const sessionsWithLiveSource = new WeakSet();
 function mergeSession(target, source) {
   target.totalTokens += Math.max(0, Math.round(asNumber(source.totalTokens)));
   target.costUsd += asNumber(source.costUsd);
+  addUnpricedTokens(target, source, source.totalTokens);
   target.messageCount += Math.max(0, Math.round(asNumber(source.messageCount)));
   target.inputTokens += Math.max(0, Math.round(asNumber(source.inputTokens)));
   target.outputTokens += Math.max(0, Math.round(asNumber(source.outputTokens)));
@@ -640,6 +675,7 @@ function sessionFromRow(row) {
   const session = emptySession(client, id);
   session.totalTokens = Math.max(0, Math.round(tokenValueForClient(row, client)));
   session.costUsd = costValue(row);
+  addUnpricedTokens(session, row, session.totalTokens);
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
   Object.assign(session, sessionTokenComponents(row));
   session.outputTokens = Math.max(0, Math.round(outputValueForClient(row, client)));
@@ -677,6 +713,7 @@ function normalizeSession(input, fallbackKey) {
   const componentTotal = components.inputTokens + components.outputTokens + components.cacheReadTokens + components.cacheWriteTokens; // reasoning is a subset of output — see TOKEN_COMPONENT_KEYS
   session.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? input.tokens ?? componentTotal)));
   session.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
+  addUnpricedTokens(session, input, session.totalTokens);
   session.messageCount = Math.max(0, Math.round(firstNumber(input, MESSAGE_COUNT_KEYS)));
   session.timedDurationMs = Math.max(0, Math.round(asNumber(input.timedDurationMs ?? input.timed_duration_ms ?? 0)));
   session.timedOutputTokens = normalizeTimedOutputTokens(
@@ -801,6 +838,8 @@ function normalizePeriod(input, options = {}) {
   period.capabilities.tokenComponents = componentCapability === true
     || (componentCapability !== false && (period.totalTokens === 0 || hasLegacyComponentShape));
   period.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
+  addUnpricedTokens(period, input, period.totalTokens);
+  mergeUnpricedMaps(period, input);
   period.cacheReadTokens = Math.max(0, Math.round(asNumber(input.cacheReadTokens ?? input.cache_read_tokens ?? 0)));
   period.cacheWriteTokens = Math.max(0, Math.round(asNumber(input.cacheWriteTokens ?? input.cache_write_tokens ?? 0)));
   period.outputTokens = Math.max(0, Math.round(asNumber(input.outputTokens ?? input.output_tokens ?? 0)));
@@ -1005,6 +1044,15 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const model = detectModel(row, client);
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;
+  const unpriced = Math.min(Math.max(0, Math.round(tokens)), Math.max(0, Math.round(asNumber(row.unpricedTokens))));
+  addUnpricedTokens(period, { unpricedTokens: unpriced });
+  if (unpriced > 0) {
+    mergeUnpricedMaps(period, {
+      clientUnpricedTokens: client ? { [client]: unpriced } : {},
+      modelUnpricedTokens: model ? { [model]: unpriced } : {},
+      clientModelUnpricedTokens: client && model ? { [client]: { [model]: unpriced } } : {}
+    });
+  }
   period.cacheReadTokens += cacheRead;
   period.cacheWriteTokens += cacheWrite;
   period.outputTokens += output;
@@ -1543,6 +1591,8 @@ function addPeriodInto(target, source) {
     && source.capabilities?.throughput === true;
   target.totalTokens += source.totalTokens;
   target.costUsd += source.costUsd;
+  addUnpricedTokens(target, source, source.totalTokens);
+  mergeUnpricedMaps(target, source);
   target.cacheReadTokens += source.cacheReadTokens;
   target.cacheWriteTokens += source.cacheWriteTokens;
   target.outputTokens += source.outputTokens;

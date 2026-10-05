@@ -57,6 +57,7 @@
         project.name = deterministicProjectLabel(project.name, name);
         project.value += Math.max(0, Number(entry.tokens || 0));
         project.cost += Number(entry.costUsd || 0);
+        if (entry.unpricedTokens > 0) project.unpricedTokens = (project.unpricedTokens || 0) + Number(entry.unpricedTokens);
         for (const [client, tokens] of Object.entries(clientTokens)) {
           project.clients.add(client);
           project.clientTokens[client] = (Object.prototype.hasOwnProperty.call(project.clientTokens, client) ? project.clientTokens[client] : 0) + tokens;
@@ -73,6 +74,7 @@
         const sessionTokens = Math.max(0, Number(session.totalTokens || 0));
         project.value += sessionTokens;
         project.cost += Number(session.costUsd || 0);
+        if (session.unpricedTokens > 0) project.unpricedTokens = (project.unpricedTokens || 0) + Number(session.unpricedTokens);
         if (session.client) {
           project.clients.add(session.client);
           project.clientTokens[session.client] = (Object.prototype.hasOwnProperty.call(project.clientTokens, session.client) ? project.clientTokens[session.client] : 0) + sessionTokens;

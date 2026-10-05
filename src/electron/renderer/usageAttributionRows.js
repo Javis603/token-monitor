@@ -12,6 +12,12 @@
     return Number.isFinite(number) ? number : 0;
   }
 
+  function usageCostLabel(cost, unpricedTokens, formatCost, formatTokens, unpricedLabel) {
+    if (!(finiteNumber(unpricedTokens) > 0)) return formatCost(finiteNumber(cost));
+    const missing = `${formatTokens(unpricedTokens)} ${unpricedLabel}`;
+    return finiteNumber(cost) > 0 ? `${formatCost(cost)} + ${missing}` : `— (${missing})`;
+  }
+
   function attributionRows(values, costs, options = {}) {
     const valueMap = values && typeof values === 'object' ? values : {};
     const costMap = costs && typeof costs === 'object' ? costs : {};
@@ -19,7 +25,8 @@
     const rows = Array.from(keys, (key) => ({
       key,
       value: finiteNumber(valueMap[key]),
-      cost: finiteNumber(costMap[key])
+      cost: finiteNumber(costMap[key]),
+      ...(options.unpricedTokens?.[key] > 0 ? { unpricedTokens: finiteNumber(options.unpricedTokens[key]) } : {})
     })).filter((row) => row.value > 0 || row.cost > 0);
     const attributedValue = rows.reduce((sum, row) => sum + Math.max(0, row.value), 0);
     const attributedCost = rows.reduce((sum, row) => sum + Math.max(0, row.cost), 0);
@@ -98,6 +105,7 @@
   }
 
   return {
+    usageCostLabel,
     attributionRows,
     visibleAttributionRows,
     attributionValue,

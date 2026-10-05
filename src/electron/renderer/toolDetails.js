@@ -24,7 +24,8 @@
     const totalCost = amount(period?.clientCosts?.[clientKey]);
     return usageAttributionRowsApi.attributionRows(models, costs, {
       totalValue: total,
-      totalCost
+      totalCost,
+      unpricedTokens: period?.clientModelUnpricedTokens?.[clientKey]
     })
       .map((row) => {
         const value = amount(row.value);
@@ -34,6 +35,7 @@
           name: row.key,
           value,
           cost,
+          ...(row.unpricedTokens > 0 ? { unpricedTokens: row.unpricedTokens } : {}),
           percent: total > 0 ? Math.min(100, value / total * 100) : 0,
           unattributed: row.unattributed === true
         };
