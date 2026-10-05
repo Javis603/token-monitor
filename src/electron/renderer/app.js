@@ -699,6 +699,7 @@ function applySettingsTranslations() {
   setThirdPartyAdapterFields();
   setSubscriptionFormMode();
   diagnosticsPanel?.render();
+  backgroundVideoController?.sync();
 }
 
 function applySettingsSectionDom(id, open) {
@@ -7005,12 +7006,16 @@ function applyAppearanceSettings(settings) {
 let backgroundImageActive = false;
 let backgroundImageBusy = false;
 let backgroundImageError = false;
+let backgroundImageStorageError = false;
 let backgroundImageRequest = 0;
 let backgroundImageObjectUrl = null;
+let backgroundVideoController = null;
 
 function syncBackgroundImageStatus() {
   if (els.backgroundImageStatus) {
-    els.backgroundImageStatus.textContent = t(backgroundImageError
+    els.backgroundImageStatus.textContent = t(backgroundImageStorageError
+      ? 'settings.appearance.backgroundImageStorageError'
+      : backgroundImageError
       ? 'settings.appearance.backgroundImageError'
       : backgroundImageActive
         ? (nativeMaterialState.reducedTransparency || nativeMaterialState.type === 'opaque'
@@ -7024,6 +7029,7 @@ function syncBackgroundImageStatus() {
   els.backgroundImageOpacityRow?.classList.toggle('hidden', !backgroundImageActive);
   if (els.chooseBackgroundImageButton) els.chooseBackgroundImageButton.disabled = backgroundImageBusy;
   if (els.clearBackgroundImageButton) els.clearBackgroundImageButton.disabled = backgroundImageBusy;
+  backgroundVideoController?.sync();
 }
 
 function applyBackgroundImage(bytes) {
@@ -7045,6 +7051,7 @@ function applyBackgroundImage(bytes) {
   }
   els.shell.classList.toggle('has-custom-background', backgroundImageActive);
   backgroundImageError = false;
+  backgroundImageStorageError = false;
   syncBackgroundImageStatus();
 }
 
@@ -7061,7 +7068,7 @@ async function loadBackgroundImage() {
 }
 
 async function changeBackgroundImage(clear = false) {
-  if (backgroundImageBusy) return;
+  if (backgroundImageBusy || backgroundVideoController?.isBusy()) return;
   backgroundImageBusy = true;
   backgroundImageRequest += 1;
   syncBackgroundImageStatus();
@@ -7071,16 +7078,33 @@ async function changeBackgroundImage(clear = false) {
       applyBackgroundImage(null);
     } else {
       const result = await window.tokenMonitor.chooseBackgroundImage();
-      if (!result?.canceled && result?.bytes) applyBackgroundImage(result.bytes);
+      if (!result?.canceled && result?.bytes) {
+        backgroundVideoController?.reset();
+        applyBackgroundImage(result.bytes);
+      }
     }
   } catch (_) {
-    backgroundImageError = true;
+    // A video may already be removed when metadata cleanup fails. Reconcile
+    // both layers with storage instead of keeping a now-deleted video visible.
+    await Promise.all([loadBackgroundImage(), backgroundVideoController?.load()]);
+    backgroundImageStorageError = true;
     syncBackgroundImageStatus();
   } finally {
     backgroundImageBusy = false;
     syncBackgroundImageStatus();
   }
 }
+
+backgroundVideoController = window.TokenMonitorBackgroundVideo.createBackgroundVideoController({
+  api: window.tokenMonitor,
+  shell: els.shell,
+  t,
+  imageBusy: () => backgroundImageBusy,
+  imageActive: () => backgroundImageActive,
+  reducedMotion: prefersReducedMotion,
+  visible: () => !document.hidden && state.windowVisible,
+  blocked: () => window.TokenMonitorBackgroundVideo.isBackgroundVideoBlocked(nativeMaterialState, state.floatingBubble)
+});
 
 const themePresetsApi = window.TokenMonitorThemePresets;
 let themeCodeFeedbackGeneration = 0;
@@ -7472,6 +7496,7 @@ function applyFloatingBubbleState(payload = {}, options = {}) {
     statsRenderScheduler.request();
     return;
   }
+  backgroundVideoController?.sync();
   document.documentElement.classList.toggle('floating-bubble-collapsed-left', side === 'left');
   document.documentElement.classList.toggle('floating-bubble-collapsed-right', side === 'right');
   document.body.classList.toggle('floating-bubble-collapsed-left', side === 'left');
@@ -12314,6 +12339,7 @@ els.zoomInput.addEventListener('input', applyAppearanceFromControls);
 els.chooseBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(); });
 els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(true); });
 void loadBackgroundImage();
+void backgroundVideoController.load();
 els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}));
 els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
 els.interfaceFontPreset?.addEventListener('change', () => handleFontPresetChange('interface'));
@@ -12364,6 +12390,7 @@ for (const input of els.reduceMotionInputs || []) {
   input.addEventListener('change', async () => {
     if (!input.checked) return;
     state.settings.reduceMotion = applyReduceMotionPreference(input.value);
+    backgroundVideoController?.sync();
     await saveAppearanceFromControls();
   });
 }
@@ -12730,6 +12757,7 @@ window.tokenMonitor.codex.onActiveAccount?.((account) => {
 reducedMotionMedia?.addEventListener?.('change', () => {
   if (motionPreferenceApi.normalize(state.settings?.reduceMotion) !== 'system') return;
   applyReduceMotionPreference('system');
+  backgroundVideoController?.sync();
 });
 
 window.tokenMonitor.onOpenSettings?.(openSettingsPanel);
@@ -12815,6 +12843,7 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
 });
 function handleWindowVisibilityChange() {
+  backgroundVideoController?.sync();
   if (els.syncPanelSignal) els.syncPanelSignal.dataset.windowHidden = String(isRendererWindowHidden());
   if (!statsRenderScheduler.visibilityChanged()) return;
   if (isRendererWindowHidden()) cancelTokenRateBoost();

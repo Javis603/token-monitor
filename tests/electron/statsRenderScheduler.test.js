@@ -169,6 +169,30 @@ test('renderer wires visibility scheduling without deferring tray icon updates',
   );
 });
 
+test('visibility notifications sync video and connection state before the stats edge guard', () => {
+  let hidden = false;
+  let videoSyncs = 0;
+  const signal = { dataset: {} };
+  const handleWindowVisibilityChange = rendererFunction(
+    'handleWindowVisibilityChange',
+    "\ndocument.addEventListener('visibilitychange'",
+    {
+      backgroundVideoController: { sync() { videoSyncs += 1; } },
+      els: { syncPanelSignal: signal },
+      isRendererWindowHidden: () => hidden,
+      statsRenderScheduler: { visibilityChanged: () => false }
+    }
+  );
+
+  for (const nextHidden of [false, true, true, false]) {
+    hidden = nextHidden;
+    const previousSyncs = videoSyncs;
+    handleWindowVisibilityChange();
+    assert.equal(videoSyncs, previousSyncs + 1);
+    assert.equal(signal.dataset.windowHidden, String(hidden));
+  }
+});
+
 test('native window visibility covers a tray window that has never been shown', () => {
   const main = fs.readFileSync(path.join(electronDir, 'main.js'), 'utf8');
   const preload = fs.readFileSync(path.join(electronDir, 'preload.js'), 'utf8');

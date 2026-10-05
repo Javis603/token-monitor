@@ -2,6 +2,8 @@
 
 Token Monitor is local-first. It processes AI-tool usage logs on the device and does not send analytics or telemetry to the project maintainer. The project does not operate a hosted data-collection service.
 
+Optional [background videos](background-video.md) are copied to the local application data directory. The video, filename and original path are not included in Hub or iCloud sync. Removing a video deletes its saved copy and metadata. Storage errors are reported; pending cleanup or image-recovery data stays local and is retained for retry rather than silently discarded.
+
 ## Network features
 
 Token Monitor makes network requests only for documented or user-enabled features:
