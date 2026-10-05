@@ -6,6 +6,7 @@
     <title>Usage Dashboard</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="dashboard.css" />
+    <link rel="stylesheet" href="cloudUsagePanel.css" />
   </head>
   <body>
     <header class="dash-header">
@@ -21,6 +22,7 @@
     <nav class="dash-tabs">
       <button id="activityTab" class="dash-tab active" data-tab="activity" data-i18n="dashboard.tab.activity">Overview</button>
       <button id="trendsTab" class="dash-tab" data-tab="trends" data-i18n="dashboard.tab.trends">Trends</button>
+      <button id="cloudTab" class="dash-tab" data-tab="cloud">Codex Cloud</button>
     </nav>
 
     <section id="trendsPane" class="dash-pane hidden">
@@ -56,6 +58,8 @@
       <div id="dashBreakdown" class="dash-breakdown"></div>
     </section>
 
+    <section id="cloudPane" class="dash-pane hidden"><div id="cloudUsageRoot"></div></section>
+
     <div id="dashEmpty" class="dash-empty hidden" data-i18n="dashboard.empty">No usage history yet</div>
     <div id="dashTooltip" class="dash-tooltip hidden"></div>
 
@@ -71,6 +75,7 @@
     <script src="../motionPreference.js"></script>
     <script src="statsRenderScheduler.js"></script>
     <script src="glassRendering.js"></script>
+    <script src="cloudUsagePanel.js"></script>
     <script src="dashboard.js"></script>
   </body>
 </html>

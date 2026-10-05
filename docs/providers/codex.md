@@ -78,3 +78,7 @@ node --test tests/shared/codex*.test.js tests/shared/limitCollector.codex*.test.
 ## Automatic hosted-cloud observation
 
 `cloudAutoWatch.js` and `codex-cloud-auto-watch.js` automatically union the live cloud catalogs and attach to running tasks without manual IDs. Per-thread engine counters survive connection retries within the process, but are not summed into local/account totals. A separate user LaunchAgent runs the tested observer with an explicit automatic-attachment flag. Scope, persistence limits, controls and real validation are documented in [automatic cloud monitoring](../codex-cloud-auto-watch.md).
+
+## Native cloud dashboard
+
+The main widget's Cloud shortcut and native dashboard tab read the existing automatic observer through `src/electron/cloudUsageBridge.js`. Its top-frame IPC accepts only owned bundled renderer windows and sends a bounded numeric projection, never credentials, scope fingerprints, arbitrary files or raw errors. Cloud lifetime snapshots remain separate from Tokscale periods and parent/child sums. The main app can control the one existing launchd observer and bundle its runtime without duplicating it. Account mismatch, stale reports and retained pre-restart counts have distinct UI states. See [native integration and deployment](../codex-cloud-native-integration.md).

@@ -6487,10 +6487,12 @@ async function maybeDownloadAutomaticAppUpdate(updateState) {
 }
 
 function maybeRunBackgroundUpdateCheck() {
+  if (require('../../package.json').tokenMonitorBuild?.localCloudIntegration === true) return;
   runAppUpdateCheck({ force: false }).catch(() => {});
 }
 
 function startAppUpdateBackgroundChecks() {
+  if (require('../../package.json').tokenMonitorBuild?.localCloudIntegration === true) return;
   if (appUpdateBackgroundTimer) return;
   appUpdateBackgroundTimer = setInterval(maybeRunBackgroundUpdateCheck, 60 * 60 * 1000);
   appUpdateBackgroundTimer.unref?.();
@@ -6875,12 +6877,13 @@ function discardFailedDashboardWindow(win, reason) {
   win.destroy();
 }
 
-function createDashboardWindow() {
+function createDashboardWindow(initialTab = 'activity') {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     // Reload so a reopened window always picks up the latest renderer + fresh history,
     // instead of showing whatever was loaded when it first opened.
     dashboardWindow.hide();
-    dashboardWindow.webContents.reload();
+    dashboardWindow.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'), { query: { tab: initialTab === 'cloud' ? 'cloud' : 'activity' } })
+      .catch((error) => discardFailedDashboardWindow(dashboardWindow, `load failed: ${error.message}`));
     return dashboardWindow;
   }
   const glass = nativeBlurEnabled();
@@ -6931,7 +6934,7 @@ function createDashboardWindow() {
   win.on('closed', () => {
     dashboardWindow = null;
   });
-  win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
+  win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'), { query: { tab: initialTab === 'cloud' ? 'cloud' : 'activity' } })
     .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
   return win;
 }
@@ -8698,6 +8701,10 @@ app.whenReady().then(() => {
     }
     actionWindowForEvent(BrowserWindow, event, mainWindow)?.close();
   });
+  require('./cloudUsageBridge').registerCloudUsageIpc({
+    ipcMain, getWindows: () => [mainWindow, dashboardWindow],
+    rendererDir: path.join(__dirname, 'renderer'), open: () => createDashboardWindow('cloud')
+  });
   ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
   ipcMain.on('dashboard:ready', (event) => {
@@ -8727,9 +8734,11 @@ app.whenReady().then(() => {
   });
   maybeRunBackgroundUpdateCheck();
   startAppUpdateBackgroundChecks();
+  if (process.argv.includes('--cloud-usage')) createDashboardWindow('cloud');
 });
 
 app.on('second-instance', focusExistingWindow);
+app.on('second-instance', (_event, argv) => { if (argv.includes('--cloud-usage')) createDashboardWindow('cloud'); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 // Every quit route (Cmd+Q, last window closed, system shutdown) lands here.
 // performQuit is synchronous through to the exit, so there is nothing to wait
