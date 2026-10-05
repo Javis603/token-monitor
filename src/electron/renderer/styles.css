@@ -854,9 +854,6 @@ span.settings-note.settings-item-desc {
 .settings-collapsible-group.expanded > .settings-section-toggle {
   border-bottom: 1px solid rgba(var(--line-rgb), 0.08);
 }
-:root:is([data-text-size="larger"], [data-text-size="largest"]) .settings-section-toggle {
-  grid-template-columns: minmax(max-content, 1fr) minmax(0, auto);
-}
 .settings-section-toggle:hover,
 .settings-section-toggle:focus-visible {
   background: rgba(var(--overlay-rgb), var(--control-alpha));
@@ -1333,7 +1330,7 @@ span.settings-note.settings-item-desc {
   background: none;
   color: var(--muted);
   cursor: pointer;
-  font-size: 0.6875rem;
+  font-size: 11px;
   line-height: 18px;
   text-align: center;
   opacity: 0.55;
@@ -5301,7 +5298,7 @@ html.is-windows .limit-live-badge {
   border: none;
   background: none;
   color: var(--muted);
-  font-size: 0.6875rem;
+  font-size: 11px;
   line-height: 1;
   opacity: 0.55;
 }
@@ -5458,7 +5455,7 @@ html.is-windows .limit-live-badge {
   background: none;
   color: var(--muted);
   cursor: pointer;
-  font-size: 0.6875rem;
+  font-size: 11px;
   line-height: 18px;
   text-align: center;
   transition: opacity 0.15s, color 0.15s, background 0.15s;
@@ -6017,7 +6014,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   border: 0;
   color: var(--blue);
   opacity: 0.6;
-  font-size: 0.75rem;
+  font-size: 12px;
   line-height: 1;
   width: 14px;
   height: 14px;
@@ -6133,10 +6130,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   .shell { gap: 8px; padding: 12px 14px; }
   .titlebar { min-height: clamp(28px, 8vh, 38px); }
   .total-panel { padding: 2px 2px; }
-  .label-row { font-size: clamp(11px, 2.6vw, 16px); }
+  .label-row { font-size: calc(clamp(11px, 2.6vw, 16px) * var(--ui-text-scale)); }
   .total-number { margin-top: clamp(2px, 1.2vh, 8px); font-size: clamp(22px, 13vw, 60px); }
-  .total-compact { font-size: clamp(11px, 3vw, 16px); }
-  .cost { margin-top: clamp(2px, 1vh, 6px); font-size: clamp(12px, 2.8vw, 18px); }
+  .total-compact { font-size: calc(clamp(11px, 3vw, 16px) * var(--ui-text-scale)); }
+  .cost { margin-top: clamp(2px, 1vh, 6px); font-size: calc(clamp(12px, 2.8vw, 18px) * var(--ui-text-scale)); }
   .breakdown,
   .home-panel,
   .service-status-panel { display: none; }
@@ -7097,7 +7094,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   background: none;
   color: var(--muted);
   cursor: pointer;
-  font-size: 0.6875rem;
+  font-size: 11px;
   line-height: 18px;
   text-align: center;
   opacity: 0.55;

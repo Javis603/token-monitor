@@ -124,6 +124,9 @@ test('font controls live inside Appearance advanced customization', () => {
   const advanced = html.slice(advancedStart, vendorGroup);
   assert.ok(advanced.indexOf('id="themeColorGrid"') < advanced.indexOf('class="settings-font-controls"'));
   assert.doesNotMatch(advanced, /data-i18n="settings\.appearance\.fonts"/);
+  assert.match(advanced, /id="textSizeInput" aria-labelledby="textSizeLabel" aria-describedby="textSizeNote"/);
+  assert.match(advanced, /<span id="textSizeLabel"[^>]*>Text size<\/span>/);
+  assert.ok(advanced.indexOf('id="textSizeInput"') < advanced.indexOf('id="interfaceFontPreset"'));
   assert.match(advanced, /id="interfaceFontPreset"/);
   assert.match(advanced, /value="app" data-i18n="settings\.appearance\.fontPresetApp"/);
   assert.match(advanced, /value="system" data-i18n="settings\.appearance\.fontPresetSystem"/);
