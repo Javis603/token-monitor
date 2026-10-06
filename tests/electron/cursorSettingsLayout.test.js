@@ -371,7 +371,10 @@ test('OpenCode multi-account rows separate profile identity from plan label', ()
   assert.match(policy, /opencode: \(provider, color, \{ grouped \}\) => \(\{[\s\S]*?grouped \? \{ showIcon: false/);
   assert.doesNotMatch(app, /legacyProfileLabel/);
   // The plan/account fallback is the shared view's limitProviderPlan.
-  assert.match(readRendererFile('limits/windowsView.js'), /provider\?\.planLabel \|\| provider\?\.accountLabel/);
+  const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
+  const view = createLimitWindowsView({ presentation: require('../../src/electron/renderer/limits/providerPresentation') });
+  assert.equal(view.limitProviderPlan({ provider: 'opencode', status: 'ok', planLabel: 'Zen', accountLabel: 'Go' }), 'Zen');
+  assert.equal(view.limitProviderPlan({ provider: 'opencode', status: 'ok', planLabel: '', accountLabel: 'Go' }), 'Go');
   assert.doesNotMatch(app, /renderLimitProviderRow\('opencode', provider\.accountLabel/);
 });
 

@@ -1712,7 +1712,15 @@
       // the generic path below.
       return plan ? presentationApi.limitProviderPlanDisplayLabel(provider, plan) : '';
     }
-    const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
+    const plan = String(provider?.planLabel || '').trim();
+    let legacyLabel = String(provider?.accountLabel || '').trim();
+    if (provider?.provider === 'cursor' && !plan) {
+      // Cursor stores its email identity in accountLabel when membership is
+      // unknown. It is never a plan, even when email masking is disabled.
+      const email = String(provider?.accountEmail || '').trim();
+      if ((email && legacyLabel.toLowerCase() === email.toLowerCase()) || /^[^\s@]+@[^\s@]+$/.test(legacyLabel)) legacyLabel = '';
+    }
+    const label = plan || legacyLabel;
     if (label) return presentationApi.limitProviderPlanDisplayLabel(provider, label);
     return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status) : '';
   }

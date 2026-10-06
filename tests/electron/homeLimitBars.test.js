@@ -13,14 +13,14 @@ function read(relativePath) {
   return fs.readFileSync(path.join(__dirname, '../..', relativePath), 'utf8');
 }
 
-function resolveHomeRows(providers) {
+function resolveHomeRows(providers, settings = {}) {
   const presentation = require('../../src/electron/renderer/limits/providerPresentation');
   const windowLabels = require('../../src/shared/limits/windowLabels');
   const view = createLimitWindowsView({
     presentation,
     ...windowLabels,
     accountIdentity: require('../../src/electron/renderer/accountIdentity'),
-    settings: () => ({}),
+    settings: () => settings,
     t: (key) => key
   });
   const ids = [...new Set(providers.map((provider) => provider.provider))];
@@ -28,7 +28,7 @@ function resolveHomeRows(providers) {
   const start = app.indexOf('function homeLimitRows()');
   const end = app.indexOf('function homeLimitWindowLabel(', start);
   return vm.runInNewContext(`${app.slice(start, end)}; homeLimitRows();`, {
-    state: { stats: { limits: { providers } }, settings: { homeLimitAccountCount: 20 } },
+    state: { stats: { limits: { providers } }, settings: { homeLimitAccountCount: 20, ...settings } },
     enabledLimitProviderSet: () => new Set(ids),
     hiddenHomeLimitProviderSet: () => new Set(),
     LIMIT_PROVIDERS: ids.map((id) => ({ id, label: id })),
@@ -92,13 +92,43 @@ test('Home shares Limits status and stale-plan semantics for retained quota wind
   ])[0].plan, 'Student');
 });
 
+test('Home Cursor plans never expose email identities with masking enabled or disabled', () => {
+  const window = { kind: 'monthly', remainingPercent: 40 };
+  for (const homeLimitDisplayMode of ['text', 'bars']) {
+    for (const maskLimitAccountEmails of [true, false]) {
+      const settings = { homeLimitDisplayMode, maskLimitAccountEmails };
+      const rows = resolveHomeRows(['alice@example.com', 'bob@example.com'].map((email) => ({
+        provider: 'cursor', status: 'ok', accountEmail: email, accountLabel: email, planLabel: '', windows: [window]
+      })), settings);
+      assert.equal(rows[0].plan, '');
+      assert.equal(rows[1].plan, '');
+      assert.equal(rows[0].name, maskLimitAccountEmails ? 'a***e@example.com' : 'alice@example.com');
+      const metric = renderHomeWindow(window, settings, rows[0].plan);
+      assert.equal(metric.accountHead.children.length, 2, 'no email-bearing plan node or hover title');
+    }
+  }
+  for (const [accountLabel, planLabel, expected] of [
+    ['alice@example.com', 'Pro', 'Pro'],
+    ['Pro', '', 'Pro'],
+    ['legacy@example.com', '', '']
+  ]) {
+    assert.equal(resolveHomeRows([
+      { provider: 'cursor', status: 'ok', accountLabel, planLabel, windows: [window] }
+    ], { maskLimitAccountEmails: true })[0].plan, expected);
+  }
+});
+
 function renderHomeWindow(window, settings = {}, plan = '') {
   class Element {
     constructor() {
       this.children = [];
       this.style = { setProperty(name, value) { this[name] = value; } };
       this.attributes = {};
-      this.classList = { add() {} };
+      this.classList = {
+        values: new Set(),
+        add(name) { this.values.add(name); },
+        contains(name) { return this.values.has(name); }
+      };
     }
     append(...children) { this.children.push(...children); }
     setAttribute(name, value) { this.attributes[name] = value; }
@@ -145,6 +175,20 @@ test('Home shows the plan on the account heading in both modes and omits unknown
     assert.equal(known.accountHead.children[2].title, 'Pro More');
     const unknown = renderHomeWindow({ remainingPercent: 88 }, { homeLimitDisplayMode });
     assert.equal(unknown.accountHead.children.length, 2);
+  }
+});
+
+test('Home low-limit highlighting is independent of display mode and remains opt-in', () => {
+  for (const homeLimitDisplayMode of ['text', 'bars']) {
+    for (const [remainingPercent, expected] of [[50, ''], [49, 'home-limit-value-low'], [20, 'home-limit-value-low'], [19, 'home-limit-value-critical'], [0, 'home-limit-value-critical']]) {
+      for (const showHomeLimitBars of [true, false]) {
+        const metric = renderHomeWindow({ remainingPercent }, { homeLimitDisplayMode, showHomeLimitBars });
+        const value = metric.children[0].children[1];
+        for (const className of ['home-limit-value-low', 'home-limit-value-critical']) {
+          assert.equal(value.classList.contains(className), showHomeLimitBars && expected === className);
+        }
+      }
+    }
   }
 });
 
