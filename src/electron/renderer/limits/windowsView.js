@@ -71,11 +71,14 @@
       colorWithAlpha,
       applyBarScale,
       creditsAmount,
+      creditsCurrency,
       creditsMeterPercent,
       isCreditsWindow,
       spendWindow,
       limitWindowLabel,
       limitWindowText,
+      mimoAccountGroups,
+      mimoProductLabel,
       accountIdentity,
       accountControl,
       codexAccounts,
@@ -1136,30 +1139,44 @@
       }
     } else if (provider.provider === 'mimo') {
       windows.classList.add('limit-windows-mimo');
-      const balance = provider.balance || null;
-      const tokenPlan = windowForKind(provider, 'billing') || mimoTokenPlanWindowFromBalance(balance);
-      if (tokenPlan) {
-        const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
+      // Token Plan and membership quotas reuse the shared labels and wide rows.
+      const quotaWindows = (provider.windows || []).filter((window) => !isCreditsWindow(window));
+      for (const quotaWindow of quotaWindows) {
+        const node = limitWindowNode(providerWindowLabel(provider, quotaWindow), quotaWindow, color, 0.68);
         node.classList.add('limit-window-wide');
         windows.append(node);
-      } else if (balance?.planStatus === 'expired') {
-        // The same item as the live plan, whichever of the two is drawn.
-        const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
-        tagUsageItem(node, usageItems.limitUsageItemId({ kind: 'billing', label: 'Token Plan' }), 'Token Plan');
-        node.classList.add('limit-window-wide', 'limit-window-no-reset');
-        windows.append(node);
       }
-      const amount = optionalFiniteNumber(balance?.amount);
+      const balance = provider.balance || null;
+      // Older Console records may carry Token Plan data only in balance.
+      // Credits windows are money, so they must not suppress this fallback.
+      if (!quotaWindows.some((window) => String(window?.label || '').trim())) {
+        const tokenPlan = mimoTokenPlanWindowFromBalance(balance);
+        if (tokenPlan) {
+          const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
+          node.classList.add('limit-window-wide');
+          windows.append(node);
+        } else if (balance?.planStatus === 'expired') {
+          const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
+          tagUsageItem(node, usageItems.limitUsageItemId({ kind: 'billing', label: 'Token Plan' }), 'Token Plan');
+          node.classList.add('limit-window-wide', 'limit-window-no-reset');
+          windows.append(node);
+        }
+      }
+      const creditsWindow = (provider.windows || []).find(isCreditsWindow) || null;
+      const amount = creditsAmount(provider, creditsWindow);
+      const currency = creditsCurrency(provider, creditsWindow);
       const giftBalance = optionalFiniteNumber(balance?.giftBalance);
       const cashBalance = optionalFiniteNumber(balance?.cashBalance);
       if (amount !== null || giftBalance !== null || cashBalance !== null) {
         const detailParts = [];
-        if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, balance.currency)}`);
-        if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, balance.currency)}`);
-        const balanceText = formatMoney(amount, balance.currency) || '—';
+        if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, currency)}`);
+        if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, currency)}`);
+        const balanceText = formatMoney(amount, currency) || '—';
+        // Reuse the shared display-only balance meter; do not put it on the wire.
+        const meterPercent = creditsMeterPercent(provider, creditsWindow);
         const balanceNode = limitWindowNode(
           'Balance',
-          { showMeter: false },
+          meterPercent === null ? { showMeter: false } : { remainingPercent: meterPercent },
           color,
           0.68,
           balanceText,
@@ -1168,6 +1185,8 @@
         tagUsageItem(balanceNode, 'credits', 'Balance');
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(balanceNode);
+        const spendNode = providerSpendNode(balance);
+        if (spendNode) windows.append(spendNode);
       }
     } else if (provider.provider === 'grok') {
       // Grok exposes a single Monthly billing window (no session/weekly). Render it
@@ -1640,7 +1659,8 @@
     opencode: opencodeAccountTitle,
     openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
     thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
-    volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers)
+    volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers),
+    mimo: (provider, index, providers) => mimoAccountTitle(provider, index, providers)
   };
 
   // Fallback names for `provider.source`, used when the provider has no override
@@ -1678,14 +1698,35 @@
       if (sourceDevice) parts.push(sourceDevice);
       return `${freshness.text}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
     }
-    return limitStatusLabel(provider.status, false);
+    return limitStatusLabel(provider?.status);
   }
 
   function limitProviderPlan(provider) {
-    if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
-    const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
+    if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status);
+    const mimoProduct = provider?.provider === 'mimo' ? mimoProductLabel(provider) : '';
+    if (mimoProduct) {
+      const plan = String(provider?.planLabel || '').trim();
+      // Current MiMo rows keep the product in accountLabel and the plan in
+      // planLabel. Falling back to accountLabel would repeat the product in the
+      // plan cell when the app deliberately has no plan name. Legacy rows take
+      // the generic path below.
+      return plan ? presentationApi.limitProviderPlanDisplayLabel(provider, plan) : '';
+    }
+    const plan = String(provider?.planLabel || '').trim();
+    let legacyLabel = String(provider?.accountLabel || '').trim();
+    if (provider?.provider === 'cursor' && !plan) {
+      // Cursor stores its email identity in accountLabel when membership is
+      // unknown. It is never a plan, even when email masking is disabled.
+      const email = String(provider?.accountEmail || '').trim();
+      if ((email && legacyLabel.toLowerCase() === email.toLowerCase()) || /^[^\s@]+@[^\s@]+$/.test(legacyLabel)) legacyLabel = '';
+    }
+    const label = plan || legacyLabel;
     if (label) return presentationApi.limitProviderPlanDisplayLabel(provider, label);
-    return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
+    return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status) : '';
+  }
+
+  function limitPlanText(provider, options = {}) {
+    return options.planText ?? limitProviderPlan(provider);
   }
 
   function renderLimitProviderMark(id, color) {
@@ -1709,9 +1750,15 @@
     const name = document.createElement('div');
     name.className = 'limit-name';
     if (options.showIcon !== false) name.append(renderLimitProviderMark(options.markId || id, color));
-    const title = document.createElement('span');
-    title.className = 'limit-name-title';
-    title.textContent = options.title || label;
+    // A row that names nothing renders without the title line at all — its meta
+    // line ("Updated · source") becomes the row's first text — instead of
+    // leaving a blank heading behind.
+    const titleText = options.title || label;
+    const title = titleText ? document.createElement('span') : null;
+    if (title) {
+      title.className = 'limit-name-title';
+      title.textContent = titleText;
+    }
     const provenance = presentationApi.limitProviderProvenance(provider, provenanceContext());
     // The ✓ marks the account THIS device's Codex is signed into
     // (state.codexActiveAccount, derived locally by codexActiveAccountFromStats).
@@ -1721,7 +1768,7 @@
     // which would move the ✓ onto the wrong one.
     const activeCodexAccount = options.showActiveBadge && codexAccounts.matchesActive(provider);
     const switchAccount = options.allowSystemSwitch && !activeCodexAccount ? codexAccounts.switchTarget(provider) : null;
-    name.append(accountControl.render({
+    const control = accountControl.render({
       titleNode: title,
       active: Boolean(activeCodexAccount),
       switchAccount: codexAccounts.canSwitchSystemAccount() ? switchAccount : null,
@@ -1731,7 +1778,10 @@
       // entries carry — so the same control named the account on one surface and
       // fell back to the unnamed placeholder on the other.
       accountLabel: options.accountLabel || ''
-    }));
+    });
+    // A named row hands the title through the control (which returns it unchanged
+    // when there is nothing to switch); an unnamed row appends nothing.
+    if (control) name.append(control);
     titleBlock.append(name);
     // The multi-account group header has no quota of its own, and its accounts can
     // update at different times (different devices too), so it omits the meta line
@@ -1750,7 +1800,7 @@
     }
     const plan = document.createElement('div');
     plan.className = 'limit-plan';
-    plan.textContent = options.planText ?? limitProviderPlan(provider);
+    plan.textContent = limitPlanText(provider, options);
     // A record binds to one account, so the provider-wide rollup belongs on the
     // row that stands for the provider as a whole — the header of a group, or a
     // provider's single row — and not on each member of a group, which would
@@ -2041,10 +2091,10 @@
     opencode: (provider, color, { grouped }) => ({
       options: {
         // A profile name that is neither Go nor Zen predates accountName, and it
-        // is the only label the row has — repeating it in the plan cell says
-        // nothing. Only a group row has a sibling whose plan cell it could be
-        // mistaken for.
-        ...(grouped && legacyOpencodeProfileLabel(provider) ? { planText: '' } : {}),
+        // is repeated by the legacy plan fallback. Hide that duplicate only
+        // for healthy/stale rows with no explicit plan. Recovery status and
+        // known Go/Zen plans must survive.
+        ...(grouped && (provider?.status === 'ok' || provider?.stale) && !String(provider?.planLabel || '').trim() && legacyOpencodeProfileLabel(provider) ? { planText: '' } : {}),
         ...(grouped ? { showIcon: false } : {})
       }
     }),
@@ -2059,7 +2109,16 @@
     // only repeats it. Standing alone the row has nothing else to be recognised
     // by and keeps its own.
     openrouter: (provider, color, { grouped }) => ({
-      options: grouped ? { showIcon: false } : {}
+      options: grouped ? {
+        showIcon: false,
+        // A credits-only response has no key plan; accountLabel then repeats
+        // the profile title. Keep explicit plans and recovery status visible.
+        ...((provider?.status === 'ok' || provider?.stale)
+          && !String(provider?.planLabel || '').trim()
+          && String(provider?.accountName || '').trim()
+          && String(provider?.accountName || '').trim() === String(provider?.accountLabel || '').trim()
+          ? { planText: '' } : {})
+      } : {}
     }),
     antigravity: (provider, color, { grouped }) => ({
       options: grouped ? { showIcon: false } : {}
@@ -2099,10 +2158,18 @@
     return { color: resolved.color || color, options: resolved.options || {} };
   }
 
+  // Compact surfaces keep the same plan-cell policy as the full account rows.
+  function limitAccountPlan(provider, { grouped = false } = {}) {
+    const policy = limitAccountRowPolicy(provider?.provider, provider, '', { grouped, sharedFamily: null });
+    return limitPlanText(provider, policy.options);
+  }
+
   // A provider's row standing on its own. Both surfaces call this rather than
   // renderLimitProviderRow, so the policy cannot be skipped by a caller that did
   // not know there was one to pass.
   function renderLimitProviderSolo(id, label, provider, color) {
+    // Keep the same provider frame when only one MiMo product remains.
+    if (id === 'mimo' && mimoProductLabel(provider)) return renderMimoProviderGroup(label, [provider], color);
     const policy = limitAccountRowPolicy(id, provider, color, { grouped: false, sharedFamily: null });
     // Standing alone, the row is titled with the provider's name, so the account
     // name is resolved here instead: the switch control still has to say which
@@ -2173,12 +2240,31 @@
     return accountName || `Account ${index + 1}`;
   }
 
-  // Both Volcengine plans sit on one account, so the row title carries the plan
-  // name from accountLabel. accountTitleLabel reads accountName/accountEmail,
-  // neither of which these rows have, so without this they would all render as
-  // "Account N".
+  // Volcengine carries the plan in accountLabel; without it, both rows would
+  // be named "Account N".
   function volcenginePlanAccountTitle(provider, index, providers) {
     return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
+  }
+
+  function mimoAccountTitle(provider, index, providers) {
+    const product = mimoProductLabel(provider);
+    if (product) {
+      const identity = accountIdentity.accountEmailLabel(provider, providers || [provider], {
+        maskEmail: limitAccountEmailsMasked(),
+        suffix: String(provider?.accountName || '').trim()
+      }) || String(provider?.accountName || '').trim();
+      return [identity, product].filter(Boolean).join(' · ') || `Account ${index + 1}`;
+    }
+    // Compatibility for rows from versions that put the product in accountName
+    // and the plan in accountLabel.
+    const peers = (providers || [provider]).map((row) => ({
+      ...row,
+      accountName: String(row?.accountName || row?.accountLabel || '').trim()
+    }));
+    return accountIdentity.accountTitleLabel(peers[index], peers, {
+      maskEmail: limitAccountEmailsMasked(),
+      index
+    }) || `Account ${index + 1}`;
   }
 
   function limitAccountTitle(id, provider, index, providerEntries = [provider]) {
@@ -2189,7 +2275,7 @@
   }
 
   // Volcengine's two rows are one account's two subscriptions, so its header
-  // counts plans; every other group counts accounts.
+  // counts plans; every other ordinary group counts accounts.
   const GROUP_COUNT_KEYS = { volcengine: 'settings.volcengine.nPlans' };
 
   // "4 accounts" on the group header. A caller that has a better phrase passes
@@ -2202,19 +2288,11 @@
     return text === key ? '' : text;
   }
 
-  // A provider's several accounts, as the page's group header plus one row each.
-  // No options: what the header wears and what each row says is the provider's
-  // policy above, so a second surface cannot render the same group differently by
-  // passing a different set.
-  function renderLimitProviderGroup(providerId, label, providers, color) {
-    const policy = LIMIT_GROUP_POLICIES[providerId] || (() => ({}));
-    const { markId, sharedFamily, forecastOnGroup } = policy(providers);
+  function renderLimitProviderGroupFrame(providerId, label, providers, color, { count, markId } = {}) {
     const row = document.createElement('div');
     row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-    // `groupAccounts` is the accounts this header stands for. The head is drawn
-    // from a synthetic record, so without it a subscription resolved against the
-    // wider universe could summarise an account the row does not draw — the
-    // card's composer can hide one from the group it is still part of.
+    // The header stands for the rows it draws, including when a card hides
+    // another row of this provider. Subscription rollups use that exact set.
     const groupProvider = {
       provider: providerId,
       status: 'ok',
@@ -2222,13 +2300,73 @@
       accountGroup: true,
       groupAccounts: providers
     };
-    const head = renderLimitProviderHead(providerId, label, groupProvider, color, {
-      planText: limitGroupCountText(providerId, providers.length),
+    row.append(renderLimitProviderHead(providerId, label, groupProvider, color, {
+      planText: count ? limitGroupCountText(providerId, count) : '',
       hideMeta: true,
       ...(markId ? { markId } : {})
+    }));
+    const list = document.createElement('div');
+    list.className = 'limit-account-list';
+    row.append(list);
+    return { row, list, groupProvider };
+  }
+
+  function appendMimoAccountProducts(list, providers, color) {
+    providers.forEach((provider, index) => {
+      const policy = limitAccountRowPolicy('mimo', provider, color, { grouped: true, sharedFamily: null });
+      // Readings and plan metadata identify healthy products. A status-only row
+      // needs its product title; older records fall back to the account title.
+      const statusOnly = Boolean(provider.status) && provider.status !== 'ok' && !provider.stale;
+      const title = statusOnly
+        ? (mimoProductLabel(provider) || limitAccountTitle('mimo', provider, index, providers))
+        : '';
+      list.append(renderLimitProviderRow('mimo', title, provider, policy.color, {
+        accountRow: true,
+        ...policy.options
+      }));
     });
-    const accountList = document.createElement('div');
-    accountList.className = 'limit-account-list';
+  }
+
+  function renderMimoProviderGroup(label, providers, color) {
+    const groups = mimoAccountGroups(providers);
+    const representatives = groups.map((group) => group.find((row) => row.accountEmail) || group[0]);
+    const accountTitle = (index) => limitAccountDefaultTitle(representatives[index], index, representatives);
+    const oneAccount = groups.length === 1;
+    const { row, list } = renderLimitProviderGroupFrame(
+      'mimo', label, providers, color, { count: oneAccount ? 0 : groups.length }
+    );
+    if (oneAccount) {
+      appendMimoAccountProducts(list, groups[0], color);
+    } else {
+      groups.forEach((group, index) => {
+        const account = document.createElement('div');
+        account.className = 'limit-row limit-account-row';
+        const products = document.createElement('div');
+        products.className = 'limit-account-list';
+        appendMimoAccountProducts(products, group, color);
+        account.append(renderLimitProviderHead('mimo', accountTitle(index), representatives[index], color, {
+          showIcon: false,
+          accountRow: true,
+          planText: '',
+          hideMeta: true
+        }), products);
+        list.append(account);
+      });
+    }
+    return row;
+  }
+
+  // A provider's several accounts, as the page's group header plus one row each.
+  // No options: what the header wears and what each row says is the provider's
+  // policy above, so a second surface cannot render the same group differently by
+  // passing a different set.
+  function renderLimitProviderGroup(providerId, label, providers, color) {
+    if (providerId === 'mimo') return renderMimoProviderGroup(label, providers, color);
+    const policy = LIMIT_GROUP_POLICIES[providerId] || (() => ({}));
+    const { markId, sharedFamily, forecastOnGroup } = policy(providers);
+    const { row, list: accountList } = renderLimitProviderGroupFrame(
+      providerId, label, providers, color, { count: providers.length, markId }
+    );
     providers.forEach((provider, index) => {
       const account = limitAccountRowPolicy(providerId, provider, color, { grouped: true, sharedFamily });
       // The row's own title is also the name the switch control offers, so the
@@ -2243,7 +2381,6 @@
         { accountRow: true, accountLabel: title, ...account.options }
       ));
     });
-    row.append(head, accountList);
     if (forecastOnGroup) appendCodexResetForecast(row);
     return row;
   }
@@ -2573,7 +2710,7 @@
     return subscriptionCardNode(subscriptionTooltipRows(subscription, provider, includeRollup));
   }
 
-  // Wraps the plan label so hovering it reveals the subscription card. Reuses the
+  // Wraps a visible plan label so hovering it reveals the subscription card. Reuses the
   // limit-detail tooltip plumbing, which already holds off the list re-render
   // while the pointer is inside.
   //
@@ -2581,6 +2718,7 @@
   // nothing, so having recorded one IS the switch. A separate toggle only made it
   // possible to enter the data and see nothing happen.
   function decoratePlanWithSubscription(plan, provider, includeRollup) {
+    if (!plan.textContent) return plan;
     const card = subscriptionCardForRow(provider, includeRollup);
     if (!card) return plan;
 
@@ -2604,6 +2742,7 @@
     setDetailTooltip,
     codexResetForecastExpired,
     limitAccountTitle,
+    limitAccountPlan,
     limitProviderMeta,
     limitProviderPlan,
     limitStatusLabel,

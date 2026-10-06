@@ -35,7 +35,7 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.ok(html.indexOf('src="fixedPeriodRanges.js"') < html.indexOf('src="app.js"'));
   assert.match(html, /id="monthPeriodMenu" class="view-switcher-menu period-menu hidden"/);
   assert.equal((html.match(/class="view-switcher-menu-item"/g) || []).length, 4);
-  assert.match(css, /\.view-switcher-menu-item\s*\{[^}]*font-size:\s*11px;[^}]*text-align:\s*left;/s);
+  assert.match(css, /\.view-switcher-menu-item\s*\{[^}]*font-size:\s*0\.6875rem;[^}]*text-align:\s*left;/s);
   assert.ok(css.lastIndexOf('.period-menu {') > css.indexOf('.view-switcher-menu {'));
   assert.match(css, /\.titlebar\.period-menu-open\s*\{\s*z-index:\s*13;/);
   assert.match(css, /\.period-menu\s*\{[^}]*-webkit-app-region:\s*no-drag;[^}]*pointer-events:\s*auto;/s);

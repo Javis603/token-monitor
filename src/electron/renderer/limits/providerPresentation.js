@@ -4,10 +4,14 @@
   const accountIdentityApi = typeof module === 'object' && module.exports
     ? require('../accountIdentity')
     : root?.TokenMonitorAccountIdentity;
-  const api = factory(accountIdentityApi);
+  const limitWindowLabelsApi = typeof module === 'object' && module.exports
+    ? require('../../../shared/limits/windowLabels')
+    : root?.TokenMonitorLimitWindowLabels;
+  const api = factory(accountIdentityApi, limitWindowLabelsApi || {});
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorLimitProviderPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi(accountIdentityApi) {
+})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi(accountIdentityApi, limitWindowLabelsApi) {
+  const { isMimoMembershipProduct } = limitWindowLabelsApi;
   const SOURCE_LABELS = {
     oauth: 'OAuth',
     cli: 'CLI',
@@ -37,8 +41,8 @@
     qoder: { web: 'Web' },
     deepseek: { api: 'API' },
     devin: { web: 'Web' },
-    openrouter: { api: 'API' },
     minimax: { api: 'API' },
+    openrouter: { api: 'API' },
     volcengine: { api: 'API', cli: 'arkcli' },
     ollama: { web: 'Web' },
     trae: { api: 'Web' },
@@ -67,7 +71,7 @@
     copilot: ['Manual login', 'API'],
     zed: ['Manual login', 'Web'],
     commandcode: ['Manual login', 'Web'],
-    mimo: ['Token Plan', 'Web'],
+    mimo: ['Auto', 'Desktop app', 'Token Plan'],
     zai: ['Auto', 'Coding Plan', 'API key'],
     zaiteam: ['Team Plan', 'API key'],
     kiro: ['Auto', 'CLI'],
@@ -75,9 +79,9 @@
     qoder: ['Manual login', 'Web'],
     deepseek: ['Pay-as-you-go', 'API key'],
     devin: ['Manual login', 'Web'],
+    minimax: ['Token Plan', 'API key'],
     typesafe: ['Manual login', 'Web'],
     openrouter: ['Pay-as-you-go', 'API key'],
-    minimax: ['Token Plan', 'API key'],
     volcengine: ['Auto', 'API key', 'CLI'],
     ollama: ['Manual login', 'Web'],
     trae: ['Manual login', 'Web'],
@@ -597,6 +601,16 @@
     return tags;
   }
 
+  function limitProviderSettingsRecord(providers, id) {
+    const rows = (providers || []).filter((row) => row.provider === id);
+    if (id !== 'mimo') return rows.at(-1);
+    // Either healthy product keeps the provider connected. Otherwise prefer the
+    // Console status, since Settings manages that credential rather than membership.
+    return rows.findLast((row) => row.status === 'ok')
+      || rows.find((row) => !isMimoMembershipProduct(row))
+      || rows.at(-1);
+  }
+
   return {
     antigravityQuotaWindow,
     apiKeyAccountStatus,
@@ -618,6 +632,7 @@
     limitProviderSourceLabel,
     limitProviderStatusLabel,
     limitProviderSettingsTags,
+    limitProviderSettingsRecord,
     thirdPartyAdapterFamily,
     thirdPartyAdapterVisual,
     thirdPartyGroupPlanText,

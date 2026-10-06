@@ -7,6 +7,10 @@
 })(typeof window !== 'undefined' ? window : null, function createHomeModulePreferencesApi() {
   const DEFAULT_HOME_MODULE_ORDER = 'limits,tool,model,session,device,trends';
 
+  function normalizeHomeLimitDisplayMode(value) {
+    return value === 'bars' ? 'bars' : 'text';
+  }
+
   function optionIds(options) {
     return (options || []).map((option) => String(option?.id || '').trim().toLowerCase()).filter(Boolean);
   }
@@ -85,6 +89,7 @@
     defaultHomeModulePreferences,
     moveHomeModuleOrder,
     normalizeHiddenHomeModules,
+    normalizeHomeLimitDisplayMode,
     normalizeHomeModuleOrder,
     orderedHomeModules,
     reorderHomeModuleOrder

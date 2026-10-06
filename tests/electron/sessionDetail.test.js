@@ -83,6 +83,15 @@ test('session detail renders its heading before loading, errors and empty result
   context.bindHoverMarquee = overflowText.bind;
   vm.runInNewContext(`${rendererSource.slice(start, end)}\nglobalThis.render = renderSessionDetail;`, context);
   render = context.render;
+  for (const [options, expected] of [
+    [{ error: true }, 'Could not read the transcript. Please try again.'],
+    [{ detail: { found: false, error: 'read-failed' } }, 'Could not read the transcript. Please try again.'],
+    [{ detail: { found: false, error: 'line-too-large' } }, 'A transcript entry exceeds the 16 MiB limit. Session details cannot be loaded.'],
+    [{ detail: { found: false } }, 'Transcript not found on this machine.']
+  ]) {
+    render(options);
+    assert.equal(els.sessionDetail.textContent, expected);
+  }
   for (const title of ['gpt-5.6-sol · 12:34', 'A long ordinary session title that exceeds the available header width']) {
     state.openSession = { title, detail: { exchanges: [{ title: 'Reply', value: 10 }] } };
     for (const options of [{ loading: true }, { error: true }, { detail: { found: false } },
@@ -280,7 +289,7 @@ test('session detail renders its heading before loading, errors and empty result
   assert.equal(groupHeading.parentElement, groupBack);
   groupHeading.click();
   assert.equal(state.backClicked, true);
-  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) {
     context.t = (key, params) => translate(locale, key, params);
     for (const returnTo of [null, { kind: 'background-review-group' }]) {
       const title = 'Review PR 906';

@@ -1,8 +1,8 @@
 'use strict';
 
-// Verifies every id tokscaleClientFilter() actually sends for a DEFAULT_CLIENTS
-// scan (other than clients Token Monitor parses itself) is a client the real,
-// currently-authoritative tokscale binary recognizes. This deliberately checks
+// Verifies that the real, currently-authoritative tokscale binary recognizes
+// every id tokscaleClientFilter() actually sends for a DEFAULT_CLIENTS scan
+// (fork-only ids by a real scan, see below). This deliberately checks
 // the same expanded set collectUsageOnce hands to runTokscale/runTokscaleGraph
 // — including TOKSCALE_CLIENT_ALIASES sub-source ids like antigravity-cli —
 // not just the logical DEFAULT_CLIENTS entries, since a binary can drop an
@@ -26,23 +26,44 @@
 // vendor-tokscale.yml, after ensure-vendored-tokscale.js.
 
 const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { resolveManifestEntry, resolveTargetBinPath, loadManifest, manifestMode } = require('./vendoredTokscale');
 const { parseSupportedClients } = require('../src/shared/tokscaleCapabilities');
-const { KNOWN_CLIENTS, PARSE_LOCAL_CLIENTS } = require(path.join(__dirname, '..', 'src', 'shared', 'clientTracking'));
+const { KNOWN_CLIENTS } = require(path.join(__dirname, '..', 'src', 'shared', 'clientTracking'));
+const { FORK_ONLY_CLIENT_IDS } = require(path.join(__dirname, '..', 'src', 'shared', 'clientCatalog'));
 const { tokscaleClientFilter } = require(path.join(__dirname, '..', 'src', 'shared', 'collector'));
 
-// Clients Token Monitor parses itself rather than through tokscale — see the
-// "Adding a tracked client" table in docs/providers/README.md (parse_local clients). These
-// are expected to be absent from tokscale's own --client list; everything
-// else in DEFAULT_CLIENTS must be a client tokscale genuinely recognizes.
-const LOCALLY_PARSED_CLIENTS = new Set(PARSE_LOCAL_CLIENTS);
+// Clients parsed by Token Monitor's tokscale fork (`forkOnly` in the client
+// catalog). The fork strips them from --client before clap parses argv, so
+// they never appear in --help's possible values; they are verified by a real
+// scan instead.
+const FORK_ONLY_CLIENTS = new Set(FORK_ONLY_CLIENT_IDS);
 
 function supportedClients(binPath, spawn = spawnSync) {
   const result = spawn(binPath, ['--help'], { encoding: 'utf8', timeout: 10_000 });
   if (result.error) throw new Error(`--help failed to execute: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`--help exited ${result.status}: ${result.stderr || result.stdout}`);
   return parseSupportedClients(`${result.stdout || ''}\n${result.stderr || ''}`);
+}
+
+// A binary without the fork's client module rejects these ids with clap's
+// exit 2. The scan runs against an empty --home so it proves only that the
+// ids are accepted, never what the CI machine happens to have on disk.
+function forkOnlyClientsAccepted(binPath, clients, spawn = spawnSync) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-tokscale-fork-clients-'));
+  try {
+    const result = spawn(binPath, ['--json', '--client', clients.join(','), '--today', '--home', home], {
+      encoding: 'utf8',
+      timeout: 30_000
+    });
+    if (result.error) return `scan failed to execute: ${result.error.message}`;
+    if (result.status !== 0) return `scan exited ${result.status}: ${result.stderr || result.stdout}`;
+    return null;
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 }
 
 function verifyVendoredTokscaleClients({
@@ -62,7 +83,7 @@ function verifyVendoredTokscaleClients({
   // an id it does not recognize, so a binary missing one breaks that client's
   // scans outright. Scoping this to the default-on list would leave every
   // opt-in client — and its alias sub-sources — unguarded.
-  const tokscaleOnlyClients = KNOWN_CLIENTS.split(',').filter((client) => !LOCALLY_PARSED_CLIENTS.has(client));
+  const tokscaleOnlyClients = KNOWN_CLIENTS.split(',').filter((client) => !FORK_ONLY_CLIENTS.has(client));
   const clients = tokscaleClientFilter(tokscaleOnlyClients.join(',')).split(',');
   const supported = supportedClients(binPath, spawn);
   const unsupported = clients.filter((client) => !supported.has(client));
@@ -70,12 +91,23 @@ function verifyVendoredTokscaleClients({
     throw new Error(
       `${isUpstream ? 'npm-installed' : 'Vendored'} tokscale (${key}) does not recognize these client ` +
         `ids: ${unsupported.join(', ')}. Either the ${isUpstream ? 'tokscale dependency' : 'vendor pin'} needs ` +
-        'updating, or these clients need to be parsed locally (add to PARSE_LOCAL_CLIENTS) or removed from DEFAULT_CLIENTS / TOKSCALE_CLIENT_ALIASES.'
+        'updating, or these clients need to be removed from KNOWN_CLIENTS / TOKSCALE_CLIENT_ALIASES.'
+    );
+  }
+  const forkOnlyClients = [...FORK_ONLY_CLIENTS];
+  const forkFailure = forkOnlyClients.length > 0
+    ? forkOnlyClientsAccepted(binPath, forkOnlyClients, spawn)
+    : null;
+  if (forkFailure) {
+    throw new Error(
+      `${isUpstream ? 'npm-installed' : 'Vendored'} tokscale (${key}) does not accept the fork-only client ` +
+        `ids ${forkOnlyClients.join(', ')} (${forkFailure.trim()}). They need a fork build that carries ` +
+        'crates/tokscale-core/src/token_monitor/; upstream tokscale cannot serve them.'
     );
   }
 
-  log(`Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): all ${clients.length} effective client ids (known clients plus their tokscale aliases) are supported (tokscale-native or locally parsed).`);
-  return { key, mode, clients: clients.length };
+  log(`Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): all ${clients.length} effective client ids (known clients plus their tokscale aliases) are supported, and the ${forkOnlyClients.length} fork-only client ids are accepted.`);
+  return { key, mode, clients: clients.length, forkOnlyClients: forkOnlyClients.length };
 }
 
 if (require.main === module) {

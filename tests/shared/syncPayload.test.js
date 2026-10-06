@@ -69,25 +69,36 @@ test('a formerly uploadable year of history remains within the 1 MiB ingest boun
   assert.deepEqual(summary, raw);
 });
 
-test('a server 413 retries without optional cost matrices while retaining raw local history', async () => {
-  const summary = costAttributionSummary();
-  summary.today.modelThroughput = { alpha: { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 1000 } };
-  const before = structuredClone(summary);
-  const bodies = [];
-  const { response, retried } = await postSyncPayload(async (_url, options) => {
-    bodies.push(JSON.parse(options.body));
-    return { status: bodies.length === 1 ? 413 : 200, async arrayBuffer() { return new ArrayBuffer(0); } };
-  }, 'http://hub/api/ingest', { summary });
-  assert.equal(response.status, 200);
-  assert.equal(retried, true);
-  assert.ok(bodies[0].history.summary.clientModelCosts);
-  assert.ok(bodies[0].today.modelThroughput);
-  assert.equal(Object.hasOwn(bodies[1].today, 'modelThroughput'), false);
-  assert.ok(bodies[1].today.sessions.keep);
-  assert.equal(Object.hasOwn(bodies[1].history.summary, 'clientModelCosts'), false);
-  assert.equal(bodies[1].history.summary.clientModelCostsIncomplete, true);
-  assert.deepEqual(summary, before);
-});
+for (const syncSessionTitles of [false, true]) {
+  test(`a server 413 preserves title consent (${syncSessionTitles}) while omitting optional cost matrices`, async () => {
+    const summary = costAttributionSummary();
+    summary.today.modelThroughput = { alpha: { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 1000 } };
+    summary.today.sessions.keep.title = 'Consented title';
+    summary.today.sessions.keep.preview = 'Private preview';
+    const before = structuredClone(summary);
+    const bodies = [];
+    const { response, retried } = await postSyncPayload(async (_url, options) => {
+      bodies.push(JSON.parse(options.body));
+      return { status: bodies.length === 1 ? 413 : 200, async arrayBuffer() { return new ArrayBuffer(0); } };
+    }, 'http://hub/api/ingest', { summary, syncSessionTitles, sessionTitleSyncGeneration: 7 });
+    assert.equal(response.status, 200);
+    assert.equal(retried, true);
+    assert.ok(bodies[0].history.summary.clientModelCosts);
+    assert.ok(bodies[0].today.modelThroughput);
+    assert.equal(Object.hasOwn(bodies[1].today, 'modelThroughput'), false);
+    assert.ok(bodies[1].today.sessions.keep);
+    assert.equal(Object.hasOwn(bodies[1].history.summary, 'clientModelCosts'), false);
+    assert.equal(bodies[1].history.summary.clientModelCostsIncomplete, true);
+    for (const body of bodies) {
+      assert.equal(body.sessionTitleSyncGeneration, syncSessionTitles ? 7 : undefined);
+      assert.equal(body.today.sessions.keep.title, syncSessionTitles ? 'Consented title' : undefined);
+      assert.equal(Object.hasOwn(body.today.sessions.keep, 'preview'), false);
+      assert.equal(body.today.totalTokens, 100);
+      assert.equal(body.today.costUsd, 100);
+    }
+    assert.deepEqual(summary, before);
+  });
+}
 
 test('syncPayload preserves nullish inputs', () => {
   assert.equal(syncPayload(null), null);
@@ -664,4 +675,23 @@ test('postSyncPayload reports omitted session detail without changing period tot
   assert.deepEqual(posted.sessionDetailsOmitted, payload.sessionDetailsOmitted);
   assert.ok(payload.sessionDetailsOmitted.month > 0);
   assert.match(logs.at(-1), /^session detail omitted for sync \(month: \d+\)/);
+});
+
+
+test('discarded allTime sessions are never accessed or cloned before text sanitization', () => {
+  for (const syncSessionTitles of [false, true]) {
+    let reads = 0;
+    const session = { client: 'codex', sessionId: 'a', totalTokens: 1 };
+    Object.defineProperty(session, 'title', { enumerable: true, get() { reads += 1; throw new Error('discarded title read'); } });
+    const allTime = { totalTokens: 1 };
+    Object.defineProperty(allTime, 'sessions', { enumerable: true, get() { reads += 1; throw new Error('discarded sessions read'); } });
+    const summary = { deviceId: 'a', allTime, periods: { allTime: { totalTokens: 1, sessions: { a: session } } } };
+    const serialized = serializeSyncPayload(summary, { syncSessionTitles, sessionTitleSyncGeneration: 1 });
+    assert.equal(reads, 0);
+    assert.equal(Object.hasOwn(serialized.payload.allTime, 'sessions'), false);
+    assert.equal(Object.hasOwn(serialized.payload.periods.allTime, 'sessions'), false);
+    assert.equal(serialized.payload.allTime.totalTokens, 1);
+    assert.equal(Object.hasOwn(allTime, 'sessions'), true);
+    assert.strictEqual(summary.periods.allTime.sessions.a, session);
+  }
 });

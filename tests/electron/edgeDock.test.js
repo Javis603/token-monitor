@@ -108,7 +108,51 @@ test('a long detail total shrinks beside its compact reading instead of wrapping
   fitCardTotal({ querySelector: () => row });
   assert.equal(number.style.fontSize, undefined);
   assert.match(css, /\.edge-dock-total-row \{[^}]*white-space: nowrap/);
-  assert.ok(dock.indexOf('fitCardTotal(card);') < dock.indexOf('const height = Math.ceil(card.getBoundingClientRect().height)'));
+  const bubble = dock.slice(dock.indexOf('function renderBubble('));
+  assert.ok(bubble.indexOf('fitCardTotal(card);') < bubble.indexOf('const height = '));
+});
+
+test('a card commits after its reported height is clamped to the work area', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('// ---- Wiring'));
+  for (const kind of ['provider', 'stat']) {
+    for (const { measured, maxCardHeight, expected } of [
+      // Chromium at 175% scaling can measure a max-height: 851px card this way.
+      { measured: 851.000061, maxCardHeight: 851, expected: 851 },
+      { measured: 260.25, maxCardHeight: 851, expected: 261 },
+      { measured: 260.25, expected: 261 }
+    ]) {
+      let visibleId = 'previous-card';
+      const reports = [];
+      const card = { dataset: {}, style: {}, getBoundingClientRect: () => ({ height: measured }) };
+      const renderBubble = Function('deps', `
+        const { root, stagingLayer, providerCard, statCard, fitCardTotal,
+          clampBreakdownList, bridge, commitCard } = deps;
+        ${source}
+        return renderBubble;
+      `)({
+        root: { dataset: {} },
+        stagingLayer: { replaceChildren() {} },
+        providerCard: () => card,
+        statCard: () => card,
+        fitCardTotal() {},
+        clampBreakdownList() {},
+        bridge: { reportBubbleSize: (cellId, height) => reports.push({ cellId, height }) },
+        commitCard: (_card, cellId) => { visibleId = cellId; }
+      });
+      const cell = { id: `next-${kind}`, kind };
+      const payload = { side: 'right', cell, maxCardHeight };
+      renderBubble(payload);
+      assert.deepEqual(reports, [{ cellId: cell.id, height: expected }]);
+      assert.equal(visibleId, 'previous-card', 'wait for the main process to place the new card');
+      // Mirror the main process acknowledgement, including its height cap.
+      renderBubble({ ...payload, placed: {
+        cellId: cell.id, height: Math.min(reports[0].height, maxCardHeight || Infinity)
+      } });
+      assert.equal(visibleId, cell.id, `${kind} card must replace the previous card`);
+      assert.equal(reports.length, 1, 'a placed card must not keep reporting its size');
+    }
+  }
 });
 
 const {

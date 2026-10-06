@@ -265,8 +265,8 @@ function groupedLeader(rows, resolve) {
 //  - 'device': a posted device record. That is normalizeHistory() — ranked over the
 //    UNCAPPED contribution set, i.e. `monthly` — for a device with a single graph
 //    source, but mergeHistories() (capped `daily`) for a device that merges several,
-//    which collector.js does whenever proma/qoderCn sit alongside tokscale. Not
-//    decidable here, so re-rank only when both windows agree on the grouped leader
+//    which agents did while proma/qoderCn were parsed outside tokscale, and those
+//    records can still arrive from older agents. Not decidable here, so re-rank only when both windows agree on the grouped leader
 //    and otherwise keep the stored leader.
 //  - 'preview': historyPreview() strips per-model attribution, so there is nothing
 //    to re-rank. Rename the stored leader into its group and stop — notably do NOT

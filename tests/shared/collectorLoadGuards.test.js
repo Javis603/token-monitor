@@ -13,7 +13,6 @@ const path = require('node:path');
 const { performance } = require('node:perf_hooks');
 
 const { emptyPeriod } = require('../../src/shared/usage');
-const { localDayKey } = require('../../src/shared/history');
 const {
   clampTimerDelayMs, SYNC_MIN_INTERVAL_MS, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS
 } = require('../../src/shared/selfSyncThrottle');
@@ -3159,7 +3158,8 @@ test('self-watch db-shm events are ignored for every client whose scan recreates
   const zcodeRoot = path.join(os.tmpdir(), 'zcode', 'cli', 'db');
   const antigravityRoot = path.join(os.tmpdir(), '.gemini', 'antigravity');
   const antigravityConversation = path.join(antigravityRoot, 'conversations');
-  const roots = { antigravity: [antigravityRoot], qodercn: [qoderRoot], zcode: [zcodeRoot] };
+  const cherryRoot = path.join(os.tmpdir(), 'CherryStudio', 'Data');
+  const roots = { antigravity: [antigravityRoot], cherrystudio: [cherryRoot], qodercn: [qoderRoot], zcode: [zcodeRoot] };
 
   // Each client keeps its own database basename: Qoder CN names it local.db,
   // ZCode names it db.sqlite, Antigravity names one per conversation, below its
@@ -3167,7 +3167,8 @@ test('self-watch db-shm events are ignored for every client whose scan recreates
   for (const [root, base] of [
     [qoderRoot, 'local.db'],
     [zcodeRoot, 'db.sqlite'],
-    [antigravityConversation, '1f17ba78-fe78-4ed6-9f69-07387625fdad.db']
+    [antigravityConversation, '1f17ba78-fe78-4ed6-9f69-07387625fdad.db'],
+    [cherryRoot, 'cherrystudio.sqlite']
   ]) {
     assert.equal(isSelfWatchSqliteSidecarEvent(path.join(root, base + '-shm'), roots), true);
     assert.equal(isSelfWatchSqliteSidecarEvent(path.join(root, base + '-wal'), roots), false,
@@ -3203,170 +3204,91 @@ test('a SQLite client whose scan does not recreate its sidecar still watches db-
 // was actually about. A suppressed shm event must not spawn a scan, while a real
 // -wal change from the same directory still must — otherwise the fix would have
 // traded a runaway loop for silent staleness.
-test('a zcode shm event does not spawn a scan while a -wal change still does', async () => {
-  const tmp = withTmpHome([path.join('.zcode', 'cli', 'db')]);
-  const originalHomedir = os.homedir;
-  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  os.homedir = () => tmp;
-  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+for (const client of ['zcode', 'cherrystudio']) {
+  test(`a ${client} shm event does not spawn a scan while WAL and database changes still do`, async () => {
+    const tmp = withTmpHome([]);
+    const originalHomedir = os.homedir;
+    const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+    os.homedir = () => tmp;
+    process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+    const { clientSourceRoots } = freshCollector();
+    const dbDir = clientSourceRoots(client)[client].find((root) => root.id === (client === 'zcode' ? 'zcode-db' : 'cherrystudio-db'))?.dir
+      || path.join(tmp, '.zcode', 'cli', 'db');
+    fs.mkdirSync(dbDir, { recursive: true });
+    const dbName = client === 'zcode' ? 'db.sqlite' : 'cherrystudio.sqlite';
 
-  const chokidar = require('chokidar');
-  const originalWatch = chokidar.watch;
-  let watchHandler = null;
-  chokidar.watch = () => {
-    const watcher = {
-      on(event, handler) {
-        if (event === 'all') watchHandler = handler;
-        return watcher;
-      },
-      close() {}
+    const chokidar = require('chokidar');
+    const originalWatch = chokidar.watch;
+    let watchHandler = null;
+    chokidar.watch = () => {
+      const watcher = {
+        on(event, handler) {
+          if (event === 'all') watchHandler = handler;
+          return watcher;
+        },
+        close() {}
+      };
+      return watcher;
     };
-    return watcher;
-  };
 
-  const childProcess = require('node:child_process');
-  const originalSpawn = childProcess.spawn;
-  const calls = [];
-  childProcess.spawn = recordingSpawn(calls);
+    const childProcess = require('node:child_process');
+    const originalSpawn = childProcess.spawn;
+    const calls = [];
+    childProcess.spawn = recordingSpawn(calls);
 
-  const dbDir = path.join(tmp, '.zcode', 'cli', 'db');
-  let handle = null;
-  try {
-    const { startCollector } = freshCollector();
-    const updates = [];
-    handle = startCollector({
-      clients: 'zcode',
-      allTimeSince: '2024-01-01',
-      commandTimeoutMs: 5000,
-      deviceId: 'test-device',
-      agentVersion: 'test',
-      intervalMs: 60 * 60 * 1000,
-      watchEnabled: true,
-      watchUsePolling: false,
-      watchTriggersCollection: true,
-      watchDebounceMs: 10,
-      limitsEnabled: false,
-      historyEnabled: false,
-      anchorPersistenceEnabled: false,
-      onUpdate: (summary, reason) => updates.push({ summary, reason })
-    });
+    let handle = null;
+    try {
+      const { startCollector } = freshCollector();
+      const updates = [];
+      handle = startCollector({
+        clients: client,
+        allTimeSince: '2024-01-01',
+        commandTimeoutMs: 5000,
+        deviceId: 'test-device',
+        agentVersion: 'test',
+        intervalMs: 60 * 60 * 1000,
+        watchEnabled: true,
+        watchUsePolling: false,
+        watchTriggersCollection: true,
+        watchDebounceMs: 10,
+        limitsEnabled: false,
+        historyEnabled: false,
+        anchorPersistenceEnabled: false,
+        onUpdate: (summary, reason) => updates.push({ summary, reason })
+      });
 
-    await waitForCondition(() => updates.length === 1);
-    const afterInitialTick = calls.length;
+      await waitForCondition(() => updates.length === 1);
+      const afterInitialTick = calls.length;
 
-    // Our own scan recreates this sidecar, so it must not schedule another scan.
-    watchHandler('change', path.join(dbDir, 'db.sqlite-shm'));
-    await new Promise((resolve) => { setTimeout(resolve, 120); });
-    assert.equal(calls.length, afterInitialTick,
-      'a self-watch shm event must not spawn another scan');
+      // Our own scan recreates this sidecar, so it must not schedule another scan.
+      watchHandler('change', path.join(dbDir, dbName + '-shm'));
+      await new Promise((resolve) => { setTimeout(resolve, 120); });
+      assert.equal(calls.length, afterInitialTick,
+        'a self-watch shm event must not spawn another scan');
 
-    // The same directory, but the write that carries real data.
-    watchHandler('change', path.join(dbDir, 'db.sqlite-wal'));
-    await waitForCondition(() => calls.length > afterInitialTick, 4000);
-    assert.ok(calls.length > afterInitialTick, 'a -wal change must still spawn a scan');
-  } finally {
-    if (handle) handle.stop();
-    childProcess.spawn = originalSpawn;
-    chokidar.watch = originalWatch;
-    os.homedir = originalHomedir;
-    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
-    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
-    delete require.cache[collectorPath];
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test('collector preserves Qoder CN while publishing other clients after a bounded SQLite read fails', async () => {
-  const tmp = withTmpHome([]);
-  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
-
-  const qoderCnUsagePath = require.resolve('../../src/shared/providers/qodercn/usage');
-  const qoderCnUsage = require(qoderCnUsagePath);
-  const originalRows = qoderCnUsage.collectQoderCnRows;
-  const originalPeriods = qoderCnUsage.buildQoderCnPeriods;
-  let failReads = false;
-  let claudeTokens = 3;
-  const qoderCnReadOptions = [];
-  qoderCnUsage.collectQoderCnRows = async (options) => {
-    qoderCnReadOptions.push(options);
-    if (failReads) {
-      const error = new Error('qodercn sqlite read budget exceeded (rows limit 100000)');
-      error.code = 'QODER_CN_READ_BUDGET_EXCEEDED';
-      throw error;
+      // The same directory, but the write that carries real data.
+      watchHandler('change', path.join(dbDir, dbName + '-wal'));
+      await waitForCondition(() => calls.length > afterInitialTick, 4000);
+      assert.ok(calls.length > afterInitialTick, 'a -wal change must still spawn a scan');
+      await waitForCondition(() => updates.length >= 2);
+      const afterWalTick = calls.length;
+      watchHandler('change', path.join(dbDir, dbName));
+      await waitForCondition(() => calls.length > afterWalTick, 4000);
+      assert.ok(calls.length > afterWalTick, 'a database change must still spawn a scan');
+    } finally {
+      if (handle) handle.stop();
+      childProcess.spawn = originalSpawn;
+      chokidar.watch = originalWatch;
+      os.homedir = originalHomedir;
+      if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+      else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+      delete require.cache[collectorPath];
+      fs.rmSync(tmp, { recursive: true, force: true });
     }
-    return [];
-  };
-  qoderCnUsage.buildQoderCnPeriods = () => ({
-    today: { entries: [{ client: 'qodercn', model: 'qmodel', input: 7 }] },
-    month: { entries: [{ client: 'qodercn', model: 'qmodel', input: 7 }] },
-    allTime: { entries: [{ client: 'qodercn', model: 'qmodel', input: 7 }] }
   });
-  delete require.cache[collectorPath];
+}
 
-  let handle = null;
-  try {
-    const { startCollector } = freshCollector();
-    const previews = [];
-    const updates = [];
-    const collectorOptions = {
-      clients: 'claude,qodercn',
-      allTimeSince: '2024-01-01',
-      commandTimeoutMs: 1000,
-      deviceId: 'test-device',
-      agentVersion: 'test',
-      intervalMs: 60 * 60 * 1000,
-      watchEnabled: false,
-      limitsEnabled: false,
-      historyEnabled: false,
-      runTokscale: async () => ({ entries: [{ client: 'claude', model: 'm', input: claudeTokens }] })
-    };
-    handle = startCollector({
-      ...collectorOptions,
-      onPreview: (summary) => previews.push(summary),
-      onUpdate: (summary) => updates.push(summary)
-    });
-
-    await waitForCondition(() => updates.length === 1);
-    assert.equal(qoderCnReadOptions[0].includeJsonl, true, 'production collection includes current JSONL transcripts');
-    const anchorPath = path.join(tmp, 'collector-anchor.json');
-    const firstAnchor = JSON.parse(fs.readFileSync(anchorPath, 'utf8'));
-    assert.equal(firstAnchor.qoderCnPeriods.today.clients.qodercn, 7);
-    const initialPreviewCount = previews.length;
-    failReads = true;
-    claudeTokens = 5;
-    await handle.tick('manual');
-
-    assert.equal(updates.length, 2, 'a Qoder CN failure must not suppress fresh data from other clients');
-    assert.equal(updates.at(-1).today.clients.qodercn, 7, 'final update keeps the last Qoder CN period');
-    assert.equal(updates.at(-1).today.clients.claude, 5, 'final update publishes the fresh Claude period');
-    const fallbackAnchor = JSON.parse(fs.readFileSync(anchorPath, 'utf8'));
-    assert.equal(fallbackAnchor.fullScanAt, firstAnchor.fullScanAt, 'a fallback is not recorded as a successful full scan');
-    const failedPreviews = previews.slice(initialPreviewCount);
-    assert.equal(failedPreviews.length, 2, 'the failed full scan still emits its two host previews');
-    assert.equal(Object.prototype.hasOwnProperty.call(failedPreviews.at(-1), 'qoderCnStatus'), false);
-    assert.equal(failedPreviews.at(-1).today.clients.qodercn, 7, 'preview keeps the anchored Qoder CN today partition');
-    assert.equal('month' in failedPreviews.at(-1), false, 'preview keeps the last complete month while Qoder CN is unavailable');
-
-    handle.stop();
-    handle = startCollector({
-      ...collectorOptions,
-      onUpdate: (summary) => updates.push(summary)
-    });
-    await waitForCondition(() => updates.length === 3);
-    assert.equal(updates.at(-1).today.clients.qodercn, 7, 'a persisted anchor keeps Qoder CN data after restart');
-  } finally {
-    if (handle) handle.stop();
-    qoderCnUsage.collectQoderCnRows = originalRows;
-    qoderCnUsage.buildQoderCnPeriods = originalPeriods;
-    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
-    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
-    delete require.cache[collectorPath];
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test('collector does not reuse persisted Qoder CN periods after the DB path changes', async () => {
+test('collector does not reuse a persisted anchor after the Qoder CN DB path changes', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   const originalQoderCnDbPath = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
@@ -3382,20 +3304,11 @@ test('collector does not reuse persisted Qoder CN periods after the DB path chan
   fs.writeFileSync(path.join(tmp, 'collector-anchor.json'), JSON.stringify({
     dateKey: initialCollector.localTodayKey(),
     today: emptyPeriod(),
-    month: emptyPeriod(),
-    allTime: emptyPeriod(),
-    qoderCnPeriods: { today: oldQoderCnPeriod, month: oldQoderCnPeriod, allTime: oldQoderCnPeriod },
-    configFingerprint: initialCollector.configFingerprint('claude,qodercn', '2024-01-01', true, oldDbPath),
+    month: oldQoderCnPeriod,
+    allTime: oldQoderCnPeriod,
+    configFingerprint: initialCollector.configFingerprint('claude,qodercn', '2024-01-01', true, oldDbPath, initialCollector.qoderCnProjectsDirForClients('claude,qodercn')),
     fullScanAt: new Date(Date.now() - 5 * 60 * 1000).toISOString()
   }));
-
-  const qoderCnUsagePath = require.resolve('../../src/shared/providers/qodercn/usage');
-  const qoderCnUsage = require(qoderCnUsagePath);
-  const originalRows = qoderCnUsage.collectQoderCnRows;
-  qoderCnUsage.collectQoderCnRows = async () => {
-    throw new Error('new Qoder CN database is temporarily unavailable');
-  };
-  delete require.cache[collectorPath];
 
   let handle = null;
   try {
@@ -3417,134 +3330,14 @@ test('collector does not reuse persisted Qoder CN periods after the DB path chan
 
     await waitForCondition(() => updates.length === 1);
     assert.equal(updates.at(-1).today.clients.claude, 3);
-    assert.equal(updates.at(-1).today.clients.qodercn || 0, 0, 'old-path Qoder CN fallback must not leak into the new path');
+    assert.equal(updates.at(-1).month.clients.qodercn || 0, 0, 'the old-path anchor must not leak into the new path');
+    assert.equal(updates.at(-1).allTime.clients.qodercn || 0, 0, 'the old-path anchor must not leak into the new path');
   } finally {
     if (handle) handle.stop();
-    qoderCnUsage.collectQoderCnRows = originalRows;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     if (originalQoderCnDbPath === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
     else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = originalQoderCnDbPath;
-    delete require.cache[collectorPath];
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test('collector publishes other clients when Qoder CN fails before the first complete snapshot', async () => {
-  const tmp = withTmpHome([]);
-  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
-
-  const qoderCnUsagePath = require.resolve('../../src/shared/providers/qodercn/usage');
-  const qoderCnUsage = require(qoderCnUsagePath);
-  const originalRows = qoderCnUsage.collectQoderCnRows;
-  let qoderCnReads = 0;
-  let claudeTokens = 3;
-  qoderCnUsage.collectQoderCnRows = async () => {
-    qoderCnReads += 1;
-    throw new Error('Qoder CN unavailable before first complete snapshot');
-  };
-  delete require.cache[collectorPath];
-
-  let handle = null;
-  try {
-    const { startCollector } = freshCollector();
-    const updates = [];
-    handle = startCollector({
-      clients: 'claude,qodercn',
-      allTimeSince: '2024-01-01',
-      commandTimeoutMs: 1000,
-      deviceId: 'test-device',
-      agentVersion: 'test',
-      intervalMs: 60 * 60 * 1000,
-      watchEnabled: false,
-      anchorPersistenceEnabled: false,
-      limitsEnabled: false,
-      historyEnabled: false,
-      runTokscale: async () => ({ entries: [{ client: 'claude', model: 'm', input: claudeTokens }] }),
-      onUpdate: (summary) => updates.push(summary)
-    });
-
-    await waitForCondition(() => updates.length === 1);
-    claudeTokens = 5;
-    await handle.tick('incremental', { todayOnly: true });
-
-    assert.equal(qoderCnReads, 2, 'Qoder CN is retried on the incremental read');
-    assert.equal(updates.length, 2, 'a first-read Qoder CN failure must not suppress other clients');
-    assert.equal(updates.at(-1).today.clients.claude, 5, 'the incremental Claude period is published');
-  } finally {
-    if (handle) handle.stop();
-    qoderCnUsage.collectQoderCnRows = originalRows;
-    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
-    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
-    delete require.cache[collectorPath];
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test('collector publishes live periods when only Qoder CN history read fails', async () => {
-  const tmp = withTmpHome([]);
-  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
-
-  const qoderCnUsagePath = require.resolve('../../src/shared/providers/qodercn/usage');
-  const qoderCnUsage = require(qoderCnUsagePath);
-  const originalRows = qoderCnUsage.collectQoderCnRows;
-  const originalHistory = qoderCnUsage.buildQoderCnHistoryGraph;
-  let failHistory = false;
-  const todayKey = localDayKey();
-  qoderCnUsage.collectQoderCnRows = async () => [];
-  qoderCnUsage.buildQoderCnHistoryGraph = () => {
-    if (failHistory) throw new Error('temporary Qoder CN history read failure');
-    return {
-      contributions: [{
-        date: todayKey,
-        clients: [{ client: 'qodercn', modelId: 'qmodel', tokens: { input: 2 }, cost: 0, messages: 1 }]
-      }]
-    };
-  };
-  delete require.cache[collectorPath];
-
-  let handle = null;
-  try {
-    const { startCollector } = freshCollector();
-    const updates = [];
-    handle = startCollector({
-      clients: 'claude,qodercn',
-      allTimeSince: '2024-01-01',
-      commandTimeoutMs: 1000,
-      deviceId: 'test-device',
-      agentVersion: 'test',
-      intervalMs: 60 * 60 * 1000,
-      watchEnabled: false,
-      anchorPersistenceEnabled: false,
-      limitsEnabled: false,
-      historyEnabled: true,
-      runTokscale: async () => ({ entries: [{ client: 'claude', model: 'm', input: 3 }] }),
-      runGraph: async () => ({
-        contributions: [{
-          date: todayKey,
-          clients: [{ client: 'claude', modelId: 'm', tokens: { input: 3 }, cost: 0, messages: 1 }]
-        }]
-      }),
-      onUpdate: (summary) => updates.push(summary)
-    });
-
-    await waitForCondition(() => updates.length === 1);
-    failHistory = true;
-    await handle.tick('manual', { forceHistory: true });
-
-    assert.equal(updates.length, 2, 'history-only failure must not suppress fresh live periods');
-    assert.equal(Object.prototype.hasOwnProperty.call(updates.at(-1), 'qoderCnStatus'), false);
-    assert.equal(updates.at(-1).history.daily[0].perClient.claude.tokens, 3);
-    assert.equal(updates.at(-1).history.daily[0].perClient.qodercn.tokens, 2);
-    assert.equal(updates.at(-1).today.clients.claude, 3);
-  } finally {
-    if (handle) handle.stop();
-    qoderCnUsage.collectQoderCnRows = originalRows;
-    qoderCnUsage.buildQoderCnHistoryGraph = originalHistory;
-    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
-    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }

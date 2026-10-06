@@ -11,7 +11,8 @@ const {
   watchIgnoreMatcher, watchPathsForClients
 } = require('../../src/shared/collector');
 const { normalizeClientHealth } = require('../../src/shared/clientHealth');
-const { clientsCsvForSetting, DEFAULT_CLIENTS, PARSE_LOCAL_CLIENTS } = require('../../src/shared/clientTracking');
+const { clientsCsvForSetting, DEFAULT_CLIENTS } = require('../../src/shared/clientTracking');
+const { FORK_ONLY_CLIENT_IDS } = require('../../src/shared/clientCatalog');
 const { extractUsageFromTokscale, normalizeClientName } = require('../../src/shared/usage');
 const { homeHasData } = require('../../src/shared/wslUsage');
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
@@ -40,7 +41,7 @@ test('Unsloth source resolution follows the released Tokscale environment overri
 
 test('Unsloth is a normal Tokscale client without changing saved selections', () => {
   assert.ok(DEFAULT_CLIENTS.split(',').includes('unsloth'));
-  assert.ok(!PARSE_LOCAL_CLIENTS.includes('unsloth'));
+  assert.ok(!FORK_ONLY_CLIENT_IDS.includes('unsloth'));
   assert.equal(clientsCsvForSetting('codex,lmstudio'), 'codex,lmstudio');
   assert.equal(clientsCsvForSetting('codex,unsloth'), 'codex,unsloth');
   assert.equal(clientsCsvForSetting(''), '');

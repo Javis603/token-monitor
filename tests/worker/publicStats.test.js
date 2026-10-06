@@ -99,8 +99,8 @@ test('Worker public stats strip every account identity and plan field', async ()
       // what the user pays, not even to read a version off it and drop it again.
       async get(key) { throw new Error(`public stats must not read storage key: ${key}`); },
       async list(options) {
-        assert.deepEqual(options, { prefix: 'dev:' });
-        return new Map([['dev:macbook', device]]);
+        assert.ok(['dev:', 'title-policy:'].includes(options.prefix));
+        return options.prefix === 'dev:' ? new Map([['dev:macbook', device]]) : new Map();
       }
     }
   }, { PUBLIC_STATS_ENABLED: '1' });

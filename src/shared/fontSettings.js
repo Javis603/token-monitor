@@ -14,6 +14,16 @@
     system: SYSTEM_UI_FONT,
     mono: DEFAULT_INTERFACE_FONT
   });
+  const TEXT_SIZE_SCALES = Object.freeze({ standard: 1, larger: 1.1, largest: 1.2 });
+
+  function normalizeTextSize(value) {
+    return typeof value === 'string' && Object.hasOwn(TEXT_SIZE_SCALES, value) ? value : 'standard';
+  }
+
+  function textScaleForSize(value) {
+    return TEXT_SIZE_SCALES[normalizeTextSize(value)];
+  }
+
   const MAX_FONT_FAMILY_LENGTH = 160;
   const UNSAFE_FONT_FAMILY_CHARACTERS = /[\u0000-\u001f\u007f;{}<>]/;
 
@@ -61,6 +71,8 @@
     FONT_PRESETS,
     MAX_FONT_FAMILY_LENGTH,
     SYSTEM_UI_FONT,
+    normalizeTextSize,
+    textScaleForSize,
     fontFamilyForPreset,
     normalizeFontFamily,
     presetForFontFamily,

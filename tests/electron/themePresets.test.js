@@ -29,8 +29,8 @@ const {
 
 const { clientColors } = require('../../src/electron/renderer/usageCharts');
 
-test('interface palette is the four always-visible colours, each mapped to a CSS variable', () => {
-  assert.deepEqual(INTERFACE_COLOR_KEYS, ['accent', 'bg', 'text', 'muted']);
+test('interface palette includes chart colour independently from semantic colours, each mapped to a CSS variable', () => {
+  assert.deepEqual(INTERFACE_COLOR_KEYS, ['accent', 'chart', 'bg', 'text', 'muted']);
   // Semantic status colours are intentionally not customisable.
   for (const dead of ['success', 'blue', 'orange', 'purple', 'yellow', 'red']) {
     assert.ok(!INTERFACE_COLOR_KEYS.includes(dead), `${dead} should not be customisable`);
@@ -148,7 +148,7 @@ test('themeCssVarEntries flips the overlay/border system for light backgrounds',
   assert.equal(byName(themeCssVarEntries({})) ['color-scheme'], null);
 });
 
-test('every preset is a full palette of valid hex for all four keys', () => {
+test('every preset is a full palette of valid hex for every interface key', () => {
   for (const preset of THEME_PRESETS) {
     assert.ok(preset.id, 'preset missing id');
     assert.deepEqual(Object.keys(preset.colors).sort(), [...INTERFACE_COLOR_KEYS].sort(), `${preset.id} is not a full palette`);
@@ -190,7 +190,7 @@ test('mergeThemeColors layers valid overrides on defaults', () => {
 });
 
 test('TM1 theme codes round-trip the four interface colours in a stable order', () => {
-  assert.equal(THEME_CODE_VERSION, 'TM1');
+  assert.equal(THEME_CODE_VERSION, 'TM2');
   const code = encodeThemeCode({
     accent: '#112233',
     bg: '#445566',
@@ -216,8 +216,43 @@ test('TM1 theme codes normalize input and reject malformed or future versions', 
     'TM1-B7EAD4-303438-EEF5FB-A3ADBB'
   );
   assert.deepEqual(decodeThemeCode('TM1-not-a-theme'), { ok: false, reason: 'invalid' });
-  assert.deepEqual(decodeThemeCode('TM2-B7EAD4-303438-EEF5FB-A3ADBB'), { ok: false, reason: 'unsupportedVersion' });
+  assert.deepEqual(decodeThemeCode('TM3-B7EAD4-303438-EEF5FB-A3ADBB'), { ok: false, reason: 'unsupportedVersion' });
   assert.deepEqual(decodeThemeCode(''), { ok: false, reason: 'invalid' });
+});
+
+test('TM2 shares the chart colour without changing the legacy field order', () => {
+  const colors = { accent: '#112233', bg: '#445566', text: '#aabbcc', muted: '#778899', chart: '#cc8844' };
+  const code = 'TM2-112233-445566-AABBCC-778899-CC8844';
+  assert.equal(encodeThemeCode(colors), code);
+  assert.deepEqual(decodeThemeCode(`  ${code.toLowerCase()}  `), { ok: true, code, colors });
+  assert.deepEqual(decodeThemeCode('TM2-112233-445566-AABBCC-778899'), { ok: false, reason: 'invalid' });
+  assert.deepEqual(decodeThemeCode(`${code}-FFFFFF`), { ok: false, reason: 'invalid' });
+  assert.deepEqual(decodeThemeCode('TM2-112233-445566-AABBCC-778899-ZZZZZZ'), { ok: false, reason: 'invalid' });
+  const legacy = decodeThemeCode('TM1-112233-445566-AABBCC-778899');
+  assert.equal(mergeThemeColors(legacy.colors).chart, DEFAULT_THEME.chart);
+  assert.equal(encodeThemeCode({ ...colors, chart: DEFAULT_THEME.chart }), legacy.code);
+});
+
+test('chart preview, invalid input and reset share one isolated palette mapping', () => {
+  const entries = (colors) => Object.fromEntries(themeCssVarEntries(colors).map(({ name, value }) => [name, value]));
+  const custom = entries({ chart: '#CC8844', accent: '#112233' });
+  assert.equal(custom['--chart-color'], '#cc8844');
+  assert.equal(custom['--chart-rgb'], '204, 136, 68');
+  assert.equal(custom['--chart-bar'], '#cc8844');
+  assert.equal(custom['--chart-heat-1-rgb'], '204, 136, 68');
+  assert.equal(custom['--chart-heat-4-rgb'], '232, 200, 169');
+  for (let level = 1; level <= 4; level += 1) {
+    assert.equal(custom[`--chart-heat-bright-${level}-rgb`], custom[`--chart-heat-${level}-rgb`]);
+  }
+  assert.equal(custom['--accent'], '#112233');
+  assert.ok(!('--blue' in custom));
+  assert.ok(!('--blue-rgb' in custom));
+  assert.equal(custom['--success'], null);
+  const chartKeys = Object.keys(custom).filter((key) => key.startsWith('--chart-'));
+  for (const colors of [{}, { chart: 'invalid' }, { chart: DEFAULT_THEME.chart }]) {
+    const reset = entries(colors);
+    for (const key of chartKeys) assert.equal(reset[key], null, `${key} restores its stylesheet default`);
+  }
 });
 
 test('mergeVendorColors overrides brand defaults, ignoring junk', () => {

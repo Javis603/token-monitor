@@ -28,6 +28,7 @@ test('a client resolves to the provider its tokens belong to', () => {
   assert.equal(limitProviderForClient('dsh'), 'deepseek');
   assert.equal(limitProviderForClient('CODEX'), 'codex');
   assert.equal(limitProviderForClient(' zcode '), 'zai');
+  assert.equal(limitProviderForClient('mcode'), 'minimax');
   assert.equal(limitProviderForClient('qwen'), null);
   assert.equal(limitProviderForClient('nonesuch'), null);
   assert.equal(limitProviderForClient(''), null);
@@ -57,10 +58,11 @@ test('initial limit providers map only corresponding Collection client aliases',
         qodercn: { source: { state: 'detected' } },
         zcode: { source: { state: 'detected' } },
         mimo: { source: { state: 'detected' } },
-        dsh: { source: { state: 'detected' } }
+        dsh: { source: { state: 'detected' } },
+        mcode: { source: { state: 'detected' } }
       }
     }),
-    ['mimo', 'zai', 'qoder', 'deepseek']
+    ['mimo', 'zai', 'qoder', 'deepseek', 'minimax']
   );
 });
 

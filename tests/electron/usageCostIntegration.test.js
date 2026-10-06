@@ -51,6 +51,7 @@ test('normalized cost rules remain available to the renderer settings UI', () =>
   const project = mainFunction('settingsForRenderer', {
     settings,
     credentialSettingsForRenderer: () => ({}),
+    getSyncContentRuntime: () => ({ status: () => ({}) }),
     rendererOmittedAccountKeys: () => [],
     trayMenuLocale: () => 'en',
     effectiveSubscriptions: () => [],

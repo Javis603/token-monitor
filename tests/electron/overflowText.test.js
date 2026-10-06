@@ -62,6 +62,57 @@ function harness(distance = 7, options = {}) {
   return { api, element, node, document, window, frame, hover, frames, timers };
 }
 
+test('sync endpoint reuses hover reading and preserves its wrapper across settings pushes', () => {
+  let reduced = false;
+  const h = harness(100);
+  const endpoint = h.node();
+  endpoint.id = 'syncConnectionEndpoint';
+  endpoint.closest = () => null;
+  const document = { activeElement: null, createElement: h.node, querySelectorAll: () => [endpoint] };
+  const control = () => ({ contains: () => false });
+  const els = Object.fromEntries(['syncConnectionEditor', 'syncDeviceSettings', 'syncConnectionEdit',
+    'syncConnectionCancel', 'syncConnectionIdentity', 'syncUploadIntervalRow', 'syncConnectionSaveError']
+    .map(id => [id, control()]));
+  els.syncConnectionEndpoint = endpoint;
+  const state = { settings: { hubMode: 'client', hubUrl: 'https://user:password@long-host.example:8443/private?secret=hidden#token' } };
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const setup = app.slice(app.indexOf('const overflowText ='), app.indexOf('// Two clicks to remove from sync settings'));
+  const ui = app.slice(app.indexOf('function syncHubConnectionUi('), app.indexOf('function beginClientConnectionEdit('));
+  const context = vm.createContext({
+    document, window: { ...h.window, TokenMonitorOverflowText: { create } }, els, state,
+    requestAnimationFrame: h.window.requestAnimationFrame, homeSessionRenderPending: false,
+    prefersReducedMotion: () => reduced, clientConnectionEditing: false, hubSaveBusy: false, hubSaveError: false,
+    clientConnectionHasDraft: () => false, syncDevicePanelApi: require('../../src/electron/renderer/syncDevicePanel'),
+    t: () => 'Saved Hub URL'
+  });
+  vm.runInContext(`${setup}\n${ui}`, context);
+  context.syncHubConnectionUi();
+  h.frame(0);
+  const content = endpoint.children[0];
+  assert.equal(endpoint.textContent, 'long-host.example:8443');
+  assert.equal(endpoint.classList.contains('is-overflow-enabled'), true);
+  assert.equal(endpoint.classList.contains('has-overflow-fade'), true);
+  endpoint.mouseenter();
+  context.syncHubConnectionUi();
+  assert.equal(endpoint.children[0], content, 'background settings updates keep the content wrapper');
+  assert.equal(endpoint.classList.contains('is-hover-reading'), true, 'unchanged endpoint keeps the pending hover');
+  assert.equal(h.timers.size, 1);
+  endpoint.mouseleave();
+  assert.equal(h.timers.size, 0);
+  reduced = true;
+  context.syncHubConnectionUi();
+  h.frame(0);
+  assert.equal(endpoint.title, 'long-host.example:8443', 'the reduced-motion tooltip contains only the safe host');
+  state.settings.hubUrl = 'https://next.example/secret';
+  context.syncHubConnectionUi();
+  assert.equal(endpoint.children[0], content);
+  assert.equal(endpoint.title, 'next.example');
+  state.settings.hubUrl = 'invalid credential text';
+  context.syncHubConnectionUi();
+  assert.equal(endpoint.textContent, 'Saved Hub URL');
+  assert.equal(endpoint.title, 'Saved Hub URL');
+});
+
 test('small overflow moves smoothly in fractional pixels and finishes promptly', () => {
   const h = harness();
   h.hover();

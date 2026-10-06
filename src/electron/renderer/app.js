@@ -17,6 +17,7 @@ const accountProfileRequests = accountShellApi.createRequestGuard();
 const accountProfileStatuses = accountShellApi.createRequestGuard();
 const accountProfileSaves = accountShellApi.createBusyGuard();
 const accountShellErrors = Object.create(null);
+let syncContentForm = null;
 
 function setAccountShellError(id, message) {
   accountShellErrors[id] = message || '';
@@ -49,6 +50,9 @@ const vendorPresentationApi = window.TokenMonitorVendorPresentation;
 // also show the marks that have no colour of their own (Factory, the relays).
 const clientsWithIcon = new Set(vendorPresentationApi.VENDOR_IDS);
 const limitMarksWithIcon = new Set(vendorPresentationApi.MARK_IDS);
+
+// Modes whose device list is shared with other machines; only these can remove one.
+const SHARED_SYNC_MODES = new Set(['client', 'host', 'icloud']);
 
 function osIconFor(platform) {
   const prefix = String(platform || '').toLowerCase().split('-')[0];
@@ -161,6 +165,7 @@ const homeOverviewApi = window.TokenMonitorHomeOverview;
 const homeModulePreferencesApi = window.TokenMonitorHomeModulePreferences;
 const fixedPeriodRangesApi = window.TokenMonitorFixedPeriodRanges;
 const hubBuildPresentationApi = window.TokenMonitorHubBuildPresentation;
+const syncDevicePanelApi = window.TokenMonitorSyncDevicePanel;
 const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMode;
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
@@ -398,12 +403,21 @@ Object.assign(els, {
   trayIconOptions: document.getElementById('trayIconOptions'),
   trayOptions: document.getElementById('trayOptions'),
   hubModeOptions: document.getElementById('hubModeOptions'),
-  icloudModeOption: document.querySelector('input[name="hubMode"][value="icloud"]'),
+  icloudModeOption: document.querySelector('#hubModeOptions option[value="icloud"]'),
+  syncModeDescription: document.getElementById('syncModeDescription'),
   icloudFields: document.getElementById('icloudFields'),
   icloudStatus: document.getElementById('icloudStatus'),
   icloudRootStatus: document.getElementById('icloudRootStatus'),
   hubBuildStatus: document.getElementById('hubBuildStatus'),
   hubClientFields: document.getElementById('hubClientFields'),
+  syncConnectionEditor: document.getElementById('syncConnectionEditor'),
+  syncConnectionIdentity: document.getElementById('syncConnectionIdentity'),
+  syncConnectionEndpoint: document.getElementById('syncConnectionEndpoint'),
+  syncConnectionEdit: document.getElementById('syncConnectionEdit'),
+  syncConnectionCancel: document.getElementById('syncConnectionCancel'),
+  syncConnectionSaveError: document.getElementById('syncConnectionSaveError'),
+  syncDeviceSettings: document.getElementById('syncDeviceSettings'),
+  syncUploadIntervalRow: document.getElementById('syncUploadIntervalRow'),
   hubHostFields: document.getElementById('hubHostFields'),
   hubPortInput: document.getElementById('hubPortInput'),
   hubSecretInput: document.getElementById('hubSecretInput'),
@@ -411,7 +425,16 @@ Object.assign(els, {
   hubSecretRegenButton: document.getElementById('hubSecretRegenButton'),
   secretPasteButton: document.getElementById('secretPasteButton'),
   hubStatusRow: document.getElementById('hubStatusRow'),
-  syncClientStatus: document.getElementById('syncClientStatus'),
+  syncDevicePanel: document.getElementById('syncDevicePanel'),
+  syncPanelConnection: document.getElementById('syncPanelConnection'),
+  syncPanelSignal: document.getElementById('syncPanelSignal'),
+  syncPanelState: document.getElementById('syncPanelState'),
+  syncPanelDetail: document.getElementById('syncPanelDetail'),
+  syncPanelUpload: document.getElementById('syncPanelUpload'),
+  syncPanelBuild: document.getElementById('syncPanelBuild'),
+  syncPanelCount: document.getElementById('syncPanelCount'),
+  syncDeviceList: document.getElementById('syncDeviceList'),
+  syncPanelOpenDevices: document.getElementById('syncPanelOpenDevices'),
   hubAddressList: document.getElementById('hubAddressList'),
   syncUploadIntervalInput: document.getElementById('syncUploadIntervalInput'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
@@ -501,6 +524,7 @@ Object.assign(els, {
   themeAdvancedGroup: document.getElementById('themeAdvancedGroup'),
   themeAdvancedToggle: document.getElementById('themeAdvancedToggle'),
   themeAdvancedDetails: document.getElementById('themeAdvancedDetails'),
+  textSizeInput: document.getElementById('textSizeInput'),
   interfaceFontPreset: document.getElementById('interfaceFontPreset'),
   interfaceFontInput: document.getElementById('interfaceFontInput'),
   interfaceFontCustomRow: document.getElementById('interfaceFontCustomRow'),
@@ -520,6 +544,35 @@ Object.assign(els, {
   sessionDetail: document.getElementById('session-detail'),
   sessionDetailHead: document.getElementById('session-detail-head')
 });
+
+const SYNC_MODE_DESCRIPTIONS = {
+  local: 'settings.sync.localOnlyDesc',
+  client: 'settings.sync.connectHubDesc',
+  host: 'settings.sync.hostHubDesc',
+  icloud: 'settings.sync.icloudDesc'
+};
+const SYNC_MODE_ICON_PATHS = {
+  local: ['M5 4h14v12H5z', 'M2 20h20l-3-4H5z'],
+  client: ['M10 13a5 5 0 0 0 7 .5l3-3a5 5 0 0 0-7-7l-2 2', 'M14 11a5 5 0 0 0-7-.5l-3 3a5 5 0 0 0 7 7l2-2'],
+  host: ['M4 3h16v7H4z', 'M4 14h16v7H4z', 'M7 6.5h.01M7 17.5h.01', 'M11 6.5h6M11 17.5h6'],
+  icloud: ['M7 18H6a4 4 0 1 1 .7-7.9A6 6 0 0 1 18 8a5 5 0 0 1 0 10H7']
+};
+const syncModeIcons = Object.fromEntries(Object.entries(SYNC_MODE_ICON_PATHS).map(([mode, paths]) => [mode, (doc) => {
+  const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  for (const [name, value] of Object.entries({ viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })) {
+    svg.setAttribute(name, value);
+  }
+  for (const d of paths) {
+    const path = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
+}]));
+const syncModeSelect = window.TokenMonitorSelectControl?.enhance(els.hubModeOptions, {
+  getOptionMeta: option => ({ description: t(SYNC_MODE_DESCRIPTIONS[option.value]), icon: syncModeIcons[option.value] })
+});
+window.addEventListener('unload', () => syncModeSelect?.destroy(), { once: true });
 
 function toggleAccordionRow(row) {
   const isExpanded = row.classList.contains('expanded');
@@ -651,6 +704,7 @@ function applySettingsTranslations() {
 }
 
 function applySettingsSectionDom(id, open) {
+  if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
   const details = document.getElementById(`${id}SettingsDetails`);
   const group = toggle?.closest('.settings-collapsible-group');
@@ -672,6 +726,7 @@ function setSettingsSectionExpanded(section, expanded) {
   }
   state.settingsSections[id] = next;
   applySettingsSectionDom(id, next);
+  if (id === 'sync' && next) void syncContentForm?.refresh();
 }
 
 // Expanding a section auto-collapses the previously open one. When that one
@@ -767,10 +822,12 @@ function viewsSummary() {
 function settingsSectionSummary(section) {
   if (!state.settings) return '';
   if (section === 'sync') {
-    if (state.settings.hubMode === 'host') return t('settings.sync.hostHub');
-    if (state.settings.hubMode === 'client') return t('settings.sync.connectHub');
-    if (state.settings.hubMode === 'icloud') return t('settings.sync.icloud');
-    return t('settings.sync.localOnly');
+    const modeKeys = { host: 'settings.sync.hostHub', client: 'settings.sync.connectHub', icloud: 'settings.sync.icloud' };
+    const label = t(modeKeys[state.settings.hubMode] || 'settings.sync.localOnly');
+    const devices = SHARED_SYNC_MODES.has(state.settings.hubMode) && state.mode === 'sync' ? state.stats?.devices : null;
+    if (!Array.isArray(devices) || devices.length === 0) return label;
+    const online = devices.filter((device) => device?.stale !== true).length;
+    return `${label} · ${t('settings.sync.panel.onlineCount', { online, total: devices.length })}`;
   }
   if (section === 'tools') {
     const counts = clientHealthPresentationApi.clientHealthCountsForTracked(
@@ -1924,26 +1981,26 @@ function clearDeviceDeleteConfirmationTimer(remove) {
   deviceDeleteConfirmationTimers.delete(remove);
 }
 
-function resetDeviceDeleteConfirmation(remove, defaultText = '') {
+function resetDeviceDeleteConfirmation(remove, defaultText = remove.dataset.idleText || '') {
   clearDeviceDeleteConfirmationTimer(remove);
   armedDeviceDeleteButtons.delete(remove);
   remove.dataset.confirm = '';
-  remove.textContent = defaultText;
+  remove.querySelector('.device-delete-label').textContent = defaultText;
 }
 
-function armDeviceDeleteConfirmation(remove, defaultText, confirmationText) {
+function armDeviceDeleteConfirmation(remove) {
   clearDeviceDeleteConfirmationTimer(remove);
   armedDeviceDeleteButtons.add(remove);
   remove.dataset.confirm = 'true';
-  remove.textContent = confirmationText;
-  const timer = setTimeout(() => resetDeviceDeleteConfirmation(remove, defaultText), DEVICE_DELETE_CONFIRMATION_MS);
+  remove.querySelector('.device-delete-label').textContent = remove.dataset.confirmText;
+  const timer = setTimeout(() => resetDeviceDeleteConfirmation(remove), DEVICE_DELETE_CONFIRMATION_MS);
   deviceDeleteConfirmationTimers.set(remove, timer);
 }
 
 document.addEventListener('pointerdown', (event) => {
   for (const remove of armedDeviceDeleteButtons) {
     if (remove !== event.target && !remove.contains?.(event.target)) {
-      resetDeviceDeleteConfirmation(remove, t('settings.sync.icloudDelete'));
+      resetDeviceDeleteConfirmation(remove);
     }
   }
 });
@@ -1951,7 +2008,7 @@ document.addEventListener('pointerdown', (event) => {
 let homeSessionRenderPending = false;
 const overflowText = window.TokenMonitorOverflowText.create({
   document, window, prefersReducedMotion,
-  enabled: element => Boolean(element.closest('.session-mode, .home-session-row')),
+  enabled: element => Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint'),
   onLeave: () => requestAnimationFrame(() => {
     if (homeSessionRenderPending && state.breakdown === 'home'
       && visibleStatsSurface() === 'main' && state.stats) renderHome();
@@ -1961,14 +2018,56 @@ const overflowText = window.TokenMonitorOverflowText.create({
 function bindHoverMarquee(element) { overflowText.bind(element); }
 function setHoverMarqueeText(element, value) { overflowText.setText(element, value); }
 
+bindHoverMarquee(els.syncConnectionEndpoint);
+
+// Two clicks to remove from sync settings: the first arms the button, the
+// second deletes. The usage view has no device-management actions.
+function createDeviceRemoveButton(deviceId, deleteText, deleteConfirmText) {
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'device-delete-button';
+  remove.dataset.deviceId = deviceId;
+  remove.dataset.idleText = deleteText;
+  remove.dataset.confirmText = deleteConfirmText;
+  remove.disabled = devicesBeingDeleted.has(deviceId);
+  const label = document.createElement('span');
+  label.className = 'device-delete-label';
+  label.textContent = deleteText;
+  remove.append(label);
+  const resetConfirmation = () => resetDeviceDeleteConfirmation(remove);
+  remove.addEventListener('blur', resetConfirmation);
+  remove.addEventListener('click', async () => {
+    if (devicesBeingDeleted.has(deviceId)) return;
+    if (remove.dataset.confirm !== 'true') {
+      armDeviceDeleteConfirmation(remove);
+      return;
+    }
+    remove.disabled = true;
+    devicesBeingDeleted.add(deviceId);
+    try {
+      await window.tokenMonitor.deleteDevice(deviceId);
+      resetConfirmation();
+      await refreshStats();
+    } catch (_) {
+      resetConfirmation();
+    } finally {
+      devicesBeingDeleted.delete(deviceId);
+      // Stats may have replaced the original button while IPC was pending.
+      for (const current of [remove, ...document.querySelectorAll('.device-delete-button')]) {
+        if (current.dataset.deviceId !== deviceId) continue;
+        current.disabled = false;
+        resetDeviceDeleteConfirmation(current);
+      }
+    }
+  });
+  return remove;
+}
+
 function renderDeviceAccordion(accordionInner, deviceDetail) {
   const signature = JSON.stringify([
     toolIconsEnabled(state.settings?.showToolIcons),
     deviceDetail.emptyText,
     deviceDetail.metaParts,
-    deviceDetail.canDelete,
-    deviceDetail.deviceId,
-    devicesBeingDeleted.has(deviceDetail.deviceId),
     deviceDetail.tools.map((tool) => [
       tool.key,
       tool.value,
@@ -1978,8 +2077,6 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
       ])
   ]);
   if (accordionInner.dataset.signature === signature) return;
-  const previousDelete = accordionInner.querySelector?.('.device-delete-button');
-  if (previousDelete) resetDeviceDeleteConfirmation(previousDelete);
 
   const content = document.createElement('div');
   content.className = 'accordion-content device-breakdown';
@@ -2041,43 +2138,6 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
     meta.className = 'device-meta';
     meta.textContent = deviceDetail.metaParts.join(' · ');
     content.append(meta);
-  }
-  if (deviceDetail.canDelete && window.tokenMonitor.deleteDevice) {
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'device-delete-button';
-    remove.dataset.deviceId = deviceDetail.deviceId;
-    remove.disabled = devicesBeingDeleted.has(deviceDetail.deviceId);
-    const deleteText = t('settings.sync.icloudDelete');
-    const deleteConfirmText = t('settings.sync.icloudDeleteConfirm');
-    remove.textContent = deleteText;
-    const resetConfirmation = () => resetDeviceDeleteConfirmation(remove, deleteText);
-    remove.addEventListener('blur', resetConfirmation);
-    remove.addEventListener('click', async () => {
-      if (devicesBeingDeleted.has(deviceDetail.deviceId)) return;
-      if (remove.dataset.confirm !== 'true') {
-        armDeviceDeleteConfirmation(remove, deleteText, deleteConfirmText);
-        return;
-      }
-      remove.disabled = true;
-      devicesBeingDeleted.add(deviceDetail.deviceId);
-      try {
-        await window.tokenMonitor.deleteDevice(deviceDetail.deviceId);
-        resetConfirmation();
-        await refreshStats();
-      } catch (_) {
-        resetConfirmation();
-      } finally {
-        devicesBeingDeleted.delete(deviceDetail.deviceId);
-        // Stats may have replaced the original button while IPC was pending.
-        for (const current of [remove, ...document.querySelectorAll('.device-delete-button')]) {
-          if (current.dataset.deviceId !== deviceDetail.deviceId) continue;
-          current.disabled = false;
-          resetDeviceDeleteConfirmation(current, deleteText);
-        }
-      }
-    });
-    content.append(remove);
   }
   accordionInner.replaceChildren(content);
   accordionInner.dataset.signature = signature;
@@ -2298,7 +2358,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   }
   const interactive = reviewGroup === true || (
     kind === 'session'
-    && ['claude', 'codex', 'opencode', 'dsh'].includes(client)
+    && ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy'].includes(client)
   ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
   const mark = row.querySelector('.row-mark');
   const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '' }, state.breakdown);
@@ -2610,23 +2670,22 @@ function deviceRuntimeLabel(value) {
   return String(value || '');
 }
 
-function deviceSyncedLabel(value) {
+function relativeAgeLabel(value) {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) return '';
   const diffMs = Math.max(0, Date.now() - date.getTime());
-  let age;
-  if (diffMs < 45_000) age = t('settings.age.justNow');
-  else {
-    const minutes = Math.round(diffMs / 60000);
-    if (minutes < 60) age = t('settings.age.minutesAgo', { minutes });
-    else {
-      const hours = Math.round(minutes / 60);
-      age = hours < 24
-        ? t('settings.age.hoursAgo', { hours })
-        : t('settings.age.daysAgo', { days: Math.round(hours / 24) });
-    }
-  }
-  return t('devices.synced', { age });
+  if (diffMs < 45_000) return t('settings.age.justNow');
+  const minutes = Math.round(diffMs / 60000);
+  if (minutes < 60) return t('settings.age.minutesAgo', { minutes });
+  const hours = Math.round(minutes / 60);
+  return hours < 24
+    ? t('settings.age.hoursAgo', { hours })
+    : t('settings.age.daysAgo', { days: Math.round(hours / 24) });
+}
+
+function deviceSyncedLabel(value) {
+  const age = relativeAgeLabel(value);
+  return age ? t('devices.synced', { age }) : '';
 }
 
 function stableColor(value, colors) {
@@ -2683,10 +2742,7 @@ function deviceRowsForPeriod() {
         ...breakdown,
         emptyText: breakdown.totalTokens > 0 ? t('devices.detailsUnavailable') : t('home.noTools'),
         metaParts,
-        deviceId: device.deviceId,
-        canDelete: state.settings?.hubMode === 'icloud'
-          && device.deviceId !== localId
-          && state.stats?.devices?.some((live) => live.deviceId === device.deviceId && live.stale === true)
+        deviceId: device.deviceId
       }
     };
   }).sort((a, b) => b.value - a.value);
@@ -3946,6 +4002,7 @@ function flushPendingLimitDetailTooltipRender() {
 
 const {
   creditsAmount,
+  creditsCurrency,
   creditsMeterPercent,
   formatCompactMoney,
   formatMoney,
@@ -3953,7 +4010,7 @@ const {
   spendWindow
 } = window.TokenMonitorLimitBalanceDisplay;
 
-const { limitWindowLabel } = window.TokenMonitorLimitWindowLabels;
+const { limitWindowLabel, mimoAccountGroups, mimoProductLabel } = window.TokenMonitorLimitWindowLabels;
 const { limitWindowText } = window.TokenMonitorLimitWindowText;
 
 // The Limits rows are built by the shared view, which the edge dock also calls
@@ -4007,11 +4064,14 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   colorWithAlpha,
   applyBarScale,
   creditsAmount,
+  creditsCurrency,
   creditsMeterPercent,
   isCreditsWindow,
   spendWindow,
   limitWindowLabel,
   limitWindowText,
+  mimoAccountGroups,
+  mimoProductLabel,
   accountIdentity: accountIdentityApi,
   accountControl: codexAccountControl,
   codexAccounts: {
@@ -4602,7 +4662,11 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   if (idLabel) container.append(sessionIdLine(idLabel));
 
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
-  if (error || (detail && detail.found === false)) { container.append(detailNote(t('detailNotFound') || 'Transcript not found on this machine.')); return; }
+  if (error || detail?.error) {
+    container.append(detailNote(t(detail?.error === 'line-too-large' ? 'detailRecordTooLarge' : 'detailReadFailed')));
+    return;
+  }
+  if (detail && detail.found === false) { container.append(detailNote(t('detailNotFound') || 'Transcript not found on this machine.')); return; }
 
   const rows = sessionDetailApi.exchangeRows(detail, { now: new Date(), sortBy: state.detailSort });
   if (rows.length === 0) { container.append(detailNote(t('detailEmpty') || 'No activity in this period.')); return; }
@@ -4995,6 +5059,8 @@ function openViewFromTray(viewId) {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   stopWindowShortcutRecording();
   resetSettingsListSearch();
+  syncModeSelect?.close();
+  syncContentForm?.closeHelp();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   state.openSession = null;
@@ -5556,6 +5622,9 @@ function homeLimitRows() {
     colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
+    accountPlan: (provider, index, providerEntries) => limitWindowsView.limitAccountPlan(provider, {
+      grouped: providerEntries.length > 1
+    }),
     accountColor: (provider, id, fallbackColor) => (
       id === 'thirdparty'
         ? limitProviderPresentationApi.thirdPartyAdapterVisual(provider, fallbackColor).color
@@ -5570,11 +5639,22 @@ function homeLimitRows() {
       const id = String(provider?.provider || '').trim().toLowerCase();
       const option = providerOptions.find((entry) => entry.id === id);
       const providerTitle = option?.label || id;
-      if (providerEntries.length > 1) {
+      const showProviderTitle = state.settings?.showHomeLimitProviderNames === true || state.settings?.showToolIcons === false;
+      // A provider's row count is its account count — except MiMo, whose two
+      // products of one account are two rows. Names resolve over the same
+      // logical-account grouping the Limits page groups by, so one account's
+      // lanes are told apart by their product word alone and only several
+      // accounts earn an account name.
+      const accountCount = id === 'mimo'
+        ? mimoAccountGroups(providerEntries).length
+        : providerEntries.length;
+      if (accountCount > 1) {
         const accountTitle = limitAccountTitle(id, provider, index, providerEntries);
-        return state.settings?.showHomeLimitProviderNames === true || state.settings?.showToolIcons === false
-          ? `${providerTitle} · ${accountTitle}`
-          : accountTitle;
+        return showProviderTitle ? `${providerTitle} · ${accountTitle}` : accountTitle;
+      }
+      if (id === 'mimo') {
+        const product = mimoProductLabel(provider);
+        if (product) return showProviderTitle ? `${providerTitle} · ${product}` : product;
       }
       return providerTitle;
     }
@@ -5616,6 +5696,7 @@ function renderHomeLimitModule() {
     body.append(empty);
     return module;
   }
+  const showBars = state.settings?.homeLimitDisplayMode === 'bars';
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-limit-account';
@@ -5627,8 +5708,15 @@ function renderHomeLimitModule() {
     name.className = 'home-list-name';
     name.textContent = row.name;
     account.append(mark, name);
+    if (row.plan) {
+      const plan = document.createElement('span');
+      plan.className = 'home-limit-plan';
+      plan.textContent = row.plan;
+      plan.title = row.plan;
+      account.append(plan);
+    }
     const windows = document.createElement('div');
-    windows.className = 'home-limit-windows';
+    windows.className = showBars ? 'home-limit-windows home-limit-windows-bars' : 'home-limit-windows';
     for (const window of row.windows) {
       const metric = document.createElement('div');
       metric.className = 'home-limit-window';
@@ -5652,6 +5740,18 @@ function renderHomeLimitModule() {
       }
       line.append(label, value);
       metric.append(line);
+      // Money and fixed labels retain a remaining meter; only percentage
+      // labels follow the global used/remaining display preference.
+      if (showBars && window.showMeter !== false) {
+        const remainingPercent = optionalFiniteNumber(window.remainingPercent);
+        if (remainingPercent != null) {
+          const fillPercent = limitFillPercent(remainingPercent, null, showUsed && !isCreditsWindow(window) && !window.value);
+          const tone = window.kind === 'session' || window.kind === 'daily' ? 0.95 : 0.68;
+          const meter = limitWindowsView.limitMeterNode(row.color, fillPercent, tone);
+          meter.setAttribute('aria-hidden', 'true');
+          metric.append(meter);
+        }
+      }
       const resetLabel = window.resetsAt
         ? formatLimitBoundary(window) || ''
         : window.resetDescription
@@ -6656,16 +6756,19 @@ function liveDotTitle(mode, connected) {
 function setLiveDot(connected) {
   els.liveDot.classList.toggle('live', Boolean(connected));
   els.liveDot.title = liveDotTitle(state.mode, connected);
+  if (!connected) for (const animation of els.liveDot.getAnimations()) animation.cancel();
 }
 
-// Flare the live dot once when fresh data arrives. Re-arming the one-shot
-// animation needs a class remove + forced reflow before re-adding.
+// A single opacity cue acknowledges fresh data without animating a shadow or
+// forcing layout to restart a CSS animation.
 function pulseLiveDot() {
   const dot = els.liveDot;
-  if (!dot || !dot.classList.contains('live')) return;
-  dot.classList.remove('pulse');
-  void dot.offsetWidth;
-  dot.classList.add('pulse');
+  if (!dot || !dot.classList.contains('live') || prefersReducedMotion() || isRendererWindowHidden()) return;
+  for (const animation of dot.getAnimations()) animation.cancel();
+  dot.animate([{ opacity: 0.4 }, { opacity: 1 }], {
+    duration: 420,
+    easing: 'cubic-bezier(0.22, 1, 0.36, 1)'
+  });
 }
 
 function refreshButtonIdleTitle() {
@@ -6869,6 +6972,8 @@ function applyFontSettings(settings) {
   const source = { ...(state.settings || {}), ...(settings || {}) };
   const root = document.documentElement.style;
   const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(source);
+  document.documentElement.dataset.textSize = fontSettingsApi.normalizeTextSize(source.textSize);
+  root.setProperty('--ui-text-scale', String(fontSettingsApi.textScaleForSize(source.textSize)));
   root.setProperty('--ui-font', interfaceFont);
   root.setProperty('--display-font', displayFont);
 }
@@ -7767,6 +7872,7 @@ async function resetDisplayFont() {
 }
 
 function syncFontSettingsControls() {
+  if (els.textSizeInput) els.textSizeInput.value = fontSettingsApi.normalizeTextSize(state.settings?.textSize);
   for (const [role, settingKey] of [['interface', 'interfaceFontFamily'], ['display', 'displayFontFamily']]) {
     const controls = fontControlsFor(role);
     const value = fontSettingsApi.normalizeFontFamily(state.settings?.[settingKey]);
@@ -7803,26 +7909,30 @@ async function saveAppearanceFromControls() {
 }
 
 function syncHubModeUi() {
+  syncContentForm?.syncSettings();
   const mode = state.settings.hubMode || 'local';
-  for (const input of els.hubModeOptions.querySelectorAll('input[name="hubMode"]')) {
-    input.checked = input.value === mode;
-  }
+  els.hubModeOptions.value = mode;
+  if (els.syncModeDescription) els.syncModeDescription.textContent = t(SYNC_MODE_DESCRIPTIONS[mode] || SYNC_MODE_DESCRIPTIONS.local);
   const icloudSupported = state.appInfo?.platform === 'darwin';
-  if (els.icloudModeOption) {
-    els.icloudModeOption.disabled = !icloudSupported;
-    els.icloudModeOption.closest('.hub-mode-option')?.classList.toggle('unsupported', !icloudSupported);
-  }
+  if (els.icloudModeOption) els.icloudModeOption.disabled = !icloudSupported;
   els.hubClientFields.classList.toggle('hidden', mode !== 'client');
+  els.hubClientFields.inert = mode !== 'client';
   els.hubHostFields.classList.toggle('hidden', mode !== 'host');
-  els.icloudFields?.classList.toggle('hidden', mode !== 'icloud');
+  els.hubHostFields.inert = mode !== 'host';
+  if (els.icloudFields) {
+    els.icloudFields.classList.toggle('hidden', mode !== 'icloud');
+    els.icloudFields.inert = mode !== 'icloud';
+  }
   if (mode === 'host') {
     els.hubSecretInput.value = state.settings.hubHostSecret || '';
     renderHubStatus();
   } else {
     renderIcloudStatus();
   }
-  renderSyncClientStatus();
+  syncModeSelect?.sync();
+  renderSyncPanel();
   renderHubBuildStatus();
+  syncHubConnectionUi();
   syncHubSaveButton();
 }
 
@@ -7883,25 +7993,259 @@ function renderHubStatus() {
   renderHubAddresses(info.lanAddresses || [], info.listeningPort);
 }
 
-function renderSyncClientStatus() {
-  if (!els.syncClientStatus) return;
-  // Gate on the runtime mode, not just the hubMode setting: client mode with no
-  // URL falls back to the local collector (mode 'local'), and its statuses must
-  // not surface as a sync failure in this row. Matches liveDotTitle's gating.
-  const show = state.settings?.hubMode === 'client' && state.mode === 'sync' && !state.streamConnected;
-  const text = show ? streamFailureText(state.streamFailure) : '';
-  els.syncClientStatus.textContent = text;
-  els.syncClientStatus.className = 'hub-status error';
-  // Empty .hub-status still renders a bordered box, so hide it entirely when
-  // there is nothing to show (connected, or not in client mode).
-  els.syncClientStatus.hidden = !text;
+const SYNC_PANEL_AGE_REFRESH_MS = 30_000;
+const SYNC_UPLOAD_INTERVAL_KEYS = {
+  600000: 'settings.sync.uploadInterval.10m',
+  1200000: 'settings.sync.uploadInterval.20m',
+  1800000: 'settings.sync.uploadInterval.30m'
+};
+let syncPanelRows = [];
+let syncPanelListScope = '';
+let syncPanelAgeTimer = 0;
+const syncPanelSignalObserver = els.syncPanelSignal && typeof IntersectionObserver === 'function'
+  ? new IntersectionObserver(([entry]) => {
+    els.syncPanelSignal.dataset.visible = String(entry.isIntersecting);
+  }, { root: els.settingsPanel }) : null;
+syncPanelSignalObserver?.observe(els.syncPanelSignal);
+window.addEventListener('unload', () => syncPanelSignalObserver?.disconnect(), { once: true });
+
+// The sync settings status and device list reflect what the sync backend holds. Runs on every connection/stats push while the
+// settings panel is open; keyed rows keep their controls through updates and sorting.
+function renderSyncPanel() {
+  if (!els.syncDevicePanel) return;
+  const hubMode = state.settings?.hubMode || 'local';
+  const shared = SHARED_SYNC_MODES.has(hubMode)
+    && (hubMode !== 'icloud' || state.appInfo?.platform === 'darwin');
+  els.syncDevicePanel.hidden = !shared;
+  if (!shared) {
+    syncPanelRows = [];
+    renderSyncPanelDevices(syncPanelRows);
+    stopSyncPanelAgeTimer();
+    return;
+  }
+  // Client mode without a Hub URL runs the local collector, whose stats hold
+  // only this machine: that is not a device list from any Hub.
+  syncPanelRows = state.mode === 'sync'
+    ? syncDevicePanelApi.deviceRows(state.stats?.devices, {
+      localDeviceId: state.settings?.deviceId || ''
+    })
+    : [];
+  renderSyncPanelConnection(hubMode);
+  renderSyncPanelDevices(syncPanelRows);
+  updateSyncPanelAges();
+  if (!syncPanelAgeTimer) syncPanelAgeTimer = setInterval(tickSyncPanelAges, SYNC_PANEL_AGE_REFRESH_MS);
+}
+
+function renderSyncPanelConnection(hubMode) {
+  els.syncPanelSignal.dataset.windowHidden = String(isRendererWindowHidden());
+  const show = hubMode === 'client';
+  els.syncPanelConnection.hidden = !show;
+  if (!show) return;
+  const failure = streamFailureText(state.streamFailure);
+  const connection = syncDevicePanelApi.clientConnectionState({
+    mode: state.mode,
+    streamConnected: state.streamConnected,
+    failureReason: failure
+  });
+  els.syncPanelConnection.dataset.state = connection;
+  els.syncPanelState.textContent = t(`settings.sync.panel.${connection}`);
+  els.syncPanelDetail.textContent = connection === 'disconnected' ? failure : '';
+  els.syncPanelDetail.hidden = connection !== 'disconnected';
+  if (els.syncPanelUpload) els.syncPanelUpload.hidden = !String(state.settings?.hubUrl || '').trim();
+}
+
+function syncPanelUploadText() {
+  const local = syncPanelRows.find((row) => row.isLocal);
+  if (!local) return '';
+  const age = relativeAgeLabel(local.syncedAt);
+  const uploaded = age ? t('settings.sync.panel.lastUpload', { age }) : t('settings.sync.panel.notUploaded');
+  const intervalKey = SYNC_UPLOAD_INTERVAL_KEYS[Number(state.settings?.syncUploadIntervalMs) || 0];
+  return intervalKey ? `${uploaded} · ${t(intervalKey)}` : uploaded;
+}
+
+function syncPanelPresenceText(row) {
+  const age = relativeAgeLabel(row.syncedAt);
+  if (row.isLocal && !row.syncedAt) return t('settings.sync.panel.notUploaded');
+  if (row.stale) return age ? `${t('home.staleDevice')} · ${deviceSyncedLabel(row.syncedAt)}` : t('home.staleDevice');
+  return deviceSyncedLabel(row.syncedAt);
+}
+
+function updateSyncPanelAges() {
+  if (els.syncPanelUpload && !els.syncPanelUpload.hidden) {
+    els.syncPanelUpload.textContent = syncPanelUploadText() || t('settings.sync.panel.notUploaded');
+  }
+  const rowsByKey = new Map(syncPanelRows.map((row) => [row.key, row]));
+  for (const element of els.syncDeviceList?.querySelectorAll('.sync-device-age') || []) {
+    const row = rowsByKey.get(element.dataset.key);
+    if (!row) continue;
+    element.textContent = syncPanelPresenceText(row);
+    const date = row.syncedAt ? new Date(row.syncedAt) : null;
+    element.title = date && !Number.isNaN(date.getTime()) ? date.toLocaleString(currentLocale()) : '';
+  }
+}
+
+function tickSyncPanelAges() {
+  if (!isSettingsSurfaceVisible() || els.syncDevicePanel?.hidden) {
+    stopSyncPanelAgeTimer();
+    return;
+  }
+  updateSyncPanelAges();
+}
+
+function stopSyncPanelAgeTimer() {
+  if (!syncPanelAgeTimer) return;
+  clearInterval(syncPanelAgeTimer);
+  syncPanelAgeTimer = 0;
+}
+
+function renderSyncPanelDevices(rows) {
+  const counts = syncDevicePanelApi.deviceCounts(rows);
+  els.syncPanelCount.textContent = counts.total > 0 ? t('settings.sync.panel.onlineCount', counts) : '';
+  els.syncPanelOpenDevices.hidden = counts.total === 0 || !availableBreakdownIds().includes('device');
+  const list = els.syncDeviceList;
+  const scope = JSON.stringify([
+    state.settings?.hubMode, state.mode, state.settings?.deviceId,
+    state.settings?.hubUrl, state.settings?.secret,
+    state.settings?.hubHostPort, state.settings?.hubHostSecret
+  ]);
+  if (scope !== syncPanelListScope) {
+    for (const remove of list.querySelectorAll('.device-delete-button')) resetDeviceDeleteConfirmation(remove);
+    list.replaceChildren();
+    syncPanelListScope = scope;
+  }
+  const existing = new Map(Array.from(list.children, item => [item.dataset.key, item]));
+  const wanted = new Set(rows.map(row => row.key));
+  for (const [key, item] of existing) {
+    if (wanted.has(key)) continue;
+    const remove = item.querySelector('.device-delete-button');
+    if (remove) resetDeviceDeleteConfirmation(remove);
+    item.remove();
+  }
+  if (rows.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'sync-device-empty';
+    empty.textContent = t(state.mode === 'sync' ? 'settings.sync.panel.empty' : 'settings.sync.panel.waiting');
+    list.replaceChildren(empty);
+    return;
+  }
+  rows.forEach((row, index) => {
+    let item = existing.get(row.key);
+    if (item) updateSyncDeviceRow(item, row);
+    else item = syncDeviceRow(row);
+    const before = list.children[index] || null;
+    if (before === item) return;
+    // Moving a live row with insertBefore would blur its confirmation button.
+    if (item.parentElement === list) list.moveBefore(item, before);
+    else list.insertBefore(item, before);
+  });
+}
+
+function syncDeviceRow(row) {
+  const item = document.createElement('div');
+  item.className = `sync-device-row${row.isLocal ? ' is-local' : ''}${row.stale ? ' is-stale' : ''}`;
+  item.dataset.key = row.key;
+
+  const mark = document.createElement('span');
+  mark.className = 'sync-device-mark';
+  mark.setAttribute('aria-hidden', 'true');
+
+  const main = document.createElement('div');
+  main.className = 'sync-device-main';
+  const title = document.createElement('div');
+  title.className = 'sync-device-title';
+  const name = document.createElement('span');
+  name.className = 'sync-device-name';
+  title.append(name);
+  const meta = document.createElement('div');
+  meta.className = 'sync-device-meta';
+  const metaText = document.createElement('span');
+  metaText.className = 'sync-device-meta-text';
+  meta.append(metaText);
+  main.append(title, meta);
+
+  const side = document.createElement('div');
+  side.className = 'sync-device-side';
+  const presence = document.createElement('span');
+  presence.className = 'sync-device-presence';
+  const dot = document.createElement('span');
+  dot.className = 'sync-device-dot';
+  dot.setAttribute('aria-hidden', 'true');
+  const age = document.createElement('span');
+  age.className = 'sync-device-age';
+  age.dataset.key = row.key;
+  presence.append(dot, age);
+  side.append(presence);
+
+  item.append(mark, main, side);
+  updateSyncDeviceRow(item, row);
+  return item;
+}
+
+function updateSyncDeviceRow(item, row) {
+  const signature = JSON.stringify([
+    currentLocale(), row.name, row.hostname, row.platform, row.osName, row.osVersion,
+    row.agentVersion, row.agentRuntime, row.isLocal, row.stale, row.canRemove,
+    devicesBeingDeleted.has(row.key), Boolean(window.tokenMonitor.deleteDevice)
+  ]);
+  if (item.dataset.signature === signature) return;
+  item.dataset.signature = signature;
+  item.className = `sync-device-row${row.isLocal ? ' is-local' : ''}${row.stale ? ' is-stale' : ''}`;
+  const mark = item.querySelector('.sync-device-mark');
+  const os = osIconFor(row.platform);
+  mark.className = os ? `sync-device-mark row-icon row-icon-os-${os}` : 'sync-device-mark sync-device-mark-generic';
+  const name = item.querySelector('.sync-device-name');
+  name.textContent = row.name;
+  name.title = row.hostname && row.hostname !== row.name ? `${row.name} · ${row.hostname}` : row.name;
+  const title = item.querySelector('.sync-device-title');
+  let badge = title.querySelector('.sync-device-badge');
+  if (row.isLocal) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'sync-device-badge';
+      title.append(badge);
+    }
+    badge.textContent = t('settings.sync.panel.thisDevice');
+  } else badge?.remove();
+  item.querySelector('.sync-device-meta-text').textContent = [
+    deviceBreakdownApi.devicePlatformLabel(row.platform, row.osName, row.osVersion),
+    [deviceRuntimeLabel(row.agentRuntime), row.agentVersion ? `v${row.agentVersion}` : ''].filter(Boolean).join(' ')
+  ].filter(Boolean).join(' · ');
+  const side = item.querySelector('.sync-device-side');
+  let remove = side.querySelector('.device-delete-button');
+  if (row.canRemove && row.stale && !row.isLocal && window.tokenMonitor.deleteDevice) {
+    if (!remove) {
+      remove = createDeviceRemoveButton(row.key, t('devices.remove'), t('devices.removeConfirm'));
+      const action = document.createElement('span');
+      action.className = 'sync-device-action';
+      action.append(remove);
+      side.append(action);
+    }
+    remove.dataset.idleText = t('devices.remove');
+    remove.dataset.confirmText = t('devices.removeConfirm');
+    remove.querySelector('.device-delete-label').textContent = remove.dataset.confirm === 'true'
+      ? remove.dataset.confirmText : remove.dataset.idleText;
+    remove.disabled = devicesBeingDeleted.has(row.key);
+  } else if (remove) {
+    resetDeviceDeleteConfirmation(remove);
+    remove.parentElement.remove();
+  }
 }
 
 function renderHubBuildStatus() {
   if (!els.hubBuildStatus) return;
-  const visible = state.settings?.hubMode === 'client';
+  const savedUrl = String(state.settings?.hubUrl || '').trim().replace(/\/$/, '');
+  const visible = state.settings?.hubMode === 'client'
+    && (!state.hubBuildStatus?.hubUrl || state.hubBuildStatus.hubUrl === savedUrl);
   const model = visible ? hubBuildPresentationApi.presentation(state.hubBuildStatus) : null;
-  if (!model) {
+  // Label the confirmed backend, not its version status. Version notices stay
+  // near the connection fields, and a matching build needs no extra message.
+  const current = model?.tone === 'ok';
+  const knownRuntime = ['cloudflare-worker', 'node-hub'].includes(state.hubBuildStatus?.runtime);
+  if (els.syncPanelBuild) {
+    els.syncPanelBuild.hidden = !model || !knownRuntime;
+    els.syncPanelBuild.textContent = model && knownRuntime ? t(model.targetKey) : '';
+  }
+  if (!model || current) {
     els.hubBuildStatus.hidden = true;
     els.hubBuildStatus.textContent = '';
     return;
@@ -7997,7 +8341,8 @@ async function refreshHubBuildStatus() {
       || (result?.hubUrl && result.hubUrl !== currentUrl)) return;
     state.hubBuildStatus = result;
   } catch (_) {
-    if (request !== hubBuildStatusRequest) return;
+    const currentUrl = String(state.settings.hubUrl || '').trim().replace(/\/$/, '');
+    if (request !== hubBuildStatusRequest || currentUrl !== requestedUrl) return;
     state.hubBuildStatus = null;
   }
   renderHubBuildStatus();
@@ -8059,6 +8404,76 @@ const hubDraftDirty = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [fiel
 const hubDraftRevisions = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [field, 0]));
 let hubSaveBusy = false;
 let hubSaveInFlightRevisions = null;
+const CLIENT_CONNECTION_FIELDS = ['hubUrl', 'secret', 'deviceId'];
+let clientConnectionEditing = false;
+let clientConnectionEditRevision = 0;
+let hubSaveError = false;
+
+function clientConnectionHasDraft() {
+  return CLIENT_CONNECTION_FIELDS.some(field => hubDraftDirty[field]);
+}
+
+function syncHubConnectionUi() {
+  if (!els.syncConnectionEditor) return;
+  const client = state.settings?.hubMode === 'client';
+  const configured = Boolean(String(state.settings?.hubUrl || '').trim());
+  const editing = clientConnectionEditing || clientConnectionHasDraft() || !configured;
+  const focusedEditor = els.syncConnectionEditor.contains(document.activeElement)
+    || els.syncDeviceSettings.contains(document.activeElement);
+  els.syncConnectionEdit.hidden = !client || editing;
+  if (client && !editing && focusedEditor && isSettingsSurfaceVisible()) {
+    els.syncConnectionEdit.focus({ preventScroll: true });
+  }
+  els.syncConnectionEditor.hidden = !client || !editing;
+  els.syncConnectionEditor.inert = !client || !editing;
+  els.syncDeviceSettings.hidden = client && !editing;
+  els.syncDeviceSettings.inert = client && !editing;
+  els.syncConnectionCancel.hidden = !client || !editing;
+  els.syncConnectionCancel.disabled = hubSaveBusy;
+  els.syncConnectionIdentity.hidden = !client || editing;
+  setHoverMarqueeText(els.syncConnectionEndpoint, syncDevicePanelApi.connectionEndpoint(state.settings?.hubUrl)
+    || t('settings.sync.savedEndpoint'));
+  els.syncUploadIntervalRow.hidden = !client;
+  els.syncUploadIntervalRow.inert = !client;
+  els.syncConnectionSaveError.hidden = !hubSaveError;
+  els.syncConnectionSaveError.textContent = hubSaveError ? t('settings.sync.saveFailed') : '';
+}
+
+function beginClientConnectionEdit({ focus = false } = {}) {
+  if (state.settings?.hubMode !== 'client' || clientConnectionEditing) return;
+  if (focus) syncHubDraftFields();
+  clientConnectionEditing = true;
+  clientConnectionEditRevision += 1;
+  hubSaveError = false;
+  preserveSettingsPanelScroll(() => {
+    syncHubConnectionUi();
+    if (focus) els.hubUrlInput.focus({ preventScroll: true });
+  });
+}
+
+function cancelClientConnectionEdit() {
+  if (hubSaveBusy || state.settings?.hubMode !== 'client') return;
+  clientConnectionEditing = false;
+  clientConnectionEditRevision += 1;
+  hubSaveError = false;
+  for (const [field, inputId] of HUB_DRAFT_FIELDS) {
+    if (!CLIENT_CONNECTION_FIELDS.includes(field)) continue;
+    hubDraftDirty[field] = false;
+    els[inputId].value = state.settings?.[field] || '';
+  }
+  preserveSettingsPanelScroll(() => {
+    syncHubDraftFields();
+    if (!String(state.settings?.hubUrl || '').trim()) els.hubUrlInput.focus({ preventScroll: true });
+  });
+}
+
+function finishClientConnectionSave(submittedRevisions, editRevision) {
+  if (state.settings?.hubMode !== 'client' || clientConnectionEditRevision !== editRevision
+    || !String(state.settings?.hubUrl || '').trim() || clientConnectionHasDraft()
+    || CLIENT_CONNECTION_FIELDS.some(field => hubDraftRevisions[field] !== submittedRevisions[field])) return;
+  clientConnectionEditing = false;
+  preserveSettingsPanelScroll(syncHubDraftFields);
+}
 
 function hubDraftFieldIsActive(field) {
   return field !== 'hubHostPort' || state.settings?.hubMode === 'host';
@@ -8092,18 +8507,25 @@ function markHubDraftDirty(field) {
   if (!input) return;
   hubDraftRevisions[field] += 1;
   syncHubDraftDirty(field);
+  if (CLIENT_CONNECTION_FIELDS.includes(field)) beginClientConnectionEdit();
+  hubSaveError = false;
+  syncHubConnectionUi();
   syncHubSaveButton();
 }
 
 function syncHubDraftFields() {
   reconcileHubDraftDirtyState();
+  if (clientConnectionEditing) {
+    for (const field of CLIENT_CONNECTION_FIELDS) syncHubDraftDirty(field);
+  }
   for (const [field, inputId] of HUB_DRAFT_FIELDS) {
     const input = els[inputId];
-    if (!input || hubDraftDirty[field]) continue;
+    if (!input || hubDraftDirty[field] || (clientConnectionEditing && CLIENT_CONNECTION_FIELDS.includes(field))) continue;
     input.value = field === 'hubHostPort'
       ? String(state.settings?.hubHostPort || 17321)
       : state.settings?.[field] || '';
   }
+  syncHubConnectionUi();
   syncHubSaveButton();
 }
 
@@ -8842,6 +9264,24 @@ function renderHomeLimitProviderList() {
     .orderedLimitProviders(LIMIT_PROVIDERS, homeLimitProviderOrderValue())
     .filter(({ id }) => enabled.has(id));
   const hasCustomOrder = Boolean(state.settings?.homeLimitProviderOrder);
+  const displayLabel = document.createElement('label');
+  displayLabel.className = 'settings-item';
+  const displayText = document.createElement('span');
+  displayText.className = 'settings-item-text';
+  const displayTitle = document.createElement('span');
+  displayTitle.className = 'settings-item-title';
+  displayTitle.textContent = t('settings.home.limitDisplayMode');
+  const displayInput = document.createElement('select');
+  for (const mode of ['text', 'bars']) {
+    const option = document.createElement('option');
+    option.value = mode;
+    option.textContent = t(`settings.home.limitDisplayMode.${mode}`);
+    displayInput.append(option);
+  }
+  displayInput.value = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  displayInput.addEventListener('change', () => void saveSettings({ homeLimitDisplayMode: displayInput.value }));
+  displayText.append(displayTitle);
+  displayLabel.append(displayText, displayInput);
   const statusLabel = document.createElement('label');
   statusLabel.className = 'checkbox-label home-limit-status-setting';
   const statusInput = document.createElement('input');
@@ -8926,7 +9366,7 @@ function renderHomeLimitProviderList() {
   showAll.addEventListener('click', () => void showAllHomeLimitProviders());
   headerActions.append(reset, showAll);
   header.append(note, headerActions);
-  wrap.append(statusLabel, providerNamesLabel, countLabel, header);
+  wrap.append(displayLabel, statusLabel, providerNamesLabel, countLabel, header);
   for (const { id, label, settingsLabel } of providers) {
     const isHidden = hidden.has(id);
     const row = document.createElement('div');
@@ -10364,12 +10804,12 @@ function renderLimitProviderCheckboxesNow() {
     }
   }
   const enabled = enabledLimitProviderSet();
-  const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
   const filtering = Boolean(limitProviderQuery());
   for (const { id, label, settingsLabel } of providers) {
     const isEnabled = enabled.has(id);
     const provider = isEnabled
-      ? (collected.get(id) || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
+      ? (limitProviderPresentationApi.limitProviderSettingsRecord(state.stats?.limits?.providers, id)
+        || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
       : { provider: id, status: 'disabled', windows: [] };
     const row = document.createElement('div');
     row.className = `limit-provider-row${isEnabled ? '' : ' is-disabled'}${matched.has(id) ? '' : ' is-filtered-out'}`;
@@ -11313,15 +11753,32 @@ function preserveSettingsPanelScroll(callback) {
   return result;
 }
 
-async function saveSettings(patch) {
+function setSyncContentEditError(patch, error) {
+  const conflict = window.TokenMonitorSyncContentForm.isConflictError(error);
+  for (const [changed, id] of [
+    [patch.modelAliases !== undefined || patch.modelAliasGrouping !== undefined, 'modelAliasesError'],
+    [patch.customModelPricing !== undefined, 'customPricingSyncError']
+  ]) {
+    if (!changed) continue;
+    const node = document.getElementById(id);
+    if (!node) continue;
+    node.textContent = conflict ? t('settings.sync.content.conflict') : '';
+    node.classList.toggle('hidden', !conflict);
+  }
+}
+
+async function saveSettings(patch, syncContentBase) {
+  setSyncContentEditError(patch, null);
   for (const key of Object.keys(patch)) delete appearancePreview[key];
   const settingsPushRevision = state.settingsPushRevision;
   let next;
   pendingSettingsPatches.add(patch);
   try {
-    next = await window.tokenMonitor.updateSettings(patch);
+    next = await window.tokenMonitor.updateSettings(syncContentForm?.decoratePatch(patch, syncContentBase) || patch);
   } catch (error) {
     pendingSettingsPatches.delete(patch);
+    syncContentForm?.reportSettingsError(error);
+    setSyncContentEditError(patch, error);
     console.error('Could not persist settings:', error);
     try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
     applyEffectiveCurrencyRates();
@@ -11439,6 +11896,8 @@ async function init() {
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  syncContentForm?.syncSettings();
+  await syncContentForm?.refresh(false);
   applyEffectiveCurrencyRates();
   deliverTrayProviderIcons();
 
@@ -11469,7 +11928,7 @@ async function init() {
       state.mode = status.mode || state.mode;
       state.streamFailure = status.connected ? null : (status.reason ? { reason: status.reason, detail: status.detail ?? null } : null);
       setLiveDot(state.streamConnected);
-      renderSyncClientStatus();
+      renderSyncPanel();
     }
   } catch (_) {}
   await refreshStats();
@@ -11593,7 +12052,7 @@ els.breakdown.addEventListener('click', (event) => {
   }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh') return;
+  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy') return;
   if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
@@ -11631,6 +12090,8 @@ els.settingsButton.addEventListener('click', (event) => {
   if (settingsOpen) {
     syncSettingsForm();
   } else {
+    syncModeSelect?.close();
+    syncContentForm?.closeHelp();
     resetSettingsListSearch();
     stopWindowShortcutRecording();
   }
@@ -11643,8 +12104,11 @@ els.settingsButton.addEventListener('click', (event) => {
 els.saveSettingsButton.addEventListener('click', async () => {
   if (hubSaveBusy || !hubDraftHasChanges()) return;
   hubSaveBusy = true;
+  hubSaveError = false;
+  syncHubConnectionUi();
   syncHubSaveButton();
   try {
+    const submittedEditRevision = clientConnectionEditRevision;
     const submittedHubFields = hubDraftValuesFromInputs();
     const patch = { ...submittedHubFields };
     if (Object.prototype.hasOwnProperty.call(submittedHubFields, 'hubHostPort')) {
@@ -11654,22 +12118,33 @@ els.saveSettingsButton.addEventListener('click', async () => {
       Object.keys(submittedHubFields).map((field) => [field, hubDraftRevisions[field]])
     );
     hubSaveInFlightRevisions = submittedHubRevisions;
-    await saveSettings(patch);
+    try {
+      await saveSettings(patch);
+    } catch (_) {
+      hubSaveError = true;
+      return;
+    }
     reconcileHubDraftsAfterSave(submittedHubFields, submittedHubRevisions);
+    finishClientConnectionSave(submittedHubRevisions, submittedEditRevision);
     await refreshHubInfo();
     void refreshHubBuildStatus();
     await refreshStats();
   } finally {
     hubSaveInFlightRevisions = null;
-    syncHubDraftFields();
     hubSaveBusy = false;
+    syncHubDraftFields();
     syncHubSaveButton();
   }
 });
 
+els.syncConnectionEdit?.addEventListener('click', () => beginClientConnectionEdit({ focus: true }));
+els.syncConnectionCancel?.addEventListener('click', cancelClientConnectionEdit);
+
+els.syncPanelOpenDevices?.addEventListener('click', () => openViewFromTray('device'));
+
 els.hubModeOptions.addEventListener('change', async (event) => {
   const target = event.target;
-  if (!(target instanceof HTMLInputElement) || target.name !== 'hubMode') return;
+  if (target !== els.hubModeOptions) return;
   if (target.value === 'icloud' && state.appInfo?.platform !== 'darwin') {
     syncHubModeUi();
     return;
@@ -11842,6 +12317,9 @@ for (const input of els.showLimitUsedInputs || []) {
 }
 for (const [field, inputId] of HUB_DRAFT_FIELDS) {
   els[inputId]?.addEventListener('input', () => markHubDraftDirty(field));
+  if (CLIENT_CONNECTION_FIELDS.includes(field)) {
+    els[inputId]?.addEventListener('focus', () => beginClientConnectionEdit());
+  }
 }
 els.syncUploadIntervalInput?.addEventListener('change', async () => {
   await saveSettings({ syncUploadIntervalMs: Number(els.syncUploadIntervalInput.value) });
@@ -11961,6 +12439,9 @@ els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBac
 void loadBackgroundImage();
 els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}));
 els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
+els.textSizeInput?.addEventListener('change', async () => {
+  await saveSettings({ textSize: fontSettingsApi.normalizeTextSize(els.textSizeInput.value) });
+});
 els.interfaceFontPreset?.addEventListener('change', () => handleFontPresetChange('interface'));
 els.displayFontPreset?.addEventListener('change', () => handleFontPresetChange('display'));
 els.interfaceFontInput?.addEventListener('input', previewFontSettings);
@@ -11985,10 +12466,11 @@ function setSettingsAccordionExpanded(group, toggle, details, expanded) {
   details.inert = !open;
   group.classList.toggle('expanded', open);
 }
-function setupSettingsAccordion(group, toggle, details) {
+function setupSettingsAccordion(group, toggle, details, onExpandedChange) {
   if (!group || !toggle || !details) return;
   toggle.addEventListener('click', () => {
     setSettingsAccordionExpanded(group, toggle, details, details.classList.contains('hidden'));
+    onExpandedChange?.(!details.classList.contains('hidden'));
   });
   setSettingsAccordionExpanded(group, toggle, details, false);
 }
@@ -12118,6 +12600,7 @@ const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComp
     maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
       ? accountIdentityApi.maskEmailAddress(email)
       : String(email || '')),
+    mimoProductLabel,
     createRowDrag: (config) => rowDragControllerApi.createRowDragController({
       dragSort: verticalDragSortApi,
       getScrollPanel: () => els.settingsPanel,
@@ -12405,7 +12888,7 @@ function renderConnectionStatus(surface = visibleStatsSurface()) {
   if (surface !== 'main') return;
   setLiveDot(state.streamConnected);
   setStatus(statusTextFor(state.mode, state.streamConnected));
-  if (isSettingsSurfaceVisible()) renderSyncClientStatus();
+  if (isSettingsSurfaceVisible()) renderSyncPanel();
 }
 
 function renderStatsUpdate() {
@@ -12420,6 +12903,7 @@ function renderStatsUpdate() {
   render();
   if (!isSettingsSurfaceVisible()) return;
   renderCodexAccounts();
+  renderMimoStatus();
   renderSettingsSummaries();
   renderLimitProviderCheckboxes();
   renderToolPreferences();
@@ -12459,6 +12943,7 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
 });
 function handleWindowVisibilityChange() {
+  if (els.syncPanelSignal) els.syncPanelSignal.dataset.windowHidden = String(isRendererWindowHidden());
   if (!statsRenderScheduler.visibilityChanged()) return;
   if (isRendererWindowHidden()) cancelTokenRateBoost();
   else applyFloatingBubbleState(state.floatingBubble, { renderContent: false });
@@ -12518,6 +13003,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   }
   if (!wasStreamConnected && state.streamConnected && state.settings?.hubMode === 'client') {
     void refreshHubBuildStatus();
+    void syncContentForm?.refresh();
   }
   if (payload.data?.stats) {
     if (fixedPeriodRangesApi.isDerived(state.period)) {
@@ -13863,6 +14349,13 @@ function setMimoAccountExpanded(expanded) {
   setAccountGroupExpanded('mimo', expanded, 'mimoAccountExpanded');
 }
 
+async function refreshMimoAccounts() {
+  try {
+    state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts() || [];
+    renderMimoStatus();
+  } catch (_) {}
+}
+
 function setCopilotAccountExpanded(expanded) {
   setAccountGroupExpanded('copilot', expanded, 'copilotAccountExpanded');
 }
@@ -14187,6 +14680,9 @@ function renderAntigravityStatus() {
 }
 
 function mimoSettingsAccountTitle(account, index) {
+  // The discovered session has no address to name it by — nothing was pasted for
+  // it — so it is named after the app it comes from.
+  if (account?.removable === false) return t('settings.mimo.desktopAccount');
   return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
 }
 
@@ -14205,6 +14701,7 @@ function renderMimoStatus() {
   accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.mimoAccountError });
   emptyEl.classList.toggle('hidden', accounts.length > 0);
 
+  const providers = localProviderStatuses('mimo');
   listEl.replaceChildren();
   if (accounts.length > 0) {
     for (const [index, account] of accounts.entries()) {
@@ -14213,26 +14710,33 @@ function renderMimoStatus() {
       const row = document.createElement('div');
       row.className = 'managed-account-row';
       row.classList.toggle('disabled', !enabled);
+      // A credential Token Monitor never stored has no stored preference to
+      // toggle and nothing here to remove: this row is the session the machine's
+      // own MiMo Desktop is signed into, listed so the count above it is honest
+      // about what the provider answers for.
+      const detected = account.removable === false;
 
-      const input = document.createElement('input');
-      input.className = 'managed-account-checkbox';
-      input.type = 'checkbox';
-      input.checked = enabled;
-      input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
-        account: accountName
-      }));
-      input.addEventListener('change', async () => {
-        input.disabled = true;
-        const result = await window.tokenMonitor.mimo.setAccountEnabled(account.id, input.checked);
-        if (!result?.ok) {
-          state.mimoAccountError = result?.error || t('settings.mimo.toggleFailed');
-        } else {
-          state.mimoAccountError = '';
-          state.settings.mimoManagedAccounts = result.accounts || [];
-        }
-        renderMimoStatus();
-        renderSettingsSummaries();
-      });
+      const input = detected ? null : document.createElement('input');
+      if (input) {
+        input.className = 'managed-account-checkbox';
+        input.type = 'checkbox';
+        input.checked = enabled;
+        input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
+          account: accountName
+        }));
+        input.addEventListener('change', async () => {
+          input.disabled = true;
+          const result = await window.tokenMonitor.mimo.setAccountEnabled(account.id, input.checked);
+          if (!result?.ok) {
+            state.mimoAccountError = result?.error || t('settings.mimo.toggleFailed');
+          } else {
+            state.mimoAccountError = '';
+            state.settings.mimoManagedAccounts = result.accounts || [];
+          }
+          renderMimoStatus();
+          renderSettingsSummaries();
+        });
+      }
 
       const main = document.createElement('div');
       main.className = 'managed-account-main';
@@ -14245,40 +14749,53 @@ function renderMimoStatus() {
       right.className = 'managed-account-right';
       const info = document.createElement('span');
       info.className = 'managed-account-info';
-      info.textContent = enabled ? limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel) : t('settings.mimo.disabled');
+      const failedProvider = enabled && providers.find((provider) => (
+        provider.accountKey === account.accountKey
+        && provider.sourceDetail === (detected ? 'app' : 'managed')
+        && provider.status === 'unauthorized'
+      ));
+      const statusLabel = failedProvider
+        ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(failedProvider))
+        : '';
+      info.textContent = !enabled ? t('settings.mimo.disabled')
+        : statusLabel || limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel);
+      info.title = info.textContent;
 
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'managed-account-remove';
-      remove.textContent = '✕';
-      remove.title = t('settings.mimo.remove');
-      let confirmingRemove = false;
-      remove.addEventListener('click', async () => {
-        if (!confirmingRemove) {
-          confirmingRemove = true;
-          remove.classList.add('confirming');
-          remove.textContent = '✓';
-          remove.title = t('settings.mimo.removeConfirm', {
-            account: accountName
-          });
-          return;
-        }
-        const result = await window.tokenMonitor.mimo.removeAccount(account.id);
-        if (result?.ok) {
-          state.mimoAccountError = '';
-          state.settings.mimoManagedAccounts = result.accounts || [];
+      const remove = detected ? null : document.createElement('button');
+      if (remove) {
+        remove.type = 'button';
+        remove.className = 'managed-account-remove';
+        remove.textContent = '✕';
+        remove.title = t('settings.mimo.remove');
+        let confirmingRemove = false;
+        remove.addEventListener('click', async () => {
+          if (!confirmingRemove) {
+            confirmingRemove = true;
+            remove.classList.add('confirming');
+            remove.textContent = '✓';
+            remove.title = t('settings.mimo.removeConfirm', {
+              account: accountName
+            });
+            return;
+          }
+          const result = await window.tokenMonitor.mimo.removeAccount(account.id);
+          if (result?.ok) {
+            state.mimoAccountError = '';
+            state.settings.mimoManagedAccounts = result.accounts || [];
+            renderMimoStatus();
+            renderSettingsSummaries();
+            refreshStats({ force: true }).catch(() => {});
+            return;
+          }
+          state.mimoAccountError = result?.error || t('settings.mimo.removeFailed');
           renderMimoStatus();
           renderSettingsSummaries();
-          refreshStats({ force: true }).catch(() => {});
-          return;
-        }
-        state.mimoAccountError = result?.error || t('settings.mimo.removeFailed');
-        renderMimoStatus();
-        renderSettingsSummaries();
-      });
+        });
+      }
 
-      right.append(info, remove);
-      row.append(input, main, right);
+      right.append(info);
+      if (remove) right.append(remove);
+      row.append(input || document.createElement('span'), main, right);
       listEl.append(row);
     }
   }
@@ -14750,9 +15267,10 @@ function renderOpenCodeProfiles() {
       nameInput.value = name;
 
       const renameBtn = document.createElement('button');
+      renameBtn.type = 'button';
       renameBtn.className = 'profile-rename-btn';
-      renameBtn.textContent = '✎';
       renameBtn.title = t('settings.opencode.rename');
+      renameBtn.setAttribute('aria-label', renameBtn.title);
 
       let editing = false;
       function beginRename() {
@@ -15331,9 +15849,10 @@ function appendNamedApiProfileRow(listEl, config) {
     nameInput.type = 'text';
     nameInput.value = name;
     const renameBtn = document.createElement('button');
+    renameBtn.type = 'button';
     renameBtn.className = 'profile-rename-btn';
-    renameBtn.textContent = '✎';
     renameBtn.title = t('settings.profiles.rename');
+    renameBtn.setAttribute('aria-label', renameBtn.title);
     let editing = false;
     const finishRename = async (save) => {
       if (!editing) return;
@@ -15661,6 +16180,7 @@ function setCursorCheckboxesEnabled(enabled) {
 
 let openCustomPricingForm = null;
 let modelAliasForm = null;
+let modelAliasSaveConflict = false;
 
 function setupModelAliasesUI() {
   const toggle = document.getElementById('modelAliasesSettingsToggle');
@@ -15668,15 +16188,28 @@ function setupModelAliasesUI() {
   toggle.addEventListener('click', () => setAccountGroupExpanded('modelAliases', !state.modelAliasesExpanded, 'modelAliasesExpanded'));
   setAccountGroupExpanded('modelAliases', false, 'modelAliasesExpanded');
   modelAliasForm = window.TokenMonitorModelAliasForm.createModelAliasForm({
-    document, t,
+    document, t: (key, params) => t(key === 'settings.modelAliases.saveError' && modelAliasSaveConflict ? 'settings.sync.content.conflict' : key, params),
     getAliases: () => state.settings?.modelAliases || {},
+    getBase: () => syncContentForm?.base(),
     getGrouping: () => state.settings?.modelAliasGrouping || 'off',
-    saveAliases: (modelAliases) => saveSettings({ modelAliases })
+    getModelIds: () => [
+      ...customPricingFormApi.inUseModelIds(state.stats),
+      ...(state.settings?.customModelPricing || []).map(entry => entry.modelId)
+    ],
+    saveAliases: async (modelAliases, base) => {
+      modelAliasSaveConflict = false;
+      try {
+        await saveSettings({ modelAliases }, base);
+      } catch (error) {
+        modelAliasSaveConflict = window.TokenMonitorSyncContentForm.isConflictError(error);
+        throw error;
+      }
+    }
   });
   for (const input of document.querySelectorAll('input[name="modelAliasGrouping"]')) {
     input.addEventListener('change', async () => {
       if (!input.checked) return;
-      await saveSettings({ modelAliasGrouping: input.value });
+      try { await saveSettings({ modelAliasGrouping: input.value }); } catch (_) { return; }
       modelAliasForm?.syncSettings();
     });
   }
@@ -15687,6 +16220,8 @@ function customPricingMeta(ov) {
   if (typeof ov.cacheReadPerM === 'number') parts.push(`${t('settings.customPricing.cacheRead')} $${ov.cacheReadPerM}`);
   if (typeof ov.inputPerM === 'number') parts.push(`${t('settings.customPricing.input')} $${ov.inputPerM}`);
   if (typeof ov.outputPerM === 'number') parts.push(`${t('settings.customPricing.output')} $${ov.outputPerM}`);
+  if (typeof ov.cacheWritePerM === 'number') parts.push(`${t('settings.customPricing.cacheWrite')} $${ov.cacheWritePerM}`);
+  if (typeof ov.cacheWrite1hPerM === 'number') parts.push(`${t('settings.customPricing.cacheWrite1h')} $${ov.cacheWrite1hPerM}`);
   return parts.length ? `${parts.join(' · ')} / 1M` : '';
 }
 
@@ -15696,6 +16231,7 @@ function renderCustomPricing() {
   const statusEl = document.getElementById('customPricingStatus');
   if (!listEl) return;
   const overrides = state.settings?.customModelPricing || [];
+  const pricingBase = syncContentForm?.base();
   if (statusEl) {
     statusEl.textContent = overrides.length
       ? t('settings.customPricing.count', { count: overrides.length })
@@ -15729,8 +16265,8 @@ function renderCustomPricing() {
     remove.className = 'managed-account-remove custom-pricing-remove';
     remove.textContent = t('settings.customPricing.remove');
     remove.addEventListener('click', async () => {
-      const next = customPricingFormApi.removeOverride(state.settings?.customModelPricing || [], ov.modelId);
-      await saveSettings({ customModelPricing: next });
+      const next = customPricingFormApi.removeOverride(overrides, ov.modelId);
+      try { await saveSettings({ customModelPricing: next }, pricingBase); } catch (_) { return; }
       renderCustomPricing();
     });
     row.append(main, remove);
@@ -15751,6 +16287,18 @@ function setupCustomPricingUI() {
   const inputEl = document.getElementById('customPricingInput');
   const outputEl = document.getElementById('customPricingOutput');
   const cacheReadEl = document.getElementById('customPricingCacheRead');
+  const cacheWriteEl = document.getElementById('customPricingCacheWrite');
+  const cacheWrite1hEl = document.getElementById('customPricingCacheWrite1h');
+  const advanced = document.getElementById('customPricingAdvanced');
+  const advancedSummary = document.getElementById('customPricingAdvancedSummary');
+  const help = document.getElementById('customPricingHelp');
+  const rateFields = [
+    [inputEl, 'inputPerM'], [outputEl, 'outputPerM'], [cacheReadEl, 'cacheReadPerM'],
+    [cacheWriteEl, 'cacheWritePerM'], [cacheWrite1hEl, 'cacheWrite1hPerM']
+  ];
+  let lookupRevision = 0;
+  let pricingEdit = null;
+  const editedFields = new Set();
   const hintEl = document.getElementById('customPricingHint');
   const errorEl = document.getElementById('customPricingError');
   const saveButton = document.getElementById('customPricingSaveButton');
@@ -15762,10 +16310,15 @@ function setupCustomPricingUI() {
   const selectedModelId = () => (select.value === '__manual__' ? manualInput.value.trim() : select.value);
 
   const resetForm = () => {
-    inputEl.value = ''; outputEl.value = ''; cacheReadEl.value = '';
+    lookupRevision += 1;
+    editedFields.clear();
+    advanced.open = false;
+    if (help.matches(':popover-open')) help.hidePopover();
+    for (const [el] of rateFields) el.value = '';
+    updateAdvancedSummary();
     manualInput.value = ''; manualInput.classList.add('hidden');
-    for (const id of ['customPricingInputApprox', 'customPricingOutputApprox', 'customPricingCacheReadApprox']) {
-      const span = document.getElementById(id);
+    for (const [el] of rateFields) {
+      const span = document.getElementById(el.id + 'Approx');
       if (span) span.textContent = '';
     }
     showHint(''); showError('');
@@ -15796,6 +16349,7 @@ function setupCustomPricingUI() {
     resetForm();
   };
   openCustomPricingForm = (prefill) => {
+    pricingEdit = { base: syncContentForm?.base(), entries: structuredClone(state.settings?.customModelPricing || []) };
     resetForm();
     populateModels();
     if (prefill && prefill.modelId) {
@@ -15807,10 +16361,11 @@ function setupCustomPricingUI() {
         manualInput.classList.remove('hidden');
         manualInput.value = prefill.modelId;
       }
-      inputEl.value = prefill.inputPerM ?? '';
-      outputEl.value = prefill.outputPerM ?? '';
-      cacheReadEl.value = prefill.cacheReadPerM ?? '';
-      for (const el of [inputEl, outputEl, cacheReadEl]) el.dispatchEvent(new Event('input'));
+      for (const [el, key] of rateFields) {
+        el.value = prefill[key] ?? '';
+        updateApproximation(el);
+      }
+      advanced.open = cacheWriteEl.value !== '' || cacheWrite1hEl.value !== '';
     }
     form.classList.remove('hidden');
     addButton.classList.add('hidden');
@@ -15820,6 +16375,10 @@ function setupCustomPricingUI() {
   cancelButton.addEventListener('click', closeForm);
 
   select.addEventListener('change', async () => {
+    const revision = ++lookupRevision;
+    editedFields.clear();
+    advanced.open = false;
+    for (const [el] of rateFields) { el.value = ''; updateApproximation(el); }
     showError('');
     manualInput.classList.toggle('hidden', select.value !== '__manual__');
     if (!select.value || select.value === '__manual__') { showHint(''); return; }
@@ -15827,27 +16386,42 @@ function setupCustomPricingUI() {
     showHint(t('settings.customPricing.lookingUp'));
     try {
       const res = await window.tokenMonitor.lookupModelPricing(id);
+      if (revision !== lookupRevision) return;
       if (res?.ok && res.result?.pricing) {
         const p = customPricingFormApi.perMillionFromPricing(res.result);
-        if (p.inputPerM !== undefined) inputEl.value = p.inputPerM;
-        if (p.outputPerM !== undefined) outputEl.value = p.outputPerM;
-        if (p.cacheReadPerM !== undefined) cacheReadEl.value = p.cacheReadPerM;
-        for (const el of [inputEl, outputEl, cacheReadEl]) el.dispatchEvent(new Event('input'));
+        for (const [el, key] of rateFields) {
+          if (!editedFields.has(key)) el.value = p[key] ?? '';
+          updateApproximation(el);
+        }
         showHint(t('settings.customPricing.currentPrice', { key: res.result.matchedKey || id, source: res.result.source || '' }));
       } else {
         showHint(t('settings.customPricing.noCurrentPrice'));
       }
     } catch (_) {
+      if (revision !== lookupRevision) return;
       showHint(t('settings.customPricing.noCurrentPrice'));
     }
   });
 
-  for (const el of [inputEl, outputEl, cacheReadEl]) {
+  function updateAdvancedSummary() {
+    const count = [cacheWriteEl, cacheWrite1hEl].filter(el => el.value !== '').length;
+    advancedSummary.textContent = count ? t('settings.customPricing.advancedConfigured', { count }) : '';
+  }
+
+  function updateApproximation(el) {
+    updateAdvancedSummary();
+    const span = document.getElementById(el.id + 'Approx');
+    if (!span) return;
+    const v = Number(el.value);
+    span.textContent = (el.value !== '' && Number.isFinite(v)) ? `≈ ${formatCost(v)} / 1M` : '';
+  }
+
+  for (const [el, key] of rateFields) {
+    const writeDescription = el === cacheWrite1hEl ? ' customPricingWriteNote' : '';
+    el.setAttribute('aria-describedby', 'customPricingRateUnits customPricingCoverageNote customPricingHint customPricingError' + writeDescription);
     el.addEventListener('input', () => {
-      const span = document.getElementById(el.id + 'Approx');
-      if (!span) return;
-      const v = Number(el.value);
-      span.textContent = (el.value !== '' && Number.isFinite(v)) ? `≈ ${formatCost(v)} / 1M` : '';
+      editedFields.add(key);
+      updateApproximation(el);
     });
   }
 
@@ -15855,17 +16429,24 @@ function setupCustomPricingUI() {
     showError('');
     const modelId = selectedModelId();
     if (!modelId) { showError(t('settings.customPricing.errorNoModel')); return; }
-    const entry = {
-      modelId,
-      inputPerM: inputEl.value === '' ? undefined : Number(inputEl.value),
-      outputPerM: outputEl.value === '' ? undefined : Number(outputEl.value),
-      cacheReadPerM: cacheReadEl.value === '' ? undefined : Number(cacheReadEl.value)
-    };
-    if (!customPricingFormApi.hasUsableBasePrice(entry)) { showError(t('settings.customPricing.errorNoPrice')); return; }
-    const next = customPricingFormApi.upsertOverride(state.settings?.customModelPricing || [], entry);
-    await saveSettings({ customModelPricing: next });
-    closeForm();
-    renderCustomPricing();
+    const entry = { modelId };
+    for (const [el, key] of rateFields) entry[key] = el.value === '' ? undefined : Number(el.value);
+    if (!customPricingFormApi.hasUsableBasePrice(entry)) {
+      if ([entry.cacheWritePerM, entry.cacheWrite1hPerM].some(value => value !== undefined && (!Number.isFinite(value) || value < 0))) advanced.open = true;
+      showError(t('settings.customPricing.errorNoPrice'));
+      return;
+    }
+    const next = customPricingFormApi.upsertOverride(pricingEdit?.entries || [], entry);
+    saveButton.disabled = true;
+    try {
+      await saveSettings({ customModelPricing: next }, pricingEdit?.base);
+      closeForm();
+      renderCustomPricing();
+    } catch (error) {
+      showError(t(window.TokenMonitorSyncContentForm.isConflictError(error) ? 'settings.sync.content.conflict' : 'settings.customPricing.saveFailed'));
+    } finally {
+      saveButton.disabled = false;
+    }
   });
 
   renderCustomPricing();
@@ -16483,7 +17064,11 @@ function setupCursorAccountUI() {
 
   const mimoToggle = document.getElementById('mimoSettingsToggle');
   if (mimoToggle) {
-    mimoToggle.addEventListener('click', () => setMimoAccountExpanded(!state.mimoAccountExpanded));
+    mimoToggle.addEventListener('click', () => {
+      const expanding = !state.mimoAccountExpanded;
+      setMimoAccountExpanded(expanding);
+      if (expanding) void refreshMimoAccounts();
+    });
 
     const addToggle = document.getElementById('mimoAddToggle');
     const addDetails = document.getElementById('mimoAddDetails');
@@ -16502,10 +17087,7 @@ function setupCursorAccountUI() {
       renderMimoStatus();
     });
 
-    window.tokenMonitor.mimo.accounts().then((accounts) => {
-      state.settings.mimoManagedAccounts = accounts || [];
-      renderMimoStatus();
-    }).catch(() => {});
+    void refreshMimoAccounts();
 
     document.getElementById('mimoOpenConsoleButton').addEventListener('click', async () => {
       const result = await window.tokenMonitor.mimo.openConsole();
@@ -16724,6 +17306,13 @@ function initSettingsAnimationWrappers() {
 }
 
 initSettingsAnimationWrappers();
+syncContentForm = window.TokenMonitorSyncContentForm.createSyncContentForm({
+  document, bridge: window.tokenMonitor, t, saveSettings, getSettings: () => state.settings
+});
+setupSettingsAccordion(
+  document.getElementById('syncContentGroup'), document.getElementById('syncContentToggle'),
+  document.getElementById('syncContentDetails'), expanded => syncContentForm.setExpanded(expanded)
+);
 setupSettingsSections();
 setupCursorAccountUI();
 setupCustomPricingUI();

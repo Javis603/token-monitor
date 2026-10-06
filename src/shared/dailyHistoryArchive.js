@@ -63,6 +63,7 @@ function normalizeObservation(value) {
     tokens,
     cost,
     messages,
+    ...(typeof value.pricingRevision === 'string' ? { pricingRevision: value.pricingRevision } : {}),
     ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {}),
     ...(tokenComponentsAvailable ? {
       tokenComponentsAvailable: true,
@@ -204,6 +205,7 @@ function normalizeDay(value, fallbackDate = '') {
 
 function normalizeDailyHistoryArchive(value) {
   const normalized = { version: ARCHIVE_VERSION, days: {} };
+  if (typeof value?.pricingRevision === 'string') normalized.pricingRevision = value.pricingRevision;
   const source = value?.days && typeof value.days === 'object' ? value.days : {};
   for (const [date, rawDay] of Object.entries(source)) {
     const day = normalizeDay(rawDay, date);
@@ -285,9 +287,23 @@ function shouldReplaceObservation(previous, incoming) {
 
 function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
   const archive = normalizeDailyHistoryArchive(existingArchive);
+  const reprice = options.reprice === true;
+  if (typeof options.pricingRevision === 'string') {
+    // Stamp each retained observation before adopting the new revision. A
+    // source absent from this scan must still be repriced when it reappears.
+    const previousRevision = archive.pricingRevision ?? 'legacy';
+    for (const day of Object.values(archive.liveDays || {})) {
+      for (const observation of Object.values(day.observations)) {
+        observation.pricingRevision ??= previousRevision;
+      }
+    }
+  }
   const todayKey = String(options.todayKey || '').slice(0, 10);
   const hasTodayKey = DAY_KEY_RE.test(todayKey);
   const incomingDays = observationsFromGraphs(graphs, { archive });
+  // A failed/empty graph did not confirm any current prices. Keep the old
+  // revision so a later successful scan still reconciles retained live costs.
+  if (incomingDays.size > 0 && typeof options.pricingRevision === 'string') archive.pricingRevision = options.pricingRevision;
 
   for (const [date, incoming] of incomingDays) {
     if (hasTodayKey && date > todayKey) continue;
@@ -312,6 +328,13 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
     }
     const normalized = normalizeDay(next, date);
     if (normalized) archive.days[date] = normalized;
+    // When the collector rescans with current pricing, matching source usage
+    // owns its price (including explicit zero). Keep archive-only usage and
+    // richer live metadata, but do not let an older live cost undo repricing.
+    const liveDay = archive.liveDays?.[date];
+    if (liveDay && (reprice || typeof options.pricingRevision === 'string')) {
+      archive.liveDays[date] = withReconciledGraphCosts(liveDay, incoming, liveDay, reprice, options.pricingRevision);
+    }
   }
 
   // Presentation and sync windows are intentionally applied later by
@@ -457,29 +480,33 @@ function liveDayIsGreater(incoming, previous) {
   return dayCost(incoming) !== dayCost(previous);
 }
 
-// A Cursor liveDay keeps the cost of the moment it was captured, while the
-// graph reprices that day's same events on every scan. For Cursor usage both
-// hold, the graph's cost is the current one and the liveDay's only fills a
-// graph cost that is missing. That holds whichever day liveDayIsGreater keeps:
-// a liveDay chosen because another observation grew must not carry a stale
-// Cursor cost along, and a graph day kept because the aggregate cost happened
-// to tie must still take a price only the liveDay has. Every other client keeps
-// the bidirectional repricing liveDayIsGreater allows.
-function withReconciledCursorCosts(day, graphDay, liveDay) {
+// A changed pricing revision makes matching graph usage authoritative, even
+// when its new cost is zero. Otherwise preserve live prices, with Cursor's
+// existing positive-graph-price preference and live fallback for missing cost.
+function withReconciledGraphCosts(day, graphDay, liveDay, reprice = false, pricingRevision) {
   let changed = false;
   const observations = Object.fromEntries(Object.entries(day.observations).map(([key, observation]) => {
     const graphObservation = graphDay.observations[key];
     const liveObservation = liveDay.observations[key];
-    if (normalizeTokscaleClientName(observation.client) !== 'cursor'
+    const revisionChanged = typeof pricingRevision === 'string'
+      && liveObservation?.pricingRevision !== pricingRevision;
+    const useGraphPrice = reprice || revisionChanged;
+    const isCursor = normalizeTokscaleClientName(observation.client) === 'cursor';
+    if ((!useGraphPrice && typeof pricingRevision !== 'string' && !isCursor)
       || !graphObservation
       || !liveObservation
       || num(graphObservation.tokens) !== num(liveObservation.tokens)) {
       return [key, observation];
     }
-    const cost = num(graphObservation.cost) > 0 ? graphObservation.cost : liveObservation.cost;
-    if (num(cost) === num(observation.cost)) return [key, observation];
+    const cost = useGraphPrice || (isCursor && num(graphObservation.cost) > 0)
+      ? graphObservation.cost : liveObservation.cost;
+    if (num(cost) === num(observation.cost)
+      && (typeof pricingRevision !== 'string' || observation.pricingRevision === pricingRevision)) return [key, observation];
     changed = true;
-    return [key, { ...observation, cost }];
+    return [key, {
+      ...observation, cost,
+      ...(typeof pricingRevision === 'string' ? { pricingRevision } : {})
+    }];
   }));
   return changed ? { ...day, observations } : day;
 }
@@ -513,8 +540,8 @@ function mergeLiveDayMetadata(liveDay, previousDay) {
         cacheWriteTokens: num(previous.cacheWriteTokens),
         outputTokens: num(previous.outputTokens)
       } : {}),
-      ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {}),
-      ...(unclassifiedTokens === 0 ? { tokenComponentsAvailable: true } : {}),
+      unclassifiedTokens,
+      tokenComponentsAvailable: unclassifiedTokens === 0,
       ...(Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) > 0
         ? { reasoningTokens: Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) }
         : {})
@@ -537,9 +564,36 @@ function captureLiveDailyHistory(existingArchive, period, options = {}) {
   }
   const incoming = periodLiveDay(period, date);
   if (!incoming) return archive;
+  if (typeof options.pricingRevision === 'string') {
+    for (const observation of Object.values(incoming.observations)) {
+      observation.pricingRevision = options.pricingRevision;
+    }
+  }
   const previous = archive.liveDays?.[date];
-  if (!previous || liveDayIsGreater(incoming, previous)) {
-    archive.liveDays = { ...(archive.liveDays || {}), [date]: incoming };
+  const equalUsage = previous && dayTokens(incoming) === dayTokens(previous);
+  // Revision provenance comes from the retained rows, not a missing model key.
+  // Equal totals can also be reattributed by a parser correction independently
+  // of pricing. Keep the incoming identities and merge only matching metadata.
+  const revisionChanged = equalUsage && typeof options.pricingRevision === 'string'
+    && Object.values(previous.observations).some(observation => (
+      observation.pricingRevision !== options.pricingRevision
+    ));
+  const attributionChanged = equalUsage && (
+    Object.keys(incoming.observations).length !== Object.keys(previous.observations).length
+    || Object.entries(incoming.observations).some(([key, observation]) => (
+      observation.tokens !== previous.observations[key]?.tokens
+    ))
+  );
+  if (!previous || liveDayIsGreater(incoming, previous) || revisionChanged || attributionChanged) {
+    let selected = incoming;
+    if (equalUsage && dayComponentQuality(incoming) < dayComponentQuality(previous)) {
+      selected = mergeLiveDayMetadata(incoming, previous);
+      // A whole-day component summary is reusable only for identical attribution.
+      if (!attributionChanged && previous.componentSummary) {
+        selected.componentSummary = previous.componentSummary;
+      }
+    }
+    archive.liveDays = { ...(archive.liveDays || {}), [date]: selected };
   }
   return archive;
 }
@@ -575,7 +629,7 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
       currentDays.set(date, liveDay);
     } else {
       const selected = liveDayIsGreater(liveDay, previous) ? mergeLiveDayMetadata(liveDay, previous) : previous;
-      currentDays.set(date, withReconciledCursorCosts(selected, previous, liveDay));
+      currentDays.set(date, withReconciledGraphCosts(selected, previous, liveDay, options.reprice === true));
     }
   }
 

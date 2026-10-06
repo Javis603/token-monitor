@@ -138,7 +138,7 @@ function normalizeSessionKind(value) {
   return String(value || '').trim() === 'background-review' ? 'background-review' : '';
 }
 
-function stripSessionTextFromPeriod(period) {
+function stripSessionTextFromPeriod(period, { preserveSessionTitles = false } = {}) {
   if (!period || typeof period !== 'object' || !period.sessions || typeof period.sessions !== 'object') {
     return period;
   }
@@ -150,27 +150,30 @@ function stripSessionTextFromPeriod(period) {
     }
     const session = { ...value };
     for (const field of SESSION_TEXT_KEYS) delete session[field];
+    if (preserveSessionTitles && typeof value.title === 'string' && value.title) {
+      session.title = normalizeSessionTitle(value.title);
+    }
     sessions[key] = session;
   }
   return { ...period, sessions };
 }
 
-// Hub ingress is a trust boundary. Current clients already omit local titles,
-// but the Hub must enforce that privacy contract even for stale, buggy, or
-// custom senders. Preserve non-text classification such as `sessionKind`.
-function stripSessionTextFromDeviceRecord(record) {
+// Hub ingress is a trust boundary. Only explicitly permitted canonical titles
+// may survive; compatibility title fields, previews and messages never do.
+// Preserve non-text classification such as `sessionKind`.
+function stripSessionTextFromDeviceRecord(record, { preserveSessionTitles = false } = {}) {
   if (!record || typeof record !== 'object') return record;
   const stripped = { ...record };
   for (const periodName of PERIODS) {
     if (hasOwn(stripped, periodName)) {
-      stripped[periodName] = stripSessionTextFromPeriod(stripped[periodName]);
+      stripped[periodName] = stripSessionTextFromPeriod(stripped[periodName], { preserveSessionTitles });
     }
   }
   if (stripped.periods && typeof stripped.periods === 'object') {
     stripped.periods = { ...stripped.periods };
     for (const periodName of PERIODS) {
       if (hasOwn(stripped.periods, periodName)) {
-        stripped.periods[periodName] = stripSessionTextFromPeriod(stripped.periods[periodName]);
+        stripped.periods[periodName] = stripSessionTextFromPeriod(stripped.periods[periodName], { preserveSessionTitles });
       }
     }
   }
@@ -265,6 +268,9 @@ function normalizeClientName(value) {
   if (raw.includes('dsh')) return 'dsh';
   if (raw.includes('devin')) return 'devin';
   if (raw === 'fx') return 'fx';
+  // Tokscale's id for MiniMax Code. The bare vendor name stays a model vendor
+  // and limits provider, so only the product spellings map here.
+  if (raw === 'mcode' || /^minimax[\s_-]*code$/.test(raw)) return 'mcode';
   if (raw.includes('opencode')) return 'opencode';
   if (raw.includes('openclaw') || raw.includes('clawd') || raw.includes('moltbot') || raw.includes('moldbot')) return 'openclaw';
   return raw.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || null;
@@ -1380,6 +1386,27 @@ function mergeDeviceRecord(existing, incoming) {
   return normalizedIncoming;
 }
 
+// Sync ingress always revokes saved text before preserving usage. A limits-only
+// update may still carry a current usage snapshot, so restore just its admitted
+// titles after mergeDeviceRecord has retained the previous usage counters.
+function mergeSyncDeviceRecord(existing, incoming, { preserveSessionTitles = false } = {}) {
+  const safeIncoming = stripSessionTextFromDeviceRecord(incoming, { preserveSessionTitles });
+  const record = mergeDeviceRecord(stripSessionTextFromDeviceRecord(existing), safeIncoming);
+  if (preserveSessionTitles && safeIncoming?.limitsOnly === true) {
+    for (const periodName of PERIODS) {
+      const period = safeIncoming[periodName] || safeIncoming.periods?.[periodName];
+      for (const [key, value] of Object.entries(period?.sessions || {})) {
+        if (!value?.title) continue;
+        const session = normalizeSession(value, key);
+        if (!session) continue;
+        const retained = record.periods[periodName]?.sessions?.[sessionKey(session.client, session.sessionId)];
+        if (retained) retained.title = session.title;
+      }
+    }
+  }
+  return record;
+}
+
 // History rides along only on interval-gated collector ticks, so a later
 // history-less tick would otherwise blank the local snapshot (and the trends
 // dashboard with it). Carry the prior snapshot's history forward when the
@@ -1765,6 +1792,7 @@ module.exports = {
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,
   mergeDeviceRecord,
+  mergeSyncDeviceRecord,
   mergePeriods,
   normalizeClientName,
   normalizeModelName,
