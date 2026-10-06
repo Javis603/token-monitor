@@ -13,6 +13,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const balanceDisplay = require('../../src/shared/limits/balanceDisplay');
 const currencyApi = require('../../src/shared/currency');
@@ -181,6 +182,83 @@ function dockView(appearance = {}, overrides = {}) {
     ...overrides
   });
 }
+
+test('Home text and bars use the plan text rendered by Limits account rows', () => {
+  const window = { kind: 'weekly', remainingPercent: 40 };
+  const fixtures = [
+    [{ provider: 'codex', status: 'ok', planLabel: 'Plus' }],
+    [{ provider: 'zed', status: 'ok', planLabel: 'Zed Student' }],
+    [{ provider: 'future-provider', status: 'ok', planLabel: 'Pro' }],
+    [{ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', planLabel: '' }],
+    [{ provider: 'cursor', status: 'ok', accountEmail: 'alice@example.com', accountLabel: 'alice@example.com', planLabel: '' }],
+    [{ provider: 'openrouter', status: 'ok', accountName: 'Work', accountLabel: 'Work', planLabel: '' }],
+    ['Work', 'Personal'].map((accountName) => ({ provider: 'openrouter', status: 'ok', accountName, accountLabel: accountName, planLabel: '' })),
+    ['Zen', ''].map((planLabel, index) => ({ provider: 'opencode', status: 'ok', accountLabel: `Profile ${index}`, planLabel })),
+    ['Coding Plan', 'Agent Plan Pro'].map((accountLabel) => ({ provider: 'volcengine', status: 'ok', accountLabel })),
+    ['newapi-account', 'sub2api'].map((adapterId) => ({ provider: 'thirdparty', status: 'ok', adapterId, planLabel: 'Account' })),
+    [false, true].map((stale) => ({ provider: 'opencode', status: 'unauthorized', stale, accountLabel: 'Work profile', planLabel: 'Zen' }))
+  ];
+  const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+  const start = app.indexOf('function homeLimitRows()');
+  const end = app.indexOf('function homeLimitWindowLabel(', start);
+  const renderStart = app.indexOf('function renderHomeLimitModule()');
+  const renderEnd = app.indexOf('function renderHomeModelModule(', renderStart);
+  for (const homeLimitDisplayMode of ['text', 'bars']) {
+    for (const maskLimitAccountEmails of [true, false]) {
+      const settings = { homeLimitDisplayMode, maskLimitAccountEmails, homeLimitAccountCount: 20 };
+      const view = dockView(settings);
+      for (const fixture of fixtures) {
+        const providers = fixture.map((provider, index) => ({ ...provider, accountKey: `account-${index}`, windows: [window] }));
+        const id = providers[0].provider;
+        settings.homeLimitProviderOrder = [id];
+        const limits = providers.length > 1
+          ? view.renderLimitProviderGroup(id, id, providers, '#000000')
+          : view.renderLimitProviderSolo(id, id, providers[0], '#000000');
+        const limitsPlans = [...limits.walk()]
+          .filter((node) => node.classNames.has('limit-row') && node.children[1]?.classNames?.has('limit-windows'))
+          .map((row) => row.children[0].find('limit-plan').textContent);
+        const home = vm.runInNewContext(`${app.slice(start, end)}; homeLimitRows();`, {
+          state: { stats: { limits: { providers } }, settings },
+          enabledLimitProviderSet: () => new Set([id]),
+          hiddenHomeLimitProviderSet: () => new Set(),
+          LIMIT_PROVIDERS: [{ id, label: id }],
+          limitProviderOrderApi: require('../../src/electron/renderer/limits/providerOrder'),
+          limitUsageItemsApi: require('../../src/shared/limits/usageItems'),
+          homeOverviewApi: require('../../src/electron/renderer/homeOverview'),
+          limitProviderPresentationApi: limitPresentationApi,
+          limitWindowsView: view,
+          limitAccountTitle: view.limitAccountTitle,
+          ...limitWindowLabels,
+          clientColors: {}
+        });
+        assert.deepEqual(Array.from(home, (row) => row.plan), limitsPlans, `${id}: ${homeLimitDisplayMode}, mask=${maskLimitAccountEmails}`);
+        const body = new FakeElement('div');
+        vm.runInNewContext(`${app.slice(renderStart, renderEnd)}; renderHomeLimitModule();`, {
+          document: { createElement: (tag) => new FakeElement(tag) },
+          state: { settings },
+          homeModuleShell: () => ({ module: new FakeElement('div'), body }),
+          homeLimitRows: () => home,
+          applyHomeListMark() {},
+          iconKindFor: () => id,
+          homeLimitWindowLabel: () => 'Weekly',
+          formatHomeLimitWindowValue: () => '40% left',
+          isCreditsWindow: balanceDisplay.isCreditsWindow,
+          limitFillPercent: limitDisplayMode.limitFillPercent,
+          optionalFiniteNumber: Number,
+          limitWindowsView: view,
+          t: (key) => key,
+          limitProviderPresentationApi: limitPresentationApi
+        });
+        assert.deepEqual(body.children.map((row) => row.find('home-limit-plan')?.textContent || ''), limitsPlans);
+        for (const row of body.children) {
+          const plan = row.find('home-limit-plan');
+          if (plan) assert.equal(plan.title, plan.textContent);
+          assert.equal(Boolean(row.find('limit-meter')), homeLimitDisplayMode === 'bars');
+        }
+      }
+    }
+  }
+});
 
 for (const [host, file] of [
   ['dock', 'edgeDock/dock.js'],

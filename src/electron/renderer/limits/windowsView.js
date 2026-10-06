@@ -1725,6 +1725,10 @@
     return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status) : '';
   }
 
+  function limitPlanText(provider, options = {}) {
+    return options.planText ?? limitProviderPlan(provider);
+  }
+
   function renderLimitProviderMark(id, color) {
     const mark = document.createElement('span');
     if (hasMark(id)) {
@@ -1796,7 +1800,7 @@
     }
     const plan = document.createElement('div');
     plan.className = 'limit-plan';
-    plan.textContent = options.planText ?? limitProviderPlan(provider);
+    plan.textContent = limitPlanText(provider, options);
     // A record binds to one account, so the provider-wide rollup belongs on the
     // row that stands for the provider as a whole — the header of a group, or a
     // provider's single row — and not on each member of a group, which would
@@ -2157,7 +2161,7 @@
   // Compact surfaces keep the same plan-cell policy as the full account rows.
   function limitAccountPlan(provider, { grouped = false } = {}) {
     const policy = limitAccountRowPolicy(provider?.provider, provider, '', { grouped, sharedFamily: null });
-    return policy.options.planText ?? limitProviderPlan(provider);
+    return limitPlanText(provider, policy.options);
   }
 
   // A provider's row standing on its own. Both surfaces call this rather than
