@@ -2087,10 +2087,9 @@
     opencode: (provider, color, { grouped }) => ({
       options: {
         // A profile name that is neither Go nor Zen predates accountName, and it
-        // is the only label the row has — repeating it in the plan cell says
-        // nothing. Only a group row has a sibling whose plan cell it could be
-        // mistaken for.
-        ...(grouped && legacyOpencodeProfileLabel(provider) ? { planText: '' } : {}),
+        // is repeated by the legacy plan fallback. Hide that duplicate only
+        // when no explicit plan is supplied; a known Go/Zen plan must survive.
+        ...(grouped && !String(provider?.planLabel || '').trim() && legacyOpencodeProfileLabel(provider) ? { planText: '' } : {}),
         ...(grouped ? { showIcon: false } : {})
       }
     }),

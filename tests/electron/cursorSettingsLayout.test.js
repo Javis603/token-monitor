@@ -367,7 +367,7 @@ test('OpenCode multi-account rows separate profile identity from plan label', ()
   assert.match(titleBody, /legacyName !== 'Go' && legacyName !== 'Zen'/);
   // One place decides this now: the view's policy table, applied by the group
   // builder the page and the Edge Dock card both call.
-  assert.match(policy, /opencode: \(provider, color, \{ grouped \}\) => \(\{[\s\S]*?grouped && legacyOpencodeProfileLabel\(provider\) \? \{ planText: '' \} : \{\}/);
+  assert.match(policy, /opencode: \(provider, color, \{ grouped \}\) => \(\{[\s\S]*?grouped && !String\(provider\?\.planLabel \|\| ''\)\.trim\(\) && legacyOpencodeProfileLabel\(provider\) \? \{ planText: '' \} : \{\}/);
   assert.match(policy, /opencode: \(provider, color, \{ grouped \}\) => \(\{[\s\S]*?grouped \? \{ showIcon: false/);
   assert.doesNotMatch(app, /legacyProfileLabel/);
   // The plan/account fallback is the shared view's limitProviderPlan.

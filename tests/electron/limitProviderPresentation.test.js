@@ -2899,6 +2899,15 @@ test('MiMo settings stays connected while one independent product is live', () =
   assert.equal(presentation.limitProviderSettingsRecord([expired], 'mimo'), expired);
 });
 
+test('OpenCode grouped plan policy preserves explicit plans beside legacy profile titles', () => {
+  const view = createLimitWindowsView({ presentation: require('../../src/electron/renderer/limits/providerPresentation') });
+  const provider = { provider: 'opencode', status: 'ok', accountLabel: 'Work profile' };
+  for (const [planLabel, expected] of [['', ''], ['   ', ''], ['Zen', 'Zen'], ['Go', 'Go'], [' Zen ', 'Zen']]) {
+    assert.equal(view.limitAccountPlan({ ...provider, planLabel }, { grouped: true }), expected);
+  }
+  assert.equal(view.limitAccountPlan(provider), 'Work profile');
+});
+
 test('Cursor shared plan cells omit email identities while preserving membership and legacy plans', () => {
   const view = createLimitWindowsView({ presentation: require('../../src/electron/renderer/limits/providerPresentation') });
   const provider = { provider: 'cursor', status: 'ok', accountEmail: 'alice@example.com', accountLabel: 'alice@example.com', planLabel: '' };

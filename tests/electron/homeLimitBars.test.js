@@ -92,6 +92,22 @@ test('Home shares Limits status and stale-plan semantics for retained quota wind
   ])[0].plan, 'Student');
 });
 
+test('Home grouped legacy OpenCode profiles retain explicit plan labels', () => {
+  for (const planLabel of ['Zen', 'Go', ' Zen ']) {
+    const rows = resolveHomeRows([
+      { provider: 'opencode', status: 'ok', accountLabel: 'Work profile', planLabel, windows: [{ kind: 'weekly', remainingPercent: 40 }] },
+      { provider: 'opencode', status: 'ok', accountLabel: 'Personal profile', windows: [{ kind: 'weekly', remainingPercent: 60 }] }
+    ]);
+    assert.equal(rows[0].name, 'Work profile');
+    assert.equal(rows[0].plan, planLabel.trim());
+    assert.equal(rows[1].plan, '');
+    for (const homeLimitDisplayMode of ['text', 'bars']) {
+      const metric = renderHomeWindow(rows[0].windows[0], { homeLimitDisplayMode }, rows[0].plan);
+      assert.equal(metric.accountHead.children[2].textContent, planLabel.trim());
+    }
+  }
+});
+
 test('Home Cursor plans never expose email identities with masking enabled or disabled', () => {
   const window = { kind: 'monthly', remainingPercent: 40 };
   for (const homeLimitDisplayMode of ['text', 'bars']) {
