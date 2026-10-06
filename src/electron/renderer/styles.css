@@ -3706,6 +3706,8 @@ html.is-windows .settings-panel select option {
 .home-limit-window {
   display: grid;
   min-width: 0;
+  /* A sibling reset line must not stretch this window's text or meter rows. */
+  align-content: start;
   gap: 4px;
 }
 .home-limit-window-line {
