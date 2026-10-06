@@ -751,15 +751,19 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     return promise;
   }
 
-  function refresh(scope = {}, reason = 'manual') {
+  function refresh(scope = {}, reason = 'manual', options = {}) {
     const normalized = normalizedScope(scope);
     if (normalized.provider) return queueScope(normalized, reason);
     if (reason === 'manual' && started && enabled && !stopped) {
       lastScheduledFullAt = now();
       scheduleInterval(refreshMs);
     }
-    return Promise.all([...configuredProviders].map((provider) => queueScope({ provider }, reason)))
-      .then(() => getSnapshot());
+    return Promise.all([...configuredProviders].map(async (provider) => ({
+      provider,
+      ...await queueScope({ provider }, reason)
+    }))).then((results) => options.includeProviderResults
+      ? { snapshot: getSnapshot(), results }
+      : getSnapshot());
   }
 
   function clear(scope = {}, reason = 'removed') {

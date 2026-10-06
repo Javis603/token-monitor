@@ -264,12 +264,14 @@ test('runtime control methods delegate to the precise producer', () => {
   assert.equal(runtime.tick('manual', { forceHistory: true }), 'tick');
   assert.equal(runtime.refreshClient('cursor', { forceSync: true }), 'client');
   assert.equal(runtime.refreshLimits({ provider: 'kimi' }, 'credential'), 'refresh');
+  assert.equal(runtime.refreshLimits({}, 'manual', { includeProviderResults: true }), 'refresh');
   assert.equal(runtime.reconfigureLimits({ limitsRefreshMs: 60000 }), 'reconfigure');
   assert.equal(runtime.clearLimits({ provider: 'kimi' }, 'logout'), 'clear');
   assert.deepEqual(calls, [
     ['tick', 'manual', { forceHistory: true }],
     ['refreshClient', 'cursor', { forceSync: true }],
     ['refresh', { provider: 'kimi' }, 'credential'],
+    ['refresh', {}, 'manual', { includeProviderResults: true }],
     ['reconfigure', { limitsRefreshMs: 60000 }],
     ['clear', { provider: 'kimi' }, 'logout']
   ]);

@@ -5523,12 +5523,12 @@ function canRefreshEdgeDockLimits() {
 
 async function refreshLimitsFromEdgeDock() {
   if (!canRefreshEdgeDockLimits()) return { ok: false, error: 'No local limits runtime' };
-  const providers = parseLimitProviders(settings?.limitProviders ?? defaultLimitProviders());
-  // Keep manual backoff and inspect each lane's result: a deferred or failed
-  // probe must not turn the button green just because its promise resolved.
-  const results = await Promise.all(providers.map((provider) => deviceRuntimeHandle.refreshLimits({ provider }, 'manual')));
-  const failed = results.some((result, index) => !result || result.superseded || result.deferred || result.error
-    || result.snapshot?.providers?.some((row) => row.provider === providers[index]
+  // A full manual refresh resets the interval once, while lane results retain
+  // deferred/failure feedback instead of reporting every resolved probe as OK.
+  const response = await deviceRuntimeHandle.refreshLimits({}, 'manual', { includeProviderResults: true });
+  if (!response?.results?.length) return { ok: false };
+  const failed = response.results.some((result) => result.superseded || result.deferred || result.error
+    || response.snapshot?.providers?.some((row) => row.provider === result.provider
       && !['ok', 'notConfigured', 'unsupported'].includes(row.status)));
   return { ok: !failed };
 }

@@ -734,6 +734,46 @@ test('always-visible refresh appears on hover, stays over the button and hides d
   assert.equal(rail.ignoreMouse, false);
 });
 
+for (const side of ['left', 'right']) {
+  test(`${side} full-height rail dismisses its bottom card when the pointer reaches refresh`, async (t) => {
+    const fixture = createFixture({
+      settings: { edgeDockSide: side },
+      displays: [{ id: 1, bounds: { x: 0, y: 0, width: 1200, height: 700 }, workArea: { x: 0, y: 0, width: 1200, height: 700 } }],
+      canRefreshLimits: () => true,
+      onRefreshLimits: async () => ({ ok: true })
+    });
+    t.after(() => fixture.controller.stop());
+    fixture.controller.setCells(Array.from({ length: 12 }, (_, index) => ({ id: `provider-${index}`, kind: 'provider', label: `Provider ${index}` })));
+    const rail = fixture.windowFor('rail');
+    const bubble = fixture.windowFor('bubble');
+    const peek = fixture.windowFor('peek');
+    fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 20 };
+    await new Promise((resolve) => setTimeout(resolve, 105));
+    fixture.paintPeek();
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 11 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'provider-11', height: 180 });
+    assert.equal(bubble.ignoreMouse, false);
+    assert.ok(peek.bounds.x < bubble.bounds.x + bubble.bounds.width && peek.bounds.x + peek.bounds.width > bubble.bounds.x
+      && peek.bounds.y < bubble.bounds.y + bubble.bounds.height && peek.bounds.y + peek.bounds.height > bubble.bounds.y,
+    'fixture reproduces the button/card overlap');
+    fixture.screen.point = { x: peek.bounds.x + 16, y: peek.bounds.y + 16 };
+    await new Promise((resolve) => setTimeout(resolve, 105));
+    assert.equal(bubble.ignoreMouse, true);
+    assert.equal(bubble.opacity, 0);
+    assert.equal(sentPayload(rail, 'rail').focusCellId, null);
+    assert.equal(peek.ignoreMouse, false);
+    assert.equal(peek.opacity, 1);
+    const handler = fixture.ipcMain.handlers.get('edgeDock:refreshLimits');
+    assert.deepEqual(await handler({ sender: peek.webContents }), { ok: true });
+    // Returning to the same bottom cell must reopen its card through hover.
+    fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + rail.bounds.height - 35 };
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    assert.equal(sentPayload(rail, 'rail').focusCellId, 'provider-11');
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'provider-11', height: 180 });
+    assert.equal(bubble.ignoreMouse, false);
+  });
+}
+
 test('refresh follows the rail fallback when shaped Liquid Glass fails', (t) => {
   const factory = fakeGlassFactory({ failShape: true });
   const fixture = createFixture({ platform: 'darwin', nativeGlass: true,

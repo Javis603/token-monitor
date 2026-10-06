@@ -195,8 +195,8 @@ function createDeviceRuntime(options = {}, deps = {}) {
     refreshClient: (clientId, refreshOptions) => active
       ? usageRuntime.refreshClient(clientId, refreshOptions)
       : Promise.resolve(false),
-    refreshLimits: (scope, reason) => active
-      ? limitsRuntime.refresh(scope, reason)
+    refreshLimits: (scope, reason, ...refreshOptions) => active
+      ? limitsRuntime.refresh(scope, reason, ...refreshOptions)
       : Promise.resolve(false),
     stop,
     tick: (reason, tickOptions) => active

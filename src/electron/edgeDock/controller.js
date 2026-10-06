@@ -754,6 +754,13 @@ function createEdgeDockController(deps) {
         const bubbleRect = bubbleVisible ? current.bubble : null;
         const inRefresh = refreshVisible && rectContains(current.refresh, point);
         const inRefreshCorridor = refreshVisible && rectContains(edgeDockRefreshCorridor(current.rail, current.refresh), point);
+        // On a full-height rail the button can share the bottom card's bounds.
+        // Give the action precedence and clear intent too, so returning to the
+        // same cell can open its card again after the normal hover delay.
+        if (inRefresh) {
+          intent.focusCell(null);
+          hideBubble();
+        }
         const input = {
           inTrigger: rectContains(current.trigger, point),
           inPeek: !revealed && rectContains(current.peek, point),
