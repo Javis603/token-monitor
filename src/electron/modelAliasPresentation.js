@@ -11,6 +11,7 @@ const { historyRevision, num } = require('../shared/history');
 const MODEL_MAP_FIELDS = [
   'models',
   'modelCosts',
+  'modelUnpricedTokens',
   'modelCacheReads',
   'modelCacheWrites',
   'modelOutputs',
@@ -71,7 +72,7 @@ function collectUsageModelIds(value, modelIds = new Set()) {
   addModelId(modelIds, value.model);
   for (const field of MODEL_MAP_FIELDS) addModelMapIds(modelIds, value[field]);
   addModelMapIds(modelIds, value.modelThroughput);
-  for (const field of ['clientModels', 'clientModelCosts']) addClientModelIds(modelIds, value[field]);
+  for (const field of ['clientModels', 'clientModelCosts', 'clientModelUnpricedTokens']) addClientModelIds(modelIds, value[field]);
   for (const field of ['sessions', 'projects']) {
     for (const row of Object.values(value[field] || {})) collectUsageModelIds(row, modelIds);
   }
@@ -158,6 +159,7 @@ const USAGE_PROJECTIONS = [
   ['modelThroughput', foldModelThroughput],
   ['clientModels', foldClientModelMaps],
   ['clientModelCosts', foldClientModelMaps],
+  ['clientModelUnpricedTokens', foldClientModelMaps],
   ['sessions', projectNestedUsage],
   ['projects', projectNestedUsage]
 ];

@@ -18,6 +18,16 @@
     return Number.isFinite(number) ? number : 0;
   }
 
+  function unpricedFields(count, tokens) {
+    const unpricedTokens = Math.min(Math.max(0, finiteNumber(tokens)), Math.max(0, Math.round(finiteNumber(count))));
+    return unpricedTokens > 0 ? { unpricedTokens } : {};
+  }
+
+  function addUnpricedTokens(target, source) {
+    const count = unpricedFields(source?.unpricedTokens, source?.tokens).unpricedTokens;
+    if (count > 0) target.unpricedTokens = (target.unpricedTokens || 0) + count;
+  }
+
   function normalizeDateKey(value) {
     const key = String(value || '').slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return '';
@@ -165,6 +175,8 @@
   }
 
   function rowFromLivePeriod(period, date, previous = {}) {
+    const retained = { ...previous };
+    delete retained.unpricedTokens;
     const tokenComponentsAvailable = period?.capabilities?.tokenComponents === true;
     const hasClientUnclassified = Object.prototype.hasOwnProperty.call(period || {}, 'clientUnclassifiedTokens');
     const hasModelUnclassified = Object.prototype.hasOwnProperty.call(period || {}, 'modelUnclassifiedTokens');
@@ -187,6 +199,7 @@
       perClient[client] = {
         tokens,
         cost: finiteNumber(period?.clientCosts?.[client]),
+        ...unpricedFields(period?.clientUnpricedTokens?.[client], tokens),
         messages: finiteNumber(previous?.perClient?.[client]?.messages),
         ...components
       };
@@ -210,6 +223,7 @@
       perModel[model] = {
         tokens,
         cost: finiteNumber(period?.modelCosts?.[model]),
+        ...unpricedFields(period?.modelUnpricedTokens?.[model], tokens),
         ...components
       };
     }
@@ -223,10 +237,11 @@
       Object.prototype.hasOwnProperty.call(period || {}, 'unclassifiedTokens')
     );
     return {
-      ...previous,
+      ...retained,
       date,
       tokens: finiteNumber(period?.totalTokens),
       cost: finiteNumber(period?.costUsd),
+      ...unpricedFields(period?.unpricedTokens, period?.totalTokens),
       ...totalComponents,
       tokenComponentsAvailable,
       perClient,
@@ -439,6 +454,7 @@
       if (!target[field][name]) target[field][name] = { tokens: 0, cost: 0 };
       target[field][name].tokens += finiteNumber(value?.tokens);
       target[field][name].cost += finiteNumber(value?.cost);
+      addUnpricedTokens(target[field][name], value);
       target[field][name].cacheReadTokens = finiteNumber(target[field][name].cacheReadTokens)
         + finiteNumber(value?.cacheReadTokens);
       target[field][name].cacheWriteTokens = finiteNumber(target[field][name].cacheWriteTokens)
@@ -478,6 +494,7 @@
         const target = byDate.get(date);
         target.tokens += finiteNumber(row?.tokens);
         target.cost += finiteNumber(row?.cost);
+        addUnpricedTokens(target, row);
         target.activeTimeMs += finiteNumber(row?.activeTimeMs);
         target.cacheReadTokens += finiteNumber(row?.cacheReadTokens);
         target.cacheWriteTokens += finiteNumber(row?.cacheWriteTokens);
@@ -589,6 +606,8 @@
     for (const row of rows) {
       period.totalTokens += finiteNumber(row?.tokens);
       period.costUsd += finiteNumber(row?.cost);
+      const unpriced = unpricedFields(row?.unpricedTokens, row?.tokens).unpricedTokens || 0;
+      if (unpriced > 0) period.unpricedTokens = (period.unpricedTokens || 0) + unpriced;
       period.cacheReadTokens += finiteNumber(row?.cacheReadTokens);
       period.cacheWriteTokens += finiteNumber(row?.cacheWriteTokens);
       period.outputTokens += finiteNumber(row?.outputTokens);
@@ -597,6 +616,11 @@
         const client = rawClient === 'antigravity-cli' ? 'antigravity' : rawClient;
         addMap(period.clients, client, value?.tokens);
         addMap(period.clientCosts, client, value?.cost);
+        const missing = unpricedFields(value?.unpricedTokens, value?.tokens).unpricedTokens;
+        if (missing > 0) {
+          period.clientUnpricedTokens ||= {};
+          addMap(period.clientUnpricedTokens, client, missing);
+        }
         addMap(period.clientCacheReads, client, value?.cacheReadTokens);
         addMap(period.clientCacheWrites, client, value?.cacheWriteTokens);
         addMap(period.clientOutputs, client, value?.outputTokens);
@@ -605,6 +629,11 @@
       for (const [model, value] of Object.entries(row?.perModel || {})) {
         addMap(period.models, model, value?.tokens);
         addMap(period.modelCosts, model, value?.cost);
+        const missing = unpricedFields(value?.unpricedTokens, value?.tokens).unpricedTokens;
+        if (missing > 0) {
+          period.modelUnpricedTokens ||= {};
+          addMap(period.modelUnpricedTokens, model, missing);
+        }
         addMap(period.modelCacheReads, model, value?.cacheReadTokens);
         addMap(period.modelCacheWrites, model, value?.cacheWriteTokens);
         addMap(period.modelOutputs, model, value?.outputTokens);

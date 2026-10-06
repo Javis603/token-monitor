@@ -12,6 +12,7 @@ const { createLocalUsageStore, usageCounters } = require('../../src/shared/provi
 const { createLocalUsageSource } = require('../../src/shared/providers/codex/localUsageSource');
 const { collectUsageOnce, projectIdentity, localTodayKey } = require('../../src/shared/collector');
 const { createSessionUsageArchiveStore } = require('../../src/shared/usage/sessionUsageArchiveStore');
+const { captureArchivedClientUsage, normalizeArchivedClientUsage } = require('../../src/shared/usage/clientUsageArchive');
 const { createUsageTransform } = require('../../src/shared/usage/usageTransform');
 const { sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
 const { projectRowsForPeriod } = require('../../src/electron/renderer/projectRows');
@@ -188,6 +189,72 @@ test('dates, model changes and project changes preserve request attribution; pro
   assert.equal(disabled.allTime.sessions[`codex:${ID}`].projectLabel, '');
 });
 
+test('hiding Dots excludes its periods and history without deleting the ledger or retaining archive copies', async (t) => {
+  const { env, home, store, closeables } = fixture(t);
+  store.observe(event());
+  const archiveStore = createSessionUsageArchiveStore({ env });
+  closeables.push(archiveStore);
+  const transform = createUsageTransform({ store: archiveStore });
+  const options = {
+    clients: 'codex', allTimeSince: '2025-01-01', now: AT, env, homeDir: home,
+    codexLocalUsageStore: store, includeHistory: true, dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveOptions: { env },
+    runTokscale: async () => ({ entries: [] }),
+    runGraph: async () => ({ contributions: [] }), lookupModelPricing: async () => ({})
+  };
+  const visible = transform.transform(await collectUsageOnce(options));
+  assert.equal(visible.allTime.totalTokens, LAST.totalTokens);
+  const hidden = transform.transform(await collectUsageOnce({ ...options, codexDotsVisible: false }));
+  for (const name of ['today', 'month', 'allTime']) {
+    assert.equal(hidden[name].totalTokens, 0);
+    assert.equal(Object.keys(hidden[name].sessions).length, 0);
+    assert.equal(Object.keys(hidden[name].projects).length, 0);
+  }
+  assert.equal((hidden.history?.daily || []).reduce((sum, day) => sum + day.tokens, 0), 0);
+  assert.equal(store.rows().length, 1);
+  const restored = transform.transform(await collectUsageOnce(options));
+  assert.equal(restored.allTime.totalTokens, LAST.totalTokens);
+  assert.ok(restored.history.daily.some((day) => day.tokens === LAST.totalTokens));
+});
+
+test('untracking Codex captures only native usage and cannot replay Dots after hiding', async (t) => {
+  const { env, home, store, closeables } = fixture(t);
+  store.observe(event());
+  const archiveStore = createSessionUsageArchiveStore({ env });
+  closeables.push(archiveStore);
+  let settings = { clients: 'codex' };
+  const transform = createUsageTransform({ store: archiveStore, getSettings: () => settings });
+  const options = {
+    clients: 'codex', now: AT, env, homeDir: home, codexLocalUsageStore: store,
+    runTokscale: async () => ({ entries: [{ client: 'codex', sessionId: 'native-other', model: 'gpt-test', input: 10, output: 2 }] }),
+    lookupModelPricing: async () => ({})
+  };
+  const visible = transform.transform(await collectUsageOnce(options));
+  settings = { clients: 'claude', codexDotsVisible: false,
+    archivedClientUsage: captureArchivedClientUsage(null, visible, ['codex'], AT) };
+  const hidden = transform.transform(await collectUsageOnce({ ...options, clients: 'claude', codexDotsVisible: false,
+    runTokscale: async () => ({ entries: [] }) }));
+  for (const name of ['today', 'month', 'allTime']) {
+    assert.equal(hidden[name].totalTokens, 12);
+    assert.equal(hidden[name].sessions[`codex:${ID}`], undefined);
+    assert.equal(settings.archivedClientUsage.clients.codex.periods[name].totalTokens, 12);
+  }
+  assert.equal(normalizeDeviceRecord(syncPayload(hidden)).periods.today.totalTokens, 12);
+  // Older snapshots are repaired from explicit provenance even without the
+  // local-only summary marker; native amounts and models survive the repair.
+  const legacy = { clients: { codex: { capturedAt: AT, periods: {} } } };
+  for (const name of ['today', 'month', 'allTime']) {
+    const period = visible[name];
+    legacy.clients.codex.periods[name] = { totalTokens: period.clients.codex,
+      costUsd: period.clientCosts.codex, models: period.clientModels.codex,
+      modelCosts: period.clientModelCosts.codex, sessions: period.sessions };
+  }
+  const repaired = normalizeArchivedClientUsage(legacy);
+  assert.equal(repaired.clients.codex.periods.allTime.totalTokens, 12);
+  assert.equal(repaired.clients.codex.periods.allTime.models.unknown, undefined);
+  assert.equal(store.rows().length, 1);
+});
+
 test('native rollout precedence does not resurrect an archived supplemental row', async (t) => {
   const { env, home, store, closeables } = fixture(t);
   store.observe(event());
@@ -228,6 +295,70 @@ class FakeSocket extends EventTarget {
   }
   close() { this.readyState = 3; this.dispatchEvent(new Event('close')); }
 }
+
+test('ownership standby retries promptly without probing until the lease is available', async (t) => {
+  const { store } = fixture(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let blocked = true;
+  let scans = 0;
+  const claim = store.claimObserver.bind(store);
+  store.claimObserver = (owner) => !blocked && claim(owner);
+  const source = createLocalUsageSource({ store, agentRuntime: 'headless-agent' }, {
+    pollMs: 5000, idlePollMs: 30000,
+    readAuth: () => ({ accessToken: 'fixture', accountId: 'account' }),
+    localExecutorIds: () => { scans++; return new Set(); }
+  });
+  t.after(() => source.stop());
+  source.start();
+  await source.whenIdle();
+  assert.equal(source.getDiagnostics().state, 'standby');
+  assert.equal(scans, 0);
+  blocked = false;
+  t.mock.timers.tick(4999);
+  await source.whenIdle();
+  assert.equal(scans, 0);
+  t.mock.timers.tick(1);
+  await source.whenIdle();
+  assert.equal(scans, 1, 'ownership must not use the no-executor idle delay');
+  t.mock.timers.tick(29999);
+  await source.whenIdle();
+  assert.equal(scans, 1, 'confirmed absence of an executor still uses idle cadence');
+  t.mock.timers.tick(1);
+  await source.whenIdle();
+  assert.equal(scans, 2);
+});
+
+test('Dots missing prices survive history, sync, Hub/Worker merging and fixed ranges', async (t) => {
+  const { env, home, store } = fixture(t);
+  store.observe(event({ thread: { ...LOCAL, model: 'unknown' } }));
+  const collected = await collectUsageOnce({
+    clients: 'codex', allTimeSince: '2025-01-01', now: AT, env, homeDir: home,
+    deviceId: 'fixture', codexLocalUsageStore: store, includeHistory: true,
+    runTokscale: async () => ({ entries: [] }), runGraph: async () => ({ contributions: [] })
+  });
+  const { aggregateHistory } = require('../../src/shared/usage');
+  const workerUsage = require('../../worker/src/shared/usage');
+  const { historyPreview } = require('../../src/shared/history');
+  const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
+  const { usageCostLabel } = require('../../src/electron/renderer/usageAttributionRows');
+  const synced = normalizeDeviceRecord(syncPayload(collected));
+  for (const aggregate of [aggregateHistory, workerUsage.aggregateHistory]) {
+    const history = aggregate([synced, { ...synced, deviceId: 'fixture-2' }], { todayKey: localTodayKey(new Date(AT)) });
+    const day = history.daily.find((row) => row.date === localTodayKey(new Date(AT)));
+    const expected = LAST.totalTokens * 2;
+    assert.equal(day.unpricedTokens, expected);
+    assert.equal(day.perClient.codex.unpricedTokens, expected);
+    assert.equal(day.perModel.unknown.unpricedTokens, expected);
+    assert.equal(history.monthly[0].unpricedTokens, expected);
+    assert.equal(history.summary.unpricedTokens, expected);
+    assert.equal(historyPreview(history).daily.find((row) => row.date === day.date).unpricedTokens, expected);
+    const period = ranges.derivePeriod(history.daily, { start: day.date, end: day.date });
+    assert.equal(period.unpricedTokens, expected);
+    assert.equal(period.clientUnpricedTokens.codex, expected);
+    assert.equal(period.modelUnpricedTokens.unknown, expected);
+    assert.notEqual(usageCostLabel(period.costUsd, period.unpricedTokens, String, String, 'unpriced'), '0');
+  }
+});
 
 test('live source subscribes only to this executor, ignores content/approval requests and stops cleanly', async (t) => {
   const { store, home, env } = fixture(t);
@@ -302,7 +433,8 @@ test('a live notification drives the real collector debounce and exact warm peri
     delete require.cache[collectorPath];
   });
   runtime = startCollector({
-    clients: 'codex', homeDir: home, env: { ...env, TOKEN_MONITOR_CODEX_LOCAL_USAGE: '1' },
+    clients: 'codex', homeDir: home, env: { ...env, TOKEN_MONITOR_CODEX_LOCAL_USAGE: '0' },
+    codexDotsEnabled: true,
     deviceId: 'test-mac', agentRuntime: 'headless-agent', now: AT, historyEnabled: false, watchEnabled: false,
     anchorPersistenceEnabled: false, intervalMs: 60000, watchDebounceMs: 1,
     runTokscale: async () => { scans += 1; return { entries: [] }; },
@@ -324,6 +456,156 @@ test('a live notification drives the real collector debounce and exact warm peri
   await runtime.whenIdle();
   assert.equal(runtime.getDiagnostics().codexLocalUsage.state, 'stopped');
   assert.equal(store.agentObserverRequested(), false);
+});
+
+test('visibility switches preserve the live subscription and fence an in-flight visible result', { timeout: 5000 }, async (t) => {
+  const { home, env, store } = fixture(t);
+  const socket = new FakeSocket();
+  const sourceModule = require('../../src/shared/providers/codex/localUsageSource');
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const original = sourceModule.createLocalUsageSource;
+  let source;
+  let runtime;
+  let starts = 0;
+  let releaseScan;
+  let enteredScan;
+  let blockScan = false;
+  const summaries = [];
+  sourceModule.createLocalUsageSource = (options) => {
+    starts += 1;
+    source = original({ ...options, store }, {
+      localExecutorIds: () => new Set(['executor-local']),
+      readAuth: () => ({ accessToken: 'fixture-auth', accountId: 'fixture-account' }),
+      makeSocket: () => { queueMicrotask(() => socket.dispatchEvent(new Event('open'))); return { socket }; },
+      now: () => new Date(AT)
+    });
+    return source;
+  };
+  delete require.cache[collectorPath];
+  t.after(async () => {
+    releaseScan?.();
+    runtime?.stop();
+    await runtime?.whenIdle();
+    sourceModule.createLocalUsageSource = original;
+    delete require.cache[collectorPath];
+  });
+  runtime = require(collectorPath).startCollector({
+    clients: 'codex', homeDir: home, env, codexDotsEnabled: true,
+    now: AT, historyEnabled: true, watchEnabled: false, anchorPersistenceEnabled: false,
+    intervalMs: 60000, watchDebounceMs: 1,
+    runTokscale: async () => {
+      if (blockScan) {
+        blockScan = false;
+        enteredScan();
+        await new Promise((resolve) => { releaseScan = resolve; });
+      }
+      return { entries: [] };
+    },
+    runGraph: async () => ({ contributions: [] }), lookupModelPricing: async () => ({}),
+    onUpdate: (summary) => summaries.push(summary)
+  });
+  await runtime.whenIdle();
+  await source.whenIdle();
+  socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'baseline', tokenUsage: { last: LAST, total: TOTAL } });
+  socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'turn-1', tokenUsage: { last: LAST, total: addCounters(TOTAL, LAST) } });
+  await runtime.tick('manual');
+  const resumeCount = socket.sent.filter((item) => item.method === 'thread/resume').length;
+  const before = summaries.length;
+  const scanEntered = new Promise((resolve) => { enteredScan = resolve; });
+  blockScan = true;
+  const inFlight = runtime.tick('manual');
+  await scanEntered;
+  const hidden = runtime.setCodexDotsVisible(false);
+  releaseScan();
+  await Promise.all([inFlight, hidden]);
+  assert.ok(summaries.length > before);
+  assert.ok(summaries.slice(before).every((summary) => summary.today.totalTokens === 0));
+  assert.equal(summaries.at(-1).history.summary.totalTokens, 0);
+  assert.equal(source.getDiagnostics().state, 'connected');
+  socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'turn-2', tokenUsage: { last: LAST, total: addCounters(addCounters(TOTAL, LAST), LAST) } });
+  assert.equal(store.rows().length, 2, 'hidden observation does not establish a new baseline');
+  await runtime.setCodexDotsVisible(true);
+  assert.equal(summaries.at(-1).allTime.totalTokens, LAST.totalTokens * 2);
+  assert.equal(summaries.at(-1).history.summary.totalTokens, LAST.totalTokens * 2);
+  assert.equal(starts, 1);
+  assert.equal(socket.readyState, 1);
+  assert.equal(socket.sent.filter((item) => item.method === 'thread/resume').length, resumeCount);
+});
+
+test('replacement during a hide refresh clears the previous Dots history on outgoing wire', async (t) => {
+  const { env, home, store } = fixture(t);
+  store.observe(event());
+  const { startCollector } = require('../../src/shared/collector');
+  const { createDeviceRuntime } = require('../../src/shared/usage/deviceRuntime');
+  const base = { clients: 'codex', now: AT, env, homeDir: home, codexLocalUsageStore: store,
+    historyEnabled: true, watchEnabled: false, anchorPersistenceEnabled: false, intervalMs: 60000,
+    runTokscale: async () => ({ entries: [] }), runGraph: async () => ({ contributions: [] }),
+    lookupModelPricing: async () => ({}) };
+  const handles = [];
+  const records = [];
+  let release;
+  let entered;
+  let block = false;
+  const options = { ...base, runTokscale: async () => {
+    if (block) { block = false; entered(); await new Promise((resolve) => { release = resolve; }); }
+    return { entries: [] };
+  } };
+  const runtime = createDeviceRuntime({ usageOptions: options, onRecord: (record) => records.push(record) }, {
+    createUsageRuntime(next) { const handle = startCollector(next); handles.push(handle); return handle; },
+    createLimitsRuntime: () => ({ stop() {} })
+  });
+  t.after(async () => { release?.(); runtime.stop(); await Promise.all(handles.map((handle) => handle.whenIdle())); });
+  await handles[0].whenIdle();
+  assert.equal(records.at(-1).history.summary.totalTokens, LAST.totalTokens);
+  const scanEntered = new Promise((resolve) => { entered = resolve; });
+  block = true;
+  const hiding = runtime.setCodexDotsVisible(false);
+  await scanEntered;
+  runtime.reconfigureUsage({ ...base, codexDotsVisible: false, intervalMs: 120000 });
+  release();
+  await hiding;
+  await handles[1].whenIdle();
+  const hidden = records.at(-1);
+  assert.equal(hidden.today.totalTokens, 0);
+  assert.equal(hidden.history.summary.totalTokens, 0);
+  assert.equal(syncPayload(hidden).history.summary.totalTokens, 0);
+});
+
+test('a worker crash before hide acknowledgement clears Dots history in the fallback record', async (t) => {
+  const { env, home, store } = fixture(t);
+  store.observe(event());
+  const { startCollector } = require('../../src/shared/collector');
+  const { createUsageHostCoordinator } = require('../../src/shared/usage/usageHost');
+  const { createDeviceState } = require('../../src/shared/usage/deviceState');
+  const options = { clients: 'codex', now: AT, env, homeDir: home, codexLocalUsageStore: store,
+    historyEnabled: true, watchEnabled: false, anchorPersistenceEnabled: false, intervalMs: 60000,
+    runTokscale: async () => ({ entries: [] }), runGraph: async () => ({ contributions: [] }),
+    lookupModelPricing: async () => ({}) };
+  const records = [];
+  const state = createDeviceState({ onRecord: (record) => records.push(record) });
+  state.updateUsage(await collectUsageOnce({ ...options, includeHistory: true }), 'initial');
+  assert.equal(records.at(-1).history.summary.totalTokens, LAST.totalTokens);
+  let worker;
+  let fallback;
+  class FakeWorker extends EventEmitter {
+    constructor() { super(); worker = this; }
+    postMessage() {}
+    unref() {}
+  }
+  const coordinator = createUsageHostCoordinator({ Worker: FakeWorker,
+    startCollector(next) { fallback = startCollector(next); return fallback; } });
+  const host = coordinator.create({ ...options, onUpdate: (summary) => state.updateUsage(summary, 'fallback') });
+  t.after(async () => { host.stop(); await host.whenIdle(); state.stop(); });
+  await new Promise(setImmediate);
+  const hiding = host.setCodexDotsVisible(false);
+  worker.emit('error', new Error('fixture crash before visibility reply'));
+  worker.emit('exit', 1);
+  await hiding;
+  await fallback.whenIdle();
+  const hidden = records.at(-1);
+  assert.equal(hidden.today.totalTokens, 0);
+  assert.equal(hidden.history.summary.totalTokens, 0);
+  assert.equal(syncPayload(hidden).history.summary.totalTokens, 0);
 });
 
 test('observer lease admits one writer, releases only its owner and recovers dead/expired owners', (t) => {
@@ -445,9 +727,10 @@ test('default and explicit disable do not construct the source, while keeping st
   sourceModule.createLocalUsageSource = () => { constructions += 1; throw new Error('must not construct'); };
   delete require.cache[collectorPath];
   t.after(() => { sourceModule.createLocalUsageSource = original; delete require.cache[collectorPath]; });
-  for (const flag of [undefined, '0']) {
+  for (const [flag, codexDotsEnabled] of [[undefined, undefined], ['0', undefined], ['1', false]]) {
     const runtime = require(collectorPath).startCollector({
       clients: 'codex', env: { ...env, TOKEN_MONITOR_CODEX_LOCAL_USAGE: flag }, homeDir: home,
+      codexDotsEnabled,
       codexLocalUsageStore: store, now: AT, deviceId: 'fixture',
       allTimeSince: '2025-01-01', historyEnabled: false, watchEnabled: false,
       anchorPersistenceEnabled: false, intervalMs: 60000,

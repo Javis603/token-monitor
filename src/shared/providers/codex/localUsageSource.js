@@ -296,7 +296,11 @@ function createLocalUsageSource(options = {}, deps = {}) {
       disconnect('local-usage-connect-failed');
     }
     finally {
-      if (!stopped) timer = setTimeout(() => { executorScan = poll(); }, executorIds.size ? pollMs : Math.max(pollMs, deps.idlePollMs ?? 30000));
+      // Waiting for ownership is not evidence that no executor exists. Retry
+      // the lease promptly so a yielding observer does not leave a slow gap.
+      const interval = state === 'standby' || executorIds.size
+        ? pollMs : Math.max(pollMs, deps.idlePollMs ?? 30000);
+      if (!stopped) timer = setTimeout(() => { executorScan = poll(); }, interval);
     }
   }
 

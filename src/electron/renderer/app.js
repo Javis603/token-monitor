@@ -68,6 +68,11 @@ function iconKindFor(rowData, breakdown) {
     return os ? { kind: 'icon', iconClass: `row-icon-os-${os}` } : { kind: 'dot' };
   }
   if (breakdown === 'model') {
+    if (rowData.key === 'unknown') {
+      return rowData.modelSource === 'codex'
+        ? { kind: 'icon', iconClass: 'row-icon-codex' }
+        : { kind: 'dot' };
+    }
     const vendor = modelVendorFor(rowData.key);
     return vendor && clientsWithIcon.has(vendor)
       ? { kind: 'icon', iconClass: `row-icon-${vendor}` }
@@ -1298,6 +1303,29 @@ function formatCost(value, unpricedTokens) {
   return usageAttributionRowsApi.usageCostLabel(value, unpricedTokens,
     (cost) => currencyApi.formatCurrencyFromUsd(cost, currentCurrency()), formatNumber, t('usage.unpricedTokens'));
 }
+function setTotalCost(cost, unpricedTokens, available = true) {
+  let label = els.cost.querySelector('.usage-cost-value');
+  if (!label) {
+    label = document.createElement('span');
+    label.className = 'usage-cost-value';
+    els.cost.replaceChildren(label);
+  }
+  const hasUnpriced = available && unpricedTokens > 0;
+  els.cost.classList.toggle('has-unpriced', hasUnpriced);
+  label.textContent = available
+    ? (hasUnpriced && !(cost > 0) ? '—' : formatCost(cost)) : '';
+  let info = els.cost.querySelector('.usage-cost-info');
+  if (!info && hasUnpriced) {
+    info = document.createElement('span');
+    info.className = 'usage-cost-info';
+    els.cost.append(info);
+  }
+  if (!info) return;
+  info.hidden = !hasUnpriced;
+  limitWindowsView.setDetailTooltip(info, hasUnpriced
+    ? [{ full: t('usage.excludedFromCost', { tokens: formatNumber(unpricedTokens) }) }]
+    : null, { centered: true });
+}
 function applyEffectiveCurrencyRates() {
   if (state.settings?.currencyRatesEffective) currencyApi.configureRates(state.settings.currencyRatesEffective);
 }
@@ -2332,7 +2360,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2363,7 +2391,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
     && ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy'].includes(client)
   ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
   const mark = row.querySelector('.row-mark');
-  const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '' }, state.breakdown);
+  const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '', modelSource }, state.breakdown);
   if (iconKind.kind === 'icon') {
     mark.className = `row-mark row-icon ${iconKind.iconClass}`;
     mark.style.background = '';
@@ -2795,6 +2823,7 @@ function toolRowsForPeriod(period) {
 }
 
 function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRankingMetric) {
+  const unknownSource = usageAttributionRowsApi.unknownModelSource(period);
   const modelRows = periodAttributionRows(period, period?.models, period?.modelCosts, period?.modelUnpricedTokens).map(({ key: model, value, cost, unpricedTokens, unattributed }) => ({
     key: model,
     unpricedTokens,
@@ -2802,7 +2831,8 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
     value,
     cost,
     unattributed,
-    color: modelColor(model),
+    modelSource: model === 'unknown' ? unknownSource : null,
+    color: model === 'unknown' ? (unknownSource ? clientColors[unknownSource] : 'var(--muted)') : modelColor(model),
     stale: false,
     cacheReadTokens: attributionComponent(period, 'modelCacheReads', model),
     cacheWriteTokens: attributionComponent(period, 'modelCacheWrites', model),
@@ -5766,7 +5796,7 @@ function renderHomeModelModule(period) {
     const item = document.createElement('div');
     item.className = 'home-list-row home-model-row';
     const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ key: row.key || row.name }, 'model'), row.color);
+    applyHomeListMark(mark, iconKindFor({ key: row.key || row.name, modelSource: row.modelSource }, 'model'), row.color);
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.name;
@@ -6554,7 +6584,7 @@ function render() {
     cancelNumberAnimation();
     els.totalTokens.textContent = fixedUnavailable ? '—' : formatNumber(Number(period.totalTokens || 0));
     updateTotalCompact(fixedUnavailable ? 0 : Number(period.totalTokens || 0));
-    els.cost.textContent = fixedUnavailable ? '' : formatCost(period.costUsd || 0, period.unpricedTokens);
+    setTotalCost(period.costUsd || 0, period.unpricedTokens, !fixedUnavailable);
     state.currentTotal = fixedUnavailable ? 0 : Number(period.totalTokens || 0);
     hidePeriodContentForMessage(fixedPeriodMessage(state.fixedPeriodSnapshot, detailUnavailable ? state.breakdown : ''));
     renderFloatingBubbleContent();
@@ -6588,7 +6618,7 @@ function render() {
     updateTotalCompact(nextTotal);
   }
   state.currentTotal = nextTotal;
-  els.cost.textContent = formatCost(period.costUsd || 0, period.unpricedTokens);
+  setTotalCost(period.costUsd || 0, period.unpricedTokens);
   renderTokenRate();
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');
@@ -9920,6 +9950,9 @@ function patchRenderedNode(current, next) {
     const value = next.getAttribute(name);
     if (current.getAttribute(name) !== value) current.setAttribute(name, value);
   }
+  if (current instanceof HTMLInputElement && current.id.startsWith('codexDots') && current.type === 'checkbox') {
+    current.checked = next.checked;
+  }
   const currentChildren = Array.from(current.childNodes);
   const nextChildren = Array.from(next.childNodes);
   for (let index = 0; index < nextChildren.length; index += 1) {
@@ -10048,6 +10081,17 @@ async function removeCustomScanPath(clientId, dir) {
 
 // Values are formatted here and nowhere else — the presentation helper returns
 // three semantic groups containing only raw numbers, timestamps and i18n keys.
+function codexDotsSettingState(key) {
+  let checked = key === 'codexDotsEnabled' ? state.settings?.[key] === true : state.settings?.[key] !== false;
+  let pending = false;
+  for (const patch of pendingSettingsPatches) {
+    if (!Object.prototype.hasOwnProperty.call(patch, key)) continue;
+    checked = patch[key] === true;
+    pending = true;
+  }
+  return { checked, pending };
+}
+
 function clientHealthGroup(group, notes, clientId) {
   const section = document.createElement('section');
   section.className = `tool-health-group tool-health-group-${group.id}`;
@@ -10123,6 +10167,64 @@ function clientHealthGroup(group, notes, clientId) {
     summary.className = 'tool-health-group-summary';
     summary.textContent = t(`settings.tools.health.sync.${group.state}`);
     body.append(summary);
+    if (clientId === 'codex') {
+      const row = document.createElement('label');
+      row.className = 'checkbox-label codex-dots-setting';
+      const label = document.createElement('span');
+      label.textContent = t('settings.tools.codexDots');
+      const input = document.createElement('input');
+      input.id = 'codexDotsInput';
+      input.type = 'checkbox';
+      const collectionState = codexDotsSettingState('codexDotsEnabled');
+      input.checked = collectionState.checked;
+      input.disabled = collectionState.pending;
+      input.setAttribute('aria-describedby', 'codexDotsNote');
+      input.addEventListener('change', async () => {
+        if (codexDotsSettingState('codexDotsEnabled').pending) return;
+        input.disabled = true;
+        try {
+          await saveSettings({ codexDotsEnabled: input.checked });
+        } catch (_) {
+          input.checked = state.settings?.codexDotsEnabled === true;
+        } finally {
+          input.disabled = false;
+          refillOpenClientHealthPanel();
+        }
+      });
+      const note = document.createElement('div');
+      note.id = 'codexDotsNote';
+      note.className = 'tool-health-group-meta';
+      note.textContent = t('settings.tools.codexDotsNote');
+      row.append(label, input);
+      const visibility = document.createElement('label');
+      visibility.className = 'checkbox-label codex-dots-setting';
+      const visibilityLabel = document.createElement('span');
+      visibilityLabel.textContent = t('settings.tools.codexDotsVisible');
+      const visibilityInput = document.createElement('input');
+      visibilityInput.id = 'codexDotsVisibleInput';
+      visibilityInput.type = 'checkbox';
+      const visibilityState = codexDotsSettingState('codexDotsVisible');
+      visibilityInput.checked = visibilityState.checked;
+      visibilityInput.disabled = visibilityState.pending;
+      visibilityInput.setAttribute('aria-describedby', 'codexDotsNote');
+      visibilityInput.addEventListener('change', async () => {
+        if (codexDotsSettingState('codexDotsVisible').pending) return;
+        visibilityInput.disabled = true;
+        try {
+          await saveSettings({ codexDotsVisible: visibilityInput.checked });
+        } catch (_) {
+          visibilityInput.checked = state.settings?.codexDotsVisible !== false;
+        } finally {
+          visibilityInput.disabled = false;
+          refillOpenClientHealthPanel();
+        }
+      });
+      visibility.append(visibilityLabel, visibilityInput);
+      const dots = document.createElement('div');
+      dots.className = 'codex-dots-settings';
+      dots.append(row, visibility, note);
+      body.append(dots);
+    }
     const stamps = [
       ['lastAttemptAt', 'settings.tools.health.lastAttempt'],
       ['lastSuccessAt', 'settings.tools.health.lastSuccess']
@@ -10457,6 +10559,8 @@ function toolPreferenceRenderSignature() {
       state.settings?.locale || state.settings?.language || '',
       state.settings?.currency || '',
       state.settings?.compactTokenUnits || '',
+      state.settings?.codexDotsEnabled === true,
+      state.settings?.codexDotsVisible !== false,
       JSON.stringify(state.settings?.customScanPaths || {})
     ],
     query: toolPreferenceQuery(),

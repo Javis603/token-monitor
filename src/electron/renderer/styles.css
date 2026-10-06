@@ -2403,6 +2403,31 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
+.codex-dots-settings {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+}
+.settings-panel .checkbox-label.codex-dots-setting {
+  min-height: 24px;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+}
+.settings-panel .codex-dots-setting > input[type="checkbox"] {
+  width: 28px;
+  height: 16px;
+}
+.settings-panel .codex-dots-setting > input[type="checkbox"]::before {
+  width: 10px;
+  height: 10px;
+}
+.settings-panel .codex-dots-setting > input[type="checkbox"]:checked::before {
+  transform: translateX(12px);
+}
+.codex-dots-settings .tool-health-group-meta {
+  margin-top: 3px;
+}
 .tool-health-group-meta {
   color: var(--muted);
   font-size: 0.5625rem;
@@ -3335,6 +3360,23 @@ html.is-windows .settings-panel select option {
   white-space: nowrap;
 }
 .cost { margin-top: 6px; color: var(--readable-muted); font-size: 0.75rem; }
+.cost { display: flex; align-items: center; gap: 3px; }
+.usage-cost-value { white-space: nowrap; }
+.usage-cost-info.limit-detail-tooltip-wrap {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 11px;
+}
+.usage-cost-info::before {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='black' stroke-width='1.2'/%3E%3Cpath d='M8 7v4' stroke='black' stroke-width='1.2'/%3E%3Ccircle cx='8' cy='4.5' r='.75'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='black' stroke-width='1.2'/%3E%3Cpath d='M8 7v4' stroke='black' stroke-width='1.2'/%3E%3Ccircle cx='8' cy='4.5' r='.75'/%3E%3C/svg%3E") center / contain no-repeat;
+  content: "";
+  opacity: 0.7;
+}
 .view-back-row {
   position: relative;
   z-index: 1;
@@ -5106,6 +5148,28 @@ html.is-windows .limit-live-badge {
 .detail-ex-title.limit-detail-tooltip-wrap .limit-detail-tooltip {
   right: auto;
   left: calc(anchor(left) - 1px);
+}
+.usage-cost-info .limit-detail-tooltip {
+  right: auto;
+  left: anchor(center);
+  translate: calc(-50% + var(--tooltip-shift, 0px)) 0;
+  max-width: min(260px, calc(100vw - 40px));
+  grid-template-columns: minmax(0, 1fr) max-content;
+  column-gap: 10px;
+  row-gap: 3px;
+  padding: 6px 8px;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  line-height: 1.35;
+  white-space: normal;
+}
+.usage-cost-info .limit-detail-tooltip-full {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.usage-cost-info .limit-detail-tooltip::after {
+  right: auto;
+  left: calc(50% - 4px - var(--tooltip-shift, 0px));
 }
 .session-models.limit-detail-tooltip-wrap .limit-detail-tooltip::after,
 .row-title.limit-detail-tooltip-wrap .limit-detail-tooltip::after,

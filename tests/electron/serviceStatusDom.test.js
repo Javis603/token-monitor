@@ -162,7 +162,7 @@ test('Home overview list markers use the shared tool icon path when enabled', ()
   const app = readRendererFile('app.js');
   assert.match(app, /function applyHomeListMark/);
   assert.match(app, /iconKindFor\(\{ key: row\.iconId \|\| row\.providerId \|\| row\.key \}, 'limits'\)/);
-  assert.match(app, /iconKindFor\(\{ key: row\.key \|\| row\.name \}, 'model'\)/);
+  assert.match(app, /iconKindFor\(\{ key: row\.key \|\| row\.name, modelSource: row\.modelSource \}, 'model'\)/);
   assert.match(app, /home-list-mark row-icon/);
 });
 

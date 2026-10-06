@@ -18,6 +18,24 @@
     return finiteNumber(cost) > 0 ? `${formatCost(cost)} + ${missing}` : `— (${missing})`;
   }
 
+  function compactUsageCostLabel(cost, unpricedTokens, formatCost) {
+    if (!(finiteNumber(unpricedTokens) > 0)) return formatCost(finiteNumber(cost));
+    return finiteNumber(cost) > 0 ? `${formatCost(cost)} + ?` : '—';
+  }
+
+  // A client can identify the source of unknown usage without identifying its
+  // execution model. Only use the Codex mark when the entire bucket is covered.
+  function unknownModelSource(period) {
+    const total = Number(period?.models?.unknown);
+    if (!Number.isFinite(total) || total <= 0) return null;
+    if (Number(period?.clientModels?.codex?.unknown) !== total) return null;
+    for (const [client, models] of Object.entries(period?.clientModels || {})) {
+      const value = Number(models?.unknown ?? 0);
+      if (!Number.isFinite(value) || value < 0 || (client !== 'codex' && value > 0)) return null;
+    }
+    return 'codex';
+  }
+
   function attributionRows(values, costs, options = {}) {
     const valueMap = values && typeof values === 'object' ? values : {};
     const costMap = costs && typeof costs === 'object' ? costs : {};
@@ -116,6 +134,8 @@
 
   return {
     usageCostLabel,
+    compactUsageCostLabel,
+    unknownModelSource,
     attributionRows,
     visibleAttributionRows,
     attributionValue,

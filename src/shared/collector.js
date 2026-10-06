@@ -1116,7 +1116,8 @@ async function collectUsageOnce(options) {
   // This contribution is durable but has no rollout file. Keep it outside
   // windowsPeriods/todayPartitions so exact native watch deltas stay native.
   let codexLocalView = null;
-  if (trackedClientSet.has('codex') && options.codexLocalUsageEnabled !== false) {
+  if (trackedClientSet.has('codex') && options.codexLocalUsageEnabled !== false
+    && options.codexDotsVisible !== false) {
     try {
       codexLocalView = await readLocalUsageView({
         ...options, store: options.codexLocalUsageStore, now: collectedAt,
@@ -2347,6 +2348,9 @@ function startCollector(options) {
   let codexLocalView = null;
   let codexLocalViewDay = null;
   let codexLocalSource = null;
+  let codexDotsVisible = options.codexDotsVisible !== false;
+  let codexVisibilityRevision = 0;
+  let publishedCodexVisibilityRevision = 0;
   // Keep the highest complete live day in this collector even when another
   // process owns the shared archive. A watch tick can then hand its value to a
   // later full/history tick instead of losing it at the tick boundary.
@@ -2545,6 +2549,7 @@ function startCollector(options) {
   const pricingChangedDuringScan = Symbol('pricing changed during scan');
 
   async function performTick(reason, tickOptions = {}) {
+    const visibilityRevision = codexVisibilityRevision;
     const tickStartedAt = Date.now();
     const collectedAt = collectionDate(options.now);
     const todayKey = localTodayKey(collectedAt);
@@ -2589,6 +2594,7 @@ function startCollector(options) {
       let tickLocalView = null;
       const summary = await collectUsageOnce({
         ...options,
+        codexDotsVisible,
         signal: runtimeSignal,
         clients,
         allTimeSince,
@@ -2620,6 +2626,7 @@ function startCollector(options) {
         reasonixNativeSessionCache,
         codexLocalUsageStore: codexLocalSource?.store || options.codexLocalUsageStore,
         onCodexLocalUsageComputed: (view) => {
+          if (visibilityRevision !== codexVisibilityRevision) return;
           codexLocalView = view;
           codexLocalViewDay = todayKey;
           tickLocalView = view;
@@ -2639,6 +2646,8 @@ function startCollector(options) {
         refreshWsl: anchored ? refreshWsl : false,
         onAnchorComputed: (x) => { captured = x; },
         onProgress: (partial) => {
+          if (visibilityRevision !== codexVisibilityRevision) return;
+          if (visibilityRevision !== publishedCodexVisibilityRevision) return;
           if (!partial.today) return;
           if (pricingChanged || pricingFingerprint(options) !== tickPricingRevision) return;
           try {
@@ -2695,6 +2704,18 @@ function startCollector(options) {
         }
       });
       if (stopped) return;
+      // A visibility change queues a fresh projection, but must neither stop
+      // the observer nor publish an in-flight result under the old selection.
+      if (visibilityRevision !== codexVisibilityRevision) return false;
+      if (includeHistory && !summary.history
+        && (!codexDotsVisible || visibilityRevision !== publishedCodexVisibilityRevision)) {
+        // An empty successful graph normally omits history so DeviceState can
+        // keep its last snapshot. A visibility change must replace that old
+        // projection, including when all its history was Dots-only. A newly
+        // created hidden collector must do the same after replacement/fallback:
+        // its local revision starts at zero, but DeviceState keeps old history.
+        summary.history = historyScanSucceeded ? normalizeHistory([], { todayKey }) : null;
+      }
       // A settings save can land between the serial period scans. Discard that
       // mixed result and replay all windows against one pricing revision.
       if (pricingFingerprint(options) !== tickPricingRevision) {
@@ -2757,6 +2778,7 @@ function startCollector(options) {
         if (titlesChanged) persistAnchor(tickPricingRevision);
       }
       const transformedSummary = await onUpdate?.(summary, reason);
+      publishedCodexVisibilityRevision = visibilityRevision;
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'
         ? transformedSummary
         : summary;
@@ -3285,7 +3307,8 @@ function startCollector(options) {
   setupWatchers();
   loop();
   if (trackedClients.has('codex') && options.codexLocalUsageEnabled !== false
-    && (options.env || process.env).TOKEN_MONITOR_CODEX_LOCAL_USAGE === '1') {
+    && (options.codexDotsEnabled === true || (options.codexDotsEnabled === undefined
+      && (options.env || process.env).TOKEN_MONITOR_CODEX_LOCAL_USAGE === '1'))) {
     codexLocalSource = createLocalUsageSource({
       ...sourceOptions,
       agentRuntime: options.agentRuntime,
@@ -3321,6 +3344,15 @@ function startCollector(options) {
   return {
     getDiagnostics,
     refreshClient,
+    setCodexDotsVisible(visible) {
+      if (stopped) return Promise.resolve(false);
+      const next = visible !== false;
+      if (next === codexDotsVisible) return Promise.resolve(true);
+      codexDotsVisible = next;
+      codexVisibilityRevision += 1;
+      codexLocalView = null;
+      return runTick('dots-visibility', { todayOnly: true, targetClients: ['codex'], forceHistory: true });
+    },
     stop,
     tick: (reason = 'manual', tickOptions = {}) => runTick(reason, tickOptions),
     whenIdle

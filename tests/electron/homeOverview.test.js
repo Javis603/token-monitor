@@ -540,6 +540,14 @@ test('homeToolRows returns top current-period tools with shares', () => {
   ]);
 });
 
+test('Home retains the source mark for fully attributed unknown usage', () => {
+  const rows = homeModelRows([
+    { key: 'unknown', name: 'unknown', value: 200, color: '#49a3b0', modelSource: 'codex' }
+  ], 200);
+  assert.equal(rows[0].modelSource, 'codex');
+  assert.equal(rows[0].name, 'unknown');
+});
+
 test('homeDeviceRows uses display names, skips empty devices, and sorts by usage', () => {
   const rows = homeDeviceRows([
     { deviceId: 'remote-stale', hostname: 'Old PC', stale: true, periods: { today: { totalTokens: 900 } } },
