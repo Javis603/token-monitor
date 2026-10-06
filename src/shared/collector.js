@@ -2586,6 +2586,7 @@ function startCollector(options) {
     lastTickScope = tickScopeCode(tickOptions);
     try {
       let captured = null;
+      let tickLocalView = null;
       const summary = await collectUsageOnce({
         ...options,
         signal: runtimeSignal,
@@ -2618,7 +2619,11 @@ function startCollector(options) {
         reasonixNativeSessionsEnabled,
         reasonixNativeSessionCache,
         codexLocalUsageStore: codexLocalSource?.store || options.codexLocalUsageStore,
-        onCodexLocalUsageComputed: (view) => { codexLocalView = view; codexLocalViewDay = todayKey; },
+        onCodexLocalUsageComputed: (view) => {
+          codexLocalView = view;
+          codexLocalViewDay = todayKey;
+          tickLocalView = view;
+        },
         // Both selections name clients whose pending source event this tick has
         // already consumed — the queue's drain for one, its acknowledgement for
         // the other — so either is a legitimate restore.
@@ -2762,8 +2767,8 @@ function startCollector(options) {
           const visibleDateKey = Number.isFinite(visibleDate.getTime())
             ? localTodayKey(visibleDate)
             : todayKey;
-          const retainedToday = codexLocalView
-            ? applyPeriodDelta(visibleSummary.today, emptyPeriod(), codexLocalView.today)
+          const retainedToday = tickLocalView?.sessionKeys?.length
+            ? applyPeriodDelta(visibleSummary.today, emptyPeriod(), tickLocalView.today)
             : visibleSummary.today;
           const retainedLive = retainLiveDailyHistory(retainedToday, {
             ...(options.dailyHistoryArchiveOptions || {}),

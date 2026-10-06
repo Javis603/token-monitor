@@ -53,6 +53,34 @@ test('attribution rows expose totals without a tool or model identity as Unclass
   assert.equal(attributionValue({ codex: 60 }, 90, 'codex'), 60);
 });
 
+test('unpriced counts missing from attribution maps stay on the remainder row', () => {
+  const rows = attributionRows({}, {}, {
+    totalValue: 50,
+    totalUnpricedTokens: 50
+  });
+
+  assert.deepEqual(rows, [
+    {
+      key: UNATTRIBUTED_KEY,
+      value: 50,
+      cost: 0,
+      unpricedTokens: 50,
+      unattributed: true
+    }
+  ]);
+
+  const zeroValueRemainder = attributionRows({ codex: 100 }, { codex: 1 }, {
+    totalValue: 100,
+    totalCost: 1,
+    totalUnpricedTokens: 50
+  });
+  assert.equal(zeroValueRemainder.at(-1).unpricedTokens, 50);
+  assert.deepEqual(
+    visibleAttributionRows(zeroValueRemainder, (value) => `$${Number(value || 0).toFixed(4)}`),
+    zeroValueRemainder
+  );
+});
+
 test('display rows hide a zero-token synthetic residual that formats as zero', () => {
   const rows = attributionRows(
     { codex: 100 },
@@ -178,6 +206,8 @@ test('Tool and Model breakdowns consume the shared token-or-cost rows', () => {
   assert.match(app, /periodAttributionRows\(period, period\?\.models, period\?\.modelCosts, period\?\.modelUnpricedTokens\)/);
   assert.match(app, /visibleAttributionRows\(rows, formatCost\)/);
   assert.match(app, /attributionValue\(/);
+  assert.match(app, /totalUnpricedTokens:\s*period\?\.unpricedTokens/);
+  assert.match(app, /cost:\s*Number\(period\.costUsd \|\| 0\),\s*unpricedTokens:\s*Number\(period\.unpricedTokens \|\| 0\),/);
 });
 
 test('Model settings expose and persist the ranking metric without changing the default', () => {

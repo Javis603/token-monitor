@@ -2740,6 +2740,7 @@ function deviceRowsForPeriod() {
       name: deviceLabel(device),
       value: breakdown.totalTokens,
       cost: Number(period.costUsd || 0),
+      unpricedTokens: Number(period.unpricedTokens || 0),
       color: deviceColor(Boolean(device.stale)),
       stale: Boolean(device.stale),
       platform: device.platform || '',
@@ -2776,6 +2777,7 @@ function periodAttributionRows(period, values, costs, unpricedTokens) {
   const rows = usageAttributionRowsApi.attributionRows(values, costs, {
     totalValue: period?.totalTokens,
     totalCost: period?.costUsd,
+    totalUnpricedTokens: period?.unpricedTokens,
     unpricedTokens
   });
   return usageAttributionRowsApi.visibleAttributionRows(rows, formatCost);

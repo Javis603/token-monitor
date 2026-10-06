@@ -462,6 +462,91 @@ test('startCollector retains a transformed watch total until the next history ti
   }
 });
 
+test('startCollector does not subtract a stale Dots view after the current read fails', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-stale-dots-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const archivePath = path.join(dir, 'daily-history.json');
+  const now = new Date();
+  const todayKey = localTodayKey(now);
+  const env = {
+    CODEX_HOME: path.join(dir, '.codex'),
+    TOKEN_MONITOR_CODEX_LOCAL_USAGE: '0',
+    TOKEN_MONITOR_SHARED_DIR: dir
+  };
+  const localRow = {
+    threadId: 'local-dots-thread',
+    model: 'gpt-test',
+    observedAt: now.toISOString(),
+    cwd: path.join(dir, 'project'),
+    title: 'Local test task',
+    turnEnded: false,
+    contextTokens: 10,
+    contextWindow: 100,
+    usage: { input: 10, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 10 }
+  };
+  let usageReads = 0;
+  let todayScans = 0;
+  const usageStore = {
+    rows() {
+      usageReads += 1;
+      if (usageReads === 2) throw new Error('temporary ledger read failure');
+      return [localRow];
+    }
+  };
+  const runtime = startCollector({
+    clients: 'codex',
+    env,
+    homeDir: dir,
+    pricingPath: path.join(dir, 'pricing.json'),
+    codexLocalUsageEnabled: true,
+    codexLocalUsageStore: usageStore,
+    allTimeSince: '2025-01-01',
+    now,
+    deviceId: 'stale-dots-history',
+    intervalMs: 60 * 60 * 1000,
+    historyIntervalMs: 15 * 60 * 1000,
+    watchEnabled: false,
+    watchTriggersCollection: false,
+    historyEnabled: true,
+    dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveWriteEnabled: true,
+    dailyHistoryArchiveOptions: { path: archivePath, env },
+    projectsEnabled: false,
+    limitsEnabled: false,
+    wslScanEnabled: false,
+    anchorPersistenceEnabled: false,
+    runTokscale: async ({ flags }) => {
+      if (flags.includes('--today')) {
+        todayScans += 1;
+        const input = todayScans === 1 ? 100 : 200;
+        return { entries: [{ client: 'codex', sessionId: 'native-session', model: 'gpt-test', input, output: 0, messages: 1 }] };
+      }
+      return { entries: [] };
+    },
+    runGraph: async () => ({ contributions: [] })
+  });
+
+  const retainedTokens = () => {
+    const stored = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+    return Object.values(stored.liveDays[todayKey].observations)
+      .reduce((sum, item) => sum + item.tokens, 0);
+  };
+
+  try {
+    await waitForCondition(() => runtime.getDiagnostics().lastTickSuccessAt != null);
+    await runtime.whenIdle();
+    assert.equal(usageReads, 1);
+    assert.equal(retainedTokens(), 100);
+
+    await runtime.tick('manual', { forceHistory: true });
+
+    assert.equal(usageReads, 2);
+    assert.equal(retainedTokens(), 200);
+  } finally {
+    runtime.stop();
+  }
+});
+
 test('collectHistoryOnce falls back to the current graph when archive persistence fails', async () => {
   const messages = [];
   const history = await collectHistoryOnce({

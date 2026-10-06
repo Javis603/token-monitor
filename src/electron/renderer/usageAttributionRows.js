@@ -21,24 +21,33 @@
   function attributionRows(values, costs, options = {}) {
     const valueMap = values && typeof values === 'object' ? values : {};
     const costMap = costs && typeof costs === 'object' ? costs : {};
-    const keys = new Set([...Object.keys(valueMap), ...Object.keys(costMap)]);
+    const unpricedMap = options.unpricedTokens && typeof options.unpricedTokens === 'object'
+      ? options.unpricedTokens
+      : {};
+    const keys = new Set([...Object.keys(valueMap), ...Object.keys(costMap), ...Object.keys(unpricedMap)]);
     const rows = Array.from(keys, (key) => ({
       key,
       value: finiteNumber(valueMap[key]),
       cost: finiteNumber(costMap[key]),
-      ...(options.unpricedTokens?.[key] > 0 ? { unpricedTokens: finiteNumber(options.unpricedTokens[key]) } : {})
-    })).filter((row) => row.value > 0 || row.cost > 0);
+      ...(unpricedMap[key] > 0 ? { unpricedTokens: finiteNumber(unpricedMap[key]) } : {})
+    })).filter((row) => row.value > 0 || row.cost > 0 || row.unpricedTokens > 0);
     const attributedValue = rows.reduce((sum, row) => sum + Math.max(0, row.value), 0);
     const attributedCost = rows.reduce((sum, row) => sum + Math.max(0, row.cost), 0);
+    const attributedUnpricedTokens = rows.reduce((sum, row) => sum + Math.max(0, finiteNumber(row.unpricedTokens)), 0);
     const remainderValue = Math.max(0, finiteNumber(options.totalValue) - attributedValue);
     const remainderCost = Math.max(0, Number(
       (finiteNumber(options.totalCost) - attributedCost).toFixed(6)
     ));
-    if (remainderValue > 0 || remainderCost > 0) {
+    const remainderUnpricedTokens = Math.max(
+      0,
+      finiteNumber(options.totalUnpricedTokens) - attributedUnpricedTokens
+    );
+    if (remainderValue > 0 || remainderCost > 0 || remainderUnpricedTokens > 0) {
       rows.push({
         key: options.unattributedKey || UNATTRIBUTED_KEY,
         value: remainderValue,
         cost: remainderCost,
+        ...(remainderUnpricedTokens > 0 ? { unpricedTokens: remainderUnpricedTokens } : {}),
         unattributed: true
       });
     }
@@ -52,6 +61,7 @@
     return sourceRows.filter((row) => (
       row?.unattributed !== true
       || finiteNumber(row.value) > 0
+      || finiteNumber(row.unpricedTokens) > 0
       || String(formatCost(row.cost)) !== zeroCost
     ));
   }
