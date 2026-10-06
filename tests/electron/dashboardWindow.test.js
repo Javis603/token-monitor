@@ -129,6 +129,7 @@ test('dashboard.html wires the shared modules and the two panels', () => {
   assert.match(html, /id="activityTab"/);
   assert.match(html, /id="dashChart"/);
   assert.match(html, /id="dashHeatmap"/);
+  assert.match(html, /id="dashDayDetail"/);
   assert.match(html, /id="dashCards"/);
   assert.match(html, /data-control="mode"/);
   assert.match(html, /data-control="stack"/);
@@ -152,6 +153,9 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(js, /charts\.barsChartSvg/);
   assert.match(js, /charts\.candleChartSvg/);
   assert.match(js, /charts\.heatmapSvg/);
+  assert.match(js, /charts\.modelsForDay\(state\.history, date\)/);
+  assert.match(js, /els\.heatmap\.addEventListener\('click'/);
+  assert.match(js, /els\.heatmap\.addEventListener\('keydown'/);
   assert.match(js, /updateSettings\(\{ dashboardFlat: state\.flat \}\)/);
   assert.match(js, /dashboard\.minimize\(\)/);
   assert.match(js, /dashboard\.ready\(\)/);
