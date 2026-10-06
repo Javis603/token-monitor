@@ -1,0 +1,13 @@
+{
+  "note": "Synthetic fixture sealed by original WorkBuddy 5.7.6 AtRestCrypto, deterministic dummy secret and nonce; not a credential.",
+  "payload": {
+    "version": 1,
+    "atRestSecretKey": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE="
+  },
+  "wrapper": {
+    "$wbEncrypted": 1,
+    "envelope": "eyJzdWl0ZSI6MSwia2V5SWQiOiIxMmRkYTUxNzU5NTI1ZDJiIiwibm9uY2UiOiJJeU1qSXlNakl5TWpJeU1qIiwiYXV0aFRhZyI6IkdBbWhaMnk3S3NHTnZMSTh4ODZXaUE9PSIsImNpcGhlcnRleHQiOiJ2UEgreE1XdU00Q3dIQUhPamVobVEwSEhLQT09In0="
+  },
+  "expected": "fixture-codec-token",
+  "aadHex": "57422d41414400010000000557424556310000000673796d2d7631000000010000001031326464613531373539353235643262020000"
+}

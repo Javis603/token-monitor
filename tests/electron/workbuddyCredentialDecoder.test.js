@@ -34,7 +34,7 @@ test('WorkBuddy decoder uses an injected executable and anonymous stdin/stdout p
   assert.equal(calls[0].options.windowsHide, true);
   assert.equal(calls[0].options.input, JSON.stringify({ $wbEncrypted: 1, envelope: 'fixture-envelope' }));
   assert.equal(calls[0].options.env.ELECTRON_RUN_AS_NODE, '1');
-  assert.equal(calls[0].options.env.WORKBUDDY_APP_ASAR, 'C:/WorkBuddy/resources/app.asar');
+  assert.equal(calls[0].options.env.WORKBUDDY_APP_ASAR, undefined);
 });
 
 test('WorkBuddy decoder fails closed on codec errors or unsafe output', () => {
