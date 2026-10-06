@@ -10365,6 +10365,29 @@ function clientHealthPanel(detail, clientId) {
   return inner;
 }
 
+let codexWebCostRuleSaveQueue = Promise.resolve();
+let pendingCodexWebCostRules = null;
+let codexWebCostRuleSaveCount = 0;
+
+function queueCodexWebCostRuleSave(patch) {
+  const baseRules = pendingCodexWebCostRules ?? state.settings?.usageCostRules;
+  pendingCodexWebCostRules = usageCostPolicyApi.updateCodexWebCostRule(baseRules, patch);
+  const rules = pendingCodexWebCostRules;
+  codexWebCostRuleSaveCount += 1;
+
+  const save = async () => {
+    try {
+      await saveSettings({ usageCostRules: rules });
+    } finally {
+      codexWebCostRuleSaveCount -= 1;
+      if (codexWebCostRuleSaveCount === 0) pendingCodexWebCostRules = null;
+    }
+  };
+  const operation = codexWebCostRuleSaveQueue.then(save, save);
+  codexWebCostRuleSaveQueue = operation.catch(() => {});
+  return operation;
+}
+
 function codexWebCostSettings() {
   const section = document.createElement('section');
   section.className = 'codex-web-cost-settings';
@@ -10375,7 +10398,9 @@ function codexWebCostSettings() {
   note.className = 'settings-note';
   note.textContent = t('settings.codex.webCosts.description');
   section.append(heading, note);
-  const rule = usageCostPolicyApi.codexWebCostRule(state.settings?.usageCostRules);
+  const rule = usageCostPolicyApi.codexWebCostRule(
+    pendingCodexWebCostRules ?? state.settings?.usageCostRules
+  );
   const models = new Set(['chatgpt-web/pro', 'chatgpt-web/extra-high', ...Object.keys(rule.models)]);
   for (const period of Object.values(state.stats?.periods || {})) {
     for (const model of new Set([...Object.keys(period.clientModels?.codex || {}), ...Object.keys(period.clientModelCosts?.codex || {})])) {
@@ -10391,12 +10416,12 @@ function codexWebCostSettings() {
     input.type = 'checkbox';
     input.dataset.costRule = model || 'master';
     input.checked = model ? rule.models[model] !== false : rule.included;
-    input.disabled = Boolean(model && !rule.included);
+    input.disabled = codexWebCostRuleSaveCount > 0 || Boolean(model && !rule.included);
     input.addEventListener('change', async () => {
       input.disabled = true;
       try {
         const patch = model ? { models: { [model]: input.checked } } : { included: input.checked };
-        await saveSettings({ usageCostRules: usageCostPolicyApi.updateCodexWebCostRule(state.settings?.usageCostRules, patch) });
+        await queueCodexWebCostRuleSave(patch);
       } catch (_) {}
       finally { refillOpenClientHealthPanel(); }
     });

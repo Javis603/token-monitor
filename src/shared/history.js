@@ -377,20 +377,54 @@ function activeTimeTotal(days) {
 // manufacture a split for their ambiguous, mixed-tool rows.
 function addCostAttribution(target, source) {
   const clients = Object.keys(source.perClient || {});
-  const matrix = source.clientModelCosts || (clients.length === 1 && source.perModel
-    ? { [clients[0]]: Object.fromEntries(Object.entries(source.perModel).map(([model, value]) => [model, num(value.cost)])) }
-    : null);
-  if (!matrix || source.clientModelCostsIncomplete) {
-    if (num(source.cost) > 0) target.clientModelCostsIncomplete = true;
+  let matrix = source.clientModelCosts || null;
+  let fallbackAttributedCost = 0;
+  if (!matrix && clients.length === 1 && source.perModel) {
+    const models = Object.create(null);
+    for (const [model, value] of Object.entries(source.perModel)) {
+      const cost = num(value.cost);
+      models[model] = cost;
+      fallbackAttributedCost += cost;
+    }
+    matrix = Object.create(null);
+    matrix[clients[0]] = models;
+  }
+  if (matrix && (typeof matrix !== 'object' || Array.isArray(matrix))) matrix = null;
+  const sourceCost = Math.max(0, num(source.cost));
+  const fallbackIncomplete = !source.clientModelCosts
+    && matrix
+    && sourceCost - fallbackAttributedCost > Math.max(1e-9, sourceCost * 1e-9);
+  if (!matrix || source.clientModelCostsIncomplete || fallbackIncomplete) {
+    if (sourceCost > 0) target.clientModelCostsIncomplete = true;
   }
   if (!matrix) return;
-  target.clientModelCosts ||= {};
+  if (!target.clientModelCosts || typeof target.clientModelCosts !== 'object'
+    || Array.isArray(target.clientModelCosts)) {
+    target.clientModelCosts = Object.create(null);
+  } else if (Object.getPrototypeOf(target.clientModelCosts) !== null) {
+    target.clientModelCosts = Object.assign(Object.create(null), target.clientModelCosts);
+  }
   for (const [client, models] of Object.entries(matrix)) {
-    if (['__proto__', 'constructor', 'prototype'].includes(client)) continue;
-    const costs = target.clientModelCosts[client] || (target.clientModelCosts[client] = {});
-    for (const [model, cost] of Object.entries(models || {})) {
-      if (['__proto__', 'constructor', 'prototype'].includes(model)) continue;
-      costs[model] = num(costs[model]) + num(cost);
+    if (!models || typeof models !== 'object' || Array.isArray(models)) continue;
+    let costs;
+    if (Object.prototype.hasOwnProperty.call(target.clientModelCosts, client)
+      && target.clientModelCosts[client]
+      && typeof target.clientModelCosts[client] === 'object'
+      && !Array.isArray(target.clientModelCosts[client])) {
+      costs = target.clientModelCosts[client];
+      if (Object.getPrototypeOf(costs) !== null) {
+        costs = Object.assign(Object.create(null), costs);
+        target.clientModelCosts[client] = costs;
+      }
+    } else {
+      costs = Object.create(null);
+      target.clientModelCosts[client] = costs;
+    }
+    for (const [model, cost] of Object.entries(models)) {
+      const previous = Object.prototype.hasOwnProperty.call(costs, model)
+        ? num(costs[model])
+        : 0;
+      costs[model] = previous + num(cost);
     }
   }
 }

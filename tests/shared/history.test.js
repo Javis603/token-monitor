@@ -579,3 +579,37 @@ test('historyPreview defaults to the compact 30-day daily window', () => {
   assert.equal(preview.daily.length, 30);
   assert.equal(preview.daily[0].date, '2026-07-02');
 });
+
+
+test('single-client fallback reports unaccounted cost as incomplete', () => {
+  const [month] = monthlyRollup([{
+    date: '2026-10-01',
+    tokens: 10,
+    cost: 3,
+    activeTimeMs: 0,
+    perClient: { codex: { tokens: 10, cost: 3, messages: 1 } },
+    perModel: { 'chatgpt-web/pro': { tokens: 10, cost: 1 } }
+  }]);
+
+  assert.equal(month.clientModelCosts.codex['chatgpt-web/pro'], 1);
+  assert.equal(month.clientModelCostsIncomplete, true);
+});
+
+test('cost attribution stores inherited-looking labels as data-only keys', () => {
+  const matrix = JSON.parse('{"toString":{"hasOwnProperty":1.25},"codex":{"toString":0.5}}');
+  const [month] = monthlyRollup([{
+    date: '2026-10-02',
+    tokens: 10,
+    cost: 1.75,
+    activeTimeMs: 0,
+    perClient: { codex: { tokens: 10, cost: 1.75, messages: 1 } },
+    perModel: { model: { tokens: 10, cost: 1.75 } },
+    clientModelCosts: matrix
+  }]);
+
+  assert.equal(Object.getPrototypeOf(month.clientModelCosts), null);
+  assert.equal(Object.getPrototypeOf(month.clientModelCosts.toString), null);
+  assert.equal(month.clientModelCosts.toString.hasOwnProperty, 1.25);
+  assert.equal(month.clientModelCosts.codex.toString, 0.5);
+  assert.equal(month.clientModelCostsIncomplete, undefined);
+});

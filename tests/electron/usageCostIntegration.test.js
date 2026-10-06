@@ -189,3 +189,53 @@ test('cost and title preferences independently reproject one cached snapshot and
   }
   assert.deepEqual(raw, before);
 });
+
+
+test('Codex Web cost saves serialize against the latest pending rules', async () => {
+  const renderer = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const block = renderer.match(
+    /let codexWebCostRuleSaveQueue = Promise\.resolve\(\);[^]*?function queueCodexWebCostRuleSave\(patch\) \{[^]*?\n\}/
+  )?.[0];
+  assert.ok(block);
+
+  const writes = [];
+  const releases = [];
+  const saver = vm.runInNewContext(`(() => {
+    ${block}
+    return {
+      save: queueCodexWebCostRuleSave,
+      pending: () => codexWebCostRuleSaveCount
+    };
+  })()`, {
+    Promise,
+    state: { settings: { usageCostRules: [] } },
+    usageCostPolicyApi: policy,
+    saveSettings: ({ usageCostRules }) => new Promise((resolve) => {
+      writes.push(JSON.parse(JSON.stringify(usageCostRules)));
+      releases.push(resolve);
+    })
+  });
+
+  const first = saver.save({ models: { 'chatgpt-web/pro': false } });
+  const second = saver.save({ models: { 'chatgpt-web/extra-high': false } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(writes.length, 1);
+  assert.equal(saver.pending(), 2);
+
+  releases.shift()();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(writes.length, 2);
+  const finalRule = policy.codexWebCostRule(writes[1]);
+  assert.equal(finalRule.models['chatgpt-web/pro'], false);
+  assert.equal(finalRule.models['chatgpt-web/extra-high'], false);
+
+  releases.shift()();
+  await Promise.all([first, second]);
+  assert.equal(saver.pending(), 0);
+
+  const panel = renderer.match(/function codexWebCostSettings\(\) \{[^]*?\n\}/)?.[0];
+  assert.ok(panel);
+  assert.match(panel, /pendingCodexWebCostRules \?\? state\.settings\?\.usageCostRules/);
+  assert.match(panel, /codexWebCostRuleSaveCount > 0/);
+  assert.match(panel, /await queueCodexWebCostRuleSave\(patch\)/);
+});
