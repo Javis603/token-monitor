@@ -1,30 +1,37 @@
 ﻿'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
-const { decideResolver, kimiWorkSessionsRoots } = require('../../src/shared/collector');
+const { kimiWorkSessionsRoots, readTokscaleBundledBuild } = require('../../src/shared/collector');
 
-test('decideResolver prefers downloaded binary only when it is newer than bundled', () => {
-  const bundled = { source: 'bundled', version: '2.1.3', path: '/bundled/tokscale' };
-  const downloaded = { source: 'downloaded', version: '2.3.0', path: '/downloaded/tokscale' };
-
-  assert.equal(decideResolver({ downloaded, bundled }), downloaded);
+test('bundled build describes the manifest rather than executable bytes', () => {
+  const manifest = { mode: 'override', commit: 'a'.repeat(40), releaseTag: 'token-monitor-test' };
+  assert.deepEqual(readTokscaleBundledBuild(manifest), { commit: manifest.commit, releaseTag: manifest.releaseTag });
+  assert.deepEqual(readTokscaleBundledBuild({ ...manifest, mode: undefined }), readTokscaleBundledBuild(manifest));
+  assert.deepEqual(readTokscaleBundledBuild({ ...manifest, mode: null }), readTokscaleBundledBuild(manifest));
+  for (const invalid of [null, {}, { ...manifest, mode: 'upstream' }, { ...manifest, mode: 'typo' }, { ...manifest, commit: '' }, { ...manifest, releaseTag: '' }]) {
+    assert.equal(readTokscaleBundledBuild(invalid), null);
+  }
 });
 
-test('decideResolver keeps bundled as floor when bundled is same or newer', () => {
-  const bundled = { source: 'bundled', version: '2.5.0', path: '/bundled/tokscale' };
-  const downloaded = { source: 'downloaded', version: '2.3.0', path: '/downloaded/tokscale' };
-
-  assert.equal(decideResolver({ downloaded, bundled }), bundled);
-  assert.equal(decideResolver({ downloaded: { ...downloaded, version: '2.5.0' }, bundled }), bundled);
-});
-
-test('decideResolver falls back to JS shim when no bundled binary exists', () => {
-  const shim = { source: 'shim', version: '2.1.3', path: '/shim/bin.js' };
-
-  assert.equal(decideResolver({ downloaded: null, bundled: null, shim }), shim);
+test('status keeps runtime selection separate from declared bundled build', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/shared/collector.js'), 'utf8');
+  const body = source.slice(source.indexOf('function getTokscaleStatus()'), source.indexOf('// Tokscale reads a few XDG'));
+  const current = { source: 'shim', version: null, path: '/tmp/tokscale/bin.js' };
+  const build = { commit: 'a'.repeat(40), releaseTag: 'token-monitor-test' };
+  const status = vm.runInNewContext(`${body}\ngetTokscaleStatus()`, {
+    bundledPackageCandidates: () => ['@tokscale/cli-linux-x64-gnu'],
+    resolvePlatformBinary: () => current,
+    readTokscaleBundledBuild: () => build
+  });
+  assert.equal(status.supported, true);
+  assert.equal(status.current.source, 'shim');
+  assert.equal(status.current.version, null);
+  assert.equal(status.bundledBuild, build);
 });
 
 test('kimiWorkSessionsRoots mirrors platform paths and relocated Windows shares', () => {

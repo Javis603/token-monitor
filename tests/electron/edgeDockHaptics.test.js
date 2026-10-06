@@ -25,5 +25,5 @@ test('macOS Edge Dock settings expose a localized haptic toggle', () => {
   assert.match(app, /edgeDockHapticInput\.checked = state\.settings\?\.edgeDockHaptic !== false/);
   assert.match(app, /saveSettings\(\{ edgeDockHaptic: els\.edgeDockHapticInput\.checked \}\)/);
   assert.match(app, /edgeDockHapticRow\?\.classList\.toggle\('hidden', state\.appInfo\?\.platform !== 'darwin'\)/);
-  assert.equal((i18n.match(/'settings\.edgeDock\.haptic':/g) || []).length, 5);
+  assert.equal((i18n.match(/'settings\.edgeDock\.haptic':/g) || []).length, 6);
 });

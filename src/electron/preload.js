@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     return () => ipcRenderer.removeListener('appearance:nativeMaterial', listener);
   },
   getStats: (options) => ipcRenderer.invoke('stats:get', options),
+  deleteDevice: (deviceId) => ipcRenderer.invoke('devices:delete', deviceId),
   getAllTimeSessions: (snapshotId) => ipcRenderer.invoke('stats:allTimeSessions', snapshotId),
   getSessionDetail: (args) => ipcRenderer.invoke('session:getDetail', args),
   getStreamStatus: () => ipcRenderer.invoke('stream:status'),
@@ -41,6 +42,15 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     ready: () => ipcRenderer.send('dashboard:ready'),
     minimize: () => ipcRenderer.send('dashboard:minimize'),
     close: () => ipcRenderer.send('dashboard:close')
+  },
+  getSyncContentStatus: (refresh = true) => ipcRenderer.invoke('syncContent:status', refresh),
+  previewSyncContent: (kind) => ipcRenderer.invoke('syncContent:preview', kind),
+  configureSyncContent: (options) => ipcRenderer.invoke('syncContent:configure', options),
+  retrySyncContentCleanup: () => ipcRenderer.invoke('syncContent:retryCleanup'),
+  onSyncContentPush: (callback) => {
+    const listener = (_event, status) => { try { callback(status); } catch (_) {} };
+    ipcRenderer.on('syncContent:push', listener);
+    return () => ipcRenderer.removeListener('syncContent:push', listener);
   },
   getHubInfo: () => ipcRenderer.invoke('hub:getInfo'),
   getHubBuildStatus: () => ipcRenderer.invoke('hub:getBuildStatus'),
@@ -80,11 +90,6 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     ipcRenderer.on('view:open', listener);
     return () => ipcRenderer.removeListener('view:open', listener);
   },
-  onTokscalePush: (callback) => {
-    const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
-    ipcRenderer.on('tokscale:push', listener);
-    return () => ipcRenderer.removeListener('tokscale:push', listener);
-  },
   getAppInfo: () => ipcRenderer.invoke('app:getInfo'),
   generateDiagnosticReport: () => ipcRenderer.invoke('diagnostics:generate'),
   copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
@@ -123,9 +128,6 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   exportNow: () => ipcRenderer.invoke('export:now'),
   pickExportDir: () => ipcRenderer.invoke('export:pickAutoDir'),
   getTokscaleStatus: () => ipcRenderer.invoke('tokscale:getStatus'),
-  checkTokscaleNpm: () => ipcRenderer.invoke('tokscale:checkNpm'),
-  downloadTokscaleFromNpm: () => ipcRenderer.invoke('tokscale:downloadFromNpm'),
-  resetTokscaleToBundled: () => ipcRenderer.invoke('tokscale:resetToBundled'),
   getAppUpdateState: () => ipcRenderer.invoke('appUpdate:getState'),
   checkAppUpdateNow: () => ipcRenderer.invoke('appUpdate:checkNow'),
   downloadAppUpdate: () => ipcRenderer.invoke('appUpdate:download'),
@@ -157,6 +159,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   },
   limits: {
     saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
+    listOrganizationChoices: (providerId) => ipcRenderer.invoke('limits:listOrganizationChoices', providerId),
     clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId)
   },
   opencode: {

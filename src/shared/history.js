@@ -85,7 +85,8 @@ function normalizeTimeMetrics(value) {
 // uses the same reasoning-inclusive public output convention as usage.js.
 // zcode/opencode/muse: tokscale subtracts the reasoning overlap out of
 // `output` (their sources are reasoning-inclusive), so add it back here.
-const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'codex', 'droid', 'dsh', 'zcode', 'opencode', 'muse']);
+// Tencent Buddy and Cherry Studio chat ledgers also emit independent reasoning.
+const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'codex', 'droid', 'dsh', 'zcode', 'opencode', 'muse', 'codebuddy', 'workbuddy', 'cherrystudio']);
 
 function hasDisjointReasoning(client) {
   return TOKSCALE_DISJOINT_REASONING_CLIENTS.has(String(client).trim().toLowerCase());

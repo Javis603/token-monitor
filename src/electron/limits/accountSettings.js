@@ -279,7 +279,7 @@ function accountForm(entry) {
 
 function formUrls(openUrl) {
   if (openUrl?.url) return [openUrl.url];
-  return [...Object.values(openUrl?.urls || {}), ...(openUrl?.default ? [openUrl.default] : [])];
+  return [...Object.values(openUrl?.urls || {}), ...Object.values(openUrl?.statusUrls || {}), ...(openUrl?.default ? [openUrl.default] : [])];
 }
 
 function assertAccountForm(entry, form) {

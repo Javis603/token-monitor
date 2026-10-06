@@ -11,6 +11,19 @@ module.exports = {
       storePath: ['providers', 'minimax', 'apiKey'],
       resolve: 'minimaxToken',
       resolveStyle: 'explicit'
+    },
+    {
+      key: 'minimaxApiRegion',
+      kind: 'setting',
+      normalize: { fn: 'normalizeMinimaxRegionSetting', style: 'value' },
+      envFallback: ['TOKEN_MONITOR_MINIMAX_API_REGION', 'MINIMAX_API_REGION', 'MINIMAX_API_HOST'],
+      configDefault: 'auto',
+      // Resolve an implicit choice at use time. Saving another setting must not
+      // turn the default or env value into a permanent region override.
+      initial: '',
+      persist: 'renormalize',
+      persistFallback: '',
+      project: (value, limits, env) => limits.minimaxRegion({ minimaxApiRegion: value }, env)
     }
   ],
   status: {
@@ -20,21 +33,44 @@ module.exports = {
     pendingKey: 'minimaxPendingCheckSince'
   },
   form: {
-    field: 'minimaxApiKey',
-    input: 'input',
     titleKey: 'settings.minimax.title',
     openKey: 'settings.minimax.openBrowser',
     clearKey: 'settings.minimax.clearApiKey',
-    placeholderKey: 'settings.minimax.apiKeyPlaceholder',
     saveKey: 'settings.minimax.saveApiKey',
     emptyKey: 'settings.minimax.statusNotSet',
     failedKey: 'settings.minimax.saveFailed',
-    noteKey: 'settings.minimax.note',
-    // Follow the region the last successful poll resolved to, so a global
-    // (minimax.io) account lands on its own platform; the CN host until then.
+    fields: [
+      {
+        key: 'minimaxApiRegion',
+        input: 'select',
+        labelKey: 'settings.minimax.apiRegion',
+        options: [
+          { value: 'auto', labelKey: 'settings.minimax.regionAuto' },
+          { value: 'cn', labelKey: 'settings.minimax.regionCn' },
+          { value: 'intl', labelKey: 'settings.minimax.regionIntl' }
+        ],
+        saveOnChange: true,
+        submitWithCredential: false
+      },
+      { key: 'minimaxApiKey', input: 'password', placeholderKey: 'settings.minimax.apiKeyPlaceholder', required: true }
+    ],
+    // The region stays reachable once a key is saved: an account whose key is
+    // fine but whose auto-probe keeps flapping needs the switch after linking.
+    top: [{ field: 'minimaxApiRegion' }],
+    manual: [{ note: 'settings.minimax.note' }, { field: 'minimaxApiKey' }],
+    // Explicit choices follow the select even before the first probe. Auto
+    // follows the last successful probe, with the historical CN fallback.
     openUrl: {
+      byField: 'minimaxApiRegion',
+      urls: {
+        cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
+        intl: 'https://platform.minimax.io/user-center/payment/token-plan'
+      },
       byStatus: 'region',
-      urls: { en: 'https://platform.minimax.io/user-center/payment/token-plan' },
+      statusUrls: {
+        cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
+        en: 'https://platform.minimax.io/user-center/payment/token-plan'
+      },
       default: 'https://platform.minimaxi.com/user-center/payment/token-plan'
     }
   },

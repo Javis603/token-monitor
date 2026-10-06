@@ -38,13 +38,12 @@ test('full tick merges WSL bundle and marks WSL-only client active', async () =>
   assert.equal(anchorCaptured.wslBundle.today.totalTokens, 9);
 });
 
-test('WSL scans exclude locally parsed Proma while retaining it for marker detection', async () => {
+test('WSL scans receive fork-only Proma like any other tokscale client', async () => {
   let wslOptions = null;
-  const collectedAt = '2026-07-10T08:00:00.000Z';
   await collectUsageOnce({
     clients: 'claude,proma',
     allTimeSince: '2025-01-01',
-    now: collectedAt,
+    now: '2026-07-10T08:00:00.000Z',
     commandTimeoutMs: 1000,
     deviceId: 'dev1',
     limitsEnabled: false,
@@ -54,9 +53,8 @@ test('WSL scans exclude locally parsed Proma while retaining it for marker detec
       return { bundle: { today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() }, detected: [] };
     }
   });
-  assert.equal(wslOptions.clients, 'claude');
+  assert.equal(wslOptions.clients, 'claude,proma');
   assert.equal(wslOptions.trackedClients, 'claude,proma');
-  assert.equal(wslOptions.now.toISOString(), collectedAt);
 });
 
 test('watch tick reuses wslAnchor and does not rescan WSL', async () => {

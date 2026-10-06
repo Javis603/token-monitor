@@ -7,16 +7,19 @@
 // `edgeDockItems` is either null — the automatic default, which follows the
 // connected limit providers — or an ordered list the user composed:
 //   { type: 'limit', provider, hiddenAccounts: [accountKey], showUsage,
-//     accountMode: 'active' | 'lowest' }
+//     accountMode: 'active' | 'lowest', windowKey: '' | limitWindowKey(window) }
 //   { type: 'stat', metric }   metric: a usage period, 'liveRate', or 'sessions'
 //                              ('sessions' additionally carries runningOnly
 //                              and groupBy; see normalizeItem)
 (function exposeEdgeDockItems(root, factory) {
   const node = typeof module === 'object' && module.exports;
-  const api = factory(node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders);
+  const api = factory(
+    node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders,
+    node ? require('../../../shared/limits/usageItems') : root?.TokenMonitorLimitUsageItems
+  );
   if (node) module.exports = api;
   if (root) root.TokenMonitorEdgeDockItems = api;
-})(typeof window !== 'undefined' ? window : null, function createEdgeDockItems(limitProviders) {
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockItems(limitProviders, usageItems) {
   // Usage readouts follow the widget's own period choices; each shows tokens
   // with its cost beneath, so tokens and cost are no longer separate items.
   const USAGE_PERIODS = Object.freeze(['today', 'week', 'last7', 'last30', 'month', 'allTime']);
@@ -46,6 +49,24 @@
     return String(value || '').trim().toLowerCase();
   }
 
+  // A pinned window and a hidden usage item name a row the same way.
+  const { limitWindowKey, limitWindowKeys, normalizeWindowKey } = usageItems;
+
+  function selectableLimitWindows(provider, options = {}) {
+    return (provider?.windows || []).filter((window) => (
+      window && window.showMeter !== false
+      && !(provider.provider === 'codex' && window.additional === true
+        && options.showCodexAdditionalLimits === false)
+    ));
+  }
+
+  function selectedLimitWindow(provider, key, options = {}) {
+    const candidates = selectableLimitWindows(provider, options)
+      .filter((window) => limitWindowKeys(window).includes(key));
+    // Old label-based pins can migrate only when their identity is unambiguous.
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
   function itemId(item) {
     if (item?.type === 'limit') return `limit:${item.provider}`;
     if (item?.type === 'stat') return `stat:${item.metric}`;
@@ -73,6 +94,7 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
         hiddenAccounts,
         showUsage: raw.showUsage !== false,
         showSessions: raw.showSessions !== false,
+        windowKey: normalizeWindowKey(raw.windowKey),
         // Codex has a meaningful local "current account", so its glance value
         // follows that account unless the user explicitly asks for the tightest
         // visible account. Other providers have no local-login identity.
@@ -125,6 +147,7 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
       hiddenAccounts: [],
       showUsage: true,
       showSessions: true,
+      windowKey: '',
       accountMode: provider === 'codex' ? 'active' : 'lowest'
     }));
   }
@@ -154,6 +177,10 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
     USAGE_PERIODS,
     defaultEdgeDockItems,
     itemId,
+    limitWindowKey,
+    limitWindowKeys,
+    selectableLimitWindows,
+    selectedLimitWindow,
     normalizeEdgeDockItems,
     reorderEdgeDockItems
   };

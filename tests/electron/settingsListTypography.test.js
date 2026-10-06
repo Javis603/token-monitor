@@ -25,8 +25,8 @@ function cssRule(source, selector) {
 // half the rows never render.
 test('each settings list row owns its type size rather than an optional child', () => {
   const css = readRendererFile('styles.css');
-  assert.match(cssRule(css, '.settings-panel .limit-provider-row'), /font-size:\s*11px/);
-  assert.match(cssRule(css, '.tool-preference-name'), /font-size:\s*11px/);
+  assert.match(cssRule(css, '.settings-panel .limit-provider-row'), /font-size:\s*0\.6875rem/);
+  assert.match(cssRule(css, '.tool-preference-name'), /font-size:\s*0\.6875rem/);
 });
 
 // The disclosure button only exists for providers that have something to
@@ -36,6 +36,6 @@ test('the limit provider disclosure button does not re-declare the type size', (
   const css = readRendererFile('styles.css');
   assert.doesNotMatch(cssRule(css, '.limit-provider-main'), /font-size/);
   const app = readRendererFile('app.js');
-  assert.match(app, /const hasOptions = Boolean\(accountGroup \|\| settings \|\| connectionDetailKey\);/);
+  assert.match(app, /const hasOptions = Boolean\(accountGroup \|\| settings \|\| connectionDetailKey \|\| usageItems\.length\);/);
   assert.match(app, /\} else \{\n\s*row\.append\(wrap, copy, actions\);/);
 });

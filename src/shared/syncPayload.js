@@ -2,6 +2,7 @@
 
 const { MAX_JSON_BODY_BYTES } = require('./http');
 const { syncLimits } = require('./limits/core');
+const { stripSessionTextFromDeviceRecord } = require('./usage');
 const { isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
@@ -161,20 +162,6 @@ function sessionsWithoutProjectMetadata(sessions) {
   return sanitized;
 }
 
-function sessionsWithoutLocalTitles(sessions) {
-  if (!sessions || typeof sessions !== 'object') return sessions;
-  const sanitized = {};
-  for (const [key, session] of Object.entries(sessions)) {
-    if (!session || typeof session !== 'object') {
-      sanitized[key] = session;
-      continue;
-    }
-    sanitized[key] = { ...session };
-    delete sanitized[key].title;
-  }
-  return sanitized;
-}
-
 function sessionsWithoutReasonix(sessions) {
   if (!sessions || typeof sessions !== 'object') return sessions;
   const sanitized = {};
@@ -191,10 +178,31 @@ function sessionsWithoutReasonix(sessions) {
 
 function buildSyncPayload(summary, {
   omitAllTimeProjects = false,
-  omitHistoryTokenComponents = false
+  omitHistoryTokenComponents = false,
+  omitModelThroughput = false,
+  syncSessionTitles = false,
+  sessionTitleSyncGeneration
 } = {}) {
   if (!summary || typeof summary !== 'object') return summary;
-  const payload = { ...summary, limits: syncLimits(summary.limits) };
+  // allTime session detail is never uploaded. Exclude it before the sanitizer
+  // can clone discarded text or evaluate session/title accessors.
+  const withoutAllTimeSessions = (period) => {
+    if (!period || typeof period !== 'object') return period;
+    return Object.fromEntries(Object.keys(period).filter((key) => key !== 'sessions')
+      .map((key) => [key, period[key]]));
+  };
+  const source = { ...summary, limits: syncLimits(summary.limits) };
+  if (hasOwn(source, 'allTime')) source.allTime = withoutAllTimeSessions(source.allTime);
+  if (source.periods && typeof source.periods === 'object' && hasOwn(source.periods, 'allTime')) {
+    source.periods = { ...source.periods, allTime: withoutAllTimeSessions(source.periods.allTime) };
+  }
+  const payload = stripSessionTextFromDeviceRecord(source, {
+    preserveSessionTitles: syncSessionTitles === true
+  });
+  delete payload.sessionTitleSyncGeneration;
+  if (syncSessionTitles === true && Number.isSafeInteger(sessionTitleSyncGeneration) && sessionTitleSyncGeneration > 0) {
+    payload.sessionTitleSyncGeneration = sessionTitleSyncGeneration;
+  }
   if (summary.history && typeof summary.history === 'object') {
     payload.history = historyForSync(summary.history, summary.periodWindows);
     if (omitHistoryTokenComponents) {
@@ -214,27 +222,26 @@ function buildSyncPayload(summary, {
   delete payload.periodProjectsOmitted;
 
   for (const periodName of ['today', 'month']) {
-    const period = summary[periodName];
+    const period = payload[periodName];
     if (!period || typeof period !== 'object') continue;
     payload[periodName] = { ...period };
     delete payload[periodName].projects;
     if (hasOwn(payload[periodName], 'sessions')) {
       payload[periodName].sessions = sessionsWithoutReasonix(payload[periodName].sessions);
-      // Titles come from local client metadata rather than Tokscale. Keep them
-      // as a widget-only overlay: composeLocalSyncStats() restores this device's
-      // local record for presentation, while the sync payload never carries text.
-      payload[periodName].sessions = sessionsWithoutLocalTitles(payload[periodName].sessions);
       if (!projectsEnabled) payload[periodName].sessions = sessionsWithoutProjectMetadata(payload[periodName].sessions);
     }
   }
 
-  if (summary.allTime && typeof summary.allTime === 'object') {
-    payload.allTime = { ...summary.allTime };
-    delete payload.allTime.sessions;
+  if (payload.allTime && typeof payload.allTime === 'object') {
     if (!projectsEnabled) delete payload.allTime.projects;
     if (omitAllTimeProjects && hasOwn(payload.allTime, 'projects')) {
       delete payload.allTime.projects;
       payload.allTimeProjectsOmitted = true;
+    }
+  }
+  if (omitModelThroughput) {
+    for (const period of ['today', 'month', 'allTime']) {
+      if (payload[period]) delete payload[period].modelThroughput;
     }
   }
   return payload;
@@ -253,6 +260,14 @@ function serializeSyncPayload(summary, options = {}) {
     return { payload, body, bytes: body ? Buffer.byteLength(body, 'utf8') : 0 };
   }
   let body = JSON.stringify(payload);
+  if (Buffer.byteLength(body, 'utf8') > maxBytes
+    && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput)) {
+    // Optional live attribution must never evict aggregate usage or session detail.
+    // Omit the whole map so readers re-baseline rather than infer missing keys as zero.
+    buildOptions.omitModelThroughput = true;
+    payload = buildSyncPayload(summary, buildOptions);
+    body = JSON.stringify(payload);
+  }
   if (Buffer.byteLength(body, 'utf8') > maxBytes && payload.history && typeof payload.history === 'object') {
     // Component detail is additive. Never let it evict an existing project/session
     // payload or turn a previously uploadable History V1 record into a 413.
@@ -285,8 +300,9 @@ function syncPayload(summary, options = {}) {
   return serializeSyncPayload(summary, options).payload;
 }
 
-async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } = {}) {
-  let serialized = serializeSyncPayload(summary);
+async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, syncSessionTitles = false, sessionTitleSyncGeneration } = {}) {
+  const syncOptions = { syncSessionTitles, sessionTitleSyncGeneration };
+  let serialized = serializeSyncPayload(summary, syncOptions);
   if (serialized.payload?.allTimeProjectsOmitted === true && typeof logger === 'function') {
     logger(`all-time project breakdown omitted; payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
   }
@@ -305,8 +321,10 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
   let response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   const retrySerialized = response.status === 413
     ? serializeSyncPayload(summary, {
+        ...syncOptions,
         omitHistoryTokenComponents: true,
-        omitAllTimeProjects: true
+        omitAllTimeProjects: true,
+        omitModelThroughput: true
       })
     : null;
   const canRetryReduced = response.status === 413
@@ -315,7 +333,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
     try { await response.arrayBuffer(); } catch (_) { /* best-effort drain before retry */ }
     serialized = retrySerialized;
     if (typeof logger === 'function') {
-      logger('hub rejected the payload; retrying once without additive History components or all-time projects');
+      logger('hub rejected the payload; retrying once without model timing detail, additive History components or all-time projects');
     }
     response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   }
@@ -324,6 +342,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
 
 module.exports = {
   SYNC_PAYLOAD_BUDGET_BYTES,
+  buildSyncPayload,
   postSyncPayload,
   serializeSyncPayload,
   syncPayload

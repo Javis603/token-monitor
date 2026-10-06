@@ -256,7 +256,47 @@
       },
       {
         "revision": 64,
-        "buildId": "sha256:0d5323af498c1a3c8947e500f2a269de6e2d2e7740fe7ecb75a8cbde282c6af4"
+        "buildId": "sha256:10252c17e59ce9f56628cd91902895895d75a2e11f08b4df88ad056d21ec956c"
+      },
+      {
+        "revision": 65,
+        "buildId": "sha256:1deabed0cf8655c45eb8839ed657ff1f982c6cd4b1e2f5e5c9891e2f9eb2c0f0"
+      },
+      {
+        "revision": 66,
+        "buildId": "sha256:76b26396d9b1c3e1534b4832548085e56dd2f144f5e87ac1aa334ecdc1b43624"
+      },
+      {
+        "revision": 67,
+        "buildId": "sha256:0123b02da54b8f55bd40cca80a66393a02dc9a26124f9da39bddbb33a507ef93"
+      },
+      {
+        "revision": 68,
+        "buildId": "sha256:dc48876d57784ea0d6e7908bda050847558c167e785343aca4ea129eb520d676"
+      },
+      {
+        "revision": 69,
+        "buildId": "sha256:52b0c37e5f6ae7571441b85b06c97a2d2f998c04bfc101eb3b7e8b57a870f0d6"
+      },
+      {
+        "revision": 70,
+        "buildId": "sha256:7eeda67d5ac35547174ebb9d8dc608f8687852f65063ad71ddf9f94a3b0dda3f"
+      },
+      {
+        "revision": 71,
+        "buildId": "sha256:d4d518133984cf0eff80e3d91e15ef84b14715378978e646be90f2cfdd2657a0"
+      },
+      {
+        "revision": 72,
+        "buildId": "sha256:def1356528aba303a32dd706822a1cf566a2e45a39407bf1aa54cce690f14958"
+      },
+      {
+        "revision": 73,
+        "buildId": "sha256:8a286284faa3d9eda68ec806afada17710c557cf87ae45952022f21e1a063a84"
+      },
+      {
+        "revision": 74,
+        "buildId": "sha256:f62baf0c7c0f1a4fdd7c8aea051f54a8afacb03e821a6bc329a837f6c6b61e2f"
       }
     ],
     "node-hub": [
@@ -275,6 +315,10 @@
       {
         "revision": 4,
         "buildId": "sha256:f1db81c0d1ede372aaf74c39514e00d19bee54f064dec77e5554c6434eb6ceb0"
+      },
+      {
+        "revision": 5,
+        "buildId": "sha256:d825a515df8f90735f15682eaae40d039b266b21a0e282667d6f6472987977e8"
       }
     ],
     "cloudflare-worker": [
@@ -297,6 +341,10 @@
       {
         "revision": 5,
         "buildId": "sha256:63d5baedb008de3d80f4da376c8579fb7e7d906fda51e7f5264430adf0597df5"
+      },
+      {
+        "revision": 6,
+        "buildId": "sha256:55a2b202dd01754eb1e8f59fecdfab3bc5fd14e1bbd71ea63f00e36dfb127c81"
       }
     ]
   }

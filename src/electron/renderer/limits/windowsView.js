@@ -37,10 +37,13 @@
 // give three hosts three chances to supply a different one.
 (function exposeLimitWindowsView(root, factory) {
   const node = typeof module === 'object' && module.exports;
-  const api = factory(node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders);
+  const api = factory(
+    node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders,
+    node ? require('../../../shared/limits/usageItems') : root?.TokenMonitorLimitUsageItems
+  );
   if (node) module.exports = api;
   if (root) root.TokenMonitorLimitWindowsView = api;
-})(typeof window !== 'undefined' ? window : globalThis, function createLimitWindowsViewApi(limitProviders) {
+})(typeof window !== 'undefined' ? window : globalThis, function createLimitWindowsViewApi(limitProviders, usageItems) {
   function createLimitWindowsView(deps) {
     const {
       t,
@@ -68,11 +71,14 @@
       colorWithAlpha,
       applyBarScale,
       creditsAmount,
+      creditsCurrency,
       creditsMeterPercent,
       isCreditsWindow,
       spendWindow,
       limitWindowLabel,
       limitWindowText,
+      mimoAccountGroups,
+      mimoProductLabel,
       accountIdentity,
       accountControl,
       codexAccounts,
@@ -219,6 +225,22 @@
     }).format(date);
   }
 
+  // Marks `node` as the row of usage item `id` (see shared/limits/usageItems),
+  // which is what lets the user hide it and what the settings checklist lists.
+  // `label` is the row's name there. An empty id leaves the row untagged —
+  // always drawn, never listed.
+  function tagUsageItem(node, id, label = '') {
+    if (!node) return node;
+    if (id) {
+      node.dataset.usageItem = id;
+      node.dataset.usageItemLabel = label;
+    } else {
+      delete node.dataset.usageItem;
+      delete node.dataset.usageItemLabel;
+    }
+    return node;
+  }
+
   // `detail` optionally replaces the ⓘ tooltip's contents: Claude's reset
   // grants carry a label, the windows they clear, and a usability state, which
   // is more than the bare expiry dates Codex has to work with.
@@ -231,6 +253,8 @@
       : null;
     const item = document.createElement('div');
     item.className = 'limit-window limit-window-wide limit-window-note limit-reset-credits';
+    // The line has no name of its own; the checklist calls it `Resets`.
+    tagUsageItem(item, 'resets', 'Resets');
     const line = document.createElement('div');
     line.className = 'limit-reset-credits-line';
     const value = document.createElement('span');
@@ -414,6 +438,7 @@
     tooltip.setAttribute('popover', 'manual');
 
     const open = () => {
+      if (!tooltip.childElementCount) return;
       tooltipHost.markOpened();
       wrap.classList.add('has-opened');
       if (!wrap.isConnected) return;
@@ -429,6 +454,7 @@
     wrap.addEventListener('focusin', open);
     wrap.addEventListener('pointerleave', close);
     wrap.addEventListener('focusout', close);
+    wrap.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); });
   }
 
   // Entries are rows of cells: `[label, value]`, or `[label, middle, value]` when
@@ -438,6 +464,8 @@
   // `{full: 'text'}` renders one full-width line that wraps in place — a long
   // sentence in a nowrap cell would push the popover past the window edge —
   // and `{separated: true}` draws a divider above it for a second block.
+  // `{caption: true}` marks secondary text; `{heading: true}` marks a section
+  // title whose emphasis is styled by the caller's wrapper.
   // `ariaLabel` overrides the spoken label for callers whose cells don't read
   // as `<name>: <value>` on their own.
   function limitDetailInfoNode(entries, extraClass = '', ariaLabel = '') {
@@ -460,6 +488,13 @@
         .map(([entryLabel, ...rest]) => `${entryLabel}: ${rest.filter(Boolean).join(' ')}`)
         .join(', ')
     );
+    const tooltip = detailTooltipNode(entries, columns);
+    infoWrap.append(info, tooltip);
+    attachLimitDetailTooltip(infoWrap, tooltip);
+    return infoWrap;
+  }
+
+  function detailTooltipNode(entries, columns = 2) {
     const tooltip = document.createElement('span');
     tooltip.className = ['limit-detail-tooltip', columns > 2 ? 'limit-detail-tooltip-triple' : '']
       .filter(Boolean).join(' ');
@@ -470,6 +505,7 @@
         full.className = [
           'limit-detail-tooltip-full',
           entry?.caption === true ? 'is-caption' : '',
+          entry?.heading === true ? 'is-heading' : '',
           entry?.separated === true ? 'is-separated' : ''
         ].filter(Boolean).join(' ');
         full.textContent = String(entry?.full ?? '');
@@ -485,9 +521,46 @@
       }
       tooltip.append(row);
     });
-    infoWrap.append(info, tooltip);
-    attachLimitDetailTooltip(infoWrap, tooltip);
-    return infoWrap;
+    return tooltip;
+  }
+
+  // A gauge or plan label can be the trigger itself; no extra info icon needed.
+  function setDetailTooltip(wrap, entries) {
+    let tooltip = wrap.querySelector('.limit-detail-tooltip');
+    if (!entries?.length) {
+      tooltip?.hidePopover?.();
+      tooltip?.replaceChildren();
+      wrap.classList.remove('limit-detail-tooltip-wrap');
+      wrap.removeAttribute('tabindex');
+      wrap.removeAttribute('aria-label');
+      wrap.style.removeProperty('-webkit-app-region');
+      return;
+    }
+    // The popover replaces whatever native tooltip the element had; do this on
+    // attach only — on detach the caller may have already restored `title` for
+    // its own fallback (the marquee's reduced-motion tooltip, say).
+    wrap.removeAttribute('title');
+    wrap.classList.add('limit-detail-tooltip-wrap');
+    wrap.style.setProperty('-webkit-app-region', 'no-drag');
+    wrap.setAttribute('aria-label', entries.map((entry) => Array.isArray(entry) ? entry.join(': ') : entry.full).join(', '));
+    wrap.tabIndex = 0;
+    // Widen to the triple-column layout when an entry carries a middle cell
+    // (e.g. model name · tokens · share) the same way limitDetailInfoNode does.
+    const columns = entries.reduce(
+      (widest, entry) => Math.max(widest, Array.isArray(entry) ? entry.length : 0),
+      0
+    );
+    const next = detailTooltipNode(entries, columns);
+    if (tooltip) {
+      // Sync only the layout class: is-below is positional state the tooltip
+      // manages itself, and overwriting it mid-hover flips an open popover.
+      tooltip.classList.toggle('limit-detail-tooltip-triple', next.classList.contains('limit-detail-tooltip-triple'));
+      tooltip.replaceChildren(...next.children);
+    } else {
+      tooltip = next;
+      wrap.append(tooltip);
+      attachLimitDetailTooltip(wrap, tooltip);
+    }
   }
 
   function providerSpendNode(balance, provider = null) {
@@ -516,7 +589,7 @@
         Number.isFinite(usage.todayTokens) ? `Today ${brief(usage.todayTokens)}` : '',
         `Month ${brief(usage.totalTokens)}`
       ].filter(Boolean);
-      return limitNoteRowNode({
+      return tagUsageItem(limitNoteRowNode({
         // Row labels on this page are fixed English ('Balance', 'Spend',
         // 'Reset'); the token row mirrors the Spend row's Today · Month shape.
         // Only the tooltip stays localized, matching the third-party rows.
@@ -524,14 +597,14 @@
         summary: summaryParts.join(' · '),
         detailEntries: details,
         ariaParts: details.filter(Array.isArray).map(([label, value]) => `${label} ${value}`)
-      });
+      }), 'spend', 'Tokens');
     }
     const entries = providerSpendEntries(balance);
     if (entries.length === 0) return null;
     const preferredSummary = entries.filter(([label]) => label === 'Today' || label === 'Month');
     const summaryEntries = preferredSummary.length > 0 ? preferredSummary : entries.slice(0, 2);
     const formatted = entries.map(([entryLabel, value]) => [entryLabel, formatBalanceSpendAmount(value, balance)]);
-    return limitNoteRowNode({
+    return tagUsageItem(limitNoteRowNode({
       label: 'Spend',
       summary: summaryEntries
         .map(([label, value]) => `${label} ${formatBalanceSpendAmount(value, balance)}`)
@@ -539,7 +612,7 @@
       // Only worth a tooltip when it would say more than the summary already does.
       detailEntries: entries.length > summaryEntries.length ? formatted : null,
       ariaParts: formatted.map(([entryLabel, value]) => `${entryLabel} ${value}`)
-    });
+    }), 'spend', 'Spend');
   }
 
   function thirdPartySpendNode(provider, quotaWindow) {
@@ -592,7 +665,7 @@
       ...(monthSpend !== null ? [`Month ${formatMoney(monthSpend, currency)}`] : []),
       ...(allTimeSpend !== null ? [`All time ${formatMoney(allTimeSpend, currency)}`] : [])
     ].join(' · ');
-    return limitNoteRowNode({
+    const node = limitNoteRowNode({
       label: summary ? 'Spend' : 'Details',
       summary,
       detailEntries: entries,
@@ -601,6 +674,7 @@
         ...entries.map(([entryLabel, value]) => `${entryLabel} ${value}`)
       ]
     });
+    return tagUsageItem(node, 'spend', summary ? 'Spend' : 'Details');
   }
 
   // One tooltip row per prepaid grant: amount, expiry date, time left, the same
@@ -638,12 +712,12 @@
     const currency = balance?.currency || 'USD';
     const tranches = Array.isArray(balance.tranches) ? balance.tranches : [];
     const grants = claudePrepaidGrantRows(tranches, currency);
-    return limitNoteRowNode({
+    return tagUsageItem(limitNoteRowNode({
       label: 'Balance',
       summary: formatMoney(amount, currency),
       detailEntries: grants.map((grant) => grant.cells),
       ariaParts: [formatMoney(amount, currency), ...grants.map((grant) => grant.aria)]
-    });
+    }), 'credits', 'Balance');
   }
 
   // What a window's headline and sub-line read, from the module the edge dock
@@ -705,12 +779,14 @@
     if (!value) return null;
     const monthSpend = optionalFiniteNumber(spend?.used);
     const spendValue = monthSpend === null ? '' : formatBalanceSpendAmount(monthSpend, spend);
-    return limitNoteRowNode({
-      label: credits.label || 'Credits',
+    const label = credits.label || 'Credits';
+    // The month's spend is part of this row, so one item covers both.
+    return tagUsageItem(limitNoteRowNode({
+      label,
       summary: value,
       detailEntries: spendValue ? [['Month spent', spendValue]] : null,
       ariaParts: [value, ...(spendValue ? [`Month spent ${spendValue}`] : [])]
-    });
+    }), 'credits', label);
   }
 
   function mimoTokenPlanWindowFromBalance(balance) {
@@ -809,16 +885,23 @@
       item.classList.add('limit-window-note');
       item.append(text, reset);
     }
-    return item;
+    // Rows drawn straight from a payload window name their own item; callers
+    // that draw from a synthesized or relabelled window retag the row.
+    return tagUsageItem(item, usageItems.limitUsageItemId(window), name.textContent);
   }
 
-  function renderProviderWindows(provider, color) {
+  // `showAllUsageItems` draws the rows the user hid as well: the settings
+  // checklist is read off that render.
+  function renderProviderWindows(provider, color, options = {}) {
     const windows = document.createElement('div');
     windows.className = 'limit-windows';
     if (provider.provider === 'codex') {
       const session = codexCanonicalWindow(provider, 'session');
       const weekly = codexCanonicalWindow(provider, 'weekly');
       const monthly = codexCanonicalWindow(provider, 'billing');
+      // Each additional pool is a checklist item of its own. An install still
+      // carrying the retired `showCodexAdditionalLimits: false` hides them all
+      // until main carries the switch over (codexAdditionalLimitsMigration.js).
       const additionalWindows = settings()?.showCodexAdditionalLimits === false
         ? []
         : (provider.windows || []).filter((window) => window?.additional === true);
@@ -838,12 +921,10 @@
         windows.append(monthlyNode);
       }
       for (const additional of additionalWindows) {
-        const additionalNode = limitWindowNode(
-          codexAdditionalWindowLabel(additional, additionalWindows),
-          { ...additional, label: '' },
-          color,
-          0.78
-        );
+        const additionalLabel = codexAdditionalWindowLabel(additional, additionalWindows);
+        const additionalNode = limitWindowNode(additionalLabel, { ...additional, label: '' }, color, 0.78);
+        // Drawn from a relabelled copy, so the row is named by the pool itself.
+        tagUsageItem(additionalNode, usageItems.limitUsageItemId(additional), additionalLabel);
         additionalNode.classList.add('limit-window-wide');
         windows.append(additionalNode);
       }
@@ -874,11 +955,10 @@
           groupWindows.className = 'limit-window-group-items';
           for (const entry of group.windows) {
             const opacity = entry.window.kind === 'session' ? 0.95 : 0.78;
-            groupWindows.append(limitWindowNode(
-              entry.windowLabel,
-              { ...entry.window, label: entry.windowLabel },
-              color,
-              opacity
+            groupWindows.append(tagUsageItem(
+              limitWindowNode(entry.windowLabel, { ...entry.window, label: entry.windowLabel }, color, opacity),
+              usageItems.limitUsageItemId(entry.window),
+              `${group.label} · ${entry.windowLabel}`
             ));
           }
           groupNode.append(title, groupWindows);
@@ -932,6 +1012,7 @@
           0.68,
           formatLimitAmount(balanceAmount)
         );
+        tagUsageItem(node, 'credits', providerWindowLabel(provider, balanceWindow, 'Balance'));
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
@@ -952,6 +1033,7 @@
           0.95,
           formatMoney(balanceAmount, currency)
         );
+        tagUsageItem(balanceNode, 'credits', 'Balance');
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(balanceNode);
       }
@@ -1002,6 +1084,7 @@
           0.95,
           balanceValue
         );
+        tagUsageItem(balanceNode, 'credits', balanceLabel);
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(balanceNode);
       } else if (quotaWindow?.showMeter === false && quotaWindow.detail) {
@@ -1015,6 +1098,7 @@
           0.95,
           value
         );
+        tagUsageItem(balanceNode, 'credits', balanceLabel);
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(balanceNode);
       }
@@ -1045,6 +1129,7 @@
           formatMoney(balance.amount, currency),
           expiringAmount
         );
+        tagUsageItem(balanceNode, 'credits', 'Balance');
         balanceNode.classList.add('limit-window-wide');
         if (!boundaryAt) balanceNode.classList.add('limit-window-no-reset');
         windows.append(balanceNode);
@@ -1054,35 +1139,54 @@
       }
     } else if (provider.provider === 'mimo') {
       windows.classList.add('limit-windows-mimo');
-      const balance = provider.balance || null;
-      const tokenPlan = windowForKind(provider, 'billing') || mimoTokenPlanWindowFromBalance(balance);
-      if (tokenPlan) {
-        const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
+      // Token Plan and membership quotas reuse the shared labels and wide rows.
+      const quotaWindows = (provider.windows || []).filter((window) => !isCreditsWindow(window));
+      for (const quotaWindow of quotaWindows) {
+        const node = limitWindowNode(providerWindowLabel(provider, quotaWindow), quotaWindow, color, 0.68);
         node.classList.add('limit-window-wide');
         windows.append(node);
-      } else if (balance?.planStatus === 'expired') {
-        const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
-        node.classList.add('limit-window-wide', 'limit-window-no-reset');
-        windows.append(node);
       }
-      const amount = optionalFiniteNumber(balance?.amount);
+      const balance = provider.balance || null;
+      // Older Console records may carry Token Plan data only in balance.
+      // Credits windows are money, so they must not suppress this fallback.
+      if (!quotaWindows.some((window) => String(window?.label || '').trim())) {
+        const tokenPlan = mimoTokenPlanWindowFromBalance(balance);
+        if (tokenPlan) {
+          const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
+          node.classList.add('limit-window-wide');
+          windows.append(node);
+        } else if (balance?.planStatus === 'expired') {
+          const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
+          tagUsageItem(node, usageItems.limitUsageItemId({ kind: 'billing', label: 'Token Plan' }), 'Token Plan');
+          node.classList.add('limit-window-wide', 'limit-window-no-reset');
+          windows.append(node);
+        }
+      }
+      const creditsWindow = (provider.windows || []).find(isCreditsWindow) || null;
+      const amount = creditsAmount(provider, creditsWindow);
+      const currency = creditsCurrency(provider, creditsWindow);
       const giftBalance = optionalFiniteNumber(balance?.giftBalance);
       const cashBalance = optionalFiniteNumber(balance?.cashBalance);
       if (amount !== null || giftBalance !== null || cashBalance !== null) {
         const detailParts = [];
-        if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, balance.currency)}`);
-        if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, balance.currency)}`);
-        const balanceText = formatMoney(amount, balance.currency) || '—';
+        if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, currency)}`);
+        if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, currency)}`);
+        const balanceText = formatMoney(amount, currency) || '—';
+        // Reuse the shared display-only balance meter; do not put it on the wire.
+        const meterPercent = creditsMeterPercent(provider, creditsWindow);
         const balanceNode = limitWindowNode(
           'Balance',
-          { showMeter: false },
+          meterPercent === null ? { showMeter: false } : { remainingPercent: meterPercent },
           color,
           0.68,
           balanceText,
           detailParts.join(' · ')
         );
+        tagUsageItem(balanceNode, 'credits', 'Balance');
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(balanceNode);
+        const spendNode = providerSpendNode(balance);
+        if (spendNode) windows.append(spendNode);
       }
     } else if (provider.provider === 'grok') {
       // Grok exposes a single Monthly billing window (no session/weekly). Render it
@@ -1172,6 +1276,7 @@
           0.95,
           formatMoney(balanceWindow.remaining, balanceWindow.currency)
         );
+        tagUsageItem(balanceNode, 'credits', 'Balance');
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(balanceNode);
         const spendNode = provider.balance && providerSpendNode(provider.balance);
@@ -1200,6 +1305,51 @@
       ].filter(Boolean);
       if (quotaNodes.length === 1) quotaNodes[0].classList.add('limit-window-wide');
       windows.append(...quotaNodes);
+      if (balanceWindow) {
+        const amount = creditsAmount(provider, balanceWindow);
+        if (amount !== null) {
+          const balanceNode = limitWindowNode(
+            providerWindowLabel(provider, balanceWindow, 'Extra usage balance'),
+            { ...balanceWindow, showMeter: false },
+            color,
+            0.68,
+            formatMoney(amount, balanceWindow.currency || provider.balance?.currency)
+          );
+          balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
+          windows.append(balanceNode);
+        }
+      }
+    } else if (provider.provider === 'factory') {
+      // Token-rate-limit accounts carry a Standard pool and, once it has been
+      // used, a Core pool marked `additional` — 5-hour, weekly and monthly
+      // each — plus the extra-usage balance as a credits window; legacy
+      // accounts carry Standard/Premium billing windows instead. The default
+      // branch draws session + weekly only, dropping every monthly row and the
+      // balance. normalizeProvider() sorts by kind, which interleaves the two
+      // pools, so each pool renders as its own group: rate windows pair up,
+      // billing windows span the row.
+      const balanceWindow = (provider.windows || []).find(isCreditsWindow) || null;
+      const quotaWindows = (provider.windows || []).filter((window) => window !== balanceWindow);
+      for (const additional of [false, true]) {
+        const pool = quotaWindows.filter((window) => (window?.additional === true) === additional);
+        const rateNodes = pool
+          .filter((window) => window.kind !== 'billing')
+          .map((window) => limitWindowNode(
+            providerWindowLabel(provider, window),
+            window,
+            color,
+            window.kind === 'session' ? 0.95 : 0.68
+          ));
+        if (rateNodes.length % 2 === 1) rateNodes.at(-1).classList.add('limit-window-wide');
+        const billingNodes = pool
+          .filter((window) => window.kind === 'billing')
+          .map((window) => {
+            const node = limitWindowNode(providerWindowLabel(provider, window), window, color, 0.5);
+            node.classList.add('limit-window-wide');
+            return node;
+          });
+        windows.append(...rateNodes, ...billingNodes);
+      }
       if (balanceWindow) {
         const amount = creditsAmount(provider, balanceWindow);
         if (amount !== null) {
@@ -1270,6 +1420,7 @@
           0.95,
           value
         );
+        tagUsageItem(node, usageItems.limitUsageItemId(credits), displayWindow.label);
         node.classList.add('limit-window-wide');
         if (!displayWindow.resetsAt && !displayWindow.resetDescription) {
           node.classList.add('limit-window-no-reset');
@@ -1335,11 +1486,10 @@
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
-    } else if (provider.provider === 'alibaba') {
-      // Team returns one credit pool; Personal/Solo returns rolling 5-hour and
-      // weekly windows. Both are the same provider, so the shape decides the
-      // layout rather than the configured variant — a device syncing another
-      // machine's row has no access to that setting.
+    } else if (provider.provider === 'alibaba' || provider.provider === 'stepfun') {
+      // Alibaba Team / StepFun Token Plan return one credit window; their
+      // rolling plans return 5-hour and weekly windows. The payload shape
+      // decides the layout, including on a device receiving a synced row.
       const billing = windowForKind(provider, 'billing');
       const session = windowForKind(provider, 'session');
       const weekly = windowForKind(provider, 'weekly');
@@ -1382,6 +1532,7 @@
       // set, "$2.35 spent" without one. Absent entirely when credits are off.
       const usageCredits = spendWindow(provider);
       if (usageCredits) {
+        // Older hubs send this window without a metric; it is the spend row either way.
         const node = limitWindowNode(
           'Usage credits',
           usageCredits,
@@ -1389,6 +1540,7 @@
           0.5,
           providerWindowText(provider, usageCredits).value
         );
+        tagUsageItem(node, 'spend', 'Usage credits');
         node.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(node);
       }
@@ -1435,7 +1587,66 @@
       if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
       if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
     }
+    if (!options.showAllUsageItems) {
+      hideUsageItems(windows, usageItems.hiddenUsageItemSet(settings()?.limitProviderHiddenItems, provider?.provider));
+    }
     return windows;
+  }
+
+  // Removes the rows of hidden items. Each branch above pairs its rows for a
+  // full set, so a row whose partner was hidden would sit in a half-empty grid
+  // row; the rows left behind are re-paired instead.
+  function hideUsageItems(container, hidden) {
+    if (hidden.size === 0) return;
+    let removed = false;
+    for (const child of [...container.children]) {
+      if (child.dataset?.usageItem && hidden.has(child.dataset.usageItem)) {
+        child.remove();
+        removed = true;
+      } else if (child.classList.contains('limit-window-group')) {
+        const items = [...child.children].find((node) => node.classList.contains('limit-window-group-items'));
+        if (!items) continue;
+        hideUsageItems(items, hidden);
+        if (items.children.length === 0) {
+          child.remove();
+          removed = true;
+        }
+      }
+    }
+    if (removed) repairWindowPairs(container);
+  }
+
+  // A run of half-width rows with an odd count leaves its last row alone on a
+  // grid row, so that row spans it.
+  function repairWindowPairs(container) {
+    let run = [];
+    const closeRun = () => {
+      if (run.length % 2 === 1) run.at(-1).classList.add('limit-window-wide');
+      run = [];
+    };
+    for (const child of container.children) {
+      if (child.classList.contains('limit-window') && !child.classList.contains('limit-window-wide')) run.push(child);
+      else closeRun();
+    }
+    closeRun();
+  }
+
+  // The usage items `records` (one provider's accounts) draw, in card order,
+  // each once: what the settings checklist offers.
+  function limitProviderUsageItems(records, color = '') {
+    const items = new Map();
+    const collect = (container) => {
+      for (const child of container.children) {
+        const id = child.dataset?.usageItem;
+        if (id && !items.has(id)) items.set(id, child.dataset.usageItemLabel || '');
+        if (child.classList.contains('limit-window-group')) collect(child);
+        else if (child.classList.contains('limit-window-group-items')) collect(child);
+      }
+    };
+    for (const record of records || []) {
+      if (record) collect(renderProviderWindows(record, color, { showAllUsageItems: true }));
+    }
+    return [...items].map(([id, label]) => ({ id, label }));
   }
 
   // Every limits surface (the limits panel and the Home cards) resolves account
@@ -1448,7 +1659,8 @@
     opencode: opencodeAccountTitle,
     openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
     thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
-    volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers)
+    volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers),
+    mimo: (provider, index, providers) => mimoAccountTitle(provider, index, providers)
   };
 
   // Fallback names for `provider.source`, used when the provider has no override
@@ -1486,14 +1698,35 @@
       if (sourceDevice) parts.push(sourceDevice);
       return `${freshness.text}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
     }
-    return limitStatusLabel(provider.status, false);
+    return limitStatusLabel(provider?.status);
   }
 
   function limitProviderPlan(provider) {
-    if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
-    const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
+    if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status);
+    const mimoProduct = provider?.provider === 'mimo' ? mimoProductLabel(provider) : '';
+    if (mimoProduct) {
+      const plan = String(provider?.planLabel || '').trim();
+      // Current MiMo rows keep the product in accountLabel and the plan in
+      // planLabel. Falling back to accountLabel would repeat the product in the
+      // plan cell when the app deliberately has no plan name. Legacy rows take
+      // the generic path below.
+      return plan ? presentationApi.limitProviderPlanDisplayLabel(provider, plan) : '';
+    }
+    const plan = String(provider?.planLabel || '').trim();
+    let legacyLabel = String(provider?.accountLabel || '').trim();
+    if (provider?.provider === 'cursor' && !plan) {
+      // Cursor stores its email identity in accountLabel when membership is
+      // unknown. It is never a plan, even when email masking is disabled.
+      const email = String(provider?.accountEmail || '').trim();
+      if ((email && legacyLabel.toLowerCase() === email.toLowerCase()) || /^[^\s@]+@[^\s@]+$/.test(legacyLabel)) legacyLabel = '';
+    }
+    const label = plan || legacyLabel;
     if (label) return presentationApi.limitProviderPlanDisplayLabel(provider, label);
-    return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
+    return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status) : '';
+  }
+
+  function limitPlanText(provider, options = {}) {
+    return options.planText ?? limitProviderPlan(provider);
   }
 
   function renderLimitProviderMark(id, color) {
@@ -1517,9 +1750,15 @@
     const name = document.createElement('div');
     name.className = 'limit-name';
     if (options.showIcon !== false) name.append(renderLimitProviderMark(options.markId || id, color));
-    const title = document.createElement('span');
-    title.className = 'limit-name-title';
-    title.textContent = options.title || label;
+    // A row that names nothing renders without the title line at all — its meta
+    // line ("Updated · source") becomes the row's first text — instead of
+    // leaving a blank heading behind.
+    const titleText = options.title || label;
+    const title = titleText ? document.createElement('span') : null;
+    if (title) {
+      title.className = 'limit-name-title';
+      title.textContent = titleText;
+    }
     const provenance = presentationApi.limitProviderProvenance(provider, provenanceContext());
     // The ✓ marks the account THIS device's Codex is signed into
     // (state.codexActiveAccount, derived locally by codexActiveAccountFromStats).
@@ -1529,7 +1768,7 @@
     // which would move the ✓ onto the wrong one.
     const activeCodexAccount = options.showActiveBadge && codexAccounts.matchesActive(provider);
     const switchAccount = options.allowSystemSwitch && !activeCodexAccount ? codexAccounts.switchTarget(provider) : null;
-    name.append(accountControl.render({
+    const control = accountControl.render({
       titleNode: title,
       active: Boolean(activeCodexAccount),
       switchAccount: codexAccounts.canSwitchSystemAccount() ? switchAccount : null,
@@ -1539,7 +1778,10 @@
       // entries carry — so the same control named the account on one surface and
       // fell back to the unnamed placeholder on the other.
       accountLabel: options.accountLabel || ''
-    }));
+    });
+    // A named row hands the title through the control (which returns it unchanged
+    // when there is nothing to switch); an unnamed row appends nothing.
+    if (control) name.append(control);
     titleBlock.append(name);
     // The multi-account group header has no quota of its own, and its accounts can
     // update at different times (different devices too), so it omits the meta line
@@ -1558,7 +1800,7 @@
     }
     const plan = document.createElement('div');
     plan.className = 'limit-plan';
-    plan.textContent = options.planText ?? limitProviderPlan(provider);
+    plan.textContent = limitPlanText(provider, options);
     // A record binds to one account, so the provider-wide rollup belongs on the
     // row that stands for the provider as a whole — the header of a group, or a
     // provider's single row — and not on each member of a group, which would
@@ -1643,45 +1885,47 @@
   function codexResetForecastTooltip(forecast) {
     const entries = [];
     const disclaimer = t('limits.codexResetForecast.disclaimer');
-    const resetType = codexResetForecastType(
-      forecast?.status === 'scheduled' ? forecast?.scheduledResetType : forecast?.latestResetType
-    );
-    if (resetType) {
-      entries.push([t('limits.codexResetForecast.resetType'), resetType]);
+    const isScheduled = forecast?.status === 'scheduled';
+    const isActiveForecast = forecast?.status === 'active' && !codexResetForecastExpired(forecast);
+    if (isScheduled) {
+      const resetType = codexResetForecastType(forecast.scheduledResetType);
+      entries.push({
+        full: [t('limits.codexResetForecast.scheduled'), resetType].filter(Boolean).join(' · '),
+        heading: true
+      });
+      const scheduledFor = codexResetForecastDate(forecast.scheduledFor);
+      const scheduledIn = codexResetForecastTimeUntil(forecast.scheduledFor);
+      if (scheduledFor) {
+        entries.push({ full: [scheduledFor, scheduledIn].filter(Boolean).join(' · ') });
+      }
+    } else if (isActiveForecast) {
+      entries.push({ full: t('limits.codexResetForecast.signal'), heading: true });
+      const expiresAt = codexResetForecastDate(forecast.expiresAt);
+      const expiresIn = codexResetForecastTimeUntil(forecast.expiresAt);
+      if (expiresAt) {
+        entries.push({
+          full: `${t('limits.codexResetForecast.expiresLabel')} ${[expiresAt, expiresIn].filter(Boolean).join(' · ')}`
+        });
+      }
     }
-    const scheduledFor = codexResetForecastDate(forecast?.scheduledFor);
-    const scheduledIn = codexResetForecastTimeUntil(forecast?.scheduledFor);
-    if (scheduledFor) {
-      entries.push([
-        t('limits.codexResetForecast.scheduledFor'),
-        [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
-      ]);
+    if (isScheduled || isActiveForecast) {
+      const sourceObservedAt = isScheduled ? forecast.scheduledAnnouncedAt : forecast.observedAt;
+      const source = [
+        codexResetForecastSourceAuthor(forecast.sourceAuthor),
+        codexResetForecastAge(sourceObservedAt)
+      ].filter(Boolean).join(' · ');
+      if (source) entries.push({ full: source, caption: true });
     }
     const latestReset = codexResetForecastDate(forecast?.latestResetAt);
-    if (latestReset) {
-      const age = codexResetForecastAge(forecast.latestResetAt);
-      entries.push([t('limits.codexResetForecast.lastReset'), [latestReset, age].filter(Boolean).join(' · ')]);
-    }
-    const sourceObservedAt = forecast?.status === 'scheduled'
-      ? forecast?.scheduledAnnouncedAt
-      : forecast?.observedAt;
-    const source = [
-      codexResetForecastSourceAuthor(forecast?.sourceAuthor),
-      codexResetForecastAge(sourceObservedAt)
-    ].filter(Boolean).join(' · ');
-    if (source) {
-      const sourceLabel = forecast?.status === 'scheduled'
-        ? 'limits.codexResetForecast.sourceAnnouncement'
-        : 'limits.codexResetForecast.sourceSignal';
-      entries.push([t(sourceLabel), source]);
-    }
-    const expiresAt = codexResetForecastDate(forecast?.expiresAt);
-    const expiresIn = codexResetForecastTimeUntil(forecast?.expiresAt);
-    if (expiresAt) {
-      entries.push([
-        t('limits.codexResetForecast.expiresLabel'),
-        [expiresAt, expiresIn].filter(Boolean).join(' · ')
-      ]);
+    const latestResetType = codexResetForecastType(forecast?.latestResetType);
+    if (latestReset || latestResetType) {
+      const age = latestReset ? codexResetForecastAge(forecast.latestResetAt) : '';
+      entries.push({
+        full: [t('limits.codexResetForecast.lastReset'), age].filter(Boolean).join(' · '),
+        heading: true,
+        separated: entries.length > 0
+      });
+      entries.push({ full: [latestResetType, latestReset].filter(Boolean).join(' · ') });
     }
     if (forecast?.error && forecast.errorKind !== 'invalid-response') {
       entries.push([
@@ -1697,7 +1941,7 @@
     const info = limitDetailInfoNode(
       entries,
       'codex-reset-forecast-info-wrap',
-      [...entries.map(([label, value]) => `${label}: ${value}`), disclaimer].join(', ')
+      [...entries.map((entry) => Array.isArray(entry) ? `${entry[0]}: ${entry[1]}` : entry.full), disclaimer].join(', ')
     );
     const tooltip = info.querySelector('.limit-detail-tooltip');
     if (tooltip) {
@@ -1847,10 +2091,10 @@
     opencode: (provider, color, { grouped }) => ({
       options: {
         // A profile name that is neither Go nor Zen predates accountName, and it
-        // is the only label the row has — repeating it in the plan cell says
-        // nothing. Only a group row has a sibling whose plan cell it could be
-        // mistaken for.
-        ...(grouped && legacyOpencodeProfileLabel(provider) ? { planText: '' } : {}),
+        // is repeated by the legacy plan fallback. Hide that duplicate only
+        // for healthy/stale rows with no explicit plan. Recovery status and
+        // known Go/Zen plans must survive.
+        ...(grouped && (provider?.status === 'ok' || provider?.stale) && !String(provider?.planLabel || '').trim() && legacyOpencodeProfileLabel(provider) ? { planText: '' } : {}),
         ...(grouped ? { showIcon: false } : {})
       }
     }),
@@ -1865,7 +2109,16 @@
     // only repeats it. Standing alone the row has nothing else to be recognised
     // by and keeps its own.
     openrouter: (provider, color, { grouped }) => ({
-      options: grouped ? { showIcon: false } : {}
+      options: grouped ? {
+        showIcon: false,
+        // A credits-only response has no key plan; accountLabel then repeats
+        // the profile title. Keep explicit plans and recovery status visible.
+        ...((provider?.status === 'ok' || provider?.stale)
+          && !String(provider?.planLabel || '').trim()
+          && String(provider?.accountName || '').trim()
+          && String(provider?.accountName || '').trim() === String(provider?.accountLabel || '').trim()
+          ? { planText: '' } : {})
+      } : {}
     }),
     antigravity: (provider, color, { grouped }) => ({
       options: grouped ? { showIcon: false } : {}
@@ -1905,10 +2158,18 @@
     return { color: resolved.color || color, options: resolved.options || {} };
   }
 
+  // Compact surfaces keep the same plan-cell policy as the full account rows.
+  function limitAccountPlan(provider, { grouped = false } = {}) {
+    const policy = limitAccountRowPolicy(provider?.provider, provider, '', { grouped, sharedFamily: null });
+    return limitPlanText(provider, policy.options);
+  }
+
   // A provider's row standing on its own. Both surfaces call this rather than
   // renderLimitProviderRow, so the policy cannot be skipped by a caller that did
   // not know there was one to pass.
   function renderLimitProviderSolo(id, label, provider, color) {
+    // Keep the same provider frame when only one MiMo product remains.
+    if (id === 'mimo' && mimoProductLabel(provider)) return renderMimoProviderGroup(label, [provider], color);
     const policy = limitAccountRowPolicy(id, provider, color, { grouped: false, sharedFamily: null });
     // Standing alone, the row is titled with the provider's name, so the account
     // name is resolved here instead: the switch control still has to say which
@@ -1979,12 +2240,31 @@
     return accountName || `Account ${index + 1}`;
   }
 
-  // Both Volcengine plans sit on one account, so the row title carries the plan
-  // name from accountLabel. accountTitleLabel reads accountName/accountEmail,
-  // neither of which these rows have, so without this they would all render as
-  // "Account N".
+  // Volcengine carries the plan in accountLabel; without it, both rows would
+  // be named "Account N".
   function volcenginePlanAccountTitle(provider, index, providers) {
     return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
+  }
+
+  function mimoAccountTitle(provider, index, providers) {
+    const product = mimoProductLabel(provider);
+    if (product) {
+      const identity = accountIdentity.accountEmailLabel(provider, providers || [provider], {
+        maskEmail: limitAccountEmailsMasked(),
+        suffix: String(provider?.accountName || '').trim()
+      }) || String(provider?.accountName || '').trim();
+      return [identity, product].filter(Boolean).join(' · ') || `Account ${index + 1}`;
+    }
+    // Compatibility for rows from versions that put the product in accountName
+    // and the plan in accountLabel.
+    const peers = (providers || [provider]).map((row) => ({
+      ...row,
+      accountName: String(row?.accountName || row?.accountLabel || '').trim()
+    }));
+    return accountIdentity.accountTitleLabel(peers[index], peers, {
+      maskEmail: limitAccountEmailsMasked(),
+      index
+    }) || `Account ${index + 1}`;
   }
 
   function limitAccountTitle(id, provider, index, providerEntries = [provider]) {
@@ -1995,7 +2275,7 @@
   }
 
   // Volcengine's two rows are one account's two subscriptions, so its header
-  // counts plans; every other group counts accounts.
+  // counts plans; every other ordinary group counts accounts.
   const GROUP_COUNT_KEYS = { volcengine: 'settings.volcengine.nPlans' };
 
   // "4 accounts" on the group header. A caller that has a better phrase passes
@@ -2008,19 +2288,11 @@
     return text === key ? '' : text;
   }
 
-  // A provider's several accounts, as the page's group header plus one row each.
-  // No options: what the header wears and what each row says is the provider's
-  // policy above, so a second surface cannot render the same group differently by
-  // passing a different set.
-  function renderLimitProviderGroup(providerId, label, providers, color) {
-    const policy = LIMIT_GROUP_POLICIES[providerId] || (() => ({}));
-    const { markId, sharedFamily, forecastOnGroup } = policy(providers);
+  function renderLimitProviderGroupFrame(providerId, label, providers, color, { count, markId } = {}) {
     const row = document.createElement('div');
     row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-    // `groupAccounts` is the accounts this header stands for. The head is drawn
-    // from a synthetic record, so without it a subscription resolved against the
-    // wider universe could summarise an account the row does not draw — the
-    // card's composer can hide one from the group it is still part of.
+    // The header stands for the rows it draws, including when a card hides
+    // another row of this provider. Subscription rollups use that exact set.
     const groupProvider = {
       provider: providerId,
       status: 'ok',
@@ -2028,13 +2300,73 @@
       accountGroup: true,
       groupAccounts: providers
     };
-    const head = renderLimitProviderHead(providerId, label, groupProvider, color, {
-      planText: limitGroupCountText(providerId, providers.length),
+    row.append(renderLimitProviderHead(providerId, label, groupProvider, color, {
+      planText: count ? limitGroupCountText(providerId, count) : '',
       hideMeta: true,
       ...(markId ? { markId } : {})
+    }));
+    const list = document.createElement('div');
+    list.className = 'limit-account-list';
+    row.append(list);
+    return { row, list, groupProvider };
+  }
+
+  function appendMimoAccountProducts(list, providers, color) {
+    providers.forEach((provider, index) => {
+      const policy = limitAccountRowPolicy('mimo', provider, color, { grouped: true, sharedFamily: null });
+      // Readings and plan metadata identify healthy products. A status-only row
+      // needs its product title; older records fall back to the account title.
+      const statusOnly = Boolean(provider.status) && provider.status !== 'ok' && !provider.stale;
+      const title = statusOnly
+        ? (mimoProductLabel(provider) || limitAccountTitle('mimo', provider, index, providers))
+        : '';
+      list.append(renderLimitProviderRow('mimo', title, provider, policy.color, {
+        accountRow: true,
+        ...policy.options
+      }));
     });
-    const accountList = document.createElement('div');
-    accountList.className = 'limit-account-list';
+  }
+
+  function renderMimoProviderGroup(label, providers, color) {
+    const groups = mimoAccountGroups(providers);
+    const representatives = groups.map((group) => group.find((row) => row.accountEmail) || group[0]);
+    const accountTitle = (index) => limitAccountDefaultTitle(representatives[index], index, representatives);
+    const oneAccount = groups.length === 1;
+    const { row, list } = renderLimitProviderGroupFrame(
+      'mimo', label, providers, color, { count: oneAccount ? 0 : groups.length }
+    );
+    if (oneAccount) {
+      appendMimoAccountProducts(list, groups[0], color);
+    } else {
+      groups.forEach((group, index) => {
+        const account = document.createElement('div');
+        account.className = 'limit-row limit-account-row';
+        const products = document.createElement('div');
+        products.className = 'limit-account-list';
+        appendMimoAccountProducts(products, group, color);
+        account.append(renderLimitProviderHead('mimo', accountTitle(index), representatives[index], color, {
+          showIcon: false,
+          accountRow: true,
+          planText: '',
+          hideMeta: true
+        }), products);
+        list.append(account);
+      });
+    }
+    return row;
+  }
+
+  // A provider's several accounts, as the page's group header plus one row each.
+  // No options: what the header wears and what each row says is the provider's
+  // policy above, so a second surface cannot render the same group differently by
+  // passing a different set.
+  function renderLimitProviderGroup(providerId, label, providers, color) {
+    if (providerId === 'mimo') return renderMimoProviderGroup(label, providers, color);
+    const policy = LIMIT_GROUP_POLICIES[providerId] || (() => ({}));
+    const { markId, sharedFamily, forecastOnGroup } = policy(providers);
+    const { row, list: accountList } = renderLimitProviderGroupFrame(
+      providerId, label, providers, color, { count: providers.length, markId }
+    );
     providers.forEach((provider, index) => {
       const account = limitAccountRowPolicy(providerId, provider, color, { grouped: true, sharedFamily });
       // The row's own title is also the name the switch control offers, so the
@@ -2049,7 +2381,6 @@
         { accountRow: true, accountLabel: title, ...account.options }
       ));
     });
-    row.append(head, accountList);
     if (forecastOnGroup) appendCodexResetForecast(row);
     return row;
   }
@@ -2379,7 +2710,7 @@
     return subscriptionCardNode(subscriptionTooltipRows(subscription, provider, includeRollup));
   }
 
-  // Wraps the plan label so hovering it reveals the subscription card. Reuses the
+  // Wraps a visible plan label so hovering it reveals the subscription card. Reuses the
   // limit-detail tooltip plumbing, which already holds off the list re-render
   // while the pointer is inside.
   //
@@ -2387,6 +2718,7 @@
   // nothing, so having recorded one IS the switch. A separate toggle only made it
   // possible to enter the data and see nothing happen.
   function decoratePlanWithSubscription(plan, provider, includeRollup) {
+    if (!plan.textContent) return plan;
     const card = subscriptionCardForRow(provider, includeRollup);
     if (!card) return plan;
 
@@ -2407,8 +2739,10 @@
   return {
     antigravityQuotaGroups,
     attachLimitDetailTooltip,
+    setDetailTooltip,
     codexResetForecastExpired,
     limitAccountTitle,
+    limitAccountPlan,
     limitProviderMeta,
     limitProviderPlan,
     limitStatusLabel,
@@ -2434,6 +2768,7 @@
     providerWindowLabel,
     providerWindowText,
     renderProviderWindows,
+    limitProviderUsageItems,
     thirdPartyQuotaWindow,
     thirdPartySpendNode,
     windowForKind,

@@ -12,8 +12,4 @@ function tokscalePackageNameForPlatform(platform = process.platform, arch = proc
   return null;
 }
 
-function tokscalePlatformKey(platform = process.platform, arch = process.arch) {
-  return `${platform}-${arch}`;
-}
-
-module.exports = { tokscalePackageNameForPlatform, tokscalePlatformKey };
+module.exports = { tokscalePackageNameForPlatform };

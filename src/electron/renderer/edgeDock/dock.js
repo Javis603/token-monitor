@@ -22,8 +22,10 @@ const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const limitPresentationApi = window.TokenMonitorLimitProviderPresentation;
 const limitWindowLabels = window.TokenMonitorLimitWindowLabels;
+const { mimoAccountGroups, mimoProductLabel } = limitWindowLabels;
 const limitWindowTextApi = window.TokenMonitorLimitWindowText;
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
+const limitResetAnimatorApi = window.TokenMonitorLimitResetAnimator;
 const limitWindowsViewApi = window.TokenMonitorLimitWindowsView;
 const subscriptionDisplayApi = window.TokenMonitorSubscriptionDisplay;
 const subscriptionTextApi = window.TokenMonitorSubscriptionText;
@@ -39,6 +41,9 @@ const { CLIENT_LABELS } = window.TokenMonitorClientCatalog;
 // at paint time rather than frozen at push time.
 const sessionLive = window.TokenMonitorSessionLive;
 const sessionRowsApi = window.TokenMonitorSessionRows;
+const overflowText = window.TokenMonitorOverflowText.create({
+  document, window, prefersReducedMotion
+});
 const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
   spin: 'edge-dock-session-spin',
   check: 'edge-dock-session-check',
@@ -145,10 +150,9 @@ function applyAppearance(payload) {
   docEl.classList.toggle('edge-dock-liquid-glass', payload?.glass === true && payload?.liquidGlass === true);
   docEl.classList.toggle('is-windows', payload?.platform === 'win32');
   docEl.classList.toggle('is-mac-legacy', isMacLegacy(payload));
-  docEl.classList.toggle(
-    'edge-dock-reduced-motion',
-    motionPreferenceApi.shouldReduceMotion(appearance.reduceMotion, reducedMotionMedia?.matches)
-  );
+  const reduceMotion = motionPreferenceApi.shouldReduceMotion(appearance.reduceMotion, reducedMotionMedia?.matches);
+  docEl.classList.toggle('edge-dock-reduced-motion', reduceMotion);
+  if (reduceMotion) settleDockMotions();
 
   state.locale = i18n.resolveLocale(appearance.language, navigator.languages);
   docEl.lang = state.locale;
@@ -191,7 +195,6 @@ function readableColor(color) {
 // The provider's own colour, as the Limits view resolves it.
 function limitProviderColor(id) {
   if (id === 'factory') return clientColors.droid;
-  if (id === 'mimo') return clientColors.xiaomi;
   return clientColors[id] || clientColors.default;
 }
 
@@ -239,6 +242,10 @@ function appearance() {
   return state.payload?.appearance || {};
 }
 
+function prefersReducedMotion() {
+  return motionPreferenceApi.shouldReduceMotion(appearance().reduceMotion, reducedMotionMedia?.matches);
+}
+
 function formatTokens(value) {
   const units = compactTokenApi.effectiveCompactTokenUnits(appearance().compactTokenUnits, state.locale);
   return compactTokenApi.formatCompactTokens(value, units, state.locale, { style: 'tray' });
@@ -275,11 +282,6 @@ function displaySeverity(remainingPercent) {
   const severity = presentation.remainingSeverity(remainingPercent);
   if (severity === 'unknown' || appearance().edgeDockWarnColors === true) return severity;
   return 'ok';
-}
-
-function percentText(remainingPercent) {
-  const shown = presentation.displayPercent(remainingPercent, appearance().showLimitUsed === true);
-  return shown === null ? '--' : `${Math.round(shown)}%`;
 }
 
 // The Codex account the card can switch to, resolved from the cell projection
@@ -383,10 +385,13 @@ const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
   colorWithAlpha,
   applyBarScale,
   creditsAmount: balanceDisplay.creditsAmount,
+  creditsCurrency: balanceDisplay.creditsCurrency,
   creditsMeterPercent: balanceDisplay.creditsMeterPercent,
   isCreditsWindow: balanceDisplay.isCreditsWindow,
   spendWindow: balanceDisplay.spendWindow,
   limitWindowLabel: limitWindowLabels.limitWindowLabel,
+  mimoAccountGroups,
+  mimoProductLabel,
   limitWindowText: limitWindowTextApi.limitWindowText,
   accountIdentity: accountIdentityApi,
   accountControl: codexAccountControl,
@@ -521,14 +526,24 @@ function providerCellNode(cell) {
   const running = runningSessionSummary(cell.sessions).count;
   if (running > 0) node.dataset.running = 'yes';
   const color = providerColor(cell.provider);
+  const shown = presentation.displayPercent(cell.remainingPercent, appearance().showLimitUsed === true);
   const value = el('span', 'edge-dock-value');
   if (cell.credits && cell.credits.amount !== null && cell.credits.amount !== undefined) {
     value.textContent = balanceDisplay.formatCompactMoney(
       cell.credits.amount, cell.credits.currency, appearance().compactTokenUnits, state.locale
     );
   } else {
-    value.textContent = percentText(cell.remainingPercent);
+    value.textContent = shown === null ? '--' : `${Math.round(shown)}%`;
   }
+  // What a refill motion compares against to recognise a real reset on this
+  // cell: the headline's account and window identities ride the key, so a
+  // headline that swapped to another account or pool is never animated as one.
+  node.dataset.ringMotionKey = `${cell.id}\0${cell.headlineAccount || ''}\0${cell.headlineWindowKey || ''}`;
+  node.dataset.ringRemaining = cell.remainingPercent === null || cell.remainingPercent === undefined
+    ? ''
+    : String(cell.remainingPercent);
+  node.dataset.ringDisplay = cell.credits || shown === null ? '' : String(shown);
+  node.dataset.ringResetAt = cell.resetsAt || '';
   // Colour answers "how close is the closest quota to empty"; the figure itself
   // answers "what does the primary window say" (0% when a quota is spent).
   // Splitting the two lets a tight secondary window warn without turning the
@@ -691,6 +706,229 @@ function statCellNode(cell) {
   return node;
 }
 
+// ---- Reset refill motion --------------------------------------------------
+// A quota resetting to full plays the same refill the Limits page's meters
+// play: the arc sweeps to full, the figure counts up to meet it, and a flare
+// lands with the last of the sweep. Whether a push is a real reset is
+// resetMotion.js's call — this only paints its answer. The card's quota rows
+// go through the shared animator itself (commitCard); the ring is the dock's
+// own DOM, so its half of the same motion lives here, paced by the same
+// constants.
+
+const ringResetMotions = new WeakMap();
+const ringNumberAnimations = new Map();
+const RING_MOTION_EASING = limitResetAnimatorApi.EASING;
+const RING_GLOW_MS = limitResetAnimatorApi.GLOW_MS;
+const RING_GLOW_LEAD_MS = limitResetAnimatorApi.GLOW_LEAD_MS;
+
+function captureRingResetMotion() {
+  const snapshot = new Map();
+  for (const cell of railNode?.querySelectorAll('.edge-dock-cell[data-ring-motion-key]') || []) {
+    const key = cell.dataset.ringMotionKey;
+    const entry = {
+      remainingPercent: cell.dataset.ringRemaining,
+      displayPercent: cell.dataset.ringDisplay,
+      resetsAt: cell.dataset.ringResetAt,
+      motion: ringResetMotions.get(cell.querySelector('.edge-dock-ring-fill'))
+    };
+    // Ambiguous identities are safer left static than animated on the wrong cell.
+    snapshot.set(key, snapshot.has(key) ? null : entry);
+  }
+  return snapshot;
+}
+
+// The arc itself. stroke-dashoffset is the property the circle already paints
+// from; a WAAPI pass on it overrides the ring's 420ms CSS transition for the
+// run, then lets go — the attribute already holds the target.
+function animateRingArc(circle, from, to, duration, startedAt) {
+  if (!circle?.animate) return;
+  for (const animation of circle.getAnimations()) animation.cancel();
+  const fromOffset = RING_CIRCUMFERENCE * (1 - Math.max(0, Math.min(100, from)) / 100);
+  const toOffset = RING_CIRCUMFERENCE * (1 - Math.max(0, Math.min(100, to)) / 100);
+  if (Math.abs(toOffset - fromOffset) < 0.001) return;
+  const animation = circle.animate([
+    { strokeDashoffset: `${fromOffset}px` },
+    { strokeDashoffset: `${toOffset}px` }
+  ], {
+    duration,
+    easing: RING_MOTION_EASING,
+    fill: 'backwards'
+  });
+  if (startedAt !== null) animation.startTime = startedAt;
+}
+
+function animateRingPercent(el, from, to, duration, startedAt = performance.now()) {
+  if (!el) return;
+  if (prefersReducedMotion() || !Number.isFinite(from) || !Number.isFinite(to) || from === to) {
+    el.textContent = `${Math.round(to)}%`;
+    return;
+  }
+  const delta = to - from;
+  const entry = { handle: 0, target: to };
+  const initialProgress = Math.max(0, Math.min(1, (performance.now() - startedAt) / duration));
+  let renderedText = `${Math.round(from + delta * (1 - ((1 - initialProgress) ** 2)))}%`;
+  el.textContent = renderedText;
+  function frame(now) {
+    if (!el.isConnected) {
+      if (ringNumberAnimations.get(el) === entry) ringNumberAnimations.delete(el);
+      return;
+    }
+    if (prefersReducedMotion()) {
+      el.textContent = `${Math.round(to)}%`;
+      if (ringNumberAnimations.get(el) === entry) ringNumberAnimations.delete(el);
+      return;
+    }
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const eased = 1 - ((1 - progress) * (1 - progress));
+    const nextText = `${Math.round(from + delta * eased)}%`;
+    if (nextText !== renderedText) {
+      renderedText = nextText;
+      el.textContent = nextText;
+    }
+    if (progress < 1) {
+      entry.handle = requestAnimationFrame(frame);
+    } else if (ringNumberAnimations.get(el) === entry) {
+      ringNumberAnimations.delete(el);
+    }
+  }
+  entry.handle = requestAnimationFrame(frame);
+  ringNumberAnimations.set(el, entry);
+}
+
+// The flare the sweep lands with — the ring's counterpart to the meter's
+// .limit-meter-completion.
+function animateRingCompletion(ring, duration, startedAt = null) {
+  if (!ring || prefersReducedMotion()) return;
+  const flare = document.createElement('span');
+  flare.className = 'edge-dock-ring-complete';
+  ring.append(flare);
+  const animation = flare.animate([
+    { opacity: 0 },
+    { offset: RING_GLOW_LEAD_MS / RING_GLOW_MS, opacity: 0.55 },
+    { opacity: 0 }
+  ], {
+    duration: RING_GLOW_MS,
+    delay: Math.max(0, duration - RING_GLOW_LEAD_MS),
+    easing: 'linear'
+  });
+  if (startedAt !== null) animation.startTime = startedAt;
+  const remove = () => flare.remove();
+  animation.onfinish = remove;
+  animation.oncancel = remove;
+}
+
+function animateRingResets(snapshot) {
+  if (!snapshot?.size || prefersReducedMotion()) return;
+  const motions = [];
+  for (const cell of railNode?.querySelectorAll('.edge-dock-cell[data-ring-motion-key]') || []) {
+    const key = cell.dataset.ringMotionKey;
+    const previous = snapshot.get(key);
+    const current = {
+      remainingPercent: cell.dataset.ringRemaining,
+      displayPercent: cell.dataset.ringDisplay,
+      resetsAt: cell.dataset.ringResetAt
+    };
+    if (!previous) continue;
+    const circle = cell.querySelector('.edge-dock-ring-fill');
+    const active = previous.motion;
+    // A stats push rebuilds the rail even when nothing changed. Carry the
+    // original timeline across that replacement, including its flare.
+    if (
+      active
+      && circle
+      && previous.remainingPercent === current.remainingPercent
+      && previous.displayPercent === current.displayPercent
+      && previous.resetsAt === current.resetsAt
+      && (active.startedAt === null || performance.now() - active.startedAt < active.duration + RING_GLOW_MS - RING_GLOW_LEAD_MS)
+    ) {
+      motions.push({ cell, circle, motion: active });
+      continue;
+    }
+    if (!limitResetMotionApi.shouldAnimateReset(previous, current)) continue;
+    const fromRemaining = Number(previous.remainingPercent);
+    const toRemaining = Number(current.remainingPercent);
+    const from = Number(previous.displayPercent);
+    const to = Number(current.displayPercent);
+    if (
+      !Number.isFinite(fromRemaining)
+      || !Number.isFinite(toRemaining)
+      || !circle
+    ) continue;
+    const duration = limitResetMotionApi.durationMs(fromRemaining, toRemaining);
+    motions.push({
+      cell,
+      circle,
+      motion: {
+        fromRemaining,
+        toRemaining,
+        // A cell whose figure is not a percent — a credits balance — still
+        // sweeps its arc; it just has no count to run up.
+        display: previous.displayPercent !== '' && current.displayPercent !== ''
+          && Number.isFinite(from) && Number.isFinite(to)
+          ? { from, to }
+          : null,
+        duration,
+        startedAt: null
+      }
+    });
+  }
+  if (!motions.length) return;
+  // The same batch rule the meters follow: refills land on full together,
+  // paced by the longest member.
+  const duration = limitResetMotionApi.groupDurationMs(
+    motions.filter(({ motion }) => motion.startedAt === null).map(({ motion }) => motion.duration)
+  );
+  for (const { circle, motion } of motions) {
+    if (motion.startedAt === null) motion.duration = duration;
+    ringResetMotions.set(circle, motion);
+  }
+  function startMotion({ cell, circle, motion }, now) {
+    if (!circle.isConnected || !cell.isConnected || prefersReducedMotion()) return;
+    if (motion.startedAt === null) motion.startedAt = now;
+    const { fromRemaining, toRemaining, display, duration, startedAt } = motion;
+    animateRingArc(circle, fromRemaining, toRemaining, duration, startedAt);
+    animateRingCompletion(cell.querySelector('.edge-dock-ring'), duration, startedAt);
+    if (display) animateRingPercent(cell.querySelector('.edge-dock-value'), display.from, display.to, duration, startedAt);
+  }
+  // Resumed effects must cover the replacement DOM before it can paint its
+  // static target; new refills still begin after the rest of this render.
+  const pending = [];
+  for (const entry of motions) {
+    if (entry.motion.startedAt === null) pending.push(entry);
+    else startMotion(entry, entry.motion.startedAt);
+  }
+  if (pending.length) requestAnimationFrame((now) => {
+    for (const entry of pending) startMotion(entry, now);
+  });
+}
+
+// Snapping running effects to their end state when reduced motion turns on —
+// the same settle the widget's limits panel gets, for both the rail's own
+// motions and the card animator's.
+function settleDockMotions() {
+  for (const animation of root.getAnimations({ subtree: true })) {
+    try { animation.finish(); } catch (_) { animation.cancel(); }
+  }
+  for (const [el, entry] of ringNumberAnimations) {
+    cancelAnimationFrame(entry.handle);
+    el.textContent = `${Math.round(entry.target)}%`;
+  }
+  ringNumberAnimations.clear();
+  cardResetAnimator.settle(contentLayer);
+}
+
+// The card's quota rows are the Limits page's rows — including their refill
+// motion, driven by the animator the page itself uses, scoped to the card.
+const cardResetAnimator = limitResetAnimatorApi.createLimitResetAnimator({
+  document,
+  motion: limitResetMotionApi,
+  prefersReducedMotion,
+  formatPercent: (value) => (Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'),
+  requestAnimationFrame: (frame) => requestAnimationFrame(frame),
+  cancelAnimationFrame: (handle) => cancelAnimationFrame(handle),
+  performance
+});
+
 let railNode = null;
 // `null` until a payload has said: the entrance is keyed to a reveal this page has
 // not seen, so a page that loads with the rail already up shows it instead of
@@ -744,7 +982,9 @@ function renderRail(payload) {
     node.classList.toggle('is-focused', payload.focusCellId === cell.id);
     nodes.push(node);
   });
+  const ringSnapshot = captureRingResetMotion();
   railNode.replaceChildren(...nodes);
+  animateRingResets(ringSnapshot);
 }
 
 let gesture = null;
@@ -823,7 +1063,7 @@ function relativeAgo(value) {
 // runs out. Absent for a session whose transcript states no window, which is the
 // normal case rather than an error.
 function contextNode(session) {
-  const context = session?.context;
+  const context = sessionLive.sessionActivityState(session) !== 'idle' ? session?.context : null;
   if (!context) return null;
   const showUsed = appearance().sessionContextMetric !== 'remaining';
   const percent = showUsed ? context.percentUsed : context.percentLeft;
@@ -831,12 +1071,12 @@ function contextNode(session) {
   node.dataset.tone = String(context.tone || '');
   // The full phrase lives in the tooltip; the line itself stays a bar and a
   // number so it reads at a glance in the meta row.
-  node.title = t(showUsed ? 'session.contextUsed' : 'session.contextLeft', { percent });
   const meter = el('span', 'edge-dock-session-context-meter');
   const fill = el('span', 'edge-dock-session-context-fill');
   fill.style.setProperty('--bar-scale', String(percent / 100));
   meter.append(fill);
   node.append(meter, el('span', 'edge-dock-session-context-value', `${percent}%`));
+  sessionRowsApi.setSessionTooltip(node, context, sessionLive.sessionPromptCacheForRow(session), t, limitWindowsView);
   return node;
 }
 
@@ -943,7 +1183,10 @@ function sessionsContainer(sessions, options = {}) {
     // made the row read as a different kind of row, and the colour carried no
     // more information than the dot does.
     nameNode.append(stateMark(session, key, state));
-    nameNode.append(document.createTextNode(name));
+    const title = el('span', 'edge-dock-session-title', name);
+    title.dataset.overflowKey = key;
+    overflowText.bind(title);
+    nameNode.append(title);
     // The glyph is decorative and its `title` only reaches pointer users, so the
     // translated state is rendered as real text for assistive technology. It
     // cannot go on the row itself: a plain `div` has the generic role and
@@ -958,9 +1201,29 @@ function sessionsContainer(sessions, options = {}) {
     // The model label is composed by the Sessions list's own helper, so a
     // multi-model session reads "N models" here exactly as it does there —
     // projecting only the top model showed a different name than the list's
-    // for the same session.
-    meta.append(document.createTextNode([sessionRowsApi.sessionModelLabel(session), relativeAgo(session.lastUsedAt || session.startedAt)].filter(Boolean).join(' · ')));
+    // for the same session. The label is the tooltip trigger there too: one
+    // row per model with its tokens and share.
+    const modelLabel = sessionRowsApi.sessionModelLabel(session);
+    const age = relativeAgo(session.lastUsedAt || session.startedAt);
+    const modelEntries = sessionRowsApi.sessionModelTooltipEntries(session, {
+      unattributedLabel: t('dashboard.tooltip.unclassified'),
+      formatTokens: formatBreakdownTokens
+    });
+    if (modelLabel && modelEntries.length > 1) {
+      const models = el('span', 'session-models', modelLabel);
+      limitWindowsView.setDetailTooltip(models, modelEntries);
+      meta.append(models);
+      if (age) meta.append(document.createTextNode(` · ${age}`));
+    } else {
+      meta.append(document.createTextNode([modelLabel, age].filter(Boolean).join(' · ')));
+    }
     const context = contextNode(session);
+    const cache = context ? null : sessionLive.sessionPromptCacheForRow(session);
+    if (cache) {
+      const badge = el('span', 'edge-dock-session-cache', t('session.cacheEstimate', { minutes: cache.minutes }));
+      sessionRowsApi.setSessionTooltip(badge, session, cache, t, limitWindowsView);
+      meta.append(badge);
+    }
     if (context) meta.append(context);
     row.append(
       nameNode,
@@ -1053,6 +1316,29 @@ function appendLiveRate(card, head, cell) {
   if (cell.deviceCount > 1) secondary.push(t('edgeDock.rate.devices', { count: cell.deviceCount }));
   if (secondary.length) headline.append(el('span', '', secondary.join(' · ')));
   card.append(headline);
+  appendLiveRateDetails(card, cell);
+}
+
+function appendLiveRateDetails(card, cell) {
+  const entries = window.TokenMonitorTokenRate.liveTokenRateTooltipEntries(
+    { devices: cell.rateDevices, deviceCount: cell.deviceCount }, cell.rateMode, formatRate
+  );
+  if (!entries.length) return;
+  const list = el('div', 'edge-dock-accounts edge-dock-clients edge-dock-rate-details');
+  for (const entry of entries) {
+    if (!Array.isArray(entry)) {
+      const heading = el('div', 'edge-dock-rate-device', entry.full);
+      heading.classList.toggle('is-separated', entry.separated === true);
+      list.append(heading);
+      continue;
+    }
+    const row = el('div', 'edge-dock-rate-model');
+    const mark = markNode(modelVendorFor(entry[0]) || 'token-monitor');
+    mark.setAttribute('aria-hidden', 'true');
+    row.append(mark, el('span', 'edge-dock-rate-model-name', entry[0]), el('span', 'edge-dock-rate-model-value', entry[1]));
+    list.append(row);
+  }
+  card.append(list);
 }
 
 function statCard(cell) {
@@ -1238,9 +1524,14 @@ function commitCard(card, cellId) {
   const sameCard = previous?.dataset.cellId === cellId
     && previous?.dataset.breakdownMode === card.dataset.breakdownMode;
   const scrollTop = sameCard ? previous.querySelector(CARD_SCROLL_SELECTOR)?.scrollTop || 0 : 0;
+  const resetSnapshot = cardResetAnimator.capture(contentLayer);
   contentLayer.replaceChildren(card);
+  overflowText.refresh();
   const list = card.querySelector(CARD_SCROLL_SELECTOR);
   if (list) list.scrollTop = scrollTop;
+  // Measure reading targets only after mounting and restoring their scroll position.
+  if (sameCard) overflowText.preserveReading(previous, card);
+  cardResetAnimator.animate(card, resetSnapshot);
 }
 
 // The period card is a summary even when the period contains dozens of tools or
@@ -1284,7 +1575,7 @@ function renderBubble(payload) {
   stagingLayer.replaceChildren(card);
   fitCardTotal(card);
   clampBreakdownList(card);
-  const height = Math.ceil(card.getBoundingClientRect().height);
+  const height = Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
   if (payload.placed?.cellId === cell.id && payload.placed.height === height) {
     commitCard(card, cell.id);
   } else {
@@ -1369,7 +1660,9 @@ function sessionsExpiryDelayMs() {
     // recomputed each time, which is also what makes a second and third expiry wake the
     // surface in turn. Only an expiry still ahead can shorten a wait; a stale one would
     // otherwise pin the delay to the floor and re-arm on every pass.
-    const expiresAt = presentation.nextRunningExpiryAt(cell.sessions, now);
+    const runningExpiry = presentation.nextRunningExpiryAt(cell.sessions, now);
+    const cacheExpiry = sessionLive.nextSessionStatusChangeAt(cell.sessions, now);
+    const expiresAt = [runningExpiry, cacheExpiry].filter((at) => at > now).sort((a, b) => a - b)[0] || 0;
     if (expiresAt > now && (!soonest || expiresAt < soonest)) soonest = expiresAt;
   }
   if (!soonest) return 0;

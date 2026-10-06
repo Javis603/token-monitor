@@ -98,7 +98,7 @@ test('publishes projected stats to the macOS Widget on collection and presentati
   const end = mainSource.indexOf('\nfunction statsHistoryRevision', start);
   assert.ok(start >= 0 && end > start, 'sendPush function should exist');
   const sendPush = mainSource.slice(start, end);
-  assert.match(sendPush, /latestStats = payload\.data\.stats;\s+const visibleStats = electronPresentationStats\(latestStats\);/);
+  assert.match(sendPush, /latestStats = payload\.data\.stats;[\s\S]*?const visibleStats = electronPresentationStats\(latestStats\);/);
   assert.match(sendPush, /scheduleMacWidgetSnapshot\(visibleStats, options\.widgetProducerOwner\);/);
   assert.equal((mainSource.match(/scheduleMacWidgetSnapshot\(visibleStats, options\.widgetProducerOwner\)/g) || []).length, 1);
   const refreshStart = mainSource.indexOf('function refreshLimitStatsPresentation()');
@@ -146,8 +146,8 @@ test('Widget producers carry lifetime ownership through the sendPush outlet', ()
 
 test('Widget ownership advances producer lifetime only for mode transitions', () => {
   assert.match(
-    mainSource,
-    /function startMode\(\) \{\s*hubModeGeneration \+= 1;\s*advanceMacWidgetProducerAndSourceEpoch\(\);/
+    mainFunctionSource('function startMode()'),
+    /hubModeGeneration \+= 1;\s*advanceMacWidgetProducerAndSourceEpoch\(\);/
   );
   assert.match(
     mainSource,
@@ -939,7 +939,7 @@ test('maps the Electron target architecture to both Widget build products', () =
   assert.match(widgetBuildSource, /assertWidgetArchitecture\(stagedExtension, helperBinary, architecture\)/);
 });
 
-test('Widget user-facing strings are localized in five languages', () => {
+test('Widget user-facing strings are localized in every supported language', () => {
   const swiftSources = [widgetSource, widgetIntentSource, widgetViewModelSource, widgetDashboardSource, widgetActivitySource];
   const snapshotSource = fs.readFileSync(
     path.join(root, 'native', 'macos', 'TokenMonitorWidget', 'WidgetSnapshot.swift'),
@@ -951,8 +951,15 @@ test('Widget user-facing strings are localized in five languages', () => {
   for (const [key, entry] of Object.entries(widgetLocalization.strings)) {
     assert.deepEqual(
       Object.keys(entry.localizations).sort(),
-      ['en', 'ja', 'ko', 'zh-Hans', 'zh-Hant'],
+      ['en', 'ja', 'ko', 'pt-BR', 'zh-Hans', 'zh-Hant'],
       `missing localization for ${key}`
+    );
+    const formatSpecifiers = (value) => [...value.matchAll(/%(?:\d+\$)?(@|lld|%)/g)]
+      .map((match) => match[1]).sort();
+    assert.deepEqual(
+      formatSpecifiers(entry.localizations['pt-BR'].stringUnit.value),
+      formatSpecifiers(entry.localizations.en.stringUnit.value),
+      `Portuguese format specifiers differ for ${key}`
     );
     assert.ok(Object.values(entry.localizations).every((localization) => (
       localization.stringUnit?.state === 'translated' && localization.stringUnit.value

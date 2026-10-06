@@ -4,7 +4,7 @@ ids: [qoder, qodercn]
 read_when:
   - Changing or debugging Qoder or Qoder CN usage, limits, source discovery or storage migration
   - Investigating Qoder CN usage that is missing, zero or stale in the widget
-  - Touching providers/qodercn/usage.js or Qoder roots in clientSources.js
+  - Touching the fork's token_monitor/qodercn.rs, providers/qodercn/paths.js or Qoder roots in clientSources.js
 ---
 
 # Qoder provider
@@ -28,7 +28,7 @@ Credits are quota units, not tokens. Never copy credit deltas into `qodercn` usa
 | Legacy Qoder CN token usage | `SharedClientCache/cache/db/local.db` under the platform QoderCN app-data root |
 | Credit quota and plan | Qoder's global or CN web API, authenticated with the separately configured `qoder` cookie |
 
-The local adapter reads both usage layouts because an upgraded machine can retain historical SQLite data while new sessions are written to JSONL. JSONL token semantics differ from Anthropic's envelope: `input_tokens` already includes `cache_read_input_tokens`, so the adapter subtracts the cached subset before emitting uncached input.
+Token Monitor's tokscale fork parses Qoder CN (`crates/tokscale-core/src/token_monitor/qodercn.rs` in Javis603/tokscale); upstream tokscale has no `qodercn` client, so the catalog marks it `forkOnly`. The parser reads both usage layouts because an upgraded machine can retain historical SQLite data while new sessions are written to JSONL. JSONL token semantics differ from Anthropic's envelope: `input_tokens` already includes `cache_read_input_tokens`, so the parser subtracts the cached subset before emitting uncached input. Model display names and routing tiers (`auto`, `ultimate`, …) are normalized there too; routing tiers are never priced from the model catalog.
 
 Only rows with reported token counts enter usage. Current first-party, plan-billed rows can contain `credits` and `context_usage_ratio` while every token field is zero. The active context-window denominator is not reliably present in the observed session data and can vary per session, so a model-wide window must not be used to reconstruct tokens. Those rows remain absent from token totals; their credits belong to AI Tool Limits. BYOK/custom-model rows that contain measured token fields are counted normally.
 
@@ -40,9 +40,9 @@ The JSONL projects directory resolves in this order:
 2. Qoder's own `QODERCN_CONFIG_DIR/projects`;
 3. `~/.qoder-cn/projects`.
 
-The legacy database uses `TOKEN_MONITOR_QODER_CN_DB_PATH` when set, then the platform default documented in the README.
+The legacy database uses `TOKEN_MONITOR_QODER_CN_DB_PATH` when set, then the platform default documented in the README. `src/shared/providers/qodercn/paths.js` resolves the same paths for watching, source health and the anchor fingerprint; it must stay in step with the fork's resolution.
 
-A missing JSONL root is a valid empty source for a legacy-only install. Once traversal starts, directory, stat or stream failures abort the whole JSONL collection so the collector can retain its last complete snapshot. File, byte, row and line budgets fail the same way. Do not skip an unreadable enumerated entry and publish the remaining rows as complete.
+A missing JSONL root is a valid empty source for a legacy-only install. Each source (the database and each transcript) is fingerprinted and its normalized rows are cached in `<tokscale cache dir>/token-monitor/qodercn.json`. Once traversal starts, directory, stat or stream failures, and the file, byte, row and line budgets, fail that whole source: the fork serves its last cached rows and logs a warning rather than publishing a partial read, and a database that is locked or unreadable is treated the same way. Do not skip an unreadable enumerated entry and publish the remaining rows as complete; a scan that returned less would feed a negative delta into the anchored watch tick.
 
 The database path and projects directory are both part of the persisted-anchor fingerprint. Moving either source invalidates the anchor instead of combining today's data from one location with older periods captured from another.
 
@@ -57,6 +57,9 @@ Local token usage needs no credential and stays on disk. The `qoder` limits prov
 - JSONL reads are bounded and fail closed after source discovery begins.
 - The explicit Token Monitor projects override takes precedence over Qoder's config-root override.
 - Output tokens cannot be recovered from credits or context occupancy.
+- Legacy database sessions carry only `chat_session.project_name`, a bare name rather than a path, and project attribution needs a resolved workspace path, so those sessions have no project. JSONL sessions use the transcript `cwd`.
+- Rows without a timestamp are stored at the epoch and fall outside any `--since` window.
+- Qoder CN is excluded from WSL scans: under a Windows host the fork resolves the legacy database from the host's `APPDATA`, not from `--home`, so a WSL scan would recount host usage.
 - The two storage generations have no verified cross-format message key; do not invent one from path or timestamp similarity.
 
 ## Verification
@@ -64,7 +67,9 @@ Local token usage needs no credential and stays on disk. The `qoder` limits prov
 Run:
 
 ```bash
-node --test tests/shared/qoderCnUsage.test.js tests/shared/collectorAnchorPersistence.test.js tests/shared/anchorSeed.test.js tests/shared/clientHealth.test.js
+node --test tests/shared/collectorAnchorPersistence.test.js tests/shared/anchorSeed.test.js tests/shared/clientHealth.test.js tests/shared/wslUsage.test.js
 ```
+
+The parser's own tests live in the fork: `cargo test -p tokscale-core token_monitor::qodercn`.
 
 Real first-party Qoder CN installs are still needed to verify whether a future build begins persisting a trustworthy per-session active context window. Do not enable reconstruction from a model catalog or preference default alone.

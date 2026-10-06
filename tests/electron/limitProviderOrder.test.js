@@ -49,13 +49,14 @@ test('default provider order follows tracked tools, named services, then third-p
     'qoder',
     'deepseek',
     'devin',
+    'minimax',
     'typesafe',
     'openrouter',
-    'minimax',
     'volcengine',
     'ollama',
     'trae',
     'alibaba',
+    'stepfun',
     'thirdparty'
   ]);
 });

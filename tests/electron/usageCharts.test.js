@@ -250,6 +250,7 @@ test('heatmapSvg can include a glow filter for hovered cells', () => {
 
   assert.match(svg, /<defs><filter id="homeActivityHeatGlow"/);
   assert.match(svg, /<feDropShadow/);
+  assert.equal((svg.match(/flood-color="rgb\(var\(--chart-heat-2-rgb, 120, 190, 255\)\)"/g) || []).length, 2);
 });
 
 test('heatmapSvg can include a spotlight layer with cell data attributes', () => {

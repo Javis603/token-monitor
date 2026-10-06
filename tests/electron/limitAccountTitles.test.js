@@ -14,6 +14,7 @@ const {
   codexAccountDisplayLabel,
   maskEmailAddress
 } = require('../../src/electron/renderer/accountIdentity');
+const limitWindowLabels = require('../../src/shared/limits/windowLabels');
 
 const TITLE_FUNCTIONS = [
   'limitAccountTitle',
@@ -22,7 +23,8 @@ const TITLE_FUNCTIONS = [
   'codexAccountTitle',
   'opencodeAccountTitle',
   'namedApiAccountTitle',
-  'volcenginePlanAccountTitle'
+  'volcenginePlanAccountTitle',
+  'mimoAccountTitle'
 ];
 
 function readRendererFile(name) {
@@ -70,6 +72,9 @@ function runTitle(source, expression, context = {}) {
 function titleContext(maskLimitAccountEmails) {
   return {
     accountIdentity: { accountEmailLabel, accountTitleLabel, codexAccountDisplayLabel, maskEmailAddress },
+    // MiMo's title path takes its words from the shared display vocabulary,
+    // the way the view receives them from its host.
+    mimoProductLabel: limitWindowLabels.mimoProductLabel,
     settings: () => ({ maskLimitAccountEmails }),
     t: (key) => (key === 'settings.codex.personalWorkspace' ? 'Personal' : key)
   };

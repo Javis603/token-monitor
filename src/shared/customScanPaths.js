@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { CLIENT_IDS, LOCALLY_PARSED_CLIENT_IDS } = require('./clientCatalog');
+const { CLIENT_IDS, FORK_ONLY_CLIENT_IDS } = require('./clientCatalog');
 const { LEGACY_CLIENT_ID_ALIASES } = require('./clientTracking');
 const { tokscaleCustomScanClientIds } = require('./tokscaleClientMapping');
 
@@ -14,8 +14,8 @@ const CUSTOM_SCAN_PATH_LIMIT_ERRORS = Object.freeze({
   GLOBAL: 'custom-scan-path-limit-global',
   PER_CLIENT: 'custom-scan-path-limit-per-client'
 });
-// Tokscale exposes extra roots for its recursive/file scanners. Locally parsed
-// clients never enter Tokscale at all. OpenCode's generic extra-root scanner
+// Tokscale exposes extra roots for its recursive/file scanners. Fork-only
+// clients are parsed outside that scanner, so they never see those roots. OpenCode's generic extra-root scanner
 // covers only its legacy JSON storage; modern SQLite databases require the
 // separate scanner.opencodeDbPaths setting, which TOKSCALE_EXTRA_DIRS cannot
 // express. Cursor's scanner accepts only Tokscale's generated usage cache, not
@@ -23,11 +23,14 @@ const CUSTOM_SCAN_PATH_LIMIT_ERRORS = Object.freeze({
 // similarly misleading. Keep both controls hidden rather than accepting paths
 // that appear healthy but contribute no usage. Token Monitor's Kilo row combines
 // the `kilo` CLI database and `kilocode` extension sources; the former rejects
-// extra roots, so persisted Kilo roots are forwarded to the latter.
+// extra roots, so persisted Kilo roots are forwarded to the latter. MiniMax
+// Code's runtime store is read by the fork only from its data directories, so
+// an extra `mcode` root would reach upstream's headless-capture scan alone.
 const UNSUPPORTED_CUSTOM_SCAN_CLIENTS = new Set([
-  ...LOCALLY_PARSED_CLIENT_IDS,
+  ...FORK_ONLY_CLIENT_IDS,
   'opencode',
-  'cursor'
+  'cursor',
+  'mcode'
 ]);
 const CUSTOM_SCAN_CLIENT_IDS = Object.freeze(
   CLIENT_IDS.filter((id) => !UNSUPPORTED_CUSTOM_SCAN_CLIENTS.has(id))

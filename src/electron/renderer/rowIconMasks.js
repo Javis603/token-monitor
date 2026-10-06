@@ -25,11 +25,15 @@
   }
 })(typeof window !== 'undefined' ? window : null, function createRowIconMasksApi(vendorPresentation) {
   function rowIconMaskRules(iconBaseUrl) {
-    // Unquoted like the rules in styles.css; ids and file stems are
-    // [a-z0-9-] (vendorPresentation.test.js), so nothing needs escaping.
+    // Quoted, because the installed sheet passes an absolute file:// URL and a
+    // Windows install path may contain parentheses (C:\Program Files (x86)).
+    // An unquoted url() token ends at the first `)`, so the declaration — and
+    // with it the whole rule — is invalid CSS and gets dropped, leaving the
+    // mark as a solid currentColor square. Ids and file stems stay unquoted:
+    // they are [a-z0-9-] (vendorPresentation.test.js).
     return Object.entries(vendorPresentation.ROW_ICON_MASKS).map(([id, file]) => {
-      const url = `${iconBaseUrl}${file}.svg`;
-      return `.row-icon-${id} { -webkit-mask-image: url(${url}); mask-image: url(${url}); }`;
+      const url = `${iconBaseUrl}${file}.svg`.replace(/["\\]/g, '\\$&');
+      return `.row-icon-${id} { -webkit-mask-image: url("${url}"); mask-image: url("${url}"); }`;
     }).join('\n');
   }
 

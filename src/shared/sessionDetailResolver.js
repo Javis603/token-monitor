@@ -7,15 +7,17 @@ const { readSessionDetail } = require('./sessionDetail');
 const { readDshSessionDetail } = require('./providers/dsh/sessionDetail');
 const { wslUsageHomes } = require('./wslUsage');
 
-// wslUsage.js's MARKER_CLIENTS also scans `.dsh/sessions`, so a DSH session
-// surfaced from a WSL distro on Windows is a real, reachable case, not just
-// claude/codex — dsh must get the same native-miss -> WSL-hit fallback, just
-// through its own reader (it parses zstd transcripts directly, not tokscale
-// JSONL).
-const WSL_FALLBACK_CLIENTS = new Set(['claude', 'codex', 'dsh']);
+// wslUsage.js's MARKER_CLIENTS also scans `.dsh/sessions` and
+// `.codebuddy/projects`, so a session surfaced from a WSL distro on Windows is a
+// real, reachable case for them, not just claude/codex — dsh must get the same
+// native-miss -> WSL-hit fallback, just through its own reader (it parses zstd
+// transcripts directly, not tokscale JSONL). CodeBuddy resolves its transcripts
+// under the scoped home exactly as Claude and Codex do, so it needs the entry
+// and nothing else.
+const WSL_FALLBACK_CLIENTS = new Set(['claude', 'codebuddy', 'codex', 'dsh', 'workbuddy']);
 const SESSION_DETAIL_WORKER_TIMEOUT_MS = 20_000;
 
-function resolveSessionDetailForPlatform(args = {}, deps = {}) {
+async function resolveSessionDetailForPlatform(args = {}, deps = {}) {
   const nativeHome = (deps.homedir || os.homedir)();
   const platform = deps.platform || process.platform;
   // resolveDshHome in providers/dsh/paths.js checks env.DSH_HOME before the
@@ -33,9 +35,9 @@ function resolveSessionDetailForPlatform(args = {}, deps = {}) {
         ? { env: {}, useEnvRoots: false }
         : (deps.env === undefined ? {} : { env: deps.env }))
     });
-  const nativeDetail = readDetail({ ...args, home: nativeHome }, false);
+  const nativeDetail = await readDetail({ ...args, home: nativeHome }, false);
 
-  if (nativeDetail.found || platform !== 'win32' || !WSL_FALLBACK_CLIENTS.has(args.client)) {
+  if (nativeDetail.found || nativeDetail.error || platform !== 'win32' || !WSL_FALLBACK_CLIENTS.has(args.client)) {
     return nativeDetail;
   }
 
@@ -50,8 +52,8 @@ function resolveSessionDetailForPlatform(args = {}, deps = {}) {
   for (const home of wslHomes || []) {
     if (!home || searched.has(home)) continue;
     searched.add(home);
-    const detail = readDetail({ ...args, home }, true);
-    if (detail.found) return detail;
+    const detail = await readDetail({ ...args, home }, true);
+    if (detail.found || detail.error) return detail;
   }
   return nativeDetail;
 }

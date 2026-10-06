@@ -12,7 +12,7 @@ function toUnitPrice(value) {
   return value;
 }
 
-// Array<{modelId,inputPerM,outputPerM,cacheReadPerM}> -> cleaned array.
+// Array<{modelId,inputPerM,outputPerM,cacheReadPerM,cacheWritePerM,cacheWrite1hPerM}> -> cleaned array.
 // Mirrors tokscale's rule: at least one of input/output must be present.
 // A present zero is an explicit free price; undefined means unset.
 function normalizeCustomPricingSetting(value) {
@@ -25,9 +25,13 @@ function normalizeCustomPricingSetting(value) {
     const inputPerM = toUnitPrice(raw.inputPerM);
     const outputPerM = toUnitPrice(raw.outputPerM);
     const cacheReadPerM = toUnitPrice(raw.cacheReadPerM);
-    if ([inputPerM, outputPerM, cacheReadPerM].includes(INVALID_UNIT_PRICE)) continue;
+    const cacheWritePerM = toUnitPrice(raw.cacheWritePerM);
+    const cacheWrite1hPerM = toUnitPrice(raw.cacheWrite1hPerM);
+    if ([inputPerM, outputPerM, cacheReadPerM, cacheWritePerM, cacheWrite1hPerM].includes(INVALID_UNIT_PRICE)) continue;
     if (inputPerM === undefined && outputPerM === undefined) continue;
-    byId.set(modelId, { modelId, inputPerM, outputPerM, cacheReadPerM });
+    byId.set(modelId, { modelId, inputPerM, outputPerM, cacheReadPerM,
+      ...(cacheWritePerM !== undefined ? { cacheWritePerM } : {}),
+      ...(cacheWrite1hPerM !== undefined ? { cacheWrite1hPerM } : {}) });
   }
   return [...byId.values()];
 }
@@ -40,6 +44,8 @@ function buildTokscaleModels(entries) {
     if (e.inputPerM !== undefined) m.input_cost_per_million_tokens = e.inputPerM;
     if (e.outputPerM !== undefined) m.output_cost_per_million_tokens = e.outputPerM;
     if (e.cacheReadPerM !== undefined) m.cache_read_input_token_cost_per_million_tokens = e.cacheReadPerM;
+    if (e.cacheWritePerM !== undefined) m.cache_creation_input_token_cost_per_million_tokens = e.cacheWritePerM;
+    if (e.cacheWrite1hPerM !== undefined) m.cache_creation_input_token_cost_per_million_tokens_above_1hr = e.cacheWrite1hPerM;
     models[e.modelId] = m;
   }
   return models;

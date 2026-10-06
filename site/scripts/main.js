@@ -64,23 +64,33 @@ function setupDiscordClock() {
   if (!reducedMotion()) setInterval(tick, 1000);
 }
 
+/* Interface language -> formatting locale. The dictionaries collapse regional
+   variants (en-GB -> en), so a date formatter needs the mapped locale and not the
+   raw lang tag. Route every locale-aware date through this: a formatter that skips
+   it renders English dates in every language, which is invisible in English. */
+function dateLocale() {
+  var lang = document.documentElement.lang;
+  return {
+    en: "en-US",
+    "zh-TW": "zh-Hant-HK",
+    "zh-CN": "zh-Hans-CN",
+    ko: "ko-KR",
+    ja: "ja-JP",
+    "pt-BR": "pt-BR"
+  }[lang] || "en-US";
+}
+
 /* The menu bar preview uses the visitor's actual local time. Align updates to
    the next minute boundary so the static product mock stays accurate without
    running a per-second timer. */
 function setupMenubarClock() {
   var el = document.querySelector("[data-menubar-clock]");
   if (!el) return;
-  var localeMap = {
-    en: "en-US",
-    "zh-TW": "zh-Hant-HK",
-    "zh-CN": "zh-Hans-CN"
-  };
   var timeoutId = null;
   var languageObserver = null;
   function render() {
     var now = new Date();
-    var lang = document.documentElement.lang || "en";
-    var locale = localeMap[lang] || lang;
+    var locale = dateLocale();
     try {
       el.textContent = new Intl.DateTimeFormat(locale, {
         weekday: "short",
@@ -545,7 +555,7 @@ function setupDashboard() {
     return new Date(Date.now() - (chartDays.length - 1 - i) * 86400000);
   }
   function xLabel(i) {
-    return chartDate(i).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return chartDate(i).toLocaleDateString(dateLocale(), { month: "short", day: "numeric" });
   }
   function chartTickIndexes(length) {
     if (length <= 1) return [0];
@@ -582,8 +592,7 @@ function setupDashboard() {
     var active = daily.filter(function (v) { return v > 0; }).sort(function (a, b) { return a - b; });
     function q(p) { return active[Math.min(active.length - 1, Math.floor(active.length * p))]; }
     var q1 = q(0.25), q2 = q(0.5), q3 = q(0.75);
-    var localeMap = { en: "en-US", "zh-TW": "zh-Hant-HK", "zh-CN": "zh-Hans-CN" };
-    var monthFormatter = new Intl.DateTimeFormat(localeMap[document.documentElement.lang] || "en-US", { month: "short", timeZone: "UTC" });
+    var monthFormatter = new Intl.DateTimeFormat(dateLocale(), { month: "short", timeZone: "UTC" });
     var months = [];
     for (var month = 0; month < 12; month++) months.push(monthFormatter.format(new Date(Date.UTC(2026, 6 + month, 1))));
     var out = "";
@@ -736,9 +745,10 @@ function setupDashboard() {
   function showHeatTip(d, ev) {
     var dt = new Date(Date.now() - (DAYS - 1 - d) * 86400000);
     var tokens = daily[d] * scale;
-    var html = '<div class="tt-head">' + dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) + "</div>"
+    var messages = translations[document.documentElement.lang] || translations.en;
+    var html = '<div class="tt-head">' + dt.toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: "numeric" }) + "</div>"
       + '<div class="tt-row"><span class="tt-name">Tokens</span><span class="tt-val">' + fmtCompact(tokens) + "</span></div>";
-    if (tokens > 0) html += '<div class="tt-row"><span class="tt-name">Cost</span><span class="tt-val">' + fmtCost(tokens * COST_RATE) + "</span></div>";
+    if (tokens > 0) html += '<div class="tt-row"><span class="tt-name">' + (messages["dash.heatmap.cost"] || "Cost") + '</span><span class="tt-val">' + fmtCost(tokens * COST_RATE) + "</span></div>";
     tip.innerHTML = html;
     positionTip(ev);
   }
@@ -769,8 +779,11 @@ function setupDashboard() {
     heatEl.innerHTML = heatmapSvg();
   }
   renderHeatmap();
-  window.addEventListener("token-monitor-languagechange", renderHeatmap);
   renderChart();
+  /* Both draw locale-dependent labels — the heatmap months and the chart axis through
+     xLabel — so both have to follow the language change applyLanguage() announces. */
+  window.addEventListener("token-monitor-languagechange", renderHeatmap);
+  window.addEventListener("token-monitor-languagechange", renderChart);
 
   function wireSeg(seg, attr, apply) {
     if (!seg) return;
@@ -1136,6 +1149,432 @@ function setupLangMenu() {
   });
 }
 
+/* Edge Dock replica. The DOM is the app renderer's own output; the geometry
+   below is a verbatim port of src/electron/renderer/edgeDock/shapes.js
+   (railCommands / bubbleCommands / toSvgPath, side:"right") and the placement
+   math of src/electron/edgeDock/geometry.js (edgeDockCellLayout /
+   edgeDockBubbleBounds), so the silhouette, tail and cell alignment match the
+   app to the pixel. */
+var ED_METRICS = {
+  railWidth: 64,
+  railRadius: 20,
+  shoulder: 28,
+  bubbleWidth: 280,
+  bubbleTail: 12,
+  bubbleNeck: 18,
+  bubbleRadius: 18,
+  bubbleGap: 4,
+  screenMargin: 8
+};
+// edgeDockCellLayout for [stat, provider, provider, stat] at full density.
+var ED_CELL_TOPS = [32, 90, 162, 234];
+var ED_CELL_HEIGHTS = [56, 70, 70, 56];
+var ED_RAIL_LENGTH = 322;
+var ED_ARC = 0.448;
+
+function edRound(value) { return Math.round(value * 100) / 100; }
+function edPath(commands) {
+  return commands.map(function (c) { return c[0] + c.slice(1).map(edRound).join(" "); }).join(" ");
+}
+function edRailPath(width, height, shoulder, radius) {
+  var w = width, h = height;
+  var s = Math.max(0, Math.min(shoulder, h / 2));
+  var spread = Math.min(w * 0.53, w - radius);
+  var r = Math.max(0, Math.min(radius, (h - 2 * s) / 2, w - spread));
+  return edPath([
+    ["M", w, 0],
+    ["C", w, s * 0.76, w - w * 0.25, s, w - spread, s],
+    ["L", r, s],
+    ["C", r * ED_ARC, s, 0, s + r * ED_ARC, 0, s + r],
+    ["L", 0, h - s - r],
+    ["C", 0, h - s - r * ED_ARC, r * ED_ARC, h - s, r, h - s],
+    ["L", w - spread, h - s],
+    ["C", w - w * 0.25, h - s, w, h - s * 0.76, w, h],
+    ["Z"]
+  ]);
+}
+function edBubblePath(width, height, tailY) {
+  var bw = width - ED_METRICS.bubbleTail;
+  var tipX = Math.max(bw, width - 1);
+  var h = height;
+  var r = Math.max(0, Math.min(ED_METRICS.bubbleRadius, h / 2, bw / 2));
+  var n = Math.max(0, Math.min(ED_METRICS.bubbleNeck, (h - 2 * r) / 2));
+  var ty = Math.max(r + n, Math.min(h - r - n, Number(tailY) || h / 2));
+  return edPath([
+    ["M", r, 0],
+    ["L", bw - r, 0],
+    ["C", bw - r * ED_ARC, 0, bw, r * ED_ARC, bw, r],
+    ["L", bw, ty - n],
+    ["C", bw, ty - n * 0.4, bw + ED_METRICS.bubbleTail * 0.5, ty - 1.5, tipX, ty],
+    ["C", bw + ED_METRICS.bubbleTail * 0.5, ty + 1.5, bw, ty + n * 0.4, bw, ty + n],
+    ["L", bw, h - r],
+    ["C", bw, h - r * ED_ARC, bw - r * ED_ARC, h, bw - r, h],
+    ["L", r, h],
+    ["C", r * ED_ARC, h, 0, h - r * ED_ARC, 0, h - r],
+    ["L", 0, r],
+    ["C", 0, r * ED_ARC, r * ED_ARC, 0, r, 0],
+    ["Z"]
+  ]);
+}
+
+/* Rail cells open their hover cards. Until the visitor interacts, the card
+   auto-cycles Usage -> Codex limits -> Sessions once the stage scrolls into
+   view; reduced motion pins the Usage card statically. */
+function setupEdgeDock() {
+  var stage = document.querySelector("[data-ed-stage]");
+  if (!stage) return;
+  var scene = stage.querySelector("[data-ed-scene]");
+  var railWin = stage.querySelector(".ed-rail-win");
+  var rail = stage.querySelector("[data-ed-rail]");
+  if (!scene || !railWin || !rail) return;
+  var m = ED_METRICS;
+  var sceneW = m.bubbleWidth + m.bubbleTail + m.bubbleGap + m.railWidth;
+  var cells = Array.prototype.slice.call(rail.querySelectorAll("[data-ed-item]"));
+  var bubbles = {};
+  var bubbleList = Array.prototype.slice.call(scene.querySelectorAll("[data-ed-card]"));
+  bubbleList.forEach(function (b) { bubbles[b.getAttribute("data-ed-card")] = b; });
+  var cycle = ["stat:today", "codex", "stat:sessions"];
+  var cycleIndex = 0;
+  var interacted = false;
+  var inView = false;
+  var timer = null;
+  var sceneH = ED_RAIL_LENGTH;
+
+  function paintShape(root, d) {
+    var paths = root.querySelectorAll(".edge-dock-shape path");
+    for (var i = 0; i < paths.length; i++) paths[i].setAttribute("d", d);
+  }
+
+  /* Measure each card the way the app measures its bubble window, then place
+     the rail and cards with the controller's math (edgeDockBubbleBounds). */
+  function layout() {
+    var heights = {};
+    var maxCard = 0;
+    bubbleList.forEach(function (b) {
+      var card = b.querySelector(".edge-dock-card");
+      var h = card ? Math.round(card.getBoundingClientRect().height || card.offsetHeight) : 0;
+      heights[b.getAttribute("data-ed-card")] = h;
+      if (h > maxCard) maxCard = h;
+    });
+    sceneH = Math.max(ED_RAIL_LENGTH, maxCard + m.screenMargin * 2);
+    scene.style.height = sceneH + "px";
+    var railTop = Math.round((sceneH - ED_RAIL_LENGTH) / 2);
+    railWin.style.left = (sceneW - m.railWidth) + "px";
+    railWin.style.top = railTop + "px";
+    railWin.style.width = m.railWidth + "px";
+    railWin.style.height = ED_RAIL_LENGTH + "px";
+    paintShape(railWin, edRailPath(m.railWidth, ED_RAIL_LENGTH, m.shoulder, m.railRadius));
+    cells.forEach(function (cell) {
+      var index = Number(cell.getAttribute("data-index"));
+      var bubble = bubbles[cell.getAttribute("data-ed-item")];
+      if (!bubble || !Number.isInteger(index)) return;
+      var h = Math.max(40, heights[cell.getAttribute("data-ed-item")] || 0);
+      var cellCenter = railTop + ED_CELL_TOPS[index] + ED_CELL_HEIGHTS[index] / 2;
+      var minY = m.screenMargin;
+      var maxY = Math.max(minY, sceneH - h - m.screenMargin);
+      var y = Math.round(Math.max(minY, Math.min(maxY, cellCenter - h / 2)));
+      var w = m.bubbleWidth + m.bubbleTail;
+      bubble.style.left = (sceneW - m.railWidth - m.bubbleGap - w) + "px";
+      bubble.style.top = y + "px";
+      bubble.style.width = w + "px";
+      bubble.style.height = h + "px";
+      var svg = bubble.querySelector(".edge-dock-shape");
+      if (svg) svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+      paintShape(bubble, edBubblePath(w, h, cellCenter - y));
+    });
+    applyScale();
+  }
+
+  /* Under 768px the fixed-width scene scales down as one composition; the
+     stage height hugs the scaled scene (see edgedock.css). */
+  function applyScale() {
+    var mobile = window.matchMedia("(max-width: 768px)").matches;
+    var avail = stage.clientWidth - (mobile ? 14 : 0);
+    var scale = mobile ? Math.min(1, avail / sceneW) : 1;
+    stage.style.setProperty("--ed-scale", String(Math.max(0.2, scale)));
+    stage.style.setProperty("--ed-scene-h", sceneH + "px");
+  }
+
+  function open(id) {
+    for (var i = 0; i < cells.length; i++) {
+      var active = cells[i].getAttribute("data-ed-item") === id;
+      cells[i].classList.toggle("is-focused", active);
+      cells[i].setAttribute("aria-expanded", active ? "true" : "false");
+    }
+    bubbleList.forEach(function (b) {
+      var show = b.getAttribute("data-ed-card") === id;
+      var was = b.classList.contains("is-open");
+      b.classList.toggle("is-open", show);
+      b.setAttribute("aria-hidden", String(!show));
+      if (show && !was && !reducedMotion()) {
+        b.classList.remove("is-card-changed");
+        void b.offsetWidth;
+        b.classList.add("is-card-changed");
+      }
+    });
+  }
+
+  function stopCycling() {
+    interacted = true;
+    if (timer) { window.clearInterval(timer); timer = null; }
+  }
+
+  for (var i = 0; i < cells.length; i++) (function (cell) {
+    function activate() {
+      stopCycling();
+      open(cell.getAttribute("data-ed-item"));
+    }
+    cell.addEventListener("pointerenter", activate);
+    cell.addEventListener("focus", activate);
+    cell.addEventListener("click", activate);
+  })(cells[i]);
+
+  bubbleList.forEach(function (b) {
+    b.addEventListener("pointerenter", stopCycling);
+    b.addEventListener("focusin", stopCycling);
+  });
+
+  var switchButtons = Array.prototype.slice.call(stage.querySelectorAll(".edge-dock-breakdown-option"));
+  switchButtons.forEach(function (button) {
+    button.addEventListener("click", function (event) {
+      event.stopPropagation();
+      stopCycling();
+      var mode = button.getAttribute("data-ed-mode");
+      switchButtons.forEach(function (other) {
+        var on = other === button;
+        other.classList.toggle("is-active", on);
+        other.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      Array.prototype.slice.call(stage.querySelectorAll("[data-ed-rows]")).forEach(function (rows) {
+        rows.hidden = rows.getAttribute("data-ed-rows") !== mode;
+      });
+      var card = stage.querySelector(".edge-dock-card[data-breakdown-mode]");
+      if (card) card.setAttribute("data-breakdown-mode", mode);
+    });
+  });
+
+  layout();
+  open("stat:today");
+  window.addEventListener("resize", applyScale);
+  if ("ResizeObserver" in window) new ResizeObserver(applyScale).observe(stage);
+  window.addEventListener("token-monitor-languagechange", layout);
+  if (reducedMotion() || !("IntersectionObserver" in window)) return;
+  var io = new IntersectionObserver(function (entries) {
+    inView = entries[0].isIntersecting;
+    if (inView && !interacted && !timer) {
+      timer = window.setInterval(function () {
+        if (!inView) return;
+        cycleIndex = (cycleIndex + 1) % cycle.length;
+        open(cycle[cycleIndex]);
+      }, 4000);
+    } else if (!inView && timer) {
+      window.clearInterval(timer);
+      timer = null;
+    }
+  }, { threshold: 0.35 });
+  io.observe(stage);
+}
+
+/* The Activity widgets' heatmaps are generated so the replica stays compact;
+   the pattern is deterministic sample data, like the rest of the page. The
+   grid itself ports WidgetHeatmapLayoutCalculator + HeatmapMonthLabels: a
+   Sunday-first grid ending in the current week, weekCount = min(maxWeeks,
+   coverageWeeks, widthCapacity) and cell = min(maxCell, widthFit, heightFit),
+   with future cells left clear. */
+var WDG_HEAT_PROFILES = {
+  full: { maxWeeks: 26, minCell: 5.5, maxCell: 9.5, spacing: 2.5, vPad: 42 },
+  mini: { maxWeeks: 16, minCell: 5, maxCell: 7.5, spacing: 2.25, fixedHeight: 64 }
+};
+
+function wdgHeatLayout(availW, availH, profile, coverageWeeks) {
+  var spacing = profile.spacing;
+  var widthCapacity = Math.max(0, Math.floor((availW + spacing) / (profile.minCell + spacing)));
+  var weekCount = Math.min(profile.maxWeeks, coverageWeeks, widthCapacity);
+  if (weekCount <= 0) return null;
+  var widthFit = (availW - (weekCount - 1) * spacing) / weekCount;
+  var heightFit = (availH - 6 * spacing) / 7;
+  var cell = Math.min(profile.maxCell, widthFit, heightFit);
+  if (cell <= 0) return null;
+  return {
+    weekCount: weekCount,
+    cell: cell,
+    spacing: spacing,
+    renderedW: weekCount * cell + (weekCount - 1) * spacing
+  };
+}
+
+function wdgSunday(date) {
+  var d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  d.setDate(d.getDate() - d.getDay());
+  return d;
+}
+
+function setupWidgetHeat() {
+  var heats = document.querySelectorAll("[data-wdg-heat]");
+  if (!heats.length) return;
+  var seed = 7;
+  function next() {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
+  }
+  var today = new Date();
+  var todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  var referenceSunday = wdgSunday(today);
+  // The sample data spans a year, so coverage never bounds the week count.
+  var coverageWeeks = 53;
+  var layouts = {};
+  Array.prototype.slice.call(heats).forEach(function (heat) {
+    var mini = heat.getAttribute("data-wdg-heat") === "mini";
+    var profile = mini ? WDG_HEAT_PROFILES.mini : WDG_HEAT_PROFILES.full;
+    var holder = heat.parentElement;
+    var wdg = heat.closest(".wdg");
+    if (!holder || !wdg) return;
+    var wdgStyle = window.getComputedStyle(wdg);
+    var availW = mini
+      ? holder.clientWidth
+      : wdg.clientWidth - parseFloat(wdgStyle.paddingLeft) - parseFloat(wdgStyle.paddingRight);
+    var availH = mini
+      ? profile.fixedHeight
+      : Math.max(60, wdg.clientHeight - parseFloat(wdgStyle.paddingTop) - parseFloat(wdgStyle.paddingBottom) - profile.vPad);
+    var layout = wdgHeatLayout(availW, availH, profile, coverageWeeks);
+    if (!layout) return;
+    layouts[heat.getAttribute("data-wdg-heat")] = layout;
+    var gridStart = new Date(referenceSunday);
+    gridStart.setDate(gridStart.getDate() - (layout.weekCount - 1) * 7);
+    heat.style.gridTemplateRows = "repeat(7, " + layout.cell + "px)";
+    heat.style.gridAutoColumns = layout.cell + "px";
+    heat.style.gap = layout.spacing + "px";
+    heat.style.width = layout.renderedW + "px";
+    var months = holder.querySelector(".wdg-months");
+    if (months) months.style.width = layout.renderedW + "px";
+    for (var week = 0; week < layout.weekCount; week++) {
+      for (var day = 0; day < 7; day++) {
+        var date = new Date(gridStart);
+        date.setDate(date.getDate() + week * 7 + day);
+        var cell = document.createElement("i");
+        var future = date > todayMidnight;
+        var roll = next();
+        var level = 0;
+        // Weekends sit quieter; older weeks are sparse and dark.
+        var weekend = day === 0 || day === 6;
+        var recency = week / layout.weekCount;
+        if (roll < (weekend ? 0.72 : 0.4) - recency * 0.3) level = 0;
+        else if (roll < 0.6) level = 1;
+        else if (roll < 0.82) level = 2;
+        else if (roll < 0.94) level = 3;
+        else level = 4;
+        if (!future) cell.setAttribute("data-l", String(level));
+        else cell.setAttribute("data-f", "1");
+        cell.setAttribute("data-date", date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0"));
+        cell.style.setProperty("--d", week * 20 + day * 7 + "ms");
+        heat.appendChild(cell);
+      }
+    }
+  });
+
+  /* HeatmapMonthLabels: a marker for the first week in each new month, offset
+     week * pitch, capped so the label fits inside the rendered width. */
+  var monthBlocks = document.querySelectorAll("[data-wdg-months]");
+  function renderMonths() {
+    var fmt;
+    try {
+      fmt = new Intl.DateTimeFormat(dateLocale(), { month: "short" });
+    } catch (_) {
+      fmt = new Intl.DateTimeFormat("en-US", { month: "short" });
+    }
+    Array.prototype.slice.call(monthBlocks).forEach(function (months) {
+      var heat = months.parentElement && months.parentElement.querySelector("[data-wdg-heat]");
+      var layout = heat && layouts[heat.getAttribute("data-wdg-heat")];
+      months.innerHTML = "";
+      if (!heat || !layout) return;
+      var cells = heat.querySelectorAll("i");
+      var previousMonth = null;
+      for (var w = 0; w < layout.weekCount; w++) {
+        var firstKey = null;
+        var monthKey = null;
+        for (var d = 0; d < 7; d++) {
+          var cellEl = cells[w * 7 + d];
+          if (!cellEl) continue;
+          var key = cellEl.getAttribute("data-date").slice(0, 7);
+          if (firstKey === null) firstKey = key;
+          if (previousMonth !== null && key !== previousMonth) { monthKey = monthKey || key; }
+        }
+        if (monthKey === null) monthKey = previousMonth === null ? firstKey : null;
+        if (monthKey === null || monthKey === previousMonth) continue;
+        previousMonth = monthKey;
+        var parts = monthKey.split("-");
+        var label = document.createElement("span");
+        label.textContent = fmt.format(new Date(Number(parts[0]), Number(parts[1]) - 1, 1));
+        label.style.left = Math.min(w * (layout.cell + layout.spacing), Math.max(0, layout.renderedW - 22)) + "px";
+        months.appendChild(label);
+      }
+    });
+  }
+  renderMonths();
+  window.addEventListener("token-monitor-languagechange", renderMonths);
+}
+
+/* The widget wall keeps the real WidgetKit point sizes (170 / 364x170 /
+   364x382, 24pt desktop spacing). Above ~820px of stage width the desktop
+   cluster renders as-is and scales down as one scene; below that the widgets
+   stack vertically at the same real sizes, smalls side by side. */
+var WDG_LAYOUTS = {
+  cluster: {
+    sceneW: 1140, sceneH: 382,
+    pos: {
+      dash: [0, 0, 364, 382],
+      activity: [388, 0, 364, 170],
+      quota: [388, 194, 364, 170],
+      breakdown: [776, 0, 364, 170],
+      "small-a": [776, 194, 170, 170],
+      "small-b": [970, 194, 170, 170]
+    }
+  },
+  stack: {
+    sceneW: 364, sceneH: 1142,
+    pos: {
+      dash: [0, 0, 364, 382],
+      activity: [0, 398, 364, 170],
+      quota: [0, 584, 364, 170],
+      breakdown: [0, 770, 364, 170],
+      "small-a": [0, 956, 170, 170],
+      "small-b": [194, 956, 170, 170]
+    }
+  }
+};
+
+function setupWidgetScene() {
+  var wall = document.querySelector("[data-wdg-wall]");
+  if (!wall) return;
+  var scene = wall.querySelector("[data-wdg-scene]");
+  if (!scene) return;
+  function layout() {
+    var pad = wall.clientWidth < 620 ? 16 : 24;
+    var availW = Math.max(0, wall.clientWidth - pad * 2);
+    var stack = availW < 820;
+    var def = stack ? WDG_LAYOUTS.stack : WDG_LAYOUTS.cluster;
+    wall.classList.toggle("is-stack", stack);
+    var scale = Math.min(1, availW / def.sceneW);
+    scene.style.setProperty("--wdg-scale", String(scale));
+    wall.style.setProperty("--wdg-wall-h", Math.ceil(def.sceneH * scale + pad * 2) + "px");
+    var widgets = scene.querySelectorAll("[data-wdg]");
+    for (var i = 0; i < widgets.length; i++) {
+      var p = def.pos[widgets[i].getAttribute("data-wdg")];
+      if (!p) continue;
+      widgets[i].style.left = p[0] + "px";
+      widgets[i].style.top = p[1] + "px";
+      widgets[i].style.width = p[2] + "px";
+      widgets[i].style.height = p[3] + "px";
+    }
+  }
+  layout();
+  var raf = 0;
+  window.addEventListener("resize", function () {
+    if (raf) return;
+    raf = window.requestAnimationFrame(function () { raf = 0; layout(); });
+  }, { passive: true });
+}
+
 document.addEventListener("DOMContentLoaded", function () {
   setupLanguageButtons();
   applyLanguage(preferredLanguage());
@@ -1149,6 +1588,9 @@ document.addEventListener("DOMContentLoaded", function () {
   setupFeatureStory();
   setupWidgetViewSwitchers();
   setupDashboard();
+  setupEdgeDock();
+  setupWidgetScene();
+  setupWidgetHeat();
   setupDiscordClock();
   setupMenubarClock();
 });

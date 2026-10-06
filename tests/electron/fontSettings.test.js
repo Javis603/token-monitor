@@ -124,6 +124,9 @@ test('font controls live inside Appearance advanced customization', () => {
   const advanced = html.slice(advancedStart, vendorGroup);
   assert.ok(advanced.indexOf('id="themeColorGrid"') < advanced.indexOf('class="settings-font-controls"'));
   assert.doesNotMatch(advanced, /data-i18n="settings\.appearance\.fonts"/);
+  assert.match(advanced, /id="textSizeInput" aria-labelledby="textSizeLabel" aria-describedby="textSizeNote"/);
+  assert.match(advanced, /<span id="textSizeLabel"[^>]*>Text size<\/span>/);
+  assert.ok(advanced.indexOf('id="textSizeInput"') < advanced.indexOf('id="interfaceFontPreset"'));
   assert.match(advanced, /id="interfaceFontPreset"/);
   assert.match(advanced, /value="app" data-i18n="settings\.appearance\.fontPresetApp"/);
   assert.match(advanced, /value="system" data-i18n="settings\.appearance\.fontPresetSystem"/);
@@ -164,4 +167,25 @@ test('font settings wiring keeps renderer defaults concrete and technical monosp
   assert.match(dashboardStyles, /font-family: var\(--ui-font,/);
   assert.match(dashboardStyles, /font-family: var\(--display-font, inherit\)/);
   assert.match(styles, /font-family: var\(--mono-font, ui-monospace/);
+});
+
+
+test('text size defaults remain compact across missing and invalid saved preferences', () => {
+  for (const value of [undefined, null, '', 1.2, {}, '__proto__', 'unknown']) {
+    assert.equal(fontSettings.normalizeTextSize(value), 'standard');
+    assert.equal(fontSettings.textScaleForSize(value), 1);
+  }
+  assert.equal(fontSettings.textScaleForSize('standard'), 1);
+  assert.equal(fontSettings.textScaleForSize('larger'), 1.1);
+  assert.equal(fontSettings.textScaleForSize('largest'), 1.2);
+});
+
+
+test('text size labels exist in every supported locale', () => {
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const [locale, messages] of Object.entries(MESSAGES)) {
+    for (const suffix of ['textSize', 'textSizeStandard', 'textSizeLarger', 'textSizeLargest', 'textSizeNote']) {
+      assert.ok(messages[`settings.appearance.${suffix}`], `${locale}: ${suffix}`);
+    }
+  }
 });

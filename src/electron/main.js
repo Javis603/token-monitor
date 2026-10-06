@@ -26,6 +26,7 @@ const motionPreferenceApi = require('./motionPreference');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
+const { createMimoExchangeFetch } = require('./providers/mimo/exchangeFetch');
 const { runAntigravityOAuthLogin } = require('./providers/antigravity/oauthLogin');
 const antigravityOAuth = require('../shared/providers/antigravity/oauth');
 const {
@@ -58,9 +59,19 @@ const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
 // `deps.fetch` — see limits/fetch.js for why the branch and the request options
 // are what they are. Probes that build their own transport inherit neither
 // branch: cursorProbe and antigravityProbe on node:https, Claude Web on the
-// claudeWebFetch above, the CLI fallbacks on a spawned binary.
+// claudeWebFetch above, the CLI fallbacks on a spawned binary, and MiMo's
+// exchange on the mimoExchangeFetch below, which keeps undici for the per-hop
+// request it needs but still asks Chromium which proxy to use.
 function electronLimitsFetch() {
   return createElectronLimitsFetch({ net, env: process.env });
+}
+
+// Lazy because `session.defaultSession` only exists once the app is ready, and
+// process-wide because the transport caches one proxy agent per proxy URL.
+let mimoExchangeFetch = null;
+function ensureMimoExchangeFetch() {
+  if (!mimoExchangeFetch) mimoExchangeFetch = createMimoExchangeFetch({ session: session.defaultSession });
+  return mimoExchangeFetch;
 }
 
 // Settings-side provider probes take the same transport as the collector's.
@@ -68,7 +79,7 @@ function electronLimitsFetch() {
 // global fetch refuses to save an account on exactly the machines this
 // transport exists for.
 function electronProviderDeps(deps = {}) {
-  return { ...deps, fetch: electronLimitsFetch() };
+  return { ...deps, fetch: electronLimitsFetch(), mimoExchangeFetch: ensureMimoExchangeFetch() };
 }
 const {
   DEFAULT_CLIENTS,
@@ -79,6 +90,7 @@ const {
 const { seedSplitClients } = require('../shared/clientIdentitySplits');
 const {
   clientDiagnosticRoots,
+  getTokscaleStatus,
   lookupModelPricing,
   normalizeHistoryIntervalMs,
   visibleDiagnosticRoots
@@ -89,14 +101,18 @@ const {
 } = require('../shared/providers/antigravity/selfSync');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
-const { actionWindowForEvent, handoffWindow, showWindow } = require('./windowLifecycle');
+const { actionWindowForEvent, activateWindowAction, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
+const { applyCodexAdditionalLimitsMigration } = require('./codexAdditionalLimitsMigration');
 const { createDeviceRuntime } = require('../shared/usage/deviceRuntime');
 const { externalAgentActive } = require('../shared/usage/agentPid');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
 const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
+const { normalizeSharedSyncValue } = require('../shared/syncContent');
+const { createSyncContentRuntime, normalizeSyncContentState, sameDestination } = require('./syncContentRuntime');
+const { createSyncContentCredentialQueue } = require('./syncContentCredentials');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const {
   normalizeModelAliases,
@@ -116,6 +132,7 @@ const {
 } = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 const { limitProviderUrlAllowed } = require('../shared/limits/accounts');
+const { normalizeLimitProviderHiddenItems } = require('../shared/limits/usageItems');
 const {
   accountFieldProjection,
   accountStatusProjection,
@@ -163,15 +180,9 @@ const {
 const {
   defaultHomeModulePreferences,
   normalizeHiddenHomeModules,
+  normalizeHomeLimitDisplayMode,
   normalizeHomeModuleOrder
 } = require('./renderer/homeModulePreferences');
-const {
-  checkNpmForNewer,
-  cleanupStaleStaging,
-  downloadFromNpm,
-  getTokscaleStatus,
-  resetToBundled
-} = require('../shared/tokscaleUpdater');
 const {
   appUpdateInstallSupport,
   classifyAppUpdateError,
@@ -262,8 +273,10 @@ const {
   MIMO_PLATFORM_CONSOLE_URL,
   createMimoManagedAccount,
   fetchMimoLimits,
-  normalizeMimoCookieHeader
+  normalizeMimoCookieHeader,
+  withDetectedMimoAccount
 } = require('../shared/providers/mimo/limits');
+const { createMimoAccountMetadataReader } = require('./providers/mimo/accountMetadata');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
@@ -330,9 +343,12 @@ const {
   createStatsPublicationBatcher,
   rendererStats
 } = require('./statsPublisher');
+const { withoutSessionTitleStats, withoutSessionTitles } = require('./sessionTitleDisplay');
 const { createSseBlockReader, parseSseBlock } = require('./sseEventReader');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
+const { createIcloudSyncStore } = require('./icloudSync');
+const { createIcloudSyncRuntime } = require('./icloudSyncRuntime');
 const {
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
@@ -389,8 +405,10 @@ const {
 } = require('./floatingBubble');
 const { applyWindowsChrome } = require('./windowsChrome');
 const { canUseEdgeDock, createEdgeDockController, edgeDockSupported } = require('./edgeDock/controller');
+const { createFullScreenProbe } = require('./edgeDock/fullScreenProbe');
 const {
   normalizeEdgeDockDisplayId,
+  normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide
 } = require('./edgeDock/geometry');
@@ -461,7 +479,7 @@ const CSP_HEADER = [
   "frame-ancestors 'none'"
 ].join('; ');
 const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
-const HUB_MODE_VALUES = new Set(['local', 'client', 'host']);
+const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval']);
 const COLLECTION_INTERVAL_OPTIONS = [5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
@@ -535,6 +553,8 @@ function defaultSettings() {
     // to a random secret generated in startEmbeddedHub() if env is empty.
     hubHostSecret: process.env.TOKEN_MONITOR_SECRET || '',
     secret: process.env.TOKEN_MONITOR_SECRET || '',
+    hubSyncSessionTitles: parseBoolean(process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES, false),
+    syncContentState: normalizeSyncContentState(null),
     windowBehavior,
     alwaysOnTop: windowBehavior === 'floating',
     keepAboveTaskbar: false,
@@ -562,9 +582,11 @@ function defaultSettings() {
     // `used` is what the Sessions view and this app's own readouts show, while
     // the clients' default footers tend to lead with what is left.
     sessionContextMetric: 'used',
+    sessionTitlesEnabled: true,
     periodMonthMode: 'month',
     themeColors: {},
     vendorColors: {},
+    textSize: 'standard',
     interfaceFontFamily: '',
     displayFontFamily: fontSettingsApi.DEFAULT_DISPLAY_FONT,
     floatingBubbleEnabled: false,
@@ -581,9 +603,10 @@ function defaultSettings() {
     edgeDockOffset: null,
     edgeDockDisplayId: null,
     edgeDockItems: null,
-    lastViewState: { period: 'today', breakdown: 'tool' },
+    lastViewState: { period: 'today', breakdown: 'home' },
     discordRpcEnabled: false,
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
+    icloudWriterId: '',
     lastPostedDeviceId: '',
     clients: clientsCsvForSetting(process.env.TOKEN_MONITOR_CLIENTS),
     customScanPaths: {},
@@ -595,6 +618,7 @@ function defaultSettings() {
     homeModuleOrder: defaultHomeModulePreferences().homeModuleOrder,
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
     showHomeLimitBars: false,
+    homeLimitDisplayMode: 'text',
     showHomeLimitProviderNames: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
     historyEnabled: true,
@@ -621,6 +645,9 @@ function defaultSettings() {
     limitProviderOrder: defaultLimitProviderOrder(),
     homeLimitProviderOrder: '',
     hiddenHomeLimitProviders: '',
+    // Rows of a provider's limits card the user has hidden, as
+    // `{ providerId: [itemId, ...] }` (see shared/limits/usageItems).
+    limitProviderHiddenItems: {},
     homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
     limitsRefreshMode: normalizeLimitsRefreshMode(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE),
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
@@ -845,6 +872,7 @@ function credentialProbeDeps(renewed = {}) {
 function electronLimitsDeps() {
   return {
     fetch: electronLimitsFetch(),
+    mimoExchangeFetch: ensureMimoExchangeFetch(),
     claudeWebFetch: electronClaudeWebFetch,
     workbuddyFetch: async (url, init = {}, expectedSession = null) => {
       const result = await electronWorkbuddyLocalAuth.request(url, init, expectedSession);
@@ -1236,17 +1264,42 @@ function normalizeMimoManagedAccounts(value) {
   return accounts;
 }
 
-function mimoAccountsForRenderer() {
-  return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map(({
-    id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled
-  }) => ({ id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled }));
+// Synthetic settings-row id for the session discovered from MiMo Desktop. It is
+// local UI state, not a provider id.
+const MIMO_DETECTED_ACCOUNT_ID = 'mimo-local-session';
+const detectedMimoAccountKey = createMimoAccountMetadataReader();
+
+// Settings lists a detected Desktop identity without retaining its credential.
+function mimoDetectedAccount() {
+  const accountKey = detectedMimoAccountKey();
+  if (!accountKey) return null;
+  return {
+    id: MIMO_DETECTED_ACCOUNT_ID,
+    accountKey,
+    accountEmail: '',
+    accountLabel: '',
+    enabled: true
+  };
 }
 
+function mimoAccountsForRenderer() {
+  const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map(({
+    id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled
+  }) => ({ id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled }));
+  return withDetectedMimoAccount(accounts, mimoDetectedAccount());
+}
+
+// Every saved account is handed over, including one whose credential cannot be
+// read right now: the provider answers that account with its own not-configured
+// row, which keeps the failure on the account it belongs to. Dropping it here
+// instead used to leave the provider with no accounts at all, and a provider with
+// no accounts answers once for the whole lane — which cleared every other
+// account's row with it.
 function mimoManagedAccountsForCollector() {
   return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map((account) => ({
     ...account,
     cookieHeader: readMimoCredential(account.id)
-  })).filter((account) => account.cookieHeader);
+  }));
 }
 
 function legacyMimoCredentialPath(id) {
@@ -1284,7 +1337,10 @@ async function addMimoManagedAccount(cookieValue) {
   const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
   const result = createMimoManagedAccount(cookieValue, accounts);
   if (!result.ok) return result;
-  const [validation] = await fetchMimoLimits({ mimoManagedAccounts: [result.account] }, electronProviderDeps());
+  const [validation] = await fetchMimoLimits({
+    mimoManagedAccounts: [result.account],
+    limitRefreshScope: { provider: 'mimo', accountKey: result.account.accountKey }
+  }, credentialProbeDeps());
   if (validation?.status !== 'ok') {
     const errorCode = validation?.status === 'unauthorized'
       ? 'invalidCookie'
@@ -1925,8 +1981,11 @@ function normalizeTrayContent(value, fallback = 'tokens', allowedValues = TRAY_C
   return allowedValues.has(v) ? v : fallback;
 }
 
-function normalizeHubMode(value, fallback = 'local') {
+function normalizeHubMode(value, fallback = 'local', platform = process.platform) {
   const v = String(value || '').trim();
+  if (v === 'icloud' && platform !== 'darwin') {
+    return fallback === 'icloud' ? 'local' : fallback;
+  }
   return HUB_MODE_VALUES.has(v) ? v : fallback;
 }
 
@@ -1937,6 +1996,7 @@ function normalizeLanguageSetting(value, fallback = 'auto') {
   if (lower === 'en' || lower.startsWith('en-')) return 'en';
   if (lower === 'zh-tw' || lower.startsWith('zh-hant') || /-(tw|hk|mo)\b/i.test(raw)) return 'zh-TW';
   if (lower === 'zh-cn' || lower.startsWith('zh-hans') || /-(cn|sg|my)\b/i.test(raw)) return 'zh-CN';
+  if (lower === 'pt' || lower.startsWith('pt-')) return 'pt-BR';
   return LANGUAGE_VALUES.has(raw) ? raw : fallback;
 }
 
@@ -2452,6 +2512,7 @@ function readSettings() {
       merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
+    merged.homeLimitDisplayMode = normalizeHomeLimitDisplayMode(merged.homeLimitDisplayMode);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
     merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
     merged.showCodexAdditionalLimits = parseBoolean(merged.showCodexAdditionalLimits, true);
@@ -2465,6 +2526,7 @@ function readSettings() {
     if (saved.hiddenHomeLimitProviders !== undefined) {
       merged.hiddenHomeLimitProviders = normalizeHiddenLimitProviders(saved.hiddenHomeLimitProviders);
     }
+    merged.limitProviderHiddenItems = normalizeLimitProviderHiddenItems(merged.limitProviderHiddenItems);
     merged.homeLimitAccountCount = normalizeHomeLimitAccountCount(merged.homeLimitAccountCount);
     merged.periodMonthMode = normalizePeriodMonthMode(merged.periodMonthMode);
     if (saved.historyEnabled !== undefined) {
@@ -2485,13 +2547,17 @@ function readSettings() {
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
+    merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
     merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
     merged.modelAliases = normalizeModelAliases(merged.modelAliases);
+    merged.syncContentState = normalizeSyncContentState(merged.syncContentState);
+    merged.hubSyncSessionTitles = parseBoolean(merged.hubSyncSessionTitles, false);
     merged.modelAliasGrouping = normalizeModelAliasGrouping(merged.modelAliasGrouping);
+    merged.textSize = fontSettingsApi.normalizeTextSize(merged.textSize);
     merged.interfaceFontFamily = fontSettingsApi.normalizeFontFamily(merged.interfaceFontFamily);
     merged.displayFontFamily = fontSettingsApi.normalizeFontFamily(merged.displayFontFamily);
     merged.tokenRateMode = normalizeTokenRateMode(merged.tokenRateMode);
@@ -2516,7 +2582,7 @@ function readSettings() {
     if (saved.lastViewState !== undefined) {
       merged.lastViewState = normalizeInitialRendererViewState(saved.lastViewState);
     }
-    merged.hubMode = normalizeHubMode(merged.hubMode);
+    merged.hubMode = normalizeHubMode(merged.hubMode, 'local', process.platform);
     merged.language = normalizeLanguageSetting(merged.language);
     merged.currency = normalizeCurrency(merged.currency);
     merged.currencyRates = normalizeCurrencyOverrides(merged.currencyRates);
@@ -2536,7 +2602,7 @@ function readSettings() {
     merged.edgeDockSide = normalizeEdgeDockSide(merged.edgeDockSide);
     merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
     merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
-    merged.edgeDockMode = merged.edgeDockMode === 'always' ? 'always' : 'autoHide';
+    merged.edgeDockMode = normalizeEdgeDockMode(merged.edgeDockMode);
     merged.edgeDockHaptic = parseBoolean(merged.edgeDockHaptic, true);
     merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
     merged.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode(merged.edgeDockMacBackdrop);
@@ -2596,6 +2662,16 @@ function seedInitialLimitProviders(summary) {
   });
 }
 
+// Runs on the presented stats rather than this device's record, so a Codex
+// account another device reports carries the switch over too.
+function migrateCodexAdditionalLimits(visibleStats) {
+  return applyCodexAdditionalLimitsMigration(visibleStats, {
+    settings,
+    saveSettings,
+    onPersisted: pushSettingsToRenderer
+  });
+}
+
 function loginItemEnabledHere() {
   if (!app.isPackaged) return false;
   // Electron login items only cover macOS/Windows; on Linux we manage an XDG
@@ -2640,6 +2716,7 @@ function localArchiveSourceDevice() {
   return selectLocalDeviceRecord({
     deviceId: settings?.deviceId || defaultDeviceId(),
     externalAgentActive: isExternalAgentActive(),
+    hubMode: settings?.hubMode,
     lastCollectedDevice,
     localDevice,
     latestHubStats: currentHubStatsCache(),
@@ -2817,6 +2894,9 @@ function withHistoryPreview(stats, devices) {
 
 let mode = 'idle';
 let deviceRuntimeHandle = null;
+let icloudRuntimeHandle = null;
+let icloudRuntimeEpoch = 0;
+let icloudRuntimeStopPromise = Promise.resolve();
 const USAGE_RECONFIGURE_SETTLE_MS = 750;
 const USAGE_RECONFIGURE_RETRY_DELAYS_MS = Object.freeze([1000, 3000, 10_000]);
 const usageRuntimeReconciler = createLatestWinsReconciler({
@@ -2872,9 +2952,9 @@ function electronPresentationStats(stats) {
   };
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
-  const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null]);
+  const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
   return presentationCache.get(stats, key, () => projectModelAliasStats(
-    projectLimitStatsForDisplay(stats, limitOptions),
+    projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(stats) : stats, limitOptions),
     aliases,
     { grouping }
   ));
@@ -2895,14 +2975,14 @@ function rendererAllTimeSessions(stats) {
   if (!stats) return null;
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
-  const key = JSON.stringify([aliases ?? null, grouping ?? null]);
+  const key = JSON.stringify([aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
   return allTimeSessionsCache.get(stats, key, () => {
     const complete = completeLocalSyncStats(stats);
     const hubSnapshot = snapshotLocalDevices.get(stats);
     const sessions = hubSnapshot
       ? mergedLocalAllTimeSessions(complete.periods, hubSnapshot.localDevice)
       : complete.periods?.allTime?.sessions || {};
-    return projectModelAliasSessions(stats, sessions, aliases, { grouping });
+    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, aliases, { grouping });
   });
 }
 
@@ -2922,8 +3002,6 @@ const providerTrayIcons = {};
 let registeredWindowToggleShortcut = '';
 let windowToggleShortcutRegistered = false;
 let defaultTrayIcon = null;
-let tokScaleNpmMetadata = null;
-let tokScaleUpdaterBusy = false;
 function getDefaultTrayIcon() {
   if (!defaultTrayIcon) defaultTrayIcon = buildTrayIcon();
   return defaultTrayIcon;
@@ -2953,7 +3031,9 @@ function currentHubStatsCache() {
     ? 'host'
     : hubMode === 'client'
       ? 'client'
-      : 'none';
+      : hubMode === 'icloud'
+        ? 'icloud'
+        : 'none';
   if (!latestHubStats
     || latestHubStatsSource !== expectedSource
     || latestHubStatsGeneration !== hubModeGeneration
@@ -2986,6 +3066,7 @@ const diagnosticSnapshotBuilder = createDiagnosticSnapshotBuilder({
   getExternalAgentActive: isExternalAgentActive,
   getDeviceRuntime: () => deviceRuntimeHandle,
   getEmbeddedHub: () => embeddedHub,
+  getIcloudSync: () => icloudRuntimeHandle?.getStatus?.() || null,
   getStreamState: () => ({ connected: streamConnected, failure: streamFailure }),
   getLatestHubStats: () => latestHubStats,
   getLatestHubStatsReceivedAt: () => latestHubStatsReceivedAt,
@@ -3116,7 +3197,7 @@ function bestEffortTrackedUsageRefresh(clientId, options = {}) {
   const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
   if (
     !tracked.has(client)
-    || !canRefreshUsageRuntime(mode, isExternalAgentActive)
+    || (settings?.hubMode !== 'icloud' && !canRefreshUsageRuntime(mode, isExternalAgentActive))
   ) return;
   try {
     void refreshUsageClient(client, options).catch((error) => {
@@ -3134,7 +3215,7 @@ function drainPendingUsageClientRefreshes(runtime) {
     (error) => {
       console.log(`[usage-runtime] pending client refresh failed: ${error.message}`);
     },
-    { enabled: canRefreshUsageRuntime(mode, isExternalAgentActive) }
+    { enabled: settings?.hubMode === 'icloud' || canRefreshUsageRuntime(mode, isExternalAgentActive) }
   );
 }
 
@@ -3143,16 +3224,16 @@ function drainPendingRuntimeActions(runtime) {
   drainPendingUsageClientRefreshes(runtime);
 }
 
-function effectiveHubConfig() {
-  if (settings?.hubMode === 'host') {
+function effectiveHubConfig(sourceSettings = settings) {
+  if (sourceSettings?.hubMode === 'host') {
     return {
-      url: `http://127.0.0.1:${normalizeHubPort(settings.hubHostPort)}`,
-      secret: settings.hubHostSecret || ''
+      url: `http://127.0.0.1:${normalizeHubPort(sourceSettings.hubHostPort)}`,
+      secret: sourceSettings.hubHostSecret || ''
     };
   }
-  if (settings?.hubMode === 'client') {
-    const url = String(settings.hubUrl || '').trim();
-    return { url: url || null, secret: settings.secret || '' };
+  if (sourceSettings?.hubMode === 'client') {
+    const url = String(sourceSettings.hubUrl || '').trim();
+    return { url: url || null, secret: sourceSettings.secret || '' };
   }
   return { url: null, secret: '' };
 }
@@ -3176,7 +3257,16 @@ function getHubInfo() {
     listening: Boolean(embeddedHub),
     listeningPort: embeddedHub ? embeddedHub.port : null,
     error: embeddedHubError,
-    lanAddresses: lanIpv4Addresses()
+    lanAddresses: lanIpv4Addresses(),
+    icloud: icloudRuntimeHandle?.getStatus?.() || {
+      state: process.platform === 'darwin' ? 'waiting' : 'unavailable',
+      availability: process.platform === 'darwin' ? 'unknown' : 'unavailable',
+      supported: process.platform === 'darwin',
+      root: '[redacted]/Token Monitor/sync-v1',
+      deviceCount: 0,
+      watcher: 'inactive',
+      reconciliation: 'idle'
+    }
   };
 }
 
@@ -3189,21 +3279,33 @@ async function getHubBuildStatus() {
 async function startEmbeddedHub() {
   if (embeddedHub) return embeddedHub;
   embeddedHubError = null;
-  if (!settings.hubHostSecret) {
-    settings.hubHostSecret = generateHubSecret();
-    saveSettings();
-  }
   const port = normalizeHubPort(settings.hubHostPort);
   try {
+    if (!settings.hubHostSecret) {
+      const previous = settings;
+      try {
+        const next = { ...settings, hubHostSecret: generateHubSecret() };
+        getSyncContentRuntime().beforeDestinationChange(syncContentContext(next));
+        next.syncContentState = normalizeSyncContentState(settings.syncContentState);
+        settings = next;
+        saveSettings({ throwOnError: true });
+      } catch (error) {
+        // Restore connection settings without undoing a preflight OFF/journal.
+        settings = { ...previous, syncContentState: normalizeSyncContentState(settings.syncContentState) };
+        throw error;
+      }
+      getSyncContentRuntime().invalidate();
+    }
     const hub = createHub({
       port,
       host: '0.0.0.0',
       secret: settings.hubHostSecret,
+      syncSessionTitles: settings.hubSyncSessionTitles === true,
       dataFile: hubDataFile(),
       logger: { error: (err) => console.log(`[hub] ${err?.message || err}`) }
     });
     await hub.start();
-    embeddedHub = { hub, port };
+    embeddedHub = { hub, port, secret: settings.hubHostSecret };
     console.log(`[hub] listening on 0.0.0.0:${port}`);
     sendHubPush({ type: 'listening', info: getHubInfo() });
     return embeddedHub;
@@ -3230,7 +3332,7 @@ function isExternalAgentActive() {
 function ownsUsageRuntime() {
   return Boolean(
     deviceRuntimeHandle
-    && canRefreshUsageRuntime(mode, isExternalAgentActive)
+    && (settings?.hubMode === 'icloud' || canRefreshUsageRuntime(mode, isExternalAgentActive))
   );
 }
 
@@ -3245,8 +3347,52 @@ async function deleteDeviceFromHub(deviceId) {
   if (!response.ok && response.status !== 404) throw new Error(`DELETE ${response.status}`);
 }
 
+function normalizeDeviceIdForDeletion(deviceId) {
+  const id = String(deviceId ?? '').trim();
+  if (!id) throw Object.assign(new Error('invalid_device_id'), { code: 'invalid_device_id' });
+  return id;
+}
+
+async function deleteDeviceFromCurrentSync(deviceId) {
+  const hubMode = settings?.hubMode;
+  if (hubMode !== 'icloud' && hubMode !== 'client' && hubMode !== 'host') {
+    throw Object.assign(new Error('Device deletion is only available in shared sync mode'), { code: 'not_shared' });
+  }
+  const hubIdentity = currentHubIdentity();
+  const runtime = hubMode === 'icloud' ? icloudRuntimeHandle : null;
+  if (hubMode === 'icloud' && !runtime) {
+    throw Object.assign(new Error('iCloud sync is unavailable'), { code: 'icloud_unavailable' });
+  }
+
+  const stats = await fetchStats();
+  if (
+    settings?.hubMode !== hubMode
+    || currentHubIdentity() !== hubIdentity
+    || (hubMode === 'icloud' && icloudRuntimeHandle !== runtime)
+  ) {
+    throw Object.assign(new Error('hub changed'), { code: 'hub_changed' });
+  }
+  const localDeviceId = String(settings?.deviceId || defaultDeviceId()).trim();
+  if (deviceId === localDeviceId) {
+    throw Object.assign(new Error('local_device_delete_not_allowed'), { code: 'local_device_delete_not_allowed' });
+  }
+  const devices = Array.isArray(stats?.devices) ? stats.devices : [];
+  const target = devices.find((device) => device?.deviceId === deviceId);
+  if (!target) {
+    throw Object.assign(new Error('device_not_found'), { code: 'device_not_found' });
+  }
+  if (target.stale !== true) {
+    throw Object.assign(new Error('device_not_stale'), { code: 'device_not_stale' });
+  }
+
+  if (hubMode === 'icloud') return runtime.deleteDevice(deviceId);
+  return deleteDeviceFromHub(deviceId);
+}
+
 async function postToHub(summary) {
   const { url: hubUrl, secret } = effectiveHubConfig();
+  const uploadIdentity = getSyncContentRuntime().status().identity;
+  const uploadContext = syncContentContext();
   if (!hubUrl) throw new Error('hub not configured');
   const stale = settings.lastPostedDeviceId;
   if (stale && stale !== summary.deviceId) {
@@ -3254,7 +3400,17 @@ async function postToHub(summary) {
     catch (error) { console.log(`[sync] cleanup of old deviceId ${stale} failed: ${error.message}`); }
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/ingest`;
-  const { response } = await postSyncPayload(fetch, url, {
+  const runtime = getSyncContentRuntime();
+  const syncOptions = await runtime.prepareUpload();
+  if (syncOptions.identity !== uploadIdentity || syncOptions.signal.aborted
+    || syncOptions.identity !== getSyncContentRuntime().status().identity
+    || !sameDestination(uploadContext, syncContentContext())
+    || summary.deviceId !== syncContentContext().deviceId) throw new Error('hub_changed');
+  const fetchForUpload = (target, options) => fetch(target, { ...options, redirect: 'error',
+    signal: AbortSignal.any([syncOptions.signal, AbortSignal.timeout(15_000)]) });
+  const { response } = await postSyncPayload(fetchForUpload, url, {
+    syncSessionTitles: syncOptions.syncSessionTitles,
+    sessionTitleSyncGeneration: syncOptions.sessionTitleSyncGeneration,
     headers: {
       'content-type': 'application/json',
       [HUB_RESPONSE_HEADER]: HUB_RESPONSE_MINIMAL,
@@ -3269,6 +3425,85 @@ async function postToHub(summary) {
     saveSettings();
   }
   return response.json();
+}
+
+let syncContentRuntime = null;
+let applySyncSettingsPatch = null;
+
+function syncContentContext(sourceSettings = settings) {
+  const endpoint = effectiveHubConfig(sourceSettings);
+  return { ...endpoint, mode: sourceSettings?.hubMode, deviceId: sourceSettings?.deviceId || defaultDeviceId() };
+}
+
+function getSyncContentRuntime() {
+  if (syncContentRuntime) return syncContentRuntime;
+  const cleanupCredentials = createSyncContentCredentialQueue(ensureCredentialStore);
+  syncContentRuntime = createSyncContentRuntime({
+    resolveIdentity: cleanupCredentials.resolveIdentity,
+    loadCleanupContexts: cleanupCredentials.read,
+    saveCleanupContext: cleanupCredentials.save,
+    removeCleanupContext: cleanupCredentials.remove,
+    getContext: syncContentContext,
+    getState: () => settings?.syncContentState,
+    saveState: (next) => {
+      const previous = settings;
+      settings = { ...settings, syncContentState: next };
+      try {
+        // Sync policy changes never alter credentials. Persist OFF independently
+        // so a failed private journal write cannot block the preference journal.
+        writePrivateJsonAtomic(settingsPath, stripCredentialSettings(settings));
+        persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
+      } catch (error) { settings = previous; throw error; }
+    },
+    getLocalValue: (kind) => kind === 'modelAliases'
+      ? { modelAliases: settings.modelAliases, modelAliasGrouping: settings.modelAliasGrouping }
+      : settings.customModelPricing,
+    applyLocalValue: (kind, value) => {
+      if (!applySyncSettingsPatch) throw new Error('settings_not_ready');
+      return applySyncSettingsPatch(kind === 'modelAliases' ? value : { customModelPricing: value });
+    },
+    normalizeValue: normalizeSharedSyncValue,
+    request: async (context, pathname, method, body) => {
+      // The embedded Hub uses the same authenticated protocol in-process. Its
+      // own usage must keep working when outbound loopback traffic is blocked.
+      if (context.mode === 'host' && embeddedHub
+        && ((context.url === `http://127.0.0.1:${embeddedHub.port}` && context.secret === embeddedHub.secret)
+          // Every embedded host generation shares this app's hubDataFile. Old
+          // host journals may scrub that same store after port/secret rotation;
+          // they cannot read or admit a new generation through this exception.
+          || (method === 'PUT' && /^\/api\/sync\/titles\//.test(pathname) && body?.enabled === false))) {
+        const hub = embeddedHub.hub;
+        try {
+          if (pathname === '/api/sync/content') return { status: 200, body: hub.getSyncContent() };
+          const match = pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing)$/);
+          if (match) return { status: 200, body: { ok: true, ...(method === 'PUT'
+            ? hub.setSyncSettings(match[1], body) : hub.getSyncSettings(match[1])) } };
+          const titleMatch = pathname.match(/^\/api\/sync\/titles\/([^/]+)$/);
+          if (titleMatch && method === 'PUT') return { status: 200,
+            body: { ok: true, ...hub.setSyncTitlePolicy(decodeURIComponent(titleMatch[1]), body.enabled) } };
+          return { status: 404, body: null };
+        } catch (error) {
+          return { status: error.code === 'stale_write' ? 409 : error.code === 'forbidden' ? 403 : 400,
+            body: error.current || null };
+        }
+      }
+      const response = await fetch(`${context.url.replace(/\/$/, '')}${pathname}`, {
+        method, redirect: 'error',
+        headers: { 'content-type': 'application/json', ...(context.secret ? { authorization: `Bearer ${context.secret}` } : {}) },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        signal: AbortSignal.timeout(15_000)
+      });
+      let data;
+      try { data = await response.json(); } catch (_) { data = null; }
+      return { status: response.status, body: data };
+    },
+    onStatus: (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try { mainWindow.webContents.send('syncContent:push', status); } catch (_) {}
+      }
+    }
+  });
+  return syncContentRuntime;
 }
 
 // ---------------------------------------------------------------------------
@@ -3313,7 +3548,7 @@ let lastSubscriptionCatchUp = { hub: '', version: '', at: 0 };
 const SUBSCRIPTION_RETRY_MS = 60000;
 
 function subscriptionsAreShared() {
-  return settings?.hubMode === 'client' || settings?.hubMode === 'host';
+  return settings?.hubMode === 'client' || settings?.hubMode === 'host' || settings?.hubMode === 'icloud';
 }
 
 // The document in hand, but only when it is the one this hub answered with.
@@ -3349,6 +3584,7 @@ function cacheSharedSubscriptions(doc, hub) {
   // and comparing timestamps alone left the marker pointing at the previous hub,
   // so an offline restart came back showing its records.
   const changed = (hubSubscriptions?.updatedAt || '') !== (doc.updatedAt || '')
+    || (hubSubscriptions?.revisionToken || '') !== (doc.revisionToken || '')
     || String(settings.subscriptionsCacheHub || '') !== hub;
   hubSubscriptions = doc;
   hubSubscriptionsHub = hub;
@@ -3533,7 +3769,15 @@ function rememberOrphanedSubscriptions(local, doc) {
 // Trimmed the same way subscriptionsEndpoint() trims it, so a trailing slash the
 // user typed does not read as a different hub and strand them.
 function currentHubIdentity() {
+  if (typeof settings !== 'undefined' && settings?.hubMode === 'icloud') return 'icloud';
   return String(effectiveHubConfig().url || '').replace(/\/$/, '');
+}
+
+function subscriptionDocumentVersion(doc) {
+  if (!doc) return '';
+  return settings?.hubMode === 'icloud'
+    ? String(doc.revisionToken || '')
+    : String(doc.updatedAt || '');
 }
 
 function orphanedSubscriptions() {
@@ -3571,10 +3815,37 @@ async function adoptOrphanedSubscriptions() {
     // this one as though they had been entered here; with none in hand the write
     // goes out claiming no base, which the hub answers with 409 rather than an
     // overwrite.
-    const held = subscriptionsDocumentFor(hub);
-    const merged = new Map((held?.subscriptions || []).map((entry) => [entry.id, entry]));
-    for (const orphan of orphans) merged.set(orphan.id, orphan);
-    await writeSharedSubscriptionsNow([...merged.values()], hub, held?.updatedAt || '');
+    if (settings.hubMode === 'icloud') {
+      const runtime = icloudRuntimeHandle;
+      if (!runtime) throw Object.assign(new Error('iCloud sync is unavailable'), { code: 'icloud_unavailable' });
+      const held = runtime.getSubscriptions?.();
+      const merged = new Map((held?.subscriptions || []).map((entry) => [entry.id, entry]));
+      for (const orphan of orphans) merged.set(orphan.id, orphan);
+      const result = await runtime.saveSubscriptions([...merged.values()], held?.revisionToken || '');
+      if (!subscriptionOpIsCurrent(hub) || icloudRuntimeHandle !== runtime) throw hubChangedError();
+      if (result?.winner) {
+        cacheSharedSubscriptions({
+          version: 1,
+          updatedAt: result.winner.updatedAt || '',
+          subscriptions: result.winner.subscriptions || [],
+          revisionToken: result.revisionToken || ''
+        }, hub);
+      }
+      // iCloud may discover a competing writer's snapshot after publishing ours.
+      // Unlike the Hub's accepted write, that result does not prove adoption.
+      const winningRecords = new Map((result?.winner?.subscriptions || []).map((entry) => [entry.id, entry]));
+      if (result?.errors?.length || !result?.winner || orphans.some((entry) =>
+        JSON.stringify(winningRecords.get(entry.id)) !== JSON.stringify(entry)
+      )) {
+        const code = result?.errors?.length || !result?.winner ? 'icloud_adoption_unconfirmed' : 'stale_write';
+        throw Object.assign(new Error(code), { code });
+      }
+    } else {
+      const held = subscriptionsDocumentFor(hub);
+      const merged = new Map((held?.subscriptions || []).map((entry) => [entry.id, entry]));
+      for (const orphan of orphans) merged.set(orphan.id, orphan);
+      await writeSharedSubscriptionsNow([...merged.values()], hub, held?.updatedAt || '');
+    }
     // Cleared in the same turn: between the write landing and this, the records
     // are on the hub and still marked as waiting for a decision here.
     settings.subscriptionsOrphaned = { hubUrl: '', records: [] };
@@ -3591,6 +3862,11 @@ function subscriptionWriteFailureCode(error) {
   if (error?.code === 'rejected') return 'hub_rejected';
   if (error?.code === 'write_failed') return 'write_failed';
   if (error?.code === 'hub_changed') return 'hub_changed';
+  if (typeof settings !== 'undefined' && settings?.hubMode === 'icloud') {
+    return error?.code === 'icloud_unavailable' || error?.code === 'icloud_stopped' || error?.code === 'icloud_adoption_unconfirmed'
+      ? error.code
+      : 'icloud_write_failed';
+  }
   return 'hub_unreachable';
 }
 
@@ -3620,6 +3896,38 @@ async function refreshSharedSubscriptionsNow({ seedFromLocal = false } = {}) {
   if (hubSubscriptions && hubSubscriptionsHub !== hub) {
     hubSubscriptions = null;
     hubSubscriptionsHub = '';
+  }
+
+  if (settings.hubMode === 'icloud') {
+    const runtime = icloudRuntimeHandle;
+    if (!runtime) return false;
+    await runtime.reconcile('subscription-refresh');
+    if (!subscriptionOpIsCurrent(hub) || icloudRuntimeHandle !== runtime) return false;
+    const local = settings.subscriptionsCacheHub ? [] : (settings.subscriptions || []);
+    let document = runtime.getSubscriptions?.() || null;
+    if (!document && seedFromLocal && local.length > 0) {
+      const written = await runtime.saveSubscriptions(local, '');
+      if (!subscriptionOpIsCurrent(hub) || icloudRuntimeHandle !== runtime) return false;
+      document = written?.winner
+        ? { ...written.winner, revisionToken: written.revisionToken || '' }
+        : null;
+    }
+    // No winner means no valid snapshot exists. Missing, malformed, or
+    // temporarily unavailable files are not an authoritative empty list; only
+    // a valid winner whose subscriptions array is [] can clear the cache.
+    if (!document) return false;
+    const normalizedDocument = {
+      version: 1,
+      updatedAt: document.updatedAt || '',
+      subscriptions: document.subscriptions || [],
+      revisionToken: document.revisionToken || ''
+    };
+    const orphansChanged = seedFromLocal && local.length > 0
+      ? rememberOrphanedSubscriptions(local, normalizedDocument)
+      : false;
+    const changed = cacheSharedSubscriptions(normalizedDocument, hub);
+    if (orphansChanged && !changed) persistSubscriptionState();
+    return changed || orphansChanged;
   }
 
   try {
@@ -3773,6 +4081,25 @@ async function saveSubscriptions(list, base) {
   // version cannot answer for it: two hubs that have never been written to both
   // report no version, so an edit made against one would pass a version check
   // against the other and be written into a list it was never meant for.
+  if (settings.hubMode === 'icloud') {
+    return queueSubscriptionOp(async (hub) => {
+      if (!subscriptionOpIsCurrent(hub) || settings.hubMode !== 'icloud') throw hubChangedError();
+      const runtime = icloudRuntimeHandle;
+      if (!runtime) throw Object.assign(new Error('iCloud sync is unavailable'), { code: 'icloud_unavailable' });
+      const result = await runtime.saveSubscriptions(list, String(base?.updatedAt || ''));
+      if (!subscriptionOpIsCurrent(hub) || icloudRuntimeHandle !== runtime) throw hubChangedError();
+      if (result?.winner) {
+        cacheSharedSubscriptions({
+          version: 1,
+          updatedAt: result.winner.updatedAt || '',
+          subscriptions: result.winner.subscriptions || [],
+          revisionToken: result.revisionToken || ''
+        }, hub);
+      }
+      pushSettingsToRenderer();
+      return settingsForRenderer();
+    });
+  }
   await writeSharedSubscriptions(list, String(base?.updatedAt || ''));
   return settingsForRenderer();
 }
@@ -3784,6 +4111,194 @@ function stopSyncCollector(options = {}) {
   usageRuntimeReconciler.setActiveKey(null);
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
+}
+
+async function stopIcloudRuntime() {
+  // The hub-mode generation changes for mode switches, but a sink-only restart
+  // (for example, changing the upload cadence) keeps that generation. This
+  // separate epoch fences callbacks from the replaced filesystem runtime too.
+  icloudRuntimeEpoch += 1;
+  const oldRuntime = icloudRuntimeHandle;
+  icloudRuntimeHandle = null;
+  if (!oldRuntime) return icloudRuntimeStopPromise;
+  icloudRuntimeStopPromise = icloudRuntimeStopPromise.then(async () => {
+    try {
+      await oldRuntime.stop();
+    } catch (error) {
+      // A failed watcher close or store cleanup must not prevent the next mode
+      // from starting. The runtime has fenced its callbacks; keep the error
+      // visible and let the replacement proceed.
+      console.log(`[icloud] runtime teardown failed: ${error?.message || error}`);
+    }
+  });
+  return icloudRuntimeStopPromise;
+}
+
+function retainIcloudDeviceIdentity(previous, next) {
+  const retired = new Set(previous.icloudRetiredDeviceIds || []);
+  if (previous.hubMode === 'icloud'
+    && (previous.deviceId !== next.deviceId || next.hubMode !== 'icloud')) {
+    retired.add(previous.deviceId);
+  }
+  next.icloudRetiredDeviceIds = [...retired].filter(Boolean);
+}
+
+// iCloud mode keeps the normal Electron collector and limits runtime, but its
+// sink is a local, atomic file write rather than an HTTP upload.  The runtime
+// below owns reconciliation and aggregation, so a temporarily absent iCloud
+// Drive never turns a last-good multi-device snapshot into zeroes.
+async function startIcloudCollector() {
+  await stopIcloudRuntime();
+  stopSyncCollector();
+  if (process.platform !== 'darwin') return;
+  const generation = hubModeGeneration;
+  const runtimeEpoch = ++icloudRuntimeEpoch;
+  const icloudRequestIsCurrent = () => hubModeRequestIsCurrent(
+    generation,
+    'icloud',
+    currentHubStatsIdentity('icloud')
+  ) && runtimeEpoch === icloudRuntimeEpoch;
+  const widgetProducerOwner = captureMacWidgetProducerOwner();
+  let lastIcloudStatusState = '';
+  // The writer owns subscription and deletion snapshots across Device ID edits.
+  // Persist its identity before publishing anything under it.
+  if (!settings.icloudWriterId) {
+    settings.icloudWriterId = settings.deviceId;
+    if (!saveSettings()) throw new Error('Could not persist iCloud writer identity');
+  }
+  const store = createIcloudSyncStore({
+    platform: process.platform,
+    home: app.getPath('home'),
+    deviceId: settings.deviceId,
+    writerId: settings.icloudWriterId,
+    revisionLedgerPath: path.join(app.getPath('userData'), 'icloud-revisions.json'),
+    staleAfterMs: 10 * 60 * 1000
+  });
+  const runtime = createIcloudSyncRuntime({
+    store,
+    deviceId: settings.deviceId,
+    retiredDeviceIds: settings.icloudRetiredDeviceIds || [],
+    historyEnabled: () => settings?.historyEnabled !== false,
+    staleAfterMs: 10 * 60 * 1000,
+    onStats: (stats) => {
+      if (!icloudRequestIsCurrent()) return;
+      const identity = currentHubStatsIdentity('icloud');
+      setLatestHubStatsCache(stats, 'icloud', generation, identity);
+      updateDiscordRpcDisplay(stats);
+      sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats, at: new Date().toISOString() } }, { widgetProducerOwner });
+    },
+    onStatus: (status) => {
+      if (!icloudRequestIsCurrent()) return;
+      const connected = status.state === 'available';
+      sendStatus(connected, {
+        provider: 'icloud',
+        reason: status.reason || (connected ? 'icloud-ready' : 'icloud-waiting'),
+        icloud: status
+      });
+      const stateChanged = status.state !== lastIcloudStatusState;
+      lastIcloudStatusState = status.state;
+      if (connected && stateChanged && status.lastSuccessfulReconciliation && !subscriptionsDocumentFor('icloud')) {
+        void reconcileSharedSubscriptions();
+      }
+      sendHubPush({ type: 'icloud', info: getHubInfo() });
+    },
+    onSubscriptions: (document) => {
+      if (!icloudRequestIsCurrent()) return;
+      // On the first switch from Local, settings.subscriptions is still this
+      // device's owned list. The runtime may finish its initial discovery before
+      // the mode queue reaches reconcileSharedSubscriptions(seedFromLocal), so
+      // do not let that callback turn a remote winner (or an authoritative empty
+      // directory) into a cache and erase the list before the adoption decision.
+      // Once the reconcile has cached the iCloud document, later callbacks are
+      // ordinary cross-device updates and must be applied normally.
+      const localOwnedSubscriptions = !settings.subscriptionsCacheHub
+        && Array.isArray(settings.subscriptions)
+        && settings.subscriptions.length > 0
+        && !subscriptionsDocumentFor('icloud');
+      if (localOwnedSubscriptions) return;
+      if (!document) {
+        const changed = cacheSharedSubscriptions({
+          version: 1,
+          updatedAt: '',
+          subscriptions: [],
+          revisionToken: ''
+        }, 'icloud');
+        if (changed) pushSettingsToRenderer();
+        return;
+      }
+      const changed = cacheSharedSubscriptions({
+        version: 1,
+        updatedAt: document.updatedAt || '',
+        subscriptions: document.subscriptions || [],
+        revisionToken: document.revisionToken || ''
+      }, 'icloud');
+      if (changed) pushSettingsToRenderer();
+    },
+    onError: ({ category }) => {
+      if (icloudRequestIsCurrent()) {
+        recordDiagnosticEvent({ subsystem: 'icloud', code: category || 'icloud-sync-error' });
+      }
+    }
+  });
+  icloudRuntimeHandle = runtime;
+  let createdDeviceRuntime = null;
+  try {
+    mode = 'sync';
+    sendStatus(false, { provider: 'icloud', reason: 'icloud-initializing', icloud: runtime.getStatus() });
+    await runtime.start();
+    if (!icloudRequestIsCurrent()) {
+      await runtime.stop();
+      if (icloudRuntimeHandle === runtime) icloudRuntimeHandle = null;
+      return;
+    }
+    const sink = {
+      async enqueue(summary) {
+        seedInitialLimitProviders(summary);
+        // The headless agent has no iCloud sink. The widget still publishes
+        // this device's record while the agent owns the local history archive.
+        const visibleSummary = {
+          ...summary,
+          syncUploadIntervalMs: 0
+        };
+        lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
+        const retiredDeviceIds = settings.icloudRetiredDeviceIds || [];
+        const written = await runtime.writeDevice(visibleSummary, { retiredDeviceIds });
+        if (written && icloudRequestIsCurrent() && settings.deviceId === visibleSummary.deviceId) {
+          settings.icloudRetiredDeviceIds = (settings.icloudRetiredDeviceIds || [])
+            .filter((id) => !retiredDeviceIds.includes(id));
+          if (retiredDeviceIds.length) saveSettings();
+        }
+      },
+      flush: () => runtime.flush(),
+      stop: () => runtime.stop()
+    };
+    const usageOptions = electronUsageConfig('icloud-collector');
+    createdDeviceRuntime = createDeviceRuntime({
+      envelope: electronDeviceEnvelope(),
+      initialLimits: lastCollectedDevice?.limits,
+      limitsOptions: electronLimitsConfig(),
+      transformUsage: usageTransform.transform,
+      usageOptions,
+      sink,
+      onDiagnosticEvent: recordDiagnosticEvent,
+      onError: (error, reason) => console.log(`[icloud-collector] ${reason}: ${error.message}`)
+    }, {
+      createUsageRuntime: createElectronUsageRuntime,
+      limitsDeps: electronLimitsDeps()
+    });
+    deviceRuntimeHandle = createdDeviceRuntime;
+    usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
+    drainPendingRuntimeActions(createdDeviceRuntime);
+  } catch (error) {
+    if (icloudRuntimeHandle === runtime) {
+      if (createdDeviceRuntime && deviceRuntimeHandle === createdDeviceRuntime) stopSyncCollector();
+      icloudRuntimeHandle = null;
+    }
+    try { await runtime.stop(); } catch (stopError) {
+      console.log(`[icloud] failed-start teardown failed: ${stopError?.message || stopError}`);
+    }
+    throw error;
+  }
 }
 
 // Well inside the 3–5 s update promise: a watch tick already waits out its own
@@ -3868,12 +4383,20 @@ function startHostCollector() {
       const visibleSummary = summary;
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       if (!embeddedHub) return;
-      try {
+      const handle = embeddedHub;
+      const uploadIdentity = getSyncContentRuntime().status().identity;
+      const uploadContext = syncContentContext();
+      void (async () => {
+        const options = await getSyncContentRuntime().prepareUpload();
+        if (handle !== embeddedHub || options.identity !== uploadIdentity || options.signal.aborted
+          || options.identity !== getSyncContentRuntime().status().identity
+          || !sameDestination(uploadContext, syncContentContext())
+          || visibleSummary.deviceId !== syncContentContext().deviceId) return;
         const stale = settings.lastPostedDeviceId;
         if (stale && stale !== visibleSummary.deviceId) {
-          embeddedHub.hub.deleteDevice(stale);
+          handle.hub.deleteDevice(stale);
         }
-        const payload = syncPayload(visibleSummary);
+        const payload = syncPayload(visibleSummary, options);
         if (payload.allTimeProjectsOmitted === true) {
           console.log('[host-ingest] all-time project breakdown omitted to reduce the sync snapshot size');
         }
@@ -3882,9 +4405,9 @@ function startHostCollector() {
           settings.lastPostedDeviceId = visibleSummary.deviceId;
           saveSettings();
         }
-      } catch (error) {
+      })().catch((error) => {
         console.log(`[host-ingest] failed: ${error.message}`);
-      }
+      });
     }
   };
   const usageOptions = electronUsageConfig('host-collector');
@@ -4011,6 +4534,7 @@ function historyResolverOptions() {
     historyEnabled: settings?.historyEnabled !== false,
     hubMode: settings?.hubMode,
     hubUrl,
+    icloudSync: settings?.hubMode === 'icloud' ? icloudRuntimeHandle : null,
     // In sync/host mode the headless agent owns this machine's producer while its
     // PID is live. Do not let the widget's last pre-handoff snapshot compete with
     // the newer Hub record; local mode always owns its collector by contract.
@@ -4192,7 +4716,9 @@ function sendPush(payload, options = {}) {
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    getSyncContentRuntime().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
+    migrateCodexAdditionalLimits(visibleStats);
     rendererPayload = {
       ...payload,
       data: { ...payload.data, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
@@ -4336,7 +4862,7 @@ function sendStatus(connected, extra) {
   const previous = streamConnected;
   streamConnected = Boolean(connected);
   streamFailure = streamConnected ? null : ((extra && extra.reason) ? { reason: extra.reason, detail: extra.detail ?? null } : streamFailure);
-  if (mode === 'sync') {
+  if (mode === 'sync' && settings?.hubMode !== 'icloud') {
     if (streamConnected && !previous) {
       recordDiagnosticEvent({ subsystem: 'stream', code: 'stream-reconnected' });
     } else if (!streamConnected && (previous || extra?.reason)) {
@@ -4679,9 +5205,13 @@ function settingsForRenderer() {
     expose: ['hubHostSecret', 'secret']
   });
   const rendererSettings = { ...settings };
+  delete rendererSettings.icloudRetiredDeviceIds;
+  delete rendererSettings.icloudWriterId;
+  delete rendererSettings.syncContentState;
   for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
   return {
     ...rendererSettings,
+    syncContentStatus: getSyncContentRuntime().status(),
     locale: trayMenuLocale(),
     ...redactedCredentials,
     // On a hub the shared list is the truth; settings.subscriptions is only the
@@ -4693,7 +5223,7 @@ function settingsForRenderer() {
     // this process holds by the time the write goes out — and which hub issued
     // that version, because it does not mean anything without one.
     subscriptionsHub: currentHubIdentity(),
-    subscriptionsUpdatedAt: subscriptionsDocumentFor(currentHubIdentity())?.updatedAt || '',
+    subscriptionsUpdatedAt: subscriptionDocumentVersion(subscriptionsDocumentFor(currentHubIdentity())),
     subscriptionsOrphaned: pendingOrphanedSubscriptions(),
     ...accountFieldProjection(settings, process.env),
     codexManagedAccounts: codexAccountsForRenderer(),
@@ -4816,6 +5346,7 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     // every preference that view reads has to reach this renderer as well —
     // otherwise the card silently renders a different page's answer.
     showCodexAdditionalLimits: source.showCodexAdditionalLimits,
+    limitProviderHiddenItems: source.limitProviderHiddenItems,
     showLimitSource: source.showLimitSource,
     codexResetForecastEnabled: source.codexResetForecastEnabled,
     claudePrepaidBalanceEnabled: source.claudePrepaidBalanceEnabled,
@@ -4862,7 +5393,7 @@ function edgeDockLiveRateSample(visibleStats) {
     return null;
   }
   const hubMode = settings?.hubMode;
-  const syncMode = hubMode === 'client' || hubMode === 'host';
+  const syncMode = tokenRateApi.isSharedSyncMode(hubMode);
   const scope = syncMode && settings?.liveTokenRateScope !== 'device' ? 'all' : 'device';
   const selection = tokenRateApi.selectLiveTokenRatePeriods(visibleStats, settings?.deviceId, hubMode, scope);
   const context = [mode, hubMode || '', settings?.hubUrl || '', settings?.deviceId || '', scope, selection.source].join('|');
@@ -4997,6 +5528,7 @@ function edgeDockCellsFor(visibleStats) {
     // dock window is handed cells and nothing else, so both ride the cell.
     syncActive: syncProvenanceActive(),
     items: settings?.edgeDockItems,
+    showCodexAdditionalLimits: settings?.showCodexAdditionalLimits,
     codexManagedAccounts: codexAccountsForRenderer(),
     activeCodexAccountId: codexPresentationPendingAccountId || codexPresentationActiveAccountId,
     limitsEnabled: settings?.limitsEnabled !== false,
@@ -5104,6 +5636,7 @@ function ensureEdgeDockController() {
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
+    isFullScreen: createFullScreenProbe({ platform: process.platform, screen, logger: (message) => console.log(message) }),
     // The dock card's Switch button runs the same swap the Limits view does,
     // then repaints from the refreshed records. It is the dock's only write.
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
@@ -5153,6 +5686,7 @@ function syncEdgeDock(rendererSettings) {
 function refreshLimitStatsPresentation() {
   if (!latestStats) return;
   const visibleStats = electronPresentationStats(latestStats);
+  migrateCodexAdditionalLimits(visibleStats);
   scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
   updateEdgeDockCells(visibleStats);
   updateTrayDisplay();
@@ -5252,7 +5786,7 @@ function setTrayContentFromMenu(value) {
 
 function setEdgeDockFromMenu(patch = {}) {
   if (patch.edgeDockEnabled !== undefined) settings.edgeDockEnabled = parseBoolean(patch.edgeDockEnabled, false);
-  if (patch.edgeDockMode !== undefined) settings.edgeDockMode = patch.edgeDockMode === 'always' ? 'always' : 'autoHide';
+  if (patch.edgeDockMode !== undefined) settings.edgeDockMode = normalizeEdgeDockMode(patch.edgeDockMode);
   if (patch.edgeDockSide !== undefined) settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
   saveSettings();
   // Also re-syncs the dock itself (pushSettingsToRenderer → syncEdgeDock).
@@ -5482,11 +6016,14 @@ function exitTrayMode() {
 }
 
 function startMode() {
+  getSyncContentRuntime().invalidate();
   hubModeGeneration += 1;
   advanceMacWidgetProducerAndSourceEpoch();
   clearLatestHubStatsCache();
+  const icloudStop = stopIcloudRuntime();
   // Tear down collectors synchronously so they can't double-run while the
-  // async reconciliation below is queued.
+  // async reconciliation below is queued. iCloud's filesystem teardown is
+  // awaited by the mode lane before any replacement runtime is created.
   stopLocalCollector();
   stopStatsStream();
   stopHostStats();
@@ -5497,6 +6034,10 @@ function startMode() {
   // than racing — otherwise an in-flight start could finish with the old
   // port/secret after the UI already advertises the new ones.
   modeQueue = modeQueue.then(async () => {
+    await icloudStop;
+    // A prior queued mode may have created an iCloud runtime after this call's
+    // initial stop. Drain that runtime as well before applying the latest mode.
+    await stopIcloudRuntime();
     if (settings.hubMode === 'host') {
       await stopEmbeddedHub();
       const handle = await startEmbeddedHub();
@@ -5505,21 +6046,28 @@ function startMode() {
         return;
       }
       if (!handle) {
-        // Bind failed (e.g. EADDRINUSE). The error is already surfaced via
-        // hub:push; fall back to the local collector so the widget still
-        // shows data while the user fixes the port.
+        // Hub startup or secret persistence failed. The error is already
+        // surfaced via hub:push; keep local collection available while the
+        // user resolves the startup failure.
         startLocalCollector();
         return;
       }
       startHostStats();
       startHostCollector();
+      void getSyncContentRuntime().refresh();
       reconcileSharedSubscriptions();
       return;
     }
     await stopEmbeddedHub();
+    if (settings.hubMode === 'icloud') {
+      await startIcloudCollector();
+      if (settings.hubMode === 'icloud') void reconcileSharedSubscriptions();
+      return;
+    }
     if (effectiveHubConfig().url) {
       startStatsStream({ resetSnapshot: true });
       startSyncCollector();
+      void getSyncContentRuntime().refresh();
       reconcileSharedSubscriptions();
     } else {
       startLocalCollector();
@@ -5560,6 +6108,12 @@ function restartDeviceRuntimeForMode() {
     startHostCollector();
     return;
   }
+  if (settings.hubMode === 'icloud') {
+    return startIcloudCollector().catch((error) => {
+      console.log(`[icloud] collector restart failed: ${error?.message || error}`);
+      recordDiagnosticEvent({ subsystem: 'icloud', code: 'icloud-start-failed' });
+    });
+  }
   if (effectiveHubConfig().url) startSyncCollector();
   else startLocalCollector();
 }
@@ -5567,7 +6121,9 @@ function restartDeviceRuntimeForMode() {
 function usageCollectorNameForMode() {
   return mode === 'local'
     ? 'collector'
-    : (settings.hubMode === 'host' && embeddedHub ? 'host-collector' : 'sync-collector');
+    : (settings.hubMode === 'host' && embeddedHub
+      ? 'host-collector'
+      : settings.hubMode === 'icloud' ? 'icloud-collector' : 'sync-collector');
 }
 
 function usageConfigForMode() {
@@ -5601,6 +6157,7 @@ function stopAll() {
   stopStatsStream();
   stopHostStats();
   stopSyncCollector({ skipCloseWatchers: true });
+  stopIcloudRuntime();
   // A collector on the usage worker stops by message, which nothing guarantees
   // the worker handles before the exit below; its tokscale subprocesses would
   // outlive us.
@@ -5737,7 +6294,7 @@ async function writeExportTo(dir, periods, options = {}) {
 
 async function fetchStats(options = {}) {
   const requestGeneration = hubModeGeneration;
-  const requestHubIdentity = currentHubStatsIdentity('client');
+  const requestHubIdentity = currentHubStatsIdentity(settings?.hubMode === 'icloud' ? 'icloud' : 'client');
   const force = Boolean(options?.force);
   // forceHistory and forceSelfSync stay independent of `force` on purpose: tool
   // settings, account sign-ins and limits actions all refresh with { force: true },
@@ -5757,6 +6314,12 @@ async function fetchStats(options = {}) {
   }
   if (settings.hubMode === 'host' && embeddedHub) {
     return injectLocalDeviceStatus(embeddedHub.hub.getStats());
+  }
+  if (settings.hubMode === 'icloud') {
+    const stats = icloudRuntimeHandle?.getStats?.()
+      || currentHubStatsCache()
+      || withHistoryPreview(aggregateDevices([], 0), []);
+    return injectLocalDeviceStatus(stats);
   }
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return withHistoryPreview(aggregateDevices([], 0), []);
@@ -5799,57 +6362,10 @@ function regenerateTokscalePricing() {
 async function refreshAfterPricingChange() {
   try {
     if (ownsUsageRuntime()) {
-      await deviceRuntimeHandle.tick('manual', {});
+      await deviceRuntimeHandle.tick('manual', { forceHistory: true });
     }
   } catch (error) {
     console.warn(`[pricing] refresh after pricing change failed: ${error.message}`);
-  }
-}
-
-function stripTokscaleMetadata(result) {
-  if (!result || typeof result !== 'object') return result;
-  const { metadata: _metadata, ...publicResult } = result;
-  return publicResult;
-}
-
-function sendTokscalePush(payload) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send('tokscale:push', payload); } catch (_) {}
-}
-
-async function checkTokscaleNpm({ silent = false } = {}) {
-  try {
-    const result = await checkNpmForNewer(app.getVersion());
-    if (result.metadata) tokScaleNpmMetadata = result.metadata;
-    const publicResult = stripTokscaleMetadata(result);
-    sendTokscalePush({ type: 'check', ...publicResult });
-    return publicResult;
-  } catch (error) {
-    if (silent) {
-      console.log(`[tokscale] npm check failed: ${error.message}`);
-      return { supported: true, error: null, silent: true };
-    }
-    return { supported: true, error: error.message };
-  }
-}
-
-async function downloadTokscaleFromNpm() {
-  if (tokScaleUpdaterBusy) return { supported: true, busy: true };
-  tokScaleUpdaterBusy = true;
-  try {
-    if (!tokScaleNpmMetadata) {
-      const checked = await checkNpmForNewer(app.getVersion());
-      if (!checked.supported) return { supported: false };
-      tokScaleNpmMetadata = checked.metadata;
-    }
-    const result = await downloadFromNpm(tokScaleNpmMetadata);
-    const publicResult = stripTokscaleMetadata(result);
-    sendTokscalePush({ type: 'download', ...publicResult });
-    return publicResult;
-  } catch (error) {
-    return { supported: true, error: error.message };
-  } finally {
-    tokScaleUpdaterBusy = false;
   }
 }
 
@@ -6711,7 +7227,10 @@ app.whenReady().then(() => {
   createWindow();
   syncLoginItemSettingFromOs();
   configureWindowToggleShortcut();
-  cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
+  // The retired in-app npm updater kept upstream tokscale builds here; the
+  // collector no longer reads them, so drop the leftovers.
+  fs.promises.rm(path.join(sharedDataDir(), 'tokscale'), { recursive: true, force: true })
+    .catch((error) => console.log(`[tokscale] removing retired npm downloads failed: ${error.message}`));
   ensureTray();
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
@@ -6731,7 +7250,6 @@ app.whenReady().then(() => {
   refreshExchangeRates();                // non-blocking: only fetches when stale
   rateRefreshTimer = setInterval(() => { refreshExchangeRates(); }, 6 * 60 * 60 * 1000);
   syncEdgeDock();
-  setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
   ipcMain.handle('appearance:getBackgroundImage', () => getBackgroundImage(app.getPath('userData')));
   ipcMain.handle('appearance:chooseBackgroundImage', async () => {
@@ -6810,6 +7328,11 @@ app.whenReady().then(() => {
       return { ok: false, error: error.message };
     }
   });
+  applySyncSettingsPatch = applySettingsPatch;
+  ipcMain.handle('syncContent:status', (_event, refresh = true) => refresh ? getSyncContentRuntime().refresh() : getSyncContentRuntime().status());
+  ipcMain.handle('syncContent:preview', (_event, kind) => getSyncContentRuntime().preview(kind));
+  ipcMain.handle('syncContent:configure', (_event, options) => getSyncContentRuntime().configure(options));
+  ipcMain.handle('syncContent:retryCleanup', () => getSyncContentRuntime().retryCleanup());
   const credentialCommands = createCredentialCommands({
     getSettings: () => settings,
     applySettingsPatch,
@@ -6819,6 +7342,12 @@ app.whenReady().then(() => {
   // pausing the session archive must not be reported done while the worker can
   // still capture under the old value.
   ipcMain.handle('settings:update', async (_event, patch) => {
+    const contentRuntime = getSyncContentRuntime();
+    const sharedEdit = patch.modelAliases !== undefined || patch.modelAliasGrouping !== undefined
+      || patch.customModelPricing !== undefined;
+    const settingsIdentity = contentRuntime.status().identity;
+    await contentRuntime.publishPatch(patch, patch?.syncContentBase);
+    if (sharedEdit && settingsIdentity !== contentRuntime.status().identity) throw new Error('hub_changed');
     const result = applySettingsPatch(patch);
     await latestUsageHost?.transformSettingsApplied?.();
     return result;
@@ -6826,6 +7355,7 @@ app.whenReady().then(() => {
   // The settings:update body, named so a credential save persists through the
   // exact same normalization, runtime reconfigure and limit invalidation.
   function applySettingsPatch(patch) {
+    const contentRuntime = getSyncContentRuntime();
     credentialCommands.noteSettingsPatch(patch);
     const previousSettingsState = settings;
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
@@ -6853,6 +7383,9 @@ app.whenReady().then(() => {
     delete normalizedPatch.workbuddyEndpoint;
     delete normalizedPatch.workbuddyLocalAppEnabled;
     delete normalizedPatch.customModelPricing;
+    delete normalizedPatch.syncContentState;
+    delete normalizedPatch.syncContentStatus;
+    delete normalizedPatch.syncContentBase;
     // Account fields declared persist:'never' (managed account lists, profile
     // maps, workbuddy session fields) are stripped by the registry walk below.
     normalizeAccountPatch(patch, normalizedPatch);
@@ -6864,6 +7397,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.subscriptions;
     delete normalizedPatch.subscriptionsOrphaned;
     delete normalizedPatch.subscriptionsCacheHub;
+    delete normalizedPatch.icloudWriterId;
     // Derived for the renderer from the hub document, not settings. Persisting a
     // copy would leave a key on disk that describes a hub as of whenever a form
     // was last saved, waiting to be mistaken for the real thing.
@@ -6886,9 +7420,13 @@ app.whenReady().then(() => {
     settings = normalizeWindowBehaviorSettings({
       ...settings,
       ...normalizedPatch,
-      hubMode: patch.hubMode !== undefined ? normalizeHubMode(patch.hubMode, settings.hubMode) : settings.hubMode,
+      hubMode: patch.hubMode !== undefined
+        ? normalizeHubMode(patch.hubMode, settings.hubMode, process.platform)
+        : normalizeHubMode(settings.hubMode, 'local', process.platform),
       hubHostPort: patch.hubHostPort !== undefined ? normalizeHubPort(patch.hubHostPort, settings.hubHostPort) : settings.hubHostPort,
       hubHostSecret: patch.hubHostSecret !== undefined ? String(patch.hubHostSecret) : settings.hubHostSecret,
+      hubSyncSessionTitles: parseBoolean(patch.hubSyncSessionTitles ?? settings.hubSyncSessionTitles, false),
+      syncContentState: normalizeSyncContentState(settings.syncContentState),
       deviceId: (patch.deviceId !== undefined ? String(patch.deviceId).trim() : settings.deviceId) || defaultDeviceId(),
       clients: patch.clients !== undefined ? clientsCsvForSetting(patch.clients, '') : clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS),
       customScanPaths: normalizeCustomScanPaths(patch.customScanPaths ?? settings.customScanPaths),
@@ -6909,6 +7447,7 @@ app.whenReady().then(() => {
       compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
       modelAliases: normalizeModelAliases(patch.modelAliases ?? settings.modelAliases),
       modelAliasGrouping: normalizeModelAliasGrouping(patch.modelAliasGrouping ?? settings.modelAliasGrouping),
+      textSize: fontSettingsApi.normalizeTextSize(patch.textSize ?? settings.textSize),
       interfaceFontFamily: fontSettingsApi.normalizeFontFamily(
         patch.interfaceFontFamily ?? settings.interfaceFontFamily
       ),
@@ -6921,7 +7460,7 @@ app.whenReady().then(() => {
       edgeDockSide: normalizeEdgeDockSide(patch.edgeDockSide ?? settings.edgeDockSide),
       edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
       edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),
-      edgeDockMode: (patch.edgeDockMode ?? settings.edgeDockMode) === 'always' ? 'always' : 'autoHide',
+      edgeDockMode: normalizeEdgeDockMode(patch.edgeDockMode ?? settings.edgeDockMode),
       edgeDockHaptic: parseBoolean(patch.edgeDockHaptic ?? settings.edgeDockHaptic, true),
       edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
       edgeDockMacBackdrop: normalizeEdgeDockBackdropMode(patch.edgeDockMacBackdrop ?? settings.edgeDockMacBackdrop),
@@ -6939,6 +7478,7 @@ app.whenReady().then(() => {
         { currencyApi: { normalizeCurrency } }
       ),
       subscriptionsCacheHub: String(settings.subscriptionsCacheHub || ''),
+      icloudWriterId: String(settings.icloudWriterId || ''),
       subscriptionsOrphaned: {
         hubUrl: orphanedSubscriptions().hubUrl,
         records: subscriptionDisplay.normalizeSubscriptions(
@@ -6956,12 +7496,15 @@ app.whenReady().then(() => {
       homeModuleOrder: patch.homeModuleOrder !== undefined ? normalizeHomeModuleOrder(patch.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',') : normalizeHomeModuleOrder(settings.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(','),
       hiddenHomeModules: patch.hiddenHomeModules !== undefined ? normalizeHiddenHomeModules(patch.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST) : normalizeHiddenHomeModules(settings.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST),
       showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
+      homeLimitDisplayMode: normalizeHomeLimitDisplayMode(patch.homeLimitDisplayMode ?? settings.homeLimitDisplayMode),
       showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
+      limitProviderHiddenItems: normalizeLimitProviderHiddenItems(patch.limitProviderHiddenItems ?? settings.limitProviderHiddenItems),
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
+      sessionTitlesEnabled: parseBoolean(patch.sessionTitlesEnabled ?? settings.sessionTitlesEnabled, true),
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
@@ -7008,15 +7551,28 @@ app.whenReady().then(() => {
         ? normalizeCustomPricingSetting(patch.customModelPricing)
         : normalizeCustomPricingSetting(settings.customModelPricing)
     }, windowBehaviorSelection(normalizedPatch));
+    retainIcloudDeviceIdentity(previousSettingsState, settings);
     settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
     if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
     delete settings.edgeDrawerEnabled;
+    const nextSettingsState = settings;
+    settings = previousSettingsState;
     try {
+      // Journal the previous title context and OFF while the old connection is
+      // still active. No replacement credentials/device may commit before this.
+      contentRuntime.beforeDestinationChange(syncContentContext(nextSettingsState));
+      nextSettingsState.syncContentState = normalizeSyncContentState(settings.syncContentState);
+      settings = nextSettingsState;
       saveSettings({ throwOnError: true });
     } catch (error) {
-      settings = previousSettingsState;
+      // Keep any OFF/cleanup journal already committed by the preflight.
+      settings = { ...previousSettingsState,
+        syncContentState: normalizeSyncContentState(persistedSettingsSnapshot?.syncContentState || settings.syncContentState) };
       throw error;
     }
+    contentRuntime.invalidate();
+    const receiverPermissionChanged = settings.hubSyncSessionTitles !== previousSettingsState.hubSyncSessionTitles;
+    if (receiverPermissionChanged) contentRuntime.receiverPermissionChanged(settings.hubSyncSessionTitles);
     // A worker-hosted transform holds its own copy of the settings it reads.
     // Update it now rather than when the usage reconfigure settles: pausing the
     // session archive must stop captures from the next summary on.
@@ -7063,7 +7619,7 @@ app.whenReady().then(() => {
       refreshMacWidgetHistorySource();
     }
     const limitInvalidations = settingsLimitInvalidationPlan(runtimeChange);
-    if (runtimeChange.modeStructural) {
+    if (runtimeChange.modeStructural || (receiverPermissionChanged && settings.hubMode === 'host')) {
       for (const { scope, reason, options } of limitInvalidations) {
         rememberPendingLimitInvalidation(scope, reason, options);
       }
@@ -7131,6 +7687,9 @@ app.whenReady().then(() => {
       }
     }
     pushSettingsToRenderer();
+    if (settings.sessionTitlesEnabled !== previousSettingsState.sessionTitlesEnabled) {
+      refreshLimitStatsPresentation();
+    }
     return settingsForRenderer();
   }
   ipcMain.handle('appearance:preview', (event, patch) => {
@@ -7257,6 +7816,14 @@ app.whenReady().then(() => {
     maybeAdoptSharedSubscriptionRevision(stats);
     return rendererSnapshots.stamp(stats, rendererStats(electronPresentationStats(stats)));
   });
+  ipcMain.handle('devices:delete', async (_event, deviceId) => {
+    try {
+      await deleteDeviceFromCurrentSync(normalizeDeviceIdForDeletion(deviceId));
+      return { ok: true };
+    } catch (error) {
+      throw new Error(error.code || error.message, { cause: error });
+    }
+  });
   ipcMain.handle('stats:allTimeSessions', (_event, snapshotId) => rendererAllTimeSessions(rendererSnapshots.get(snapshotId)));
   ipcMain.handle('export:now', async () => {
     const result = await dialog.showOpenDialog({
@@ -7295,9 +7862,7 @@ app.whenReady().then(() => {
   ipcMain.handle('hub:getInfo', () => getHubInfo());
   ipcMain.handle('hub:getBuildStatus', () => getHubBuildStatus());
   ipcMain.handle('hub:regenerateSecret', () => {
-    settings.hubHostSecret = generateHubSecret();
-    saveSettings({ throwOnError: true });
-    if (settings.hubMode === 'host') startMode();
+    applySettingsPatch({ hubHostSecret: generateHubSecret() });
     return getHubInfo();
   });
   ipcMain.handle('appearance:getNativeMaterial', (event) => {
@@ -7408,14 +7973,6 @@ app.whenReady().then(() => {
   ipcMain.handle('mimo:setAccountEnabled', (_event, id, enabled) => setMimoManagedAccountEnabled(id, enabled));
   ipcMain.handle('mimo:removeAccount', async (_event, id) => removeMimoManagedAccount(id));
   ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
-  ipcMain.handle('tokscale:checkNpm', () => checkTokscaleNpm());
-  ipcMain.handle('tokscale:downloadFromNpm', () => downloadTokscaleFromNpm());
-  ipcMain.handle('tokscale:resetToBundled', async () => {
-    tokScaleNpmMetadata = null;
-    const status = await resetToBundled();
-    sendTokscalePush({ type: 'reset', status });
-    return status;
-  });
   ipcMain.handle('appUpdate:getState', () => deriveAppUpdateState());
   ipcMain.handle('appUpdate:checkNow', () => runAppUpdateCheck({ force: true }));
   ipcMain.handle('appUpdate:download', () => downloadAndPrepareAppUpdate());
@@ -7452,6 +8009,7 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
+  ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
     const cookie = opencodeWeb.sanitizeCookieHeader(raw);
@@ -8352,14 +8910,21 @@ app.whenReady().then(() => {
   });
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
-  // The window this builds is about to be on screen, so the policy is resolved
-  // for a visible window exactly as focusExistingWindow() does. Without it this
-  // was the one path reaching applyMacSpaceBehavior() with a process type
-  // nothing had decided, which skipTransformProcessType now preserves.
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().some((win) => !edgeDockController?.owns(win))) return;
-    applyMacActivationPolicy({ mainWindowVisible: true });
-    createWindow();
+    const action = activateWindowAction({
+      mainWindow,
+      windows: BrowserWindow.getAllWindows(),
+      isDockOwned: (win) => Boolean(edgeDockController?.owns(win))
+    });
+    if (action === 'focusWindow') focusExistingWindow();
+    else if (action === 'createWindow') {
+      // The window this builds is about to be on screen, so the policy is resolved
+      // for a visible window exactly as focusExistingWindow() does. Without it this
+      // was the one path reaching applyMacSpaceBehavior() with a process type
+      // nothing had decided, which skipTransformProcessType now preserves.
+      applyMacActivationPolicy({ mainWindowVisible: true });
+      createWindow();
+    }
   });
   maybeRunBackgroundUpdateCheck();
   startAppUpdateBackgroundChecks();

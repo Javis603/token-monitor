@@ -173,7 +173,7 @@ test('LM Studio has a label and uses the standard mask-safe icon path', () => {
 
   assert.ok(clientLabelIds().has('lmstudio'));
   assertUsageMarks('lmstudio');
-  assert.match(styles, /\.row-icon-lmstudio\s*\{[^}]*mask-image:\s*url\([^)]*assets\/icons\/lmstudio\.svg\)/s);
+  assert.match(styles, /\.row-icon-lmstudio\s*\{[^}]*mask-image:\s*url\(["']?[^)]*assets\/icons\/lmstudio\.svg["']?\)/s);
   assert.doesNotMatch(styles, /\.row-icon-lmstudio\s*\{[^}]*background-image:/s);
   assert.equal(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'lmstudio.svg')), true);
   assert.equal(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'lmstudio.png')), true);
@@ -183,7 +183,7 @@ test('Unsloth has a label and uses the standard mask-safe icon path', () => {
   const styles = rendererStyles();
   assert.ok(clientLabelIds().has('unsloth'));
   assertUsageMarks('unsloth');
-  assert.match(styles, /\.row-icon-unsloth\s*\{[^}]*mask-image:\s*url\([^)]*assets\/icons\/unsloth\.svg\)/s);
+  assert.match(styles, /\.row-icon-unsloth\s*\{[^}]*mask-image:\s*url\(["']?[^)]*assets\/icons\/unsloth\.svg["']?\)/s);
   assert.doesNotMatch(styles, /\.row-icon-unsloth\s*\{[^}]*background-image:/s);
   assert.ok(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'unsloth.svg')));
   assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'unsloth.png')));
@@ -193,7 +193,7 @@ test('Devin has a label and uses the standard mask-safe icon path', () => {
   const styles = rendererStyles();
   assert.ok(clientLabelIds().has('devin'));
   assertUsageMarks('devin');
-  assert.match(styles, /\.row-icon-devin\s*\{[^}]*mask-image:\s*url\([^)]*assets\/icons\/devin\.svg\)/s);
+  assert.match(styles, /\.row-icon-devin\s*\{[^}]*mask-image:\s*url\(["']?[^)]*assets\/icons\/devin\.svg["']?\)/s);
   assert.doesNotMatch(styles, /\.row-icon-devin\s*\{[^}]*background-image:/s);
   assert.ok(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'devin.svg')));
   assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'devin.png')));
@@ -213,7 +213,7 @@ test('Amp carries its own brand colour and mask-safe icon assets', () => {
   assert.ok(clientLabelIds().has('amp'));
   assert.equal(clientColors.amp, '#F34E3F', 'Amp chart colour is the Amp brand red');
   assertUsageMarks('amp');
-  assert.match(styles, /\.row-icon-amp\s*\{[^}]*mask-image:\s*url\([^)]*assets\/icons\/amp\.svg\)/s);
+  assert.match(styles, /\.row-icon-amp\s*\{[^}]*mask-image:\s*url\(["']?[^)]*assets\/icons\/amp\.svg["']?\)/s);
   assert.doesNotMatch(styles, /\.row-icon-amp\s*\{[^}]*background-image:/s);
   assert.ok(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'amp.svg')));
   assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'amp.png')));

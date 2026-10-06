@@ -9,12 +9,18 @@ const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
 const compactTokenApi = require('../../src/shared/compactTokens');
+const { normalizeSubscriptions } = require('../../src/shared/subscriptionDisplay');
 const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
 const limitProviderOrderApi = require('../../src/electron/renderer/limits/providerOrder');
 const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
 const { limitWindowLabel } = require('../../src/shared/limits/windowLabels');
 const { limitWindowText } = require('../../src/shared/limits/windowText');
+const { creditsAmount, creditsCurrency, creditsMeterPercent, isCreditsWindow, formatMoney } = require('../../src/shared/limits/balanceDisplay');
+const limitWindowLabels = require('../../src/shared/limits/windowLabels');
+
+const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
+const mainProcessSource = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
 
 const {
   antigravityQuotaWindow,
@@ -301,7 +307,8 @@ function runProviderSpendNode(source, balance, provider = null) {
       'settings.thirdparty.outputTokens': 'Output tokens',
       'settings.thirdparty.requests': 'Requests'
     })[key] || key,
-    limitNoteRowNode: (options) => options
+    limitNoteRowNode: (options) => options,
+    tagUsageItem: (node) => node
   };
   vm.runInNewContext(
     `${optionalNumber}\n${spendEntries}\n${spendNode}\n`
@@ -844,7 +851,8 @@ test('every multi-account Limits group uses its provider-localized account count
   // key itself.
   assert.match(view, /const key = GROUP_COUNT_KEYS\[providerId\] \|\| `settings\.\$\{providerId\}\.nAccounts`;/);
   assert.match(view, /return text === key \? '' : text;/);
-  assert.match(view, /planText: limitGroupCountText\(providerId, providers\.length\)/);
+  assert.match(view, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(view, /providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.doesNotMatch(view, /settings\.(claude|codex|mimo|opencode|openrouter|thirdparty)\.nAccounts/);
   for (const provider of ['claude', 'codex', 'mimo', 'opencode', 'openrouter', 'thirdparty']) {
     assert.match(i18n, new RegExp(`'settings\\.${provider}\\.nAccounts'`));
@@ -1238,6 +1246,10 @@ test('Z.ai and Team keep all billing windows and render MCP full width after pai
       limitWindowNode: (label, window, _color, _tone, _value, detail) => Object.assign(makeNode(), { label, window, detail }),
       providerWindowLabel: (p, window, fallback = '') => limitWindowLabel(p?.provider, window, fallback),
       providerWindowText: (p, window) => limitWindowText(p, window, { showLimitUsed: false }),
+      tagUsageItem: (node) => node,
+      hideUsageItems() {},
+      usageItems: { hiddenUsageItemSet: () => new Set() },
+      settings: () => ({}),
       provider: { provider, windows: [
         { kind: 'weekly', label: 'Weekly' },
         { kind: 'billing', label: 'MCP' },
@@ -1286,7 +1298,11 @@ test('OpenCode reads the Zen balance from its credits window without metering it
     optionalFiniteNumber: (value) => (Number.isFinite(Number(value)) && value !== null && value !== '' ? Number(value) : null),
     formatLimitAmount: (value) => `$${Number(value).toFixed(2)}`,
     providerWindowLabel: (p, window, fallback = '') => limitWindowLabel(p?.provider, window, fallback),
-    limitWindowNode: (label, window, _color, _tone, value) => Object.assign(makeNode(), { label, window, value })
+    limitWindowNode: (label, window, _color, _tone, value) => Object.assign(makeNode(), { label, window, value }),
+    tagUsageItem: (node) => node,
+    hideUsageItems() {},
+    usageItems: { hiddenUsageItemSet: () => new Set() },
+    settings: () => ({})
   };
   const balanceWindow = { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 8.5, currency: 'USD', showMeter: false };
 
@@ -1361,7 +1377,9 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   // The edge dock builds the same rows from the same view, so the preference
   // reaches that renderer through its appearance projection.
   assert.match(main, /showCodexAdditionalLimits: source\.showCodexAdditionalLimits,/);
-  assert.match(app, /key: 'showCodexAdditionalLimits',[\s\S]*?defaultValue: true/);
+  // The switch is retired from the options in favour of the usage-items
+  // checklist; a stored `false` is carried over by codexAdditionalLimitsMigration.
+  assert.doesNotMatch(app, /key: 'showCodexAdditionalLimits'/);
   assert.match(renderProviderWindows, /settings\(\)\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
   assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);
   assert.match(renderProviderWindows, /additionalNode\.classList\.add\('limit-window-wide'\);/);
@@ -1414,7 +1432,7 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(limitDetailTooltipShouldHoldRender, /state\.limitDetailTooltipActive/);
   assert.match(renderLimits, /const holdLimitDetailTooltipRender = limitDetailTooltipShouldHoldRender\(\);/);
   assert.match(renderLimits, /if \(holdLimitDetailTooltipRender \|\| holdCodexSwitchPopoverRender\)/);
-  assert.match(styles, /\.limit-reset-credits\s*\{[^}]*min-height: 11px;[^}]*font-size: 9px;/s);
+  assert.match(styles, /\.limit-reset-credits\s*\{[^}]*min-height: 11px;[^}]*font-size: 0\.5625rem;/s);
   assert.match(styles, /\.limit-reset-credits-line\s*\{[^}]*justify-content: space-between;/s);
   assert.match(styles, /\.limit-reset-credits-expiry-group\s*\{[^}]*flex: 0 0 auto;/s);
   assert.match(styles, /\.limit-reset-credits-timeline\s*\{[^}]*opacity: 0\.66;/s);
@@ -1616,7 +1634,7 @@ test('Claude reset grants wrap their label and clears as full-width lines', () =
   assert.match(styles, /\.limit-detail-tooltip-full\s*\{[^}]*grid-column: 1 \/ -1;/s);
   assert.match(styles, /\.limit-detail-tooltip-full\s*\{[^}]*white-space: normal;/s);
   assert.match(styles, /\.limit-detail-tooltip-full\.is-separated\s*\{[^}]*border-top:/s);
-  assert.match(styles, /\.limit-detail-tooltip-full\.is-caption\s*\{[^}]*font-size: 8px;/s);
+  assert.match(styles, /\.limit-detail-tooltip-full\.is-caption\s*\{[^}]*font-size: 0\.5rem;/s);
 });
 
 test('Home uses explicit billing labels so Copilot Premium and Chat stay distinct', () => {
@@ -1629,7 +1647,7 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
 
   assert.match(homeLabel, /if \(window\?\.kind === 'billing'\) \{/);
   assert.match(homeLabel, /limitProviderCompactWindowLabel\(providerId, window, visibleWindows\)/);
-  assert.match(homeRows, /limitProviderCompactWindows\(provider, provider\.windows\)/);
+  assert.match(homeRows, /limitProviderCompactWindows\(\s*provider,\s*\(provider\.windows \|\| \[\]\)\.filter\(/);
   assert.match(homeLabel, /const label = String\(window\?\.label \|\| ''\)\.trim\(\);/);
   assert.match(homeLabel, /if \(label\) return label;/);
   assert.match(homeLabel, /billing: 'home\.limit\.billing'/);
@@ -1771,23 +1789,42 @@ test('Balance and token quota values omit the redundant left suffix', () => {
   assert.doesNotMatch(renderProviderWindows, /`\$\{balanceValue\} left`/);
 });
 
-test('MiMo main Limits row falls back to balance plan fields for Token Plan', () => {
-  const renderProviderWindows = viewBody('renderProviderWindows');
-  const tokenPlanFallback = viewBody('mimoTokenPlanWindowFromBalance', 'limitWindowNode');
+test('MiMo Limits draws a credits balance when the provider balance object is absent', () => {
+  const render = [viewBody('tagUsageItem'), viewBody('hideUsageItems'), viewBody('renderProviderWindows')].join('\n');
+  const makeNode = () => {
+    const node = { children: [], dataset: {}, classes: new Set(), append(...children) { this.children.push(...children); } };
+    node.classList = { add(...classes) { classes.forEach((name) => node.classes.add(name)); } };
+    return node;
+  };
+  const context = {
+    document: { createElement: makeNode },
+    settings: () => ({}),
+    usageItems: require('../../src/shared/limits/usageItems'),
+    windowForKind: (provider, kind) => provider.windows.find((window) => window.kind === kind) || null,
+    windowsForKind: (provider, kind) => provider.windows.filter((window) => window.kind === kind),
+    isCreditsWindow,
+    creditsAmount,
+    creditsCurrency,
+    creditsMeterPercent,
+    providerSpendNode: () => null,
+    optionalFiniteNumber: (value) => value == null ? null : Number(value),
+    mimoTokenPlanWindowFromBalance: () => null,
+    formatMoney,
+    limitWindowNode: (label, window, _color, _tone, value, detail) => Object.assign(makeNode(), { label, window, value, detail }),
+    t: (key) => key,
+    provider: {
+      provider: 'mimo', accountLabel: 'Pay-as-you-go', status: 'ok',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }]
+    }
+  };
 
-  assert.match(renderProviderWindows, /const balance = provider\.balance \|\| null;/);
-  assert.match(renderProviderWindows, /const tokenPlan = windowForKind\(provider, 'billing'\) \|\| mimoTokenPlanWindowFromBalance\(balance\);/);
-  assert.match(renderProviderWindows, /limitWindowNode\(tokenPlan\.label \|\| 'Token Plan', tokenPlan, color, 0\.68\)/);
-  assert.match(renderProviderWindows, /const giftBalance = optionalFiniteNumber\(balance\?\.giftBalance\);/);
-  assert.match(renderProviderWindows, /const cashBalance = optionalFiniteNumber\(balance\?\.cashBalance\);/);
-  assert.match(renderProviderWindows, /const balanceNode = limitWindowNode\(\s*'Balance',\s*\{ showMeter: false \},\s*color,\s*0\.68,\s*balanceText,\s*detailParts\.join\(' · '\)\s*\);/);
-  assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide', 'limit-window-no-reset'\);/);
-  assert.match(tokenPlanFallback, /const used = optionalFiniteNumber\(balance\.planUsed\);/);
-  assert.match(tokenPlanFallback, /const limit = optionalFiniteNumber\(balance\.planLimit\);/);
-  assert.match(tokenPlanFallback, /const percent = optionalFiniteNumber\(balance\.planPercent\);/);
-  assert.match(tokenPlanFallback, /if \(!hasUsed && !hasLimit && !hasPercent\) return null;/);
-  assert.match(tokenPlanFallback, /usedPercent: resolvedPercent/);
-  assert.match(tokenPlanFallback, /remainingPercent: resolvedPercent == null \? null : Math\.max\(0, Math\.min\(100, 100 - resolvedPercent\)\)/);
+  const windowOnly = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  assert.deepEqual(Array.from(windowOnly.children, (node) => [node.label, node.value]), [['Balance', '¥9.95']]);
+
+  context.provider.balance = { amount: 9.95, currency: 'CNY', giftBalance: 9.95, cashBalance: 0 };
+  const withBalance = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  assert.deepEqual(Array.from(withBalance.children, (node) => [node.label, node.value, node.detail]),
+    [['Balance', '¥9.95', 'Gift ¥9.95 · Cash ¥0.00']]);
 });
 
 test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', () => {
@@ -1802,27 +1839,6 @@ test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', (
     planStatus: null
   });`, context);
   assert.equal(context.result, null);
-});
-
-test('MiMo expired Token Plan renders a localized status without a meter', () => {
-  const i18n = readRendererFile('i18n.js');
-  const renderProviderWindows = viewBody('renderProviderWindows');
-  const tokenPlanFallback = viewBody('mimoTokenPlanWindowFromBalance', 'limitWindowNode');
-
-  assert.match(renderProviderWindows, /balance\?\.planStatus === 'expired'/);
-  assert.match(renderProviderWindows, /\{ showMeter: false \}, color, 0\.68, t\('limits\.mimo\.planExpired'\)/);
-  assert.match(tokenPlanFallback, /if \(balance\.planStatus === 'expired'\) return null;/);
-  assert.match(i18n, /'limits\.mimo\.planExpired': 'Expired'/);
-  assert.match(i18n, /'limits\.mimo\.planExpired': '已过期'/);
-  assert.match(i18n, /'limits\.mimo\.planExpired': '만료됨'/);
-  assert.match(i18n, /'limits\.mimo\.planExpired': '期限切れ'/);
-});
-
-test('main Limits plan text shows failure status before account labels', () => {
-  const planBody = viewBody('limitProviderPlan');
-
-  assert.match(planBody, /if \(provider\?\.status && provider\.status !== 'ok' && !provider\.stale\) return limitStatusLabel\(provider\.status, false\);/);
-  assert.match(planBody, /const label = String\(provider\?\.planLabel \|\| provider\?\.accountLabel \|\| ''\)\.trim\(\);/);
 });
 
 test('settings provider status waits for stats and refreshes when stats arrive', () => {
@@ -2615,11 +2631,11 @@ test('account and automatic provider panels reuse the original account summary g
   assert.match(app, /antigravity: 'settings\.limits\.connection\.antigravity'/);
   assert.match(app, /grok: 'settings\.limits\.connection\.grok'/);
   assert.match(app, /kiro: 'settings\.limits\.connection\.kiro'/);
-  assert.equal((i18n.match(/'settings\.limits\.connection\.title':/g) || []).length, 5);
-  assert.equal((i18n.match(/'settings\.limits\.connection\.autoDetect':/g) || []).length, 5);
-  assert.equal((i18n.match(/'settings\.limits\.connection\.antigravity':/g) || []).length, 5);
-  assert.equal((i18n.match(/'settings\.limits\.connection\.grok':/g) || []).length, 5);
-  assert.equal((i18n.match(/'settings\.limits\.connection\.kiro':/g) || []).length, 5);
+  assert.equal((i18n.match(/'settings\.limits\.connection\.title':/g) || []).length, 6);
+  assert.equal((i18n.match(/'settings\.limits\.connection\.autoDetect':/g) || []).length, 6);
+  assert.equal((i18n.match(/'settings\.limits\.connection\.antigravity':/g) || []).length, 6);
+  assert.equal((i18n.match(/'settings\.limits\.connection\.grok':/g) || []).length, 6);
+  assert.equal((i18n.match(/'settings\.limits\.connection\.kiro':/g) || []).length, 6);
   assert.match(css, /\.limit-provider-main\s*\{[\s\S]*?display: flex;[\s\S]*?justify-content: space-between/);
   assert.match(css, /\.limit-provider-actions\s*\{[\s\S]*?flex: 0 1 auto;[\s\S]*?max-width: 58%;[\s\S]*?gap: 4px/);
   assert.doesNotMatch(css, /\.limit-provider-actions > \.cursor-status-pill\s*\{[^}]*min-width:/);
@@ -2772,6 +2788,15 @@ test('Antigravity account verification is shown as an actionable status', () => 
   );
 });
 
+test('MiMo reuses the Cookie-backed provider status for either credential source', () => {
+  for (const sourceDetail of ['app', 'managed']) {
+    assert.deepEqual(
+      presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'unauthorized', sourceDetail }),
+      presentation.limitProviderStatusLabel({ provider: 'ollama', status: 'unauthorized' })
+    );
+  }
+});
+
 test('WorkBuddy sealed app credentials are shown as an actionable status', () => {
   assert.deepEqual(
     presentation.limitProviderStatusLabel({
@@ -2845,7 +2870,7 @@ test('minimax status copy uses the same API key wording as CodexBar', () => {
   );
 });
 
-test('mimo setup status uses the generic not configured and sign-in-again copy', () => {
+test('MiMo uses shared Limits statuses while keeping errors distinct from rejected sessions', () => {
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'notConfigured' }),
     { label: 'Not set up', tone: 'setup' }
@@ -2858,6 +2883,135 @@ test('mimo setup status uses the generic not configured and sign-in-again copy',
     presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'error' }),
     { label: 'Unavailable', tone: 'warn' }
   );
+});
+
+test('MiMo settings stays connected while one independent product is live', () => {
+  const live = { provider: 'mimo', status: 'ok', accountKey: 'console', accountLabel: 'Console' };
+  const expired = { provider: 'mimo', status: 'unauthorized', accountKey: 'membership', accountLabel: 'Desktop Membership' };
+  assert.equal(presentation.limitProviderSettingsRecord([live, expired], 'mimo'), live);
+  assert.equal(presentation.limitProviderSettingsRecord([expired, live], 'mimo'), live);
+  assert.equal(presentation.limitProviderSettingsRecord([live, expired], 'codex'), undefined);
+  // Neither live: the console product is the row the account is named by.
+  assert.equal(
+    presentation.limitProviderSettingsRecord([expired, { ...live, status: 'unauthorized' }], 'mimo').accountKey,
+    'console'
+  );
+  assert.equal(presentation.limitProviderSettingsRecord([expired], 'mimo'), expired);
+});
+
+test('OpenRouter grouped plan policy separates profile identities, explicit plans, and recovery status', () => {
+  const view = createLimitWindowsView({ presentation: require('../../src/electron/renderer/limits/providerPresentation') });
+  for (const [status, recovery] of [['ok', ''], ['unauthorized', 'Sign in again'], ['unavailable', 'Unavailable']]) {
+    for (const stale of [true, false]) {
+      for (const grouped of [true, false]) {
+        for (const planLabel of ['', 'Management']) {
+          const provider = { provider: 'openrouter', status, stale, accountName: 'Work', accountLabel: 'Work', planLabel };
+          const expected = status !== 'ok' && !stale ? recovery : planLabel || (grouped ? '' : 'Work');
+          assert.equal(view.limitAccountPlan(provider, { grouped }), expected);
+        }
+      }
+    }
+  }
+  assert.equal(view.limitAccountPlan({ provider: 'openrouter', status: 'ok', accountName: 'Work', accountLabel: 'Pay-as-you-go' }, { grouped: true }), 'Pay-as-you-go');
+});
+
+test('OpenCode grouped plan policy preserves explicit plans beside legacy profile titles', () => {
+  const view = createLimitWindowsView({ presentation: require('../../src/electron/renderer/limits/providerPresentation') });
+  const provider = { provider: 'opencode', status: 'ok', accountLabel: 'Work profile' };
+  for (const [planLabel, expected] of [['', ''], ['   ', ''], ['Zen', 'Zen'], ['Go', 'Go'], [' Zen ', 'Zen']]) {
+    assert.equal(view.limitAccountPlan({ ...provider, planLabel }, { grouped: true }), expected);
+  }
+  assert.equal(view.limitAccountPlan(provider), 'Work profile');
+  for (const [status, recovery] of [['ok', ''], ['unauthorized', 'Sign in again'], ['unavailable', 'Unavailable']]) {
+    for (const stale of [true, false]) {
+      for (const grouped of [true, false]) {
+        for (const planLabel of ['', 'Zen']) {
+          const expected = status !== 'ok' && !stale ? recovery : planLabel || (grouped ? '' : 'Work profile');
+          assert.equal(view.limitAccountPlan({ ...provider, status, stale, planLabel }, { grouped }), expected);
+        }
+      }
+    }
+  }
+});
+
+test('Cursor shared plan cells omit email identities while preserving membership and legacy plans', () => {
+  const view = createLimitWindowsView({ presentation: require('../../src/electron/renderer/limits/providerPresentation') });
+  const provider = { provider: 'cursor', status: 'ok', accountEmail: 'alice@example.com', accountLabel: 'alice@example.com', planLabel: '' };
+  for (const resolve of [view.limitProviderPlan, view.limitAccountPlan]) {
+    assert.equal(resolve(provider), '');
+    assert.equal(resolve({ ...provider, accountLabel: ' ALICE@example.com ' }), '');
+    assert.equal(resolve({ ...provider, accountEmail: '', accountLabel: 'legacy@example.com' }), '');
+    assert.equal(resolve({ ...provider, planLabel: 'Pro' }), 'Pro');
+    assert.equal(resolve({ ...provider, accountLabel: 'Pro', accountEmail: '' }), 'Pro');
+    assert.equal(resolve({ ...provider, status: 'unauthorized' }), 'Sign in again');
+    assert.equal(resolve({ ...provider, status: 'unavailable', stale: true }), 'Unavailable');
+    assert.equal(resolve({ ...provider, status: 'unavailable', stale: true, planLabel: 'Pro' }), 'Pro');
+  }
+});
+
+test('MiMo plan cells keep missing plan names empty and use shared recovery text', () => {
+  const view = createLimitWindowsView({
+    mimoProductLabel: limitWindowLabels.mimoProductLabel,
+    mimoAccountGroups: limitWindowLabels.mimoAccountGroups,
+    accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    settings: () => ({}),
+    t: (key) => key,
+    presentation: presentation
+  });
+  assert.equal(
+    view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', windows: [{ kind: 'weekly' }] }),
+    '',
+    'an invited quota does not invent a plan name'
+  );
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [] }), 'Pro');
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }), 'Sign in again');
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }), 'Sign in again');
+});
+
+test('MiMo product rows name the shared account and the product when both are known', () => {
+  const view = createLimitWindowsView({
+    mimoProductLabel: limitWindowLabels.mimoProductLabel,
+    mimoAccountGroups: limitWindowLabels.mimoAccountGroups,
+    accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    settings: () => ({}),
+    t: (key) => key,
+    presentation
+  });
+  const rows = [
+    { provider: 'mimo', accountKey: 'console', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Console' },
+    { provider: 'mimo', accountKey: 'membership', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Desktop Membership' }
+  ];
+  assert.equal(view.limitAccountTitle('mimo', rows[0], 0, rows), 'user@example.com · MiMo account · Console');
+  assert.equal(view.limitAccountTitle('mimo', rows[1], 1, rows), 'user@example.com · MiMo account · Desktop Membership');
+  const withoutEmail = rows.map((row) => ({ ...row, accountEmail: '' }));
+  assert.deepEqual(withoutEmail.map((row, index) => view.limitAccountTitle('mimo', row, index, withoutEmail)),
+    ['MiMo account · Console', 'MiMo account · Desktop Membership']);
+  assert.equal(view.limitAccountTitle('mimo', withoutEmail[0], 0), 'MiMo account · Console');
+  assert.equal(view.limitAccountTitle('mimo', {
+    provider: 'mimo', accountName: 'Membership', accountLabel: 'Pro', accountKey: 'sha256:abcdef123456'
+  }, 0), 'Membership');
+});
+
+test('a healthy MiMo row keeps its meta line free of recovery prompts', () => {
+  const view = createLimitWindowsView({
+    mimoProductLabel: limitWindowLabels.mimoProductLabel,
+    mimoAccountGroups: limitWindowLabels.mimoAccountGroups,
+    accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    t: (key) => ({ 'settings.limits.status.signInAgain': '重新登录' })[key] || key,
+    presentation,
+    settings: () => ({})
+  });
+  // The membership's recovery lives on its own row now, so nothing has to be
+  // said beside a row that is fine: the wallet it carries is the whole line.
+  const row = {
+    provider: 'mimo',
+    status: 'ok',
+    accountLabel: 'Console',
+    planLabel: 'Pay-as-you-go',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.96, currency: 'CNY' }]
+  };
+  assert.equal(view.limitProviderMeta(row), 'Update unknown');
+  assert.equal(view.limitProviderPlan(row), 'Pay-as-you-go');
 });
 
 test('copilot setup status asks for sign-in instead of an API key', () => {
@@ -2959,13 +3113,20 @@ test('Kimi credential statuses are localized in settings', () => {
 
 test('Kimi, Droid and MiMo limits reuse their tracked-client colors', () => {
   const app = readRendererFile('app.js');
+  const dock = readRendererFile('edgeDock/dock.js');
   assert.equal(LIMIT_PROVIDER_LABELS.kimi, 'Kimi');
   // `factory` is the last remaining bridge: its tracked client is named
   // `droid`. MiMo needs none — the client and the provider are both `mimo`, so
-  // the generic lookup below already finds clientColors.mimo.
+  // the generic lookup below already finds clientColors.mimo on both surfaces.
   assert.match(app, /if \(providerId === 'factory'\) return clientColors\.droid;/);
   assert.doesNotMatch(app, /providerId === 'mimo'/);
   assert.match(app, /const color = limitProviderColor\(id\);/);
+  const dockColor = vm.runInNewContext(
+    `(${functionBody(dock, 'limitProviderColor', 'providerColor')})`,
+    { clientColors: { mimo: '#111111', xiaomi: '#222222', droid: '#333333', default: '#444444' } }
+  );
+  assert.equal(dockColor('mimo'), '#111111');
+  assert.equal(dockColor('factory'), '#333333');
 });
 
 // A value produced inside a vm realm carries that realm's prototypes, which
@@ -3930,11 +4091,13 @@ test('the provider rollup appears once, on the row that stands for the provider'
   // that did not do the grouping.
   const head = viewBody('renderLimitProviderHead', 'codexResetForecastDate');
   const group = viewBody('renderLimitProviderGroup');
+  const frame = viewBody('renderLimitProviderGroupFrame', 'appendMimoAccountProducts');
   assert.match(head, /decoratePlanWithSubscription\(plan, provider, !options\.accountRow\)/);
   assert.doesNotMatch(head, /state\.stats/);
   // The group's own head is drawn without the flag, and each member passes it —
   // so the summary lands once, on the header.
-  assert.match(group, /renderLimitProviderHead\(providerId, label, groupProvider, color, \{/);
+  assert.match(group, /renderLimitProviderGroupFrame\(/);
+  assert.match(frame, /renderLimitProviderHead\(providerId, label, groupProvider, color, \{/);
   assert.match(group, /accountRow: true/);
   assert.match(cardFor, /provider\?\.accountGroup === true/);
 });
@@ -3979,7 +4142,7 @@ test('elapsed subscription time never reads as zero months', () => {
 
   const i18n = readRendererFile('i18n.js');
   for (const key of ['subscription.tooltip.daysCount', 'subscription.tooltip.notStarted']) {
-    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+    assert.equal(i18n.split(`'${key}':`).length - 1, 6, `${key} should exist in all bundled locales`);
   }
 });
 
@@ -4042,7 +4205,7 @@ test('one account holds one subscription record', () => {
   // display name — the duplicate this check exists to refuse.
   assert.equal(clash({ ...accounts[1], accountName: 'work' }), 's1');
   assert.match(submit, /settings\.subscriptions\.errorDuplicate/);
-  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.errorDuplicate':").length - 1, 5);
+  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.errorDuplicate':").length - 1, 6);
 });
 
 test('a first charge or last top-up cannot be dated in the future', () => {
@@ -4052,7 +4215,7 @@ test('a first charge or last top-up cannot be dated in the future', () => {
   // still submits it, and a future anchor makes every derived figure nonsense.
   assert.match(submit, /startDate > subscriptionApi\.todayString\(\)/);
   assert.match(submit, /settings\.subscriptions\.errorFutureDate/);
-  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.errorFutureDate':").length - 1, 5);
+  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.errorFutureDate':").length - 1, 6);
 });
 
 test('the subscription card is revealed by having a record, not by a preference', () => {
@@ -4108,7 +4271,7 @@ test('a plan that does not auto-renew asks when it ends, and stores it there', (
   assert.match(submit, /settings\.subscriptions\.errorRenewalDate/);
   assert.match(beginEdit, /subscription\.autoRenew \? subscription\.nextRenewalOverride : subscription\.endDate/);
   for (const key of ['coverageEnd', 'coverageEndNote', 'errorRenewalDate']) {
-    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${key}':`).length - 1, 5);
+    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${key}':`).length - 1, 6);
   }
 });
 
@@ -4116,7 +4279,7 @@ test('a lapsed plan reads as ended rather than counting days backwards', () => {
   const rows = viewBody('subscriptionPlanTooltipRows', 'topUpTooltipRows');
   const elapsed = functionBody(readSharedFile('subscriptionText.js'), 'elapsedText', 'topUpMinorText');
   assert.match(rows, /daysLeft < 0 \? t\('subscription\.tooltip\.expired'\)/);
-  assert.equal(readRendererFile('i18n.js').split("'subscription.tooltip.expired':").length - 1, 5);
+  assert.equal(readRendererFile('i18n.js').split("'subscription.tooltip.expired':").length - 1, 6);
   // Time on the plan stops at the day coverage ran out; it does not keep ageing
   // after the plan ended.
   assert.match(elapsed, /coverageStopDate\(subscription\)/);
@@ -4131,7 +4294,7 @@ test('removing a ledger entry has to be confirmed, like the rows above it', () =
   assert.match(render, /if \(!armed\) \{/);
   assert.match(render, /remove\.textContent = '✓'/);
   assert.match(render, /settings\.subscriptions\.topUpRemoveConfirm/);
-  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.topUpRemoveConfirm':").length - 1, 5);
+  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.topUpRemoveConfirm':").length - 1, 6);
   assert.ok(cssBlock(readRendererFile('styles.css'), '.subscription-topup-row .subscription-topup-remove.is-armed'));
 });
 
@@ -4180,9 +4343,9 @@ test('the section says where the recorded data shows up', () => {
   // A record decorates a plan label somewhere else entirely; without being told,
   // there is nothing in this panel that points at it.
   const notes = [...i18n.matchAll(/'settings\.subscriptions\.note': '(.+?)',\n/g)].map((match) => match[1]);
-  assert.equal(notes.length, 5);
+  assert.equal(notes.length, 6);
   for (const note of notes) {
-    assert.match(note, /Hover|游標|光标|마우스|カーソル/);
+    assert.match(note, /Hover|游標|光标|마우스|カーソル|mouse/);
   }
   // The markup fallback is what renders before i18n applies, so it cannot lag.
   assert.ok(html.includes("Hover an account's plan label on the AI Tool Limits page"));
@@ -4236,7 +4399,7 @@ test('subscriptions are written through the hub-aware channel, never as a settin
   assert.match(save, /window\.tokenMonitor\.getSettings\(\)/);
   assert.match(save, /stale_write/);
   for (const key of ['errorStaleWrite', 'errorHubWrite', 'noteShared']) {
-    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${key}':`).length - 1, 5);
+    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${key}':`).length - 1, 6);
   }
 });
 
@@ -4465,6 +4628,8 @@ test('a refused write says which problem it was', () => {
   const key = (message) => vm.runInNewContext(`${mapKey}\nsubscriptionWriteErrorKey({ message });`, { message });
   assert.match(key("Error invoking remote method 'subscriptions:save': Error: hub_rejected"), /errorHubRejected$/);
   assert.match(key('Error: write_failed'), /errorWriteFailed$/);
+  assert.match(key('Error: icloud_write_failed'), /errorIcloudWrite$/);
+  assert.match(key('Error: icloud_adoption_unconfirmed'), /errorIcloudAdoptionUnconfirmed$/);
   assert.match(key('Error: stale_write'), /errorStaleWrite$/);
   assert.match(key('Error: hub_unreachable'), /errorHubWrite$/);
 
@@ -4472,8 +4637,17 @@ test('a refused write says which problem it was', () => {
   const save = functionBody(main, 'saveSubscriptions', 'stopSyncCollector');
   assert.match(save, /if \(!saveSettings\(\)\) \{/);
   for (const k of ['errorHubRejected', 'errorWriteFailed', 'orphanNotice', 'orphanAdopt', 'orphanDiscard']) {
-    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${k}':`).length - 1, 5);
+    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${k}':`).length - 1, 6);
   }
+});
+
+test('iCloud startup lets local subscription ownership reach the seed reconcile', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const start = main.indexOf('onSubscriptions: (document) => {');
+  assert.ok(start >= 0);
+  const body = main.slice(start, main.indexOf('\n    onError:', start));
+  assert.match(body, /localOwnedSubscriptions = !settings\.subscriptionsCacheHub/);
+  assert.match(body, /if \(localOwnedSubscriptions\) return;/);
 });
 
 test('a device with no limits of its own can still name the accounts on the hub', () => {
@@ -5436,6 +5610,232 @@ test('switching hubs does not wait out the old hub request before starting', () 
   assert.match(functionBody(main, 'reconcileSharedSubscriptions', 'restartDeviceRuntimeForMode'), /\} catch \(error\) \{/);
 });
 
+test('iCloud subscription writes discard results from a replaced runtime', async () => {
+  const source = [
+    functionBody(mainProcessSource, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(mainProcessSource, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(mainProcessSource, 'hubChangedError', 'subscriptionsEndpoint'),
+    functionBody(mainProcessSource, 'currentHubIdentity', 'subscriptionDocumentVersion'),
+    `async ${functionBody(mainProcessSource, 'saveSubscriptions', 'stopSyncCollector')}`
+  ].join('\n');
+  let resolveSave;
+  let saveCalls = 0;
+  const pendingSave = new Promise((resolve) => { resolveSave = resolve; });
+  const runtime = {
+    saveSubscriptions: () => { saveCalls += 1; return pendingSave; }
+  };
+  const context = vm.createContext({
+    settings: { hubMode: 'icloud' },
+    subscriptionQueues: new Map(),
+    icloudRuntimeHandle: runtime,
+    effectiveHubConfig: () => ({ url: '' }),
+    subscriptionsAreShared: () => true,
+    cacheCalls: [],
+    cacheSharedSubscriptions: (...args) => { context.cacheCalls.push(args); },
+    pushCalls: 0,
+    pushSettingsToRenderer: () => { context.pushCalls += 1; },
+    settingsForRenderer: () => ({ ok: true }),
+    Promise,
+    String,
+    Object
+  });
+  vm.runInContext(source, context);
+
+  const saving = vm.runInContext("saveSubscriptions([{ id: 'mine' }], { hub: 'icloud', updatedAt: 'v1' });", context);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(saveCalls, 1);
+  context.icloudRuntimeHandle = { saveSubscriptions: async () => ({}) };
+  resolveSave({ winner: { updatedAt: 'v2', subscriptions: [{ id: 'mine' }] }, revisionToken: 'v2' });
+
+  await assert.rejects(() => saving, (error) => error.code === 'hub_changed');
+  assert.deepEqual(plain(context.cacheCalls), []);
+  assert.equal(context.pushCalls, 0);
+});
+
+test('iCloud adoption keeps orphan records when the saving runtime is replaced', async () => {
+  const source = [
+    functionBody(mainProcessSource, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(mainProcessSource, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(mainProcessSource, 'hubChangedError', 'subscriptionsEndpoint'),
+    functionBody(mainProcessSource, 'currentHubIdentity', 'subscriptionDocumentVersion'),
+    functionBody(mainProcessSource, 'orphanedSubscriptions', 'pendingOrphanedSubscriptions'),
+    functionBody(mainProcessSource, 'pendingOrphanedSubscriptions', 'adoptOrphanedSubscriptions'),
+    `async ${functionBody(mainProcessSource, 'adoptOrphanedSubscriptions', 'subscriptionWriteFailureCode')}`
+  ].join('\n');
+  let resolveSave;
+  const pendingSave = new Promise((resolve) => { resolveSave = resolve; });
+  const runtime = {
+    getSubscriptions: () => ({ subscriptions: [], revisionToken: 'v1' }),
+    saveSubscriptions: () => pendingSave
+  };
+  const context = vm.createContext({
+    settings: { hubMode: 'icloud', subscriptionsOrphaned: { hubUrl: 'icloud', records: [{ id: 'mine' }] } },
+    subscriptionQueues: new Map(),
+    icloudRuntimeHandle: runtime,
+    effectiveHubConfig: () => ({ url: '' }),
+    subscriptionsAreShared: () => true,
+    cacheCalls: [],
+    cacheSharedSubscriptions: (...args) => { context.cacheCalls.push(args); },
+    saveSettings: () => { context.saved = true; return true; },
+    settingsForRenderer: () => ({ ok: true }),
+    Promise,
+    String,
+    Object
+  });
+  vm.runInContext(source, context);
+
+  const adopting = vm.runInContext('adoptOrphanedSubscriptions();', context);
+  await new Promise((resolve) => setImmediate(resolve));
+  context.icloudRuntimeHandle = {};
+  resolveSave({ winner: { updatedAt: 'v2', subscriptions: [{ id: 'mine' }] }, revisionToken: 'v2' });
+
+  await assert.rejects(() => adopting, (error) => error.code === 'hub_changed');
+  assert.deepEqual(plain(context.cacheCalls), []);
+  assert.deepEqual(plain(context.settings.subscriptionsOrphaned.records), [{ id: 'mine' }]);
+  assert.equal(context.saved, undefined);
+});
+
+test('iCloud adoption retains orphaned records when another writer wins the local snapshot', async () => {
+  const source = [
+    functionBody(mainProcessSource, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(mainProcessSource, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(mainProcessSource, 'currentHubIdentity', 'subscriptionDocumentVersion'),
+    functionBody(mainProcessSource, 'orphanedSubscriptions', 'pendingOrphanedSubscriptions'),
+    functionBody(mainProcessSource, 'pendingOrphanedSubscriptions', 'adoptOrphanedSubscriptions'),
+    `async ${functionBody(mainProcessSource, 'adoptOrphanedSubscriptions', 'subscriptionWriteFailureCode')}`
+  ].join('\n');
+
+  const orphan = normalizeSubscriptions([{
+    id: 'mine', provider: 'codex', kind: 'recurring', startDate: '2026-01-01',
+    amountMinor: 2000, currency: 'USD', updatedAt: '2026-01-02T00:00:00.000Z'
+  }])[0];
+  for (const { winnerSubscriptions, errors, code } of [
+    { winnerSubscriptions: [], code: 'stale_write' },
+    { winnerSubscriptions: [{ ...orphan, amountMinor: 3000 }], code: 'stale_write' },
+    { winnerSubscriptions: null, code: 'icloud_adoption_unconfirmed' },
+    { winnerSubscriptions: [orphan], errors: [{ category: 'read-failed' }], code: 'icloud_adoption_unconfirmed' }
+  ]) {
+    const runtime = {
+      getSubscriptions: () => ({ subscriptions: [], revisionToken: 'v1' }),
+      saveSubscriptions: async () => ({
+        winner: winnerSubscriptions && { updatedAt: 'now', subscriptions: winnerSubscriptions },
+        revisionToken: winnerSubscriptions ? 'v2:other' : '',
+        errors
+      })
+    };
+    const context = vm.createContext({
+      settings: { hubMode: 'icloud', subscriptionsOrphaned: { hubUrl: 'icloud', records: [orphan] } },
+      subscriptionQueues: new Map(),
+      icloudRuntimeHandle: runtime,
+      effectiveHubConfig: () => ({ url: '' }),
+      subscriptionsAreShared: () => true,
+      cacheSharedSubscriptions: () => true,
+      saveSettings: () => { context.saved = true; return true; },
+      settingsForRenderer: () => ({}),
+      Promise,
+      String,
+      Object,
+      JSON,
+      Map
+    });
+    vm.runInContext(source, context);
+
+    await assert.rejects(
+      () => vm.runInContext('adoptOrphanedSubscriptions();', context),
+      (error) => error.code === code
+    );
+    assert.deepEqual(plain(context.settings.subscriptionsOrphaned.records), [orphan]);
+    assert.equal(context.saved, undefined);
+  }
+});
+
+test('iCloud adoption clears orphans when the winning snapshot contains their full records', async () => {
+  const source = [
+    functionBody(mainProcessSource, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(mainProcessSource, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(mainProcessSource, 'currentHubIdentity', 'subscriptionDocumentVersion'),
+    functionBody(mainProcessSource, 'orphanedSubscriptions', 'pendingOrphanedSubscriptions'),
+    functionBody(mainProcessSource, 'pendingOrphanedSubscriptions', 'adoptOrphanedSubscriptions'),
+    `async ${functionBody(mainProcessSource, 'adoptOrphanedSubscriptions', 'subscriptionWriteFailureCode')}`
+  ].join('\n');
+  const orphan = normalizeSubscriptions([{
+    id: 'mine', provider: 'codex', kind: 'recurring', startDate: '2026-01-01',
+    amountMinor: 2000, currency: 'USD', updatedAt: '2026-01-02T00:00:00.000Z'
+  }])[0];
+  const runtime = {
+    getSubscriptions: () => ({ subscriptions: [], revisionToken: 'v1' }),
+    saveSubscriptions: async () => ({
+      winner: { updatedAt: 'now', subscriptions: normalizeSubscriptions([orphan]) },
+      revisionToken: 'v2:other'
+    })
+  };
+  const context = vm.createContext({
+    settings: { hubMode: 'icloud', subscriptionsOrphaned: { hubUrl: 'icloud', records: [orphan] } },
+    subscriptionQueues: new Map(),
+    icloudRuntimeHandle: runtime,
+    effectiveHubConfig: () => ({ url: '' }),
+    subscriptionsAreShared: () => true,
+    cacheSharedSubscriptions: () => true,
+    saveSettings: () => true,
+    settingsForRenderer: () => ({}),
+    Promise,
+    String,
+    Object,
+    JSON,
+    Map
+  });
+  vm.runInContext(source, context);
+
+  await vm.runInContext('adoptOrphanedSubscriptions();', context);
+  assert.deepEqual(plain(context.settings.subscriptionsOrphaned), { hubUrl: '', records: [] });
+});
+
+test('iCloud local seeding does not cache a result from a replaced runtime', async () => {
+  const source = [
+    functionBody(mainProcessSource, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(mainProcessSource, 'currentHubIdentity', 'subscriptionDocumentVersion'),
+    `async ${functionBody(mainProcessSource, 'refreshSharedSubscriptionsNow', 'maybeAdoptSharedSubscriptionRevision')}`
+  ].join('\n');
+  let resolveSave;
+  const pendingSave = new Promise((resolve) => { resolveSave = resolve; });
+  const runtime = {
+    reconcile: async () => {},
+    getSubscriptions: () => null,
+    saveSubscriptions: () => pendingSave
+  };
+  const context = vm.createContext({
+    settings: {
+      hubMode: 'icloud',
+      subscriptions: [{ id: 'local' }],
+      subscriptionsCacheHub: '',
+      subscriptionsOrphaned: { hubUrl: '', records: [] }
+    },
+    hubSubscriptions: null,
+    hubSubscriptionsHub: '',
+    icloudRuntimeHandle: runtime,
+    effectiveHubConfig: () => ({ url: '' }),
+    subscriptionsAreShared: () => true,
+    cacheCalls: [],
+    cacheSharedSubscriptions: (...args) => { context.cacheCalls.push(args); return true; },
+    rememberCalls: 0,
+    rememberOrphanedSubscriptions: () => { context.rememberCalls += 1; },
+    persistSubscriptionState: () => true,
+    Promise,
+    String,
+    Object
+  });
+  vm.runInContext(source, context);
+
+  const refreshing = vm.runInContext('refreshSharedSubscriptionsNow({ seedFromLocal: true });', context);
+  await new Promise((resolve) => setImmediate(resolve));
+  context.icloudRuntimeHandle = {};
+  resolveSave({ winner: { updatedAt: 'v2', subscriptions: [{ id: 'local' }] }, revisionToken: 'v2' });
+
+  assert.equal(await refreshing, false);
+  assert.deepEqual(plain(context.cacheCalls), []);
+  assert.equal(context.rememberCalls, 0);
+});
+
 test('GLM Home daily windows retain returned model names instead of the generic daily label', () => {
   const window = { kind: 'daily', label: 'arbitrary-model-name' };
   assert.equal(limitProviderCompactWindowLabel('zai', window), window.label);
@@ -5459,4 +5859,31 @@ test('Z.ai token-pool windows print an absolute token pair through the detail sl
   // Shared compact formatting keeps its normal rounding and promotion rules.
   assert.equal(detail({ limit: 3_000_000, remaining: 2_578_372 }, false), '2.6M / 3M');
   assert.equal(detail({ limit: 999_950, remaining: 999_950 }, false), '1M / 1M');
+});
+
+test('the compact picker and tray retain a weekly-only MiMo quota', () => {
+  const trayTextApi = require('../../src/shared/trayText');
+  const row = {
+    provider: 'mimo',
+    status: 'ok',
+    accountKey: 'sha256:membership',
+    source: 'local',
+    sourceDetail: 'app',
+    updatedAt: '2026-09-23T00:00:00.000Z',
+    windows: [{ kind: 'weekly', usedPercent: 40, remainingPercent: 60, resetsAt: '2026-09-29T00:00:00.000Z' }]
+  };
+
+  // Home and the compact tray both read the shared picker, and the tray's kinds
+  // priority has to reach a provider whose only window is the weekly one.
+  const compact = presentation.limitProviderCompactWindows('mimo', row.windows);
+  assert.deepEqual(compact.map((window) => window.kind), ['weekly']);
+  assert.equal(compact[0].remainingPercent, 60);
+  const picked = trayTextApi.pickLimitProviderByKindPriority(
+    { limits: { providers: [row] } },
+    ['session', 'weekly']
+  );
+  assert.equal(picked?.selectedWindow?.kind, 'weekly');
+  assert.equal(picked?.remaining, 60);
+
+  assert.equal(limitWindowLabel('mimo', { kind: 'weekly' }), 'Weekly');
 });

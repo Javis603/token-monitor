@@ -453,6 +453,7 @@
 
   return {
     compactLimitSelection,
+    remainingPercent,
     formatCompactNumber,
     formatConfiguredSessionLimits,
     formatTrayText,

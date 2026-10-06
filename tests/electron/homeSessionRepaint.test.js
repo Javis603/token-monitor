@@ -41,7 +41,7 @@ test('Home sessions repaint at successive running expiries without a stats push'
     { TokenMonitorEdgeDockPresentation: {
       recentSessionRows: () => rows,
       nextRunningExpiryAt: presentation.nextRunningExpiryAt
-    } },
+    }, TokenMonitorSessionLive: sessionLive },
     { now: () => now },
     (callback, delay) => { const id = ++nextTimerId; timers.set(id, { callback, at: now + delay }); return id; },
     (id) => timers.delete(id),

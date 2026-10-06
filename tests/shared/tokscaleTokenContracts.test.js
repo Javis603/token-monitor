@@ -7,8 +7,9 @@ const { TOKEN_CONTRACT_CASES } = require('../../scripts/verify-vendored-tokscale
 
 // Existing Tokscale-parsed clients before this gate was introduced. Keep this
 // baseline fixed when adding a client: each new id needs a runnable contract
-// case in verify-vendored-tokscale.js. Locally parsed clients have their own
-// adapter tests and are excluded below.
+// case in verify-vendored-tokscale.js. Fork-only clients are included: the
+// gate runs against the pinned fork build that parses them. Locally parsed
+// clients have their own adapter tests and are excluded below.
 const LEGACY_CLIENT_IDS = new Set(
   'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,amp,droid,kimi,qwen,grok,copilot,pi,omp,zed,kilo,commandcode,mimo,zcode,kiro,codebuddy,workbuddy,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin'.split(',')
 );

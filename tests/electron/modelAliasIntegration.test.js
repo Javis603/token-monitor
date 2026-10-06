@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const test = require('node:test');
 const presentation = require('../../src/electron/modelAliasPresentation');
 const { inUseModelIds } = require('../../src/electron/renderer/customPricingForm');
+const { upsertModelAliasBatch } = require('../../src/electron/renderer/modelAliases');
 const { classifySettingsChange } = require('../../src/electron/runtimeConfig');
 const { createStatsPresentationCache } = require('../../src/electron/statsPublisher');
 
@@ -60,6 +61,19 @@ test('complete dashboard history uses local mappings for offline and multi-devic
 test('custom pricing still offers original model IDs when reporting aliases are enabled', () => {
   const raw = { periods: { today: { models: { 'anthropic/claude-opus-5': 20, 'claude-opus-5': 30 } } } };
   assert.deepEqual(inUseModelIds(presentation.projectModelAliasStats(raw, aliases)), ['anthropic/claude-opus-5', 'claude-opus-5']);
+});
+
+test('multiple aliases share a display target while costs and pricing IDs remain tied to source usage', () => {
+  const modelAliases = upsertModelAliasBatch({}, ['provider/a', 'provider/b'], 'canonical');
+  const period = { models: { 'provider/a': 20, 'provider/b': 30, canonical: 10 }, modelCosts: { 'provider/a': 8, 'provider/b': 1, canonical: 2 }, totalTokens: 60, costUsd: 11 };
+  const raw = { periods: { today: period }, devices: [{ periods: { today: period } }] };
+  const projected = presentation.projectModelAliasStats(raw, modelAliases, { grouping: 'off' });
+  assert.deepEqual(projected.periods.today.models, { canonical: 60 });
+  assert.deepEqual(projected.periods.today.modelCosts, { canonical: 11 });
+  assert.deepEqual(projected.devices[0].periods.today.models, { canonical: 60 });
+  assert.equal(projected.periods.today.costUsd, 11);
+  assert.deepEqual(inUseModelIds(projected), ['canonical', 'provider/a', 'provider/b']);
+  assert.deepEqual(raw.periods.today.models, { 'provider/a': 20, 'provider/b': 30, canonical: 10 });
 });
 
 test('model alias settings do not restart collection, sync or limits runtimes', () => {

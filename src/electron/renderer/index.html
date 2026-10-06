@@ -53,6 +53,7 @@
                   <option value="zh-CN" data-i18n="settings.language.zhCN">简体中文</option>
                   <option value="ko" data-i18n="settings.language.korean">한국어</option>
                   <option value="ja" data-i18n="settings.language.japanese">日本語</option>
+                  <option value="pt-BR" data-i18n="settings.language.portugueseBR">Português (Brasil)</option>
                 </select>
               </label>
             </div>
@@ -118,19 +119,12 @@
               <div id="advancedSettingsDetails" class="advanced-settings-details hidden" inert>
                 <div class="advanced-settings-body">
                   <div id="tokscaleGroup" class="settings-group advanced-settings-block maintenance-panel">
-                    <div class="settings-group-header maintenance-header"><span>Tokscale</span><span data-i18n="settings.tokscale.source">Data engine from npm</span></div>
+                    <div class="settings-group-header maintenance-header"><span>Tokscale</span><span data-i18n="settings.tokscale.source">Bundled CLI dependency</span></div>
                     <div class="maintenance-version-grid tokscale-version-grid">
                       <div class="maintenance-version-item"><span data-i18n="settings.tokscale.installed">Installed</span><strong id="tokscaleInstalled" data-i18n="settings.common.checking">Checking...</strong></div>
-                      <div class="maintenance-version-item"><span><span data-i18n="settings.tokscale.npm">On npm</span> <small data-i18n="settings.tokscale.latestTag">(latest tag)</small></span><strong id="tokscaleNpm" data-i18n="settings.common.notChecked">Not checked</strong></div>
-                      <div id="tokscaleBundledLine" class="maintenance-version-item"><span data-i18n="settings.tokscale.bundled">Bundled</span><strong id="tokscaleBundled">—</strong></div>
+                      <div id="tokscaleBundledBuildRow" class="maintenance-version-item hidden"><span data-i18n="settings.tokscale.bundledBuild">Bundled build</span><strong id="tokscaleBundledBuild"></strong></div>
                     </div>
                     <p class="settings-note"><span data-i18n="settings.tokscale.noteBefore">Token Monitor uses tokscale (MIT, open-source) to read token data.</span> <button id="openTokscaleLinkButton" type="button" class="inline-link" data-i18n="settings.tokscale.learnMore">Learn more</button></p>
-                    <div id="tokscaleMessage" class="tokscale-message"></div>
-                    <div class="settings-actions maintenance-actions">
-                      <button id="checkTokscaleButton" type="button" data-i18n="settings.tokscale.checkNpm">Check npm</button>
-                      <button id="downloadTokscaleButton" type="button" class="hidden" data-i18n="settings.tokscale.downloadNpm">Download from npm</button>
-                      <button id="resetTokscaleButton" type="button" class="hidden" data-i18n="settings.tokscale.resetBundled">Reset to bundled</button>
-                    </div>
                   </div>
                   <div class="settings-group advanced-settings-block advanced-config-row">
                     <p class="settings-note"><span data-i18n="settings.advanced.note">Additional options are available in</span> <code>settings.json</code>.</p>
@@ -279,6 +273,7 @@
                     <div class="inline-options" role="radiogroup" aria-labelledby="edgeDockModeLabel">
                       <label class="inline-option"><input type="radio" name="edgeDockMode" value="autoHide" /><span data-i18n="settings.edgeDock.mode.autoHide">Auto-hide</span></label>
                       <label class="inline-option"><input type="radio" name="edgeDockMode" value="always" /><span data-i18n="settings.edgeDock.mode.always">Always visible</span></label>
+                      <label class="inline-option"><input type="radio" name="edgeDockMode" value="alwaysExceptFullScreen" /><span data-i18n="settings.edgeDock.mode.alwaysExceptFullScreen">Fullscreen auto-hide</span></label>
                     </div>
                   </div>
                   <div class="settings-item">
@@ -435,6 +430,7 @@
                 <div id="themeAdvancedDetails" class="cursor-settings-details hidden" inert>
                   <div id="themeColorGrid" class="color-picker-grid"></div>
                   <div class="settings-font-controls">
+                    <div class="settings-item"><span class="settings-item-text"><span id="textSizeLabel" class="settings-item-title" data-i18n="settings.appearance.textSize">Text size</span></span><select id="textSizeInput" aria-labelledby="textSizeLabel" aria-describedby="textSizeNote"><option value="standard" data-i18n="settings.appearance.textSizeStandard">Standard</option><option value="larger" data-i18n="settings.appearance.textSizeLarger">Larger</option><option value="largest" data-i18n="settings.appearance.textSizeLargest">Largest</option></select><span id="textSizeNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.textSizeNote">Adjust labels and data text. Token total and icons keep their size.</span></div>
                     <div class="settings-font-field">
                       <label class="settings-item-title" for="interfaceFontPreset" data-i18n="settings.appearance.fontInterface">Interface font</label>
                       <span class="settings-font-input-row">
@@ -622,12 +618,21 @@
                   <button id="modelAliasesAddButton" type="button" data-i18n="settings.modelAliases.add">Add alias</button>
                 </div>
                 <div id="modelAliasesForm" class="model-alias-form hidden">
-                  <label for="modelAliasesAliasInput"><span data-i18n="settings.modelAliases.alias">Alias (reported model ID)</span>
-                    <input id="modelAliasesAliasInput" type="text" maxlength="256" placeholder="anthropic/claude-opus-5" spellcheck="false" />
-                  </label>
-                  <label for="modelAliasesCanonicalInput"><span data-i18n="settings.modelAliases.canonical">Group as (model ID)</span>
-                    <input id="modelAliasesCanonicalInput" type="text" maxlength="256" placeholder="claude-opus-5" spellcheck="false" />
-                  </label>
+                  <div class="model-alias-field">
+                    <label id="modelAliasesAliasLabel" for="modelAliasesAliasSelect" data-i18n="settings.modelAliases.alias">Alias (reported model ID)</label>
+                    <select id="modelAliasesAliasSelect"></select>
+                    <input id="modelAliasesAliasInput" class="hidden" type="text" maxlength="256" placeholder="anthropic/claude-opus-5" spellcheck="false" />
+                  </div>
+                  <div id="modelAliasesMoreSources" class="model-alias-form"></div>
+                  <div class="settings-actions">
+                    <button id="modelAliasesAddSourceButton" type="button" data-i18n="settings.modelAliases.addSource">Add another alias</button>
+                  </div>
+                  <div class="model-alias-field">
+                    <label id="modelAliasesCanonicalLabel" for="modelAliasesCanonicalSelect" data-i18n="settings.modelAliases.canonical">Group as (model ID)</label>
+                    <select id="modelAliasesCanonicalSelect"></select>
+                    <input id="modelAliasesCanonicalInput" class="hidden" type="text" maxlength="256" placeholder="claude-opus-5" spellcheck="false" />
+                  </div>
+                  <p class="settings-note" data-i18n="settings.modelAliases.multipleNote">All aliases above will point to this model ID.</p>
                   <div class="settings-actions">
                     <button id="modelAliasesSaveButton" type="button" data-i18n="settings.modelAliases.save">Save</button>
                     <button id="modelAliasesCancelButton" type="button" data-i18n="settings.modelAliases.cancel">Cancel</button>
@@ -647,6 +652,7 @@
               <div id="customPricingSettingsDetails" class="cursor-settings-details hidden">
                 <p class="settings-note" data-i18n="settings.customPricing.note">Override a model's price (USD per 1M tokens) when its auto-detected price is wrong. Applies to all providers of that model.</p>
                 <div id="customPricingList" class="managed-account-list"></div>
+                <p id="customPricingSyncError" class="settings-note error hidden" role="alert"></p>
                 <div class="settings-actions">
                   <button id="customPricingAddButton" type="button" data-i18n="settings.customPricing.add">Add override</button>
                 </div>
@@ -655,18 +661,49 @@
                     <select id="customPricingModelSelect"></select>
                     <input id="customPricingModelInput" class="hidden" type="text" />
                   </label>
-                  <label><span data-i18n="settings.customPricing.cacheRead">Input (cache hit)</span>
-                    <input id="customPricingCacheRead" type="number" min="0" step="any" /><span id="customPricingCacheReadApprox" class="custom-pricing-approx"></span>
-                  </label>
-                  <label><span data-i18n="settings.customPricing.input">Input (cache miss)</span>
-                    <input id="customPricingInput" type="number" min="0" step="any" /><span id="customPricingInputApprox" class="custom-pricing-approx"></span>
-                  </label>
-                  <label><span data-i18n="settings.customPricing.output">Output</span>
-                    <input id="customPricingOutput" type="number" min="0" step="any" /><span id="customPricingOutputApprox" class="custom-pricing-approx"></span>
-                  </label>
-                  <p class="settings-note" data-i18n="settings.customPricing.perMillion">USD / 1M tokens</p>
+                  <p id="customPricingRateUnits" class="custom-pricing-rate-heading" data-i18n="settings.customPricing.rateUnits">Rates · USD / 1M tokens</p>
+                  <div class="custom-pricing-rates">
+                    <label><span data-i18n="settings.customPricing.cacheRead">Input (cache hit)</span>
+                      <input id="customPricingCacheRead" type="number" min="0" step="any" /><span id="customPricingCacheReadApprox" class="custom-pricing-approx"></span>
+                    </label>
+                    <label><span data-i18n="settings.customPricing.input">Input (cache miss)</span>
+                      <input id="customPricingInput" type="number" min="0" step="any" /><span id="customPricingInputApprox" class="custom-pricing-approx"></span>
+                    </label>
+                    <label class="custom-pricing-rate-wide"><span data-i18n="settings.customPricing.output">Output</span>
+                      <input id="customPricingOutput" type="number" min="0" step="any" /><span id="customPricingOutputApprox" class="custom-pricing-approx"></span>
+                    </label>
+                  </div>
+                  <details id="customPricingAdvanced" class="custom-pricing-advanced">
+                    <summary><span data-i18n="settings.customPricing.advanced">Cache-write pricing</span><span class="custom-pricing-advanced-meta"><span id="customPricingAdvancedSummary" class="settings-note"></span><span class="cursor-disclosure-icon" aria-hidden="true"></span></span></summary>
+                    <div class="custom-pricing-advanced-body">
+                      <div class="custom-pricing-rates">
+                        <label><span data-i18n="settings.customPricing.cacheWrite">Cache write</span>
+                          <input id="customPricingCacheWrite" type="number" min="0" step="any" /><span id="customPricingCacheWriteApprox" class="custom-pricing-approx"></span>
+                        </label>
+                        <div>
+                          <label><span data-i18n="settings.customPricing.cacheWrite1h">Cache write (1 hour)</span>
+                            <input id="customPricingCacheWrite1h" type="number" min="0" step="any" /><span id="customPricingCacheWrite1hApprox" class="custom-pricing-approx"></span>
+                          </label>
+                          <span id="customPricingWriteNote" class="settings-note" data-i18n="settings.customPricing.writeNote">Leave blank to use the regular cache-write price.</span>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+                  <div class="custom-pricing-help-row">
+                    <p id="customPricingCoverageNote" class="settings-note" data-i18n="settings.customPricing.coverageNote">If the supplied rates cannot price the usage, the original cost is kept.</p>
+                    <button id="customPricingHelpButton" class="custom-pricing-help-button" type="button" popovertarget="customPricingHelp" data-i18n="settings.customPricing.help">Pricing guide</button>
+                  </div>
+                  <div id="customPricingHelp" class="custom-pricing-help" popover="auto" role="dialog" aria-labelledby="customPricingHelpTitle">
+                    <div class="custom-pricing-help-header">
+                      <strong id="customPricingHelpTitle" data-i18n="settings.customPricing.help">Pricing guide</strong>
+                      <button type="button" class="app-update-popover-close" popovertarget="customPricingHelp" popovertargetaction="hide" data-i18n-aria-label="settings.appUpdate.close" aria-label="Close" autofocus>×</button>
+                    </div>
+                    <p class="settings-note" data-i18n="settings.customPricing.partialNote">Unused rates can be left blank. Custom pricing applies only when the rates cover every used token type.</p>
+                    <p id="customPricingFreeNote" class="settings-note" data-i18n="settings.customPricing.freeNote">For a free model, set both input and output to 0 and leave other prices blank or 0.</p>
+                    <p class="settings-note" data-i18n="settings.customPricing.cacheNote">Cache-write rates are only needed for providers that bill cache writes separately. If the 1-hour rate differs, enter it manually.</p>
+                  </div>
                   <p id="customPricingHint" class="settings-note"></p>
-                  <div id="customPricingError" class="settings-note error hidden"></div>
+                  <div id="customPricingError" class="settings-note error hidden" role="alert"></div>
                   <div class="settings-actions">
                     <button id="customPricingSaveButton" type="button" data-i18n="settings.customPricing.save">Save</button>
                     <button id="customPricingCancelButton" type="button" data-i18n="settings.customPricing.cancel">Cancel</button>
@@ -1361,30 +1398,91 @@
             <span class="settings-section-meta"><span id="syncSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
           </button>
           <div id="syncSettingsDetails" class="settings-section-details hidden">
-            <div id="hubModeOptions" class="hub-mode-options" role="radiogroup">
-              <label class="hub-mode-option">
-                <input type="radio" name="hubMode" value="local" />
-                <div class="hub-mode-text"><strong data-i18n="settings.sync.localOnly">Local only</strong><span data-i18n="settings.sync.localOnlyDesc">This device only.</span></div>
+            <div class="sync-connection-fields">
+              <label class="sync-mode-field" for="hubModeOptions">
+                <span data-i18n="settings.sync.mode">Sync method</span>
+                <span class="sync-mode-select">
+                  <select id="hubModeOptions" aria-describedby="syncModeDescription">
+                    <option value="local" data-i18n="settings.sync.localOnly">Local only</option>
+                    <option value="client" data-i18n="settings.sync.connectHub">Connect to a hub</option>
+                    <option value="host" data-i18n="settings.sync.hostHub">Host hub on this device</option>
+                    <option value="icloud" data-i18n="settings.sync.icloud">iCloud Drive</option>
+                  </select>
+                  <span class="settings-section-disclosure" aria-hidden="true"></span>
+                </span>
               </label>
-              <label class="hub-mode-option">
-                <input type="radio" name="hubMode" value="client" />
-                <div class="hub-mode-text"><strong data-i18n="settings.sync.connectHub">Connect to a hub</strong><span data-i18n="settings.sync.connectHubDesc">Send this device's usage to a hub elsewhere.</span></div>
-              </label>
-              <label class="hub-mode-option">
-                <input type="radio" name="hubMode" value="host" />
-                <div class="hub-mode-text"><strong data-i18n="settings.sync.hostHub">Host hub on this device</strong><span data-i18n="settings.sync.hostHubDesc">Open a hub here so other devices can connect.</span></div>
-              </label>
-            </div>
-            <div id="hubClientFields" class="hub-mode-fields hidden">
-              <label><span data-i18n="settings.sync.hubUrl">Hub URL</span><input id="hubUrlInput" type="text" spellcheck="false" placeholder="http://hub-host:17321" /></label>
-              <div class="settings-field hub-secret-field">
-                <label for="secretInput" data-i18n="settings.sync.secret">Secret</label>
-                <div class="hub-secret-row">
-                  <input id="secretInput" type="password" spellcheck="false" placeholder="optional shared secret" data-i18n-placeholder="settings.sync.secretPlaceholder" />
-                  <button id="secretPasteButton" type="button" class="icon-button" title="Paste secret" data-i18n-title="settings.sync.pasteSecret" aria-label="Paste secret" data-i18n-aria-label="settings.sync.pasteSecret">⎘</button>
+              <p id="syncModeDescription" class="settings-note sync-mode-description"></p>
+              <div id="hubClientFields" class="hub-mode-fields hidden">
+                <div id="syncPanelConnection" class="sync-panel-connection" hidden>
+                  <div class="sync-panel-state">
+                    <div class="sync-connection-heading">
+                      <span class="sync-connection-status">
+                        <span id="syncPanelSignal" class="sync-panel-signal" aria-hidden="true">
+                          <svg class="sync-panel-signal-linked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="9" />
+                            <path d="m8 12 3 3 5-6" />
+                          </svg>
+                          <svg class="sync-panel-signal-unlinked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="9" />
+                            <path d="m6 6 12 12" />
+                          </svg>
+                          <svg class="sync-panel-signal-pending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+                            <circle cx="12" cy="12" r="9" opacity="0.2" />
+                            <path d="M12 3a9 9 0 0 1 9 9" />
+                          </svg>
+                        </span>
+                        <strong id="syncPanelState" role="status" aria-live="polite"></strong>
+                      </span>
+                      <button id="syncConnectionEdit" type="button" class="sync-connection-edit" data-i18n="settings.sync.editConnection">Change connection</button>
+                    </div>
+                    <div id="syncConnectionIdentity" class="sync-connection-identity">
+                      <span id="syncConnectionEndpoint"></span>
+                      <span id="syncPanelBuild" class="sync-panel-build" hidden></span>
+                    </div>
+                    <span id="syncPanelUpload"></span>
+                    <span id="syncPanelDetail" role="status" aria-live="polite" hidden></span>
+                  </div>
                 </div>
+                <div id="syncConnectionEditor" class="sync-connection-editor">
+                  <label><span data-i18n="settings.sync.hubUrl">Hub URL</span><input id="hubUrlInput" type="text" spellcheck="false" placeholder="http://hub-host:17321" /></label>
+                  <div class="settings-field hub-secret-field">
+                    <label for="secretInput" data-i18n="settings.sync.secret">Secret</label>
+                    <div class="hub-secret-row">
+                      <input id="secretInput" type="password" spellcheck="false" placeholder="optional shared secret" data-i18n-placeholder="settings.sync.secretPlaceholder" />
+                      <button id="secretPasteButton" type="button" class="icon-button" title="Paste secret" data-i18n-title="settings.sync.pasteSecret" aria-label="Paste secret" data-i18n-aria-label="settings.sync.pasteSecret">⎘</button>
+                    </div>
+                  </div>
+                </div>
+                <div id="hubBuildStatus" class="hub-status hub-build-status" role="status" hidden></div>
               </div>
-              <label class="sync-upload-interval-row settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.uploadInterval">Sync upload frequency</span></span>
+              <div id="hubHostFields" class="hub-mode-fields hidden">
+                <label><span data-i18n="settings.sync.port">Port</span><input id="hubPortInput" type="number" min="1" max="65535" spellcheck="false" /></label>
+                <label><span data-i18n="settings.sync.sharedSecret">Shared Secret</span>
+                  <div class="hub-secret-row">
+                    <input id="hubSecretInput" type="text" spellcheck="false" readonly />
+                    <button id="hubSecretCopyButton" type="button" class="icon-button" title="Copy secret" data-i18n-title="settings.sync.copySecret">⧉</button>
+                    <button id="hubSecretRegenButton" type="button" class="icon-button" title="Regenerate" data-i18n-title="settings.sync.regenerateSecret">↺</button>
+                  </div>
+                </label>
+                <div id="hubStatusRow" class="hub-status"></div>
+                <div id="hubAddressList" class="hub-address-list"></div>
+                <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. macOS / Windows may prompt to allow incoming connections the first time. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
+                <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
+              </div>
+              <div id="icloudFields" class="hub-mode-fields hidden">
+                <div id="icloudStatus" class="hub-status" role="status" aria-live="polite"></div>
+                <div id="icloudRootStatus" class="icloud-root-status"></div>
+                <p class="settings-note" data-i18n="settings.sync.icloudNote">Sync usage, limits, history, devices and subscriptions across Macs signed into the same Apple ID. No Token Monitor server is used; updates may take a moment to appear.</p>
+              </div>
+              <div id="syncDeviceSettings" class="sync-device-settings">
+                <label><span data-i18n="settings.sync.deviceId">Device ID</span><input id="deviceIdInput" type="text" spellcheck="false" placeholder="auto (hostname)" data-i18n-placeholder="settings.sync.deviceIdPlaceholder" /></label>
+                <div class="settings-actions">
+                  <button id="saveSettingsButton" type="button" data-i18n="settings.common.save">Save</button>
+                  <button id="syncConnectionCancel" type="button" data-i18n="settings.common.cancel" hidden>Cancel</button>
+                </div>
+                <div id="syncConnectionSaveError" class="hub-status error" role="alert" hidden></div>
+              </div>
+              <label id="syncUploadIntervalRow" class="sync-upload-interval-row settings-item" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.uploadInterval">Sync upload frequency</span></span>
                 <select id="syncUploadIntervalInput">
                   <option value="0" data-i18n="settings.sync.uploadInterval.live">Live</option>
                   <option value="600000" data-i18n="settings.sync.uploadInterval.10m">Every 10 minutes</option>
@@ -1392,26 +1490,44 @@
                   <option value="1800000" data-i18n="settings.sync.uploadInterval.30m">Every 30 minutes</option>
                 </select>
               </label>
-              <div id="syncClientStatus" class="hub-status" hidden></div>
-              <div id="hubBuildStatus" class="hub-status hub-build-status" role="status" hidden></div>
             </div>
-            <div id="hubHostFields" class="hub-mode-fields hidden">
-              <label><span data-i18n="settings.sync.port">Port</span><input id="hubPortInput" type="number" min="1" max="65535" spellcheck="false" /></label>
-              <label><span data-i18n="settings.sync.sharedSecret">Shared Secret</span>
-                <div class="hub-secret-row">
-                  <input id="hubSecretInput" type="text" spellcheck="false" readonly />
-                  <button id="hubSecretCopyButton" type="button" class="icon-button" title="Copy secret" data-i18n-title="settings.sync.copySecret">⧉</button>
-                  <button id="hubSecretRegenButton" type="button" class="icon-button" title="Regenerate" data-i18n-title="settings.sync.regenerateSecret">↺</button>
+            <div id="syncContentGroup" class="settings-group cursor-account-group theme-color-accordion">
+              <button id="syncContentToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="syncContentDetails">
+                <span data-i18n="settings.sync.content.title">Additional sync</span>
+                <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
+              </button>
+              <div id="syncContentDetails" class="cursor-settings-details hidden" inert>
+                <div class="sync-content-body">
+                  <p class="settings-note" data-i18n="settings.sync.content.basis">Usage, cost, tool limits and subscriptions sync automatically.</p>
+                  <p id="syncContentLocalNote" class="settings-note" data-i18n="settings.sync.content.localNote">Optional content sync is available when connected to or hosting a hub.</p>
+                  <div id="syncContentNotice" class="sync-content-notice" hidden>
+                    <p id="syncContentStatus" class="settings-note" role="status" aria-live="polite" hidden></p>
+                    <button id="syncContentRetry" class="sync-content-retry" type="button" data-i18n="settings.sync.content.retry" hidden>Check again</button>
+                  </div>
+                  <div id="syncContentOptions" class="sync-content-options" hidden>
+                    <label id="syncContentHostRow" class="settings-item checkbox-label sync-content-option" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.hostPermission">Allow devices to sync session titles</span><span class="settings-item-desc" data-i18n="settings.sync.content.hostNote">Controls what this hub accepts. Each device chooses separately whether to send titles.</span></span><input id="syncContentHostPermission" type="checkbox" /></label>
+                    <div class="settings-item checkbox-label sync-content-option">
+                      <div class="settings-item-text">
+                        <span class="sync-title-heading"><label for="syncContentsessionTitles" class="settings-item-title" data-i18n="settings.sync.content.sessionTitles">Session titles</label><button id="syncContentTitleHelp" class="settings-help-trigger" type="button" aria-describedby="syncContentTitleHelpPopover" aria-expanded="false" aria-controls="syncContentTitleHelpPopover" data-i18n-aria-label="settings.sync.content.helpLabel" aria-label="How to enable title sync"><span aria-hidden="true">i</span></button></span>
+                        <span id="syncContentTitleNote" class="settings-item-desc" data-i18n="settings.sync.content.titleNote">Let other devices display session titles.</span>
+                        <span id="syncContentTitleUnavailable" class="settings-item-desc sync-title-unavailable" hidden><span data-i18n="settings.sync.content.titleUnavailable">Title sync is not enabled on the server.</span></span>
+                      </div>
+                      <input id="syncContentsessionTitles" type="checkbox" aria-describedby="syncContentStatus syncContentTitleUnavailable syncContentCleanup" disabled />
+                    </div>
+                    <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.modelAliases">Model aliases and grouping</span><span class="settings-item-desc" data-i18n="settings.sync.content.aliasesNote">Use the same model names and groups on your devices.</span></span><input id="syncContentmodelAliases" type="checkbox" aria-describedby="syncContentStatus" disabled /></label>
+                    <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.customPricing">Custom pricing</span><span class="settings-item-desc" data-i18n="settings.sync.content.pricingNote">Use the same custom rates on your devices.</span></span><input id="syncContentcustomPricing" type="checkbox" aria-describedby="syncContentStatus" disabled /></label>
+                  </div>
+                  <div id="syncContentCleanup" class="sync-content-cleanup" hidden><p class="settings-note hub-warning" data-i18n="settings.sync.content.cleanup_pending">Title sync is off, but previously shared titles still need to be removed from the server. Retry when connected.</p><div class="settings-actions"><button id="syncContentCleanupRetry" type="button" data-i18n="settings.sync.content.cleanupRetry">Retry title removal</button></div></div>
                 </div>
-              </label>
-              <div id="hubStatusRow" class="hub-status"></div>
-              <div id="hubAddressList" class="hub-address-list"></div>
-              <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. macOS / Windows may prompt to allow incoming connections the first time. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
-              <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
+              </div>
             </div>
-            <label><span data-i18n="settings.sync.deviceId">Device ID</span><input id="deviceIdInput" type="text" spellcheck="false" placeholder="auto (hostname)" data-i18n-placeholder="settings.sync.deviceIdPlaceholder" /></label>
-            <div class="settings-actions">
-              <button id="saveSettingsButton" data-i18n="settings.common.save">Save</button>
+            <div id="syncDevicePanel" class="sync-panel" hidden>
+              <div class="sync-panel-heading">
+                <span data-i18n="settings.sync.panel.devices">Devices</span>
+                <span id="syncPanelCount" class="sync-panel-count"></span>
+              </div>
+              <div id="syncDeviceList" class="sync-device-list"></div>
+              <button id="syncPanelOpenDevices" type="button" class="sync-panel-link"><span data-i18n="settings.sync.panel.viewUsage">View usage by device</span><span class="sync-panel-link-arrow" aria-hidden="true"></span></button>
             </div>
           </div>
         </div>
@@ -1479,6 +1595,34 @@
         </div>
       </div>
     </main>
+    <div id="syncContentTitleHelpPopover" class="settings-help-popover" popover="auto" role="tooltip">
+      <strong data-i18n="settings.sync.content.helpTitle">Enable title sync on the server</strong>
+      <dl>
+        <dt data-i18n="settings.sync.content.helpDesktop">Desktop Hub</dt>
+        <dd data-i18n="settings.sync.content.helpDesktopBody">On the device hosting the Hub, open Additional sync and turn on Allow devices to sync session titles.</dd>
+        <dt data-i18n="settings.sync.hubBuild.targetNode">Node Hub</dt>
+        <dd><span data-i18n="settings.sync.content.helpNodeBody">Set this in the project’s .env file or deployment environment, then restart the Hub:</span><code>TOKEN_MONITOR_SYNC_SESSION_TITLES=1</code></dd>
+        <dt data-i18n="settings.sync.hubBuild.targetWorker">Cloudflare Worker</dt>
+        <dd><span data-i18n="settings.sync.content.helpWorkerBody">Set this variable to true, then redeploy:</span><code>TOKEN_MONITOR_SYNC_SESSION_TITLES</code></dd>
+      </dl>
+      <p data-i18n="settings.sync.content.helpAfter">After enabling it, collapse and reopen Additional sync to check again. Each device still chooses whether to share titles.</p>
+    </div>
+    <dialog id="syncContentDialog" class="sync-content-dialog" aria-labelledby="syncContentDialogTitle" aria-describedby="syncContentDialogCopy">
+      <strong id="syncContentDialogTitle"></strong>
+      <p id="syncContentDialogCopy"></p>
+      <p id="syncContentCounts"></p>
+      <p id="syncContentNoShared" class="settings-note" data-i18n="settings.sync.content.noShared" hidden>No shared settings yet. Use server settings to wait for a future shared edit, or publish this device's settings.</p>
+      <p id="syncContentDialogStatus" class="settings-note error" role="status" aria-live="polite" hidden></p>
+      <div id="syncContentSourceChoices" class="sync-content-source-choices" hidden>
+        <button id="syncContentUseServer" type="button" data-i18n="settings.sync.content.useServer">Use server settings</button>
+        <button id="syncContentPublish" type="button" data-i18n="settings.sync.content.publish">Publish this device's settings</button>
+      </div>
+      <div class="settings-actions">
+        <button id="syncContentCancel" type="button" data-i18n="settings.common.cancel" autofocus>Cancel</button>
+        <button id="syncContentDialogRetry" type="button" data-i18n="settings.sync.content.retry" hidden>Reload sync status</button>
+        <button id="syncContentConfirm" class="sync-content-primary" type="button" data-i18n="settings.sync.content.enableTitles">Enable title sync</button>
+      </div>
+    </dialog>
     <button id="floatingBubbleTab" class="floating-bubble-tab" type="button" title="Show Token Monitor" aria-label="Show Token Monitor" data-i18n-title="floatingBubble.expand" data-i18n-aria-label="floatingBubble.expand">
       <span id="floatingBubbleContent" aria-hidden="true">Σ</span>
     </button>
@@ -1489,6 +1633,7 @@
     <script src="../../shared/compactTokens.js"></script>
     <script src="../../shared/limits/balanceDisplay.js"></script>
     <script src="../../shared/limits/windowLabels.js"></script>
+    <script src="../../shared/limits/usageItems.js"></script>
     <script src="../../shared/limits/windowText.js"></script>
     <script src="limits/windowsView.js"></script>
     <script src="trayBars.js"></script>
@@ -1505,6 +1650,7 @@
     <script src="../providers/codex/accountControl.js"></script>
     <script src="limits/displayMode.js"></script>
     <script src="limits/resetMotion.js"></script>
+    <script src="limits/resetAnimator.js"></script>
     <script src="clientStatusPresentation.js"></script>
     <script src="clientHealthPresentation.js"></script>
     <script src="clientSourceCache.js"></script>
@@ -1522,11 +1668,15 @@
     <script src="i18n.js"></script>
     <script src="../../shared/providers/reasonix/sessionGuard.js"></script>
     <script src="../../shared/sessionLive.js"></script>
+    <script src="../sessionTitleDisplay.js"></script>
     <script src="sessionRows.js"></script>
+    <script src="overflowText.js"></script>
     <script src="breakdownRenderPolicy.js"></script>
     <script src="statsRenderScheduler.js"></script>
     <script src="allTimeSessions.js"></script>
     <script src="hubBuildPresentation.js"></script>
+    <script src="syncDevicePanel.js"></script>
+    <script src="selectControl.js"></script>
     <script src="deviceBreakdown.js"></script>
     <script src="usageAttributionRows.js"></script>
     <script src="toolDetails.js"></script>
@@ -1536,6 +1686,8 @@
     <script src="customPricingForm.js"></script>
     <script src="modelAliases.js"></script>
     <script src="modelAliasForm.js"></script>
+    <script src="helpPopover.js"></script>
+    <script src="syncContentForm.js"></script>
     <script src="../windowShortcut.js"></script>
     <script src="../../shared/currency.js"></script>
     <script src="../../shared/subscriptionDisplay.js"></script>

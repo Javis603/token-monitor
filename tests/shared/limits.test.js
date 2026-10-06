@@ -1076,7 +1076,8 @@ test('collectLimitsOnce flattens multiple providers returned by a provider fetch
     providerFetchers: {
       codex: async () => [
         codexProvider('sha256:codex-a', 'a@example.com', 18, '2026-06-14T10:00:00.000Z'),
-        codexProvider('sha256:codex-b', 'b@example.com', 72, '2026-06-14T10:01:00.000Z')
+        codexProvider('sha256:codex-b', 'b@example.com', 72, '2026-06-14T10:01:00.000Z'),
+        { provider: 'codex', accountKey: 'sha256:removed', removed: true }
       ]
     }
   });
@@ -1086,6 +1087,7 @@ test('collectLimitsOnce flattens multiple providers returned by a provider fetch
     new Set(summary.providers.map((provider) => provider.accountKey)),
     new Set(['sha256:codex-a', 'sha256:codex-b'])
   );
+  assert.equal(JSON.stringify(summary).includes('removed'), false, 'runtime removals never enter a one-shot wire snapshot');
 });
 
 test('aggregateLimits preserves distinct Cursor accounts and deduplicates the same account across devices', () => {
