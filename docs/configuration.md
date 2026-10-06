@@ -19,7 +19,7 @@ Click the `⚙` button in the bottom-right corner of the widget to open the sett
 | **Main** | Which Home modules appear and their order, plus the display currency (USD, TWD, HKD, or CNY; daily auto rate or a manual override). |
 | **Window** | Window behavior (float above other apps / normal / desktop-pinned), tray mode (macOS menu bar or Windows system tray, and what shows next to the icon), built-in or hand-built menu bar and floating-bubble layouts, hiding the taskbar/Dock icon while keeping the widget on screen, and the global show/hide shortcut. |
 | **Appearance** | Interface theme (presets such as Default and Obsidian, a porcelain light mode, or custom colors), per-vendor tool colors, system glass opacity / blur (on macOS 26+, Frosted Glass or native Liquid Glass; the Edge Dock can follow it or pick its own), and separate interface and display fonts. |
-| **Collection** | Tracked tools — searchable, with hide / pin / drag-reorder for the main list, per-tool source health, re-scan, and custom scan paths for sessions kept outside the defaults — collection cadence, **Keep usage from deleted sessions**, custom pricing, data export, and — on Windows — the built-in WSL scan toggle. |
+| **Collection** | Tracked tools — searchable, with hide / pin / drag-reorder for the main list, per-tool source health, re-scan, and custom scan paths for sessions kept outside the defaults — collection cadence, **Keep usage from deleted sessions**, model aliases (select or manually enter model IDs and group multiple aliases under one display target; custom pricing still uses the original reported IDs), custom pricing, data export, and — on Windows — the built-in WSL scan toggle. |
 | **AI Tool Limits** | Which providers to enable, their credentials and sign-in options, multiple accounts per provider (including switching the active local Codex account), session / daily / weekly / billing / credit windows (with a per-provider **Visible usage items** checklist that hides any of them from the Limits page, the Edge Dock card and the Home module), and how often to refresh (a fixed interval, or adaptive to how fast a quota is being consumed). The provider list is searchable. |
 | **Subscriptions** | What you actually pay for each AI account — a recurring plan, or a top-up ledger for balance-style accounts — surfaced on hover of that account's plan label. Entered by hand; nothing is fetched from any provider. With a hub configured the list is stored on the hub and shared by every connected device; otherwise it stays in this device's `settings.json`. |
 | **Multi-device Sync** | **Local only** (no hub), **Connect to a hub** (paste another machine's Hub URL + secret), **Host hub on this device** (run a hub locally; the panel lists reachable LAN / Tailscale / ZeroTier addresses), or **iCloud Drive** on macOS (opt-in, same Apple ID, no Token Monitor server). |
@@ -31,12 +31,6 @@ Under **Multi-device Sync → Additional sync**, Node Hub and Worker connections
 When first enabling aliases or prices, choose the current server settings or publish this device's settings if they differ. Future edits share a server revision; a conflict asks you to reload instead of silently overwriting another device. Devices that leave an option off keep their own local settings. An older server without these endpoints continues basic sync and disables optional controls. See [privacy](privacy.md) and the [sync API](API.md#get-apisynccontent).
 
 The `⇧` button in the title bar cycles the window behavior.
-
-### Model aliases
-
-Under **Collection → Model aliases**, select an existing model ID for the alias and its **Group as** target, or choose **Other** to type an ID. Choices include the original IDs from usage, saved aliases and their targets, and models with custom pricing. **Add another alias** adds more IDs to the same target; **Save** validates and saves the whole form. Each saved alias can still be edited or removed independently.
-
-Aliases group displayed usage; custom pricing continues to use the original reported IDs. To change a model's cost, set its price under **Custom model pricing**.
 
 ---
 
