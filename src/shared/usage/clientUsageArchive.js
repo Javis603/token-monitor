@@ -525,6 +525,35 @@ function pruneArchivedClientUsage(archive, activeClients) {
 // nothing and no tokens are ever counted twice. `cumulative` is
 // allTimeCumulativeFromArchive()'s output, already folded onto the period's
 // client and model keys, so the two sides compare on the same key.
+// The live usage a floor entry must be compared against. For an ordinary entry
+// that is the client's own live model maps. A merged-era entry (see
+// allTimeCumulativeFromArchive) is different: its total was recorded while the
+// split client shared the merged id, so it already contains the split client's
+// usage while live allTime reports the two apart. Comparing the merged row
+// against the merged client alone would read the split client's live usage as a
+// shortfall and add it a second time. Folding the split client's live maps in
+// keeps both sides in the merged identity, exactly as the daily graph path folds
+// a pre-split day back together.
+function liveModelMapsFor(client, entry, live) {
+  const family = [client];
+  if (entry?.mergedEra) {
+    for (const { merged, split } of CLIENT_IDENTITY_SPLITS) {
+      if (merged === client) family.push(split);
+    }
+  }
+  const tokens = {};
+  const costs = {};
+  for (const member of family) {
+    for (const [model, value] of Object.entries(live.clientModels?.[member] || {})) {
+      tokens[model] = numberValue(tokens[model]) + numberValue(value);
+    }
+    for (const [model, value] of Object.entries(live.clientModelCosts?.[member] || {})) {
+      costs[model] = numberValue(costs[model]) + numberValue(value);
+    }
+  }
+  return { tokens, costs };
+}
+
 function applyDailyHistoryAllTimeFloor(summary, cumulative) {
   if (!cumulative || typeof cumulative !== 'object') return summary;
   const clients = Object.keys(cumulative);
@@ -537,8 +566,7 @@ function applyDailyHistoryAllTimeFloor(summary, cumulative) {
   const shortfalls = [];
   for (const client of clients) {
     const floor = cumulative[client];
-    const liveModels = live.clientModels?.[client] || {};
-    const liveModelCosts = live.clientModelCosts?.[client] || {};
+    const { tokens: liveModels, costs: liveModelCosts } = liveModelMapsFor(client, floor, live);
     // The union of token- and cost-bearing models: a retained observation with
     // cost but zero tokens still has a shortfall to restore.
     const modelKeys = new Set([

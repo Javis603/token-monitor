@@ -10,7 +10,7 @@ const {
 } = require('./history');
 const { normalizeClientName, normalizeModelNameForClient } = require('./usage');
 const {
-  CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry
+  CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry, mergedClientIdFor
 } = require('./clientIdentitySplits');
 
 const ARCHIVE_VERSION = 1;
@@ -702,9 +702,16 @@ function allTimeCumulativeFromArchive(archive) {
   // assignment is silently dropped while the token still lands in the total.
   const cumulative = Object.create(null);
   for (const day of Object.values(normalized.days)) {
+    // A day with no generation marker was captured while a split client shared
+    // its merged id, so its merged-id usage already contains the split client.
+    // Fold such a day into the merged id the same way the graph path does, and
+    // mark the entry so the floor compares it against the whole family rather
+    // than reading the split client's live usage back as a shortfall.
+    const mergedEra = isPreSplitEntry(day);
     for (const observation of Object.values(day.observations)) {
-      const client = normalizeClientName(observation.client);
+      let client = normalizeClientName(observation.client);
       if (!client || UNSAFE_MAP_KEYS.has(client)) continue;
+      if (mergedEra) client = mergedClientIdFor(client) || client;
       const tokens = Math.max(0, Math.round(num(observation.tokens)));
       const cost = Math.max(0, num(observation.cost));
       if (tokens === 0 && cost === 0) continue;
@@ -718,6 +725,7 @@ function allTimeCumulativeFromArchive(archive) {
       entry.costUsd += cost;
       if (tokens > 0) entry.models[model] = num(entry.models[model]) + tokens;
       if (cost > 0) entry.modelCosts[model] = num(entry.modelCosts[model]) + cost;
+      if (mergedEra) entry.mergedEra = true;
     }
   }
   return cumulative;

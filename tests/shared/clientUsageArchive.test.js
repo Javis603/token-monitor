@@ -814,3 +814,90 @@ test('the floor restores a model that carried cost but no tokens', () => {
   assert.equal(Math.round(floored.allTime.costUsd * 100) / 100, 5, 'cost-only shortfall restored');
   assert.equal(floored.allTime.totalTokens, 100, 'tokens unchanged');
 });
+
+// --- merged-era Pi / Oh My Pi split (issue #808, author repro) ---
+
+const { allTimeCumulativeFromArchive } = require('../../src/shared/dailyHistoryArchive');
+
+test('the floor does not recount a merged-era Pi row against split live usage', () => {
+  // A day captured before the split: both products sit under `pi`, no generation
+  // marker. The reduction must mark it merged-era.
+  const archive = { version: 1, days: {
+    '2026-08-01': { date: '2026-08-01', activeTimeMs: 0,
+      observations: [{ client: 'pi', modelId: 'gpt', tokens: 100, cost: 6, messages: 2 }] }
+  } };
+  const cumulative = allTimeCumulativeFromArchive(archive);
+  assert.equal(cumulative.pi.mergedEra, true);
+
+  // Live allTime reports the two clients apart: pi 60 + omp 40 = the same 100 the
+  // merged row already holds. Comparing against pi alone would read the 40 as a
+  // shortfall and raise the total to 140.
+  const summary = allTimeOnly({
+    totalTokens: 100, costUsd: 6,
+    clients: { pi: 60, omp: 40 },
+    clientCosts: { pi: 4, omp: 2 },
+    models: { gpt: 100 },
+    clientModels: { pi: { gpt: 60 }, omp: { gpt: 40 } },
+    clientModelCosts: { pi: { gpt: 4 }, omp: { gpt: 2 } }
+  });
+
+  const floored = applyDailyHistoryAllTimeFloor(summary, cumulative);
+
+  assert.equal(floored.allTime.totalTokens, 100, 'the merged Pi row must not add OMP again');
+  assert.equal(floored.allTime.clients.pi, 60);
+  assert.equal(floored.allTime.clients.omp, 40);
+});
+
+test('a merged-era entry still restores history the whole family lost', () => {
+  const archive = { version: 1, days: {
+    '2026-08-01': { date: '2026-08-01', activeTimeMs: 0,
+      observations: [{ client: 'pi', modelId: 'gpt', tokens: 100, cost: 6, messages: 2 }] }
+  } };
+  const cumulative = allTimeCumulativeFromArchive(archive);
+
+  // Only 15 of the family's 100 survives live, so the missing 85 comes back
+  // under the merged id the day was actually recorded as.
+  const summary = allTimeOnly({
+    totalTokens: 15, costUsd: 1,
+    clients: { pi: 10, omp: 5 },
+    clientCosts: { pi: 1 },
+    models: { gpt: 15 },
+    clientModels: { pi: { gpt: 10 }, omp: { gpt: 5 } },
+    clientModelCosts: { pi: { gpt: 1 } }
+  });
+
+  const floored = applyDailyHistoryAllTimeFloor(summary, cumulative);
+
+  assert.equal(floored.allTime.totalTokens, 100, 'the family total is restored to the archive');
+  assert.equal(floored.allTime.clients.pi, 95, '10 live pi + 85 restored');
+  assert.equal(floored.allTime.clients.omp, 5, 'live omp untouched');
+});
+
+test('a post-split day keeps the two clients apart in the floor', () => {
+  const archive = { version: 1, days: {
+    '2026-09-01': { date: '2026-09-01', activeTimeMs: 0, clientIdentityGeneration: 2,
+      observations: [
+        { client: 'pi', modelId: 'gpt', tokens: 10, cost: 1, messages: 1 },
+        { client: 'omp', modelId: 'gpt', tokens: 20, cost: 2, messages: 1 }
+      ] }
+  } };
+  const cumulative = allTimeCumulativeFromArchive(archive);
+  assert.equal(cumulative.pi.mergedEra, undefined, 'a generation-marked day is not merged-era');
+  assert.equal(cumulative.omp.totalTokens, 20);
+
+  // Live lost the whole omp source; only omp should be restored, never pi.
+  const summary = allTimeOnly({
+    totalTokens: 10, costUsd: 1,
+    clients: { pi: 10 },
+    clientCosts: { pi: 1 },
+    models: { gpt: 10 },
+    clientModels: { pi: { gpt: 10 } },
+    clientModelCosts: { pi: { gpt: 1 } }
+  });
+
+  const floored = applyDailyHistoryAllTimeFloor(summary, cumulative);
+
+  assert.equal(floored.allTime.clients.pi, 10, 'pi stays at its live value');
+  assert.equal(floored.allTime.clients.omp, 20, 'omp restored on its own');
+  assert.equal(floored.allTime.totalTokens, 30);
+});
