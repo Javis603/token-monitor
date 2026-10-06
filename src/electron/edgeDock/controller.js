@@ -270,6 +270,13 @@ function createEdgeDockController(deps) {
       // demoted when Electron moves the HWND behind a non-topmost taskbar.
       if (platform === 'win32') win.setAlwaysOnTop(true, 'pop-up-menu');
     }
+    // The nested refresh circle overlaps the rail's transparent shoulder, but
+    // macOS still hit-tests that rail rectangle. Keep the action above it,
+    // including when the rail finishes loading after the refresh frame.
+    if (visible && peekMode === 'refresh' && !peekPaintPending
+      && (surface === 'peek' || (surface === 'rail' && refreshVisible))) {
+      windows.peek?.moveTop?.();
+    }
     fade(win, visible ? 1 : 0, duration);
   }
 

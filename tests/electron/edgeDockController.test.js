@@ -22,6 +22,13 @@ class FakeWebContents extends EventEmitter {
 
 class FakeBrowserWindow extends EventEmitter {
   static instances = [];
+  static zOrder = [];
+
+  static atPoint(point) {
+    return this.zOrder.findLast((win) => !win.destroyed && win.visible && !win.ignoreMouse
+      && point.x >= win.bounds.x && point.x < win.bounds.x + win.bounds.width
+      && point.y >= win.bounds.y && point.y < win.bounds.y + win.bounds.height);
+  }
 
   constructor(options) {
     super();
@@ -50,7 +57,12 @@ class FakeBrowserWindow extends EventEmitter {
   getBounds() { return { ...this.bounds }; }
   setOpacity(value) { this.opacity = value; }
   setIgnoreMouseEvents(value) { this.ignoreMouse = value; }
-  showInactive() { this.visible = true; this.zOrderCalls.push('showInactive'); }
+  showInactive() { this.visible = true; this.zOrderCalls.push('showInactive'); this.orderFront(); }
+  moveTop() { this.zOrderCalls.push('moveTop'); this.orderFront(); }
+  orderFront() {
+    FakeBrowserWindow.zOrder = FakeBrowserWindow.zOrder.filter((win) => win !== this);
+    FakeBrowserWindow.zOrder.push(this);
+  }
   setBounds(bounds) { this.bounds = { ...bounds }; }
   setAlwaysOnTop(flag, level) { this.zOrderCalls.push(['setAlwaysOnTop', flag, level]); }
   setVisibleOnAllWorkspaces() {}
@@ -100,6 +112,7 @@ function sentPayload(win, surface) {
 
 function createFixture(options = {}) {
   FakeBrowserWindow.instances = [];
+  FakeBrowserWindow.zOrder = [];
   const settings = {
     edgeDockEnabled: true,
     edgeDockMode: 'always',
@@ -732,6 +745,46 @@ test('always-visible refresh appears on hover, stays over the button and hides d
   await new Promise((resolve) => setTimeout(resolve, 105));
   assert.equal(peek.ignoreMouse, true);
   assert.equal(rail.ignoreMouse, false);
+});
+
+test('refresh is raised above the rail shoulder after paint and on each hover reveal', async (t) => {
+  const fixture = createFixture({ platform: 'darwin', canRefreshLimits: () => true });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const peek = fixture.windowFor('peek');
+  const raises = () => peek.zOrderCalls.filter((call) => call === 'moveTop').length;
+  assert.equal(raises(), 0);
+  fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 20 };
+  await new Promise((resolve) => setTimeout(resolve, 105));
+  assert.equal(raises(), 0, 'the old handle frame stays hidden');
+  fixture.paintPeek();
+  assert.equal(raises(), 1);
+  assert.ok(peek.bounds.y < rail.bounds.y + rail.bounds.height, 'circle nests into the native rail rectangle');
+  const edge = { x: peek.bounds.x + 16, y: peek.bounds.y + 3 };
+  assert.equal(FakeBrowserWindow.atPoint(edge), peek, 'the circular edge receives input ahead of the rail');
+  await new Promise((resolve) => setTimeout(resolve, 105));
+  assert.equal(raises(), 1, 'steady hover does not repeatedly reorder windows');
+  fixture.screen.point = { x: 100, y: 100 };
+  await new Promise((resolve) => setTimeout(resolve, 105));
+  fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 20 };
+  await new Promise((resolve) => setTimeout(resolve, 105));
+  assert.equal(raises(), 2, 'reused refresh mode is raised again after being hidden');
+});
+
+test('a rail that finishes loading last leaves the painted refresh above its shoulder', (t) => {
+  const fixture = createFixture({ platform: 'darwin', settings: { edgeDockMode: 'autoHide' }, canRefreshLimits: () => true });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+  const rail = fixture.windowFor('rail');
+  fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents });
+  fixture.paintPeek();
+  const before = peek.zOrderCalls.filter((call) => call === 'moveTop').length;
+  // Native first-show ordering is reapplied when a newly loaded rail reveals.
+  rail.visible = false;
+  rail.webContents.emit('did-finish-load');
+  assert.equal(peek.zOrderCalls.filter((call) => call === 'moveTop').length, before + 1);
+  assert.equal(FakeBrowserWindow.atPoint({ x: peek.bounds.x + 16, y: peek.bounds.y + 3 }), peek);
+  assert.equal(peek.ignoreMouse, false);
 });
 
 for (const side of ['left', 'right']) {
