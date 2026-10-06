@@ -13,6 +13,85 @@ function read(relativePath) {
   return fs.readFileSync(path.join(__dirname, '../..', relativePath), 'utf8');
 }
 
+function resolveHomeRows(providers) {
+  const presentation = require('../../src/electron/renderer/limits/providerPresentation');
+  const windowLabels = require('../../src/shared/limits/windowLabels');
+  const view = createLimitWindowsView({
+    presentation,
+    ...windowLabels,
+    accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    settings: () => ({}),
+    t: (key) => key
+  });
+  const ids = [...new Set(providers.map((provider) => provider.provider))];
+  const app = read('src/electron/renderer/app.js');
+  const start = app.indexOf('function homeLimitRows()');
+  const end = app.indexOf('function homeLimitWindowLabel(', start);
+  return vm.runInNewContext(`${app.slice(start, end)}; homeLimitRows();`, {
+    state: { stats: { limits: { providers } }, settings: { homeLimitAccountCount: 20 } },
+    enabledLimitProviderSet: () => new Set(ids),
+    hiddenHomeLimitProviderSet: () => new Set(),
+    LIMIT_PROVIDERS: ids.map((id) => ({ id, label: id })),
+    limitProviderOrderApi: require('../../src/electron/renderer/limits/providerOrder'),
+    limitUsageItemsApi: require('../../src/shared/limits/usageItems'),
+    homeOverviewApi: require('../../src/electron/renderer/homeOverview'),
+    limitProviderPresentationApi: presentation,
+    limitWindowsView: view,
+    limitAccountTitle: view.limitAccountTitle,
+    ...windowLabels,
+    clientColors: {}
+  });
+}
+
+test('Home resolves real plan labels without treating MiMo products as plans', () => {
+  const rows = resolveHomeRows([
+    { provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', planLabel: '', windows: [{ kind: 'weekly', remainingPercent: 40 }] },
+    { provider: 'mimo', status: 'ok', accountLabel: 'Console', planLabel: 'Pay-as-you-go', windows: [{ kind: 'weekly', remainingPercent: 50 }] }
+  ]);
+  assert.equal(rows.find((row) => row.name === 'Desktop Membership').plan, '');
+  assert.equal(rows.find((row) => row.name === 'Console').plan, 'Pay-as-you-go');
+  assert.equal(resolveHomeRows([
+    { provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [{ kind: 'weekly', remainingPercent: 40 }] }
+  ])[0].plan, 'Pro');
+});
+
+test('Home uses account-row plan policies for grouped titles and adapter identities', () => {
+  const window = { kind: 'weekly', remainingPercent: 40 };
+  const rows = resolveHomeRows([
+    ...['Coding Plan', 'Agent Plan Pro'].map((accountLabel) => ({ provider: 'volcengine', status: 'ok', accountLabel, windows: [window] })),
+    ...['Work profile', 'Personal profile'].map((accountLabel) => ({ provider: 'opencode', status: 'ok', accountLabel, windows: [window] })),
+    ...['newapi-account', 'sub2api'].map((adapterId) => ({ provider: 'thirdparty', status: 'ok', adapterId, planLabel: 'Account', windows: [window] }))
+  ]);
+  for (const name of ['Coding Plan', 'Agent Plan Pro', 'Work profile', 'Personal profile']) {
+    assert.equal(rows.find((row) => row.name === name).plan, '');
+  }
+  const adapters = rows.filter((row) => row.providerId === 'thirdparty');
+  assert.equal(adapters[0].plan, 'New API · Account');
+  assert.equal(adapters[1].plan, 'Sub2API · Account');
+  for (const [provider, accountLabel] of [['volcengine', 'Coding Plan'], ['opencode', 'Work profile']]) {
+    const solo = resolveHomeRows([{ provider, status: 'ok', accountLabel, windows: [window] }])[0];
+    assert.equal(solo.name, provider);
+    assert.equal(solo.plan, accountLabel, 'a solo provider title still needs its plan/profile label');
+  }
+});
+
+test('Home shares Limits status and stale-plan semantics for retained quota windows', () => {
+  const window = { kind: 'weekly', remainingPercent: 40 };
+  for (const [status, stale, expected] of [
+    ['unauthorized', false, 'Sign in again'],
+    ['unavailable', false, 'Unavailable'],
+    ['unavailable', true, 'Plus'],
+    ['ok', false, 'Plus']
+  ]) {
+    assert.equal(resolveHomeRows([
+      { provider: 'codex', status, stale, accountLabel: 'Plus', windows: [window] }
+    ])[0].plan, expected);
+  }
+  assert.equal(resolveHomeRows([
+    { provider: 'zed', status: 'ok', planLabel: 'Zed Student', windows: [window] }
+  ])[0].plan, 'Student');
+});
+
 function renderHomeWindow(window, settings = {}, plan = '') {
   class Element {
     constructor() {

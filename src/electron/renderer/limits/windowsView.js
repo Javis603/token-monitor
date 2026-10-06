@@ -2137,6 +2137,12 @@
     return { color: resolved.color || color, options: resolved.options || {} };
   }
 
+  // Compact surfaces keep the same plan-cell policy as the full account rows.
+  function limitAccountPlan(provider, { grouped = false } = {}) {
+    const policy = limitAccountRowPolicy(provider?.provider, provider, '', { grouped, sharedFamily: null });
+    return policy.options.planText ?? limitProviderPlan(provider);
+  }
+
   // A provider's row standing on its own. Both surfaces call this rather than
   // renderLimitProviderRow, so the policy cannot be skipped by a caller that did
   // not know there was one to pass.
@@ -2715,6 +2721,7 @@
     setDetailTooltip,
     codexResetForecastExpired,
     limitAccountTitle,
+    limitAccountPlan,
     limitProviderMeta,
     limitProviderPlan,
     limitStatusLabel,

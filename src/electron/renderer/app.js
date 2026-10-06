@@ -5614,10 +5614,9 @@ function homeLimitRows() {
     colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
-    accountPlan: (provider) => {
-      const label = String(provider.planLabel || provider.accountLabel || '').trim();
-      return label ? limitProviderPresentationApi.limitProviderPlanDisplayLabel(provider, label) : '';
-    },
+    accountPlan: (provider, index, providerEntries) => limitWindowsView.limitAccountPlan(provider, {
+      grouped: providerEntries.length > 1
+    }),
     accountColor: (provider, id, fallbackColor) => (
       id === 'thirdparty'
         ? limitProviderPresentationApi.thirdPartyAdapterVisual(provider, fallbackColor).color

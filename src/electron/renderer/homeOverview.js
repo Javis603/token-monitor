@@ -251,7 +251,7 @@
           key: `${id}:${index}`,
           providerId: id,
           name: typeof accountName === 'function' ? accountName(provider, index, providerEntries) : label,
-          plan: typeof accountPlan === 'function' ? accountPlan(provider) : '',
+          plan: typeof accountPlan === 'function' ? accountPlan(provider, index, providerEntries) : '',
           color: typeof accountColor === 'function'
             ? accountColor(provider, id, colors[id] || colors.default || '')
             : (colors[id] || colors.default || ''),
