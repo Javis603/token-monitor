@@ -320,27 +320,50 @@ function addUnpricedTokens(target, source, maximum = Infinity) {
   if (count > 0) target.unpricedTokens = (target.unpricedTokens || 0) + count;
 }
 
+function unpricedMapTotal(map) {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return 0;
+  return Object.values(map).reduce(
+    (sum, value) => sum + Math.max(0, Math.round(asNumber(value))),
+    0
+  );
+}
+
 function mergeUnpricedMaps(target, source) {
   for (const field of ['clientUnpricedTokens', 'modelUnpricedTokens']) {
+    const existingMap = target[field] || Object.create(null);
+    let remaining = Math.max(0, (target.unpricedTokens || 0) - unpricedMapTotal(existingMap));
     for (const [rawKey, value] of Object.entries(source[field] || {})) {
       const key = field === 'clientUnpricedTokens' ? normalizeClientName(rawKey) : normalizeModelName(rawKey);
       if (!key) continue;
-      const count = Math.min(target.unpricedTokens || 0, Math.max(0, Math.round(asNumber(value))));
+      const count = Math.min(remaining, Math.max(0, Math.round(asNumber(value))));
       if (!count) continue;
       const map = target[field] ||= Object.create(null);
       map[key] = (map[key] || 0) + count;
+      remaining -= count;
     }
   }
+  const existingClientModels = target.clientModelUnpricedTokens || Object.create(null);
+  let remaining = Math.max(
+    0,
+    (target.unpricedTokens || 0)
+      - Object.values(existingClientModels).reduce((sum, models) => sum + unpricedMapTotal(models), 0)
+  );
   for (const [rawClient, models] of Object.entries(source.clientModelUnpricedTokens || {})) {
     const client = normalizeClientName(rawClient);
     if (!client) continue;
+    const existingModels = existingClientModels[client] || Object.create(null);
+    let clientRemaining = hasOwn(target.clientUnpricedTokens, client)
+      ? Math.max(0, asNumber(target.clientUnpricedTokens[client]) - unpricedMapTotal(existingModels))
+      : remaining;
     for (const [rawModel, value] of Object.entries(models || {})) {
       const model = normalizeModelNameForClient(rawModel, client);
       if (!model) continue;
-      const count = Math.min(target.unpricedTokens || 0, Math.max(0, Math.round(asNumber(value))));
+      const count = Math.min(remaining, clientRemaining, Math.max(0, Math.round(asNumber(value))));
       if (!count) continue;
       const map = (target.clientModelUnpricedTokens ||= Object.create(null))[client] ||= Object.create(null);
       map[model] = (map[model] || 0) + count;
+      remaining -= count;
+      clientRemaining -= count;
     }
   }
 }
@@ -566,9 +589,10 @@ function emptySession(client, id) {
 const sessionsWithLiveSource = new WeakSet();
 
 function mergeSession(target, source) {
-  target.totalTokens += Math.max(0, Math.round(asNumber(source.totalTokens)));
+  const sourceTokens = Math.max(0, Math.round(asNumber(source.totalTokens)));
+  target.totalTokens += sourceTokens;
   target.costUsd += asNumber(source.costUsd);
-  addUnpricedTokens(target, source, source.totalTokens);
+  addUnpricedTokens(target, source, sourceTokens);
   target.messageCount += Math.max(0, Math.round(asNumber(source.messageCount)));
   target.inputTokens += Math.max(0, Math.round(asNumber(source.inputTokens)));
   target.outputTokens += Math.max(0, Math.round(asNumber(source.outputTokens)));

@@ -39,6 +39,39 @@ test('session normalization preserves bounded titles and recognized background-r
   assert.equal(period.sessions['codex:unknown'].sessionKind, '');
 });
 
+test('unpriced attribution maps stay within period and per-client token allowances', () => {
+  const total = (map) => Object.values(map || {}).reduce((sum, value) => sum + value, 0);
+  const input = {
+    totalTokens: 50,
+    unpricedTokens: 50,
+    clientUnpricedTokens: { codex: 20, claude: 30 },
+    modelUnpricedTokens: { 'model-a': 40, 'model-b': 40 },
+    clientModelUnpricedTokens: {
+      codex: { 'model-a': 15, 'model-b': 15 },
+      claude: { 'model-c': 30 }
+    }
+  };
+  const period = normalizePeriod(input);
+  const clientModelTotal = (maps) => Object.values(maps || {}).reduce((sum, models) => sum + total(models), 0);
+
+  assert.equal(total(period.clientUnpricedTokens), period.unpricedTokens);
+  assert.equal(total(period.modelUnpricedTokens), period.unpricedTokens);
+  assert.equal(clientModelTotal(period.clientModelUnpricedTokens), period.unpricedTokens);
+  for (const [client, models] of Object.entries(period.clientModelUnpricedTokens)) {
+    assert.ok(total(models) <= period.clientUnpricedTokens[client]);
+  }
+  assert.deepEqual(normalizePeriod(period), period);
+
+  const merged = mergePeriods(period, period);
+  assert.equal(merged.unpricedTokens, 100);
+  assert.equal(total(merged.clientUnpricedTokens), merged.unpricedTokens);
+  assert.equal(total(merged.modelUnpricedTokens), merged.unpricedTokens);
+  assert.equal(clientModelTotal(merged.clientModelUnpricedTokens), merged.unpricedTokens);
+  for (const [client, models] of Object.entries(merged.clientModelUnpricedTokens)) {
+    assert.ok(total(models) <= merged.clientUnpricedTokens[client]);
+  }
+});
+
 test('Hub ingress projection strips session text without mutating local records', () => {
   const record = {
     deviceId: 'macbook',
