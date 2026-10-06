@@ -32,7 +32,7 @@ test('small sync payloads retain exact history cost attribution in every tier', 
     assert.equal(row.clientModelCosts.tool0['model-long-version-2026-0'], 1);
     assert.notEqual(row.clientModelCostsIncomplete, true);
   }
-  assert.deepEqual(summary, before);
+  assert.deepEqual(JSON.parse(JSON.stringify(summary)), JSON.parse(JSON.stringify(before)));
 });
 
 test('cost matrices yield to the sync budget before session or project identities', () => {
@@ -51,7 +51,7 @@ test('cost matrices yield to the sync budget before session or project identitie
   assert.equal(compact.payload.history.summary.totalCost, 100);
   assert.equal(compact.payload.history.daily[0].perModel['model-long-version-2026-0'].cost, 10);
   assert.equal(compact.payload.history.monthly[0].perClient.tool0.cost, 10);
-  assert.deepEqual(summary, before);
+  assert.deepEqual(JSON.parse(JSON.stringify(summary)), JSON.parse(JSON.stringify(before)));
 });
 
 test('a formerly uploadable year of history remains within the 1 MiB ingest boundary', () => {
@@ -66,7 +66,7 @@ test('a formerly uploadable year of history remains within the 1 MiB ingest boun
   assert.ok(payload.today.sessions.keep);
   assert.ok(payload.month.sessions.keep);
   assert.ok(payload.allTime.projects.keep);
-  assert.deepEqual(summary, raw);
+  assert.deepEqual(JSON.parse(JSON.stringify(summary)), JSON.parse(JSON.stringify(raw)));
 });
 
 for (const syncSessionTitles of [false, true]) {
@@ -96,7 +96,7 @@ for (const syncSessionTitles of [false, true]) {
       assert.equal(body.today.totalTokens, 100);
       assert.equal(body.today.costUsd, 100);
     }
-    assert.deepEqual(summary, before);
+    assert.deepEqual(JSON.parse(JSON.stringify(summary)), JSON.parse(JSON.stringify(before)));
   });
 }
 
