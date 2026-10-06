@@ -2899,6 +2899,22 @@ test('MiMo settings stays connected while one independent product is live', () =
   assert.equal(presentation.limitProviderSettingsRecord([expired], 'mimo'), expired);
 });
 
+test('OpenRouter grouped plan policy separates profile identities, explicit plans, and recovery status', () => {
+  const view = createLimitWindowsView({ presentation: require('../../src/electron/renderer/limits/providerPresentation') });
+  for (const [status, recovery] of [['ok', ''], ['unauthorized', 'Sign in again'], ['unavailable', 'Unavailable']]) {
+    for (const stale of [true, false]) {
+      for (const grouped of [true, false]) {
+        for (const planLabel of ['', 'Management']) {
+          const provider = { provider: 'openrouter', status, stale, accountName: 'Work', accountLabel: 'Work', planLabel };
+          const expected = status !== 'ok' && !stale ? recovery : planLabel || (grouped ? '' : 'Work');
+          assert.equal(view.limitAccountPlan(provider, { grouped }), expected);
+        }
+      }
+    }
+  }
+  assert.equal(view.limitAccountPlan({ provider: 'openrouter', status: 'ok', accountName: 'Work', accountLabel: 'Pay-as-you-go' }, { grouped: true }), 'Pay-as-you-go');
+});
+
 test('OpenCode grouped plan policy preserves explicit plans beside legacy profile titles', () => {
   const view = createLimitWindowsView({ presentation: require('../../src/electron/renderer/limits/providerPresentation') });
   const provider = { provider: 'opencode', status: 'ok', accountLabel: 'Work profile' };

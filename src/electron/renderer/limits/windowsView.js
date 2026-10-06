@@ -2105,7 +2105,16 @@
     // only repeats it. Standing alone the row has nothing else to be recognised
     // by and keeps its own.
     openrouter: (provider, color, { grouped }) => ({
-      options: grouped ? { showIcon: false } : {}
+      options: grouped ? {
+        showIcon: false,
+        // A credits-only response has no key plan; accountLabel then repeats
+        // the profile title. Keep explicit plans and recovery status visible.
+        ...((provider?.status === 'ok' || provider?.stale)
+          && !String(provider?.planLabel || '').trim()
+          && String(provider?.accountName || '').trim()
+          && String(provider?.accountName || '').trim() === String(provider?.accountLabel || '').trim()
+          ? { planText: '' } : {})
+      } : {}
     }),
     antigravity: (provider, color, { grouped }) => ({
       options: grouped ? { showIcon: false } : {}

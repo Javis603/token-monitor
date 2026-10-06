@@ -161,6 +161,32 @@ test('Home Cursor plans never expose email identities with masking enabled or di
   }
 });
 
+test('Home OpenRouter credits-only success does not repeat grouped profile names as plans', async () => {
+  const { fetchOpenRouterLimits } = require('../../src/shared/providers/openrouter/limits');
+  const providers = await fetchOpenRouterLimits({
+    openrouterProfiles: { Work: { apiKey: 'test-work' }, Personal: { apiKey: 'test-personal' } }
+  }, {
+    env: {},
+    fetch: async (url) => url.endsWith('/key')
+      ? { ok: false, status: 503 }
+      : { ok: true, json: async () => ({ data: { total_credits: 100, total_usage: 20 } }) }
+  });
+  for (const provider of providers) {
+    assert.equal(provider.status, 'ok');
+    assert.equal(provider.planLabel, '');
+    assert.equal(provider.windows[0].metric, 'credits');
+  }
+  const rows = resolveHomeRows(providers);
+  assert.deepEqual(rows.map((row) => [row.name, row.plan]), [['Work', ''], ['Personal', '']]);
+  for (const homeLimitDisplayMode of ['text', 'bars']) {
+    const head = renderHomeWindow(rows[0].windows[0], { homeLimitDisplayMode }, rows[0].plan).accountHead;
+    assert.equal(head.children.length, 2);
+  }
+  const solo = resolveHomeRows([providers[0]])[0];
+  assert.equal(solo.name, 'openrouter');
+  assert.equal(solo.plan, 'Work');
+});
+
 function renderHomeWindow(window, settings = {}, plan = '') {
   class Element {
     constructor() {
