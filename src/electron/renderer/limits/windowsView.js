@@ -2088,8 +2088,9 @@
       options: {
         // A profile name that is neither Go nor Zen predates accountName, and it
         // is repeated by the legacy plan fallback. Hide that duplicate only
-        // when no explicit plan is supplied; a known Go/Zen plan must survive.
-        ...(grouped && !String(provider?.planLabel || '').trim() && legacyOpencodeProfileLabel(provider) ? { planText: '' } : {}),
+        // for healthy/stale rows with no explicit plan. Recovery status and
+        // known Go/Zen plans must survive.
+        ...(grouped && (provider?.status === 'ok' || provider?.stale) && !String(provider?.planLabel || '').trim() && legacyOpencodeProfileLabel(provider) ? { planText: '' } : {}),
         ...(grouped ? { showIcon: false } : {})
       }
     }),

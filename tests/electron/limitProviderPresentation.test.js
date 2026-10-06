@@ -2906,6 +2906,16 @@ test('OpenCode grouped plan policy preserves explicit plans beside legacy profil
     assert.equal(view.limitAccountPlan({ ...provider, planLabel }, { grouped: true }), expected);
   }
   assert.equal(view.limitAccountPlan(provider), 'Work profile');
+  for (const [status, recovery] of [['ok', ''], ['unauthorized', 'Sign in again'], ['unavailable', 'Unavailable']]) {
+    for (const stale of [true, false]) {
+      for (const grouped of [true, false]) {
+        for (const planLabel of ['', 'Zen']) {
+          const expected = status !== 'ok' && !stale ? recovery : planLabel || (grouped ? '' : 'Work profile');
+          assert.equal(view.limitAccountPlan({ ...provider, status, stale, planLabel }, { grouped }), expected);
+        }
+      }
+    }
+  }
 });
 
 test('Cursor shared plan cells omit email identities while preserving membership and legacy plans', () => {

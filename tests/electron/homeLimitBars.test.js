@@ -108,6 +108,33 @@ test('Home grouped legacy OpenCode profiles retain explicit plan labels', () => 
   }
 });
 
+test('Home legacy OpenCode groups retain recovery status for non-stale errors', () => {
+  const emptyError = resolveHomeRows([
+    { provider: 'opencode', status: 'unauthorized', accountLabel: 'Legacy failed', windows: [] },
+    { provider: 'opencode', status: 'ok', accountLabel: 'Personal profile', windows: [{ kind: 'weekly', remainingPercent: 60 }] }
+  ]);
+  assert.equal(emptyError.length, 1, 'normal failed probes without quotas stay absent from Home');
+  assert.equal(emptyError[0].name, 'Personal profile');
+  for (const [status, recovery] of [['unauthorized', 'Sign in again'], ['unavailable', 'Unavailable']]) {
+    for (const stale of [true, false]) {
+      for (const planLabel of ['', 'Zen']) {
+        const windows = [{ kind: 'weekly', remainingPercent: 40 }];
+        const rows = resolveHomeRows([
+          { provider: 'opencode', status, stale, accountName: '', accountLabel: 'Legacy failed', planLabel, windows },
+          { provider: 'opencode', status: 'ok', accountLabel: 'Personal profile', windows }
+        ]);
+        const plan = stale ? planLabel : recovery;
+        assert.equal(rows[0].plan, plan);
+        for (const homeLimitDisplayMode of ['text', 'bars']) {
+          const head = renderHomeWindow(windows[0], { homeLimitDisplayMode }, rows[0].plan).accountHead;
+          if (plan) assert.equal(head.children[2].textContent, plan);
+          else assert.equal(head.children.length, 2);
+        }
+      }
+    }
+  }
+});
+
 test('Home Cursor plans never expose email identities with masking enabled or disabled', () => {
   const window = { kind: 'monthly', remainingPercent: 40 };
   for (const homeLimitDisplayMode of ['text', 'bars']) {
