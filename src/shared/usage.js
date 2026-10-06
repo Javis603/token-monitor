@@ -811,7 +811,7 @@ function reconcileCursorAutoGlobalModels(period, input) {
         'modelUnclassifiedTokens',
         'modelUnpricedTokens'
       ]) {
-        if (!period[key][raw]) continue;
+        if (!period[key]?.[raw]) continue;
         period[key]['cursor-auto'] = (period[key]['cursor-auto'] || 0) + period[key][raw];
         delete period[key][raw];
       }

@@ -1239,6 +1239,16 @@ test('normalizePeriod reconciles old Cursor default global models using client a
   assert.equal(cursorOnly.clientModelUnpricedTokens.cursor.default, undefined);
   assert.equal(cursorOnly.clientModelUnpricedTokens.cursor['cursor-auto'], 4);
   assert.deepEqual(normalizePeriod(cursorOnly), cursorOnly);
+
+  const cursorOnlyWithoutUnpriced = normalizePeriod({
+    totalTokens: 7,
+    models: { default: 7 },
+    clientModels: { cursor: { default: 7 } }
+  });
+  assert.equal(cursorOnlyWithoutUnpriced.models.default, undefined);
+  assert.equal(cursorOnlyWithoutUnpriced.models['cursor-auto'], 7);
+  assert.equal(cursorOnlyWithoutUnpriced.modelUnpricedTokens, undefined);
+  assert.deepEqual(normalizePeriod(cursorOnlyWithoutUnpriced), cursorOnlyWithoutUnpriced);
 });
 
 test('extractUsageFromTokscale folds disjoint DSH reasoning into totals and output', () => {
