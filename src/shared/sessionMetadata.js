@@ -344,12 +344,22 @@ function applySessionMetadata(periods, home, deps = {}) {
   for (const period of Object.values(periods || {})) {
     for (const [key, session] of Object.entries(period?.sessions || {})) {
       const meta = metadata.get(key);
+      // Restore only the catalog title we replaced, leaving newer native labels.
+      if (meta?.invalidatedTitle && session.title === meta.invalidatedTitle) {
+        if (meta.titleFallback) session.title = meta.titleFallback;
+        else delete session.title;
+      } else if (deps.invalidatedTitleKeys?.has(key) && session.title === deps.t3Titles?.[key]) delete session.title;
       if (!meta) continue;
+      if (meta.t3Title && !Object.prototype.hasOwnProperty.call(meta, 'titleFallback')) {
+        meta.titleFallback = session.title;
+      }
+      if (meta.title) session.title = meta.title;
+      // A catalog title is not evidence about transcript state or activity.
+      if (meta.titleOnly === true) continue;
       if (meta.startedAt && (!session.startedAt || Date.parse(meta.startedAt) < Date.parse(session.startedAt))) session.startedAt = meta.startedAt;
       if (meta.lastUsedAt && (!session.lastUsedAt || Date.parse(meta.lastUsedAt) > Date.parse(session.lastUsedAt))) session.lastUsedAt = meta.lastUsedAt;
       if (meta.projectId) session.projectId = meta.projectId;
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
-      if (meta.title) session.title = meta.title;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
       if (Object.prototype.hasOwnProperty.call(meta, 'promptCache')) session.promptCache = meta.promptCache;
       // The three states mean different things and are copied as they are:

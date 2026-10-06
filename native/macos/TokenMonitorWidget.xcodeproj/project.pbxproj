@@ -188,6 +188,7 @@
 			knownRegions = (
 				en,
 				Base,
+				"pt-BR",
 			);
 			mainGroup = 400000000000000000000001;
 			productRefGroup = 400000000000000000000005 /* Products */;

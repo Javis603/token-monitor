@@ -10,6 +10,7 @@ const {
   resolveWidgetSourceFreshness,
   serializeMacWidgetSnapshot
 } = require('../../src/shared/macWidgetSnapshot');
+const { normalizeLimitProvider } = require('../../src/shared/limits/core');
 const { widgetVendorPalette } = require('../../src/shared/vendorPresentation');
 const { aggregateDevices } = require('../../src/shared/usage');
 const { localIso } = require('../helpers/localTime');
@@ -875,4 +876,55 @@ test('the Widget presentation accepts exactly the shipped UI locales', () => {
     const snapshot = buildSnapshot(stats, { now: NOW, presentation: { locale: unsupported } });
     assert.equal(snapshot.presentation.locale, 'auto');
   }
+});
+
+test('a row whose only window is the weekly quota still reaches the widget', () => {
+  // A MiMo Desktop membership answers with one weekly window and no balance.
+  // Every surface selects and caps windows its own way, so this pins that the
+  // widget's own cap keeps a single-window row rather than dropping it.
+  const snapshot = buildSnapshot({
+    limits: { providers: [{
+      provider: 'mimo',
+      status: 'ok',
+      accountKey: 'sha256:membership',
+      source: 'local',
+      sourceDetail: 'app',
+      windows: [{ kind: 'weekly', usedPercent: 40, remainingPercent: 60, resetsAt: '2026-07-20T00:00:00Z' }]
+    }] }
+  }, { now: NOW });
+
+  const row = snapshot.quota.find((entry) => entry.provider === 'mimo');
+  assert.deepEqual(row.windows.map((window) => window.kind), ['weekly']);
+  assert.equal(row.windows[0].remainingPercent, 60);
+  assert.equal(row.windows[0].label, 'Weekly');
+});
+
+test('MiMo widget rows of one account name the product alone', () => {
+  // One Xiaomi account answering with both products needs no account name to
+  // tell its rows apart — the product word is the difference.
+  const snapshot = buildSnapshot({
+    limits: { providers: [
+      { provider: 'mimo', status: 'ok', accountKey: 'console', accountEmail: 'user@example.com', accountName: 'Alice · MiMo abcdef1', accountLabel: 'Console', windows: [] },
+      { provider: 'mimo', status: 'ok', accountKey: 'membership', accountEmail: 'renamed@example.com', accountName: 'Renamed · MiMo abcdef1', accountLabel: 'Desktop Membership', windows: [] }
+    ].map(normalizeLimitProvider) }
+  }, { now: NOW });
+  assert.deepEqual(snapshot.quota.map((row) => row.accountLabel).sort(), [
+    'Console',
+    'Desktop Membership'
+  ]);
+});
+
+test('MiMo widget rows of several accounts keep the account and product distinguishable', () => {
+  const snapshot = buildSnapshot({
+    limits: { providers: [
+      { provider: 'mimo', status: 'ok', accountKey: 'console', accountEmail: 'user@example.com', accountName: 'Alice · MiMo abcdef1', accountLabel: 'Console', windows: [] },
+      { provider: 'mimo', status: 'ok', accountKey: 'membership', accountEmail: 'renamed@example.com', accountName: 'Renamed · MiMo abcdef1', accountLabel: 'Desktop Membership', windows: [] },
+      { provider: 'mimo', status: 'ok', accountKey: 'console-2', accountEmail: 'other@example.com', accountName: 'Other · MiMo abcdef2', accountLabel: 'Console', windows: [] }
+    ].map(normalizeLimitProvider) }
+  }, { now: NOW });
+  assert.deepEqual(snapshot.quota.map((row) => row.accountLabel).sort(), [
+    'o***r@example.com · Other MiMo abcdef2 · Console',
+    'r***d@example.com · Renamed MiMo abcdef1 · Desktop Membership',
+    'u***r@example.com · Alice MiMo abcdef1 · Console'
+  ]);
 });

@@ -25,8 +25,8 @@ function cssRule(source, selector) {
 // half the rows never render.
 test('each settings list row owns its type size rather than an optional child', () => {
   const css = readRendererFile('styles.css');
-  assert.match(cssRule(css, '.settings-panel .limit-provider-row'), /font-size:\s*11px/);
-  assert.match(cssRule(css, '.tool-preference-name'), /font-size:\s*11px/);
+  assert.match(cssRule(css, '.settings-panel .limit-provider-row'), /font-size:\s*0\.6875rem/);
+  assert.match(cssRule(css, '.tool-preference-name'), /font-size:\s*0\.6875rem/);
 });
 
 // The disclosure button only exists for providers that have something to

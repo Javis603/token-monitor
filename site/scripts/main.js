@@ -64,25 +64,33 @@ function setupDiscordClock() {
   if (!reducedMotion()) setInterval(tick, 1000);
 }
 
+/* Interface language -> formatting locale. The dictionaries collapse regional
+   variants (en-GB -> en), so a date formatter needs the mapped locale and not the
+   raw lang tag. Route every locale-aware date through this: a formatter that skips
+   it renders English dates in every language, which is invisible in English. */
+function dateLocale() {
+  var lang = document.documentElement.lang;
+  return {
+    en: "en-US",
+    "zh-TW": "zh-Hant-HK",
+    "zh-CN": "zh-Hans-CN",
+    ko: "ko-KR",
+    ja: "ja-JP",
+    "pt-BR": "pt-BR"
+  }[lang] || "en-US";
+}
+
 /* The menu bar preview uses the visitor's actual local time. Align updates to
    the next minute boundary so the static product mock stays accurate without
    running a per-second timer. */
 function setupMenubarClock() {
   var el = document.querySelector("[data-menubar-clock]");
   if (!el) return;
-  var localeMap = {
-    en: "en-US",
-    "zh-TW": "zh-Hant-HK",
-    "zh-CN": "zh-Hans-CN",
-    ko: "ko-KR",
-    ja: "ja-JP"
-  };
   var timeoutId = null;
   var languageObserver = null;
   function render() {
     var now = new Date();
-    var lang = document.documentElement.lang || "en";
-    var locale = localeMap[lang] || lang;
+    var locale = dateLocale();
     try {
       el.textContent = new Intl.DateTimeFormat(locale, {
         weekday: "short",
@@ -547,7 +555,7 @@ function setupDashboard() {
     return new Date(Date.now() - (chartDays.length - 1 - i) * 86400000);
   }
   function xLabel(i) {
-    return chartDate(i).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return chartDate(i).toLocaleDateString(dateLocale(), { month: "short", day: "numeric" });
   }
   function chartTickIndexes(length) {
     if (length <= 1) return [0];
@@ -584,8 +592,7 @@ function setupDashboard() {
     var active = daily.filter(function (v) { return v > 0; }).sort(function (a, b) { return a - b; });
     function q(p) { return active[Math.min(active.length - 1, Math.floor(active.length * p))]; }
     var q1 = q(0.25), q2 = q(0.5), q3 = q(0.75);
-    var localeMap = { en: "en-US", "zh-TW": "zh-Hant-HK", "zh-CN": "zh-Hans-CN", ko: "ko-KR", ja: "ja-JP" };
-    var monthFormatter = new Intl.DateTimeFormat(localeMap[document.documentElement.lang] || "en-US", { month: "short", timeZone: "UTC" });
+    var monthFormatter = new Intl.DateTimeFormat(dateLocale(), { month: "short", timeZone: "UTC" });
     var months = [];
     for (var month = 0; month < 12; month++) months.push(monthFormatter.format(new Date(Date.UTC(2026, 6 + month, 1))));
     var out = "";
@@ -738,9 +745,10 @@ function setupDashboard() {
   function showHeatTip(d, ev) {
     var dt = new Date(Date.now() - (DAYS - 1 - d) * 86400000);
     var tokens = daily[d] * scale;
-    var html = '<div class="tt-head">' + dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) + "</div>"
+    var messages = translations[document.documentElement.lang] || translations.en;
+    var html = '<div class="tt-head">' + dt.toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: "numeric" }) + "</div>"
       + '<div class="tt-row"><span class="tt-name">Tokens</span><span class="tt-val">' + fmtCompact(tokens) + "</span></div>";
-    if (tokens > 0) html += '<div class="tt-row"><span class="tt-name">Cost</span><span class="tt-val">' + fmtCost(tokens * COST_RATE) + "</span></div>";
+    if (tokens > 0) html += '<div class="tt-row"><span class="tt-name">' + (messages["dash.heatmap.cost"] || "Cost") + '</span><span class="tt-val">' + fmtCost(tokens * COST_RATE) + "</span></div>";
     tip.innerHTML = html;
     positionTip(ev);
   }
@@ -771,8 +779,11 @@ function setupDashboard() {
     heatEl.innerHTML = heatmapSvg();
   }
   renderHeatmap();
-  window.addEventListener("token-monitor-languagechange", renderHeatmap);
   renderChart();
+  /* Both draw locale-dependent labels — the heatmap months and the chart axis through
+     xLabel — so both have to follow the language change applyLanguage() announces. */
+  window.addEventListener("token-monitor-languagechange", renderHeatmap);
+  window.addEventListener("token-monitor-languagechange", renderChart);
 
   function wireSeg(seg, attr, apply) {
     if (!seg) return;
@@ -1465,10 +1476,9 @@ function setupWidgetHeat() {
      week * pitch, capped so the label fits inside the rendered width. */
   var monthBlocks = document.querySelectorAll("[data-wdg-months]");
   function renderMonths() {
-    var localeMap = { en: "en-US", "zh-TW": "zh-Hant-HK", "zh-CN": "zh-Hans-CN", ko: "ko-KR", ja: "ja-JP" };
     var fmt;
     try {
-      fmt = new Intl.DateTimeFormat(localeMap[document.documentElement.lang] || "en-US", { month: "short" });
+      fmt = new Intl.DateTimeFormat(dateLocale(), { month: "short" });
     } catch (_) {
       fmt = new Intl.DateTimeFormat("en-US", { month: "short" });
     }

@@ -94,6 +94,6 @@ test('Antigravity account copy is complete in every locale', () => {
     'settings.antigravity.verificationRequired',
     'settings.antigravity.verificationRequiredDetail'
   ]) {
-    assert.equal(i18n.split(`'${key}'`).length - 1, 5, `${key} should exist in all five locales`);
+    assert.equal(i18n.split(`'${key}'`).length - 1, 6, `${key} should exist in all bundled locales`);
   }
 });

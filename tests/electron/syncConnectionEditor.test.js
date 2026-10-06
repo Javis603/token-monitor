@@ -239,7 +239,7 @@ test('endpoint summary cannot leak URL credentials or suffixes', () => {
     ['https://hub.example/', 'hub.example'],
     ['not a URL with secret', ''], ['file:///private/secret', ''], ['javascript:secret', ''], ['', '']
   ]) assert.equal(panelApi.connectionEndpoint(value), expected);
-  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) {
     for (const key of ['editConnection', 'savedEndpoint', 'saveFailed']) {
       assert.equal(typeof i18n.MESSAGES[locale][`settings.sync.${key}`], 'string');
     }
