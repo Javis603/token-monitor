@@ -230,7 +230,37 @@ function mergeResidueIntoPeriod(oldPeriod, newPeriod) {
   };
 }
 
-function addClientUsage(period, client, usage) {
+// Adds an explicit cache read/write/output split for usage that arrived without
+// session detail. `perModel` only counts for models the caller also added to
+// `usage.models`, so a stray key cannot create a model row.
+function addComponentShare(period, client, components) {
+  const add = (map, key, value) => {
+    const amount = Math.max(0, Math.round(numberValue(value)));
+    if (amount > 0) map[key] = numberValue(map[key]) + amount;
+  };
+  const cacheRead = Math.max(0, Math.round(numberValue(components.cacheReadTokens)));
+  const cacheWrite = Math.max(0, Math.round(numberValue(components.cacheWriteTokens)));
+  const output = Math.max(0, Math.round(numberValue(components.outputTokens)));
+  if (cacheRead > 0) {
+    period.cacheReadTokens += cacheRead;
+    add(period.clientCacheReads, client, cacheRead);
+  }
+  if (cacheWrite > 0) {
+    period.cacheWriteTokens += cacheWrite;
+    add(period.clientCacheWrites, client, cacheWrite);
+  }
+  if (output > 0) {
+    period.outputTokens += output;
+    add(period.clientOutputs, client, output);
+  }
+  for (const [model, part] of Object.entries(components.perModel || {})) {
+    add(period.modelCacheReads, model, part?.cacheReadTokens);
+    add(period.modelCacheWrites, model, part?.cacheWriteTokens);
+    add(period.modelOutputs, model, part?.outputTokens);
+  }
+}
+
+function addClientUsage(period, client, usage, components = null) {
   const tokens = Math.max(0, Math.round(numberValue(usage?.totalTokens)));
   const cost = numberValue(usage?.costUsd);
   const beforeComponents = {
@@ -257,22 +287,34 @@ function addClientUsage(period, client, usage) {
     if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
     period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + numberValue(modelCost);
   }
+  // The daily-history floor knows the restored usage's cache/output split from
+  // the archived record itself — there is no session detail to derive it from —
+  // so it hands the split in. Adding it before the known/unclassified step keeps
+  // restored tokens in their real buckets instead of dumping them all into
+  // unclassified and dropping the period's component capability.
+  if (components) addComponentShare(period, client, components);
   const normalizedSessions = normalizePeriod({ sessions: usage?.sessions }).sessions;
   for (const [key, session] of Object.entries(normalizedSessions)) {
     period.sessions[key] = session;
     addSessionBreakdown(period, client, session);
   }
+  // A complete split (see the daily-history floor) leaves no unclassified
+  // remainder: what the cache/output buckets do not cover is plain input, which
+  // the token total already carries. Anything else falls back to treating the
+  // uncovered remainder as unclassified.
+  const componentsComplete = components?.complete === true;
   const known = Math.min(tokens,
     period.cacheReadTokens - beforeComponents.cacheRead
     + period.cacheWriteTokens - beforeComponents.cacheWrite
     + period.outputTokens - beforeComponents.output);
-  const unclassified = Math.max(0, tokens - known);
+  const unclassified = componentsComplete ? 0 : Math.max(0, tokens - known);
   if (unclassified > 0) {
     period.unclassifiedTokens += unclassified;
     period.clientUnclassifiedTokens[client] = (period.clientUnclassifiedTokens[client] || 0) + unclassified;
     period.capabilities.tokenComponents = false;
   }
   for (const [model, modelTokens] of Object.entries(usage?.models || {})) {
+    if (componentsComplete || components?.perModel?.[model]?.complete === true) continue;
     const before = beforeComponents.models[model] || {};
     const modelKnown = Math.min(Math.max(0, Math.round(numberValue(modelTokens))),
       numberValue(period.modelCacheReads?.[model]) - numberValue(before.cacheRead)
@@ -575,14 +617,28 @@ function applyDailyHistoryAllTimeFloor(summary, cumulative) {
     ]);
     const models = {};
     const modelCosts = {};
+    const perModelComponents = {};
     let missingTokens = 0;
     let missingCost = 0;
     for (const model of modelKeys) {
-      const gapTokens = Math.max(0, Math.round(numberValue(floor.models?.[model])))
-        - Math.max(0, Math.round(numberValue(liveModels[model])));
+      const floorTokens = Math.max(0, Math.round(numberValue(floor.models?.[model])));
+      const gapTokens = floorTokens - Math.max(0, Math.round(numberValue(liveModels[model])));
       if (gapTokens > 0) {
         models[model] = gapTokens;
         missingTokens += gapTokens;
+        // The archived split belongs to the whole retained row, so the restored
+        // share of it follows the restored share of the tokens.
+        const split = floor.modelComponents?.[model];
+        if (split && floorTokens > 0) {
+          const share = gapTokens / floorTokens;
+          perModelComponents[model] = {
+            cacheReadTokens: Math.round(numberValue(split.cacheReadTokens) * share),
+            cacheWriteTokens: Math.round(numberValue(split.cacheWriteTokens) * share),
+            outputTokens: Math.round(numberValue(split.outputTokens) * share),
+            // A partial restore of an exact row is no longer exact.
+            complete: split.complete === true && gapTokens === floorTokens
+          };
+        }
       }
       const gapCost = Math.max(0, numberValue(floor.modelCosts?.[model]))
         - Math.max(0, numberValue(liveModelCosts[model]));
@@ -592,29 +648,58 @@ function applyDailyHistoryAllTimeFloor(summary, cumulative) {
       }
     }
     if (missingTokens > 0 || missingCost > 0) {
-      shortfalls.push({ client, models, modelCosts, missingTokens, missingCost });
+      shortfalls.push({
+        client,
+        models,
+        modelCosts,
+        components: clientComponentsFrom(perModelComponents, missingTokens),
+        missingTokens,
+        missingCost
+      });
     }
   }
   if (shortfalls.length === 0) return summary;
 
   const next = cloneJson(summary);
   const period = targetPeriod(next, 'allTime');
-  for (const { client, models, modelCosts, missingTokens, missingCost } of shortfalls) {
+  for (const { client, models, modelCosts, components, missingTokens, missingCost } of shortfalls) {
     // Exact per-model shortfalls, so the client and global totals move by exactly
     // the sum of what each model got back — no proportional rounding drift, and a
     // model still fully present adds nothing. addClientUsage keys the
-    // client/period totals off totalTokens/costUsd; the restored slice carries no
-    // session detail, so it lands as unclassified rather than claiming a
-    // cache/output breakdown it never had.
+    // client/period totals off totalTokens/costUsd. When the archive kept a
+    // cache/output split, the restored share carries it so those tokens land in
+    // their real buckets; without one they fall to unclassified, as before.
     addClientUsage(period, client, {
       totalTokens: missingTokens,
       costUsd: missingCost,
       models,
       modelCosts,
       sessions: {}
-    });
+    }, components);
   }
   return next;
+}
+
+// Rolls the per-model restored split into a client-level one for addClientUsage,
+// clamped so the parts never claim more than the tokens actually restored. The
+// client split is complete only when every restored model's is.
+function clientComponentsFrom(perModelComponents, missingTokens) {
+  const models = Object.keys(perModelComponents);
+  if (models.length === 0 || missingTokens <= 0) return null;
+  const total = { cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, complete: true };
+  for (const part of Object.values(perModelComponents)) {
+    total.cacheReadTokens += Math.max(0, Math.round(numberValue(part.cacheReadTokens)));
+    total.cacheWriteTokens += Math.max(0, Math.round(numberValue(part.cacheWriteTokens)));
+    total.outputTokens += Math.max(0, Math.round(numberValue(part.outputTokens)));
+    if (part.complete !== true) total.complete = false;
+  }
+  let budget = missingTokens;
+  for (const key of ['cacheReadTokens', 'cacheWriteTokens', 'outputTokens']) {
+    total[key] = Math.min(total[key], budget);
+    budget -= total[key];
+  }
+  if (total.cacheReadTokens + total.cacheWriteTokens + total.outputTokens === 0) return null;
+  return { ...total, perModel: perModelComponents };
 }
 
 module.exports = {

@@ -901,3 +901,35 @@ test('a post-split day keeps the two clients apart in the floor', () => {
   assert.equal(floored.allTime.clients.omp, 20, 'omp restored on its own');
   assert.equal(floored.allTime.totalTokens, 30);
 });
+
+test('the floor restores a cache/output split when the archive kept one', () => {
+  const archive = { version: 1, days: { '2026-06-01': { date: '2026-06-01', observations: [
+    { client: 'claude-code', modelId: 'opus', tokens: 1000, cost: 5, messages: 1,
+      tokenComponentsAvailable: true, cacheReadTokens: 600, cacheWriteTokens: 100, outputTokens: 100 }
+  ] } } };
+  const cumulative = allTimeCumulativeFromArchive(archive);
+
+  const floored = applyDailyHistoryAllTimeFloor(allTimeOnly({ totalTokens: 0 }), cumulative);
+
+  assert.equal(floored.allTime.totalTokens, 1000);
+  assert.equal(floored.allTime.cacheReadTokens, 600, 'cache read lands in its own bucket');
+  assert.equal(floored.allTime.cacheWriteTokens, 100);
+  assert.equal(floored.allTime.outputTokens, 100);
+  assert.equal(floored.allTime.modelCacheReads.opus, 600, 'model-level split restored too');
+  // A complete archived split leaves plain input implicit, exactly as
+  // normalizePeriod does for a live period, so nothing is called unclassified.
+  assert.equal(floored.allTime.unclassifiedTokens, 0);
+  assert.equal(floored.allTime.capabilities.tokenComponents, true);
+});
+
+test('the floor restores history that only a live day retained', () => {
+  const archive = { version: 1, days: {}, liveDays: { '2026-07-01': { date: '2026-07-01', observations: [
+    { client: 'codex', modelId: 'gpt', tokens: 50, cost: 1, messages: 1 }
+  ] } } };
+  const cumulative = allTimeCumulativeFromArchive(archive);
+
+  const floored = applyDailyHistoryAllTimeFloor(allTimeOnly({ totalTokens: 0 }), cumulative);
+
+  assert.equal(floored.allTime.totalTokens, 50);
+  assert.equal(floored.allTime.clients.codex, 50);
+});

@@ -1228,3 +1228,28 @@ test('allTimeCumulativeFromArchive drops reserved key names and never pollutes t
   assert.equal(cumulative.claude.totalTokens, 100);
   assert.equal(Object.prototype.totalTokens, before, 'Object.prototype is untouched');
 });
+
+test('allTimeCumulativeFromArchive folds liveDays in and takes the larger reading per pair', () => {
+  const archive = {
+    version: 1,
+    days: { '2026-07-01': { date: '2026-07-01', clientIdentityGeneration: 2, observations: [
+      { client: 'codex', modelId: 'gpt', tokens: 100, cost: 2, messages: 1 }
+    ] } },
+    liveDays: {
+      '2026-07-01': { date: '2026-07-01', observations: [
+        { client: 'codex', modelId: 'gpt', tokens: 120, cost: 3, messages: 1 }
+      ] },
+      '2026-07-02': { date: '2026-07-02', observations: [
+        { client: 'codex', modelId: 'gpt', tokens: 50, cost: 1, messages: 1 }
+      ] }
+    }
+  };
+
+  const cumulative = allTimeCumulativeFromArchive(archive);
+
+  // 07-01 is in both stores: the larger live reading wins, not the sum.
+  // 07-02 exists only as a live day and still counts.
+  assert.equal(cumulative.codex.totalTokens, 170, '120 (max on 07-01) + 50 (07-02)');
+  assert.equal(cumulative.codex.models.gpt, 170);
+  assert.equal(cumulative.codex.costUsd, 4);
+});
