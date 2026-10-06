@@ -269,8 +269,13 @@ function createLocalUsageSource(options = {}, deps = {}) {
         return;
       }
       const next = authContext();
-      const ids = next?.accessToken && next.accountId && !next.isFedrampAccount ? await findExecutors() : new Set();
+      const probedIds = next?.accessToken && next.accountId && !next.isFedrampAccount
+        ? await findExecutors()
+        : new Set();
       if (stopped) return;
+      // A failed OS process probe is inconclusive. Keep the last observed owner
+      // set so one slow `ps`/PowerShell call cannot tear down healthy usage capture.
+      const ids = probedIds ?? executorIds;
       const ownerChanged = [...executorIds].sort().join() !== [...ids].sort().join();
       executorIds = ids;
       if (!next?.accessToken || !next.accountId || !ids.size || next.isFedrampAccount) {

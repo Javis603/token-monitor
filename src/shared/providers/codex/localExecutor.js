@@ -23,17 +23,17 @@ function localExecutorIds(options = {}) {
     ? ['-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process -Filter "Name = \'codex.exe\'" | ForEach-Object { $_.CommandLine }']
     : ['-axo', 'args='];
   return new Promise((resolve) => {
-    if (options.signal?.aborted) return resolve(new Set());
+    if (options.signal?.aborted) return resolve(null);
     let child;
     try {
       child = run(platform === 'win32' ? 'powershell.exe' : 'ps', args, {
         windowsHide: true, stdio: ['ignore', 'pipe', 'ignore']
       });
-    } catch (_) { return resolve(new Set()); }
+    } catch (_) { return resolve(null); }
     let text = '';
     let failed = false;
     let finished = false;
-    const finish = (ids = new Set()) => {
+    const finish = (ids = null) => {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
@@ -52,7 +52,7 @@ function localExecutorIds(options = {}) {
     child.on('error', () => { failed = true; });
     child.on('close', (code) => {
       termination.confirmClosed();
-      finish(!failed && code === 0 ? executorIdsFromProcesses(text) : new Set());
+      finish(!failed && code === 0 ? executorIdsFromProcesses(text) : null);
     });
     if (options.signal?.aborted) abort();
   });

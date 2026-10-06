@@ -5,8 +5,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { EventEmitter } = require('node:events');
 const { spawn } = require('node:child_process');
-const { executorIdsFromProcesses, localThreadEnvironment } = require('../../src/shared/providers/codex/localExecutor');
+const { executorIdsFromProcesses, localExecutorIds, localThreadEnvironment } = require('../../src/shared/providers/codex/localExecutor');
 const { createLocalUsageStore, usageCounters } = require('../../src/shared/providers/codex/localUsageStore');
 const { createLocalUsageSource } = require('../../src/shared/providers/codex/localUsageSource');
 const { collectUsageOnce, projectIdentity, localTodayKey } = require('../../src/shared/collector');
@@ -56,6 +57,26 @@ test('ownership requires the actual local executor, excluding cloud, other compu
   assert.equal(localThreadEnvironment({ ...LOCAL, environments: [{ environmentId: 'executor-other', cwd: '/work/project' }] }, ids), null);
   assert.equal(localThreadEnvironment({ ...LOCAL, path: '/rollout.jsonl' }, ids), null);
   assert.equal(localThreadEnvironment({ ...LOCAL, environments: [...LOCAL.environments, { environmentId: 'executor-other', cwd: '/work/project' }] }, ids), null);
+});
+
+test('executor probe failure is distinct from a successful empty process list', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  assert.equal(await localExecutorIds({ platform: 'linux', signal: controller.signal }), null);
+  assert.equal(await localExecutorIds({ platform: 'linux', spawn: () => { throw new Error('spawn failed'); } }), null);
+
+  const processWith = (code) => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.kill = () => true;
+    const probe = localExecutorIds({ platform: 'linux', spawn: () => child });
+    child.emit('close', code);
+    return probe;
+  };
+  const empty = await processWith(0);
+  assert.ok(empty instanceof Set);
+  assert.equal(empty.size, 0);
+  assert.equal(await processWith(1), null);
 });
 
 test('canonical input excludes cached tokens; reasoning remains a subset of output', () => {
@@ -381,6 +402,37 @@ test('an enabled source without a local executor never opens a socket; agent own
   assert.equal(scans, 1);
   assert.equal(sockets, 0);
   standby.stop();
+});
+
+test('an inconclusive executor probe retains the active local usage connection', async (t) => {
+  const { store } = fixture(t);
+  const socket = new FakeSocket();
+  let scans = 0;
+  const source = createLocalUsageSource({ store }, {
+    pollMs: 5,
+    idlePollMs: 30000,
+    shouldYield: () => false,
+    localExecutorIds: () => (++scans === 1 ? new Set(['executor-local']) : null),
+    readAuth: () => ({ accessToken: 'fixture', accountId: 'account' }),
+    makeSocket: () => { queueMicrotask(() => socket.dispatchEvent(new Event('open'))); return { socket }; },
+    now: () => new Date(AT)
+  });
+  t.after(() => source.stop());
+  source.start();
+
+  const deadline = Date.now() + 2000;
+  while (source.getDiagnostics().subscriptions === 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(source.getDiagnostics().state, 'connected');
+  assert.equal(source.getDiagnostics().subscriptions, 1);
+
+  while (scans < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.ok(scans >= 2, 'the next executor probe ran');
+  assert.equal(source.getDiagnostics().state, 'connected');
+  assert.equal(source.getDiagnostics().localExecutors, 1);
+  assert.equal(source.getDiagnostics().subscriptions, 1);
+  assert.equal(socket.readyState, 1);
 });
 
 test('default and explicit disable do not construct the source, while keeping stored usage', async (t) => {
