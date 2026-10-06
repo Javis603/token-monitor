@@ -137,6 +137,16 @@
   }
 
   return {
+    refreshCommands({ width, height }) {
+      const x = width / 2;
+      const y = height / 2;
+      const r = Math.min(x, y) - 0.5;
+      const k = r * 0.5522847498;
+      return [['M', x, y - r], ['C', x + k, y - r, x + r, y - k, x + r, y],
+        ['C', x + r, y + k, x + k, y + r, x, y + r],
+        ['C', x - k, y + r, x - r, y + k, x - r, y],
+        ['C', x - r, y - k, x - k, y - r, x, y - r], ['Z']];
+    },
     bubbleCommands,
     peekCommands,
     railCommands,

@@ -166,6 +166,8 @@ const {
   edgeDockPeekBounds,
   edgeDockPlacementForDrop,
   edgeDockRailBounds,
+  edgeDockRefreshBounds,
+  edgeDockRefreshCorridor,
   edgeDockTriggerBounds,
   normalizeEdgeDockDisplayId,
   normalizeEdgeDockOffset,
@@ -2518,4 +2520,27 @@ test('live rate card renders device model rows with vendor marks and retains eve
   const empty = node('section', '');
   render(empty, { rateDevices: [] });
   assert.equal(empty.children.length, 0);
+});
+
+test('refresh placement preserves rail bounds and stays accessible at either display edge', () => {
+  const area = { x: -1200, y: 80, width: 1200, height: 700 };
+  for (const side of ['left', 'right']) {
+    for (const offset of [0, 0.3, 1]) {
+      const rail = edgeDockRailBounds({ workArea: area, side, offset, cellKinds: ['provider', 'provider'] });
+      const before = structuredClone(rail);
+      const button = edgeDockRefreshBounds({ workArea: area, railBounds: rail });
+      assert.deepEqual(rail, before);
+      assert.equal(button.x + button.width / 2, rail.x + rail.width / 2);
+      assert.ok(button.y >= area.y + EDGE_DOCK_METRICS.screenMargin);
+      assert.ok(button.y + button.height <= area.y + area.height - EDGE_DOCK_METRICS.screenMargin);
+      assert.equal(offset === 1 ? button.y + button.height - rail.y : rail.y + rail.height - button.y, Math.round(EDGE_DOCK_METRICS.shoulder * 0.7) - EDGE_DOCK_METRICS.refreshGap);
+      const corridor = edgeDockRefreshCorridor(rail, button);
+      assert.equal(corridor.width, 0, 'the shoulder bounds already cover the short passage');
+    }
+    const full = edgeDockRailBounds({ workArea: area, side, offset: 1, cellKinds: Array(30).fill('provider') });
+    const button = edgeDockRefreshBounds({ workArea: area, railBounds: full });
+    assert.ok(side === 'left' ? button.x > full.x + full.width : button.x + button.width < full.x);
+    assert.ok(button.y + button.height <= area.y + area.height - EDGE_DOCK_METRICS.screenMargin);
+    assert.equal(edgeDockRefreshCorridor(full, button).width, EDGE_DOCK_METRICS.refreshGap);
+  }
 });

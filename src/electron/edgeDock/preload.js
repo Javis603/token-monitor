@@ -13,7 +13,9 @@ contextBridge.exposeInMainWorld('tokenMonitorEdgeDock', {
   reportBubbleSize: (cellId, height) => ipcRenderer.send('edgeDock:bubbleSize', { cellId, height }),
   dismiss: () => ipcRenderer.send('edgeDock:dismiss'),
   toggleRateMode: () => ipcRenderer.send('edgeDock:toggleRateMode'),
-  // Switching the local Codex account is the one action the dock can take; it
+  refreshLimits: () => ipcRenderer.invoke('edgeDock:refreshLimits'),
+  peekPainted: (mode, shapeKey) => ipcRenderer.send('edgeDock:peekPainted', { mode, shapeKey }),
+  // Switching the local Codex account runs through the same action as the widget; it
   // is the same call the Limits view's Switch button makes, and the main
   // process re-projects the cards once it lands.
   switchCodexAccount: (accountId) => ipcRenderer.invoke('edgeDock:switchCodexAccount', { accountId }),

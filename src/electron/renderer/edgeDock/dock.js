@@ -450,10 +450,74 @@ function updateShape(payload) {
 
 // ---- Peek ----------------------------------------------------------------
 
+let refreshButton = null;
+let refreshBusy = false;
+let refreshResult = '';
+let refreshFeedbackTimer = null;
+
+function paintRefreshButton() {
+  if (!refreshButton) return;
+  const key = refreshBusy ? 'refreshButton.refreshing'
+    : refreshResult === 'success' ? 'refreshButton.refreshed'
+      : refreshResult === 'error' ? 'refreshButton.failed' : 'edgeDock.refreshLimits';
+  refreshButton.title = t(key);
+  refreshButton.setAttribute('aria-label', t(key));
+  refreshButton.setAttribute('aria-busy', String(refreshBusy));
+  refreshButton.disabled = refreshBusy || state.payload?.refreshable !== true;
+  refreshButton.dataset.state = refreshBusy ? 'busy' : refreshResult;
+}
+
+async function refreshDockLimits() {
+  if (refreshBusy || state.payload?.peekMode !== 'refresh') return;
+  clearTimeout(refreshFeedbackTimer);
+  refreshBusy = true;
+  refreshResult = '';
+  paintRefreshButton();
+  try {
+    const result = await bridge.refreshLimits();
+    refreshResult = result?.ok === true ? 'success' : 'error';
+  } catch {
+    refreshResult = 'error';
+  } finally {
+    refreshBusy = false;
+    paintRefreshButton();
+    refreshFeedbackTimer = setTimeout(() => {
+      refreshResult = '';
+      paintRefreshButton();
+    }, 1800);
+  }
+}
+
 function renderPeek(payload) {
   root.dataset.side = payload.side;
+  root.dataset.peekMode = payload.peekMode || 'handle';
+  // AppKit can clamp a resized window to 10px. Keep the handle's content on
+  // its original 7px geometry even when those extra pixels lie off-screen.
+  root.style.width = `${payload.shape?.width || 7}px`;
+  root.style.height = `${payload.shape?.height || 48}px`;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (state.payload === payload) bridge.peekPainted?.(payload.peekMode || 'handle', payload.shape?.key);
+  }));
+  if (payload.peekMode === 'refresh') {
+    root.title = '';
+    root.classList.remove('is-handle-hidden');
+    if (!refreshButton) {
+      refreshButton = el('button', 'edge-dock-refresh');
+      refreshButton.type = 'button';
+      const icon = el('span', 'edge-dock-refresh-icon');
+      icon.setAttribute('aria-hidden', 'true');
+      refreshButton.append(icon);
+      refreshButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        void refreshDockLimits();
+      });
+    }
+    if (contentLayer.firstChild !== refreshButton) contentLayer.replaceChildren(refreshButton);
+    paintRefreshButton();
+    return;
+  }
   root.title = t('settings.display.edgeDock');
-  if (!contentLayer.firstChild) contentLayer.append(el('span', 'edge-dock-grip'));
+  if (!contentLayer.firstChild?.classList.contains('edge-dock-grip')) contentLayer.replaceChildren(el('span', 'edge-dock-grip'));
   // The handle's exit is a move, not a blink, so the withdrawn pose is held as a
   // class and one transition carries it both ways (see the grip's rules). The class
   // goes on in the same frame the grip is built, which is what keeps a page that
@@ -461,7 +525,9 @@ function renderPeek(payload) {
   root.classList.toggle('is-handle-hidden', payload.peeking !== true);
 }
 
-if (surface === 'peek') root.addEventListener('click', () => bridge.click(null));
+if (surface === 'peek') root.addEventListener('click', () => {
+  if (state.payload?.peekMode !== 'refresh') bridge.click(null);
+});
 
 // ---- Rail ----------------------------------------------------------------
 

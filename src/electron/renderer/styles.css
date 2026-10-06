@@ -3180,10 +3180,16 @@ html.is-windows .settings-panel select option {
   display: inline-block;
   position: relative;
   z-index: 1;
-  width: 1em;
-  height: 1em;
-  line-height: 1;
-  text-align: center;
+  /* An SVG rather than the U+21BB glyph: no font carries that glyph, so each
+     platform drew a different fallback arrow beside the settings gear. The
+     drawing is the monospace fallback's, kept at the size that glyph drew at
+     (about half the button's 16px em), not stretched to the gear's box. The
+     asset's viewBox is cropped to its ink, so this box is the arrow itself. */
+  width: 8.3px;
+  height: 8px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/refresh.svg") center / contain no-repeat;
+  mask: url("icons/actions/refresh.svg") center / contain no-repeat;
   transform-origin: 50% 50%;
   transition: transform 120ms cubic-bezier(0.25, 1, 0.5, 1);
 }

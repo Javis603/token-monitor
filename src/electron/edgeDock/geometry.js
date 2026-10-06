@@ -32,6 +32,8 @@ const EDGE_DOCK_METRICS = Object.freeze({
   edgeInset: 0,
   peekWidth: 7,
   peekLength: 48,
+  refreshSize: 32,
+  refreshGap: 4,
   bubbleWidth: 280,
   bubbleTail: 12,
   bubbleNeck: 18,
@@ -174,6 +176,34 @@ function edgeDockPeekBounds({ workArea, side, railBounds, metrics = EDGE_DOCK_ME
   const height = metrics.peekLength;
   const y = railBounds.y + Math.round((railBounds.height - height) / 2);
   return { x: Math.round(x), y, width: metrics.peekWidth, height };
+}
+
+function edgeDockRefreshBounds({ workArea, railBounds, metrics = EDGE_DOCK_METRICS }) {
+  if (!workArea || !railBounds) return null;
+  const size = metrics.refreshSize;
+  const minY = workArea.y + metrics.screenMargin;
+  const maxY = workArea.y + workArea.height - metrics.screenMargin - size;
+  // The shoulder reaches the screen edge beyond the visible body. Nest the
+  // button into that empty curve rather than measuring from the window edge.
+  const inset = Math.round(metrics.shoulder * 0.7);
+  const below = railBounds.y + railBounds.height - inset + metrics.refreshGap;
+  const above = railBounds.y + inset - metrics.refreshGap - size;
+  const outside = below <= maxY ? below : above >= minY ? above : null;
+  // A full-height rail leaves neither end free. Keep the action beside its
+  // bottom shoulder instead of covering its last cell or leaving the display.
+  const x = outside === null
+    ? railBounds.x === workArea.x ? railBounds.x + railBounds.width + metrics.refreshGap : railBounds.x - metrics.refreshGap - size
+    : railBounds.x + Math.round((railBounds.width - size) / 2);
+  return { x, y: outside ?? Math.max(minY, maxY), width: size, height: size };
+}
+
+function edgeDockRefreshCorridor(rail, button) {
+  if (!rail || !button) return null;
+  if (button.y >= rail.y + rail.height) return { x: button.x, y: rail.y + rail.height, width: button.width, height: button.y - rail.y - rail.height };
+  if (button.y + button.height <= rail.y) return { x: button.x, y: button.y + button.height, width: button.width, height: rail.y - button.y - button.height };
+  const x = Math.min(rail.x + rail.width, button.x + button.width);
+  const right = Math.max(rail.x, button.x);
+  return { x, y: button.y, width: Math.max(0, right - x), height: button.height };
 }
 
 // The strip the pointer has to reach to reveal the dock. It runs from the work
@@ -435,6 +465,8 @@ module.exports = {
   edgeDockPeekBounds,
   edgeDockPlacementForDrop,
   edgeDockRailBounds,
+  edgeDockRefreshBounds,
+  edgeDockRefreshCorridor,
   edgeDockTriggerBounds,
   normalizeEdgeDockDisplayId,
   normalizeEdgeDockMode,

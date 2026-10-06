@@ -5516,6 +5516,23 @@ function refreshEdgeDockForecast() {
     .finally(() => { edgeDockForecastInFlight = false; });
 }
 
+function canRefreshEdgeDockLimits() {
+  return ownsUsageRuntime() && Boolean(deviceRuntimeHandle) && settings?.limitsEnabled !== false
+    && parseLimitProviders(settings?.limitProviders ?? defaultLimitProviders()).length > 0;
+}
+
+async function refreshLimitsFromEdgeDock() {
+  if (!canRefreshEdgeDockLimits()) return { ok: false, error: 'No local limits runtime' };
+  const providers = parseLimitProviders(settings?.limitProviders ?? defaultLimitProviders());
+  // Keep manual backoff and inspect each lane's result: a deferred or failed
+  // probe must not turn the button green just because its promise resolved.
+  const results = await Promise.all(providers.map((provider) => deviceRuntimeHandle.refreshLimits({ provider }, 'manual')));
+  const failed = results.some((result, index) => !result || result.superseded || result.deferred || result.error
+    || result.snapshot?.providers?.some((row) => row.provider === providers[index]
+      && !['ok', 'notConfigured', 'unsupported'].includes(row.status)));
+  return { ok: !failed };
+}
+
 function edgeDockCellsFor(visibleStats) {
   refreshEdgeDockDerivedPeriods(visibleStats);
   refreshEdgeDockForecast();
@@ -5638,8 +5655,10 @@ function ensureEdgeDockController() {
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
     isFullScreen: createFullScreenProbe({ platform: process.platform, screen, logger: (message) => console.log(message) }),
     // The dock card's Switch button runs the same swap the Limits view does,
-    // then repaints from the refreshed records. It is the dock's only write.
+    // then repaints from the refreshed records.
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
+    canRefreshLimits: () => canRefreshEdgeDockLimits(),
+    onRefreshLimits: () => refreshLimitsFromEdgeDock(),
     onOpenResetForecastSource: () => {
       if (isAllowedExternalUrl(CODEX_RESET_FORECAST_SOURCE_URL)) void shell.openExternal(CODEX_RESET_FORECAST_SOURCE_URL);
     },
