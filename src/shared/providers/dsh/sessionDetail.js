@@ -21,9 +21,10 @@
  *   second time.
  */
 
-const fs = require('node:fs');
+const path = require('node:path');
+const { readDshTranscriptRecords } = require('./transcriptReader');
 const { makeTokens, groupEvents, filterExchangesByPeriod, distributeCost } = require('../../sessionDetail');
-const { decodeSessionText, dshSessionFiles, readDshSessionHeader, resolveDshSessionsRoot } = require('./sessionFiles');
+const { dshSessionFiles, resolveDshSessionsRoot } = require('./sessionFiles');
 
 function numberValue(value) {
   const parsed = Number(value || 0);
@@ -50,11 +51,18 @@ function promptFromContent(content) {
   return text ? `${marker} ${text}` : marker;
 }
 
-function findDshSessionFile(sessionId, options = {}) {
+async function findDshSessionFile(sessionId, options = {}) {
   const root = options.sessionsRoot || resolveDshSessionsRoot(options);
   for (const filePath of dshSessionFiles(root)) {
-    const header = readDshSessionHeader(filePath);
-    if (header?.id === sessionId) return filePath;
+    let id;
+    try {
+      for await (const record of readDshTranscriptRecords(filePath, { headerOnly: true })) {
+        id = record?.type === 'session' && typeof record.id === 'string' ? record.id : null;
+        break;
+      }
+    } catch (_) {}
+    // Keep discovery's directory-name fallback for torn or unreadable headers.
+    if ((id || path.basename(path.dirname(filePath))) === sessionId) return filePath;
   }
   return null;
 }
@@ -91,6 +99,14 @@ function lastStreamUsage(stream) {
 }
 
 function parseDshDetailEvents(text) {
+  const records = [];
+  for (const line of String(text || '').split(/\r?\n/)) {
+    try { records.push(JSON.parse(line)); } catch (_) {}
+  }
+  return parseDshDetailRecords(records);
+}
+
+function parseDshDetailRecords(inputRecords) {
   const events = [];
   // dsh's own persistence layer can replay an already-flushed line back into
   // the file (crash/retry on the writer side); tokscale's dsh parser guards
@@ -102,20 +118,10 @@ function parseDshDetailEvents(text) {
   const records = [];
   let header = null;
   let headerRecordIndex = -1;
-  for (const line of String(text || '').split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let record;
-    try {
-      record = JSON.parse(trimmed);
-    } catch (_) {
-      continue;
-    }
-    if (record?.type === 'session') {
-      if (!header) {
-        header = record;
-        headerRecordIndex = records.length;
-      }
+  for (const record of inputRecords) {
+    if (record?.type === 'session' && !header) {
+      header = record;
+      headerRecordIndex = records.length;
     }
     records.push(record);
   }
@@ -215,7 +221,7 @@ function totalsOf(exchanges, sessionCost) {
   return { totalTokens, costUsd: numberValue(sessionCost), exchangeCount: exchanges.length, turnCount };
 }
 
-function readDshSessionDetail({ sessionId, period = 'total', sessionCost = 0, home, env, platform, cwdDir, sessionsRoot, deps = {} }) {
+async function readDshSessionDetail({ sessionId, period = 'total', sessionCost = 0, home, env, platform, cwdDir, sessionsRoot, deps = {} }) {
   const options = {
     homeDir: home,
     env: env || deps.env || process.env,
@@ -224,17 +230,19 @@ function readDshSessionDetail({ sessionId, period = 'total', sessionCost = 0, ho
     ...(sessionsRoot ? { sessionsRoot } : {})
   };
   const findFile = deps.findDshSessionFile || findDshSessionFile;
-  const filePath = findFile(sessionId, options);
+  const filePath = await findFile(sessionId, options);
   if (!filePath) {
     return { found: false, client: 'dsh', sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
   }
   let events;
   try {
-    const buffer = fs.readFileSync(filePath);
-    const text = decodeSessionText(filePath, buffer);
-    events = parseDshDetailEvents(text);
-  } catch (_) {
-    return { found: false, client: 'dsh', sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
+    const records = [];
+    for await (const record of readDshTranscriptRecords(filePath)) records.push(record);
+    events = parseDshDetailRecords(records);
+  } catch (error) {
+    const missing = { found: false, client: 'dsh', sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
+    if (error.code === 'ENOENT') return missing;
+    return { ...missing, error: error.code === 'SESSION_DETAIL_LINE_TOO_LARGE' ? 'line-too-large' : 'read-failed' };
   }
   const now = new Date((deps.now || Date.now)());
   const grouped = filterExchangesByPeriod(groupEvents(events), period, now);

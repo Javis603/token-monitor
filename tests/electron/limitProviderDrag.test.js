@@ -201,7 +201,7 @@ test('the limits section tells the user rows can be dragged', () => {
     'the reorder note should introduce the list rather than follow it'
   );
   const i18n = readRendererFile('i18n.js');
-  assert.equal((i18n.match(/'settings\.limits\.reorderNote':/g) || []).length, 5, 'one entry per bundled locale');
+  assert.equal((i18n.match(/'settings\.limits\.reorderNote':/g) || []).length, 6, 'one entry per bundled locale');
 });
 
 test('the renderer loads the drag modules', () => {

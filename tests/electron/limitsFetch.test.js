@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { createElectronLimitsFetch } = require('../../src/electron/limitsFetch');
+const { createElectronLimitsFetch } = require('../../src/electron/limits/fetch');
 const { resetOutboundFetchCache } = require('../../src/shared/outboundFetch');
 
 function recordingNet() {
@@ -100,8 +100,12 @@ test('every widget provider probe takes the runtime transport', () => {
   for (const call of [
     /opencodeWeb\.fetchGoWeb\([^,]+, electronProviderDeps\(\)\)/,
     /opencodeWeb\.fetchZen\([^,]+, electronProviderDeps\(\)\)/,
-    /fetchOllamaLimits\([^,]+, electronProviderDeps\(/,
-    /fetchMimoLimits\([^;]+electronProviderDeps\(\)\)/,
+    // Every account form's save-time probe (limits:saveCredential).
+    /function credentialProbeDeps\(renewed = \{\}\) \{\s*return electronProviderDeps\(/,
+    // MiMo's save path is hand-wired rather than going through the account
+    // forms, so it has to ask for the probe deps itself: saving a credential
+    // must not write the spend ledger the credential has not earned yet.
+    /fetchMimoLimits\([^;]+credentialProbeDeps\(\)\)/,
     /fetchOpenRouterAccount\([^,]+, [^,]+, electronProviderDeps\(/,
     /fetchThirdPartyAccount\(\{[^}]*\}, electronProviderDeps\(/,
     /listCodexWorkspaces\(auth, electronProviderDeps\(/
@@ -111,9 +115,9 @@ test('every widget provider probe takes the runtime transport', () => {
 });
 
 test('the auto-detect pill requires a usable ZCode credential, not any install', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const account = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'providers', 'zai', 'account.js'), 'utf8');
   // An API-only or unentitled ZCode selection is not an auto quota source;
   // only entitled + credential marks the login detected, so the pill never
   // advertises auto-detect for a state the collector cannot answer.
-  assert.match(main, /return discovery\.entitled && discovery\.credential \? discovery : null;/);
+  assert.match(account, /return discovery\.entitled && discovery\.credential \? discovery : null;/);
 });

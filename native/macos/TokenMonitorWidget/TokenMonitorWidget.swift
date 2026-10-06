@@ -132,9 +132,27 @@ struct TokenMonitorWidgetView: View {
                 )
             }
         } else {
-            switch family {
-            case .systemLarge:
-                LargeDashboardWidgetView(
+            dashboard(snapshot)
+                .environment(\.widgetVendorPalette, WidgetVendorPalette(styles: snapshot.vendors))
+        }
+    }
+
+    @ViewBuilder
+    private func dashboard(_ snapshot: WidgetSnapshot) -> some View {
+        switch family {
+        case .systemLarge:
+            LargeDashboardWidgetView(
+                snapshot: snapshot,
+                period: entry.period,
+                page: entry.page,
+                referenceDate: entry.date,
+                selectedActivityDate: entry.selectedActivityDate,
+                quotaMode: entry.quotaMode,
+                selectedQuotaProviderIDs: entry.selectedQuotaProviderIDs
+            )
+        case .systemMedium:
+            if entry.page == .activity {
+                MediumUsageWidgetView(
                     snapshot: snapshot,
                     period: entry.period,
                     page: entry.page,
@@ -143,8 +161,8 @@ struct TokenMonitorWidgetView: View {
                     quotaMode: entry.quotaMode,
                     selectedQuotaProviderIDs: entry.selectedQuotaProviderIDs
                 )
-            case .systemMedium:
-                if entry.page == .activity {
+            } else {
+                WidgetRefreshButton {
                     MediumUsageWidgetView(
                         snapshot: snapshot,
                         period: entry.period,
@@ -154,23 +172,11 @@ struct TokenMonitorWidgetView: View {
                         quotaMode: entry.quotaMode,
                         selectedQuotaProviderIDs: entry.selectedQuotaProviderIDs
                     )
-                } else {
-                    WidgetRefreshButton {
-                        MediumUsageWidgetView(
-                            snapshot: snapshot,
-                            period: entry.period,
-                            page: entry.page,
-                            referenceDate: entry.date,
-                            selectedActivityDate: entry.selectedActivityDate,
-                            quotaMode: entry.quotaMode,
-                            selectedQuotaProviderIDs: entry.selectedQuotaProviderIDs
-                        )
-                    }
                 }
-            default:
-                WidgetRefreshButton {
-                    SmallUsageWidgetView(snapshot: snapshot, period: entry.period)
-                }
+            }
+        default:
+            WidgetRefreshButton {
+                SmallUsageWidgetView(snapshot: snapshot, period: entry.period)
             }
         }
     }

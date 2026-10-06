@@ -74,7 +74,7 @@ const {
   MAC_APP_MIN_VERSION,
   MAC_WIDGET_MIN_VERSION
 } = require('../../src/shared/macSystemRequirements');
-const { projectLimitStatsForDisplay } = require('../../src/electron/limitStatsPresentation');
+const { projectLimitStatsForDisplay } = require('../../src/electron/limits/statsPresentation');
 
 function functionSource(name, nextName) {
   const start = mainSource.indexOf(`function ${name}(`);
@@ -98,7 +98,7 @@ test('publishes projected stats to the macOS Widget on collection and presentati
   const end = mainSource.indexOf('\nfunction statsHistoryRevision', start);
   assert.ok(start >= 0 && end > start, 'sendPush function should exist');
   const sendPush = mainSource.slice(start, end);
-  assert.match(sendPush, /latestStats = payload\.data\.stats;\s+const visibleStats = electronPresentationStats\(latestStats\);/);
+  assert.match(sendPush, /latestStats = payload\.data\.stats;[\s\S]*?const visibleStats = electronPresentationStats\(latestStats\);/);
   assert.match(sendPush, /scheduleMacWidgetSnapshot\(visibleStats, options\.widgetProducerOwner\);/);
   assert.equal((mainSource.match(/scheduleMacWidgetSnapshot\(visibleStats, options\.widgetProducerOwner\)/g) || []).length, 1);
   const refreshStart = mainSource.indexOf('function refreshLimitStatsPresentation()');
@@ -111,27 +111,43 @@ test('publishes projected stats to the macOS Widget on collection and presentati
   assert.match(mainSource, /compactTokenUnits: settings\?\.compactTokenUnits/);
 });
 
+function mainFunctionSource(signature) {
+  const start = mainSource.indexOf(signature);
+  const end = mainSource.indexOf('\nfunction ', start + signature.length);
+  assert.ok(start >= 0, `${signature} should exist`);
+  return mainSource.slice(start, end === -1 ? mainSource.length : end);
+}
+
 test('Widget producers carry lifetime ownership through the sendPush outlet', () => {
   for (const signature of [
-    'function startSyncCollector()',
     'function startHostStats()',
     'function startLocalCollector()',
-    'async function startStatsStream(options = {})',
     'async function refreshFromTray()'
   ]) {
-    const start = mainSource.indexOf(signature);
-    const end = mainSource.indexOf('\nfunction ', start + signature.length);
-    assert.ok(start >= 0, `${signature} should exist`);
-    const source = mainSource.slice(start, end === -1 ? mainSource.length : end);
+    const source = mainFunctionSource(signature);
     assert.match(source, /const widgetProducerOwner = captureMacWidgetProducerOwner\(\);/);
     assert.match(source, /sendPush\([\s\S]*\{ widgetProducerOwner \}\)/);
   }
+  // Client mode batches its publications, so its producers hand the owner to the
+  // batch and the publisher passes it on to sendPush.
+  for (const signature of [
+    'function startSyncCollector()',
+    'async function startStatsStream(options = {})'
+  ]) {
+    const source = mainFunctionSource(signature);
+    assert.match(source, /const widgetProducerOwner = captureMacWidgetProducerOwner\(\);/);
+    assert.match(source, /requestSyncDisplayStats\(\{[\s\S]*widgetProducerOwner\s*\}\)/);
+  }
+  assert.match(
+    mainFunctionSource('function publishSyncDisplayStats('),
+    /sendPush\([\s\S]*\{ widgetProducerOwner \}\)/
+  );
 });
 
 test('Widget ownership advances producer lifetime only for mode transitions', () => {
   assert.match(
-    mainSource,
-    /function startMode\(\) \{\s*hubModeGeneration \+= 1;\s*advanceMacWidgetProducerAndSourceEpoch\(\);/
+    mainFunctionSource('function startMode()'),
+    /hubModeGeneration \+= 1;\s*advanceMacWidgetProducerAndSourceEpoch\(\);/
   );
   assert.match(
     mainSource,
@@ -923,7 +939,7 @@ test('maps the Electron target architecture to both Widget build products', () =
   assert.match(widgetBuildSource, /assertWidgetArchitecture\(stagedExtension, helperBinary, architecture\)/);
 });
 
-test('Widget user-facing strings are localized in five languages', () => {
+test('Widget user-facing strings are localized in every supported language', () => {
   const swiftSources = [widgetSource, widgetIntentSource, widgetViewModelSource, widgetDashboardSource, widgetActivitySource];
   const snapshotSource = fs.readFileSync(
     path.join(root, 'native', 'macos', 'TokenMonitorWidget', 'WidgetSnapshot.swift'),
@@ -935,8 +951,15 @@ test('Widget user-facing strings are localized in five languages', () => {
   for (const [key, entry] of Object.entries(widgetLocalization.strings)) {
     assert.deepEqual(
       Object.keys(entry.localizations).sort(),
-      ['en', 'ja', 'ko', 'zh-Hans', 'zh-Hant'],
+      ['en', 'ja', 'ko', 'pt-BR', 'zh-Hans', 'zh-Hant'],
       `missing localization for ${key}`
+    );
+    const formatSpecifiers = (value) => [...value.matchAll(/%(?:\d+\$)?(@|lld|%)/g)]
+      .map((match) => match[1]).sort();
+    assert.deepEqual(
+      formatSpecifiers(entry.localizations['pt-BR'].stringUnit.value),
+      formatSpecifiers(entry.localizations.en.stringUnit.value),
+      `Portuguese format specifiers differ for ${key}`
     );
     assert.ok(Object.values(entry.localizations).every((localization) => (
       localization.stringUnit?.state === 'translated' && localization.stringUnit.value

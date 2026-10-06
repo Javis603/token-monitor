@@ -195,7 +195,7 @@ test('an anchored watch tick does not re-read session files that only appear in 
   }
 });
 
-test('an all-client fallback preserves parse-local partitions that were not refreshed', async () => {
+test('an all-client fallback refreshes fork-only partitions from the same tokscale scan', async () => {
   const { collectUsageOnce, localTodayKey } = freshCollector();
   const calls = [];
   const anchorClients = { claude: 10, codex: 20, proma: 5 };
@@ -213,7 +213,7 @@ test('an all-client fallback preserves parse-local partitions that were not refr
   const runTokscale = async ({ clients }) => {
     calls.push(clients);
     if (clients === 'codex') return tokscaleRows({ claude: 99 });
-    return tokscaleRows({ claude: 10, codex: 20 });
+    return tokscaleRows({ claude: 10, codex: 20, proma: 7 });
   };
 
   const summary = await collectUsageOnce({
@@ -226,11 +226,11 @@ test('an all-client fallback preserves parse-local partitions that were not refr
     projectsEnabled: false
   });
 
-  assert.deepEqual(calls, ['codex', 'claude,codex']);
-  assert.equal(summary.today.totalTokens, 35);
-  assert.equal(summary.today.clients.proma, 5);
-  assert.equal(summary.month.clients.proma, 5);
-  assert.equal(summary.allTime.clients.proma, 5);
+  assert.deepEqual(calls, ['codex', 'claude,codex,proma']);
+  assert.equal(summary.today.totalTokens, 37);
+  assert.equal(summary.today.clients.proma, 7);
+  assert.equal(summary.month.clients.proma, 7);
+  assert.equal(summary.allTime.clients.proma, 7);
 });
 
 test('a partial multi-target union falls back instead of trusting a polluted partition', async () => {
@@ -476,5 +476,27 @@ test('startCollector: watch ticks reuse the full-scan anchor, manual ticks resca
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     fs.rmSync(tmpShared, { recursive: true, force: true });
     delete require.cache[collectorPath];
+  }
+});
+
+test('anchored watch updates carry cache observations and cold clears into broader periods', async () => {
+  const { collectUsageOnce, localTodayKey } = freshCollector();
+  const { emptyPeriod } = require('../../src/shared/usage');
+  const observedAt = new Date().toISOString();
+  const warm = { observedAt, ttlSeconds: 3600 };
+  const makePeriod = () => ({ ...emptyPeriod(), totalTokens: 50, clients: { claude: 50 }, sessions: {
+    'claude:s1': { client: 'claude', sessionId: 's1', totalTokens: 50, lastUsedAt: observedAt, promptCache: warm }
+  } });
+  for (const promptCache of [{ observedAt, ttlSeconds: 300 }, null, undefined]) {
+    const anchor = { dateKey: localTodayKey(), today: makePeriod(), month: makePeriod(), allTime: makePeriod() };
+    const summary = await collectUsageOnce({
+      ...baseOptions, todayOnlyAnchor: anchor,
+      runTokscale: async () => ({ entries: [{ client: 'claude', sessionId: 's1', model: 'claude-opus-4-8', input: 60, output: 0 }] }),
+      sessionMetadataDeps: { sessionMetadataResolvers: new Map([['claude', () => new Map([['s1', { lastUsedAt: observedAt, ...(promptCache === undefined ? {} : { promptCache }) }]])]]) }
+    });
+    for (const name of ['today', 'month', 'allTime']) {
+      const expected = promptCache === undefined && name !== 'today' ? warm : promptCache;
+      assert.deepEqual(summary[name].sessions['claude:s1'].promptCache, expected, name);
+    }
   }
 });

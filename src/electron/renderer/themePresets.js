@@ -4,21 +4,25 @@
 // Pure data + functions so it can be unit-tested under node:test and shared by
 // the widget and dashboard renderers. No DOM / Node built-ins here.
 (function exposeThemePresets(root, factory) {
-  const api = factory();
-  if (typeof module === 'object' && module.exports) module.exports = api;
+  const node = typeof module === 'object' && module.exports;
+  const api = factory(node ? require('../../shared/vendorPresentation') : root?.TokenMonitorVendorPresentation);
+  if (node) module.exports = api;
   if (root) root.TokenMonitorThemePresets = api;
-})(typeof window !== 'undefined' ? window : null, function createThemePresetsApi() {
+})(typeof window !== 'undefined' ? window : null, function createThemePresetsApi(vendorPresentation) {
   // The customisable interface colours, in display order. Each maps to a CSS
   // custom property on :root (see styles.css). `bg` drives the glass tint
   // (--glass-rgb, an "r, g, b" triplet); `text` also drives --number (the big
   // TOTAL figure) so it reads as plain text. Semantic status colours
-  // (--success/--blue/--orange/--purple/--yellow/--red) are intentionally NOT
-  // exposed: their meaning must remain stable when the accent changes.
-  const INTERFACE_COLOR_KEYS = ['accent', 'bg', 'text', 'muted'];
-  const THEME_CODE_VERSION = 'TM1';
+  // (--success/--blue/--orange/--purple/--yellow/--red) stay independent from
+  // both the interaction accent and the custom chart colour.
+  const INTERFACE_COLOR_KEYS = ['accent', 'chart', 'bg', 'text', 'muted'];
+  const LEGACY_THEME_CODE_KEYS = ['accent', 'bg', 'text', 'muted'];
+  const THEME_CODE_KEYS = [...LEGACY_THEME_CODE_KEYS, 'chart'];
+  const THEME_CODE_VERSION = 'TM2';
 
   const THEME_VAR_MAP = {
     accent: '--accent',
+    chart: '--chart-color',
     bg: '--glass-rgb',
     text: '--text',
     muted: '--muted'
@@ -28,6 +32,7 @@
   // bg #303438 == rgb(48, 52, 56) (the --glass-rgb default).
   const DEFAULT_THEME = {
     accent: '#b7ead4',
+    chart: '#73bdf5',
     bg: '#303438',
     text: '#eef5fb',
     muted: '#a3adbb'
@@ -43,8 +48,8 @@
   // flip in themeCssVarEntries() so borders/panels stay visible on a pale base.
   const THEME_PRESETS = [
     { id: 'default', colors: { ...DEFAULT_THEME } },
-    { id: 'obsidian', colors: { accent: '#e6e8ec', bg: '#0b0c0e', text: '#eceef2', muted: '#8f949c' } },
-    { id: 'porcelain', colors: { accent: '#2563eb', bg: '#f6f7f9', text: '#1c1f26', muted: '#5b626d' } }
+    { id: 'obsidian', colors: { accent: '#e6e8ec', chart: DEFAULT_THEME.chart, bg: '#0b0c0e', text: '#eceef2', muted: '#8f949c' } },
+    { id: 'porcelain', colors: { accent: '#2563eb', chart: DEFAULT_THEME.chart, bg: '#f6f7f9', text: '#1c1f26', muted: '#5b626d' } }
   ];
 
   // Surface RGBs used when the background is light, so overlays/borders read as
@@ -57,74 +62,11 @@
   const LIGHT_SUCCESS = '#18794e';
   const LIGHT_SUCCESS_RGB = '24, 121, 78';
 
-  // Vendors shown in the vendor-colour list, tracked clients first. Vendors not
-  // listed here but present in clientColors are appended after these, then the
-  // synthetic "default" fallback is shown last.
-  const VENDOR_ORDER = [
-    'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline',
-    'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'mimo', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth', 'devin',
-    'openrouter', 'gemini', 'qoder', 'deepseek', 'xai', 'meta', 'mistral', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'minimax', 'doubao', 'hunyuan', 'volcengine', 'ollama', 'trae', 'alibaba', 'nvidia', 'stepfun', 'thirdparty'
-  ];
-
-  // Display labels for every vendor in the clientColors map. The widget also
-  // has its own clientLabels for tracked clients; this map is the complete set
-  // so the appearance picker is self-contained.
-  const VENDOR_LABELS = {
-    claude: 'Claude Code',
-    codex: 'Codex',
-    opencode: 'OpenCode',
-    hermes: 'Hermes Agent',
-    openclaw: 'OpenClaw',
-    cursor: 'Cursor',
-    antigravity: 'Antigravity',
-    cline: 'Cline',
-    amp: 'Amp',
-    droid: 'Factory Droid',
-    kimi: 'Kimi',
-    qwen: 'Qwen',
-    grok: 'Grok Build',
-    copilot: 'GitHub Copilot',
-    pi: 'Pi',
-    zed: 'Zed',
-    kilo: 'Kilo',
-    commandcode: 'Command Code',
-    mimo: 'Xiaomi MiMo',
-    zcode: 'ZCode',
-    kiro: 'Kiro',
-    codebuddy: 'CodeBuddy',
-    workbuddy: 'WorkBuddy',
-    proma: 'Proma',
-    qodercn: 'Qoder CN',
-    reasonix: 'Reasonix',
-    dsh: 'DeepSeek Harness',
-    cherrystudio: 'Cherry Studio',
-    lmstudio: 'LM Studio',
-    unsloth: 'Unsloth',
-    devin: 'Devin',
-    openrouter: 'OpenRouter',
-    gemini: 'Gemini',
-    qoder: 'Qoder',
-    deepseek: 'DeepSeek',
-    xai: 'xAI',
-    meta: 'Meta',
-    mistral: 'Mistral',
-    moonshot: 'Moonshot',
-    zai: 'GLM',
-    zaiteam: 'GLM Team',
-    cohere: 'Cohere',
-    xiaomi: 'Xiaomi',
-    minimax: 'MiniMax',
-    doubao: 'Doubao',
-    hunyuan: 'Hunyuan',
-    volcengine: 'Volcengine',
-    trae: 'Trae CN',
-    ollama: 'Ollama',
-    alibaba: 'Alibaba Cloud',
-    nvidia: 'NVIDIA',
-    stepfun: 'StepFun',
-    thirdparty: 'Third-party APIs',
-    default: 'Default'
-  };
+  // Vendors shown in the vendor-colour list and their labels, from the vendor
+  // presentation table (tracked clients first). Vendors not listed here but
+  // present in clientColors are appended after these, then the synthetic
+  // "default" fallback is shown last.
+  const { VENDOR_IDS: VENDOR_ORDER, VENDOR_LABELS } = vendorPresentation;
 
   const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -156,25 +98,30 @@
     return { ...DEFAULT_THEME, ...clean };
   }
 
-  // Portable, offline theme code. The fixed field order is part of the TM1
-  // format, so future schemas can add fields under a new version without
-  // silently changing how an older shared code is interpreted.
+  // TM1 keeps its original four-field order. Only a custom chart colour needs
+  // TM2, whose fifth field carries it; untouched themes remain shareable with
+  // older app versions. Importing TM1 restores the default chart palette.
   function encodeThemeCode(overrides) {
     const colors = mergeThemeColors(overrides);
-    const fields = INTERFACE_COLOR_KEYS.map((key) => colors[key].slice(1).toUpperCase());
-    return `${THEME_CODE_VERSION}-${fields.join('-')}`;
+    const customChart = colors.chart !== DEFAULT_THEME.chart;
+    const keys = customChart ? THEME_CODE_KEYS : LEGACY_THEME_CODE_KEYS;
+    const fields = keys.map((key) => colors[key].slice(1).toUpperCase());
+    return `${customChart ? THEME_CODE_VERSION : 'TM1'}-${fields.join('-')}`;
   }
 
   function decodeThemeCode(value) {
     const code = typeof value === 'string' ? value.trim() : '';
     const version = /^TM(\d+)(?:-|$)/i.exec(code);
-    if (version && version[1] !== '1') return { ok: false, reason: 'unsupportedVersion' };
+    if (version && !['1', '2'].includes(version[1])) return { ok: false, reason: 'unsupportedVersion' };
 
-    const match = /^TM1-([0-9a-f]{6})-([0-9a-f]{6})-([0-9a-f]{6})-([0-9a-f]{6})$/i.exec(code);
-    if (!match) return { ok: false, reason: 'invalid' };
+    const fields = code.split('-');
+    const keys = version?.[1] === '2' ? THEME_CODE_KEYS : LEGACY_THEME_CODE_KEYS;
+    if (!version || fields.length !== keys.length + 1 || fields.slice(1).some((field) => !/^[0-9a-f]{6}$/i.test(field))) {
+      return { ok: false, reason: 'invalid' };
+    }
 
     const colors = Object.fromEntries(
-      INTERFACE_COLOR_KEYS.map((key, index) => [key, `#${match[index + 1].toLowerCase()}`])
+      keys.map((key, index) => [key, `#${fields[index + 1].toLowerCase()}`])
     );
     return { ok: true, colors, code: encodeThemeCode(colors) };
   }
@@ -203,6 +150,23 @@
     const entries = [];
     for (const key of INTERFACE_COLOR_KEYS) {
       const value = clean[key] || null;
+      if (key === 'chart') {
+        // Clearing/default blue retains the exact shipped ramp and bar colour.
+        const custom = value && value !== DEFAULT_THEME.chart ? value : null;
+        entries.push({ name: '--chart-color', value: custom });
+        entries.push({ name: '--chart-rgb', value: custom ? hexToRgbTriplet(custom) : null });
+        entries.push({ name: '--chart-bar', value: custom });
+        const rgb = custom ? hexToRgbTriplet(custom).split(', ').map(Number) : null;
+        for (let level = 1; level <= 4; level += 1) {
+          const tint = (level - 1) * 0.18;
+          const value = rgb ? rgb.map((channel) => Math.round(channel + (255 - channel) * tint)).join(', ') : null;
+          entries.push({ name: `--chart-heat-${level}-rgb`, value });
+          // The spotlight uses stronger opacity, but must keep the same hue.
+          // Clear separately so its original blue ramp survives reset.
+          entries.push({ name: `--chart-heat-bright-${level}-rgb`, value });
+        }
+        continue;
+      }
       if (key === 'bg') {
         entries.push({ name: '--glass-rgb', value: value ? hexToRgbTriplet(value) : null });
         continue;

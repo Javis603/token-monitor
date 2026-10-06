@@ -8,11 +8,12 @@ const test = require('node:test');
 const {
   displayPercent,
   durationMs,
+  groupDurationMs,
   providerKey,
   remainingPercent,
   shouldAnimateReset,
   windowKey
-} = require('../../src/electron/renderer/limitResetMotion');
+} = require('../../src/electron/renderer/limits/resetMotion');
 
 const root = path.join(__dirname, '../..');
 
@@ -57,6 +58,13 @@ test('refill duration follows the distance while preserving the approved short r
   assert.equal(durationMs(null, 100), 1100);
 });
 
+test('a refill batch lands on full together at the longest member\'s pace', () => {
+  assert.equal(groupDurationMs([durationMs(0, 100), durationMs(69, 100)]), 1600);
+  assert.equal(groupDurationMs([durationMs(99, 100)]), 907);
+  assert.equal(groupDurationMs([1100, Number.NaN, Number.POSITIVE_INFINITY]), 1100);
+  assert.equal(groupDurationMs([]), 0);
+});
+
 test('known reset boundaries must advance before a refill animates', () => {
   const firstReset = '2026-09-09T01:00:00.000Z';
   const nextReset = '2026-09-09T06:00:00.000Z';
@@ -97,26 +105,33 @@ test('motion keys preserve account and window identity without exposing labels',
 test('renderer wires reset motion before app boot and respects reduced motion', () => {
   const html = fs.readFileSync(path.join(root, 'src/electron/renderer/index.html'), 'utf8');
   const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
-  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limitWindowsView.js'), 'utf8');
+  // The refill driver is shared: the limits panel and the edge dock's card
+  // each bind one animator, so the implementation is asserted off the module
+  // rather than off either callsite.
+  const animator = fs.readFileSync(path.join(root, 'src/electron/renderer/limits/resetAnimator.js'), 'utf8');
+  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
   const css = fs.readFileSync(path.join(root, 'src/electron/renderer/styles.css'), 'utf8');
 
-  assert.ok(html.indexOf('<script src="limitResetMotion.js"></script>') < html.indexOf('<script src="app.js"></script>'));
+  assert.ok(html.indexOf('<script src="limits/resetMotion.js"></script>') < html.indexOf('<script src="limits/resetAnimator.js"></script>'));
+  assert.ok(html.indexOf('<script src="limits/resetAnimator.js"></script>') < html.indexOf('<script src="app.js"></script>'));
+  assert.match(app, /createLimitResetAnimator\(\{[\s\S]*?motion: limitResetMotionApi/);
   assert.match(app, /const resetMotionSnapshot = captureLimitResetMotion\(\);/);
   assert.match(app, /els\.limitsPanel\.replaceChildren\(\.\.\.nodes\);\s*animateLimitResets\(resetMotionSnapshot\);/);
-  assert.match(app, /limitResetMotionApi\.shouldAnimateReset\(previous, current\)/);
-  assert.match(app, /previous\.displayPercent === ''/);
-  assert.match(app, /LIMIT_RESET_MOTION_EASING/);
-  assert.match(app, /const duration = limitResetMotionApi\.durationMs\(from, to\);/);
-  assert.match(app, /animateLimitResetCompletion\(fill, duration\);/);
+  assert.match(animator, /motion\.shouldAnimateReset\(previous, current\)/);
+  assert.match(animator, /previous\.displayPercent === ''/);
+  assert.match(animator, /const duration = motion\.durationMs\(from, to\);/);
+  assert.match(animator, /motion\.groupDurationMs\(/);
+  assert.match(animator, /function startMotion\(\{ fill, item, motion \}, now\)/);
+  assert.match(animator, /animateCompletion\(fill, duration, startedAt\);/);
   // The meter itself is built by the shared view the edge dock also renders
   // from, so the motion module reaches it as an injected dependency.
   assert.match(view, /const fillPercent = motion\.displayPercent\([\s\S]*limitFillPercent\(remaining, used, showUsed\)[\s\S]*\);/);
-  assert.match(app, /requestAnimationFrame\(\(startedAt\) => \{/);
-  assert.match(app, /duration,\s*startedAt\s*\);/);
-  assert.match(app, /delay: Math\.max\(0, duration - LIMIT_RESET_GLOW_LEAD_MS\)/);
-  assert.match(app, /highlight\.className = 'limit-meter-completion'/);
-  assert.doesNotMatch(app, /filter: 'brightness\(/);
-  assert.match(app, /if \(nextText !== renderedText\)/);
+  assert.match(animator, /requestAnimationFrame\(\(now\) => \{/);
+  assert.match(animator, /duration,\s*startedAt\s*\);/);
+  assert.match(animator, /delay: Math\.max\(0, duration - GLOW_LEAD_MS\)/);
+  assert.match(animator, /highlight\.className = 'limit-meter-completion'/);
+  assert.doesNotMatch(animator, /filter: 'brightness\(/);
+  assert.match(animator, /if \(nextText !== renderedText\)/);
   assert.match(css, /\.limit-meter-completion\s*\{[^}]*position:\s*absolute;[^}]*opacity:\s*0;/s);
   assert.doesNotMatch(css, /limit-window-resetting|limit-reset-shine|limit-reset-brighten|limit-reset-glow/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.limit-meter-fill/);

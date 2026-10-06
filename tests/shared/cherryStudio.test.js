@@ -12,9 +12,11 @@ const {
   clientSourceRoots,
   clientWatchCandidates,
   deriveClientHealth,
-  watchPathsForClients
+  watchPathsForClients,
+  watchIgnoreMatcher
 } = require('../../src/shared/collector');
-const { normalizeClientName } = require('../../src/shared/usage');
+const { parseGraphResult } = require('../../src/shared/history');
+const { normalizeClientName, extractUsageFromTokscale } = require('../../src/shared/usage');
 
 test('normalizeClientName maps Cherry Studio sources to cherrystudio', () => {
   assert.equal(normalizeClientName('cherrystudio'), 'cherrystudio');
@@ -56,7 +58,11 @@ test('Cherry Studio roots mirror tokscale AppData resolution per platform', () =
     assert.deepEqual(cherryStudioTranscriptRoots({ homeDir: home, platform, env }), expected);
     assert.deepEqual(
       clientSourceRoots('cherrystudio', { homeDir: home, platform, env }).cherrystudio,
-      expected.map(([id, dir]) => ({ id, dir }))
+      [...expected.map(([id, dir]) => ({ id, dir })), {
+        id: 'cherrystudio-db',
+        dir: path.join(base, 'CherryStudio', 'Data'),
+        sourcePath: path.join(base, 'CherryStudio', 'Data', 'cherrystudio.sqlite')
+      }]
     );
   }
 });
@@ -85,15 +91,18 @@ test('Cherry Studio V1 and V2 roots feed watches and source health', () => {
     const legacyRoots = expected.filter((dir) => !dir.includes(path.join('Data', 'Agents')));
     const roots = clientSourceRoots('cherrystudio').cherrystudio;
 
-    assert.deepEqual(roots, expected.map((dir) => ({ id: 'cherrystudio-transcripts', dir })));
-    assert.deepEqual(clientWatchCandidates('cherrystudio').cherrystudio, expected);
+    const dataDir = path.join(appData, 'CherryStudio', 'Data');
+    assert.deepEqual(roots, [...expected.map((dir) => ({ id: 'cherrystudio-transcripts', dir })), {
+      id: 'cherrystudio-db', dir: dataDir, sourcePath: path.join(dataDir, 'cherrystudio.sqlite')
+    }]);
+    assert.deepEqual(clientWatchCandidates('cherrystudio').cherrystudio, [...expected, dataDir]);
 
     const assertSourceState = (existingRoots) => {
       for (const dir of existingRoots) fs.mkdirSync(dir, { recursive: true });
       try {
-        assert.deepEqual(watchPathsForClients('cherrystudio').sort(), existingRoots.slice().sort());
+        assert.deepEqual(watchPathsForClients('cherrystudio').sort(), [...existingRoots, ...(fs.existsSync(dataDir) ? [dataDir] : [])].sort());
         const checks = clientSourceChecks('cherrystudio');
-        assert.deepEqual(checks.cherrystudio, [{ id: 'cherrystudio-transcripts', exists: true }]);
+        assert.deepEqual(checks.cherrystudio, [{ id: 'cherrystudio-transcripts', exists: true }, { id: 'cherrystudio-db', exists: false }]);
         const health = deriveClientHealth('cherrystudio', { clients: {} }, { sourceChecks: checks });
         assert.equal(health.clients.cherrystudio.source.state, 'detected');
       } finally {
@@ -134,7 +143,7 @@ test('Cherry Studio ignores foreign-platform roots for watches and source health
     assert.equal(watchPaths.includes(foreignRoot), false);
     assert.deepEqual(watchPaths, []);
     const checks = clientSourceChecks('cherrystudio');
-    assert.deepEqual(checks.cherrystudio, [{ id: 'cherrystudio-transcripts', exists: false }]);
+    assert.deepEqual(checks.cherrystudio, [{ id: 'cherrystudio-transcripts', exists: false }, { id: 'cherrystudio-db', exists: false }]);
     const health = deriveClientHealth('cherrystudio', { clients: {} }, { sourceChecks: checks });
     assert.equal(health.clients.cherrystudio.source.state, 'missing');
   } finally {
@@ -145,4 +154,43 @@ test('Cherry Studio ignores foreign-platform roots for watches and source health
     else process.env.XDG_CONFIG_HOME = previousXdgConfigHome;
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+
+test('Cherry Studio chat database and WAL refresh usage without watching unrelated app data', () => {
+  // Windows runners expose an 8.3 tmp path; the matcher canonicalizes roots.
+  const home = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'cherrystudio-ledger-'));
+  const options = { homeDir: home, platform: 'linux', env: {} };
+  const dataDir = path.join(home, '.config', 'CherryStudio', 'Data');
+  const db = path.join(dataDir, 'cherrystudio.sqlite');
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+    const missing = clientSourceChecks('cherrystudio', options).cherrystudio;
+    assert.equal(missing.find((check) => check.id === 'cherrystudio-db').exists, false);
+    fs.writeFileSync(db, 'fixture');
+    const checks = clientSourceChecks('cherrystudio', options);
+    assert.equal(checks.cherrystudio.find((check) => check.id === 'cherrystudio-db').exists, true);
+    assert.equal(deriveClientHealth('cherrystudio', { clients: {} }, { sourceChecks: checks }).clients.cherrystudio.source.state, 'detected');
+    assert.deepEqual(watchPathsForClients('cherrystudio', options), [dataDir]);
+    const ignored = watchIgnoreMatcher('cherrystudio', options);
+    for (const file of [db, db + '-wal', db + '-shm']) assert.equal(ignored(file), false);
+    for (const file of ['attachments', 'unrelated.sqlite', 'other/nested.jsonl']) {
+      assert.equal(ignored(path.join(dataDir, file)), true);
+    }
+    const transcript = path.join(dataDir, 'Agents', '.claude', 'projects', 'project', 'session.jsonl');
+    assert.equal(ignored(transcript), false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+
+test('Cherry Studio disjoint reasoning closes both usage and history totals', () => {
+  const row = { client: 'cherrystudio', model: 'glm-5.2', sessionId: 'zai', input: 620, output: 280, cacheRead: 500, cacheWrite: 80, reasoning: 60 };
+  const period = extractUsageFromTokscale({ entries: [row] });
+  assert.equal(period.totalTokens, 1540);
+  assert.equal(period.outputTokens, 340);
+  const history = parseGraphResult({ contributions: [{ date: '2026-10-05', clients: [{ client: row.client, modelId: row.model, tokens: row }] }] });
+  assert.equal(history.contributions[0].tokens, period.totalTokens);
+  assert.equal(history.contributions[0].outputTokens, period.outputTokens);
 });

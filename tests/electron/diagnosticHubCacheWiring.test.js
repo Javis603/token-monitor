@@ -16,7 +16,9 @@ test('late Hub responses cannot replace the active mode cache', () => {
     mainSource,
     /function hubModeRequestIsCurrent\(generation, expectedMode, expectedIdentity = null\)[\s\S]*generation === hubModeGeneration[\s\S]*currentHubStatsIdentity\(expectedMode\) === expectedIdentity/
   );
-  assert.match(mainSource, /function startMode\(\) \{\s*hubModeGeneration \+= 1;\s*advanceMacWidgetProducerAndSourceEpoch\(\);\s*clearLatestHubStatsCache\(\);/);
+  const startMode = mainSource.match(/function startMode\(\) \{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(startMode, 'startMode exists');
+  assert.match(startMode, /^\s*getSyncContentRuntime\(\)\.invalidate\(\);\s*hubModeGeneration \+= 1;\s*advanceMacWidgetProducerAndSourceEpoch\(\);\s*clearLatestHubStatsCache\(\);/);
   assert.match(mainSource, /function setLatestHubStatsCache\(stats, source, generation, identity\)/);
   assert.match(
     mainSource,
@@ -31,7 +33,7 @@ test('late Hub responses cannot replace the active mode cache', () => {
     fetchStats[1],
     /const stats = await response\.json\(\);[\s\S]*if \(!hubModeRequestIsCurrent\(requestGeneration, 'client', requestHubIdentity\)\)/
   );
-  assert.match(fetchStats[1], /composeLocalSyncStats\(stats, lastCollectedDevice\)/);
+  assert.match(fetchStats[1], /composeLocalSyncSummary\(stats, lastCollectedDevice\)/);
 
   const stream = mainSource.match(/async function startStatsStream\(options = \{\}\) \{([\s\S]*?)\n\}\n\nfunction/);
   assert.ok(stream, 'startStatsStream exists');

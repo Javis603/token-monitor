@@ -246,7 +246,8 @@ function normalizeCodexResetForecast(payload, options = {}) {
     source.username
   ) || '').trim().slice(0, 80);
   const hasPrediction = chancePercent !== null || Boolean(predictedAt);
-  const recognized = hasScheduledReset || explicitlyNoActiveWatch || explicitlyActive !== null || hasPrediction;
+  const hasStrongWatch = String(watch.level || '').trim().toLowerCase() === 'strong';
+  const recognized = hasScheduledReset || explicitlyNoActiveWatch || explicitlyActive !== null || hasPrediction || hasStrongWatch;
   if (!recognized) {
     return {
       status: 'unavailable',
@@ -260,7 +261,7 @@ function normalizeCodexResetForecast(payload, options = {}) {
   }
   const active = explicitlyNoActiveWatch
     ? false
-    : (explicitlyActive === null ? hasPrediction : explicitlyActive);
+    : (explicitlyActive === null ? (hasPrediction || hasStrongWatch) : explicitlyActive);
 
   return forecastAtTime({
     status: hasScheduledReset ? 'scheduled' : (active ? 'active' : 'inactive'),

@@ -9,7 +9,7 @@ const {
   FIVE_HOUR_WINDOW_PROVIDERS,
   limitWindowKindLabel,
   limitWindowLabel
-} = require('../../src/shared/limitWindowLabels');
+} = require('../../src/shared/limits/windowLabels');
 
 function read(relativePath) {
   return fs.readFileSync(path.join(__dirname, '../..', relativePath), 'utf8');
@@ -60,9 +60,9 @@ test('every surface that paints a window label routes through the helper', () =>
   const dock = read('src/electron/renderer/edgeDock/dock.js');
   const widget = read('src/shared/macWidgetSnapshot.js');
 
-  assert.match(app, /const \{ limitWindowLabel \} = window\.TokenMonitorLimitWindowLabels;/);
+  assert.match(app, /const \{[^}]*limitWindowLabel[^}]*\} = window\.TokenMonitorLimitWindowLabels;/);
   assert.match(dock, /const limitWindowLabels = window\.TokenMonitorLimitWindowLabels;/);
-  assert.match(widget, /require\('\.\/limitWindowLabels'\)/);
+  assert.match(widget, /require\('\.\/limits\/windowLabels'\)/);
 
   // The duplicated per-provider knowledge is gone from the widget snapshot.
   assert.doesNotMatch(widget, /FIVE_HOUR_WINDOW_PROVIDERS/);
@@ -72,8 +72,42 @@ test('every surface that paints a window label routes through the helper', () =>
   assert.doesNotMatch(app, /limitWindowNode\('5-hour'/);
 
   for (const page of ['src/electron/renderer/index.html', 'src/electron/renderer/edgeDock/index.html']) {
-    assert.match(read(page), /limitWindowLabels\.js/, `${page} should load the helper`);
+    assert.match(read(page), /limits\/windowLabels\.js/, `${page} should load the helper`);
   }
+
+});
+
+test('MiMo rows group into logical accounts by suffix, then address', () => {
+  // The two products of one account are two rows wherever they come from —
+  // two devices may report different profile names, but the identity suffix
+  // both carry wins. A row with no suffix falls back to its address; an
+  // address beside a suffix is a separate group until the collector rewrites
+  // the row, because folding an anonymous row into a named one would merge
+  // two devices' accounts that merely share a mask (the considered and
+  // rejected heuristic).
+  const { mimoAccountGroups } = require('../../src/shared/limits/windowLabels');
+  const sameSuffix = mimoAccountGroups([
+    { accountKey: 'console', accountEmail: 'a@example.com', accountName: 'Alice · MiMo abcdef1' },
+    { accountKey: 'membership', accountEmail: 'b@example.com', accountName: 'Renamed · MiMo abcdef1' }
+  ]);
+  assert.equal(sameSuffix.length, 1, 'the suffix ties two devices\' rows together');
+  const { normalizeLimitProvider } = require('../../src/shared/limits/core');
+  assert.equal(mimoAccountGroups([
+    { provider: 'mimo', accountKey: 'console', accountEmail: 'a@example.com', accountName: 'Alice · MiMo abcdef1' },
+    { provider: 'mimo', accountKey: 'membership', accountEmail: 'b@example.com', accountName: 'Renamed · MiMo abcdef1' }
+  ].map(normalizeLimitProvider)).length, 1, 'the identity survives shared name normalization');
+  assert.equal(mimoAccountGroups([
+    { accountKey: 'one', accountEmail: 'a@example.com', accountName: 'Alice' },
+    { accountKey: 'two', accountEmail: 'a@example.com', accountName: '' }
+  ]).length, 1, 'rows without a suffix group by the address they share');
+  assert.equal(mimoAccountGroups([
+    { accountKey: 'legacy', accountEmail: 'a@example.com', accountName: '' },
+    { accountKey: 'membership', accountEmail: 'a@example.com', accountName: 'Alice · MiMo abcdef1' }
+  ]).length, 2, 'a legacy address-only row groups apart from a suffix-named row');
+  assert.equal(mimoAccountGroups([
+    { accountKey: 'one', accountEmail: 'a@example.com', accountName: 'Alice' },
+    { accountKey: 'two', accountEmail: 'b@example.com', accountName: 'Bob' }
+  ]).length, 2);
 });
 
 test('the default is display-only and never written onto the wire', () => {
@@ -83,7 +117,7 @@ test('the default is display-only and never written onto the wire', () => {
   // collector set. Defaulting inside normalizeLimitWindow would erase that.
   const core = read('src/shared/limits/core.js');
   assert.doesNotMatch(core, /limitWindowLabels/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /if \(weekly\.label\) node\.classList\.add\('limit-window-wide'\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /if \(weekly\.label\) node\.classList\.add\('limit-window-wide'\)/);
 
   const { normalizeLimitWindow } = require('../../src/shared/limits/core');
   const normalized = normalizeLimitWindow({ kind: 'session', used: 1, limit: 4 });
@@ -91,7 +125,7 @@ test('the default is display-only and never written onto the wire', () => {
 });
 
 test('the helper carries no knowledge that contradicts the provider catalogue', () => {
-  const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
+  const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
   const known = new Set(LIMIT_PROVIDER_IDS);
   for (const id of FIVE_HOUR_WINDOW_PROVIDERS) {
     assert.ok(known.has(id), `${id} should be a registered limit provider`);

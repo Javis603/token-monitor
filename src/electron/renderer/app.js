@@ -10,29 +10,48 @@ const {
 // Limits provider identity comes from its own shared catalog, bound here rather
 // than at its first use below because the icon tables are derived from it.
 const { LIMIT_PROVIDER_CATALOG: LIMIT_PROVIDERS, LIMIT_PROVIDER_IDS } = window.TokenMonitorLimitProviders;
-const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
+const limitAccountPanelsApi = window.TokenMonitorLimitAccountPanels;
+const limitUsageItemsApi = window.TokenMonitorLimitUsageItems;
+const accountShellApi = window.TokenMonitorAccountShell;
+const accountProfileRequests = accountShellApi.createRequestGuard();
+const accountProfileStatuses = accountShellApi.createRequestGuard();
+const accountProfileSaves = accountShellApi.createBusyGuard();
+const accountShellErrors = Object.create(null);
+let syncContentForm = null;
+
+function setAccountShellError(id, message) {
+  accountShellErrors[id] = message || '';
+  renderAccountShellError(id);
+}
+
+function renderAccountShellError(id) {
+  accountShellApi.render({
+    error: document.getElementById(`${id}ErrorMessage`),
+    errorText: accountShellErrors[id] || ''
+  });
+}
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
+const macBackdropApi = window.TokenMonitorMacBackdropMode;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const fontSettingsApi = window.TokenMonitorFontSettings;
 const wslStatusPresentationApi = window.TokenMonitorWslStatusPresentation;
 const statsRenderSchedulerApi = window.TokenMonitorStatsRenderScheduler;
+const allTimeSessionsApi = window.TokenMonitorAllTimeSessions;
 const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-const clientsWithIcon = new Set([
-  'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline', 'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'mimo', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth', 'devin',
-  'gemini', 'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan', 'nvidia', 'stepfun'
-]);
-// Limits rows mark more ids than there are tracked clients: every provider, plus
-// relay ids that only ever appear as a limits row and have no catalog entry.
-// Derived rather than listed, because a provider whose id is missing here is
-// drawn as a bare dot — a defect nothing about adding a provider points at. The
-// mask rule behind each id is asserted from the same catalog in
-// limitProviderPresentationCoverage.test.js, which is what makes deriving safe:
-// an id in this set with no rule paints a solid square instead.
-const limitMarksWithIcon = new Set([...clientsWithIcon, ...LIMIT_PROVIDER_IDS, 'newapi', 'sub2api']);
+const vendorPresentationApi = window.TokenMonitorVendorPresentation;
+// Marks come from the vendor presentation table, which is also what installs
+// the .row-icon-<id> masks, so a listed id always has a mask behind it. Usage
+// rows (clients, sessions, models) carry the coloured vendors; Limits rows can
+// also show the marks that have no colour of their own (Factory, the relays).
+const clientsWithIcon = new Set(vendorPresentationApi.VENDOR_IDS);
+const limitMarksWithIcon = new Set(vendorPresentationApi.MARK_IDS);
+
+// Modes whose device list is shared with other machines; only these can remove one.
+const SHARED_SYNC_MODES = new Set(['client', 'host', 'icloud']);
 
 function osIconFor(platform) {
   const prefix = String(platform || '').toLowerCase().split('-')[0];
@@ -66,57 +85,17 @@ function iconKindFor(rowData, breakdown) {
     : { kind: 'dot' };
 }
 
-const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
-  claude: 'claudeAccountGroup',
-  codex: 'codexAccountGroup',
-  opencode: 'opencodeCookieGroup',
-  cursor: 'cursorAccountGroup',
-  antigravity: 'antigravityAccountGroup',
-  cline: 'clineAccountGroup',
-  factory: 'factoryAccountGroup',
-  kimi: 'kimiAccountGroup',
-  copilot: 'copilotAccountGroup',
-  zed: 'zedAccountGroup',
-  commandcode: 'commandcodeAccountGroup',
-  mimo: 'mimoAccountGroup',
-  zai: 'zaiAccountGroup',
-  zaiteam: 'zaiteamAccountGroup',
-  qoder: 'qoderAccountGroup',
-  deepseek: 'deepseekAccountGroup',
-  devin: 'devinAccountGroup',
-  openrouter: 'openrouterAccountGroup',
-  minimax: 'minimaxAccountGroup',
-  volcengine: 'volcengineAccountGroup',
-  ollama: 'ollamaAccountGroup',
-  trae: 'traeAccountGroup',
-  alibaba: 'alibabaAccountGroup',
-  thirdparty: 'thirdpartyAccountGroup'
-};
-const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
-  claude: 'claudeAccountStatus',
-  codex: 'codexAccountStatus',
-  opencode: 'opencodeCookieStatus',
-  cursor: 'cursorAccountStatus',
-  antigravity: 'antigravityAccountStatus',
-  cline: 'clineAccountStatus',
-  factory: 'factoryAccountStatus',
-  kimi: 'kimiAccountStatus',
-  copilot: 'copilotApiTokenStatus',
-  zed: 'zedAccountStatus',
-  commandcode: 'commandcodeAccountStatus',
-  mimo: 'mimoAccountStatus',
-  zai: 'zaiAccountStatus',
-  zaiteam: 'zaiteamAccountStatus',
-  qoder: 'qoderAccountStatus',
-  deepseek: 'deepseekApiKeyStatus',
-  devin: 'devinAccountStatus',
-  openrouter: 'openrouterStatus',
-  minimax: 'minimaxApiKeyStatus',
-  volcengine: 'volcengineAccountStatus',
-  ollama: 'ollamaAccountStatus',
-  trae: 'traeAccountStatus',
-  alibaba: 'alibabaAccountStatus',
-  thirdparty: 'thirdpartyStatus'
+const LIMIT_PROVIDER_ACCOUNT_NODES = {
+  codex: { group: 'codexAccountGroup', status: 'codexAccountStatus' },
+  opencode: { group: 'opencodeCookieGroup', status: 'opencodeCookieStatus' },
+  cursor: { group: 'cursorAccountGroup', status: 'cursorAccountStatus' },
+  antigravity: { group: 'antigravityAccountGroup', status: 'antigravityAccountStatus' },
+  kimi: { group: 'kimiAccountGroup', status: 'kimiAccountStatus' },
+  copilot: { group: 'copilotAccountGroup', status: 'copilotApiTokenStatus' },
+  mimo: { group: 'mimoAccountGroup', status: 'mimoAccountStatus' },
+  openrouter: { group: 'openrouterAccountGroup', status: 'openrouterStatus' },
+  volcengine: { group: 'volcengineAccountGroup', status: 'volcengineAccountStatus' },
+  thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
 };
 const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
@@ -159,6 +138,15 @@ function limitProviderColor(providerId) {
   return clientColors[providerId] || clientColors.default;
 }
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
+const limitResetAnimator = window.TokenMonitorLimitResetAnimator.createLimitResetAnimator({
+  document,
+  motion: limitResetMotionApi,
+  prefersReducedMotion: () => prefersReducedMotion(),
+  formatPercent: (value) => formatPercent(value),
+  requestAnimationFrame: (frame) => requestAnimationFrame(frame),
+  cancelAnimationFrame: (handle) => cancelAnimationFrame(handle),
+  performance
+});
 const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
@@ -176,6 +164,7 @@ const homeOverviewApi = window.TokenMonitorHomeOverview;
 const homeModulePreferencesApi = window.TokenMonitorHomeModulePreferences;
 const fixedPeriodRangesApi = window.TokenMonitorFixedPeriodRanges;
 const hubBuildPresentationApi = window.TokenMonitorHubBuildPresentation;
+const syncDevicePanelApi = window.TokenMonitorSyncDevicePanel;
 const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMode;
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
@@ -254,22 +243,23 @@ const deviceStaleColor = '#8c97a7';
 const baseBreakdownOrder = ['tool', 'device', 'model', 'project', 'session'];
 const VIEW_DISPLAY_OPTIONS = [
   { id: 'home', labelKey: 'views.home' },
+  { id: 'limits', labelKey: 'views.limits' },
   { id: 'tool', labelKey: 'views.tool' },
-  { id: 'status', labelKey: 'views.status' },
-  { id: 'device', labelKey: 'views.device' },
   { id: 'model', labelKey: 'views.model' },
   { id: 'project', labelKey: 'views.project' },
   { id: 'session', labelKey: 'views.session' },
-  { id: 'limits', labelKey: 'views.limits' },
-  { id: 'trends', labelKey: 'views.trends' }
+  { id: 'device', labelKey: 'views.device' },
+  { id: 'trends', labelKey: 'views.trends' },
+  { id: 'status', labelKey: 'views.status' }
 ];
 const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', 'allTime']);
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
   { id: 'tool', labelKey: 'home.tools', viewId: 'tool' },
-  { id: 'device', labelKey: 'home.devices', viewId: 'device' },
   { id: 'model', labelKey: 'home.models', viewId: 'model' },
+  { id: 'session', labelKey: 'home.sessions', viewId: 'session' },
+  { id: 'device', labelKey: 'home.devices', viewId: 'device' },
   { id: 'trends', labelKey: 'home.activity', viewId: 'trends' }
 ];
 const VIEW_SWITCHER_LONG_PRESS_MS = 420;
@@ -302,9 +292,6 @@ const REFRESH_BUTTON_FEEDBACK_MS = 700;
 const LIVE_TOKEN_RATE_ACTIVE_MS = 8000;
 const LIVE_TOKEN_RATE_CLEAR_MS = 3 * 60 * 1000;
 const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;
-const LIMIT_RESET_MOTION_EASING = 'cubic-bezier(0.333, 0.667, 0.667, 1)';
-const LIMIT_RESET_GLOW_MS = 700;
-const LIMIT_RESET_GLOW_LEAD_MS = 252;
 const initialFloatingBubble = window.__TOKEN_MONITOR_INITIAL_FLOATING_BUBBLE__ || { collapsed: false, side: null };
 const initialViewState = window.__TOKEN_MONITOR_INITIAL_VIEW_STATE__ || {};
 let initialBreakdownPreferenceApplied = typeof initialViewState.breakdown === 'string';
@@ -314,9 +301,10 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '' };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
+state.icloudStatus = null;
 state.zedAccountExpanded = false;
 state.zedPendingCheckSince = 0;
 state.toolDetailMode = 'tokens';
@@ -364,7 +352,14 @@ state.projectSettingsExpanded = false;
 state.sessionSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
+let nativeMaterialRevision = 0;
+let appearancePreview = {};
+// Writes still in flight. Main applies the native material before it broadcasts
+// the saved settings, so a material push landing in between must not repaint
+// the appearance controls from the settings that write is replacing.
+const pendingSettingsPatches = new Set();
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
@@ -373,6 +368,11 @@ const els = {
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
+  glassInputNote: document.getElementById('glassInputNote'),
+  backgroundImageOpacityRow: document.getElementById('backgroundImageOpacityRow'),
+  backgroundImageOpacityInput: document.getElementById('backgroundImageOpacityInput'),
+  resetBackgroundImageOpacityButton: document.getElementById('resetBackgroundImageOpacityButton'),
+  blurInputNote: document.getElementById('blurInputNote'),
   fixedPeriodMessage: document.getElementById('fixedPeriodMessage'),
   toolDetailFooter: document.getElementById('toolDetailFooter'),
   toolDetailFooterTokens: document.getElementById('toolDetailFooterTokens'),
@@ -396,12 +396,27 @@ Object.assign(els, {
   edgeDockHapticRow: document.getElementById('edgeDockHapticRow'),
   edgeDockHapticInput: document.getElementById('edgeDockHapticInput'),
   edgeDockWarnColorsInput: document.getElementById('edgeDockWarnColorsInput'),
+  edgeDockMacBackdropRow: document.getElementById('edgeDockMacBackdropRow'),
+  edgeDockMacBackdropInput: document.getElementById('edgeDockMacBackdropInput'),
   edgeDockComposer: document.getElementById('edgeDockComposer'),
   trayIconOptions: document.getElementById('trayIconOptions'),
   trayOptions: document.getElementById('trayOptions'),
   hubModeOptions: document.getElementById('hubModeOptions'),
+  icloudModeOption: document.querySelector('#hubModeOptions option[value="icloud"]'),
+  syncModeDescription: document.getElementById('syncModeDescription'),
+  icloudFields: document.getElementById('icloudFields'),
+  icloudStatus: document.getElementById('icloudStatus'),
+  icloudRootStatus: document.getElementById('icloudRootStatus'),
   hubBuildStatus: document.getElementById('hubBuildStatus'),
   hubClientFields: document.getElementById('hubClientFields'),
+  syncConnectionEditor: document.getElementById('syncConnectionEditor'),
+  syncConnectionIdentity: document.getElementById('syncConnectionIdentity'),
+  syncConnectionEndpoint: document.getElementById('syncConnectionEndpoint'),
+  syncConnectionEdit: document.getElementById('syncConnectionEdit'),
+  syncConnectionCancel: document.getElementById('syncConnectionCancel'),
+  syncConnectionSaveError: document.getElementById('syncConnectionSaveError'),
+  syncDeviceSettings: document.getElementById('syncDeviceSettings'),
+  syncUploadIntervalRow: document.getElementById('syncUploadIntervalRow'),
   hubHostFields: document.getElementById('hubHostFields'),
   hubPortInput: document.getElementById('hubPortInput'),
   hubSecretInput: document.getElementById('hubSecretInput'),
@@ -409,7 +424,16 @@ Object.assign(els, {
   hubSecretRegenButton: document.getElementById('hubSecretRegenButton'),
   secretPasteButton: document.getElementById('secretPasteButton'),
   hubStatusRow: document.getElementById('hubStatusRow'),
-  syncClientStatus: document.getElementById('syncClientStatus'),
+  syncDevicePanel: document.getElementById('syncDevicePanel'),
+  syncPanelConnection: document.getElementById('syncPanelConnection'),
+  syncPanelSignal: document.getElementById('syncPanelSignal'),
+  syncPanelState: document.getElementById('syncPanelState'),
+  syncPanelDetail: document.getElementById('syncPanelDetail'),
+  syncPanelUpload: document.getElementById('syncPanelUpload'),
+  syncPanelBuild: document.getElementById('syncPanelBuild'),
+  syncPanelCount: document.getElementById('syncPanelCount'),
+  syncDeviceList: document.getElementById('syncDeviceList'),
+  syncPanelOpenDevices: document.getElementById('syncPanelOpenDevices'),
   hubAddressList: document.getElementById('hubAddressList'),
   syncUploadIntervalInput: document.getElementById('syncUploadIntervalInput'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
@@ -420,6 +444,8 @@ Object.assign(els, {
   windowsBackdropRow: document.getElementById('windowsBackdropRow'),
   windowsBackdropInput: document.getElementById('windowsBackdropInput'),
   windowsBackdropNote: document.getElementById('windowsBackdropNote'),
+  macBackdropRow: document.getElementById('macBackdropRow'),
+  macBackdropInput: document.getElementById('macBackdropInput'),
   clearSessionUsageArchiveButton: document.getElementById('clearSessionUsageArchiveButton'),
   startupGroup: document.getElementById('startupGroup'),
   startAtLoginInput: document.getElementById('startAtLoginInput'),
@@ -427,16 +453,10 @@ Object.assign(els, {
   advancedSettingsGroup: document.getElementById('advancedSettingsGroup'),
   advancedSettingsToggle: document.getElementById('advancedSettingsToggle'),
   advancedSettingsDetails: document.getElementById('advancedSettingsDetails'),
-  advancedSettingsSummary: document.getElementById('advancedSettingsSummary'),
   tokscaleGroup: document.getElementById('tokscaleGroup'),
   tokscaleInstalled: document.getElementById('tokscaleInstalled'),
-  tokscaleBundledLine: document.getElementById('tokscaleBundledLine'),
-  tokscaleBundled: document.getElementById('tokscaleBundled'),
-  tokscaleNpm: document.getElementById('tokscaleNpm'),
-  tokscaleMessage: document.getElementById('tokscaleMessage'),
-  checkTokscaleButton: document.getElementById('checkTokscaleButton'),
-  downloadTokscaleButton: document.getElementById('downloadTokscaleButton'),
-  resetTokscaleButton: document.getElementById('resetTokscaleButton'),
+  tokscaleBundledBuild: document.getElementById('tokscaleBundledBuild'),
+  tokscaleBundledBuildRow: document.getElementById('tokscaleBundledBuildRow'),
   openTokscaleLinkButton: document.getElementById('openTokscaleLinkButton'),
   aboutVersion: document.getElementById('aboutVersion'),
   openRepositoryButton: document.getElementById('openRepositoryButton'),
@@ -490,6 +510,9 @@ Object.assign(els, {
   mainSettingsSummary: document.getElementById('mainSettingsSummary'),
   windowSettingsSummary: document.getElementById('windowSettingsSummary'),
   appearanceSettingsSummary: document.getElementById('appearanceSettingsSummary'),
+  backgroundImageStatus: document.getElementById('backgroundImageStatus'),
+  chooseBackgroundImageButton: document.getElementById('chooseBackgroundImageButton'),
+  clearBackgroundImageButton: document.getElementById('clearBackgroundImageButton'),
   subscriptionsSettingsSummary: document.getElementById('subscriptionsSettingsSummary'),
   themePresetChips: document.getElementById('themePresetChips'),
   themeColorGrid: document.getElementById('themeColorGrid'),
@@ -500,6 +523,7 @@ Object.assign(els, {
   themeAdvancedGroup: document.getElementById('themeAdvancedGroup'),
   themeAdvancedToggle: document.getElementById('themeAdvancedToggle'),
   themeAdvancedDetails: document.getElementById('themeAdvancedDetails'),
+  textSizeInput: document.getElementById('textSizeInput'),
   interfaceFontPreset: document.getElementById('interfaceFontPreset'),
   interfaceFontInput: document.getElementById('interfaceFontInput'),
   interfaceFontCustomRow: document.getElementById('interfaceFontCustomRow'),
@@ -519,6 +543,35 @@ Object.assign(els, {
   sessionDetail: document.getElementById('session-detail'),
   sessionDetailHead: document.getElementById('session-detail-head')
 });
+
+const SYNC_MODE_DESCRIPTIONS = {
+  local: 'settings.sync.localOnlyDesc',
+  client: 'settings.sync.connectHubDesc',
+  host: 'settings.sync.hostHubDesc',
+  icloud: 'settings.sync.icloudDesc'
+};
+const SYNC_MODE_ICON_PATHS = {
+  local: ['M5 4h14v12H5z', 'M2 20h20l-3-4H5z'],
+  client: ['M10 13a5 5 0 0 0 7 .5l3-3a5 5 0 0 0-7-7l-2 2', 'M14 11a5 5 0 0 0-7-.5l-3 3a5 5 0 0 0 7 7l2-2'],
+  host: ['M4 3h16v7H4z', 'M4 14h16v7H4z', 'M7 6.5h.01M7 17.5h.01', 'M11 6.5h6M11 17.5h6'],
+  icloud: ['M7 18H6a4 4 0 1 1 .7-7.9A6 6 0 0 1 18 8a5 5 0 0 1 0 10H7']
+};
+const syncModeIcons = Object.fromEntries(Object.entries(SYNC_MODE_ICON_PATHS).map(([mode, paths]) => [mode, (doc) => {
+  const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  for (const [name, value] of Object.entries({ viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })) {
+    svg.setAttribute(name, value);
+  }
+  for (const d of paths) {
+    const path = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
+}]));
+const syncModeSelect = window.TokenMonitorSelectControl?.enhance(els.hubModeOptions, {
+  getOptionMeta: option => ({ description: t(SYNC_MODE_DESCRIPTIONS[option.value]), icon: syncModeIcons[option.value] })
+});
+window.addEventListener('unload', () => syncModeSelect?.destroy(), { once: true });
 
 function toggleAccordionRow(row) {
   const isExpanded = row.classList.contains('expanded');
@@ -650,6 +703,7 @@ function applySettingsTranslations() {
 }
 
 function applySettingsSectionDom(id, open) {
+  if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
   const details = document.getElementById(`${id}SettingsDetails`);
   const group = toggle?.closest('.settings-collapsible-group');
@@ -671,6 +725,7 @@ function setSettingsSectionExpanded(section, expanded) {
   }
   state.settingsSections[id] = next;
   applySettingsSectionDom(id, next);
+  if (id === 'sync' && next) void syncContentForm?.refresh();
 }
 
 // Expanding a section auto-collapses the previously open one. When that one
@@ -766,9 +821,12 @@ function viewsSummary() {
 function settingsSectionSummary(section) {
   if (!state.settings) return '';
   if (section === 'sync') {
-    if (state.settings.hubMode === 'host') return t('settings.sync.hostHub');
-    if (state.settings.hubMode === 'client') return t('settings.sync.connectHub');
-    return t('settings.sync.localOnly');
+    const modeKeys = { host: 'settings.sync.hostHub', client: 'settings.sync.connectHub', icloud: 'settings.sync.icloud' };
+    const label = t(modeKeys[state.settings.hubMode] || 'settings.sync.localOnly');
+    const devices = SHARED_SYNC_MODES.has(state.settings.hubMode) && state.mode === 'sync' ? state.stats?.devices : null;
+    if (!Array.isArray(devices) || devices.length === 0) return label;
+    const online = devices.filter((device) => device?.stale !== true).length;
+    return `${label} · ${t('settings.sync.panel.onlineCount', { online, total: devices.length })}`;
   }
   if (section === 'tools') {
     const counts = clientHealthPresentationApi.clientHealthCountsForTracked(
@@ -900,7 +958,7 @@ function liveTokenRateSourceKey(periodSource) {
 
 function effectiveLiveTokenRateScope() {
   const hubMode = state.settings?.hubMode;
-  const syncMode = hubMode === 'client' || hubMode === 'host';
+  const syncMode = tokenRateApi.isSharedSyncMode(hubMode);
   return syncMode && state.settings?.liveTokenRateScope !== 'device' ? 'all' : 'device';
 }
 
@@ -935,7 +993,7 @@ function displayLiveTokenRateItems() {
 
 function effectiveDisplayLiveTokenRateScope(scope) {
   const hubMode = state.settings?.hubMode;
-  const syncMode = hubMode === 'client' || hubMode === 'host';
+  const syncMode = tokenRateApi.isSharedSyncMode(hubMode);
   return syncMode && scope === 'all' ? 'all' : 'device';
 }
 
@@ -1071,7 +1129,10 @@ function formatLiveTokenRate(value) {
 function renderLiveTokenRate() {
   if (!els.liveTokenRate || !els.liveTokenRateValue) return;
   const enabled = state.settings?.showLiveTokenRate === true;
-  if (!enabled) resetLiveTokenRateTracking();
+  if (!enabled) {
+    resetLiveTokenRateTracking();
+    limitWindowsView.setDetailTooltip(els.liveTokenRate, null);
+  }
   els.liveTokenRate.classList.toggle('hidden', !enabled);
   syncLiveTokenRateFooterState();
   if (!enabled) return;
@@ -1094,8 +1155,25 @@ function renderLiveTokenRate() {
     ? (burn ? 'home.liveTokenRate.burnIdleTitle' : 'home.liveTokenRate.speedIdleTitle')
     : (burn ? 'home.liveTokenRate.burnTitle' : 'home.liveTokenRate.speedTitle');
   const label = t(labelKey, { value: text, scope });
-  els.liveTokenRate.title = label;
-  els.liveTokenRate.setAttribute('aria-label', label);
+  const detailEntries = tokenRateApi.liveTokenRateTooltipEntries(
+    sample, burn ? 'burn' : 'speed', formatLiveTokenRate
+  );
+  limitWindowsView.setDetailTooltip(els.liveTokenRate, detailEntries.length ? detailEntries : null);
+  for (const cell of els.liveTokenRate.querySelectorAll('.limit-detail-tooltip-row span:first-child')) {
+    const model = cell.textContent;
+    const icon = document.createElement('span');
+    icon.className = `row-icon row-icon-${modelVendorFor(model) || 'token-monitor'}`;
+    icon.setAttribute('aria-hidden', 'true');
+    const name = document.createElement('span');
+    name.className = 'live-token-rate-model-label';
+    name.textContent = model;
+    cell.classList.add('live-token-rate-model-name');
+    cell.replaceChildren(icon, name);
+  }
+  if (!detailEntries.length) els.liveTokenRate.title = label;
+  els.liveTokenRate.setAttribute('aria-label', [label, ...detailEntries.map((entry) =>
+    Array.isArray(entry) ? entry.join(': ') : entry.full)].join(', '));
+  syncLiveTokenRateFooterState();
 
   if (!idle && sample.revision !== liveTokenRateRenderedRevision) {
     liveTokenRateRenderedRevision = sample.revision;
@@ -1511,135 +1589,31 @@ function colorWithAlpha(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-function setTokscaleMessage(text = '', tone = '') {
-  if (!els.tokscaleMessage) return;
-  els.tokscaleMessage.textContent = text;
-  els.tokscaleMessage.classList.toggle('error', tone === 'error');
-  els.tokscaleMessage.classList.toggle('success', tone === 'success');
-}
-
-function mergeTokscalePayload(payload) {
-  if (!payload || typeof payload !== 'object') return;
-  if (payload.status) state.tokscaleStatus = payload.status;
-  else if (payload.supported === false) state.tokscaleStatus = { supported: false };
-  else if (payload.current || payload.bundled || payload.downloaded) {
-    state.tokscaleStatus = {
-      ...(state.tokscaleStatus || { supported: true }),
-      supported: payload.supported !== false,
-      current: payload.current ?? state.tokscaleStatus?.current ?? null,
-      bundled: payload.bundled ?? state.tokscaleStatus?.bundled ?? null,
-      downloaded: payload.downloaded ?? state.tokscaleStatus?.downloaded ?? null
-    };
-  }
-  if (payload.npm || payload.checkedAt) {
-    state.tokscaleCheck = {
-      newer: Boolean(payload.newer),
-      npm: payload.npm || state.tokscaleCheck?.npm || null,
-      checkedAt: payload.checkedAt || state.tokscaleCheck?.checkedAt || null
-    };
-  }
-  if (payload.downloaded === true && state.tokscaleCheck?.npm?.version === payload.version) {
-    state.tokscaleCheck = { ...state.tokscaleCheck, newer: false };
-  }
-}
-
 function renderTokscaleStatus() {
   if (!els.tokscaleGroup) return;
   const status = state.tokscaleStatus;
-  const advancedSummaryKey = state.tokscaleCheck?.newer
-    ? 'settings.advanced.tokscaleUpdate'
-    : 'settings.advanced.summary';
-  if (els.advancedSettingsSummary) {
-    els.advancedSettingsSummary.dataset.i18n = advancedSummaryKey;
-    els.advancedSettingsSummary.textContent = t(advancedSummaryKey);
-  }
   if (status?.supported === false) {
     els.tokscaleGroup.classList.add('hidden');
     return;
   }
   els.tokscaleGroup.classList.remove('hidden');
   const current = status?.current;
-  const source = current?.source === 'downloaded'
-    ? (current.installedAt
-      ? t('settings.tokscale.downloadedSourceWithAge', { age: compactAge(current.installedAt) })
-      : t('settings.tokscale.downloadedSource'))
-    : t('settings.tokscale.bundledSource');
-  els.tokscaleInstalled.textContent = current ? `${versionText(current.version)} (${source})` : t('settings.common.notFound');
-  els.tokscaleBundledLine.classList.toggle('hidden', !status?.downloaded || !status?.bundled);
-  els.tokscaleBundled.textContent = status?.bundled ? versionText(status.bundled.version) : '—';
-  if (state.tokscaleCheck?.npm?.version) {
-    els.tokscaleNpm.textContent = state.tokscaleCheck.newer
-      ? versionText(state.tokscaleCheck.npm.version)
-      : t('settings.appUpdate.latestWithStatus', { version: state.tokscaleCheck.npm.version, status: t('settings.tokscale.currentSuffix') });
-  } else {
-    els.tokscaleNpm.textContent = t('settings.common.notChecked');
-  }
-  els.checkTokscaleButton.disabled = state.tokscaleBusy;
-  els.downloadTokscaleButton.disabled = state.tokscaleBusy;
-  els.resetTokscaleButton.disabled = state.tokscaleBusy;
-  els.downloadTokscaleButton.classList.toggle('hidden', !state.tokscaleCheck?.newer);
-  els.resetTokscaleButton.classList.toggle('hidden', !status?.downloaded);
+  els.tokscaleInstalled.textContent = current?.version
+    ? versionText(current.version)
+    : t(status ? 'settings.tokscale.versionUnknown' : 'settings.common.checking');
+  const build = status?.bundledBuild;
+  els.tokscaleBundledBuildRow.classList.toggle('hidden', !build);
+  els.tokscaleBundledBuild.textContent = build ? `fork ${build.commit.slice(0, 8)}` : '';
 }
 
 async function refreshTokscaleStatus() {
   if (!window.tokenMonitor.getTokscaleStatus) return;
   try {
     state.tokscaleStatus = await window.tokenMonitor.getTokscaleStatus();
-    renderTokscaleStatus();
-  } catch (error) {
-    setTokscaleMessage(error.message, 'error');
+  } catch (_) {
+    state.tokscaleStatus = {};
   }
-}
-
-async function checkTokscaleNpm() {
-  state.tokscaleBusy = true;
-  setTokscaleMessage(t('settings.tokscale.checkingNpm'));
   renderTokscaleStatus();
-  try {
-    const result = await window.tokenMonitor.checkTokscaleNpm();
-    if (result?.error) throw new Error(result.error);
-    mergeTokscalePayload(result);
-    if (state.tokscaleStatus?.supported === false) return;
-    setTokscaleMessage(state.tokscaleCheck?.newer ? t('settings.tokscale.newerOnNpm') : t('settings.tokscale.bundledCurrent'));
-  } catch (error) {
-    setTokscaleMessage(error.message, 'error');
-  } finally {
-    state.tokscaleBusy = false;
-    renderTokscaleStatus();
-  }
-}
-
-async function downloadTokscaleFromNpm() {
-  state.tokscaleBusy = true;
-  setTokscaleMessage(t('settings.tokscale.downloading'));
-  renderTokscaleStatus();
-  try {
-    const result = await window.tokenMonitor.downloadTokscaleFromNpm();
-    if (result?.error) throw new Error(result.error);
-    mergeTokscalePayload(result);
-    setTokscaleMessage(t('settings.tokscale.downloaded', { version: versionText(result.version) }), 'success');
-  } catch (error) {
-    setTokscaleMessage(error.message, 'error');
-  } finally {
-    state.tokscaleBusy = false;
-    renderTokscaleStatus();
-  }
-}
-
-async function resetTokscaleToBundled() {
-  state.tokscaleBusy = true;
-  setTokscaleMessage(t('settings.tokscale.resetting'));
-  renderTokscaleStatus();
-  try {
-    state.tokscaleStatus = await window.tokenMonitor.resetTokscaleToBundled();
-    state.tokscaleCheck = null;
-    setTokscaleMessage(t('settings.tokscale.usingBundled'), 'success');
-  } catch (error) {
-    setTokscaleMessage(error.message, 'error');
-  } finally {
-    state.tokscaleBusy = false;
-    renderTokscaleStatus();
-  }
 }
 function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
 
@@ -1694,7 +1668,6 @@ function animateTotalNumber(el, from, to, duration) {
 
 const rowNumberAnimations = new Map();
 const rowBarAnimations = new Map();
-const limitResetNumberAnimations = new Map();
 const rowRenderFingerprints = new WeakMap();
 const toolDetailData = new WeakMap();
 
@@ -1716,11 +1689,7 @@ function settleMotionAnimations() {
     delete el.dataset.motionTarget;
   }
   rowNumberAnimations.clear();
-  for (const [el, motion] of limitResetNumberAnimations) {
-    cancelAnimationFrame(motion.handle);
-    el.textContent = `${formatPercent(motion.target)} ${motion.suffix}`;
-  }
-  limitResetNumberAnimations.clear();
+  limitResetAnimator.settle(els.limitsPanel);
   for (const animation of document.getAnimations?.() || []) {
     try { animation.finish(); } catch (_) { animation.cancel(); }
   }
@@ -1852,7 +1821,8 @@ function animateBarBetween(
   toScale,
   delay = 0,
   duration = 420,
-  easing = 'cubic-bezier(0.22, 1, 0.36, 1)'
+  easing = 'cubic-bezier(0.22, 1, 0.36, 1)',
+  startedAt = null
 ) {
   if (!fill?.animate) return;
   const previous = rowBarAnimations.get(fill);
@@ -1870,6 +1840,7 @@ function animateBarBetween(
     easing,
     fill: 'backwards'
   });
+  if (startedAt !== null) animation.startTime = startedAt;
   const motion = { animation, target: toScale };
   const forget = () => {
     if (rowBarAnimations.get(fill) === motion) rowBarAnimations.delete(fill);
@@ -1877,64 +1848,6 @@ function animateBarBetween(
   animation.onfinish = forget;
   animation.oncancel = forget;
   rowBarAnimations.set(fill, motion);
-}
-
-function animateLimitResetPercent(el, from, to, duration, startedAt = performance.now()) {
-  if (!el) return;
-  const suffix = el.dataset.limitMotionSuffix || '';
-  if (prefersReducedMotion() || !Number.isFinite(from) || !Number.isFinite(to) || from === to) {
-    el.textContent = `${formatPercent(to)} ${suffix}`;
-    return;
-  }
-  const delta = to - from;
-  const motion = { handle: 0, target: to, suffix };
-  let renderedText = `${formatPercent(from)} ${suffix}`;
-  el.textContent = renderedText;
-  function frame(now) {
-    if (prefersReducedMotion()) {
-      el.textContent = `${formatPercent(to)} ${suffix}`;
-      if (limitResetNumberAnimations.get(el) === motion) limitResetNumberAnimations.delete(el);
-      return;
-    }
-    const progress = Math.min(1, (now - startedAt) / duration);
-    const eased = 1 - ((1 - progress) * (1 - progress));
-    const nextText = `${formatPercent(from + delta * eased)} ${suffix}`;
-    // The displayed value is integer-rounded, so several animation frames can
-    // resolve to the same string. Avoid invalidating text layout on those frames.
-    if (nextText !== renderedText) {
-      renderedText = nextText;
-      el.textContent = nextText;
-    }
-    if (progress < 1) {
-      motion.handle = requestAnimationFrame(frame);
-    } else if (limitResetNumberAnimations.get(el) === motion) {
-      limitResetNumberAnimations.delete(el);
-    }
-  }
-  motion.handle = requestAnimationFrame(frame);
-  limitResetNumberAnimations.set(el, motion);
-}
-
-function animateLimitResetCompletion(fill, duration) {
-  if (!fill?.animate || prefersReducedMotion()) return;
-  const highlight = document.createElement('span');
-  highlight.className = 'limit-meter-completion';
-  fill.append(highlight);
-  const animation = highlight.animate([
-    { opacity: 0 },
-    {
-      offset: LIMIT_RESET_GLOW_LEAD_MS / LIMIT_RESET_GLOW_MS,
-      opacity: 0.52
-    },
-    { opacity: 0 }
-  ], {
-    duration: LIMIT_RESET_GLOW_MS,
-    delay: Math.max(0, duration - LIMIT_RESET_GLOW_LEAD_MS),
-    easing: 'linear'
-  });
-  const removeHighlight = () => highlight.remove();
-  animation.onfinish = removeHighlight;
-  animation.oncancel = removeHighlight;
 }
 
 function captureTrendBarMotion() {
@@ -2049,54 +1962,104 @@ function rowTemplate(rowData) {
   row.querySelector('.row-activity').textContent = activity || '';
   row.querySelector('.row-detail').textContent = detail || '';
   bindHoverMarquee(row.querySelector('.row-title'));
+  bindHoverMarquee(row.querySelector('.row-subtitle'));
+  bindHoverMarquee(row.querySelector('.row-activity'));
   bindHoverMarquee(row.querySelector('.row-detail'));
   return row;
 }
 
-const hoverMarqueeStates = new WeakMap();
+const DEVICE_DELETE_CONFIRMATION_MS = 3000;
+const armedDeviceDeleteButtons = new Set();
+const devicesBeingDeleted = new Set();
+const deviceDeleteConfirmationTimers = new WeakMap();
 
-function stopHoverMarquee(element, { reset = true } = {}) {
-  const motion = hoverMarqueeStates.get(element);
-  if (motion?.delayId) clearTimeout(motion.delayId);
-  if (motion?.frameId) cancelAnimationFrame(motion.frameId);
-  hoverMarqueeStates.delete(element);
-  element.classList.remove('is-hover-scrolling');
-  if (reset) element.scrollLeft = 0;
+function clearDeviceDeleteConfirmationTimer(remove) {
+  const timer = deviceDeleteConfirmationTimers.get(remove);
+  if (timer === undefined) return;
+  clearTimeout(timer);
+  deviceDeleteConfirmationTimers.delete(remove);
 }
 
-function startHoverMarquee(element) {
-  stopHoverMarquee(element);
-  if (prefersReducedMotion() || !element.closest('.session-mode')) return;
-  const distance = Math.ceil(element.scrollWidth - element.clientWidth);
-  if (distance <= 1) return;
-
-  const motion = { delayId: 0, frameId: 0 };
-  hoverMarqueeStates.set(element, motion);
-  motion.delayId = setTimeout(() => {
-    motion.delayId = 0;
-    element.classList.add('is-hover-scrolling');
-    const startedAt = performance.now();
-    const duration = Math.max(1800, Math.min(8000, distance * 22));
-    const step = (now) => {
-      const progress = Math.min(1, (now - startedAt) / duration);
-      element.scrollLeft = distance * progress;
-      if (progress < 1) motion.frameId = requestAnimationFrame(step);
-      else motion.frameId = 0;
-    };
-    motion.frameId = requestAnimationFrame(step);
-  }, 240);
+function resetDeviceDeleteConfirmation(remove, defaultText = remove.dataset.idleText || '') {
+  clearDeviceDeleteConfirmationTimer(remove);
+  armedDeviceDeleteButtons.delete(remove);
+  remove.dataset.confirm = '';
+  remove.querySelector('.device-delete-label').textContent = defaultText;
 }
 
-function bindHoverMarquee(element) {
-  element.addEventListener('mouseenter', () => startHoverMarquee(element));
-  element.addEventListener('mouseleave', () => stopHoverMarquee(element));
+function armDeviceDeleteConfirmation(remove) {
+  clearDeviceDeleteConfirmationTimer(remove);
+  armedDeviceDeleteButtons.add(remove);
+  remove.dataset.confirm = 'true';
+  remove.querySelector('.device-delete-label').textContent = remove.dataset.confirmText;
+  const timer = setTimeout(() => resetDeviceDeleteConfirmation(remove), DEVICE_DELETE_CONFIRMATION_MS);
+  deviceDeleteConfirmationTimers.set(remove, timer);
 }
 
-function setHoverMarqueeText(element, value) {
-  stopHoverMarquee(element);
-  const text = value || '';
-  element.textContent = text;
-  element.removeAttribute('title');
+document.addEventListener('pointerdown', (event) => {
+  for (const remove of armedDeviceDeleteButtons) {
+    if (remove !== event.target && !remove.contains?.(event.target)) {
+      resetDeviceDeleteConfirmation(remove);
+    }
+  }
+});
+
+let homeSessionRenderPending = false;
+const overflowText = window.TokenMonitorOverflowText.create({
+  document, window, prefersReducedMotion,
+  enabled: element => Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint'),
+  onLeave: () => requestAnimationFrame(() => {
+    if (homeSessionRenderPending && state.breakdown === 'home'
+      && visibleStatsSurface() === 'main' && state.stats) renderHome();
+  })
+});
+
+function bindHoverMarquee(element) { overflowText.bind(element); }
+function setHoverMarqueeText(element, value) { overflowText.setText(element, value); }
+
+bindHoverMarquee(els.syncConnectionEndpoint);
+
+// Two clicks to remove from sync settings: the first arms the button, the
+// second deletes. The usage view has no device-management actions.
+function createDeviceRemoveButton(deviceId, deleteText, deleteConfirmText) {
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'device-delete-button';
+  remove.dataset.deviceId = deviceId;
+  remove.dataset.idleText = deleteText;
+  remove.dataset.confirmText = deleteConfirmText;
+  remove.disabled = devicesBeingDeleted.has(deviceId);
+  const label = document.createElement('span');
+  label.className = 'device-delete-label';
+  label.textContent = deleteText;
+  remove.append(label);
+  const resetConfirmation = () => resetDeviceDeleteConfirmation(remove);
+  remove.addEventListener('blur', resetConfirmation);
+  remove.addEventListener('click', async () => {
+    if (devicesBeingDeleted.has(deviceId)) return;
+    if (remove.dataset.confirm !== 'true') {
+      armDeviceDeleteConfirmation(remove);
+      return;
+    }
+    remove.disabled = true;
+    devicesBeingDeleted.add(deviceId);
+    try {
+      await window.tokenMonitor.deleteDevice(deviceId);
+      resetConfirmation();
+      await refreshStats();
+    } catch (_) {
+      resetConfirmation();
+    } finally {
+      devicesBeingDeleted.delete(deviceId);
+      // Stats may have replaced the original button while IPC was pending.
+      for (const current of [remove, ...document.querySelectorAll('.device-delete-button')]) {
+        if (current.dataset.deviceId !== deviceId) continue;
+        current.disabled = false;
+        resetDeviceDeleteConfirmation(current);
+      }
+    }
+  });
+  return remove;
 }
 
 function renderDeviceAccordion(accordionInner, deviceDetail) {
@@ -2110,7 +2073,7 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
       Math.round(tool.percent),
       tool.color,
       tool.models.map((model) => [model.key, model.value])
-    ])
+      ])
   ]);
   if (accordionInner.dataset.signature === signature) return;
 
@@ -2299,16 +2262,20 @@ function setActiveToolDetailMode(mode) {
 // right now", and a fuel gauge for how much of its context window is left. The
 // dot is drawn only while the agent is working and the gauge only while the
 // session is recent, so a list of several hundred past sessions is untouched.
-function updateRowContext(row, context) {
+function updateRowContext(row, context, promptCache, contextSnapshot) {
   const gauge = row.querySelector('.row-context');
   if (!gauge) return;
   const percentLeft = context ? Number(context.percentLeft) : NaN;
   if (!Number.isFinite(percentLeft)) {
-    gauge.classList.add('hidden');
-    gauge.removeAttribute('title');
+    gauge.classList.toggle('hidden', !promptCache);
+    gauge.dataset.tone = '';
+    gauge.querySelector('.row-context-meter').classList.add('hidden');
+    gauge.querySelector('.row-context-value').textContent = promptCache ? t('session.cacheEstimate', { minutes: promptCache.minutes }) : '';
+    sessionRowsApi.setSessionTooltip(gauge, promptCache ? contextSnapshot : null, promptCache, t, limitWindowsView);
     return;
   }
   gauge.classList.remove('hidden');
+  gauge.querySelector('.row-context-meter').classList.remove('hidden');
   // Headroom is what decides the colour whichever way the number is written:
   // a gauge reading "93% used" is the same emergency as one reading "7% left".
   gauge.dataset.tone = String(context.tone || '');
@@ -2319,7 +2286,7 @@ function updateRowContext(row, context) {
   // Default is used, matching Codex and Claude Code's own readouts.
   const showUsed = state.settings?.sessionContextMetric !== 'remaining';
   const percent = showUsed ? Number(context.percentUsed) : percentLeft;
-  gauge.title = t(showUsed ? 'session.contextUsed' : 'session.contextLeft', { percent }) || `${percent}%`;
+  sessionRowsApi.setSessionTooltip(gauge, context, promptCache, t, limitWindowsView);
   gauge.querySelector('.row-context-value').textContent = `${percent}%`;
   gauge.querySelector('.row-context-fill').style.setProperty('--bar-scale', String(percent / 100));
 }
@@ -2362,7 +2329,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, sortTime }) {
+function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2390,7 +2357,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   }
   const interactive = reviewGroup === true || (
     kind === 'session'
-    && ['claude', 'codex', 'opencode', 'dsh'].includes(client)
+    && ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy'].includes(client)
   ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
   const mark = row.querySelector('.row-mark');
   const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '' }, state.breakdown);
@@ -2401,16 +2368,49 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
     mark.className = 'row-mark dot';
     mark.style.background = color;
   }
-  setHoverMarqueeText(row.querySelector('.row-title'), name);
+  const titleEl = row.querySelector('.row-title');
+  setHoverMarqueeText(titleEl, name);
   const subtitleEl = row.querySelector('.row-subtitle');
-  subtitleEl.textContent = subtitle || '';
+  // A multi-model session abbreviates to "N models"; that label opens the same
+  // tooltip the context gauge carries, one row per model with its tokens and
+  // share of the session. A titled row prints the label inside the
+  // client · model line, so the trigger is just the "N models" span; an
+  // untitled row folds it into the title instead, whose whole text then opens
+  // the tooltip. The trigger mirrors the row's own wording rather than adding
+  // chrome, so there is nothing extra on a single-model row.
+  const modelEntries = Array.isArray(modelTooltipEntries) && modelTooltipEntries.length > 1
+    ? modelTooltipEntries : null;
+  const subtitleShowsModel = Boolean(modelEntries && modelLabel && String(subtitle || '').endsWith(modelLabel));
+  if (subtitleShowsModel) {
+    const models = document.createElement('span');
+    models.className = 'session-models';
+    models.textContent = modelLabel;
+    // Inside the marquee's own wrapper, so a long line still scrolls on hover.
+    const subtitleContent = subtitleEl.querySelector('.overflow-text-content') || subtitleEl;
+    subtitleContent.replaceChildren(document.createTextNode(subtitle.slice(0, -modelLabel.length)), models);
+    overflowText.update(subtitleEl);
+    limitWindowsView.setDetailTooltip(models, modelEntries);
+  } else {
+    setHoverMarqueeText(subtitleEl, subtitle);
+  }
+  if (!subtitleShowsModel && modelEntries && modelLabel && String(name || '').endsWith(modelLabel)) {
+    limitWindowsView.setDetailTooltip(titleEl, modelEntries);
+  } else if (titleEl.classList.contains('limit-detail-tooltip-wrap')) {
+    limitWindowsView.setDetailTooltip(titleEl, null);
+  }
   subtitleEl.classList.toggle('hidden', !subtitle);
+  // The activity line carries time, calls, cache hit and tok/s; a narrow window
+  // fades and scrolls it on hover the way the title does rather than wrapping.
   const activityEl = row.querySelector('.row-activity');
-  activityEl.textContent = activity || '';
+  setHoverMarqueeText(activityEl, activity);
   activityEl.classList.toggle('hidden', !activity);
+  // A titled session already has name, client/model and activity lines. Move
+  // its ID into Details, but keep the ID when only two lines remain so untitled
+  // sessions can still be distinguished (including when titles are disabled).
+  const shownDetail = kind === 'session' && interactive && activity ? '' : detail;
   const detailEl = row.querySelector('.row-detail');
-  setHoverMarqueeText(detailEl, detail);
-  detailEl.classList.toggle('hidden', !detail);
+  setHoverMarqueeText(detailEl, shownDetail);
+  detailEl.classList.toggle('hidden', !shownDetail);
   const valueEl = row.querySelector('.row-value');
   if (tokenDataUnavailable === true) {
     row.dataset.tokenDataUnavailable = 'true';
@@ -2427,7 +2427,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   // reading), so this draws whatever arrived rather than re-deciding from
   // `running` - that second gate is exactly what made the dock card and this
   // list disagree about whether a session still had a gauge.
-  updateRowContext(row, context);
+  updateRowContext(row, context, promptCache, contextSnapshot);
   updateRowLive(row, activityState || (running === true ? 'running' : 'idle'), sortTime);
   const fill = row.querySelector('.bar-fill');
   fill.style.background = barBackground || color;
@@ -2581,6 +2581,7 @@ function renderSessionPager(page) {
 }
 
 function renderRows(rows, { incompleteHint = '' } = {}) {
+  if (sessionTooltipShouldHoldRender()) return;
   if (rows.length === 0 && !incompleteHint) {
     els.breakdown.replaceChildren();
     renderSessionPager(null);
@@ -2668,23 +2669,22 @@ function deviceRuntimeLabel(value) {
   return String(value || '');
 }
 
-function deviceSyncedLabel(value) {
+function relativeAgeLabel(value) {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) return '';
   const diffMs = Math.max(0, Date.now() - date.getTime());
-  let age;
-  if (diffMs < 45_000) age = t('settings.age.justNow');
-  else {
-    const minutes = Math.round(diffMs / 60000);
-    if (minutes < 60) age = t('settings.age.minutesAgo', { minutes });
-    else {
-      const hours = Math.round(minutes / 60);
-      age = hours < 24
-        ? t('settings.age.hoursAgo', { hours })
-        : t('settings.age.daysAgo', { days: Math.round(hours / 24) });
-    }
-  }
-  return t('devices.synced', { age });
+  if (diffMs < 45_000) return t('settings.age.justNow');
+  const minutes = Math.round(diffMs / 60000);
+  if (minutes < 60) return t('settings.age.minutesAgo', { minutes });
+  const hours = Math.round(minutes / 60);
+  return hours < 24
+    ? t('settings.age.hoursAgo', { hours })
+    : t('settings.age.daysAgo', { days: Math.round(hours / 24) });
+}
+
+function deviceSyncedLabel(value) {
+  const age = relativeAgeLabel(value);
+  return age ? t('devices.synced', { age }) : '';
 }
 
 function stableColor(value, colors) {
@@ -2740,7 +2740,8 @@ function deviceRowsForPeriod() {
       deviceDetail: {
         ...breakdown,
         emptyText: breakdown.totalTokens > 0 ? t('devices.detailsUnavailable') : t('home.noTools'),
-        metaParts
+        metaParts,
+        deviceId: device.deviceId
       }
     };
   }).sort((a, b) => b.value - a.value);
@@ -2804,16 +2805,21 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
   return toolRowsForPeriod(period);
 }
 
-function sessionRowsForPeriod(period) {
-  const rows = sessionRowsApi.sessionRowsForPeriod(period, {
+function rawSessionRowsForPeriod(period) {
+  return sessionRowsApi.sessionRowsForPeriod(period, {
     clientLabels,
     clientColors,
     modelColor,
     stableColor,
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived'),
+    unattributedLabel: t('dashboard.tooltip.unclassified'),
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
+}
+
+function sessionRowsForPeriod(period) {
+  const rows = rawSessionRowsForPeriod(period);
   if (rows.length > 0) {
     rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
     return sessionRowsApi.groupBackgroundReviewRows(rows, {
@@ -3386,7 +3392,11 @@ async function saveSubscriptions(list, base, { render = true } = {}) {
 function subscriptionWriteErrorKey(error) {
   const message = error?.message || '';
   if (/stale_write/.test(message)) return 'settings.subscriptions.errorStaleWrite';
+  if (/icloud_adoption_unconfirmed/.test(message)) return 'settings.subscriptions.errorIcloudAdoptionUnconfirmed';
   if (/hub_rejected/.test(message)) return 'settings.subscriptions.errorHubRejected';
+  if (/icloud_(?:unavailable|stopped)|icloud_write_failed|root-create-failed|subscription-write-failed/.test(message)) {
+    return 'settings.subscriptions.errorIcloudWrite';
+  }
   if (/write_failed/.test(message)) return 'settings.subscriptions.errorWriteFailed';
   if (/hub_changed/.test(message)) return 'settings.subscriptions.errorHubChanged';
   return 'settings.subscriptions.errorHubWrite';
@@ -3420,9 +3430,11 @@ function renderSubscriptionSyncError() {
 function renderSubscriptionNote() {
   const el = els.subscriptionNote;
   if (!el) return;
-  const key = state.settings?.subscriptionsShared
-    ? 'settings.subscriptions.noteShared'
-    : 'settings.subscriptions.note';
+  const key = state.settings?.hubMode === 'icloud'
+    ? 'settings.subscriptions.noteIcloud'
+    : state.settings?.subscriptionsShared
+      ? 'settings.subscriptions.noteShared'
+      : 'settings.subscriptions.note';
   el.dataset.i18n = key;
   el.textContent = t(key);
 }
@@ -3938,15 +3950,6 @@ function limitProviderEnabled(providerName) {
   return enabledLimitProviderSet().has(providerName);
 }
 
-function limitProviderSelectionIncluding(providerName) {
-  const selected = new Set(configuredLimitProviderSelection());
-  selected.add(providerName);
-  return LIMIT_PROVIDERS
-    .map((provider) => provider.id)
-    .filter((id) => selected.has(id))
-    .join(',');
-}
-
 function missingLimitProviderStatus() {
   return state.mode === 'sync' || String(state.settings?.hubUrl || '').trim() ? 'noSyncedData' : 'notConfigured';
 }
@@ -3971,6 +3974,10 @@ function limitDetailTooltipShouldHoldRender() {
   return Boolean(els.limitsPanel.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
 }
 
+function sessionTooltipShouldHoldRender() {
+  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
+}
+
 function flushPendingLimitDetailTooltipRender() {
   if (!state.limitDetailTooltipRenderPending || state.breakdown !== 'limits') return;
   state.limitDetailTooltipRenderPending = false;
@@ -3987,6 +3994,7 @@ function flushPendingLimitDetailTooltipRender() {
 
 const {
   creditsAmount,
+  creditsCurrency,
   creditsMeterPercent,
   formatCompactMoney,
   formatMoney,
@@ -3994,7 +4002,7 @@ const {
   spendWindow
 } = window.TokenMonitorLimitBalanceDisplay;
 
-const { limitWindowLabel } = window.TokenMonitorLimitWindowLabels;
+const { limitWindowLabel, mimoAccountGroups, mimoProductLabel } = window.TokenMonitorLimitWindowLabels;
 const { limitWindowText } = window.TokenMonitorLimitWindowText;
 
 // The Limits rows are built by the shared view, which the edge dock also calls
@@ -4027,12 +4035,18 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
         if (limitDetailTooltipShouldHoldRender()) return;
         state.limitDetailTooltipActive = false;
         flushPendingLimitDetailTooltipRender();
+        if (state.breakdown === 'home' || state.breakdown === 'session') render();
       });
     }
   },
   formatCompact,
+  compactTokenThreshold: () => compactTokenApi.compactTokenUnitThreshold(
+    effectiveCompactTokenUnits(), currentLocale()
+  ),
   formatMoney,
-  formatCompactMoney,
+  formatCompactMoney: (value, currency) => formatCompactMoney(
+    value, currency, state.settings?.compactTokenUnits, currentLocale()
+  ),
   formatPercent,
   formatDuration,
   formatLimitBoundary,
@@ -4042,11 +4056,14 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   colorWithAlpha,
   applyBarScale,
   creditsAmount,
+  creditsCurrency,
   creditsMeterPercent,
   isCreditsWindow,
   spendWindow,
   limitWindowLabel,
   limitWindowText,
+  mimoAccountGroups,
+  mimoProductLabel,
   accountIdentity: accountIdentityApi,
   accountControl: codexAccountControl,
   codexAccounts: {
@@ -4097,7 +4114,7 @@ function formatHomeLimitWindowValue(window, showUsed) {
         ? t('settings.thirdparty.unlimited')
         : (window.detail || '--');
     }
-    return formatCompactMoney(window.remaining, window.currency);
+    return formatCompactMoney(window.remaining, window.currency, state.settings?.compactTokenUnits, currentLocale());
   }
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
   return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
@@ -4284,81 +4301,14 @@ function maybeFetchCodexResetForecast() {
 }
 
 function captureLimitResetMotion() {
-  const snapshot = new Map();
-  for (const row of els.limitsPanel?.querySelectorAll('.limit-row[data-limit-motion-key]') || []) {
-    for (const item of row.querySelectorAll('.limit-window[data-limit-motion-key]')) {
-      const key = `${row.dataset.limitMotionKey}\0${item.dataset.limitMotionKey}`;
-      const entry = {
-        remainingPercent: item.dataset.limitRemainingPercent,
-        displayPercent: item.dataset.limitDisplayPercent,
-        resetsAt: item.dataset.limitResetAt
-      };
-      // Ambiguous identities are safer left static than animated on the wrong row.
-      snapshot.set(key, snapshot.has(key) ? null : entry);
-    }
-  }
-  return snapshot;
+  // The refill motion itself lives in limits/resetAnimator.js — the edge
+  // dock's card plays it through the same animator, so this page keeps a
+  // scope-bound wrapper rather than a second copy.
+  return limitResetAnimator.capture(els.limitsPanel);
 }
 
 function animateLimitResets(snapshot) {
-  if (!snapshot?.size || prefersReducedMotion()) return;
-  const motions = [];
-  for (const row of els.limitsPanel?.querySelectorAll('.limit-row[data-limit-motion-key]') || []) {
-    for (const item of row.querySelectorAll('.limit-window[data-limit-motion-key]')) {
-      const key = `${row.dataset.limitMotionKey}\0${item.dataset.limitMotionKey}`;
-      const previous = snapshot.get(key);
-      const current = {
-        remainingPercent: item.dataset.limitRemainingPercent,
-        displayPercent: item.dataset.limitDisplayPercent,
-        resetsAt: item.dataset.limitResetAt
-      };
-      if (!previous || !limitResetMotionApi.shouldAnimateReset(previous, current)) continue;
-      const from = Number(previous.displayPercent);
-      const to = Number(current.displayPercent);
-      const fill = item.querySelector('.limit-meter-fill');
-      if (
-        previous.displayPercent === ''
-        || current.displayPercent === ''
-        || !Number.isFinite(from)
-        || !Number.isFinite(to)
-        || !fill
-      ) continue;
-      const duration = limitResetMotionApi.durationMs(from, to);
-      motions.push({
-        fill,
-        from,
-        item,
-        to,
-        duration
-      });
-    }
-  }
-  if (!motions.length) return;
-  // Start only after the replacement DOM is paintable. The rest of the refresh render
-  // can delay this first frame; excluding that delay prevents the motion from visibly
-  // catching up by skipping its opening values.
-  requestAnimationFrame((startedAt) => {
-    if (prefersReducedMotion()) return;
-    for (const { fill, from, item, to, duration } of motions) {
-      if (!fill.isConnected || !item.isConnected) continue;
-      animateBarBetween(
-        fill,
-        from / 100,
-        to / 100,
-        0,
-        duration,
-        LIMIT_RESET_MOTION_EASING
-      );
-      animateLimitResetCompletion(fill, duration);
-      animateLimitResetPercent(
-        item.querySelector('[data-limit-motion-value]'),
-        from,
-        to,
-        duration,
-        startedAt
-      );
-    }
-  });
+  limitResetAnimator.animate(els.limitsPanel, snapshot);
 }
 
 function renderLimits() {
@@ -4396,6 +4346,7 @@ function renderLimits() {
       state.settings?.claudePrepaidBalanceEnabled !== false,
       state.settings?.codexResetForecastEnabled === true,
       state.settings?.showCodexAdditionalLimits !== false,
+      state.settings?.limitProviderHiddenItems || {},
       state.settings?.currency || '',
       state.settings?.currencyRatesEffective || null,
       state.settings?.subscriptions || [],
@@ -4648,7 +4599,9 @@ function applySessionDetailResult(request, options) {
 }
 
 async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null }) {
-  const request = { kind: 'session', client, sessionId, sessionCost, title, period: state.period, detail: null, returnTo };
+  const request = { kind: 'session', client, sessionId, sessionCost,
+    title: state.settings?.sessionTitlesEnabled === false && returnTo?.kind !== 'background-review-group' ? '' : title,
+    period: state.period, detail: null, returnTo };
   state.openSession = request;
   renderSessionDetail({ loading: true });
   try {
@@ -4695,14 +4648,17 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   head.replaceChildren();
   container.replaceChildren();
 
-  const back = document.createElement('button');
-  back.className = 'detail-back';
-  back.textContent = `‹ ${t('sessions') || 'Sessions'}`;
-  back.addEventListener('click', sessionDetailBack);
-  head.append(back);
+  head.append(sessionDetailBackButton());
+
+  const idLabel = sessionRowsApi.sessionDetailIdLabel(state.openSession?.client, state.openSession?.sessionId, detail);
+  if (idLabel) container.append(sessionIdLine(idLabel));
 
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
-  if (error || (detail && detail.found === false)) { container.append(detailNote(t('detailNotFound') || 'Transcript not found on this machine.')); return; }
+  if (error || detail?.error) {
+    container.append(detailNote(t(detail?.error === 'line-too-large' ? 'detailRecordTooLarge' : 'detailReadFailed')));
+    return;
+  }
+  if (detail && detail.found === false) { container.append(detailNote(t('detailNotFound') || 'Transcript not found on this machine.')); return; }
 
   const rows = sessionDetailApi.exchangeRows(detail, { now: new Date(), sortBy: state.detailSort });
   if (rows.length === 0) { container.append(detailNote(t('detailEmpty') || 'No activity in this period.')); return; }
@@ -4720,6 +4676,77 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   for (const row of rows) container.append(exchangeNode(row, max));
 }
 
+function sessionDetailTitle() {
+  const request = state.openSession;
+  // Review runs use a model/time heading, which is independent of session
+  // title visibility. Ordinary Details follow the current session metadata.
+  if (request?.returnTo?.kind === 'background-review-group') return request.title;
+  if (state.settings?.sessionTitlesEnabled === false) return '';
+  const period = request?.period || state.period;
+  const session = request?.client === 'reasonix'
+    ? state.stats?.nativeSessions?.[period]?.[request.sessionId]
+    : state.stats?.periods?.[period]?.sessions?.[`${request?.client}:${request?.sessionId}`];
+  return session?.title || request?.title || '';
+}
+
+function refreshSessionDetailHeading() {
+  if (state.openSession?.kind !== 'session') return;
+  const head = els.sessionDetailHead;
+  if ((head.querySelector('.detail-heading')?.textContent || '') === sessionDetailTitle()) return;
+  // Retain the body, loading/error state and sort control. Unchanged headings
+  // also retain their hover-reading motion through periodic stats updates.
+  head.replaceChildren(sessionDetailBackButton(), ...Array.from(head.children).slice(1));
+}
+
+function sessionDetailBackButton() {
+  const back = document.createElement('button');
+  const title = sessionDetailTitle();
+  const backLabel = state.openSession?.returnTo?.kind === 'background-review-group'
+    ? t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
+  back.type = 'button';
+  back.className = title ? 'detail-back detail-back-titled' : 'detail-back';
+  if (!title) back.textContent = `‹ ${backLabel}`;
+  back.setAttribute('aria-label', title
+    ? t('sessions.backToWithTitle', { title, destination: backLabel })
+    : t('sessions.backTo', { destination: backLabel }));
+  if (!title) back.title = backLabel;
+  back.addEventListener('click', sessionDetailBack);
+
+  if (title) {
+    const arrow = document.createElement('span');
+    arrow.className = 'detail-back-arrow';
+    arrow.textContent = '‹';
+    arrow.setAttribute('aria-hidden', 'true');
+    const heading = document.createElement('span');
+    heading.className = 'detail-heading';
+    heading.textContent = title;
+    heading.title = title;
+    bindHoverMarquee(heading);
+    back.append(arrow, heading);
+  }
+
+  return back;
+}
+
+// Copy the conversation identity, not a multi-UUID rollout filename.
+function sessionIdLine(idLabel) {
+  const line = document.createElement('div');
+  line.className = 'detail-session-id';
+  const text = document.createElement('span');
+  text.className = 'detail-session-id-text';
+  text.textContent = idLabel;
+  text.title = idLabel;
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'detail-session-id-copy';
+  copy.textContent = '⧉';
+  copy.title = t('session.copyId');
+  copy.setAttribute('aria-label', t('session.copyId'));
+  copy.addEventListener('click', () => copyToClipboard(idLabel, copy));
+  line.append(text, copy);
+  return line;
+}
+
 function backgroundReviewRunNode(row, max, parent) {
   const wrap = document.createElement('div');
   wrap.className = 'detail-exchange background-review-run';
@@ -4730,7 +4757,16 @@ function backgroundReviewRunNode(row, max, parent) {
     + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
     + '<div class="bar"><div class="bar-fill"></div></div>';
   const time = sessionRowsApi.compactSessionTime(row.sortTime, new Date());
-  wrap.querySelector('.detail-ex-title').textContent = time || t('sessions.backgroundReviews');
+  const title = [row.modelLabel, time].filter(Boolean).join(' · ') || t('sessions.backgroundReviews');
+  const titleEl = wrap.querySelector('.detail-ex-title');
+  titleEl.textContent = title;
+  titleEl.title = title;
+  bindHoverMarquee(titleEl);
+  // A multi-model run reads "N models · time" here — the same label the
+  // Sessions list opens for its per-model shares, so the title opens it too.
+  if (row.modelTooltipEntries?.length > 1) {
+    limitWindowsView.setDetailTooltip(titleEl, row.modelTooltipEntries);
+  }
   wrap.querySelector('.detail-ex-sub').textContent = row.detail || '';
   wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
   wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0);
@@ -4739,7 +4775,7 @@ function backgroundReviewRunNode(row, max, parent) {
     client: row.client,
     sessionId: String(row.key || '').replace(/^session:[^:]+:/, ''),
     sessionCost: Number(row.cost || 0),
-    title: `${t('sessions.backgroundReviews')} · ${time}`,
+    title,
     returnTo: parent
   });
   wrap.addEventListener('click', open);
@@ -4761,13 +4797,22 @@ function renderBackgroundReviewDetail(request) {
   container.replaceChildren();
 
   const back = document.createElement('button');
-  back.className = 'detail-back';
-  back.textContent = `‹ ${t('sessions') || 'Sessions'}`;
+  back.type = 'button';
+  back.className = 'detail-back detail-back-titled';
+  back.setAttribute('aria-label', t('sessions.backToWithTitle', {
+    title: t('sessions.backgroundReviews'), destination: t('sessions') || 'Sessions'
+  }));
   back.addEventListener('click', closeSessionDetail);
-  const heading = document.createElement('strong');
+  const arrow = document.createElement('span');
+  arrow.className = 'detail-back-arrow';
+  arrow.textContent = '‹';
+  arrow.setAttribute('aria-hidden', 'true');
+  const heading = document.createElement('span');
   heading.className = 'detail-heading';
   heading.textContent = t('sessions.backgroundReviews');
-  head.append(back, heading);
+  bindHoverMarquee(heading);
+  back.append(arrow, heading);
+  head.append(back);
 
   const rows = request?.summary?.backgroundReviewRows || [];
   if (rows.length === 0) {
@@ -4811,6 +4856,7 @@ function exchangeNode(row, max) {
     exTitle.append(role, sep);
   }
   exTitle.append(document.createTextNode(row.title));
+  bindHoverMarquee(exTitle);
   wrap.querySelector('.detail-ex-sub').textContent = row.subtitle;
   const tokensAvailable = row.tokensAvailable !== false;
   wrap.querySelector('.detail-ex-value').textContent = tokensAvailable
@@ -5005,6 +5051,8 @@ function openViewFromTray(viewId) {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   stopWindowShortcutRecording();
   resetSettingsListSearch();
+  syncModeSelect?.close();
+  syncContentForm?.closeHelp();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   state.openSession = null;
@@ -5546,17 +5594,29 @@ function homeLimitRows() {
   const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
   const providerOptions = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, providerOrder);
   const hasConfiguredOrder = Boolean(state.settings?.homeLimitProviderOrder);
+  const isWindowHidden = (providerId, window) => limitUsageItemsApi.isLimitWindowHidden(
+    state.settings?.limitProviderHiddenItems, providerId, window
+  );
   return homeOverviewApi.homeLimitAccountsForProviders({
+    // Hidden rows go before the compact pick, so Antigravity's tightest window
+    // per group is chosen among the ones the user still shows.
     providers: (state.stats?.limits?.providers || []).map((provider) => ({
       ...provider,
-      windows: limitProviderPresentationApi.limitProviderCompactWindows(provider, provider.windows)
+      windows: limitProviderPresentationApi.limitProviderCompactWindows(
+        provider,
+        (provider.windows || []).filter((window) => !isWindowHidden(provider.provider, window))
+      )
     })),
     providerOptions,
     enabledProviderIds: Array.from(enabled),
     hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet()),
+    isWindowHidden,
     colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
+    accountPlan: (provider, index, providerEntries) => limitWindowsView.limitAccountPlan(provider, {
+      grouped: providerEntries.length > 1
+    }),
     accountColor: (provider, id, fallbackColor) => (
       id === 'thirdparty'
         ? limitProviderPresentationApi.thirdPartyAdapterVisual(provider, fallbackColor).color
@@ -5571,11 +5631,22 @@ function homeLimitRows() {
       const id = String(provider?.provider || '').trim().toLowerCase();
       const option = providerOptions.find((entry) => entry.id === id);
       const providerTitle = option?.label || id;
-      if (providerEntries.length > 1) {
+      const showProviderTitle = state.settings?.showHomeLimitProviderNames === true || state.settings?.showToolIcons === false;
+      // A provider's row count is its account count — except MiMo, whose two
+      // products of one account are two rows. Names resolve over the same
+      // logical-account grouping the Limits page groups by, so one account's
+      // lanes are told apart by their product word alone and only several
+      // accounts earn an account name.
+      const accountCount = id === 'mimo'
+        ? mimoAccountGroups(providerEntries).length
+        : providerEntries.length;
+      if (accountCount > 1) {
         const accountTitle = limitAccountTitle(id, provider, index, providerEntries);
-        return state.settings?.showHomeLimitProviderNames === true || state.settings?.showToolIcons === false
-          ? `${providerTitle} · ${accountTitle}`
-          : accountTitle;
+        return showProviderTitle ? `${providerTitle} · ${accountTitle}` : accountTitle;
+      }
+      if (id === 'mimo') {
+        const product = mimoProductLabel(provider);
+        if (product) return showProviderTitle ? `${providerTitle} · ${product}` : product;
       }
       return providerTitle;
     }
@@ -5606,10 +5677,18 @@ function renderHomeLimitModule() {
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
-    empty.textContent = t('home.noLimits');
+    const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
+    const awaitingFirstData = homeOverviewApi.homeLimitsAwaitingFirstData({
+      providers: state.stats?.limits?.providers || [],
+      providerOptions: limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, providerOrder),
+      enabledProviderIds: Array.from(enabledLimitProviderSet()),
+      hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet())
+    });
+    empty.textContent = t(awaitingFirstData ? 'home.limitsInitializing' : 'home.noLimits');
     body.append(empty);
     return module;
   }
+  const showBars = state.settings?.homeLimitDisplayMode === 'bars';
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-limit-account';
@@ -5621,8 +5700,15 @@ function renderHomeLimitModule() {
     name.className = 'home-list-name';
     name.textContent = row.name;
     account.append(mark, name);
+    if (row.plan) {
+      const plan = document.createElement('span');
+      plan.className = 'home-limit-plan';
+      plan.textContent = row.plan;
+      plan.title = row.plan;
+      account.append(plan);
+    }
     const windows = document.createElement('div');
-    windows.className = 'home-limit-windows';
+    windows.className = showBars ? 'home-limit-windows home-limit-windows-bars' : 'home-limit-windows';
     for (const window of row.windows) {
       const metric = document.createElement('div');
       metric.className = 'home-limit-window';
@@ -5646,6 +5732,18 @@ function renderHomeLimitModule() {
       }
       line.append(label, value);
       metric.append(line);
+      // Money and fixed labels retain a remaining meter; only percentage
+      // labels follow the global used/remaining display preference.
+      if (showBars && window.showMeter !== false) {
+        const remainingPercent = optionalFiniteNumber(window.remainingPercent);
+        if (remainingPercent != null) {
+          const fillPercent = limitFillPercent(remainingPercent, null, showUsed && !isCreditsWindow(window) && !window.value);
+          const tone = window.kind === 'session' || window.kind === 'daily' ? 0.95 : 0.68;
+          const meter = limitWindowsView.limitMeterNode(row.color, fillPercent, tone);
+          meter.setAttribute('aria-hidden', 'true');
+          metric.append(meter);
+        }
+      }
       const resetLabel = window.resetsAt
         ? formatLimitBoundary(window) || ''
         : window.resetDescription
@@ -5730,6 +5828,162 @@ function renderHomeToolModule(period) {
     share.className = 'home-list-aux';
     share.textContent = formatPercent(row.share * 100);
     item.append(mark, name, value, share);
+    body.append(item);
+  }
+  return module;
+}
+
+function homeSessionAgo(value) {
+  if (!Number.isFinite(value) || value <= 0) return '';
+  const minutes = Math.round(Math.max(0, Date.now() - value) / 60000);
+  if (minutes < 1) return t('edgeDock.agoNow');
+  if (minutes < 60) return t('edgeDock.agoMinutes', { count: minutes });
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return t('edgeDock.agoHours', { count: hours });
+  return t('edgeDock.agoDays', { count: Math.round(hours / 24) });
+}
+
+function homeSessionContext(context, promptCache) {
+  const showUsed = state.settings?.sessionContextMetric !== 'remaining';
+  const percent = showUsed ? context.percentUsed : context.percentLeft;
+  const node = document.createElement('span');
+  node.className = 'home-session-context';
+  node.dataset.tone = context.tone || '';
+  const meter = document.createElement('span');
+  meter.className = 'home-session-context-meter';
+  const fill = document.createElement('span');
+  fill.className = 'home-session-context-fill';
+  fill.style.setProperty('--bar-scale', String(percent / 100));
+  meter.append(fill);
+  const value = document.createElement('span');
+  value.textContent = `${percent}%`;
+  node.append(meter, value);
+  sessionRowsApi.setSessionTooltip(node, context, promptCache, t, limitWindowsView);
+  return node;
+}
+
+function stopHomeSessionRepaint() {
+  clearTimeout(state.homeSessionRepaintTimer);
+  state.homeSessionRepaintTimer = null;
+}
+
+function scheduleHomeSessionRepaint() {
+  stopHomeSessionRepaint();
+  const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
+  if (!rows.length) return;
+  const now = Date.now();
+  const expiry = window.TokenMonitorEdgeDockPresentation.nextRunningExpiryAt(rows, now);
+  // Refresh relative ages once a minute, or sooner when a running session expires.
+  const cacheExpiry = window.TokenMonitorSessionLive?.nextSessionStatusChangeAt(rows, now) || 0;
+  const nextExpiry = [expiry, cacheExpiry].filter((at) => at > now).sort((a, b) => a - b)[0];
+  const delay = nextExpiry ? Math.min(60_000, Math.max(1_000, nextExpiry - now + 50)) : 60_000;
+  state.homeSessionRepaintTimer = setTimeout(() => {
+    state.homeSessionRepaintTimer = null;
+    if (visibleStatsSurface() !== 'main' || state.breakdown !== 'home') return;
+    const current = els.homePanel?.querySelector('.home-module-session');
+    if (!current) return;
+    const hadFocus = document.activeElement === current;
+    const next = renderHomeSessionModule();
+    current.replaceWith(next);
+    if (hadFocus) next.focus();
+    scheduleHomeSessionRepaint();
+  }, delay);
+}
+
+// Keep the Sessions metrics slot current even when no collection arrives.
+let sessionStatusRepaintTimer = null;
+function stopSessionStatusRepaint() {
+  clearTimeout(sessionStatusRepaintTimer);
+  sessionStatusRepaintTimer = null;
+}
+function scheduleSessionStatusRepaint(period, incompleteHint = '') {
+  stopSessionStatusRepaint();
+  const now = Date.now();
+  const next = window.TokenMonitorSessionLive.nextSessionStatusChangeAt(Object.values(period?.sessions || {}), now);
+  if (!next) return;
+  sessionStatusRepaintTimer = setTimeout(() => {
+    sessionStatusRepaintTimer = null;
+    if (visibleStatsSurface() !== 'main' || state.breakdown !== 'session' || state.openSession) return;
+    renderRows(sessionRowsForPeriod(period), { incompleteHint });
+    scheduleSessionStatusRepaint(period, incompleteHint);
+  }, Math.min(60_000, Math.max(1_000, next - now + 50)));
+}
+
+function renderHomeSessionModule() {
+  const current = els.homePanel?.querySelector('.home-module-session');
+  if (current && sessionTooltipShouldHoldRender()) {
+    homeSessionRenderPending = true;
+    return current;
+  }
+  const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
+  const runningCount = rows.filter((row) => window.TokenMonitorSessionLive.sessionActivityState(row) === 'running').length;
+  const meta = runningCount > 0 ? t('home.runningSessions', { count: runningCount }) : '';
+  const { module, body } = homeModuleShell('session', t('home.sessions'), 'session', meta);
+  if (rows.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'home-module-empty';
+    empty.textContent = t('home.noSessions');
+    body.append(empty);
+    return module;
+  }
+  for (const row of rows) {
+    const activityState = window.TokenMonitorSessionLive.sessionActivityState(row);
+    const item = document.createElement('div');
+    item.className = 'home-list-row home-session-row';
+    const mark = document.createElement('span');
+    applyHomeListMark(mark, iconKindFor({ client: row.client }, 'session'), clientColors[row.client] || stableColor(row.key, fallbackModelColors));
+    const stateMark = document.createElement('span');
+    stateMark.className = 'home-session-state';
+    stateMark.dataset.state = activityState;
+    stateMark.setAttribute('aria-hidden', 'true');
+    stateMark.innerHTML = window.TokenMonitorSessionLive.sessionStateMarkup({
+      spin: 'home-session-spin',
+      check: 'home-session-check',
+      idle: 'home-session-idle'
+    });
+    stateMark.title = t(activityState === 'running' ? 'session.running'
+      : activityState === 'ended' ? 'session.finished' : 'session.idle');
+    const name = document.createElement('span');
+    name.className = 'home-list-name';
+    name.textContent = row.title || row.projectLabel || String(row.sessionId || '').slice(0, 12) || '—';
+    bindHoverMarquee(name);
+    const value = document.createElement('span');
+    value.className = 'home-list-value';
+    value.textContent = formatCompact(row.totalTokens);
+    const meta = document.createElement('div');
+    meta.className = 'home-session-meta';
+    const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
+    const description = document.createElement('span');
+    description.className = 'home-list-sub';
+    // The same "N models" hover the Sessions list draws: the label stays the
+    // row's own text, and the tooltip lists the models behind the count.
+    const modelLabel = sessionRowsApi.sessionModelLabel(row);
+    const modelEntries = sessionRowsApi.sessionModelTooltipEntries(row, {
+      unattributedLabel: t('dashboard.tooltip.unclassified'),
+      formatTokens: formatCompact
+    });
+    if (modelLabel && modelEntries.length > 1) {
+      const models = document.createElement('span');
+      models.className = 'session-models';
+      models.textContent = modelLabel;
+      limitWindowsView.setDetailTooltip(models, modelEntries);
+      description.append(models);
+      if (age) description.append(document.createTextNode(` · ${age}`));
+    } else {
+      description.textContent = [modelLabel, age].filter(Boolean).join(' · ');
+    }
+    meta.append(description);
+    const context = window.TokenMonitorSessionLive.sessionActivityState(row) !== 'idle' ? row.context : null;
+    const cache = window.TokenMonitorSessionLive.sessionPromptCacheForRow(row);
+    if (cache && !context) {
+      const badge = document.createElement('span');
+      badge.className = 'home-session-cache';
+      badge.textContent = t('session.cacheEstimate', { minutes: cache.minutes });
+      sessionRowsApi.setSessionTooltip(badge, row, cache, t, limitWindowsView);
+      meta.append(badge);
+    }
+    if (context) meta.append(homeSessionContext(context, cache));
+    item.append(mark, stateMark, name, value, meta);
     body.append(item);
   }
   return module;
@@ -6194,6 +6448,11 @@ function renderHomeTrendsModule() {
 
 function renderHome() {
   if (!els.homePanel) return;
+  if (sessionTooltipShouldHoldRender()) {
+    homeSessionRenderPending = true;
+    return;
+  }
+  homeSessionRenderPending = false;
   // The previous scroller (and its ResizeObserver) is about to be replaced; drop the
   // observer so at most one is live. Keep the active tooltip visible while the
   // replacement heatmap reconnects it to the same date cell.
@@ -6227,9 +6486,11 @@ function renderHome() {
     if (id === 'tool') return renderHomeToolModule(period);
     if (id === 'device') return renderHomeDeviceModule();
     if (id === 'model') return renderHomeModelModule(period);
+    if (id === 'session') return renderHomeSessionModule();
     return renderHomeTrendsModule();
   });
   els.homePanel.replaceChildren(...nodes);
+  if (moduleIds.includes('session')) scheduleHomeSessionRepaint();
   // setupHomeActivityScroller first runs while its module is detached, where
   // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
   // attached, before the browser paints or hover restoration measures the new cell.
@@ -6243,6 +6504,24 @@ function renderHome() {
   // ResizeObserver repeats the scroll + hover restoration once layout fully settles.
 }
 
+function sessionStatsForDisplay(stats) {
+  return state.settings?.sessionTitlesEnabled === false
+    ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitleStats(stats) : stats;
+}
+
+function setRendererSettings(next) {
+  const titlesChanged = (state.settings?.sessionTitlesEnabled !== false) !== (next.sessionTitlesEnabled !== false);
+  state.settings = next;
+  if (titlesChanged) {
+    if (next.sessionTitlesEnabled === false) state.stats = sessionStatsForDisplay(state.stats);
+    // Main may have returned a titleless map while disabled. Pull it again
+    // when re-enabled, even if no new usage snapshot has arrived.
+    allTimeSessions.invalidate();
+    allTimeSessions.ensure();
+  }
+  if (titlesChanged) refreshSessionDetailHeading();
+}
+
 function render() {
   const surface = visibleStatsSurface();
   if (surface !== 'main') {
@@ -6250,6 +6529,9 @@ function render() {
     return;
   }
   if (!state.stats) return;
+  allTimeSessions.ensure();
+  stopHomeSessionRepaint();
+  stopSessionStatusRepaint();
   els.toolDetailFooter.classList.add('hidden');
   syncLiveTokenRateFooterState();
   renderSessionUsageArchiveStatus();
@@ -6369,8 +6651,12 @@ function render() {
     if (state.openSession.kind === 'background-review-group') {
       const latest = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
       if (latest) state.openSession.summary = latest;
-      renderBackgroundReviewDetail(state.openSession);
+      // The rebuild replaces every run node, so a hovered run tooltip would die
+      // mid-read (and a keyboard focus with it); hold until it closes, as the
+      // session and home lists already do.
+      if (!sessionTooltipShouldHoldRender()) renderBackgroundReviewDetail(state.openSession);
     }
+    refreshSessionDetailHeading();
     if (state.openSession.renderOptions) {
       const options = state.openSession.renderOptions;
       state.openSession.renderOptions = null;
@@ -6390,6 +6676,7 @@ function render() {
       incompleteHint = 'sessions.incomplete';
     }
     renderRows(rows, { incompleteHint });
+    if (state.breakdown === 'session') scheduleSessionStatusRepaint(period, incompleteHint);
   }
   
   renderFloatingBubbleContent();
@@ -6426,6 +6713,11 @@ function streamFailureText(failure) {
 }
 
 function statusTextFor(mode, connected) {
+  if (mode === 'sync' && state.settings?.hubMode === 'icloud') {
+    return String(state.icloudStatus?.state || '').toLowerCase() === 'available'
+      ? 'iCloud'
+      : 'Waiting…';
+  }
   if (mode === 'sync') return connected ? 'Live' : 'Offline';
   if (mode === 'local') return connected ? 'Local' : 'Collecting…';
   return 'Starting…';
@@ -6433,6 +6725,12 @@ function statusTextFor(mode, connected) {
 
 function liveDotTitle(mode, connected) {
   if (mode === 'sync') {
+    if (state.settings?.hubMode === 'icloud') {
+      const status = String(state.icloudStatus?.state || 'waiting');
+      return status === 'available'
+        ? t('settings.sync.icloudAvailable')
+        : t('settings.sync.icloudWaiting');
+    }
     if (connected) return t('status.hubStreamLive');
     const reason = streamFailureText(state.streamFailure);
     return reason ? `${t('status.hubStreamOffline')}: ${reason}` : t('status.hubStreamOffline');
@@ -6444,16 +6742,19 @@ function liveDotTitle(mode, connected) {
 function setLiveDot(connected) {
   els.liveDot.classList.toggle('live', Boolean(connected));
   els.liveDot.title = liveDotTitle(state.mode, connected);
+  if (!connected) for (const animation of els.liveDot.getAnimations()) animation.cancel();
 }
 
-// Flare the live dot once when fresh data arrives. Re-arming the one-shot
-// animation needs a class remove + forced reflow before re-adding.
+// A single opacity cue acknowledges fresh data without animating a shadow or
+// forcing layout to restart a CSS animation.
 function pulseLiveDot() {
   const dot = els.liveDot;
-  if (!dot || !dot.classList.contains('live')) return;
-  dot.classList.remove('pulse');
-  void dot.offsetWidth;
-  dot.classList.add('pulse');
+  if (!dot || !dot.classList.contains('live') || prefersReducedMotion() || isRendererWindowHidden()) return;
+  for (const animation of dot.getAnimations()) animation.cancel();
+  dot.animate([{ opacity: 0.4 }, { opacity: 1 }], {
+    duration: 420,
+    easing: 'cubic-bezier(0.22, 1, 0.36, 1)'
+  });
 }
 
 function refreshButtonIdleTitle() {
@@ -6501,22 +6802,6 @@ function settleRefreshButtonState(status) {
   }, REFRESH_BUTTON_FEEDBACK_MS);
 }
 
-// The main process rebuilds the TOTAL session list for display but ships it as a
-// display-only sibling (`allTimeSessionsView`) so it never pollutes the lossless
-// period export. Overlay it onto periods.allTime here, on the renderer's own copy, so
-// every session-view reader (list, archived count, detail lookup) sees it. See
-// injectLocalDeviceStatus in main.js.
-function overlayAllTimeSessions(stats) {
-  if (stats && stats.allTimeSessionsView && stats.periods?.allTime) {
-    const sessions = reasonixSessionGuard?.filterReasonixSyntheticSessions
-      ? reasonixSessionGuard.filterReasonixSyntheticSessions(stats.allTimeSessionsView)
-      : stats.allTimeSessionsView;
-    stats.allTimeSessionsView = sessions;
-    stats.periods.allTime.sessions = sessions;
-  }
-  return stats;
-}
-
 async function refreshStats(options = {}) {
   const feedback = options.feedback === true;
   if (feedback) {
@@ -6526,9 +6811,10 @@ async function refreshStats(options = {}) {
     setRefreshButtonState('refreshing');
   }
   try {
-    const nextStats = overlayAllTimeSessions(await window.tokenMonitor.getStats(options));
+    const nextStats = await window.tokenMonitor.getStats(options);
     observeLiveTokenRate(nextStats);
-    state.stats = nextStats;
+    allTimeSessions.invalidate();
+    state.stats = sessionStatsForDisplay(allTimeSessions.attach(nextStats));
     observeDisplayLiveTokenRates(nextStats);
     if (options.forceHistory === true) {
       // A manual history rescan is an explicit retry boundary. Let Home request the
@@ -6672,24 +6958,39 @@ function applyFontSettings(settings) {
   const source = { ...(state.settings || {}), ...(settings || {}) };
   const root = document.documentElement.style;
   const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(source);
+  document.documentElement.dataset.textSize = fontSettingsApi.normalizeTextSize(source.textSize);
+  root.setProperty('--ui-text-scale', String(fontSettingsApi.textScaleForSize(source.textSize)));
   root.setProperty('--ui-font', interfaceFont);
   root.setProperty('--display-font', displayFont);
 }
 
 function applyAppearanceSettings(settings) {
+  glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
   const opacity = glassRenderingApi.renderedGlassOpacity(settings, {
     platform: state.appInfo?.platform,
     userAgent: navigator.userAgent
   });
-  const depth = clamp(settings?.glassBlur ?? 32, 0, 100) / 100;
+  const depth = (glassRenderingApi.usesNativeMaterial(nativeMaterialState) ? 32 : clamp(settings?.glassBlur ?? 32, 0, 100)) / 100;
   const systemGlassDisabled = settings?.systemGlass === false;
   const isWindows = navigator.userAgent.toLowerCase().includes('windows');
   const windowsGlass = windowsGlassApi.appearanceState(settings, { isWindows });
+  const macGlass = macBackdropApi.appearanceState(settings, {
+    liquidGlassSupported: nativeMaterialState.liquidGlassSupported
+  });
   document.documentElement.style.setProperty('--glass-alpha', opacity.toFixed(2));
+  const imageOpacity = clamp(Number(settings?.backgroundImageOpacity ?? defaultAppearance.backgroundImageOpacity), 0, 100) / 100;
+  document.documentElement.style.setProperty('--background-image-alpha', imageOpacity.toFixed(2));
   document.documentElement.style.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
   document.documentElement.style.setProperty('--line-strong-alpha', (0.18 + depth * 0.14).toFixed(3));
   document.documentElement.style.setProperty('--control-alpha', (0.03 + depth * 0.045).toFixed(3));
   document.documentElement.classList.toggle('system-glass-disabled', systemGlassDisabled);
+  const nativeMaterial = glassRenderingApi.usesNativeMaterial(nativeMaterialState);
+  for (const control of [els.glassInput, els.blurInput, els.resetGlassButton, els.resetDepthButton]) {
+    if (control) control.disabled = nativeMaterial;
+  }
+  for (const note of [els.glassInputNote, els.blurInputNote]) {
+    if (note) note.classList.toggle('hidden', !nativeMaterial);
+  }
   els.windowsBackdropRow?.classList.toggle('hidden', !windowsGlass.showBackdropControl);
   if (els.windowsBackdropInput) {
     els.windowsBackdropInput.value = windowsGlass.backdropMode;
@@ -6703,6 +7004,10 @@ function applyAppearanceSettings(settings) {
     els.windowsBackdropNote.classList.toggle('error', accentFallback);
     els.windowsBackdropNote.classList.toggle('hidden', !windowsGlass.showAccentNote);
   }
+  els.macBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
+  // Same terms as the widget's own selector; material pushes land here too.
+  els.edgeDockMacBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
+  if (els.macBackdropInput) els.macBackdropInput.value = macGlass.backdropMode;
   applyReduceMotionPreference(settings?.reduceMotion);
   applyFontSettings(settings);
   // Only full settings objects carry themeColors; glass/zoom preview patches
@@ -6734,7 +7039,88 @@ function applyAppearanceSettings(settings) {
   
   document.documentElement.classList.toggle('is-mac-legacy', isMacLegacyRadius);
   document.body.classList.toggle('is-mac-legacy', isMacLegacyRadius);
+  syncBackgroundImageStatus();
   updateTitleFit();
+}
+
+let backgroundImageActive = false;
+let backgroundImageBusy = false;
+let backgroundImageError = false;
+let backgroundImageRequest = 0;
+let backgroundImageObjectUrl = null;
+
+function syncBackgroundImageStatus() {
+  if (els.backgroundImageStatus) {
+    els.backgroundImageStatus.textContent = t(backgroundImageError
+      ? 'settings.appearance.backgroundImageError'
+      : backgroundImageActive
+        ? (nativeMaterialState.reducedTransparency || nativeMaterialState.type === 'opaque'
+          ? 'settings.appearance.backgroundImageAccessibilityHidden'
+          : nativeMaterialState.type === 'liquid-glass'
+            ? 'settings.appearance.backgroundImageNativeOverlay'
+            : 'settings.appearance.backgroundImageActive')
+        : 'settings.appearance.backgroundImageNone');
+  }
+  els.clearBackgroundImageButton?.classList.toggle('hidden', !backgroundImageActive);
+  els.backgroundImageOpacityRow?.classList.toggle('hidden', !backgroundImageActive);
+  if (els.chooseBackgroundImageButton) els.chooseBackgroundImageButton.disabled = backgroundImageBusy;
+  if (els.clearBackgroundImageButton) els.clearBackgroundImageButton.disabled = backgroundImageBusy;
+}
+
+function applyBackgroundImage(bytes) {
+  // The PNG is carried over IPC as bytes and shown through a blob: URL. A
+  // data: URL is not an option: Blink silently truncates CSS values set via
+  // setProperty() at 2 MiB, which corrupted the url("data:...") value and made
+  // larger saved images render as nothing at all.
+  const buffer = bytes instanceof Uint8Array && bytes.byteLength > 0 ? bytes : null;
+  backgroundImageActive = buffer !== null;
+  if (backgroundImageObjectUrl) {
+    URL.revokeObjectURL(backgroundImageObjectUrl);
+    backgroundImageObjectUrl = null;
+  }
+  if (backgroundImageActive) {
+    backgroundImageObjectUrl = URL.createObjectURL(new Blob([buffer], { type: 'image/png' }));
+    els.shell.style.setProperty('--custom-background-image', `url("${backgroundImageObjectUrl}")`);
+  } else {
+    els.shell.style.removeProperty('--custom-background-image');
+  }
+  els.shell.classList.toggle('has-custom-background', backgroundImageActive);
+  backgroundImageError = false;
+  syncBackgroundImageStatus();
+}
+
+async function loadBackgroundImage() {
+  const request = ++backgroundImageRequest;
+  try {
+    const bytes = await window.tokenMonitor.getBackgroundImage();
+    if (request === backgroundImageRequest) applyBackgroundImage(bytes);
+  } catch (_) {
+    if (request !== backgroundImageRequest) return;
+    backgroundImageError = true;
+    syncBackgroundImageStatus();
+  }
+}
+
+async function changeBackgroundImage(clear = false) {
+  if (backgroundImageBusy) return;
+  backgroundImageBusy = true;
+  backgroundImageRequest += 1;
+  syncBackgroundImageStatus();
+  try {
+    if (clear) {
+      await window.tokenMonitor.clearBackgroundImage();
+      applyBackgroundImage(null);
+    } else {
+      const result = await window.tokenMonitor.chooseBackgroundImage();
+      if (!result?.canceled && result?.bytes) applyBackgroundImage(result.bytes);
+    }
+  } catch (_) {
+    backgroundImageError = true;
+    syncBackgroundImageStatus();
+  } finally {
+    backgroundImageBusy = false;
+    syncBackgroundImageStatus();
+  }
 }
 
 const themePresetsApi = window.TokenMonitorThemePresets;
@@ -6887,7 +7273,9 @@ function currentVendorOverrides() {
 function previewThemeColor(key, value) {
   if (!themePresetsApi.isValidHex(value)) return;
   const next = { ...currentThemeOverrides(), [key]: themePresetsApi.normalizeHex(value) };
+  appearancePreview = { ...appearancePreview, themeColors: next };
   applyThemeColors(next);
+  window.tokenMonitor.previewAppearance?.(appearancePreview).catch?.(() => {});
 }
 
 async function saveThemeColor(key, value) {
@@ -7375,6 +7763,7 @@ function appearancePatchFromControls() {
   return {
     systemGlass,
     windowsBackdrop: windowsGlassApi.normalizeWindowsBackdropMode(els.windowsBackdropInput?.value),
+    macBackdrop: macBackdropApi.normalizeMacBackdropMode(els.macBackdropInput?.value),
     reduceMotion: els.reduceMotionInputs?.find((input) => input.checked)?.value || 'system',
     showLiveDot: Boolean(els.liveDotInput.checked),
     showToolIcons: Boolean(els.toolIconsInput.checked),
@@ -7386,6 +7775,7 @@ function appearancePatchFromControls() {
     settingsInTitlebar: Boolean(els.swapSettingsRefreshInput.checked),
     glassOpacity: Number(els.glassInput.value === '' ? defaultAppearance.glassOpacity : els.glassInput.value),
     glassBlur: Number(els.blurInput.value === '' ? defaultAppearance.glassBlur : els.blurInput.value),
+    backgroundImageOpacity: Number(els.backgroundImageOpacityInput?.value || defaultAppearance.backgroundImageOpacity),
     zoomFactor: Number(els.zoomInput.value === '' ? defaultAppearance.zoomFactor * 100 : els.zoomInput.value) / 100
   };
 }
@@ -7468,6 +7858,7 @@ async function resetDisplayFont() {
 }
 
 function syncFontSettingsControls() {
+  if (els.textSizeInput) els.textSizeInput.value = fontSettingsApi.normalizeTextSize(state.settings?.textSize);
   for (const [role, settingKey] of [['interface', 'interfaceFontFamily'], ['display', 'displayFontFamily']]) {
     const controls = fontControlsFor(role);
     const value = fontSettingsApi.normalizeFontFamily(state.settings?.[settingKey]);
@@ -7487,14 +7878,16 @@ function syncSliderRow(input) {
 function syncSliderRows() {
   syncSliderRow(els.glassInput);
   syncSliderRow(els.blurInput);
+  syncSliderRow(els.backgroundImageOpacityInput);
   syncSliderRow(els.zoomInput);
 }
 
 function applyAppearanceFromControls() {
   const patch = appearancePatchFromControls();
+  appearancePreview = { ...appearancePreview, ...patch };
   applyAppearanceSettings(patch);
   syncSliderRows();
-  window.tokenMonitor.previewAppearance?.(patch).catch(() => {});
+  window.tokenMonitor.previewAppearance?.(appearancePreview).catch(() => {});
 }
 
 async function saveAppearanceFromControls() {
@@ -7502,22 +7895,63 @@ async function saveAppearanceFromControls() {
 }
 
 function syncHubModeUi() {
+  syncContentForm?.syncSettings();
   const mode = state.settings.hubMode || 'local';
-  for (const input of els.hubModeOptions.querySelectorAll('input[name="hubMode"]')) {
-    input.checked = input.value === mode;
-  }
+  els.hubModeOptions.value = mode;
+  if (els.syncModeDescription) els.syncModeDescription.textContent = t(SYNC_MODE_DESCRIPTIONS[mode] || SYNC_MODE_DESCRIPTIONS.local);
+  const icloudSupported = state.appInfo?.platform === 'darwin';
+  if (els.icloudModeOption) els.icloudModeOption.disabled = !icloudSupported;
   els.hubClientFields.classList.toggle('hidden', mode !== 'client');
+  els.hubClientFields.inert = mode !== 'client';
   els.hubHostFields.classList.toggle('hidden', mode !== 'host');
+  els.hubHostFields.inert = mode !== 'host';
+  if (els.icloudFields) {
+    els.icloudFields.classList.toggle('hidden', mode !== 'icloud');
+    els.icloudFields.inert = mode !== 'icloud';
+  }
   if (mode === 'host') {
     els.hubSecretInput.value = state.settings.hubHostSecret || '';
     renderHubStatus();
+  } else {
+    renderIcloudStatus();
   }
-  renderSyncClientStatus();
+  syncModeSelect?.sync();
+  renderSyncPanel();
   renderHubBuildStatus();
+  syncHubConnectionUi();
   syncHubSaveButton();
 }
 
+function renderIcloudStatus() {
+  if (!els.icloudStatus || !els.icloudRootStatus) return;
+  const supported = state.appInfo?.platform === 'darwin';
+  const info = state.icloudStatus || state.hubInfo?.icloud || null;
+  if (!supported) {
+    els.icloudStatus.textContent = t('settings.sync.icloudUnsupported');
+    els.icloudStatus.className = 'hub-status';
+    els.icloudRootStatus.textContent = '';
+    return;
+  }
+  const status = String(info?.state || 'waiting');
+  const labels = {
+    available: 'settings.sync.icloudAvailable',
+    initializing: 'settings.sync.icloudInitializing',
+    starting: 'settings.sync.icloudInitializing',
+    waiting: 'settings.sync.icloudWaiting',
+    unavailable: 'settings.sync.icloudUnavailable',
+    error: 'settings.sync.icloudError',
+    stopped: 'settings.sync.icloudWaiting'
+  };
+  els.icloudStatus.textContent = t(labels[status] || 'settings.sync.icloudWaiting');
+  els.icloudStatus.className = `hub-status${status === 'available' ? ' ok' : status === 'error' ? ' error' : ''}`;
+  const root = String(info?.root || '').trim();
+  els.icloudRootStatus.textContent = root
+    ? `${t('settings.sync.icloudRoot')}: ${root}`
+    : t('settings.sync.icloudRootWaiting');
+}
+
 function renderHubStatus() {
+  renderIcloudStatus();
   if (!els.hubStatusRow || !els.hubAddressList) return;
   const info = state.hubInfo;
   const port = Number(state.settings.hubHostPort || 17321);
@@ -7545,25 +7979,259 @@ function renderHubStatus() {
   renderHubAddresses(info.lanAddresses || [], info.listeningPort);
 }
 
-function renderSyncClientStatus() {
-  if (!els.syncClientStatus) return;
-  // Gate on the runtime mode, not just the hubMode setting: client mode with no
-  // URL falls back to the local collector (mode 'local'), and its statuses must
-  // not surface as a sync failure in this row. Matches liveDotTitle's gating.
-  const show = state.settings?.hubMode === 'client' && state.mode === 'sync' && !state.streamConnected;
-  const text = show ? streamFailureText(state.streamFailure) : '';
-  els.syncClientStatus.textContent = text;
-  els.syncClientStatus.className = 'hub-status error';
-  // Empty .hub-status still renders a bordered box, so hide it entirely when
-  // there is nothing to show (connected, or not in client mode).
-  els.syncClientStatus.hidden = !text;
+const SYNC_PANEL_AGE_REFRESH_MS = 30_000;
+const SYNC_UPLOAD_INTERVAL_KEYS = {
+  600000: 'settings.sync.uploadInterval.10m',
+  1200000: 'settings.sync.uploadInterval.20m',
+  1800000: 'settings.sync.uploadInterval.30m'
+};
+let syncPanelRows = [];
+let syncPanelListScope = '';
+let syncPanelAgeTimer = 0;
+const syncPanelSignalObserver = els.syncPanelSignal && typeof IntersectionObserver === 'function'
+  ? new IntersectionObserver(([entry]) => {
+    els.syncPanelSignal.dataset.visible = String(entry.isIntersecting);
+  }, { root: els.settingsPanel }) : null;
+syncPanelSignalObserver?.observe(els.syncPanelSignal);
+window.addEventListener('unload', () => syncPanelSignalObserver?.disconnect(), { once: true });
+
+// The sync settings status and device list reflect what the sync backend holds. Runs on every connection/stats push while the
+// settings panel is open; keyed rows keep their controls through updates and sorting.
+function renderSyncPanel() {
+  if (!els.syncDevicePanel) return;
+  const hubMode = state.settings?.hubMode || 'local';
+  const shared = SHARED_SYNC_MODES.has(hubMode)
+    && (hubMode !== 'icloud' || state.appInfo?.platform === 'darwin');
+  els.syncDevicePanel.hidden = !shared;
+  if (!shared) {
+    syncPanelRows = [];
+    renderSyncPanelDevices(syncPanelRows);
+    stopSyncPanelAgeTimer();
+    return;
+  }
+  // Client mode without a Hub URL runs the local collector, whose stats hold
+  // only this machine: that is not a device list from any Hub.
+  syncPanelRows = state.mode === 'sync'
+    ? syncDevicePanelApi.deviceRows(state.stats?.devices, {
+      localDeviceId: state.settings?.deviceId || ''
+    })
+    : [];
+  renderSyncPanelConnection(hubMode);
+  renderSyncPanelDevices(syncPanelRows);
+  updateSyncPanelAges();
+  if (!syncPanelAgeTimer) syncPanelAgeTimer = setInterval(tickSyncPanelAges, SYNC_PANEL_AGE_REFRESH_MS);
+}
+
+function renderSyncPanelConnection(hubMode) {
+  els.syncPanelSignal.dataset.windowHidden = String(isRendererWindowHidden());
+  const show = hubMode === 'client';
+  els.syncPanelConnection.hidden = !show;
+  if (!show) return;
+  const failure = streamFailureText(state.streamFailure);
+  const connection = syncDevicePanelApi.clientConnectionState({
+    mode: state.mode,
+    streamConnected: state.streamConnected,
+    failureReason: failure
+  });
+  els.syncPanelConnection.dataset.state = connection;
+  els.syncPanelState.textContent = t(`settings.sync.panel.${connection}`);
+  els.syncPanelDetail.textContent = connection === 'disconnected' ? failure : '';
+  els.syncPanelDetail.hidden = connection !== 'disconnected';
+  if (els.syncPanelUpload) els.syncPanelUpload.hidden = !String(state.settings?.hubUrl || '').trim();
+}
+
+function syncPanelUploadText() {
+  const local = syncPanelRows.find((row) => row.isLocal);
+  if (!local) return '';
+  const age = relativeAgeLabel(local.syncedAt);
+  const uploaded = age ? t('settings.sync.panel.lastUpload', { age }) : t('settings.sync.panel.notUploaded');
+  const intervalKey = SYNC_UPLOAD_INTERVAL_KEYS[Number(state.settings?.syncUploadIntervalMs) || 0];
+  return intervalKey ? `${uploaded} · ${t(intervalKey)}` : uploaded;
+}
+
+function syncPanelPresenceText(row) {
+  const age = relativeAgeLabel(row.syncedAt);
+  if (row.isLocal && !row.syncedAt) return t('settings.sync.panel.notUploaded');
+  if (row.stale) return age ? `${t('home.staleDevice')} · ${deviceSyncedLabel(row.syncedAt)}` : t('home.staleDevice');
+  return deviceSyncedLabel(row.syncedAt);
+}
+
+function updateSyncPanelAges() {
+  if (els.syncPanelUpload && !els.syncPanelUpload.hidden) {
+    els.syncPanelUpload.textContent = syncPanelUploadText() || t('settings.sync.panel.notUploaded');
+  }
+  const rowsByKey = new Map(syncPanelRows.map((row) => [row.key, row]));
+  for (const element of els.syncDeviceList?.querySelectorAll('.sync-device-age') || []) {
+    const row = rowsByKey.get(element.dataset.key);
+    if (!row) continue;
+    element.textContent = syncPanelPresenceText(row);
+    const date = row.syncedAt ? new Date(row.syncedAt) : null;
+    element.title = date && !Number.isNaN(date.getTime()) ? date.toLocaleString(currentLocale()) : '';
+  }
+}
+
+function tickSyncPanelAges() {
+  if (!isSettingsSurfaceVisible() || els.syncDevicePanel?.hidden) {
+    stopSyncPanelAgeTimer();
+    return;
+  }
+  updateSyncPanelAges();
+}
+
+function stopSyncPanelAgeTimer() {
+  if (!syncPanelAgeTimer) return;
+  clearInterval(syncPanelAgeTimer);
+  syncPanelAgeTimer = 0;
+}
+
+function renderSyncPanelDevices(rows) {
+  const counts = syncDevicePanelApi.deviceCounts(rows);
+  els.syncPanelCount.textContent = counts.total > 0 ? t('settings.sync.panel.onlineCount', counts) : '';
+  els.syncPanelOpenDevices.hidden = counts.total === 0 || !availableBreakdownIds().includes('device');
+  const list = els.syncDeviceList;
+  const scope = JSON.stringify([
+    state.settings?.hubMode, state.mode, state.settings?.deviceId,
+    state.settings?.hubUrl, state.settings?.secret,
+    state.settings?.hubHostPort, state.settings?.hubHostSecret
+  ]);
+  if (scope !== syncPanelListScope) {
+    for (const remove of list.querySelectorAll('.device-delete-button')) resetDeviceDeleteConfirmation(remove);
+    list.replaceChildren();
+    syncPanelListScope = scope;
+  }
+  const existing = new Map(Array.from(list.children, item => [item.dataset.key, item]));
+  const wanted = new Set(rows.map(row => row.key));
+  for (const [key, item] of existing) {
+    if (wanted.has(key)) continue;
+    const remove = item.querySelector('.device-delete-button');
+    if (remove) resetDeviceDeleteConfirmation(remove);
+    item.remove();
+  }
+  if (rows.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'sync-device-empty';
+    empty.textContent = t(state.mode === 'sync' ? 'settings.sync.panel.empty' : 'settings.sync.panel.waiting');
+    list.replaceChildren(empty);
+    return;
+  }
+  rows.forEach((row, index) => {
+    let item = existing.get(row.key);
+    if (item) updateSyncDeviceRow(item, row);
+    else item = syncDeviceRow(row);
+    const before = list.children[index] || null;
+    if (before === item) return;
+    // Moving a live row with insertBefore would blur its confirmation button.
+    if (item.parentElement === list) list.moveBefore(item, before);
+    else list.insertBefore(item, before);
+  });
+}
+
+function syncDeviceRow(row) {
+  const item = document.createElement('div');
+  item.className = `sync-device-row${row.isLocal ? ' is-local' : ''}${row.stale ? ' is-stale' : ''}`;
+  item.dataset.key = row.key;
+
+  const mark = document.createElement('span');
+  mark.className = 'sync-device-mark';
+  mark.setAttribute('aria-hidden', 'true');
+
+  const main = document.createElement('div');
+  main.className = 'sync-device-main';
+  const title = document.createElement('div');
+  title.className = 'sync-device-title';
+  const name = document.createElement('span');
+  name.className = 'sync-device-name';
+  title.append(name);
+  const meta = document.createElement('div');
+  meta.className = 'sync-device-meta';
+  const metaText = document.createElement('span');
+  metaText.className = 'sync-device-meta-text';
+  meta.append(metaText);
+  main.append(title, meta);
+
+  const side = document.createElement('div');
+  side.className = 'sync-device-side';
+  const presence = document.createElement('span');
+  presence.className = 'sync-device-presence';
+  const dot = document.createElement('span');
+  dot.className = 'sync-device-dot';
+  dot.setAttribute('aria-hidden', 'true');
+  const age = document.createElement('span');
+  age.className = 'sync-device-age';
+  age.dataset.key = row.key;
+  presence.append(dot, age);
+  side.append(presence);
+
+  item.append(mark, main, side);
+  updateSyncDeviceRow(item, row);
+  return item;
+}
+
+function updateSyncDeviceRow(item, row) {
+  const signature = JSON.stringify([
+    currentLocale(), row.name, row.hostname, row.platform, row.osName, row.osVersion,
+    row.agentVersion, row.agentRuntime, row.isLocal, row.stale, row.canRemove,
+    devicesBeingDeleted.has(row.key), Boolean(window.tokenMonitor.deleteDevice)
+  ]);
+  if (item.dataset.signature === signature) return;
+  item.dataset.signature = signature;
+  item.className = `sync-device-row${row.isLocal ? ' is-local' : ''}${row.stale ? ' is-stale' : ''}`;
+  const mark = item.querySelector('.sync-device-mark');
+  const os = osIconFor(row.platform);
+  mark.className = os ? `sync-device-mark row-icon row-icon-os-${os}` : 'sync-device-mark sync-device-mark-generic';
+  const name = item.querySelector('.sync-device-name');
+  name.textContent = row.name;
+  name.title = row.hostname && row.hostname !== row.name ? `${row.name} · ${row.hostname}` : row.name;
+  const title = item.querySelector('.sync-device-title');
+  let badge = title.querySelector('.sync-device-badge');
+  if (row.isLocal) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'sync-device-badge';
+      title.append(badge);
+    }
+    badge.textContent = t('settings.sync.panel.thisDevice');
+  } else badge?.remove();
+  item.querySelector('.sync-device-meta-text').textContent = [
+    deviceBreakdownApi.devicePlatformLabel(row.platform, row.osName, row.osVersion),
+    [deviceRuntimeLabel(row.agentRuntime), row.agentVersion ? `v${row.agentVersion}` : ''].filter(Boolean).join(' ')
+  ].filter(Boolean).join(' · ');
+  const side = item.querySelector('.sync-device-side');
+  let remove = side.querySelector('.device-delete-button');
+  if (row.canRemove && row.stale && !row.isLocal && window.tokenMonitor.deleteDevice) {
+    if (!remove) {
+      remove = createDeviceRemoveButton(row.key, t('devices.remove'), t('devices.removeConfirm'));
+      const action = document.createElement('span');
+      action.className = 'sync-device-action';
+      action.append(remove);
+      side.append(action);
+    }
+    remove.dataset.idleText = t('devices.remove');
+    remove.dataset.confirmText = t('devices.removeConfirm');
+    remove.querySelector('.device-delete-label').textContent = remove.dataset.confirm === 'true'
+      ? remove.dataset.confirmText : remove.dataset.idleText;
+    remove.disabled = devicesBeingDeleted.has(row.key);
+  } else if (remove) {
+    resetDeviceDeleteConfirmation(remove);
+    remove.parentElement.remove();
+  }
 }
 
 function renderHubBuildStatus() {
   if (!els.hubBuildStatus) return;
-  const visible = state.settings?.hubMode === 'client';
+  const savedUrl = String(state.settings?.hubUrl || '').trim().replace(/\/$/, '');
+  const visible = state.settings?.hubMode === 'client'
+    && (!state.hubBuildStatus?.hubUrl || state.hubBuildStatus.hubUrl === savedUrl);
   const model = visible ? hubBuildPresentationApi.presentation(state.hubBuildStatus) : null;
-  if (!model) {
+  // Label the confirmed backend, not its version status. Version notices stay
+  // near the connection fields, and a matching build needs no extra message.
+  const current = model?.tone === 'ok';
+  const knownRuntime = ['cloudflare-worker', 'node-hub'].includes(state.hubBuildStatus?.runtime);
+  if (els.syncPanelBuild) {
+    els.syncPanelBuild.hidden = !model || !knownRuntime;
+    els.syncPanelBuild.textContent = model && knownRuntime ? t(model.targetKey) : '';
+  }
+  if (!model || current) {
     els.hubBuildStatus.hidden = true;
     els.hubBuildStatus.textContent = '';
     return;
@@ -7626,6 +8294,7 @@ async function refreshHubInfo() {
   if (!window.tokenMonitor.getHubInfo) return;
   try {
     state.hubInfo = await window.tokenMonitor.getHubInfo();
+    if (state.hubInfo?.icloud) state.icloudStatus = state.hubInfo.icloud;
     renderHubStatus();
   } catch (_) { /* ignore */ }
 }
@@ -7658,7 +8327,8 @@ async function refreshHubBuildStatus() {
       || (result?.hubUrl && result.hubUrl !== currentUrl)) return;
     state.hubBuildStatus = result;
   } catch (_) {
-    if (request !== hubBuildStatusRequest) return;
+    const currentUrl = String(state.settings.hubUrl || '').trim().replace(/\/$/, '');
+    if (request !== hubBuildStatusRequest || currentUrl !== requestedUrl) return;
     state.hubBuildStatus = null;
   }
   renderHubBuildStatus();
@@ -7720,6 +8390,76 @@ const hubDraftDirty = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [fiel
 const hubDraftRevisions = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [field, 0]));
 let hubSaveBusy = false;
 let hubSaveInFlightRevisions = null;
+const CLIENT_CONNECTION_FIELDS = ['hubUrl', 'secret', 'deviceId'];
+let clientConnectionEditing = false;
+let clientConnectionEditRevision = 0;
+let hubSaveError = false;
+
+function clientConnectionHasDraft() {
+  return CLIENT_CONNECTION_FIELDS.some(field => hubDraftDirty[field]);
+}
+
+function syncHubConnectionUi() {
+  if (!els.syncConnectionEditor) return;
+  const client = state.settings?.hubMode === 'client';
+  const configured = Boolean(String(state.settings?.hubUrl || '').trim());
+  const editing = clientConnectionEditing || clientConnectionHasDraft() || !configured;
+  const focusedEditor = els.syncConnectionEditor.contains(document.activeElement)
+    || els.syncDeviceSettings.contains(document.activeElement);
+  els.syncConnectionEdit.hidden = !client || editing;
+  if (client && !editing && focusedEditor && isSettingsSurfaceVisible()) {
+    els.syncConnectionEdit.focus({ preventScroll: true });
+  }
+  els.syncConnectionEditor.hidden = !client || !editing;
+  els.syncConnectionEditor.inert = !client || !editing;
+  els.syncDeviceSettings.hidden = client && !editing;
+  els.syncDeviceSettings.inert = client && !editing;
+  els.syncConnectionCancel.hidden = !client || !editing;
+  els.syncConnectionCancel.disabled = hubSaveBusy;
+  els.syncConnectionIdentity.hidden = !client || editing;
+  setHoverMarqueeText(els.syncConnectionEndpoint, syncDevicePanelApi.connectionEndpoint(state.settings?.hubUrl)
+    || t('settings.sync.savedEndpoint'));
+  els.syncUploadIntervalRow.hidden = !client;
+  els.syncUploadIntervalRow.inert = !client;
+  els.syncConnectionSaveError.hidden = !hubSaveError;
+  els.syncConnectionSaveError.textContent = hubSaveError ? t('settings.sync.saveFailed') : '';
+}
+
+function beginClientConnectionEdit({ focus = false } = {}) {
+  if (state.settings?.hubMode !== 'client' || clientConnectionEditing) return;
+  if (focus) syncHubDraftFields();
+  clientConnectionEditing = true;
+  clientConnectionEditRevision += 1;
+  hubSaveError = false;
+  preserveSettingsPanelScroll(() => {
+    syncHubConnectionUi();
+    if (focus) els.hubUrlInput.focus({ preventScroll: true });
+  });
+}
+
+function cancelClientConnectionEdit() {
+  if (hubSaveBusy || state.settings?.hubMode !== 'client') return;
+  clientConnectionEditing = false;
+  clientConnectionEditRevision += 1;
+  hubSaveError = false;
+  for (const [field, inputId] of HUB_DRAFT_FIELDS) {
+    if (!CLIENT_CONNECTION_FIELDS.includes(field)) continue;
+    hubDraftDirty[field] = false;
+    els[inputId].value = state.settings?.[field] || '';
+  }
+  preserveSettingsPanelScroll(() => {
+    syncHubDraftFields();
+    if (!String(state.settings?.hubUrl || '').trim()) els.hubUrlInput.focus({ preventScroll: true });
+  });
+}
+
+function finishClientConnectionSave(submittedRevisions, editRevision) {
+  if (state.settings?.hubMode !== 'client' || clientConnectionEditRevision !== editRevision
+    || !String(state.settings?.hubUrl || '').trim() || clientConnectionHasDraft()
+    || CLIENT_CONNECTION_FIELDS.some(field => hubDraftRevisions[field] !== submittedRevisions[field])) return;
+  clientConnectionEditing = false;
+  preserveSettingsPanelScroll(syncHubDraftFields);
+}
 
 function hubDraftFieldIsActive(field) {
   return field !== 'hubHostPort' || state.settings?.hubMode === 'host';
@@ -7753,18 +8493,25 @@ function markHubDraftDirty(field) {
   if (!input) return;
   hubDraftRevisions[field] += 1;
   syncHubDraftDirty(field);
+  if (CLIENT_CONNECTION_FIELDS.includes(field)) beginClientConnectionEdit();
+  hubSaveError = false;
+  syncHubConnectionUi();
   syncHubSaveButton();
 }
 
 function syncHubDraftFields() {
   reconcileHubDraftDirtyState();
+  if (clientConnectionEditing) {
+    for (const field of CLIENT_CONNECTION_FIELDS) syncHubDraftDirty(field);
+  }
   for (const [field, inputId] of HUB_DRAFT_FIELDS) {
     const input = els[inputId];
-    if (!input || hubDraftDirty[field]) continue;
+    if (!input || hubDraftDirty[field] || (clientConnectionEditing && CLIENT_CONNECTION_FIELDS.includes(field))) continue;
     input.value = field === 'hubHostPort'
       ? String(state.settings?.hubHostPort || 17321)
       : state.settings?.[field] || '';
   }
+  syncHubConnectionUi();
   syncHubSaveButton();
 }
 
@@ -7868,6 +8615,7 @@ function syncSettingsForm() {
     return;
   }
   settingsDomSyncPending = false;
+  setupLimitAccountPanels();
   applySettingsTranslations();
   applyInitialBreakdownPreference();
   syncPeriodTabs();
@@ -7919,6 +8667,7 @@ function syncSettingsForm() {
   if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled !== false;
   if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
   renderAutomaticAppUpdateControl();
+  allTimeSessions.ensure();
   renderSessionUsageArchiveStatus();
   const exportAutoOn = Boolean(state.settings.exportAutoEnabled);
   const exportDir = state.settings.exportDir || '';
@@ -7938,6 +8687,7 @@ function syncSettingsForm() {
   const systemGlass = state.settings.systemGlass === false ? 'off' : 'system';
   for (const input of els.systemGlassInputs || []) input.checked = input.value === systemGlass;
   if (els.windowsBackdropInput) els.windowsBackdropInput.value = windowsGlassApi.normalizeWindowsBackdropMode(state.settings.windowsBackdrop);
+  if (els.macBackdropInput) els.macBackdropInput.value = macBackdropApi.normalizeMacBackdropMode(state.settings.macBackdrop);
   const reduceMotion = motionPreferenceApi.normalize(state.settings.reduceMotion);
   for (const input of els.reduceMotionInputs || []) input.checked = input.value === reduceMotion;
   els.liveDotInput.checked = state.settings.showLiveDot !== false;
@@ -7949,7 +8699,7 @@ function syncSettingsForm() {
     els.liveTokenRateScopeInput.value = state.settings.liveTokenRateScope === 'device' ? 'device' : 'all';
   }
   const liveRateHasScope = state.settings.showLiveTokenRate === true
-    && (state.settings.hubMode === 'client' || state.settings.hubMode === 'host');
+    && tokenRateApi.isSharedSyncMode(state.settings.hubMode);
   els.liveTokenRateScopeRow?.classList.toggle('hidden', !liveRateHasScope);
   if (els.compactTokenUnitsInput) {
     els.compactTokenUnitsInput.value = state.settings.compactTokenUnits === 'localized' ? 'localized' : 'western';
@@ -7993,24 +8743,14 @@ function syncSettingsForm() {
   }
   els.glassInput.value = String(state.settings.glassOpacity ?? 68);
   els.blurInput.value = String(state.settings.glassBlur ?? 32);
+  if (els.backgroundImageOpacityInput) els.backgroundImageOpacityInput.value = String(state.settings.backgroundImageOpacity ?? defaultAppearance.backgroundImageOpacity);
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
   syncSliderRows();
-  renderDeepseekStatus();
-  renderMinimaxStatus();
-  renderExternalProviderStatus('claude');
-  renderExternalProviderStatus('cline');
-  renderExternalProviderStatus('factory');
-  renderExternalProviderStatus('zai');
-  renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
-  renderExternalProviderStatus('qoder');
-  renderExternalProviderStatus('devin');
-  renderExternalProviderStatus('trae');
-  renderExternalProviderStatus('zed');
-  renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
-  renderExternalProviderStatus('ollama');
-  renderExternalProviderStatus('alibaba');
+  for (const form of state.settings?.limitAccountForms || []) {
+    if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
+  }
   renderAntigravityStatus();
   renderMimoStatus();
   renderCopilotStatus();
@@ -8510,6 +9250,24 @@ function renderHomeLimitProviderList() {
     .orderedLimitProviders(LIMIT_PROVIDERS, homeLimitProviderOrderValue())
     .filter(({ id }) => enabled.has(id));
   const hasCustomOrder = Boolean(state.settings?.homeLimitProviderOrder);
+  const displayLabel = document.createElement('label');
+  displayLabel.className = 'settings-item';
+  const displayText = document.createElement('span');
+  displayText.className = 'settings-item-text';
+  const displayTitle = document.createElement('span');
+  displayTitle.className = 'settings-item-title';
+  displayTitle.textContent = t('settings.home.limitDisplayMode');
+  const displayInput = document.createElement('select');
+  for (const mode of ['text', 'bars']) {
+    const option = document.createElement('option');
+    option.value = mode;
+    option.textContent = t(`settings.home.limitDisplayMode.${mode}`);
+    displayInput.append(option);
+  }
+  displayInput.value = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  displayInput.addEventListener('change', () => void saveSettings({ homeLimitDisplayMode: displayInput.value }));
+  displayText.append(displayTitle);
+  displayLabel.append(displayText, displayInput);
   const statusLabel = document.createElement('label');
   statusLabel.className = 'checkbox-label home-limit-status-setting';
   const statusInput = document.createElement('input');
@@ -8594,7 +9352,7 @@ function renderHomeLimitProviderList() {
   showAll.addEventListener('click', () => void showAllHomeLimitProviders());
   headerActions.append(reset, showAll);
   header.append(note, headerActions);
-  wrap.append(statusLabel, providerNamesLabel, countLabel, header);
+  wrap.append(displayLabel, statusLabel, providerNamesLabel, countLabel, header);
   for (const { id, label, settingsLabel } of providers) {
     const isHidden = hidden.has(id);
     const row = document.createElement('div');
@@ -8883,6 +9641,24 @@ function renderSessionSettingsList() {
   const wrap = document.createElement('div');
   wrap.id = 'sessionSettingsList';
   wrap.className = 'settings-nested-list trend-settings-list';
+  const titleLabel = document.createElement('label');
+  titleLabel.className = 'checkbox-label trend-settings-row';
+  const titleInput = document.createElement('input');
+  titleInput.type = 'checkbox';
+  titleInput.name = 'sessionTitlesEnabled';
+  titleInput.checked = state.settings?.sessionTitlesEnabled !== false;
+  titleInput.setAttribute('aria-describedby', 'sessionTitlesNote');
+  const titleText = document.createElement('span');
+  titleText.textContent = t('settings.session.showTitles');
+  titleLabel.append(titleInput, titleText);
+  const titleNote = document.createElement('p');
+  titleNote.id = 'sessionTitlesNote';
+  titleNote.className = 'settings-note';
+  titleNote.textContent = t('settings.session.showTitlesNote');
+  titleInput.addEventListener('change', async () => {
+    await saveSettings({ sessionTitlesEnabled: titleInput.checked });
+  });
+  wrap.append(titleLabel, titleNote);
   // A plain `.settings-item` row, matching the Model ranking control in Main —
   // the same title-left/control-right shape. It deliberately does NOT reuse
   // `.home-activity-settings`: that carries its own indent rule for the Home
@@ -9960,14 +10736,17 @@ function renderLimitProviderCheckboxesNow() {
       const input = inputs[index];
       if (input) reusableSettingInputs.set(`${providerId}:${setting.key}`, input);
     });
+    for (const input of row.querySelectorAll?.('.limit-provider-usage-items-list input[data-item-id]') || []) {
+      reusableSettingInputs.set(`${providerId}:item:${input.dataset.itemId}`, input);
+    }
   }
   const enabled = enabledLimitProviderSet();
-  const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
   const filtering = Boolean(limitProviderQuery());
   for (const { id, label, settingsLabel } of providers) {
     const isEnabled = enabled.has(id);
     const provider = isEnabled
-      ? (collected.get(id) || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
+      ? (limitProviderPresentationApi.limitProviderSettingsRecord(state.stats?.limits?.providers, id)
+        || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
       : { provider: id, status: 'disabled', windows: [] };
     const row = document.createElement('div');
     row.className = `limit-provider-row${isEnabled ? '' : ' is-disabled'}${matched.has(id) ? '' : ' is-filtered-out'}`;
@@ -10040,7 +10819,8 @@ function renderLimitProviderCheckboxesNow() {
       actions.append(mode);
     }
     const settings = LIMIT_PROVIDER_SETTINGS[id];
-    const hasOptions = Boolean(accountGroup || settings || connectionDetailKey);
+    const usageItems = isEnabled ? limitProviderUsageItemRows(id) : [];
+    const hasOptions = Boolean(accountGroup || settings || connectionDetailKey || usageItems.length);
     let optionsContainer = null;
     let optionsInner = null;
     let main = null;
@@ -10070,6 +10850,7 @@ function renderLimitProviderCheckboxesNow() {
       }
       if (connectionDetailKey) optionsInner.append(limitProviderConnectionDetail(connectionDetailKey));
       if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
+      if (usageItems.length) optionsInner.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
       optionsContainer.append(optionsInner);
       const toggleOptions = () => {
         const opening = state.limitProviderSettingsExpanded !== id;
@@ -10153,14 +10934,217 @@ function moveOpenCodeLocalFallbackSetting() {
   }
 }
 
+// Every account form saves through limits:saveCredential, which checks the
+// draft, probes it in main and stores it unless the provider rejected it. The
+// panel only turns the answer into its message line and the pending pill;
+// generated and hand-built panels share this, including which messages they
+// may override (`messages.required` / `rejected` / `invalidFormat`).
+let claudeOrganizationChoicesRevision = 0;
+async function saveAccountCredential(id, values, { messages = {}, failedKey, clearInput = () => {} } = {}) {
+  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
+  const provider = LIMIT_PROVIDERS.find((entry) => entry.id === id);
+  const name = provider?.settingsLabel || provider?.label || id;
+  setAccountPanelMessage(id, null);
+  renderExternalProviderStatus(id);
+  let result;
+  try {
+    result = await commitAccountCredential(() => window.tokenMonitor.limits.saveCredential(id, values));
+  } catch (error) {
+    setAccountPanelMessage(id, { key: failedKey, params: { message: error.message } });
+    renderExternalProviderStatus(id);
+    return result;
+  }
+  if (result?.verdict === 'superseded') return result;
+  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
+  if (id === 'claude' && result?.choices) renderClaudeOrganizationChoices(result.choices, result.settings?.claudeWebOrganizationId || values.claudeWebOrganizationId);
+  if (id === 'claude' && result?.verdict === 'selectionRequired') {
+    setAccountPanelMessage(id, { key: 'settings.claude.organizationRequired', tone: 'notice' });
+    renderExternalProviderStatus(id);
+    return result;
+  }
+  if (!result?.saved) {
+    const rejection = {
+      required: { key: messages.required || 'settings.common.credentialRequired' },
+      invalidFormat: { key: messages.invalidFormat || 'settings.common.credentialInvalidFormat' }
+    }[result?.status] || { key: messages.rejected || 'settings.common.credentialRejected', params: { provider: name } };
+    setAccountPanelMessage(id, rejection);
+    renderExternalProviderStatus(id);
+    return result;
+  }
+  clearInput();
+  // Marked only once the credential is stored: marking drops the provider's
+  // current record, and a rejected key must leave the linked status on screen.
+  markExternalProviderCheckPending(id);
+  if (result.verdict === 'indeterminate') {
+    const throttled = result.status === 'rateLimited' || result.status === 'sourceRateLimited';
+    setAccountPanelMessage(id, {
+      key: throttled ? 'settings.common.credentialSavedRateLimited' : 'settings.common.credentialSavedUnconfirmed',
+      params: { provider: name },
+      tone: 'notice',
+      untilChecked: true
+    });
+  }
+  renderExternalProviderStatus(id);
+  await refreshStats({ force: true });
+  setExternalAccountExpanded(id, !externalProviderAccountLinked(id));
+  renderExternalProviderStatus(id);
+  return result;
+}
+
+// The busy guard generated panels get from their factory, for a hand-built
+// panel's own submit button.
+async function submitAccountCredential(button, id, values, options) {
+  if (button.disabled) return undefined;
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = t('settings.common.checking');
+  try {
+    return await saveAccountCredential(id, values, options);
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+async function clearAccountCredential(id) {
+  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
+  setAccountPanelMessage(id, null);
+  await commitAccountCredential(() => window.tokenMonitor.limits.clearCredential(id));
+  if (id === 'claude') {
+    claudeOrganizationChoicesRevision += 1;
+    renderClaudeOrganizationChoices([]);
+  }
+  clearExternalProviderCheckPending(id);
+  clearExternalProviderPendingStatus(id);
+  renderExternalProviderStatus(id);
+  await refreshStats({ force: true });
+}
+
+async function commitAccountCredential(request) {
+  const settingsPushRevision = state.settingsPushRevision;
+  const result = await request();
+  if (result?.settings) applyPersistedSettings(result.settings, settingsPushRevision);
+  return result;
+}
+
+function limitAccountForm(providerId) {
+  return state.settings?.limitAccountForms?.find((form) => form.id === providerId);
+}
+
+function renderClaudeOrganizationChoices(choices, selectedId = state.settings?.claudeWebOrganizationId || '') {
+  const select = document.getElementById('claudeWebOrganizationIdInput');
+  if (!select) return false;
+  document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', choices.length === 0);
+  select.options.length = 0;
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = t('settings.claude.organizationChoose');
+  select.append(placeholder);
+  for (const choice of choices) {
+    const option = document.createElement('option');
+    option.value = choice.id;
+    option.textContent = [choice.name || choice.id, choice.plan ? choice.plan[0].toUpperCase() + choice.plan.slice(1) : ''].filter(Boolean).join(' · ');
+    select.append(option);
+  }
+  const selectedAvailable = choices.some((choice) => choice.id === selectedId);
+  select.value = selectedAvailable ? selectedId : !selectedId && choices.length === 1 ? choices[0].id : '';
+  select.disabled = choices.length === 0;
+  return selectedAvailable;
+}
+
+async function loadClaudeOrganizationChoices() {
+  const revision = ++claudeOrganizationChoicesRevision;
+  try {
+    const result = await window.tokenMonitor.limits.listOrganizationChoices('claude');
+    if (revision !== claudeOrganizationChoicesRevision) return;
+    if (result.status === 'ok') {
+      const selectedAvailable = renderClaudeOrganizationChoices(result.choices);
+      if (!selectedAvailable && (state.settings?.claudeWebOrganizationId || result.choices.length > 1)) {
+        setAccountPanelMessage('claude', { key: state.settings?.claudeWebOrganizationId
+          ? 'settings.claude.organizationUnavailable'
+          : 'settings.claude.organizationSelect', tone: 'notice' });
+      }
+    } else setAccountPanelMessage('claude', { key: 'settings.claude.organizationLoadFailed', tone: 'notice' });
+  } catch (_) {
+    if (revision !== claudeOrganizationChoicesRevision) return;
+    setAccountPanelMessage('claude', { key: 'settings.claude.organizationLoadFailed', tone: 'notice' });
+  }
+}
+
+// A select beside a credential (region, site, console) saves as soon as it
+// changes. `clears` names what the change invalidates: an Alibaba cookie
+// belongs to the console it was copied from and cannot authenticate the other
+// one, so switching drops it instead of leaving a key that can only fail.
+async function saveAccountFormSetting({ id }, field, value) {
+  if (id === 'claude' && field.key === 'claudeWebOrganizationId') {
+    if (!value || !state.settings?.claudeWebCookieConfigured || document.getElementById('claudeWebCookieInput')?.value) return;
+    claudeOrganizationChoicesRevision += 1;
+    await saveSettings({ claudeWebOrganizationId: value });
+    setAccountPanelMessage('claude', null);
+    await refreshStats({ force: true });
+    return;
+  }
+  if (!field.saveOnChange) return;
+  const cleared = Object.fromEntries((field.clears || []).map((key) => [key, '']));
+  await saveSettings({ [field.key]: value, ...cleared });
+  if (!field.clears?.length) return;
+  clearExternalProviderCheckPending(id);
+  clearExternalProviderPendingStatus(id);
+  renderExternalProviderStatus(id);
+  await refreshStats({ force: true });
+}
+
+function setupLimitAccountPanels() {
+  const container = document.getElementById('accountsSettingsDetails');
+  let added = false;
+  for (const form of state.settings?.limitAccountForms || []) {
+    if (form.kind !== 'credential' || document.getElementById(`${form.id}AccountGroup`)) continue;
+    const panel = limitAccountPanelsApi.createCredentialPanel(form, {
+      document,
+      translate: t,
+      onToggle: ({ id }) => setExternalAccountExpanded(id, !state[`${id}AccountExpanded`]),
+      onOpen: (form) => window.tokenMonitor.openExternal(limitAccountPanelsApi.resolveOpenUrl(form, {
+        document,
+        provider: externalProviderForAccount(form.id)
+      })),
+      onRefresh: async () => {
+        if (form.id === 'claude') await loadClaudeOrganizationChoices();
+        await refreshStats({ force: true });
+      },
+      onClear: ({ id }) => clearAccountCredential(id),
+      onSave: ({ id, messages, failedKey }, values, clearInput) => saveAccountCredential(id, values, { messages, failedKey, clearInput }),
+      onFieldChange: (form, field, value) => saveAccountFormSetting(form, field, value),
+      onFieldError: ({ id, failedKey }, error) => {
+        setAccountPanelMessage(id, { key: failedKey, params: { message: error.message } });
+        renderExternalProviderStatus(id);
+      }
+    });
+    const catalogIndex = LIMIT_PROVIDERS.findIndex((provider) => provider.id === form.id);
+    const nextGroup = LIMIT_PROVIDERS.slice(catalogIndex + 1)
+      .map((provider) => limitProviderAccountGroup(provider.id))
+      .find((group) => group?.parentElement === container);
+    container.insertBefore(panel, nextGroup || null);
+    added = true;
+    setExternalAccountExpanded(form.id, false);
+    limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
+    if (form.id === 'claude' && state.settings?.claudeWebCookieConfigured) void loadClaudeOrganizationChoices();
+    renderExternalProviderStatus(form.id);
+  }
+  if (added) initSettingsAnimationWrappers();
+}
+
 function limitProviderAccountGroup(providerId) {
-  const groupId = LIMIT_PROVIDER_ACCOUNT_GROUP_IDS[providerId];
-  return groupId ? document.getElementById(groupId) : null;
+  const groupId = LIMIT_PROVIDER_ACCOUNT_NODES[providerId]?.group;
+  return (groupId || limitAccountForm(providerId))
+    ? document.getElementById(groupId || `${providerId}AccountGroup`)
+    : null;
 }
 
 function limitProviderAccountStatus(providerId) {
-  const statusId = LIMIT_PROVIDER_ACCOUNT_STATUS_IDS[providerId];
-  return statusId ? document.getElementById(statusId) : null;
+  const statusId = LIMIT_PROVIDER_ACCOUNT_NODES[providerId]?.status;
+  return (statusId || limitAccountForm(providerId))
+    ? document.getElementById(statusId || `${providerId}AccountStatus`)
+    : null;
 }
 
 function limitProviderConnectionDetail(bodyKey) {
@@ -10204,11 +11188,6 @@ const LIMIT_PROVIDER_SETTINGS = {
     defaultValue: true
   }],
   codex: [{
-    key: 'showCodexAdditionalLimits',
-    titleKey: 'settings.limits.codexAdditionalLimits',
-    descKey: 'settings.limits.codexAdditionalLimitsDesc',
-    defaultValue: true
-  }, {
     key: 'codexResetForecastEnabled',
     titleKey: 'settings.limits.codexResetForecast',
     descKey: 'settings.limits.codexResetForecastDesc',
@@ -10261,6 +11240,7 @@ function limitProviderSettingsRenderSignature() {
       settingValues,
       state.limitProviderSettingsExpanded
     ],
+    usageItems: [...enabledLimitProviderSet()].sort().map((id) => [id, limitProviderUsageItemRows(id)]),
     query: limitProviderQuery(),
     providers: (state.stats?.limits?.providers || []).map(providerSignature),
     devices: (state.stats?.devices || []).map(deviceSignature)
@@ -10311,6 +11291,90 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
     list.append(item);
   }
   return list;
+}
+
+// The checklist of what a provider's card draws, read off an unfiltered render
+// of its records so it can only name rows the card really has (see
+// shared/limits/usageItems). A hidden item the records no longer draw stays
+// listed, marked unavailable, so it can still be shown again. The renders are
+// kept until the records, the settings or the locale change: the list's render
+// signature asks for them on every pass.
+let limitUsageItemsCache = null;
+function limitProviderUsageItemRows(providerId) {
+  const records = state.stats?.limits?.providers || [];
+  const locale = currentLocale();
+  const cache = limitUsageItemsCache;
+  if (!cache || cache.records !== records || cache.settings !== state.settings || cache.locale !== locale) {
+    limitUsageItemsCache = { records, settings: state.settings, locale, byProvider: new Map() };
+  }
+  const cached = limitUsageItemsCache.byProvider.get(providerId);
+  if (cached) return cached;
+  const fallbackLabel = (itemId) => limitUsageItemsApi.usageItemFallbackLabel(providerId, itemId);
+  const hidden = limitUsageItemsApi.hiddenUsageItemSet(state.settings?.limitProviderHiddenItems, providerId);
+  const drawn = limitWindowsView.limitProviderUsageItems(records.filter((record) => record?.provider === providerId));
+  const rows = drawn.map(({ id, label }) => ({ id, label: label || fallbackLabel(id), hidden: hidden.has(id), available: true }));
+  const drawnIds = new Set(drawn.map(({ id }) => id));
+  for (const id of hidden) {
+    if (drawnIds.has(id)) continue;
+    const label = fallbackLabel(id) || id;
+    rows.push({ id, label, hidden: true, available: false });
+  }
+  limitUsageItemsCache.byProvider.set(providerId, rows);
+  return rows;
+}
+
+function limitProviderUsageItemsList(providerId, items, reusableInputs = null) {
+  const section = document.createElement('div');
+  section.className = 'limit-provider-usage-items';
+  const head = document.createElement('div');
+  head.className = 'limit-provider-usage-items-head';
+  const title = document.createElement('span');
+  title.className = 'limit-provider-usage-items-title';
+  title.textContent = t('settings.limits.usageItems');
+  head.append(title);
+  if (items.some((item) => item.hidden)) {
+    const restore = document.createElement('button');
+    restore.type = 'button';
+    restore.className = 'reset-appearance-button reset-inline';
+    restore.textContent = '↺';
+    restore.title = t('settings.limits.usageItemsRestore');
+    restore.setAttribute('aria-label', restore.title);
+    restore.addEventListener('click', () => commitLimitProviderHiddenItems(
+      limitUsageItemsApi.restoreUsageItemDefaults(state.settings?.limitProviderHiddenItems, providerId)
+    ));
+    head.append(restore);
+  }
+  const list = document.createElement('div');
+  list.className = 'limit-provider-usage-items-list';
+  for (const entry of items) {
+    const item = document.createElement('label');
+    item.className = 'client-checkbox';
+    const inputKey = `${providerId}:item:${entry.id}`;
+    const existingInput = reusableInputs?.get(inputKey);
+    const input = existingInput || document.createElement('input');
+    input.type = 'checkbox';
+    input.dataset.itemId = entry.id;
+    input.checked = !entry.hidden;
+    if (!existingInput) {
+      input.addEventListener('change', () => commitLimitProviderHiddenItems(
+        limitUsageItemsApi.setUsageItemHidden(state.settings?.limitProviderHiddenItems, providerId, entry.id, !input.checked)
+      ));
+    }
+    const text = document.createElement('span');
+    text.textContent = entry.available ? entry.label : t('settings.limits.usageItemUnavailable', { item: entry.label });
+    item.title = text.textContent;
+    item.append(input, text);
+    list.append(item);
+  }
+  section.append(head, list);
+  return section;
+}
+
+// Applied locally before the write, so a second click made while the first is
+// still in flight builds on it instead of on the value the first replaces.
+function commitLimitProviderHiddenItems(next) {
+  state.settings = { ...state.settings, limitProviderHiddenItems: next };
+  saveSettings({ limitProviderHiddenItems: next }).catch(() => {});
 }
 
 async function onToolTrackingToggle() {
@@ -10626,11 +11690,32 @@ function preserveSettingsPanelScroll(callback) {
   return result;
 }
 
-async function saveSettings(patch) {
+function setSyncContentEditError(patch, error) {
+  const conflict = window.TokenMonitorSyncContentForm.isConflictError(error);
+  for (const [changed, id] of [
+    [patch.modelAliases !== undefined || patch.modelAliasGrouping !== undefined, 'modelAliasesError'],
+    [patch.customModelPricing !== undefined, 'customPricingSyncError']
+  ]) {
+    if (!changed) continue;
+    const node = document.getElementById(id);
+    if (!node) continue;
+    node.textContent = conflict ? t('settings.sync.content.conflict') : '';
+    node.classList.toggle('hidden', !conflict);
+  }
+}
+
+async function saveSettings(patch, syncContentBase) {
+  setSyncContentEditError(patch, null);
+  for (const key of Object.keys(patch)) delete appearancePreview[key];
   const settingsPushRevision = state.settingsPushRevision;
+  let next;
+  pendingSettingsPatches.add(patch);
   try {
-    state.settings = await window.tokenMonitor.updateSettings(patch);
+    next = await window.tokenMonitor.updateSettings(syncContentForm?.decoratePatch(patch, syncContentBase) || patch);
   } catch (error) {
+    pendingSettingsPatches.delete(patch);
+    syncContentForm?.reportSettingsError(error);
+    setSyncContentEditError(patch, error);
     console.error('Could not persist settings:', error);
     try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
     applyEffectiveCurrencyRates();
@@ -10640,6 +11725,18 @@ async function saveSettings(patch) {
     maybeUpdateBarsIcon();
     throw error;
   }
+  pendingSettingsPatches.delete(patch);
+  applyPersistedSettings(next, settingsPushRevision);
+  if (patch.showTrayProviderBadge !== undefined) {
+    await deliverTrayProviderIcons(patch.showTrayProviderBadge === true);
+  }
+  return true;
+}
+
+// The resolved settings of a write that went through settings:update in main,
+// whether the renderer sent it as a patch or as an account credential command.
+function applyPersistedSettings(next, settingsPushRevision) {
+  setRendererSettings(next);
   applyEffectiveCurrencyRates();
   // settings:update broadcasts the normalized settings before resolving the
   // IPC request. The push already ran the full sync; repeating it when the
@@ -10651,10 +11748,6 @@ async function saveSettings(patch) {
   }
   restartTimer();
   maybeUpdateBarsIcon();
-  if (patch.showTrayProviderBadge !== undefined) {
-    await deliverTrayProviderIcons(patch.showTrayProviderBadge === true);
-  }
-  return true;
 }
 
 function renderHomeIfVisible() {
@@ -10699,6 +11792,25 @@ window.addEventListener('blur', () => {
 });
 
 async function init() {
+  // Subscribe before querying: a native appearance/accessibility change can
+  // arrive while the initial state round trip is in flight.
+  const materialPush = window.tokenMonitor.onNativeMaterialState;
+  if (typeof materialPush === 'function') {
+    materialPush((next) => {
+      nativeMaterialRevision += 1;
+      nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState(next);
+      glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
+      applyAppearanceSettings(Object.assign({}, state.settings, ...pendingSettingsPatches, appearancePreview));
+    });
+  }
+  const materialQueryRevision = nativeMaterialRevision;
+  try {
+    const initialMaterial = await window.tokenMonitor.getNativeMaterialState?.();
+    if (materialQueryRevision === nativeMaterialRevision && initialMaterial) {
+      nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState(initialMaterial);
+      glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
+    }
+  } catch (_) {}
   // Subscribed before the app-info round trip, not after: a theme flipped while
   // that call is in flight would otherwise be missed until the next flip. The
   // seeded value then only fills in when no push has already answered.
@@ -10721,6 +11833,8 @@ async function init() {
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  syncContentForm?.syncSettings();
+  await syncContentForm?.refresh(false);
   applyEffectiveCurrencyRates();
   deliverTrayProviderIcons();
 
@@ -10751,7 +11865,7 @@ async function init() {
       state.mode = status.mode || state.mode;
       state.streamFailure = status.connected ? null : (status.reason ? { reason: status.reason, detail: status.detail ?? null } : null);
       setLiveDot(state.streamConnected);
-      renderSyncClientStatus();
+      renderSyncPanel();
     }
   } catch (_) {}
   await refreshStats();
@@ -10875,7 +11989,7 @@ els.breakdown.addEventListener('click', (event) => {
   }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh') return;
+  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy') return;
   if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
@@ -10913,6 +12027,8 @@ els.settingsButton.addEventListener('click', (event) => {
   if (settingsOpen) {
     syncSettingsForm();
   } else {
+    syncModeSelect?.close();
+    syncContentForm?.closeHelp();
     resetSettingsListSearch();
     stopWindowShortcutRecording();
   }
@@ -10925,8 +12041,11 @@ els.settingsButton.addEventListener('click', (event) => {
 els.saveSettingsButton.addEventListener('click', async () => {
   if (hubSaveBusy || !hubDraftHasChanges()) return;
   hubSaveBusy = true;
+  hubSaveError = false;
+  syncHubConnectionUi();
   syncHubSaveButton();
   try {
+    const submittedEditRevision = clientConnectionEditRevision;
     const submittedHubFields = hubDraftValuesFromInputs();
     const patch = { ...submittedHubFields };
     if (Object.prototype.hasOwnProperty.call(submittedHubFields, 'hubHostPort')) {
@@ -10936,22 +12055,37 @@ els.saveSettingsButton.addEventListener('click', async () => {
       Object.keys(submittedHubFields).map((field) => [field, hubDraftRevisions[field]])
     );
     hubSaveInFlightRevisions = submittedHubRevisions;
-    await saveSettings(patch);
+    try {
+      await saveSettings(patch);
+    } catch (_) {
+      hubSaveError = true;
+      return;
+    }
     reconcileHubDraftsAfterSave(submittedHubFields, submittedHubRevisions);
+    finishClientConnectionSave(submittedHubRevisions, submittedEditRevision);
     await refreshHubInfo();
     void refreshHubBuildStatus();
     await refreshStats();
   } finally {
     hubSaveInFlightRevisions = null;
-    syncHubDraftFields();
     hubSaveBusy = false;
+    syncHubDraftFields();
     syncHubSaveButton();
   }
 });
 
+els.syncConnectionEdit?.addEventListener('click', () => beginClientConnectionEdit({ focus: true }));
+els.syncConnectionCancel?.addEventListener('click', cancelClientConnectionEdit);
+
+els.syncPanelOpenDevices?.addEventListener('click', () => openViewFromTray('device'));
+
 els.hubModeOptions.addEventListener('change', async (event) => {
   const target = event.target;
-  if (!(target instanceof HTMLInputElement) || target.name !== 'hubMode') return;
+  if (target !== els.hubModeOptions) return;
+  if (target.value === 'icloud' && state.appInfo?.platform !== 'darwin') {
+    syncHubModeUi();
+    return;
+  }
   await saveSettings({ hubMode: target.value });
   await refreshHubInfo();
   void refreshHubBuildStatus();
@@ -11120,6 +12254,9 @@ for (const input of els.showLimitUsedInputs || []) {
 }
 for (const [field, inputId] of HUB_DRAFT_FIELDS) {
   els[inputId]?.addEventListener('input', () => markHubDraftDirty(field));
+  if (CLIENT_CONNECTION_FIELDS.includes(field)) {
+    els[inputId]?.addEventListener('focus', () => beginClientConnectionEdit());
+  }
 }
 els.syncUploadIntervalInput?.addEventListener('change', async () => {
   await saveSettings({ syncUploadIntervalMs: Number(els.syncUploadIntervalInput.value) });
@@ -11225,11 +12362,23 @@ els.resetDepthButton.addEventListener('click', async () => {
   applyAppearanceFromControls();
   await saveSettings({ glassBlur: defaultAppearance.glassBlur });
 });
+els.resetBackgroundImageOpacityButton?.addEventListener('click', async () => {
+  els.backgroundImageOpacityInput.value = String(defaultAppearance.backgroundImageOpacity);
+  applyAppearanceFromControls();
+  await saveSettings({ backgroundImageOpacity: defaultAppearance.backgroundImageOpacity });
+});
 els.glassInput.addEventListener('input', applyAppearanceFromControls);
 els.blurInput.addEventListener('input', applyAppearanceFromControls);
+els.backgroundImageOpacityInput?.addEventListener('input', applyAppearanceFromControls);
 els.zoomInput.addEventListener('input', applyAppearanceFromControls);
+els.chooseBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(); });
+els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(true); });
+void loadBackgroundImage();
 els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}));
 els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
+els.textSizeInput?.addEventListener('change', async () => {
+  await saveSettings({ textSize: fontSettingsApi.normalizeTextSize(els.textSizeInput.value) });
+});
 els.interfaceFontPreset?.addEventListener('change', () => handleFontPresetChange('interface'));
 els.displayFontPreset?.addEventListener('change', () => handleFontPresetChange('display'));
 els.interfaceFontInput?.addEventListener('input', previewFontSettings);
@@ -11254,10 +12403,11 @@ function setSettingsAccordionExpanded(group, toggle, details, expanded) {
   details.inert = !open;
   group.classList.toggle('expanded', open);
 }
-function setupSettingsAccordion(group, toggle, details) {
+function setupSettingsAccordion(group, toggle, details, onExpandedChange) {
   if (!group || !toggle || !details) return;
   toggle.addEventListener('click', () => {
     setSettingsAccordionExpanded(group, toggle, details, details.classList.contains('hidden'));
+    onExpandedChange?.(!details.classList.contains('hidden'));
   });
   setSettingsAccordionExpanded(group, toggle, details, false);
 }
@@ -11272,6 +12422,7 @@ for (const input of els.systemGlassInputs || []) {
   });
 }
 els.windowsBackdropInput?.addEventListener('change', saveAppearanceFromControls);
+els.macBackdropInput?.addEventListener('change', saveAppearanceFromControls);
 for (const input of els.reduceMotionInputs || []) {
   input.addEventListener('change', async () => {
     if (!input.checked) return;
@@ -11292,7 +12443,7 @@ els.showCompactTotalTokensInput.addEventListener('change', async () => {
 els.showLiveTokenRateInput.addEventListener('change', async () => {
   state.settings.showLiveTokenRate = els.showLiveTokenRateInput.checked;
   const liveRateHasScope = state.settings.showLiveTokenRate
-    && (state.settings.hubMode === 'client' || state.settings.hubMode === 'host');
+    && tokenRateApi.isSharedSyncMode(state.settings.hubMode);
   els.liveTokenRateScopeRow?.classList.toggle('hidden', !liveRateHasScope);
   if (state.settings.showLiveTokenRate) observeLiveTokenRate(state.stats);
   renderLiveTokenRate();
@@ -11344,11 +12495,15 @@ function syncEdgeDockControls() {
   els.edgeDockOptions?.classList.toggle('hidden', !enabled);
   const side = state.settings?.edgeDockSide === 'left' ? 'left' : 'right';
   for (const input of els.edgeDockSideInputs || []) input.checked = input.value === side;
-  const mode = state.settings?.edgeDockMode === 'always' ? 'always' : 'autoHide';
+  const modes = (els.edgeDockModeInputs || []).map((input) => input.value);
+  const mode = modes.includes(state.settings?.edgeDockMode) ? state.settings.edgeDockMode : 'autoHide';
   for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
   els.edgeDockHapticRow?.classList.toggle('hidden', state.appInfo?.platform !== 'darwin');
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
   if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
+  if (els.edgeDockMacBackdropInput) {
+    els.edgeDockMacBackdropInput.value = macBackdropApi.normalizeEdgeDockBackdropMode(state.settings?.edgeDockMacBackdrop);
+  }
   if (enabled) edgeDockComposer?.render();
 }
 
@@ -11363,10 +12518,26 @@ const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComp
     save: (patch) => saveSettings(patch),
     providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
     providerColor: (id) => limitProviderColor(id),
+    windowLabel: (record, quotaWindow) => record?.provider === 'codex' && quotaWindow.additional === true
+      ? limitWindowsView.codexAdditionalWindowLabel(
+        quotaWindow,
+        (record.windows || []).filter((entry) => entry?.additional === true)
+      )
+      : limitWindowsView.providerWindowLabel(record, quotaWindow, 'Quota'),
     hasProviderMark: (id) => limitMarksWithIcon.has(id),
+    // Offer every enabled provider in the user's limits order, including those
+    // without quota data. Keep the ordering rule here rather than in the composer.
+    enabledLimitProviders: () => limitProviderOrderApi
+      .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
+      .filter(({ id }) => enabledLimitProviderSet().has(id))
+      .map(({ id }) => id),
+    isWindowHidden: (providerId, quotaWindow) => limitUsageItemsApi.isLimitWindowHidden(
+      state.settings?.limitProviderHiddenItems, providerId, quotaWindow
+    ),
     maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
       ? accountIdentityApi.maskEmailAddress(email)
       : String(email || '')),
+    mimoProductLabel,
     createRowDrag: (config) => rowDragControllerApi.createRowDragController({
       dragSort: verticalDragSortApi,
       getScrollPanel: () => els.settingsPanel,
@@ -11388,6 +12559,9 @@ for (const input of els.edgeDockSideInputs || []) {
 }
 els.edgeDockWarnColorsInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockWarnColors: els.edgeDockWarnColorsInput.checked });
+});
+els.edgeDockMacBackdropInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockMacBackdrop: macBackdropApi.normalizeEdgeDockBackdropMode(els.edgeDockMacBackdropInput.value) });
 });
 els.edgeDockHapticInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockHaptic: els.edgeDockHapticInput.checked });
@@ -11453,6 +12627,7 @@ els.startAtLoginInput?.addEventListener('change', () => saveSettings({ startAtLo
 els.automaticAppUpdatesInput?.addEventListener('change', () => saveSettings({ automaticAppUpdates: els.automaticAppUpdatesInput.checked }));
 els.glassInput.addEventListener('change', saveAppearanceFromControls);
 els.blurInput.addEventListener('change', saveAppearanceFromControls);
+els.backgroundImageOpacityInput?.addEventListener('change', saveAppearanceFromControls);
 els.zoomInput.addEventListener('change', saveAppearanceFromControls);
 els.resetZoomButton.addEventListener('click', async () => {
   els.zoomInput.value = String(Math.round(defaultAppearance.zoomFactor * 100));
@@ -11460,9 +12635,6 @@ els.resetZoomButton.addEventListener('click', async () => {
   await saveSettings({ zoomFactor: defaultAppearance.zoomFactor });
 });
 els.openConfigButton.addEventListener('click', () => window.tokenMonitor.openUserData());
-els.checkTokscaleButton?.addEventListener('click', checkTokscaleNpm);
-els.downloadTokscaleButton?.addEventListener('click', downloadTokscaleFromNpm);
-els.resetTokscaleButton?.addEventListener('click', resetTokscaleToBundled);
 els.openTokscaleLinkButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.('https://github.com/junhoyeo/tokscale'));
 els.openRepositoryButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_REPOSITORY_URL));
 els.openWebsiteButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_WEBSITE_URL));
@@ -11599,7 +12771,10 @@ els.appUpdateReleaseNotesButton.addEventListener('click', async () => {
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
   state.settingsPushRevision += 1;
-  state.settings = next;
+  for (const key of Object.keys(appearancePreview)) {
+    if (JSON.stringify(next[key]) !== JSON.stringify(state.settings?.[key])) delete appearancePreview[key];
+  }
+  setRendererSettings(next);
   applyEffectiveCurrencyRates();
   observeDisplayLiveTokenRates(state.stats);
   preserveSettingsPanelScroll(syncSettingsForm);
@@ -11631,6 +12806,7 @@ window.tokenMonitor.onFloatingBubbleState?.((payload) => {
 window.tokenMonitor.onHubPush?.((payload) => {
   if (!payload?.info) return;
   state.hubInfo = payload.info;
+  if (payload.info.icloud) state.icloudStatus = payload.info.icloud;
   const settingsVisible = isSettingsSurfaceVisible();
   // The first switch to Host mode generates the shared secret asynchronously
   // after settings:update has already returned, so mirror the freshly minted
@@ -11645,16 +12821,11 @@ window.tokenMonitor.onHubPush?.((payload) => {
   if (settingsVisible) renderHubStatus();
 });
 
-window.tokenMonitor.onTokscalePush?.((payload) => {
-  mergeTokscalePayload(payload);
-  if (isSettingsSurfaceVisible()) renderTokscaleStatus();
-});
-
 function renderConnectionStatus(surface = visibleStatsSurface()) {
   if (surface !== 'main') return;
   setLiveDot(state.streamConnected);
   setStatus(statusTextFor(state.mode, state.streamConnected));
-  if (isSettingsSurfaceVisible()) renderSyncClientStatus();
+  if (isSettingsSurfaceVisible()) renderSyncPanel();
 }
 
 function renderStatsUpdate() {
@@ -11669,28 +12840,18 @@ function renderStatsUpdate() {
   render();
   if (!isSettingsSurfaceVisible()) return;
   renderCodexAccounts();
+  renderMimoStatus();
   renderSettingsSummaries();
   renderLimitProviderCheckboxes();
   renderToolPreferences();
   renderWslPanel();
   updateOpenRouterProfilesStatus();
   updateThirdPartyProfilesStatus();
-  renderDeepseekStatus();
-  renderMinimaxStatus();
-  renderExternalProviderStatus('claude');
-  renderExternalProviderStatus('cline');
-  renderExternalProviderStatus('factory');
-  renderExternalProviderStatus('zai');
-  renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
-  renderExternalProviderStatus('qoder');
-  renderExternalProviderStatus('devin');
-  renderExternalProviderStatus('trae');
-  renderExternalProviderStatus('zed');
-  renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
-  renderExternalProviderStatus('ollama');
-  renderExternalProviderStatus('alibaba');
+  for (const form of state.settings?.limitAccountForms || []) {
+    if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
+  }
   renderCopilotStatus();
   signalContentReady();
 }
@@ -11699,7 +12860,27 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
   isHidden: isRendererWindowHidden,
   render: renderStatsUpdate
 });
+// Pulled once up front, then only while something on screen reads it: the
+// archived count in Settings, or the TOTAL session and project lists.
+function allTimeSessionsNeeded() {
+  if (!allTimeSessions.loaded() || isSettingsPanelOpen()) return true;
+  return state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');
+}
+const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
+  fetchSessions: (snapshotId) => window.tokenMonitor.getAllTimeSessions(snapshotId),
+  currentSnapshot: () => state.stats?.snapshot,
+  needed: allTimeSessionsNeeded,
+  projectSessions: (sessions) => state.settings?.sessionTitlesEnabled === false
+    ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitles(sessions) : sessions,
+  projectionKey: () => state.settings?.sessionTitlesEnabled !== false,
+  onLoaded: () => {
+    if (state.stats) state.stats = allTimeSessions.attach(state.stats);
+    statsRenderScheduler.request();
+  },
+  onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
+});
 function handleWindowVisibilityChange() {
+  if (els.syncPanelSignal) els.syncPanelSignal.dataset.windowHidden = String(isRendererWindowHidden());
   if (!statsRenderScheduler.visibilityChanged()) return;
   if (isRendererWindowHidden()) cancelTokenRateBoost();
   else applyFloatingBubbleState(state.floatingBubble, { renderContent: false });
@@ -11729,6 +12910,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   if (payload.event === 'status') {
     state.streamConnected = Boolean(payload.data?.connected);
     if (payload.data?.mode) state.mode = payload.data.mode;
+    if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
     state.streamFailure = state.streamConnected ? null : (payload.data?.reason ? { reason: payload.data.reason, detail: payload.data.detail ?? null } : state.streamFailure);
   } else if (payload.data?.stats) {
     // Local collector overlays update client-mode data independently of the
@@ -11739,7 +12921,9 @@ window.tokenMonitor.onStatsPush?.((payload) => {
       state.streamFailure = null;
     }
     if (payload.data?.mode) state.mode = payload.data.mode;
-    state.stats = overlayAllTimeSessions(payload.data.stats);
+    if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
+    allTimeSessions.invalidate();
+    state.stats = sessionStatsForDisplay(allTimeSessions.attach(payload.data.stats));
     observeLiveTokenRate(state.stats);
     observeDisplayLiveTokenRates(state.stats);
     applyCodexActiveAccountFromStats();
@@ -11756,6 +12940,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   }
   if (!wasStreamConnected && state.streamConnected && state.settings?.hubMode === 'client') {
     void refreshHubBuildStatus();
+    void syncContentForm?.refresh();
   }
   if (payload.data?.stats) {
     if (fixedPeriodRangesApi.isDerived(state.period)) {
@@ -12974,14 +14159,14 @@ function setAccountGroupExpanded(prefix, expanded, stateKey) {
   if (!toggle || !details) return;
   const next = Boolean(expanded);
   if (stateKey) state[stateKey] = next;
-  toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-  details.classList.toggle('hidden', !next);
-  if (group) group.classList.toggle('expanded', next);
-  syncLimitProviderAccountExpansion(prefix, next);
+  accountShellApi.setExpanded({
+    toggle, details, group, expanded: next,
+    onChange: (open) => syncLimitProviderAccountExpansion(prefix, open)
+  });
 }
 
 function syncLimitProviderAccountExpansion(providerId, expanded) {
-  if (!LIMIT_PROVIDER_ACCOUNT_GROUP_IDS[providerId]) return;
+  if (!LIMIT_PROVIDER_ACCOUNT_NODES[providerId] && !limitAccountForm(providerId)) return;
   if (expanded) {
     setLimitProviderSettingsExpanded(providerId);
   } else if (state.limitProviderSettingsExpanded === providerId) {
@@ -13096,12 +14281,16 @@ function setThirdPartyAdapterFields() {
   }
 }
 
-function setDeepseekAccountExpanded(expanded) {
-  setAccountGroupExpanded('deepseek', expanded, 'deepseekAccountExpanded');
-}
 
 function setMimoAccountExpanded(expanded) {
   setAccountGroupExpanded('mimo', expanded, 'mimoAccountExpanded');
+}
+
+async function refreshMimoAccounts() {
+  try {
+    state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts() || [];
+    renderMimoStatus();
+  } catch (_) {}
 }
 
 function setCopilotAccountExpanded(expanded) {
@@ -13138,8 +14327,7 @@ function renderCodexLoginStatus() {
   addButton.classList.toggle('hidden', state.codexSignInBusy);
   cancelButton.classList.toggle('hidden', !state.codexSignInBusy);
   refreshButton.classList.toggle('hidden', state.codexSignInBusy);
-  statusEl.textContent = state.codexLoginStatus;
-  statusEl.classList.toggle('hidden', !state.codexLoginStatus);
+  accountShellApi.render({ progress: statusEl, progressText: state.codexLoginStatus });
   workspaceSelection.classList.toggle('hidden', state.codexWorkspaceChoices.length === 0);
   workspaceSelect.replaceChildren(...state.codexWorkspaceChoices.map((workspace) => {
     const option = document.createElement('option');
@@ -13169,9 +14357,7 @@ function renderCodexAccounts() {
   const statusText = accounts.length === 0
     ? t('settings.codex.notConfigured')
     : t('settings.opencode.connected', { linked: enabledCount, total: accounts.length });
-  setCursorStatusText(statusEl, statusText);
-  errorEl.textContent = state.codexAccountError || '';
-  errorEl.classList.toggle('hidden', !state.codexAccountError);
+  accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.codexAccountError });
   listEl.replaceChildren();
   if (accounts.length === 0) {
     const empty = document.createElement('p');
@@ -13307,39 +14493,6 @@ function localProviderStatuses(name) {
   return providers.filter((provider) => provider.provider === name);
 }
 
-function deepseekAccountLinked() {
-  const provider = deepseekProviderForAccount();
-  return Boolean(state.settings?.deepseekApiKeyConfigured) && provider?.status === 'ok';
-}
-
-function deepseekProviderStatus() {
-  return localProviderStatus('deepseek');
-}
-
-function deepseekProviderForAccount() {
-  const provider = deepseekProviderStatus();
-  const pendingSince = Number(state.deepseekPendingCheckSince || 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state.deepseekPendingCheckSince = 0;
-  return provider;
-}
-
-function markDeepseekKeyCheckPending() {
-  state.deepseekPendingCheckSince = Date.now();
-  clearDeepseekProviderStatus();
-}
-
-function clearDeepseekPendingCheck() {
-  state.deepseekPendingCheckSince = 0;
-}
-
-function clearDeepseekProviderStatus() {
-  if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'deepseek');
-}
-
 function renderAntigravityStatus() {
   if (!isSettingsSurfaceVisible()) return;
   const statusEl = document.getElementById('antigravityAccountStatus');
@@ -13351,20 +14504,21 @@ function renderAntigravityStatus() {
   if (!statusEl || !listEl || !errorEl || !addButton || !cancelButton) return;
   const accounts = state.settings?.antigravityManagedAccounts || [];
   const enabledCount = accounts.filter((account) => account.enabled !== false).length;
-  setCursorStatusText(statusEl, accounts.length === 0
-    ? t('settings.antigravity.notConfigured')
-    : t('settings.antigravity.connected', { linked: enabledCount, total: accounts.length }));
-  errorEl.textContent = state.antigravityAccountError || '';
-  errorEl.classList.toggle('hidden', !state.antigravityAccountError);
+  accountShellApi.render({
+    status: statusEl,
+    statusText: accounts.length === 0
+      ? t('settings.antigravity.notConfigured')
+      : t('settings.antigravity.connected', { linked: enabledCount, total: accounts.length }),
+    error: errorEl,
+    errorText: state.antigravityAccountError,
+    progress: statusMessage,
+    progressText: state.antigravitySignInBusy ? t('settings.antigravity.loginStatus') : ''
+  });
   addButton.disabled = state.antigravitySignInBusy;
   addButton.textContent = t(state.antigravitySignInBusy
     ? 'settings.antigravity.waitingForGoogle'
     : 'settings.antigravity.addAccount');
   cancelButton.classList.toggle('hidden', !state.antigravitySignInBusy);
-  if (statusMessage) {
-    statusMessage.textContent = state.antigravitySignInBusy ? t('settings.antigravity.loginStatus') : '';
-    statusMessage.classList.toggle('hidden', !state.antigravitySignInBusy);
-  }
 
   listEl.replaceChildren();
   if (accounts.length === 0) {
@@ -13463,6 +14617,9 @@ function renderAntigravityStatus() {
 }
 
 function mimoSettingsAccountTitle(account, index) {
+  // The discovered session has no address to name it by — nothing was pasted for
+  // it — so it is named after the app it comes from.
+  if (account?.removable === false) return t('settings.mimo.desktopAccount');
   return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
 }
 
@@ -13478,11 +14635,10 @@ function renderMimoStatus() {
   const statusText = accounts.length === 0
     ? t('settings.mimo.notConfigured')
     : t('settings.mimo.connected', { linked: enabledCount, total: accounts.length });
-  setCursorStatusText(statusEl, statusText);
-  errorEl.textContent = state.mimoAccountError || '';
-  errorEl.classList.toggle('hidden', !state.mimoAccountError);
+  accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.mimoAccountError });
   emptyEl.classList.toggle('hidden', accounts.length > 0);
 
+  const providers = localProviderStatuses('mimo');
   listEl.replaceChildren();
   if (accounts.length > 0) {
     for (const [index, account] of accounts.entries()) {
@@ -13491,26 +14647,33 @@ function renderMimoStatus() {
       const row = document.createElement('div');
       row.className = 'managed-account-row';
       row.classList.toggle('disabled', !enabled);
+      // A credential Token Monitor never stored has no stored preference to
+      // toggle and nothing here to remove: this row is the session the machine's
+      // own MiMo Desktop is signed into, listed so the count above it is honest
+      // about what the provider answers for.
+      const detected = account.removable === false;
 
-      const input = document.createElement('input');
-      input.className = 'managed-account-checkbox';
-      input.type = 'checkbox';
-      input.checked = enabled;
-      input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
-        account: accountName
-      }));
-      input.addEventListener('change', async () => {
-        input.disabled = true;
-        const result = await window.tokenMonitor.mimo.setAccountEnabled(account.id, input.checked);
-        if (!result?.ok) {
-          state.mimoAccountError = result?.error || t('settings.mimo.toggleFailed');
-        } else {
-          state.mimoAccountError = '';
-          state.settings.mimoManagedAccounts = result.accounts || [];
-        }
-        renderMimoStatus();
-        renderSettingsSummaries();
-      });
+      const input = detected ? null : document.createElement('input');
+      if (input) {
+        input.className = 'managed-account-checkbox';
+        input.type = 'checkbox';
+        input.checked = enabled;
+        input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
+          account: accountName
+        }));
+        input.addEventListener('change', async () => {
+          input.disabled = true;
+          const result = await window.tokenMonitor.mimo.setAccountEnabled(account.id, input.checked);
+          if (!result?.ok) {
+            state.mimoAccountError = result?.error || t('settings.mimo.toggleFailed');
+          } else {
+            state.mimoAccountError = '';
+            state.settings.mimoManagedAccounts = result.accounts || [];
+          }
+          renderMimoStatus();
+          renderSettingsSummaries();
+        });
+      }
 
       const main = document.createElement('div');
       main.className = 'managed-account-main';
@@ -13523,77 +14686,57 @@ function renderMimoStatus() {
       right.className = 'managed-account-right';
       const info = document.createElement('span');
       info.className = 'managed-account-info';
-      info.textContent = enabled ? limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel) : t('settings.mimo.disabled');
+      const failedProvider = enabled && providers.find((provider) => (
+        provider.accountKey === account.accountKey
+        && provider.sourceDetail === (detected ? 'app' : 'managed')
+        && provider.status === 'unauthorized'
+      ));
+      const statusLabel = failedProvider
+        ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(failedProvider))
+        : '';
+      info.textContent = !enabled ? t('settings.mimo.disabled')
+        : statusLabel || limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel);
+      info.title = info.textContent;
 
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'managed-account-remove';
-      remove.textContent = '✕';
-      remove.title = t('settings.mimo.remove');
-      let confirmingRemove = false;
-      remove.addEventListener('click', async () => {
-        if (!confirmingRemove) {
-          confirmingRemove = true;
-          remove.classList.add('confirming');
-          remove.textContent = '✓';
-          remove.title = t('settings.mimo.removeConfirm', {
-            account: accountName
-          });
-          return;
-        }
-        const result = await window.tokenMonitor.mimo.removeAccount(account.id);
-        if (result?.ok) {
-          state.mimoAccountError = '';
-          state.settings.mimoManagedAccounts = result.accounts || [];
+      const remove = detected ? null : document.createElement('button');
+      if (remove) {
+        remove.type = 'button';
+        remove.className = 'managed-account-remove';
+        remove.textContent = '✕';
+        remove.title = t('settings.mimo.remove');
+        let confirmingRemove = false;
+        remove.addEventListener('click', async () => {
+          if (!confirmingRemove) {
+            confirmingRemove = true;
+            remove.classList.add('confirming');
+            remove.textContent = '✓';
+            remove.title = t('settings.mimo.removeConfirm', {
+              account: accountName
+            });
+            return;
+          }
+          const result = await window.tokenMonitor.mimo.removeAccount(account.id);
+          if (result?.ok) {
+            state.mimoAccountError = '';
+            state.settings.mimoManagedAccounts = result.accounts || [];
+            renderMimoStatus();
+            renderSettingsSummaries();
+            refreshStats({ force: true }).catch(() => {});
+            return;
+          }
+          state.mimoAccountError = result?.error || t('settings.mimo.removeFailed');
           renderMimoStatus();
           renderSettingsSummaries();
-          refreshStats({ force: true }).catch(() => {});
-          return;
-        }
-        state.mimoAccountError = result?.error || t('settings.mimo.removeFailed');
-        renderMimoStatus();
-        renderSettingsSummaries();
-      });
+        });
+      }
 
-      right.append(info, remove);
-      row.append(input, main, right);
+      right.append(info);
+      if (remove) right.append(remove);
+      row.append(input || document.createElement('span'), main, right);
       listEl.append(row);
     }
   }
   renderSettingsSummaries();
-}
-
-function minimaxProviderStatus() {
-  return localProviderStatus('minimax');
-}
-
-function minimaxAccountLinked() {
-  const provider = minimaxProviderForAccount();
-  return Boolean(state.settings?.minimaxApiKeyConfigured) && provider?.status === 'ok';
-}
-
-function minimaxProviderForAccount() {
-  const provider = minimaxProviderStatus();
-  const pendingSince = Number(state.minimaxPendingCheckSince || 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state.minimaxPendingCheckSince = 0;
-  return provider;
-}
-
-function markMinimaxKeyCheckPending() {
-  state.minimaxPendingCheckSince = Date.now();
-  clearMinimaxProviderStatus();
-}
-
-function clearMinimaxPendingCheck() {
-  state.minimaxPendingCheckSince = 0;
-}
-
-function clearMinimaxProviderStatus() {
-  if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'minimax');
 }
 
 function copilotProviderStatus() {
@@ -13630,90 +14773,29 @@ function clearCopilotProviderStatus() {
 }
 
 const externalLimitAccountConfig = {
-  claude: {
-    configuredKey: 'claudeWebCookieConfigured',
-    sourceKey: 'claudeWebCookieSource',
-    pendingKey: 'claudePendingCheckSince'
-  },
-  cline: {
-    configuredKey: 'clineCredentialConfigured',
-    sourceKey: 'clineCredentialSource',
-    pendingKey: 'clinePendingCheckSince'
-  },
-  factory: {
-    configuredKey: 'factoryCredentialConfigured',
-    sourceKey: 'factoryCredentialSource',
-    pendingKey: 'factoryPendingCheckSince'
-  },
   kimi: {
     configuredKey: 'kimiCredentialConfigured',
     sourceKey: 'kimiCredentialSource',
     pendingKey: 'kimiPendingCheckSince'
   },
-  zed: {
-    configuredKey: 'zedCookieConfigured',
-    sourceKey: 'zedCookieSource',
-    pendingKey: 'zedPendingCheckSince'
-  },
-  commandcode: {
-    configuredKey: 'commandcodeCookieConfigured',
-    sourceKey: 'commandcodeCookieSource',
-    pendingKey: 'commandcodePendingCheckSince'
-  },
-  zai: {
-    configuredKey: 'zaiApiKeyConfigured',
-    sourceKey: 'zaiApiKeySource',
-    pendingKey: 'zaiPendingCheckSince'
-  },
-  zaiteam: {
-    configuredKey: 'zaiTeamApiKeyConfigured',
-    sourceKey: 'zaiTeamApiKeySource',
-    pendingKey: 'zaiteamPendingCheckSince'
-  },
-  qoder: {
-    configuredKey: 'qoderCookieConfigured',
-    sourceKey: 'qoderCookieSource',
-    pendingKey: 'qoderPendingCheckSince'
-  },
-  devin: {
-    configuredKey: 'devinBearerTokenConfigured',
-    sourceKey: 'devinBearerTokenSource',
-    pendingKey: 'devinPendingCheckSince'
-  },
   volcengine: {
     configuredKey: 'volcengineCredentialsConfigured',
     sourceKey: 'volcengineCredentialsSource',
     pendingKey: 'volcenginePendingCheckSince'
-  },
-  ollama: {
-    configuredKey: 'ollamaCookieConfigured',
-    sourceKey: 'ollamaCookieSource',
-    pendingKey: 'ollamaPendingCheckSince'
-  },
-  trae: {
-    configuredKey: 'traeAccessTokenConfigured',
-    sourceKey: 'traeAccessTokenSource',
-    pendingKey: 'traePendingCheckSince'
-  },
-  alibaba: {
-    configuredKey: 'alibabaCookieConfigured',
-    sourceKey: 'alibabaCookieSource',
-    pendingKey: 'alibabaPendingCheckSince'
   }
 };
 
 function clearDisabledLimitProviderPendingChecks(enabledProviders) {
-  if (!enabledProviders.has('deepseek')) clearDeepseekPendingCheck();
-  if (!enabledProviders.has('minimax')) clearMinimaxPendingCheck();
   if (!enabledProviders.has('copilot')) clearCopilotPendingCheck();
-  for (const providerName of Object.keys(externalLimitAccountConfig)) {
+  for (const providerName of [...Object.keys(externalLimitAccountConfig),
+    ...(state.settings?.limitAccountForms || []).map((form) => form.id)]) {
     if (!enabledProviders.has(providerName)) clearExternalProviderCheckPending(providerName);
   }
 }
 
 function externalProviderForAccount(providerName) {
   const provider = localProviderStatus(providerName);
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const pendingSince = Number(config ? state[config.pendingKey] : 0);
   if (!provider || !pendingSince) return provider;
   const updatedAt = Date.parse(provider.updatedAt || '');
@@ -13723,20 +14805,25 @@ function externalProviderForAccount(providerName) {
 }
 
 function externalProviderAccountLinked(providerName) {
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const provider = externalProviderForAccount(providerName);
   return Boolean(config && state.settings?.[config.configuredKey]) && provider?.status === 'ok';
 }
 
+function setAccountPanelMessage(providerName, message) {
+  if (message) state.accountPanelMessages[providerName] = message;
+  else delete state.accountPanelMessages[providerName];
+}
+
 function markExternalProviderCheckPending(providerName) {
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   if (!config) return;
   state[config.pendingKey] = Date.now();
   clearExternalProviderPendingStatus(providerName);
 }
 
 function clearExternalProviderCheckPending(providerName) {
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   if (config) state[config.pendingKey] = 0;
 }
 
@@ -13820,176 +14907,28 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
   return t(statusKeys[accountStatus] || 'settings.common.error');
 }
 
-// Follow the region we last successfully polled so a global (minimax.io)
-// account lands on platform.minimax.io, not the CN landing page. Fall back
-// to the CN host until we've seen a successful poll.
-function minimaxPlatformUrl() {
-  const provider = minimaxProviderForAccount();
-  const region = provider && provider.region === 'en' ? 'en' : 'cn';
-  return region === 'en'
-    ? 'https://platform.minimax.io/user-center/payment/token-plan'
-    : 'https://platform.minimaxi.com/user-center/payment/token-plan';
-}
-
 function setExternalAccountExpanded(providerName, expanded) {
   const details = document.getElementById(`${providerName}SettingsDetails`);
   const toggle = document.getElementById(`${providerName}SettingsToggle`);
   if (!details || !toggle) return;
   const next = Boolean(expanded);
   state[`${providerName}AccountExpanded`] = next;
-  details.classList.toggle('hidden', !next);
-  toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-  limitProviderAccountGroup(providerName)?.classList.toggle('expanded', next);
-  syncLimitProviderAccountExpansion(providerName, next);
-}
-
-function zaiPlatformUrl() {
-  const selectedRegion = document.getElementById('zaiApiRegionInput')?.value;
-  const region = selectedRegion || (state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global');
-  return region === 'bigmodel-cn'
-    ? 'https://bigmodel.cn/coding-plan/personal/usage'
-    : 'https://z.ai/manage-apikey/coding-plan/personal/my-plan';
-}
-
-function clinePlatformUrl() {
-  return 'https://app.cline.bot/dashboard/account';
-}
-
-function factoryPlatformUrl() {
-  return 'https://app.factory.ai/settings/api-keys';
-}
-
-function zaiteamPlatformUrl() {
-  return 'https://bigmodel.cn/coding-plan/team/usage-stats';
+  accountShellApi.setExpanded({
+    toggle, details, group: limitProviderAccountGroup(providerName), expanded: next,
+    onChange: (open) => syncLimitProviderAccountExpansion(providerName, open)
+  });
 }
 
 function volcenginePlatformUrl() {
   return 'https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe';
 }
 
-function claudePlatformUrl() {
-  return 'https://claude.ai/settings/usage';
-}
-
-function selectedQoderSite() {
-  const selectedSite = document.getElementById('qoderSiteInput')?.value;
-  return selectedSite || (state.settings?.qoderSite === 'cn' ? 'cn' : 'global');
-}
-
-function qoderUsagePagePath() {
-  return selectedQoderSite() === 'cn' ? 'qoder.com.cn/account/usage' : 'qoder.com/account/usage';
-}
-
-function qoderPlatformUrl() {
-  return `https://${qoderUsagePagePath()}`;
-}
-
-function devinPlatformUrl() {
-  return 'https://app.devin.ai/settings/usage';
-}
-
-function updateQoderUsagePageHint() {
-  const hint = document.getElementById('qoderUsagePageHint');
-  if (hint) hint.textContent = qoderUsagePagePath();
-}
-
 function kimiPlatformUrl() {
   return 'https://www.kimi.com/code/console';
 }
 
-function ollamaPlatformUrl() {
-  return 'https://ollama.com/settings';
-}
-
-const ALIBABA_DASHBOARD_URLS = {
-  cn: 'https://bailian.console.aliyun.com/cn-beijing?tab=plan#/efm/subscription/token-plan',
-  intl: 'https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=plan#/efm/subscription/token-plan',
-  'cn-personal': 'https://bailian.console.aliyun.com/cn-beijing?tab=plan#/efm/subscription/token-plan/personal',
-  'intl-personal': 'https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=plan#/efm/subscription/token-plan/personal'
-};
-
-// Mirrors normalizeAlibabaCookieHeader's preprocessing in the main process:
-// surrounding quotes and a `Cookie:` prefix come off before the pair check, so
-// the two sides accept and reject exactly the same inputs.
-function alibabaCookieCandidate(value) {
-  let raw = String(value || '').trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw.replace(/^cookie\s*:\s*/i, '').trim();
-}
-
-function alibabaVariantOr(value) {
-  return ALIBABA_DASHBOARD_URLS[value] ? value : 'cn';
-}
-
-// What the user is looking at right now: the live select wins so the "Open
-// Token Plan" button and the request hint follow the dropdown before the
-// change has been saved.
-function alibabaSelectedVariant() {
-  const selected = document.getElementById('alibabaVariantInput')?.value;
-  return alibabaVariantOr(selected || state.settings?.alibabaVariant);
-}
-
-// What is stored. Used when re-rendering the form, so a settings reload can put
-// the select back rather than reading its own value and never changing.
-function alibabaSavedVariant() {
-  return alibabaVariantOr(state.settings?.alibabaVariant);
-}
-
-function alibabaPlatformUrl() {
-  return ALIBABA_DASHBOARD_URLS[alibabaSelectedVariant()];
-}
-
-// Personal/Solo quota comes from a different host than the dashboard, so the
-// cookie has to be copied from that request. Naming the right request is the
-// difference between a working paste and an `unauthorized` the user cannot
-// explain.
-function renderAlibabaVariantHints() {
-  const variant = alibabaSelectedVariant();
-  const personal = variant.endsWith('-personal');
-  const hint = document.getElementById('alibabaRequestHint');
-  if (hint) hint.textContent = personal ? '/tokenplan/personal/api/v2/usage' : 'GetSubscriptionSummary';
-  document.getElementById('alibabaPersonalNote')?.classList.toggle('hidden', !personal);
-}
-
-function commandcodePlatformUrl() {
-  // Account-scoped in the address bar (/<username>/settings/usage), but this
-  // path resolves to it and bounces through signin?returnTo= when signed out,
-  // so it is the one link that works without knowing the username.
-  return 'https://commandcode.ai/settings/usage';
-}
-
-function zedPlatformUrl() {
-  return 'https://dashboard.zed.dev/';
-}
-
-function ollamaValidationError(provider) {
-  if (provider?.status === 'unauthorized') return t('settings.ollama.validationInvalid');
-  if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
-    return t('settings.ollama.validationRateLimited');
-  }
-  return t('settings.ollama.validationUnavailable');
-}
-
-function clineApiKeyValidationError(provider) {
-  if (provider?.status === 'unauthorized') return t('settings.cline.validationInvalid');
-  if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
-    return t('settings.cline.validationRateLimited');
-  }
-  return t('settings.cline.validationUnavailable');
-}
-
-function factoryApiKeyValidationError(provider) {
-  if (provider?.status === 'unauthorized') return t('settings.factory.validationInvalid');
-  if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
-    return t('settings.factory.validationRateLimited');
-  }
-  return t('settings.factory.validationUnavailable');
-}
-
 function renderExternalProviderStatus(providerName) {
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const statusEl = document.getElementById(`${providerName}AccountStatus`);
   const openBtn = document.getElementById(`${providerName}OpenBrowser`);
   const logoutBtn = document.getElementById(`${providerName}LogoutButton`);
@@ -13998,40 +14937,30 @@ function renderExternalProviderStatus(providerName) {
   const errorEl = document.getElementById(`${providerName}ErrorMessage`);
   if (!config || !statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
 
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
-
   const source = state.settings?.[config.sourceKey] || '';
   const wasPending = Number(state[config.pendingKey] || 0) > 0;
   const provider = externalProviderForAccount(providerName);
+  // The message line is state, not DOM: this runs on every stats push, and a
+  // line written straight into the element would be wiped by the next one.
+  // A "saved but not yet confirmed" notice retires once a record newer than
+  // the save arrives, because the pill then carries the real answer.
+  if (state.accountPanelMessages[providerName]?.untilChecked && provider) {
+    delete state.accountPanelMessages[providerName];
+  }
+  const message = state.accountPanelMessages[providerName];
+  errorEl.textContent = message ? t(message.key, message.params) : '';
+  errorEl.classList.toggle('hidden', !message);
+  errorEl.classList.toggle('error', message?.tone !== 'notice');
   const configured = Boolean(state.settings?.[config.configuredKey]);
   const enabled = limitProviderEnabled(providerName);
   const pending = enabled && Number(state[config.pendingKey] || 0) > 0;
   const linked = externalProviderAccountLinked(providerName);
-  if (providerName === 'ollama' && wasPending && !pending && linked) {
-    setExternalAccountExpanded('ollama', false);
-  }
-  if (providerName === 'zai') {
-    const regionInput = document.getElementById('zaiApiRegionInput');
-    if (regionInput) regionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
-  }
+  // A pending check that comes back linked folds the panel: the refresh that
+  // followed the save may have returned before the new record did.
+  if (wasPending && !pending && linked) setExternalAccountExpanded(providerName, false);
+  const form = limitAccountForm(providerName);
+  if (form) limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
   if (providerName === 'volcengine') renderVolcengineAgentOverrideState();
-  if (providerName === 'qoder') {
-    const siteInput = document.getElementById('qoderSiteInput');
-    if (siteInput) siteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
-    updateQoderUsagePageHint();
-  }
-  if (providerName === 'devin') {
-    const organizationInput = document.getElementById('devinOrganizationInput');
-    if (organizationInput && !organizationInput.value) {
-      organizationInput.value = state.settings?.devinOrganization || '';
-    }
-  }
-  if (providerName === 'alibaba') {
-    const variantInput = document.getElementById('alibabaVariantInput');
-    if (variantInput) variantInput.value = alibabaSavedVariant();
-    renderAlibabaVariantHints();
-  }
   setCursorStatusText(
     statusEl,
     pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
@@ -14083,42 +15012,6 @@ function setVolcengineAgentExpanded(expanded) {
   document.getElementById('volcengineAgentPanel')?.classList.toggle('expanded', next);
 }
 
-function setMinimaxAccountExpanded(expanded) {
-  const details = document.getElementById('minimaxSettingsDetails');
-  const toggle = document.getElementById('minimaxSettingsToggle');
-  if (!details || !toggle) return;
-  const next = Boolean(expanded);
-  state.minimaxAccountExpanded = next;
-  details.classList.toggle('hidden', !next);
-  toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-  limitProviderAccountGroup('minimax')?.classList.toggle('expanded', next);
-  syncLimitProviderAccountExpansion('minimax', next);
-}
-
-function renderMinimaxStatus() {
-  const statusEl = document.getElementById('minimaxApiKeyStatus');
-  const openBtn = document.getElementById('minimaxOpenBrowser');
-  const logoutBtn = document.getElementById('minimaxLogoutButton');
-  const refreshBtn = document.getElementById('minimaxRefreshButton');
-  const manualPanel = document.getElementById('minimaxManualPanel');
-  const errorEl = document.getElementById('minimaxErrorMessage');
-  if (!statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
-
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
-
-  const source = state.settings?.minimaxApiKeySource || '';
-  const provider = minimaxProviderForAccount();
-  const configured = Boolean(state.settings?.minimaxApiKeyConfigured);
-  const enabled = limitProviderEnabled('minimax');
-  const linked = minimaxAccountLinked();
-  setCursorStatusText(statusEl, apiKeyAccountStatusText('minimax', provider, configured, source, enabled));
-  manualPanel.classList.toggle('hidden', linked);
-  openBtn.classList.toggle('hidden', linked);
-  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
-  refreshBtn.classList.toggle('hidden', !configured);
-  renderSettingsSummaries();
-}
 
 function renderCopilotStatus() {
   const statusEl = document.getElementById('copilotApiTokenStatus');
@@ -14136,59 +15029,44 @@ function renderCopilotStatus() {
   const configured = Boolean(state.settings?.copilotApiTokenConfigured);
   const enabled = limitProviderEnabled('copilot');
   const linked = copilotAccountLinked();
-  errorEl.textContent = state.copilotErrorMessage || '';
-  errorEl.classList.toggle('hidden', !state.copilotErrorMessage);
-  setCursorStatusText(statusEl, copilotAccountStatusText(provider, configured, source, enabled));
+  accountShellApi.render({
+    status: statusEl,
+    statusText: copilotAccountStatusText(provider, configured, source, enabled),
+    error: errorEl,
+    errorText: state.copilotErrorMessage,
+    progress: loginStatusEl,
+    progressText: state.copilotLoginStatus
+  });
   manualPanel.classList.toggle('hidden', linked);
   if (linked && state.copilotManualExpanded) setCopilotManualExpanded(false);
   signInBtn.classList.toggle('hidden', linked || state.copilotSignInBusy);
   cancelBtn.classList.toggle('hidden', !state.copilotSignInBusy || !state.copilotSignInCancelable || linked);
   logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
   refreshBtn.classList.toggle('hidden', !configured || (state.copilotSignInBusy && !linked));
-  loginStatusEl.classList.toggle('hidden', !state.copilotLoginStatus);
-  loginStatusEl.textContent = state.copilotLoginStatus;
   renderSettingsSummaries();
 }
 
-function renderDeepseekStatus() {
-  const statusEl = document.getElementById('deepseekApiKeyStatus');
-  const openBtn = document.getElementById('deepseekOpenBrowser');
-  const logoutBtn = document.getElementById('deepseekLogoutButton');
-  const refreshBtn = document.getElementById('deepseekRefreshButton');
-  const manualPanel = document.getElementById('deepseekManualPanel');
-  const errorEl = document.getElementById('deepseekErrorMessage');
-  if (!statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
-
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
-
-  const source = state.settings?.deepseekApiKeySource || '';
-  const provider = deepseekProviderForAccount();
-  const configured = Boolean(state.settings?.deepseekApiKeyConfigured);
-  const enabled = limitProviderEnabled('deepseek');
-  const linked = deepseekAccountLinked();
-  setCursorStatusText(statusEl, apiKeyAccountStatusText('deepseek', provider, configured, source, enabled));
-  manualPanel.classList.toggle('hidden', linked);
-  openBtn.classList.toggle('hidden', linked);
-  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
-  refreshBtn.classList.toggle('hidden', !configured);
-  renderSettingsSummaries();
-}
 
 function renderOpenCodeProfiles() {
   if (!isSettingsSurfaceVisible()) return;
   const listEl = document.getElementById('opencodeProfileList');
   if (!listEl) return;
+  renderAccountShellError('opencode');
 
   const api = window.tokenMonitor.opencode;
 
+  const isCurrent = accountProfileRequests.begin('opencode');
   api.getProfiles().then(({ profiles, hasEnvVar, hasAmbientKey, ambientEnabled = true }) => {
-    if (!isSettingsSurfaceVisible()) return;
-    listEl.innerHTML = '';
+    if (!isCurrent() || !isSettingsSurfaceVisible() || document.getElementById('opencodeProfileList') !== listEl) return;
+    accountProfileStatuses.retire('opencode');
+    listEl.replaceChildren();
     const entries = Object.entries(profiles);
 
     if (entries.length === 0 && !hasEnvVar && !hasAmbientKey) {
-      listEl.innerHTML = '<div class="opencode-empty">' + t('settings.opencode.emptyList') + '</div>';
+      const empty = document.createElement('div');
+      empty.className = 'opencode-empty';
+      empty.textContent = t('settings.opencode.emptyList');
+      listEl.append(empty);
       state.opencodeProfileCount = 0;
       renderOpenCodeProfilesStatusSummary({});
       renderSettingsSummaries();
@@ -14249,11 +15127,10 @@ function renderOpenCodeProfiles() {
             return;
           }
           if (offer.stale(at)) return;
-          const errorEl = document.getElementById('opencodeErrorMessage');
-          errorEl.textContent = opencodeSaveErrorText(result);
-          errorEl.classList.remove('hidden');
+          setAccountShellError('opencode', opencodeSaveErrorText(result));
           return;
         }
+        setAccountShellError('opencode', '');
         renderOpenCodeProfiles();
         updateOpenCodeProfilesStatus();
         renderSettingsSummaries();
@@ -14327,9 +15204,10 @@ function renderOpenCodeProfiles() {
       nameInput.value = name;
 
       const renameBtn = document.createElement('button');
+      renameBtn.type = 'button';
       renameBtn.className = 'profile-rename-btn';
-      renameBtn.textContent = '✎';
       renameBtn.title = t('settings.opencode.rename');
+      renameBtn.setAttribute('aria-label', renameBtn.title);
 
       let editing = false;
       function beginRename() {
@@ -14349,7 +15227,6 @@ function renderOpenCodeProfiles() {
       const offer = opencodeMergeOffer(mergeBtn, (next) => applyRename(next, true));
       const applyRename = async (next, merge) => {
         const at = offer.revision();
-        const errorEl = document.getElementById('opencodeErrorMessage');
         const result = await api.renameProfile(name, next, { merge });
         if (!result.ok) {
           if (result.nameTaken) {
@@ -14357,11 +15234,10 @@ function renderOpenCodeProfiles() {
             return;
           }
           if (offer.stale(at)) return;
-          errorEl.textContent = opencodeSaveErrorText(result);
-          errorEl.classList.remove('hidden');
+          setAccountShellError('opencode', opencodeSaveErrorText(result));
           return;
         }
-        errorEl.classList.add('hidden');
+        setAccountShellError('opencode', '');
         renderOpenCodeProfiles();
         updateOpenCodeProfilesStatus();
         renderSettingsSummaries();
@@ -14484,6 +15360,12 @@ function renderOpenCodeProfiles() {
     }
 
     updateOpenCodeProfilesStatus();
+  }).catch(() => {
+    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
+    accountShellApi.render({
+      status: document.getElementById('opencodeCookieStatus'),
+      statusText: t('settings.opencode.connectFailed')
+    });
   });
 }
 
@@ -14562,7 +15444,6 @@ function opencodeRowId(prefix, name) {
 // deleting drops just this credential and leaves the rest of the account.
 function opencodeCredentialRow(accountName, kind, label) {
   const api = window.tokenMonitor.opencode;
-  const errorEl = () => document.getElementById('opencodeErrorMessage');
   const refresh = () => {
     renderOpenCodeProfiles();
     updateOpenCodeProfilesStatus();
@@ -14605,10 +15486,10 @@ function opencodeCredentialRow(accountName, kind, label) {
         return;
       }
       if (offer.stale(at)) return;
-      errorEl().textContent = opencodeSaveErrorText(result);
-      errorEl().classList.remove('hidden');
+      setAccountShellError('opencode', opencodeSaveErrorText(result));
       return;
     }
+    setAccountShellError('opencode', '');
     refresh();
   };
   const endMove = async (save) => {
@@ -14657,7 +15538,9 @@ function opencodeCredentialRow(accountName, kind, label) {
 
 async function updateOpenCodeProfilesStatus() {
   const api = window.tokenMonitor.opencode;
+  const isCurrent = accountProfileStatuses.begin('opencode');
   const status = await api.status();
+  if (!isCurrent() || !isSettingsSurfaceVisible()) return;
   const profiles = status.profiles || {};
 
   // The auto-detected key has no account name, so it arrives in its own field
@@ -14711,11 +15594,12 @@ function renderOpenCodeProfilesStatusSummary(profiles, ambient = null) {
     const linkedCount = statuses.filter(s => s.linked).length;
     const configuredProfileCount = state.opencodeProfileCount || 0;
     const totalCount = Math.max(statuses.length, configuredProfileCount);
-    if (totalCount > 0) {
-      totalEl.textContent = t('settings.opencode.connected', { linked: linkedCount, total: totalCount });
-    } else {
-      totalEl.textContent = t('settings.opencode.statusNotSet');
-    }
+    accountShellApi.render({
+      status: totalEl,
+      statusText: totalCount > 0
+        ? t('settings.opencode.connected', { linked: linkedCount, total: totalCount })
+        : t('settings.opencode.statusNotSet')
+    });
   }
 }
 
@@ -14742,7 +15626,7 @@ function thirdPartyProfileStatusText(provider, options = {}) {
   if (status === 'invalid') return t('settings.thirdparty.invalidKey');
   if (status !== 'linked') return t('settings.thirdparty.unavailable');
   const balance = optionalFiniteNumber(provider.balance?.amount);
-  if (balance !== null) return `✓ ${formatCompactMoney(balance, provider.balance?.currency || 'USD')}`;
+  if (balance !== null) return `✓ ${formatCompactMoney(balance, provider.balance?.currency || 'USD', state.settings?.compactTokenUnits, currentLocale())}`;
   const unlimited = (provider.windows || []).some((window) => (
     window?.showMeter === false && String(window?.detail || '').toLowerCase() === 'unlimited'
   ));
@@ -14777,11 +15661,14 @@ function updateNamedApiProfilesStatus({
   if (!statusEl) return;
   const total = state[profileCountStateKey] || 0;
   const linked = providers.filter((provider) => provider.status === 'ok').length;
-  statusEl.textContent = total === 0
-    ? t(`settings.${providerId}.statusNotSet`)
-    : !providerEnabled
-      ? t(`settings.${providerId}.nAccounts`, { count: total })
-      : t(`settings.${providerId}.connected`, { linked, total });
+  accountShellApi.render({
+    status: statusEl,
+    statusText: total === 0
+      ? t(`settings.${providerId}.statusNotSet`)
+      : !providerEnabled
+        ? t(`settings.${providerId}.nAccounts`, { count: total })
+        : t(`settings.${providerId}.connected`, { linked, total })
+  });
 }
 
 function updateOpenRouterProfilesStatus() {
@@ -14899,9 +15786,10 @@ function appendNamedApiProfileRow(listEl, config) {
     nameInput.type = 'text';
     nameInput.value = name;
     const renameBtn = document.createElement('button');
+    renameBtn.type = 'button';
     renameBtn.className = 'profile-rename-btn';
-    renameBtn.textContent = '✎';
     renameBtn.title = t('settings.profiles.rename');
+    renameBtn.setAttribute('aria-label', renameBtn.title);
     let editing = false;
     const finishRename = async (save) => {
       if (!editing) return;
@@ -14912,14 +15800,11 @@ function appendNamedApiProfileRow(listEl, config) {
       if (save && nextName && nextName !== name) {
         const result = await api.renameProfile(name, nextName);
         if (result?.ok) {
+          setAccountShellError(providerId, '');
           rerender();
         } else {
           nameInput.value = name;
-          const errorEl = document.getElementById(`${providerId}ErrorMessage`);
-          if (errorEl) {
-            errorEl.textContent = errorText(result);
-            errorEl.classList.remove('hidden');
-          }
+          setAccountShellError(providerId, errorText(result));
         }
       }
     };
@@ -14986,8 +15871,10 @@ function renderNamedApiProfiles(config) {
   } = config;
   const listEl = document.getElementById(`${providerId}ProfileList`);
   if (!listEl || !api) return;
+  renderAccountShellError(providerId);
+  const isCurrent = accountProfileRequests.begin(providerId);
   api.getProfiles().then(({ profiles, hasEnvVar }) => {
-    if (!isSettingsSurfaceVisible()) return;
+    if (!isCurrent() || !isSettingsSurfaceVisible() || document.getElementById(`${providerId}ProfileList`) !== listEl) return;
     listEl.replaceChildren();
     state.settings[profileSettingsKey] = profiles;
     state.settings[envConfiguredKey] = Boolean(hasEnvVar);
@@ -15028,8 +15915,11 @@ function renderNamedApiProfiles(config) {
     updateStatus();
     renderSettingsSummaries();
   }).catch(() => {
-    const statusEl = document.getElementById(`${providerId}Status`);
-    if (statusEl) statusEl.textContent = t(`settings.${providerId}.unavailable`);
+    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
+    accountShellApi.render({
+      status: document.getElementById(`${providerId}Status`),
+      statusText: t(`settings.${providerId}.unavailable`)
+    });
   });
 }
 
@@ -15078,13 +15968,15 @@ function renderCursorStatus() {
   const errorEl = document.getElementById('cursorErrorMessage');
   if (!statusEl || !listEl || !errorEl) return;
 
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
+  accountShellApi.render({
+    error: errorEl,
+    errorText: state.cursorAccount.error
+      ? t('settings.cursor.statusCheckFailed', { message: state.cursorAccount.error })
+      : accountShellErrors.cursor || ''
+  });
 
   if (state.cursorAccount.error) {
     setCursorStatusText(statusEl, t('settings.common.error'));
-    errorEl.textContent = t('settings.cursor.statusCheckFailed', { message: state.cursorAccount.error });
-    errorEl.classList.remove('hidden');
     setCursorCheckboxesEnabled(Boolean(state.cursorAccount.status?.accounts?.length));
     setSettingsSectionExpanded('limits', true);
     setCursorAccountExpanded(true);
@@ -15201,6 +16093,7 @@ function renderCursorStatus() {
 }
 
 async function refreshCursorStatus({ force = false, discover = false } = {}) {
+  setAccountShellError('cursor', '');
   state.cursorAccount = { status: null, error: '', busy: true };
   renderCursorStatus();
   try {
@@ -15224,6 +16117,7 @@ function setCursorCheckboxesEnabled(enabled) {
 
 let openCustomPricingForm = null;
 let modelAliasForm = null;
+let modelAliasSaveConflict = false;
 
 function setupModelAliasesUI() {
   const toggle = document.getElementById('modelAliasesSettingsToggle');
@@ -15231,15 +16125,28 @@ function setupModelAliasesUI() {
   toggle.addEventListener('click', () => setAccountGroupExpanded('modelAliases', !state.modelAliasesExpanded, 'modelAliasesExpanded'));
   setAccountGroupExpanded('modelAliases', false, 'modelAliasesExpanded');
   modelAliasForm = window.TokenMonitorModelAliasForm.createModelAliasForm({
-    document, t,
+    document, t: (key, params) => t(key === 'settings.modelAliases.saveError' && modelAliasSaveConflict ? 'settings.sync.content.conflict' : key, params),
     getAliases: () => state.settings?.modelAliases || {},
+    getBase: () => syncContentForm?.base(),
     getGrouping: () => state.settings?.modelAliasGrouping || 'off',
-    saveAliases: (modelAliases) => saveSettings({ modelAliases })
+    getModelIds: () => [
+      ...customPricingFormApi.inUseModelIds(state.stats),
+      ...(state.settings?.customModelPricing || []).map(entry => entry.modelId)
+    ],
+    saveAliases: async (modelAliases, base) => {
+      modelAliasSaveConflict = false;
+      try {
+        await saveSettings({ modelAliases }, base);
+      } catch (error) {
+        modelAliasSaveConflict = window.TokenMonitorSyncContentForm.isConflictError(error);
+        throw error;
+      }
+    }
   });
   for (const input of document.querySelectorAll('input[name="modelAliasGrouping"]')) {
     input.addEventListener('change', async () => {
       if (!input.checked) return;
-      await saveSettings({ modelAliasGrouping: input.value });
+      try { await saveSettings({ modelAliasGrouping: input.value }); } catch (_) { return; }
       modelAliasForm?.syncSettings();
     });
   }
@@ -15250,6 +16157,8 @@ function customPricingMeta(ov) {
   if (typeof ov.cacheReadPerM === 'number') parts.push(`${t('settings.customPricing.cacheRead')} $${ov.cacheReadPerM}`);
   if (typeof ov.inputPerM === 'number') parts.push(`${t('settings.customPricing.input')} $${ov.inputPerM}`);
   if (typeof ov.outputPerM === 'number') parts.push(`${t('settings.customPricing.output')} $${ov.outputPerM}`);
+  if (typeof ov.cacheWritePerM === 'number') parts.push(`${t('settings.customPricing.cacheWrite')} $${ov.cacheWritePerM}`);
+  if (typeof ov.cacheWrite1hPerM === 'number') parts.push(`${t('settings.customPricing.cacheWrite1h')} $${ov.cacheWrite1hPerM}`);
   return parts.length ? `${parts.join(' · ')} / 1M` : '';
 }
 
@@ -15259,6 +16168,7 @@ function renderCustomPricing() {
   const statusEl = document.getElementById('customPricingStatus');
   if (!listEl) return;
   const overrides = state.settings?.customModelPricing || [];
+  const pricingBase = syncContentForm?.base();
   if (statusEl) {
     statusEl.textContent = overrides.length
       ? t('settings.customPricing.count', { count: overrides.length })
@@ -15292,8 +16202,8 @@ function renderCustomPricing() {
     remove.className = 'managed-account-remove custom-pricing-remove';
     remove.textContent = t('settings.customPricing.remove');
     remove.addEventListener('click', async () => {
-      const next = customPricingFormApi.removeOverride(state.settings?.customModelPricing || [], ov.modelId);
-      await saveSettings({ customModelPricing: next });
+      const next = customPricingFormApi.removeOverride(overrides, ov.modelId);
+      try { await saveSettings({ customModelPricing: next }, pricingBase); } catch (_) { return; }
       renderCustomPricing();
     });
     row.append(main, remove);
@@ -15314,6 +16224,18 @@ function setupCustomPricingUI() {
   const inputEl = document.getElementById('customPricingInput');
   const outputEl = document.getElementById('customPricingOutput');
   const cacheReadEl = document.getElementById('customPricingCacheRead');
+  const cacheWriteEl = document.getElementById('customPricingCacheWrite');
+  const cacheWrite1hEl = document.getElementById('customPricingCacheWrite1h');
+  const advanced = document.getElementById('customPricingAdvanced');
+  const advancedSummary = document.getElementById('customPricingAdvancedSummary');
+  const help = document.getElementById('customPricingHelp');
+  const rateFields = [
+    [inputEl, 'inputPerM'], [outputEl, 'outputPerM'], [cacheReadEl, 'cacheReadPerM'],
+    [cacheWriteEl, 'cacheWritePerM'], [cacheWrite1hEl, 'cacheWrite1hPerM']
+  ];
+  let lookupRevision = 0;
+  let pricingEdit = null;
+  const editedFields = new Set();
   const hintEl = document.getElementById('customPricingHint');
   const errorEl = document.getElementById('customPricingError');
   const saveButton = document.getElementById('customPricingSaveButton');
@@ -15325,10 +16247,15 @@ function setupCustomPricingUI() {
   const selectedModelId = () => (select.value === '__manual__' ? manualInput.value.trim() : select.value);
 
   const resetForm = () => {
-    inputEl.value = ''; outputEl.value = ''; cacheReadEl.value = '';
+    lookupRevision += 1;
+    editedFields.clear();
+    advanced.open = false;
+    if (help.matches(':popover-open')) help.hidePopover();
+    for (const [el] of rateFields) el.value = '';
+    updateAdvancedSummary();
     manualInput.value = ''; manualInput.classList.add('hidden');
-    for (const id of ['customPricingInputApprox', 'customPricingOutputApprox', 'customPricingCacheReadApprox']) {
-      const span = document.getElementById(id);
+    for (const [el] of rateFields) {
+      const span = document.getElementById(el.id + 'Approx');
       if (span) span.textContent = '';
     }
     showHint(''); showError('');
@@ -15359,6 +16286,7 @@ function setupCustomPricingUI() {
     resetForm();
   };
   openCustomPricingForm = (prefill) => {
+    pricingEdit = { base: syncContentForm?.base(), entries: structuredClone(state.settings?.customModelPricing || []) };
     resetForm();
     populateModels();
     if (prefill && prefill.modelId) {
@@ -15370,10 +16298,11 @@ function setupCustomPricingUI() {
         manualInput.classList.remove('hidden');
         manualInput.value = prefill.modelId;
       }
-      inputEl.value = prefill.inputPerM ?? '';
-      outputEl.value = prefill.outputPerM ?? '';
-      cacheReadEl.value = prefill.cacheReadPerM ?? '';
-      for (const el of [inputEl, outputEl, cacheReadEl]) el.dispatchEvent(new Event('input'));
+      for (const [el, key] of rateFields) {
+        el.value = prefill[key] ?? '';
+        updateApproximation(el);
+      }
+      advanced.open = cacheWriteEl.value !== '' || cacheWrite1hEl.value !== '';
     }
     form.classList.remove('hidden');
     addButton.classList.add('hidden');
@@ -15383,6 +16312,10 @@ function setupCustomPricingUI() {
   cancelButton.addEventListener('click', closeForm);
 
   select.addEventListener('change', async () => {
+    const revision = ++lookupRevision;
+    editedFields.clear();
+    advanced.open = false;
+    for (const [el] of rateFields) { el.value = ''; updateApproximation(el); }
     showError('');
     manualInput.classList.toggle('hidden', select.value !== '__manual__');
     if (!select.value || select.value === '__manual__') { showHint(''); return; }
@@ -15390,27 +16323,42 @@ function setupCustomPricingUI() {
     showHint(t('settings.customPricing.lookingUp'));
     try {
       const res = await window.tokenMonitor.lookupModelPricing(id);
+      if (revision !== lookupRevision) return;
       if (res?.ok && res.result?.pricing) {
         const p = customPricingFormApi.perMillionFromPricing(res.result);
-        if (p.inputPerM !== undefined) inputEl.value = p.inputPerM;
-        if (p.outputPerM !== undefined) outputEl.value = p.outputPerM;
-        if (p.cacheReadPerM !== undefined) cacheReadEl.value = p.cacheReadPerM;
-        for (const el of [inputEl, outputEl, cacheReadEl]) el.dispatchEvent(new Event('input'));
+        for (const [el, key] of rateFields) {
+          if (!editedFields.has(key)) el.value = p[key] ?? '';
+          updateApproximation(el);
+        }
         showHint(t('settings.customPricing.currentPrice', { key: res.result.matchedKey || id, source: res.result.source || '' }));
       } else {
         showHint(t('settings.customPricing.noCurrentPrice'));
       }
     } catch (_) {
+      if (revision !== lookupRevision) return;
       showHint(t('settings.customPricing.noCurrentPrice'));
     }
   });
 
-  for (const el of [inputEl, outputEl, cacheReadEl]) {
+  function updateAdvancedSummary() {
+    const count = [cacheWriteEl, cacheWrite1hEl].filter(el => el.value !== '').length;
+    advancedSummary.textContent = count ? t('settings.customPricing.advancedConfigured', { count }) : '';
+  }
+
+  function updateApproximation(el) {
+    updateAdvancedSummary();
+    const span = document.getElementById(el.id + 'Approx');
+    if (!span) return;
+    const v = Number(el.value);
+    span.textContent = (el.value !== '' && Number.isFinite(v)) ? `≈ ${formatCost(v)} / 1M` : '';
+  }
+
+  for (const [el, key] of rateFields) {
+    const writeDescription = el === cacheWrite1hEl ? ' customPricingWriteNote' : '';
+    el.setAttribute('aria-describedby', 'customPricingRateUnits customPricingCoverageNote customPricingHint customPricingError' + writeDescription);
     el.addEventListener('input', () => {
-      const span = document.getElementById(el.id + 'Approx');
-      if (!span) return;
-      const v = Number(el.value);
-      span.textContent = (el.value !== '' && Number.isFinite(v)) ? `≈ ${formatCost(v)} / 1M` : '';
+      editedFields.add(key);
+      updateApproximation(el);
     });
   }
 
@@ -15418,17 +16366,24 @@ function setupCustomPricingUI() {
     showError('');
     const modelId = selectedModelId();
     if (!modelId) { showError(t('settings.customPricing.errorNoModel')); return; }
-    const entry = {
-      modelId,
-      inputPerM: inputEl.value === '' ? undefined : Number(inputEl.value),
-      outputPerM: outputEl.value === '' ? undefined : Number(outputEl.value),
-      cacheReadPerM: cacheReadEl.value === '' ? undefined : Number(cacheReadEl.value)
-    };
-    if (!customPricingFormApi.hasUsableBasePrice(entry)) { showError(t('settings.customPricing.errorNoPrice')); return; }
-    const next = customPricingFormApi.upsertOverride(state.settings?.customModelPricing || [], entry);
-    await saveSettings({ customModelPricing: next });
-    closeForm();
-    renderCustomPricing();
+    const entry = { modelId };
+    for (const [el, key] of rateFields) entry[key] = el.value === '' ? undefined : Number(el.value);
+    if (!customPricingFormApi.hasUsableBasePrice(entry)) {
+      if ([entry.cacheWritePerM, entry.cacheWrite1hPerM].some(value => value !== undefined && (!Number.isFinite(value) || value < 0))) advanced.open = true;
+      showError(t('settings.customPricing.errorNoPrice'));
+      return;
+    }
+    const next = customPricingFormApi.upsertOverride(pricingEdit?.entries || [], entry);
+    saveButton.disabled = true;
+    try {
+      await saveSettings({ customModelPricing: next }, pricingEdit?.base);
+      closeForm();
+      renderCustomPricing();
+    } catch (error) {
+      showError(t(window.TokenMonitorSyncContentForm.isConflictError(error) ? 'settings.sync.content.conflict' : 'settings.customPricing.saveFailed'));
+    } finally {
+      saveButton.disabled = false;
+    }
   });
 
   renderCustomPricing();
@@ -15600,25 +16555,25 @@ function setupCursorAccountUI() {
     window.tokenMonitor.openExternal('https://cursor.com/dashboard');
   });
 
-  document.getElementById('cursorManualSubmit').addEventListener('click', async () => {
+  const cursorManualSubmit = document.getElementById('cursorManualSubmit');
+  cursorManualSubmit.addEventListener('click', () => accountProfileSaves.run('cursor', cursorManualSubmit, async () => {
     const input = document.getElementById('cursorManualInput');
-    const errorEl = document.getElementById('cursorErrorMessage');
-    errorEl.classList.add('hidden');
+    setAccountShellError('cursor', '');
     const result = await window.tokenMonitor.cursor.loginManual(input.value);
     if (!result.ok) {
       const message = result.code === 'EXTERNAL_AGENT_ACTIVE'
         ? t('settings.cursor.agentActive')
         : result.error;
-      errorEl.textContent = t('settings.cursor.loginFailed', { message });
-      errorEl.classList.remove('hidden');
+      setAccountShellError('cursor', t('settings.cursor.loginFailed', { message }));
       return;
     }
     input.value = '';
+    setAccountShellError('cursor', '');
     state.cursorAccount = { status: result.status, error: '', busy: false };
     renderCursorStatus();
     setCursorManualExpanded(false);
     await refreshStats({ force: true });
-  });
+  }));
 
   refreshCursorStatus({ discover: true });
 
@@ -15679,23 +16634,23 @@ function setupCursorAccountUI() {
       // can never be submitted as the other.
       const stale = document.getElementById(isCookie ? 'opencodeApiKeyInput' : 'opencodeCookieInput');
       if (stale) stale.value = '';
-      document.getElementById('opencodeErrorMessage')?.classList.add('hidden');
+      setAccountShellError('opencode', '');
       clearOpenCodeMergeOffer();
     };
     kindSelect?.addEventListener('change', applyOpenCodeCredentialKind);
     applyOpenCodeCredentialKind();
 
-    document.getElementById('opencodeCookieSubmit').addEventListener('click', async () => {
+    const profileSubmit = document.getElementById('opencodeCookieSubmit');
+    profileSubmit.addEventListener('click', () => accountProfileSaves.run('opencode', profileSubmit, async () => {
       const opencodeCredentialKind = kindSelect?.value === 'cookie' ? 'cookie' : 'api';
       const input = document.getElementById(opencodeCredentialKind === 'cookie'
         ? 'opencodeCookieInput'
         : 'opencodeApiKeyInput');
       const nameInput = document.getElementById('opencodeProfileName');
-      const errorEl = document.getElementById('opencodeErrorMessage');
       const name = (nameInput.value || '').trim();
       const cookie = input.value;
 
-      errorEl.classList.add('hidden');
+      setAccountShellError('opencode', '');
 
       // The name is required rather than defaulted. Saving one credential keeps
       // the other under the same name, and the collector reads that as "these
@@ -15703,8 +16658,7 @@ function setupCursorAccountUI() {
       // could attach one account's key to another account's cookie. Making the
       // user type the name is what keeps the association explicit.
       if (!name) {
-        errorEl.textContent = t('settings.opencode.nameRequired');
-        errorEl.classList.remove('hidden');
+        setAccountShellError('opencode', t('settings.opencode.nameRequired'));
         nameInput.focus();
         return;
       }
@@ -15715,7 +16669,7 @@ function setupCursorAccountUI() {
       // it: the next click has different consequences from the one just made.
       const submit = async (merge) => {
         const at = addMergeOffer?.revision();
-        confirmOpenCodeMerge = () => submit(true);
+        confirmOpenCodeMerge = () => accountProfileSaves.run('opencode', addMergeButton, () => submit(true));
         const result = await window.tokenMonitor.opencode.saveProfile(
           name,
           cookie,
@@ -15736,6 +16690,7 @@ function setupCursorAccountUI() {
             nameInput.value = '';
             addMergeOffer?.withdraw();
           }
+          if (!stale) setAccountShellError('opencode', '');
           renderOpenCodeProfiles();
           updateOpenCodeProfilesStatus();
           renderSettingsSummaries();
@@ -15746,11 +16701,10 @@ function setupCursorAccountUI() {
           addMergeOffer.offer(at, name, t('settings.opencode.mergeInto', { name }));
           return;
         }
-        errorEl.textContent = opencodeSaveErrorText(result);
-        errorEl.classList.remove('hidden');
+        setAccountShellError('opencode', opencodeSaveErrorText(result));
       };
       await submit(false);
-    });
+    }));
   }
 
   const openrouterToggle = document.getElementById('openrouterSettingsToggle');
@@ -15773,18 +16727,15 @@ function setupCursorAccountUI() {
     document.getElementById('openrouterOpenBrowser')?.addEventListener('click', () => {
       window.tokenMonitor.openExternal('https://openrouter.ai/settings/keys');
     });
-    document.getElementById('openrouterProfileSubmit')?.addEventListener('click', async () => {
+    const profileSubmit = document.getElementById('openrouterProfileSubmit');
+    profileSubmit?.addEventListener('click', () => accountProfileSaves.run('openrouter', profileSubmit, async () => {
       const nameInput = document.getElementById('openrouterProfileName');
       const keyInput = document.getElementById('openrouterApiKeyInput');
-      const errorEl = document.getElementById('openrouterErrorMessage');
       const name = String(nameInput?.value || '').trim() || 'default';
       const apiKey = String(keyInput?.value || '').trim();
-      errorEl?.classList.add('hidden');
+      setAccountShellError('openrouter', '');
       if (!apiKey) {
-        if (errorEl) {
-          errorEl.textContent = t('settings.openrouter.statusNotSet');
-          errorEl.classList.remove('hidden');
-        }
+        setAccountShellError('openrouter', t('settings.openrouter.statusNotSet'));
         return;
       }
       const result = await window.tokenMonitor.openrouter.saveProfile(name, apiKey);
@@ -15793,11 +16744,10 @@ function setupCursorAccountUI() {
         keyInput.value = '';
         renderOpenRouterProfiles();
         await refreshStats({ force: true });
-      } else if (errorEl) {
-        errorEl.textContent = openrouterProfileErrorText(result);
-        errorEl.classList.remove('hidden');
+      } else {
+        setAccountShellError('openrouter', openrouterProfileErrorText(result));
       }
-    });
+    }));
   }
 
   const thirdpartyToggle = document.getElementById('thirdpartySettingsToggle');
@@ -15825,7 +16775,8 @@ function setupCursorAccountUI() {
       addDetails?.classList.toggle('hidden', !expanded);
       document.getElementById('thirdpartyAddForm')?.classList.toggle('expanded', expanded);
     });
-    document.getElementById('thirdpartyProfileSubmit')?.addEventListener('click', async () => {
+    const profileSubmit = document.getElementById('thirdpartyProfileSubmit');
+    profileSubmit?.addEventListener('click', () => accountProfileSaves.run('thirdparty', profileSubmit, async () => {
       const nameInput = document.getElementById('thirdpartyProfileName');
       const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
       const refreshTokenInput = document.getElementById('thirdpartyRefreshTokenInput');
@@ -15838,7 +16789,6 @@ function setupCursorAccountUI() {
       const totalPathInput = document.getElementById('thirdpartyTotalPathInput');
       const currencyInput = document.getElementById('thirdpartyCurrencyInput');
       const divisorInput = document.getElementById('thirdpartyDivisorInput');
-      const errorEl = document.getElementById('thirdpartyErrorMessage');
       const name = String(nameInput?.value || '').trim() || 'default';
       const adapter = selectedThirdPartyAdapter();
       const baseUrl = String(baseUrlInput?.value || '').trim();
@@ -15846,7 +16796,7 @@ function setupCursorAccountUI() {
       const refreshToken = String(refreshTokenInput?.value || '').trim();
       const userId = String(userIdInput?.value || '').trim();
       const apiKey = String(keyInput?.value || '').trim();
-      errorEl?.classList.add('hidden');
+      setAccountShellError('thirdparty', '');
       const result = await window.tokenMonitor.thirdparty.saveProfile({
         name,
         adapter,
@@ -15880,333 +16830,10 @@ function setupCursorAccountUI() {
         divisorInput.value = '1';
         renderThirdPartyProfiles();
         await refreshStats({ force: true });
-      } else if (errorEl) {
-        errorEl.textContent = thirdPartyProfileErrorText(result, adapter);
-        errorEl.classList.remove('hidden');
+      } else {
+        setAccountShellError('thirdparty', thirdPartyProfileErrorText(result, adapter));
       }
-    });
-  }
-
-  const deepseekToggle = document.getElementById('deepseekSettingsToggle');
-  if (deepseekToggle) {
-    deepseekToggle.addEventListener('click', () => setDeepseekAccountExpanded(!state.deepseekAccountExpanded));
-    setDeepseekAccountExpanded(false);
-    renderDeepseekStatus();
-
-    document.getElementById('deepseekOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://platform.deepseek.com/api_keys');
-    });
-
-    document.getElementById('deepseekLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ deepseekApiKey: '' });
-      clearDeepseekPendingCheck();
-      clearDeepseekProviderStatus();
-      renderDeepseekStatus();
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('deepseekRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('deepseekApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('deepseekApiKeyInput');
-      const errorEl = document.getElementById('deepseekErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.deepseek.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markDeepseekKeyCheckPending();
-        await saveSettings({ deepseekApiKey: input.value });
-        input.value = '';
-        renderDeepseekStatus();
-        await refreshStats({ force: true });
-        if (deepseekAccountLinked()) setDeepseekAccountExpanded(false);
-        else setDeepseekAccountExpanded(true);
-        renderDeepseekStatus();
-      } catch (err) {
-        clearDeepseekPendingCheck();
-        errorEl.textContent = t('settings.deepseek.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-  const minimaxToggle = document.getElementById('minimaxSettingsToggle');
-  if (minimaxToggle) {
-    minimaxToggle.addEventListener('click', () => setMinimaxAccountExpanded(!state.minimaxAccountExpanded));
-    setMinimaxAccountExpanded(false);
-    renderMinimaxStatus();
-
-    document.getElementById('minimaxOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(minimaxPlatformUrl());
-    });
-
-    document.getElementById('minimaxLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ minimaxApiKey: '' });
-      clearMinimaxPendingCheck();
-      clearMinimaxProviderStatus();
-      renderMinimaxStatus();
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('minimaxRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('minimaxApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('minimaxApiKeyInput');
-      const errorEl = document.getElementById('minimaxErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.minimax.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markMinimaxKeyCheckPending();
-        await saveSettings({ minimaxApiKey: input.value });
-        input.value = '';
-        renderMinimaxStatus();
-        await refreshStats({ force: true });
-        if (minimaxAccountLinked()) setMinimaxAccountExpanded(false);
-        else setMinimaxAccountExpanded(true);
-        renderMinimaxStatus();
-      } catch (err) {
-        clearMinimaxPendingCheck();
-        errorEl.textContent = t('settings.minimax.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const clineToggle = document.getElementById('clineSettingsToggle');
-  if (clineToggle) {
-    clineToggle.addEventListener('click', () => setExternalAccountExpanded('cline', !state.clineAccountExpanded));
-    setExternalAccountExpanded('cline', false);
-    renderExternalProviderStatus('cline');
-
-    document.getElementById('clineOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(clinePlatformUrl());
-    });
-
-    document.getElementById('clineLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ clineApiKey: '' });
-      clearExternalProviderCheckPending('cline');
-      clearExternalProviderPendingStatus('cline');
-      renderExternalProviderStatus('cline');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('clineRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('clineApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('clineApiKeyInput');
-      const errorEl = document.getElementById('clineErrorMessage');
-      const submit = document.getElementById('clineApiKeySubmit');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.cline.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      submit.disabled = true;
-      submit.textContent = t('settings.common.checking');
-      try {
-        markExternalProviderCheckPending('cline');
-        const validation = await window.tokenMonitor.cline.validateApiKey(input.value);
-        if (!validation?.ok) {
-          clearExternalProviderCheckPending('cline');
-          renderExternalProviderStatus('cline');
-          errorEl.textContent = clineApiKeyValidationError(validation);
-          errorEl.classList.remove('hidden');
-          return;
-        }
-        await saveSettings({ clineApiKey: input.value });
-        input.value = '';
-        renderExternalProviderStatus('cline');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('cline', !externalProviderAccountLinked('cline'));
-        renderExternalProviderStatus('cline');
-      } catch (err) {
-        clearExternalProviderCheckPending('cline');
-        errorEl.textContent = t('settings.cline.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      } finally {
-        submit.disabled = false;
-        submit.textContent = t('settings.cline.saveApiKey');
-      }
-    });
-  }
-
-  const factoryToggle = document.getElementById('factorySettingsToggle');
-  if (factoryToggle) {
-    factoryToggle.addEventListener('click', () => setExternalAccountExpanded('factory', !state.factoryAccountExpanded));
-    setExternalAccountExpanded('factory', false);
-    renderExternalProviderStatus('factory');
-
-    document.getElementById('factoryOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(factoryPlatformUrl());
-    });
-
-    document.getElementById('factoryLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ factoryApiKey: '' });
-      clearExternalProviderCheckPending('factory');
-      clearExternalProviderPendingStatus('factory');
-      renderExternalProviderStatus('factory');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('factoryRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('factoryApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('factoryApiKeyInput');
-      const errorEl = document.getElementById('factoryErrorMessage');
-      const submit = document.getElementById('factoryApiKeySubmit');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.factory.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      submit.disabled = true;
-      submit.textContent = t('settings.common.checking');
-      try {
-        markExternalProviderCheckPending('factory');
-        const validation = await window.tokenMonitor.factory.validateApiKey(input.value);
-        if (!validation?.ok) {
-          clearExternalProviderCheckPending('factory');
-          renderExternalProviderStatus('factory');
-          errorEl.textContent = factoryApiKeyValidationError(validation);
-          errorEl.classList.remove('hidden');
-          return;
-        }
-        await saveSettings({ factoryApiKey: input.value });
-        input.value = '';
-        renderExternalProviderStatus('factory');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('factory', !externalProviderAccountLinked('factory'));
-        renderExternalProviderStatus('factory');
-      } catch (err) {
-        clearExternalProviderCheckPending('factory');
-        errorEl.textContent = t('settings.factory.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      } finally {
-        submit.disabled = false;
-        submit.textContent = t('settings.factory.saveApiKey');
-      }
-    });
-  }
-
-  const zaiToggle = document.getElementById('zaiSettingsToggle');
-  if (zaiToggle) {
-    const zaiApiRegionInput = document.getElementById('zaiApiRegionInput');
-    if (zaiApiRegionInput) zaiApiRegionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
-    zaiApiRegionInput?.addEventListener('change', () => void saveSettings({ zaiApiRegion: zaiApiRegionInput.value || 'global' }));
-    zaiToggle.addEventListener('click', () => setExternalAccountExpanded('zai', !state.zaiAccountExpanded));
-    setExternalAccountExpanded('zai', false);
-    renderExternalProviderStatus('zai');
-
-    document.getElementById('zaiOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(zaiPlatformUrl());
-    });
-
-    document.getElementById('zaiLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ zaiApiKey: '' });
-      clearExternalProviderCheckPending('zai');
-      clearExternalProviderPendingStatus('zai');
-      renderExternalProviderStatus('zai');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('zaiApiKeyInput');
-      const regionInput = document.getElementById('zaiApiRegionInput');
-      const errorEl = document.getElementById('zaiErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.zai.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('zai');
-        await saveSettings({ zaiApiKey: input.value, zaiApiRegion: regionInput?.value || 'global' });
-        input.value = '';
-        renderExternalProviderStatus('zai');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('zai', !externalProviderAccountLinked('zai'));
-        renderExternalProviderStatus('zai');
-      } catch (err) {
-        clearExternalProviderCheckPending('zai');
-        errorEl.textContent = t('settings.zai.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const zaiteamToggle = document.getElementById('zaiteamSettingsToggle');
-  if (zaiteamToggle) {
-    zaiteamToggle.addEventListener('click', () => setExternalAccountExpanded('zaiteam', !state.zaiteamAccountExpanded));
-    setExternalAccountExpanded('zaiteam', false);
-    renderExternalProviderStatus('zaiteam');
-
-    document.getElementById('zaiteamOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(zaiteamPlatformUrl());
-    });
-
-    document.getElementById('zaiteamLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ zaiTeamApiKey: '', zaiTeamOrganizationId: '', zaiTeamProjectId: '' });
-      clearExternalProviderCheckPending('zaiteam');
-      clearExternalProviderPendingStatus('zaiteam');
-      renderExternalProviderStatus('zaiteam');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiteamRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiteamApiKeySubmit').addEventListener('click', async () => {
-      const keyInput = document.getElementById('zaiteamApiKeyInput');
-      const orgInput = document.getElementById('zaiteamOrganizationIdInput');
-      const projectInput = document.getElementById('zaiteamProjectIdInput');
-      const errorEl = document.getElementById('zaiteamErrorMessage');
-      errorEl.classList.add('hidden');
-      const apiKey = String(keyInput.value || '').trim();
-      const organizationId = String(orgInput.value || '').trim();
-      const projectId = String(projectInput.value || '').trim();
-      if (!apiKey || !organizationId || !projectId) {
-        errorEl.textContent = t('settings.zaiteam.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('zaiteam');
-        await saveSettings({ zaiTeamApiKey: apiKey, zaiTeamOrganizationId: organizationId, zaiTeamProjectId: projectId });
-        keyInput.value = '';
-        orgInput.value = '';
-        projectInput.value = '';
-        renderExternalProviderStatus('zaiteam');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('zaiteam', !externalProviderAccountLinked('zaiteam'));
-        renderExternalProviderStatus('zaiteam');
-      } catch (err) {
-        clearExternalProviderCheckPending('zaiteam');
-        errorEl.textContent = t('settings.zaiteam.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
+    }));
   }
 
   const volcengineToggle = document.getElementById('volcengineSettingsToggle');
@@ -16232,547 +16859,52 @@ function setupCursorAccountUI() {
       await refreshStats({ force: true });
     });
 
-    document.getElementById('volcengineLogoutButton').addEventListener('click', async () => {
-      await saveSettings({
-        volcengineAccessKeyId: '', volcengineSecretAccessKey: '', volcengineRegion: '',
-        volcengineAgentAccessKeyId: '', volcengineAgentSecretAccessKey: '', volcengineAgentRegion: ''
-      });
-      clearExternalProviderCheckPending('volcengine');
-      clearExternalProviderPendingStatus('volcengine');
-      renderExternalProviderStatus('volcengine');
-      await refreshStats({ force: true });
-    });
+    document.getElementById('volcengineLogoutButton').addEventListener('click', () => clearAccountCredential('volcengine'));
 
     document.getElementById('volcengineRefreshButton').addEventListener('click', async () => {
       await refreshStats({ force: true });
     });
 
-    document.getElementById('volcengineCredentialsSubmit').addEventListener('click', async () => {
+    document.getElementById('volcengineCredentialsSubmit').addEventListener('click', async (event) => {
       const accessKeyInput = document.getElementById('volcengineAccessKeyInput');
       const secretInput = document.getElementById('volcengineSecretAccessKeyInput');
       const regionInput = document.getElementById('volcengineRegionInput');
       const agentAccessKeyInput = document.getElementById('volcengineAgentAccessKeyInput');
       const agentSecretInput = document.getElementById('volcengineAgentSecretAccessKeyInput');
       const agentRegionInput = document.getElementById('volcengineAgentRegionInput');
-      const errorEl = document.getElementById('volcengineErrorMessage');
-      errorEl.classList.add('hidden');
       const accessKeyValue = String(accessKeyInput.value || '').trim();
       const secretValue = String(secretInput.value || '').trim();
-      if (!accessKeyValue || (/^AKLT/i.test(accessKeyValue) && !secretValue)) {
-        errorEl.textContent = t('settings.volcengine.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      // Only sent when the user actually filled the override in, so saving the
-      // Coding Plan key again cannot silently wipe a separate Agent account.
+      // Checks only this panel can make: which fields pair with which.
       const agentAccessKeyValue = String(agentAccessKeyInput?.value || '').trim();
       const agentSecretValue = String(agentSecretInput?.value || '').trim();
-      if (agentAccessKeyValue && !agentSecretValue) {
-        errorEl.textContent = t('settings.volcengine.agentSecretRequired');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('volcengine');
-        await saveSettings({
-          volcengineAccessKeyId: accessKeyInput.value,
-          volcengineSecretAccessKey: secretInput.value,
-          volcengineRegion: regionInput.value || 'cn-beijing',
-          ...(agentAccessKeyValue ? {
-            volcengineAgentAccessKeyId: agentAccessKeyValue,
-            volcengineAgentSecretAccessKey: agentSecretValue,
-            volcengineAgentRegion: agentRegionInput?.value || 'cn-beijing'
-          } : {})
-        });
-        accessKeyInput.value = '';
-        secretInput.value = '';
-        if (agentAccessKeyInput) agentAccessKeyInput.value = '';
-        if (agentSecretInput) agentSecretInput.value = '';
+      const pairing = accessKeyValue && /^AKLT/i.test(accessKeyValue) && !secretValue
+        ? 'settings.volcengine.secretRequired'
+        : agentAccessKeyValue && !agentSecretValue ? 'settings.volcengine.agentSecretRequired' : '';
+      if (pairing) {
+        setAccountPanelMessage('volcengine', { key: pairing });
         renderExternalProviderStatus('volcengine');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('volcengine', !externalProviderAccountLinked('volcengine'));
-        renderExternalProviderStatus('volcengine');
-      } catch (err) {
-        clearExternalProviderCheckPending('volcengine');
-        errorEl.textContent = t('settings.volcengine.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const claudeToggle = document.getElementById('claudeSettingsToggle');
-  if (claudeToggle) {
-    claudeToggle.addEventListener('click', () => setExternalAccountExpanded('claude', !state.claudeAccountExpanded));
-    setExternalAccountExpanded('claude', false);
-    renderExternalProviderStatus('claude');
-
-    document.getElementById('claudeOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(claudePlatformUrl());
-    });
-
-    document.getElementById('claudeLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ claudeWebCookie: '' });
-      clearExternalProviderCheckPending('claude');
-      clearExternalProviderPendingStatus('claude');
-      renderExternalProviderStatus('claude');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('claudeRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('claudeWebCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('claudeWebCookieInput');
-      const submitButton = document.getElementById('claudeWebCookieSubmit');
-      const errorEl = document.getElementById('claudeErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.claude.cookieRequired');
-        errorEl.classList.remove('hidden');
         return;
       }
-      if (/[\r\n]/.test(input.value)) {
-        errorEl.textContent = t('settings.claude.cookieInvalidFormat');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      if (submitButton.disabled) return;
-      submitButton.disabled = true;
-      submitButton.textContent = t('settings.common.checking');
-      try {
-        const result = await window.tokenMonitor.claude.saveCookie(input.value);
-        if (result?.superseded) return;
-        if (!result?.ok) {
-          if (result?.errorCode === 'INVALID_CLAUDE_WEB_SESSION_KEY') {
-            errorEl.textContent = t('settings.claude.cookieInvalidFormat');
-          } else if (result?.errorCode === 'CLAUDE_WEB_SOURCE_CHALLENGE') {
-            errorEl.textContent = t('settings.claude.sourceChallenge');
-          } else if (result?.status === 'unauthorized') {
-            errorEl.textContent = t('settings.claude.cookieRejected');
-          } else {
-            errorEl.textContent = t('settings.claude.cookieCheckFailed');
-          }
-          errorEl.classList.remove('hidden');
-          return;
+      await submitAccountCredential(event.currentTarget, 'volcengine', {
+        volcengineAccessKeyId: accessKeyInput.value,
+        volcengineSecretAccessKey: secretInput.value,
+        volcengineRegion: regionInput.value || 'cn-beijing',
+        // Only sent when the user actually filled the override in, so saving the
+        // Coding Plan key again cannot silently wipe a separate Agent account.
+        ...(agentAccessKeyValue ? {
+          volcengineAgentAccessKeyId: agentAccessKeyValue,
+          volcengineAgentSecretAccessKey: agentSecretValue,
+          volcengineAgentRegion: agentRegionInput?.value || 'cn-beijing'
+        } : {})
+      }, {
+        failedKey: 'settings.volcengine.saveFailed',
+        clearInput: () => {
+          accessKeyInput.value = '';
+          secretInput.value = '';
+          if (agentAccessKeyInput) agentAccessKeyInput.value = '';
+          if (agentSecretInput) agentSecretInput.value = '';
         }
-        markExternalProviderCheckPending('claude');
-        await saveSettings({
-          limitProviders: limitProviderSelectionIncluding('claude'),
-          limitsEnabled: true
-        });
-        input.value = '';
-        renderExternalProviderStatus('claude');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('claude', !externalProviderAccountLinked('claude'));
-        renderExternalProviderStatus('claude');
-      } catch (err) {
-        clearExternalProviderCheckPending('claude');
-        errorEl.textContent = t('settings.claude.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      } finally {
-        submitButton.disabled = false;
-        submitButton.textContent = t('settings.claude.saveCookie');
-      }
-    });
-  }
-
-  const qoderToggle = document.getElementById('qoderSettingsToggle');
-  if (qoderToggle) {
-    qoderToggle.addEventListener('click', () => setExternalAccountExpanded('qoder', !state.qoderAccountExpanded));
-    setExternalAccountExpanded('qoder', false);
-    renderExternalProviderStatus('qoder');
-
-    const qoderSiteInput = document.getElementById('qoderSiteInput');
-    if (qoderSiteInput) qoderSiteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
-    updateQoderUsagePageHint();
-    qoderSiteInput?.addEventListener('change', () => {
-      updateQoderUsagePageHint();
-      void saveSettings({ qoderSite: qoderSiteInput.value || 'global' });
-    });
-
-    document.getElementById('qoderOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(qoderPlatformUrl());
-    });
-
-    document.getElementById('qoderLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ qoderCookie: '' });
-      clearExternalProviderCheckPending('qoder');
-      clearExternalProviderPendingStatus('qoder');
-      renderExternalProviderStatus('qoder');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('qoderRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('qoderCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('qoderCookieInput');
-      const siteInput = document.getElementById('qoderSiteInput');
-      const errorEl = document.getElementById('qoderErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.qoder.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('qoder');
-        await saveSettings({ qoderCookie: input.value, qoderSite: siteInput?.value || 'global' });
-        input.value = '';
-        renderExternalProviderStatus('qoder');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('qoder', !externalProviderAccountLinked('qoder'));
-        renderExternalProviderStatus('qoder');
-      } catch (err) {
-        clearExternalProviderCheckPending('qoder');
-        errorEl.textContent = t('settings.qoder.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const devinToggle = document.getElementById('devinSettingsToggle');
-  if (devinToggle) {
-    devinToggle.addEventListener('click', () => setExternalAccountExpanded('devin', !state.devinAccountExpanded));
-    setExternalAccountExpanded('devin', false);
-    renderExternalProviderStatus('devin');
-
-    document.getElementById('devinOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(devinPlatformUrl());
-    });
-
-    document.getElementById('devinLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ devinBearerToken: '', devinOrganization: '' });
-      clearExternalProviderCheckPending('devin');
-      clearExternalProviderPendingStatus('devin');
-      renderExternalProviderStatus('devin');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('devinRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('devinCredentialSubmit').addEventListener('click', async () => {
-      const tokenInput = document.getElementById('devinBearerTokenInput');
-      const organizationInput = document.getElementById('devinOrganizationInput');
-      const errorEl = document.getElementById('devinErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(tokenInput.value || '').trim() || !String(organizationInput.value || '').trim()) {
-        errorEl.textContent = t('settings.devin.credentialsRequired');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('devin');
-        await saveSettings({
-          devinBearerToken: tokenInput.value,
-          devinOrganization: organizationInput.value,
-          limitProviders: limitProviderSelectionIncluding('devin'),
-          limitsEnabled: true
-        });
-        tokenInput.value = '';
-        organizationInput.value = '';
-        renderExternalProviderStatus('devin');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('devin', !externalProviderAccountLinked('devin'));
-        renderExternalProviderStatus('devin');
-      } catch (err) {
-        clearExternalProviderCheckPending('devin');
-        errorEl.textContent = t('settings.devin.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const traeToggle = document.getElementById('traeSettingsToggle');
-  if (traeToggle) {
-    traeToggle.addEventListener('click', () => setExternalAccountExpanded('trae', !state.traeAccountExpanded));
-    setExternalAccountExpanded('trae', false);
-    renderExternalProviderStatus('trae');
-
-    document.getElementById('traeOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://www.trae.cn');
-    });
-    document.getElementById('traeLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ traeAccessToken: '', traeDeviceId: '' });
-      clearExternalProviderCheckPending('trae');
-      clearExternalProviderPendingStatus('trae');
-      renderExternalProviderStatus('trae');
-      await refreshStats({ force: true });
-    });
-    document.getElementById('traeRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-    document.getElementById('traeTokenSubmit').addEventListener('click', async () => {
-      const tokenInput = document.getElementById('traeTokenInput');
-      const deviceIdInput = document.getElementById('traeDeviceIdInput');
-      const errorEl = document.getElementById('traeErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(tokenInput.value || '').trim()) {
-        errorEl.textContent = t('settings.trae.missingAuthorization');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('trae');
-        await saveSettings({
-          traeAccessToken: tokenInput.value,
-          traeDeviceId: deviceIdInput.value,
-          limitProviders: limitProviderSelectionIncluding('trae'),
-          limitsEnabled: true
-        });
-        tokenInput.value = '';
-        deviceIdInput.value = '';
-        renderExternalProviderStatus('trae');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('trae', !externalProviderAccountLinked('trae'));
-        renderExternalProviderStatus('trae');
-      } catch (err) {
-        clearExternalProviderCheckPending('trae');
-        errorEl.textContent = t('settings.trae.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const zedToggle = document.getElementById('zedSettingsToggle');
-  if (zedToggle) {
-    zedToggle.addEventListener('click', () => setExternalAccountExpanded('zed', !state.zedAccountExpanded));
-    setExternalAccountExpanded('zed', false);
-    renderExternalProviderStatus('zed');
-
-    document.getElementById('zedOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(zedPlatformUrl());
-    });
-
-    document.getElementById('zedLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ zedCookie: '' });
-      clearExternalProviderCheckPending('zed');
-      clearExternalProviderPendingStatus('zed');
-      renderExternalProviderStatus('zed');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zedRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zedCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('zedCookieInput');
-      const errorEl = document.getElementById('zedErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.zed.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('zed');
-        await saveSettings({
-          zedCookie: input.value,
-          limitProviders: limitProviderSelectionIncluding('zed'),
-          limitsEnabled: true
-        });
-        input.value = '';
-        renderExternalProviderStatus('zed');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('zed', !externalProviderAccountLinked('zed'));
-        renderExternalProviderStatus('zed');
-      } catch (err) {
-        clearExternalProviderCheckPending('zed');
-        errorEl.textContent = t('settings.zed.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const commandcodeToggle = document.getElementById('commandcodeSettingsToggle');
-  if (commandcodeToggle) {
-    commandcodeToggle.addEventListener('click', () => setExternalAccountExpanded('commandcode', !state.commandcodeAccountExpanded));
-    setExternalAccountExpanded('commandcode', false);
-    renderExternalProviderStatus('commandcode');
-
-    document.getElementById('commandcodeOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(commandcodePlatformUrl());
-    });
-
-    document.getElementById('commandcodeLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ commandcodeCookie: '' });
-      clearExternalProviderCheckPending('commandcode');
-      clearExternalProviderPendingStatus('commandcode');
-      renderExternalProviderStatus('commandcode');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('commandcodeRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('commandcodeCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('commandcodeCookieInput');
-      const errorEl = document.getElementById('commandcodeErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.commandcode.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('commandcode');
-        await saveSettings({
-          commandcodeCookie: input.value,
-          limitProviders: limitProviderSelectionIncluding('commandcode'),
-          limitsEnabled: true
-        });
-        input.value = '';
-        renderExternalProviderStatus('commandcode');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('commandcode', !externalProviderAccountLinked('commandcode'));
-        renderExternalProviderStatus('commandcode');
-      } catch (err) {
-        clearExternalProviderCheckPending('commandcode');
-        errorEl.textContent = t('settings.commandcode.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const alibabaToggle = document.getElementById('alibabaSettingsToggle');
-  if (alibabaToggle) {
-    alibabaToggle.addEventListener('click', () => setExternalAccountExpanded('alibaba', !state.alibabaAccountExpanded));
-    setExternalAccountExpanded('alibaba', false);
-    renderExternalProviderStatus('alibaba');
-
-    const variantInput = document.getElementById('alibabaVariantInput');
-    if (variantInput) {
-      variantInput.value = alibabaSavedVariant();
-      variantInput.addEventListener('change', async () => {
-        renderAlibabaVariantHints();
-        // Switching console switches account: the stored cookie belongs to the
-        // console it was copied from and cannot authenticate the other one.
-        // Clearing it here is honest about that instead of leaving a saved
-        // credential that will only ever answer `unauthorized`.
-        await saveSettings({ alibabaVariant: variantInput.value || 'cn', alibabaCookie: '' });
-        clearExternalProviderCheckPending('alibaba');
-        clearExternalProviderPendingStatus('alibaba');
-        renderExternalProviderStatus('alibaba');
-        await refreshStats({ force: true });
       });
-    }
-    renderAlibabaVariantHints();
-
-    document.getElementById('alibabaOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(alibabaPlatformUrl());
-    });
-    document.getElementById('alibabaLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ alibabaCookie: '' });
-      clearExternalProviderCheckPending('alibaba');
-      clearExternalProviderPendingStatus('alibaba');
-      renderExternalProviderStatus('alibaba');
-      await refreshStats({ force: true });
-    });
-    document.getElementById('alibabaRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-    document.getElementById('alibabaCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('alibabaCookieInput');
-      const errorEl = document.getElementById('alibabaErrorMessage');
-      errorEl.classList.add('hidden');
-      // The main process rejects a header with no name=value pair, so catching
-      // it here keeps a mis-paste from being reported back as "saved" while the
-      // stored value is silently empty.
-      // Same anchored rule as normalizeAlibabaCookieHeader in the main process.
-      // A looser test here lets a pasted URL pass, save as empty, and surface as
-      // "Not configured" instead of telling the user the paste was wrong.
-      if (!/(?:^|;\s*)[A-Za-z0-9!#$%&'*+\-.^_`|~]+=/.test(alibabaCookieCandidate(input.value))) {
-        errorEl.textContent = t('settings.alibaba.invalidCookie');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('alibaba');
-        renderExternalProviderStatus('alibaba');
-        await saveSettings({
-          alibabaCookie: input.value,
-          alibabaVariant: alibabaSelectedVariant(),
-          limitProviders: limitProviderSelectionIncluding('alibaba'),
-          limitsEnabled: true
-        });
-        input.value = '';
-        renderExternalProviderStatus('alibaba');
-        await refreshStats({ force: true });
-        renderExternalProviderStatus('alibaba');
-      } catch (err) {
-        clearExternalProviderCheckPending('alibaba');
-        renderExternalProviderStatus('alibaba');
-        errorEl.textContent = t('settings.alibaba.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const ollamaToggle = document.getElementById('ollamaSettingsToggle');
-  if (ollamaToggle) {
-    ollamaToggle.addEventListener('click', () => setExternalAccountExpanded('ollama', !state.ollamaAccountExpanded));
-    setExternalAccountExpanded('ollama', false);
-    renderExternalProviderStatus('ollama');
-
-    document.getElementById('ollamaOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(ollamaPlatformUrl());
-    });
-    document.getElementById('ollamaLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ ollamaCookie: '' });
-      clearExternalProviderCheckPending('ollama');
-      clearExternalProviderPendingStatus('ollama');
-      renderExternalProviderStatus('ollama');
-      await refreshStats({ force: true });
-    });
-    document.getElementById('ollamaRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-    document.getElementById('ollamaCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('ollamaCookieInput');
-      const errorEl = document.getElementById('ollamaErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.ollama.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('ollama');
-        renderExternalProviderStatus('ollama');
-        const validation = await window.tokenMonitor.ollama.validateCookie(input.value);
-        if (!validation?.ok) {
-          clearExternalProviderCheckPending('ollama');
-          renderExternalProviderStatus('ollama');
-          errorEl.textContent = ollamaValidationError(validation);
-          errorEl.classList.remove('hidden');
-          return;
-        }
-        await saveSettings({
-          ollamaCookie: input.value,
-          limitProviders: limitProviderSelectionIncluding('ollama'),
-          limitsEnabled: true
-        });
-        if (!state.settings?.ollamaCookieConfigured) {
-          clearExternalProviderCheckPending('ollama');
-          renderExternalProviderStatus('ollama');
-          errorEl.textContent = t('settings.ollama.validationInvalid');
-          errorEl.classList.remove('hidden');
-          return;
-        }
-        input.value = '';
-        renderExternalProviderStatus('ollama');
-      } catch (err) {
-        clearExternalProviderCheckPending('ollama');
-        renderExternalProviderStatus('ollama');
-        errorEl.textContent = t('settings.ollama.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
     });
   }
 
@@ -16786,65 +16918,26 @@ function setupCursorAccountUI() {
       window.tokenMonitor.openExternal(kimiPlatformUrl());
     });
 
-    document.getElementById('kimiLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ kimiApiKey: '', kimiWebAccessToken: '' });
-      clearExternalProviderCheckPending('kimi');
-      clearExternalProviderPendingStatus('kimi');
-      renderExternalProviderStatus('kimi');
-      await refreshStats({ force: true });
-    });
+    document.getElementById('kimiLogoutButton').addEventListener('click', () => clearAccountCredential('kimi'));
 
     document.getElementById('kimiRefreshButton').addEventListener('click', async () => {
       await refreshStats({ force: true });
     });
 
-    document.getElementById('kimiWebAccessTokenSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('kimiWebAccessTokenInput');
-      const errorEl = document.getElementById('kimiErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.kimi.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('kimi');
-        await saveSettings({ kimiWebAccessToken: input.value });
-        input.value = '';
-        renderExternalProviderStatus('kimi');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('kimi', !externalProviderAccountLinked('kimi'));
-        renderExternalProviderStatus('kimi');
-      } catch (err) {
-        clearExternalProviderCheckPending('kimi');
-        errorEl.textContent = t('settings.kimi.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-
-    document.getElementById('kimiApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('kimiApiKeyInput');
-      const errorEl = document.getElementById('kimiErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.kimi.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('kimi');
-        await saveSettings({ kimiApiKey: input.value });
-        input.value = '';
-        renderExternalProviderStatus('kimi');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('kimi', !externalProviderAccountLinked('kimi'));
-        renderExternalProviderStatus('kimi');
-      } catch (err) {
-        clearExternalProviderCheckPending('kimi');
-        errorEl.textContent = t('settings.kimi.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
+    // Two independent lanes: each submit sends only its own credential, so
+    // saving one never blanks the other.
+    for (const [submitId, inputId, field] of [
+      ['kimiApiKeySubmit', 'kimiApiKeyInput', 'kimiApiKey'],
+      ['kimiWebAccessTokenSubmit', 'kimiWebAccessTokenInput', 'kimiWebAccessToken']
+    ]) {
+      document.getElementById(submitId).addEventListener('click', (event) => {
+        const input = document.getElementById(inputId);
+        return submitAccountCredential(event.currentTarget, 'kimi', { [field]: input.value }, {
+          failedKey: 'settings.kimi.saveFailed',
+          clearInput: () => { input.value = ''; }
+        });
+      });
+    }
   }
 
   const antigravityToggle = document.getElementById('antigravitySettingsToggle');
@@ -16908,7 +17001,11 @@ function setupCursorAccountUI() {
 
   const mimoToggle = document.getElementById('mimoSettingsToggle');
   if (mimoToggle) {
-    mimoToggle.addEventListener('click', () => setMimoAccountExpanded(!state.mimoAccountExpanded));
+    mimoToggle.addEventListener('click', () => {
+      const expanding = !state.mimoAccountExpanded;
+      setMimoAccountExpanded(expanding);
+      if (expanding) void refreshMimoAccounts();
+    });
 
     const addToggle = document.getElementById('mimoAddToggle');
     const addDetails = document.getElementById('mimoAddDetails');
@@ -16927,10 +17024,7 @@ function setupCursorAccountUI() {
       renderMimoStatus();
     });
 
-    window.tokenMonitor.mimo.accounts().then((accounts) => {
-      state.settings.mimoManagedAccounts = accounts || [];
-      renderMimoStatus();
-    }).catch(() => {});
+    void refreshMimoAccounts();
 
     document.getElementById('mimoOpenConsoleButton').addEventListener('click', async () => {
       const result = await window.tokenMonitor.mimo.openConsole();
@@ -16993,13 +17087,9 @@ function setupCursorAccountUI() {
     setCopilotManualExpanded(false);
     renderCopilotStatus();
 
-    const errorEl = document.getElementById('copilotErrorMessage');
     const setCopilotError = (message) => {
       state.copilotErrorMessage = message || '';
-      if (errorEl) {
-        errorEl.textContent = state.copilotErrorMessage;
-        errorEl.classList.toggle('hidden', !state.copilotErrorMessage);
-      }
+      renderCopilotStatus();
     };
 
     window.tokenMonitor.copilot?.onLoginStatus?.((status) => {
@@ -17125,24 +17215,11 @@ function initSettingsAnimationWrappers() {
     '.app-update-notes-details',
     '.hub-mode-fields',
     '.presence-feature-body',
-    '#claudeManualPanel',
     '#opencodeManualPanel',
     '#cursorManualPanel',
-    '#clineManualPanel',
-    '#factoryManualPanel',
     '#kimiManualPanel',
-    '#zedManualPanel',
-    '#commandcodeManualPanel',
-    '#zaiManualPanel',
-    '#zaiteamManualPanel',
-    '#qoderManualPanel',
-    '#devinManualPanel',
-    '#deepseekManualPanel',
-    '#minimaxManualPanel',
-    '#volcengineManualPanel',
-    '#ollamaManualPanel',
-    '#traeManualPanel',
-    '#alibabaManualPanel'
+    '.credential-manual-panel',
+    '#volcengineManualPanel'
   ].join(', ');
 
   document.querySelectorAll(selectors).forEach(el => {
@@ -17154,9 +17231,9 @@ function initSettingsAnimationWrappers() {
       ? 'cursor-settings-details-inner'
       : el.classList.contains('settings-section-details')
         ? 'settings-section-details-inner'
-        : 'accordion-animation-inner';
+        : '';
 
-    inner.className = `accordion-animation-inner ${innerSpecificClass}`;
+    inner.className = ['accordion-animation-inner', innerSpecificClass].filter(Boolean).join(' ');
     while (el.firstChild) {
       inner.appendChild(el.firstChild);
     }
@@ -17166,6 +17243,13 @@ function initSettingsAnimationWrappers() {
 }
 
 initSettingsAnimationWrappers();
+syncContentForm = window.TokenMonitorSyncContentForm.createSyncContentForm({
+  document, bridge: window.tokenMonitor, t, saveSettings, getSettings: () => state.settings
+});
+setupSettingsAccordion(
+  document.getElementById('syncContentGroup'), document.getElementById('syncContentToggle'),
+  document.getElementById('syncContentDetails'), expanded => syncContentForm.setExpanded(expanded)
+);
 setupSettingsSections();
 setupCursorAccountUI();
 setupCustomPricingUI();

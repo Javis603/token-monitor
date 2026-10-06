@@ -13,17 +13,22 @@ const {
   edgeDockRailBounds,
   edgeDockTriggerBounds,
   normalizeEdgeDockDisplayId,
+  normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
   rectContains
 } = require('./geometry');
 const { shapeRectsFromPolygons } = require('./mask');
-const { bubbleCommands, railCommands, toPolygons, toSvgPath } = require('../renderer/edgeDock/shapes');
+const { bubbleCommands, peekCommands, railCommands, toPolygons, toSvgPath } = require('../renderer/edgeDock/shapes');
 
 const SURFACES = Object.freeze(['peek', 'rail', 'bubble']);
 const POLL_IDLE_MS = 90;
 const POLL_ACTIVE_MS = 40;
 const POLL_DRAG_MS = 16;
+// How often `alwaysExceptFullScreen` re-checks for a full-screen app. The macOS
+// Space transition itself takes longer than this, so a faster poll would only
+// spend window-list reads without making the dock react sooner.
+const FULL_SCREEN_POLL_MS = 500;
 const FADE_IN_MS = 150;
 const FADE_OUT_MS = 120;
 const FADE_STEP_MS = 16;
@@ -56,6 +61,10 @@ function createEdgeDockController(deps) {
     preloadPath,
     getSettings,
     nativeGlass,
+    // Returns `{ dark }` when the surfaces should use shaped Liquid Glass, or
+    // null for the classic masked vibrancy.
+    liquidGlass = () => null,
+    createGlass,
     prefersReducedMotion = () => false,
     onPlacementChange,
     applyShapeMask,
@@ -64,6 +73,8 @@ function createEdgeDockController(deps) {
     onSwitchCodexAccount,
     onOpenResetForecastSource,
     performHaptic = () => false,
+    // (display) => whether another app is full screen on that display.
+    isFullScreen = () => false,
     logger = () => {}
   } = deps;
 
@@ -96,10 +107,13 @@ function createEdgeDockController(deps) {
   let peeking = false;
   let drag = null;
   let placementOverride = null;
+  let fullScreen = false;
+  let fullScreenCheckedAt = -Infinity;
   let ipcRegistered = false;
   let displayListenersAttached = false;
   const shapes = { peek: null, rail: null, bubble: null };
   const nativeMaterial = { peek: false, rail: false, bubble: false };
+  const glasses = { peek: null, rail: null, bubble: null };
   const lastSent = { peek: '', rail: '', bubble: '' };
 
   function settings() {
@@ -107,7 +121,35 @@ function createEdgeDockController(deps) {
   }
 
   function alwaysVisible() {
-    return settings().edgeDockMode === 'always';
+    const mode = normalizeEdgeDockMode(settings().edgeDockMode);
+    return mode === 'always' || (mode === 'alwaysExceptFullScreen' && !fullScreen);
+  }
+
+  // Re-reads the full-screen state when the mode depends on it and the last
+  // read is stale; returns whether it changed.
+  function refreshFullScreen(now, force = false) {
+    const previous = fullScreen;
+    if (normalizeEdgeDockMode(settings().edgeDockMode) !== 'alwaysExceptFullScreen') {
+      fullScreen = false;
+      fullScreenCheckedAt = -Infinity;
+    } else if (force || now - fullScreenCheckedAt >= FULL_SCREEN_POLL_MS) {
+      fullScreenCheckedAt = now;
+      try {
+        fullScreen = isFullScreen(display()) === true;
+      } catch (error) {
+        logger(`[edge-dock] full-screen check failed: ${error.message}`);
+        fullScreen = false;
+      }
+    }
+    return fullScreen !== previous;
+  }
+
+  function syncAlwaysVisible() {
+    const always = alwaysVisible();
+    if (always === intent.snapshot().always) return;
+    applyEffects(intent.setAlways(always));
+    // Leaving always-visible behaves like a pointer that just left.
+    if (!always && !intent.snapshot().pinned) applyEffects(intent.retract());
   }
 
   function hapticsEnabled() {
@@ -213,6 +255,9 @@ function createEdgeDockController(deps) {
     if (!win.isVisible()) {
       win.setOpacity(0);
       win.showInactive();
+      // Reassert native topmost after showInactive. The floating level can be
+      // demoted when Electron moves the HWND behind a non-topmost taskbar.
+      if (platform === 'win32') win.setAlwaysOnTop(true, 'pop-up-menu');
     }
     fade(win, visible ? 1 : 0, duration);
   }
@@ -229,7 +274,8 @@ function createEdgeDockController(deps) {
 
   function renderPayload(surface) {
     const { side } = placement();
-    const base = { surface, side, platform, osRelease: os.release(), appearance, glass: nativeMaterial[surface] === true, shape: shapes[surface] };
+    const shapedGlass = nativeMaterial[surface] === true && glasses[surface] !== null;
+    const base = { surface, side, platform, osRelease: os.release(), appearance, glass: nativeMaterial[surface] === true, liquidGlass: shapedGlass, shape: shapes[surface] };
     if (surface === 'rail') {
       return {
         ...base,
@@ -272,6 +318,10 @@ function createEdgeDockController(deps) {
     const win32 = platform === 'win32';
     const material = materialKey !== 'none';
     const macMaterial = mac && material;
+    // A 7px handle leaves no room for Liquid Glass's own bright edge highlight:
+    // it reads as a second grip at the display edge. Keep its masked HUD material
+    // so the renderer's grip stays in the same place in both glass styles.
+    const macGlass = materialKey === 'mac-glass' && surface !== 'peek';
     nativeMaterial[surface] = macMaterial;
     const win = new BrowserWindow({
       width: surface === 'bubble' ? EDGE_DOCK_METRICS.bubbleWidth : EDGE_DOCK_METRICS.railWidth,
@@ -298,8 +348,10 @@ function createEdgeDockController(deps) {
       ...(mac ? { type: 'panel', acceptFirstMouse: true, roundedCorners: false } : {}),
       // The macOS material stays attached for the window's lifetime rather than
       // being detached while hidden: re-attaching builds a new effect view,
-      // which would silently drop the shape mask.
-      ...(macMaterial ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
+      // which would silently drop the shape mask. The active state is set even
+      // for Liquid Glass, so a HUD fallback on these never-focused panels
+      // does not dim as an inactive window.
+      ...(macMaterial ? { visualEffectState: 'active', ...(macGlass ? {} : { vibrancy: 'hud' }) } : {}),
       webPreferences: {
         preload: preloadPath,
         contextIsolation: true,
@@ -313,6 +365,14 @@ function createEdgeDockController(deps) {
       win.setVisibleOnAllWorkspaces?.(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
       win.setHiddenInMissionControl?.(true);
     }
+    if (macGlass) {
+      try {
+        glasses[surface] = createGlass(win);
+      } catch (error) {
+        logger(`[edge-dock] ${surface} Liquid Glass unavailable: ${error.message}`);
+        win.setVibrancy?.('hud');
+      }
+    }
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.webContents.on('will-navigate', (event) => event.preventDefault());
     win.webContents.on('did-finish-load', () => {
@@ -323,6 +383,7 @@ function createEdgeDockController(deps) {
     });
     win.on('closed', () => {
       cancelFade(win);
+      if (windows[surface] === win) disposeGlass(surface, { windowClosed: true });
       if (windows[surface] === win) {
         windows[surface] = null;
         ready[surface] = false;
@@ -333,6 +394,32 @@ function createEdgeDockController(deps) {
     return win;
   }
 
+  function disposeGlass(surface, options) {
+    const glass = glasses[surface];
+    glasses[surface] = null;
+    try {
+      glass?.dispose(options);
+    } catch (error) {
+      logger(`[edge-dock] ${surface} Liquid Glass cleanup failed: ${error.message}`);
+    }
+  }
+
+  // The glass takes the silhouette itself, so it keeps its own rim and
+  // highlights along the real outline instead of being cut by a mask.
+  function shapeGlass(surface, commands, width, height) {
+    const glass = glasses[surface];
+    const wanted = liquidGlass();
+    try {
+      glass.update({ dark: wanted?.dark !== false, shape: { commands, width, height } });
+      return true;
+    } catch (error) {
+      logger(`[edge-dock] ${surface} Liquid Glass shape failed: ${error.message}`);
+      disposeGlass(surface);
+      windows[surface]?.setVibrancy?.('hud');
+      return false;
+    }
+  }
+
   function destroyWindows() {
     for (const surface of SURFACES) {
       const win = windows[surface];
@@ -341,6 +428,7 @@ function createEdgeDockController(deps) {
       lastSent[surface] = '';
       if (alive(win)) {
         cancelFade(win);
+        disposeGlass(surface);
         win.destroy();
       }
     }
@@ -370,9 +458,11 @@ function createEdgeDockController(deps) {
         radius: m.bubbleRadius
       });
     }
-    const options = surface === 'peek'
-      ? { width: bounds.width, height: bounds.height, side, shoulder: m.peekShoulder, radius: 3.5 }
-      : { width: bounds.width, height: bounds.height, side, shoulder: m.shoulder, radius: m.railRadius };
+    if (surface === 'peek') {
+      const options = { width: bounds.width, height: bounds.height, side };
+      return { closed: peekCommands(options), outline: peekCommands({ ...options, open: true }) };
+    }
+    const options = { width: bounds.width, height: bounds.height, side, shoulder: m.shoulder, radius: m.railRadius };
     return { closed: railCommands(options), outline: railCommands({ ...options, open: true }) };
   }
 
@@ -393,7 +483,9 @@ function createEdgeDockController(deps) {
     const closed = Array.isArray(built) ? built : built.closed;
     const outline = Array.isArray(built) ? built : built.outline;
     shapes[surface] = { key, width, height, d: toSvgPath(closed), outline: toSvgPath(outline) };
-    if (builtGlass && platform === 'darwin' && nativeMaterial[surface]) {
+    if (glasses[surface] && shapeGlass(surface, closed, width, height)) {
+      // Shaped Liquid Glass needs no mask.
+    } else if (builtGlass && platform === 'darwin' && nativeMaterial[surface]) {
       let masked = false;
       try {
         masked = applyShapeMask?.(win, closed, width, height, currentDisplay) === true;
@@ -418,7 +510,8 @@ function createEdgeDockController(deps) {
 
   function buildWindows() {
     const glass = Boolean(nativeGlass());
-    const materialKey = glass && platform === 'darwin' ? 'mac' : 'none';
+    const materialKey = !glass || platform !== 'darwin' ? 'none'
+      : liquidGlass() && createGlass ? 'mac-glass' : 'mac';
     if (builtMaterial === materialKey && SURFACES.every((surface) => alive(windows[surface]))) return;
     destroyWindows();
     builtMaterial = materialKey;
@@ -569,6 +662,11 @@ function createEdgeDockController(deps) {
       } else if (current && drag) {
         followDrag(point, current);
       } else if (current) {
+        if (refreshFullScreen(Date.now())) {
+          syncAlwaysVisible();
+          showPeek();
+          render('rail');
+        }
         const revealed = intent.snapshot().revealed;
         const bubbleRect = bubbleVisible ? current.bubble : null;
         const input = {
@@ -733,6 +831,12 @@ function createEdgeDockController(deps) {
     if (bubbleCell !== null) invalidateBubblePlacement();
     positionRail();
     if (bubbleCell !== null) render('bubble');
+    // The dock may now sit on another display (a removed one falls back to the
+    // primary), so the cached full-screen state can describe the wrong screen.
+    if (refreshFullScreen(Date.now(), true)) {
+      syncAlwaysVisible();
+      render('rail');
+    }
     if (!railVisible) showPeek();
   }
 
@@ -763,6 +867,8 @@ function createEdgeDockController(deps) {
     drag = null;
     placementOverride = null;
     intent.retract();
+    fullScreen = false;
+    fullScreenCheckedAt = -Infinity;
     destroyWindows();
   }
 
@@ -774,12 +880,8 @@ function createEdgeDockController(deps) {
         return;
       }
       start();
-      const always = alwaysVisible();
-      if (always !== intent.snapshot().always) {
-        applyEffects(intent.setAlways(always));
-        // Leaving always-visible mode behaves like a pointer that just left.
-        if (!always && !intent.snapshot().pinned) applyEffects(intent.retract());
-      }
+      refreshFullScreen(Date.now(), true);
+      syncAlwaysVisible();
       if (!drag) {
         positionRail();
         showPeek();
@@ -831,6 +933,14 @@ function createEdgeDockController(deps) {
     setAppearance(nextAppearance) {
       appearance = nextAppearance || {};
       if (!running) return;
+      const wanted = liquidGlass();
+      for (const surface of SURFACES) {
+        try {
+          glasses[surface]?.update({ dark: wanted?.dark !== false });
+        } catch (error) {
+          logger(`[edge-dock] ${surface} Liquid Glass appearance failed: ${error.message}`);
+        }
+      }
       for (const surface of SURFACES) render(surface);
     },
     isRunning: () => running,

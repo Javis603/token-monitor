@@ -7,13 +7,8 @@
 // the derivations below must keep producing the same ids in the same order.
 const {
   CLIENT_IDS,
-  DEFAULT_CLIENT_IDS,
-  LOCALLY_PARSED_CLIENT_IDS
+  DEFAULT_CLIENT_IDS
 } = require('./clientCatalog');
-
-// Clients read by a local adapter instead of tokscale (collector.js excludes
-// these from the tokscale client filter).
-const PARSE_LOCAL_CLIENTS = LOCALLY_PARSED_CLIENT_IDS;
 
 // Tracked on a fresh install.
 const DEFAULT_CLIENTS = DEFAULT_CLIENT_IDS.join(',');
@@ -54,7 +49,6 @@ function clientsCsvForSetting(value, fallback = DEFAULT_CLIENTS) {
 
 module.exports = {
   DEFAULT_CLIENTS,
-  PARSE_LOCAL_CLIENTS,
   KNOWN_CLIENTS,
   LEGACY_CLIENT_ID_ALIASES,
   clientsCsvForSetting,

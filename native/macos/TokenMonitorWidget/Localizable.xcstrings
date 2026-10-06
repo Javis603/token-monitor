@@ -8,7 +8,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "明细" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "明細" } },
         "ja": { "stringUnit": { "state": "translated", "value": "内訳" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "분석" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "분석" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Detalhamento" } }
       }
     },
     "Quota Mode": {
@@ -17,7 +18,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度模式" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度模式" } },
         "ja": { "stringUnit": { "state": "translated", "value": "クォータモード" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "할당량 모드" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 모드" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Modo de cota" } }
       }
     },
     "Automatic": {
@@ -26,7 +28,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "自动" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "自動" } },
         "ja": { "stringUnit": { "state": "translated", "value": "自動" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "자동" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "자동" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Automático" } }
       }
     },
     "Custom": {
@@ -35,7 +38,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "自定义" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "自訂" } },
         "ja": { "stringUnit": { "state": "translated", "value": "カスタム" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "사용자 지정" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "사용자 지정" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Personalizado" } }
       }
     },
     "Quota 1": {
@@ -44,7 +48,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度 1" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度 1" } },
         "ja": { "stringUnit": { "state": "translated", "value": "クォータ 1" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "할당량 1" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 1" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Cota 1" } }
       }
     },
     "Quota 2": {
@@ -53,7 +58,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度 2" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度 2" } },
         "ja": { "stringUnit": { "state": "translated", "value": "クォータ 2" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "할당량 2" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 2" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Cota 2" } }
       }
     },
     "Quota Account": {
@@ -62,7 +68,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度账户" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度帳號" } },
         "ja": { "stringUnit": { "state": "translated", "value": "クォータアカウント" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "할당량 계정" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 계정" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Conta de cota" } }
       }
     },
     "Usage Summary": {
@@ -71,7 +78,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "用量摘要" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "用量摘要" } },
         "ja": { "stringUnit": { "state": "translated", "value": "使用量サマリー" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "사용량 요약" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "사용량 요약" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Resumo de uso" } }
       }
     },
     "Choose the usage period shown by this widget.": {
@@ -80,7 +88,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择此小组件显示的用量周期。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇此小工具顯示的用量週期。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "このウィジェットに表示する使用期間を選択します。" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "이 위젯에 표시할 사용량 기간을 선택합니다." } }
+        "ko": { "stringUnit": { "state": "translated", "value": "이 위젯에 표시할 사용량 기간을 선택합니다." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Escolha o período de uso exibido por este widget." } }
       }
     },
     "Usage Breakdown": {
@@ -89,7 +98,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "用量明细" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "用量明細" } },
         "ja": { "stringUnit": { "state": "translated", "value": "使用量の内訳" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "사용량 분석" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "사용량 분석" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Detalhamento de uso" } }
       }
     },
     "Choose a tool or model breakdown and its period.": {
@@ -98,7 +108,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择工具或模型明细及其统计周期。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇工具或模型明細及其統計週期。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "ツールまたはモデルの内訳と期間を選択します。" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "도구 또는 모델 분석과 기간을 선택합니다." } }
+        "ko": { "stringUnit": { "state": "translated", "value": "도구 또는 모델 분석과 기간을 선택합니다." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Escolha o detalhamento por ferramenta ou modelo e seu período." } }
       }
     },
     "Dashboard": {
@@ -107,7 +118,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "仪表盘" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "儀表板" } },
         "ja": { "stringUnit": { "state": "translated", "value": "ダッシュボード" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "대시보드" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "대시보드" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Painel" } }
       }
     },
     "Choose the dashboard period, breakdown, and quota display mode.": {
@@ -116,7 +128,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择仪表盘的统计周期、明细和额度显示模式。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇儀表板的統計週期、明細和額度顯示模式。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "ダッシュボードの期間、内訳、クォータ表示モードを選択します。" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "대시보드의 기간, 분석 및 할당량 표시 모드를 선택합니다." } }
+        "ko": { "stringUnit": { "state": "translated", "value": "대시보드의 기간, 분석 및 할당량 표시 모드를 선택합니다." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Escolha o período, o detalhamento e o modo de exibição das cotas do painel." } }
       }
     },
     "Show quota accounts automatically or choose up to two.": {
@@ -125,7 +138,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "自动显示额度账户，或选择最多两个账户。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "自動顯示額度帳號，或選擇最多兩個帳號。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "クォータアカウントを自動表示するか、最大2つ選択します。" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "할당량 계정을 자동으로 표시하거나 최대 2개를 선택합니다." } }
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 계정을 자동으로 표시하거나 최대 2개를 선택합니다." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Mostre as contas de cota automaticamente ou escolha até duas." } }
       }
     },
     "Token Monitor Dashboard": {
@@ -134,7 +148,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 仪表盘" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 儀表板" } },
         "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor ダッシュボード" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 대시보드" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 대시보드" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Painel do Token Monitor" } }
       }
     },
     "Usage, quota, breakdown, and activity in one dashboard.": {
@@ -143,7 +158,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "在一个仪表盘中查看用量、额度、明细和活动。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "在一個儀表板中查看用量、額度、明細和活動。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "使用量、クォータ、内訳、アクティビティを1つのダッシュボードで確認できます。" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "사용량, 할당량, 분석 및 활동을 하나의 대시보드에서 확인합니다." } }
+        "ko": { "stringUnit": { "state": "translated", "value": "사용량, 할당량, 분석 및 활동을 하나의 대시보드에서 확인합니다." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Uso, cotas, detalhamento e atividade em um só painel." } }
       }
     },
     "Token Monitor Summary": {
@@ -152,7 +168,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 摘要" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 摘要" } },
         "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor サマリー" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 요약" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 요약" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Resumo do Token Monitor" } }
       }
     },
     "Tokens, cost, and a compact trend.": {
@@ -161,7 +178,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "令牌数、费用和简洁趋势。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token 數、費用和簡潔趨勢。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "トークン、コスト、コンパクトな推移。" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "토큰, 비용 및 간결한 추세입니다." } }
+        "ko": { "stringUnit": { "state": "translated", "value": "토큰, 비용 및 간결한 추세입니다." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Tokens, custo e uma tendência compacta." } }
       }
     },
     "Token Monitor Activity": {
@@ -170,7 +188,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 活动" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 活動" } },
         "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor アクティビティ" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 활동" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 활동" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Atividade do Token Monitor" } }
       }
     },
     "Your recent activity heatmap.": {
@@ -179,7 +198,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "你最近的活动热力图。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "你最近的活動熱力圖。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "最近のアクティビティヒートマップ。" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "최근 활동 히트맵입니다." } }
+        "ko": { "stringUnit": { "state": "translated", "value": "최근 활동 히트맵입니다." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Seu mapa de calor de atividade recente." } }
       }
     },
     "Token Monitor Breakdown": {
@@ -188,7 +208,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 明细" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 明細" } },
         "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor 内訳" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 분석" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 분석" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Detalhamento do Token Monitor" } }
       }
     },
     "Compare tools or models for one period.": {
@@ -197,7 +218,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "比较一个周期内的工具或模型。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "比較一個期間內的工具或模型。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "1つの期間のツールまたはモデルを比較します。" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "한 기간의 도구 또는 모델을 비교합니다." } }
+        "ko": { "stringUnit": { "state": "translated", "value": "한 기간의 도구 또는 모델을 비교합니다." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Compare ferramentas ou modelos em um período." } }
       }
     },
     "Token Monitor Quota": {
@@ -206,7 +228,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 额度" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 額度" } },
         "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor クォータ" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 할당량" } }
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 할당량" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Cotas do Token Monitor" } }
       }
     },
     "Subscription windows and reset times.": {
@@ -215,7 +238,8 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "订阅窗口和重置时间。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "訂閱視窗和重設時間。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "サブスクリプション期間とリセット時刻。" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "구독 기간과 초기화 시간입니다." } }
+        "ko": { "stringUnit": { "state": "translated", "value": "구독 기간과 초기화 시간입니다." } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Janelas de assinatura e horários de reset." } }
       }
     },
     "Current Account": {
@@ -248,6 +272,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "현재 계정"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conta atual"
           }
         }
       }
@@ -283,6 +313,12 @@
             "state": "translated",
             "value": "개요"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visão geral"
+          }
         }
       }
     },
@@ -316,6 +352,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "할당량"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cota"
           }
         }
       }
@@ -351,6 +393,12 @@
             "state": "translated",
             "value": "도구"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ferramentas"
+          }
         }
       }
     },
@@ -384,6 +432,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "모델"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modelos"
           }
         }
       }
@@ -419,6 +473,12 @@
             "state": "translated",
             "value": "활동"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atividade"
+          }
         }
       }
     },
@@ -452,6 +512,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "구성되지 않음"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não configurado"
           }
         }
       }
@@ -487,6 +553,12 @@
             "state": "translated",
             "value": "다시 로그인 필요"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entre novamente"
+          }
         }
       }
     },
@@ -520,6 +592,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "사용할 수 없음"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Indisponível"
           }
         }
       }
@@ -555,6 +633,12 @@
             "state": "translated",
             "value": "일시적으로 사용할 수 없음"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Temporariamente indisponível"
+          }
         }
       }
     },
@@ -589,6 +673,12 @@
             "state": "translated",
             "value": "사용 가능"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disponível"
+          }
         }
       }
     },
@@ -619,6 +709,12 @@
           }
         },
         "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unlimited"
+          }
+        },
+        "pt-BR": {
           "stringUnit": {
             "state": "translated",
             "value": "Unlimited"
@@ -657,6 +753,12 @@
             "state": "translated",
             "value": "비활성화됨"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desativado"
+          }
         }
       }
     },
@@ -690,6 +792,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "요청 제한됨"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limite de requisições atingido"
           }
         }
       }
@@ -725,6 +833,12 @@
             "state": "translated",
             "value": "데이터가 오래되었을 수 있음"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os dados podem estar desatualizados"
+          }
         }
       }
     },
@@ -758,6 +872,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "데이터 대기 중"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aguardando dados"
           }
         }
       }
@@ -793,6 +913,12 @@
             "state": "translated",
             "value": "Token Monitor를 한 번 열어 주세요"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abra o Token Monitor uma vez"
+          }
         }
       }
     },
@@ -826,6 +952,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "데이터 없음"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sem dados"
           }
         }
       }
@@ -861,6 +993,12 @@
             "state": "translated",
             "value": "활동 %lld일"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld dias ativos"
+          }
         }
       }
     },
@@ -894,6 +1032,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@, %lld 토큰"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, %lld tokens"
           }
         }
       }
@@ -929,6 +1073,12 @@
             "state": "translated",
             "value": "선택 해제"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desmarcar"
+          }
         }
       }
     },
@@ -962,6 +1112,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "이 날짜 사용량 표시"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar o uso deste dia"
           }
         }
       }
@@ -997,6 +1153,12 @@
             "state": "translated",
             "value": "활동 히트맵"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mapa de calor de atividade"
+          }
         }
       }
     },
@@ -1030,6 +1192,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ 업데이트"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atualizado %@"
           }
         }
       }
@@ -1065,6 +1233,12 @@
             "state": "translated",
             "value": "기간"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Período"
+          }
         }
       }
     },
@@ -1098,6 +1272,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "DAY"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DIA"
           }
         }
       }
@@ -1133,6 +1313,12 @@
             "state": "translated",
             "value": "MONTH"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MÊS"
+          }
         }
       }
     },
@@ -1163,6 +1349,12 @@
           }
         },
         "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TOTAL"
+          }
+        },
+        "pt-BR": {
           "stringUnit": {
             "state": "translated",
             "value": "TOTAL"
@@ -1201,6 +1393,12 @@
             "state": "translated",
             "value": "오늘 사용량"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uso de hoje"
+          }
         }
       }
     },
@@ -1234,6 +1432,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "이번 달 사용량"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uso deste mês"
           }
         }
       }
@@ -1269,6 +1473,12 @@
             "state": "translated",
             "value": "누적 사용량"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uso total"
+          }
         }
       }
     },
@@ -1302,6 +1512,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "위젯 크기"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tamanho do widget"
           }
         }
       }
@@ -1337,6 +1553,12 @@
             "state": "translated",
             "value": "소형"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pequeno"
+          }
         }
       }
     },
@@ -1370,6 +1592,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "중형"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Médio"
           }
         }
       }
@@ -1405,6 +1633,12 @@
             "state": "translated",
             "value": "대형"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Grande"
+          }
         }
       }
     },
@@ -1438,6 +1672,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "활동 날짜 선택"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecionar a data de atividade"
           }
         }
       }
@@ -1473,6 +1713,12 @@
             "state": "translated",
             "value": "날짜"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Data"
+          }
         }
       }
     },
@@ -1506,6 +1752,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$@ · %2$@ 토큰"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@ tokens"
           }
         }
       }
@@ -1541,6 +1793,12 @@
             "state": "translated",
             "value": "%1$@ · %2$@ 토큰 · %3$@"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@ tokens · %3$@"
+          }
         }
       }
     },
@@ -1574,6 +1832,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ 토큰 · 활동 %lld일"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ tokens · %lld dias ativos"
           }
         }
       }
@@ -1609,6 +1873,12 @@
             "state": "translated",
             "value": "%@ 남음"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ restantes"
+          }
         }
       }
     },
@@ -1642,6 +1912,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld%% 남음"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld%% restantes"
           }
         }
       }
@@ -1677,6 +1953,12 @@
             "state": "translated",
             "value": "%@ 후 만료"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expira em %@"
+          }
         }
       }
     },
@@ -1710,6 +1992,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ 후 변경"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Muda em %@"
           }
         }
       }
@@ -1745,6 +2033,12 @@
             "state": "translated",
             "value": "변경 중"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Muda agora"
+          }
         }
       }
     },
@@ -1779,6 +2073,12 @@
             "state": "translated",
             "value": "위젯 새로고침"
           }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atualizar widget"
+          }
         }
       }
     },
@@ -1812,6 +2112,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ 후 초기화"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset em %@"
           }
         }
       }

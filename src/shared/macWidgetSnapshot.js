@@ -1,8 +1,10 @@
 'use strict';
 
+const { CLIENT_LABELS } = require('./clientCatalog');
 const { KNOWN_CLIENTS } = require('./clientTracking');
-const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } = require('./limitProviders');
-const { limitWindowKindLabel } = require('./limitWindowLabels');
+const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } = require('./limits/providers');
+const { limitWindowKindLabel, mimoAccountGroups, mimoProductLabel } = require('./limits/windowLabels');
+const { widgetVendorPalette } = require('./vendorPresentation');
 
 const MAC_WIDGET_SCHEMA_VERSION = 10;
 const MAC_WIDGET_FRESHNESS_HEARTBEAT_MS = 5 * 60 * 1000;
@@ -148,6 +150,7 @@ function buildTools(period) {
   const denominator = tools.reduce((sum, tool) => sum + tool.totalTokens, 0);
   return tools.slice(0, 10).map((tool) => ({
     id: tool.id,
+    displayName: toolLabel(tool.id),
     totalTokens: tool.totalTokens,
     costUsd: tool.costUsd,
     sharePercent: denominator > 0 ? Math.max(0, Math.min(100, tool.totalTokens / denominator * 100)) : 0
@@ -235,6 +238,10 @@ function codexAccountMatchesActive(provider, activeAccount) {
 
 function buildQuota(limits, activeCodexAccount) {
   const providers = Array.isArray(limits?.providers) ? limits.providers : [];
+  const mimoRows = providers.filter((row) => (
+    row && typeof row === 'object' && String(row.provider || '').trim().toLowerCase() === 'mimo'
+  ));
+  const mimoSeveralAccounts = mimoAccountGroups(mimoRows).length > 1;
   const candidates = [];
   for (const [inputIndex, provider] of providers.entries()) {
     if (!provider || typeof provider !== 'object') continue;
@@ -256,9 +263,17 @@ function buildQuota(limits, activeCodexAccount) {
         : window
     ));
     const accountKey = String(provider.accountKey || '').trim();
-    const accountLabel = maskedWidgetEmail(provider.accountEmail)
-      || safeDisplayName(provider.accountName)
-      || safeDisplayName(provider.accountLabel);
+    const accountEmail = maskedWidgetEmail(provider.accountEmail);
+    const accountName = safeDisplayName(provider.accountName);
+    const product = providerId === 'mimo' ? mimoProductLabel(provider) : '';
+    // The lane word alone tells one account's products apart on the widget; the
+    // account identity joins only when the provider holds several logical
+    // accounts — the grouping the tray's picker and the Limits page go by.
+    const accountLabel = product
+      ? (mimoSeveralAccounts
+        ? [accountEmail, accountName, product].filter(Boolean).join(' · ')
+        : product)
+      : accountEmail || accountName || safeDisplayName(provider.accountLabel);
     const source = String(provider.source || '').trim().toLowerCase();
     const sourceDetail = String(provider.sourceDetail || '').trim().toLowerCase();
     const stableRecord = {
@@ -337,6 +352,13 @@ function buildQuota(limits, activeCodexAccount) {
 // displayName and the Swift side prefers that over its own fallback map.
 function providerLabel(provider) {
   return LIMIT_PROVIDER_LABELS[provider] || provider;
+}
+
+// A tool row is named the way the same id's quota row is, so where an id is
+// both the limits name wins: the widget says "Claude" and "Grok" where the
+// app's usage rows say "Claude Code" and "Grok Build".
+function toolLabel(id) {
+  return LIMIT_PROVIDER_LABELS[id] || CLIENT_LABELS[id] || id;
 }
 
 function buildModels(period) {
@@ -565,7 +587,7 @@ function buildPresentation(source = {}) {
     numberStyle: source.compactNumbers === false ? 'full' : 'compact',
     compactTokenUnits: source.compactTokenUnits === 'localized' ? 'localized' : 'western',
     showCost: source.showCost !== false,
-    locale: /^(?:auto|en|zh-CN|zh-TW|ko|ja)$/.test(locale) ? locale : 'auto',
+    locale: /^(?:auto|en|zh-CN|zh-TW|ko|ja|pt-BR)$/.test(locale) ? locale : 'auto',
     theme: source.theme === 'custom' ? 'custom' : 'system'
   };
 }
@@ -602,6 +624,12 @@ function buildMacWidgetSnapshot(stats, options = {}) {
     periods,
     quota,
     presentation,
+    // Colour and artwork per mark id, from the vendor presentation table. The
+    // widget keeps no copy of its own, so a vendor added there needs no Swift
+    // edit. Model rows still resolve their vendor id in Swift. Additive, like
+    // tool displayName: a widget that predates them ignores both, and one that
+    // reads an older snapshot falls back to defaults, so the schema stays put.
+    vendors: widgetVendorPalette(),
     status: buildStatus({ now: safeNow, sourceFreshness })
   };
 }

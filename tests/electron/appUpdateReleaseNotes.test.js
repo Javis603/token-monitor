@@ -129,7 +129,8 @@ test('release-note locale selection follows the complete fallback matrix', () =>
     zh: [{ title: '简体中文', items: ['zh'] }],
     traditional: [{ title: '繁體中文', items: ['zh-TW'] }],
     ko: [{ title: '한국어', items: ['ko'] }],
-    ja: [{ title: '日本語', items: ['ja'] }]
+    ja: [{ title: '日本語', items: ['ja'] }],
+    pt: [{ title: 'Português (Brasil)', items: ['pt-BR'] }]
   };
   const cases = [
     ['zh-TW prefers Traditional Chinese', 'zh-TW', { 'zh-TW': groups.traditional, zh: groups.zh, en: groups.en }, groups.traditional],
@@ -143,6 +144,11 @@ test('release-note locale selection follows the complete fallback matrix', () =>
     ['Japanese prefers Japanese', 'ja', { ja: groups.ja, en: groups.en, zh: groups.zh }, groups.ja],
     ['Japanese falls back through English', 'ja', { ja: {}, en: groups.en, zh: groups.zh }, groups.en],
     ['Japanese falls back to Simplified Chinese', 'ja', { ja: [], en: [], zh: groups.zh }, groups.zh],
+    ['Portuguese uses English even when Portuguese notes are supplied', 'pt-BR', { 'pt-BR': groups.pt, en: groups.en, zh: groups.zh }, groups.en],
+    ['Portuguese uses English release notes', 'pt-BR', { en: groups.en, zh: groups.zh }, groups.en],
+    ['Portuguese uses English with invalid Portuguese notes', 'pt-BR', { 'pt-BR': {}, en: groups.en }, groups.en],
+    ['Portuguese falls back to Simplified Chinese', 'pt-BR', { 'pt-BR': [], en: [], zh: groups.zh }, groups.zh],
+    ['Portuguese returns no groups when all fallbacks are empty', 'pt-BR', { 'pt-BR': [], en: [], zh: [] }, []],
     ['English and unknown locales prefer English', 'en', { en: groups.en, zh: groups.zh }, groups.en],
     ['Unknown locales fall back to Simplified Chinese', 'fr', { en: [], zh: groups.zh }, groups.zh],
     ['invalid release metadata returns no groups', 'ja', null, []]

@@ -8,7 +8,7 @@ const test = require('node:test');
 const {
   projectLimitProviderForDisplay,
   projectLimitStatsForDisplay
-} = require('../../src/electron/limitStatsPresentation');
+} = require('../../src/electron/limits/statsPresentation');
 const { homeLimitAccountsForProviders } = require('../../src/electron/renderer/homeOverview');
 const { collectLimitsOnce: collectLimitsOnceRaw } = require('../../src/shared/limits/collector');
 const { aggregateLimits } = require('../../src/shared/limits/core');
@@ -509,7 +509,7 @@ test('Electron routes cached stats through the presentation projection', () => {
   );
   assert.match(main, /function updateTrayDisplay\(\)[\s\S]*formatTrayText\(visibleStats, mode/);
   assert.match(main, /function refreshLimitStatsPresentation\(\)[\s\S]*reason: 'presentation'/);
-  assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*return electronPresentationStats\(stats\)/);
+  assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*return rendererSnapshots\.stamp\(stats, rendererStats\(electronPresentationStats\(stats\)\)\)/);
   assert.doesNotMatch(renderer, /function displayLimitProvider\(/);
   assert.match(renderer, /reason !== 'local' && payload\.data\?\.reason !== 'presentation'/);
 });

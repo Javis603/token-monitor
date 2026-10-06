@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -8,7 +11,8 @@ const {
   filterExchangesByPeriod,
   groupEvents,
   parseClaudeTranscript,
-  parseCodexTranscript
+  parseCodexTranscript,
+  readSessionDetail
 } = require('../../src/shared/sessionDetail');
 
 test('parseClaudeTranscript yields prompts and turns with exact tokens + tools', () => {
@@ -55,6 +59,45 @@ test('parseClaudeTranscript labels a text-free image message instead of dropping
   assert.equal(ev.length, 1);
   assert.equal(ev[0].kind, 'prompt');
   assert.equal(ev[0].text, '[image]');
+});
+
+test('Codex details return the metadata identity without changing the rollout key or token totals', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-codex-detail-id-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const first = '11111111-1111-4111-8111-111111111111';
+  const second = '22222222-2222-4222-8222-222222222222';
+  const sessionId = `rollout-2026-09-10T02-33-00-${first}_${second}`;
+  const dir = path.join(home, '.codex', 'sessions', '2026', '09', '10');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${sessionId}.jsonl`);
+  const turn = { type: 'event_msg', timestamp: '2026-09-10T02:33:01.000Z', payload: {
+    type: 'token_count', info: { last_token_usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 10 } }
+  } };
+  for (const [metadata, expected] of [
+    [[{ id: first }], first],
+    [[{ id: second }], second],
+    [[{ id: ` ${second} ` }], second],
+    [[], ''],
+    [[{ id: 'not-a-uuid' }], ''],
+    [[{ id: `${first}_${second}` }], ''],
+    [[{ id: 123 }], ''],
+    [[{}, { id: second }], ''],
+    [[{ id: first }, { id: second }], first]
+  ]) {
+    fs.writeFileSync(file, [
+      ...metadata.map(payload => JSON.stringify({ type: 'session_meta', payload })),
+      '{torn json', JSON.stringify(turn)
+    ].join('\n'));
+    const detail = readSessionDetail({ client: 'codex', sessionId, home, env: {}, sessionCost: 0.5 });
+    assert.equal(detail.found, true);
+    assert.equal(detail.sessionId, sessionId, 'lookup/grouping identity is untouched');
+    assert.equal(detail.canonicalSessionId, expected);
+    assert.equal(detail.totals.totalTokens, 110);
+    assert.equal(detail.totals.costUsd, 0.5);
+    assert.equal(parseCodexTranscript(fs.readFileSync(file, 'utf8')).length, 1);
+  }
+  fs.rmSync(file);
+  assert.equal(readSessionDetail({ client: 'codex', sessionId, home, env: {} }).found, false);
 });
 
 test('parseCodexTranscript extracts the real request from the IDE context preamble', () => {
@@ -367,11 +410,6 @@ test('distributeCost splits session cost by token share and reconciles', () => {
   assert.ok(ex[0].costEstimate > ex[1].costEstimate);
   assert.ok(Math.abs(ex[0].turns[0].costEstimate - ex[0].costEstimate) < 1e-9);
 });
-
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { readSessionDetail } = require('../../src/shared/sessionDetail');
 
 function writeClaudeSession(home, sessionId, lines) {
   const dir = path.join(home, '.claude', 'projects', '-proj');

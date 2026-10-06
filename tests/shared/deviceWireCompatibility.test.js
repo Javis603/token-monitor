@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createDeviceState } = require('../../src/shared/deviceState');
+const { createDeviceState } = require('../../src/shared/usage/deviceState');
 const { syncPayload } = require('../../src/shared/syncPayload');
 const { mergeDeviceRecord, normalizeDeviceRecord } = require('../../src/shared/usage');
 const workerUsage = require('../../worker/src/shared/usage');

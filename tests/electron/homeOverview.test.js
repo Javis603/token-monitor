@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   homeActivityHeatmapLayout,
@@ -11,6 +12,7 @@ const {
   homeDeviceRows,
   homeLimitAccounts,
   homeLimitAccountsForProviders,
+  homeLimitsAwaitingFirstData,
   homeModelRows,
   longRangePeakDayTokens,
   homeToolRows,
@@ -26,7 +28,8 @@ const {
   shouldRetryHomeHistory,
   homeHistoryFetchOutcome
 } = require('../../src/electron/renderer/homeOverview');
-const { limitProviderCompactWindows } = require('../../src/electron/renderer/limitProviderPresentation');
+const { limitProviderCompactWindows } = require('../../src/electron/renderer/limits/providerPresentation');
+const limitProviderOrderApi = require('../../src/electron/renderer/limits/providerOrder');
 
 const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], monthly: [], summary: {} };
 const emptyHistory = { daily: [], monthly: [], summary: {} };
@@ -325,6 +328,74 @@ test('homeLimitAccountsForProviders includes Grok billing and DeepSeek balance r
   ]);
 });
 
+test('homeLimitsAwaitingFirstData is false once every enabled provider has reported', () => {
+  const awaiting = homeLimitsAwaitingFirstData({
+    providers: [{ provider: 'claude' }, { provider: 'zai' }],
+    providerOptions: [{ id: 'claude' }, { id: 'zai' }],
+    enabledProviderIds: ['claude', 'zai']
+  });
+  assert.equal(awaiting, false);
+});
+
+test('homeLimitsAwaitingFirstData is true when an enabled provider has no entry yet (cold start)', () => {
+  const awaiting = homeLimitsAwaitingFirstData({
+    providers: [{ provider: 'claude' }],
+    providerOptions: [{ id: 'claude' }, { id: 'zai' }],
+    enabledProviderIds: ['claude', 'zai']
+  });
+  assert.equal(awaiting, true);
+});
+
+test('homeLimitsAwaitingFirstData is false when every candidate provider is hidden', () => {
+  assert.equal(homeLimitsAwaitingFirstData({
+    providers: [],
+    providerOptions: [{ id: 'claude' }],
+    enabledProviderIds: ['claude'],
+    hiddenProviderIds: ['claude']
+  }), false);
+});
+
+test('homeLimitsAwaitingFirstData is false when no provider is enabled', () => {
+  assert.equal(homeLimitsAwaitingFirstData({
+    providers: [],
+    providerOptions: [{ id: 'claude' }],
+    enabledProviderIds: []
+  }), false);
+});
+
+for (const { name, settings, expected } of [
+  { name: 'limits are globally disabled', settings: { limitsEnabled: false, limitProviders: 'claude' }, expected: 'home.noLimits' },
+  { name: 'all providers are deselected', settings: { limitsEnabled: true, limitProviders: '' }, expected: 'home.noLimits' },
+  { name: 'an enabled provider is awaiting its first data', settings: { limitsEnabled: true, limitProviders: 'claude' }, expected: 'home.limitsInitializing' }
+]) {
+  test(`Home limits empty-state copy when ${name}`, () => {
+    const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+    const functions = ['configuredLimitProviderSelection', 'enabledLimitProviderSet', 'homeLimitRows', 'renderHomeLimitModule']
+      .map((functionName) => {
+        const start = source.indexOf(`function ${functionName}(`);
+        assert.notEqual(start, -1, `${functionName} exists`);
+        const end = source.indexOf('\n}\n', start);
+        assert.notEqual(end, -1, `${functionName} closes`);
+        return source.slice(start, end + 2);
+      }).join('\n');
+    const body = { children: [], append(element) { this.children.push(element); } };
+    vm.runInNewContext(`${functions}\nrenderHomeLimitModule();`, {
+      state: { settings, stats: { limits: { providers: [] } } },
+      LIMIT_PROVIDERS: [{ id: 'claude', label: 'Claude' }],
+      DEFAULT_LIMIT_PROVIDER_ORDER: 'claude',
+      limitProviderOrderApi,
+      homeOverviewApi: { homeLimitAccountsForProviders, homeLimitsAwaitingFirstData },
+      clientColors: {},
+      hiddenHomeLimitProviderSet: () => new Set(),
+      homeModuleShell: () => ({ module: {}, body }),
+      document: { createElement: () => ({}) },
+      t: (key) => key
+    });
+    assert.equal(body.children.length, 1);
+    assert.equal(body.children[0].textContent, expected);
+  });
+}
+
 test('homeLimitAccountsForProviders includes MiMo Token Plan status and balance', () => {
   const rows = homeLimitAccountsForProviders({
     providers: [
@@ -503,6 +574,26 @@ test('homeLimitAccountsForProviders keeps provider order and filters hidden prov
   assert.equal(rows.length, 1);
   assert.equal(rows[0].providerId, 'codex');
   assert.equal(rows[0].name, 'Codex');
+});
+
+test('Home retains each account plan through quota sorting without borrowing another account plan', () => {
+  const presentation = require('../../src/electron/renderer/limits/providerPresentation');
+  const rows = homeLimitAccountsForProviders({
+    providers: [
+      { provider: 'codex', accountEmail: 'pro@example.com', planLabel: 'Pro More', windows: [{ kind: 'weekly', remainingPercent: 93 }] },
+      { provider: 'codex', accountEmail: 'plus@example.com', planLabel: 'Plus', windows: [{ kind: 'weekly', remainingPercent: 30 }] },
+      { provider: 'zed', planLabel: 'Zed Student', windows: [{ kind: 'monthly', remainingPercent: 60 }] },
+      { provider: 'claude', windows: [{ kind: 'session', remainingPercent: 70 }] }
+    ],
+    providerOptions: [{ id: 'codex', label: 'Codex' }, { id: 'zed', label: 'Zed' }, { id: 'claude', label: 'Claude' }],
+    enabledProviderIds: ['codex', 'zed', 'claude'],
+    limit: 4,
+    accountName: (provider) => provider.accountEmail || provider.provider,
+    accountPlan: (provider) => presentation.limitProviderPlanDisplayLabel(provider, provider.planLabel)
+  });
+  assert.deepEqual(rows.map((row) => [row.name, row.plan]), [
+    ['plus@example.com', 'Plus'], ['zed', 'Student'], ['claude', ''], ['pro@example.com', 'Pro More']
+  ]);
 });
 
 test('homeLimitAccountsForProviders can preserve configured provider order over remaining quota', () => {
@@ -923,6 +1014,37 @@ test('Home shows WorkBuddy credits through the shared credits contract', () => {
   });
 });
 
+test('Home bars a MiMo lane by lane, so all readings stay on their own bar', () => {
+  // Home is handed one entry per wire row, so each lane's readings keep a bar.
+  const rows = homeLimitAccounts([
+    {
+      key: 'mimo:console',
+      providerId: 'mimo',
+      name: 'Console',
+      windows: [
+        { kind: 'billing', label: 'Token Plan', usedPercent: 20, remainingPercent: 80 },
+        { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }
+      ],
+      balance: { amount: 9.95, currency: 'CNY', monthSpend: 0 }
+    },
+    {
+      key: 'mimo:membership',
+      providerId: 'mimo',
+      name: 'Desktop Membership',
+      windows: [{ kind: 'weekly', usedPercent: 22, remainingPercent: 78 }]
+    }
+  ]);
+
+  assert.deepEqual(rows.map((row) => row.windows.map((window) => [window.label, window.metric])), [
+    [['weekly', '']],
+    [['Token Plan', ''], ['Balance', 'credits']]
+  ]);
+  assert.deepEqual(rows.map((row) => [row.key, row.windows.map((window) => window.remainingPercent)]), [
+    ['mimo:membership', [78]], ['mimo:console', [80, 100]]
+  ]);
+  assert.equal(rows[1].windows[1].remaining, 9.95);
+});
+
 test('Home shows a MiMo token plan and balance side by side', () => {
   const [row] = homeLimitAccounts([{
     key: 'mimo',
@@ -962,4 +1084,30 @@ test('Home sorts a nearly drained balance ahead of a healthy percentage quota', 
   // 1 / (1 + 99) = 1% remaining, so DeepSeek must sort first.
   assert.equal(rows[0].key, 'deepseek');
   assert.equal(rows[1].key, 'claude');
+});
+
+test('Home drops the rows unchecked on a provider\'s usage-item list, MiMo\'s synthesized plan included', () => {
+  const usageItems = require('../../src/shared/limits/usageItems');
+  const hidden = {
+    claude: [usageItems.limitWindowKey({ kind: 'weekly', label: 'Weekly' })],
+    mimo: [usageItems.limitWindowKey({ kind: 'billing', label: 'Token Plan' })]
+  };
+  const rows = homeLimitAccountsForProviders({
+    providers: [
+      { provider: 'claude', windows: [
+        { kind: 'session', label: 'Session', remainingPercent: 80 },
+        { kind: 'weekly', label: 'Weekly', remainingPercent: 10 }
+      ] },
+      { provider: 'mimo', balance: { amount: 3, currency: 'USD', planUsed: 20, planLimit: 100 }, windows: [
+        { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 3, currency: 'USD' }
+      ] }
+    ],
+    providerOptions: [{ id: 'claude', label: 'Claude' }, { id: 'mimo', label: 'MiMo' }],
+    enabledProviderIds: ['claude', 'mimo'],
+    limit: 5,
+    isWindowHidden: (providerId, window) => usageItems.isLimitWindowHidden(hidden, providerId, window)
+  });
+  const byProvider = Object.fromEntries(rows.map((row) => [row.providerId, row.windows.map((window) => window.label)]));
+  assert.deepEqual(byProvider.claude, ['Session']);
+  assert.deepEqual(byProvider.mimo, ['Balance']);
 });

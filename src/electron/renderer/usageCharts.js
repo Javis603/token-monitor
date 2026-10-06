@@ -1,10 +1,11 @@
 'use strict';
 
 (function exposeUsageCharts(root, factory) {
-  const api = factory();
-  if (typeof module === 'object' && module.exports) module.exports = api;
+  const node = typeof module === 'object' && module.exports;
+  const api = factory(node ? require('../../shared/vendorPresentation') : root?.TokenMonitorVendorPresentation);
+  if (node) module.exports = api;
   if (root) root.TokenMonitorUsageCharts = api;
-})(typeof window !== 'undefined' ? window : null, function createUsageChartsApi() {
+})(typeof window !== 'undefined' ? window : null, function createUsageChartsApi(vendorPresentation) {
   function n(value) {
     const x = Number(value);
     return Number.isFinite(x) ? x : 0;
@@ -419,14 +420,10 @@
     return result;
   }
 
-  // A vendor shares the colour of the client it names (moonshot/kimi, zai/zaiteam, xai/grok).
-  const clientColors = {
-    claude: '#cc7c5e', codex: '#49a3b0', opencode: '#000000', hermes: '#d4af37', openclaw: '#ff4d4d', cursor: '#000000', antigravity: '#4285f4', cline: '#9D4EDD',
-    amp: '#F34E3F', droid: '#000000', kimi: '#16191e', qwen: '#615ced', grok: '#000000', copilot: '#000000', pi: '#000', zed: '#4173e7', kilo: '#F8F676', commandcode: '#8C4EDD', mimo: '#000000', zcode: '#000000', kiro: '#9046FF', codebuddy: '#6C4DFF', workbuddy: '#0DC8A5', proma: '#000000', qodercn: '#2ADB5C', reasonix: '#4d6bfe', dsh: '#4d6bfe', cherrystudio: '#EA5E5D', lmstudio: '#6C5CE7', unsloth: '#40B85A', devin: '#000000',
-    openrouter: '#6566F1', gemini: '#4285f4', qoder: '#2ADB5C', deepseek: '#4d6bfe', xai: '#000000', meta: '#1d65c1', mistral: '#fa520f', moonshot: '#16191e', zai: '#000000', zaiteam: '#000000', cohere: '#39594d', xiaomi: '#000000', minimax: '#f23f5d', doubao: '#1E37FC', hunyuan: '#0053E0', volcengine: '#006EFF', trae: '#32F08C', ollama: '#888888', alibaba: '#615CED', nvidia: '#74B71B', stepfun: '#000000', thirdparty: '#8090A6',
-    default: '#6ab4f0'
-  };
-  // Kept distinct from every named provider color above — sharing a hex with a real
+  // Brand colours come from the vendor presentation table. One shared, mutable
+  // object: the renderers apply the user's vendor-colour overrides onto it.
+  const clientColors = vendorPresentation.vendorColors();
+  // Kept distinct from every named vendor colour in the table — sharing a hex with a real
   // vendor (as '#cc7c5e'/'#49a3b0' used to, colliding with claude/codex) makes an
   // unrelated unrecognized model look like it belongs to that vendor.
   const fallbackModelColors = ['#6ab4f0', '#5fbf8a', '#a57df0', '#d97bc4', '#f0d66a', '#f06a7b'];
@@ -603,7 +600,7 @@
     const radius = svgRound(Math.max(1, Number(o.spotlightRadius) || 86));
     const defsParts = [];
     if (glowFilterId) {
-      defsParts.push(`<filter id="${escapeXml(glowFilterId)}" x="-80%" y="-80%" width="260%" height="260%" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="0" stdDeviation="2.1" flood-color="rgb(120, 190, 255)" flood-opacity="0.95"></feDropShadow><feDropShadow dx="0" dy="0" stdDeviation="4.2" flood-color="rgb(120, 190, 255)" flood-opacity="0.42"></feDropShadow></filter>`);
+      defsParts.push(`<filter id="${escapeXml(glowFilterId)}" x="-80%" y="-80%" width="260%" height="260%" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="0" stdDeviation="2.1" flood-color="rgb(var(--chart-heat-2-rgb, 120, 190, 255))" flood-opacity="0.95"></feDropShadow><feDropShadow dx="0" dy="0" stdDeviation="4.2" flood-color="rgb(var(--chart-heat-2-rgb, 120, 190, 255))" flood-opacity="0.42"></feDropShadow></filter>`);
     }
     if (spotlightId) {
       defsParts.push(`<radialGradient id="${escapeXml(spotlightGradientId)}" gradientUnits="userSpaceOnUse" cx="-200" cy="-200" r="${radius}"><stop offset="0" stop-color="white" stop-opacity="1"></stop><stop offset="0.35" stop-color="white" stop-opacity="0.62"></stop><stop offset="0.75" stop-color="white" stop-opacity="0"></stop></radialGradient><mask id="${escapeXml(spotlightMaskId)}"><rect x="0" y="0" width="${svgRound(modelWidth)}" height="${svgRound(modelHeight)}" fill="url(#${escapeXml(spotlightGradientId)})"></rect></mask>`);

@@ -5,119 +5,12 @@ const { execFileSync } = require('node:child_process');
 const { throwIfAborted } = require('./abortSignal');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
-const { buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
+const { WSL_DATA_MARKERS, MARKER_CLIENTS } = require('./clientSourceRegistration');
+const { isMcodeProfileDir } = require('./providers/mcode/paths');
+
+const WSL_EXCLUDED_CLIENTS = new Set([REASONIX_CLIENT, 'qodercn']);
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
-
-// Relative (Linux-style) paths under a WSL home. If any exists, a tracked client
-// stores data there and the home is worth a tokscale scan. These mirror the roots
-// tokscale actually reads (incl. alternate roots: Claude transcripts, Kimi
-// Code, legacy OpenClaw bot dirs) so a home holding only an alternate-root client
-// is still discovered. The `.vscode-server` entries cover Cline / Kilo
-// running through the VS Code WSL remote.
-const WSL_DATA_MARKERS = [
-  '.claude/projects',
-  '.claude/transcripts',
-  '.codex/sessions',
-  '.local/share/opencode',
-  '.openclaw/agents',
-  '.clawdbot/agents',
-  '.moltbot/agents',
-  '.moldbot/agents',
-  '.hermes',
-  '.kimi/sessions',
-  '.kimi-code/sessions',
-  '.qwen/projects',
-  '.grok/sessions',
-  '.copilot/otel',
-  '.gemini/antigravity-cli/conversations',
-  '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks',
-  '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks',
-  '.local/share/amp/threads',
-  '.pi/agent/sessions',
-  '.omp/agent/sessions',
-  '.local/share/zed/threads/threads.db',
-  '.local/share/kilo/kilo.db',
-  '.config/Code/User/globalStorage/kilocode.kilo-code/tasks',
-  '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks',
-  '.commandcode/projects',
-  '.dsh/sessions',
-  '.factory/sessions',
-  '.local/share/mimocode/mimocode.db',
-  '.zcode/projects',
-  '.zcode/cli/db',
-  '.kiro/sessions',
-  '.local/share/kiro-cli/data.sqlite3',
-  '.config/Kiro/User/globalStorage/kiro.kiroagent',
-  '.config/kiro/User/globalStorage/kiro.kiroagent',
-  '.codebuddy/projects',
-  '.workbuddy',
-  '.workbuddy-ai',
-  '.proma/agent-sessions',
-  '.lmstudio/server-logs',
-  '.unsloth/studio/studio.db',
-  '.local/share/devin/cli/sessions.db',
-  'AppData/Roaming/devin/cli/sessions.db',
-  '.config/Devin/User/acp-events',
-  '.config/devin/User/acp-events',
-  'AppData/Roaming/Devin/User/acp-events',
-  'Library/Application Support/Devin/User/acp-events'
-];
-
-// Maps every WSL_DATA_MARKERS entry to the tracked-client id that owns it, so a
-// matched marker can be attributed back to a client (alt roots collapse to one
-// id, e.g. .kimi/.kimi-code -> kimi; the OpenClaw bot dirs -> openclaw; the two
-// Cline globalStorage paths -> cline). Ids must match DEFAULT_CLIENTS.
-const MARKER_CLIENTS = {
-  '.claude/projects': 'claude',
-  '.claude/transcripts': 'claude',
-  '.codex/sessions': 'codex',
-  '.local/share/opencode': 'opencode',
-  '.openclaw/agents': 'openclaw',
-  '.clawdbot/agents': 'openclaw',
-  '.moltbot/agents': 'openclaw',
-  '.moldbot/agents': 'openclaw',
-  '.hermes': 'hermes',
-  '.kimi/sessions': 'kimi',
-  '.kimi-code/sessions': 'kimi',
-  '.qwen/projects': 'qwen',
-  '.grok/sessions': 'grok',
-  '.copilot/otel': 'copilot',
-  // Antigravity CLI's own parse-local root, mapped to the umbrella `antigravity`
-  // id we track; tokscaleClientFilter widens the scan to the antigravity-cli id.
-  '.gemini/antigravity-cli/conversations': 'antigravity',
-  '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks': 'cline',
-  '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks': 'cline',
-  '.local/share/amp/threads': 'amp',
-  '.pi/agent/sessions': 'pi',
-  '.omp/agent/sessions': 'pi',
-  '.local/share/zed/threads/threads.db': 'zed',
-  '.local/share/kilo/kilo.db': 'kilo',
-  '.config/Code/User/globalStorage/kilocode.kilo-code/tasks': 'kilo',
-  '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks': 'kilo',
-  '.commandcode/projects': 'commandcode',
-  '.dsh/sessions': 'dsh',
-  '.factory/sessions': 'droid',
-  '.local/share/mimocode/mimocode.db': 'mimo',
-  '.zcode/projects': 'zcode',
-  '.zcode/cli/db': 'zcode',
-  '.kiro/sessions': 'kiro',
-  '.local/share/kiro-cli/data.sqlite3': 'kiro',
-  '.config/Kiro/User/globalStorage/kiro.kiroagent': 'kiro',
-  '.config/kiro/User/globalStorage/kiro.kiroagent': 'kiro',
-  '.codebuddy/projects': 'codebuddy',
-  '.workbuddy': 'workbuddy',
-  '.workbuddy-ai': 'workbuddy',
-  '.proma/agent-sessions': 'proma',
-  '.lmstudio/server-logs': 'lmstudio',
-  '.unsloth/studio/studio.db': 'unsloth',
-  '.local/share/devin/cli/sessions.db': 'devin',
-  'AppData/Roaming/devin/cli/sessions.db': 'devin',
-  '.config/Devin/User/acp-events': 'devin',
-  '.config/devin/User/acp-events': 'devin',
-  'AppData/Roaming/Devin/User/acp-events': 'devin',
-  'Library/Application Support/Devin/User/acp-events': 'devin'
-};
 
 // Default command runner. reg output is ANSI/utf8; wsl.exe output is UTF-16LE.
 // stdin is NUL ('ignore') so a non-WSL wsl.exe stub cannot block on "press any
@@ -191,6 +84,18 @@ function homeHasData(home, existsSync, readdirSync = fs.readdirSync) {
       }
     }
   } catch (_) { /* workspaceStorage missing or unreadable */ }
+  // MiniMax Code profiles (`.minimax-<profile>`, `.mavis-<profile>`) have no
+  // fixed name to mark, and the fork reads them under --home too.
+  if (!ids.has('mcode')) {
+    try {
+      for (const name of readdirSync(home)) {
+        if (isMcodeProfileDir(name) && existsSync(wslHomePath(home, `${name}/v2/sessions`))) {
+          ids.add('mcode');
+          break;
+        }
+      }
+    } catch (_) { /* home unreadable */ }
+  }
   return [...ids];
 }
 
@@ -223,9 +128,7 @@ function probeWslState(deps = {}) {
 }
 
 async function collectWslUsage(options = {}, deps = {}) {
-  const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, now, runTokscale, logger, decoratePeriods } = options;
-  const buildProma = options.buildPromaPeriods || buildPromaPeriods;
-  const collectProma = options.collectPromaRows || collectPromaRows;
+  const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, runTokscale, logger, decoratePeriods } = options;
   const existsSync = deps.existsSync || fs.existsSync;
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
@@ -237,10 +140,12 @@ async function collectWslUsage(options = {}, deps = {}) {
   // Reasonix aggregate usage is supported on the host, but remains excluded
   // from WSL scans: Tokscale's Windows PathRoot::ReasonixHome conflicts with
   // the Linux-default `.reasonix/stats` path inside WSL. Native session files
-  // are local-only as well.
+  // are local-only as well. Qoder CN is excluded for the same kind of reason:
+  // under a Windows host the fork resolves its legacy database from the host's
+  // APPDATA rather than from --home, so a WSL scan would recount host usage.
   const tracked = new Set(String(trackedClients).split(',').map((c) => c.trim()).filter(Boolean));
   const clientsCsv = String(clients || '').split(',').map((c) => c.trim()).filter(Boolean)
-    .filter((client) => client !== REASONIX_CLIENT)
+    .filter((client) => !WSL_EXCLUDED_CLIENTS.has(client))
     .join(',');
   for (const home of wslUsageHomes(deps)) {
     throwIfAborted(options.signal, 'WSL usage scan aborted');
@@ -248,32 +153,6 @@ async function collectWslUsage(options = {}, deps = {}) {
     const homeDataClients = homeHasData(home, existsSync, readdirSync);
     for (const id of homeDataClients) {
       if (tracked.has(id)) detected.add(id);
-    }
-    // Proma is locally parsed rather than tokscale-backed. Scan its WSL JSONL
-    // root directly so a Proma-only home contributes actual usage, not merely
-    // marker detection. The root is isolated per home to avoid double-counting
-    // another distro or the host's local Proma sessions.
-    if (tracked.has('proma') && homeDataClients.includes('proma')) {
-      try {
-        const promaOptions = {
-          now,
-          allTimeSince,
-          roots: [wslHomePath(home, '.proma/agent-sessions')]
-        };
-        if (typeof options.resolvePromaPricing === 'function') {
-          const rows = collectProma(promaOptions);
-          promaOptions.rows = rows;
-          promaOptions.pricingByModel = await options.resolvePromaPricing(rows);
-        } else if (options.promaPricingByModel) {
-          promaOptions.pricingByModel = options.promaPricingByModel;
-        }
-        const proma = buildProma(promaOptions);
-        bundle.today = mergePeriods(bundle.today, extractUsageFromTokscale(proma.today));
-        bundle.month = mergePeriods(bundle.month, extractUsageFromTokscale(proma.month));
-        bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(proma.allTime));
-      } catch (error) {
-        if (typeof logger === 'function') logger(`wsl Proma usage parse failed for ${home}: ${error.message}`);
-      }
     }
     // Tokscale 4.6+ keeps explicit --home scans isolated from host-native roots,
     // so every requested client can be passed through for each discovered home.

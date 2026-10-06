@@ -12,7 +12,7 @@ const {
   LIMIT_PROVIDER_LABELS,
   limitProviderForClient,
   limitProvidersForDetectedClients
-} = require('../../src/shared/limitProviders');
+} = require('../../src/shared/limits/providers');
 const { parseLimitProviders, providerFetchers } = require('../../src/shared/limits/collector');
 
 const rootDir = path.join(__dirname, '..', '..');
@@ -28,6 +28,7 @@ test('a client resolves to the provider its tokens belong to', () => {
   assert.equal(limitProviderForClient('dsh'), 'deepseek');
   assert.equal(limitProviderForClient('CODEX'), 'codex');
   assert.equal(limitProviderForClient(' zcode '), 'zai');
+  assert.equal(limitProviderForClient('mcode'), 'minimax');
   assert.equal(limitProviderForClient('qwen'), null);
   assert.equal(limitProviderForClient('nonesuch'), null);
   assert.equal(limitProviderForClient(''), null);
@@ -57,10 +58,11 @@ test('initial limit providers map only corresponding Collection client aliases',
         qodercn: { source: { state: 'detected' } },
         zcode: { source: { state: 'detected' } },
         mimo: { source: { state: 'detected' } },
-        dsh: { source: { state: 'detected' } }
+        dsh: { source: { state: 'detected' } },
+        mcode: { source: { state: 'detected' } }
       }
     }),
-    ['mimo', 'zai', 'qoder', 'deepseek']
+    ['mimo', 'zai', 'qoder', 'deepseek', 'minimax']
   );
 });
 
@@ -154,7 +156,7 @@ test('the renderer derives its provider list from this catalog', () => {
   assert.doesNotMatch(app, /const LIMIT_PROVIDERS = \[/);
 
   const html = read('src', 'electron', 'renderer', 'index.html');
-  const tag = html.indexOf('<script src="../../shared/limitProviders.js"></script>');
+  const tag = html.indexOf('<script src="../../shared/limits/providers.js"></script>');
   assert.notEqual(tag, -1, 'index.html should load the provider catalog');
   assert.ok(tag < html.indexOf('<script src="app.js"></script>'), 'it must load before app.js');
 });

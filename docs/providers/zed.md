@@ -86,9 +86,9 @@ Token/session tracking still depends on local Zed data that `tokscale` supports 
 | --- | --- |
 | Token/session source discovery and collection | `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/usage.js` |
 | Dashboard Cookie parsing and billing requests | `src/shared/providers/zed/limits.js` |
-| Credential persistence and runtime configuration | `src/shared/credentialStore.js`, `src/electron/runtimeConfig.js`, `src/electron/main.js` |
-| Settings flow and localized setup instructions | `src/electron/renderer/index.html`, `src/electron/renderer/app.js`, `src/electron/renderer/i18n.js` |
-| Limits presentation | `src/electron/renderer/limitProviderPresentation.js`, `src/electron/renderer/app.js`, `src/shared/macWidgetSnapshot.js` |
+| Credential persistence and runtime configuration | `src/shared/providers/zed/account.js`, `src/shared/limits/registry.js`, `src/electron/limits/accountSettings.js` |
+| Settings flow and localized setup instructions | `src/shared/providers/zed/account.js`, `src/electron/renderer/limits/accountPanels.js`, `src/electron/renderer/i18n.js` |
+| Limits presentation | `src/electron/renderer/limits/providerPresentation.js`, `src/electron/renderer/app.js`, `src/shared/macWidgetSnapshot.js` |
 | Hub build identity after shared changes | `src/shared/hubBuildRegistry.json`, generated Worker registry |
 
 ## Verification checklist

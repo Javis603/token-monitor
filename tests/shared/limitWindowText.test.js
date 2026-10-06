@@ -5,8 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { limitWindowText } = require('../../src/shared/limitWindowText');
-const { limitProviderFreshness } = require('../../src/electron/renderer/limitProviderPresentation');
+const { limitWindowText } = require('../../src/shared/limits/windowText');
+const { limitProviderFreshness } = require('../../src/electron/renderer/limits/providerPresentation');
 
 function read(relativePath) {
   return fs.readFileSync(path.join(__dirname, '../..', relativePath), 'utf8');
@@ -128,7 +128,7 @@ test('both renderers paint from the shared modules, not their own copies', () =>
   assert.match(app, /const \{ limitWindowText \} = window\.TokenMonitorLimitWindowText;/);
   assert.match(dock, /const limitWindowTextApi = window\.TokenMonitorLimitWindowText;/);
   for (const page of ['src/electron/renderer/index.html', 'src/electron/renderer/edgeDock/index.html']) {
-    assert.match(read(page), /limitWindowText\.js/, `${page} should load the module`);
+    assert.match(read(page), /limits\/windowText\.js/, `${page} should load the module`);
   }
 
   // The per-provider formatters moved out of the renderer entirely.
@@ -146,7 +146,7 @@ test('both renderers paint from the shared modules, not their own copies', () =>
   // One age formatter, called by both, replacing three hand-rolled copies. The
   // limits meta line is the shared view's, so the page reaches it through the
   // view rather than formatting an age of its own.
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /presentationApi\.limitProviderFreshness\(provider\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /presentationApi\.limitProviderFreshness\(provider\)/);
   // The card formats no age of its own — it renders the page's rows, so the
   // freshness wording has exactly one call site across both surfaces.
   assert.doesNotMatch(dock, /limitProviderFreshness/);

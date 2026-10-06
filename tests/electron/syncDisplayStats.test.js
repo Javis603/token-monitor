@@ -1,13 +1,18 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const { aggregateDevices } = require('../../src/shared/usage');
 const { pickRecentUsageProviderId } = require('../../src/shared/trayText');
 const {
   attachLocalPresentationNativeViews,
-  composeLocalSyncStats
+  completeLocalSyncStats,
+  composeLocalOnlySummary,
+  composeLocalSyncStats,
+  composeLocalSyncSummary
 } = require('../../src/electron/syncDisplayStats');
 
 function device(deviceId, totalTokens, extra = {}) {
@@ -50,7 +55,7 @@ function usagePeriod(client, lastUsedAt, totalTokens = 1) {
 
 test('composeLocalSyncStats replaces the hub copy of the local device without double counting', () => {
   const hubStats = aggregateDevices([
-    device('local', 100),
+    device('local', 100, { updatedAt: '2026-07-16T00:01:00.000Z' }),
     device('remote', 50)
   ], 0, Date.parse('2026-07-16T00:01:00.000Z'));
   const localHubDevice = hubStats.devices.find((entry) => entry.deviceId === 'local');
@@ -72,6 +77,10 @@ test('composeLocalSyncStats replaces the hub copy of the local device without do
   assert.equal(result.devices.length, 2);
   assert.equal(result.devices.find((entry) => entry.deviceId === 'local').periods.today.totalTokens, 120);
   assert.equal(result.devices.find((entry) => entry.deviceId === 'local').displayName, 'This Mac');
+  // The live record owns receivedAt; the Hub's copy is kept as proof of upload.
+  assert.equal(result.devices.find((entry) => entry.deviceId === 'local').receivedAt, '2026-07-16T00:02:00.000Z');
+  assert.equal(result.devices.find((entry) => entry.deviceId === 'local').hubReceivedAt, '2026-07-16T00:00:00.000Z');
+  assert.equal(Object.hasOwn(result.devices.find((entry) => entry.deviceId === 'remote'), 'hubReceivedAt'), false);
   assert.equal(result.devices.find((entry) => entry.deviceId === 'remote').displayName, 'Studio');
   assert.equal(result.devices.find((entry) => entry.deviceId === 'remote').stale, true);
   assert.equal(result.devices.find((entry) => entry.deviceId === 'remote').ageMs, 900000);
@@ -100,6 +109,7 @@ test('composeLocalSyncStats can render a local device before the first hub snaps
   assert.equal(result.periods.today.totalTokens, 25);
   assert.equal(result.devices.length, 1);
   assert.equal(result.devices[0].deviceId, 'local');
+  assert.equal(result.devices[0].hubReceivedAt, null);
 });
 
 test('composeLocalSyncStats restores local titles over a title-free hub device', () => {
@@ -331,4 +341,166 @@ test('composeLocalSyncStats preserves an incompatible legacy snapshot instead of
   const hubStats = { periods: { today: { totalTokens: 50 } } };
 
   assert.equal(composeLocalSyncStats(hubStats, device('local', 25)), hubStats);
+});
+
+test('composeLocalSyncStats recomposes an unchanged local record exactly like a fresh one', () => {
+  const nowMs = Date.parse('2026-07-16T10:05:00.000Z');
+  const shared = (totalTokens) => usagePeriod('codex', '2026-07-16T10:00:00.000Z', totalTokens);
+  const local = device('local', 10, { today: shared(10), month: shared(10), allTime: shared(10) });
+  const untouched = structuredClone(local);
+
+  // The remote device reports the same session key, so every recompose merges
+  // into it; a reused normalization must come out of that exactly as it went in.
+  for (const remoteTokens of [5, 7, 11]) {
+    const hubStats = aggregateDevices([
+      device('remote', remoteTokens, { today: shared(remoteTokens), month: shared(remoteTokens), allTime: shared(remoteTokens) })
+    ], 0, nowMs);
+    const reused = composeLocalSyncStats(hubStats, local, { nowMs });
+    const fresh = composeLocalSyncStats(hubStats, structuredClone(local), { nowMs });
+    assert.deepEqual(reused.periods, fresh.periods);
+    assert.deepEqual(reused.devices, fresh.devices);
+    assert.equal(Object.values(reused.periods.today.sessions)[0].totalTokens, 10 + remoteTokens);
+  }
+  assert.deepEqual(local, untouched);
+});
+
+test('a publish composes without all-time session detail and completes to the full composition', () => {
+  const nowMs = Date.parse('2026-07-16T10:05:00.000Z');
+  const period = (client, totalTokens) => usagePeriod(client, '2026-07-16T10:00:00.000Z', totalTokens);
+  const local = device('local', 10, { today: period('codex', 10), month: period('codex', 10), allTime: period('codex', 10) });
+  // An agent older than #118 still uploads its all-time sessions.
+  const hubStats = aggregateDevices([
+    device('legacy', 5, { today: period('claude', 5), month: period('claude', 5), allTime: period('claude', 5) })
+  ], 0, nowMs);
+  const untouched = structuredClone(local);
+
+  const summary = composeLocalSyncSummary(hubStats, local, { nowMs });
+  const full = composeLocalSyncStats(hubStats, local, { nowMs });
+  assert.deepEqual(summary.periods.allTime.sessions, {});
+  assert.deepEqual({ ...summary.periods.allTime, sessions: null }, { ...full.periods.allTime, sessions: null });
+  assert.deepEqual(summary.periods.today, full.periods.today);
+  assert.deepEqual(summary.periods.month, full.periods.month);
+
+  const complete = completeLocalSyncStats(summary);
+  assert.deepEqual(complete.periods, full.periods);
+  assert.equal(Object.keys(complete.periods.allTime.sessions).length, 2, 'both devices, legacy upload included');
+  assert.equal(completeLocalSyncStats(summary), complete, 'completed once per snapshot');
+  assert.deepEqual(local, untouched);
+});
+
+// Counts reads of the token totals of each local all-time session. Normalizing a
+// session reads them; the tray's recent-activity scan, which runs per publish
+// over the raw record, reads only its client and timestamps.
+function countingSessions(sessions) {
+  const reads = { count: 0 };
+  const counted = {};
+  for (const [key, session] of Object.entries(sessions)) {
+    counted[key] = new Proxy(session, {
+      get(target, property, receiver) {
+        if (property === 'totalTokens') reads.count += 1;
+        return Reflect.get(target, property, receiver);
+      }
+    });
+  }
+  return { sessions: counted, reads };
+}
+
+test('a summary never normalizes the local all-time sessions', () => {
+  const nowMs = Date.parse('2026-07-16T10:05:00.000Z');
+  const period = (totalTokens) => usagePeriod('codex', '2026-07-16T10:00:00.000Z', totalTokens);
+  const allTime = period(10);
+  const { sessions, reads } = countingSessions(allTime.sessions);
+  const local = device('local', 10, { today: period(10), month: period(10), allTime: { ...allTime, sessions } });
+
+  const summary = composeLocalSyncSummary(aggregateDevices([device('remote', 5)], 0, nowMs), local, { nowMs });
+  const localOnly = composeLocalOnlySummary(local, (stats) => stats, { nowMs });
+  assert.equal(reads.count, 0);
+
+  assert.equal(Object.keys(completeLocalSyncStats(summary).periods.allTime.sessions).length, 1);
+  assert.equal(Object.keys(completeLocalSyncStats(localOnly).periods.allTime.sessions).length, 1);
+  assert.ok(reads.count > 0, 'the completions normalize them');
+});
+
+test('a completion normalizes only the all-time period on top of its summary', () => {
+  const nowMs = Date.parse('2026-07-16T10:05:00.000Z');
+  const period = (totalTokens) => usagePeriod('codex', '2026-07-16T10:00:00.000Z', totalTokens);
+  const today = period(10);
+  const { sessions, reads } = countingSessions(today.sessions);
+  const local = device('local', 10, { today: { ...today, sessions }, month: period(10), allTime: period(10) });
+
+  const summary = composeLocalOnlySummary(local, (stats) => stats, { nowMs });
+  const afterSummary = reads.count;
+  assert.ok(afterSummary > 0);
+  completeLocalSyncStats(summary);
+  assert.equal(reads.count, afterSummary, 'today is not normalized again');
+});
+
+test('a completion matches normalizing the whole record', () => {
+  const nowMs = Date.parse('2026-07-16T10:05:00.000Z');
+  const period = (client, totalTokens) => ({
+    ...usagePeriod(client, '2026-07-16T10:00:00.000Z', totalTokens),
+    projects: { 'repo-a': { totalTokens, clients: { [client]: totalTokens } } }
+  });
+  const records = {
+    'top-level periods': device('local', 10, { today: period('codex', 10), month: period('codex', 10), allTime: period('claude', 10) }),
+    'wire periods': { deviceId: 'local', receivedAt: '2026-07-16T10:00:00.000Z', periods: { today: period('codex', 10), month: period('codex', 10), allTime: period('claude', 10) } },
+    'projects disabled': device('local', 10, { projectsEnabled: false, today: period('codex', 10), month: period('codex', 10), allTime: period('claude', 10) }),
+    'both shapes, top level first': device('local', 10, { allTime: period('claude', 10), periods: { allTime: period('codex', 99) } }),
+    'no all-time period': device('local', 10, { allTime: undefined })
+  };
+  for (const [name, local] of Object.entries(records)) {
+    const summary = composeLocalOnlySummary(local, (stats) => stats, { nowMs });
+    assert.deepEqual(completeLocalSyncStats(summary).periods, aggregateDevices([local], 0, nowMs).periods, name);
+  }
+});
+
+test('local mode publishes a summary that completes to the full aggregate', () => {
+  const nowMs = Date.parse('2026-07-16T10:05:00.000Z');
+  const period = (client, totalTokens) => usagePeriod(client, '2026-07-16T10:00:00.000Z', totalTokens);
+  const local = device('local', 10, { today: period('codex', 10), month: period('codex', 10), allTime: period('claude', 10) });
+  const untouched = structuredClone(local);
+  const finished = [];
+  const finish = (stats) => {
+    finished.push(stats);
+    stats.historyRevision = 'local-revision';
+    return stats;
+  };
+
+  const summary = composeLocalOnlySummary(local, finish, { nowMs });
+  const full = aggregateDevices([local], 0, nowMs);
+  assert.deepEqual(finished, [summary]);
+  assert.deepEqual(summary.periods.allTime.sessions, {});
+  assert.deepEqual({ ...summary.periods.allTime, sessions: null }, { ...full.periods.allTime, sessions: null });
+  assert.deepEqual(summary.periods.today, full.periods.today);
+  assert.deepEqual(summary.periods.month, full.periods.month);
+  const withoutPeriods = (devices) => devices.map(({ periods, ...rest }) => rest);
+  assert.deepEqual(withoutPeriods(summary.devices), withoutPeriods(full.devices));
+  assert.deepEqual(summary.devices[0].periods.allTime.sessions, {}, 'as in a Hub summary');
+
+  const complete = completeLocalSyncStats(summary);
+  assert.deepEqual(complete.periods, full.periods);
+  assert.equal(complete.historyRevision, 'local-revision', 'the completion is finished like the summary');
+  assert.equal(completeLocalSyncStats(summary), complete, 'completed once per snapshot');
+  assert.equal(finished.length, 2);
+  assert.deepEqual(local, untouched);
+});
+
+test('stats that were never summarised are already complete', () => {
+  const hubStats = { periods: { today: { totalTokens: 50 } } };
+  assert.equal(composeLocalSyncSummary(hubStats, device('local', 25)), hubStats, 'a legacy snapshot passes through');
+  assert.equal(completeLocalSyncStats(hubStats), hubStats);
+  const full = composeLocalSyncStats(null, device('local', 25));
+  assert.equal(completeLocalSyncStats(full), full);
+  assert.equal(completeLocalSyncStats(null), null);
+});
+
+test('main publishes summaries and exports their completions', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  assert.doesNotMatch(main, /composeLocalSyncStats\(/, 'every composition main publishes is a summary');
+  assert.equal((main.match(/composeLocalSyncSummary\(/g) || []).length, 2, 'the publish and stats:get');
+  assert.equal((main.match(/composeLocalOnlySummary\(/g) || []).length, 1, 'the local collector publish');
+  assert.doesNotMatch(main, /aggregateDevices\(\[localDevice\], 0\)/, 'local mode publishes a summary too');
+  assert.match(main, /writeExportTo\(settings\.exportDir, completeLocalSyncStats\(payload\.data\.stats\)\.periods/);
+  assert.match(main, /writeExportTo\(result\.filePaths\[0\], completeLocalSyncStats\(stats\)\.periods\)/);
+  assert.equal((main.match(/writeExportTo\(/g) || []).length, 3, 'the definition and the two exports above');
 });

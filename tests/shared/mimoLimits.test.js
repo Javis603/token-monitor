@@ -4,13 +4,25 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   createMimoManagedAccount,
-  fetchMimoLimits,
+  fetchMimoLimits: fetchMimoLimitsWithLocalSource,
   normalizeMimoCookieHeader,
   parseMimoBalance,
   parseMimoPlanDetail,
   parseMimoPlanUsage,
   parseMimoProfile
 } = require('../../src/shared/providers/mimo/limits');
+
+// These cases predate the local Desktop source and are about the console lane,
+// so the reader is declared absent unless a case asks for it: on a machine with
+// MiMo Desktop signed in, discovery would add an account and change the request
+// and row counts these cases assert.
+const noDesktopSession = () => {
+  throw Object.assign(new Error('no MiMo Desktop session'), { status: 'notConfigured' });
+};
+const fetchMimoLimits = (options = {}, deps = {}) => fetchMimoLimitsWithLocalSource(options, {
+  readMimoDesktopAccount: noDesktopSession,
+  ...deps
+});
 const { createLimitsCollector } = require('../../src/shared/limits/collector');
 
 const COOKIE = 'unrelated=drop; userId=123; api-platform_serviceToken=secret; api-platform_ph=optional';
@@ -88,8 +100,10 @@ test('MiMo parsers match the official balance and Token Plan shapes', () => {
   assert.equal(detail.expired, false);
   assert.equal(detail.active, true);
   assert.match(detail.resetsAt, /^2099-01-01T00:00:00/);
+  // The profile parse carries the display name beside the address now.
   assert.deepEqual(parseMimoProfile({ data: { email: 'user@example.com' } }), {
-    email: 'user@example.com'
+    email: 'user@example.com',
+    name: ''
   });
 });
 
@@ -175,11 +189,15 @@ test('fetchMimoLimits requests fixed official endpoints concurrently with minimi
   assert.equal(result.length, 1);
   assert.equal(result[0].status, 'ok');
   assert.equal(planWindows(result[0])[0].usedPercent, 10);
+  // `/api/v1/usage` joins the fixed set: the wallet row states what the console
+  // reports as spent, and the ledger derives the two periods it cannot.
   assert.deepEqual(calls.map(({ url }) => new URL(url).pathname).sort(), [
-    '/api/v1/balance', '/api/v1/tokenPlan/detail', '/api/v1/tokenPlan/usage', '/api/v1/userProfile'
+    '/api/v1/balance', '/api/v1/tokenPlan/detail', '/api/v1/tokenPlan/usage', '/api/v1/usage', '/api/v1/userProfile'
   ]);
   assert.equal(result[0].accountEmail, 'user@example.com');
-  assert.equal(result[0].accountName, '');
+  // The row is named by the account's own key, so two accounts of one provider
+  // stay distinguishable without an address to name them by.
+  assert.equal(result[0].accountName, 'MiMo mimo1');
   for (const call of calls) {
     assert.equal(call.cookie, 'api-platform_ph=optional; api-platform_serviceToken=secret; userId=123');
   }
@@ -253,7 +271,7 @@ test('fetchMimoLimits does not activate a default plan with positive quota', asy
   assert.equal(provider.balance.planLimit, null);
   assert.equal(provider.balance.planPercent, null);
   assert.equal(provider.balance.planStatus, null);
-  assert.equal(provider.accountLabel, '');
+  assert.equal(provider.accountLabel, 'Console');
 });
 
 test('MiMo no-plan code takes priority over active status', () => {
@@ -386,7 +404,7 @@ test('fetchMimoLimits maps an expired browser session to unauthorized', async ()
     fetch: async () => response({}, 401)
   });
   assert.equal(provider.status, 'unauthorized');
-  assert.equal(provider.accountLabel, '');
+  assert.equal(provider.accountLabel, 'Console');
 });
 
 test('fetchMimoLimits maps string auth codes to unauthorized', async () => {
@@ -483,6 +501,10 @@ test('LimitsRuntime compatibility distinguishes provider-wide and account-scoped
       }))
     }
   }, {
+    // This path builds its own deps through the collector, so the absent reader
+    // is declared here too; otherwise a machine with MiMo Desktop signed in adds
+    // its own account to every assertion below.
+    readMimoDesktopAccount: noDesktopSession,
     fetch: async (url, init) => {
       fetchCalls += 1;
       cookies.push(init.headers.Cookie);

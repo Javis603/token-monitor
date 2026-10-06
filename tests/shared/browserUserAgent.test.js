@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { BROWSER_USER_AGENT } = require('../../src/shared/browserUserAgent');
+const { BROWSER_USER_AGENT, BROWSER_CLIENT_HINTS } = require('../../src/shared/browserUserAgent');
 const { fetchClaudeLimits } = require('../../src/shared/limits/collector');
 const { fetchMimoLimits } = require('../../src/shared/providers/mimo/limits');
 const { fetchOllamaLimits } = require('../../src/shared/providers/ollama/limits');
@@ -18,6 +18,14 @@ const opencodeWeb = require('../../src/shared/providers/opencode/web');
 const root = path.join(__dirname, '..', '..');
 
 const SHARED_AGENT_FILE = 'src/shared/browserUserAgent.js';
+
+// These cases reach the MiMo provider, whose console ledger defaults to the
+// app's own data directory; a test must never write there. The same isolation
+// the archive tests make with this variable, for the whole file (node runs each
+// test file in its own process).
+const testDataDir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'mimo-ledger-tests-'));
+process.env.TOKEN_MONITOR_SHARED_DIR = testDataDir;
+test.after(() => fs.rmSync(testDataDir, { recursive: true, force: true }));
 
 function jsFilesUnder(dir) {
   const out = [];
@@ -71,6 +79,15 @@ test('the shared browser user-agent reads as a current browser', () => {
   assert.match(BROWSER_USER_AGENT, /^Mozilla\/5\.0 /);
   assert.match(BROWSER_USER_AGENT, /Chrome\/\d+[\d.]* Safari\/[\d.]+$/);
   assert.doesNotMatch(BROWSER_USER_AGENT, /token-monitor/i);
+});
+
+test('the client hints claim the same Chrome major as the user-agent', () => {
+  // Cloudflare compares the two: a UA bumped without the hints (or the other
+  // way) re-flags the request even though every header still looks
+  // browser-shaped, and no provider test would notice.
+  const uaMajor = BROWSER_USER_AGENT.match(/Chrome\/(\d+)\./)[1];
+  const hintsMajor = BROWSER_CLIENT_HINTS['sec-ch-ua'].match(/Chromium";v="(\d+)"/)[1];
+  assert.equal(hintsMajor, uaMajor);
 });
 
 test('no source file hard-codes a browser user-agent', () => {
@@ -146,7 +163,15 @@ test('MiMo sends the shared agent on the wire', async () => {
         enabled: true
       }]
     },
-    { fetch }
+    // The membership lane is declared absent: this case is about the header the
+    // console calls carry, and without this it would read this machine's real
+    // MiMo Desktop partition.
+    {
+      fetch,
+      readMimoDesktopAccount: () => {
+        throw Object.assign(new Error('no Desktop session'), { status: 'notConfigured' });
+      }
+    }
   ));
   assert.deepEqual([...new Set(sent)], [BROWSER_USER_AGENT]);
 });

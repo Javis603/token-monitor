@@ -1,7 +1,8 @@
 ---
-summary: "WorkBuddy provider notes: the app-owned local session, its credential-encryption boundary, the headless token lane, and the billing contract."
+summary: "WorkBuddy provider notes: transcript roots and shared session readers, the app-owned credential session, its encryption boundary, and the billing contract."
 ids: [workbuddy]
 read_when:
+  - Changing WorkBuddy session discovery, titles, turn status or Session Detail
   - Adding or changing WorkBuddy limits collection
   - Changing how the WorkBuddy desktop session is read, validated, or reported
   - Debugging a WorkBuddy row that shows as signed out on a signed-in machine
@@ -10,14 +11,27 @@ read_when:
 
 # WorkBuddy provider
 
-WorkBuddy appears in Token Monitor in two independent data planes. Keep them separate when changing or debugging the provider.
+WorkBuddy's usage, transcript enrichment and quota reads have independent sources. Keep them separate when changing or debugging the provider.
 
 | Data plane | What it measures | Primary runtime | Inputs |
 | --- | --- | --- | --- |
 | Token/session activity | Local model-token activity attributed to WorkBuddy | Shared usage collector through `tokscale` | Local WorkBuddy conversation data |
+| Session metadata and Detail | Titles, turn boundaries, prompts, tools and per-turn tokens | Shared local metadata and Session Detail readers | WorkBuddy JSONL transcripts |
 | Limits/quota | Remaining WorkBuddy Credits | Shared limits runtime | The installed WorkBuddy desktop app's session, or an explicit billing token |
 
-Local App monitoring runs in the Electron main process on macOS and Windows. Linux has no supported local app session, and the Widget reports that capability as unavailable rather than falling back to a token.
+Local App quota monitoring runs in the Electron main process on macOS and Windows. Linux has no supported local app credential session, and the Widget reports that capability as unavailable rather than falling back to a token. This platform restriction does not apply to local transcript readers.
+
+## Session transcripts
+
+Session discovery checks `~/.workbuddy/projects/**/*.jsonl`, then `~/.workbuddy-ai/projects/**/*.jsonl`; the latter is the home used by WorkBuddy 5.5. Both remain supported because tokscale scans both, and the first matching transcript wins. `providers/workbuddy/sessionMetadata.js` binds the shared CodeBuddy metadata reader to these roots. Token totals continue to come from tokscale, independently of whether a local transcript can be resolved.
+
+The shared resolver receives the client id in its context and keeps existing metadata under `workbuddy:<sessionId>`. Bare session ids can coincide with CodeBuddy ids; sharing a parser must not share cached titles, turn state or project identity across clients.
+
+WorkBuddy shares the [CodeBuddy transcript format and readers](codebuddy.md#workbuddy-writes-the-same-family), with two compatibility rules: a non-empty `custom-title` takes priority over `ai-title`, and older records without `providerData.messageId` or cache details still produce turns from their usage-bearing records. WorkBuddy's `<user_query>` prompt is extracted from the surrounding context envelope. Token conversion follows the pinned Tencent Buddy parser, including usage-object precedence, conditional cache subtraction and additive reasoning/cache writes; live rows, history and Detail share the same total.
+
+On-demand Session Detail uses the shared streaming line reader and CodeBuddy parser. It retains the 16 MiB per-record bound and explicit read-error results; Windows detail resolution follows the async native-to-WSL fallback contract. There is no CodeBuddy VS Code extension-store fallback for WorkBuddy, whose conversations use the transcript roots above.
+
+The shared metadata scanner still skips records above 64 KiB, so oversized user or assistant records can leave turn status stale. This metadata limit is separate from Session Detail's record bound. The desktop credential-encryption boundary described below concerns quota access; it does not prevent reading local session transcripts.
 
 ## Limits and quota
 
@@ -68,15 +82,19 @@ That distinction is the whole point: an encrypted credential is not a signed-out
 
 | Concern | Primary files |
 | --- | --- |
+| Transcript metadata and roots | `src/shared/providers/workbuddy/sessionMetadata.js`, shared CodeBuddy transcript readers |
+| Transcript discovery and streaming Detail | `src/shared/sessionFiles.js`, `src/shared/sessionDetail.js`, `src/shared/sessionDetailResolver.js` |
 | App session reading, encryption detection, read reasons | `src/electron/providers/workbuddy/localAuth.js`, `src/electron/providers/workbuddy/credentialDecoder.js` |
 | Billing request and response mapping | `src/shared/providers/workbuddy/limits.js` |
 | Widget lane configuration and reason plumbing | `src/electron/main.js`, `src/electron/runtimeConfig.js` |
 | Action hint bounds | `src/shared/limits/core.js`, generated `worker/src/shared/limits/core.js` |
-| Status label and localized strings | `src/electron/renderer/limitProviderPresentation.js`, `src/electron/renderer/i18n.js` |
+| Status label and localized strings | `src/electron/renderer/limits/providerPresentation.js`, `src/electron/renderer/i18n.js` |
 | Wire contract | `docs/API.md` |
 
 ## Verification checklist
 
+- both transcript roots, custom-title precedence and older ungrouped usage records;
+- streamed Session Detail, oversized-record errors and async WSL fallback;
 - personal and enterprise billing mapping, including the unlimited enterprise plan;
 - an empty active-package list staying visible as configured;
 - a sealed credential opening on supported Windows and retaining the `encrypted` action on unsupported platforms or codec failure;
@@ -86,3 +104,5 @@ That distinction is the whole point: an encrypted credential is not a signed-out
 - the allowlisted endpoint, header stripping, and mid-request session switch rejection.
 
 Run focused tests while iterating, then `npm run sync:worker` when `src/shared/limits/core.js` changed, `npm run verify`, and `git diff --check`.
+
+For session changes, run `node --test tests/shared/workbuddySessionMetadata.test.js tests/shared/sessionDetail.codebuddy.test.js tests/shared/sessionDetailStreaming.test.js tests/shared/sessionDetailResolver.test.js`.

@@ -2,9 +2,12 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { defaultDeviceId, loadDotEnv, parseArgs, pidFilePath } = require('../shared/config');
+const {
+  defaultDeviceId, loadDotEnv, parseArgs, pidFilePath
+} = require('../shared/config');
 const { appVersion } = require('../shared/appVersion');
 const { clientsCsvForSetting } = require('../shared/clientTracking');
+const { seedAgentClients } = require('./seedClients');
 const { normalizeHistoryIntervalMs } = require('../shared/collector');
 const {
   normalizeLimitsRefreshMode,
@@ -13,6 +16,7 @@ const {
   parseLimitProviders
 } = require('../shared/limits/collector');
 const { postSyncPayload } = require('../shared/syncPayload');
+const { createAgentTitleSync } = require('./titleSync');
 const { HUB_RESPONSE_HEADER, HUB_RESPONSE_MINIMAL } = require('../shared/hubProtocol');
 const { applyProjectRollups } = require('../shared/usage');
 const { runAgent, runAgentOnce } = require('./runtime');
@@ -20,22 +24,32 @@ const {
   applySessionUsageArchive,
   sessionUsageArchiveDate,
   updateSessionUsageArchive
-} = require('../shared/sessionUsageArchive');
+} = require('../shared/usage/sessionUsageArchive');
 const {
   createSessionUsageArchiveStore,
   readSessionUsageArchiveSnapshot
-} = require('../shared/sessionUsageArchiveStore');
+} = require('../shared/usage/sessionUsageArchiveStore');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 
 loadDotEnv();
 const args = parseArgs(process.argv.slice(2));
+
 const hubUrl = String(args.hub || args.hubUrl || process.env.TOKEN_MONITOR_HUB_URL || 'http://127.0.0.1:17321').replace(/\/$/, '');
 const secret = String(args.secret || process.env.TOKEN_MONITOR_SECRET || '').trim();
 const deviceId = String(args.device || args.deviceId || process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId());
 const intervalMs = Number(args.interval || args.intervalMs || process.env.TOKEN_MONITOR_INTERVAL_MS || 5 * 60 * 1000);
 const watchEnabled = String(args.watch ?? process.env.TOKEN_MONITOR_WATCH ?? '1') !== '0';
 const watchDebounceMs = Number(args.watchDebounceMs || process.env.TOKEN_MONITOR_WATCH_DEBOUNCE_MS || 1500);
-const clients = clientsCsvForSetting(args.clients ?? process.env.TOKEN_MONITOR_CLIENTS);
+// A headless deployment has no settings.json, so the enabled-client CSV is a
+// fresh declaration on every launch. That makes the identity-split migration a
+// different problem from the widget's: there is no persisted user choice to
+// leave alone, but there is still a pre-split meaning to carry forward, because
+// a CSV written before the split listed the merged id and counted both products.
+// The marker therefore lives beside the collector anchor, and it is what stops
+// the seed from re-adding a client the operator deliberately removed afterwards.
+const clients = seedAgentClients(clientsCsvForSetting(args.clients ?? process.env.TOKEN_MONITOR_CLIENTS), {
+  persist: !(args['dry-run'] || args.dryRun)
+});
 const allTimeSince = String(args.since || args.allTimeSince || process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01');
 const commandTimeoutMs = Number(args.timeoutMs || process.env.TOKEN_MONITOR_TOKSCALE_TIMEOUT_MS || 120 * 1000);
 const limitsEnabled = parseBoolean(args.limits ?? args.limitsEnabled ?? process.env.TOKEN_MONITOR_LIMITS_ENABLED, true);
@@ -43,6 +57,7 @@ const limitProviders = parseLimitProviders(args.limitProviders ?? process.env.TO
 const limitsRefreshMs = normalizeLimitsRefreshMs(args.limitsRefreshMs || process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS);
 const limitsRefreshMode = normalizeLimitsRefreshMode(args.limitsRefreshMode || process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE);
 const historyEnabled = parseBoolean(args.history ?? args.historyEnabled ?? process.env.TOKEN_MONITOR_HISTORY_ENABLED, true);
+const syncSessionTitles = parseBoolean(args.syncSessionTitles ?? args['sync-session-titles'] ?? process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES, false);
 const projectsEnabled = parseBoolean(args.projects ?? args.projectsEnabled ?? process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true);
 const sessionUsageArchiveEnabled = parseBoolean(args.sessionArchive ?? args.sessionUsageArchiveEnabled ?? process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true);
 const wslScanEnabled = parseBoolean(args.wslScan ?? args.wslScanEnabled ?? process.env.TOKEN_MONITOR_WSL_SCAN, true);
@@ -126,17 +141,27 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
 }
 
+const titleSyncNegotiator = createAgentTitleSync({ dataDir: path.dirname(pidFilePath()), fetchFn: fetch });
+
 async function postUsage(summary) {
-  const { response } = await postSyncPayload(fetch, `${hubUrl}/api/ingest`, {
+  const authHeaders = secret ? { authorization: `Bearer ${secret}` } : {};
+  const titleSyncOptions = await titleSyncNegotiator.negotiate({
+    hubUrl, headers: authHeaders, deviceId: summary.deviceId || deviceId, enabled: syncSessionTitles
+  });
+  const { response } = await postSyncPayload((url, options) => fetch(url, { ...options, redirect: 'error' }), `${hubUrl}/api/ingest`, {
     headers: {
       'content-type': 'application/json',
       [HUB_RESPONSE_HEADER]: HUB_RESPONSE_MINIMAL,
-      ...(secret ? { authorization: `Bearer ${secret}` } : {})
+      ...authHeaders
     },
     summary,
+    ...titleSyncOptions,
     logger: (message) => console.warn(`[sync] ${message}`)
   });
-  if (!response.ok) throw new Error(`Hub responded ${response.status}: ${(await response.text()).slice(0, 300)}`);
+  if (!response.ok) {
+    titleSyncNegotiator.invalidate();
+    throw new Error(`Hub responded ${response.status}: ${(await response.text()).slice(0, 300)}`);
+  }
   return response.json();
 }
 
@@ -172,6 +197,11 @@ async function main() {
   if (!dryRun) registerPidFile(() => {
     runtimeHandle?.stop();
     sessionUsageArchiveStore.close();
+  });
+  // Reconcile old destinations even if the first collector scan later fails.
+  // Dry runs never read/write private cleanup state or make sync requests.
+  if (!dryRun) await titleSyncNegotiator.negotiate({
+    hubUrl, deviceId, headers: secret ? { authorization: `Bearer ${secret}` } : {}, enabled: syncSessionTitles
   });
   const runtimeOptions = {
     envelope: { deviceId, agentVersion: appVersion(), agentRuntime: 'headless-agent' },

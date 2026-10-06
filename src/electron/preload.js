@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -15,7 +15,18 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   clearSessionUsageArchive: () => ipcRenderer.invoke('sessionUsageArchive:clear'),
   lookupModelPricing: (modelId) => ipcRenderer.invoke('pricing:lookup', modelId),
   previewAppearance: (patch) => ipcRenderer.invoke('appearance:preview', patch),
+  getBackgroundImage: () => ipcRenderer.invoke('appearance:getBackgroundImage'),
+  chooseBackgroundImage: () => ipcRenderer.invoke('appearance:chooseBackgroundImage'),
+  clearBackgroundImage: () => ipcRenderer.invoke('appearance:clearBackgroundImage'),
+  getNativeMaterialState: () => ipcRenderer.invoke('appearance:getNativeMaterial'),
+  onNativeMaterialState: (callback) => {
+    const listener = (_event, state) => { try { callback(state); } catch (_) {} };
+    ipcRenderer.on('appearance:nativeMaterial', listener);
+    return () => ipcRenderer.removeListener('appearance:nativeMaterial', listener);
+  },
   getStats: (options) => ipcRenderer.invoke('stats:get', options),
+  deleteDevice: (deviceId) => ipcRenderer.invoke('devices:delete', deviceId),
+  getAllTimeSessions: (snapshotId) => ipcRenderer.invoke('stats:allTimeSessions', snapshotId),
   getSessionDetail: (args) => ipcRenderer.invoke('session:getDetail', args),
   getStreamStatus: () => ipcRenderer.invoke('stream:status'),
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
@@ -31,6 +42,15 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     ready: () => ipcRenderer.send('dashboard:ready'),
     minimize: () => ipcRenderer.send('dashboard:minimize'),
     close: () => ipcRenderer.send('dashboard:close')
+  },
+  getSyncContentStatus: (refresh = true) => ipcRenderer.invoke('syncContent:status', refresh),
+  previewSyncContent: (kind) => ipcRenderer.invoke('syncContent:preview', kind),
+  configureSyncContent: (options) => ipcRenderer.invoke('syncContent:configure', options),
+  retrySyncContentCleanup: () => ipcRenderer.invoke('syncContent:retryCleanup'),
+  onSyncContentPush: (callback) => {
+    const listener = (_event, status) => { try { callback(status); } catch (_) {} };
+    ipcRenderer.on('syncContent:push', listener);
+    return () => ipcRenderer.removeListener('syncContent:push', listener);
   },
   getHubInfo: () => ipcRenderer.invoke('hub:getInfo'),
   getHubBuildStatus: () => ipcRenderer.invoke('hub:getBuildStatus'),
@@ -70,11 +90,6 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     ipcRenderer.on('view:open', listener);
     return () => ipcRenderer.removeListener('view:open', listener);
   },
-  onTokscalePush: (callback) => {
-    const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
-    ipcRenderer.on('tokscale:push', listener);
-    return () => ipcRenderer.removeListener('tokscale:push', listener);
-  },
   getAppInfo: () => ipcRenderer.invoke('app:getInfo'),
   generateDiagnosticReport: () => ipcRenderer.invoke('diagnostics:generate'),
   copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
@@ -113,9 +128,6 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   exportNow: () => ipcRenderer.invoke('export:now'),
   pickExportDir: () => ipcRenderer.invoke('export:pickAutoDir'),
   getTokscaleStatus: () => ipcRenderer.invoke('tokscale:getStatus'),
-  checkTokscaleNpm: () => ipcRenderer.invoke('tokscale:checkNpm'),
-  downloadTokscaleFromNpm: () => ipcRenderer.invoke('tokscale:downloadFromNpm'),
-  resetTokscaleToBundled: () => ipcRenderer.invoke('tokscale:resetToBundled'),
   getAppUpdateState: () => ipcRenderer.invoke('appUpdate:getState'),
   checkAppUpdateNow: () => ipcRenderer.invoke('appUpdate:checkNow'),
   downloadAppUpdate: () => ipcRenderer.invoke('appUpdate:download'),
@@ -145,17 +157,10 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     logout: (accountId) => ipcRenderer.invoke('cursor:logout', accountId),
     status: (options = {}) => ipcRenderer.invoke('cursor:status', options)
   },
-  claude: {
-    saveCookie: (cookie) => ipcRenderer.invoke('claude:saveCookie', cookie)
-  },
-  ollama: {
-    validateCookie: (cookie) => ipcRenderer.invoke('ollama:validateCookie', cookie)
-  },
-  cline: {
-    validateApiKey: (apiKey) => ipcRenderer.invoke('cline:validateApiKey', apiKey)
-  },
-  factory: {
-    validateApiKey: (apiKey) => ipcRenderer.invoke('factory:validateApiKey', apiKey)
+  limits: {
+    saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
+    listOrganizationChoices: (providerId) => ipcRenderer.invoke('limits:listOrganizationChoices', providerId),
+    clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId)
   },
   opencode: {
     saveCookie: (cookie) => ipcRenderer.invoke('opencode:saveCookie', cookie),

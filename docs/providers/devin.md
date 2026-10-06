@@ -15,7 +15,7 @@ Devin is both a Tokscale-backed usage client and an optional AI Tool Limits prov
 
 Token Monitor requests `GET https://app.devin.ai/api/<organization>/billing/quota/usage` with the browser session's Bearer token. In Settings → AI Tool Limits → Devin, open Devin Usage & Limits, inspect the successful `billing/quota/usage` request in DevTools, then paste its `Authorization` value and `x-cog-org-id`. The token is stored in the local credential store; it is never exposed to the renderer after saving and is sent only to `app.devin.ai`.
 
-The response supplies Daily and Weekly percentages and reset timestamps. When Devin sets `hide_daily_quota` to `true`, Token Monitor omits Daily while retaining Weekly. `overage_balance` (or `overage_balance_cents`) is shown as the USD Extra usage balance. Headless installs can set `DEVIN_BEARER_TOKEN` and `DEVIN_ORGANIZATION`; `TOKEN_MONITOR_DEVIN_BEARER_TOKEN` and `TOKEN_MONITOR_DEVIN_ORGANIZATION` are also accepted.
+The response supplies Daily and Weekly percentages and reset timestamps. When Devin sets `hide_daily_quota` to `true`, Token Monitor omits Daily while retaining Weekly. `overage_balance` (or `overage_balance_cents`) is shown as the USD Extra usage balance. The quota payload carries no plan field for most accounts, so when `plan_name` is absent the plan label comes from a best-effort `GET /api/billing/subscription` call (same headers, org scoped through `x-cog-org-id`), reading the subscription `slug`. Headless installs can set `DEVIN_BEARER_TOKEN` and `DEVIN_ORGANIZATION`; `TOKEN_MONITOR_DEVIN_BEARER_TOKEN` and `TOKEN_MONITOR_DEVIN_ORGANIZATION` are also accepted.
 
 ## Sources
 

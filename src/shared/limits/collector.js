@@ -1,6 +1,7 @@
 'use strict';
 
-const { LIMIT_PROVIDER_IDS } = require('../limitProviders');
+const { LIMIT_PROVIDER_IDS } = require('./providers');
+const { LIMIT_PROVIDER_FETCHERS, limitProviderEntry } = require('./registry');
 const {
   DEFAULT_LIMITS_REFRESH_MS,
   normalizeLimitProvider,
@@ -40,6 +41,7 @@ const { kimiToken, kimiWebToken, fetchKimiLimits } = kimiLimits;
 const workbuddyLimits = require('../providers/workbuddy/limits');
 const traeLimits = require('../providers/trae/limits');
 const zedLimits = require('../providers/zed/limits');
+const typesafeLimits = require('../providers/typesafe/limits');
 const {
   grokCredential,
   readAuthJson,
@@ -127,33 +129,7 @@ function statusProvider(provider, status, updatedAt) {
 
 function providerFetchers(deps = {}) {
   return {
-    claude: (providerOptions, probeDeps) => fetchClaudeLimits(providerOptions, probeDeps),
-    codex: (providerOptions, probeDeps) => fetchCodexLimits(providerOptions, probeDeps),
-    opencode: (providerOptions, probeDeps) => fetchOpenCodeLimits(providerOptions, probeDeps),
-    cursor: (providerOptions, probeDeps) => fetchCursorLimits(providerOptions, probeDeps),
-    antigravity: (providerOptions, probeDeps) => fetchAntigravityLimits(providerOptions, probeDeps),
-    cline: (providerOptions, probeDeps) => fetchClineLimits(providerOptions, probeDeps),
-    factory: (providerOptions, probeDeps) => fetchFactoryLimits(providerOptions, probeDeps),
-    kimi: (providerOptions, probeDeps) => kimiLimits.fetchKimiLimits(providerOptions, probeDeps),
-    grok: (providerOptions, probeDeps) => grokLimits.fetchGrokLimits(providerOptions, probeDeps),
-    copilot: (providerOptions, probeDeps) => copilotLimits.fetchCopilotLimits(providerOptions, probeDeps),
-    zed: (providerOptions, probeDeps) => zedLimits.fetchZedLimits(providerOptions, probeDeps),
-    commandcode: (providerOptions, probeDeps) => commandcodeLimits.fetchCommandcodeLimits(providerOptions, probeDeps),
-    mimo: (providerOptions, probeDeps) => fetchMimoLimits(providerOptions, probeDeps),
-    zai: (providerOptions, probeDeps) => zaiLimits.fetchZaiLimits(providerOptions, probeDeps),
-    zaiteam: (providerOptions, probeDeps) => zaiTeamLimits.fetchZaiTeamLimits(providerOptions, probeDeps),
-    kiro: (providerOptions, probeDeps) => kiroLimits.fetchKiroLimits(providerOptions, probeDeps),
-    workbuddy: (providerOptions, probeDeps) => workbuddyLimits.fetchWorkbuddyLimits(providerOptions, probeDeps),
-    qoder: (providerOptions, probeDeps) => qoderLimits.fetchQoderLimits(providerOptions, probeDeps),
-    deepseek: (providerOptions, probeDeps) => fetchDeepSeekLimits(providerOptions, probeDeps),
-    devin: (providerOptions, probeDeps) => devinLimits.fetchDevinLimits(providerOptions, probeDeps),
-    openrouter: (providerOptions, probeDeps) => openrouterLimits.fetchOpenRouterLimits(providerOptions, probeDeps),
-    minimax: (providerOptions, probeDeps) => minimaxLimits.fetchMinimaxLimits(providerOptions, probeDeps),
-    volcengine: (providerOptions, probeDeps) => volcengineLimits.fetchVolcengineLimits(providerOptions, probeDeps),
-    ollama: (providerOptions, probeDeps) => ollamaLimits.fetchOllamaLimits(providerOptions, probeDeps),
-    trae: (providerOptions, probeDeps) => traeLimits.fetchTraeLimits(providerOptions, probeDeps),
-    alibaba: (providerOptions, probeDeps) => alibabaLimits.fetchAlibabaLimits(providerOptions, probeDeps),
-    thirdparty: (providerOptions, probeDeps) => thirdPartyLimits.fetchThirdPartyLimits(providerOptions, probeDeps),
+    ...LIMIT_PROVIDER_FETCHERS,
     ...(deps.providerFetchers || {})
   };
 }
@@ -179,11 +155,6 @@ function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
     ].some((key) => String(options.limitRefreshScope[key] || '').trim())
       ? 1
       : Math.max(1, managed.length + 1);
-  } else if (provider === 'mimo') {
-    const managed = Array.isArray(options.mimoManagedAccounts || deps.mimoManagedAccounts)
-      ? (options.mimoManagedAccounts || deps.mimoManagedAccounts)
-      : [];
-    jobs = options.limitRefreshScope?.provider === 'mimo' ? 1 : Math.max(1, managed.length);
   }
   return base * jobs;
 }
@@ -209,8 +180,9 @@ function createProbeFetch(fetchFn, context = {}, deps = {}) {
 
 function resolveProviderFetch(provider, deps = {}) {
   if (typeof deps.fetch === 'function') return deps.fetch;
-  if (provider === 'workbuddy' && typeof deps.workbuddyFetch === 'function') return deps.workbuddyFetch;
-  if (provider === 'grok') return grokLimits.resolveGrokFetch(deps);
+  const entry = limitProviderEntry(provider);
+  if (entry?.fetchDep && typeof deps[entry.fetchDep] === 'function') return deps[entry.fetchDep];
+  if (entry?.resolveFetch) return entry.resolveFetch(deps);
   return fetch;
 }
 
@@ -242,7 +214,11 @@ async function collectLimitsOnce(options = {}, deps = {}) {
   const selectedProviders = parseLimitProviders(options.limitProviders ?? options.providers)
     .filter((provider) => !scope?.provider || provider === scope.provider);
   for (const provider of selectedProviders) {
-    providers.push(...await probeLimitProvider(provider, options, {}, deps));
+    // Runtime-only identity removals are consumed by LimitsRuntime. A one-shot
+    // normalized snapshot has no previous identity state to remove and must not
+    // publish the marker as provider data.
+    providers.push(...(await probeLimitProvider(provider, options, {}, deps))
+      .filter((row) => row?.removed !== true));
   }
   return normalizeLimitsSummary({ updatedAt: nowIso(nowMs), refreshMs, providers });
 }
@@ -358,6 +334,7 @@ module.exports = {
   kimiWebToken,
   fetchKimiLimits,
   zedCookie: zedLimits.zedCookie,
+  typesafeCookie: typesafeLimits.typesafeCookie,
   normalizeZedCookieHeader: zedLimits.normalizeZedCookieHeader,
   fetchZedLimits: zedLimits.fetchZedLimits,
   mapClaudeCliUsageToProvider,

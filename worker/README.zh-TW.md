@@ -268,3 +268,10 @@ npm run tail
 ```
 
 即時串流輸出 Worker + Durable Object 日誌。
+
+
+## 可選共享內容
+
+`wrangler.toml` 中的 `TOKEN_MONITOR_SYNC_SESSION_TITLES = "false"` 是預設關閉的伺服器端標題接收權限。只有需要允許裝置傳送標題時才設為 `"true"`；裝置仍需個別選擇加入，通過身分驗證存取 `/api/sync/content`，並與 `/api/sync/titles/:deviceId` 協商。關閉權限會清除離線裝置已儲存的標題，並使已啟用的世代權杖失效。公開統計始終不包含標題、共享設定及其版本標記。
+
+經過身分驗證的 `/api/sync/settings/modelAliases` 和 `/api/sync/settings/customPricing` 只儲存有大小限制的共享群組，使用整數 `baseRevision` 進行比較並交換（CAS）。從未初始化的值為 `null`；主動清空的群組具有正數修訂版本。過期寫入會回傳 `409` 和目前群組，用戶端必須先重新整理並處理衝突。私有統計和 SSE 透過 `syncSettingsRevisions` 通知變更。設定和標題策略使用獨立於 `dev:` 的儲存前綴；刪除裝置仍會保留已停用的策略記錄，防止舊上傳恢復標題。完整請求格式見主專案的 `docs/API.md`。

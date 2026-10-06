@@ -26,6 +26,16 @@ body {
   overflow: hidden;
 }
 body.flat { background: rgb(var(--glass-rgb)); }
+html.native-liquid-glass body { background: transparent; }
+html.native-liquid-glass body.flat { background: rgb(var(--glass-rgb)); }
+html.native-material-opaque body,
+html.native-reduced-transparency body { background: rgb(var(--glass-rgb)); }
+html.native-reduced-transparency body * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.native-high-contrast .dash-header,
+html.native-high-contrast .dash-cards { border-color: var(--line-strong); }
 
 .dash-header {
   -webkit-app-region: drag;
@@ -97,10 +107,10 @@ body.flat { background: rgb(var(--glass-rgb)); }
 .dash-heatmap-wrap.is-motion-pending .heat-base-layer .heat { opacity: 0; }
 .heat { stroke: none; stroke-width: 0; }
 .heat.lvl-0 { fill: rgba(var(--overlay-rgb), 0.03); }
-.heat.lvl-1 { fill: rgba(90, 170, 255, 0.18); }
-.heat.lvl-2 { fill: rgba(120, 190, 255, 0.45); }
-.heat.lvl-3 { fill: rgba(150, 210, 255, 0.8); }
-.heat.lvl-4 { fill: rgba(180, 230, 255, 1); }
+.heat.lvl-1 { fill: rgba(var(--chart-heat-1-rgb), 0.18); }
+.heat.lvl-2 { fill: rgba(var(--chart-heat-2-rgb), 0.45); }
+.heat.lvl-3 { fill: rgba(var(--chart-heat-3-rgb), 0.8); }
+.heat.lvl-4 { fill: rgba(var(--chart-heat-4-rgb), 1); }
 
 .dash-cards { flex: none; display: grid; grid-template-columns: repeat(var(--stat-count, 8), minmax(0, 1fr)); overflow: hidden; border: 1px solid rgba(var(--overlay-rgb), 0.08); border-radius: 12px; background: rgba(var(--overlay-rgb), 0.03); }
 .dash-card { min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 14px clamp(12px, 1.35vw, 18px); border-right: 1px solid rgba(var(--overlay-rgb), 0.06); }
