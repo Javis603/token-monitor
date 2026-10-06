@@ -1430,6 +1430,18 @@ function provider(id, overrides = {}) {
   };
 }
 
+test('a provider card is refreshable only when this device probes that provider', () => {
+  const stats = { limits: { providers: ['claude', 'codex'].map((id) => provider(id)) } };
+  const items = [{ type: 'limit', provider: 'claude' }, { type: 'limit', provider: 'codex' }];
+  const cells = buildEdgeDockCells(stats, { items, refreshableLimitProviders: ['codex'] });
+  assert.deepEqual(cells.map((cell) => [cell.id, cell.refreshable]), [['claude', false], ['codex', true]]);
+  // A device that only reads limits from a hub hands over no list at all.
+  assert.deepEqual(buildEdgeDockCells(stats, { items }).map((cell) => cell.refreshable), [false, false]);
+  // Automatic items take the same answer.
+  assert.equal(buildEdgeDockCells(stats, { refreshableLimitProviders: ['claude'] })
+    .find((cell) => cell.id === 'claude').refreshable, true);
+});
+
 test('automatic items follow the limits order and enabled set, capped at the default count', () => {
   const stats = {
     periods: { today: { totalTokens: 1200, costUsd: 2.5, clients: { codex: 200, claude: 1000 }, clientCosts: { claude: 2 } } },

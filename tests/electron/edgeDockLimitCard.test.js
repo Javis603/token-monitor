@@ -1469,6 +1469,70 @@ test('the dock hands the shared view the device context a cell carries', () => {
   );
 });
 
+// The dock's refresh control rides the end of a row's "Updated" line. The text
+// moves into its own box so it can ellipsize while the control stays whole, and a
+// host that supplies nothing (the page) keeps the plain text line.
+test('a host meta action sits after the Updated text in its own box', () => {
+  const record = {
+    provider: 'claude',
+    status: 'ok',
+    updatedAt: new Date(Date.now() - 120_000).toISOString(),
+    windows: [{ kind: 'session', remainingPercent: 70 }]
+  };
+  const asked = [];
+  const action = new FakeElement('button');
+  action.className = 'edge-dock-refresh';
+  const withAction = dockView({}, {
+    metaAction: (provider, provenance) => {
+      asked.push([provider.provider, typeof provenance]);
+      return action;
+    }
+  }).renderLimitProviderSolo('claude', 'Claude', record, '#D97757');
+  const meta = withAction.find('limit-meta');
+  assert.equal(meta.classNames.has('has-action'), true);
+  assert.deepEqual(meta.children.map((child) => child.className), ['limit-meta-text', 'edge-dock-refresh']);
+  assert.match(meta.children[0].textContent, /^Updated 2m ago/);
+  assert.deepEqual(asked, [['claude', 'object']]);
+
+  const plain = dockView().renderLimitProviderSolo('claude', 'Claude', record, '#D97757').find('limit-meta');
+  assert.equal(plain.classNames.has('has-action'), false);
+  assert.equal(plain.find('limit-meta-text'), null);
+  assert.match(plain.text, /^Updated 2m ago/);
+});
+
+// A multi-account card carries the action after every account row's "Updated"
+// line, like a single row, and not on the group header, which has no such line.
+test('every account row of a group carries the host action and its header none', () => {
+  const records = ['a@example.com', 'b@example.com'].map((accountEmail, index) => ({
+    provider: 'openrouter',
+    status: 'ok',
+    accountKey: `account-${index}`,
+    accountEmail,
+    updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    windows: [{ kind: 'weekly', remainingPercent: 50 }]
+  }));
+  const asked = [];
+  const group = dockView({}, {
+    metaAction: (provider) => {
+      asked.push(provider.accountKey);
+      const action = new FakeElement('button');
+      action.className = 'edge-dock-refresh';
+      return action;
+    }
+  }).renderLimitProviderGroup('openrouter', 'OpenRouter', records, '#6566F1');
+  assert.deepEqual(asked, ['account-0', 'account-1']);
+  const metas = [...group.walk()].filter((node) => node.classNames.has('limit-meta'));
+  assert.deepEqual(metas.map((meta) => meta.children.at(-1).className), ['edge-dock-refresh', 'edge-dock-refresh']);
+  assert.equal(group.children[0].find('edge-dock-refresh'), null, 'the group header carries none');
+});
+
+test('the dock wires its refresh control into the shared view and the page does not', () => {
+  const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  assert.match(balancedCall(dock, 'createLimitWindowsView({'), /metaAction: limitsRefreshControl/);
+  const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+  assert.doesNotMatch(balancedCall(app, 'createLimitWindowsView({'), /metaAction/);
+});
+
 test('a stale row is dimmed by the page rule, not recoloured', () => {
   const row = dockView().renderLimitProviderRow('openrouter', 'OpenRouter', {
     provider: 'openrouter',

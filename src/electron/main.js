@@ -5516,6 +5516,21 @@ function refreshEdgeDockForecast() {
     .finally(() => { edgeDockForecastInFlight = false; });
 }
 
+// Providers this device's own limits runtime probes, which is what the card's
+// refresh control can act on. A device that only reads limits from a hub (or
+// defers to an external agent) has nothing local to refresh.
+function edgeDockRefreshableLimitProviders() {
+  if (!ownsUsageRuntime() || settings?.limitsEnabled === false) return [];
+  return parseLimitProviders(settings?.limitProviders ?? defaultLimitProviders());
+}
+
+async function refreshLimitsFromEdgeDock(provider) {
+  if (!ownsUsageRuntime() || !edgeDockRefreshableLimitProviders().includes(provider)) return null;
+  // 'manual' keeps the runtime's backoff: a provider that is rate limited answers
+  // with its retry time instead of being probed again.
+  return deviceRuntimeHandle.refreshLimits({ provider }, 'manual');
+}
+
 function edgeDockCellsFor(visibleStats) {
   refreshEdgeDockDerivedPeriods(visibleStats);
   refreshEdgeDockForecast();
@@ -5534,6 +5549,7 @@ function edgeDockCellsFor(visibleStats) {
     limitsEnabled: settings?.limitsEnabled !== false,
     limitProviders: settings?.limitProviders,
     limitProviderOrder: settings?.limitProviderOrder,
+    refreshableLimitProviders: edgeDockRefreshableLimitProviders(),
     liveRate: edgeDockLiveRateSample(visibleStats),
     tokenRateMode: settings?.tokenRateMode
   });
@@ -5640,6 +5656,9 @@ function ensureEdgeDockController() {
     // The dock card's Switch button runs the same swap the Limits view does,
     // then repaints from the refreshed records. It is the dock's only write.
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
+    // The card's refresh control: one provider's quota, through the runtime's own
+    // per-provider lane, so other providers and local usage are left alone.
+    onRefreshLimits: (provider) => refreshLimitsFromEdgeDock(provider),
     onOpenResetForecastSource: () => {
       if (isAllowedExternalUrl(CODEX_RESET_FORECAST_SOURCE_URL)) void shell.openExternal(CODEX_RESET_FORECAST_SOURCE_URL);
     },

@@ -620,6 +620,58 @@ html.edge-dock-liquid-glass .edge-dock-shape-line { stroke: transparent; }
   mask: url("../icons/actions/spinner.svg") center / contain no-repeat;
 }
 
+/* The card's limits refresh control, after a row's "Updated" time. It reads as
+   one more character of that line: the button is only as big as its glyph, so
+   the meta line's baseline alignment stands it on the text baseline (an empty
+   box's baseline is its bottom edge) whatever the font, and a hover only lifts
+   its ink to the text colour. A filled hover box was taller than the text and
+   centred on the line box, so it hung into the descenders and read as
+   misaligned. The asset's viewBox is cropped to its ink, so the box's bottom
+   edge is the arrow's, and the size is in em so it scales with the line it
+   sits in. The click target reaches past the glyph through ::after.
+   Masked from the same asset as the widget's own refresh button, so both draw
+   one arrow on every platform; while it runs it swaps to the spinner the
+   session column uses. */
+.edge-dock-refresh {
+  position: relative;
+  flex: 0 0 auto;
+  width: 0.65em;
+  height: 0.62em;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+.edge-dock-refresh::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 4px;
+}
+.edge-dock-refresh:hover:not(:disabled),
+.edge-dock-refresh:focus-visible { color: var(--text); }
+.edge-dock-refresh:focus-visible { outline: none; }
+.edge-dock-refresh:focus-visible::after { box-shadow: 0 0 0 1px rgba(var(--overlay-rgb), 0.32); }
+.edge-dock-refresh:disabled { cursor: default; }
+.edge-dock-refresh-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: currentColor;
+  -webkit-mask: url("../icons/actions/refresh.svg") center / contain no-repeat;
+  mask: url("../icons/actions/refresh.svg") center / contain no-repeat;
+}
+.edge-dock-refresh:active:not(:disabled) .edge-dock-refresh-icon { transform: scale(0.88); }
+.edge-dock-refresh.is-refreshing { color: var(--text); }
+.edge-dock-refresh.is-refreshing .edge-dock-refresh-icon {
+  -webkit-mask-image: url("../icons/actions/spinner.svg");
+  mask-image: url("../icons/actions/spinner.svg");
+}
+.edge-dock-refresh.is-refreshed { color: var(--success); }
+.edge-dock-refresh.is-refresh-error { color: var(--red); }
+
 /* Ended: a receipt, not a status light, so it stays muted rather than green.
    Stroked rather than filled, matching the Sessions list. */
  .edge-dock-session-check { color: var(--muted); }
@@ -942,6 +994,14 @@ html.edge-dock-reduced-motion .edge-dock-root * {
    quiet rows keep their faint one, and the contrast is the reading. */
 html[data-reduce-motion="on"] .edge-dock-session-dot[data-state="running"] .edge-dock-session-spin,
 html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge-dock-session-spin { display: none; }
+/* The spinner's spokes animate on their own, so a refresh in flight keeps the
+   still arrow and only dims it. */
+html[data-reduce-motion="on"] .edge-dock-refresh.is-refreshing .edge-dock-refresh-icon,
+html.edge-dock-reduced-motion .edge-dock-refresh.is-refreshing .edge-dock-refresh-icon {
+  -webkit-mask-image: url("../icons/actions/refresh.svg");
+  mask-image: url("../icons/actions/refresh.svg");
+  opacity: 0.45;
+}
 html[data-reduce-motion="on"] .edge-dock-session-dot[data-state="running"] .edge-dock-session-idle,
 html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge-dock-session-idle { display: block; }
 html[data-reduce-motion="on"] .edge-dock-session-dot[data-state="running"] .edge-dock-session-idle::before,

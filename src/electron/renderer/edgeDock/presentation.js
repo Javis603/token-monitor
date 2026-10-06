@@ -453,6 +453,10 @@
       // What the card draws of those rows. The rail's mark reads them whatever this
       // says, because whether a tool is working is not the card's question.
       showSessions: options.showSessions !== false,
+      // Whether this device's own limits runtime probes the provider, so the
+      // card can offer to refresh it. The main process decides; the dock window
+      // has no settings to work it out from.
+      refreshable: options.refreshable === true,
       forecast: id === 'codex' ? options.codexResetForecast || null : null
     };
   }
@@ -632,7 +636,9 @@
           syncActive: options.syncActive,
           codexManagedAccounts: options.codexManagedAccounts,
           activeCodexAccountId: options.activeCodexAccountId,
-          codexResetForecast: options.codexResetForecast
+          codexResetForecast: options.codexResetForecast,
+          refreshable: Array.isArray(options.refreshableLimitProviders)
+            && options.refreshableLimitProviders.includes(item.provider)
         }));
       }
     }

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
-const { createEdgeDockController } = require('../../src/electron/edgeDock/controller');
+const { createEdgeDockController, edgeDockRefreshOutcome } = require('../../src/electron/edgeDock/controller');
 const { EDGE_DOCK_METRICS, edgeDockBubbleBounds } = require('../../src/electron/edgeDock/geometry');
 
 class FakeWebContents extends EventEmitter {
@@ -142,6 +142,7 @@ function createFixture(options = {}) {
       haptics.push(pattern);
       hapticCalls.push({ pattern, performanceTime });
     },
+    onRefreshLimits: options.onRefreshLimits,
     onPlacementChange: (placement) => {
       placements.push(placement);
       settings.edgeDockSide = placement.side;
@@ -269,6 +270,52 @@ test('structural updates only haptic when the item under the pointer changes', a
   ]);
   await new Promise((resolve) => setTimeout(resolve, 55));
   assert.deepEqual(fixture.haptics, ['alignment', 'alignment']);
+});
+
+test('the card refresh is honoured only for the open, refreshable provider card', async (t) => {
+  const asked = [];
+  const fixture = createFixture({
+    onRefreshLimits: async (provider) => {
+      asked.push(provider);
+      return { snapshot: {} };
+    }
+  });
+  t.after(() => fixture.controller.stop());
+  fixture.controller.setCells([
+    { id: 'claude', kind: 'provider', provider: 'claude', refreshable: true },
+    { id: 'codex', kind: 'provider', provider: 'codex', refreshable: false }
+  ]);
+  const rail = fixture.windowFor('rail');
+  const bubble = fixture.windowFor('bubble');
+  const refresh = fixture.ipcMain.handlers.get('edgeDock:refreshLimits');
+
+  // Nothing is open yet, and only the bubble may ask.
+  assert.deepEqual(await refresh({ sender: bubble.webContents }, { provider: 'claude' }), { ok: false, error: 'Not refreshable' });
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
+  assert.deepEqual(await refresh({ sender: rail.webContents }, { provider: 'claude' }), { ok: false, error: 'Unknown surface' });
+  // The page cannot name a provider other than the card it is showing.
+  assert.deepEqual(await refresh({ sender: bubble.webContents }, { provider: 'codex' }), { ok: false, error: 'Not refreshable' });
+  assert.deepEqual(await refresh({ sender: bubble.webContents }, { provider: 'claude' }), { ok: true });
+
+  // A card the projection did not mark refreshable is refused even when open.
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+  assert.deepEqual(await refresh({ sender: bubble.webContents }, { provider: 'codex' }), { ok: false, error: 'Not refreshable' });
+  assert.deepEqual(asked, ['claude']);
+});
+
+test('a refresh outcome keeps the runtime backoff and only reports real failures', () => {
+  assert.deepEqual(edgeDockRefreshOutcome({ snapshot: {} }), { ok: true });
+  // Superseded by another refresh of the same provider still ends in a fresh reading.
+  assert.deepEqual(edgeDockRefreshOutcome({ superseded: true, reason: 'superseded' }), { ok: true });
+  assert.deepEqual(
+    edgeDockRefreshOutcome({ deferred: true, provider: 'claude', retryAt: '2026-10-06T08:00:00.000Z' }),
+    { ok: false, deferred: true, retryAt: '2026-10-06T08:00:00.000Z' }
+  );
+  assert.deepEqual(edgeDockRefreshOutcome({ error: new Error('HTTP 500') }), { ok: false, error: 'HTTP 500' });
+  assert.deepEqual(edgeDockRefreshOutcome({ superseded: true, reason: 'disabled' }), { ok: false, error: 'Unavailable' });
+  // A stopped runtime answers false; the main process answers null when it owns none.
+  assert.deepEqual(edgeDockRefreshOutcome(false), { ok: false, error: 'Unavailable' });
+  assert.deepEqual(edgeDockRefreshOutcome(null), { ok: false, error: 'Unavailable' });
 });
 
 test('an open card follows its cell id across removal and reorder', (t) => {

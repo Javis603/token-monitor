@@ -51,6 +51,19 @@ function canUseEdgeDock(settings = {}, platform = process.platform) {
 // material behind it is clipped to the same silhouette through a mask. Windows
 // uses a transparent shaped window and lets the renderer paint the tint: both
 // DWM backdrop APIs paint the full BrowserWindow rectangle despite setShape().
+// What the card's refresh control is told, from the limits runtime's settled
+// intent. A refresh superseded by another one still ends in a fresh reading, so
+// only a provider the runtime does not run counts as unavailable. A provider in
+// backoff is deferred rather than bypassed: the control reports when the runtime
+// will try again instead of letting a click hammer a rate-limited endpoint.
+function edgeDockRefreshOutcome(result) {
+  if (!result || typeof result !== 'object') return { ok: false, error: 'Unavailable' };
+  if (result.deferred) return { ok: false, deferred: true, retryAt: String(result.retryAt || '') };
+  if (result.error) return { ok: false, error: String(result.error?.message || result.error) };
+  if (result.superseded && result.reason === 'disabled') return { ok: false, error: 'Unavailable' };
+  return { ok: true };
+}
+
 function createEdgeDockController(deps) {
   const {
     BrowserWindow,
@@ -71,6 +84,8 @@ function createEdgeDockController(deps) {
     primaryButtonDown = () => null,
     onToggleRateMode,
     onSwitchCodexAccount,
+    // (providerId) => the limits runtime's answer to a refresh of that provider.
+    onRefreshLimits,
     onOpenResetForecastSource,
     performHaptic = () => false,
     // (display) => whether another app is full screen on that display.
@@ -811,6 +826,24 @@ function createEdgeDockController(deps) {
         return { ok: false, error: error?.message || 'Switch failed' };
       }
     });
+    // The card's refresh control asks for its own provider's quota only. It is
+    // honoured for the provider whose card is open and only when the projection
+    // marked that card refreshable, so the page cannot name an arbitrary provider.
+    ipcMain.removeHandler('edgeDock:refreshLimits');
+    ipcMain.handle('edgeDock:refreshLimits', async (event, payload) => {
+      if (surfaceFor(event.sender) !== 'bubble') return { ok: false, error: 'Unknown surface' };
+      const provider = String(payload?.provider || '').trim();
+      const cell = bubbleCell === null ? null : cells[bubbleCell];
+      if (!provider || cell?.kind !== 'provider' || cell.provider !== provider || cell.refreshable !== true) {
+        return { ok: false, error: 'Not refreshable' };
+      }
+      try {
+        return edgeDockRefreshOutcome(await onRefreshLimits?.(provider));
+      } catch (error) {
+        logger(`[edge-dock] limits refresh failed: ${error.message}`);
+        return { ok: false, error: error?.message || 'Refresh failed' };
+      }
+    });
     // The forecast row on the card is the Limits page's row, link and all. The
     // renderer reports the intent rather than a URL, so the dock's bridge stays
     // a list of named actions instead of gaining a general "open anything" verb.
@@ -952,5 +985,6 @@ function createEdgeDockController(deps) {
 module.exports = {
   canUseEdgeDock,
   createEdgeDockController,
+  edgeDockRefreshOutcome,
   edgeDockSupported
 };

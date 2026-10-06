@@ -101,7 +101,11 @@
       // `{ enabled, busy, forecast }` — the Codex reset forecast as this host
       // currently holds it, read at paint time because the widget refreshes it
       // on its own timer.
-      resetForecast = () => ({ busy: false, forecast: null })
+      resetForecast = () => ({ busy: false, forecast: null }),
+      // (provider, provenance) => a node placed at the end of a row's "Updated"
+      // line, or null. Only the edge dock supplies one (its refresh control); the
+      // page refreshes from its own footer button.
+      metaAction = () => null
     } = deps;
     const document = deps.document || globalThis.document;
 
@@ -1795,7 +1799,20 @@
       // group, where it's each subrow's title (options.accountTitle) — not here.
       if (provider.status === 'ok' || provider.stale) metaParts.push(limitProviderMeta(provider, provenance));
       const metaText = metaParts.filter(Boolean).join(' · ');
-      if (metaText) meta.append(document.createTextNode(metaText));
+      const action = metaAction(provider, provenance);
+      if (action) {
+        // The text gets its own box so it can ellipsize while the action stays whole.
+        meta.classList.add('has-action');
+        if (metaText) {
+          const text = document.createElement('span');
+          text.className = 'limit-meta-text';
+          text.textContent = metaText;
+          meta.append(text);
+        }
+        meta.append(action);
+      } else if (metaText) {
+        meta.append(document.createTextNode(metaText));
+      }
       titleBlock.append(meta);
     }
     const plan = document.createElement('div');

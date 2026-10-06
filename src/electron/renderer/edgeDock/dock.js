@@ -340,6 +340,90 @@ function limitTooltipShouldHoldRender() {
   return Boolean(contentLayer.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
 }
 
+// ---- Limits refresh -----------------------------------------------------------
+
+// The card's refresh control, beside each row's "Updated" time. It re-probes the
+// open card's provider only: local usage moves by itself, and other providers keep
+// their own schedule. State is per provider and outlives the card, which is
+// rebuilt on every repaint, so a refresh in flight survives the 30-second tick.
+const LIMITS_REFRESH_SETTLE_MS = { refreshed: 1600, error: 4000 };
+// Rows with nothing to re-probe: switched off, never set up, or a hub-only reading.
+const LIMITS_REFRESH_SKIP_STATUSES = new Set(['disabled', 'notConfigured', 'noSyncedData']);
+const limitsRefresh = new Map();
+
+function repaintBubble() {
+  if (surface === 'bubble' && state.payload?.cell) renderBubble(state.payload);
+}
+
+function settleLimitsRefresh(provider, status, title = '') {
+  const entry = { status, title, timer: null };
+  limitsRefresh.set(provider, entry);
+  entry.timer = setTimeout(() => {
+    if (limitsRefresh.get(provider) !== entry) return;
+    limitsRefresh.delete(provider);
+    repaintBubble();
+  }, LIMITS_REFRESH_SETTLE_MS[status]);
+  repaintBubble();
+}
+
+function limitsRefreshRetryTitle(retryAt) {
+  const date = retryAt ? new Date(retryAt) : null;
+  if (!date || Number.isNaN(date.getTime())) return t('edgeDock.refreshLimitsFailed');
+  const time = new Intl.DateTimeFormat(state.locale, { hour: 'numeric', minute: '2-digit' }).format(date);
+  return t('edgeDock.refreshLimitsDeferred', { time });
+}
+
+async function runLimitsRefresh(provider) {
+  const current = limitsRefresh.get(provider);
+  if (current?.status === 'refreshing') return;
+  clearTimeout(current?.timer);
+  limitsRefresh.set(provider, { status: 'refreshing', title: '', timer: null });
+  repaintBubble();
+  let result;
+  try {
+    result = await bridge.refreshLimits(provider);
+  } catch (error) {
+    result = { ok: false, error: error?.message || '' };
+  }
+  if (result?.ok) {
+    settleLimitsRefresh(provider, 'refreshed');
+    return;
+  }
+  console.log(`[edge-dock] limits refresh did not run: ${result?.deferred ? `deferred until ${result.retryAt}` : result?.error || 'unknown'}`);
+  settleLimitsRefresh(provider, 'error', result?.deferred
+    ? limitsRefreshRetryTitle(result.retryAt)
+    : t('edgeDock.refreshLimitsFailed'));
+}
+
+// After every row's "Updated" time, a multi-account card's included. The refresh
+// is provider-wide and its state is keyed by provider, so pressing any row spins
+// all of them, which is what it does. `refreshable` already says this device
+// probes the provider, so a row synced from another device keeps the control too:
+// refreshing here replaces it with this device's own reading.
+function limitsRefreshControl(record) {
+  const cell = state.payload?.cell;
+  const provider = String(record?.provider || '');
+  if (!cell?.refreshable || cell.provider !== provider) return null;
+  if (LIMITS_REFRESH_SKIP_STATUSES.has(record.status) && !record.stale) return null;
+  const entry = limitsRefresh.get(provider);
+  const status = entry?.status || 'idle';
+  const button = el('button', 'edge-dock-refresh');
+  button.type = 'button';
+  button.classList.toggle('is-refreshing', status === 'refreshing');
+  button.classList.toggle('is-refreshed', status === 'refreshed');
+  button.classList.toggle('is-refresh-error', status === 'error');
+  button.disabled = status === 'refreshing';
+  const label = status === 'refreshing' ? t('edgeDock.refreshingLimits')
+    : entry?.title || t('edgeDock.refreshLimits');
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  if (status === 'refreshing') button.setAttribute('aria-busy', 'true');
+  button.append(el('span', 'edge-dock-refresh-icon'));
+  // Press-activated: a push between press and release replaces the card.
+  activateOnPress(button, () => { void runLimitsRefresh(provider); });
+  return button;
+}
+
 const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
   document,
   t,
@@ -423,7 +507,8 @@ const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
   // compares the plan's price against. It rides the cell because it changes with
   // every stats push, while the appearance is only re-pushed on a settings edit.
   monthClientCosts: () => state.payload?.cell?.monthClientCosts,
-  resetForecast: () => ({ busy: false, forecast: cardForecast })
+  resetForecast: () => ({ busy: false, forecast: cardForecast }),
+  metaAction: limitsRefreshControl
 });
 
 // ---- Silhouette -------------------------------------------------------------
