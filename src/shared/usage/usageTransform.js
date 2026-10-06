@@ -200,6 +200,7 @@ function createUsageTransform(options = {}) {
 
 module.exports = {
   USAGE_TRANSFORM_SETTING_KEYS,
+  createDailyHistoryFloorReader,
   createUsageTransform,
   usageTransformSettings
 };

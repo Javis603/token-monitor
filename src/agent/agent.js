@@ -29,6 +29,8 @@ const {
   createSessionUsageArchiveStore,
   readSessionUsageArchiveSnapshot
 } = require('../shared/usage/sessionUsageArchiveStore');
+const { applyDailyHistoryAllTimeFloor } = require('../shared/usage/clientUsageArchive');
+const { createDailyHistoryFloorReader } = require('../shared/usage/usageTransform');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 
 loadDotEnv();
@@ -116,6 +118,13 @@ const limitsOptions = {
 let sessionUsageArchive;
 const cursorUsageEvents = createCursorUsageEventIndex();
 const sessionUsageArchiveStore = dryRun ? null : createSessionUsageArchiveStore({ cursorUsageEvents });
+// The headless agent projects the same archives the widget does, so a rotated
+// source's history must not drop out of its allTime either. The daily history
+// archive is written here regardless of dry-run (see dailyHistoryArchiveEnabled
+// below), so the floor reads it the same way in both modes.
+const loadDailyHistoryFloor = createDailyHistoryFloorReader({
+  dailyHistoryArchive: sessionUsageArchiveEnabled
+});
 
 function summaryWithSessionUsageArchive(summary, now = new Date()) {
   let visibleSummary = summary;
@@ -137,6 +146,9 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
       now: archiveDate,
       canonical: !dryRun
     });
+    // After the session archive, and gated by the same switch: with the daily
+    // archive off there is nothing on disk to raise allTime to.
+    visibleSummary = applyDailyHistoryAllTimeFloor(visibleSummary, loadDailyHistoryFloor());
   }
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
 }
