@@ -102,7 +102,10 @@ test('every widget provider probe takes the runtime transport', () => {
     /opencodeWeb\.fetchZen\([^,]+, electronProviderDeps\(\)\)/,
     // Every account form's save-time probe (limits:saveCredential).
     /function credentialProbeDeps\(renewed = \{\}\) \{\s*return electronProviderDeps\(/,
-    /fetchMimoLimits\([^;]+electronProviderDeps\(\)\)/,
+    // MiMo's save path is hand-wired rather than going through the account
+    // forms, so it has to ask for the probe deps itself: saving a credential
+    // must not write the spend ledger the credential has not earned yet.
+    /fetchMimoLimits\([^;]+credentialProbeDeps\(\)\)/,
     /fetchOpenRouterAccount\([^,]+, [^,]+, electronProviderDeps\(/,
     /fetchThirdPartyAccount\(\{[^}]*\}, electronProviderDeps\(/,
     /listCodexWorkspaces\(auth, electronProviderDeps\(/

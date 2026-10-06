@@ -23,6 +23,7 @@
       windowLabel,
       hasProviderMark,
       maskEmail,
+      mimoProductLabel,
       createRowDrag,
       enabledLimitProviders,
       isWindowHidden = () => false
@@ -356,8 +357,13 @@
             else next.add(account.accountKey);
             void updateItem(id, { hiddenAccounts: [...next] });
           });
-          const name = account.accountName || maskEmail(account.accountEmail) || account.planLabel || providerLabel(item.provider);
+          const identity = account.accountName || maskEmail(account.accountEmail);
+          const product = item.provider === 'mimo' ? mimoProductLabel(account) : '';
+          const name = product
+            ? [identity, product].filter(Boolean).join(' · ')
+            : identity || account.planLabel || providerLabel(item.provider);
           const text = el('span', 'edge-dock-composer-account-name', name);
+          text.title = name;
           const plan = account.planLabel && name !== account.planLabel ? el('span', 'edge-dock-composer-account-plan', account.planLabel) : null;
           label.append(input, text);
           if (plan) label.append(plan);
@@ -386,7 +392,7 @@
         addable: ui.menuOpen ? enabledLimitProviders?.() : null,
         windows: selectedItem?.type === 'limit' ? windowChoices(selectedItem) : null,
         accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account) => [
-          account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel
+          account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel
         ]) : null,
         wording: [t('settings.edgeDock.window'), t('settings.edgeDock.window.auto'), t('settings.edgeDock.window.unavailable')]
       });

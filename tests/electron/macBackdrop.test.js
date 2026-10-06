@@ -50,7 +50,7 @@ test('settings expose a localized macOS style selector wired to the saved prefer
   assert.match(app, /macBackdrop: macBackdropApi\.normalizeMacBackdropMode\(els\.macBackdropInput\?\.value\)/);
   assert.match(app, /els\.macBackdropInput\?\.addEventListener\('change', saveAppearanceFromControls\)/);
   for (const key of ['macBackdrop', 'macBackdropLiquidGlass', 'macBackdropVibrancy']) {
-    assert.equal((i18n.match(new RegExp(`'settings\\.appearance\\.${key}':`, 'g')) || []).length, 5, key);
+    assert.equal((i18n.match(new RegExp(`'settings\\.appearance\\.${key}':`, 'g')) || []).length, 6, key);
   }
 });
 
@@ -75,6 +75,6 @@ test('the edge dock style is persisted, feeds only the dock glass, and has a loc
   assert.match(app, /edgeDockMacBackdropRow\?\.classList\.toggle\('hidden', !macGlass\.showBackdropControl\)/);
   assert.match(app, /saveSettings\(\{ edgeDockMacBackdrop: macBackdropApi\.normalizeEdgeDockBackdropMode\(els\.edgeDockMacBackdropInput\.value\) \}\)/);
   for (const key of ['macBackdrop', 'macBackdropInherit']) {
-    assert.equal((i18n.match(new RegExp(`'settings\\.edgeDock\\.${key}':`, 'g')) || []).length, 5, key);
+    assert.equal((i18n.match(new RegExp(`'settings\\.edgeDock\\.${key}':`, 'g')) || []).length, 6, key);
   }
 });

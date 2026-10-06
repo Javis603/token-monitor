@@ -647,7 +647,7 @@ function computePeriodWindows(now = new Date()) {
 // in the delta-derived periods. Used on watch ticks, where month/allTime are not
 // re-decorated: a session that started today is absent from the anchor, so its
 // project label would otherwise be missing from the broader-period breakdown.
-function propagateTodayProjects(today, periods) {
+function propagateTodayProjects(today, periods, titleMetadata = {}) {
   for (const [key, session] of Object.entries(today?.sessions || {})) {
     if (!session) continue;
     for (const period of periods) {
@@ -660,9 +660,10 @@ function propagateTodayProjects(today, periods) {
       // The fresh scan's title is authoritative and replaces the anchor's, like
       // the context pair below: a Cursor rename arrives only through this path
       // on watch ticks, so gap-filling would leave derived periods showing the
-      // old name until the hourly full scan. A fresh miss keeps the old title —
-      // a transient reader failure is not a deletion.
+      // old name until the hourly full scan. An authoritative removal clears
+      // the anchor; a metadata miss or transient reader failure keeps it.
       if (session.title) target.title = session.title;
+      else if (titleMetadata.invalidatedTitleKeys?.has(key) && target.title === titleMetadata.t3Titles?.[key]) delete target.title;
       if (session.sessionKind && !target.sessionKind) target.sessionKind = session.sessionKind;
       // Context occupancy is replaced rather than gap-filled: the derived
       // periods carry the last full scan's reading, which is older than this
@@ -860,11 +861,13 @@ async function collectUsageOnce(options) {
     customScanPaths: options.customScanPaths,
     metadataCache: new Map(),
     resolvedSessionKeys: new Set(),
-    attemptedSessionKeys: new Set()
+    attemptedSessionKeys: new Set(),
+    invalidatedTitleKeys: new Set(),
+    t3Titles: {}
     // dshSessionFileCache is deliberately NOT reset here: it's module-level
     // (declared with jsonlTimestampCache above) precisely so it survives
-    // across collectUsageOnce calls — every field in this object, unlike
-    // that one, is intentionally rebuilt fresh on every call.
+    // across collectUsageOnce calls. These caches and sets start fresh each
+    // call; watch ticks recover title provenance from their local anchor below.
   };
   const decorateLocalPeriods = (periods, { retryMisses = false } = {}) => applySessionMetadata(
     periods,
@@ -890,6 +893,7 @@ async function collectUsageOnce(options) {
     && anchor.dateKey === localTodayKey(collectedAt)
     && canTargetTodayPartitions(anchor, targetClients)
   );
+  if (anchorUsed) localSessionMetadataDeps.t3Titles = anchor.todayT3Titles || anchor.t3Titles || {};
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     try { options.onProgress({ ...periods, updatedAt: new Date().toISOString() }); } catch (_) {}
@@ -996,14 +1000,17 @@ async function collectUsageOnce(options) {
       // (the perceived UI stutter). Decorate only today, then propagate its freshly
       // resolved identities onto sessions that started today (absent from the anchor).
       decorateLocalPeriods({ today }, { retryMisses: true });
-      propagateTodayProjects(today, [month, allTime]);
+      propagateTodayProjects(today, [month, allTime], {
+        invalidatedTitleKeys: localSessionMetadataDeps.invalidatedTitleKeys,
+        t3Titles: anchor.t3Titles
+      });
     } else {
       decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
     // period: a later targeted tick re-merges these sessions into `today`.
-    propagateTodayProjects(today, Object.values(todayPartitions));
+    propagateTodayProjects(today, Object.values(todayPartitions), localSessionMetadataDeps);
   }
 
   // WSL contribution (Windows only; no-op elsewhere). Full tick scans running WSL
@@ -1186,9 +1193,16 @@ async function collectUsageOnce(options) {
     }
   }
   if (typeof options.onAnchorComputed === 'function') {
+    // Title provenance belongs to the local anchor, never to published rows.
+    const t3Titles = { ...localSessionMetadataDeps.t3Titles };
+    for (const key of localSessionMetadataDeps.invalidatedTitleKeys) t3Titles[key] = null;
+    for (const [key, meta] of localSessionMetadataDeps.metadataCache) {
+      if (meta.t3Title) t3Titles[key] = meta.t3Title;
+    }
     options.onAnchorComputed({
       windowsPeriods,
       todayPartitions,
+      t3Titles,
       wslBundle,
       wslStatus,
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
@@ -1423,6 +1437,7 @@ const ZED_DB_WATCH_PATTERN = /^threads\.db(?:-(?:wal|shm))?$/;
 // would only appear on the next full tick instead of within the refresh window.
 const COPILOT_DB_WATCH_PATTERN = /^(?:data|session-store)\.db(?:-(?:wal|shm))?$/;
 const ZCODE_DB_WATCH_PATTERN = /^db\.sqlite(?:-(?:wal|shm))?$/;
+const CHERRY_STUDIO_DB_WATCH_PATTERN = /^cherrystudio\.sqlite(?:-(?:wal|shm))?$/;
 const UNSLOTH_DB_WATCH_PATTERN = /^studio\.db(?:-(?:wal|shm))?$/;
 // Bounded to sessions.db directly under each *default* Devin CLI root; the WAL
 // and SHM sidecars ride along as the live-write signal, as with every other
@@ -1652,6 +1667,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // Tokscale reads only direct children of each MiMo root, so log/* and every
   // other recursive subtree is pruned before chokidar descends into it.
   bound('mimo', candidates.mimo || [], directChildOnly((name) => MIMO_DB_WATCH_PATTERN.test(name)));
+  bound('cherrystudio', withBasename('cherrystudio', 'Data'), directChildOnly((name) => CHERRY_STUDIO_DB_WATCH_PATTERN.test(name)));
   bound('unsloth', candidates.unsloth || [], directChildOnly((name) => UNSLOTH_DB_WATCH_PATTERN.test(name)));
   bound('devin', withBasename('devin', 'cli'), directChildOnly((name) => DEVIN_CLI_DB_WATCH_PATTERN.test(name)));
   // The dual-source Grok scanner derives exactly logs/unified.jsonl from each
@@ -2219,7 +2235,8 @@ function watcherOptions(usePolling, ignored) {
 // its -wal, so a genuine change still produces an event; a client whose scan was
 // measured NOT to rewrite its sidecar (mimo) is deliberately absent here, and
 // adding a client to this list asserts a measurement rather than a hunch.
-const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'qodercn', 'zcode']);
+// Cherry Studio also rewrites its wal-index on repeated read-only WAL scans.
+const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'cherrystudio', 'qodercn', 'zcode']);
 
 function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
   // Match SQLite's wal-index suffix, not one client's database basename: ZCode's
@@ -2452,6 +2469,8 @@ function startCollector(options) {
           today: saved.today,
           month: saved.month,
           allTime: saved.allTime,
+          t3Titles: saved.t3Titles,
+          todayT3Titles: saved.todayT3Titles,
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -2467,6 +2486,28 @@ function startCollector(options) {
         // a full scan on the first interval tick (see loop()).
         if (trust.capturedAtMs !== null) lastFullScanAt = trust.capturedAtMs;
       }
+    } catch (_) {}
+  }
+
+  function persistAnchor(tickPricingRevision) {
+    if (options.anchorPersistenceEnabled === false) return;
+    try {
+      fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
+      fs.writeFileSync(anchorPath, JSON.stringify({
+        dateKey: anchor.dateKey,
+        cursorAutoModelVersion: 1,
+        today: anchor.today,
+        month: anchor.month,
+        allTime: anchor.allTime,
+        t3Titles: anchor.t3Titles,
+        todayT3Titles: anchor.todayT3Titles,
+        wslBundle: wslAnchor,
+        wslStatus: wslStatusAnchor,
+        ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
+        ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
+        configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, tickPricingRevision),
+        fullScanAt: new Date(lastFullScanAt).toISOString()
+      }));
     } catch (_) {}
   }
 
@@ -2670,40 +2711,45 @@ function startCollector(options) {
           month: captured.windowsPeriods.month,
           allTime: captured.windowsPeriods.allTime,
           todayPartitions: captured.todayPartitions,
+          t3Titles: captured.t3Titles,
+          todayT3Titles: captured.t3Titles,
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {})
         };
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
         lastFullScanAt = Date.now();
-        if (options.anchorPersistenceEnabled !== false) {
-          try {
-            fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
-            fs.writeFileSync(anchorPath, JSON.stringify({
-              dateKey: anchor.dateKey,
-              cursorAutoModelVersion: 1,
-              today: anchor.today,
-              month: anchor.month,
-              allTime: anchor.allTime,
-              wslBundle: wslAnchor,
-              wslStatus: wslStatusAnchor,
-              ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
-              ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
-              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, tickPricingRevision),
-              fullScanAt: new Date(lastFullScanAt).toISOString()
-            }));
-          } catch (_) {}
-        }
+        persistAnchor(tickPricingRevision);
       } else if (anchored && captured) {
         // Keep the rolling per-client today partitions fresh for targeted
         // watch ticks. WSL stays independently frozen between interval ticks.
         if (captured.todayPartitions) anchor.todayPartitions = captured.todayPartitions;
+        const titlesChanged = JSON.stringify(anchor.todayT3Titles || anchor.t3Titles || {}) !== JSON.stringify(captured.t3Titles);
+        if (titlesChanged) {
+          // Only labels move: the exact usage baseline and full-scan time stay
+          // frozen. This also keeps cold-start previews at the latest title.
+          for (const [key, title] of Object.entries(captured.t3Titles || {})) {
+            for (const period of ['today', 'month', 'allTime']) {
+              const session = anchor[period]?.sessions?.[key];
+              if (!session) continue;
+              if (title) session.title = title;
+              else if (session.title === anchor.t3Titles?.[key]) {
+                const fallback = summary[period]?.sessions?.[key]?.title;
+                if (fallback) session.title = fallback;
+                else delete session.title;
+              }
+            }
+          }
+          anchor.t3Titles = captured.t3Titles;
+        }
+        anchor.todayT3Titles = captured.t3Titles;
         if (captured.nativeSessions) anchor.nativeSessions = captured.nativeSessions;
         if (captured.nativeProjects) anchor.nativeProjects = captured.nativeProjects;
         if (refreshWsl) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
         }
+        if (titlesChanged) persistAnchor(tickPricingRevision);
       }
       const transformedSummary = await onUpdate?.(summary, reason);
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'

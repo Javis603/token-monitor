@@ -315,9 +315,9 @@ test('unreachable and authentication errors disable unavailable controls and off
   assert.equal(f.get('customPricing').disabled, true);
 });
 
-test('five locales contain all sync content messages and matching parameters', () => {
+test('all bundled locales contain sync content messages and matching parameters', () => {
   const keys = Object.keys(i18n.MESSAGES.en).filter(key => key.startsWith('settings.sync.content.'));
-  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) for (const key of keys) {
+  for (const locale of Object.keys(i18n.MESSAGES)) for (const key of keys) {
     assert.ok(Object.hasOwn(i18n.MESSAGES[locale], key), `${locale}: ${key}`);
     assert.ok(i18n.MESSAGES[locale][key].trim());
     assert.deepEqual(i18n.MESSAGES[locale][key].match(/\{\w+\}/g), i18n.MESSAGES.en[key].match(/\{\w+\}/g));
@@ -554,7 +554,7 @@ test('title-help headings reuse the existing localized deployment target labels'
   for (const target of ['Node', 'Worker']) {
     const key = `settings.sync.hubBuild.target${target}`;
     assert.match(html, new RegExp(`<dt data-i18n="${key.replaceAll('.', '\\.')}">`));
-    for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) assert.ok(i18n.MESSAGES[locale][key]);
+    for (const locale of Object.keys(i18n.MESSAGES)) assert.ok(i18n.MESSAGES[locale][key]);
   }
 });
 

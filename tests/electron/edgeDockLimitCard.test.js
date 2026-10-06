@@ -150,10 +150,13 @@ function dockView(appearance = {}, overrides = {}) {
     colorWithAlpha: (color, alpha) => `rgba(0, 0, 0, ${alpha})${color}`,
     applyBarScale: (fill, scale) => fill.style.setProperty('--bar-scale', String(scale)),
     creditsAmount: balanceDisplay.creditsAmount,
+    creditsCurrency: balanceDisplay.creditsCurrency,
     creditsMeterPercent: balanceDisplay.creditsMeterPercent,
     isCreditsWindow: balanceDisplay.isCreditsWindow,
     spendWindow: balanceDisplay.spendWindow,
     limitWindowLabel: limitWindowLabels.limitWindowLabel,
+    mimoProductLabel: limitWindowLabels.mimoProductLabel,
+    mimoAccountGroups: limitWindowLabels.mimoAccountGroups,
     limitWindowText: limitWindowTextApi.limitWindowText,
     accountIdentity: accountIdentityApi,
     // Mirrored from the dock's own wiring: the device context rides the cell
@@ -179,27 +182,32 @@ function dockView(appearance = {}, overrides = {}) {
   });
 }
 
-test('the dock hands the shared view every dependency it destructures', () => {
-  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
-  const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
-  const required = view
-    .slice(view.indexOf('const {'), view.indexOf('} = deps;'))
-    .replace('const {', '')
-    .split('\n')
-    .map((line) => line.replace(/\/\/.*$/, '').trim())
-    // A dependency with a default is one the host may legitimately omit.
-    .filter((line) => line && !line.includes('='))
-    .map((entry) => entry.split(':')[0].replace(',', '').trim())
-    .filter(Boolean);
-  const wiring = balancedCall(dock, 'createLimitWindowsView({');
+for (const [host, file] of [
+  ['dock', 'edgeDock/dock.js'],
+  ['page', 'app.js']
+]) {
+  test(`the ${host} hands the shared view every dependency it destructures`, () => {
+    const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
+    const source = fs.readFileSync(path.join(root, 'src/electron/renderer', file), 'utf8');
+    const required = view
+      .slice(view.indexOf('const {'), view.indexOf('} = deps;'))
+      .replace('const {', '')
+      .split('\n')
+      .map((line) => line.replace(/\/\/.*$/, '').trim())
+      // A dependency with a default is one the host may legitimately omit.
+      .filter((line) => line && !line.includes('='))
+      .map((entry) => entry.split(':')[0].replace(',', '').trim())
+      .filter(Boolean);
+    const wiring = balancedCall(source, 'createLimitWindowsView({');
 
-  assert.ok(required.length > 10, 'the dependency list should have been parsed');
-  for (const name of required) {
-    assert.match(wiring, new RegExp(`(^|[\\s{,])${name}\\s*[,:]`, 'm'), `the dock must supply ${name}`);
-  }
-  // `document` is read off deps separately rather than destructured with the rest.
-  assert.match(wiring, /^\s*document,$/m);
-});
+    assert.ok(required.length > 10, 'the dependency list should have been parsed');
+    for (const name of required) {
+      assert.match(wiring, new RegExp(`(^|[\\s{,])${name}\\s*[,:]`, 'm'), `the ${host} must supply ${name}`);
+    }
+    // `document` is read off deps separately rather than destructured with the rest.
+    if (host === 'dock') assert.match(wiring, /^\s*document,$/m);
+  });
+}
 
 test('session gauges reuse the detail tooltip builder without an info icon', () => {
   const view = dockView();
@@ -335,6 +343,204 @@ test('an OpenRouter card carries the balance meter and its detail tooltip', () =
   assert.ok(tooltip, 'the card should carry the ⓘ tooltip, not only the page');
   assert.match(card.find('limit-detail-tooltip-trigger').textContent, /i/);
   assert.match(tooltip.text, /All time/);
+});
+
+test('a MiMo membership row meters like any percent quota, WorkBuddy included', () => {
+  // The membership lane answers with a percentage and nothing else — the app's
+  // own card prints "{{percent}}% remaining" from that field, and no endpoint
+  // reports an absolute used/limit pair for it. So the row is a percent window
+  // and draws the shared meter, the path every rate-limit window takes.
+  const membershipRow = {
+    provider: 'mimo',
+    source: 'local',
+    sourceDetail: 'app',
+    status: 'ok',
+    accountName: 'MiMo abcdef1',
+    accountLabel: 'Desktop Membership',
+    planLabel: 'Pro',
+    // What the collector's normalization produces from the vendor's percent.
+    windows: [{
+      kind: 'weekly',
+      usedPercent: 21.5,
+      remainingPercent: 78.5,
+      resetsAt: new Date(Date.now() + 86_400_000).toISOString()
+    }]
+  };
+  const card = dockView().renderProviderWindows(membershipRow, '#000000');
+  const fill = card.find('limit-meter-fill');
+  assert.ok(fill, 'the membership row should carry a bar, not only a number');
+  // "left" mode is the default, so the bar shows the share still available.
+  assert.equal(fill.style['--bar-scale'], '0.785');
+  assert.match(card.text, /79% left/);
+  assert.match(card.text, /Weekly/);
+  assert.doesNotMatch(card.text, /Monthly/);
+  assert.match(card.text, /Reset/);
+
+  // The used-mode flip is the shared one, so the same row read the other way
+  // fills to the consumed share.
+  const usedMode = dockView({ showLimitUsed: true }).renderProviderWindows(membershipRow, '#000000');
+  assert.equal(usedMode.find('limit-meter-fill').style['--bar-scale'], '0.215');
+  assert.match(usedMode.text, /22% used/);
+
+  // WorkBuddy meters a credits window the same way — its own branch only swaps
+  // the right-hand cell for the amount, so the two rows agree on the bar.
+  const workbuddyRow = {
+    provider: 'workbuddy',
+    status: 'ok',
+    windows: [{
+      kind: 'billing',
+      label: 'Credits',
+      metric: 'credits',
+      currency: 'CREDITS',
+      used: 215,
+      limit: 1000,
+      remaining: 785,
+      usedPercent: 21.5,
+      remainingPercent: 78.5,
+      showMeter: true
+    }],
+    balance: { amount: 785, currency: 'CREDITS' }
+  };
+  const workbuddyCard = dockView().renderProviderWindows(workbuddyRow, '#12B7F5');
+  assert.equal(workbuddyCard.find('limit-meter-fill').style['--bar-scale'], '0.785');
+
+  // An empty window list must not invent a percentage meter.
+  const noPlan = dockView().renderProviderWindows(
+    { ...membershipRow, planLabel: '', windows: [] },
+    '#000000'
+  );
+  assert.equal(noPlan.find('limit-meter-fill'), null);
+});
+
+test('one MiMo product failing still leaves the other row and its quota on the card', () => {
+  const rows = [
+    {
+      provider: 'mimo',
+      status: 'ok',
+      source: 'web',
+      sourceDetail: 'managed',
+      accountKey: 'sha256:console',
+      accountLabel: 'Console',
+      accountName: 'MiMo console',
+      planLabel: 'Pay-as-you-go',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY', showMeter: false }],
+      balance: { amount: 9.95, currency: 'CNY' }
+    },
+    {
+      provider: 'mimo',
+      status: 'unauthorized',
+      source: 'local',
+      sourceDetail: 'app',
+      accountKey: 'sha256:membership',
+      accountLabel: 'Desktop Membership',
+      accountName: 'MiMo member',
+      windows: []
+    }
+  ];
+  const group = dockView().renderLimitProviderGroup('mimo', 'Xiaomi MiMo', rows, '#000000');
+
+  // The lane that answered keeps its rows: the wallet is on the card...
+  assert.match(group.text, /9\.95/);
+  // ...and the lane that did not is a row of its own instead of taking the
+  // other product's place, so neither failure is silent and neither is a
+  // swallowed row.
+  assert.match(group.text, /Sign in again/);
+  assert.equal(group.text.match(/Sign in again/g).length, 1, 'one row asks, the healthy one does not');
+});
+
+test('a MiMo wallet meters against its month spend and carries the spend line', () => {
+  // No provider percentage: reuse the shared current / (current + month spend)
+  // fallback, as DeepSeek does.
+  const row = {
+    provider: 'mimo',
+    status: 'ok',
+    source: 'web',
+    sourceDetail: 'managed',
+    accountLabel: 'Console',
+    accountName: 'MiMo console',
+    planLabel: 'Pay-as-you-go',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }],
+    balance: { amount: 9.95, currency: 'CNY', giftBalance: 9.95, cashBalance: 0, monthSpend: 9.3, allTimeSpend: 32.85 }
+  };
+  const card = dockView().renderProviderWindows(row, '#000000');
+  const labels = [...card.walk()].filter((n) => n.classNames?.has('limit-window')).map((n) => n.text.replace(/\s+/g, ' ').trim());
+
+  // 9.95 / (9.95 + 9.30) = 51.7% left.
+  assert.ok(
+    Math.abs(Number(card.find('limit-meter-fill').style['--bar-scale']) - 0.5169) < 0.001,
+    'the bar is the wallet against its month spend'
+  );
+  assert.match(labels[0], /Balance ¥9\.95 Gift ¥9\.95 · Cash ¥0\.00/);
+  // This fixture has no locally tracked Today or Week spend.
+  const spend = card.find('limit-spend');
+  assert.ok(spend, 'the card should carry the spend row the wallet providers have');
+  assert.match(spend.text, /Month ¥9\.30/);
+  assert.doesNotMatch(spend.text, /Today|Week/);
+
+  // A wallet with no reported spend reads as untouched — the shared rule for a
+  // positive top-up balance — and has no spend row to show.
+  const bare = dockView().renderProviderWindows(
+    { ...row, balance: { amount: 9.95, currency: 'CNY' } },
+    '#000000'
+  );
+  assert.equal(bare.find('limit-meter-fill').style['--bar-scale'], '1');
+  assert.equal(bare.find('limit-spend'), null);
+
+  for (const partial of [{ giftBalance: 5 }, { cashBalance: 5 }]) {
+    const unknown = dockView().renderProviderWindows({
+      ...row, windows: [], balance: { amount: null, currency: 'CNY', ...partial }
+    }, '#000000');
+    assert.match(unknown.text, /Balance —/);
+    assert.equal(unknown.find('limit-meter-fill'), null, 'unknown funds must not look exhausted');
+  }
+  const empty = dockView().renderProviderWindows({
+    ...row, windows: [], balance: { amount: 0, currency: 'CNY' }
+  }, '#000000');
+  assert.equal(empty.find('limit-meter-fill').style['--bar-scale'], '0');
+  const reported = dockView().renderProviderWindows({
+    ...row, windows: [{ kind: 'billing', metric: 'credits', usedPercent: 25 }],
+    balance: { amount: null, currency: 'CNY', giftBalance: 5 }
+  }, '#000000');
+  assert.equal(reported.find('limit-meter-fill').style['--bar-scale'], '0.75');
+});
+
+test('a MiMo Console card renders Token Plan states from normalized and persisted rows', () => {
+  const active = dockView().renderProviderWindows({
+    provider: 'mimo',
+    status: 'ok',
+    accountLabel: 'Console',
+    windows: [
+      { kind: 'billing', label: 'Token Plan', used: 25, limit: 100, usedPercent: 25, remainingPercent: 75 },
+      { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }
+    ],
+    balance: { amount: 9.95, currency: 'CNY' }
+  }, '#000000');
+  const activeRows = [...active.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.deepEqual(activeRows.map((node) => node.children[0].children[0].textContent), ['Token Plan', 'Balance']);
+  assert.equal(activeRows[0].find('limit-meter-fill').style['--bar-scale'], '0.75');
+
+  const persisted = dockView().renderProviderWindows({
+    provider: 'mimo',
+    status: 'ok',
+    accountLabel: 'Console',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }],
+    balance: { amount: 9.95, currency: 'CNY', planUsed: 25, planLimit: 100, planPercent: 25 }
+  }, '#000000');
+  const persistedRows = [...persisted.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.deepEqual(persistedRows.map((node) => node.children[0].children[0].textContent), ['Token Plan', 'Balance']);
+  assert.equal(persistedRows[0].find('limit-meter-fill').style['--bar-scale'], '0.75');
+
+  const expired = dockView().renderProviderWindows({
+    provider: 'mimo',
+    status: 'ok',
+    accountLabel: 'Console',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }],
+    balance: { amount: 9.95, currency: 'CNY', planStatus: 'expired' }
+  }, '#000000');
+  const expiredRows = [...expired.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.deepEqual(expiredRows.map((node) => node.children[0].children[0].textContent), ['Token Plan', 'Balance']);
+  assert.match(expiredRows[0].text, /Expired/);
+  assert.equal(expiredRows[0].find('limit-meter-fill'), null);
 });
 
 test('a Devin card keeps Daily, Weekly, and the extra usage balance', () => {
@@ -612,6 +818,112 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
   }
 });
 
+test('MiMo groups products under each account and keeps their own plan and status', () => {
+  const view = dockView();
+  const rows = [
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef123456', accountName: 'MiMo abcdef1', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [{ kind: 'weekly', usedPercent: 40 }] },
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef654321', accountName: 'MiMo abcdef6', accountLabel: 'Desktop Membership', windows: [{ kind: 'weekly', usedPercent: 25 }] }
+  ];
+  const group = view.renderLimitProviderGroup('mimo', 'MiMo', rows, '#000000');
+  const accounts = group.find('limit-account-list').children;
+  assert.deepEqual(accounts.map((row) => row.find('limit-name-title').textContent), [
+    'MiMo abcdef1', 'MiMo abcdef6'
+  ]);
+  assert.equal(group.find('limit-plan').textContent, '2 accounts');
+  const products = accounts.map((account) => account.find('limit-account-list').children[0]);
+  // Product rows name nothing: the plan cell and the readings carry what they are.
+  for (const row of products) {
+    assert.equal(row.find('limit-name-title'), null, 'the lane word stays off the screen');
+  }
+  assert.equal(products[0].find('limit-plan').textContent, 'Pro');
+  assert.equal(products[1].find('limit-plan')?.textContent ?? '', '');
+  // INVITE hides the plan name but retains the quota that identifies the row.
+  assert.match(products[1].text, /Weekly/);
+  assert.match(products[1].text, /75%/);
+});
+
+test('one MiMo account uses the provider heading and separate product rows', () => {
+  const view = dockView({ maskLimitAccountEmails: true });
+  const rows = [
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:console', accountName: 'Old profile · MiMo abcdef1', accountEmail: 'same@example.com', accountLabel: 'Console', windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }] },
+    { provider: 'mimo', status: 'unauthorized', sourceDetail: 'app', accountKey: 'sha256:membership', accountName: 'New profile · MiMo abcdef1', accountEmail: 'same@example.com', accountLabel: 'Desktop Membership', windows: [] }
+  ];
+  const group = view.renderLimitProviderGroup('mimo', 'Xiaomi MiMo', rows, '#000000');
+  assert.equal(group.find('limit-name-title').textContent, 'Xiaomi MiMo');
+  assert.equal(group.find('limit-plan').textContent, '');
+  const products = group.find('limit-account-list').children;
+  // The healthy row names nothing; the refused lane has no reading left, so its
+  // row carries the lane word the wire gave it.
+  assert.equal(products[0].find('limit-name-title'), null);
+  assert.equal(products[1].find('limit-name-title').textContent, 'Desktop Membership');
+  assert.match(products[0].text, /9\.95/);
+  assert.match(products[1].text, /Sign in again/);
+});
+
+test('a healthy MiMo product row names nothing; a refused one keeps its lane word', () => {
+  const view = dockView();
+  {
+    const card = view.renderLimitProviderSolo('mimo', 'Xiaomi MiMo', {
+      provider: 'mimo', status: 'ok', sourceDetail: 'app', accountLabel: 'Console',
+      planLabel: 'Pay-as-you-go', windows: []
+    }, '#000000');
+    // The readings and the plan cell say what the row is.
+    assert.deepEqual(card.textOf('limit-name-title'), ['Xiaomi MiMo']);
+    assert.equal(card.text.includes('Console'), false);
+    assert.equal(card.find('limit-account-list').children[0].find('limit-plan').textContent, 'Pay-as-you-go');
+  }
+  {
+    const card = view.renderLimitProviderSolo('mimo', 'Xiaomi MiMo', {
+      provider: 'mimo', status: 'unauthorized', sourceDetail: 'app', accountLabel: 'Desktop Membership',
+      planLabel: 'Pay-as-you-go', windows: []
+    }, '#000000');
+    assert.deepEqual(card.textOf('limit-name-title'), ['Xiaomi MiMo', 'Desktop Membership']);
+    assert.equal(card.find('limit-account-list').children[0].find('limit-plan').textContent, 'Sign in again');
+  }
+  {
+    // A status-only row synced before the lane words existed carries no
+    // recognized label; it still names itself through the account title rather
+    // than failing anonymously beside its named siblings.
+    const group = view.renderLimitProviderGroup('mimo', 'Xiaomi MiMo', [
+      { provider: 'mimo', status: 'ok', source: 'web', sourceDetail: 'managed', accountKey: 'sha256:mimoa', accountName: 'MiMo abcdefa', accountLabel: 'Console', planLabel: 'Pay-as-you-go', windows: [] },
+      { provider: 'mimo', status: 'unavailable', sourceDetail: 'app', accountKey: 'sha256:mimoa-membership', accountName: 'MiMo abcdefa', accountLabel: '', windows: [] }
+    ], '#000000');
+    // One logical account renders its products flat under the provider heading.
+    // The legacy row's title is the shared two-stage identity: the descriptive
+    // name, disambiguated by an opaque key fingerprint because both rows
+    // describe themselves identically.
+    const products = group.find('limit-account-list').children;
+    assert.equal(products[0].find('limit-name-title'), null);
+    assert.match(products[1].find('limit-name-title').textContent, /^MiMo abcdefa · #[a-z0-9]+$/);
+  }
+  const unconfigured = view.renderLimitProviderSolo('mimo', 'Xiaomi MiMo', {
+    provider: 'mimo', status: 'notConfigured', windows: []
+  }, '#000000');
+  assert.deepEqual(unconfigured.textOf('limit-name-title'), ['Xiaomi MiMo']);
+});
+
+test('MiMo keeps different accounts apart when emails mask alike', () => {
+  const view = dockView({ maskLimitAccountEmails: true });
+  const rows = [
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:console-a', accountName: 'Profile · MiMo abcdef1', accountEmail: 'james@example.com', accountLabel: 'Console', windows: [] },
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:member-b', accountName: 'Profile · MiMo abcdef6', accountEmail: 'jones@example.com', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [] },
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:member-a', accountName: 'Profile · MiMo abcdef1', accountEmail: 'james@example.com', accountLabel: 'Desktop Membership', planLabel: 'Plus', windows: [] }
+  ];
+  const group = view.renderLimitProviderGroup('mimo', 'Xiaomi MiMo', rows, '#000000');
+  const accounts = group.find('limit-account-list').children;
+  assert.equal(accounts.length, 2);
+  assert.deepEqual(accounts.map((account) => account.find('limit-name-title').textContent), [
+    'j***s@example.com · Profile · MiMo abcdef1',
+    'j***s@example.com · Profile · MiMo abcdef6'
+  ]);
+  assert.equal(group.find('limit-plan').textContent, '2 accounts');
+  for (const account of accounts) {
+    for (const product of account.find('limit-account-list').children) {
+      assert.equal(product.find('limit-name-title'), null, 'the lane word stays off the screen');
+    }
+  }
+});
+
 test('a group-only plan replacement leaves a solo row its plan', () => {
   const view = dockView();
   // A profile name stored before accountName existed: inside a group it would
@@ -652,6 +964,26 @@ test('the Codex reset forecast rides the card with its own tooltip', () => {
   const off = dockView({ codexResetForecastEnabled: false })
     .renderLimitProviderRow('codex', 'Codex', { provider: 'codex', status: 'ok', windows: [] }, '#10A37F');
   assert.equal(off.find('codex-reset-forecast'), null);
+});
+
+test('MiMo account headings do not duplicate the provider subscription card or add empty focus stops', () => {
+  const rows = ['a', 'b'].map((accountKey, index) => ({
+    provider: 'mimo', status: 'ok', accountKey, accountName: `MiMo abcdef${index + 1}`,
+    accountLabel: 'Console', planLabel: 'Pay-as-you-go', windows: []
+  }));
+  const subscription = {
+    id: 'mimo-sub', provider: 'mimo', kind: 'subscription', planName: 'Pro', amountMinor: 1000,
+    currency: 'USD', intervalCount: 1, interval: 'month', startDate: '2026-08-01', autoRenew: true,
+    topUps: [], binding: { accountKey: 'a' }
+  };
+  const view = dockView({ subscriptions: [subscription], accounts: rows });
+  const built = view.renderLimitProviderGroup('mimo', 'Xiaomi MiMo', rows, '#000000');
+  const wraps = [...built.walk()].filter((node) => node.classNames.has('subscription-plan-wrap'));
+  assert.deepEqual(wraps.map((node) => node.find('subscription-plan-trigger').textContent), ['2 accounts', 'Pay-as-you-go']);
+  assert.equal(wraps.every((node) => node.tabIndex === 0), true, 'the visible triggers remain keyboard accessible');
+  assert.equal(view.renderLimitProviderHead('mimo', 'Account A', rows[0], '#000000', {
+    accountRow: true, planText: ''
+  }).find('subscription-plan-wrap'), null, 'an empty plan has no hover or keyboard trigger');
 });
 
 // The plan cell used to be the one row that differed: the page hung a hover card

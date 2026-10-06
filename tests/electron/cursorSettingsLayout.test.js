@@ -863,7 +863,7 @@ test('API key account entries share styling and Copilot uses the folded token en
   {
     // Every generated control carries .credential-input wherever it is placed,
     // so a region select above the paste panel is styled like the inputs in it.
-    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes(".credential-input,") && match[2].includes("font-size: 12px;"));
+    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes(".credential-input,") && match[2].includes("font-size: 0.75rem;"));
     assert.ok(rule, 'shared credential input style should exist');
     for (const selector of [".credential-input", "#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", "#mimoManualPanel input", "#mimoManualPanel textarea", "#volcengineManualPanel input"]) {
       assert.ok(rule[1].split(',').map((value) => value.trim()).includes(selector), selector);
@@ -877,7 +877,7 @@ test('API key account entries share styling and Copilot uses the folded token en
     }
   }
 
-  assert.match(css, /\.thirdparty-field :is\(input, select\)\s*\{[\s\S]*?font-size: 12px;/);
+  assert.match(css, /\.thirdparty-field :is\(input, select\)\s*\{[\s\S]*?font-size: 0\.75rem;/);
 });
 
 test('Copilot account panel provides GitHub sign-in plus manual token fallback', () => {
@@ -941,7 +941,7 @@ test('Volcengine keeps its hand-built panel and saves through the shared credent
   const { limitProviderEntry } = require('../../src/shared/limits/registry');
   assert.equal(limitProviderEntry('volcengine').form.kind, 'custom');
   for (const key of ['secretRequired', 'agentSecretRequired']) {
-    assert.equal(readRendererFile('i18n.js').split(`'settings.volcengine.${key}':`).length - 1, 5, key);
+    assert.equal(readRendererFile('i18n.js').split(`'settings.volcengine.${key}':`).length - 1, 6, key);
   }
 });
 
@@ -1047,7 +1047,7 @@ test('Zed account panel follows the manual browser Cookie flow without exposing 
     'settings.zed.saveCookie',
     'settings.zed.statusInvalid'
   ]) {
-    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+    assert.equal(i18n.split(`'${key}':`).length - 1, 6, `${key} should exist in all bundled locales`);
   }
 });
 
@@ -1131,7 +1131,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     rejected: 'settings.claude.cookieRejected'
   });
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
-  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) {
     for (const key of ['organization', 'organizationChoose', 'organizationRequired', 'organizationSelect', 'organizationUnavailable', 'organizationLoadFailed']) {
       assert.ok(MESSAGES[locale][`settings.claude.${key}`], `${locale} ${key}`);
     }
@@ -1160,7 +1160,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   )));
   assert.ok(cssRulesForSelector(css, '.credential-input').some(rule => (
     declaration(rule, 'width') === '100%'
-      && declaration(rule, 'font-size') === '12px'
+      && declaration(rule, 'font-size') === '0.75rem'
   )));
   assert.ok(cssRulesForSelector(css, '.credential-input:not(select)').some(rule => declaration(rule, 'font-family') === 'monospace'));
   const textareaControlRules = cssRulesForSelector(css, '.settings-panel textarea');
@@ -1290,6 +1290,11 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(details, /id="mimoAddDetails" class="opencode-add-details accordion-animated-container hidden"/);
   assert.match(details, /id="mimoSaveAccountButton"/);
   assert.match(details, /id="mimoManualPanel"/);
+  // The membership is read from the machine's own MiMo Desktop session and is
+  // not sold on the developer platform, so the panel offers no paste for it —
+  // the console entry above is the only manual one this provider has.
+  assert.doesNotMatch(details, /mimoMembershipCookieInput|mimoSaveMembershipCookieButton|mimoClearMembershipCookieButton/);
+  assert.doesNotMatch(app, /mimoMembershipCookie|saveMembershipCookie/);
   assert.match(details, /<strong>1\.<\/strong>[\s\S]*<strong>4\.<\/strong>/);
   assert.match(details, /data-i18n="settings\.mimo\.step3Before">In Network, select<\/span> <code>balance<\/code>/);
   assert.match(details, /data-i18n="settings\.mimo\.step4">Paste it below, then click Save account\.<\/span>/);
@@ -1299,7 +1304,7 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.ok(details.indexOf('mimoAddToggle') < details.indexOf('mimoOpenConsoleButton'));
   assert.ok(details.indexOf('mimoOpenConsoleButton') < details.indexOf('mimoCookieInput'));
   assert.ok(details.indexOf('mimoCookieInput') < details.indexOf('mimoSaveAccountButton'));
-  assert.match(css, /#mimoManualPanel textarea,[\s\S]*font-size: 12px/);
+  assert.match(css, /#mimoManualPanel textarea,[\s\S]*font-size: 0\.75rem/);
   assert.match(css, /\.credential-input:not\(select\),[\s\S]*#mimoManualPanel textarea,[\s\S]*font-family: monospace/);
   assert.match(css, /\.managed-account-list:empty \{ display: none; \}/);
   assert.match(app, /getElementById\('mimoManualPanel'\)\?\.classList\.toggle\('expanded', next\)/);
@@ -1314,12 +1319,13 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(preload, /openConsole: \(\) => ipcRenderer\.invoke\('mimo:openConsole'\)/);
   assert.match(main, /ipcMain\.handle\('mimo:openConsole'/);
   assert.match(main, /ipcMain\.handle\('mimo:addAccount', \(_event, cookieHeader\) => addMimoManagedAccount\(cookieHeader\)\)/);
+  assert.doesNotMatch(main, /saveMimoMembershipCookie|mimoMembershipCookie/);
   // Limits rows mask through the shared resolver; the settings list stays readable.
   assert.match(readRendererFile('limits/windowsView.js'), /maskEmail: limitAccountEmailsMasked\(\)/);
   assert.match(app, /function mimoSettingsAccountTitle\(account, index\) \{[\s\S]*account\?\.accountEmail[\s\S]*`Account \$\{index \+ 1\}`/);
   assert.match(app, /const accountName = mimoSettingsAccountTitle\(account, index\);/);
   const addBody = functionBody(main, 'addMimoManagedAccount', 'removeMimoManagedAccount');
-  assert.match(addBody, /const \[validation\] = await fetchMimoLimits\(\{ mimoManagedAccounts: \[result\.account\] \}, electronProviderDeps\(\)\)/);
+  assert.match(addBody, /limitRefreshScope: \{ provider: 'mimo', accountKey: result\.account\.accountKey \}/);
   assert.ok(addBody.indexOf('fetchMimoLimits') < addBody.indexOf('settings.mimoManagedAccounts ='), 'validation must happen before persistence');
   assert.match(addBody, /result\.account\.accountEmail = String\(validation\.accountEmail/);
   assert.doesNotMatch(main, /new BrowserWindow\([\s\S]{0,300}Sign in to MiMo/);
@@ -1359,7 +1365,7 @@ test('Devin account panel uses the shared status label and opens the allowlisted
   assert.match(i18n, /'settings\.devin\.statusNotSet': 'Not configured'/);
   assert.match(i18n, /'settings\.devin\.statusNotSet': '尚未設定'/);
   for (const key of ['settings.devin.statusNotSet', 'settings.devin.credentialsRequired']) {
-    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+    assert.equal(i18n.split(`'${key}':`).length - 1, 6, `${key} should exist in all bundled locales`);
   }
 
 
@@ -1413,7 +1419,7 @@ test('Factory API key validation keeps its translated rejection message', () => 
   assert.deepEqual({ ...form.messages }, { rejected: 'settings.factory.validationInvalid' });
 
   const i18n = readRendererFile('i18n.js');
-  assert.equal(i18n.match(/'settings\.factory\.validationInvalid':/g)?.length, 5);
+  assert.equal(i18n.match(/'settings\.factory\.validationInvalid':/g)?.length, 6);
   assert.doesNotMatch(i18n, /settings\.factory\.validation(RateLimited|Unavailable)/);
 });
 
@@ -1438,7 +1444,7 @@ test('Factory identifies environment and Droid .env credentials separately', () 
   assert.deepEqual(Array.from(labels), ['settings.factory.statusEnv', 'settings.factory.statusDroidEnv']);
 
   const i18n = readRendererFile('i18n.js');
-  assert.equal((i18n.match(/'settings\.factory\.statusDroidEnv'/g) || []).length, 5);
+  assert.equal((i18n.match(/'settings\.factory\.statusDroidEnv'/g) || []).length, 6);
 });
 
 test('Cline account form keeps sign-in precedence, accessible input, and allowlisted setup URL', () => {
@@ -1494,7 +1500,7 @@ test('Cline API key validation keeps its rejection copy in every locale', () => 
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'cline');
   assert.deepEqual({ ...form.messages }, { rejected: 'settings.cline.validationInvalid' });
 
-  // Every cline string the UI can render exists in all five locales — the same
+  // Every cline string the UI can render exists in all bundled locales — the same
   // completeness Antigravity copy is held to, derived here from the source of truth
   // rather than hand-listed so a key added later cannot skip a locale.
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
@@ -1565,7 +1571,8 @@ test('Cline names the credential lane that went bad, not always the key field', 
     'zh-TW': '開啟 Cline',
     'zh-CN': '打开 Cline',
     ko: 'Cline 열기',
-    ja: 'Cline を開く'
+    ja: 'Cline を開く',
+    'pt-BR': 'Abrir o Cline'
   });
   assert.deepEqual(Object.fromEntries(Object.entries(MESSAGES).map(([locale, messages]) => [
     locale,
@@ -1575,7 +1582,8 @@ test('Cline names the credential lane that went bad, not always the key field', 
     'zh-TW': '已連線',
     'zh-CN': '已连接',
     ko: '연결됨',
-    ja: '接続済み'
+    ja: '接続済み',
+    'pt-BR': 'Conectado'
   });
 });
 
@@ -2658,8 +2666,8 @@ test('remote Hub build status is wired as a separate localized sync hint', () =>
   assert.match(app, /handleWindowVisibilityChange[\s\S]*hubBuildStatusRefreshDue\(\)[\s\S]*void refreshHubBuildStatus\(\)/);
   assert.match(preload, /getHubBuildStatus: \(\) => ipcRenderer\.invoke\('hub:getBuildStatus'\)/);
   assert.match(main, /ipcMain\.handle\('hub:getBuildStatus'/);
-  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.current':/g)].length, 5);
-  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.updateAvailable':/g)].length, 5);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.current':/g)].length, 6);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.updateAvailable':/g)].length, 6);
   assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.legacy':/g)].length, 0);
 });
 
@@ -2787,6 +2795,7 @@ test('main settings migrateLimitProviders normalizes without expanding old defau
 test('Home limits groups multiple MiMo accounts like Codex', () => {
   const app = readRendererFile('app.js');
   const groupBody = viewBody('renderLimitProviderGroup');
+  const frameBody = viewBody('renderLimitProviderGroupFrame', 'appendMimoAccountProducts');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   // accountGroup marks the synthetic header provider, so a subscription card on
   // it summarises the group instead of adopting one member's record — and
@@ -2794,12 +2803,13 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
   // for its own rows and not for every account the provider has. The count
   // phrase is the catalog's own, keyed by provider id.
   assert.match(
-    groupBody,
+    frameBody,
     /const groupProvider = \{\s*provider: providerId,\s*status: 'ok',\s*windows: \[\],\s*accountGroup: true,\s*groupAccounts: providers\s*\};/
   );
-  assert.match(groupBody, /planText: limitGroupCountText\(providerId, providers\.length\)/);
+  assert.match(frameBody, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(groupBody, /renderLimitProviderGroupFrame\(\s*providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
-  assert.match(readRendererFile('limits/windowsView.js'), /mimo: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
+
   // The page's dispatch is by account count with no provider branch left.
   assert.match(renderLimitsBody, /if \(Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
   assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
@@ -3246,8 +3256,99 @@ test('a ZCode-discovered GLM login reads as connected, not API-key configured', 
   assert.match(statusBody, /source === 'env' \? `settings\.\$\{providerName\}\.statusEnv` : `settings\.\$\{providerName\}\.statusSet`/);
 
   const i18n = readRendererFile('i18n.js');
-  // Five locales carry the key; translate() falls back to the raw key, so a
+  // All bundled locales carry the key; translate() falls back to the raw key, so a
   // missing entry would surface as literal text on the pill.
-  assert.equal((i18n.match(/'settings\.zai\.statusLinked'/g) || []).length, 5);
+  assert.equal((i18n.match(/'settings\.zai\.statusLinked'/g) || []).length, 6);
   assert.ok(/'settings\.zai\.statusLinked': 'Connected'/.test(i18n));
+});
+
+test('MiMo main projects the detected Desktop account without raw credentials', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  assert.match(main, /withDetectedMimoAccount\(accounts, mimoDetectedAccount\(\)\)/);
+  assert.match(main, /const accountKey = detectedMimoAccountKey\(\)/);
+  assert.doesNotMatch(functionBody(main, 'mimoDetectedAccount', 'mimoAccountsForRenderer'), /cookieHeader|userId/);
+});
+
+test('MiMo refreshes its detected account when the settings section is expanded again', async () => {
+  const app = readRendererFile('app.js');
+  const refresh = functionBody(app, 'refreshMimoAccounts', 'setCopilotAccountExpanded');
+  let detected = [{ id: 'desktop-a', removable: false }];
+  let rendered = 0;
+  const state = { settings: { mimoManagedAccounts: [] } };
+  const context = {
+    state,
+    window: { tokenMonitor: { mimo: { accounts: async () => detected } } },
+    renderMimoStatus: () => { rendered += 1; }
+  };
+  const refreshAccounts = vm.runInNewContext(`${refresh}\nrefreshMimoAccounts`, context);
+
+  await refreshAccounts();
+  assert.equal(state.settings.mimoManagedAccounts[0].id, 'desktop-a');
+  detected = [{ id: 'desktop-b', removable: false }];
+  await refreshAccounts();
+  assert.equal(state.settings.mimoManagedAccounts[0].id, 'desktop-b');
+  detected = [];
+  await refreshAccounts();
+  assert.equal(state.settings.mimoManagedAccounts.length, 0);
+  assert.equal(rendered, 3);
+  assert.match(app, /if \(expanding\) void refreshMimoAccounts\(\)/);
+});
+
+test('MiMo settings reuses the shared sign-in status for rejected accounts', () => {
+  const app = readRendererFile('app.js');
+  const source = functionBody(app, 'mimoSettingsAccountTitle', 'copilotProviderStatus');
+  class Node {
+    constructor() {
+      this.children = [];
+      this.classList = { toggle() {} };
+    }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = children; }
+    addEventListener() {}
+    setAttribute() {}
+    *walk() { yield this; for (const child of this.children) yield* child.walk(); }
+  }
+  const list = new Node();
+  const nodes = new Map([
+    ['mimoAccountStatus', new Node()],
+    ['mimoAccountList', list],
+    ['mimoAccountEmpty', new Node()],
+    ['mimoAccountErrorMessage', new Node()]
+  ]);
+  let providers = [
+    { provider: 'mimo', accountKey: 'a', sourceDetail: 'managed', status: 'unauthorized' },
+    { provider: 'mimo', accountKey: 'b', sourceDetail: 'app', status: 'unauthorized' }
+  ];
+  const context = {
+    document: { getElementById: (id) => nodes.get(id), createElement: () => new Node() },
+    isSettingsSurfaceVisible: () => true,
+    state: { settings: { mimoManagedAccounts: [
+      { id: 'a', accountKey: 'a', accountEmail: 'a@example.com', accountLabel: 'Console' },
+      { id: 'b', accountKey: 'b', accountEmail: 'b@example.com', accountLabel: 'Console' },
+      { id: 'desktop', accountKey: 'b', removable: false, accountLabel: 'Desktop app' }
+    ] }, mimoAccountError: '' },
+    accountShellApi: { render() {} },
+    localProviderStatuses: () => providers,
+    limitProviderPresentationApi: require('../../src/electron/renderer/limits/providerPresentation'),
+    translatedLimitProviderTag: (tagInfo) => tagInfo?.label || '',
+    renderSettingsSummaries() {},
+    t: (key) => ({
+      'settings.limits.status.signInAgain': 'Sign in again',
+      'settings.mimo.desktopAccount': 'MiMo Desktop'
+    })[key] || key
+  };
+  const render = vm.runInNewContext(`${source}\nrenderMimoStatus`, context);
+  render();
+  assert.ok(list.children.every((row) => row.children.length === 3), 'read-only rows retain the shared checkbox column');
+  assert.equal([...list.children[2].walk()].find((node) => node.className === 'managed-account-email').textContent, 'MiMo Desktop');
+  assert.equal(list.children[2].children[0].type, undefined);
+  assert.equal(list.children[2].children[2].children.length, 1, 'the detected account has no remove control');
+  const info = list.children.map((row) => [...row.walk()].find((node) => node.className === 'managed-account-info'));
+  assert.deepEqual(info.map((node) => node.textContent), ['Sign in again', 'Console', 'Sign in again']);
+  assert.equal(info[0].title, 'Sign in again');
+  assert.equal(info[1].title, 'Console');
+  assert.equal(info[2].title, 'Sign in again');
+  providers = [{ provider: 'mimo', accountKey: 'a', sourceDetail: 'managed', status: 'ok' }];
+  render();
+  assert.equal([...list.children[0].walk()].find((node) => node.className === 'managed-account-info').textContent, 'Console');
 });

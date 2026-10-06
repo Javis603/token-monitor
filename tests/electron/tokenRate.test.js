@@ -698,7 +698,7 @@ test('compact display surfaces can render live rates independently of the footer
   const trayOptions = html.slice(html.indexOf('id="trayContentInput"'), html.indexOf('id="trayComposer"'));
   assert.match(bubbleOptions, /<option value="liveTokenRate" data-i18n="settings\.tray\.liveTokenRate">/);
   assert.match(trayOptions, /<option value="liveTokenRate" data-i18n="settings\.tray\.liveTokenRate">/);
-  assert.equal((i18n.match(/'trayComposer\.style\.liveTokenRate'/g) || []).length, 5);
+  assert.equal((i18n.match(/'trayComposer\.style\.liveTokenRate'/g) || []).length, 6);
 });
 
 test('the live footer rate uses matched timed deltas rather than scan wall time', () => {

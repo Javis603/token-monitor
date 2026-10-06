@@ -22,7 +22,7 @@ test('Codex account switch hover action stays visually secondary', () => {
 
   assert.match(rule, /height:\s*22px/);
   assert.match(rule, /padding:\s*0 6px/);
-  assert.match(rule, /font-size:\s*9px/);
+  assert.match(rule, /font-size:\s*0\.5625rem/);
   assert.doesNotMatch(rule, /min-width/);
   assert.doesNotMatch(rule, /0 5px 12px/);
   assert.doesNotMatch(hoverRule, /outline:/);
@@ -35,7 +35,7 @@ test('Codex active-account badge stays quieter than the switch action', () => {
   assert.match(rule, /padding:\s*0 6px/);
   assert.match(rule, /border-radius:\s*6px/);
   assert.match(rule, /background:\s*rgba\(var\(--overlay-rgb\), 0\.075\)/);
-  assert.match(rule, /font-size:\s*9px/);
+  assert.match(rule, /font-size:\s*0\.5625rem/);
   assert.match(rule, /line-height:\s*22px/);
   assert.doesNotMatch(rule, /cursor:\s*pointer/);
 });

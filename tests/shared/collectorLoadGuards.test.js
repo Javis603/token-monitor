@@ -3158,7 +3158,8 @@ test('self-watch db-shm events are ignored for every client whose scan recreates
   const zcodeRoot = path.join(os.tmpdir(), 'zcode', 'cli', 'db');
   const antigravityRoot = path.join(os.tmpdir(), '.gemini', 'antigravity');
   const antigravityConversation = path.join(antigravityRoot, 'conversations');
-  const roots = { antigravity: [antigravityRoot], qodercn: [qoderRoot], zcode: [zcodeRoot] };
+  const cherryRoot = path.join(os.tmpdir(), 'CherryStudio', 'Data');
+  const roots = { antigravity: [antigravityRoot], cherrystudio: [cherryRoot], qodercn: [qoderRoot], zcode: [zcodeRoot] };
 
   // Each client keeps its own database basename: Qoder CN names it local.db,
   // ZCode names it db.sqlite, Antigravity names one per conversation, below its
@@ -3166,7 +3167,8 @@ test('self-watch db-shm events are ignored for every client whose scan recreates
   for (const [root, base] of [
     [qoderRoot, 'local.db'],
     [zcodeRoot, 'db.sqlite'],
-    [antigravityConversation, '1f17ba78-fe78-4ed6-9f69-07387625fdad.db']
+    [antigravityConversation, '1f17ba78-fe78-4ed6-9f69-07387625fdad.db'],
+    [cherryRoot, 'cherrystudio.sqlite']
   ]) {
     assert.equal(isSelfWatchSqliteSidecarEvent(path.join(root, base + '-shm'), roots), true);
     assert.equal(isSelfWatchSqliteSidecarEvent(path.join(root, base + '-wal'), roots), false,
@@ -3202,78 +3204,89 @@ test('a SQLite client whose scan does not recreate its sidecar still watches db-
 // was actually about. A suppressed shm event must not spawn a scan, while a real
 // -wal change from the same directory still must — otherwise the fix would have
 // traded a runaway loop for silent staleness.
-test('a zcode shm event does not spawn a scan while a -wal change still does', async () => {
-  const tmp = withTmpHome([path.join('.zcode', 'cli', 'db')]);
-  const originalHomedir = os.homedir;
-  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  os.homedir = () => tmp;
-  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+for (const client of ['zcode', 'cherrystudio']) {
+  test(`a ${client} shm event does not spawn a scan while WAL and database changes still do`, async () => {
+    const tmp = withTmpHome([]);
+    const originalHomedir = os.homedir;
+    const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+    os.homedir = () => tmp;
+    process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+    const { clientSourceRoots } = freshCollector();
+    const dbDir = clientSourceRoots(client)[client].find((root) => root.id === (client === 'zcode' ? 'zcode-db' : 'cherrystudio-db'))?.dir
+      || path.join(tmp, '.zcode', 'cli', 'db');
+    fs.mkdirSync(dbDir, { recursive: true });
+    const dbName = client === 'zcode' ? 'db.sqlite' : 'cherrystudio.sqlite';
 
-  const chokidar = require('chokidar');
-  const originalWatch = chokidar.watch;
-  let watchHandler = null;
-  chokidar.watch = () => {
-    const watcher = {
-      on(event, handler) {
-        if (event === 'all') watchHandler = handler;
-        return watcher;
-      },
-      close() {}
+    const chokidar = require('chokidar');
+    const originalWatch = chokidar.watch;
+    let watchHandler = null;
+    chokidar.watch = () => {
+      const watcher = {
+        on(event, handler) {
+          if (event === 'all') watchHandler = handler;
+          return watcher;
+        },
+        close() {}
+      };
+      return watcher;
     };
-    return watcher;
-  };
 
-  const childProcess = require('node:child_process');
-  const originalSpawn = childProcess.spawn;
-  const calls = [];
-  childProcess.spawn = recordingSpawn(calls);
+    const childProcess = require('node:child_process');
+    const originalSpawn = childProcess.spawn;
+    const calls = [];
+    childProcess.spawn = recordingSpawn(calls);
 
-  const dbDir = path.join(tmp, '.zcode', 'cli', 'db');
-  let handle = null;
-  try {
-    const { startCollector } = freshCollector();
-    const updates = [];
-    handle = startCollector({
-      clients: 'zcode',
-      allTimeSince: '2024-01-01',
-      commandTimeoutMs: 5000,
-      deviceId: 'test-device',
-      agentVersion: 'test',
-      intervalMs: 60 * 60 * 1000,
-      watchEnabled: true,
-      watchUsePolling: false,
-      watchTriggersCollection: true,
-      watchDebounceMs: 10,
-      limitsEnabled: false,
-      historyEnabled: false,
-      anchorPersistenceEnabled: false,
-      onUpdate: (summary, reason) => updates.push({ summary, reason })
-    });
+    let handle = null;
+    try {
+      const { startCollector } = freshCollector();
+      const updates = [];
+      handle = startCollector({
+        clients: client,
+        allTimeSince: '2024-01-01',
+        commandTimeoutMs: 5000,
+        deviceId: 'test-device',
+        agentVersion: 'test',
+        intervalMs: 60 * 60 * 1000,
+        watchEnabled: true,
+        watchUsePolling: false,
+        watchTriggersCollection: true,
+        watchDebounceMs: 10,
+        limitsEnabled: false,
+        historyEnabled: false,
+        anchorPersistenceEnabled: false,
+        onUpdate: (summary, reason) => updates.push({ summary, reason })
+      });
 
-    await waitForCondition(() => updates.length === 1);
-    const afterInitialTick = calls.length;
+      await waitForCondition(() => updates.length === 1);
+      const afterInitialTick = calls.length;
 
-    // Our own scan recreates this sidecar, so it must not schedule another scan.
-    watchHandler('change', path.join(dbDir, 'db.sqlite-shm'));
-    await new Promise((resolve) => { setTimeout(resolve, 120); });
-    assert.equal(calls.length, afterInitialTick,
-      'a self-watch shm event must not spawn another scan');
+      // Our own scan recreates this sidecar, so it must not schedule another scan.
+      watchHandler('change', path.join(dbDir, dbName + '-shm'));
+      await new Promise((resolve) => { setTimeout(resolve, 120); });
+      assert.equal(calls.length, afterInitialTick,
+        'a self-watch shm event must not spawn another scan');
 
-    // The same directory, but the write that carries real data.
-    watchHandler('change', path.join(dbDir, 'db.sqlite-wal'));
-    await waitForCondition(() => calls.length > afterInitialTick, 4000);
-    assert.ok(calls.length > afterInitialTick, 'a -wal change must still spawn a scan');
-  } finally {
-    if (handle) handle.stop();
-    childProcess.spawn = originalSpawn;
-    chokidar.watch = originalWatch;
-    os.homedir = originalHomedir;
-    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
-    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
-    delete require.cache[collectorPath];
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
+      // The same directory, but the write that carries real data.
+      watchHandler('change', path.join(dbDir, dbName + '-wal'));
+      await waitForCondition(() => calls.length > afterInitialTick, 4000);
+      assert.ok(calls.length > afterInitialTick, 'a -wal change must still spawn a scan');
+      await waitForCondition(() => updates.length >= 2);
+      const afterWalTick = calls.length;
+      watchHandler('change', path.join(dbDir, dbName));
+      await waitForCondition(() => calls.length > afterWalTick, 4000);
+      assert.ok(calls.length > afterWalTick, 'a database change must still spawn a scan');
+    } finally {
+      if (handle) handle.stop();
+      childProcess.spawn = originalSpawn;
+      chokidar.watch = originalWatch;
+      os.homedir = originalHomedir;
+      if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+      else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+      delete require.cache[collectorPath];
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+}
 
 test('collector does not reuse a persisted anchor after the Qoder CN DB path changes', async () => {
   const tmp = withTmpHome([]);

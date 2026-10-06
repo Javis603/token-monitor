@@ -523,6 +523,7 @@ Object.assign(els, {
   themeAdvancedGroup: document.getElementById('themeAdvancedGroup'),
   themeAdvancedToggle: document.getElementById('themeAdvancedToggle'),
   themeAdvancedDetails: document.getElementById('themeAdvancedDetails'),
+  textSizeInput: document.getElementById('textSizeInput'),
   interfaceFontPreset: document.getElementById('interfaceFontPreset'),
   interfaceFontInput: document.getElementById('interfaceFontInput'),
   interfaceFontCustomRow: document.getElementById('interfaceFontCustomRow'),
@@ -4002,6 +4003,7 @@ function flushPendingLimitDetailTooltipRender() {
 
 const {
   creditsAmount,
+  creditsCurrency,
   creditsMeterPercent,
   formatCompactMoney,
   formatMoney,
@@ -4009,7 +4011,7 @@ const {
   spendWindow
 } = window.TokenMonitorLimitBalanceDisplay;
 
-const { limitWindowLabel } = window.TokenMonitorLimitWindowLabels;
+const { limitWindowLabel, mimoAccountGroups, mimoProductLabel } = window.TokenMonitorLimitWindowLabels;
 const { limitWindowText } = window.TokenMonitorLimitWindowText;
 
 // The Limits rows are built by the shared view, which the edge dock also calls
@@ -4063,11 +4065,14 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   colorWithAlpha,
   applyBarScale,
   creditsAmount,
+  creditsCurrency,
   creditsMeterPercent,
   isCreditsWindow,
   spendWindow,
   limitWindowLabel,
   limitWindowText,
+  mimoAccountGroups,
+  mimoProductLabel,
   accountIdentity: accountIdentityApi,
   accountControl: codexAccountControl,
   codexAccounts: {
@@ -5632,11 +5637,22 @@ function homeLimitRows() {
       const id = String(provider?.provider || '').trim().toLowerCase();
       const option = providerOptions.find((entry) => entry.id === id);
       const providerTitle = option?.label || id;
-      if (providerEntries.length > 1) {
+      const showProviderTitle = state.settings?.showHomeLimitProviderNames === true || state.settings?.showToolIcons === false;
+      // A provider's row count is its account count — except MiMo, whose two
+      // products of one account are two rows. Names resolve over the same
+      // logical-account grouping the Limits page groups by, so one account's
+      // lanes are told apart by their product word alone and only several
+      // accounts earn an account name.
+      const accountCount = id === 'mimo'
+        ? mimoAccountGroups(providerEntries).length
+        : providerEntries.length;
+      if (accountCount > 1) {
         const accountTitle = limitAccountTitle(id, provider, index, providerEntries);
-        return state.settings?.showHomeLimitProviderNames === true || state.settings?.showToolIcons === false
-          ? `${providerTitle} · ${accountTitle}`
-          : accountTitle;
+        return showProviderTitle ? `${providerTitle} · ${accountTitle}` : accountTitle;
+      }
+      if (id === 'mimo') {
+        const product = mimoProductLabel(provider);
+        if (product) return showProviderTitle ? `${providerTitle} · ${product}` : product;
       }
       return providerTitle;
     }
@@ -6928,6 +6944,8 @@ function applyFontSettings(settings) {
   const source = { ...(state.settings || {}), ...(settings || {}) };
   const root = document.documentElement.style;
   const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(source);
+  document.documentElement.dataset.textSize = fontSettingsApi.normalizeTextSize(source.textSize);
+  root.setProperty('--ui-text-scale', String(fontSettingsApi.textScaleForSize(source.textSize)));
   root.setProperty('--ui-font', interfaceFont);
   root.setProperty('--display-font', displayFont);
 }
@@ -7826,6 +7844,7 @@ async function resetDisplayFont() {
 }
 
 function syncFontSettingsControls() {
+  if (els.textSizeInput) els.textSizeInput.value = fontSettingsApi.normalizeTextSize(state.settings?.textSize);
   for (const [role, settingKey] of [['interface', 'interfaceFontFamily'], ['display', 'displayFontFamily']]) {
     const controls = fontControlsFor(role);
     const value = fontSettingsApi.normalizeFontFamily(state.settings?.[settingKey]);
@@ -10690,12 +10709,12 @@ function renderLimitProviderCheckboxesNow() {
     }
   }
   const enabled = enabledLimitProviderSet();
-  const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
   const filtering = Boolean(limitProviderQuery());
   for (const { id, label, settingsLabel } of providers) {
     const isEnabled = enabled.has(id);
     const provider = isEnabled
-      ? (collected.get(id) || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
+      ? (limitProviderPresentationApi.limitProviderSettingsRecord(state.stats?.limits?.providers, id)
+        || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
       : { provider: id, status: 'disabled', windows: [] };
     const row = document.createElement('div');
     row.className = `limit-provider-row${isEnabled ? '' : ' is-disabled'}${matched.has(id) ? '' : ' is-filtered-out'}`;
@@ -12325,6 +12344,9 @@ els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBac
 void loadBackgroundImage();
 els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}));
 els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
+els.textSizeInput?.addEventListener('change', async () => {
+  await saveSettings({ textSize: fontSettingsApi.normalizeTextSize(els.textSizeInput.value) });
+});
 els.interfaceFontPreset?.addEventListener('change', () => handleFontPresetChange('interface'));
 els.displayFontPreset?.addEventListener('change', () => handleFontPresetChange('display'));
 els.interfaceFontInput?.addEventListener('input', previewFontSettings);
@@ -12483,6 +12505,7 @@ const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComp
     maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
       ? accountIdentityApi.maskEmailAddress(email)
       : String(email || '')),
+    mimoProductLabel,
     createRowDrag: (config) => rowDragControllerApi.createRowDragController({
       dragSort: verticalDragSortApi,
       getScrollPanel: () => els.settingsPanel,
@@ -12785,6 +12808,7 @@ function renderStatsUpdate() {
   render();
   if (!isSettingsSurfaceVisible()) return;
   renderCodexAccounts();
+  renderMimoStatus();
   renderSettingsSummaries();
   renderLimitProviderCheckboxes();
   renderToolPreferences();
@@ -14230,6 +14254,13 @@ function setMimoAccountExpanded(expanded) {
   setAccountGroupExpanded('mimo', expanded, 'mimoAccountExpanded');
 }
 
+async function refreshMimoAccounts() {
+  try {
+    state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts() || [];
+    renderMimoStatus();
+  } catch (_) {}
+}
+
 function setCopilotAccountExpanded(expanded) {
   setAccountGroupExpanded('copilot', expanded, 'copilotAccountExpanded');
 }
@@ -14554,6 +14585,9 @@ function renderAntigravityStatus() {
 }
 
 function mimoSettingsAccountTitle(account, index) {
+  // The discovered session has no address to name it by — nothing was pasted for
+  // it — so it is named after the app it comes from.
+  if (account?.removable === false) return t('settings.mimo.desktopAccount');
   return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
 }
 
@@ -14572,6 +14606,7 @@ function renderMimoStatus() {
   accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.mimoAccountError });
   emptyEl.classList.toggle('hidden', accounts.length > 0);
 
+  const providers = localProviderStatuses('mimo');
   listEl.replaceChildren();
   if (accounts.length > 0) {
     for (const [index, account] of accounts.entries()) {
@@ -14580,26 +14615,33 @@ function renderMimoStatus() {
       const row = document.createElement('div');
       row.className = 'managed-account-row';
       row.classList.toggle('disabled', !enabled);
+      // A credential Token Monitor never stored has no stored preference to
+      // toggle and nothing here to remove: this row is the session the machine's
+      // own MiMo Desktop is signed into, listed so the count above it is honest
+      // about what the provider answers for.
+      const detected = account.removable === false;
 
-      const input = document.createElement('input');
-      input.className = 'managed-account-checkbox';
-      input.type = 'checkbox';
-      input.checked = enabled;
-      input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
-        account: accountName
-      }));
-      input.addEventListener('change', async () => {
-        input.disabled = true;
-        const result = await window.tokenMonitor.mimo.setAccountEnabled(account.id, input.checked);
-        if (!result?.ok) {
-          state.mimoAccountError = result?.error || t('settings.mimo.toggleFailed');
-        } else {
-          state.mimoAccountError = '';
-          state.settings.mimoManagedAccounts = result.accounts || [];
-        }
-        renderMimoStatus();
-        renderSettingsSummaries();
-      });
+      const input = detected ? null : document.createElement('input');
+      if (input) {
+        input.className = 'managed-account-checkbox';
+        input.type = 'checkbox';
+        input.checked = enabled;
+        input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
+          account: accountName
+        }));
+        input.addEventListener('change', async () => {
+          input.disabled = true;
+          const result = await window.tokenMonitor.mimo.setAccountEnabled(account.id, input.checked);
+          if (!result?.ok) {
+            state.mimoAccountError = result?.error || t('settings.mimo.toggleFailed');
+          } else {
+            state.mimoAccountError = '';
+            state.settings.mimoManagedAccounts = result.accounts || [];
+          }
+          renderMimoStatus();
+          renderSettingsSummaries();
+        });
+      }
 
       const main = document.createElement('div');
       main.className = 'managed-account-main';
@@ -14612,40 +14654,53 @@ function renderMimoStatus() {
       right.className = 'managed-account-right';
       const info = document.createElement('span');
       info.className = 'managed-account-info';
-      info.textContent = enabled ? limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel) : t('settings.mimo.disabled');
+      const failedProvider = enabled && providers.find((provider) => (
+        provider.accountKey === account.accountKey
+        && provider.sourceDetail === (detected ? 'app' : 'managed')
+        && provider.status === 'unauthorized'
+      ));
+      const statusLabel = failedProvider
+        ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(failedProvider))
+        : '';
+      info.textContent = !enabled ? t('settings.mimo.disabled')
+        : statusLabel || limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel);
+      info.title = info.textContent;
 
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'managed-account-remove';
-      remove.textContent = '✕';
-      remove.title = t('settings.mimo.remove');
-      let confirmingRemove = false;
-      remove.addEventListener('click', async () => {
-        if (!confirmingRemove) {
-          confirmingRemove = true;
-          remove.classList.add('confirming');
-          remove.textContent = '✓';
-          remove.title = t('settings.mimo.removeConfirm', {
-            account: accountName
-          });
-          return;
-        }
-        const result = await window.tokenMonitor.mimo.removeAccount(account.id);
-        if (result?.ok) {
-          state.mimoAccountError = '';
-          state.settings.mimoManagedAccounts = result.accounts || [];
+      const remove = detected ? null : document.createElement('button');
+      if (remove) {
+        remove.type = 'button';
+        remove.className = 'managed-account-remove';
+        remove.textContent = '✕';
+        remove.title = t('settings.mimo.remove');
+        let confirmingRemove = false;
+        remove.addEventListener('click', async () => {
+          if (!confirmingRemove) {
+            confirmingRemove = true;
+            remove.classList.add('confirming');
+            remove.textContent = '✓';
+            remove.title = t('settings.mimo.removeConfirm', {
+              account: accountName
+            });
+            return;
+          }
+          const result = await window.tokenMonitor.mimo.removeAccount(account.id);
+          if (result?.ok) {
+            state.mimoAccountError = '';
+            state.settings.mimoManagedAccounts = result.accounts || [];
+            renderMimoStatus();
+            renderSettingsSummaries();
+            refreshStats({ force: true }).catch(() => {});
+            return;
+          }
+          state.mimoAccountError = result?.error || t('settings.mimo.removeFailed');
           renderMimoStatus();
           renderSettingsSummaries();
-          refreshStats({ force: true }).catch(() => {});
-          return;
-        }
-        state.mimoAccountError = result?.error || t('settings.mimo.removeFailed');
-        renderMimoStatus();
-        renderSettingsSummaries();
-      });
+        });
+      }
 
-      right.append(info, remove);
-      row.append(input, main, right);
+      right.append(info);
+      if (remove) right.append(remove);
+      row.append(input || document.createElement('span'), main, right);
       listEl.append(row);
     }
   }
@@ -15117,9 +15172,10 @@ function renderOpenCodeProfiles() {
       nameInput.value = name;
 
       const renameBtn = document.createElement('button');
+      renameBtn.type = 'button';
       renameBtn.className = 'profile-rename-btn';
-      renameBtn.textContent = '✎';
       renameBtn.title = t('settings.opencode.rename');
+      renameBtn.setAttribute('aria-label', renameBtn.title);
 
       let editing = false;
       function beginRename() {
@@ -15698,9 +15754,10 @@ function appendNamedApiProfileRow(listEl, config) {
     nameInput.type = 'text';
     nameInput.value = name;
     const renameBtn = document.createElement('button');
+    renameBtn.type = 'button';
     renameBtn.className = 'profile-rename-btn';
-    renameBtn.textContent = '✎';
     renameBtn.title = t('settings.profiles.rename');
+    renameBtn.setAttribute('aria-label', renameBtn.title);
     let editing = false;
     const finishRename = async (save) => {
       if (!editing) return;
@@ -16908,7 +16965,11 @@ function setupCursorAccountUI() {
 
   const mimoToggle = document.getElementById('mimoSettingsToggle');
   if (mimoToggle) {
-    mimoToggle.addEventListener('click', () => setMimoAccountExpanded(!state.mimoAccountExpanded));
+    mimoToggle.addEventListener('click', () => {
+      const expanding = !state.mimoAccountExpanded;
+      setMimoAccountExpanded(expanding);
+      if (expanding) void refreshMimoAccounts();
+    });
 
     const addToggle = document.getElementById('mimoAddToggle');
     const addDetails = document.getElementById('mimoAddDetails');
@@ -16927,10 +16988,7 @@ function setupCursorAccountUI() {
       renderMimoStatus();
     });
 
-    window.tokenMonitor.mimo.accounts().then((accounts) => {
-      state.settings.mimoManagedAccounts = accounts || [];
-      renderMimoStatus();
-    }).catch(() => {});
+    void refreshMimoAccounts();
 
     document.getElementById('mimoOpenConsoleButton').addEventListener('click', async () => {
       const result = await window.tokenMonitor.mimo.openConsole();

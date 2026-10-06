@@ -939,7 +939,7 @@ test('maps the Electron target architecture to both Widget build products', () =
   assert.match(widgetBuildSource, /assertWidgetArchitecture\(stagedExtension, helperBinary, architecture\)/);
 });
 
-test('Widget user-facing strings are localized in five languages', () => {
+test('Widget user-facing strings are localized in every supported language', () => {
   const swiftSources = [widgetSource, widgetIntentSource, widgetViewModelSource, widgetDashboardSource, widgetActivitySource];
   const snapshotSource = fs.readFileSync(
     path.join(root, 'native', 'macos', 'TokenMonitorWidget', 'WidgetSnapshot.swift'),
@@ -951,8 +951,15 @@ test('Widget user-facing strings are localized in five languages', () => {
   for (const [key, entry] of Object.entries(widgetLocalization.strings)) {
     assert.deepEqual(
       Object.keys(entry.localizations).sort(),
-      ['en', 'ja', 'ko', 'zh-Hans', 'zh-Hant'],
+      ['en', 'ja', 'ko', 'pt-BR', 'zh-Hans', 'zh-Hant'],
       `missing localization for ${key}`
+    );
+    const formatSpecifiers = (value) => [...value.matchAll(/%(?:\d+\$)?(@|lld|%)/g)]
+      .map((match) => match[1]).sort();
+    assert.deepEqual(
+      formatSpecifiers(entry.localizations['pt-BR'].stringUnit.value),
+      formatSpecifiers(entry.localizations.en.stringUnit.value),
+      `Portuguese format specifiers differ for ${key}`
     );
     assert.ok(Object.values(entry.localizations).every((localization) => (
       localization.stringUnit?.state === 'translated' && localization.stringUnit.value
