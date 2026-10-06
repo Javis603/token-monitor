@@ -807,7 +807,13 @@ function reconcileCursorAutoGlobalModels(period, input) {
     if (period.models[raw] === 0) delete period.models[raw];
     period.models['cursor-auto'] = (period.models['cursor-auto'] || 0) + moved;
     if (exclusive) {
-      for (const key of ['modelCacheReads', 'modelCacheWrites', 'modelOutputs', 'modelUnclassifiedTokens']) {
+      for (const key of [
+        'modelCacheReads',
+        'modelCacheWrites',
+        'modelOutputs',
+        'modelUnclassifiedTokens',
+        'modelUnpricedTokens'
+      ]) {
         if (!period[key][raw]) continue;
         period[key]['cursor-auto'] = (period[key]['cursor-auto'] || 0) + period[key][raw];
         delete period[key][raw];
