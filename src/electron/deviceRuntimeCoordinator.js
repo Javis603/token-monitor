@@ -34,7 +34,7 @@ async function runManualDeviceRefresh(runtime, options = {}) {
       options.onLimitsError?.(error);
       return { ok: false };
     });
-  await runtime.tick('manual', {
+  const usageTask = Promise.resolve().then(() => runtime.tick('manual', {
     forceHistory: options.forceHistory === true,
     // Cursor and Antigravity only move when their sync subprocess runs, and that
     // is throttled to once per 5 minutes. Without this the refresh button cannot
@@ -42,9 +42,15 @@ async function runManualDeviceRefresh(runtime, options = {}) {
     // a throttle. Opt-in for the same reason forceHistory is: the settings and
     // account flows refresh constantly and must not pay for the spawns.
     forceSelfSync: options.forceSelfSync === true
-  });
-  if (options.waitForLimits === true && !(await limitsTask).ok) {
-    throw new Error('Could not refresh local limits');
+  }));
+  if (options.waitForLimits === true) {
+    const [usage, limits] = await Promise.allSettled([usageTask, limitsTask]);
+    if (usage.status === 'rejected') throw usage.reason;
+    if (usage.value !== true) throw new Error('Could not refresh local usage');
+    if (limits.status === 'rejected') throw limits.reason;
+    if (limits.value?.ok !== true) throw new Error('Could not refresh local limits');
+  } else {
+    await usageTask;
   }
 }
 

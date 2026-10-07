@@ -56,7 +56,7 @@ for (const status of ['ok', 'unavailable']) {
     let finishLimits;
     const runtime = {
       refreshLimits: () => new Promise((resolve) => { finishLimits = resolve; }),
-      tick: async () => {}
+      tick: async () => true
     };
     const feedback = [];
     const state = { floatingBubble: { collapsed: false } };

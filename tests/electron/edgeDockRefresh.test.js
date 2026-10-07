@@ -15,6 +15,44 @@ function refreshAction(runtime) {
     `return (${actionSource.trim()})`)(() => true, runtime, runManualLimitsRefresh);
 }
 
+for (const outcome of ['ok', 'unavailable', 'removed', 'stopped', 'disabled']) {
+  test(`full manual refresh waits for a newly added pending provider until ${outcome}`, async (t) => {
+    let finishOriginal;
+    let finishAdded;
+    let addedSignal;
+    const calls = [];
+    const runtime = runtimeFor(clock(), (provider, _config, context) => {
+      calls.push([provider, context.reason]);
+      if (provider === 'kimi' && context.reason === 'manual') {
+        return new Promise((resolve) => { finishOriginal = resolve; });
+      }
+      if (provider === 'cursor') {
+        addedSignal = context.signal;
+        return new Promise((resolve) => { finishAdded = resolve; });
+      }
+      return Promise.resolve([row(provider)]);
+    });
+    t.after(() => runtime.stop());
+    await settle();
+    let completed = false;
+    const manual = refreshAction(runtime)().then((result) => { completed = true; return result; });
+    await settle();
+    runtime.reconfigureLimits({ limitProviders: ['claude', 'kimi', 'cursor'] });
+    await settle();
+    finishOriginal([row('kimi')]);
+    await settle();
+    assert.equal(completed, false, 'original providers cannot finish the refresh while the added probe is pending');
+    assert.equal(addedSignal.aborted, false, 'joining must reuse the provider-added probe');
+    assert.equal(calls.filter(([provider]) => provider === 'cursor').length, 1);
+    if (outcome === 'removed') runtime.reconfigureLimits({ limitProviders: ['claude', 'kimi'] });
+    else if (outcome === 'stopped') runtime.stop();
+    else if (outcome === 'disabled') runtime.reconfigureLimits({ limitsEnabled: false });
+    else finishAdded([row('cursor', outcome)]);
+    assert.deepEqual(await manual, { ok: outcome === 'ok' });
+    finishAdded([row('cursor')]);
+  });
+}
+
 function clock() {
   let now = 1_000;
   let id = 0;
@@ -148,7 +186,7 @@ for (const addedStatus of ['unavailable', 'sourceRateLimited', 'ok', 'notConfigu
     assert.deepEqual(calls, [['claude', 'manual'], ['kimi', 'manual'], ['cursor', 'provider-added']]);
     finish([row('kimi')]);
     const result = await manual;
-    assert.deepEqual(response.results.map((entry) => entry.provider), ['claude', 'kimi']);
+    assert.deepEqual(response.results.map((entry) => entry.provider), ['claude', 'kimi', 'cursor']);
     assert.equal(response.results.some((entry) => entry.superseded || entry.deferred || entry.error), false);
     assert.equal(response.snapshot.providers.find((entry) => entry.provider === 'cursor').status, addedStatus);
     assert.deepEqual(result, { ok: ['ok', 'notConfigured'].includes(addedStatus) });

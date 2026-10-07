@@ -202,6 +202,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
   const providerQueue = [];
   const queuedProviders = new Set();
   const attemptedResetBoundaries = new Set();
+  const fullManualRefreshes = new Set();
   let snapshot = normalizeLimitsSummary({ updatedAt: null, refreshMs, providers: [] });
 
   function laneFor(provider) {
@@ -758,12 +759,34 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       lastScheduledFullAt = now();
       scheduleInterval(refreshMs);
     }
-    return Promise.all([...configuredProviders].map(async (provider) => ({
+    const pending = [...configuredProviders].map(async (provider) => ({
       provider,
       ...await queueScope({ provider }, reason)
-    }))).then((results) => options.includeProviderResults
-      ? { snapshot: getSnapshot(), results }
-      : getSnapshot());
+    }));
+    if (reason === 'manual' && options.includeProviderResults) fullManualRefreshes.add(pending);
+    return (async () => {
+      const results = [];
+      let completed = 0;
+      try {
+        // Reconfiguration can append already-running provider-added probes while
+        // this batch is waiting. Drain them too, without dispatching a second probe.
+        while (completed < pending.length) {
+          const batch = pending.slice(completed);
+          completed = pending.length;
+          results.push(...await Promise.all(batch));
+        }
+        return options.includeProviderResults ? { snapshot: getSnapshot(), results } : getSnapshot();
+      } finally {
+        fullManualRefreshes.delete(pending);
+      }
+    })();
+  }
+
+  function refreshReconfiguredProvider(provider, reason) {
+    const task = queueScope({ provider }, reason);
+    for (const pending of fullManualRefreshes) {
+      pending.push(task.then((result) => ({ provider, ...result })));
+    }
   }
 
   function clear(scope = {}, reason = 'removed') {
@@ -834,11 +857,11 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     }
 
     if (!previousEnabled && enabled) {
-      for (const provider of configuredProviders) void queueScope({ provider }, 'enabled');
+      for (const provider of configuredProviders) refreshReconfiguredProvider(provider, 'enabled');
       lastScheduledFullAt = now();
     } else {
       for (const provider of configuredProviders) {
-        if (!previousProviders.has(provider)) void queueScope({ provider }, 'provider-added');
+        if (!previousProviders.has(provider)) refreshReconfiguredProvider(provider, 'provider-added');
       }
     }
 
