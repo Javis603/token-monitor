@@ -882,6 +882,7 @@ function createEdgeDockController(deps) {
         refreshInFlight = Promise.resolve().then(() => onRefreshLimits())
           .catch((error) => ({ ok: false, error: error?.message || 'Refresh failed' }))
           .finally(() => { refreshInFlight = null; });
+        hapticTick('generic', 'now');
       }
       return refreshInFlight;
     });
