@@ -100,7 +100,8 @@ function createEdgeDockController(deps) {
   let bubblePlaced = null;
   let bubbleVisible = false;
   let railVisible = false;
-  let hapticCellId = null;
+  const refreshHapticTarget = Symbol('refresh');
+  let hapticTarget = null;
   // How many times the rail has been revealed, as an event the page can key the
   // entrance on. See revealRail: the page cannot derive this from `railVisible`,
   // because the retract that takes the rail away never re-renders it.
@@ -615,6 +616,7 @@ function createEdgeDockController(deps) {
     if (!visible) {
       if (!windows.peek.isVisible() || refreshVisible) showPeekWindow(false, FADE_OUT_MS);
       refreshVisible = false;
+      if (hapticTarget === refreshHapticTarget) hapticTarget = null;
       return;
     }
     setPeekMode('refresh');
@@ -647,7 +649,7 @@ function createEdgeDockController(deps) {
     // re-reveals an already-visible rail does not replay the slide.
     if (entering) {
       railReveal += 1;
-      hapticCellId = null;
+      hapticTarget = null;
     }
     render('rail');
     positionRail();
@@ -667,7 +669,7 @@ function createEdgeDockController(deps) {
       return;
     }
     railVisible = false;
-    hapticCellId = null;
+    hapticTarget = null;
     setVisible('rail', false, FADE_OUT_MS);
     showPeek();
   }
@@ -777,10 +779,14 @@ function createEdgeDockController(deps) {
           inCorridor: Boolean(bubbleRect && rectContains(edgeDockCorridorBounds(current.rail, bubbleRect), point)),
           cellIndex: revealed ? edgeDockCellAt(point, current.rail, cells.length) : null
         };
-        const hoveredCellId = Number.isInteger(input.cellIndex) ? cells[input.cellIndex]?.id || null : null;
-        if (hoveredCellId !== hapticCellId) {
-          if (hoveredCellId) hapticTick('alignment', 'now');
-          hapticCellId = hoveredCellId;
+        // The refresh action shares the readouts' enter-once hover feedback.
+        const hoveredTarget = inRefresh
+          ? (!peekPaintPending && settings().edgeDockRefreshEnabled === true && canRefreshLimits() === true
+            ? refreshHapticTarget : null)
+          : (Number.isInteger(input.cellIndex) ? cells[input.cellIndex]?.id || null : null);
+        if (hoveredTarget !== hapticTarget) {
+          if (hoveredTarget) hapticTick('alignment', 'now');
+          hapticTarget = hoveredTarget;
         }
         applyEffects(intent.tick(input, Date.now()), { hapticReveal: !alwaysVisible() });
         refreshHovered = input.inRail || input.inBubble || input.inCorridor;
@@ -882,7 +888,6 @@ function createEdgeDockController(deps) {
         refreshInFlight = Promise.resolve().then(() => onRefreshLimits())
           .catch((error) => ({ ok: false, error: error?.message || 'Refresh failed' }))
           .finally(() => { refreshInFlight = null; });
-        hapticTick('generic', 'now');
       }
       return refreshInFlight;
     });

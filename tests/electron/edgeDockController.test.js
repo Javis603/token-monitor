@@ -876,11 +876,11 @@ for (const mode of ['always', 'autoHide']) {
 }
 
 for (const { platform, enabled, expected } of [
-  { platform: 'darwin', enabled: true, expected: [{ pattern: 'generic', performanceTime: 'now' }] },
+  { platform: 'darwin', enabled: true, expected: [{ pattern: 'alignment', performanceTime: 'now' }] },
   { platform: 'darwin', enabled: false, expected: [] },
   { platform: 'win32', enabled: true, expected: [] }
 ]) {
-  test(`${platform} refresh haptics ${enabled ? 'enabled' : 'disabled'} acknowledge one accepted operation`, async (t) => {
+  test(`${platform} refresh hover haptics ${enabled ? 'enabled' : 'disabled'} match readouts without click feedback`, async (t) => {
     let finish;
     let calls = 0;
     const fixture = createFixture({
@@ -892,28 +892,38 @@ for (const { platform, enabled, expected } of [
     const peek = fixture.windowFor('peek');
     const rail = fixture.windowFor('rail');
     const handler = fixture.ipcMain.handlers.get('edgeDock:refreshLimits');
-    assert.equal((await handler({ sender: peek.webContents })).ok, false);
-    assert.deepEqual(fixture.hapticCalls, []);
     fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents });
     fixture.hapticCalls.length = 0; // Exclude the existing rail-reveal feedback.
-    assert.equal((await handler({ sender: peek.webContents })).ok, false, 'unpainted refresh rejects input');
+    fixture.screen.point = { x: peek.bounds.x + 16, y: peek.bounds.y + 16 };
+    await new Promise((resolve) => setTimeout(resolve, 105));
+    assert.deepEqual(fixture.hapticCalls, [], 'the unpainted action does not trigger hover feedback');
+    assert.equal((await handler({ sender: peek.webContents })).ok, false);
     fixture.paintPeek();
+    await new Promise((resolve) => setTimeout(resolve, 105));
+    assert.deepEqual(fixture.hapticCalls, expected, 'entering a painted action triggers alignment feedback');
+    await new Promise((resolve) => setTimeout(resolve, 105));
+    assert.deepEqual(fixture.hapticCalls, expected, 'staying over the action does not repeat feedback');
     assert.equal((await handler({ sender: rail.webContents })).ok, false);
-    assert.deepEqual(fixture.hapticCalls, [], 'showing the control does not acknowledge a refresh');
     const first = handler({ sender: peek.webContents });
     const duplicate = handler({ sender: peek.webContents });
-    assert.deepEqual(fixture.hapticCalls, expected, 'feedback happens immediately and once');
+    assert.deepEqual(fixture.hapticCalls, expected, 'clicks do not overlap the trackpad click feedback');
     await Promise.resolve();
     assert.equal(calls, 1);
     finish({ ok: false });
     assert.equal((await first).ok, false);
     assert.equal((await duplicate).ok, false);
     assert.deepEqual(fixture.hapticCalls, expected, 'failure does not trigger more feedback');
+    fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 40 };
+    await new Promise((resolve) => setTimeout(resolve, 105));
+    assert.deepEqual(fixture.hapticCalls, [...expected, ...expected], 'returning to a readout gets its own hover feedback');
+    fixture.screen.point = { x: peek.bounds.x + 16, y: peek.bounds.y + 16 };
+    await new Promise((resolve) => setTimeout(resolve, 105));
+    assert.deepEqual(fixture.hapticCalls, [...expected, ...expected, ...expected], 're-entering the action triggers one more tick');
     const next = handler({ sender: peek.webContents });
     await Promise.resolve();
     assert.equal(calls, 2);
     finish({ ok: true });
     assert.equal((await next).ok, true);
-    assert.deepEqual(fixture.hapticCalls, [...expected, ...expected], 'the next refresh has its own acknowledgement');
+    assert.deepEqual(fixture.hapticCalls, [...expected, ...expected, ...expected], 'success does not trigger more feedback');
   });
 }
