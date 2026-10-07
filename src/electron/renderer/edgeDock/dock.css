@@ -72,8 +72,8 @@ html.edge-dock-liquid-glass .edge-dock-shape-line { stroke: transparent; }
 /* ---- Peek handle ------------------------------------------------------- */
 
 /* The handle is a silhouette like the rail's, with the same material, tint and
-   outline, so it reads as the rail folded away. Its shape and window come from
-   the main process, which grows both while the pointer approaches. */
+   outline, so it reads as the rail folded away. Its shape comes from the main
+   process, which draws it larger while the pointer approaches. */
 .edge-dock-root[data-surface="peek"] { cursor: pointer; }
 .edge-dock-root[data-surface="peek"][data-peek-mode="handle"] .edge-dock-shape {
   /* The return takes the window's own FADE_IN_MS, so the handle comes back out on
@@ -87,7 +87,7 @@ html.edge-dock-liquid-glass .edge-dock-shape-line { stroke: transparent; }
    length as it goes. The page holds this as a state rather than replaying an
    animation, so one transition carries it both ways and a page that loads with the
    rail already open starts here instead of animating into it. */
-/* A whole handle's width, whichever size it was withdrawn at. */
+/* The window's whole width, which clears the handle at either size. */
 .edge-dock-root[data-side="right"] { --edge-dock-handle-retreat: 100%; }
 .edge-dock-root[data-side="left"] { --edge-dock-handle-retreat: -100%; }
 .edge-dock-root[data-surface="peek"][data-peek-mode="handle"].is-handle-hidden .edge-dock-shape {

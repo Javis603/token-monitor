@@ -49,10 +49,9 @@
   }
 
   // The handle: a tab flush with the screen edge, rounded on the side facing the
-  // desktop. Its window holds it in whole pixels, so mid-growth the tab can be a
-  // fraction smaller and is centred along it. Drawn for the right edge and
-  // mirrored for the left; `open: true` drops the segment along the display edge,
-  // as the rail's outline does.
+  // desktop and centred along the window, which is larger to leave it room to
+  // grow. Drawn for the right edge and mirrored for the left; `open: true` drops
+  // the segment along the display edge, as the rail's outline does.
   function peekCommands({ width, height, side = 'right', open = false, handleWidth = width, handleLength = height }) {
     const w = width;
     const x = w - Math.min(handleWidth, w);

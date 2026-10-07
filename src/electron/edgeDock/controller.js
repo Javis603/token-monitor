@@ -8,6 +8,7 @@ const {
   edgeDockBubbleBounds,
   edgeDockCellAt,
   edgeDockCorridorBounds,
+  edgeDockHandleBounds,
   edgeDockHandleZones,
   edgeDockPeekBounds,
   edgeDockPlacementForDrop,
@@ -121,6 +122,7 @@ function createEdgeDockController(deps) {
   let peekNear = false;
   let handleGrowth = 0;
   let handleGrowthTimer = null;
+  let pointerOnHandle = false;
   let peekMode = 'handle';
   let peekPaintPending = false;
   let peekTargetVisible = false;
@@ -217,15 +219,15 @@ function createEdgeDockController(deps) {
     const { side, offset } = placement();
     const workArea = current.workArea;
     const rail = edgeDockRailBounds({ workArea, side, offset, cellKinds: cellKinds() });
-    const peek = edgeDockPeekBounds({ workArea, side, railBounds: rail, handle: handleSize() });
+    const peek = edgeDockPeekBounds({ workArea, side, railBounds: rail });
+    const handle = edgeDockHandleBounds({ side, peekBounds: peek, handle: handleSize() });
     const trigger = edgeDockTriggerBounds({ workArea, displayBounds: current.bounds, side, railBounds: rail });
-    // Measured off the resting handle, so the zones hold still while it grows.
-    const zones = edgeDockHandleZones({ side, peekBounds: edgeDockPeekBounds({ workArea, side, railBounds: rail }) });
+    const zones = edgeDockHandleZones({ side, peekBounds: peek });
     const bubble = bubbleCell !== null
       ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: bubbleHeight, workArea, side })
       : null;
     const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail });
-    return { side, workArea, rail, peek, trigger, wake: zones?.wake || null, approach: zones?.approach || null, bubble, refresh };
+    return { side, workArea, rail, peek, handle, trigger, wake: zones?.wake || null, approach: zones?.approach || null, bubble, refresh };
   }
 
   function alive(win) {
@@ -279,7 +281,7 @@ function createEdgeDockController(deps) {
   function setVisible(surface, visible, duration) {
     const win = windows[surface];
     if (!alive(win)) return;
-    win.setIgnoreMouseEvents(!visible);
+    win.setIgnoreMouseEvents(!(visible && (surface !== 'peek' || peekTakesPointer())));
     if (!win.isVisible()) {
       win.setOpacity(0);
       win.showInactive();
@@ -305,6 +307,21 @@ function createEdgeDockController(deps) {
     peeking = visible;
     render('peek');
     showPeekWindow(visible, duration);
+  }
+
+  // The handle's window is larger than the handle, and macOS hit-tests the whole
+  // window rectangle whatever is painted in it, so the margin would take clicks
+  // meant for the app beneath. The window passes the pointer through unless it
+  // is on the handle itself, read from the same cursor poll that drives the dock.
+  function peekTakesPointer() {
+    return peekMode !== 'handle' || pointerOnHandle;
+  }
+
+  function setPointerOnHandle(on) {
+    if (on === pointerOnHandle) return;
+    pointerOnHandle = on;
+    const win = windows.peek;
+    if (alive(win) && peekMode === 'handle' && peekTargetVisible) win.setIgnoreMouseEvents(!on);
   }
 
   function setPeekNear(near) {
@@ -518,6 +535,7 @@ function createEdgeDockController(deps) {
     railVisible = false;
     peeking = false;
     peekNear = false;
+    pointerOnHandle = false;
     stopHandleGrowth();
     handleGrowth = 0;
     peekMode = 'handle';
@@ -653,6 +671,7 @@ function createEdgeDockController(deps) {
     peekTargetVisible = false;
     peeking = false;
     peekNear = false;
+    pointerOnHandle = false;
     stopHandleGrowth();
     handleGrowth = 0;
     refreshVisible = false;
@@ -854,7 +873,7 @@ function createEdgeDockController(deps) {
         }
         const input = {
           inTrigger: rectContains(current.trigger, point),
-          inPeek: !revealed && rectContains(current.peek, point),
+          inPeek: !revealed && rectContains(current.handle, point),
           // Only with the button known to be up: a held one is a scrollbar or a
           // selection being dragged past the handle, not a reach for it, and an
           // unreadable state is treated as held.
@@ -874,6 +893,7 @@ function createEdgeDockController(deps) {
           hapticTarget = hoveredTarget;
         }
         setPeekNear(!revealed && peekMode === 'handle' && rectContains(current.approach, point));
+        setPointerOnHandle(input.inPeek);
         applyEffects(intent.tick(input, Date.now()), { hapticReveal: !alwaysVisible() });
         refreshHovered = input.inRail || input.inBubble || input.inCorridor;
         syncRefresh(current);

@@ -163,6 +163,7 @@ const {
   edgeDockCellAt,
   edgeDockCellLayout,
   edgeDockCorridorBounds,
+  edgeDockHandleBounds,
   edgeDockHandleZones,
   edgeDockPeekBounds,
   edgeDockPlacementForDrop,
@@ -1191,11 +1192,7 @@ test('rail hugs the chosen edge and its peek handle is flush with it', () => {
   assert.equal(right.height, railLength(3));
   const peek = edgeDockPeekBounds({ workArea, side: 'right', railBounds: right });
   assert.equal(peek.x + peek.width, workArea.width);
-  assert.equal(peek.width, EDGE_DOCK_METRICS.handleWidth, 'the window is the handle, with no margin to take clicks');
-  assert.equal(peek.height, EDGE_DOCK_METRICS.handleLength);
-  const growing = edgeDockPeekBounds({ workArea, side: 'right', railBounds: right, handle: { width: 7.25, length: 76.5 } });
-  assert.deepEqual([growing.width, growing.height], [8, 77], 'mid-growth it takes the whole pixels that hold the handle');
-  assert.equal(growing.x + growing.width, workArea.width);
+  assert.equal(peek.height, EDGE_DOCK_METRICS.peekLength);
   assert.equal(peek.y + peek.height / 2, right.y + right.height / 2);
 
   const left = edgeDockRailBounds({ workArea, side: 'left', offset: 1, cellCount: 3 });
@@ -1274,6 +1271,21 @@ test('an explicit empty cell list keeps the rail empty instead of reserving a ce
   assert.equal(edgeDockCellLayout(workArea, null).kinds.length, 1);
 });
 
+test('the handle sits flush and centred inside its larger window, and grows in place', () => {
+  const m = EDGE_DOCK_METRICS;
+  const rail = edgeDockRailBounds({ workArea, side: 'right', offset: 0.5, cellCount: 3 });
+  const peek = edgeDockPeekBounds({ workArea, side: 'right', railBounds: rail });
+  const rest = edgeDockHandleBounds({ side: 'right', peekBounds: peek });
+  assert.equal(rest.x + rest.width, peek.x + peek.width);
+  assert.equal(rest.y + rest.height / 2, peek.y + peek.height / 2);
+  assert.deepEqual([rest.width, rest.height], [m.handleWidth, m.handleLength]);
+  assert.ok(rest.width < peek.width && rest.height < peek.height, 'the window margin is not the handle');
+  const near = edgeDockHandleBounds({ side: 'right', peekBounds: peek, handle: { width: m.handleNearWidth, length: m.handleNearLength } });
+  assert.equal(near.x, peek.x + peek.width - m.handleNearWidth);
+  const leftPeek = edgeDockPeekBounds({ workArea, side: 'left', railBounds: rail });
+  assert.equal(edgeDockHandleBounds({ side: 'left', peekBounds: leftPeek }).x, leftPeek.x);
+});
+
 test('handle zones reach into the desktop from the handle, not along the whole rail', () => {
   const m = EDGE_DOCK_METRICS;
   const rail = edgeDockRailBounds({ workArea, side: 'right', offset: 0.5, cellCount: 3 });
@@ -1342,22 +1354,22 @@ test('rail silhouette starts and ends on the screen edge and mirrors for the lef
   assert.match(toSvgPath(right), /^M64 0 C/);
 });
 
-test('the handle is a tab flush with either screen edge, filling its window', () => {
-  const right = peekCommands({ width: 6, height: 72 });
-  assert.deepEqual(right[0], ['M', 6, 0]);
-  assert.deepEqual(right.at(-2), ['L', 6, 72]);
+test('the handle is a tab flush with either screen edge, centred in its window', () => {
+  const right = peekCommands({ width: 10, height: 88, handleWidth: 6, handleLength: 72 });
+  assert.deepEqual(right[0], ['M', 10, 8]);
+  assert.deepEqual(right.at(-2), ['L', 10, 80]);
   assert.deepEqual(right.at(-1), ['Z']);
-  assert.notDeepEqual(peekCommands({ width: 6, height: 72, open: true }).at(-1), ['Z']);
-  assert.deepEqual(peekCommands({ width: 6, height: 72, side: 'left' })[0], ['M', 0, 0]);
-  const { buffer, pixelWidth } = rasterizeMask(toPolygons(right), 6, 72);
+  assert.notDeepEqual(peekCommands({ width: 10, height: 88, open: true }).at(-1), ['Z']);
+  assert.deepEqual(peekCommands({ width: 10, height: 88, side: 'left', handleWidth: 6, handleLength: 72 })[0], ['M', 0, 8]);
+  const { buffer, pixelWidth } = rasterizeMask(toPolygons(right), 10, 88);
   const alpha = (x, y) => buffer[(y * pixelWidth + x) * 4 + 3];
-  assert.equal(alpha(0, 0), 0, 'the corner facing the desktop is rounded');
-  assert.equal(alpha(5, 0), 255, 'the screen-edge side stays square');
-  assert.equal(alpha(0, 36), 255, 'and the tab otherwise fills the window');
-  // Mid-growth the window holds the handle in whole pixels.
-  const growing = peekCommands({ width: 8, height: 77, handleWidth: 7.25, handleLength: 76.5 });
-  assert.deepEqual(growing[0], ['M', 8, 0.25]);
-  assert.equal(growing[2][5], 0.75);
+  assert.equal(alpha(9, 4), 0, 'the window leaves room around the resting handle');
+  assert.equal(alpha(3, 44), 0);
+  assert.equal(alpha(4, 8), 0, 'the corner facing the desktop is rounded');
+  assert.equal(alpha(9, 9), 255, 'the screen-edge side stays square');
+  assert.equal(alpha(4, 44), 255);
+  const near = rasterizeMask(toPolygons(peekCommands({ width: 10, height: 88, handleWidth: 8, handleLength: 80 })), 10, 88);
+  assert.equal(near.buffer[(44 * near.pixelWidth + 3) * 4 + 3], 255, 'the approached handle reaches further in');
 });
 
 test('bubble tail tip lands on tailY and stays clear of the corners', () => {
