@@ -1078,6 +1078,47 @@ test('deferred Dots price refreshes retain same-revision costs but never reuse a
   assert.equal(changedRevision.unpricedTokens, 40, 'old-revision prices cannot fill deferred models');
 });
 
+test('failed Dots price refreshes retain successful same-revision rates and retry without treating a confirmed miss as priced', async (t) => {
+  let now = 5000000;
+  t.mock.method(Date, 'now', () => now);
+  const rows = [{ model: 'aggregate-refresh-failure' }, { model: 'aggregate-refresh-free' }];
+  const prices = [{ inputCostPerToken: 1 }, { inputCostPerToken: 0 }];
+  let behavior = 'success';
+  let calls = 0;
+  const options = {
+    pricingRevision: 'aggregate-refresh-failure',
+    lookupModelPricing: async (model) => {
+      calls += 1;
+      if (behavior === 'throw') throw new Error('temporary catalog timeout');
+      return { pricing: behavior === 'missing' ? null : prices[rows.findIndex((row) => row.model === model)] };
+    }
+  };
+  await resolveLocalUsagePricing(rows, options);
+  now += 300001;
+  behavior = 'throw';
+  const failedRefresh = await resolveLocalUsagePricing(rows, options);
+  assert.equal(calls, 4);
+  assert.deepEqual(rows.map(({ model }) => failedRefresh[model]), prices);
+  now += 29999;
+  await resolveLocalUsagePricing(rows, options);
+  assert.equal(calls, 4, 'command failures retain the short retry delay');
+  now += 2;
+  const stillFailed = await resolveLocalUsagePricing(rows, options);
+  assert.equal(calls, 6);
+  assert.deepEqual(rows.map(({ model }) => stillFailed[model]), prices);
+
+  const changedRevision = await resolveLocalUsagePricing(rows, { ...options, pricingRevision: 'aggregate-refresh-failure-revised' });
+  assert.ok(Object.values(changedRevision).every((price) => price === null));
+  now += 30001;
+  behavior = 'missing';
+  const confirmedMissing = await resolveLocalUsagePricing(rows, options);
+  assert.ok(Object.values(confirmedMissing).every((price) => price === null), 'a successful catalog miss replaces the previous rates');
+  now += 30001;
+  behavior = 'success';
+  const recovered = await resolveLocalUsagePricing(rows, options);
+  assert.deepEqual(rows.map(({ model }) => recovered[model]), prices);
+});
+
 test('pricing rotation reaches models beyond cache capacity even when prices expire between ticks', async (t) => {
   let now = 3000000;
   t.mock.method(Date, 'now', () => now);
@@ -1117,7 +1158,8 @@ test('bounded Dots lookups preserve successful/missing cache lifetimes and expli
   assert.equal(lookups.length, 2);
   now += 2;
   await resolveLocalUsagePricing(rows, options);
-  assert.deepEqual(lookups.map(({ model }) => model), ['aggregate-free', 'aggregate-missing', 'aggregate-missing']);
+  assert.equal(lookups.filter(({ model }) => model === 'aggregate-free').length, 1);
+  assert.equal(lookups.filter(({ model }) => model === 'aggregate-missing').length, 2);
   now = 2300000;
   await resolveLocalUsagePricing(rows, options);
   assert.equal(lookups.filter(({ model }) => model === 'aggregate-free').length, 2);

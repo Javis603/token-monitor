@@ -769,9 +769,14 @@ async function collectHistoryOnce(options) {
   }
   // Keep the supplemental ledger out of generic history retention too: a
   // retained maximum would survive when a native rollout replaces this thread.
-  const withLocalHistory = (history) => options.codexLocalGraph
-    ? mergeHistories([history, normalizeHistory(parseGraphResult(options.codexLocalGraph), { capDays, todayKey })].filter(Boolean), { capDays, todayKey })
-    : history;
+  const withLocalHistory = (history) => {
+    // A failed native scan without retained history is no update, not a new
+    // Dots-only replacement for the device's last successful full history.
+    if (!history && failureCode === 'history-graph-failed') return null;
+    return options.codexLocalGraph
+      ? mergeHistories([history, normalizeHistory(parseGraphResult(options.codexLocalGraph), { capDays, todayKey })].filter(Boolean), { capDays, todayKey })
+      : history;
+  };
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {

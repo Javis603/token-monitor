@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { createDeviceState } = require('../../src/shared/usage/deviceState');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
 
 installInProcessWatchHost(test);
@@ -81,6 +82,69 @@ test('collectHistoryOnce returns null when the graph run throws', async () => {
   assert.deepEqual(statuses.map(({ failureCode, successAt }) => ({ failureCode, successAt })), [
     { failureCode: 'history-graph-failed', successAt: null }
   ]);
+});
+
+test('native graph failure with Dots usage preserves the previous complete device history', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dots-history-failure-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const now = new Date(2026, 5, 7, 12);
+  const common = {
+    clients: 'claude,codex', deviceId: 'dots-history-failure', allTimeSince: '2026-01-01', now,
+    homeDir: dir, env: { TOKEN_MONITOR_SHARED_DIR: dir, CODEX_HOME: path.join(dir, '.codex') },
+    projectsEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+    historyEnabled: true, includeHistory: true, deferLiveHistoryCapture: true,
+    runTokscale: async () => ({ entries: [] }),
+    codexLocalUsageStore: { rows: () => [{
+      threadId: 'dots-history-failure-thread', model: 'unknown', observedAt: now.toISOString(),
+      usage: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 10 }
+    }] }
+  };
+  const first = await collectUsageOnce({ ...common, runGraph: async () => SAMPLE_GRAPH });
+  assert.equal(first.history.summary.totalTokens, 40);
+  assert.equal(first.history.daily[0].perClient.claude.tokens, 30);
+  assert.equal(first.history.daily[0].perClient.codex.tokens, 10);
+  const state = createDeviceState();
+  state.updateUsage(first);
+  const corruptArchive = path.join(dir, 'corrupt-history.json');
+  fs.writeFileSync(corruptArchive, 'invalid json');
+  for (const archive of [
+    { dailyHistoryArchiveEnabled: false },
+    { dailyHistoryArchiveEnabled: true, dailyHistoryArchiveOptions: { path: path.join(dir, 'missing-history.json') } },
+    { dailyHistoryArchiveEnabled: true, dailyHistoryArchiveOptions: { path: corruptArchive } }
+  ]) {
+    const status = [];
+    const failed = await collectUsageOnce({
+      ...common, ...archive, onHistoryStatus: (value) => status.push(value),
+      runGraph: async () => { throw new Error('temporary graph failure'); }
+    });
+    assert.equal(failed.today.totalTokens, 10, 'live Dots periods still update');
+    assert.equal(Object.hasOwn(failed, 'history'), false, 'partial history must not replace the complete snapshot');
+    assert.equal(status[0].successAt, null);
+    assert.equal(status[0].failureCode, 'history-graph-failed');
+    const record = state.updateUsage(failed);
+    assert.deepEqual(record.history, first.history);
+  }
+});
+
+test('Dots history still merges after a successful empty native scan or a graph failure with retained native history', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dots-history-retained-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = {
+    clients: 'claude,codex', todayKey: '2026-06-07',
+    codexLocalGraph: { contributions: [{ date: '2026-06-07', clients: [{
+      client: 'codex', modelId: 'unknown', tokens: { input: 10 }, cost: 0, messages: 1
+    }] }] }
+  };
+  const emptyNative = await collectHistoryOnce({ ...options, runGraph: async () => ({ contributions: [] }) });
+  assert.equal(emptyNative.summary.totalTokens, 10);
+  const archiveOptions = { dailyHistoryArchiveEnabled: true, dailyHistoryArchiveOptions: { path: path.join(dir, 'history.json') } };
+  await collectHistoryOnce({ ...options, ...archiveOptions, runGraph: async () => SAMPLE_GRAPH });
+  const fallback = await collectHistoryOnce({
+    ...options, ...archiveOptions, runGraph: async () => { throw new Error('temporary graph failure'); }
+  });
+  assert.equal(fallback.summary.totalTokens, 40);
+  assert.equal(fallback.daily[0].perClient.claude.tokens, 30);
+  assert.equal(fallback.daily[0].perClient.codex.tokens, 10);
 });
 
 test('collector preserves the last successful history timestamp after a failed refresh', async () => {

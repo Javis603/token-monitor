@@ -121,9 +121,16 @@ async function resolveLocalUsagePricing(rows, options = {}) {
     - (b.index - start + models.length) % models.length);
   for (const { model, key, index } of pending.slice(0, MAX_PRICING_LOOKUPS_PER_TICK)) {
     pricingCursor = index + 1;
-    let pricing = null;
-    try { pricing = (await options.lookupModelPricing(model, options.commandTimeoutMs || 1500))?.pricing || null; } catch (_) { /* Usage remains valid without a price. */ }
-    pricingCache.set(key, { pricing, until: Date.now() + (pricing ? 300000 : 30000) });
+    let pricing;
+    let retryMs = 30000;
+    try {
+      pricing = (await options.lookupModelPricing(model, options.commandTimeoutMs || 1500))?.pricing || null;
+      if (pricing) retryMs = 300000;
+    } catch (_) {
+      // A transport/command failure says nothing about whether a rate exists.
+      pricing = pricingCache.get(key)?.pricing || null;
+    }
+    pricingCache.set(key, { pricing, until: Date.now() + retryMs });
     if (pricingCache.size > 256) pricingCache.delete(pricingCache.keys().next().value);
     result[model] = pricing;
   }
