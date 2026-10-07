@@ -23,11 +23,17 @@ class FakeWebContents extends EventEmitter {
 class FakeBrowserWindow extends EventEmitter {
   static instances = [];
   static zOrder = [];
+  static shapeFails = false;
 
+  // A window region, once set, is all of the window that takes input.
   static atPoint(point) {
     return this.zOrder.findLast((win) => !win.destroyed && win.visible && !win.ignoreMouse
       && point.x >= win.bounds.x && point.x < win.bounds.x + win.bounds.width
-      && point.y >= win.bounds.y && point.y < win.bounds.y + win.bounds.height);
+      && point.y >= win.bounds.y && point.y < win.bounds.y + win.bounds.height
+      && (!win.region || win.region.some((rect) => (
+        point.x >= win.bounds.x + rect.x && point.x < win.bounds.x + rect.x + rect.width
+        && point.y >= win.bounds.y + rect.y && point.y < win.bounds.y + rect.y + rect.height
+      ))));
   }
 
   constructor(options) {
@@ -68,7 +74,11 @@ class FakeBrowserWindow extends EventEmitter {
   setAlwaysOnTop(flag, level) { this.zOrderCalls.push(['setAlwaysOnTop', flag, level]); }
   setVisibleOnAllWorkspaces() {}
   setHiddenInMissionControl() {}
-  setShape(rects) { this.shapeCalls.push(rects); }
+  setShape(rects) {
+    this.shapeCalls.push(rects);
+    if (FakeBrowserWindow.shapeFails) throw new Error('region unavailable');
+    this.region = rects;
+  }
   setBackgroundMaterial(material) { this.backgroundMaterials.push(material); }
   setVibrancy(value) { this.vibrancyCalls.push(value); }
   setHasShadow(value) { this.hasShadowCalls.push(value); }
@@ -114,6 +124,7 @@ function sentPayload(win, surface) {
 function createFixture(options = {}) {
   FakeBrowserWindow.instances = [];
   FakeBrowserWindow.zOrder = [];
+  FakeBrowserWindow.shapeFails = options.shapeFails === true;
   const settings = {
     edgeDockEnabled: true,
     edgeDockRefreshEnabled: true,
@@ -589,13 +600,34 @@ test('the Windows handle window takes the pointer and leaves the margin to its r
   const fixture = createFixture({ platform: 'win32', settings: { edgeDockMode: 'autoHide' } });
   t.after(() => fixture.controller.stop());
   const peek = fixture.windowFor('peek');
+  const y = peek.bounds.y + peek.bounds.height / 2;
+  const margin = { x: peek.bounds.x, y: peek.bounds.y + 1 };
   assert.equal(peek.ignoreMouse, false);
   assert.equal(peek.forwardMouse, false, 'no system-wide mouse hook');
-  assert.ok(peek.shapeCalls.length > 0, 'the region is what clips the hit test');
+  assert.equal(FakeBrowserWindow.atPoint({ x: peek.bounds.x + peek.bounds.width - 1, y }), peek, 'the handle takes clicks');
+  assert.equal(FakeBrowserWindow.atPoint(margin), undefined, 'the margin leaves them to the app beneath');
 
-  fixture.screen.point = { x: peek.bounds.x, y: peek.bounds.y + 1 };
+  fixture.screen.point = margin;
   await new Promise((resolve) => setTimeout(resolve, 120));
   assert.equal(peek.ignoreMouse, false, 'leaving the handle does not turn pass-through back on');
+});
+
+test('a Windows handle without its region falls back to passing the pointer through', async (t) => {
+  const fixture = createFixture({ platform: 'win32', settings: { edgeDockMode: 'autoHide' }, shapeFails: true });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+  const margin = { x: peek.bounds.x, y: peek.bounds.y + 1 };
+  assert.equal(peek.ignoreMouse, true);
+  assert.equal(peek.forwardMouse, false, 'still without the mouse hook');
+  assert.equal(FakeBrowserWindow.atPoint(margin), undefined);
+
+  fixture.screen.point = { x: peek.bounds.x + peek.bounds.width - 1, y: peek.bounds.y + peek.bounds.height / 2 };
+  let took = false;
+  for (let waited = 0; waited < 300 && !took; waited += 5) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    took = peek.ignoreMouse === false;
+  }
+  assert.equal(took, true, 'the cursor poll still hands it the pointer on the handle');
 });
 
 test('the cursor poll speeds up in the approach zone so the handle takes the pointer sooner', async (t) => {
