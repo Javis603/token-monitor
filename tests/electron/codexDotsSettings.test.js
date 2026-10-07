@@ -30,7 +30,7 @@ class Element {
   get disabled() { return this.hasAttribute('disabled'); }
 }
 class Input extends Element {
-  constructor() { super('input'); this.checked = false; }
+  constructor() { super('input'); this.type = 'checkbox'; this.checked = false; }
 }
 function findInput(element, id) {
   if (element.id === id) return element;

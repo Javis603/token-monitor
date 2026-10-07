@@ -106,6 +106,7 @@ test('persistent checkpoints deduplicate two collectors, restarts and late notif
   assert.equal(store.observe(event()), false);
   other.close();
   const restarted = createLocalUsageStore({ env });
+  closeables.push(restarted);
   assert.equal(restarted.observe(event({ tokenUsage: { last: LAST, total: addCounters(TOTAL, LAST) } })), false);
   assert.equal(restarted.rows().reduce((sum, row) => sum + row.usage.total, 0), 300358);
   restarted.close();

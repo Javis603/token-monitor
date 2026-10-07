@@ -10,6 +10,13 @@
 })(typeof window !== 'undefined' ? window : null, function createProjectRowsApi(projectKeyApi) {
   const { canonicalProjectKey, deterministicProjectLabel } = projectKeyApi;
 
+  function unpricedTokensFor(value, total) {
+    const missing = Number(value);
+    const tokens = Number(total);
+    return Number.isFinite(missing) && Number.isFinite(tokens)
+      ? Math.min(Math.max(0, tokens), Math.max(0, Math.round(missing))) : 0;
+  }
+
   function projectBreakdownIncomplete(stats, period) {
     if (period === 'allTime') return stats?.projectsIncomplete === true;
     return Number(stats?.periodProjectsOmitted?.[period] || 0) > 0;
@@ -57,7 +64,8 @@
         project.name = deterministicProjectLabel(project.name, name);
         project.value += Math.max(0, Number(entry.tokens || 0));
         project.cost += Number(entry.costUsd || 0);
-        if (entry.unpricedTokens > 0) project.unpricedTokens = (project.unpricedTokens || 0) + Number(entry.unpricedTokens);
+        const unpriced = unpricedTokensFor(entry.unpricedTokens, entry.tokens);
+        if (unpriced > 0) project.unpricedTokens = (project.unpricedTokens || 0) + unpriced;
         for (const [client, tokens] of Object.entries(clientTokens)) {
           project.clients.add(client);
           project.clientTokens[client] = (Object.prototype.hasOwnProperty.call(project.clientTokens, client) ? project.clientTokens[client] : 0) + tokens;
@@ -74,7 +82,8 @@
         const sessionTokens = Math.max(0, Number(session.totalTokens || 0));
         project.value += sessionTokens;
         project.cost += Number(session.costUsd || 0);
-        if (session.unpricedTokens > 0) project.unpricedTokens = (project.unpricedTokens || 0) + Number(session.unpricedTokens);
+        const unpriced = unpricedTokensFor(session.unpricedTokens, sessionTokens);
+        if (unpriced > 0) project.unpricedTokens = (project.unpricedTokens || 0) + unpriced;
         if (session.client) {
           project.clients.add(session.client);
           project.clientTokens[session.client] = (Object.prototype.hasOwnProperty.call(project.clientTokens, session.client) ? project.clientTokens[session.client] : 0) + sessionTokens;

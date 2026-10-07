@@ -143,3 +143,5 @@ html.native-high-contrast .dash-cards { border-color: var(--line-strong); }
   :root:not([data-reduce-motion="off"]) .range-btn,
   :root:not([data-reduce-motion="off"]) .bar-seg { transition: none; }
 }
+
+.dash-card-v .usage-cost-info { margin-inline-start: 3px; }

@@ -25,6 +25,8 @@ These requests appear under the existing `codex` client and use the actual threa
 
 Manual acceptance: run the updated widget with the experimental environment opt-in and Codex tracking enabled and the desktop local executor connected, ask Dots to create or continue a local project task, then verify its title/tokens in Sessions and its directory label in Projects. Restart Token Monitor and verify the same totals remain; continue the task and verify only the new consumption is added. Usage before observation began is deliberately outside this acceptance scope.
 
+Dots session details preserve each observed request's model and token buckets through the Worker message boundary. Main resolves at most 16 distinct known models per open/refresh through the existing `tokscale pricing <model> --json` catalog lookup (1.5-second command timeout each); only model IDs are passed, without thread IDs, counters or conversation content. Tokscale may refresh its public pricing catalog; this is not model inference. Unknown models are never looked up. Each valid bucket rate contributes to the known subtotal while only missing-rate buckets are marked unpriced. No session subtotal is proportionally distributed onto Dots requests. Exchanges and turns preserve missing-price counts through grouping, period filtering and renderer adapters. This does not add actual-model evidence or change the raw ledger.
+
 ## Session metadata and context
 
 `sessionMetadata.js` joins rollout sessions to Codex's thread databases and, for T3 Code sessions, T3's own thread catalog. T3 drives the same harness but stores generated titles separately; a Codex-only lookup can otherwise fall back to the first user message. Attachment markup and agent boilerplate are stripped before display. Background reviews keep their `sessionKind` rather than masquerading as ordinary chats.
@@ -68,5 +70,3 @@ Run the Codex session, limits, login and account-switching tests when changing t
 ```bash
 node --test tests/shared/codex*.test.js tests/shared/limitCollector.codex*.test.js tests/shared/sessionContext.test.js tests/electron/codex*.test.js
 ```
-
-Dots session details preserve each observed request's model and token buckets through the Worker message boundary. Main resolves at most 16 distinct known models per open/refresh through the existing `tokscale pricing <model> --json` catalog lookup (1.5-second command timeout each); only model IDs are passed, without thread IDs, counters or conversation content. Tokscale may refresh its public pricing catalog; this is not model inference. Unknown models are never looked up. Each valid bucket rate contributes to the known subtotal while only missing-rate buckets are marked unpriced. No session subtotal is proportionally distributed onto Dots requests. Exchanges and turns preserve missing-price counts through grouping, period filtering and renderer adapters. This does not add actual-model evidence or change the raw ledger.

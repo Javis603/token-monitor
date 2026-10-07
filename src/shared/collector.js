@@ -1136,7 +1136,11 @@ async function collectUsageOnce(options) {
       options.onCodexLocalUsageComputed?.(codexLocalView);
     } catch (_error) {
       if (options.signal?.aborted) throw abortReason(options.signal);
-      options.onDiagnosticEvent?.({ subsystem: 'collector', code: 'codex-local-usage-read-failed' });
+      try {
+        options.onDiagnosticEvent?.({ subsystem: 'collector', code: 'codex-local-usage-read-failed' });
+      } catch (_) {
+        // Diagnostic observers must not turn a recoverable ledger error into a failed tick.
+      }
     }
   }
 

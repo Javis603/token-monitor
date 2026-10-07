@@ -275,6 +275,22 @@ function formatCost(value) {
   return currencyApi.formatCurrencyFromUsd(value, appearance().currency || 'USD');
 }
 
+// Keep the known subtotal compact; the shared info tooltip explains its omissions.
+function usageCostNode(className, usage) {
+  const node = el('span', className);
+  node.classList.add('edge-dock-cost-reading');
+  const missing = Number(usage.unpricedTokens || 0);
+  node.append(el('span', '', missing > 0 && !(usage.costUsd > 0) ? '—' : formatCost(usage.costUsd)));
+  if (missing > 0) {
+    const info = el('span', 'usage-cost-info');
+    limitWindowsView.setDetailTooltip(info, [{ full: t('usage.excludedFromCost', {
+      tokens: formatCardTokens(missing)
+    }) }], { centered: true });
+    node.append(info);
+  }
+  return node;
+}
+
 // Low and critical colours are opt-in (edgeDockWarnColors): by default every
 // figure reads in the normal text colour. Unknown values stay muted either way,
 // since `--` is an absence of data rather than a warning.
@@ -576,7 +592,8 @@ function statLabel(metric) {
 // full-precision figure. The compact form goes through the same shared helper
 // as the tray and dashboard, so it follows the token unit system — a localized
 // user sees 萬/億 here too, never 億 beside K.
-function formatRailCost(value) {
+function formatRailCost(value, unpricedTokens) {
+  if (unpricedTokens > 0) return '—';
   const code = appearance().currency || 'USD';
   const amount = Math.abs(currencyApi.convertUsd(value, code));
   if (amount >= 10_000) {
@@ -677,7 +694,7 @@ function statCellNode(cell) {
   } else {
     node.append(
       el('span', 'edge-dock-stat-value', formatTokens(cell.totalTokens)),
-      el('span', 'edge-dock-stat-cost', formatRailCost(cell.costUsd))
+      el('span', 'edge-dock-stat-cost', formatRailCost(cell.costUsd, cell.unpricedTokens))
     );
   }
   // The tool marks are decorative: the count beside them already says how many
@@ -1037,7 +1054,7 @@ function usageTile(label, usage) {
     el('span', 'edge-dock-usage-label', label),
     el('span', 'edge-dock-usage-tokens', usage ? formatBreakdownTokens(usage.tokens) : '—')
   );
-  if (usage) tile.append(el('span', 'edge-dock-usage-cost', formatCost(usage.costUsd)));
+  if (usage) tile.append(usageCostNode('edge-dock-usage-cost', usage));
   return tile;
 }
 
@@ -1366,7 +1383,7 @@ function statCard(cell) {
     compactNode.setAttribute('aria-hidden', 'true');
     totalRow.append(compactNode);
   }
-  total.append(totalRow, el('span', '', formatCost(cell.costUsd)));
+  total.append(totalRow, usageCostNode('', cell));
   card.append(total);
   if (!cell.clients.length && !(cell.models || []).length) {
     card.append(el('div', 'edge-dock-note', t('edgeDock.noUsagePeriod')));

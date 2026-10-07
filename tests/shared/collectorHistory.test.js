@@ -675,3 +675,22 @@ test('shouldIncludeHistory: first call, throttle window, and force', () => {
 test('shouldIncludeHistory returns false when history collection is disabled', () => {
   assert.equal(shouldIncludeHistory(1_000_000_000_000, 0, 0, true, false), false);
 });
+
+
+test('a failed Dots ledger and throwing diagnostic observer do not discard native scans', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dots-diagnostic-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const diagnostics = [];
+  const summary = await collectUsageOnce({
+    clients: 'codex', deviceId: 'diagnostic-fixture', homeDir: home,
+    env: { TOKEN_MONITOR_SHARED_DIR: home, CODEX_HOME: path.join(home, '.codex') },
+    projectsEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+    historyEnabled: false, includeHistory: false, codexLocalUsageEnabled: true,
+    codexLocalUsageStore: { rows() { throw new Error('fixture ledger failure'); } },
+    onDiagnosticEvent(event) { diagnostics.push(event.code); throw new Error('fixture observer failure'); },
+    runTokscale: async () => ({ entries: [{ client: 'codex', model: 'gpt-test', input: 100, cost: 1 }] })
+  });
+  assert.equal(summary.today.totalTokens, 100);
+  assert.equal(summary.today.costUsd, 1);
+  assert.ok(diagnostics.includes('codex-local-usage-read-failed'));
+});

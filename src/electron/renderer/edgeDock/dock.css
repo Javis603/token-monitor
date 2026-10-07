@@ -983,3 +983,5 @@ html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge
 .edge-dock-rate-model-value { color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .edge-dock-rate-device { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .edge-dock-rate-device.is-separated { margin-top: 2px; padding-top: 8px; border-top: 1px solid rgba(var(--line-rgb), 0.16); }
+
+.edge-dock-cost-reading { display: inline-flex; align-items: center; gap: 3px; }
