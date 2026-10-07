@@ -116,6 +116,7 @@ function createEdgeDockController(deps) {
   let refreshVisible = false;
   let refreshHovered = false;
   let refreshInFlight = null;
+  let refreshInFlightWindow = null;
   let drag = null;
   let placementOverride = null;
   let fullScreen = false;
@@ -608,11 +609,16 @@ function createEdgeDockController(deps) {
     }
   }
 
+  function refreshKeepsButtonVisible() {
+    return Boolean(refreshInFlight) && windows.peek === refreshInFlightWindow
+      && settings().edgeDockRefreshEnabled === true && canRefreshLimits() === true;
+  }
+
   function syncRefresh(current = layout()) {
     if (!current || !alive(windows.peek)) return;
     const visible = settings().edgeDockRefreshEnabled === true
       && railVisible && !drag && canRefreshLimits() === true
-      && (!alwaysVisible() || refreshHovered);
+      && (!alwaysVisible() || refreshHovered || refreshKeepsButtonVisible());
     if (!visible) {
       if (!windows.peek.isVisible() || refreshVisible) showPeekWindow(false, FADE_OUT_MS);
       refreshVisible = false;
@@ -886,6 +892,7 @@ function createEdgeDockController(deps) {
         || settings().edgeDockRefreshEnabled !== true || canRefreshLimits() !== true || !onRefreshLimits) return { ok: false, error: 'Not refreshable' };
       if (!refreshInFlight) {
         const refreshWindow = windows.peek;
+        refreshInFlightWindow = refreshWindow;
         refreshInFlight = Promise.resolve().then(() => onRefreshLimits())
           .then((result) => {
             if (result?.ok === true && running && windows.peek === refreshWindow
@@ -893,7 +900,10 @@ function createEdgeDockController(deps) {
             return result;
           })
           .catch((error) => ({ ok: false, error: error?.message || 'Refresh failed' }))
-          .finally(() => { refreshInFlight = null; });
+          .finally(() => {
+            refreshInFlight = null;
+            refreshInFlightWindow = null;
+          });
       }
       return refreshInFlight;
     });

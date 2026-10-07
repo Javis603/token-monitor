@@ -958,3 +958,90 @@ for (const change of ['stop', 'restart', 'remove', 'disable haptics']) {
     assert.deepEqual(fixture.hapticCalls, []);
   });
 }
+
+for (const mode of ['always', 'alwaysExceptFullScreen']) {
+  for (const outcome of ['success', 'failure', 'throw']) {
+    test(`${mode} refresh stays visible after pointer leave until ${outcome}`, async (t) => {
+      let finish;
+      let fail;
+      const fixture = createFixture({
+        settings: { edgeDockMode: mode }, isFullScreen: () => false,
+        canRefreshLimits: () => true,
+        onRefreshLimits: () => new Promise((resolve, reject) => { finish = resolve; fail = reject; })
+      });
+      t.after(() => fixture.controller.stop());
+      const peek = fixture.windowFor('peek');
+      const rail = fixture.windowFor('rail');
+      fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 40 };
+      await new Promise((resolve) => setTimeout(resolve, 105));
+      fixture.paintPeek();
+      const request = fixture.ipcMain.handlers.get('edgeDock:refreshLimits')({ sender: peek.webContents });
+      await Promise.resolve();
+      fixture.screen.point = { x: 100, y: 100 };
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      assert.equal(peek.ignoreMouse, false, 'the busy button remains visible after the normal leave grace');
+      assert.equal(peek.opacity, 1);
+      assert.equal(rail.ignoreMouse, false);
+      assert.equal(sentPayload(peek, 'peek').peekMode, 'refresh');
+      if (outcome === 'throw') fail(new Error('Probe failed'));
+      else finish({ ok: outcome === 'success' });
+      assert.equal((await request).ok, outcome === 'success');
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      assert.equal(peek.ignoreMouse, true, 'the unhovered button hides after completion');
+      assert.equal(rail.ignoreMouse, false);
+    });
+  }
+}
+
+test('busy visibility yields to dragging and removing the action', async (t) => {
+  let finish;
+  const fixture = createFixture({
+    canRefreshLimits: () => true,
+    onRefreshLimits: () => new Promise((resolve) => { finish = resolve; })
+  });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+  const rail = fixture.windowFor('rail');
+  fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 40 };
+  await new Promise((resolve) => setTimeout(resolve, 105));
+  fixture.paintPeek();
+  const request = fixture.ipcMain.handlers.get('edgeDock:refreshLimits')({ sender: peek.webContents });
+  await Promise.resolve();
+  fixture.screen.point = { x: 100, y: 100 };
+  await new Promise((resolve) => setTimeout(resolve, 105));
+  assert.equal(peek.ignoreMouse, false);
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetY: 20 });
+  assert.equal(peek.ignoreMouse, true);
+  fixture.ipcMain.emit('edgeDock:dragEnd', { sender: rail.webContents });
+  assert.equal(peek.ignoreMouse, false, 'the busy button returns after dragging');
+  fixture.settings.edgeDockRefreshEnabled = false;
+  fixture.controller.sync();
+  assert.equal(peek.ignoreMouse, true, 'removing the action takes effect during refresh');
+  finish({ ok: true });
+  assert.deepEqual(await request, { ok: true });
+  assert.equal(peek.ignoreMouse, true);
+});
+
+for (const mode of ['autoHide', 'alwaysExceptFullScreen']) {
+  test(`${mode} keeps auto-hide behaviour during refresh in its auto-hide state`, async (t) => {
+    let finish;
+    const fixture = createFixture({
+      settings: { edgeDockMode: mode }, isFullScreen: () => true,
+      canRefreshLimits: () => true,
+      onRefreshLimits: () => new Promise((resolve) => { finish = resolve; })
+    });
+    t.after(() => fixture.controller.stop());
+    const peek = fixture.windowFor('peek');
+    const rail = fixture.windowFor('rail');
+    fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents });
+    fixture.paintPeek();
+    const request = fixture.ipcMain.handlers.get('edgeDock:refreshLimits')({ sender: peek.webContents });
+    await Promise.resolve();
+    fixture.screen.point = { x: 100, y: 100 };
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    assert.equal(rail.ignoreMouse, true, 'leaving still retracts the auto-hide rail while refreshing');
+    assert.equal(sentPayload(peek, 'peek').peekMode, 'handle');
+    finish({ ok: true });
+    assert.deepEqual(await request, { ok: true });
+  });
+}
