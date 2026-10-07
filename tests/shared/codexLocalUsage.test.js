@@ -19,7 +19,7 @@ const { projectRowsForPeriod } = require('../../src/electron/renderer/projectRow
 const { readSessionDetail } = require('../../src/shared/sessionDetail');
 const { buildLocalUsageView } = require('../../src/shared/providers/codex/localUsage');
 const { syncPayload } = require('../../src/shared/syncPayload');
-const { normalizeDeviceRecord } = require('../../src/shared/usage');
+const { mergeDeviceRecord, normalizeDeviceRecord } = require('../../src/shared/usage');
 
 const ID = '01234567-1234-1234-1234-123456789abc';
 const AT = new Date(2026, 9, 2, 12).toISOString();
@@ -53,6 +53,12 @@ test('ownership requires the actual local executor, excluding cloud, other compu
   const ids = executorIdsFromProcesses('/app/codex exec-server --remote https://registry.test/api --environment-id executor-local\n/app/codex app-server\n/app/other exec-server --environment-id wrong');
   assert.deepEqual([...ids], ['executor-local']);
   assert.deepEqual([...executorIdsFromProcesses('"C:\\Program Files\\Codex\\codex.exe" exec-server --environment-id "executor-windows"')], ['executor-windows']);
+  assert.deepEqual([...executorIdsFromProcesses('  codex exec-server --environment-id executor-bare')], ['executor-bare']);
+  assert.deepEqual([...executorIdsFromProcesses([
+    '/bin/bash -c "echo /tmp/codex exec-server --environment-id executor-local"',
+    '/app/other --command /app/codex exec-server --environment-id executor-local',
+    '/app/codex-wrapper exec-server --environment-id executor-local'
+  ].join('\n'))], []);
   assert.equal(localThreadEnvironment(LOCAL, ids).cwd, '/work/project');
   assert.equal(localThreadEnvironment({ ...LOCAL, originator: 'orbit_cca_desktop', threadSource: 'aeon' }, ids), null);
   assert.equal(localThreadEnvironment({ ...LOCAL, environments: [{ environmentId: 'executor-other', cwd: '/work/project' }] }, ids), null);
@@ -253,6 +259,49 @@ test('untracking Codex captures only native usage and cannot replay Dots after h
   assert.equal(repaired.clients.codex.periods.allTime.totalTokens, 12);
   assert.equal(repaired.clients.codex.periods.allTime.models.unknown, undefined);
   assert.equal(store.rows().length, 1);
+});
+
+test('Hub preserves Dots missing-price attribution when Codex is untracked without borrowing live client usage', (t) => {
+  const { store } = fixture(t);
+  store.observe(event({ thread: { ...LOCAL, model: 'unknown' } }));
+  const view = buildLocalUsageView(store.rows(), { now: AT, projectIdentity });
+  const live = {
+    totalTokens: 20, costUsd: 1, unpricedTokens: 5,
+    clients: { claude: 20 }, clientCosts: { claude: 1 },
+    clientUnpricedTokens: { claude: 5 },
+    models: { unknown: 20 }, modelCosts: { unknown: 1 }, modelUnpricedTokens: { unknown: 5 },
+    clientModels: { claude: { unknown: 20 } }, clientModelCosts: { claude: { unknown: 1 } },
+    clientModelUnpricedTokens: { claude: { unknown: 5 } }
+  };
+  const existing = {
+    deviceId: 'fixture', updatedAt: AT, trackedClients: ['codex'], ...view
+  };
+  const incoming = {
+    deviceId: 'fixture', updatedAt: AT, trackedClients: ['claude'],
+    today: live, month: live, allTime: live
+  };
+  const merged = mergeDeviceRecord(existing, incoming);
+  for (const period of Object.values(merged.periods)) {
+    assert.equal(period.totalTokens, LAST.totalTokens + 20);
+    assert.equal(period.costUsd, 1);
+    assert.equal(period.unpricedTokens, LAST.totalTokens + 5);
+    assert.equal(period.clientUnpricedTokens.codex, LAST.totalTokens);
+    assert.equal(period.clientUnpricedTokens.claude, 5);
+    assert.equal(period.modelUnpricedTokens.unknown, LAST.totalTokens + 5);
+    assert.equal(period.clientModelUnpricedTokens.codex.unknown, LAST.totalTokens);
+    assert.equal(period.clientModelUnpricedTokens.claude.unknown, 5);
+    assert.equal(period.sessions['codex:' + ID].unpricedTokens, LAST.totalTokens);
+  }
+  const repeated = mergeDeviceRecord(merged, incoming);
+  for (const name of ['today', 'month', 'allTime']) {
+    for (const field of ['totalTokens', 'costUsd', 'unpricedTokens', 'clientUnpricedTokens', 'modelUnpricedTokens', 'clientModelUnpricedTokens']) {
+      assert.deepEqual(repeated.periods[name][field], merged.periods[name][field]);
+    }
+  }
+  const replacement = mergeDeviceRecord(merged, {
+    ...incoming, trackedClients: ['codex', 'claude']
+  });
+  assert.equal(replacement.periods.allTime.unpricedTokens, 5, 'live tracking replaces the preserved contribution');
 });
 
 test('native rollout precedence does not resurrect an archived supplemental row', async (t) => {
@@ -804,7 +853,12 @@ test('live model attribution requires a turn-linked event rather than the thread
   notify('turn-unknown', next);
   socket.notify('model/rerouted', { threadId: ID, turnId: 'turn-known', fromModel: 'original-model', toModel: 'confirmed-model', reason: 'modelCapacity' });
   notify('turn-known', addCounters(next, LAST));
-  assert.deepEqual(store.rows().map((row) => row.model), ['unknown', 'confirmed-model']);
+  socket.notify('model/rerouted', { threadId: ID, turn: { id: 'turn-nested' }, toModel: 'nested-model' });
+  socket.notify('thread/tokenUsage/updated', {
+    threadId: ID, turn: { id: 'turn-nested' },
+    tokenUsage: { last: LAST, total: addCounters(addCounters(next, LAST), LAST) }
+  });
+  assert.deepEqual(store.rows().map((row) => row.model), ['unknown', 'confirmed-model', 'nested-model']);
 });
 
 test('native replacement removes previously observed Dots usage from retained daily history', async (t) => {

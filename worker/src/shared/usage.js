@@ -1345,6 +1345,23 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
       target.clients[client] = tokens;
       preservedClients.add(client);
       if (cost > 0) target.clientCosts[client] = cost;
+      // Global model buckets may include live clients too. Restore only this
+      // client's explicit missing-price attribution, not the global bucket.
+      const unpriced = Math.min(tokens, asNumber(source.clientUnpricedTokens?.[client]));
+      addUnpricedTokens(target, { unpricedTokens: unpriced }, tokens);
+      const modelUnpriced = Object.create(null);
+      let remainingUnpriced = unpriced;
+      for (const [model, count] of Object.entries(source.clientModelUnpricedTokens?.[client] || {})) {
+        const retained = Math.min(remainingUnpriced, asNumber(source.clientModels?.[client]?.[model]), count);
+        if (retained <= 0) continue;
+        modelUnpriced[model] = retained;
+        remainingUnpriced -= retained;
+      }
+      mergeUnpricedMaps(target, {
+        clientUnpricedTokens: { [client]: unpriced },
+        modelUnpricedTokens: modelUnpriced,
+        clientModelUnpricedTokens: { [client]: modelUnpriced }
+      });
       const cacheRead = Math.min(tokens, asNumber(source.clientCacheReads?.[client]));
       const cacheWrite = Math.min(tokens - cacheRead, asNumber(source.clientCacheWrites?.[client]));
       const output = Math.min(tokens - cacheRead - cacheWrite, asNumber(source.clientOutputs?.[client]));

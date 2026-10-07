@@ -9,7 +9,7 @@ const { createSubprocessTermination } = require('../../subprocessTermination');
 function executorIdsFromProcesses(text) {
   const ids = new Set();
   for (const line of String(text || '').split(/\r?\n/)) {
-    if (!/(?:^|[\\/"\s])codex(?:\.exe)?["\s]+exec-server\s/.test(line)) continue;
+    if (!/^\s*(?:"(?:[^"]*[\\/])?codex(?:\.exe)?"|(?:[^\s"]*[\\/])?codex(?:\.exe)?)\s+exec-server\s/.test(line)) continue;
     const id = line.match(/--environment-id\s+"?([A-Za-z0-9_-]+)(?:"|\s|$)/)?.[1];
     if (id) ids.add(id);
   }

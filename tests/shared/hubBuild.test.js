@@ -359,16 +359,6 @@ test('known historical revisions must retain their canonical build ids', () => {
   }).status, 'unknown');
 });
 
-test('known build ids remain recognized when a merged history reindexes their revision', () => {
-  const current = currentHubBuild('cloudflare-worker');
-  const remote = {
-    ...current,
-    coreRevision: 73,
-    coreBuildId: 'sha256:8a286284faa3d9eda68ec806afada17710c557cf87ae45952022f21e1a063a84'
-  };
-  assert.equal(compareHubBuild(remote).status, 'updateAvailable');
-});
-
 test('mixed component directions are treated as unknown instead of suggesting a downgrade', () => {
   const current = currentHubBuild('node-hub');
   assert.equal(compareHubBuild({

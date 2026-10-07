@@ -655,6 +655,31 @@ test('mergeDeviceRecord preserves usage for clients omitted by the active tracke
   });
 });
 
+test('preserved missing-price maps cannot exceed the untracked client token contribution', () => {
+  const merged = mergeDeviceRecord({
+    deviceId: 'fixture',
+    allTime: {
+      totalTokens: 100, unpricedTokens: 80,
+      clients: { codex: 20, claude: 80 },
+      clientUnpricedTokens: { codex: 80 },
+      models: { unknown: 100 }, modelUnpricedTokens: { unknown: 80 },
+      clientModels: { codex: { unknown: 20 }, claude: { unknown: 80 } },
+      clientModelUnpricedTokens: { codex: { unknown: 80 } }
+    }
+  }, {
+    deviceId: 'fixture', trackedClients: ['claude'],
+    allTime: {
+      totalTokens: 10, unpricedTokens: 10, clients: { claude: 10 }
+    }
+  });
+  const period = merged.periods.allTime;
+  assert.equal(period.totalTokens, 30);
+  assert.equal(period.unpricedTokens, 30);
+  assert.equal(period.clientUnpricedTokens.codex, 20);
+  assert.equal(period.modelUnpricedTokens.unknown, 20);
+  assert.equal(period.clientModelUnpricedTokens.codex.unknown, 20);
+});
+
 test('mergeDeviceRecord marks unrecoverable all-time project attribution incomplete', () => {
   const existing = {
     deviceId: 'macbook',

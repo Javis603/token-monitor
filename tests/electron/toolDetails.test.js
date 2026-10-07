@@ -56,6 +56,18 @@ test('modelRowsForTool does not invent a remainder without any model attribution
   }, 'codex'), []);
 });
 
+test('modelRowsForTool retains missing-price tokens without model attribution as a remainder', () => {
+  const rows = modelRowsForTool({
+    clients: { codex: 100 }, clientUnpricedTokens: { codex: 80 },
+    clientModels: { codex: { unknown: 60 } },
+    clientModelUnpricedTokens: { codex: { unknown: 60 } }
+  }, 'codex');
+  assert.equal(rows.find((row) => row.key === 'unknown').unpricedTokens, 60);
+  const remainder = rows.find((row) => row.unattributed);
+  assert.equal(remainder.value, 40);
+  assert.equal(remainder.unpricedTokens, 20);
+});
+
 test('visibleModelRowsForTool hides only synthetic cost remainders that format as zero', () => {
   const period = {
     clients: { 'deepseek-harness': 100 },

@@ -25,6 +25,7 @@
     return usageAttributionRowsApi.attributionRows(models, costs, {
       totalValue: total,
       totalCost,
+      totalUnpricedTokens: period?.clientUnpricedTokens?.[clientKey],
       unpricedTokens: period?.clientModelUnpricedTokens?.[clientKey]
     })
       .map((row) => {

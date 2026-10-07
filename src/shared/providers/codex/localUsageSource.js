@@ -191,7 +191,7 @@ function createLocalUsageSource(options = {}, deps = {}) {
     if (message.method === 'thread/tokenUsage/updated') {
       if (shouldYield() || !store.claimObserver(owner)) { disconnect(); store.releaseObserver(owner); return; }
       if (store.observe({
-        accountKey, thread: { ...entry.thread, model: entry.turnModels.get(params.turnId) || 'unknown' }, ...entry.local, turnId: params.turnId,
+        accountKey, thread: { ...entry.thread, model: entry.turnModels.get(turnId) || 'unknown' }, ...entry.local, turnId,
         tokenUsage: params.tokenUsage, baselineOnly: entry.baselinePending, now: now()
       })) {
         lastUsageAt = now().toISOString();

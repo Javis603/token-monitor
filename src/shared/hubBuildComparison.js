@@ -12,33 +12,17 @@ function validBuildId(value) {
   return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/.test(value);
 }
 
-function entriesForComponent(component, registrySnapshot = registry) {
-  const entries = registrySnapshot?.components?.[component];
-  return Array.isArray(entries) ? entries : [];
-}
-
-function entryForRevision(component, revision, registrySnapshot = registry) {
-  const entries = entriesForComponent(component, registrySnapshot);
+function entryForRevision(component, revision) {
+  const entries = registry?.components?.[component];
   return Array.isArray(entries)
     ? entries.find((entry) => finiteRevision(entry?.revision) === revision) || null
     : null;
 }
 
-function canonicalRevision(component, revision, buildId, expectedRevision) {
-  const exactEntry = entryForRevision(component, revision);
-  if (exactEntry?.buildId === buildId) return revision;
-
-  // Registry histories from branches that diverged at the same revision are
-  // reindexed when merged. A hash already in the registry remains a known
-  // build even when its original wire revision is no longer canonical.
-  const entries = entriesForComponent(component);
-  const matchingEntry = [...entries].reverse().find((entry) => entry?.buildId === buildId);
-  if (matchingEntry) return finiteRevision(matchingEntry.revision);
-
-  // Keep accepting builds newer than this registry. The hash is not known yet,
-  // but the higher revision is the existing signal that the sender is ahead.
-  if (revision > expectedRevision) return revision;
-  return null;
+function knownRevisionMatches(component, revision, buildId, expectedRevision) {
+  const entry = entryForRevision(component, revision);
+  if (entry) return entry.buildId === buildId;
+  return revision > expectedRevision;
 }
 
 function compareHubBuild(remoteBuild, expectedBuild = null) {
@@ -64,15 +48,14 @@ function compareHubBuild(remoteBuild, expectedBuild = null) {
     return { status: 'unknown', runtime };
   }
 
-  const coreRevision = canonicalRevision('core', remoteCoreRevision, remoteBuild.coreBuildId, expected.coreRevision);
-  const runtimeRevision = canonicalRevision(runtime, remoteRuntimeRevision, remoteBuild.runtimeBuildId, expected.runtimeRevision);
-  if (!coreRevision || !runtimeRevision) {
+  if (!knownRevisionMatches('core', remoteCoreRevision, remoteBuild.coreBuildId, expected.coreRevision)
+    || !knownRevisionMatches(runtime, remoteRuntimeRevision, remoteBuild.runtimeBuildId, expected.runtimeRevision)) {
     return { status: 'unknown', runtime };
   }
 
   const directions = [
-    Math.sign(coreRevision - expected.coreRevision),
-    Math.sign(runtimeRevision - expected.runtimeRevision)
+    Math.sign(remoteCoreRevision - expected.coreRevision),
+    Math.sign(remoteRuntimeRevision - expected.runtimeRevision)
   ];
   const hasOlder = directions.includes(-1);
   const hasNewer = directions.includes(1);
