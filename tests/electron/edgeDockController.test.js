@@ -1032,6 +1032,56 @@ test('busy visibility yields to dragging and removing the action', async (t) => 
   assert.equal(peek.ignoreMouse, true);
 });
 
+for (const rebuild of ['material', 'restart']) {
+  test(`refresh joined after ${rebuild} rebuild keeps the new window busy and holds its result`, async (t) => {
+    let finish;
+    let calls = 0;
+    let glass = null;
+    const fixture = createFixture({
+      platform: 'darwin', nativeGlass: true,
+      liquidGlass: () => glass,
+      createGlass: () => ({ update() {}, setShape() { return true; }, dispose() {} }),
+      canRefreshLimits: () => true,
+      onRefreshLimits: () => { calls += 1; return new Promise((resolve) => { finish = resolve; }); }
+    });
+    t.after(() => fixture.controller.stop());
+    let peek = fixture.windowFor('peek');
+    let rail = fixture.windowFor('rail');
+    fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 40 };
+    await new Promise((resolve) => setTimeout(resolve, 105));
+    fixture.paintPeek();
+    const handler = fixture.ipcMain.handlers.get('edgeDock:refreshLimits');
+    const original = handler({ sender: peek.webContents });
+    await Promise.resolve();
+    const oldPeek = peek;
+    if (rebuild === 'material') glass = { dark: true };
+    else fixture.controller.stop();
+    fixture.controller.sync();
+    for (const win of FakeBrowserWindow.instances.filter((win) => !win.destroyed)) win.webContents.emit('did-finish-load');
+    peek = fixture.windowFor('peek');
+    rail = fixture.windowFor('rail');
+    assert.notEqual(peek, oldPeek);
+    fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 40 };
+    await new Promise((resolve) => setTimeout(resolve, 105));
+    fixture.paintPeek();
+    const joined = handler({ sender: peek.webContents });
+    await Promise.resolve();
+    assert.equal(calls, 1, 'rejoining does not dispatch another refresh');
+    fixture.screen.point = { x: 100, y: 100 };
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    assert.equal(peek.ignoreMouse, false, 'new busy window remains visible after pointer leave');
+    fixture.hapticCalls.length = 0;
+    finish({ ok: true });
+    assert.deepEqual(await original, { ok: true });
+    assert.deepEqual(await joined, { ok: true });
+    assert.deepEqual(fixture.hapticCalls, [{ pattern: 'generic', performanceTime: 'default' }]);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    assert.equal(peek.ignoreMouse, false, 'the new window holds its result');
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    assert.equal(peek.ignoreMouse, true, 'the new window hides after the hold');
+  });
+}
+
 for (const mode of ['autoHide', 'alwaysExceptFullScreen']) {
   test(`${mode} keeps auto-hide behaviour during refresh in its auto-hide state`, async (t) => {
     let finish;

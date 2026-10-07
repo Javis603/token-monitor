@@ -900,24 +900,25 @@ function createEdgeDockController(deps) {
     ipcMain.handle('edgeDock:refreshLimits', async (event) => {
       if (surfaceFor(event.sender) !== 'peek' || peekMode !== 'refresh' || !refreshVisible || peekPaintPending
         || settings().edgeDockRefreshEnabled !== true || canRefreshLimits() !== true || !onRefreshLimits) return { ok: false, error: 'Not refreshable' };
+      // A rebuilt renderer can join the same backend request. Bind its busy and
+      // result visibility to the current window only after it requests the action.
+      refreshInFlightWindow = windows.peek;
       if (!refreshInFlight) {
-        const refreshWindow = windows.peek;
-        refreshInFlightWindow = refreshWindow;
         refreshFeedbackUntil = 0;
         refreshFeedbackWindow = null;
         refreshInFlight = Promise.resolve().then(() => onRefreshLimits())
           .then((result) => {
-            if (result?.ok === true && running && windows.peek === refreshWindow
+            if (result?.ok === true && running && windows.peek === refreshInFlightWindow
               && settings().edgeDockRefreshEnabled === true) hapticTick('generic');
             return result;
           })
           .catch((error) => ({ ok: false, error: error?.message || 'Refresh failed' }))
           .finally(() => {
             // Let the renderer's result be readable before an unhovered action fades out.
-            if (running && windows.peek === refreshWindow && alwaysVisible()
+            if (running && windows.peek === refreshInFlightWindow && alwaysVisible()
               && settings().edgeDockRefreshEnabled === true) {
               refreshFeedbackUntil = Date.now() + REFRESH_RESULT_HOLD_MS;
-              refreshFeedbackWindow = refreshWindow;
+              refreshFeedbackWindow = refreshInFlightWindow;
             }
             refreshInFlight = null;
             refreshInFlightWindow = null;

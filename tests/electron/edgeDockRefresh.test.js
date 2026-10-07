@@ -34,6 +34,8 @@ function fixture() {
     currentHubStatsIdentity: () => 'local',
     ownsUsageRuntime: () => Boolean(context.deviceRuntimeHandle),
     runManualDeviceRefresh,
+    electronPresentationStats: (stats) => stats,
+    updateEdgeDockCells: (stats) => { context.dockStats = stats; },
     console: { log() {} }
   };
   vm.runInNewContext(`${refreshSource}\n${dockSource}`, context);
@@ -99,15 +101,39 @@ test('runtime or mode replacement does not join an obsolete refresh', async () =
   limits.resolve();
 });
 
-test('Edge Dock needs a local runtime but does not require limits to be enabled', async () => {
+test('Edge Dock refresh is available without local collection or limits', async () => {
   const { context, usage, limits } = fixture();
   assert.equal(context.canRefreshEdgeDockStats(), true);
   usage.resolve(true);
   assert.equal(JSON.stringify(await context.refreshStatsFromEdgeDock()), JSON.stringify({ ok: true }));
   limits.resolve();
   context.deviceRuntimeHandle = null;
-  assert.equal(context.canRefreshEdgeDockStats(), false);
-  assert.equal((await context.refreshStatsFromEdgeDock()).ok, false);
+  assert.equal(context.canRefreshEdgeDockStats(), true);
+  assert.equal((await context.refreshStatsFromEdgeDock()).ok, true);
+});
+
+test('Client manual refresh paints the fresh Hub response without a stats push or local runtime', async () => {
+  const { context } = fixture();
+  const old = { updatedAt: 'old' };
+  const fresh = { updatedAt: 'fresh' };
+  const requests = [];
+  context.deviceRuntimeHandle = null;
+  context.mode = 'client';
+  context.settings.hubMode = 'client';
+  context.latestStats = old;
+  context.dockStats = old;
+  context.effectiveHubConfig = () => ({ url: 'https://hub.example', secret: 'test' });
+  context.fetch = async (url) => { requests.push(url); return { ok: true, json: async () => fresh }; };
+  context.hubModeRequestIsCurrent = () => true;
+  context.setLatestHubStatsCache = () => {};
+  context.composeLocalSyncSummary = (stats) => stats;
+  context.injectLocalDeviceStatus = (stats) => stats;
+  context.lastCollectedDevice = null;
+  assert.equal(context.canRefreshEdgeDockStats(), true);
+  assert.equal((await context.refreshStatsFromEdgeDock()).ok, true);
+  assert.deepEqual(requests, ['https://hub.example/api/stats']);
+  assert.equal(context.dockStats, fresh);
+  assert.equal(context.latestStats, old, 'a manual read must not become latestStats');
 });
 
 test('App manual-button IPC uses the shared entry; other stats reads retain their options', () => {

@@ -5519,12 +5519,12 @@ function refreshEdgeDockForecast() {
 }
 
 function canRefreshEdgeDockStats() {
-  return ownsUsageRuntime();
+  return true;
 }
 
 async function refreshStatsFromEdgeDock() {
-  if (!canRefreshEdgeDockStats()) return { ok: false, error: 'No local usage runtime' };
-  await refreshManualStats();
+  const stats = await refreshManualStats();
+  updateEdgeDockCells(electronPresentationStats(stats));
   return { ok: true };
 }
 
