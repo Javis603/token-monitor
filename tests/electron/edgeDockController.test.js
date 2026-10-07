@@ -920,10 +920,41 @@ for (const { platform, enabled, expected } of [
     await new Promise((resolve) => setTimeout(resolve, 105));
     assert.deepEqual(fixture.hapticCalls, [...expected, ...expected, ...expected], 're-entering the action triggers one more tick');
     const next = handler({ sender: peek.webContents });
+    const nextDuplicate = handler({ sender: peek.webContents });
     await Promise.resolve();
     assert.equal(calls, 2);
     finish({ ok: true });
     assert.equal((await next).ok, true);
-    assert.deepEqual(fixture.hapticCalls, [...expected, ...expected, ...expected], 'success does not trigger more feedback');
+    assert.equal((await nextDuplicate).ok, true);
+    const successFeedback = platform === 'darwin' && enabled
+      ? [{ pattern: 'generic', performanceTime: 'default' }] : [];
+    assert.deepEqual(fixture.hapticCalls, [...expected, ...expected, ...expected, ...successFeedback],
+      'success adds one completion tick shared by duplicate requests');
+  });
+}
+
+for (const change of ['stop', 'restart', 'remove', 'disable haptics']) {
+  test(`a refresh that completes after ${change} does not emit completion haptics`, async (t) => {
+    let finish;
+    const fixture = createFixture({
+      platform: 'darwin', settings: { edgeDockMode: 'autoHide' },
+      canRefreshLimits: () => true,
+      onRefreshLimits: () => new Promise((resolve) => { finish = resolve; })
+    });
+    t.after(() => fixture.controller.stop());
+    const peek = fixture.windowFor('peek');
+    fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents });
+    fixture.paintPeek();
+    fixture.hapticCalls.length = 0;
+    const request = fixture.ipcMain.handlers.get('edgeDock:refreshLimits')({ sender: peek.webContents });
+    await Promise.resolve();
+    assert.deepEqual(fixture.hapticCalls, [], 'clicking does not emit feedback');
+    if (change === 'stop' || change === 'restart') fixture.controller.stop();
+    if (change === 'restart') fixture.controller.sync();
+    if (change === 'remove') fixture.settings.edgeDockRefreshEnabled = false;
+    if (change === 'disable haptics') fixture.settings.edgeDockHaptic = false;
+    finish({ ok: true });
+    assert.deepEqual(await request, { ok: true }, 'feedback gating does not change the refresh result');
+    assert.deepEqual(fixture.hapticCalls, []);
   });
 }

@@ -885,7 +885,13 @@ function createEdgeDockController(deps) {
       if (surfaceFor(event.sender) !== 'peek' || peekMode !== 'refresh' || !refreshVisible || peekPaintPending
         || settings().edgeDockRefreshEnabled !== true || canRefreshLimits() !== true || !onRefreshLimits) return { ok: false, error: 'Not refreshable' };
       if (!refreshInFlight) {
+        const refreshWindow = windows.peek;
         refreshInFlight = Promise.resolve().then(() => onRefreshLimits())
+          .then((result) => {
+            if (result?.ok === true && running && windows.peek === refreshWindow
+              && settings().edgeDockRefreshEnabled === true) hapticTick('generic');
+            return result;
+          })
           .catch((error) => ({ ok: false, error: error?.message || 'Refresh failed' }))
           .finally(() => { refreshInFlight = null; });
       }
