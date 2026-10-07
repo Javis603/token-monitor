@@ -15,10 +15,25 @@ async function runLimitInvalidation(runtime, scope, reason = 'credential-change'
   return runtime.refreshLimits(scope, reason);
 }
 
+async function runManualLimitsRefresh(runtime) {
+  // One full refresh resets the interval; inspect both dispatch results and the
+  // final snapshot, which can include providers added while probes were running.
+  const response = await runtime.refreshLimits({}, 'manual', { includeProviderResults: true });
+  if (!response?.results?.length) return { ok: false };
+  const failed = response.results.some((result) => result.superseded || result.deferred || result.error)
+    || response.snapshot?.providers?.some((row) => !['ok', 'notConfigured', 'unsupported'].includes(row.status));
+  return { ok: !failed };
+}
+
 async function runManualDeviceRefresh(runtime, options = {}) {
   if (!runtime) return;
-  const limitsTask = Promise.resolve(runtime.refreshLimits({ all: true }, 'manual'));
-  limitsTask.catch((error) => options.onLimitsError?.(error));
+  const limitsTask = (options.waitForLimits === true
+    ? runManualLimitsRefresh(runtime)
+    : Promise.resolve(runtime.refreshLimits({ all: true }, 'manual')))
+    .catch((error) => {
+      options.onLimitsError?.(error);
+      return { ok: false };
+    });
   await runtime.tick('manual', {
     forceHistory: options.forceHistory === true,
     // Cursor and Antigravity only move when their sync subprocess runs, and that
@@ -28,6 +43,9 @@ async function runManualDeviceRefresh(runtime, options = {}) {
     // account flows refresh constantly and must not pay for the spawns.
     forceSelfSync: options.forceSelfSync === true
   });
+  if (options.waitForLimits === true && !(await limitsTask).ok) {
+    throw new Error('Could not refresh local limits');
+  }
 }
 
 function canRefreshUsageRuntime(mode, isExternalAgentActive) {
@@ -50,5 +68,6 @@ module.exports = {
   drainPendingUsageClientRefreshes,
   runLimitInvalidation,
   runManualDeviceRefresh,
+  runManualLimitsRefresh,
   settingsLimitInvalidationPlan
 };

@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
+const { runManualDeviceRefresh } = require('../../src/electron/deviceRuntimeCoordinator');
 
 // main.js requires electron at the top level, so it cannot be loaded here; these
 // guard the wiring at the source level instead (same approach as the
@@ -46,4 +48,46 @@ test('fetchStats reads forceHistory independently of force', () => {
   assert.match(head, /forceHistory: Boolean\(options\?\.forceHistory\)/);
   assert.doesNotMatch(head, /forceHistory: force\b/);
   assert.doesNotMatch(head, /forceHistory: true/);
+  assert.match(head, /waitForLimits: options\?\.feedback === true && canRefreshEdgeDockLimits\(\)/);
 });
+
+for (const status of ['ok', 'unavailable']) {
+  test(`App refresh feedback waits for limits and reflects ${status}`, async () => {
+    let finishLimits;
+    const runtime = {
+      refreshLimits: () => new Promise((resolve) => { finishLimits = resolve; }),
+      tick: async () => {}
+    };
+    const feedback = [];
+    const state = { floatingBubble: { collapsed: false } };
+    const noop = () => {};
+    const context = {
+      state,
+      window: { tokenMonitor: { getStats: async () => {
+        await runManualDeviceRefresh(runtime, { waitForLimits: true });
+        return { updatedAt: '2026-10-07T00:00:00Z' };
+      } } },
+      clearRefreshButtonFeedbackTimer: noop,
+      setRefreshButtonState: (value) => feedback.push(value),
+      settleRefreshButtonState: (value) => feedback.push(value),
+      observeLiveTokenRate: noop, observeDisplayLiveTokenRates: noop,
+      allTimeSessions: { invalidate: noop, attach: (value) => value },
+      sessionStatsForDisplay: (value) => value,
+      applyCodexActiveAccountFromStats: noop,
+      fixedPeriodRangesApi: { isDerived: () => false }, warmFixedPeriodHistory: async () => {},
+      statsRenderScheduler: { request: noop }, maybeUpdateBarsIcon: noop,
+      isRendererWindowHidden: () => true, console: { log: noop }
+    };
+    const start = rendererSource.indexOf('async function refreshStats(');
+    const end = rendererSource.indexOf('\nasync function refreshStatusViewManually(', start);
+    vm.runInNewContext(rendererSource.slice(start, end), context);
+    const pending = context.refreshStats({ force: true, feedback: true });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(feedback, ['refreshing']);
+    assert.equal(state.refreshBusy, true);
+    finishLimits({ results: [{ provider: 'claude' }], snapshot: { providers: [{ provider: 'claude', status }] } });
+    await pending;
+    assert.deepEqual(feedback, ['refreshing', status === 'ok' ? 'refreshed' : 'error']);
+    assert.equal(state.refreshBusy, false);
+  });
+}

@@ -5,13 +5,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { createDeviceRuntime } = require('../../src/shared/usage/deviceRuntime');
+const { runManualLimitsRefresh } = require('../../src/electron/deviceRuntimeCoordinator');
 
 // Exercise the actual main-process action without booting Electron or collectors.
 const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 const actionSource = main.slice(main.indexOf('async function refreshLimitsFromEdgeDock('), main.indexOf('function edgeDockCellsFor('));
 function refreshAction(runtime) {
-  return Function('canRefreshEdgeDockLimits', 'deviceRuntimeHandle', 'settings', 'parseLimitProviders', 'defaultLimitProviders',
-    `return (${actionSource.trim()})`)(() => true, runtime, { limitProviders: ['claude', 'kimi'] }, (providers) => providers, () => []);
+  return Function('canRefreshEdgeDockLimits', 'deviceRuntimeHandle', 'runManualLimitsRefresh',
+    `return (${actionSource.trim()})`)(() => true, runtime, runManualLimitsRefresh);
 }
 
 function clock() {

@@ -369,6 +369,7 @@ const {
   drainPendingUsageClientRefreshes: drainPendingUsageClientRefreshQueue,
   runLimitInvalidation,
   runManualDeviceRefresh,
+  runManualLimitsRefresh,
   settingsLimitInvalidationPlan
 } = require('./deviceRuntimeCoordinator');
 const {
@@ -5525,13 +5526,7 @@ function canRefreshEdgeDockLimits() {
 
 async function refreshLimitsFromEdgeDock() {
   if (!canRefreshEdgeDockLimits()) return { ok: false, error: 'No local limits runtime' };
-  // A full manual refresh resets the interval once, while lane results retain
-  // deferred/failure feedback instead of reporting every resolved probe as OK.
-  const response = await deviceRuntimeHandle.refreshLimits({}, 'manual', { includeProviderResults: true });
-  if (!response?.results?.length) return { ok: false };
-  const failed = response.results.some((result) => result.superseded || result.deferred || result.error)
-    || response.snapshot?.providers?.some((row) => !['ok', 'notConfigured', 'unsupported'].includes(row.status));
-  return { ok: !failed };
+  return runManualLimitsRefresh(deviceRuntimeHandle);
 }
 
 function edgeDockCellsFor(visibleStats) {
@@ -6325,6 +6320,7 @@ async function fetchStats(options = {}) {
     await runManualDeviceRefresh(deviceRuntimeHandle, {
       forceHistory: Boolean(options?.forceHistory),
       forceSelfSync: Boolean(options?.forceSelfSync),
+      waitForLimits: options?.feedback === true && canRefreshEdgeDockLimits(),
       onLimitsError: (error) => console.log(`[limits-runtime] manual refresh failed: ${error.message}`)
     });
   }
