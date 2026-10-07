@@ -779,6 +779,8 @@ span.settings-note.settings-item-desc {
 }
 /* Inline text options (Codex-style): plain labels, the active one gets a soft pill. */
 .inline-options { display: inline-flex; align-items: center; gap: 2px; }
+/* Single-word options that cannot shrink ("Personalizado") wrap rather than clip. */
+.inline-options.is-wrapping { flex-wrap: wrap; }
 .settings-panel .inline-option {
   position: relative;
   display: inline-flex;

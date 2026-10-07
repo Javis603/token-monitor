@@ -283,6 +283,16 @@
                       <label class="inline-option"><input type="radio" name="edgeDockSide" value="right" /><span data-i18n="settings.edgeDockSide.right">Right</span></label>
                     </div>
                   </div>
+                  <div class="settings-item">
+                    <span id="edgeDockSizeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.size">Size</span></span>
+                    <div class="inline-options is-wrapping" role="radiogroup" aria-labelledby="edgeDockSizeLabel">
+                      <label class="inline-option"><input type="radio" name="edgeDockSize" value="small" /><span data-i18n="settings.edgeDock.size.small">Small</span></label>
+                      <label class="inline-option"><input type="radio" name="edgeDockSize" value="medium" /><span data-i18n="settings.edgeDock.size.medium">Medium</span></label>
+                      <label class="inline-option"><input type="radio" name="edgeDockSize" value="large" /><span data-i18n="settings.edgeDock.size.large">Large</span></label>
+                      <label class="inline-option"><input type="radio" name="edgeDockSize" value="custom" /><span data-i18n="settings.edgeDock.size.custom">Custom</span></label>
+                    </div>
+                  </div>
+                  <div id="edgeDockCustomScaleRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="edgeDockCustomScaleLabel" class="settings-item-title" data-i18n="settings.edgeDock.customScale">Custom size</span></span></span><input id="edgeDockCustomScaleInput" type="range" min="75" max="150" step="5" aria-labelledby="edgeDockCustomScaleLabel" /><span class="slider-value" aria-hidden="true"></span></div>
                   <label id="edgeDockHapticRow" class="checkbox-label settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.haptic">Trackpad haptic feedback</span></span><input id="edgeDockHapticInput" type="checkbox" /></label>
                   <label id="edgeDockMacBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="edgeDockMacBackdropInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass</option></select></label>
                   <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.warnColors">Highlight low limits in colour</span></span><input id="edgeDockWarnColorsInput" type="checkbox" /></label>

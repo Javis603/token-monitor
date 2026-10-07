@@ -173,8 +173,13 @@ const {
   edgeDockTriggerBounds,
   normalizeEdgeDockDisplayId,
   normalizeEdgeDockOffset,
+  edgeDockFittingScale,
+  edgeDockScale,
+  normalizeEdgeDockCustomScale,
   normalizeEdgeDockSide,
-  railLength
+  normalizeEdgeDockSize,
+  railLength,
+  scaledEdgeDockMetrics
 } = require('../../src/electron/edgeDock/geometry');
 const { canUseEdgeDock } = require('../../src/electron/edgeDock/controller');
 const { bubbleCommands, peekCommands, railCommands, toPolygons, toSvgPath } = require('../../src/electron/renderer/edgeDock/shapes');
@@ -2618,4 +2623,48 @@ test('refresh retains its original bottom position when the display extends belo
     assert.ok(button.y + button.height > area.y + area.height - EDGE_DOCK_METRICS.screenMargin);
     assert.ok(button.y + button.height <= displayBounds.y + displayBounds.height - EDGE_DOCK_METRICS.screenMargin);
   }
+});
+
+test('the dock size resolves to a preset or the custom scale, which survives a preset', () => {
+  assert.equal(normalizeEdgeDockSize('large'), 'large');
+  assert.equal(normalizeEdgeDockSize('huge'), 'medium');
+  assert.equal(normalizeEdgeDockSize(undefined), 'medium');
+  assert.equal(normalizeEdgeDockCustomScale(1.234), 1.25, 'snapped to the slider step');
+  assert.equal(normalizeEdgeDockCustomScale(9), 1.5);
+  assert.equal(normalizeEdgeDockCustomScale(0.1), 0.75);
+  assert.equal(normalizeEdgeDockCustomScale('x'), 1);
+  assert.equal(edgeDockScale({}), 1, 'settings from before the option keep today\'s size');
+  assert.equal(edgeDockScale({ edgeDockSize: 'small' }), 0.85);
+  assert.equal(edgeDockScale({ edgeDockSize: 'large', edgeDockCustomScale: 0.8 }), 1.25);
+  assert.equal(edgeDockScale({ edgeDockSize: 'custom', edgeDockCustomScale: 0.8 }), 0.8);
+});
+
+test('scaled metrics grow the dock but not the distances the pointer opens it from', () => {
+  assert.equal(scaledEdgeDockMetrics(1), EDGE_DOCK_METRICS);
+  const large = scaledEdgeDockMetrics(1.5);
+  assert.equal(large.railWidth, 96);
+  assert.equal(large.cellHeight, 105);
+  assert.equal(large.bubbleWidth, 420);
+  for (const key of ['wakeDepth', 'approachDepth', 'approachSlack', 'triggerDepth', 'screenMargin', 'edgeInset']) {
+    assert.equal(large[key], EDGE_DOCK_METRICS[key], key);
+  }
+  for (const value of Object.values(large)) assert.equal(Number.isInteger(value), true);
+
+  const small = scaledEdgeDockMetrics(0.75);
+  assert.equal(small.peekWidth, EDGE_DOCK_METRICS.peekWidth, 'the handle window stays as wide as AppKit allows');
+  assert.ok(small.handleWidth >= 5, 'the handle stays wide enough to find');
+  assert.ok(small.handleNearWidth > small.handleWidth, 'and still grows on approach');
+});
+
+test('a larger dock that would not fit shrinks to the largest size that keeps full density', () => {
+  const kinds = ['stat', 'provider', 'provider', 'provider', 'provider', 'provider', 'provider', 'stat', 'stat'];
+  const workArea = { x: 0, y: 33, width: 1280, height: 799 };
+  const fitted = edgeDockFittingScale({ workArea, cellKinds: kinds, scale: 1.25 });
+  assert.ok(fitted > 1 && fitted < 1.25, `fitted ${fitted}`);
+  assert.equal(edgeDockCellLayout(workArea, kinds, scaledEdgeDockMetrics(fitted)).compact, false);
+  assert.equal(edgeDockCellLayout(workArea, kinds, scaledEdgeDockMetrics(fitted + 0.01)).compact, true, 'and no larger');
+
+  assert.equal(edgeDockFittingScale({ workArea, cellKinds: ['provider'], scale: 1.25 }), 1.25, 'a dock that fits keeps its size');
+  assert.equal(edgeDockFittingScale({ workArea, cellKinds: kinds, scale: 0.85 }), 0.85, 'a smaller one is left alone');
+  assert.equal(edgeDockFittingScale({ workArea: { ...workArea, height: 400 }, cellKinds: kinds, scale: 1.5 }), 1, 'one too long even at 100% keeps today\'s density');
 });

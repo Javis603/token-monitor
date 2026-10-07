@@ -408,10 +408,12 @@ const { applyWindowsChrome } = require('./windowsChrome');
 const { canUseEdgeDock, createEdgeDockController, edgeDockSupported } = require('./edgeDock/controller');
 const { createFullScreenProbe } = require('./edgeDock/fullScreenProbe');
 const {
+  normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
   normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
-  normalizeEdgeDockSide
+  normalizeEdgeDockSide,
+  normalizeEdgeDockSize
 } = require('./edgeDock/geometry');
 const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
 const { DERIVED_PERIODS: EDGE_DOCK_DERIVED_PERIODS, normalizeEdgeDockItems } = require('./renderer/edgeDock/items');
@@ -601,6 +603,8 @@ function defaultSettings() {
     edgeDockHaptic: true,
     edgeDockWarnColors: false,
     edgeDockMacBackdrop: 'inherit',
+    edgeDockSize: 'medium',
+    edgeDockCustomScale: 1,
     edgeDockSide: 'right',
     edgeDockOffset: null,
     edgeDockDisplayId: null,
@@ -2613,6 +2617,8 @@ function readSettings() {
     merged.edgeDockHaptic = parseBoolean(merged.edgeDockHaptic, true);
     merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
     merged.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode(merged.edgeDockMacBackdrop);
+    merged.edgeDockSize = normalizeEdgeDockSize(merged.edgeDockSize);
+    merged.edgeDockCustomScale = normalizeEdgeDockCustomScale(merged.edgeDockCustomScale);
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
     merged.trayCustomLayout = normalizeTrayLayout(merged.trayCustomLayout);
     merged.showTrayProviderBadge = parseBoolean(merged.showTrayProviderBadge, false);
@@ -7536,6 +7542,8 @@ app.whenReady().then(() => {
       edgeDockHaptic: parseBoolean(patch.edgeDockHaptic ?? settings.edgeDockHaptic, true),
       edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
       edgeDockMacBackdrop: normalizeEdgeDockBackdropMode(patch.edgeDockMacBackdrop ?? settings.edgeDockMacBackdrop),
+      edgeDockSize: normalizeEdgeDockSize(patch.edgeDockSize ?? settings.edgeDockSize),
+      edgeDockCustomScale: normalizeEdgeDockCustomScale(patch.edgeDockCustomScale ?? settings.edgeDockCustomScale),
       // `null` is a real value here (back to the automatic default), so the
       // patch is checked for presence rather than coalesced.
       edgeDockItems: normalizeEdgeDockItems('edgeDockItems' in (patch || {}) ? patch.edgeDockItems : settings.edgeDockItems),
@@ -7779,6 +7787,9 @@ app.whenReady().then(() => {
     syncNativeMaterialVisibility(win, nativeMaterialOptions({ ...settings, ...patch }, win === dashboardWindow));
     if (patch && patch.zoomFactor !== undefined && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.setZoomFactor(clampZoom(patch.zoomFactor));
+    }
+    if (patch && patch.edgeDockCustomScale !== undefined && edgeDockController?.isRunning()) {
+      edgeDockController.previewScale(patch.edgeDockCustomScale);
     }
     return true;
   });

@@ -8,6 +8,7 @@ const {
   edgeDockBubbleBounds,
   edgeDockCellAt,
   edgeDockCorridorBounds,
+  edgeDockFittingScale,
   edgeDockHandleBounds,
   edgeDockHandleZones,
   edgeDockPeekBounds,
@@ -15,12 +16,15 @@ const {
   edgeDockRailBounds,
   edgeDockRefreshBounds,
   edgeDockRefreshCorridor,
+  edgeDockScale,
   edgeDockTriggerBounds,
+  normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
   normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
-  rectContains
+  rectContains,
+  scaledEdgeDockMetrics
 } = require('./geometry');
 const { shapeRectsFromPolygons } = require('./mask');
 const { bubbleCommands, peekCommands, railCommands, refreshCommands, toPolygons, toSvgPath } = require('../renderer/edgeDock/shapes');
@@ -215,24 +219,65 @@ function createEdgeDockController(deps) {
     } catch (_) { return null; }
   }
 
+  // The dock's own size, applied to its windows' geometry here and to their
+  // pages as a zoom factor, so a page lays out in the same units at any size.
+  // Lengths that cross between the two (card heights, the drag's grab offset)
+  // are kept in page units and converted at the window's edge. The size is the
+  // one asked for, or the largest that fits the display (edgeDockFittingScale).
+  let scaled = { key: '', scale: 1, metrics: EDGE_DOCK_METRICS };
+  // A size still being dragged on the Settings slider, shown but not yet saved.
+  let previewScale = null;
+  function dockScale() {
+    const requested = previewScale ?? edgeDockScale(settings());
+    const workArea = display()?.workArea || null;
+    const kinds = cellKinds();
+    const key = `${requested}:${workArea?.height ?? ''}:${kinds.join(',')}`;
+    if (key !== scaled.key) {
+      const scale = edgeDockFittingScale({ workArea, cellKinds: kinds, scale: requested });
+      scaled = { key, scale, metrics: scale === scaled.scale ? scaled.metrics : scaledEdgeDockMetrics(scale) };
+    }
+    return scaled.scale;
+  }
+
+  function metrics() {
+    dockScale();
+    return scaled.metrics;
+  }
+
+  // The pages' zoom follows the size whenever the geometry is placed, since the
+  // fitted size moves with the cells and the display as well as the setting.
+  function syncPageZoom() {
+    const scale = dockScale();
+    for (const surface of SURFACES) {
+      const win = windows[surface];
+      if (alive(win) && win.webContents.getZoomFactor?.() !== scale) win.webContents.setZoomFactor(scale);
+    }
+  }
+
+  function maxCardHeight() {
+    const workArea = display()?.workArea;
+    return workArea ? Math.floor((workArea.height - EDGE_DOCK_METRICS.screenMargin * 2) / dockScale()) : null;
+  }
+
   function layout() {
     const current = display();
     if (!current) return null;
     const { side, offset } = placement();
     const workArea = current.workArea;
-    const rail = edgeDockRailBounds({ workArea, side, offset, cellKinds: cellKinds() });
-    const peek = edgeDockPeekBounds({ workArea, side, railBounds: rail });
+    const m = metrics();
+    const rail = edgeDockRailBounds({ workArea, side, offset, cellKinds: cellKinds(), metrics: m });
+    const peek = edgeDockPeekBounds({ workArea, side, railBounds: rail, metrics: m });
     // The handle as drawn takes the pointer; the resting handle alone decides the
     // fast reveal, so how soon the rail opens never depends on how far the
     // handle has grown under the pointer.
-    const handle = edgeDockHandleBounds({ side, peekBounds: peek, handle: handleSize() });
-    const restingHandle = edgeDockHandleBounds({ side, peekBounds: peek });
-    const trigger = edgeDockTriggerBounds({ workArea, displayBounds: current.bounds, side, railBounds: rail });
-    const zones = edgeDockHandleZones({ side, peekBounds: peek });
+    const handle = edgeDockHandleBounds({ side, peekBounds: peek, handle: handleSize(), metrics: m });
+    const restingHandle = edgeDockHandleBounds({ side, peekBounds: peek, metrics: m });
+    const trigger = edgeDockTriggerBounds({ workArea, displayBounds: current.bounds, side, railBounds: rail, metrics: m });
+    const zones = edgeDockHandleZones({ side, peekBounds: peek, metrics: m });
     const bubble = bubbleCell !== null
-      ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: bubbleHeight, workArea, side })
+      ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: Math.round(bubbleHeight * dockScale()), workArea, side, metrics: m })
       : null;
-    const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail });
+    const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail, metrics: m });
     return { side, workArea, rail, peek, handle, restingHandle, trigger, wake: zones?.wake || null, approach: zones?.approach || null, bubble, refresh };
   }
 
@@ -389,7 +434,7 @@ function createEdgeDockController(deps) {
   // Quarter-pixel steps: fine enough to read as continuous at 2x, coarse enough
   // that the mask is not rebuilt for a change no display can show.
   function handleSize() {
-    const m = EDGE_DOCK_METRICS;
+    const m = metrics();
     const lerp = (a, b) => Math.round((a + (b - a) * handleGrowth) * 4) / 4;
     return { width: lerp(m.handleWidth, m.handleNearWidth), length: lerp(m.handleLength, m.handleNearLength) };
   }
@@ -399,11 +444,19 @@ function createEdgeDockController(deps) {
     setVisible('peek', visible && !peekPaintPending, peekPaintPending ? 0 : duration);
   }
 
+  function pageCellLayout(layout) {
+    if (!layout) return null;
+    const scale = dockScale();
+    if (scale === 1) return layout;
+    const toPage = (values) => values.map((value) => value / scale);
+    return { ...layout, tops: toPage(layout.tops), heights: toPage(layout.heights), length: layout.length / scale };
+  }
+
   function renderPayload(surface) {
     const { side } = placement();
     const shapedGlass = nativeMaterial[surface] === true && glasses[surface] !== null
       && (surface !== 'peek' || peekMode === 'refresh');
-    const base = { surface, side, platform, osRelease: os.release(), appearance, glass: nativeMaterial[surface] === true, liquidGlass: shapedGlass, shape: shapes[surface] };
+    const base = { surface, side, platform, osRelease: os.release(), appearance, glass: nativeMaterial[surface] === true, liquidGlass: shapedGlass, shape: shapes[surface], zoom: dockScale() };
     if (surface === 'rail') {
       return {
         ...base,
@@ -415,16 +468,15 @@ function createEdgeDockController(deps) {
         // rather than `railVisible` because only the reveal renders: the page would
         // never be told about the retract, and would read the next reveal as no change.
         reveal: railReveal,
-        cellLayout: layout()?.rail?.cells || null
+        cellLayout: pageCellLayout(layout()?.rail?.cells)
       };
     }
     if (surface === 'bubble') {
-      const workArea = display()?.workArea;
       return {
         ...base,
         cell: bubbleCell !== null ? cells[bubbleCell] || null : null,
         placed: bubblePlaced,
-        maxCardHeight: workArea ? workArea.height - EDGE_DOCK_METRICS.screenMargin * 2 : null
+        maxCardHeight: maxCardHeight()
       };
     }
     return { ...base, peeking, peekMode, refreshable: canRefreshLimits() === true };
@@ -453,7 +505,7 @@ function createEdgeDockController(deps) {
     const macGlass = materialKey === 'mac-glass' && surface !== 'peek';
     nativeMaterial[surface] = macMaterial;
     const win = new BrowserWindow({
-      width: surface === 'bubble' ? EDGE_DOCK_METRICS.bubbleWidth : EDGE_DOCK_METRICS.railWidth,
+      width: surface === 'bubble' ? metrics().bubbleWidth : metrics().railWidth,
       height: 80,
       show: false,
       frame: false,
@@ -486,7 +538,8 @@ function createEdgeDockController(deps) {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
-        backgroundThrottling: false
+        backgroundThrottling: false,
+        zoomFactor: dockScale()
       }
     });
     if (mac) {
@@ -585,7 +638,7 @@ function createEdgeDockController(deps) {
   }
 
   function commandsFor(surface, bounds, side) {
-    const m = EDGE_DOCK_METRICS;
+    const m = metrics();
     if (surface === 'bubble') {
       return bubbleCommands({
         width: bounds.width,
@@ -766,6 +819,7 @@ function createEdgeDockController(deps) {
 
   function positionRail(current = layout()) {
     if (!current || !alive(windows.rail)) return;
+    syncPageZoom();
     placeSurface('rail', current.rail);
     if (peekMode === 'handle' && !railVisible) placeSurface('peek', current.peek);
     if (railVisible) syncRefresh(current);
@@ -921,7 +975,7 @@ function createEdgeDockController(deps) {
           inRail: revealed && (rectContains(current.rail, point) || inRefresh || inRefreshCorridor),
           inBubble: Boolean(bubbleRect && rectContains(bubbleRect, point)),
           inCorridor: Boolean(bubbleRect && rectContains(edgeDockCorridorBounds(current.rail, bubbleRect), point)),
-          cellIndex: revealed ? edgeDockCellAt(point, current.rail, cells.length) : null
+          cellIndex: revealed ? edgeDockCellAt(point, current.rail, cells.length, metrics()) : null
         };
         // The refresh action shares the readouts' enter-once hover feedback.
         const hoveredTarget = inRefresh
@@ -950,7 +1004,8 @@ function createEdgeDockController(deps) {
       workArea: targetDisplay?.workArea || current.workArea,
       pointer: point,
       grabOffsetY: drag.grabOffsetY,
-      cellKinds: cellKinds()
+      cellKinds: cellKinds(),
+      metrics: metrics()
     });
     if (!next) return;
     next.displayId = normalizeEdgeDockDisplayId(targetDisplay?.id);
@@ -1062,7 +1117,7 @@ function createEdgeDockController(deps) {
     });
     ipcMain.on('edgeDock:dragStart', (event, payload) => {
       if (surfaceFor(event.sender) !== 'rail') return;
-      handleDragStart(payload?.grabOffsetY);
+      handleDragStart((Number(payload?.grabOffsetY) || 0) * dockScale());
     });
     ipcMain.on('edgeDock:dragEnd', (event) => {
       if (surfaceFor(event.sender) !== 'rail') return;
@@ -1074,7 +1129,7 @@ function createEdgeDockController(deps) {
       if (bubbleCell === null || cells[bubbleCell]?.id !== cellId) return;
       const height = Math.round(Number(payload?.height));
       if (!Number.isFinite(height) || height <= 0) return;
-      const maxHeight = Math.max(40, (display()?.workArea?.height || 720) - EDGE_DOCK_METRICS.screenMargin * 2);
+      const maxHeight = Math.max(40, maxCardHeight() ?? 720);
       bubbleHeight = Math.min(height, maxHeight);
       // Store the clamped height: reopening this card restores it verbatim, so
       // keeping the raw value here would place a card taller than the work area.
@@ -1171,13 +1226,24 @@ function createEdgeDockController(deps) {
   }
 
   return {
+    // Shows a custom size while its slider is dragged; the save that follows
+    // the release goes through sync(), which drops the preview.
+    previewScale(scale) {
+      previewScale = scale === null || scale === undefined ? null : normalizeEdgeDockCustomScale(scale);
+      if (!running) return;
+      positionRail();
+      if (!railVisible) showPeek();
+      for (const surface of SURFACES) render(surface);
+    },
     // Settings changed: start, stop, rebuild for a material change, or move.
     sync() {
+      previewScale = null;
       if (!canUseEdgeDock(settings(), platform)) {
         if (running) stop();
         return;
       }
       start();
+      syncPageZoom();
       refreshFullScreen(Date.now(), true);
       syncAlwaysVisible();
       if (!drag) {

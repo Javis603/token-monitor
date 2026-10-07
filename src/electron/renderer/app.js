@@ -398,6 +398,9 @@ Object.assign(els, {
   edgeDockOptions: document.getElementById('edgeDockOptions'),
   edgeDockSideInputs: Array.from(document.querySelectorAll('input[name="edgeDockSide"]')),
   edgeDockModeInputs: Array.from(document.querySelectorAll('input[name="edgeDockMode"]')),
+  edgeDockSizeInputs: Array.from(document.querySelectorAll('input[name="edgeDockSize"]')),
+  edgeDockCustomScaleRow: document.getElementById('edgeDockCustomScaleRow'),
+  edgeDockCustomScaleInput: document.getElementById('edgeDockCustomScaleInput'),
   edgeDockHapticRow: document.getElementById('edgeDockHapticRow'),
   edgeDockHapticInput: document.getElementById('edgeDockHapticInput'),
   edgeDockWarnColorsInput: document.getElementById('edgeDockWarnColorsInput'),
@@ -12613,6 +12616,14 @@ function syncEdgeDockControls() {
   const modes = (els.edgeDockModeInputs || []).map((input) => input.value);
   const mode = modes.includes(state.settings?.edgeDockMode) ? state.settings.edgeDockMode : 'autoHide';
   for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
+  const sizes = (els.edgeDockSizeInputs || []).map((input) => input.value);
+  const size = sizes.includes(state.settings?.edgeDockSize) ? state.settings.edgeDockSize : 'medium';
+  for (const input of els.edgeDockSizeInputs || []) input.checked = input.value === size;
+  els.edgeDockCustomScaleRow?.classList.toggle('hidden', size !== 'custom');
+  if (els.edgeDockCustomScaleInput && document.activeElement !== els.edgeDockCustomScaleInput) {
+    els.edgeDockCustomScaleInput.value = String(Math.round((Number(state.settings?.edgeDockCustomScale) || 1) * 100));
+    syncSliderRow(els.edgeDockCustomScaleInput);
+  }
   els.edgeDockHapticRow?.classList.toggle('hidden', state.appInfo?.platform !== 'darwin');
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
   if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
@@ -12686,6 +12697,22 @@ for (const input of els.edgeDockModeInputs || []) {
     if (input.checked) void saveSettings({ edgeDockMode: input.value });
   });
 }
+for (const input of els.edgeDockSizeInputs || []) {
+  input.addEventListener('change', () => {
+    if (!input.checked) return;
+    els.edgeDockCustomScaleRow?.classList.toggle('hidden', input.value !== 'custom');
+    void saveSettings({ edgeDockSize: input.value });
+  });
+}
+// Like the Zoom slider: the dock previews each step while the slider is dragged
+// and the size is saved on release, since a save redraws the settings form.
+els.edgeDockCustomScaleInput?.addEventListener('input', () => {
+  syncSliderRow(els.edgeDockCustomScaleInput);
+  window.tokenMonitor.previewAppearance?.({ edgeDockCustomScale: Number(els.edgeDockCustomScaleInput.value) / 100 }).catch(() => {});
+});
+els.edgeDockCustomScaleInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockCustomScale: Number(els.edgeDockCustomScaleInput.value) / 100 });
+});
 
 for (const input of els.floatingBubbleTriggerInputs || []) {
   input.addEventListener('change', () => {

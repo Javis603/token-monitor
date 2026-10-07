@@ -509,8 +509,10 @@ function renderPeek(payload) {
   root.dataset.peekMode = payload.peekMode || 'handle';
   // Sized to the window's own geometry rather than the viewport, in case AppKit
   // clamped the window wider than asked and the extra pixels lie off-screen.
-  root.style.width = `${payload.shape?.width || 10}px`;
-  root.style.height = `${payload.shape?.height || 88}px`;
+  // The geometry is in window pixels and the page is zoomed to the dock's size.
+  const zoom = payload.zoom || 1;
+  root.style.width = `${(payload.shape?.width || 10) / zoom}px`;
+  root.style.height = `${(payload.shape?.height || 88) / zoom}px`;
   requestAnimationFrame(() => requestAnimationFrame(() => {
     if (state.payload === payload) bridge.peekPainted?.(payload.peekMode || 'handle', payload.shape?.key);
   }));

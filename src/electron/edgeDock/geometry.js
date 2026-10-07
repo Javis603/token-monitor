@@ -92,6 +92,48 @@ function normalizeEdgeDockOffset(value) {
   return Math.max(0, Math.min(1, number));
 }
 
+// The dock's size: three presets, or a scale of the user's own kept separately
+// so switching to a preset and back does not lose it.
+const EDGE_DOCK_SIZES = Object.freeze({ small: 0.85, medium: 1, large: 1.25, custom: null });
+const EDGE_DOCK_CUSTOM_SCALE = Object.freeze({ min: 0.75, max: 1.5, step: 0.05 });
+
+function normalizeEdgeDockSize(value) {
+  return Object.hasOwn(EDGE_DOCK_SIZES, value) ? value : 'medium';
+}
+
+function normalizeEdgeDockCustomScale(value) {
+  const number = Number(value);
+  if (value === null || value === undefined || value === '' || !Number.isFinite(number)) return 1;
+  const { min, max, step } = EDGE_DOCK_CUSTOM_SCALE;
+  const stepped = Math.round(Math.max(min, Math.min(max, number)) / step) * step;
+  return Number(stepped.toFixed(2));
+}
+
+function edgeDockScale(settings = {}) {
+  const size = normalizeEdgeDockSize(settings?.edgeDockSize);
+  return size === 'custom' ? normalizeEdgeDockCustomScale(settings?.edgeDockCustomScale) : EDGE_DOCK_SIZES[size];
+}
+
+// Measured from the pointer's side rather than the dock's, so they stay put
+// whatever size the dock is drawn at: a larger dock should not open from
+// further away, nor a smaller one become harder to reach.
+const UNSCALED_METRICS = new Set(['wakeDepth', 'approachDepth', 'approachSlack', 'triggerDepth', 'screenMargin', 'edgeInset']);
+
+// Whole pixels, so every window keeps integer bounds. The handle's window keeps
+// the width AppKit will not clamp, and the handle stays wide enough to find.
+function scaledEdgeDockMetrics(scale) {
+  const factor = Number(scale);
+  if (!Number.isFinite(factor) || factor === 1) return EDGE_DOCK_METRICS;
+  const scaled = {};
+  for (const [key, value] of Object.entries(EDGE_DOCK_METRICS)) {
+    scaled[key] = UNSCALED_METRICS.has(key) ? value : Math.round(value * factor);
+  }
+  scaled.peekWidth = Math.max(EDGE_DOCK_METRICS.peekWidth, scaled.peekWidth);
+  scaled.handleWidth = Math.max(5, scaled.handleWidth);
+  scaled.handleNearWidth = Math.max(scaled.handleWidth + 1, scaled.handleNearWidth);
+  return Object.freeze(scaled);
+}
+
 function normalizeEdgeDockDisplayId(value) {
   if (value === null || value === undefined || value === '') return null;
   const id = String(value).trim();
@@ -155,6 +197,28 @@ function edgeDockCellLayout(workArea, cellKinds, metrics = EDGE_DOCK_METRICS) {
 // must not count as leaving. It used to be the bounding box of both surfaces,
 // which on a long rail with a card near the top swallowed a large empty area
 // of the screen and kept the card open after the pointer had clearly left.
+// A larger dock that would not fit the work area at full density shrinks to the
+// largest size that does, so it still scales as a whole: the compressed density
+// would otherwise shrink its rings and type straight back, and only its width
+// would grow. A dock that does not fit even at 100% keeps that density, as it
+// always has.
+function edgeDockFittingScale({ workArea, cellKinds, cellCount, scale }) {
+  const requested = Number(scale) || 1;
+  if (!workArea || requested <= 1) return requested;
+  const kinds = cellKindsFrom(cellKinds, cellCount);
+  const fits = (value) => !edgeDockCellLayout(workArea, kinds, scaledEdgeDockMetrics(value)).compact;
+  if (fits(requested)) return requested;
+  if (!fits(1)) return 1;
+  let low = 100;
+  let high = Math.round(requested * 100);
+  while (high - low > 1) {
+    const mid = Math.floor((low + high) / 2);
+    if (fits(mid / 100)) low = mid;
+    else high = mid;
+  }
+  return low / 100;
+}
+
 function edgeDockCorridorBounds(railBounds, bubbleBounds, slack = 6) {
   if (!railBounds || !bubbleBounds) return null;
   const bubbleRight = bubbleBounds.x + bubbleBounds.width;
@@ -490,13 +554,16 @@ module.exports = {
   EDGE_DOCK_DEFAULT_OFFSET,
   EDGE_DOCK_METRICS,
   EDGE_DOCK_MODES,
+  EDGE_DOCK_CUSTOM_SCALE,
   EDGE_DOCK_SIDES,
+  EDGE_DOCK_SIZES,
   EDGE_DOCK_TIMING,
   createEdgeDockIntent,
   edgeDockBubbleBounds,
   edgeDockCellAt,
   edgeDockCellLayout,
   edgeDockCorridorBounds,
+  edgeDockFittingScale,
   edgeDockHandleBounds,
   edgeDockHandleZones,
   edgeDockPeekBounds,
@@ -504,12 +571,16 @@ module.exports = {
   edgeDockRailBounds,
   edgeDockRefreshBounds,
   edgeDockRefreshCorridor,
+  edgeDockScale,
   edgeDockTriggerBounds,
+  normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
   normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
+  normalizeEdgeDockSize,
   railLength,
   rectContains,
+  scaledEdgeDockMetrics,
   unionRect
 };
