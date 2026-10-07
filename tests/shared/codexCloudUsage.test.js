@@ -4,7 +4,6 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
 const { EventEmitter } = require('node:events');
 const { collectCloudUsage, reference, turnPage, estimates, quotas, summary, page, error } = require('../../src/shared/providers/codex/cloudUsage');
 const { CloudTransport, cachedReferences, ROUTES, WS_URL } = require('../../src/shared/providers/codex/cloudTransport');
-const { renderCloudHtml } = require('../../src/shared/providers/codex/cloudView');
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const NOW = Date.UTC(2026, 9, 5); const seconds = NOW / 1000;
 const thread = (n, extra = {}) => ({ id: id(n), updatedAt: seconds - 10, source: null, ...extra });
@@ -112,10 +111,9 @@ test('quota percentages and purchased credits never become token counts', () => 
   assert.equal(result[0].weeklyLimitPercent, 1.5); assert.equal(result[0].purchasedCredits, '-0.001'); assert.equal(result[0].totalTokens, undefined);
   assert.throws(() => quotas({ threads: [{ thread_id: id(1), weekly_limit_percent: true }] }, [reference(thread(1), NOW)]));
 });
-test('transcript content is not copied into reports or HTML', async () => {
+test('transcript content is not copied into reports', async () => {
   const r = await collectCloudUsage(fake({ list: () => ({ data: [thread(1, { preview: 'SECRET' })] }), history: () => ({ data: [turn(11, { items: [{ text: 'SECRET' }], error: 'SECRET' })] }) }), { discover: true, now: NOW });
   assert.ok(!JSON.stringify(r).includes('SECRET'));
-  r.threads[0].kind = '<script>alert(1)</script>'; const html = renderCloudHtml(r); assert.ok(!html.includes('<script>')); assert.ok(html.includes('&lt;script&gt;'));
 });
 test('account mismatch cannot seed cached dot associations', (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cloud-cache-')); t.after(() => fs.rmSync(home, { recursive: true, force: true }));

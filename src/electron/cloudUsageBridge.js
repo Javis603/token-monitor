@@ -21,6 +21,7 @@ const millisStamp = (v) => Number.isSafeInteger(v) && v > 0 && v <= 864000000000
 function fault(code) { return Object.assign(new Error(code), { code }); }
 function safeError(e) { return /^[A-Z_]{1,60}$/.test(e?.code || '') ? e.code : 'CLOUD_SERVICE_UNAVAILABLE'; }
 function readJson(file) {
+  if (fs.lstatSync(file).isSymbolicLink()) throw fault('INVALID_CLOUD_REPORT');
   const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
   try {
     const before = fs.fstatSync(fd);

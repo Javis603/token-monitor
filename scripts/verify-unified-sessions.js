@@ -65,7 +65,7 @@ app.whenReady().then(async () => {
   for (const channel of channels) ipcMain.handle(channel, (_event, ...args) => responses[channel]?.(...args) ?? (channel.endsWith(':accounts') ? [] : null));
   win = new BrowserWindow({ width: 530, height: 820, useContentSize: true, show: false, backgroundColor: '#282b2d', webPreferences: { contextIsolation: true, nodeIntegration: false, preload } });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  win.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(String(event.message)); });
+  win.webContents.on('console-message', (event, details) => { const entry = details || event; if (entry.level === 'error') errors.push(String(entry.message)); });
   await win.loadFile(path.join(root, 'src/electron/renderer/index.html'), { query: { period: 'allTime', breakdown: 'session', suppressInitialNumberAnimation: '1' } });
   win.show();
   await waitFor('document.querySelectorAll("#breakdown .row").length === 4');

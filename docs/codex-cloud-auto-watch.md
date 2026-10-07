@@ -20,7 +20,7 @@ Each serial scan unions unfiltered and explicitly source-filtered active catalog
 
 Threads with live `status.type = active` are candidates regardless of user/aeon/subagent classification. Newly created warm idle threads are observed for a short window so a following turn can be captured. Old `notLoaded` history is not automatically loaded. Idle listeners are retained for a grace period to collect tail events. If hosted unsubscribe is unavailable, the watcher closes its own connection and reattaches the remaining candidates instead of sending a task stop.
 
-A single authenticated WebSocket carries discovery and multiple subscriptions. Exact thread IDs are deduplicated and registered before awaiting the resume response, so early usage events are not lost. The transport allowlist rejects thread/model starts, interrupts, deletion, archival, permission changes, billing queries and resume configuration overrides. The only viewer attachment is `thread/resume` with the exact ID and `excludeTurns: true`. It does not request message-history payloads.
+A single authenticated WebSocket carries discovery and multiple subscriptions. Exact thread IDs are deduplicated and registered before awaiting the resume response, so early usage events are not lost. The observer RPC allowlist rejects thread/model starts, interrupts, deletion, archival, permission changes and resume configuration overrides. This watcher does not call the shared transport's optional billing or quota methods. The only viewer attachment is `thread/resume` with the exact ID and `excludeTurns: true`. It does not request message-history payloads.
 
 ## Reconnect, scope and accounting
 
