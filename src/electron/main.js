@@ -4719,7 +4719,9 @@ function sendPush(payload, options = {}) {
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
-    statsPushRevision += 1;
+    // Client local batches overlay usage on the cached Hub snapshot; they do
+    // not supersede an in-flight read of fresh remote stats.
+    if (!(settings?.hubMode === 'client' && payload.data.reason === 'local')) statsPushRevision += 1;
     edgeDockManualStats = null;
     getSyncContentRuntime().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);

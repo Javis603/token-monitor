@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const { runManualDeviceRefresh } = require('../../src/electron/deviceRuntimeCoordinator');
+const { createStatsPublicationBatcher } = require('../../src/electron/statsPublisher');
 
 const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 const refreshSource = main.slice(main.indexOf('let manualStatsRefreshInFlight ='), main.indexOf('function managedPricingSidecarPath('));
@@ -328,3 +329,37 @@ test('runtime replacement without a mode change invalidates the dock manual sour
   assert.equal(context.dockStats, old);
   limits.resolve();
 });
+
+for (const entry of ['App', 'Edge Dock']) {
+  test(`${entry} Client refresh adopts fresh Hub stats after its pending local publication batch`, async () => {
+    const { context, response } = clientFixture();
+    const timers = [];
+    Object.assign(context, {
+      mode: 'sync',
+      latestHubStats: { remote: 'old' },
+      lastCollectedDevice: { local: 'fresh' },
+      composeLocalSyncSummary: (hub, local) => ({ ...hub, ...local }),
+      setLatestHubStatsCache: (stats) => { context.latestHubStats = stats; },
+      updateDiscordRpcDisplay() {},
+      createStatsPublicationBatcher: (options) => createStatsPublicationBatcher({
+        ...options,
+        setTimeout: (callback) => { timers.push(callback); return timers.length; },
+        clearTimeout() {}
+      })
+    });
+    const batchSource = main.slice(main.indexOf('const SYNC_STATS_PUBLISH_WINDOW_MS ='), main.indexOf('function startSyncCollector('));
+    vm.runInNewContext(batchSource, context);
+    const request = entry === 'App' ? context.refreshManualStats() : context.refreshStatsFromEdgeDock();
+    context.requestSyncDisplayStats({ reason: 'local', generation: context.hubModeGeneration });
+    assert.equal(timers.length, 1);
+    timers[0]();
+    assert.equal(context.dockStats.remote, 'old');
+    assert.equal(context.dockStats.local, 'fresh');
+    response.resolve({ remote: 'fresh' });
+    await request;
+    assert.equal(context.dockStats.remote, 'fresh');
+    assert.equal(context.dockStats.local, 'fresh');
+    context.repaintEdgeDockCells();
+    assert.equal(context.dockStats.remote, 'fresh');
+  });
+}
