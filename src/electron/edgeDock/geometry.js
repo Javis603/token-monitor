@@ -30,11 +30,10 @@ const EDGE_DOCK_METRICS = Object.freeze({
   // plus a little slack, but not the strip at the physical screen edge.
   hitRadius: 28,
   edgeInset: 0,
-  // The handle's window, with room for the handle to grow while the pointer
-  // approaches it. The handle is a silhouette inside it like the rail's, so its
-  // material and tint are the rail's too. AppKit clamps a window narrower than 10px.
-  peekWidth: 10,
-  peekLength: 88,
+  // The handle, at rest and while the pointer approaches it. Its window is
+  // sized to the handle at every step of that growth rather than reserving room
+  // for it: on macOS the whole window rectangle takes the pointer, so a margin
+  // around the handle would swallow clicks meant for whatever is beneath it.
   handleWidth: 6,
   handleLength: 72,
   handleNearWidth: 8,
@@ -183,14 +182,17 @@ function edgeDockRailBounds({ workArea, side, offset, cellCount, cellKinds, metr
   return { x: Math.round(x), y: railTop(workArea, length, offset, metrics), width: metrics.railWidth, height: length, cells };
 }
 
-function edgeDockPeekBounds({ workArea, side, railBounds, metrics = EDGE_DOCK_METRICS }) {
+// `handle` is the handle's current size, fractional mid-growth; the window takes
+// the whole pixels that hold it.
+function edgeDockPeekBounds({ workArea, side, railBounds, handle = null, metrics = EDGE_DOCK_METRICS }) {
   if (!workArea || !railBounds) return null;
+  const width = Math.ceil(handle?.width ?? metrics.handleWidth);
+  const height = Math.ceil(handle?.length ?? metrics.handleLength);
   const x = normalizeEdgeDockSide(side) === 'left'
     ? workArea.x
-    : workArea.x + workArea.width - metrics.peekWidth;
-  const height = metrics.peekLength;
+    : workArea.x + workArea.width - width;
   const y = railBounds.y + Math.round((railBounds.height - height) / 2);
-  return { x: Math.round(x), y, width: metrics.peekWidth, height };
+  return { x: Math.round(x), y, width, height };
 }
 
 function edgeDockHandleZones({ side, peekBounds, metrics = EDGE_DOCK_METRICS }) {

@@ -217,9 +217,10 @@ function createEdgeDockController(deps) {
     const { side, offset } = placement();
     const workArea = current.workArea;
     const rail = edgeDockRailBounds({ workArea, side, offset, cellKinds: cellKinds() });
-    const peek = edgeDockPeekBounds({ workArea, side, railBounds: rail });
+    const peek = edgeDockPeekBounds({ workArea, side, railBounds: rail, handle: handleSize() });
     const trigger = edgeDockTriggerBounds({ workArea, displayBounds: current.bounds, side, railBounds: rail });
-    const zones = edgeDockHandleZones({ side, peekBounds: peek });
+    // Measured off the resting handle, so the zones hold still while it grows.
+    const zones = edgeDockHandleZones({ side, peekBounds: edgeDockPeekBounds({ workArea, side, railBounds: rail }) });
     const bubble = bubbleCell !== null
       ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: bubbleHeight, workArea, side })
       : null;
@@ -854,9 +855,10 @@ function createEdgeDockController(deps) {
         const input = {
           inTrigger: rectContains(current.trigger, point),
           inPeek: !revealed && rectContains(current.peek, point),
-          // Not while a button is held: that is a scrollbar or a selection being
-          // dragged past the handle, not a reach for it.
-          inWake: !revealed && rectContains(current.wake, point) && primaryButtonDown() !== true,
+          // Only with the button known to be up: a held one is a scrollbar or a
+          // selection being dragged past the handle, not a reach for it, and an
+          // unreadable state is treated as held.
+          inWake: !revealed && rectContains(current.wake, point) && primaryButtonDown() === false,
           inRail: revealed && (rectContains(current.rail, point) || inRefresh || inRefreshCorridor),
           inBubble: Boolean(bubbleRect && rectContains(bubbleRect, point)),
           inCorridor: Boolean(bubbleRect && rectContains(edgeDockCorridorBounds(current.rail, bubbleRect), point)),

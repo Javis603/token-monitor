@@ -526,6 +526,10 @@ test('the handle grows on approach and reveals from its wake zone unless a butto
   await settle();
   assert.equal(rail.opacity, 0, 'a drag past the handle does not open the dock');
 
+  buttonDown = null;
+  await settle();
+  assert.equal(rail.opacity, 0, 'nor does one whose button state cannot be read');
+
   buttonDown = false;
   await settle();
   assert.equal(rail.opacity, 1, 'resting in the wake zone does');
@@ -543,6 +547,7 @@ test('the handle grows through intermediate silhouettes unless motion is reduced
   assert.ok(masks() - before > 2, `the mask follows the growth in steps (${masks() - before})`);
   const grown = sentPayload(peek, 'peek').shape;
   assert.equal(grown.key.endsWith(`:${EDGE_DOCK_METRICS.handleNearWidth}x${EDGE_DOCK_METRICS.handleNearLength}`), true);
+  assert.deepEqual([peek.bounds.width, peek.bounds.height], [EDGE_DOCK_METRICS.handleNearWidth, EDGE_DOCK_METRICS.handleNearLength], 'the window grows with the handle');
 });
 
 test('a rail payload carries the reveal that keys the entrance', (t) => {
@@ -761,7 +766,7 @@ test('refresh reuses the peek and retains one Liquid Glass view across role chan
   await new Promise((resolve) => setTimeout(resolve, 450));
   assert.equal(sentPayload(peek, 'peek').peekMode, 'handle');
   assert.equal(sentPayload(peek, 'peek').liquidGlass, false);
-  assert.equal(peek.bounds.width, EDGE_DOCK_METRICS.peekWidth);
+  assert.equal(peek.bounds.width, EDGE_DOCK_METRICS.handleWidth);
   assert.equal(glass.updates.at(-1).visible, false);
   fixture.controller.setAppearance({ language: 'zh-TW' });
   assert.equal(glass.updates.at(-1).visible, false);

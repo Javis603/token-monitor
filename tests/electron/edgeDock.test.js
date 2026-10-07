@@ -1191,7 +1191,11 @@ test('rail hugs the chosen edge and its peek handle is flush with it', () => {
   assert.equal(right.height, railLength(3));
   const peek = edgeDockPeekBounds({ workArea, side: 'right', railBounds: right });
   assert.equal(peek.x + peek.width, workArea.width);
-  assert.equal(peek.height, EDGE_DOCK_METRICS.peekLength);
+  assert.equal(peek.width, EDGE_DOCK_METRICS.handleWidth, 'the window is the handle, with no margin to take clicks');
+  assert.equal(peek.height, EDGE_DOCK_METRICS.handleLength);
+  const growing = edgeDockPeekBounds({ workArea, side: 'right', railBounds: right, handle: { width: 7.25, length: 76.5 } });
+  assert.deepEqual([growing.width, growing.height], [8, 77], 'mid-growth it takes the whole pixels that hold the handle');
+  assert.equal(growing.x + growing.width, workArea.width);
   assert.equal(peek.y + peek.height / 2, right.y + right.height / 2);
 
   const left = edgeDockRailBounds({ workArea, side: 'left', offset: 1, cellCount: 3 });
@@ -1338,22 +1342,22 @@ test('rail silhouette starts and ends on the screen edge and mirrors for the lef
   assert.match(toSvgPath(right), /^M64 0 C/);
 });
 
-test('the handle is a tab flush with either screen edge, centred in its window', () => {
-  const right = peekCommands({ width: 10, height: 88, handleWidth: 6, handleLength: 72 });
-  assert.deepEqual(right[0], ['M', 10, 8]);
-  assert.deepEqual(right.at(-2), ['L', 10, 80]);
+test('the handle is a tab flush with either screen edge, filling its window', () => {
+  const right = peekCommands({ width: 6, height: 72 });
+  assert.deepEqual(right[0], ['M', 6, 0]);
+  assert.deepEqual(right.at(-2), ['L', 6, 72]);
   assert.deepEqual(right.at(-1), ['Z']);
-  assert.notDeepEqual(peekCommands({ width: 10, height: 88, open: true }).at(-1), ['Z']);
-  assert.deepEqual(peekCommands({ width: 10, height: 88, side: 'left', handleWidth: 6, handleLength: 72 })[0], ['M', 0, 8]);
-  const { buffer, pixelWidth } = rasterizeMask(toPolygons(right), 10, 88);
+  assert.notDeepEqual(peekCommands({ width: 6, height: 72, open: true }).at(-1), ['Z']);
+  assert.deepEqual(peekCommands({ width: 6, height: 72, side: 'left' })[0], ['M', 0, 0]);
+  const { buffer, pixelWidth } = rasterizeMask(toPolygons(right), 6, 72);
   const alpha = (x, y) => buffer[(y * pixelWidth + x) * 4 + 3];
-  assert.equal(alpha(9, 4), 0, 'the window leaves room around the resting handle');
-  assert.equal(alpha(3, 44), 0);
-  assert.equal(alpha(4, 8), 0, 'the corner facing the desktop is rounded');
-  assert.equal(alpha(9, 9), 255, 'the screen-edge side stays square');
-  assert.equal(alpha(4, 44), 255);
-  const near = rasterizeMask(toPolygons(peekCommands({ width: 10, height: 88, handleWidth: 8, handleLength: 80 })), 10, 88);
-  assert.equal(near.buffer[(44 * near.pixelWidth + 3) * 4 + 3], 255, 'the approached handle reaches further in');
+  assert.equal(alpha(0, 0), 0, 'the corner facing the desktop is rounded');
+  assert.equal(alpha(5, 0), 255, 'the screen-edge side stays square');
+  assert.equal(alpha(0, 36), 255, 'and the tab otherwise fills the window');
+  // Mid-growth the window holds the handle in whole pixels.
+  const growing = peekCommands({ width: 8, height: 77, handleWidth: 7.25, handleLength: 76.5 });
+  assert.deepEqual(growing[0], ['M', 8, 0.25]);
+  assert.equal(growing[2][5], 0.75);
 });
 
 test('bubble tail tip lands on tailY and stays clear of the corners', () => {
@@ -2507,8 +2511,8 @@ test('the running halo resumes its phase rather than restarting on every repaint
 // the retreat lives on the withdrawn state and one transition carries it both ways.
 test('the handle retreats into the edge while the window can still show it', () => {
   const css = readRendererFile(path.join('edgeDock', 'dock.css')).replace(/\/\*[\s\S]*?\*\//g, ' ');
-  assert.match(css, /\.edge-dock-root\[data-side="right"\] \{ --edge-dock-handle-retreat: 6px; \}/);
-  assert.match(css, /\.edge-dock-root\[data-side="left"\] \{ --edge-dock-handle-retreat: -6px; \}/);
+  assert.match(css, /\.edge-dock-root\[data-side="right"\] \{ --edge-dock-handle-retreat: 100%; \}/);
+  assert.match(css, /\.edge-dock-root\[data-side="left"\] \{ --edge-dock-handle-retreat: -100%; \}/);
   assert.match(
     css,
     /\.is-handle-hidden \.edge-dock-shape \{\s*opacity: 0;\s*transform: translateX\(var\(--edge-dock-handle-retreat\)\) scaleY\(0\.2\);\s*transition: opacity 110ms ease-out, transform 110ms ease-out;/
