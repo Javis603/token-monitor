@@ -33,6 +33,8 @@ const POLL_DRAG_MS = 16;
 const FULL_SCREEN_POLL_MS = 500;
 const FADE_IN_MS = 150;
 const FADE_OUT_MS = 120;
+const REFRESH_RESULT_HOLD_MS = 900;
+const REFRESH_FADE_OUT_MS = 200;
 const FADE_STEP_MS = 16;
 
 function edgeDockSupported(platform = process.platform) {
@@ -117,6 +119,8 @@ function createEdgeDockController(deps) {
   let refreshHovered = false;
   let refreshInFlight = null;
   let refreshInFlightWindow = null;
+  let refreshFeedbackUntil = 0;
+  let refreshFeedbackWindow = null;
   let drag = null;
   let placementOverride = null;
   let fullScreen = false;
@@ -610,8 +614,8 @@ function createEdgeDockController(deps) {
   }
 
   function refreshKeepsButtonVisible() {
-    return Boolean(refreshInFlight) && windows.peek === refreshInFlightWindow
-      && settings().edgeDockRefreshEnabled === true && canRefreshLimits() === true;
+    return (Boolean(refreshInFlight) && windows.peek === refreshInFlightWindow)
+      || (Date.now() < refreshFeedbackUntil && windows.peek === refreshFeedbackWindow);
   }
 
   function syncRefresh(current = layout()) {
@@ -620,8 +624,14 @@ function createEdgeDockController(deps) {
       && railVisible && !drag && canRefreshLimits() === true
       && (!alwaysVisible() || refreshHovered || refreshKeepsButtonVisible());
     if (!visible) {
-      if (!windows.peek.isVisible() || refreshVisible) showPeekWindow(false, FADE_OUT_MS);
+      if (!windows.peek.isVisible() || refreshVisible) {
+        showPeekWindow(false, alwaysVisible() ? REFRESH_FADE_OUT_MS : FADE_OUT_MS);
+      }
       refreshVisible = false;
+      if (settings().edgeDockRefreshEnabled !== true) {
+        refreshFeedbackUntil = 0;
+        refreshFeedbackWindow = null;
+      }
       if (hapticTarget === refreshHapticTarget) hapticTarget = null;
       return;
     }
@@ -893,6 +903,8 @@ function createEdgeDockController(deps) {
       if (!refreshInFlight) {
         const refreshWindow = windows.peek;
         refreshInFlightWindow = refreshWindow;
+        refreshFeedbackUntil = 0;
+        refreshFeedbackWindow = null;
         refreshInFlight = Promise.resolve().then(() => onRefreshLimits())
           .then((result) => {
             if (result?.ok === true && running && windows.peek === refreshWindow
@@ -901,6 +913,12 @@ function createEdgeDockController(deps) {
           })
           .catch((error) => ({ ok: false, error: error?.message || 'Refresh failed' }))
           .finally(() => {
+            // Let the renderer's result be readable before an unhovered action fades out.
+            if (running && windows.peek === refreshWindow && alwaysVisible()
+              && settings().edgeDockRefreshEnabled === true) {
+              refreshFeedbackUntil = Date.now() + REFRESH_RESULT_HOLD_MS;
+              refreshFeedbackWindow = refreshWindow;
+            }
             refreshInFlight = null;
             refreshInFlightWindow = null;
           });
@@ -1005,6 +1023,8 @@ function createEdgeDockController(deps) {
 
   function stop() {
     running = false;
+    refreshFeedbackUntil = 0;
+    refreshFeedbackWindow = null;
     clearTimeout(pollTimer);
     pollTimer = null;
     drag = null;

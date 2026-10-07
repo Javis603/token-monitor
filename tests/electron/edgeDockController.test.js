@@ -36,6 +36,7 @@ class FakeBrowserWindow extends EventEmitter {
     this.webContents = new FakeWebContents();
     this.bounds = { x: 0, y: 0, width: options.width, height: options.height };
     this.opacity = 1;
+    this.opacityChanges = [];
     this.visible = false;
     this.destroyed = false;
     this.shapeCalls = [];
@@ -55,7 +56,7 @@ class FakeBrowserWindow extends EventEmitter {
   isVisible() { return this.visible; }
   getOpacity() { return this.opacity; }
   getBounds() { return { ...this.bounds }; }
-  setOpacity(value) { this.opacity = value; }
+  setOpacity(value) { this.opacity = value; this.opacityChanges.push(value); }
   setIgnoreMouseEvents(value) { this.ignoreMouse = value; }
   showInactive() { this.visible = true; this.zOrderCalls.push('showInactive'); this.orderFront(); }
   moveTop() { this.zOrderCalls.push('moveTop'); this.orderFront(); }
@@ -148,7 +149,7 @@ function createFixture(options = {}) {
     createGlass: options.createGlass,
     canRefreshLimits: options.canRefreshLimits,
     onRefreshLimits: options.onRefreshLimits,
-    prefersReducedMotion: () => true,
+    prefersReducedMotion: options.prefersReducedMotion || (() => true),
     isFullScreen: options.isFullScreen,
     applyShapeMask: (win) => {
       maskWindows.push(win);
@@ -964,7 +965,9 @@ for (const mode of ['always', 'alwaysExceptFullScreen']) {
     test(`${mode} refresh stays visible after pointer leave until ${outcome}`, async (t) => {
       let finish;
       let fail;
+      const animated = mode === 'always' && outcome === 'success';
       const fixture = createFixture({
+        prefersReducedMotion: () => !animated,
         settings: { edgeDockMode: mode }, isFullScreen: () => false,
         canRefreshLimits: () => true,
         onRefreshLimits: () => new Promise((resolve, reject) => { finish = resolve; fail = reject; })
@@ -986,8 +989,15 @@ for (const mode of ['always', 'alwaysExceptFullScreen']) {
       if (outcome === 'throw') fail(new Error('Probe failed'));
       else finish({ ok: outcome === 'success' });
       assert.equal((await request).ok, outcome === 'success');
+      peek.opacityChanges.length = 0;
       await new Promise((resolve) => setTimeout(resolve, 450));
-      assert.equal(peek.ignoreMouse, true, 'the unhovered button hides after completion');
+      assert.equal(peek.ignoreMouse, false, 'the result remains visible long enough to read');
+      assert.equal(peek.opacity, 1);
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      assert.equal(peek.ignoreMouse, true, 'the unhovered button hides after the result hold');
+      assert.equal(peek.opacity, 0);
+      if (animated) assert.ok(peek.opacityChanges.some((opacity) => opacity > 0 && opacity < 1),
+        'the button fades through intermediate opacity rather than disappearing');
       assert.equal(rail.ignoreMouse, false);
     });
   }
