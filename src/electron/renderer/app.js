@@ -2357,7 +2357,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   }
   const interactive = reviewGroup === true || (
     kind === 'session'
-    && ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy'].includes(client)
+    && ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy', 'antigravity'].includes(client)
   ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
   const mark = row.querySelector('.row-mark');
   const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '' }, state.breakdown);
@@ -4660,7 +4660,7 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   }
   if (detail && detail.found === false) { container.append(detailNote(t('detailNotFound') || 'Transcript not found on this machine.')); return; }
 
-  const rows = sessionDetailApi.exchangeRows(detail, { now: new Date(), sortBy: state.detailSort });
+  const rows = sessionDetailApi.exchangeRows(detail, { now: new Date(), sortBy: state.detailSort, translate: t });
   if (rows.length === 0) { container.append(detailNote(t('detailEmpty') || 'No activity in this period.')); return; }
   if (detail?.tokenDataUnavailable === true) {
     container.append(detailNote(t('detailTokenDataUnavailable') || 'Token data is unavailable for this session.'));
@@ -4857,7 +4857,8 @@ function exchangeNode(row, max) {
   }
   exTitle.append(document.createTextNode(row.title));
   bindHoverMarquee(exTitle);
-  wrap.querySelector('.detail-ex-sub').textContent = row.subtitle;
+  wrap.querySelector('.detail-ex-sub').textContent = row.subtitle
+    + (row.durationMs !== undefined ? ' · ' + detailSpeed('detailTaskRate', row.outputTokens, row.durationMs) : '');
   const tokensAvailable = row.tokensAvailable !== false;
   wrap.querySelector('.detail-ex-value').textContent = tokensAvailable
     ? formatNumber(row.value)
@@ -4876,6 +4877,11 @@ function exchangeNode(row, max) {
   return wrap;
 }
 
+function detailSpeed(key, output, durationMs) {
+  const rate = Number.isFinite(durationMs) && durationMs > 0 ? output * 1000 / durationMs : null;
+  return t(key, { rate: rate !== null ? rate.toFixed(1) : '—' });
+}
+
 function turnNode(turn) {
   const el = document.createElement('div');
   el.className = 'detail-turn';
@@ -4892,7 +4898,9 @@ function turnNode(turn) {
   el.querySelector('.detail-turn-split').textContent = tokensAvailable
     ? split
     : (t('detailTokenUnavailable') || 'Unavailable');
-  el.querySelector('.detail-turn-tools').textContent = turn.tools ? `⊢ ${turn.tools}` : '';
+  el.querySelector('.detail-turn-tools').textContent = turn.durationMs !== undefined
+    ? [turn.model, detailSpeed('detailGenerationRate', tk.output || 0, turn.durationMs)].filter(Boolean).join(' · ')
+    : turn.tools ? `⊢ ${turn.tools}` : '';
   el.querySelector('.detail-turn-value').textContent = tokensAvailable
     ? formatNumber(turn.value)
     : (t('detailTokenUnavailable') || 'Unavailable');
@@ -11989,7 +11997,7 @@ els.breakdown.addEventListener('click', (event) => {
   }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy') return;
+  if (client !== 'antigravity' && client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy') return;
   if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;

@@ -17,6 +17,9 @@
 
   const MESSAGES = {
     en: {
+      'detailTaskNumber': 'Task #{n}',
+      'detailTaskRate': 'Task: {rate} tok/s',
+      'detailGenerationRate': 'Generation (incl. TTFT): {rate} tok/s',
       'settings.language.title': 'Language',
       'settings.language.label': 'Interface language',
       'settings.language.auto': 'Auto (system)',
@@ -1845,6 +1848,9 @@
       'sortMostTokens': '↕ Most tokens'
     },
     'zh-TW': {
+      'detailTaskNumber': '任務 #{n}',
+      'detailTaskRate': '任務：{rate} tok/s',
+      'detailGenerationRate': '生成（含首字延遲）：{rate} tok/s',
       'settings.language.title': '語言',
       'settings.language.label': '介面語言',
       'settings.language.auto': '自動（跟隨系統）',
@@ -3673,6 +3679,9 @@
       'sortMostTokens': '↕ Token 最多'
     },
     'zh-CN': {
+      'detailTaskNumber': '任务 #{n}',
+      'detailTaskRate': '任务：{rate} tok/s',
+      'detailGenerationRate': '生成（含首字延迟）：{rate} tok/s',
       'settings.language.title': '语言',
       'settings.language.label': '界面语言',
       'settings.language.auto': '自动（跟随系统）',
@@ -5501,6 +5510,9 @@
       'sortMostTokens': '↕ Token 最多'
     },
     ko: {
+      'detailTaskNumber': '작업 #{n}',
+      'detailTaskRate': '작업: {rate} tok/s',
+      'detailGenerationRate': '생성 (TTFT 포함): {rate} tok/s',
       'dashboard.empty': '아직 사용 기록이 없습니다',
       'dashboard.heatmap.title': '토큰 활동',
       'dashboard.heatmap.tokens': '토큰',
@@ -7329,6 +7341,9 @@
       'views.trends': '추이',
     },
     ja: {
+      'detailTaskNumber': 'タスク #{n}',
+      'detailTaskRate': 'タスク: {rate} tok/s',
+      'detailGenerationRate': '生成 (TTFT含む): {rate} tok/s',
       'dashboard.empty': 'まだ使用履歴がありません',
       'dashboard.heatmap.title': 'トークンアクティビティ',
       'dashboard.heatmap.tokens': 'トークン',
@@ -9157,6 +9172,9 @@
       'views.trends': 'トレンド',
     },
     'pt-BR': {
+      'detailTaskNumber': 'Tarefa #{n}',
+      'detailTaskRate': 'Tarefa: {rate} tok/s',
+      'detailGenerationRate': 'Geração (incl. TTFT): {rate} tok/s',
       'settings.language.title': 'Idioma',
       'settings.language.label': 'Idioma da interface',
       'settings.language.auto': 'Automático (sistema)',

@@ -36,6 +36,8 @@
       tokensAvailable: turn.tokensAvailable !== false,
       cost: finiteNumber(turn.costEstimate),
       tokens: turn.tokens || {},
+      durationMs: turn.durationMs,
+      model: turn.model,
       tools: formatToolList(turn.tools)
     };
   }
@@ -57,6 +59,7 @@
   function exchangeRows(detail, options = {}) {
     const now = options.now || new Date();
     const sortBy = options.sortBy === 'tokens' ? 'tokens' : 'time';
+    const translate = options.translate || ((key, params) => key === 'detailTaskNumber' ? `Task #${params.n}` : key);
     const exchanges = (detail && detail.exchanges) || [];
     const rows = exchanges.map((ex, i) => {
       const turnCount = finiteNumber(ex.turnCount);
@@ -69,7 +72,9 @@
       return {
         key: `exchange:${i}`,
         isPrompt: Boolean(ex.promptPreview),
-        title: ex.promptPreview ? ex.promptPreview : '(session start)',
+        title: ex.taskNumber ? translate('detailTaskNumber', { n: ex.taskNumber }) : ex.promptPreview ? ex.promptPreview : '(session start)',
+        durationMs: ex.durationMs,
+        outputTokens: finiteNumber(ex.tokens?.output),
         subtitle: subtitleParts.join(' · '),
         value: finiteNumber(ex.tokens && ex.tokens.total),
         tokensAvailable: ex.tokensAvailable !== false,

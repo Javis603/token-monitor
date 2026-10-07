@@ -86,10 +86,10 @@ function normalizeTimeMetrics(value) {
 // zcode/opencode/muse: tokscale subtracts the reasoning overlap out of
 // `output` (their sources are reasoning-inclusive), so add it back here.
 // Tencent Buddy and Cherry Studio chat ledgers also emit independent reasoning.
-const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'codex', 'droid', 'dsh', 'zcode', 'opencode', 'muse', 'codebuddy', 'workbuddy', 'cherrystudio']);
+const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'antigravity', 'codex', 'droid', 'dsh', 'zcode', 'opencode', 'muse', 'codebuddy', 'workbuddy', 'cherrystudio']);
 
 function hasDisjointReasoning(client) {
-  return TOKSCALE_DISJOINT_REASONING_CLIENTS.has(String(client).trim().toLowerCase());
+  return TOKSCALE_DISJOINT_REASONING_CLIENTS.has(normalizeTokscaleClientName(client));
 }
 
 function sumTokens(breakdown, client = '') {

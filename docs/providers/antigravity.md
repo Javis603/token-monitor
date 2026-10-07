@@ -47,6 +47,16 @@ The generated `antigravity-cache` directory is deliberately not watched. Token M
 
 On Windows, running WSL distros are checked during full scans only. WSL discovery uses the same Antigravity source markers and never starts a stopped distro.
 
+### Local speed measurements
+
+The provider's `throughput.js` reads `gen_metadata` and `steps` using the runtime's native `node:sqlite` on all desktop platforms. Connections are read-only, use a 100 ms busy timeout and a read transaction, and cache successful snapshots by database and WAL fingerprints. Failed opens, queries or iteration are retried rather than cached as empty history; SHM changes do not invalidate this cache. Conversation text and tool payloads are not queried.
+
+Generation output is `chat[4][3]`, including reasoning (`chat[4][10]`) already counted there. Tokscale splits this into visible output (`chat[4][9]`) and reasoning; both usage and history fold those disjoint JSON buckets into the public output count, exactly once. Input includes the fixed system prompt (`chat[4][1]`) plus new input (`chat[4][2]`), following Tokscale's parser. Its duration is the sum of protobuf durations `chat[11]` and `chat[12]`, including TTFT. Newer records without `chat[9][4]` use the root step index to find `steps.metadata[1]`; the legacy timestamp remains a fallback. Token records with missing durations remain visible, with unavailable generation speed.
+
+The collector supplements an untimed Tokscale row only when its session, model, date window and complete output count match the native generations. Existing timed rows and ambiguous or incomplete coverage remain untouched. Custom Antigravity roots are not supplemented. Token and cost totals remain Tokscale-owned.
+
+Antigravity session Details group generations at user-input steps (type 14), display each generation's throughput, and display a separate task rate using all task output divided by the user-step start to the final step end. Tool waits are included in the task duration. Running or incompletely timed tasks, and tasks only partly included by a period filter, show unavailable task speed. These local task rates are not added to the device wire record.
+
 ### Boundary with quota collection
 
 Token/session totals are machine-local activity. They are not deduplicated by Google email and do not use the standalone OAuth credentials described below. Changes to quota identity or account aggregation must not alter usage attribution.

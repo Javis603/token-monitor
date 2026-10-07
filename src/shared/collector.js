@@ -40,6 +40,7 @@ const {
   terminationUnconfirmedError
 } = require('./subprocessTermination');
 const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
+const { applyAntigravityThroughput } = require('./providers/antigravity/throughput');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
 const {
@@ -830,6 +831,11 @@ async function collectUsageOnce(options) {
   const runTokscaleFn = async (input) => {
     const json = await runTokscaleScan(input);
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
+    const homeIndex = input.flags?.indexOf('--home') ?? -1;
+    const scanHome = homeIndex >= 0 ? input.flags[homeIndex + 1] : options.homeDir || os.homedir();
+    if (!options.customScanPaths?.antigravity?.length) {
+      applyAntigravityThroughput(json, { home: scanHome, flags: input.flags, now: collectedAt.getTime() });
+    }
     return json;
   };
   const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
