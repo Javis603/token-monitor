@@ -17,7 +17,7 @@ const { createUsageTransform } = require('../../src/shared/usage/usageTransform'
 const { sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
 const { projectRowsForPeriod } = require('../../src/electron/renderer/projectRows');
 const { readSessionDetail } = require('../../src/shared/sessionDetail');
-const { buildLocalUsageView } = require('../../src/shared/providers/codex/localUsage');
+const { buildLocalUsageView, resolveLocalUsagePricing } = require('../../src/shared/providers/codex/localUsage');
 const { syncPayload } = require('../../src/shared/syncPayload');
 const { mergeDeviceRecord, normalizeDeviceRecord } = require('../../src/shared/usage');
 
@@ -975,4 +975,112 @@ test('opening or refreshing Dots details bounds pricing work and never looks up 
   }
   assert.equal(lookups.length, 32);
   assert.ok(lookups.every(([model, timeout]) => model.startsWith('bounded-model-') && timeout === 1500));
+});
+
+test('aggregate Dots pricing bounds cold lookups, prices the remainder on later ticks and retains every token', async () => {
+  const rows = [...Array.from({ length: 24 }, (_, index) => `aggregate-bounded-${index}`), 'unknown'].map((model, index) => ({
+    model, threadId: `01234567-1234-1234-1234-${String(index).padStart(12, '0')}`,
+    observedAt: AT, usage: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 10 }
+  }));
+  const lookups = [];
+  const options = {
+    pricingRevision: 'aggregate-bounded',
+    lookupModelPricing: async (model, timeout) => {
+      lookups.push({ model, timeout });
+      return { pricing: { inputCostPerToken: 1 } };
+    }
+  };
+  const viewOptions = { now: AT, projectsEnabled: false };
+  // Duplicate/case-variant rows must not consume an extra lookup slot.
+  const pricingRows = [...rows, { model: rows[0].model.toUpperCase() }];
+  for (let tick = 0; tick < 6; tick += 1) {
+    const before = lookups.length;
+    const pricingByModel = await resolveLocalUsagePricing(pricingRows, options);
+    assert.equal(lookups.length - before, 4);
+    assert.equal(pricingByModel.unknown, null);
+    const view = buildLocalUsageView(rows, { ...viewOptions, pricingByModel });
+    for (const period of [view.today, view.month, view.allTime]) {
+      assert.equal(period.totalTokens, 250);
+      assert.equal(period.costUsd, (tick + 1) * 40);
+      assert.equal(period.unpricedTokens, 250 - (tick + 1) * 40);
+      assert.equal(Object.keys(period.sessions).length, 25);
+    }
+  }
+  assert.equal(new Set(lookups.map(({ model }) => model)).size, 24);
+  assert.ok(lookups.every(({ model, timeout }) => model !== 'unknown' && timeout === 1500));
+  await resolveLocalUsagePricing(pricingRows, options);
+  assert.equal(lookups.length, 24, 'warm cached models do not trigger subprocesses');
+
+  const revised = await resolveLocalUsagePricing(pricingRows, { ...options, pricingRevision: 'aggregate-bounded-revised' });
+  assert.equal(lookups.length, 28);
+  const revisedView = buildLocalUsageView(rows, { ...viewOptions, pricingByModel: revised });
+  assert.equal(revisedView.allTime.totalTokens, 250);
+  assert.equal(revisedView.allTime.costUsd, 40, 'old-revision prices are not reused');
+  assert.equal(revisedView.allTime.unpricedTokens, 210);
+});
+
+test('expired failed Dots prices rotate without starving remaining models', async (t) => {
+  let now = 1000000;
+  t.mock.method(Date, 'now', () => now);
+  const rows = Array.from({ length: 24 }, (_, index) => ({ model: `aggregate-failed-${index}` }));
+  const lookups = [];
+  const options = {
+    pricingRevision: 'aggregate-failed',
+    lookupModelPricing: async (model) => { lookups.push(model); throw new Error('catalog unavailable'); }
+  };
+  for (let tick = 0; tick < 6; tick += 1) {
+    const pricing = await resolveLocalUsagePricing(rows, options);
+    assert.equal(lookups.length, (tick + 1) * 4);
+    assert.equal(new Set(lookups).size, lookups.length, 'later models get queried despite expired failures');
+    assert.ok(Object.values(pricing).every((price) => price === null));
+    now += 30001;
+  }
+  await resolveLocalUsagePricing(rows, options);
+  assert.deepEqual(lookups.slice(24), lookups.slice(0, 4));
+});
+
+test('pricing rotation reaches models beyond cache capacity even when prices expire between ticks', async (t) => {
+  let now = 3000000;
+  t.mock.method(Date, 'now', () => now);
+  const rows = Array.from({ length: 300 }, (_, index) => ({ model: `aggregate-evicted-${index}` }));
+  const lookups = [];
+  const options = {
+    pricingRevision: 'aggregate-evicted',
+    lookupModelPricing: async (model) => { lookups.push(model); return { pricing: null }; }
+  };
+  for (let tick = 0; tick < 75; tick += 1) {
+    await resolveLocalUsagePricing(rows, options);
+    assert.equal(lookups.length, (tick + 1) * 4);
+    now += 30001;
+  }
+  assert.equal(new Set(lookups).size, 300);
+});
+
+test('bounded Dots lookups preserve successful/missing cache lifetimes and explicit zero prices', async (t) => {
+  let now = 2000000;
+  t.mock.method(Date, 'now', () => now);
+  const rows = [{ model: 'aggregate-free' }, { model: 'aggregate-missing' }, { model: 'unknown' }];
+  const lookups = [];
+  const free = { inputCostPerToken: 0 };
+  const options = {
+    pricingRevision: 'aggregate-cache-ttl', commandTimeoutMs: 250,
+    lookupModelPricing: async (model, timeout) => {
+      lookups.push({ model, timeout });
+      return { pricing: model === 'aggregate-free' ? free : null };
+    }
+  };
+  const first = await resolveLocalUsagePricing(rows, options);
+  assert.equal(first['aggregate-free'], free);
+  assert.equal(first['aggregate-missing'], null);
+  assert.equal(first.unknown, null);
+  now += 29999;
+  await resolveLocalUsagePricing(rows, options);
+  assert.equal(lookups.length, 2);
+  now += 2;
+  await resolveLocalUsagePricing(rows, options);
+  assert.deepEqual(lookups.map(({ model }) => model), ['aggregate-free', 'aggregate-missing', 'aggregate-missing']);
+  now = 2300000;
+  await resolveLocalUsagePricing(rows, options);
+  assert.equal(lookups.filter(({ model }) => model === 'aggregate-free').length, 2);
+  assert.ok(lookups.every(({ model, timeout }) => model !== 'unknown' && timeout === 250));
 });

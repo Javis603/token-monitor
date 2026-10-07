@@ -95,21 +95,36 @@ async function readLocalUsageView(options = {}) {
 }
 
 const pricingCache = new Map();
+const MAX_PRICING_LOOKUPS_PER_TICK = 4;
+let pricingCursor = 0;
 async function resolveLocalUsagePricing(rows, options = {}) {
   const result = {};
   const models = [...new Set(rows.map((row) => row.model.toLowerCase()))];
-  for (const model of models) {
+  const pending = [];
+  for (const [index, model] of models.entries()) {
     if (model === 'unknown') { result[model] = null; continue; }
     const key = `${options.pricingRevision || ''}:${model}`;
-    let cached = pricingCache.get(key);
+    const cached = pricingCache.get(key);
     if (!cached || cached.until <= Date.now()) {
-      let pricing = null;
-      try { pricing = (await options.lookupModelPricing(model, options.commandTimeoutMs || 1500))?.pricing || null; } catch (_) { /* Usage remains valid without a price. */ }
-      cached = { pricing, until: Date.now() + (pricing ? 300000 : 30000) };
-      pricingCache.set(key, cached);
-      if (pricingCache.size > 256) pricingCache.delete(pricingCache.keys().next().value);
+      result[model] = null;
+      pending.push({ model, key, index });
+    } else {
+      result[model] = cached.pricing;
     }
-    result[model] = cached.pricing;
+  }
+  // Keep serial catalog subprocesses bounded without delaying native scans for
+  // every historical model. Rotate through pending models so failures, expiry
+  // and cache eviction cannot starve later models on subsequent ticks.
+  const start = pricingCursor % (models.length || 1);
+  pending.sort((a, b) => (a.index - start + models.length) % models.length
+    - (b.index - start + models.length) % models.length);
+  for (const { model, key, index } of pending.slice(0, MAX_PRICING_LOOKUPS_PER_TICK)) {
+    pricingCursor = index + 1;
+    let pricing = null;
+    try { pricing = (await options.lookupModelPricing(model, options.commandTimeoutMs || 1500))?.pricing || null; } catch (_) { /* Usage remains valid without a price. */ }
+    pricingCache.set(key, { pricing, until: Date.now() + (pricing ? 300000 : 30000) });
+    if (pricingCache.size > 256) pricingCache.delete(pricingCache.keys().next().value);
+    result[model] = pricing;
   }
   return result;
 }
