@@ -5,7 +5,7 @@ const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
 const { createEdgeDockController } = require('../../src/electron/edgeDock/controller');
-const { EDGE_DOCK_METRICS, edgeDockBubbleBounds } = require('../../src/electron/edgeDock/geometry');
+const { EDGE_DOCK_METRICS, EDGE_DOCK_TIMING, edgeDockBubbleBounds } = require('../../src/electron/edgeDock/geometry');
 
 class FakeWebContents extends EventEmitter {
   constructor() {
@@ -151,6 +151,7 @@ function createFixture(options = {}) {
     onRefreshLimits: options.onRefreshLimits,
     prefersReducedMotion: options.prefersReducedMotion || (() => true),
     isFullScreen: options.isFullScreen,
+    primaryButtonDown: options.primaryButtonDown,
     applyShapeMask: (win) => {
       maskWindows.push(win);
       return options.maskAvailable !== false;
@@ -435,7 +436,7 @@ function fakeGlassFactory({ failCreate = false, failShape = false } = {}) {
   return { create, glasses };
 }
 
-test('macOS Liquid Glass shapes the rail and card while the peek keeps its masked HUD grip', (t) => {
+test('macOS Liquid Glass shapes the rail and card while the peek keeps its masked HUD handle', (t) => {
   const factory = fakeGlassFactory();
   const fixture = createFixture({ platform: 'darwin', nativeGlass: true, liquidGlass: { dark: true }, createGlass: factory.create });
   t.after(() => fixture.controller.stop());
@@ -499,6 +500,51 @@ test('switching the glass style rebuilds the dock and releases its Liquid Glass'
 // retract fades the window out with no payload at all, so a page told the state
 // alone keeps believing the rail is up and reads the next reveal as no change,
 // which is what left the entrance playing once per page load.
+test('the handle grows on approach and reveals from its wake zone unless a button is held', async (t) => {
+  let buttonDown = false;
+  const fixture = createFixture({ platform: 'darwin', nativeGlass: true, settings: { edgeDockMode: 'autoHide' }, primaryButtonDown: () => buttonDown });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+  const rail = fixture.windowFor('rail');
+  const edge = peek.bounds.x + peek.bounds.width;
+  const y = peek.bounds.y + peek.bounds.height / 2;
+  const settle = () => new Promise((resolve) => setTimeout(resolve, EDGE_DOCK_TIMING.revealDelayMs + 200));
+
+  const restShape = sentPayload(peek, 'peek').shape;
+  const masks = fixture.maskWindows.filter((win) => win === peek).length;
+  fixture.screen.point = { x: edge - EDGE_DOCK_METRICS.approachDepth + 4, y };
+  await settle();
+  const nearShape = sentPayload(peek, 'peek').shape;
+  assert.notEqual(nearShape.d, restShape.d, 'the approach zone grows the handle');
+  assert.equal(sentPayload(peek, 'peek').glass, true, 'on the rail\'s material');
+  assert.equal(fixture.maskWindows.filter((win) => win === peek).length, masks + 1, 'the mask follows the larger silhouette');
+  assert.equal(rail.opacity, 0, 'but does not reveal the rail');
+
+  // Inside the wake zone yet clear of the handle window and the edge strip.
+  fixture.screen.point = { x: edge - EDGE_DOCK_METRICS.wakeDepth + 4, y };
+  buttonDown = true;
+  await settle();
+  assert.equal(rail.opacity, 0, 'a drag past the handle does not open the dock');
+
+  buttonDown = false;
+  await settle();
+  assert.equal(rail.opacity, 1, 'resting in the wake zone does');
+  assert.equal(sentPayload(peek, 'peek').shape.d, restShape.d, 'the handle is not left grown behind the rail');
+});
+
+test('the handle grows through intermediate silhouettes unless motion is reduced', async (t) => {
+  const fixture = createFixture({ platform: 'darwin', nativeGlass: true, settings: { edgeDockMode: 'autoHide' }, prefersReducedMotion: () => false });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+  const masks = () => fixture.maskWindows.filter((win) => win === peek).length;
+  const before = masks();
+  fixture.screen.point = { x: peek.bounds.x + peek.bounds.width - EDGE_DOCK_METRICS.approachDepth + 4, y: peek.bounds.y + peek.bounds.height / 2 };
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.ok(masks() - before > 2, `the mask follows the growth in steps (${masks() - before})`);
+  const grown = sentPayload(peek, 'peek').shape;
+  assert.equal(grown.key.endsWith(`:${EDGE_DOCK_METRICS.handleNearWidth}x${EDGE_DOCK_METRICS.handleNearLength}`), true);
+});
+
 test('a rail payload carries the reveal that keys the entrance', (t) => {
   const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' } });
   t.after(() => fixture.controller.stop());

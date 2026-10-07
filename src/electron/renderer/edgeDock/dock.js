@@ -507,10 +507,10 @@ async function refreshDockLimits() {
 function renderPeek(payload) {
   root.dataset.side = payload.side;
   root.dataset.peekMode = payload.peekMode || 'handle';
-  // AppKit can clamp a resized window to 10px. Keep the handle's content on
-  // its original 7px geometry even when those extra pixels lie off-screen.
-  root.style.width = `${payload.shape?.width || 7}px`;
-  root.style.height = `${payload.shape?.height || 48}px`;
+  // Sized to the window's own geometry rather than the viewport, in case AppKit
+  // clamped the window wider than asked and the extra pixels lie off-screen.
+  root.style.width = `${payload.shape?.width || 10}px`;
+  root.style.height = `${payload.shape?.height || 88}px`;
   requestAnimationFrame(() => requestAnimationFrame(() => {
     if (state.payload === payload) bridge.peekPainted?.(payload.peekMode || 'handle', payload.shape?.key);
   }));
@@ -533,11 +533,13 @@ function renderPeek(payload) {
     return;
   }
   root.title = t('settings.display.edgeDock');
-  if (!contentLayer.firstChild?.classList.contains('edge-dock-grip')) contentLayer.replaceChildren(el('span', 'edge-dock-grip'));
+  // The handle is the silhouette itself (updateShape), tinted and outlined as the
+  // rail is; the refresh button is the only content this window carries.
+  if (contentLayer.firstChild) contentLayer.replaceChildren();
   // The handle's exit is a move, not a blink, so the withdrawn pose is held as a
-  // class and one transition carries it both ways (see the grip's rules). The class
-  // goes on in the same frame the grip is built, which is what keeps a page that
-  // loads with the rail already open from animating into a pose it starts in.
+  // class and one transition carries it both ways (see the handle's rules). The
+  // class goes on with the first render, which is what keeps a page that loads
+  // with the rail already open from animating into a pose it starts in.
   root.classList.toggle('is-handle-hidden', payload.peeking !== true);
 }
 

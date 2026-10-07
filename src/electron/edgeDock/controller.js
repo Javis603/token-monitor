@@ -8,6 +8,7 @@ const {
   edgeDockBubbleBounds,
   edgeDockCellAt,
   edgeDockCorridorBounds,
+  edgeDockHandleZones,
   edgeDockPeekBounds,
   edgeDockPlacementForDrop,
   edgeDockRailBounds,
@@ -112,6 +113,14 @@ function createEdgeDockController(deps) {
   // `railVisible` is: the handle's exit is an effect the page plays, so the
   // payload has to be able to say which push is the one that takes it away.
   let peeking = false;
+  // The pointer is near the resting handle, which draws it larger ahead of a
+  // reveal. The growth is the silhouette itself, so the mask and window region
+  // have to move with it: it is stepped here rather than left to a CSS
+  // transition, which could only animate the tint over a material already at
+  // its final size.
+  let peekNear = false;
+  let handleGrowth = 0;
+  let handleGrowthTimer = null;
   let peekMode = 'handle';
   let peekPaintPending = false;
   let peekTargetVisible = false;
@@ -210,11 +219,12 @@ function createEdgeDockController(deps) {
     const rail = edgeDockRailBounds({ workArea, side, offset, cellKinds: cellKinds() });
     const peek = edgeDockPeekBounds({ workArea, side, railBounds: rail });
     const trigger = edgeDockTriggerBounds({ workArea, displayBounds: current.bounds, side, railBounds: rail });
+    const zones = edgeDockHandleZones({ side, peekBounds: peek });
     const bubble = bubbleCell !== null
       ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: bubbleHeight, workArea, side })
       : null;
     const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail });
-    return { side, workArea, rail, peek, trigger, bubble, refresh };
+    return { side, workArea, rail, peek, trigger, wake: zones?.wake || null, approach: zones?.approach || null, bubble, refresh };
   }
 
   function alive(win) {
@@ -296,6 +306,47 @@ function createEdgeDockController(deps) {
     showPeekWindow(visible, duration);
   }
 
+  function setPeekNear(near) {
+    if (near === peekNear) return;
+    peekNear = near;
+    growHandle(near ? 1 : 0);
+  }
+
+  function stopHandleGrowth() {
+    clearInterval(handleGrowthTimer);
+    handleGrowthTimer = null;
+  }
+
+  // Eased like the window fades, on the same step.
+  function growHandle(target) {
+    stopHandleGrowth();
+    const placeHandle = () => {
+      if (peekMode === 'handle') placeSurface('peek', layout()?.peek);
+    };
+    if (prefersReducedMotion()) {
+      handleGrowth = target;
+      placeHandle();
+      return;
+    }
+    const from = handleGrowth;
+    const steps = Math.max(1, Math.round(FADE_IN_MS / FADE_STEP_MS));
+    let step = 0;
+    handleGrowthTimer = setInterval(() => {
+      step += 1;
+      handleGrowth = from + (target - from) * (1 - Math.pow(1 - step / steps, 3));
+      placeHandle();
+      if (step >= steps) stopHandleGrowth();
+    }, FADE_STEP_MS);
+  }
+
+  // Quarter-pixel steps: fine enough to read as continuous at 2x, coarse enough
+  // that the mask is not rebuilt for a change no display can show.
+  function handleSize() {
+    const m = EDGE_DOCK_METRICS;
+    const lerp = (a, b) => Math.round((a + (b - a) * handleGrowth) * 4) / 4;
+    return { width: lerp(m.handleWidth, m.handleNearWidth), length: lerp(m.handleLength, m.handleNearLength) };
+  }
+
   function showPeekWindow(visible, duration) {
     peekTargetVisible = visible;
     setVisible('peek', visible && !peekPaintPending, peekPaintPending ? 0 : duration);
@@ -348,9 +399,10 @@ function createEdgeDockController(deps) {
     const win32 = platform === 'win32';
     const material = materialKey !== 'none';
     const macMaterial = mac && material;
-    // A 7px handle leaves no room for Liquid Glass's own bright edge highlight:
-    // it reads as a second grip at the display edge. Keep its masked HUD material
-    // so the renderer's grip stays in the same place in both glass styles.
+    // A handle this narrow leaves no room for Liquid Glass's own bright edge
+    // highlight: it reads as a second edge beside the display's. The handle keeps
+    // the masked HUD material in both glass styles; the refresh button takes
+    // Liquid Glass when the peek window becomes one (setPeekMode).
     const macGlass = materialKey === 'mac-glass' && surface !== 'peek';
     nativeMaterial[surface] = macMaterial;
     const win = new BrowserWindow({
@@ -464,6 +516,9 @@ function createEdgeDockController(deps) {
     }
     railVisible = false;
     peeking = false;
+    peekNear = false;
+    stopHandleGrowth();
+    handleGrowth = 0;
     peekMode = 'handle';
     peekPaintPending = false;
     peekTargetVisible = false;
@@ -495,7 +550,13 @@ function createEdgeDockController(deps) {
     }
     if (surface === 'peek') {
       if (peekMode === 'refresh') return refreshCommands(bounds);
-      const options = { width: bounds.width, height: bounds.height, side };
+      const options = {
+        width: bounds.width,
+        height: bounds.height,
+        side,
+        handleWidth: handleSize().width,
+        handleLength: handleSize().length
+      };
       return { closed: peekCommands(options), outline: peekCommands({ ...options, open: true }) };
     }
     const options = { width: bounds.width, height: bounds.height, side, shoulder: m.shoulder, radius: m.railRadius };
@@ -516,7 +577,7 @@ function createEdgeDockController(deps) {
     const { side } = placement();
     const currentDisplay = display();
     const displayKey = `${currentDisplay?.id ?? ''}:${currentDisplay?.scaleFactor ?? ''}`;
-    const key = `${displayKey}:${side}:${width}x${height}:${bounds.tailY ?? ''}:${surface === 'peek' ? peekMode : ''}`;
+    const key = `${displayKey}:${side}:${width}x${height}:${bounds.tailY ?? ''}:${surface === 'peek' ? `${peekMode}${peekMode === 'handle' ? `:${handleSize().width}x${handleSize().length}` : ''}` : ''}`;
     if (shapes[surface]?.key === key) return;
     const built = commandsFor(surface, bounds, side);
     const closed = Array.isArray(built) ? built : built.closed;
@@ -590,6 +651,9 @@ function createEdgeDockController(deps) {
     peekPaintPending = true;
     peekTargetVisible = false;
     peeking = false;
+    peekNear = false;
+    stopHandleGrowth();
+    handleGrowth = 0;
     refreshVisible = false;
     const win = windows.peek;
     if (builtMaterial === 'mac-glass' && alive(win)) {
@@ -790,6 +854,9 @@ function createEdgeDockController(deps) {
         const input = {
           inTrigger: rectContains(current.trigger, point),
           inPeek: !revealed && rectContains(current.peek, point),
+          // Not while a button is held: that is a scrollbar or a selection being
+          // dragged past the handle, not a reach for it.
+          inWake: !revealed && rectContains(current.wake, point) && primaryButtonDown() !== true,
           inRail: revealed && (rectContains(current.rail, point) || inRefresh || inRefreshCorridor),
           inBubble: Boolean(bubbleRect && rectContains(bubbleRect, point)),
           inCorridor: Boolean(bubbleRect && rectContains(edgeDockCorridorBounds(current.rail, bubbleRect), point)),
@@ -804,6 +871,7 @@ function createEdgeDockController(deps) {
           if (hoveredTarget) hapticTick('alignment', 'now');
           hapticTarget = hoveredTarget;
         }
+        setPeekNear(!revealed && peekMode === 'handle' && rectContains(current.approach, point));
         applyEffects(intent.tick(input, Date.now()), { hapticReveal: !alwaysVisible() });
         refreshHovered = input.inRail || input.inBubble || input.inCorridor;
         syncRefresh(current);

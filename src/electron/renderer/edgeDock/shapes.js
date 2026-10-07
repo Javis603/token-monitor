@@ -48,21 +48,23 @@
     return side === 'left' ? mirrorX(commands, w) : commands;
   }
 
-  // Curve the handle into the display edge. The curve's ends live just beyond
-  // the window, so neither its fill nor its outline exposes a pointed tip.
-  function peekCommands({ width, height, side = 'right', open = false }) {
+  // The handle: a tab flush with the screen edge, rounded on the side facing the
+  // desktop and centred along the window, which is larger to leave it room to
+  // grow. Drawn for the right edge and mirrored for the left; `open: true` drops
+  // the segment along the display edge, as the rail's outline does.
+  function peekCommands({ width, height, side = 'right', open = false, handleWidth = width, handleLength = height }) {
     const w = width;
-    const h = height;
-    const edge = w + 4;
-    const shoulder = 7;
-    const r = 3.5;
+    const x = w - Math.min(handleWidth, w);
+    const top = Math.max(0, (height - handleLength) / 2);
+    const bottom = height - top;
+    const r = Math.min(w - x, (bottom - top) / 2, 5);
     const commands = [
-      ['M', edge, 0],
-      ['C', edge, shoulder * 0.76, w + 1.5, shoulder, r, shoulder],
-      ['C', r * ARC, shoulder, 0, shoulder + r * ARC, 0, shoulder + r],
-      ['L', 0, h - shoulder - r],
-      ['C', 0, h - shoulder - r * ARC, r * ARC, h - shoulder, r, h - shoulder],
-      ['C', w + 1.5, h - shoulder, edge, h - shoulder * 0.76, edge, h]
+      ['M', w, top],
+      ['L', x + r, top],
+      ['C', x + r * ARC, top, x, top + r * ARC, x, top + r],
+      ['L', x, bottom - r],
+      ['C', x, bottom - r * ARC, x + r * ARC, bottom, x + r, bottom],
+      ['L', w, bottom]
     ];
     if (!open) commands.push(['Z']);
     return side === 'left' ? mirrorX(commands, w) : commands;
