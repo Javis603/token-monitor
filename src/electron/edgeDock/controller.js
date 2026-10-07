@@ -220,14 +220,18 @@ function createEdgeDockController(deps) {
     const workArea = current.workArea;
     const rail = edgeDockRailBounds({ workArea, side, offset, cellKinds: cellKinds() });
     const peek = edgeDockPeekBounds({ workArea, side, railBounds: rail });
+    // The handle as drawn takes the pointer; the resting handle alone decides the
+    // fast reveal, so how soon the rail opens never depends on how far the
+    // handle has grown under the pointer.
     const handle = edgeDockHandleBounds({ side, peekBounds: peek, handle: handleSize() });
+    const restingHandle = edgeDockHandleBounds({ side, peekBounds: peek });
     const trigger = edgeDockTriggerBounds({ workArea, displayBounds: current.bounds, side, railBounds: rail });
     const zones = edgeDockHandleZones({ side, peekBounds: peek });
     const bubble = bubbleCell !== null
       ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: bubbleHeight, workArea, side })
       : null;
     const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail });
-    return { side, workArea, rail, peek, handle, trigger, wake: zones?.wake || null, approach: zones?.approach || null, bubble, refresh };
+    return { side, workArea, rail, peek, handle, restingHandle, trigger, wake: zones?.wake || null, approach: zones?.approach || null, bubble, refresh };
   }
 
   function alive(win) {
@@ -873,7 +877,7 @@ function createEdgeDockController(deps) {
         }
         const input = {
           inTrigger: rectContains(current.trigger, point),
-          inPeek: !revealed && rectContains(current.handle, point),
+          inPeek: !revealed && rectContains(current.restingHandle, point),
           // Only with the button known to be up: a held one is a scrollbar or a
           // selection being dragged past the handle, not a reach for it, and an
           // unreadable state is treated as held.
@@ -893,7 +897,7 @@ function createEdgeDockController(deps) {
           hapticTarget = hoveredTarget;
         }
         setPeekNear(!revealed && peekMode === 'handle' && rectContains(current.approach, point));
-        setPointerOnHandle(input.inPeek);
+        setPointerOnHandle(!revealed && rectContains(current.handle, point));
         applyEffects(intent.tick(input, Date.now()), { hapticReveal: !alwaysVisible() });
         refreshHovered = input.inRail || input.inBubble || input.inCorridor;
         syncRefresh(current);

@@ -562,6 +562,20 @@ test('the handle window lets the pointer through except over the handle itself',
   assert.equal(took, true, 'the handle takes the pointer');
 });
 
+test('the grown handle takes the pointer but only the resting handle reveals fast', async (t) => {
+  // No readable button state, so the wake zone stays out of it.
+  const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+  const rail = fixture.windowFor('rail');
+  const edge = peek.bounds.x + peek.bounds.width;
+  // Beside the resting handle, inside the one grown on approach.
+  fixture.screen.point = { x: edge - EDGE_DOCK_METRICS.handleWidth - 1, y: peek.bounds.y + peek.bounds.height / 2 };
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(peek.ignoreMouse, false, 'the grown handle takes the pointer');
+  assert.equal(rail.opacity, 0, 'without turning a wake-zone dwell into the fast reveal');
+});
+
 test('the handle grows through intermediate silhouettes unless motion is reduced', async (t) => {
   const fixture = createFixture({ platform: 'darwin', nativeGlass: true, settings: { edgeDockMode: 'autoHide' }, prefersReducedMotion: () => false });
   t.after(() => fixture.controller.stop());
