@@ -4718,6 +4718,7 @@ function sendPush(payload, options = {}) {
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    edgeDockManualStats = null;
     getSyncContentRuntime().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
     migrateCodexAdditionalLimits(visibleStats);
@@ -5425,7 +5426,7 @@ function edgeDockLiveRateSample(visibleStats) {
   if (expiresAt) {
     edgeDockRateTimer = setTimeout(() => {
       edgeDockRateTimer = null;
-      if (latestStats) updateEdgeDockCells(electronPresentationStats(latestStats));
+      repaintEdgeDockCells();
     }, Math.max(0, expiresAt - Date.now()) + 20);
   }
   return edgeDockRateTracker.getSample();
@@ -5436,6 +5437,19 @@ function edgeDockLiveRateSample(visibleStats) {
 // re-projects when the answer lands. Until then those readouts show unknown.
 let edgeDockDerivedPeriods = {};
 let edgeDockDerivedSignature = '';
+
+// A manual read is not a shared push snapshot. Keep it for dock re-projections
+// until the next push, without changing the renderer/widget snapshot source.
+let edgeDockManualStats = null;
+
+function edgeDockStats() {
+  return edgeDockManualStats?.generation === hubModeGeneration ? edgeDockManualStats.stats : latestStats;
+}
+
+function repaintEdgeDockCells() {
+  const stats = edgeDockStats();
+  if (stats) updateEdgeDockCells(electronPresentationStats(stats));
+}
 
 function edgeDockDerivedSelections() {
   const items = Array.isArray(settings?.edgeDockItems) ? settings.edgeDockItems : [];
@@ -5461,8 +5475,9 @@ function refreshEdgeDockDerivedPeriods(visibleStats) {
   edgeDockDerivedSignature = signature;
   getDashboardHistory({ includeDevices: true })
     .then((history) => {
-      if (signature !== edgeDockDerivedSignature || !latestStats) return;
-      const stats = electronPresentationStats(latestStats);
+      const source = edgeDockStats();
+      if (signature !== edgeDockDerivedSignature || !source) return;
+      const stats = electronPresentationStats(source);
       const sources = fixedPeriodRangesApi.joinDeviceHistorySources(history?.deviceHistories || [], stats.devices || []);
       const preferred = typeof app.getPreferredSystemLanguages === 'function' ? app.getPreferredSystemLanguages() : [app.getLocale()];
       const next = {};
@@ -5512,7 +5527,7 @@ function refreshEdgeDockForecast() {
     .then((forecast) => {
       const changed = JSON.stringify(forecast || null) !== JSON.stringify(edgeDockForecast);
       edgeDockForecast = forecast || null;
-      if (changed && latestStats) updateEdgeDockCells(electronPresentationStats(latestStats));
+      if (changed) repaintEdgeDockCells();
     })
     .catch((error) => console.log(`[edge-dock] reset forecast failed: ${error.message}`))
     .finally(() => { edgeDockForecastInFlight = false; });
@@ -5524,6 +5539,7 @@ function canRefreshEdgeDockStats() {
 
 async function refreshStatsFromEdgeDock() {
   const stats = await refreshManualStats();
+  edgeDockManualStats = { stats, generation: hubModeGeneration };
   updateEdgeDockCells(electronPresentationStats(stats));
   return { ok: true };
 }
@@ -5606,7 +5622,7 @@ function scheduleEdgeDockSessionExpiry() {
   const delay = Math.max(EDGE_DOCK_EXPIRY_FLOOR_MS, expiresAt - Date.now() + 50);
   edgeDockSessionExpiryTimer = setTimeout(() => {
     edgeDockSessionExpiryTimer = null;
-    if (latestStats) updateEdgeDockCells(electronPresentationStats(latestStats));
+    repaintEdgeDockCells();
   }, delay);
 }
 
@@ -5690,7 +5706,8 @@ function syncEdgeDock(rendererSettings) {
   // Through the same path as a stats push, so the session-expiry timer is armed
   // from these cells too: a settings change replaces what is on screen just as a
   // push does, and skipping the reschedule here left the rail on a stale reading.
-  if (latestStats) pushEdgeDockCells(edgeDockCellsFor(electronPresentationStats(latestStats)));
+  const stats = edgeDockStats();
+  if (stats) pushEdgeDockCells(edgeDockCellsFor(electronPresentationStats(stats)));
   controller.sync();
   // Now that the controller is running (sync() starts it when enabled), arm the
   // timer against the cells that were just handed over.
@@ -5702,7 +5719,7 @@ function refreshLimitStatsPresentation() {
   const visibleStats = electronPresentationStats(latestStats);
   migrateCodexAdditionalLimits(visibleStats);
   scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
-  updateEdgeDockCells(visibleStats);
+  repaintEdgeDockCells();
   updateTrayDisplay();
   if (mainWindow && !mainWindow.isDestroyed()) {
     try {

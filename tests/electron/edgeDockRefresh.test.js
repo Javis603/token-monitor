@@ -9,7 +9,8 @@ const { runManualDeviceRefresh } = require('../../src/electron/deviceRuntimeCoor
 
 const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 const refreshSource = main.slice(main.indexOf('let manualStatsRefreshInFlight ='), main.indexOf('function managedPricingSidecarPath('));
-const dockSource = main.slice(main.indexOf('function canRefreshEdgeDockStats('), main.indexOf('function edgeDockCellsFor('));
+const dockSource = main.slice(main.indexOf('// Week / last-7 / last-30 are not collector periods'), main.indexOf('// Hand cells to the controller'));
+const pushSource = main.slice(main.indexOf('function sendPush('), main.indexOf('function statsHistoryRevision('));
 
 function deferred() {
   let resolve;
@@ -21,6 +22,7 @@ function deferred() {
 function fixture() {
   const usage = deferred();
   const limits = deferred();
+  const history = deferred();
   const calls = [];
   const context = {
     deviceRuntimeHandle: {
@@ -35,11 +37,41 @@ function fixture() {
     ownsUsageRuntime: () => Boolean(context.deviceRuntimeHandle),
     runManualDeviceRefresh,
     electronPresentationStats: (stats) => stats,
-    updateEdgeDockCells: (stats) => { context.dockStats = stats; },
+    edgeDockController: { isRunning: () => true },
+    pushEdgeDockCells: (cells) => { context.dockStats = cells.stats; context.dockPeriods = cells.derivedPeriods; },
+    buildEdgeDockCells: (stats, options) => ({ stats, derivedPeriods: options.derivedPeriods }),
+    EDGE_DOCK_DERIVED_PERIODS: ['week', 'last7', 'last30'],
+    fixedPeriodRangesApi: {
+      localDayKey: () => '2026-10-07',
+      deviceInventorySignature: () => 'devices',
+      joinDeviceHistorySources: (_, devices) => devices,
+      fixedPeriodSnapshotFromDevices: (_, devices) => ({ status: 'ready', period: devices[0] })
+    },
+    getDashboardHistory: () => history.promise,
+    app: { getLocale: () => 'en' },
+    resolveRegionalLocale: () => 'en',
+    trayMenuLocale: () => 'en',
+    syncCodexPresentationActiveAccount() {},
+    syncProvenanceActive: () => true,
+    codexAccountsForRenderer: () => [],
+    codexPresentationPendingAccountId: '',
+    codexPresentationActiveAccountId: '',
+    edgeDockLiveRateSample: () => null,
+    statsHistoryRevision: (stats) => stats?.historyRevision,
+    injectLocalDeviceStatus: (stats) => stats,
+    getSyncContentRuntime: () => ({ notifyStats() {} }),
+    migrateCodexAdditionalLimits() {},
+    rendererSnapshots: { stamp: (_, stats) => stats },
+    rendererStats: (stats) => stats,
+    scheduleMacWidgetSnapshot() {},
+    updateTrayDisplay() {},
+    mainWindow: null,
+    dashboardWindow: null,
+    maybeAdoptSharedSubscriptionRevision() {},
     console: { log() {} }
   };
-  vm.runInNewContext(`${refreshSource}\n${dockSource}`, context);
-  return { context, usage, limits, calls };
+  vm.runInNewContext(`${refreshSource}\n${dockSource}\n${pushSource}`, context);
+  return { context, usage, limits, history, calls };
 }
 
 for (const first of ['App', 'Edge Dock']) {
@@ -134,6 +166,89 @@ test('Client manual refresh paints the fresh Hub response without a stats push o
   assert.deepEqual(requests, ['https://hub.example/api/stats']);
   assert.equal(context.dockStats, fresh);
   assert.equal(context.latestStats, old, 'a manual read must not become latestStats');
+});
+
+test('a delayed derived-period repaint retains the manually refreshed snapshot until a stats push replaces it', async () => {
+  const { context, history } = fixture();
+  const old = { historyRevision: '1', devices: [{ today: 'old' }] };
+  const fresh = { historyRevision: '2', devices: [{ today: 'fresh' }] };
+  context.latestStats = old;
+  Object.assign(context, {
+    deviceRuntimeHandle: null,
+    mode: 'client',
+    effectiveHubConfig: () => ({ url: 'https://hub.example' }),
+    fetch: async () => ({ ok: true, json: async () => fresh }),
+    hubModeRequestIsCurrent: () => true,
+    setLatestHubStatsCache() {},
+    composeLocalSyncSummary: (stats) => stats,
+    lastCollectedDevice: null
+  });
+  context.settings.hubMode = 'client';
+  context.settings.edgeDockItems = [{ type: 'stat', metric: 'week' }];
+  await context.refreshStatsFromEdgeDock();
+  assert.equal(context.dockStats, fresh);
+  history.resolve({ fixedPeriods: { historyTransportAvailable: true } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(context.dockStats, fresh, 'history completion must not repaint the old push snapshot');
+  assert.equal(context.dockPeriods.week, fresh.devices[0]);
+  assert.equal(context.latestStats, old, 'manual reads must not change the shared push snapshot');
+  const pushed = { historyRevision: '3', devices: [{ today: 'pushed' }] };
+  context.sendPush({ event: 'stats', data: { stats: pushed } });
+  await new Promise((resolve) => setImmediate(resolve));
+  context.repaintEdgeDockCells();
+  assert.equal(context.dockStats, pushed, 'a new push must replace the manually refreshed source');
+  assert.equal(context.dockPeriods.week, pushed.devices[0]);
+});
+
+test('dock re-projections keep manual stats through settings updates but never across a mode generation', async () => {
+  const { context, usage, limits } = fixture();
+  const old = { updatedAt: 'old' };
+  context.latestStats = old;
+  usage.resolve(true);
+  await context.refreshStatsFromEdgeDock();
+  const fresh = context.localStats;
+  const syncSource = main.slice(main.indexOf('function syncEdgeDock('), main.indexOf('function refreshLimitStatsPresentation('));
+  Object.assign(context, {
+    canUseEdgeDock: () => true,
+    ensureEdgeDockController: () => ({ setAppearance() {}, sync() {} }),
+    edgeDockAppearance: () => ({}),
+    scheduleEdgeDockSessionExpiry() {}
+  });
+  vm.runInNewContext(syncSource, context);
+  context.syncEdgeDock({});
+  assert.equal(context.dockStats, fresh, 'settings must re-project the manual snapshot');
+  context.hubModeGeneration += 1;
+  context.repaintEdgeDockCells();
+  assert.equal(context.dockStats, old, 'a different mode must not reuse the manual snapshot');
+  limits.resolve();
+});
+
+test('forecast completion and session expiry re-project the manually refreshed dock source', async () => {
+  const { context, usage, limits } = fixture();
+  const forecast = deferred();
+  const timers = [];
+  context.latestStats = { updatedAt: 'old' };
+  context.settings.codexResetForecastEnabled = true;
+  context.codexResetForecastClient = { getForecast: () => forecast.promise };
+  usage.resolve(true);
+  await context.refreshStatsFromEdgeDock();
+  forecast.resolve({ status: 'ready' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(context.dockStats, context.localStats, 'forecast completion must retain the manual snapshot');
+  Object.assign(context, {
+    edgeDockSessionExpiryTimer: null,
+    edgeDockLastCells: [{ metric: 'sessions', runningExpiresAt: Date.now() + 1000 }],
+    EDGE_DOCK_EXPIRY_FLOOR_MS: 20,
+    setTimeout: (callback) => { timers.push(callback); return timers.length; },
+    clearTimeout() {}
+  });
+  const schedulerSource = main.slice(main.indexOf('function edgeDockNextSessionExpiry('), main.indexOf('function ensureEdgeDockController('));
+  vm.runInNewContext(schedulerSource, context);
+  context.scheduleEdgeDockSessionExpiry();
+  assert.equal(timers.length, 1);
+  timers[0]();
+  assert.equal(context.dockStats, context.localStats, 'session expiry must retain the manual snapshot');
+  limits.resolve();
 });
 
 test('App manual-button IPC uses the shared entry; other stats reads retain their options', () => {
