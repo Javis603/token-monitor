@@ -187,14 +187,13 @@ function edgeDockRefreshBounds({ workArea, railBounds, metrics = EDGE_DOCK_METRI
   // button into that empty curve rather than measuring from the window edge.
   const inset = Math.round(metrics.shoulder * 0.7);
   const below = railBounds.y + railBounds.height - inset + metrics.refreshGap;
-  const above = railBounds.y + inset - metrics.refreshGap - size;
-  const outside = below <= maxY ? below : above >= minY ? above : null;
-  // A full-height rail leaves neither end free. Keep the action beside its
-  // bottom shoulder instead of covering its last cell or leaving the display.
-  const x = outside === null
+  const fitsBelow = below <= maxY;
+  // Refresh always belongs at the bottom. If there is no space underneath,
+  // keep it beside the bottom shoulder rather than moving it to the top.
+  const x = !fitsBelow
     ? railBounds.x === workArea.x ? railBounds.x + railBounds.width + metrics.refreshGap : railBounds.x - metrics.refreshGap - size
     : railBounds.x + Math.round((railBounds.width - size) / 2);
-  return { x, y: outside ?? Math.max(minY, maxY), width: size, height: size };
+  return { x, y: fitsBelow ? below : Math.max(minY, maxY), width: size, height: size };
 }
 
 function edgeDockRefreshCorridor(rail, button) {

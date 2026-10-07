@@ -2927,6 +2927,7 @@ let latestHubStatsIdentity = null;
 let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
+let statsPushRevision = 0;
 let macWidgetSnapshotController = null;
 let macWidgetDemand = null;
 let macWidgetPublicationReady = false;
@@ -4718,6 +4719,7 @@ function sendPush(payload, options = {}) {
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    statsPushRevision += 1;
     edgeDockManualStats = null;
     getSyncContentRuntime().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
@@ -5443,7 +5445,8 @@ let edgeDockDerivedSignature = '';
 let edgeDockManualStats = null;
 
 function edgeDockStats() {
-  return edgeDockManualStats?.generation === hubModeGeneration ? edgeDockManualStats.stats : latestStats;
+  return edgeDockManualStats?.generation === hubModeGeneration && edgeDockManualStats.runtime === deviceRuntimeHandle
+    ? edgeDockManualStats.stats : latestStats;
 }
 
 function repaintEdgeDockCells() {
@@ -5538,9 +5541,7 @@ function canRefreshEdgeDockStats() {
 }
 
 async function refreshStatsFromEdgeDock() {
-  const stats = await refreshManualStats();
-  edgeDockManualStats = { stats, generation: hubModeGeneration };
-  updateEdgeDockCells(electronPresentationStats(stats));
+  await refreshManualStats();
   return { ok: true };
 }
 
@@ -6051,6 +6052,7 @@ function startMode() {
   hubModeGeneration += 1;
   advanceMacWidgetProducerAndSourceEpoch();
   clearLatestHubStatsCache();
+  edgeDockManualStats = null;
   const icloudStop = stopIcloudRuntime();
   // Tear down collectors synchronously so they can't double-run while the
   // async reconciliation below is queued. iCloud's filesystem teardown is
@@ -6331,8 +6333,17 @@ function refreshManualStats() {
   if (manualStatsRefreshInFlight?.runtime === runtime && manualStatsRefreshInFlight.generation === generation) {
     return manualStatsRefreshInFlight.promise;
   }
+  const revision = statsPushRevision;
   const request = { runtime, generation, promise: null };
-  request.promise = fetchStats({ force: true, forceHistory: true, forceSelfSync: true }).finally(() => {
+  request.promise = fetchStats({ force: true, forceHistory: true, forceSelfSync: true }).then((stats) => {
+    // Both buttons update the dock once. A push received while this read was
+    // pending has already taken over, so a late read must not replace it.
+    if (runtime === deviceRuntimeHandle && generation === hubModeGeneration && revision === statsPushRevision) {
+      edgeDockManualStats = { stats, generation, runtime };
+      repaintEdgeDockCells();
+    }
+    return stats;
+  }).finally(() => {
     if (manualStatsRefreshInFlight === request) manualStatsRefreshInFlight = null;
   });
   manualStatsRefreshInFlight = request;

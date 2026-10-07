@@ -2530,17 +2530,30 @@ test('refresh placement preserves rail bounds and stays accessible at either dis
       const before = structuredClone(rail);
       const button = edgeDockRefreshBounds({ workArea: area, railBounds: rail });
       assert.deepEqual(rail, before);
-      assert.equal(button.x + button.width / 2, rail.x + rail.width / 2);
+      if (offset === 1) {
+        assert.ok(side === 'left' ? button.x > rail.x + rail.width : button.x + button.width < rail.x);
+        assert.equal(button.y + button.height, rail.y + rail.height);
+      } else {
+        assert.equal(button.x + button.width / 2, rail.x + rail.width / 2);
+        assert.equal(rail.y + rail.height - button.y, Math.round(EDGE_DOCK_METRICS.shoulder * 0.7) - EDGE_DOCK_METRICS.refreshGap);
+      }
       assert.ok(button.y >= area.y + EDGE_DOCK_METRICS.screenMargin);
       assert.ok(button.y + button.height <= area.y + area.height - EDGE_DOCK_METRICS.screenMargin);
-      assert.equal(offset === 1 ? button.y + button.height - rail.y : rail.y + rail.height - button.y, Math.round(EDGE_DOCK_METRICS.shoulder * 0.7) - EDGE_DOCK_METRICS.refreshGap);
       const corridor = edgeDockRefreshCorridor(rail, button);
-      assert.equal(corridor.width, 0, 'the shoulder bounds already cover the short passage');
+      assert.equal(corridor.width, offset === 1 ? EDGE_DOCK_METRICS.refreshGap : 0);
     }
     const full = edgeDockRailBounds({ workArea: area, side, offset: 1, cellKinds: Array(30).fill('provider') });
     const button = edgeDockRefreshBounds({ workArea: area, railBounds: full });
     assert.ok(side === 'left' ? button.x > full.x + full.width : button.x + button.width < full.x);
     assert.ok(button.y + button.height <= area.y + area.height - EDGE_DOCK_METRICS.screenMargin);
     assert.equal(edgeDockRefreshCorridor(full, button).width, EDGE_DOCK_METRICS.refreshGap);
+    for (const count of [2, 12, 30]) {
+      for (const offset of [0, 0.3, 0.75, 0.95, 1]) {
+        const rail = edgeDockRailBounds({ workArea: area, side, offset, cellKinds: Array(count).fill('provider') });
+        const action = edgeDockRefreshBounds({ workArea: area, railBounds: rail });
+        assert.ok(action.y >= rail.y + rail.height - action.height, 'refresh must stay at the bottom, never above the rail');
+        assert.ok(action.y + action.height <= area.y + area.height - EDGE_DOCK_METRICS.screenMargin);
+      }
+    }
   }
 });

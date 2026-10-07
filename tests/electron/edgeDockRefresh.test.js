@@ -30,6 +30,7 @@ function fixture() {
       tick: (...args) => { calls.push(['usage', ...args]); return usage.promise; }
     },
     hubModeGeneration: 1,
+    statsPushRevision: 0,
     settings: { hubMode: 'local', limitsEnabled: false, limitProviders: [] },
     mode: 'local',
     localStats: { updatedAt: '2026-10-07T00:00:00Z' },
@@ -93,6 +94,7 @@ for (const first of ['App', 'Edge Dock']) {
     assert.equal(completed, true, 'background limits must not hold either button open');
     assert.equal(JSON.stringify(values[first === 'App' ? 1 : 0]), JSON.stringify({ ok: true }));
     assert.equal(values[first === 'App' ? 0 : 1], context.localStats);
+    assert.equal(context.dockStats, context.localStats);
     limits.reject(new Error('background quota failure'));
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(calls.length, 2, 'each producer was dispatched only once');
@@ -126,6 +128,7 @@ test('runtime or mode replacement does not join an obsolete refresh', async () =
   assert.notEqual(old, next);
   usage.resolve(true);
   await old;
+  assert.equal(context.dockStats, undefined, 'an obsolete request must not update the replacement dock source');
   assert.equal(context.refreshManualStats(), next, 'old cleanup must not clear the new request');
   assert.equal(ticks, 1);
   nextUsage.resolve(true);
@@ -253,4 +256,75 @@ test('forecast completion and session expiry re-project the manually refreshed d
 
 test('App manual-button IPC uses the shared entry; other stats reads retain their options', () => {
   assert.match(main, /options\?\.force === true && options\?\.feedback === true \? refreshManualStats\(\) : fetchStats\(options\)/);
+});
+
+function clientFixture() {
+  const fixtureResult = fixture();
+  const { context } = fixtureResult;
+  const response = deferred();
+  Object.assign(context, {
+    deviceRuntimeHandle: null,
+    mode: 'client',
+    effectiveHubConfig: () => ({ url: 'https://hub.example' }),
+    fetch: async () => ({ ok: true, json: () => response.promise }),
+    hubModeRequestIsCurrent: () => true,
+    setLatestHubStatsCache() {},
+    composeLocalSyncSummary: (stats) => stats,
+    lastCollectedDevice: null
+  });
+  context.settings.hubMode = 'client';
+  const old = { updatedAt: 'old' };
+  context.latestStats = old;
+  context.dockStats = old;
+  return { ...fixtureResult, response, old };
+}
+
+test('App-only Client refresh updates the dock and replaces its previous manual snapshot', async () => {
+  const { context, response, old } = clientFixture();
+  const fresh = { updatedAt: 'fresh' };
+  const request = context.refreshManualStats();
+  response.resolve(fresh);
+  assert.equal(await request, fresh);
+  assert.equal(context.dockStats, fresh);
+  assert.equal(context.latestStats, old);
+  const newer = { updatedAt: 'newer' };
+  context.fetch = async () => ({ ok: true, json: async () => newer });
+  assert.equal(await context.refreshManualStats(), newer);
+  context.repaintEdgeDockCells();
+  assert.equal(context.dockStats, newer);
+});
+
+for (const entry of ['App', 'Edge Dock']) {
+  test(`${entry} pending manual read cannot overwrite a stats push that arrives before it completes`, async () => {
+    const { context, response } = clientFixture();
+    const pushed = { historyRevision: '3', devices: [{ today: 'pushed' }] };
+    const freshRead = { historyRevision: '2', devices: [{ today: 'read' }] };
+    const request = entry === 'App' ? context.refreshManualStats() : context.refreshStatsFromEdgeDock();
+    context.sendPush({ event: 'stats', data: { stats: pushed } });
+    assert.equal(context.dockStats, pushed);
+    response.resolve(freshRead);
+    await request;
+    assert.equal(context.dockStats, pushed, 'late manual completion must not repaint over the push');
+    context.repaintEdgeDockCells();
+    assert.equal(context.dockStats, pushed, 'late manual completion must not retain an override');
+  });
+}
+
+test('runtime replacement without a mode change invalidates the dock manual source and pending completion', async () => {
+  const { context, usage, limits } = fixture();
+  const old = { updatedAt: 'pushed' };
+  context.latestStats = old;
+  usage.resolve(true);
+  await context.refreshManualStats();
+  assert.equal(context.dockStats, context.localStats);
+  const nextUsage = deferred();
+  context.deviceRuntimeHandle.tick = () => nextUsage.promise;
+  const pending = context.refreshManualStats();
+  context.deviceRuntimeHandle = null;
+  context.repaintEdgeDockCells();
+  assert.equal(context.dockStats, old);
+  nextUsage.resolve(true);
+  await pending;
+  assert.equal(context.dockStats, old);
+  limits.resolve();
 });
