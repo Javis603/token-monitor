@@ -97,18 +97,39 @@ async function readLocalUsageView(options = {}) {
 const pricingCache = new Map();
 const MAX_PRICING_LOOKUPS_PER_TICK = 4;
 let pricingCursor = 0;
+
+function modelPricingCacheKey(model, options) {
+  return `${options.pricingRevision || ''}:${model}`;
+}
+
+async function refreshModelPricing(model, options = {}) {
+  const key = modelPricingCacheKey(model, options);
+  let pricing;
+  let retryMs = 30000;
+  try {
+    pricing = (await options.lookupModelPricing?.(model, options.commandTimeoutMs || 1500))?.pricing || null;
+    if (pricing) retryMs = 300000;
+  } catch (_) {
+    // A transport/command failure says nothing about whether a rate exists.
+    pricing = pricingCache.get(key)?.pricing || null;
+  }
+  pricingCache.set(key, { pricing, until: Date.now() + retryMs });
+  if (pricingCache.size > 256) pricingCache.delete(pricingCache.keys().next().value);
+  return pricing;
+}
+
 async function resolveLocalUsagePricing(rows, options = {}) {
   const result = {};
   const models = [...new Set(rows.map((row) => row.model.toLowerCase()))];
   const pending = [];
   for (const [index, model] of models.entries()) {
     if (model === 'unknown') { result[model] = null; continue; }
-    const key = `${options.pricingRevision || ''}:${model}`;
+    const key = modelPricingCacheKey(model, options);
     const cached = pricingCache.get(key);
     if (!cached || cached.until <= Date.now()) {
       // A deferred refresh must not erase a known price from this revision.
       result[model] = cached?.pricing || null;
-      pending.push({ model, key, index });
+      pending.push({ model, index });
     } else {
       result[model] = cached.pricing;
     }
@@ -119,20 +140,9 @@ async function resolveLocalUsagePricing(rows, options = {}) {
   const start = pricingCursor % (models.length || 1);
   pending.sort((a, b) => (a.index - start + models.length) % models.length
     - (b.index - start + models.length) % models.length);
-  for (const { model, key, index } of pending.slice(0, MAX_PRICING_LOOKUPS_PER_TICK)) {
+  for (const { model, index } of pending.slice(0, MAX_PRICING_LOOKUPS_PER_TICK)) {
     pricingCursor = index + 1;
-    let pricing;
-    let retryMs = 30000;
-    try {
-      pricing = (await options.lookupModelPricing(model, options.commandTimeoutMs || 1500))?.pricing || null;
-      if (pricing) retryMs = 300000;
-    } catch (_) {
-      // A transport/command failure says nothing about whether a rate exists.
-      pricing = pricingCache.get(key)?.pricing || null;
-    }
-    pricingCache.set(key, { pricing, until: Date.now() + retryMs });
-    if (pricingCache.size > 256) pricingCache.delete(pricingCache.keys().next().value);
-    result[model] = pricing;
+    result[model] = await refreshModelPricing(model, options);
   }
   return result;
 }
@@ -147,9 +157,7 @@ async function priceLocalSessionDetail(detail, options = {}) {
   // Bound the work when opening unusually large multi-model sessions. Omitted
   // models remain unpriced rather than blocking or borrowing another rate.
   for (const model of models.filter((id) => id !== 'unknown').slice(0, 16)) {
-    let pricing = null;
-    try { pricing = (await options.lookupModelPricing?.(model, 1500))?.pricing || null; } catch (_) { /* Explicitly unpriced. */ }
-    prices.set(model, pricing);
+    prices.set(model, await refreshModelPricing(model, options));
   }
   let knownCost = 0;
   let unpricedTokens = 0;

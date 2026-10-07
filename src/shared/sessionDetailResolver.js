@@ -118,7 +118,11 @@ function runSessionDetailWorker(args = {}, deps = {}) {
 
 async function readSessionDetailForPlatform(args = {}, deps = {}) {
   const detail = await runSessionDetailWorker(args, deps);
-  return priceLocalSessionDetail(detail, { lookupModelPricing: deps.lookupModelPricing });
+  if (detail?.usageSource !== 'codex-dots-local') return detail;
+  return priceLocalSessionDetail(detail, {
+    lookupModelPricing: deps.lookupModelPricing,
+    pricingRevision: deps.pricingRevision ?? deps.getPricingRevision?.()
+  });
 }
 
 module.exports = {
