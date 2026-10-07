@@ -118,3 +118,38 @@ test('Edge Dock full refresh reports a failed provider probe', async (t) => {
   await settle();
   assert.deepEqual(await refreshAction(runtime)(), { ok: false });
 });
+
+for (const addedStatus of ['unavailable', 'sourceRateLimited', 'ok', 'notConfigured']) {
+  test(`Edge Dock checks a provider added mid-refresh with status ${addedStatus}`, async (t) => {
+    let finish;
+    let response;
+    const calls = [];
+    const runtime = runtimeFor(clock(), async (provider, _config, context) => {
+      calls.push([provider, context.reason]);
+      if (provider === 'kimi' && context.reason === 'manual') {
+        return new Promise((resolve) => { finish = resolve; });
+      }
+      return [row(provider, provider === 'cursor' ? addedStatus : 'ok')];
+    });
+    t.after(() => runtime.stop());
+    await settle();
+    calls.length = 0;
+    const manual = refreshAction({
+      async refreshLimits(...args) {
+        response = await runtime.refreshLimits(...args);
+        return response;
+      }
+    })();
+    await settle();
+    assert.equal(typeof finish, 'function');
+    runtime.reconfigureLimits({ limitProviders: ['claude', 'kimi', 'cursor'] });
+    await settle();
+    assert.deepEqual(calls, [['claude', 'manual'], ['kimi', 'manual'], ['cursor', 'provider-added']]);
+    finish([row('kimi')]);
+    const result = await manual;
+    assert.deepEqual(response.results.map((entry) => entry.provider), ['claude', 'kimi']);
+    assert.equal(response.results.some((entry) => entry.superseded || entry.deferred || entry.error), false);
+    assert.equal(response.snapshot.providers.find((entry) => entry.provider === 'cursor').status, addedStatus);
+    assert.deepEqual(result, { ok: ['ok', 'notConfigured'].includes(addedStatus) });
+  });
+}

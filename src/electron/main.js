@@ -5529,9 +5529,8 @@ async function refreshLimitsFromEdgeDock() {
   // deferred/failure feedback instead of reporting every resolved probe as OK.
   const response = await deviceRuntimeHandle.refreshLimits({}, 'manual', { includeProviderResults: true });
   if (!response?.results?.length) return { ok: false };
-  const failed = response.results.some((result) => result.superseded || result.deferred || result.error
-    || response.snapshot?.providers?.some((row) => row.provider === result.provider
-      && !['ok', 'notConfigured', 'unsupported'].includes(row.status)));
+  const failed = response.results.some((result) => result.superseded || result.deferred || result.error)
+    || response.snapshot?.providers?.some((row) => !['ok', 'notConfigured', 'unsupported'].includes(row.status));
   return { ok: !failed };
 }
 
