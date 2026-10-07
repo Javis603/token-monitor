@@ -106,7 +106,8 @@ async function resolveLocalUsagePricing(rows, options = {}) {
     const key = `${options.pricingRevision || ''}:${model}`;
     const cached = pricingCache.get(key);
     if (!cached || cached.until <= Date.now()) {
-      result[model] = null;
+      // A deferred refresh must not erase a known price from this revision.
+      result[model] = cached?.pricing || null;
       pending.push({ model, key, index });
     } else {
       result[model] = cached.pricing;

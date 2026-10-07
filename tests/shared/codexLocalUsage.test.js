@@ -1039,6 +1039,45 @@ test('expired failed Dots prices rotate without starving remaining models', asyn
   assert.deepEqual(lookups.slice(24), lookups.slice(0, 4));
 });
 
+test('deferred Dots price refreshes retain same-revision costs but never reuse a previous revision', async (t) => {
+  let now = 4000000;
+  t.mock.method(Date, 'now', () => now);
+  const rows = Array.from({ length: 8 }, (_, index) => ({
+    model: `aggregate-stale-${index}`, threadId: `01234567-1234-1234-1234-${String(index).padStart(12, '0')}`,
+    observedAt: AT, usage: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 10 }
+  }));
+  const lookups = [];
+  let rate = 1;
+  const options = {
+    pricingRevision: 'aggregate-stale',
+    lookupModelPricing: async (model) => { lookups.push(model); return { pricing: { inputCostPerToken: rate } }; }
+  };
+  const period = (pricingByModel) => buildLocalUsageView(rows, { now: AT, projectsEnabled: false, pricingByModel }).allTime;
+  await resolveLocalUsagePricing(rows, options);
+  const warm = period(await resolveLocalUsagePricing(rows, options));
+  assert.equal(warm.totalTokens, 80);
+  assert.equal(warm.costUsd, 80);
+  assert.equal(warm.unpricedTokens || 0, 0);
+
+  now += 300001;
+  rate = 2;
+  const partialRefresh = period(await resolveLocalUsagePricing(rows, options));
+  assert.equal(lookups.length, 12, 'only four expired models are refreshed');
+  assert.equal(partialRefresh.totalTokens, 80);
+  assert.equal(partialRefresh.costUsd, 120, 'four refreshed rates plus four retained rates');
+  assert.equal(partialRefresh.unpricedTokens || 0, 0, 'deferred models retain their known price');
+  const completeRefresh = period(await resolveLocalUsagePricing(rows, options));
+  assert.equal(lookups.length, 16);
+  assert.equal(completeRefresh.costUsd, 160);
+  assert.equal(completeRefresh.unpricedTokens || 0, 0);
+
+  const changedRevision = period(await resolveLocalUsagePricing(rows, { ...options, pricingRevision: 'aggregate-stale-revised' }));
+  assert.equal(lookups.length, 20);
+  assert.equal(changedRevision.totalTokens, 80);
+  assert.equal(changedRevision.costUsd, 80, 'only four new-revision rates contribute');
+  assert.equal(changedRevision.unpricedTokens, 40, 'old-revision prices cannot fill deferred models');
+});
+
 test('pricing rotation reaches models beyond cache capacity even when prices expire between ticks', async (t) => {
   let now = 3000000;
   t.mock.method(Date, 'now', () => now);
