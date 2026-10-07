@@ -26,6 +26,12 @@ const cloud = { version: 1, state: 'listening', errorCode: null, service: { inst
 ] };
 const audit = { localDetailReads: 0, controls: [], cloudReads: 0 };
 let failCloudRead = false;
+// While held, every cloud read resolves only when the harness releases it, so
+// a pre-control or pre-login-change result can be replayed after the boundary.
+let heldReads = null;
+function holdCloudReads() { heldReads = []; }
+function releaseFirstHeldRead(value) { const resolve = heldReads.splice(0, 1)[0]; resolve(value); return heldReads.length; }
+function releaseHeldReads(value) { const pending = heldReads || []; heldReads = null; for (const resolve of pending) resolve(value); return pending.length; }
 let win, done = false;
 const errors = [];
 fs.mkdirSync(output, { recursive: true, mode: 0o700 });
@@ -42,6 +48,11 @@ async function waitFor(expression) {
   while (Date.now() < deadline) { if (await evaluate(expression)) return; await new Promise(r => setTimeout(r, 100)); }
   throw new Error('Condition not reached: ' + expression);
 }
+async function waitUntil(check, label) {
+  const deadline = Date.now() + 12000;
+  while (Date.now() < deadline) { if (check()) return; await new Promise(r => setTimeout(r, 50)); }
+  throw new Error('Condition not reached: ' + label);
+}
 async function capture(name) {
   await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
   fs.writeFileSync(path.join(output, name), (await win.webContents.capturePage()).toPNG(), { mode: 0o600 });
@@ -57,7 +68,9 @@ app.whenReady().then(async () => {
     'hub:getInfo': () => ({ mode: 'local' }), 'tokscale:getStatus': () => ({ installed: true, version: 'fixture' }),
     'stream:status': () => ({ connected: true, mode: 'local' }), 'dashboard:getHistory': () => ({ daily: [], monthly: [] }),
     'session:getDetail': () => { audit.localDetailReads++; return { found: false }; },
-    'cloudUsage:get': () => { audit.cloudReads++; if (failCloudRead) throw new Error('fixture read failure'); return cloud; },
+    'cloudUsage:get': () => { audit.cloudReads++; if (failCloudRead) throw new Error('fixture read failure');
+      if (heldReads) return new Promise((resolve) => { heldReads.push(resolve); });
+      return cloud; },
     'cloudUsage:control': (action) => { audit.controls.push(action); cloud.service.running = action === 'start'; return { ok: true, snapshot: cloud }; }
   };
   const preload = path.join(root, 'src/electron/preload.js');
@@ -94,11 +107,55 @@ app.whenReady().then(async () => {
   await evaluate(`document.getElementById('cloudSessionsEnabled').click()`);
   await waitFor(`!document.getElementById('cloudSessionsEnabled').disabled`);
   assert.deepEqual(audit.controls, ['stop', 'start']);
+
+  // Login switch: the previous account's cloud rows and open cloud detail must
+  // leave synchronously, before the held replacement read is released. Every
+  // id, counter and account below is a synthetic fixture, never a real login.
+  await evaluate(`document.getElementById('settingsButton').click()`);
+  await waitFor(`document.getElementById('settingsPanel').classList.contains('hidden')`);
+  await evaluate(`document.querySelector('#breakdown [data-cloud-only="true"]').click()`);
+  await waitFor(`document.querySelector('#session-detail .cloud-session-detail') !== null`);
+  holdCloudReads();
+  win.webContents.send('codex:activeAccount', { id: 'fixture-account-b', accountKey: 'fixture-account-b', email: 'fixture-b@example.invalid', accountLabel: 'Fixture B', enabled: true });
+  await waitFor(`document.querySelector('#session-detail .cloud-session-detail')?.textContent.includes(window.TokenMonitorCloudSessionRows.labels('zh-CN').notFound)`);
+  await evaluate(`document.querySelector('#session-detail-head .detail-back').click()`);
+  await waitFor(`document.querySelectorAll('#breakdown [data-cloud-only="true"]').length === 0`);
+  await capture('account-switch-cleared.png');
+  assert.ok(releaseHeldReads(cloud) >= 1, 'the login switch did not request a fresh read');
+  await waitFor(`document.querySelectorAll('#breakdown [data-cloud-only="true"]').length === 1`);
+
+  // Monitoring control: hold the pre-control periodic read, stop the listener,
+  // wait until the post-control fresh read has been requested, replay the held
+  // stale result, and prove it can neither repaint rows nor be reused.
+  await evaluate(`document.getElementById('settingsButton').click(); document.querySelector('[data-settings-section="general"]').click()`);
+  await waitFor(`!document.getElementById('cloudSessionsEnabled').disabled`);
+  holdCloudReads();
+  await waitUntil(() => heldReads.length >= 1, 'held periodic read');
+  const readsBeforeControl = audit.cloudReads;
+  const staleCloud = JSON.parse(JSON.stringify(cloud));
+  staleCloud.observedAt = new Date(now - 3600000).toISOString();
+  staleCloud.threads[0].total.totalTokens = 111111;
+  await evaluate(`document.getElementById('cloudSessionsEnabled').click()`);
+  await waitUntil(() => heldReads.length >= 2, 'post-control fresh read');
+  releaseFirstHeldRead(staleCloud);
+  await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+  const heldState = await evaluate(`({ disabled: document.getElementById('cloudSessionsEnabled').disabled, value: document.querySelector('[data-cloud-only="true"] .row-value')?.textContent })`);
+  assert.equal(heldState.disabled, true);                    // the fresh read is still pending; the stale one cannot release the toggle
+  assert.notEqual(heldState.value, '111,111');               // the held pre-control read must not repaint
+  releaseHeldReads(cloud);
+  await waitFor(`!document.getElementById('cloudSessionsEnabled').disabled`);
+  const controlState = await evaluate(`({ checked: document.getElementById('cloudSessionsEnabled').checked, status: document.getElementById('cloudSessionsSettingStatus').textContent, values: [...document.querySelectorAll('[data-cloud-only="true"] .row-value')].map((el) => el.textContent) })`);
+  assert.equal(controlState.checked, false);
+  assert.equal(controlState.status, await evaluate(`window.TokenMonitorCloudSessionRows.labels('zh-CN').disabled`));
+  assert.ok(!controlState.values.includes('111,111'), 'the held pre-control read repainted rows');
+  assert.ok(audit.cloudReads > readsBeforeControl, 'the control did not refresh freshly');
+
+  assert.deepEqual(audit.controls, ['stop', 'start', 'stop']);
   failCloudRead = true;
   await waitFor(`document.getElementById('cloudSessionsSettingStatus').textContent === window.TokenMonitorCloudSessionRows.labels('zh-CN').error`);
   assert.equal(await evaluate(`document.getElementById('cloudSessionsEnabled').disabled`), true);
   assert.deepEqual(errors, []);
-  const result = { actualRenderer: true, actualPreload: true, syntheticData: true, rows: state.rows, cloudRows: state.cloudRows, totalUnchanged: 42800, cloudDetailNoLocalRead: true, localDetailPreserved: true, pollingUpdatesRows: true, periodFilterByActivity: true, settingsControls: audit.controls, cloudReads: audit.cloudReads, noCloudTabOrButton: true };
+  const result = { actualRenderer: true, actualPreload: true, syntheticData: true, rows: state.rows, cloudRows: state.cloudRows, totalUnchanged: 42800, cloudDetailNoLocalRead: true, localDetailPreserved: true, pollingUpdatesRows: true, periodFilterByActivity: true, settingsControls: audit.controls, cloudReads: audit.cloudReads, noCloudTabOrButton: true, loginSwitchClearedRowsSynchronously: true, controlHeldStaleReadSuppressed: true };
   fs.writeFileSync(path.join(output, 'acceptance.json'), JSON.stringify(result, null, 2), { mode: 0o600 });
   console.log('UNIFIED_SESSIONS_PASS', JSON.stringify(result)); finish();
 }).catch(finish);

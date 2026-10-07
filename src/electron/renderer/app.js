@@ -12829,6 +12829,10 @@ window.tokenMonitor.onSettingsPush?.((next) => {
 });
 
 window.tokenMonitor.codex.onActiveAccount?.((account) => {
+  // A successful switch makes every observed cloud row part of the previous
+  // login: drop the old rows and any open cloud detail synchronously and read
+  // fresh. A cleared account must invalidate before the early return below.
+  cloudSessionsSource.invalidate({ refetch: true });
   if (!account) return;
   applyCodexOptimisticActiveAccount(account);
   renderLimits();
@@ -12945,10 +12949,13 @@ document.getElementById('cloudSessionsEnabled').addEventListener('change', async
   if (cloudSessionControlBusy) return;
   cloudSessionControlBusy = true; cloudSessionControlError = false;
   const action = event.target.checked ? 'start' : 'stop';
+  // A read that started before this flip describes the pre-control service; it
+  // must neither publish nor be reused as the post-control read below.
+  cloudSessionsSource.invalidate({ clear: false });
   renderCloudSessionSettings();
   try { const result = await window.tokenMonitor.cloudUsage.control(action); if (!result?.ok) throw new Error('Not confirmed'); }
   catch (_) { cloudSessionControlError = true; }
-  finally { cloudSessionControlBusy = false; await cloudSessionsSource.refresh(); }
+  finally { cloudSessionControlBusy = false; await cloudSessionsSource.refresh({ fresh: true }); }
 });
 window.addEventListener('beforeunload', () => cloudSessionsSource.dispose(), { once: true });
 

@@ -119,23 +119,42 @@
       [text.parent, id(t.engineParentId) || text.unavailable], [text.delegation, id(t.delegationParentId) || text.unavailable], [text.gaps, n(t.gapCount)]
     ] };
   }
-  // One UI read at a time. Inactive surfaces do not poll and failures clear the
+  // Coalesce UI reads within a generation. Inactive surfaces do not poll; failures clear the
   // old snapshot, including a changed login, rather than rendering stale IDs.
+  // `invalidate` is the UI's synchronous boundary: a changed login clears the
+  // old rows and detail immediately, and a read or timer that started before
+  // the boundary can never publish, so the next refresh reads fresh instead of
+  // joining data that belongs to the previous account or pre-control service.
   function createSource({ get, onChange, schedule = setTimeout, cancel = clearTimeout, now = Date.now }) {
-    let active = false, disposed = false, pending = null, timer = null, last = 0, value = null;
+    let active = false, disposed = false, pending = null, timer = null, last = 0, value = null, generation = 0;
     function arm() { if (timer) cancel(timer); timer = active && !disposed ? schedule(() => { timer = null; void refresh(); }, 3000) : null; }
-    async function refresh() {
-      if (disposed) return null;
-      if (pending) return pending;
-      pending = (async () => {
+    function start() {
+      const started = generation;
+      const entry = { generation: started, promise: null };
+      entry.promise = (async () => {
         let next;
         try { next = await get(); } catch (_) { next = { errorCode: 'IPC_FAILED', threads: [], stale: true }; }
-        if (!disposed) { value = next; last = now(); onChange(next); }
+        if (!disposed && started === generation) { value = next; last = now(); onChange(next); }
         return next;
       })();
-      try { return await pending; } finally { pending = null; arm(); }
+      pending = entry;
+      const settle = () => { if (pending === entry) pending = null; arm(); };
+      entry.promise.then(settle, settle);
+      return entry.promise;
     }
-    return { snapshot: () => value, refresh,
+    function refresh(options = {}) {
+      if (disposed) return null;
+      if (options.fresh) generation += 1;
+      if (pending && pending.generation === generation) return pending.promise;
+      return start();
+    }
+    function invalidate({ clear = true, refetch = false } = {}) {
+      generation += 1;
+      if (clear) { const had = value !== null; value = null; last = 0; if (had) onChange(null); }
+      if (refetch && active && !disposed) void refresh();
+      return generation;
+    }
+    return { snapshot: () => value, refresh, invalidate,
       setActive(next) { const changed = active !== Boolean(next); active = Boolean(next); if (!active) { if (timer) cancel(timer); timer = null; }
         else if (changed && (!last || now() - last >= 3000)) void refresh(); else if (changed) arm(); },
       dispose() { disposed = true; active = false; if (timer) cancel(timer); }
