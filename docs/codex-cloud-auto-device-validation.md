@@ -1,6 +1,6 @@
 # Automatic cloud watcher: device acceptance
 
-Verified on 2026-10-05 Asia/Shanghai. Runtime/package source commit: `8af4d63696b5363625dc287c3f5b02e672e68ec8`. The parallel test app has 238 verified source/runtime/license files. The user LaunchAgent `local.chengong.tokenmonitor.cloudauto` is loaded and running; its command contains no manually supplied thread ID. Login startup is configured but a physical logout/reboot was not performed as part of validation.
+Historical observer acceptance on 2026-10-05 Asia/Shanghai; the test-app installers and shortcuts described below are not included in this focused upstream proposal. Runtime/package source commit: `8af4d63696b5363625dc287c3f5b02e672e68ec8`. The parallel test app has 238 verified source/runtime/license files. The user LaunchAgent `local.chengong.tokenmonitor.cloudauto` is loaded and running; its command contains no manually supplied thread ID. Login startup is configured but a physical logout/reboot was not performed as part of validation.
 
 ## Actual automatic discovery and positive counting
 
@@ -20,7 +20,7 @@ The installer preserved a complete parallel-app backup and refused conflicts bef
 
 ## Test results
 
-Thirty-five new focused tests passed. A complete `npm run verify` passed lint and 5,923 tests with two skips, zero failures (5,925 total). One intermediate repeat stalled in an existing Worker gzip-negotiation test after the new suites had passed; only that owned test child was terminated, and a bounded full rerun passed. No user application process was terminated for testing.
+Thirty-five new focused tests passed. That earlier device-acceptance source run of `npm run verify` passed lint and 5,923 tests with two skips, zero failures (5,925 total). One intermediate repeat stalled in an existing Worker gzip-negotiation test after the new suites had passed; only that owned test child was terminated, and a bounded full rerun passed. No user application process was terminated for testing.
 
 New regressions first failed and then passed for loss of cached delegation metadata, both directory variants failing without reconnect, and stale active status after reconnect. Other tests cover default/filtered union, archived sources, subagent edges, new tasks, listener capacity, early events, privacy, scope changes, process singleton behavior, file limits, graceful shutdown and safe deployment.
 

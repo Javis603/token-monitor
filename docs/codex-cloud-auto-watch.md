@@ -4,13 +4,7 @@ This opt-in service removes the need to enter a thread UUID. It discovers the cu
 
 ## Start, stop, view
 
-The parallel test application gains three shortcuts under `~/Applications/`:
-
-- `云端Token自动监听-启动.command` enables and starts the user LaunchAgent.
-- `云端Token自动监听-停止.command` disables and removes that job from the current login session without interrupting cloud model tasks.
-- `云端Token自动监听-查看.command` opens the local automatically refreshed HTML report.
-
-The LaunchAgent is `local.chengong.tokenmonitor.cloudauto`, installed at `~/Library/LaunchAgents/local.chengong.tokenmonitor.cloudauto.plist`. It runs the source packaged in the existing parallel test app. Normal startup after login is enabled by the installer. Unexpected process failure is retried by launchd with a 60-second throttle; application-level account-scope or storage-limit pauses return normally to avoid a restart storm. Disable/stop the service when monitoring is not desired.
+The Sessions integration exposes a Settings toggle for an already installed macOS user LaunchAgent, `local.chengong.tokenmonitor.cloudauto`. It is disabled when the service is absent or unsupported. Closing the widget leaves the independent service running; disabling the toggle stops it. This proposal does not automatically install a LaunchAgent, modify an application bundle or enable monitoring on first launch.
 
 A foreground alternative is:
 
@@ -32,7 +26,7 @@ A single authenticated WebSocket carries discovery and multiple subscriptions. E
 
 The monitor reconnects after disconnection, with exponential backoff capped at 60 seconds. A successful metadata heartbeat renews a bounded connection lease; failed discovery does not masquerade as a successful heartbeat. New connections discard stale runtime-status assumptions and rediscover before attaching. Previously received counters remain in memory for the same process and account scope, with reconnection gaps explicitly counted. Repeated cumulative values are not added together.
 
-Authentication is handled by the existing repository helper. The file/identity is verified before each numeric event is passed to storage. A credential refresh can reconnect within the same account/user fingerprint. A different fingerprint pauses the service rather than combining two accounts. Token material and conversation text are never copied to the report, log or package. Package startup passes HOME/PATH only, not a bearer token or cookie.
+Authentication is handled by the existing repository helper. The file/identity is verified before each numeric event is passed to storage. A credential refresh can reconnect within the same account/user fingerprint. A different fingerprint pauses the service rather than combining two accounts. Token material and conversation text are never copied to the report, log or package. Authentication is read by the service process, never supplied by the renderer.
 
 Each thread's latest engine cumulative value is displayed separately. Cached input is contained in input; reasoning output is contained in output. Invalid counters or decreases are ambiguous. Parent totals may overlap children, and a fork may inherit earlier history: this service therefore emits no combined task/account token sum and never adds its numbers to local Tokscale totals or billing estimates.
 
@@ -44,20 +38,18 @@ Each process run keeps a separate private `runs/<run-id>/events.ndjson` and `rep
 
 An exclusive process lock prevents two watcher instances from writing the same directory. A dead PID lock can be recovered; ambiguous locks require review. Output directories and files use private permissions. The live journal is capped at 128 MiB per run, and the catalog at 1,000 known threads; exhausting a storage limit pauses rather than deleting older evidence. Previous runs are not automatically deleted, so their disk usage should be reviewed. No remote report server or public network listener is created.
 
-## Deployment and verification
+## Verification
 
 ```sh
-python3 -B scripts/deploy-codex-auto-watch.py
-python3 -B scripts/deploy-codex-auto-watch.py --apply
-node --test tests/shared/codexCloudAutoWatch.test.js tests/scripts/codexCloudAutoWatch.test.js tests/scripts/codexAutoDeploy.test.js
+node --test tests/shared/codexCloudAutoWatch.test.js tests/scripts/codexCloudAutoWatch.test.js
 npm run verify
 ```
 
-The installer verifies the existing parallel app's bundle ID and every manifest hash, requires a clean committed source checkout, preserves a rollback backup and refuses to overwrite an existing auto-service definition or shortcut. It does not replace `/Applications/Token Monitor.app`, edit Codex routing, copy authentication or install dependencies from the network. The old manual-capture entry remains available.
+Earlier device experiments used a separately installed test service. Their receipts are historical observer evidence, not deployment acceptance of this upstream change. No installer, test application or manual-capture entry is included in this proposal.
 
 A real initial automatic run found 66 hosted threads and selected a running existing task without any manually supplied UUID. It received a valid cumulative token event from that task without submitting a model request. A second real experiment intentionally closed only the observer socket; the loop created a new connection, rediscovered the catalog and reattached. No token event happened during the second test window, so numerical continuity across reconnection is covered by the offline regression rather than claimed as a second real positive sample.
 
-The actual counts, opaque thread IDs and per-run receipts are retained in private task-notes outside the repository. Automated tests cover null-source union, new tasks, subagent relationships, active/idle selection, no duplicate resumes, counters before resume response, reconnect, account isolation, capacity, permission failures, process lock, storage bounds, lifecycle shutdown and install protection. No synthetic test counter is presented as user usage.
+The actual counts, opaque thread IDs and per-run receipts are retained in private task-notes outside the repository. Automated tests cover null-source union, new tasks, subagent relationships, active/idle selection, no duplicate resumes, counters before resume response, reconnect, account isolation, capacity, permission failures, process lock, storage bounds, lifecycle shutdown. No synthetic test counter is presented as user usage.
 
 ## Limits that remain
 

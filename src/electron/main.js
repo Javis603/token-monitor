@@ -26,6 +26,7 @@ const motionPreferenceApi = require('./motionPreference');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
+const { createMimoExchangeFetch } = require('./providers/mimo/exchangeFetch');
 const { runAntigravityOAuthLogin } = require('./providers/antigravity/oauthLogin');
 const antigravityOAuth = require('../shared/providers/antigravity/oauth');
 const {
@@ -58,9 +59,19 @@ const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
 // `deps.fetch` — see limits/fetch.js for why the branch and the request options
 // are what they are. Probes that build their own transport inherit neither
 // branch: cursorProbe and antigravityProbe on node:https, Claude Web on the
-// claudeWebFetch above, the CLI fallbacks on a spawned binary.
+// claudeWebFetch above, the CLI fallbacks on a spawned binary, and MiMo's
+// exchange on the mimoExchangeFetch below, which keeps undici for the per-hop
+// request it needs but still asks Chromium which proxy to use.
 function electronLimitsFetch() {
   return createElectronLimitsFetch({ net, env: process.env });
+}
+
+// Lazy because `session.defaultSession` only exists once the app is ready, and
+// process-wide because the transport caches one proxy agent per proxy URL.
+let mimoExchangeFetch = null;
+function ensureMimoExchangeFetch() {
+  if (!mimoExchangeFetch) mimoExchangeFetch = createMimoExchangeFetch({ session: session.defaultSession });
+  return mimoExchangeFetch;
 }
 
 // Settings-side provider probes take the same transport as the collector's.
@@ -68,7 +79,7 @@ function electronLimitsFetch() {
 // global fetch refuses to save an account on exactly the machines this
 // transport exists for.
 function electronProviderDeps(deps = {}) {
-  return { ...deps, fetch: electronLimitsFetch() };
+  return { ...deps, fetch: electronLimitsFetch(), mimoExchangeFetch: ensureMimoExchangeFetch() };
 }
 const {
   DEFAULT_CLIENTS,
@@ -99,6 +110,9 @@ const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
 const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
+const { normalizeSharedSyncValue } = require('../shared/syncContent');
+const { createSyncContentRuntime, normalizeSyncContentState, sameDestination } = require('./syncContentRuntime');
+const { createSyncContentCredentialQueue } = require('./syncContentCredentials');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const {
   normalizeModelAliases,
@@ -166,6 +180,7 @@ const {
 const {
   defaultHomeModulePreferences,
   normalizeHiddenHomeModules,
+  normalizeHomeLimitDisplayMode,
   normalizeHomeModuleOrder
 } = require('./renderer/homeModulePreferences');
 const {
@@ -258,8 +273,10 @@ const {
   MIMO_PLATFORM_CONSOLE_URL,
   createMimoManagedAccount,
   fetchMimoLimits,
-  normalizeMimoCookieHeader
+  normalizeMimoCookieHeader,
+  withDetectedMimoAccount
 } = require('../shared/providers/mimo/limits');
+const { createMimoAccountMetadataReader } = require('./providers/mimo/accountMetadata');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
@@ -536,6 +553,8 @@ function defaultSettings() {
     // to a random secret generated in startEmbeddedHub() if env is empty.
     hubHostSecret: process.env.TOKEN_MONITOR_SECRET || '',
     secret: process.env.TOKEN_MONITOR_SECRET || '',
+    hubSyncSessionTitles: parseBoolean(process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES, false),
+    syncContentState: normalizeSyncContentState(null),
     windowBehavior,
     alwaysOnTop: windowBehavior === 'floating',
     keepAboveTaskbar: false,
@@ -567,6 +586,7 @@ function defaultSettings() {
     periodMonthMode: 'month',
     themeColors: {},
     vendorColors: {},
+    textSize: 'standard',
     interfaceFontFamily: '',
     displayFontFamily: fontSettingsApi.DEFAULT_DISPLAY_FONT,
     floatingBubbleEnabled: false,
@@ -598,6 +618,7 @@ function defaultSettings() {
     homeModuleOrder: defaultHomeModulePreferences().homeModuleOrder,
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
     showHomeLimitBars: false,
+    homeLimitDisplayMode: 'text',
     showHomeLimitProviderNames: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
     historyEnabled: true,
@@ -851,6 +872,7 @@ function credentialProbeDeps(renewed = {}) {
 function electronLimitsDeps() {
   return {
     fetch: electronLimitsFetch(),
+    mimoExchangeFetch: ensureMimoExchangeFetch(),
     claudeWebFetch: electronClaudeWebFetch,
     workbuddyFetch: async (url, init = {}, expectedSession = null) => {
       const result = await electronWorkbuddyLocalAuth.request(url, init, expectedSession);
@@ -1242,17 +1264,42 @@ function normalizeMimoManagedAccounts(value) {
   return accounts;
 }
 
-function mimoAccountsForRenderer() {
-  return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map(({
-    id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled
-  }) => ({ id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled }));
+// Synthetic settings-row id for the session discovered from MiMo Desktop. It is
+// local UI state, not a provider id.
+const MIMO_DETECTED_ACCOUNT_ID = 'mimo-local-session';
+const detectedMimoAccountKey = createMimoAccountMetadataReader();
+
+// Settings lists a detected Desktop identity without retaining its credential.
+function mimoDetectedAccount() {
+  const accountKey = detectedMimoAccountKey();
+  if (!accountKey) return null;
+  return {
+    id: MIMO_DETECTED_ACCOUNT_ID,
+    accountKey,
+    accountEmail: '',
+    accountLabel: '',
+    enabled: true
+  };
 }
 
+function mimoAccountsForRenderer() {
+  const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map(({
+    id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled
+  }) => ({ id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled }));
+  return withDetectedMimoAccount(accounts, mimoDetectedAccount());
+}
+
+// Every saved account is handed over, including one whose credential cannot be
+// read right now: the provider answers that account with its own not-configured
+// row, which keeps the failure on the account it belongs to. Dropping it here
+// instead used to leave the provider with no accounts at all, and a provider with
+// no accounts answers once for the whole lane — which cleared every other
+// account's row with it.
 function mimoManagedAccountsForCollector() {
   return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map((account) => ({
     ...account,
     cookieHeader: readMimoCredential(account.id)
-  })).filter((account) => account.cookieHeader);
+  }));
 }
 
 function legacyMimoCredentialPath(id) {
@@ -1290,7 +1337,10 @@ async function addMimoManagedAccount(cookieValue) {
   const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
   const result = createMimoManagedAccount(cookieValue, accounts);
   if (!result.ok) return result;
-  const [validation] = await fetchMimoLimits({ mimoManagedAccounts: [result.account] }, electronProviderDeps());
+  const [validation] = await fetchMimoLimits({
+    mimoManagedAccounts: [result.account],
+    limitRefreshScope: { provider: 'mimo', accountKey: result.account.accountKey }
+  }, credentialProbeDeps());
   if (validation?.status !== 'ok') {
     const errorCode = validation?.status === 'unauthorized'
       ? 'invalidCookie'
@@ -1946,6 +1996,7 @@ function normalizeLanguageSetting(value, fallback = 'auto') {
   if (lower === 'en' || lower.startsWith('en-')) return 'en';
   if (lower === 'zh-tw' || lower.startsWith('zh-hant') || /-(tw|hk|mo)\b/i.test(raw)) return 'zh-TW';
   if (lower === 'zh-cn' || lower.startsWith('zh-hans') || /-(cn|sg|my)\b/i.test(raw)) return 'zh-CN';
+  if (lower === 'pt' || lower.startsWith('pt-')) return 'pt-BR';
   return LANGUAGE_VALUES.has(raw) ? raw : fallback;
 }
 
@@ -2461,6 +2512,7 @@ function readSettings() {
       merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
+    merged.homeLimitDisplayMode = normalizeHomeLimitDisplayMode(merged.homeLimitDisplayMode);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
     merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
     merged.showCodexAdditionalLimits = parseBoolean(merged.showCodexAdditionalLimits, true);
@@ -2502,7 +2554,10 @@ function readSettings() {
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
     merged.modelAliases = normalizeModelAliases(merged.modelAliases);
+    merged.syncContentState = normalizeSyncContentState(merged.syncContentState);
+    merged.hubSyncSessionTitles = parseBoolean(merged.hubSyncSessionTitles, false);
     merged.modelAliasGrouping = normalizeModelAliasGrouping(merged.modelAliasGrouping);
+    merged.textSize = fontSettingsApi.normalizeTextSize(merged.textSize);
     merged.interfaceFontFamily = fontSettingsApi.normalizeFontFamily(merged.interfaceFontFamily);
     merged.displayFontFamily = fontSettingsApi.normalizeFontFamily(merged.displayFontFamily);
     merged.tokenRateMode = normalizeTokenRateMode(merged.tokenRateMode);
@@ -3169,16 +3224,16 @@ function drainPendingRuntimeActions(runtime) {
   drainPendingUsageClientRefreshes(runtime);
 }
 
-function effectiveHubConfig() {
-  if (settings?.hubMode === 'host') {
+function effectiveHubConfig(sourceSettings = settings) {
+  if (sourceSettings?.hubMode === 'host') {
     return {
-      url: `http://127.0.0.1:${normalizeHubPort(settings.hubHostPort)}`,
-      secret: settings.hubHostSecret || ''
+      url: `http://127.0.0.1:${normalizeHubPort(sourceSettings.hubHostPort)}`,
+      secret: sourceSettings.hubHostSecret || ''
     };
   }
-  if (settings?.hubMode === 'client') {
-    const url = String(settings.hubUrl || '').trim();
-    return { url: url || null, secret: settings.secret || '' };
+  if (sourceSettings?.hubMode === 'client') {
+    const url = String(sourceSettings.hubUrl || '').trim();
+    return { url: url || null, secret: sourceSettings.secret || '' };
   }
   return { url: null, secret: '' };
 }
@@ -3224,21 +3279,33 @@ async function getHubBuildStatus() {
 async function startEmbeddedHub() {
   if (embeddedHub) return embeddedHub;
   embeddedHubError = null;
-  if (!settings.hubHostSecret) {
-    settings.hubHostSecret = generateHubSecret();
-    saveSettings();
-  }
   const port = normalizeHubPort(settings.hubHostPort);
   try {
+    if (!settings.hubHostSecret) {
+      const previous = settings;
+      try {
+        const next = { ...settings, hubHostSecret: generateHubSecret() };
+        getSyncContentRuntime().beforeDestinationChange(syncContentContext(next));
+        next.syncContentState = normalizeSyncContentState(settings.syncContentState);
+        settings = next;
+        saveSettings({ throwOnError: true });
+      } catch (error) {
+        // Restore connection settings without undoing a preflight OFF/journal.
+        settings = { ...previous, syncContentState: normalizeSyncContentState(settings.syncContentState) };
+        throw error;
+      }
+      getSyncContentRuntime().invalidate();
+    }
     const hub = createHub({
       port,
       host: '0.0.0.0',
       secret: settings.hubHostSecret,
+      syncSessionTitles: settings.hubSyncSessionTitles === true,
       dataFile: hubDataFile(),
       logger: { error: (err) => console.log(`[hub] ${err?.message || err}`) }
     });
     await hub.start();
-    embeddedHub = { hub, port };
+    embeddedHub = { hub, port, secret: settings.hubHostSecret };
     console.log(`[hub] listening on 0.0.0.0:${port}`);
     sendHubPush({ type: 'listening', info: getHubInfo() });
     return embeddedHub;
@@ -3324,6 +3391,8 @@ async function deleteDeviceFromCurrentSync(deviceId) {
 
 async function postToHub(summary) {
   const { url: hubUrl, secret } = effectiveHubConfig();
+  const uploadIdentity = getSyncContentRuntime().status().identity;
+  const uploadContext = syncContentContext();
   if (!hubUrl) throw new Error('hub not configured');
   const stale = settings.lastPostedDeviceId;
   if (stale && stale !== summary.deviceId) {
@@ -3331,7 +3400,17 @@ async function postToHub(summary) {
     catch (error) { console.log(`[sync] cleanup of old deviceId ${stale} failed: ${error.message}`); }
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/ingest`;
-  const { response } = await postSyncPayload(fetch, url, {
+  const runtime = getSyncContentRuntime();
+  const syncOptions = await runtime.prepareUpload();
+  if (syncOptions.identity !== uploadIdentity || syncOptions.signal.aborted
+    || syncOptions.identity !== getSyncContentRuntime().status().identity
+    || !sameDestination(uploadContext, syncContentContext())
+    || summary.deviceId !== syncContentContext().deviceId) throw new Error('hub_changed');
+  const fetchForUpload = (target, options) => fetch(target, { ...options, redirect: 'error',
+    signal: AbortSignal.any([syncOptions.signal, AbortSignal.timeout(15_000)]) });
+  const { response } = await postSyncPayload(fetchForUpload, url, {
+    syncSessionTitles: syncOptions.syncSessionTitles,
+    sessionTitleSyncGeneration: syncOptions.sessionTitleSyncGeneration,
     headers: {
       'content-type': 'application/json',
       [HUB_RESPONSE_HEADER]: HUB_RESPONSE_MINIMAL,
@@ -3346,6 +3425,85 @@ async function postToHub(summary) {
     saveSettings();
   }
   return response.json();
+}
+
+let syncContentRuntime = null;
+let applySyncSettingsPatch = null;
+
+function syncContentContext(sourceSettings = settings) {
+  const endpoint = effectiveHubConfig(sourceSettings);
+  return { ...endpoint, mode: sourceSettings?.hubMode, deviceId: sourceSettings?.deviceId || defaultDeviceId() };
+}
+
+function getSyncContentRuntime() {
+  if (syncContentRuntime) return syncContentRuntime;
+  const cleanupCredentials = createSyncContentCredentialQueue(ensureCredentialStore);
+  syncContentRuntime = createSyncContentRuntime({
+    resolveIdentity: cleanupCredentials.resolveIdentity,
+    loadCleanupContexts: cleanupCredentials.read,
+    saveCleanupContext: cleanupCredentials.save,
+    removeCleanupContext: cleanupCredentials.remove,
+    getContext: syncContentContext,
+    getState: () => settings?.syncContentState,
+    saveState: (next) => {
+      const previous = settings;
+      settings = { ...settings, syncContentState: next };
+      try {
+        // Sync policy changes never alter credentials. Persist OFF independently
+        // so a failed private journal write cannot block the preference journal.
+        writePrivateJsonAtomic(settingsPath, stripCredentialSettings(settings));
+        persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
+      } catch (error) { settings = previous; throw error; }
+    },
+    getLocalValue: (kind) => kind === 'modelAliases'
+      ? { modelAliases: settings.modelAliases, modelAliasGrouping: settings.modelAliasGrouping }
+      : settings.customModelPricing,
+    applyLocalValue: (kind, value) => {
+      if (!applySyncSettingsPatch) throw new Error('settings_not_ready');
+      return applySyncSettingsPatch(kind === 'modelAliases' ? value : { customModelPricing: value });
+    },
+    normalizeValue: normalizeSharedSyncValue,
+    request: async (context, pathname, method, body) => {
+      // The embedded Hub uses the same authenticated protocol in-process. Its
+      // own usage must keep working when outbound loopback traffic is blocked.
+      if (context.mode === 'host' && embeddedHub
+        && ((context.url === `http://127.0.0.1:${embeddedHub.port}` && context.secret === embeddedHub.secret)
+          // Every embedded host generation shares this app's hubDataFile. Old
+          // host journals may scrub that same store after port/secret rotation;
+          // they cannot read or admit a new generation through this exception.
+          || (method === 'PUT' && /^\/api\/sync\/titles\//.test(pathname) && body?.enabled === false))) {
+        const hub = embeddedHub.hub;
+        try {
+          if (pathname === '/api/sync/content') return { status: 200, body: hub.getSyncContent() };
+          const match = pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing)$/);
+          if (match) return { status: 200, body: { ok: true, ...(method === 'PUT'
+            ? hub.setSyncSettings(match[1], body) : hub.getSyncSettings(match[1])) } };
+          const titleMatch = pathname.match(/^\/api\/sync\/titles\/([^/]+)$/);
+          if (titleMatch && method === 'PUT') return { status: 200,
+            body: { ok: true, ...hub.setSyncTitlePolicy(decodeURIComponent(titleMatch[1]), body.enabled) } };
+          return { status: 404, body: null };
+        } catch (error) {
+          return { status: error.code === 'stale_write' ? 409 : error.code === 'forbidden' ? 403 : 400,
+            body: error.current || null };
+        }
+      }
+      const response = await fetch(`${context.url.replace(/\/$/, '')}${pathname}`, {
+        method, redirect: 'error',
+        headers: { 'content-type': 'application/json', ...(context.secret ? { authorization: `Bearer ${context.secret}` } : {}) },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        signal: AbortSignal.timeout(15_000)
+      });
+      let data;
+      try { data = await response.json(); } catch (_) { data = null; }
+      return { status: response.status, body: data };
+    },
+    onStatus: (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try { mainWindow.webContents.send('syncContent:push', status); } catch (_) {}
+      }
+    }
+  });
+  return syncContentRuntime;
 }
 
 // ---------------------------------------------------------------------------
@@ -4225,12 +4383,20 @@ function startHostCollector() {
       const visibleSummary = summary;
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       if (!embeddedHub) return;
-      try {
+      const handle = embeddedHub;
+      const uploadIdentity = getSyncContentRuntime().status().identity;
+      const uploadContext = syncContentContext();
+      void (async () => {
+        const options = await getSyncContentRuntime().prepareUpload();
+        if (handle !== embeddedHub || options.identity !== uploadIdentity || options.signal.aborted
+          || options.identity !== getSyncContentRuntime().status().identity
+          || !sameDestination(uploadContext, syncContentContext())
+          || visibleSummary.deviceId !== syncContentContext().deviceId) return;
         const stale = settings.lastPostedDeviceId;
         if (stale && stale !== visibleSummary.deviceId) {
-          embeddedHub.hub.deleteDevice(stale);
+          handle.hub.deleteDevice(stale);
         }
-        const payload = syncPayload(visibleSummary);
+        const payload = syncPayload(visibleSummary, options);
         if (payload.allTimeProjectsOmitted === true) {
           console.log('[host-ingest] all-time project breakdown omitted to reduce the sync snapshot size');
         }
@@ -4239,9 +4405,9 @@ function startHostCollector() {
           settings.lastPostedDeviceId = visibleSummary.deviceId;
           saveSettings();
         }
-      } catch (error) {
+      })().catch((error) => {
         console.log(`[host-ingest] failed: ${error.message}`);
-      }
+      });
     }
   };
   const usageOptions = electronUsageConfig('host-collector');
@@ -4550,6 +4716,7 @@ function sendPush(payload, options = {}) {
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    getSyncContentRuntime().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
     migrateCodexAdditionalLimits(visibleStats);
     rendererPayload = {
@@ -5040,9 +5207,11 @@ function settingsForRenderer() {
   const rendererSettings = { ...settings };
   delete rendererSettings.icloudRetiredDeviceIds;
   delete rendererSettings.icloudWriterId;
+  delete rendererSettings.syncContentState;
   for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
   return {
     ...rendererSettings,
+    syncContentStatus: getSyncContentRuntime().status(),
     locale: trayMenuLocale(),
     ...redactedCredentials,
     // On a hub the shared list is the truth; settings.subscriptions is only the
@@ -5847,6 +6016,7 @@ function exitTrayMode() {
 }
 
 function startMode() {
+  getSyncContentRuntime().invalidate();
   hubModeGeneration += 1;
   advanceMacWidgetProducerAndSourceEpoch();
   clearLatestHubStatsCache();
@@ -5876,14 +6046,15 @@ function startMode() {
         return;
       }
       if (!handle) {
-        // Bind failed (e.g. EADDRINUSE). The error is already surfaced via
-        // hub:push; fall back to the local collector so the widget still
-        // shows data while the user fixes the port.
+        // Hub startup or secret persistence failed. The error is already
+        // surfaced via hub:push; keep local collection available while the
+        // user resolves the startup failure.
         startLocalCollector();
         return;
       }
       startHostStats();
       startHostCollector();
+      void getSyncContentRuntime().refresh();
       reconcileSharedSubscriptions();
       return;
     }
@@ -5896,6 +6067,7 @@ function startMode() {
     if (effectiveHubConfig().url) {
       startStatsStream({ resetSnapshot: true });
       startSyncCollector();
+      void getSyncContentRuntime().refresh();
       reconcileSharedSubscriptions();
     } else {
       startLocalCollector();
@@ -6487,12 +6659,10 @@ async function maybeDownloadAutomaticAppUpdate(updateState) {
 }
 
 function maybeRunBackgroundUpdateCheck() {
-  if (require('../../package.json').tokenMonitorBuild?.localCloudIntegration === true) return;
   runAppUpdateCheck({ force: false }).catch(() => {});
 }
 
 function startAppUpdateBackgroundChecks() {
-  if (require('../../package.json').tokenMonitorBuild?.localCloudIntegration === true) return;
   if (appUpdateBackgroundTimer) return;
   appUpdateBackgroundTimer = setInterval(maybeRunBackgroundUpdateCheck, 60 * 60 * 1000);
   appUpdateBackgroundTimer.unref?.();
@@ -7158,6 +7328,11 @@ app.whenReady().then(() => {
       return { ok: false, error: error.message };
     }
   });
+  applySyncSettingsPatch = applySettingsPatch;
+  ipcMain.handle('syncContent:status', (_event, refresh = true) => refresh ? getSyncContentRuntime().refresh() : getSyncContentRuntime().status());
+  ipcMain.handle('syncContent:preview', (_event, kind) => getSyncContentRuntime().preview(kind));
+  ipcMain.handle('syncContent:configure', (_event, options) => getSyncContentRuntime().configure(options));
+  ipcMain.handle('syncContent:retryCleanup', () => getSyncContentRuntime().retryCleanup());
   const credentialCommands = createCredentialCommands({
     getSettings: () => settings,
     applySettingsPatch,
@@ -7167,6 +7342,12 @@ app.whenReady().then(() => {
   // pausing the session archive must not be reported done while the worker can
   // still capture under the old value.
   ipcMain.handle('settings:update', async (_event, patch) => {
+    const contentRuntime = getSyncContentRuntime();
+    const sharedEdit = patch.modelAliases !== undefined || patch.modelAliasGrouping !== undefined
+      || patch.customModelPricing !== undefined;
+    const settingsIdentity = contentRuntime.status().identity;
+    await contentRuntime.publishPatch(patch, patch?.syncContentBase);
+    if (sharedEdit && settingsIdentity !== contentRuntime.status().identity) throw new Error('hub_changed');
     const result = applySettingsPatch(patch);
     await latestUsageHost?.transformSettingsApplied?.();
     return result;
@@ -7174,6 +7355,7 @@ app.whenReady().then(() => {
   // The settings:update body, named so a credential save persists through the
   // exact same normalization, runtime reconfigure and limit invalidation.
   function applySettingsPatch(patch) {
+    const contentRuntime = getSyncContentRuntime();
     credentialCommands.noteSettingsPatch(patch);
     const previousSettingsState = settings;
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
@@ -7201,6 +7383,9 @@ app.whenReady().then(() => {
     delete normalizedPatch.workbuddyEndpoint;
     delete normalizedPatch.workbuddyLocalAppEnabled;
     delete normalizedPatch.customModelPricing;
+    delete normalizedPatch.syncContentState;
+    delete normalizedPatch.syncContentStatus;
+    delete normalizedPatch.syncContentBase;
     // Account fields declared persist:'never' (managed account lists, profile
     // maps, workbuddy session fields) are stripped by the registry walk below.
     normalizeAccountPatch(patch, normalizedPatch);
@@ -7240,6 +7425,8 @@ app.whenReady().then(() => {
         : normalizeHubMode(settings.hubMode, 'local', process.platform),
       hubHostPort: patch.hubHostPort !== undefined ? normalizeHubPort(patch.hubHostPort, settings.hubHostPort) : settings.hubHostPort,
       hubHostSecret: patch.hubHostSecret !== undefined ? String(patch.hubHostSecret) : settings.hubHostSecret,
+      hubSyncSessionTitles: parseBoolean(patch.hubSyncSessionTitles ?? settings.hubSyncSessionTitles, false),
+      syncContentState: normalizeSyncContentState(settings.syncContentState),
       deviceId: (patch.deviceId !== undefined ? String(patch.deviceId).trim() : settings.deviceId) || defaultDeviceId(),
       clients: patch.clients !== undefined ? clientsCsvForSetting(patch.clients, '') : clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS),
       customScanPaths: normalizeCustomScanPaths(patch.customScanPaths ?? settings.customScanPaths),
@@ -7260,6 +7447,7 @@ app.whenReady().then(() => {
       compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
       modelAliases: normalizeModelAliases(patch.modelAliases ?? settings.modelAliases),
       modelAliasGrouping: normalizeModelAliasGrouping(patch.modelAliasGrouping ?? settings.modelAliasGrouping),
+      textSize: fontSettingsApi.normalizeTextSize(patch.textSize ?? settings.textSize),
       interfaceFontFamily: fontSettingsApi.normalizeFontFamily(
         patch.interfaceFontFamily ?? settings.interfaceFontFamily
       ),
@@ -7308,6 +7496,7 @@ app.whenReady().then(() => {
       homeModuleOrder: patch.homeModuleOrder !== undefined ? normalizeHomeModuleOrder(patch.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',') : normalizeHomeModuleOrder(settings.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(','),
       hiddenHomeModules: patch.hiddenHomeModules !== undefined ? normalizeHiddenHomeModules(patch.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST) : normalizeHiddenHomeModules(settings.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST),
       showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
+      homeLimitDisplayMode: normalizeHomeLimitDisplayMode(patch.homeLimitDisplayMode ?? settings.homeLimitDisplayMode),
       showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
@@ -7366,12 +7555,24 @@ app.whenReady().then(() => {
     settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
     if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
     delete settings.edgeDrawerEnabled;
+    const nextSettingsState = settings;
+    settings = previousSettingsState;
     try {
+      // Journal the previous title context and OFF while the old connection is
+      // still active. No replacement credentials/device may commit before this.
+      contentRuntime.beforeDestinationChange(syncContentContext(nextSettingsState));
+      nextSettingsState.syncContentState = normalizeSyncContentState(settings.syncContentState);
+      settings = nextSettingsState;
       saveSettings({ throwOnError: true });
     } catch (error) {
-      settings = previousSettingsState;
+      // Keep any OFF/cleanup journal already committed by the preflight.
+      settings = { ...previousSettingsState,
+        syncContentState: normalizeSyncContentState(persistedSettingsSnapshot?.syncContentState || settings.syncContentState) };
       throw error;
     }
+    contentRuntime.invalidate();
+    const receiverPermissionChanged = settings.hubSyncSessionTitles !== previousSettingsState.hubSyncSessionTitles;
+    if (receiverPermissionChanged) contentRuntime.receiverPermissionChanged(settings.hubSyncSessionTitles);
     // A worker-hosted transform holds its own copy of the settings it reads.
     // Update it now rather than when the usage reconfigure settles: pausing the
     // session archive must stop captures from the next summary on.
@@ -7418,7 +7619,7 @@ app.whenReady().then(() => {
       refreshMacWidgetHistorySource();
     }
     const limitInvalidations = settingsLimitInvalidationPlan(runtimeChange);
-    if (runtimeChange.modeStructural) {
+    if (runtimeChange.modeStructural || (receiverPermissionChanged && settings.hubMode === 'host')) {
       for (const { scope, reason, options } of limitInvalidations) {
         rememberPendingLimitInvalidation(scope, reason, options);
       }
@@ -7661,9 +7862,7 @@ app.whenReady().then(() => {
   ipcMain.handle('hub:getInfo', () => getHubInfo());
   ipcMain.handle('hub:getBuildStatus', () => getHubBuildStatus());
   ipcMain.handle('hub:regenerateSecret', () => {
-    settings.hubHostSecret = generateHubSecret();
-    saveSettings({ throwOnError: true });
-    if (settings.hubMode === 'host') startMode();
+    applySettingsPatch({ hubHostSecret: generateHubSecret() });
     return getHubInfo();
   });
   ipcMain.handle('appearance:getNativeMaterial', (event) => {

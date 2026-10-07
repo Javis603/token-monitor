@@ -17,6 +17,7 @@ const accountProfileRequests = accountShellApi.createRequestGuard();
 const accountProfileStatuses = accountShellApi.createRequestGuard();
 const accountProfileSaves = accountShellApi.createBusyGuard();
 const accountShellErrors = Object.create(null);
+let syncContentForm = null;
 
 function setAccountShellError(id, message) {
   accountShellErrors[id] = message || '';
@@ -523,6 +524,7 @@ Object.assign(els, {
   themeAdvancedGroup: document.getElementById('themeAdvancedGroup'),
   themeAdvancedToggle: document.getElementById('themeAdvancedToggle'),
   themeAdvancedDetails: document.getElementById('themeAdvancedDetails'),
+  textSizeInput: document.getElementById('textSizeInput'),
   interfaceFontPreset: document.getElementById('interfaceFontPreset'),
   interfaceFontInput: document.getElementById('interfaceFontInput'),
   interfaceFontCustomRow: document.getElementById('interfaceFontCustomRow'),
@@ -702,7 +704,7 @@ function applySettingsTranslations() {
 }
 
 function applySettingsSectionDom(id, open) {
-  if (id === 'sync' && !open) syncModeSelect?.close();
+  if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
   const details = document.getElementById(`${id}SettingsDetails`);
   const group = toggle?.closest('.settings-collapsible-group');
@@ -724,6 +726,7 @@ function setSettingsSectionExpanded(section, expanded) {
   }
   state.settingsSections[id] = next;
   applySettingsSectionDom(id, next);
+  if (id === 'sync' && next) void syncContentForm?.refresh();
 }
 
 // Expanding a section auto-collapses the previously open one. When that one
@@ -3997,6 +4000,7 @@ function flushPendingLimitDetailTooltipRender() {
 
 const {
   creditsAmount,
+  creditsCurrency,
   creditsMeterPercent,
   formatCompactMoney,
   formatMoney,
@@ -4004,7 +4008,7 @@ const {
   spendWindow
 } = window.TokenMonitorLimitBalanceDisplay;
 
-const { limitWindowLabel } = window.TokenMonitorLimitWindowLabels;
+const { limitWindowLabel, mimoAccountGroups, mimoProductLabel } = window.TokenMonitorLimitWindowLabels;
 const { limitWindowText } = window.TokenMonitorLimitWindowText;
 
 // The Limits rows are built by the shared view, which the edge dock also calls
@@ -4058,11 +4062,14 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   colorWithAlpha,
   applyBarScale,
   creditsAmount,
+  creditsCurrency,
   creditsMeterPercent,
   isCreditsWindow,
   spendWindow,
   limitWindowLabel,
   limitWindowText,
+  mimoAccountGroups,
+  mimoProductLabel,
   accountIdentity: accountIdentityApi,
   accountControl: codexAccountControl,
   codexAccounts: {
@@ -5076,6 +5083,7 @@ function openViewFromTray(viewId) {
   stopWindowShortcutRecording();
   resetSettingsListSearch();
   syncModeSelect?.close();
+  syncContentForm?.closeHelp();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   state.openSession = null;
@@ -5637,6 +5645,9 @@ function homeLimitRows() {
     colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
+    accountPlan: (provider, index, providerEntries) => limitWindowsView.limitAccountPlan(provider, {
+      grouped: providerEntries.length > 1
+    }),
     accountColor: (provider, id, fallbackColor) => (
       id === 'thirdparty'
         ? limitProviderPresentationApi.thirdPartyAdapterVisual(provider, fallbackColor).color
@@ -5651,11 +5662,22 @@ function homeLimitRows() {
       const id = String(provider?.provider || '').trim().toLowerCase();
       const option = providerOptions.find((entry) => entry.id === id);
       const providerTitle = option?.label || id;
-      if (providerEntries.length > 1) {
+      const showProviderTitle = state.settings?.showHomeLimitProviderNames === true || state.settings?.showToolIcons === false;
+      // A provider's row count is its account count — except MiMo, whose two
+      // products of one account are two rows. Names resolve over the same
+      // logical-account grouping the Limits page groups by, so one account's
+      // lanes are told apart by their product word alone and only several
+      // accounts earn an account name.
+      const accountCount = id === 'mimo'
+        ? mimoAccountGroups(providerEntries).length
+        : providerEntries.length;
+      if (accountCount > 1) {
         const accountTitle = limitAccountTitle(id, provider, index, providerEntries);
-        return state.settings?.showHomeLimitProviderNames === true || state.settings?.showToolIcons === false
-          ? `${providerTitle} · ${accountTitle}`
-          : accountTitle;
+        return showProviderTitle ? `${providerTitle} · ${accountTitle}` : accountTitle;
+      }
+      if (id === 'mimo') {
+        const product = mimoProductLabel(provider);
+        if (product) return showProviderTitle ? `${providerTitle} · ${product}` : product;
       }
       return providerTitle;
     }
@@ -5697,6 +5719,7 @@ function renderHomeLimitModule() {
     body.append(empty);
     return module;
   }
+  const showBars = state.settings?.homeLimitDisplayMode === 'bars';
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-limit-account';
@@ -5708,8 +5731,15 @@ function renderHomeLimitModule() {
     name.className = 'home-list-name';
     name.textContent = row.name;
     account.append(mark, name);
+    if (row.plan) {
+      const plan = document.createElement('span');
+      plan.className = 'home-limit-plan';
+      plan.textContent = row.plan;
+      plan.title = row.plan;
+      account.append(plan);
+    }
     const windows = document.createElement('div');
-    windows.className = 'home-limit-windows';
+    windows.className = showBars ? 'home-limit-windows home-limit-windows-bars' : 'home-limit-windows';
     for (const window of row.windows) {
       const metric = document.createElement('div');
       metric.className = 'home-limit-window';
@@ -5733,6 +5763,18 @@ function renderHomeLimitModule() {
       }
       line.append(label, value);
       metric.append(line);
+      // Money and fixed labels retain a remaining meter; only percentage
+      // labels follow the global used/remaining display preference.
+      if (showBars && window.showMeter !== false) {
+        const remainingPercent = optionalFiniteNumber(window.remainingPercent);
+        if (remainingPercent != null) {
+          const fillPercent = limitFillPercent(remainingPercent, null, showUsed && !isCreditsWindow(window) && !window.value);
+          const tone = window.kind === 'session' || window.kind === 'daily' ? 0.95 : 0.68;
+          const meter = limitWindowsView.limitMeterNode(row.color, fillPercent, tone);
+          meter.setAttribute('aria-hidden', 'true');
+          metric.append(meter);
+        }
+      }
       const resetLabel = window.resetsAt
         ? formatLimitBoundary(window) || ''
         : window.resetDescription
@@ -6953,6 +6995,8 @@ function applyFontSettings(settings) {
   const source = { ...(state.settings || {}), ...(settings || {}) };
   const root = document.documentElement.style;
   const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(source);
+  document.documentElement.dataset.textSize = fontSettingsApi.normalizeTextSize(source.textSize);
+  root.setProperty('--ui-text-scale', String(fontSettingsApi.textScaleForSize(source.textSize)));
   root.setProperty('--ui-font', interfaceFont);
   root.setProperty('--display-font', displayFont);
 }
@@ -7851,6 +7895,7 @@ async function resetDisplayFont() {
 }
 
 function syncFontSettingsControls() {
+  if (els.textSizeInput) els.textSizeInput.value = fontSettingsApi.normalizeTextSize(state.settings?.textSize);
   for (const [role, settingKey] of [['interface', 'interfaceFontFamily'], ['display', 'displayFontFamily']]) {
     const controls = fontControlsFor(role);
     const value = fontSettingsApi.normalizeFontFamily(state.settings?.[settingKey]);
@@ -7887,6 +7932,7 @@ async function saveAppearanceFromControls() {
 }
 
 function syncHubModeUi() {
+  syncContentForm?.syncSettings();
   const mode = state.settings.hubMode || 'local';
   els.hubModeOptions.value = mode;
   if (els.syncModeDescription) els.syncModeDescription.textContent = t(SYNC_MODE_DESCRIPTIONS[mode] || SYNC_MODE_DESCRIPTIONS.local);
@@ -9241,6 +9287,24 @@ function renderHomeLimitProviderList() {
     .orderedLimitProviders(LIMIT_PROVIDERS, homeLimitProviderOrderValue())
     .filter(({ id }) => enabled.has(id));
   const hasCustomOrder = Boolean(state.settings?.homeLimitProviderOrder);
+  const displayLabel = document.createElement('label');
+  displayLabel.className = 'settings-item';
+  const displayText = document.createElement('span');
+  displayText.className = 'settings-item-text';
+  const displayTitle = document.createElement('span');
+  displayTitle.className = 'settings-item-title';
+  displayTitle.textContent = t('settings.home.limitDisplayMode');
+  const displayInput = document.createElement('select');
+  for (const mode of ['text', 'bars']) {
+    const option = document.createElement('option');
+    option.value = mode;
+    option.textContent = t(`settings.home.limitDisplayMode.${mode}`);
+    displayInput.append(option);
+  }
+  displayInput.value = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  displayInput.addEventListener('change', () => void saveSettings({ homeLimitDisplayMode: displayInput.value }));
+  displayText.append(displayTitle);
+  displayLabel.append(displayText, displayInput);
   const statusLabel = document.createElement('label');
   statusLabel.className = 'checkbox-label home-limit-status-setting';
   const statusInput = document.createElement('input');
@@ -9325,7 +9389,7 @@ function renderHomeLimitProviderList() {
   showAll.addEventListener('click', () => void showAllHomeLimitProviders());
   headerActions.append(reset, showAll);
   header.append(note, headerActions);
-  wrap.append(statusLabel, providerNamesLabel, countLabel, header);
+  wrap.append(displayLabel, statusLabel, providerNamesLabel, countLabel, header);
   for (const { id, label, settingsLabel } of providers) {
     const isHidden = hidden.has(id);
     const row = document.createElement('div');
@@ -10714,12 +10778,12 @@ function renderLimitProviderCheckboxesNow() {
     }
   }
   const enabled = enabledLimitProviderSet();
-  const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
   const filtering = Boolean(limitProviderQuery());
   for (const { id, label, settingsLabel } of providers) {
     const isEnabled = enabled.has(id);
     const provider = isEnabled
-      ? (collected.get(id) || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
+      ? (limitProviderPresentationApi.limitProviderSettingsRecord(state.stats?.limits?.providers, id)
+        || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
       : { provider: id, status: 'disabled', windows: [] };
     const row = document.createElement('div');
     row.className = `limit-provider-row${isEnabled ? '' : ' is-disabled'}${matched.has(id) ? '' : ' is-filtered-out'}`;
@@ -11663,15 +11727,32 @@ function preserveSettingsPanelScroll(callback) {
   return result;
 }
 
-async function saveSettings(patch) {
+function setSyncContentEditError(patch, error) {
+  const conflict = window.TokenMonitorSyncContentForm.isConflictError(error);
+  for (const [changed, id] of [
+    [patch.modelAliases !== undefined || patch.modelAliasGrouping !== undefined, 'modelAliasesError'],
+    [patch.customModelPricing !== undefined, 'customPricingSyncError']
+  ]) {
+    if (!changed) continue;
+    const node = document.getElementById(id);
+    if (!node) continue;
+    node.textContent = conflict ? t('settings.sync.content.conflict') : '';
+    node.classList.toggle('hidden', !conflict);
+  }
+}
+
+async function saveSettings(patch, syncContentBase) {
+  setSyncContentEditError(patch, null);
   for (const key of Object.keys(patch)) delete appearancePreview[key];
   const settingsPushRevision = state.settingsPushRevision;
   let next;
   pendingSettingsPatches.add(patch);
   try {
-    next = await window.tokenMonitor.updateSettings(patch);
+    next = await window.tokenMonitor.updateSettings(syncContentForm?.decoratePatch(patch, syncContentBase) || patch);
   } catch (error) {
     pendingSettingsPatches.delete(patch);
+    syncContentForm?.reportSettingsError(error);
+    setSyncContentEditError(patch, error);
     console.error('Could not persist settings:', error);
     try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
     applyEffectiveCurrencyRates();
@@ -11789,6 +11870,8 @@ async function init() {
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  syncContentForm?.syncSettings();
+  await syncContentForm?.refresh(false);
   applyEffectiveCurrencyRates();
   deliverTrayProviderIcons();
 
@@ -11991,6 +12074,7 @@ els.settingsButton.addEventListener('click', (event) => {
     syncSettingsForm();
   } else {
     syncModeSelect?.close();
+    syncContentForm?.closeHelp();
     resetSettingsListSearch();
     stopWindowShortcutRecording();
   }
@@ -12338,6 +12422,9 @@ els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBac
 void loadBackgroundImage();
 els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}));
 els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
+els.textSizeInput?.addEventListener('change', async () => {
+  await saveSettings({ textSize: fontSettingsApi.normalizeTextSize(els.textSizeInput.value) });
+});
 els.interfaceFontPreset?.addEventListener('change', () => handleFontPresetChange('interface'));
 els.displayFontPreset?.addEventListener('change', () => handleFontPresetChange('display'));
 els.interfaceFontInput?.addEventListener('input', previewFontSettings);
@@ -12362,10 +12449,11 @@ function setSettingsAccordionExpanded(group, toggle, details, expanded) {
   details.inert = !open;
   group.classList.toggle('expanded', open);
 }
-function setupSettingsAccordion(group, toggle, details) {
+function setupSettingsAccordion(group, toggle, details, onExpandedChange) {
   if (!group || !toggle || !details) return;
   toggle.addEventListener('click', () => {
     setSettingsAccordionExpanded(group, toggle, details, details.classList.contains('hidden'));
+    onExpandedChange?.(!details.classList.contains('hidden'));
   });
   setSettingsAccordionExpanded(group, toggle, details, false);
 }
@@ -12495,6 +12583,7 @@ const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComp
     maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
       ? accountIdentityApi.maskEmailAddress(email)
       : String(email || '')),
+    mimoProductLabel,
     createRowDrag: (config) => rowDragControllerApi.createRowDragController({
       dragSort: verticalDragSortApi,
       getScrollPanel: () => els.settingsPanel,
@@ -12797,6 +12886,7 @@ function renderStatsUpdate() {
   render();
   if (!isSettingsSurfaceVisible()) return;
   renderCodexAccounts();
+  renderMimoStatus();
   renderSettingsSummaries();
   renderLimitProviderCheckboxes();
   renderToolPreferences();
@@ -12845,7 +12935,7 @@ function renderCloudSessionSettings() {
   toggle.disabled = cloudSessionControlBusy || !snapshot?.service?.canControl;
   if (!cloudSessionControlBusy) toggle.checked = snapshot?.service?.running === true;
   document.getElementById('cloudSessionsSettingStatus').textContent = cloudSessionControlError ? text.failed
-    : !snapshot ? text.error : !snapshot.service?.installed ? text.missing : snapshot.errorCode ? text.error : snapshot.service.running ? text.enabled : text.disabled;
+    : !snapshot ? text.error : snapshot.errorCode === 'IPC_FAILED' ? text.error : !snapshot.service?.installed ? text.missing : snapshot.errorCode ? text.error : snapshot.service.running ? text.enabled : text.disabled;
 }
 const cloudSessionsSource = cloudSessionRowsApi.createSource({
   get: () => window.tokenMonitor.cloudUsage.get(),
@@ -12924,6 +13014,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   }
   if (!wasStreamConnected && state.streamConnected && state.settings?.hubMode === 'client') {
     void refreshHubBuildStatus();
+    void syncContentForm?.refresh();
   }
   if (payload.data?.stats) {
     if (fixedPeriodRangesApi.isDerived(state.period)) {
@@ -14269,6 +14360,13 @@ function setMimoAccountExpanded(expanded) {
   setAccountGroupExpanded('mimo', expanded, 'mimoAccountExpanded');
 }
 
+async function refreshMimoAccounts() {
+  try {
+    state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts() || [];
+    renderMimoStatus();
+  } catch (_) {}
+}
+
 function setCopilotAccountExpanded(expanded) {
   setAccountGroupExpanded('copilot', expanded, 'copilotAccountExpanded');
 }
@@ -14593,6 +14691,9 @@ function renderAntigravityStatus() {
 }
 
 function mimoSettingsAccountTitle(account, index) {
+  // The discovered session has no address to name it by — nothing was pasted for
+  // it — so it is named after the app it comes from.
+  if (account?.removable === false) return t('settings.mimo.desktopAccount');
   return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
 }
 
@@ -14611,6 +14712,7 @@ function renderMimoStatus() {
   accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.mimoAccountError });
   emptyEl.classList.toggle('hidden', accounts.length > 0);
 
+  const providers = localProviderStatuses('mimo');
   listEl.replaceChildren();
   if (accounts.length > 0) {
     for (const [index, account] of accounts.entries()) {
@@ -14619,26 +14721,33 @@ function renderMimoStatus() {
       const row = document.createElement('div');
       row.className = 'managed-account-row';
       row.classList.toggle('disabled', !enabled);
+      // A credential Token Monitor never stored has no stored preference to
+      // toggle and nothing here to remove: this row is the session the machine's
+      // own MiMo Desktop is signed into, listed so the count above it is honest
+      // about what the provider answers for.
+      const detected = account.removable === false;
 
-      const input = document.createElement('input');
-      input.className = 'managed-account-checkbox';
-      input.type = 'checkbox';
-      input.checked = enabled;
-      input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
-        account: accountName
-      }));
-      input.addEventListener('change', async () => {
-        input.disabled = true;
-        const result = await window.tokenMonitor.mimo.setAccountEnabled(account.id, input.checked);
-        if (!result?.ok) {
-          state.mimoAccountError = result?.error || t('settings.mimo.toggleFailed');
-        } else {
-          state.mimoAccountError = '';
-          state.settings.mimoManagedAccounts = result.accounts || [];
-        }
-        renderMimoStatus();
-        renderSettingsSummaries();
-      });
+      const input = detected ? null : document.createElement('input');
+      if (input) {
+        input.className = 'managed-account-checkbox';
+        input.type = 'checkbox';
+        input.checked = enabled;
+        input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
+          account: accountName
+        }));
+        input.addEventListener('change', async () => {
+          input.disabled = true;
+          const result = await window.tokenMonitor.mimo.setAccountEnabled(account.id, input.checked);
+          if (!result?.ok) {
+            state.mimoAccountError = result?.error || t('settings.mimo.toggleFailed');
+          } else {
+            state.mimoAccountError = '';
+            state.settings.mimoManagedAccounts = result.accounts || [];
+          }
+          renderMimoStatus();
+          renderSettingsSummaries();
+        });
+      }
 
       const main = document.createElement('div');
       main.className = 'managed-account-main';
@@ -14651,40 +14760,53 @@ function renderMimoStatus() {
       right.className = 'managed-account-right';
       const info = document.createElement('span');
       info.className = 'managed-account-info';
-      info.textContent = enabled ? limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel) : t('settings.mimo.disabled');
+      const failedProvider = enabled && providers.find((provider) => (
+        provider.accountKey === account.accountKey
+        && provider.sourceDetail === (detected ? 'app' : 'managed')
+        && provider.status === 'unauthorized'
+      ));
+      const statusLabel = failedProvider
+        ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(failedProvider))
+        : '';
+      info.textContent = !enabled ? t('settings.mimo.disabled')
+        : statusLabel || limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel);
+      info.title = info.textContent;
 
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'managed-account-remove';
-      remove.textContent = '✕';
-      remove.title = t('settings.mimo.remove');
-      let confirmingRemove = false;
-      remove.addEventListener('click', async () => {
-        if (!confirmingRemove) {
-          confirmingRemove = true;
-          remove.classList.add('confirming');
-          remove.textContent = '✓';
-          remove.title = t('settings.mimo.removeConfirm', {
-            account: accountName
-          });
-          return;
-        }
-        const result = await window.tokenMonitor.mimo.removeAccount(account.id);
-        if (result?.ok) {
-          state.mimoAccountError = '';
-          state.settings.mimoManagedAccounts = result.accounts || [];
+      const remove = detected ? null : document.createElement('button');
+      if (remove) {
+        remove.type = 'button';
+        remove.className = 'managed-account-remove';
+        remove.textContent = '✕';
+        remove.title = t('settings.mimo.remove');
+        let confirmingRemove = false;
+        remove.addEventListener('click', async () => {
+          if (!confirmingRemove) {
+            confirmingRemove = true;
+            remove.classList.add('confirming');
+            remove.textContent = '✓';
+            remove.title = t('settings.mimo.removeConfirm', {
+              account: accountName
+            });
+            return;
+          }
+          const result = await window.tokenMonitor.mimo.removeAccount(account.id);
+          if (result?.ok) {
+            state.mimoAccountError = '';
+            state.settings.mimoManagedAccounts = result.accounts || [];
+            renderMimoStatus();
+            renderSettingsSummaries();
+            refreshStats({ force: true }).catch(() => {});
+            return;
+          }
+          state.mimoAccountError = result?.error || t('settings.mimo.removeFailed');
           renderMimoStatus();
           renderSettingsSummaries();
-          refreshStats({ force: true }).catch(() => {});
-          return;
-        }
-        state.mimoAccountError = result?.error || t('settings.mimo.removeFailed');
-        renderMimoStatus();
-        renderSettingsSummaries();
-      });
+        });
+      }
 
-      right.append(info, remove);
-      row.append(input, main, right);
+      right.append(info);
+      if (remove) right.append(remove);
+      row.append(input || document.createElement('span'), main, right);
       listEl.append(row);
     }
   }
@@ -15156,9 +15278,10 @@ function renderOpenCodeProfiles() {
       nameInput.value = name;
 
       const renameBtn = document.createElement('button');
+      renameBtn.type = 'button';
       renameBtn.className = 'profile-rename-btn';
-      renameBtn.textContent = '✎';
       renameBtn.title = t('settings.opencode.rename');
+      renameBtn.setAttribute('aria-label', renameBtn.title);
 
       let editing = false;
       function beginRename() {
@@ -15737,9 +15860,10 @@ function appendNamedApiProfileRow(listEl, config) {
     nameInput.type = 'text';
     nameInput.value = name;
     const renameBtn = document.createElement('button');
+    renameBtn.type = 'button';
     renameBtn.className = 'profile-rename-btn';
-    renameBtn.textContent = '✎';
     renameBtn.title = t('settings.profiles.rename');
+    renameBtn.setAttribute('aria-label', renameBtn.title);
     let editing = false;
     const finishRename = async (save) => {
       if (!editing) return;
@@ -16067,6 +16191,7 @@ function setCursorCheckboxesEnabled(enabled) {
 
 let openCustomPricingForm = null;
 let modelAliasForm = null;
+let modelAliasSaveConflict = false;
 
 function setupModelAliasesUI() {
   const toggle = document.getElementById('modelAliasesSettingsToggle');
@@ -16074,15 +16199,28 @@ function setupModelAliasesUI() {
   toggle.addEventListener('click', () => setAccountGroupExpanded('modelAliases', !state.modelAliasesExpanded, 'modelAliasesExpanded'));
   setAccountGroupExpanded('modelAliases', false, 'modelAliasesExpanded');
   modelAliasForm = window.TokenMonitorModelAliasForm.createModelAliasForm({
-    document, t,
+    document, t: (key, params) => t(key === 'settings.modelAliases.saveError' && modelAliasSaveConflict ? 'settings.sync.content.conflict' : key, params),
     getAliases: () => state.settings?.modelAliases || {},
+    getBase: () => syncContentForm?.base(),
     getGrouping: () => state.settings?.modelAliasGrouping || 'off',
-    saveAliases: (modelAliases) => saveSettings({ modelAliases })
+    getModelIds: () => [
+      ...customPricingFormApi.inUseModelIds(state.stats),
+      ...(state.settings?.customModelPricing || []).map(entry => entry.modelId)
+    ],
+    saveAliases: async (modelAliases, base) => {
+      modelAliasSaveConflict = false;
+      try {
+        await saveSettings({ modelAliases }, base);
+      } catch (error) {
+        modelAliasSaveConflict = window.TokenMonitorSyncContentForm.isConflictError(error);
+        throw error;
+      }
+    }
   });
   for (const input of document.querySelectorAll('input[name="modelAliasGrouping"]')) {
     input.addEventListener('change', async () => {
       if (!input.checked) return;
-      await saveSettings({ modelAliasGrouping: input.value });
+      try { await saveSettings({ modelAliasGrouping: input.value }); } catch (_) { return; }
       modelAliasForm?.syncSettings();
     });
   }
@@ -16104,6 +16242,7 @@ function renderCustomPricing() {
   const statusEl = document.getElementById('customPricingStatus');
   if (!listEl) return;
   const overrides = state.settings?.customModelPricing || [];
+  const pricingBase = syncContentForm?.base();
   if (statusEl) {
     statusEl.textContent = overrides.length
       ? t('settings.customPricing.count', { count: overrides.length })
@@ -16137,8 +16276,8 @@ function renderCustomPricing() {
     remove.className = 'managed-account-remove custom-pricing-remove';
     remove.textContent = t('settings.customPricing.remove');
     remove.addEventListener('click', async () => {
-      const next = customPricingFormApi.removeOverride(state.settings?.customModelPricing || [], ov.modelId);
-      await saveSettings({ customModelPricing: next });
+      const next = customPricingFormApi.removeOverride(overrides, ov.modelId);
+      try { await saveSettings({ customModelPricing: next }, pricingBase); } catch (_) { return; }
       renderCustomPricing();
     });
     row.append(main, remove);
@@ -16169,6 +16308,7 @@ function setupCustomPricingUI() {
     [cacheWriteEl, 'cacheWritePerM'], [cacheWrite1hEl, 'cacheWrite1hPerM']
   ];
   let lookupRevision = 0;
+  let pricingEdit = null;
   const editedFields = new Set();
   const hintEl = document.getElementById('customPricingHint');
   const errorEl = document.getElementById('customPricingError');
@@ -16220,6 +16360,7 @@ function setupCustomPricingUI() {
     resetForm();
   };
   openCustomPricingForm = (prefill) => {
+    pricingEdit = { base: syncContentForm?.base(), entries: structuredClone(state.settings?.customModelPricing || []) };
     resetForm();
     populateModels();
     if (prefill && prefill.modelId) {
@@ -16306,14 +16447,14 @@ function setupCustomPricingUI() {
       showError(t('settings.customPricing.errorNoPrice'));
       return;
     }
-    const next = customPricingFormApi.upsertOverride(state.settings?.customModelPricing || [], entry);
+    const next = customPricingFormApi.upsertOverride(pricingEdit?.entries || [], entry);
     saveButton.disabled = true;
     try {
-      await saveSettings({ customModelPricing: next });
+      await saveSettings({ customModelPricing: next }, pricingEdit?.base);
       closeForm();
       renderCustomPricing();
-    } catch (_) {
-      showError(t('settings.customPricing.saveFailed'));
+    } catch (error) {
+      showError(t(window.TokenMonitorSyncContentForm.isConflictError(error) ? 'settings.sync.content.conflict' : 'settings.customPricing.saveFailed'));
     } finally {
       saveButton.disabled = false;
     }
@@ -16934,7 +17075,11 @@ function setupCursorAccountUI() {
 
   const mimoToggle = document.getElementById('mimoSettingsToggle');
   if (mimoToggle) {
-    mimoToggle.addEventListener('click', () => setMimoAccountExpanded(!state.mimoAccountExpanded));
+    mimoToggle.addEventListener('click', () => {
+      const expanding = !state.mimoAccountExpanded;
+      setMimoAccountExpanded(expanding);
+      if (expanding) void refreshMimoAccounts();
+    });
 
     const addToggle = document.getElementById('mimoAddToggle');
     const addDetails = document.getElementById('mimoAddDetails');
@@ -16953,10 +17098,7 @@ function setupCursorAccountUI() {
       renderMimoStatus();
     });
 
-    window.tokenMonitor.mimo.accounts().then((accounts) => {
-      state.settings.mimoManagedAccounts = accounts || [];
-      renderMimoStatus();
-    }).catch(() => {});
+    void refreshMimoAccounts();
 
     document.getElementById('mimoOpenConsoleButton').addEventListener('click', async () => {
       const result = await window.tokenMonitor.mimo.openConsole();
@@ -17175,6 +17317,13 @@ function initSettingsAnimationWrappers() {
 }
 
 initSettingsAnimationWrappers();
+syncContentForm = window.TokenMonitorSyncContentForm.createSyncContentForm({
+  document, bridge: window.tokenMonitor, t, saveSettings, getSettings: () => state.settings
+});
+setupSettingsAccordion(
+  document.getElementById('syncContentGroup'), document.getElementById('syncContentToggle'),
+  document.getElementById('syncContentDetails'), expanded => syncContentForm.setExpanded(expanded)
+);
 setupSettingsSections();
 setupCursorAccountUI();
 setupCustomPricingUI();

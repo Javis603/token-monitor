@@ -40,13 +40,13 @@ function fixture(options = {}) {
   const state = { settings: { customModelPricing: [] }, stats: { modelAliasSourceIds: ['a', 'b'] } };
   const requests = [];
   const context = {
-    state, document, customPricingFormApi, Event: class { constructor(type) { this.type = type; } },
+    state, document, customPricingFormApi, structuredClone, syncContentForm: null, Event: class { constructor(type) { this.type = type; } },
     t: key => key, formatCost: String, isSettingsSurfaceVisible: () => true, setAccountGroupExpanded() {},
     saveSettings: async patch => {
       await options.save?.(patch);
       state.settings.customModelPricing = normalizeCustomPricingSetting(patch.customModelPricing);
     },
-    window: { tokenMonitor: { lookupModelPricing: id => new Promise(resolve => requests.push({ id, resolve })) } }
+    window: { TokenMonitorSyncContentForm: require('../../src/electron/renderer/syncContentForm'), tokenMonitor: { lookupModelPricing: id => new Promise(resolve => requests.push({ id, resolve })) } }
   };
   vm.runInNewContext(`let openCustomPricingForm; ${pricingSource}; setupCustomPricingUI();`, context);
   const get = suffix => document.getElementById('customPricing' + suffix);

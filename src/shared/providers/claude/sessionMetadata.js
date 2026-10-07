@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const { createPromptCacheState, applyPromptCacheEntry } = require('../../sessionPromptCache');
 const { claudeSessionRoots } = require('./paths');
 const { findSessionFiles } = require('../../sessionFiles');
+const { readT3SessionMeta } = require('../../t3SessionMetadata');
 const { normalizeSessionContext, shouldReadSessionContext } = require('../../sessionContext');
 
 const TITLE_MAX_CODE_POINTS = 96;
@@ -577,12 +578,51 @@ function resolveSessionMetadata(sessionIds, context) {
     env: deps.env,
     useEnvRoots: !deps.scopedHome
   });
+  const invalidatedSessionIds = new Set();
+  const t3Metadata = readT3SessionMeta(sessionIds, {
+    ...(deps.claudeMetadataDeps || {}),
+    driver: 'claudeAgent',
+    cleanTitle,
+    homeDir: home,
+    env: deps.env,
+    useEnvRoot: !deps.scopedHome,
+    invalidatedSessionIds
+  });
+  // Keep a confirmed removal across watch ticks that cannot read the store.
+  // A fresh usable title can revive it; a miss cannot revive the frozen anchor.
+  for (const sessionId of sessionIds) {
+    if (!t3Metadata.has(sessionId) && deps.t3Titles?.[`claude:${sessionId}`] === null) invalidatedSessionIds.add(sessionId);
+  }
+  // Provenance is independent of transcript availability. Remove only a T3
+  // override confirmed unusable by V2 before reading native fallback metadata.
+  for (const sessionId of invalidatedSessionIds) {
+    const key = `claude:${sessionId}`;
+    // Fresh watch scans have no cached override, but their anchor may still
+    // carry it. Keep the deletion evidence local to this collection.
+    deps.invalidatedTitleKeys?.add(key);
+    const cached = metadata.get(key);
+    if (!cached?.t3Title) continue;
+    const invalidated = { ...cached, titleOnly: true, invalidatedTitle: cached.t3Title };
+    delete invalidated.title;
+    delete invalidated.t3Title;
+    metadata.set(key, invalidated);
+  }
   const applyFile = (sessionId, filePath) => {
+    const cached = metadata.get(`claude:${sessionId}`);
+    let nativeMetadata = cached;
+    if (cached?.t3Title) {
+      nativeMetadata = { ...cached };
+      delete nativeMetadata.title;
+      delete nativeMetadata.t3Title;
+      if (cached.titleFallback) nativeMetadata.title = cached.titleFallback;
+    }
     const meta = context.fileSessionMetadata(
       sessionId,
       filePath,
-      metadata.get(`claude:${sessionId}`)
+      nativeMetadata
     );
+    // A transcript supersedes any cached title-only catalog result.
+    delete meta.titleOnly;
     const title = readSessionTitle(filePath, deps.claudeMetadataDeps);
     // The turn boundary rides the same scan and its cache, so asking for it
     // costs no second pass. Reported for every session rather than only a recent
@@ -613,6 +653,23 @@ function resolveSessionMetadata(sessionIds, context) {
   const missingIds = new Set([...sessionIds].filter((sessionId) => !projectFiles.has(sessionId)));
   const transcriptFiles = findSessionFiles(roots.transcripts, missingIds);
   for (const [sessionId, filePath] of transcriptFiles) applyFile(sessionId, filePath);
+  // T3's sidebar title may have changed independently of the transcript's
+  // custom/AI title. Native sessions without a usable T3 title keep their own.
+  for (const sessionId of sessionIds) {
+    const cached = metadata.get(`claude:${sessionId}`);
+    // A failed lookup may reuse an explicit override, never an unlabelled title.
+    const t3Title = t3Metadata.get(sessionId)?.title || cached?.t3Title
+      || (!invalidatedSessionIds.has(sessionId) && deps.t3Titles?.[`claude:${sessionId}`]);
+    if (!t3Title) continue;
+    const transcriptMeta = result.get(sessionId);
+    result.set(sessionId, {
+      ...(transcriptMeta || cached || {}),
+      title: t3Title,
+      t3Title,
+      ...(transcriptMeta?.title ? { titleFallback: transcriptMeta.title } : {}),
+      ...(!transcriptMeta ? { titleOnly: true } : {})
+    });
+  }
   return result;
 }
 

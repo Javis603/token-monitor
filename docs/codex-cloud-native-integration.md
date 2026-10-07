@@ -16,21 +16,9 @@ The main-process bridge still uses a fixed report path, size and row limits, tok
 
 The UI reads this bridge serially while Sessions or Settings is visible. It does not open cloud connections or launch a second watcher. The background automatic discovery/event capture service remains unchanged. Its toggle now lives under **Settings → General → Integrations → Automatically monitor Codex cloud sessions**, not in a cloud-only screen. Closing the application does not stop the independent user service; disabling the toggle does. Legacy `cloudUsage:open` IPC and `--cloud-usage` command arguments navigate to Sessions for compatibility; `--sessions` does the same.
 
-## Local build and installation
+## Service availability
 
-The local build config identifies the corrected UI as `0.66.0-cloud.2`; this is not an official upstream release. The normal upstream package version and release policy are not changed. Existing source/runtime/license post-pack copying preserves the main archive's shared modules. The application is locally ad-hoc signed, without a claim of Developer ID signing or notarization. The local-build metadata continues to suppress automatic upstream replacement, without rewriting the saved user setting.
-
-```sh
-npm run verify
-npm run ensure:tokscale -- --platform=darwin-arm64
-CSC_IDENTITY_AUTO_DISCOVERY=false node_modules/.bin/electron-builder \
-  --config scripts/electron-builder.cloud-local.config.js \
-  --mac --arm64 --dir --publish never
-python3 -B scripts/install-cloud-native.py
-python3 -B scripts/install-cloud-native.py --apply
-```
-
-The existing installer still validates application identity, preserves rollback backups and the event directory, and migrates the same launchd service rather than starting a duplicate. This UI correction does not require another credential, a new cloud task, a directory scan or a change to the observation protocol. A source/CI pass does not imply that an offline Mac has received the corrected application.
+The Settings toggle controls the existing macOS user LaunchAgent `local.chengong.tokenmonitor.cloudauto`; it does not install a service or launch another observer. It is disabled when that service is absent or on unsupported platforms. The standalone foreground observer remains available through `npm run codex:usage:auto -- --acknowledge-auto-attach`. Early local/account usage tools, test-app deployment, local packaging and update-policy overrides are outside this upstream proposal. This source change does not install the corrected UI on an offline Mac.
 
 ## Verification
 
@@ -42,6 +30,6 @@ TM_SESSIONS_VERIFY_DIR=/absolute/private/test-directory \
 npm run verify
 ```
 
-The UI smoke harness uses the actual main-window HTML, preload and renderer, with entirely synthetic session/stats responses. It checks mixed local/cloud rows, unchanged local header totals, live row updates, source activity period selection, the shared detail screen, absence of local transcript reads for cloud-only sessions, and the Settings toggle. The old `verify-cloud-dashboard.js` entry delegates to this Sessions verification rather than testing a removed page. It creates no cloud connection or model turn.
+The UI smoke harness uses the actual main-window HTML, preload and renderer, with entirely synthetic session/stats responses. It checks mixed local/cloud rows, unchanged local header totals, live row updates, source activity period selection, the shared detail screen, absence of local transcript reads for cloud-only sessions, and the Settings toggle. It creates no cloud connection or model turn.
 
 The screenshot in `docs/images/codex-unified-sessions.png` uses illustrative fixture data. It is UI evidence, not a new real-account token measurement. Prior cloud-engine and automatic-discovery experiments are recorded separately; they do not validate installation of this corrected UI on a disconnected device.

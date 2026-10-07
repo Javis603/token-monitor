@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -47,6 +47,15 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     ready: () => ipcRenderer.send('dashboard:ready'),
     minimize: () => ipcRenderer.send('dashboard:minimize'),
     close: () => ipcRenderer.send('dashboard:close')
+  },
+  getSyncContentStatus: (refresh = true) => ipcRenderer.invoke('syncContent:status', refresh),
+  previewSyncContent: (kind) => ipcRenderer.invoke('syncContent:preview', kind),
+  configureSyncContent: (options) => ipcRenderer.invoke('syncContent:configure', options),
+  retrySyncContentCleanup: () => ipcRenderer.invoke('syncContent:retryCleanup'),
+  onSyncContentPush: (callback) => {
+    const listener = (_event, status) => { try { callback(status); } catch (_) {} };
+    ipcRenderer.on('syncContent:push', listener);
+    return () => ipcRenderer.removeListener('syncContent:push', listener);
   },
   getHubInfo: () => ipcRenderer.invoke('hub:getInfo'),
   getHubBuildStatus: () => ipcRenderer.invoke('hub:getBuildStatus'),

@@ -5,10 +5,14 @@ const path = require('node:path');
 const { URL } = require('node:url');
 const {
   aggregateDevices,
-  mergeDeviceRecord,
+  mergeSyncDeviceRecord,
   aggregateHistory,
   stripSessionTextFromDeviceRecord
 } = require('../shared/usage');
+const {
+  SHARED_SYNC_KINDS, emptySharedSyncDocument, nextSharedSyncDocument,
+  syncContentCapability, syncSessionTitlesEnabled, normalizeTitlePolicy, nextTitlePolicy, acceptsSessionTitles
+} = require('../shared/syncContent');
 const { DEFAULT_STALE_AFTER_MS } = require('../shared/syncUploadInterval');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const {
@@ -43,6 +47,7 @@ function createHub({
   port = 17321,
   host = '0.0.0.0',
   secret = '',
+  syncSessionTitles = false,
   staleAfterMs = DEFAULT_STALE_AFTER_MS,
   broadcastDelayMs = 100,
   dataFile = path.join(projectRoot(), 'data', 'devices.json'),
@@ -55,7 +60,24 @@ function createHub({
   if (!store.subscriptions || typeof store.subscriptions !== 'object') {
     store.subscriptions = emptySubscriptionDocument();
   }
+  const serverTitlesEnabled = syncSessionTitlesEnabled(syncSessionTitles);
+  store.devices = Object.assign(Object.create(null), store.devices);
+  store.syncTitlePolicies = Object.assign(Object.create(null), store.syncTitlePolicies || {});
+  store.syncSettings = Object.assign(Object.create(null), store.syncSettings || {});
   const bindHost = resolveBindHost(host, secret);
+
+  // Apply the permission at startup, including records from offline devices.
+  // Keep disabled policies as tombstones so re-enabling cannot reuse old tokens.
+  const beforeCleanup = JSON.stringify([store.devices, store.syncTitlePolicies]);
+  for (const [id, policy] of Object.entries(store.syncTitlePolicies)) {
+    if (!serverTitlesEnabled && policy?.enabled === true) store.syncTitlePolicies[id] = nextTitlePolicy(policy, false);
+  }
+  for (const [id, record] of Object.entries(store.devices)) {
+    store.devices[id] = stripSessionTextFromDeviceRecord(record, {
+      preserveSessionTitles: serverTitlesEnabled && normalizeTitlePolicy(store.syncTitlePolicies[id]).enabled
+    });
+  }
+  if (JSON.stringify([store.devices, store.syncTitlePolicies]) !== beforeCleanup) persist();
 
   function persist() {
     store.version = 1;
@@ -75,6 +97,7 @@ function createHub({
     // been overtaken, so learning about another device's edit costs nothing in
     // the steady state and does not put what the user pays into every frame.
     stats.subscriptionsUpdatedAt = store.subscriptions?.updatedAt || '';
+    stats.syncSettingsRevisions = Object.fromEntries(SHARED_SYNC_KINDS.map((kind) => [kind, getSyncSettings(kind).revision]));
     return stats;
   }
 
@@ -159,9 +182,9 @@ function createHub({
       throw new Error('deviceId_required');
     }
     const deviceId = String(payload.deviceId || payload.id);
-    const existing = stripSessionTextFromDeviceRecord(store.devices[deviceId]);
-    const incoming = stripSessionTextFromDeviceRecord(payload);
-    const record = mergeDeviceRecord(existing, { ...incoming, receivedAt: new Date().toISOString() });
+    const record = mergeSyncDeviceRecord(store.devices[deviceId], { ...payload, receivedAt: new Date().toISOString() }, {
+      preserveSessionTitles: acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[deviceId], payload.sessionTitleSyncGeneration)
+    });
     store.devices[record.deviceId] = record;
     persist();
     if (statsListeners.size > 0) notifyStatsListeners('ingest');
@@ -170,9 +193,72 @@ function createHub({
   }
 
   function deleteDevice(deviceId) {
+    // Commit deletion and revocation together, keeping a generation tombstone.
+    const previousPolicy = store.syncTitlePolicies[deviceId];
+    const previousDevice = store.devices[deviceId];
+    const previousSavedAt = store.savedAt;
+    store.syncTitlePolicies[deviceId] = nextTitlePolicy(previousPolicy, false);
     delete store.devices[deviceId];
-    persist();
+    try { persist(); } catch (error) {
+      if (previousPolicy) store.syncTitlePolicies[deviceId] = previousPolicy;
+      else delete store.syncTitlePolicies[deviceId];
+      if (previousDevice) store.devices[deviceId] = previousDevice;
+      store.savedAt = previousSavedAt;
+      throw error;
+    }
     broadcastStats('delete');
+  }
+
+  function getSyncContent() {
+    return syncContentCapability(serverTitlesEnabled);
+  }
+
+  function getSyncSettings(kind) {
+    if (!SHARED_SYNC_KINDS.includes(kind)) {
+      const error = new Error('unknown shared settings kind');
+      error.code = 'bad_request';
+      throw error;
+    }
+    return store.syncSettings[kind] || emptySharedSyncDocument();
+  }
+
+  function setSyncSettings(kind, payload) {
+    const next = nextSharedSyncDocument(kind, getSyncSettings(kind), payload);
+    const previous = store.syncSettings[kind];
+    const previousSavedAt = store.savedAt;
+    store.syncSettings[kind] = next;
+    try { persist(); } catch (error) {
+      if (previous) store.syncSettings[kind] = previous;
+      else delete store.syncSettings[kind];
+      store.savedAt = previousSavedAt;
+      throw error;
+    }
+    broadcastStats('sync-settings');
+    return next;
+  }
+
+  function setSyncTitlePolicy(deviceId, enabled) {
+    if (enabled === true && !serverTitlesEnabled) {
+      const error = new Error('session title sync is disabled on the server');
+      error.code = 'forbidden';
+      throw error;
+    }
+    const previous = store.syncTitlePolicies[deviceId];
+    const next = nextTitlePolicy(previous, enabled);
+    if (enabled && normalizeTitlePolicy(previous).enabled) return next;
+    const previousDevice = store.devices[deviceId];
+    const previousSavedAt = store.savedAt;
+    store.syncTitlePolicies[deviceId] = next;
+    if (!enabled && previousDevice) store.devices[deviceId] = stripSessionTextFromDeviceRecord(previousDevice);
+    try { persist(); } catch (error) {
+      if (previous) store.syncTitlePolicies[deviceId] = previous;
+      else delete store.syncTitlePolicies[deviceId];
+      if (previousDevice) store.devices[deviceId] = previousDevice;
+      store.savedAt = previousSavedAt;
+      throw error;
+    }
+    broadcastStats('sync-titles');
+    return next;
   }
 
   function getSubscriptions() {
@@ -254,6 +340,32 @@ function createHub({
     }
 
     if (!isAuthorized(req, secret)) return sendJson(res, 401, { error: 'unauthorized' });
+
+    if (req.method === 'GET' && url.pathname === '/api/sync/content') return sendJson(res, 200, getSyncContent());
+
+    const settingsMatch = url.pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing)$/);
+    if (settingsMatch && req.method === 'GET') return sendJson(res, 200, { ok: true, ...getSyncSettings(settingsMatch[1]) });
+    const titlesMatch = url.pathname.match(/^\/api\/sync\/titles\/([^/]+)$/);
+    if (req.method === 'PUT' && (settingsMatch || titlesMatch)) {
+      try {
+        const payload = await readJsonBody(req);
+        if (settingsMatch) return sendJson(res, 200, { ok: true, ...setSyncSettings(settingsMatch[1], payload) });
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)
+          || Object.keys(payload).some((key) => key !== 'enabled') || typeof payload.enabled !== 'boolean') {
+          return sendJson(res, 400, { error: 'bad_request', message: 'enabled must be a boolean' });
+        }
+        const policy = setSyncTitlePolicy(decodeURIComponent(titlesMatch[1]), payload.enabled);
+        return sendJson(res, 200, { ok: true, ...policy });
+      } catch (error) {
+        if (error.code === 'stale_write') return sendJson(res, 409, { error: 'stale_write', ...error.current });
+        if (error.code === 'forbidden') return sendJson(res, 403, { error: 'forbidden', message: error.message });
+        if (error.code === 'payload_too_large') {
+          res.shouldKeepAlive = false;
+          return sendJson(res, 413, { error: 'payload_too_large' }, { connection: 'close' });
+        }
+        return sendJson(res, 400, { error: 'bad_request', message: error.message });
+      }
+    }
 
     if (req.method === 'GET' && url.pathname === '/api/stats') return sendJson(res, 200, getStats());
     if (req.method === 'GET' && url.pathname === '/api/devices') return sendJson(res, 200, { devices: getDevices() });
@@ -366,7 +478,7 @@ function createHub({
 
   return {
     start, stop, server, getStats, getHistory, getDevices, ingest, deleteDevice, onStats, bindHost,
-    getSubscriptions, setSubscriptions
+    getSubscriptions, setSubscriptions, getSyncContent, getSyncSettings, setSyncSettings, setSyncTitlePolicy
   };
 }
 
@@ -379,7 +491,8 @@ if (require.main === module) {
   const staleAfterMs = Number(args.staleAfterMs || process.env.TOKEN_MONITOR_STALE_AFTER_MS || DEFAULT_STALE_AFTER_MS);
   const dataFile = String(args.dataFile || process.env.TOKEN_MONITOR_DATA_FILE || path.join(projectRoot(), 'data', 'devices.json'));
 
-  const hub = createHub({ port, host, secret, staleAfterMs, dataFile });
+  const syncSessionTitles = syncSessionTitlesEnabled(args.syncSessionTitles ?? args['sync-session-titles'] ?? process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES);
+  const hub = createHub({ port, host, secret, staleAfterMs, dataFile, syncSessionTitles });
   hub.start().then(() => {
     console.log(`Token Monitor hub listening on http://${hub.bindHost}:${port}`);
     console.log(`Data file: ${dataFile}`);

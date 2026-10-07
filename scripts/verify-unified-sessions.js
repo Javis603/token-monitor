@@ -25,6 +25,7 @@ const cloud = { version: 1, state: 'listening', errorCode: null, service: { inst
   { threadId: ids[3], kind: 'subagent', engineParentId: ids[2], delegationParentId: null, runtimeStatus: 'idle', listening: false, status: 'no-usage-notification', total: null, observedAt: null, createdAt: iso(5), lastActivityAt: iso(4), gapCount: 1 }
 ] };
 const audit = { localDetailReads: 0, controls: [], cloudReads: 0 };
+let failCloudRead = false;
 let win, done = false;
 const errors = [];
 fs.mkdirSync(output, { recursive: true, mode: 0o700 });
@@ -56,7 +57,7 @@ app.whenReady().then(async () => {
     'hub:getInfo': () => ({ mode: 'local' }), 'tokscale:getStatus': () => ({ installed: true, version: 'fixture' }),
     'stream:status': () => ({ connected: true, mode: 'local' }), 'dashboard:getHistory': () => ({ daily: [], monthly: [] }),
     'session:getDetail': () => { audit.localDetailReads++; return { found: false }; },
-    'cloudUsage:get': () => { audit.cloudReads++; return cloud; },
+    'cloudUsage:get': () => { audit.cloudReads++; if (failCloudRead) throw new Error('fixture read failure'); return cloud; },
     'cloudUsage:control': (action) => { audit.controls.push(action); cloud.service.running = action === 'start'; return { ok: true, snapshot: cloud }; }
   };
   const preload = path.join(root, 'src/electron/preload.js');
@@ -83,6 +84,7 @@ app.whenReady().then(async () => {
   await waitFor(`document.querySelector('[data-cloud-only="true"] .row-value')?.textContent === '17,000'`);
   assert.equal(await evaluate(`document.getElementById('totalTokens').textContent`), '42,800');
   cloud.threads[1].lastActivityAt = new Date(now - 10 * 86400000).toISOString();
+  cloud.threads[0].lastActivityAt = new Date().toISOString();
   await evaluate(`document.querySelector('.tab[data-period="today"]').click()`);
   await waitFor(`document.querySelectorAll('#breakdown .row').length === 3`);
   await evaluate(`document.getElementById('settingsButton').click(); document.querySelector('[data-settings-section="general"]').click()`);
@@ -92,6 +94,9 @@ app.whenReady().then(async () => {
   await evaluate(`document.getElementById('cloudSessionsEnabled').click()`);
   await waitFor(`!document.getElementById('cloudSessionsEnabled').disabled`);
   assert.deepEqual(audit.controls, ['stop', 'start']);
+  failCloudRead = true;
+  await waitFor(`document.getElementById('cloudSessionsSettingStatus').textContent === window.TokenMonitorCloudSessionRows.labels('zh-CN').error`);
+  assert.equal(await evaluate(`document.getElementById('cloudSessionsEnabled').disabled`), true);
   assert.deepEqual(errors, []);
   const result = { actualRenderer: true, actualPreload: true, syntheticData: true, rows: state.rows, cloudRows: state.cloudRows, totalUnchanged: 42800, cloudDetailNoLocalRead: true, localDetailPreserved: true, pollingUpdatesRows: true, periodFilterByActivity: true, settingsControls: audit.controls, cloudReads: audit.cloudReads, noCloudTabOrButton: true };
   fs.writeFileSync(path.join(output, 'acceptance.json'), JSON.stringify(result, null, 2), { mode: 0o600 });

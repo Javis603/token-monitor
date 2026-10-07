@@ -576,6 +576,26 @@ test('homeLimitAccountsForProviders keeps provider order and filters hidden prov
   assert.equal(rows[0].name, 'Codex');
 });
 
+test('Home retains each account plan through quota sorting without borrowing another account plan', () => {
+  const presentation = require('../../src/electron/renderer/limits/providerPresentation');
+  const rows = homeLimitAccountsForProviders({
+    providers: [
+      { provider: 'codex', accountEmail: 'pro@example.com', planLabel: 'Pro More', windows: [{ kind: 'weekly', remainingPercent: 93 }] },
+      { provider: 'codex', accountEmail: 'plus@example.com', planLabel: 'Plus', windows: [{ kind: 'weekly', remainingPercent: 30 }] },
+      { provider: 'zed', planLabel: 'Zed Student', windows: [{ kind: 'monthly', remainingPercent: 60 }] },
+      { provider: 'claude', windows: [{ kind: 'session', remainingPercent: 70 }] }
+    ],
+    providerOptions: [{ id: 'codex', label: 'Codex' }, { id: 'zed', label: 'Zed' }, { id: 'claude', label: 'Claude' }],
+    enabledProviderIds: ['codex', 'zed', 'claude'],
+    limit: 4,
+    accountName: (provider) => provider.accountEmail || provider.provider,
+    accountPlan: (provider) => presentation.limitProviderPlanDisplayLabel(provider, provider.planLabel)
+  });
+  assert.deepEqual(rows.map((row) => [row.name, row.plan]), [
+    ['plus@example.com', 'Plus'], ['zed', 'Student'], ['claude', ''], ['pro@example.com', 'Pro More']
+  ]);
+});
+
 test('homeLimitAccountsForProviders can preserve configured provider order over remaining quota', () => {
   const rows = homeLimitAccountsForProviders({
     providers: [
@@ -992,6 +1012,37 @@ test('Home shows WorkBuddy credits through the shared credits contract', () => {
     showMeter: true,
     detail: ''
   });
+});
+
+test('Home bars a MiMo lane by lane, so all readings stay on their own bar', () => {
+  // Home is handed one entry per wire row, so each lane's readings keep a bar.
+  const rows = homeLimitAccounts([
+    {
+      key: 'mimo:console',
+      providerId: 'mimo',
+      name: 'Console',
+      windows: [
+        { kind: 'billing', label: 'Token Plan', usedPercent: 20, remainingPercent: 80 },
+        { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }
+      ],
+      balance: { amount: 9.95, currency: 'CNY', monthSpend: 0 }
+    },
+    {
+      key: 'mimo:membership',
+      providerId: 'mimo',
+      name: 'Desktop Membership',
+      windows: [{ kind: 'weekly', usedPercent: 22, remainingPercent: 78 }]
+    }
+  ]);
+
+  assert.deepEqual(rows.map((row) => row.windows.map((window) => [window.label, window.metric])), [
+    [['weekly', '']],
+    [['Token Plan', ''], ['Balance', 'credits']]
+  ]);
+  assert.deepEqual(rows.map((row) => [row.key, row.windows.map((window) => window.remainingPercent)]), [
+    ['mimo:membership', [78]], ['mimo:console', [80, 100]]
+  ]);
+  assert.equal(rows[1].windows[1].remaining, 9.95);
 });
 
 test('Home shows a MiMo token plan and balance side by side', () => {

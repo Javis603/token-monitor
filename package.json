@@ -1,8 +1,8 @@
 {
   "name": "token-monitor",
   "productName": "Token Monitor",
-  "version": "0.66.0",
-  "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
+  "version": "0.67.0",
+  "description": "Live token & cost widget for Claude Code, Codex & Hermes \u2014 local-first, optional multi-device sync.",
   "main": "src/electron/main.js",
   "scripts": {
     "start": "npm run ensure:tokscale && electron .",
@@ -33,10 +33,6 @@
     "benchmark:hub-bandwidth": "node scripts/benchmark-hub-bandwidth.js",
     "lint": "eslint .",
     "verify": "npm run lint && npm test",
-    "codex:usage": "node scripts/codex-task-usage.js",
-    "codex:usage:live": "node scripts/codex-live-usage.js",
-    "codex:usage:deploy": "python3 scripts/deploy-codex-usage-test.py",
-    "codex:usage:cloud": "node scripts/codex-cloud-usage.js",
     "codex:usage:auto": "node scripts/codex-cloud-auto-watch.js"
   },
   "build": {
@@ -165,7 +161,7 @@
     "electron-updater": "6.8.9",
     "koffi": "^3.1.5",
     "semver": "^7.8.5",
-    "tokscale": "^4.17.0",
+    "tokscale": "^4.18.0",
     "undici": "^7.29.1"
   },
   "devDependencies": {

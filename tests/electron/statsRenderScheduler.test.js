@@ -285,6 +285,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
   const calls = [];
   const settingsRenderers = [
     'renderCodexAccounts',
+    'renderMimoStatus',
     'renderSettingsSummaries',
     'renderLimitProviderCheckboxes',
     'renderToolPreferences',
@@ -317,6 +318,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
 
   assert.deepEqual(calls.slice(0, 2), ['connection:main', 'main']);
   assert.ok(calls.indexOf('renderSettingsSummaries') > calls.indexOf('main'));
+  assert.ok(calls.indexOf('renderMimoStatus') > calls.indexOf('main'));
   assert.equal(calls.at(-1), 'ready');
 });
 
@@ -481,5 +483,5 @@ test('all stats refreshes use visibility-aware rendering', () => {
 
   assert.match(refreshStats, /getStats\(options\)[\s\S]*statsRenderScheduler\.request\(\);/);
   assert.equal([...refreshStats.matchAll(/setStatus\(statusTextFor/g)].length, 1);
-  assert.doesNotMatch(statsRender, /renderMimoStatus\(\);/);
+  assert.match(statsRender, /renderMimoStatus\(\);/);
 });

@@ -198,7 +198,7 @@ test('tray limit labels describe remaining quota instead of ambiguous worst wind
 });
 
 test('live rate tray labels are translated in every bundled locale', () => {
-  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) {
     assert.notEqual(translate(locale, 'settings.tray.liveTokenRate'), 'settings.tray.liveTokenRate');
     assert.notEqual(translate(locale, 'trayMenu.content.liveTokenRate'), 'trayMenu.content.liveTokenRate');
   }

@@ -3,7 +3,7 @@
 const { CLIENT_LABELS } = require('./clientCatalog');
 const { KNOWN_CLIENTS } = require('./clientTracking');
 const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } = require('./limits/providers');
-const { limitWindowKindLabel } = require('./limits/windowLabels');
+const { limitWindowKindLabel, mimoAccountGroups, mimoProductLabel } = require('./limits/windowLabels');
 const { widgetVendorPalette } = require('./vendorPresentation');
 
 const MAC_WIDGET_SCHEMA_VERSION = 10;
@@ -238,6 +238,10 @@ function codexAccountMatchesActive(provider, activeAccount) {
 
 function buildQuota(limits, activeCodexAccount) {
   const providers = Array.isArray(limits?.providers) ? limits.providers : [];
+  const mimoRows = providers.filter((row) => (
+    row && typeof row === 'object' && String(row.provider || '').trim().toLowerCase() === 'mimo'
+  ));
+  const mimoSeveralAccounts = mimoAccountGroups(mimoRows).length > 1;
   const candidates = [];
   for (const [inputIndex, provider] of providers.entries()) {
     if (!provider || typeof provider !== 'object') continue;
@@ -259,9 +263,17 @@ function buildQuota(limits, activeCodexAccount) {
         : window
     ));
     const accountKey = String(provider.accountKey || '').trim();
-    const accountLabel = maskedWidgetEmail(provider.accountEmail)
-      || safeDisplayName(provider.accountName)
-      || safeDisplayName(provider.accountLabel);
+    const accountEmail = maskedWidgetEmail(provider.accountEmail);
+    const accountName = safeDisplayName(provider.accountName);
+    const product = providerId === 'mimo' ? mimoProductLabel(provider) : '';
+    // The lane word alone tells one account's products apart on the widget; the
+    // account identity joins only when the provider holds several logical
+    // accounts — the grouping the tray's picker and the Limits page go by.
+    const accountLabel = product
+      ? (mimoSeveralAccounts
+        ? [accountEmail, accountName, product].filter(Boolean).join(' · ')
+        : product)
+      : accountEmail || accountName || safeDisplayName(provider.accountLabel);
     const source = String(provider.source || '').trim().toLowerCase();
     const sourceDetail = String(provider.sourceDetail || '').trim().toLowerCase();
     const stableRecord = {
@@ -575,7 +587,7 @@ function buildPresentation(source = {}) {
     numberStyle: source.compactNumbers === false ? 'full' : 'compact',
     compactTokenUnits: source.compactTokenUnits === 'localized' ? 'localized' : 'western',
     showCost: source.showCost !== false,
-    locale: /^(?:auto|en|zh-CN|zh-TW|ko|ja)$/.test(locale) ? locale : 'auto',
+    locale: /^(?:auto|en|zh-CN|zh-TW|ko|ja|pt-BR)$/.test(locale) ? locale : 'auto',
     theme: source.theme === 'custom' ? 'custom' : 'system'
   };
 }
