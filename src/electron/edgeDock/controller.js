@@ -841,7 +841,9 @@ function createEdgeDockController(deps) {
     if (!running) return;
     clearTimeout(pollTimer);
     const snapshot = intent.snapshot();
-    const delay = drag ? POLL_DRAG_MS : (snapshot.revealed ? POLL_ACTIVE_MS : POLL_IDLE_MS);
+    // The approach zone is on the way to the handle, and only the poll lets the
+    // handle take the pointer, so it runs at the active rate from there on.
+    const delay = drag ? POLL_DRAG_MS : (snapshot.revealed || peekNear ? POLL_ACTIVE_MS : POLL_IDLE_MS);
     pollTimer = setTimeout(poll, delay);
   }
 

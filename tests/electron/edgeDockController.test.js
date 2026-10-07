@@ -562,6 +562,26 @@ test('the handle window lets the pointer through except over the handle itself',
   assert.equal(took, true, 'the handle takes the pointer');
 });
 
+test('the cursor poll speeds up in the approach zone so the handle takes the pointer sooner', async (t) => {
+  const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+  const read = fixture.screen.getCursorScreenPoint;
+  let polls = 0;
+  fixture.screen.getCursorScreenPoint = function () { polls += 1; return read.call(this); };
+  const pollsOver = async (ms) => {
+    polls = 0;
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    return polls;
+  };
+
+  const far = await pollsOver(450);
+  fixture.screen.point = { x: peek.bounds.x + peek.bounds.width - EDGE_DOCK_METRICS.approachDepth + 4, y: peek.bounds.y + peek.bounds.height / 2 };
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const near = await pollsOver(450);
+  assert.ok(near >= far + 3, `polls in 450ms: ${far} away from the edge, ${near} in the approach zone`);
+});
+
 test('the grown handle takes the pointer but only the resting handle reveals fast', async (t) => {
   // No readable button state, so the wake zone stays out of it.
   const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' } });
