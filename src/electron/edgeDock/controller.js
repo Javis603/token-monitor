@@ -227,8 +227,12 @@ function createEdgeDockController(deps) {
   let scaled = { key: '', scale: 1, metrics: EDGE_DOCK_METRICS };
   // A size still being dragged on the Settings slider, shown but not yet saved.
   let previewScale = null;
+  function requestedScale() {
+    return previewScale ?? edgeDockScale(settings());
+  }
+
   function dockScale() {
-    const requested = previewScale ?? edgeDockScale(settings());
+    const requested = requestedScale();
     const workArea = display()?.workArea || null;
     const kinds = cellKinds();
     const key = `${requested}:${workArea?.height ?? ''}:${kinds.join(',')}`;
@@ -275,7 +279,7 @@ function createEdgeDockController(deps) {
     const trigger = edgeDockTriggerBounds({ workArea, displayBounds: current.bounds, side, railBounds: rail, metrics: m });
     const zones = edgeDockHandleZones({ side, peekBounds: peek, metrics: m });
     const bubble = bubbleCell !== null
-      ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: Math.round(bubbleHeight * dockScale()), workArea, side, metrics: m })
+      ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: Math.round(Math.min(bubbleHeight, maxCardHeight() ?? Infinity) * dockScale()), workArea, side, metrics: m })
       : null;
     const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail, metrics: m });
     return { side, workArea, rail, peek, handle, restingHandle, trigger, wake: zones?.wake || null, approach: zones?.approach || null, bubble, refresh };
@@ -1000,12 +1004,17 @@ function createEdgeDockController(deps) {
   function followDrag(point, current) {
     let targetDisplay;
     try { targetDisplay = screen.getDisplayNearestPoint?.(point) || display(); } catch (_) { targetDisplay = display(); }
+    // Sized for the display the rail is landing on, which can fit a different
+    // size than the one it is leaving; the grab point is kept in page units so
+    // it stays under the pointer at either size.
+    const workArea = targetDisplay?.workArea || current.workArea;
+    const scale = edgeDockFittingScale({ workArea, cellKinds: cellKinds(), scale: requestedScale() });
     const next = edgeDockPlacementForDrop({
-      workArea: targetDisplay?.workArea || current.workArea,
+      workArea,
       pointer: point,
-      grabOffsetY: drag.grabOffsetY,
+      grabOffsetY: drag.grabOffsetY * scale,
       cellKinds: cellKinds(),
-      metrics: metrics()
+      metrics: scaledEdgeDockMetrics(scale)
     });
     if (!next) return;
     next.displayId = normalizeEdgeDockDisplayId(targetDisplay?.id);
@@ -1117,7 +1126,7 @@ function createEdgeDockController(deps) {
     });
     ipcMain.on('edgeDock:dragStart', (event, payload) => {
       if (surfaceFor(event.sender) !== 'rail') return;
-      handleDragStart((Number(payload?.grabOffsetY) || 0) * dockScale());
+      handleDragStart(payload?.grabOffsetY);
     });
     ipcMain.on('edgeDock:dragEnd', (event) => {
       if (surfaceFor(event.sender) !== 'rail') return;

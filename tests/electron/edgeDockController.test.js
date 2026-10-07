@@ -438,11 +438,47 @@ test('a larger dock that would not fit the display zooms to the size it is drawn
   assert.equal(rail.webContents.getZoomFactor(), zoom);
   assert.equal(rail.bounds.width, scaledEdgeDockMetrics(zoom).railWidth);
   assert.equal(sentPayload(rail, 'rail').cellLayout.compact, false, 'at full density');
+  const workArea = fixture.screen.displays[0].workArea;
+  const kinds = Array(5).fill('provider');
+  assert.equal(edgeDockCellLayout(workArea, kinds, scaledEdgeDockMetrics(zoom + 0.01)).compact, true, 'and the largest size that is');
 
   // Fewer cells fit at the size asked for.
   fixture.controller.setCells([{ id: 'codex', kind: 'provider', label: 'Codex', remainingPercent: 70 }]);
   assert.equal(rail.webContents.getZoomFactor(), 1.25);
   assert.equal(rail.bounds.width, scaledEdgeDockMetrics(1.25).railWidth);
+});
+
+test('a drag onto a display that fits a different size keeps the grab point under the pointer', async (t) => {
+  const displays = [
+    { id: 1, scaleFactor: 1, bounds: { x: 0, y: 0, width: 1000, height: 520 }, workArea: { x: 0, y: 0, width: 1000, height: 480 } },
+    { id: 2, scaleFactor: 1, bounds: { x: 1000, y: 0, width: 800, height: 1200 }, workArea: { x: 1000, y: 0, width: 800, height: 1160 } }
+  ];
+  const fixture = createFixture({ displays, settings: { edgeDockSize: 'custom', edgeDockCustomScale: 1.5 } });
+  t.after(() => fixture.controller.stop());
+  fixture.controller.setCells(['claude', 'codex', 'cursor', 'gemini', 'kiro'].map((id) => ({ id, kind: 'provider', label: id, remainingPercent: 50 })));
+  const rail = fixture.windowFor('rail');
+  assert.ok(rail.webContents.getZoomFactor() < 1.5, 'the short display fits less than asked');
+
+  fixture.screen.point = { x: 1700, y: 600 };
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetY: 100 });
+  await new Promise((resolve) => setTimeout(resolve, 35));
+  fixture.ipcMain.emit('edgeDock:dragEnd', { sender: rail.webContents });
+
+  assert.equal(rail.webContents.getZoomFactor(), 1.5, 'the tall one fits it all');
+  // 100 page units into the rail is 150 window pixels at the new size.
+  assert.equal(rail.bounds.y, 600 - 150);
+});
+
+test('an open card stays within the work area when the dock grows', (t) => {
+  const fixture = createFixture({ settings: { edgeDockSize: 'custom', edgeDockCustomScale: 1 } });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const bubble = fixture.windowFor('bubble');
+  const workArea = fixture.screen.displays[0].workArea;
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 800 });
+  fixture.controller.previewScale(1.5);
+  assert.ok(bubble.bounds.height <= workArea.height - EDGE_DOCK_METRICS.screenMargin * 2, `card ${bubble.bounds.height}px tall`);
 });
 
 test('a custom size previews while its slider is dragged and the saved size replaces it', (t) => {
