@@ -52,7 +52,8 @@ const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
 
 const BRAND_VENDOR_COLORS = { ...clientColors };
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const RING_RADIUS = 19;
+// Inset the thicker quota stroke so its outer edge stays within the 42px ring.
+const RING_RADIUS = 18.5;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 const DRAG_THRESHOLD_PX = 4;
 const BREAKDOWN_VISIBLE_ROWS = 6;
