@@ -1,10 +1,11 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { extractUsageFromTokscale, normalizeModelNameForClient } = require('../../usage');
 const { antigravityDataRoots } = require('./selfSync');
+const { antigravityCliDataDir } = require('../../clientSources');
+const { tokscaleHomeDir } = require('../../tokscaleConfig');
 
 const databaseCache = new Map();
 let sqlite;
@@ -105,11 +106,13 @@ function fingerprint(file) {
   } catch (_) { return ''; }
 }
 
-function conversationFile(sessionId, home = os.homedir(), cli = false) {
+function conversationFile(sessionId, home, cli = false, env = process.env) {
   if (!/^[\w-]+$/.test(sessionId)) return '';
-  const roots = cli ? [path.join(home, '.gemini', 'antigravity-cli')] : antigravityDataRoots(home);
-  for (const root of roots) {
-    const file = path.join(root, 'conversations', `${sessionId}.db`);
+  const resolvedHome = home || tokscaleHomeDir({ env });
+  const dirs = cli ? [antigravityCliDataDir({ homeDir: resolvedHome, env })]
+    : antigravityDataRoots(resolvedHome).map(root => path.join(root, 'conversations'));
+  for (const dir of dirs) {
+    const file = path.join(dir, `${sessionId}.db`);
     if (fingerprint(file)) return file;
   }
   return '';
@@ -202,7 +205,7 @@ function inWindow(startedAt, flags, now) {
 // Supplement existing counters only when the native sample exactly covers one
 // scan row. Usage/costs remain owned by Tokscale; ambiguous or partial coverage
 // must not put untimed output on another generation's clock.
-function applyAntigravityThroughput(json, { home = os.homedir(), flags = [], now = Date.now() } = {}) {
+function applyAntigravityThroughput(json, { home, env = process.env, flags = [], now = Date.now() } = {}) {
   const groups = new Map();
   for (const row of Array.isArray(json?.entries) ? json.entries : []) {
     if (!String(row.client || '').startsWith('antigravity')) continue;
@@ -219,7 +222,7 @@ function applyAntigravityThroughput(json, { home = os.homedir(), flags = [], now
     if (group.length !== 1) continue;
     const { row, session, model } = group[0];
     if (session.timedDurationMs > 0) continue;
-    const data = readConversation(conversationFile(session.sessionId, home, row.client === 'antigravity-cli'));
+    const data = readConversation(conversationFile(session.sessionId, home, row.client === 'antigravity-cli', env));
     if (!data?.complete) continue;
     const window = data.generations.filter(generation => inWindow(generation.startedAt, flags, now));
     let samples = window.filter(generation => generation.model === model);

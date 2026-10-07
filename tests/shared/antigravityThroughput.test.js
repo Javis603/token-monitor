@@ -9,6 +9,7 @@ const { DatabaseSync } = require('node:sqlite');
 const { applyAntigravityThroughput, conversationFile, decodeGeneration, readConversation } = require('../../src/shared/providers/antigravity/throughput');
 const { extractUsageFromTokscale } = require('../../src/shared/usage');
 const { readSessionDetail } = require('../../src/shared/sessionDetail');
+const { collectUsageOnce } = require('../../src/shared/collector');
 
 function varint(input) {
   let value = BigInt(input);
@@ -38,9 +39,10 @@ function generation({ stepIdx = 1, output = 120, responseId = '', legacyStart = 
   return proto({ 1: proto(chat), 2: packed ? varint(stepIdx) : stepIdx });
 }
 
-function fixture(t, { wal = false, steps = true } = {}) {
+function fixture(t, { wal = false, steps = true, cli = false, geminiDir = '.gemini' } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-antigravity-speed-'));
-  const root = path.join(home, '.gemini', 'antigravity', 'conversations');
+  const geminiHome = path.join(home, geminiDir);
+  const root = path.join(geminiHome, cli ? 'antigravity-cli' : 'antigravity', 'conversations');
   fs.mkdirSync(root, { recursive: true });
   const file = path.join(root, 'session.db');
   const db = new DatabaseSync(file);
@@ -52,7 +54,7 @@ function fixture(t, { wal = false, steps = true } = {}) {
     db.prepare('INSERT INTO steps VALUES(?,?,?,?)').run(idx, type, status, proto({ 1: timestamp(at), ...(end ? { 7: timestamp(end) } : {}) }));
   }
   function add(idx, options) { db.prepare('INSERT INTO gen_metadata VALUES(?,?)').run(idx, generation(options)); }
-  return { home, file, db, step, add };
+  return { home, geminiHome, file, db, step, add };
 }
 
 function scan(output = 120, overrides = {}) {
@@ -162,11 +164,10 @@ test('WAL updates invalidate successful snapshots, while the database remains re
   f.step(0, 14, start, start);
   f.step(1, 15, start + 1000, start + 3000);
   f.add(1, {});
-  const first = readConversation(f.file);
-  assert.equal(readConversation(f.file), first);
   const dbBytes = fs.readFileSync(f.file);
   const walBytes = fs.readFileSync(`${f.file}-wal`);
-  readConversation(f.file);
+  const first = readConversation(f.file);
+  assert.equal(readConversation(f.file), first);
   assert.deepEqual(fs.readFileSync(f.file), dbBytes);
   assert.deepEqual(fs.readFileSync(`${f.file}-wal`), walBytes);
   const stat = fs.statSync(f.file);
@@ -231,4 +232,53 @@ test('single-model native aliases use the scan identity without guessing mixed-m
   const mixed = scan(140, { model: 'gemini-3.1-pro' });
   applyAntigravityThroughput(mixed, { home: f.home, now: start + 10000 });
   assert.equal(mixed.entries[0].performance, undefined);
+});
+
+
+test('CLI default and GEMINI_CLI_HOME roots provide native timing and Session Details', t => {
+  for (const geminiDir of ['.gemini', 'custom-gemini']) {
+    const f = fixture(t, { cli: true, geminiDir });
+    f.step(0, 14, start, start);
+    f.step(1, 15, start + 1000, start + 3000);
+    f.add(1, {});
+    const env = geminiDir === '.gemini' ? {} : { GEMINI_CLI_HOME: f.geminiHome };
+    assert.equal(conversationFile('session', f.home, true, env), f.file);
+    const json = scan(120, { client: 'antigravity-cli' });
+    applyAntigravityThroughput(json, { home: f.home, env, now: start + 10000 });
+    assert.equal(extractUsageFromTokscale(json).timedOutputTokens, 120);
+    const detail = readSessionDetail({ client: 'antigravity', sessionId: 'session', home: f.home, env });
+    assert.equal(detail.found, true);
+    assert.equal(detail.exchanges[0].tokens.output, 120);
+    assert.equal(detail.totals.totalTokens, 190);
+    assert.equal(detail.exchanges[0].durationMs, 3000);
+    assert.equal(detail.exchanges[0].turns[0].durationMs, 2000);
+    assert.equal(readSessionDetail({ client: 'antigravity', sessionId: 'session', home: f.home, env, useEnvRoots: false }).found, geminiDir === '.gemini');
+  }
+});
+
+test('collector reads timing from the Windows HOME scanned by Tokscale instead of the profile', async t => {
+  const f = fixture(t);
+  f.step(0, 14, start, start);
+  f.step(1, 15, start + 1000, start + 3000);
+  f.add(1, {});
+  const previousHome = process.env.HOME;
+  // A native drive path on Windows; a UNC-shaped spelling of the same POSIX
+  // directory elsewhere lets the Windows resolver run without a fake file tree.
+  process.env.HOME = process.platform === 'win32' ? f.home : '/' + f.home;
+  try {
+    const summary = await collectUsageOnce({
+      clients: 'antigravity', allTimeSince: '2026-01-01', deviceId: 'speed-test',
+      homeDir: path.join(f.home, 'profile'), platform: 'win32', now: () => new Date(start + 10000),
+      limitsEnabled: false, historyEnabled: false, wslScanEnabled: false,
+      runTokscale: async () => scan()
+    });
+    for (const period of [summary.today, summary.month, summary.allTime]) {
+      assert.equal(period.outputTokens, 120);
+      assert.equal(period.timedOutputTokens, 120);
+      assert.equal(period.timedDurationMs, 2000);
+    }
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
 });

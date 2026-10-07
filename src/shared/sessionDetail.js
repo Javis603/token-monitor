@@ -588,7 +588,9 @@ function readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, h
 
 function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, env, useEnvRoots, deps = {} }) {
   if (client === 'antigravity') {
-    const file = conversationFile(sessionId, home);
+    const sourceEnv = useEnvRoots === false ? {} : env || process.env;
+    const file = conversationFile(sessionId, home, false, sourceEnv)
+      || conversationFile(sessionId, home, true, sourceEnv);
     const data = file ? readConversation(file) : null;
     if (!data) return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], 0), ...(file ? { error: 'read-failed' } : {}) };
     const now = new Date((deps.now || Date.now)());
