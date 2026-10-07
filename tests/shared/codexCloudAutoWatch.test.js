@@ -60,6 +60,24 @@ test('identity is checked before any valid token is passed to persistence', asyn
   m.connect(r); await m.cycle(); r.assertIdentity = () => { throw Object.assign(new Error('changed'), { code: 'LOGIN_CHANGED' }); };
   assert.throws(() => r.eventSink(event(ID(1), 100)), { code: 'LOGIN_CHANGED' }); assert.equal(saved.length, 0);
 });
+test('a capture failure from the event sink is stored on the connection and survives close', async () => {
+  const cred = { fileHash: 'file-hash', scopeFingerprint: SCOPE };
+  const conn = Object.create(AutoCloudConnection.prototype);
+  Object.assign(conn, { home: '/nonexistent', deps: { loadCredential: () => cred }, credential: cred, scopeFingerprint: SCOPE,
+    closed: false, initialized: true, deadline: Infinity, pending: new Map(), abort: new AbortController(), bytesRead: 0, timer: undefined, socket: undefined, dispatcher: undefined, eventSink: null });
+  const m = new AutoCloudMonitor({ now: () => NOW, onSample: () => { throw Object.assign(new Error('journal full'), { code: 'CAPTURE_STORAGE_LIMIT' }); } });
+  m.connect(conn);
+  conn.request = async () => ({ data: [row(1)], nextCursor: null });
+  conn.send = async (method, params) => (method === 'thread/resume' ? { thread: { id: params.threadId } } : { status: 'unsubscribed' });
+  await m.cycle();
+  assert.ok(m.listening.has(ID(1)));
+  conn.onMessage(JSON.stringify(event(ID(1), 100)));
+  assert.equal(conn.closed, true);
+  assert.equal(conn.failure, 'CAPTURE_STORAGE_LIMIT');
+  await conn.close();
+  assert.equal(conn.failure, 'CAPTURE_STORAGE_LIMIT');
+  clearTimeout(conn.timer);
+});
 test('listening capacity and retry delay are enforced', async () => {
   const m = new AutoCloudMonitor({ now: () => NOW, maxListening: 1 }), r = rpc([row(1), row(2)]); m.connect(r); await m.cycle();
   assert.equal(m.listening.size, 1); assert.equal(m.report().waitingForSlot, 1);
