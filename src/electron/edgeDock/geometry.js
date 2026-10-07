@@ -178,22 +178,19 @@ function edgeDockPeekBounds({ workArea, side, railBounds, metrics = EDGE_DOCK_ME
   return { x: Math.round(x), y, width: metrics.peekWidth, height };
 }
 
-function edgeDockRefreshBounds({ workArea, railBounds, metrics = EDGE_DOCK_METRICS }) {
+function edgeDockRefreshBounds({ workArea, displayBounds = workArea, railBounds, metrics = EDGE_DOCK_METRICS }) {
   if (!workArea || !railBounds) return null;
   const size = metrics.refreshSize;
-  const minY = workArea.y + metrics.screenMargin;
-  const maxY = workArea.y + workArea.height - metrics.screenMargin - size;
+  const minY = displayBounds.y + metrics.screenMargin;
+  const maxY = displayBounds.y + displayBounds.height - metrics.screenMargin - size;
   // The shoulder reaches the screen edge beyond the visible body. Nest the
   // button into that empty curve rather than measuring from the window edge.
   const inset = Math.round(metrics.shoulder * 0.7);
   const below = railBounds.y + railBounds.height - inset + metrics.refreshGap;
-  const fitsBelow = below <= maxY;
-  // Refresh always belongs at the bottom. If there is no space underneath,
-  // keep it beside the bottom shoulder rather than moving it to the top.
-  const x = !fitsBelow
-    ? railBounds.x === workArea.x ? railBounds.x + railBounds.width + metrics.refreshGap : railBounds.x - metrics.refreshGap - size
-    : railBounds.x + Math.round((railBounds.width - size) / 2);
-  return { x, y: fitsBelow ? below : Math.max(minY, maxY), width: size, height: size };
+  // The floating action stays in the rail's column. The desktop can extend
+  // below the work area (e.g. a Dock/taskbar inset); only the display edge clips it.
+  const x = railBounds.x + Math.round((railBounds.width - size) / 2);
+  return { x, y: Math.max(minY, Math.min(below, maxY)), width: size, height: size };
 }
 
 function edgeDockRefreshCorridor(rail, button) {

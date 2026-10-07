@@ -213,7 +213,7 @@ function createEdgeDockController(deps) {
     const bubble = bubbleCell !== null
       ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: bubbleHeight, workArea, side })
       : null;
-    const refresh = edgeDockRefreshBounds({ workArea, railBounds: rail });
+    const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail });
     return { side, workArea, rail, peek, trigger, bubble, refresh };
   }
 

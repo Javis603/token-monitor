@@ -808,9 +808,8 @@ for (const side of ['left', 'right']) {
     fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 11 });
     fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'provider-11', height: 180 });
     assert.equal(bubble.ignoreMouse, false);
-    assert.ok(peek.bounds.x < bubble.bounds.x + bubble.bounds.width && peek.bounds.x + peek.bounds.width > bubble.bounds.x
-      && peek.bounds.y < bubble.bounds.y + bubble.bounds.height && peek.bounds.y + peek.bounds.height > bubble.bounds.y,
-    'fixture reproduces the button/card overlap');
+    assert.equal(peek.bounds.x + peek.bounds.width / 2, rail.bounds.x + rail.bounds.width / 2,
+      'the button stays in the original rail column even for a full-height rail');
     fixture.screen.point = { x: peek.bounds.x + 16, y: peek.bounds.y + 16 };
     await new Promise((resolve) => setTimeout(resolve, 105));
     assert.equal(bubble.ignoreMouse, true);
