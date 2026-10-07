@@ -8,6 +8,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('tokenMonitorEdgeDock', {
   ready: () => ipcRenderer.send('edgeDock:ready'),
   click: (cellIndex) => ipcRenderer.send('edgeDock:click', { cellIndex }),
+  pointer: () => ipcRenderer.send('edgeDock:pointer'),
   dragStart: (grabOffsetY) => ipcRenderer.send('edgeDock:dragStart', { grabOffsetY }),
   dragEnd: () => ipcRenderer.send('edgeDock:dragEnd'),
   reportBubbleSize: (cellId, height) => ipcRenderer.send('edgeDock:bubbleSize', { cellId, height }),

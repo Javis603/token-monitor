@@ -57,7 +57,7 @@ class FakeBrowserWindow extends EventEmitter {
   getOpacity() { return this.opacity; }
   getBounds() { return { ...this.bounds }; }
   setOpacity(value) { this.opacity = value; this.opacityChanges.push(value); }
-  setIgnoreMouseEvents(value) { this.ignoreMouse = value; }
+  setIgnoreMouseEvents(value, options) { this.ignoreMouse = value; this.forwardMouse = value === true && options?.forward === true; }
   showInactive() { this.visible = true; this.zOrderCalls.push('showInactive'); this.orderFront(); }
   moveTop() { this.zOrderCalls.push('moveTop'); this.orderFront(); }
   orderFront() {
@@ -536,13 +536,14 @@ test('the handle grows on approach and reveals from its wake zone unless a butto
   assert.equal(sentPayload(peek, 'peek').shape.d, restShape.d, 'the handle is not left grown behind the rail');
 });
 
-test('the handle window lets the pointer through except over the handle itself', async (t) => {
-  const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' } });
+test('the macOS handle window lets the pointer through except over the handle itself', async (t) => {
+  const fixture = createFixture({ platform: 'darwin', settings: { edgeDockMode: 'autoHide' } });
   t.after(() => fixture.controller.stop());
   const peek = fixture.windowFor('peek');
   const rail = fixture.windowFor('rail');
   const tick = () => new Promise((resolve) => setTimeout(resolve, 120));
   assert.equal(peek.ignoreMouse, true, 'the margin passes clicks to the app beneath');
+  assert.equal(peek.forwardMouse, true, 'with the pointer\'s moves still reaching the page');
 
   // Inside the window but beside the handle: still passed through, and not the
   // handle's fast reveal.
@@ -560,6 +561,41 @@ test('the handle window lets the pointer through except over the handle itself',
     took = peek.ignoreMouse === false;
   }
   assert.equal(took, true, 'the handle takes the pointer');
+});
+
+test('a pointer report from the page takes the pointer without waiting for the cursor poll', async (t) => {
+  const fixture = createFixture({ platform: 'darwin', settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+  const y = peek.bounds.y + peek.bounds.height / 2;
+  // Let the first poll see the pointer far away, then report it at once.
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  fixture.screen.point = { x: peek.bounds.x + peek.bounds.width - 1, y };
+  fixture.ipcMain.emit('edgeDock:pointer', { sender: peek.webContents });
+  assert.equal(peek.ignoreMouse, false, 'on the handle');
+
+  fixture.screen.point = { x: peek.bounds.x, y: peek.bounds.y + 1 };
+  fixture.ipcMain.emit('edgeDock:pointer', { sender: peek.webContents });
+  assert.equal(peek.ignoreMouse, true, 'and lets it through again in the margin');
+  assert.equal(peek.forwardMouse, true);
+
+  // Only the handle's own page speaks for it.
+  fixture.screen.point = { x: peek.bounds.x + peek.bounds.width - 1, y };
+  fixture.ipcMain.emit('edgeDock:pointer', { sender: fixture.windowFor('rail').webContents });
+  assert.equal(peek.ignoreMouse, true);
+});
+
+test('the Windows handle window takes the pointer and leaves the margin to its region', async (t) => {
+  const fixture = createFixture({ platform: 'win32', settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+  assert.equal(peek.ignoreMouse, false);
+  assert.equal(peek.forwardMouse, false, 'no system-wide mouse hook');
+  assert.ok(peek.shapeCalls.length > 0, 'the region is what clips the hit test');
+
+  fixture.screen.point = { x: peek.bounds.x, y: peek.bounds.y + 1 };
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(peek.ignoreMouse, false, 'leaving the handle does not turn pass-through back on');
 });
 
 test('the cursor poll speeds up in the approach zone so the handle takes the pointer sooner', async (t) => {
@@ -649,7 +685,7 @@ test('a rail payload carries the reveal that keys the entrance', (t) => {
 // used to put the handle back on top of an open rail: a settings push ran showPeek
 // whatever the rail was doing, and the handle faded in over the cells.
 test('a peek payload carries the handle, and an open rail keeps it away', (t) => {
-  const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' } });
+  const fixture = createFixture({ platform: 'darwin', settings: { edgeDockMode: 'autoHide' } });
   t.after(() => fixture.controller.stop());
   const peek = fixture.windowFor('peek');
 

@@ -547,6 +547,18 @@ if (surface === 'peek') root.addEventListener('click', () => {
   if (state.payload?.peekMode !== 'refresh') bridge.click(null);
 });
 
+// On macOS the handle's window passes the pointer through with its moves still
+// forwarded here, so reporting them lets the main process take the pointer as
+// it reaches the handle rather than at its next cursor poll. The report carries
+// no position: the main process reads the cursor itself.
+if (surface === 'peek') {
+  const reportPointer = () => {
+    if (state.payload?.peekMode !== 'refresh') bridge.pointer();
+  };
+  document.addEventListener('mousemove', reportPointer);
+  document.documentElement.addEventListener('mouseleave', reportPointer);
+}
+
 // ---- Rail ----------------------------------------------------------------
 
 function ringNode(remainingPercent, color, mark) {
