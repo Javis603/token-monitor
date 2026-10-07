@@ -369,7 +369,6 @@ const {
   drainPendingUsageClientRefreshes: drainPendingUsageClientRefreshQueue,
   runLimitInvalidation,
   runManualDeviceRefresh,
-  runManualLimitsRefresh,
   settingsLimitInvalidationPlan
 } = require('./deviceRuntimeCoordinator');
 const {
@@ -5519,14 +5518,14 @@ function refreshEdgeDockForecast() {
     .finally(() => { edgeDockForecastInFlight = false; });
 }
 
-function canRefreshEdgeDockLimits() {
-  return ownsUsageRuntime() && Boolean(deviceRuntimeHandle) && settings?.limitsEnabled !== false
-    && parseLimitProviders(settings?.limitProviders ?? defaultLimitProviders()).length > 0;
+function canRefreshEdgeDockStats() {
+  return ownsUsageRuntime();
 }
 
-async function refreshLimitsFromEdgeDock() {
-  if (!canRefreshEdgeDockLimits()) return { ok: false, error: 'No local limits runtime' };
-  return runManualLimitsRefresh(deviceRuntimeHandle);
+async function refreshStatsFromEdgeDock() {
+  if (!canRefreshEdgeDockStats()) return { ok: false, error: 'No local usage runtime' };
+  await refreshManualStats();
+  return { ok: true };
 }
 
 function edgeDockCellsFor(visibleStats) {
@@ -5653,8 +5652,8 @@ function ensureEdgeDockController() {
     // The dock card's Switch button runs the same swap the Limits view does,
     // then repaints from the refreshed records.
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
-    canRefreshLimits: () => canRefreshEdgeDockLimits(),
-    onRefreshLimits: () => refreshLimitsFromEdgeDock(),
+    canRefreshLimits: () => canRefreshEdgeDockStats(),
+    onRefreshLimits: () => refreshStatsFromEdgeDock(),
     onOpenResetForecastSource: () => {
       if (isAllowedExternalUrl(CODEX_RESET_FORECAST_SOURCE_URL)) void shell.openExternal(CODEX_RESET_FORECAST_SOURCE_URL);
     },
@@ -6307,6 +6306,22 @@ async function writeExportTo(dir, periods, options = {}) {
   return { ok: true };
 }
 
+let manualStatsRefreshInFlight = null;
+
+function refreshManualStats() {
+  const runtime = deviceRuntimeHandle;
+  const generation = hubModeGeneration;
+  if (manualStatsRefreshInFlight?.runtime === runtime && manualStatsRefreshInFlight.generation === generation) {
+    return manualStatsRefreshInFlight.promise;
+  }
+  const request = { runtime, generation, promise: null };
+  request.promise = fetchStats({ force: true, forceHistory: true, forceSelfSync: true }).finally(() => {
+    if (manualStatsRefreshInFlight === request) manualStatsRefreshInFlight = null;
+  });
+  manualStatsRefreshInFlight = request;
+  return request.promise;
+}
+
 async function fetchStats(options = {}) {
   const requestGeneration = hubModeGeneration;
   const requestHubIdentity = currentHubStatsIdentity(settings?.hubMode === 'icloud' ? 'icloud' : 'client');
@@ -6320,7 +6335,6 @@ async function fetchStats(options = {}) {
     await runManualDeviceRefresh(deviceRuntimeHandle, {
       forceHistory: Boolean(options?.forceHistory),
       forceSelfSync: Boolean(options?.forceSelfSync),
-      waitForLimits: options?.feedback === true && canRefreshEdgeDockLimits(),
       onLimitsError: (error) => console.log(`[limits-runtime] manual refresh failed: ${error.message}`)
     });
   }
@@ -7827,7 +7841,7 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('stats:get', async (_event, options) => {
-    const stats = await fetchStats(options);
+    const stats = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);

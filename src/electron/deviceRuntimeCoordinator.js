@@ -15,26 +15,11 @@ async function runLimitInvalidation(runtime, scope, reason = 'credential-change'
   return runtime.refreshLimits(scope, reason);
 }
 
-async function runManualLimitsRefresh(runtime) {
-  // One full refresh resets the interval; inspect both dispatch results and the
-  // final snapshot, which can include providers added while probes were running.
-  const response = await runtime.refreshLimits({}, 'manual', { includeProviderResults: true });
-  if (!response?.results?.length) return { ok: false };
-  const failed = response.results.some((result) => result.superseded || result.deferred || result.error)
-    || response.snapshot?.providers?.some((row) => !['ok', 'notConfigured', 'unsupported'].includes(row.status));
-  return { ok: !failed };
-}
-
 async function runManualDeviceRefresh(runtime, options = {}) {
   if (!runtime) return;
-  const limitsTask = (options.waitForLimits === true
-    ? runManualLimitsRefresh(runtime)
-    : Promise.resolve(runtime.refreshLimits({ all: true }, 'manual')))
-    .catch((error) => {
-      options.onLimitsError?.(error);
-      return { ok: false };
-    });
-  const usageTask = Promise.resolve().then(() => runtime.tick('manual', {
+  const limitsTask = Promise.resolve(runtime.refreshLimits({ all: true }, 'manual'));
+  limitsTask.catch((error) => options.onLimitsError?.(error));
+  await runtime.tick('manual', {
     forceHistory: options.forceHistory === true,
     // Cursor and Antigravity only move when their sync subprocess runs, and that
     // is throttled to once per 5 minutes. Without this the refresh button cannot
@@ -42,16 +27,7 @@ async function runManualDeviceRefresh(runtime, options = {}) {
     // a throttle. Opt-in for the same reason forceHistory is: the settings and
     // account flows refresh constantly and must not pay for the spawns.
     forceSelfSync: options.forceSelfSync === true
-  }));
-  if (options.waitForLimits === true) {
-    const [usage, limits] = await Promise.allSettled([usageTask, limitsTask]);
-    if (usage.status === 'rejected') throw usage.reason;
-    if (usage.value !== true) throw new Error('Could not refresh local usage');
-    if (limits.status === 'rejected') throw limits.reason;
-    if (limits.value?.ok !== true) throw new Error('Could not refresh local limits');
-  } else {
-    await usageTask;
-  }
+  });
 }
 
 function canRefreshUsageRuntime(mode, isExternalAgentActive) {
@@ -74,6 +50,5 @@ module.exports = {
   drainPendingUsageClientRefreshes,
   runLimitInvalidation,
   runManualDeviceRefresh,
-  runManualLimitsRefresh,
   settingsLimitInvalidationPlan
 };

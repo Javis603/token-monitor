@@ -53,7 +53,7 @@ test('targeted rescans stay strict while Cursor credential refresh is best effor
 });
 
 for (const mode of ['local', 'client', 'host']) {
-  test(`${mode} settings refresh awaits usage without waiting for limits`, async () => {
+  test(`${mode} manual refresh awaits usage but never waits for limits`, async () => {
     const usage = deferred();
     const limits = deferred();
     const calls = [];
@@ -180,103 +180,6 @@ test('manual refresh reports a late limits failure without rejecting completed u
   await Promise.resolve();
   assert.deepEqual(errors, ['quota offline']);
 });
-
-test('App button awaits both usage and limits without serializing their work', async () => {
-  for (const first of ['usage', 'limits']) {
-    const usage = deferred();
-    const limits = deferred();
-    const calls = [];
-    const runtime = {
-      refreshLimits(...args) { calls.push(['limits', ...args]); return limits.promise; },
-      tick(...args) { calls.push(['usage', ...args]); return usage.promise; }
-    };
-    let completed = false;
-    const refresh = runManualDeviceRefresh(runtime, {
-      waitForLimits: true, forceHistory: true, forceSelfSync: true
-    }).then(() => { completed = true; });
-    await Promise.resolve();
-    assert.deepEqual(calls, [
-      ['limits', {}, 'manual', { includeProviderResults: true }],
-      ['usage', 'manual', { forceHistory: true, forceSelfSync: true }]
-    ]);
-    const response = { results: [{ provider: 'claude' }], snapshot: { providers: [{ provider: 'claude', status: 'ok' }] } };
-    if (first === 'usage') usage.resolve(true);
-    else limits.resolve(response);
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(completed, false, `finishing ${first} alone must not settle the button`);
-    usage.resolve(true);
-    limits.resolve(response);
-    await refresh;
-    assert.equal(completed, true);
-  }
-});
-
-for (const response of [
-  { results: [{ provider: 'claude', deferred: true }], snapshot: { providers: [{ provider: 'claude', status: 'ok' }] } },
-  { results: [{ provider: 'claude', superseded: true }], snapshot: { providers: [] } },
-  { results: [{ provider: 'claude', error: new Error('offline') }], snapshot: { providers: [] } },
-  { results: [{ provider: 'claude' }], snapshot: { providers: [{ provider: 'claude', status: 'ok' }, { provider: 'kimi', status: 'unavailable' }] } }
-]) {
-  test(`App button rejects unsuccessful limits completion ${JSON.stringify(response)}`, async () => {
-    let ticked = false;
-    const runtime = {
-      refreshLimits: async () => response,
-      tick: async () => { ticked = true; return true; }
-    };
-    await assert.rejects(runManualDeviceRefresh(runtime, { waitForLimits: true }), /Could not refresh local limits/);
-    assert.equal(ticked, true, 'limits failure must not prevent usage refresh');
-  });
-}
-
-test('App button reports rejected limits probes after usage completes', async () => {
-  const usage = deferred();
-  const errors = [];
-  const runtime = {
-    refreshLimits: async () => { throw new Error('quota offline'); },
-    tick: () => usage.promise
-  };
-  const refresh = runManualDeviceRefresh(runtime, {
-    waitForLimits: true, onLimitsError: (error) => errors.push(error.message)
-  });
-  const rejected = assert.rejects(refresh, /Could not refresh local limits/);
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(errors, ['quota offline']);
-  usage.resolve(true);
-  await rejected;
-});
-
-test('App button accepts non-actionable unconfigured and unsupported provider rows', async () => {
-  await runManualDeviceRefresh({
-    refreshLimits: async () => ({
-      results: [{ provider: 'claude' }, { provider: 'kimi' }],
-      snapshot: { providers: [{ provider: 'claude', status: 'notConfigured' }, { provider: 'kimi', status: 'unsupported' }] }
-    }),
-    tick: async () => true
-  }, { waitForLimits: true });
-});
-
-for (const outcome of ['false', 'reject']) {
-  test(`App button waits for limits before reporting usage ${outcome}`, async () => {
-    const limits = deferred();
-    const error = new Error('usage transport failed');
-    let completed = false;
-    const refresh = runManualDeviceRefresh({
-      refreshLimits: () => limits.promise,
-      tick: async () => { if (outcome === 'reject') throw error; return false; }
-    }, { waitForLimits: true });
-    const observed = refresh.then(
-      () => { completed = true; return null; },
-      (failure) => { completed = true; return failure; }
-    );
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(completed, false, 'usage failure must not finish feedback while limits are pending');
-    limits.resolve({ results: [{ provider: 'claude' }], snapshot: { providers: [{ provider: 'claude', status: 'ok' }] } });
-    const failure = await observed;
-    assert.ok(failure instanceof Error);
-    if (outcome === 'reject') assert.equal(failure, error);
-    else assert.match(failure.message, /Could not refresh local usage/);
-  });
-}
 
 test('settings changes plan scoped clear-before-refresh invalidations', () => {
   const scopes = [{ provider: 'deepseek' }, { provider: 'zai', accountKey: 'work' }];
