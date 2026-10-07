@@ -56,9 +56,8 @@ const RING_RADIUS = 19;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 const DRAG_THRESHOLD_PX = 4;
 const BREAKDOWN_VISIBLE_ROWS = 6;
-// The period of `edge-dock-mark-breathe` in dock.css, which the running halo's phase
-// is taken modulo (see ringNode). A test holds the two numbers together.
-const BREATH_MS = 2600;
+// Keep the phase anchor in sync with edge-dock-running-spin in dock.css.
+const RUNNING_SPIN_MS = 1400;
 
 const root = document.getElementById('edgeDockRoot');
 const query = new URLSearchParams(window.location.search);
@@ -589,17 +588,21 @@ function ringNode(remainingPercent, color, mark) {
   fill.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE * (1 - remaining / 100)));
   if (remainingPercent === null) fill.style.opacity = '0';
   svg.append(track, fill);
-  // The halo the running state breathes (see dock.css). It is always emitted and
-  // transparent until the cell is marked running, so what decides whether it shows is
-  // the cell's state alone. What it cannot carry is its own phase: renderRail rebuilds
-  // every cell from the payload on every push, so a fresh node restarts the breath at
-  // 0% each time - and the pushes are closest together exactly while a session is
-  // working, which is when this mark is worth anything. Anchoring the phase to the
-  // clock instead puts it somewhere a rebuild cannot reach, and the swap between the
-  // two nodes is invisible because they are at the same point of the same cycle.
-  const glow = el('span', 'edge-dock-ring-glow');
-  glow.style.animationDelay = `-${Date.now() % BREATH_MS}ms`;
-  ring.append(svg, glow, mark);
+  // A separate inner arc reports work without moving the quota reading. Rail
+  // pushes rebuild these nodes, so anchor rotation to the clock to avoid restarting
+  // the spinner each time new usage arrives.
+  const spinner = document.createElementNS(SVG_NS, 'svg');
+  spinner.setAttribute('class', 'edge-dock-ring-spinner');
+  spinner.setAttribute('viewBox', '0 0 42 42');
+  spinner.setAttribute('aria-hidden', 'true');
+  spinner.style.animationDelay = `-${Date.now() % RUNNING_SPIN_MS}ms`;
+  const arc = document.createElementNS(SVG_NS, 'circle');
+  arc.setAttribute('cx', '21');
+  arc.setAttribute('cy', '21');
+  arc.setAttribute('r', '14');
+  arc.setAttribute('stroke-dasharray', `${7 * Math.PI} ${21 * Math.PI}`);
+  spinner.append(arc);
+  ring.append(svg, spinner, mark);
   return ring;
 }
 
@@ -607,20 +610,10 @@ function providerCellNode(cell) {
   const node = el('div', 'edge-dock-cell');
   node.dataset.status = cell.status;
   // Work in flight for this provider's tools, asked of the rows at paint time for
-  // the same reason the sessions cell asks: running expires on a clock, so a count
-  // frozen into the payload would keep the mark breathing after the work stopped.
-  // The glow rides the mark rather than the ring's arc on purpose. A running
-  // session is not proof that this quota is what is draining - the tokens may be
-  // billed to an API key or another endpoint entirely, which is the same reason
-  // local usage is not an adaptive-polling trigger - so it is a fact about the
-  // tool, not about the arc. Keeping it off the arc also keeps the signal's
-  // strength independent of how much quota is left (an arc-confined glow is
-  // faintest at 5%, which is exactly when it matters most), leaves the focused
-  // ring's own glow unambiguous, and stays readable on a stale cell, where the
-  // dimmed arc means "this number is not to be trusted" while the tool really is
-  // working. It is read from the cell's rows whatever the card draws of them: whether
-  // a tool is working is not the card's list, so hiding that list is not an off switch
-  // for this. An item that genuinely has no session rows never breathes.
+  // same reason the sessions cell asks: running expires on a clock. The inner
+  // spinner is independent of quota, since tokens may be billed to another
+  // endpoint. It also remains visible when the quota is empty or stale. Hiding
+  // the card's session list does not hide the running signal.
   const running = runningSessionSummary(cell.sessions).count;
   if (running > 0) node.dataset.running = 'yes';
   const color = providerColor(cell.provider);
@@ -648,7 +641,7 @@ function providerCellNode(cell) {
   // headline into whichever window is lowest this minute.
   value.dataset.severity = displaySeverity(cell.severityPercent ?? cell.remainingPercent);
   node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider)), value);
-  // The halo is decorative and carries no text, so the state it announces is
+  // The spinner is decorative and carries no text, so the state it announces is
   // spoken here instead, from the same reading it is drawn from.
   const spoken = [providerLabel(cell.provider), value.textContent];
   if (running > 0) spoken.push(t('edgeDock.runningCount', { count: running }));
@@ -1716,7 +1709,7 @@ bridge.onRender(render);
 // so this costs no IPC and asks the main process for nothing.
 // A cell whose reading moves with the sessions clock. Asked by "does it carry
 // rows" rather than by metric: the sessions item is not the only cell that reads
-// them any more - a provider cell breathes its mark while that tool is working,
+// them any more - a provider cell spins its inner arc while that tool is working,
 // and that has to stop on the same clock the count does.
 function cellReadsSessions(cell) {
   return Array.isArray(cell?.sessions) && cell.sessions.length > 0;

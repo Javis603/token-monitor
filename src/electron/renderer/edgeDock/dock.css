@@ -196,58 +196,25 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
 .edge-dock-cell[data-status="stale"] .edge-dock-ring-fill,
 .edge-dock-cell[data-status="error"] .edge-dock-ring-fill { opacity: 0.35; }
 
-/* Running: a halo behind the provider's mark while that tool has work in flight.
-   It sits on the mark and not on the arc because a running session does not prove
-   this quota is what is draining (the tokens may be billed elsewhere), so it is a
-   fact about the tool rather than about the reading - see providerCellNode for the
-   full reasoning.
-
-   Opacity and transform only: this is the one animation in the dock that runs
-   whenever work is in flight rather than only while a card is open, in an
-   always-on-top window, so it has to stay on the compositor. Animating the arc's
-   `drop-shadow` instead would repaint a blur every frame for the whole life of a
-   session.
-
-   The halo has to out-reach the glyph it sits behind, and only just: the mark is
-   17px across a 42px ring, so a glow that dies at the mark's own 8.5px half-width
-   is left with nothing to show beside the letterform but whatever comes through
-   its counters. The gradient carries no hold stop, so it is brightest at the
-   centre and spends itself from there out - and at 62% of the ring the last of
-   the colour lands at 9.4px, just clear of the glyph, with the band beside it
-   being the falloff's own tail. Holding colour out to a stop and spending the
-   falloff after it was what made an earlier cut read as a second, larger circle
-   behind the ring rather than as light around the mark. It stays sized against
-   the ring rather than the mark so the compact rail keeps the same proportion. */
-.edge-dock-ring-glow {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: 62%;
-  height: 62%;
-  border-radius: 50%;
+/* Running work has its own inner arc, independent of the quota ring. Only
+   transform animates; reduced motion leaves the same short arc still. */
+.edge-dock-ring-spinner {
   pointer-events: none;
   opacity: 0;
-  background: radial-gradient(closest-side, var(--ring-color, var(--accent)), transparent 72%);
-  transition: opacity 240ms ease;
 }
-/* The mark is an in-flow grid item and the halo is positioned, so without this the
-   halo paints over the glyph it is meant to sit behind - painting order puts a
-   positioned element above an in-flow sibling whatever the DOM order. Scoped to the
-   ring: the same class is drawn flat in the card's rows and its lists. */
-.edge-dock-ring .edge-dock-mark { position: relative; }
-/* The lit state is a still halo, and the keyframes only modulate it. Reduced
-   motion stops the animation but not the declaration, so it falls back to a
-   steady glow rather than to nothing - the same trade the session dot makes when
-   it swaps its spinner for a solid dot. The still value is the midpoint of the
-   breath, so the state that replaces the animation is the one the animation
-   spends most of its time near rather than either end of the swing. */
-.edge-dock-cell[data-running="yes"] .edge-dock-ring-glow {
-  opacity: 0.45;
-  animation: edge-dock-mark-breathe 2600ms ease-in-out infinite;
+.edge-dock-ring-spinner circle {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1.5;
+  stroke-linecap: round;
 }
-@keyframes edge-dock-mark-breathe {
-  0%, 100% { opacity: 0.24; transform: scale(0.93); }
-  50%      { opacity: 0.66; transform: scale(1.06); }
+.edge-dock-cell[data-running="yes"] .edge-dock-ring-spinner {
+  opacity: 1;
+  animation: edge-dock-running-spin 1400ms linear infinite;
+}
+@keyframes edge-dock-running-spin {
+  from { transform: rotate(-90deg); }
+  to { transform: rotate(270deg); }
 }
 
 /* The flare a quota refill lands with — the ring's counterpart to the meter's

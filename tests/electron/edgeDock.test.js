@@ -1818,7 +1818,7 @@ test('provider cards list the newest sessions of their own clients this month', 
   assert.deepEqual(hidden.sessions.map((entry) => entry.sessionId), ['t', 'b', 'd']);
 });
 
-// The card's list and the rail's breathing mark read the same rows, so a switch
+// The card's list and the rail's spinning arc read the same rows, so a switch
 // labelled "Show recent sessions in card" is a choice about the card. Emptying the
 // cell instead made it an off switch for the mark - a reading the label never
 // mentions, and one the card was never asked about.
@@ -2460,65 +2460,36 @@ test('the rail entrance moves the whole surface and stops under reduced motion',
   assert.match(dock, /if \(railReveal !== null && reveal !== railReveal\) playRailReveal\(\);/);
 });
 
-// The halo the running mark breathes is bounded on both sides, and both bounds are
-// invisible in a diff because every number involved is deliberate. It fades out too
-// early and it is already at zero where the glyph ends, showing only through the
-// counters of the letterform; it reaches too far and it stops reading as light around
-// the mark and becomes a second, larger circle behind the ring. The numbers were
-// re-tuned once by eye against the real stylesheet; these bounds are what has to hold
-// whatever they are re-tuned to.
-test('the running halo lights the mark without becoming the ring', () => {
+// The work indicator must fit between the provider mark and the quota reading,
+// including the corners of a square mark as the arc rotates around it.
+test('the running arc clears the mark and stays inside the quota ring', () => {
   const css = readRendererFile(path.join('edgeDock', 'dock.css')).replace(/\/\*[\s\S]*?\*\//g, ' ');
-  const ring = Number(css.match(/\n\.edge-dock-ring \{[^}]*?width: ([\d.]+)px/)[1]);
-  const mark = Number(css.match(/\n\.edge-dock-mark \{[^}]*?width: ([\d.]+)px/)[1]);
-  const arcWidth = Number(css.match(/\n\.edge-dock-ring-fill \{[^}]*?stroke-width: ([\d.]+)/)[1]);
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const arcRadius = Number(dock.match(/const RING_RADIUS = ([\d.]+);/)[1]);
-  const glow = css.slice(css.indexOf('.edge-dock-ring-glow {'), css.indexOf('.edge-dock-cell[data-running="yes"]'));
-  const size = Number(glow.match(/width: ([\d.]+)%/)[1]) / 100;
-  // Both gradient forms are legal here: a held stop (`colour 30%, transparent 100%`) and
-  // the plain falloff this uses (`colour, transparent 72%`), which holds nothing at all.
-  const stops = glow.match(/(?:([\d.]+)%, )?transparent ([\d.]+)%/);
-  assert.ok(stops, 'the halo should be a falloff this can read');
-  const hold = Number(stops[1] ?? 0) / 100;
-  const zero = Number(stops[2]) / 100;
-
-  const radius = (size * ring) / 2;
-  // It has to reach past the mark, or there is nothing beside the glyph to see.
-  assert.ok(radius * zero > mark / 2, `the halo is spent at ${radius * zero}px, inside the mark's ${mark / 2}px`);
-  // Anything that is held at full colour has to be held *under* the glyph, so what shows
-  // beside the letterform is always falloff rather than the flat edge of a disc.
-  assert.ok(hold * radius < mark / 2, `colour is held to ${hold * radius}px, past the mark's ${mark / 2}px`);
-  // And it has to be spent inside the arc, or the halo laps under the ring and the
-  // arc stops being the ring's outer edge - the arc is the quota reading, so a glow
-  // that reaches it reads as a fatter, brighter version of the same circle. The bound
-  // is the midpoint between the two landmarks this sits between: a halo that reaches
-  // past it has crossed from light around the glyph into a disc behind the ring.
-  const arcInner = arcRadius - arcWidth / 2;
-  assert.ok(
-    radius * zero < (mark / 2 + arcInner) / 2,
-    `the halo reaches ${radius * zero}px, into the ring's half of the space at ${(mark / 2 + arcInner) / 2}px`
-  );
+  const mark = Number(css.match(/\n\.edge-dock-mark \{[^}]*?width: ([\d.]+)px/)[1]);
+  const quotaWidth = Number(css.match(/\n\.edge-dock-ring-fill \{[^}]*?stroke-width: ([\d.]+)/)[1]);
+  const quotaRadius = Number(dock.match(/const RING_RADIUS = ([\d.]+);/)[1]);
+  const spinRadius = Number(dock.match(/arc\.setAttribute\('r', '([\d.]+)'\)/)[1]);
+  const spinWidth = Number(css.match(/\.edge-dock-ring-spinner circle \{[^}]*?stroke-width: ([\d.]+)/)[1]);
+  assert.ok(spinRadius - spinWidth / 2 > mark / Math.sqrt(2), 'the rotating arc must clear the mark corners');
+  assert.ok(spinRadius + spinWidth / 2 < quotaRadius - quotaWidth / 2, 'work and quota must have separate rings');
+  const spinner = css.slice(css.indexOf('.edge-dock-ring-spinner {'), css.indexOf('/* The flare'));
+  assert.match(spinner, /stroke: var\(--text\)/);
+  assert.match(spinner, /opacity: 0;/);
+  assert.match(spinner, /data-running="yes"[^}]*opacity: 1;/);
+  assert.doesNotMatch(spinner, /edge-dock-ring-fill/);
 });
 
-// The breath is the dock's longest-running animation and the rail rebuilds every cell
-// on every stats push, so the element it is declared on is new each time. A phase that
-// lived on that element restarted at 0% with each push - and the pushes come closest
-// together while a session is working, which is exactly when the mark is worth
-// something, so it could stutter or never reach the top of the swing at all. It is
-// anchored to the clock instead, which means the two numbers that anchor it have to
-// agree: the modulo has to be the animation's own period.
-test('the running halo resumes its phase rather than restarting on every repaint', () => {
+// Stats pushes rebuild the rail. The rotation must retain its phase across those
+// swaps, including frequent pushes while an agent is working.
+test('the running arc resumes its phase rather than restarting on every repaint', () => {
   const css = readRendererFile(path.join('edgeDock', 'dock.css'));
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const period = Number(css.match(/animation: edge-dock-mark-breathe (\d+)ms/)[1]);
-  assert.equal(Number(dock.match(/const BREATH_MS = (\d+);/)[1]), period, 'the phase anchor has to be the animation\'s period');
-  // A negative delay is what starts a fresh node partway through the cycle - the
-  // point of the whole thing, since a delay of zero is the restart this avoids.
-  assert.match(dock, /glow\.style\.animationDelay = `-\$\{Date\.now\(\) % BREATH_MS\}ms`;/);
-  // And it is set where the glow is made, so no node can reach the document without it.
+  const period = Number(css.match(/animation: edge-dock-running-spin (\d+)ms/)[1]);
+  assert.equal(Number(dock.match(/const RUNNING_SPIN_MS = (\d+);/)[1]), period, 'the phase anchor must use the animation period');
+  assert.match(dock, /spinner\.style\.animationDelay = `-\$\{Date\.now\(\) % RUNNING_SPIN_MS\}ms`;/);
   const ring = dock.slice(dock.indexOf('function ringNode('), dock.indexOf('function providerCellNode('));
-  assert.match(ring, /glow\.style\.animationDelay/);
+  assert.match(ring, /spinner\.style\.animationDelay/);
+  assert.match(ring, /spinner\.setAttribute\('aria-hidden', 'true'\)/);
 });
 
 // The handle's exit is a move now rather than a blink. The window's fade is the main
