@@ -595,6 +595,7 @@ function defaultSettings() {
     floatingBubbleCustomLayout: createDefaultTrayLayout(),
     floatingBubbleBounds: null,
     edgeDockEnabled: false,
+    edgeDockRefreshEnabled: false,
     edgeDockMode: 'autoHide',
     edgeDockHaptic: true,
     edgeDockWarnColors: false,
@@ -2599,6 +2600,7 @@ function readSettings() {
     merged.floatingBubbleContent = normalizeTrayContent(merged.floatingBubbleContent, 'icon');
     merged.floatingBubbleCustomLayout = normalizeTrayLayout(merged.floatingBubbleCustomLayout);
     merged.edgeDockEnabled = parseBoolean(merged.edgeDockEnabled, false);
+    merged.edgeDockRefreshEnabled = parseBoolean(merged.edgeDockRefreshEnabled, false);
     merged.edgeDockSide = normalizeEdgeDockSide(merged.edgeDockSide);
     merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
     merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
@@ -7476,6 +7478,7 @@ app.whenReady().then(() => {
       tokenRateMode: normalizeTokenRateMode(patch.tokenRateMode ?? settings.tokenRateMode),
       floatingBubbleEnabled: parseBoolean(patch.floatingBubbleEnabled ?? settings.floatingBubbleEnabled, false),
       edgeDockEnabled: parseBoolean(patch.edgeDockEnabled ?? settings.edgeDockEnabled, false),
+      edgeDockRefreshEnabled: parseBoolean(patch.edgeDockRefreshEnabled ?? settings.edgeDockRefreshEnabled, false),
       edgeDockSide: normalizeEdgeDockSide(patch.edgeDockSide ?? settings.edgeDockSide),
       edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
       edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),

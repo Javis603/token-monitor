@@ -609,7 +609,8 @@ function createEdgeDockController(deps) {
 
   function syncRefresh(current = layout()) {
     if (!current || !alive(windows.peek)) return;
-    const visible = railVisible && !drag && canRefreshLimits() === true
+    const visible = settings().edgeDockRefreshEnabled === true
+      && railVisible && !drag && canRefreshLimits() === true
       && (!alwaysVisible() || refreshHovered);
     if (!visible) {
       if (!windows.peek.isVisible() || refreshVisible) showPeekWindow(false, FADE_OUT_MS);
@@ -876,7 +877,7 @@ function createEdgeDockController(deps) {
     });
     ipcMain.handle('edgeDock:refreshLimits', async (event) => {
       if (surfaceFor(event.sender) !== 'peek' || peekMode !== 'refresh' || !refreshVisible || peekPaintPending
-        || canRefreshLimits() !== true || !onRefreshLimits) return { ok: false, error: 'Not refreshable' };
+        || settings().edgeDockRefreshEnabled !== true || canRefreshLimits() !== true || !onRefreshLimits) return { ok: false, error: 'Not refreshable' };
       if (!refreshInFlight) {
         refreshInFlight = Promise.resolve().then(() => onRefreshLimits())
           .catch((error) => ({ ok: false, error: error?.message || 'Refresh failed' }))

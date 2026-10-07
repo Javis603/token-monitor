@@ -115,6 +115,7 @@ function createFixture(options = {}) {
   FakeBrowserWindow.zOrder = [];
   const settings = {
     edgeDockEnabled: true,
+    edgeDockRefreshEnabled: true,
     edgeDockMode: 'always',
     edgeDockSide: 'right',
     edgeDockOffset: 0.3,
@@ -841,3 +842,35 @@ test('refresh follows the rail fallback when shaped Liquid Glass fails', (t) => 
   assert.ok(fixture.maskWindows.includes(peek));
   assert.equal(peek.vibrancyCalls.at(-1), 'hud');
 });
+
+for (const mode of ['always', 'autoHide']) {
+  test(`${mode} refresh is opt-in and removing it rejects stale refresh requests`, async (t) => {
+    let calls = 0;
+    const fixture = createFixture({
+      settings: { edgeDockMode: mode, edgeDockRefreshEnabled: undefined },
+      canRefreshLimits: () => true,
+      onRefreshLimits: async () => { calls += 1; return { ok: true }; }
+    });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const peek = fixture.windowFor('peek');
+    const handler = fixture.ipcMain.handlers.get('edgeDock:refreshLimits');
+    if (mode === 'autoHide') fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents });
+    fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 20 };
+    await new Promise((resolve) => setTimeout(resolve, 105));
+    assert.equal(peek.ignoreMouse, true, 'older settings without the preference keep refresh off');
+    assert.equal((await handler({ sender: peek.webContents })).ok, false);
+    fixture.settings.edgeDockRefreshEnabled = true;
+    fixture.controller.sync();
+    fixture.paintPeek();
+    assert.equal(peek.ignoreMouse, false);
+    assert.deepEqual(await handler({ sender: peek.webContents }), { ok: true });
+    fixture.settings.edgeDockRefreshEnabled = false;
+    // A settings change invalidates IPC even before the visibility sync.
+    assert.equal((await handler({ sender: peek.webContents })).ok, false);
+    fixture.controller.sync();
+    assert.equal(peek.ignoreMouse, true);
+    assert.equal(calls, 1);
+    assert.equal(rail.ignoreMouse, false, 'removing refresh leaves the rail available');
+  });
+}
