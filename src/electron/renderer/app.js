@@ -2369,7 +2369,6 @@ function updateRowLive(row, activityState, activityAt) {
 }
 
 function updateRow(row, { name, subtitle, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime, cloudThreadId, cloudOnly, costLabel: metricLabel }) {
-
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2468,8 +2467,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
   const costLabelText = formatCost(cost || 0, unpricedTokens);
   costEl.textContent = metricLabel || (tokenDataUnavailable === true ? ''
     : unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText);
-  costEl.title = metricLabel || (tokenDataUnavailable === true ? '' : costLabelText);
-
+  costEl.title = cloudOnly ? cloudSessionRowsApi.labels(currentLocale()).lifetime : (tokenDataUnavailable === true ? '' : costLabelText);
   // The row builder already applied the shared gate (recent enough to have a
   // reading), so this draws whatever arrived rather than re-deciding from
   // `running` - that second gate is exactly what made the dock card and this
@@ -2545,7 +2543,6 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
     ? (t('detailTokenUnavailable') || 'Unavailable')
     : formatNumber(value);
   const costLabel = metricLabel ? `, ${metricLabel}` : tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0, unpricedTokens)}`;
-
   sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
     interactive,
     hasAccordion,
