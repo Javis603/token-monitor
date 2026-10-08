@@ -291,7 +291,7 @@
       return {
         entries: devices
           .filter((device) => device?.stale !== true && device?.periods?.today && typeof device.periods.today === 'object')
-          .map((device) => ({ id: `device:${String(device.deviceId || 'unknown')}`, ...(device.hostname ? { name: device.hostname } : {}), period: device.periods.today })),
+          .map((device) => ({ id: `device:${String(device.deviceId || 'unknown')}`, name: String(device.deviceId || device.hostname || 'device'), period: device.periods.today })),
         source: 'devices:all'
       };
     }
@@ -306,7 +306,7 @@
       || (!syncMode ? stats?.periods?.today : null);
     if (localPeriod && typeof localPeriod === 'object') {
       return {
-        entries: [{ id: `device:${normalizedDeviceId}`, ...(localDevice?.hostname ? { name: localDevice.hostname } : {}), period: localPeriod }],
+        entries: [{ id: `device:${normalizedDeviceId}`, name: String(localDevice?.deviceId || localDevice?.hostname || normalizedDeviceId || 'device'), period: localPeriod }],
         source: `device:${normalizedDeviceId}`
       };
     }
