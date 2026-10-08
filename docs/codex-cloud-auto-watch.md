@@ -51,9 +51,9 @@ npm run verify
 
 Earlier device experiments used a separately installed test service. Their receipts are historical observer evidence, not deployment acceptance of this upstream change. No installer, test application or manual-capture entry is included in this proposal.
 
-A real initial automatic run found 66 hosted threads and selected a running existing task without any manually supplied UUID. It received a valid cumulative token event from that task without submitting a model request. A second real experiment intentionally closed only the observer socket; the loop created a new connection, rediscovered the catalog and reattached. No token event happened during the second test window, so numerical continuity across reconnection is covered by the offline regression rather than claimed as a second real positive sample.
+Automated tests cover null-source union, new tasks, subagent relationships, active/idle selection, no duplicate resumes, counters before resume response, reconnect, account isolation, capacity, permission failures, process lock, storage bounds and lifecycle shutdown. These fixtures do not establish real-account capture completeness or numerical continuity across a real service reconnection.
 
-The actual counts, opaque thread IDs and per-run receipts are retained in private task-notes outside the repository. Automated tests cover null-source union, new tasks, subagent relationships, active/idle selection, no duplicate resumes, counters before resume response, reconnect, account isolation, capacity, permission failures, process lock, storage bounds, lifecycle shutdown. No synthetic test counter is presented as user usage.
+Account scopes use a deterministic PBKDF2-HMAC-SHA256 identifier (600,000 iterations, a v2 domain salt, account and user IDs only). The single-entry in-memory cache contains no access token; credential-file changes still invalidate a connection. This is an opaque scope identifier, not a stored password verifier. Old SHA-256 scope reports/ledger entries are deliberately not relabeled or combined: a newly generated v2 report is required, with a new TOTAL-only baseline. Installed-app history migration and restarting a deployed observer remain outside this source-only validation.
 
 ## Limits that remain
 

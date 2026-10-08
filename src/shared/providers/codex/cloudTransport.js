@@ -5,13 +5,25 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createHash } = require('node:crypto');
+const { createHash, pbkdf2Sync } = require('node:crypto');
 const { error, identifier } = require('./cloudUsage');
 const MAX_BYTES = 4_000_000;
 const WS_URL = 'wss://codex-cloud-backend.chatgpt.com/';
 const USAGE_ORIGIN = 'https://chatgpt.com';
 const ROUTES = Object.freeze({ estimates: '/backend-api/wham/usage/thread-estimates/query', quotas: '/backend-api/wham/usage/thread_usage/query_v2' });
 const READ_METHODS = new Set(['thread/list', 'thread/read', 'thread/turns/list']);
+let lastScope = null;
+function scopeFingerprint(accountId, userId) {
+  // Reports need a stable, opaque identity across the observer and Electron.
+  // Derive only from account/user identifiers, never OAuth token contents.
+  // The domain salt distinguishes this v2 identifier from the old fast hash.
+  const identity = JSON.stringify([accountId, userId]);
+  if (lastScope?.identity !== identity) {
+    lastScope = { identity, fingerprint: pbkdf2Sync(identity, 'token-monitor/codex-cloud-scope/v2', 600000, 32, 'sha256').toString('hex') };
+  }
+  // Cache one identity so hot credential-change checks do not repeat the KDF.
+  return lastScope.fingerprint;
+}
 function readJson(file, maxBytes) {
   let fd;
   try {
@@ -38,7 +50,7 @@ function loadCredential(home) {
     if (typeof user === 'string' && user) { userId = user; break; }
   }
   if (c.isFedrampAccount) throw error('UNSUPPORTED_ACCOUNT_ROUTE');
-  return { ...c, userId, fileHash: hash, file, scopeFingerprint: createHash('sha256').update(JSON.stringify([c.accountId, userId])).digest('hex') };
+  return { ...c, userId, fileHash: hash, file, scopeFingerprint: scopeFingerprint(c.accountId, userId) };
 }
 function cachedReferences(home, credential) {
   // Never treat a stale/mismatched desktop cache as live service inventory.

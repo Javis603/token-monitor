@@ -3,7 +3,7 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { collectCloudUsage, reference, turnPage, estimates, quotas, summary, page, error } = require('../../src/shared/providers/codex/cloudUsage');
-const { CloudTransport, cachedReferences, ROUTES, WS_URL } = require('../../src/shared/providers/codex/cloudTransport');
+const { CloudTransport, loadCredential, cachedReferences, ROUTES, WS_URL } = require('../../src/shared/providers/codex/cloudTransport');
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const NOW = Date.UTC(2026, 9, 5); const seconds = NOW / 1000;
 const thread = (n, extra = {}) => ({ id: id(n), updatedAt: seconds - 10, source: null, ...extra });
@@ -121,6 +121,23 @@ test('account mismatch cannot seed cached dot associations', (t) => {
   fs.writeFileSync(path.join(home, '.codex-global-state.json'), JSON.stringify({ 'electron-persisted-atom-state': { 'cloud-aeon-sidebar-cache-v1': cache } }));
   assert.equal(cachedReferences(home, { accountId: 'wrong', userId: 'u' }).length, 0); assert.equal(cachedReferences(home, { accountId: 'a', userId: null }).length, 0);
   assert.equal(cachedReferences(home, { accountId: 'a', userId: 'u' })[0].delegationParentId, id(2));
+});
+test('opaque cloud scope survives token refresh and process restart but separates accounts and users', (t) => {
+  const { spawnSync } = require('node:child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cloud-identity-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const jwt = (user) => `fixture.${Buffer.from(JSON.stringify({ user_id: user })).toString('base64url')}.fixture`;
+  const write = (account, user, access = 'fixture-access-token-0001') => fs.writeFileSync(path.join(home, 'auth.json'), JSON.stringify({ tokens: { account_id: account, access_token: access, id_token: jwt(user) } }));
+  write(id(90), 'fixture-user'); const first = loadCredential(home);
+  assert.match(first.scopeFingerprint, /^[a-f0-9]{64}$/);
+  write(id(90), 'fixture-user', 'fixture-access-token-0002'); const refreshed = loadCredential(home);
+  assert.equal(refreshed.scopeFingerprint, first.scopeFingerprint);
+  assert.notEqual(refreshed.fileHash, first.fileHash);
+  const restarted = spawnSync(process.execPath, ['-e', "process.stdout.write(require(process.argv[1]).loadCredential(process.argv[2]).scopeFingerprint)", require.resolve('../../src/shared/providers/codex/cloudTransport'), home], { encoding: 'utf8', timeout: 10000 });
+  assert.equal(restarted.status, 0, restarted.stderr);
+  assert.equal(restarted.stdout, first.scopeFingerprint);
+  write(id(91), 'fixture-user'); assert.notEqual(loadCredential(home).scopeFingerprint, first.scopeFingerprint);
+  write(id(90), 'fixture-other-user'); assert.notEqual(loadCredential(home).scopeFingerprint, first.scopeFingerprint);
 });
 function fixtureDeps(behavior = {}) {
   const trace = []; let cred = { accountId: id(90), accessToken: 'fixture-not-a-real-token', userId: 'fixture-user', fileHash: 'fixture-hash', scopeFingerprint: 'fixture-scope' };
