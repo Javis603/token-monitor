@@ -8,6 +8,8 @@ The Sessions integration exposes a Settings toggle for an already installed macO
 
 A foreground alternative is:
 
+The on-disk foreground observer currently requires Linux/macOS POSIX ownership and private-mode checks. Windows ACL-backed observer storage is not implemented: its ordinary writable-directory mode is refused, and existing lock evidence is preserved. Windows CI still exercises the cloud row adapter, account/privacy bridge and injected-sink monitoring loop; passing those checks does not establish a working Windows capture service.
+
 ```sh
 node scripts/codex-cloud-auto-watch.js --acknowledge-auto-attach
 ```
