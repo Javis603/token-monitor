@@ -85,7 +85,8 @@ module.exports = {
     ],
     // The `field` shorthand branch is what maps `url` onto `openUrl`; the
     // fields branch passes openUrl through untouched, so name it directly.
-    openUrl: { url: 'https://platform.stepfun.com/plan-usage' }
+    // `/step-plan` is the live quota page — `/plan-usage` in older docs 404s.
+    openUrl: { url: 'https://platform.stepfun.com/step-plan' }
   },
-  urlPolicy: [{ hosts: ['platform.stepfun.com'], exactPaths: ['/plan-usage'] }]
+  urlPolicy: [{ hosts: ['platform.stepfun.com'], exactPaths: ['/step-plan'] }]
 };

@@ -354,7 +354,7 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://commandcode.ai/',
     'https://dashboard.zed.dev/',
     'https://console.typesafe.ai/settings/billing',
-    'https://platform.stepfun.com/plan-usage',
+    'https://platform.stepfun.com/step-plan',
     'https://ollama.com/settings',
     'https://www.ollama.com/signin',
     'https://kimi.com/code',

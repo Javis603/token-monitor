@@ -5,15 +5,23 @@ const { normalizeLimitProvider } = require('../../limits/core');
 const { errorWithStatus, numberOrNull, providerStatusFromError } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
-const { loginStepFun, normalizeOasisToken } = require('./login');
 
 const ORIGIN = 'https://platform.stepfun.com';
 const RATE_URL = `${ORIGIN}/api/step.openapi.devcenter.Dashboard/QueryStepPlanRateLimit`;
 const PLAN_URL = `${ORIGIN}/api/step.openapi.devcenter.Dashboard/GetStepPlanStatus`;
-const DEFAULT_WEBID = 'c8a1002d2c457e758785a9979832217c7c0b884c';
+
+// Oasis-Token is a JWT; the dashboard accepts it as a bare cookie value or with
+// the `Oasis-Token:` prefix a devtools copy usually carries. Normalizing here
+// keeps a whole pasted cookie jar usable instead of only its token field.
+function normalizeOasisToken(value) {
+  const raw = String(value || '').trim();
+  const fromCookie = /(?:^|;)\s*Oasis-Token=([^;]+)/iu.exec(raw)?.[1];
+  const token = String(fromCookie || raw).replace(/^Oasis-Token\s*:\s*/iu, '').trim();
+  return token && !/[\u0000-\u001f\u007f;]/u.test(token) ? token : '';
+}
 
 // A pasted or environment token still wins when present — it is the manual
-// escape hatch. Otherwise the stored username + password drive loginStepFun(),
+// escape hatch. Otherwise the stored username + password drive the sign-in,
 // which is what keeps the quota live: an Oasis-Token is a short-lived session
 // JWT with no refresh, so a stored token alone expires and the provider goes
 // unauthorized until the user re-pastes one. Cached tokens are only used when
@@ -34,16 +42,20 @@ function stepfunCredentials(env = process.env, options = {}) {
   return username && password ? { username, password } : null;
 }
 
+// `oasis-webid` must be the device id this session was registered under — the
+// site issues it from RegisterDevice and rejects a foreign one, so there is no
+// usable constant. Read it off the token payload when it is there; otherwise
+// '' and the caller omits the header instead of guessing.
 function deviceId(token) {
-  for (const jwt of token.split('...').reverse()) {
+  for (const jwt of String(token || '').split('...').reverse()) {
     const part = jwt.split('.')[1];
     if (!part || !/^[A-Za-z0-9_-]+$/u.test(part)) continue;
     try {
       const id = JSON.parse(Buffer.from(part, 'base64url').toString('utf8')).device_id;
       if (typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/u.test(id)) return id;
-    } catch { /* A malformed JWT may still be accepted with the default web id. */ }
+    } catch { /* Not a JWT payload — try the next segment. */ }
   }
-  return DEFAULT_WEBID;
+  return '';
 }
 
 function fraction(value) {
@@ -115,37 +127,72 @@ async function fetchStepfunLimits(options = {}, deps = {}) {
   const run = deps.fetch || fetch;
   const credentials = stepfunCredentials(env, options);
   // An explicit/env token is authoritative when present; otherwise a cached
-  // token from a previous password login keeps the probe cheap, and the
-  // credentials are what make it renewable.
+  // token from a previous sign-in keeps the probe cheap, and the credentials
+  // are what make it renewable.
   let token = stepfunToken(env, options) || (deps.cachedToken ? normalizeOasisToken(deps.cachedToken) : '');
   if (!token && !credentials) {
     return normalizeLimitProvider({ ...base, status: 'notConfigured', windows: [] });
   }
 
+  // Signing in needs a browser: the site's password login hangs off
+  // GlobalPassportService, which answers 403 with an empty body to every
+  // non-browser caller (Ping, a known-good endpoint, fails the same way) while
+  // the WAF token in the ingress jar only clears once page JavaScript runs.
+  // main.js injects the Electron implementation through deps.signIn; the headless
+  // agent has no BrowserWindow, so there the credentials simply cannot renew a
+  // token and a manual paste stays the only lane.
+  const signIn = typeof deps.signIn === 'function' ? deps.signIn : null;
+  // The window gets the full budget; the wrapper deadline outlives it so a slow
+  // WAF challenge is reported as the sign-in failing, not as a probe timeout
+  // that says nothing about what happened.
+  const loginTimeoutMs = Number(deps.stepfunLoginTimeoutMs || 110000);
+  const login = async () => {
+    if (!signIn) {
+      const error = new Error('StepFun sign-in needs the desktop app; paste an Oasis-Token instead');
+      error.status = 'unavailable';
+      throw error;
+    }
+    const fresh = await runWithProbeDeadline(
+      ({ signal }) => signIn({ ...credentials, signal, logger: deps.logger, timeoutMs: loginTimeoutMs }),
+      { signal: deps.signal, deadlineMs: loginTimeoutMs + 15000 }
+    );
+    // The sign-in answers with a bare token, or with a session descriptor when
+    // the implementation also read the device id the site issued next to it.
+    // Accept both so `oasis-webid` can be a real value rather than a guess.
+    const value = normalizeOasisToken(typeof fresh === 'string' ? fresh : fresh?.token);
+    if (!value) {
+      const error = new Error('StepFun sign-in returned no token');
+      error.status = 'unavailable';
+      throw error;
+    }
+    if (deps.onTokenRefreshed) {
+      try { deps.onTokenRefreshed(value); } catch { /* persisting is best-effort */ }
+    }
+    return { token: value, webid: String(fresh?.webid || '').trim() };
+  };
+
   try {
-    const webid = deviceId(token);
+    // Mint a token before probing when we have credentials and none cached:
+    // an expired cached token would otherwise cost a wasted 401 round trip.
+    let webid = '';
+    if (!token && credentials) {
+      const session = await login();
+      token = session.token;
+      webid = session.webid;
+    }
+    if (!webid) webid = deviceId(token);
+
     const request = async (url, signal, activeToken) => {
       const response = await run(url, {
         method: 'POST', body: '{}', signal, redirect: 'error', credentials: 'omit',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json',
           'User-Agent': BROWSER_USER_AGENT, 'oasis-appid': '10300', 'oasis-platform': 'web',
-          'oasis-webid': webid, Cookie: `Oasis-Token=${activeToken}; Oasis-Webid=${webid}` }
+          ...(webid ? { 'oasis-webid': webid } : {}),
+          Cookie: `Oasis-Token=${activeToken}${webid ? `; Oasis-Webid=${webid}` : ''}` }
       });
       if (!response.ok) throw errorWithStatus(response.status === 401 || response.status === 403 ? 'unauthorized' : response.status === 429 ? 'sourceRateLimited' : 'unavailable', `StepFun returned ${response.status}`);
       try { return await response.json(); } catch { throw errorWithStatus('unavailable', 'Invalid StepFun response'); }
     };
-
-    // Mint a token before probing when we have credentials and none cached:
-    // an expired cached token would otherwise cost a wasted 401 round trip.
-    if (!token && credentials) {
-      token = await runWithProbeDeadline(
-        ({ signal }) => loginStepFun(credentials, { fetch: run, signal, webid }),
-        { signal: deps.signal, deadlineMs: Number(deps.stepfunLoginTimeoutMs || 20000) }
-      );
-      if (deps.onTokenRefreshed) {
-        try { deps.onTokenRefreshed(token); } catch { /* persisting is best-effort */ }
-      }
-    }
 
     let body;
     try {
@@ -155,16 +202,15 @@ async function fetchStepfunLimits(options = {}, deps = {}) {
       );
     } catch (error) {
       // A 401/403 on a token we did not mint this call means the cached one
-      // aged out. Re-login once and retry, so a stale cache self-heals instead
-      // of waiting for the next manual paste.
+      // aged out. Sign in once more and retry, so a stale cache self-heals
+      // instead of waiting for the next manual paste.
       if (!credentials || providerStatusFromError(error) !== 'unauthorized') throw error;
-      token = await runWithProbeDeadline(
-        ({ signal }) => loginStepFun(credentials, { fetch: run, signal, webid }),
-        { signal: deps.signal, deadlineMs: Number(deps.stepfunLoginTimeoutMs || 20000) }
-      );
-      if (deps.onTokenRefreshed) {
-        try { deps.onTokenRefreshed(token); } catch { /* persisting is best-effort */ }
-      }
+      const session = await login();
+      token = session.token;
+      // Re-read the device id with it: reusing the aged-out session's value
+      // would fail the retry for a second, unrelated reason and hide the real
+      // one behind a misleading "wrong credentials" status.
+      webid = session.webid || deviceId(token);
       body = await runWithProbeDeadline(
         async ({ signal }) => request(RATE_URL, signal, token),
         { signal: deps.signal, deadlineMs: Number(deps.stepfunFetchTimeoutMs || 15000) }
@@ -194,4 +240,4 @@ async function fetchStepfunLimits(options = {}, deps = {}) {
   }
 }
 
-module.exports = { fetchStepfunLimits, parseStepfunUsage, stepfunToken, stepfunCredentials, deviceId };
+module.exports = { fetchStepfunLimits, parseStepfunUsage, stepfunToken, stepfunCredentials, deviceId, normalizeOasisToken };

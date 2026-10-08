@@ -33,6 +33,7 @@ const {
   createWorkbuddyLocalAuth,
   isSupportedWorkbuddyLocalAppPlatform
 } = require('./providers/workbuddy/localAuth');
+const { PARTITION: STEPFUN_PARTITION, signInStepFunWithBrowser } = require('./providers/stepfun/login');
 const { createElectronLimitsFetch } = require('./limits/fetch');
 const {
   expandedBoundsForCollapse,
@@ -74,12 +75,36 @@ function ensureMimoExchangeFetch() {
   return mimoExchangeFetch;
 }
 
+// StepFun's password login has no HTTP equivalent: the endpoint lives behind a
+// WAF that only clears once the page's own JavaScript runs. So the desktop app
+// supplies the signer and limits.js calls it — the headless agent has no
+// BrowserWindow, and there a pasted token stays the only lane.
+//
+// `fromPartition` is resolved per call rather than cached because it only
+// exists once the app is ready, and the partition constant is shared with the
+// sign-in window so the window and the cookie reader cannot drift apart.
+function electronStepfunSignIn(options) {
+  return signInStepFunWithBrowser({
+    ...options,
+    BrowserWindow,
+    session: session.fromPartition(STEPFUN_PARTITION)
+  });
+}
+
 // Settings-side provider probes take the same transport as the collector's.
 // Most of them are what an account save is gated on, so leaving one on the
 // global fetch refuses to save an account on exactly the machines this
 // transport exists for.
 function electronProviderDeps(deps = {}) {
-  return { ...deps, fetch: electronLimitsFetch(), mimoExchangeFetch: ensureMimoExchangeFetch() };
+  return {
+    ...deps,
+    fetch: electronLimitsFetch(),
+    mimoExchangeFetch: ensureMimoExchangeFetch(),
+    // Unlike the two above, this one only defaults when the caller left it out
+    // — a caller that supplies its own signer (tests, and any future headless
+    // transport) must keep it.
+    signIn: deps.signIn || electronStepfunSignIn
+  };
 }
 const {
   DEFAULT_CLIENTS,
