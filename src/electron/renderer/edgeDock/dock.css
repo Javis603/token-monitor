@@ -184,12 +184,12 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
 .edge-dock-ring-track {
   fill: none;
   stroke: rgba(var(--overlay-rgb), 0.12);
-  stroke-width: 4.5;
+  stroke-width: 4;
 }
 .edge-dock-ring-fill {
   fill: none;
   stroke: var(--ring-color, var(--accent));
-  stroke-width: 4.5;
+  stroke-width: 4;
   stroke-linecap: round;
   transition: stroke-dashoffset 420ms cubic-bezier(0.2, 0.8, 0.2, 1), filter 180ms ease;
 }
