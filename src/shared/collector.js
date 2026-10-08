@@ -42,6 +42,7 @@ const {
 const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
+const { cursorDesktopWatchRoots, isCursorDesktopStateWrite } = require('./providers/cursor/desktopState');
 const {
   applySessionMetadata,
   applyTokscaleSessionMetadata,
@@ -1293,20 +1294,21 @@ function clientWatchCandidates(clientsCsv, options = {}) {
 // Watching them turns every tick into the trigger for the next one (issue #15).
 const SELF_SYNCED_CLIENTS = new Set(SELF_SYNC_KINDS);
 
-// Watch roots that feed a self-sync, keyed by client. Antigravity's IDE cache is
-// written by our sync and must stay watch-excluded, but the native session roots
-// are read-only inputs to that sync (tokscale only ever readdir/stats them —
-// every write it makes lands in its own cache dir). Watching those gives the
-// collector an event to target without recreating the issue #15
-// cache-write -> watcher -> sync loop, and an event here is what earns the sync
-// its short source-event floor.
+// Native activity sources that request a self-sync, keyed by client. Cursor's
+// desktop database is a signal to fetch cloud usage, while Antigravity's native
+// sessions are inputs to its sync. Both caches written by us stay unwatched;
+// only external source changes earn the short source-event floor.
 //
 // The parse-local antigravity-cli dir is deliberately not in here even though it
 // shares the umbrella client id: tokscale reads it directly, so a CLI write has
 // nothing to re-sync and must not pay for the subprocess.
-function selfSyncSourceRootsForClients(clientsCsv) {
+function selfSyncSourceRootsForClients(clientsCsv, options = {}) {
   const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
   const rootsByClient = {};
+  if (enabled.has('cursor')) {
+    const sourceRoots = cursorDesktopWatchRoots(options).filter(dirExists);
+    if (sourceRoots.length > 0) rootsByClient.cursor = sourceRoots;
+  }
   if (enabled.has('antigravity')) {
     const sourceRoots = [...new Set(antigravityDataRoots().filter(dirExists))];
     if (sourceRoots.length > 0) rootsByClient.antigravity = sourceRoots;
@@ -1328,7 +1330,7 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
     const existing = [...new Set(candidates.filter(dirExists))];
     if (existing.length > 0) rootsByClient[client] = existing;
   }
-  for (const [client, dirs] of Object.entries(selfSyncSourceRootsForClients(clientsCsv))) {
+  for (const [client, dirs] of Object.entries(selfSyncSourceRootsForClients(clientsCsv, options))) {
     rootsByClient[client] = [...new Set([...(rootsByClient[client] || []), ...dirs])];
   }
   // The Antigravity CLI writes parse-local SQLite that tokscale reads directly,
@@ -1612,6 +1614,13 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // watchAttributionRootsForClients keeps it from becoming a copilot prefix.
   const exporter = copilotExporterWatch(os.homedir());
   if (exporter) bound('copilot', [exporter.dir], (_parts, resolved) => resolved !== exporter.canonicalFile);
+
+  const cursorEnabled = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).includes('cursor');
+  // Cursor owns this source; Tokscale only reads its credentials/titles and
+  // writes a separate usage cache. Never descend into extension storage, and
+  // never watch the wal-index our own read-only SQLite queries can recreate.
+  bound('cursor', cursorEnabled ? options.cursorDesktopRoots || cursorDesktopWatchRoots(options) : [],
+    directChildOnly(isCursorDesktopStateWrite));
 
   const antigravityEnabled = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).includes('antigravity');
   bound('antigravity', antigravityEnabled ? antigravityDataRoots() : [], (parts) => {
@@ -2190,7 +2199,10 @@ const WATCH_REFUSAL_CODES = new Set([WATCH_POLLING_LIMIT_CODE, WATCH_POLLING_UNA
 // because the host can switch to polling on its own (a watch process that never
 // confirmed its exit), and a check the host can route around bounds nothing.
 function openWatch(chokidar, config = {}) {
-  const ignored = watchIgnoreMatcher(config.clients, { customScanPaths: config.customScanPaths });
+  const ignored = watchIgnoreMatcher(config.clients, {
+    customScanPaths: config.customScanPaths,
+    cursorDesktopRoots: config.cursorDesktopRoots
+  });
   const limit = Number.isInteger(config.pollingEntryLimit) && config.pollingEntryLimit >= 0
     ? config.pollingEntryLimit
     : WATCH_POLLING_ENTRY_LIMIT;
@@ -2246,7 +2258,8 @@ function watcherOptions(usePolling, ignored) {
 // measured NOT to rewrite its sidecar (mimo) is deliberately absent here, and
 // adding a client to this list asserts a measurement rather than a hunch.
 // Cherry Studio also rewrites its wal-index on repeated read-only WAL scans.
-const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'cherrystudio', 'qodercn', 'zcode']);
+// Cursor's read-only desktop credential/title queries change state.vscdb-shm too.
+const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'cherrystudio', 'cursor', 'qodercn', 'zcode']);
 
 function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
   // Match SQLite's wal-index suffix, not one client's database basename: ZCode's
@@ -2255,7 +2268,7 @@ function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
   // the match cannot widen into an unrelated '-shm' sidecar, and it never matches
   // the -wal or the database itself.
   const name = path.basename(String(filePath || ''));
-  if (!/^[^/]+\.(?:db|sqlite|sqlite3)-shm$/.test(name)) return false;
+  if (!/^[^/]+\.(?:db|sqlite|sqlite3|vscdb)-shm$/.test(name)) return false;
   const resolved = path.resolve(filePath);
   return SELF_WATCHED_SQLITE_SIDECAR_CLIENTS.some((client) => (rootsByClient[client] || [])
     .some((root) => resolved.startsWith(path.resolve(root) + path.sep)));
@@ -3116,7 +3129,7 @@ function startCollector(options) {
     // A subset of the same roots, matched separately so a write to a client's
     // parse-local data cannot pass for a write to its self-sync source.
     const sourceSyncRootsByClient = Object.fromEntries(
-      Object.entries(selfSyncSourceRootsForClients(clients))
+      Object.entries(selfSyncSourceRootsForClients(clients, sourceOptions))
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
     );
     const dirs = [...new Set(Object.values(rootsByClient).flat())];
@@ -3157,6 +3170,11 @@ function startCollector(options) {
         reasonixNativeSessionCache.invalidate(filePath);
       }
       for (const client of clientsForWatchPath(filePath, sourceSyncRootsByClient)) {
+        // Another client's scan root may overlap the desktop store. Its unrelated
+        // files can request a local scan, but only database/WAL writes earn a
+        // Cursor cloud sync.
+        if (client === 'cursor' && (!isCursorDesktopStateWrite(filePath)
+          || !sourceSyncRootsByClient.cursor.some((root) => path.dirname(path.resolve(filePath)) === path.resolve(root)))) continue;
         sourceSyncQueue.record(client);
       }
       if (watchTriggersCollection) {
@@ -3174,6 +3192,7 @@ function startCollector(options) {
           dirs,
           clients,
           customScanPaths: sourceOptions.customScanPaths,
+          cursorDesktopRoots: sourceSyncRootsByClient.cursor || [],
           usePolling,
           pollingEntryLimit: watchPollingEntryLimit
         },
