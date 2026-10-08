@@ -1,9 +1,16 @@
 /* Only additions to existing Sessions and Settings; no cloud-only screen. */
-.cloud-sessions-scope { font-size: 11px; line-height: 1.5; opacity: .65; padding: 0 14px; margin: 4px 0 9px; }
+.cloud-sessions-scope { display: flex; flex: 0 0 auto; align-items: flex-start; gap: 4px; font-size: 11px; line-height: 1.5; padding: 0 14px; margin: 4px 0 9px; }
+#cloudSessionsScopeText { flex: 1; min-width: 0; opacity: .65; }
+@media (max-height: 280px) {
+  .cloud-sessions-scope, .cloud-accounting-note { display: none; }
+}
 .cloud-session-detail { padding: 0 2px 14px; }
 .cloud-session-detail h3 { font-size: 13px; margin: 10px 0; font-weight: 600; }
 .cloud-session-detail dl { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(120px, 1fr); gap: 8px 16px; font-size: 12px; line-height: 1.5; }
 .cloud-session-detail dt { opacity: .6; }
 .cloud-session-detail dd { margin: 0; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 #cloudSessionsSettingStatus { width: 100%; }
-.cloud-accounting-note { font-size: 11px; line-height: 1.5; opacity: .65; margin: 6px 0 0; text-align: center; }
+.cloud-accounting-note { display: flex; align-items: flex-start; gap: 4px; font-size: 11px; line-height: 1.5; margin: 6px 0 0; text-align: center; }
+#cloudAccountingNoteText { flex: 1; opacity: .65; }
+.cloud-accounting-dismiss { flex: 0 0 22px; min-height: 22px; padding: 0; border: none; background: transparent; color: inherit; font-size: 17px; line-height: 22px; opacity: .65; cursor: pointer; }
+.cloud-accounting-dismiss:hover, .cloud-accounting-dismiss:focus-visible { opacity: 1; }

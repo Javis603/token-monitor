@@ -353,7 +353,7 @@ const limitTooltip = {
 
 function limitTooltipShouldHoldRender() {
   if (!limitTooltip.active) return false;
-  return Boolean(contentLayer.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
+  return Boolean(contentLayer.querySelector('.limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .limit-detail-tooltip-wrap.is-closing'));
 }
 
 const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
@@ -368,6 +368,7 @@ const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
   provenanceContext: () => state.payload?.cell?.provenanceContext || {},
   motion: limitResetMotionApi,
   tooltip: {
+    prefersReducedMotion,
     hasOpened: () => limitTooltip.opened,
     markOpened() {
       limitTooltip.opened = true;

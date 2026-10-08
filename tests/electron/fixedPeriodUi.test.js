@@ -14,7 +14,65 @@ test('fixed periods reuse the existing three-slot control', () => {
   const slots = [...html.matchAll(/data-period-slot="([^"]+)"/g)].map((match) => match[1]);
   assert.deepEqual(slots, ['today', 'month', 'allTime']);
   assert.match(html, /id="monthPeriodTab"[^>]*aria-haspopup="menu"[^>]*>MONTH<\/button>/);
+  assert.match(html, /class="label-row"><span>TOTAL TOKENS<\/span>/);
   assert.doesNotMatch(html, /id="monthPeriodTab"[^>]*>[^<]*(?:▼|▾|⌄)/);
+});
+
+test('primary period codes follow the selected range while localized descriptions and speed tabs stay independent', () => {
+  const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
+  const { translate } = require('../../src/electron/renderer/i18n');
+  const source = read('app.js').match(/function syncPeriodTabs\(\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(source, 'the actual primary-period synchronizer is available');
+  const makeTab = (slot) => ({
+    dataset: slot ? { period: slot, periodSlot: slot } : { speedDays: '7' },
+    attributes: {},
+    textContent: '',
+    classList: { toggle() {} },
+    setAttribute(name, value) { this.attributes[name] = value; }
+  });
+  const tabs = ['today', 'month', 'allTime'].map(makeTab);
+  const speed = makeTab();
+  speed.textContent = '7D';
+  speed.attributes['aria-pressed'] = 'true';
+  const indicator = new Map();
+  const state = { period: 'today', settings: { periodMonthMode: 'last30' } };
+  let locale = 'zh-CN';
+  const context = {
+    state, fixedPeriodRangesApi: ranges, els: { monthPeriodTab: tabs[1] },
+    t: (key) => translate(locale, key),
+    syncPeriodMenu() {},
+    document: {
+      activeElement: speed,
+      querySelectorAll: (selector) => selector === '.tab[data-period-slot]' ? tabs : [...tabs, speed],
+      querySelector: () => ({ style: { setProperty(name, value) { indicator.set(name, value); } } })
+    }
+  };
+  vm.runInNewContext(source, context);
+  context.syncPeriodTabs();
+  assert.deepEqual(tabs.map((tab) => tab.textContent), ['DAY', '30D', 'TOTAL']);
+  assert.equal(tabs[1].dataset.period, 'last30', 'the inactive middle slot uses its configured range');
+  assert.equal(tabs[1].dataset.i18n, undefined, 'translation passes cannot replace the short display code');
+  assert.equal(tabs[1].attributes['aria-label'], '近30天');
+  assert.equal(tabs[0].attributes['aria-pressed'], 'true');
+  for (const [period, label] of [['month', 'MONTH'], ['week', 'WEEK'], ['last7', '7D'], ['last30', '30D']]) {
+    state.period = period;
+    context.syncPeriodTabs();
+    assert.equal(tabs[1].dataset.period, period);
+    assert.equal(tabs[1].textContent, label);
+    assert.equal(tabs[1].attributes['aria-pressed'], 'true');
+    assert.equal(indicator.get('--period-index'), '1');
+  }
+  state.period = 'allTime';
+  locale = 'en';
+  context.syncPeriodTabs();
+  assert.deepEqual(tabs.map((tab) => tab.textContent), ['DAY', '30D', 'TOTAL']);
+  assert.equal(tabs[1].attributes.title, 'Last 30 days');
+  assert.equal(tabs[1].dataset.i18nTitle, 'edgeDock.period.last30');
+  assert.equal(tabs[2].attributes['aria-label'], 'All time');
+  assert.equal(indicator.get('--period-index'), '2');
+  assert.equal(speed.textContent, '7D');
+  assert.equal(speed.attributes['aria-pressed'], 'true', 'the separate rolling range keeps its selection');
+  assert.equal(context.document.activeElement, speed);
 });
 
 test('the middle-slot menu and Settings expose the same four fixed choices', () => {

@@ -78,6 +78,13 @@ test('fixed period slots keep the existing three-button layout', () => {
   assert.equal(ranges.displayLabel('last7'), '7D');
 });
 
+test('fixed period labels keep the original short codes without changing calendar selections', () => {
+  const selections = ['today', 'month', 'allTime', 'week', 'last7', 'last30'];
+  assert.deepEqual(selections.map(selection => ranges.displayLabel(selection)), ['DAY', 'MONTH', 'TOTAL', 'WEEK', '7D', '30D']);
+  assert.equal(ranges.displayLabel('unknown'), 'DAY');
+  assert.deepEqual(ranges.rangeForSelection('last30', { todayKey: '2026-10-08' }), { start: '2026-09-09', end: '2026-10-08' });
+});
+
 test('token component breakdown preserves known values and isolates the unknown remainder', () => {
   assert.deepEqual(ranges.tokenComponentBreakdown({
     totalTokens: 150,

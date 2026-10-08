@@ -316,18 +316,144 @@
     return { entries: [], source: `device:${normalizedDeviceId || 'unavailable'}` };
   }
 
-  function liveTokenRateTooltipEntries(sample, mode, formatRate) {
+  // Coverage is a separate, cumulative today view over the exact same selected device
+  // entries as the live tracker. Untimed usage must never refresh a retained rate sample.
+  // Client names identify usage sources only: model timing is not partitioned by client.
+  function liveTokenRateCoverage(entries = []) {
+    const object = (value) => value && typeof value === 'object' && !Array.isArray(value);
+    const counter = (value) => {
+      if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null;
+      const number = Number(value);
+      return Number.isFinite(number) && number >= 0 ? number : null;
+    };
+    const coverageState = (output, timed, duration, hasUsage) => {
+      if (output === null || timed === null || timed > output || (timed > 0 && !(duration > 0))) return 'unknown';
+      if (output > timed) return 'partial';
+      return hasUsage && output === 0 && !(duration > 0) ? 'unknown' : 'complete';
+    };
+    const combinedState = (states) => !states.length || states.includes('unknown')
+      ? 'unknown' : states.includes('partial') ? 'partial' : 'complete';
+    const devices = [];
+    const seen = new Set();
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      const id = String(entry?.id || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const period = object(entry?.period) ? entry.period : {};
+      const componentsKnown = period.capabilities?.tokenComponents !== false;
+      const outputTokens = componentsKnown ? counter(period.outputTokens) : null;
+      const timing = usageCounters(period);
+      const timedOutputTokens = timing?.timedOutputTokens ?? null;
+      const outputs = object(period.modelOutputs) ? period.modelOutputs : null;
+      const throughputs = object(period.modelThroughput) ? period.modelThroughput : null;
+      const names = new Set();
+      const clients = new Map();
+      for (const [model, value] of Object.entries(outputs || {})) {
+        if (positiveNumber(value)) names.add(model);
+      }
+      for (const [client, models] of Object.entries(object(period.clientModels) ? period.clientModels : {})) {
+        if (!object(models)) continue;
+        for (const [model, value] of Object.entries(models)) {
+          if (!positiveNumber(value)) continue;
+          names.add(model);
+          if (!clients.has(model)) clients.set(model, new Set());
+          clients.get(model).add(client);
+        }
+      }
+      for (const [model, value] of Object.entries(throughputs || {})) {
+        if (positiveNumber(value?.timedTokens) || positiveNumber(value?.timedOutputTokens)) names.add(model);
+      }
+      const models = [...names].sort((a, b) => a.localeCompare(b)).map((model) => {
+        const output = componentsKnown && outputs
+          ? counter(Object.hasOwn(outputs, model) ? outputs[model] : 0) : null;
+        const modelTiming = timing && throughputs
+          ? Object.hasOwn(throughputs, model) ? usageCounters(throughputs[model])
+            : { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 }
+          : null;
+        const timed = modelTiming && modelTiming.timedOutputTokens <= timing.timedOutputTokens
+          ? modelTiming.timedOutputTokens : null;
+        return {
+          model,
+          clients: [...(clients.get(model) || [])].sort((a, b) => a.localeCompare(b)),
+          state: coverageState(output, timed, modelTiming?.timedDurationMs, true),
+          outputTokens: output,
+          timedOutputTokens: timed
+        };
+      });
+      const hasUsage = positiveNumber(period.totalTokens) > 0 || outputTokens > 0 || models.length > 0;
+      const state = coverageState(outputTokens, timedOutputTokens, timing?.timedDurationMs, hasUsage);
+      devices.push({
+        id, name: String(entry.name || id),
+        state: combinedState([state, ...models.map((model) => model.state)]),
+        outputTokens, timedOutputTokens, hasUsage, models
+      });
+    }
+    const sumKnown = (field) => devices.length && devices.every((device) => device[field] !== null)
+      ? devices.reduce((sum, device) => sum + device[field], 0) : null;
+    return {
+      state: combinedState(devices.map((device) => device.state)),
+      outputTokens: sumKnown('outputTokens'),
+      timedOutputTokens: sumKnown('timedOutputTokens'),
+      devices
+    };
+  }
+
+  function liveTokenRateTooltipEntries(sample, mode, formatRate, coverage, labels = {}, presentation = {}) {
     const burn = mode === 'burn';
     const unit = burn ? 'TPM' : 'tok/s';
     const devices = sample?.devices || [];
     const grouped = (sample?.deviceCount || devices.length) > 1;
+    if (presentation?.compact === true) {
+      const unavailable = () => [{ full: labels.unavailable || 'No rate data' }];
+      if (!sample) return unavailable();
+      const requested = Math.floor(Number(presentation.maxModels));
+      const limit = Number.isFinite(requested) && requested > 0 ? Math.min(3, requested) : 3;
+      // Select only attributed timing samples. Cumulative coverage remains separate
+      // and must neither manufacture a rate nor refresh a retained sample.
+      const recent = devices.flatMap((device) => (device.models || []).map((entry) => ({
+        model: entry.model,
+        device: String(device.name || device.id || ''),
+        rate: burn ? entry.burn : entry.speed
+      }))).filter((entry) => typeof entry.model === 'string' && entry.model
+        && Number.isFinite(entry.rate) && entry.rate >= 0)
+        .sort((a, b) => b.rate - a.rate || a.model.localeCompare(b.model) || a.device.localeCompare(b.device))
+        .slice(0, limit);
+      if (!recent.length) return unavailable();
+      const compactEntries = recent.map((entry) => [
+        [entry.model, grouped ? entry.device : ''].filter(Boolean).join(' · '),
+        formatRate(entry.rate) + ' ' + unit
+      ]);
+      const incomplete = coverage?.state !== 'complete' && coverage?.devices?.some((device) =>
+        device.hasUsage && device.state !== 'complete');
+      if (incomplete) compactEntries.push({ full: labels.partialSummary || 'Some model rates unavailable' });
+      return compactEntries;
+    }
     const entries = [];
+    if (coverage && devices.some((device) => device.models?.length)) entries.push({ full: labels.timed || 'Recent timed samples' });
     for (const device of devices) {
       if (!device.models?.length) continue;
-      if (grouped) entries.push({ full: device.name, separated: entries.length > 0 });
+      if (grouped) entries.push({ full: device.name, separated: entries.length > 1 });
       const models = device.models.slice().sort((a, b) =>
         (burn ? b.burn - a.burn : b.speed - a.speed) || a.model.localeCompare(b.model));
       entries.push(...models.map((entry) => [entry.model, `${formatRate(burn ? entry.burn : entry.speed)} ${unit}`]));
+    }
+    const missing = (coverage?.devices || []).map((device) => ({
+      ...device, models: device.models.filter((model) => model.state !== 'complete')
+    })).filter((device) => device.models.length || (device.hasUsage && device.state !== 'complete'));
+    if (!missing.length) return entries;
+    entries.push({ full: labels.coverage || 'Today’s usage with missing or partial timing', separated: entries.length > 0 });
+    for (const device of missing) {
+      if (coverage.devices.length > 1) entries.push({ full: device.name });
+      if (!device.models.length) {
+        entries.push([device.name, labels.unknown || 'Timing coverage unknown']);
+        continue;
+      }
+      entries.push(...device.models.map((model) => [
+        [model.model, ...model.clients].join(' · '),
+        model.state === 'unknown' ? labels.unknown || 'Timing coverage unknown'
+          : model.timedOutputTokens === 0 ? labels.untimed || 'No timing yet'
+            : labels.partial || 'Partially timed'
+      ]));
     }
     return entries;
   }
@@ -549,6 +675,7 @@
     createLiveTokenRateTracker,
     createTokenRateBoostController,
     isSharedSyncMode,
+    liveTokenRateCoverage,
     liveTokenRateTooltipEntries,
     positiveNumber,
     selectLiveTokenRatePeriods,

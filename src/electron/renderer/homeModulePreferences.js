@@ -5,7 +5,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorHomeModulePreferences = api;
 })(typeof window !== 'undefined' ? window : null, function createHomeModulePreferencesApi() {
-  const DEFAULT_HOME_MODULE_ORDER = 'limits,tool,model,session,device,trends';
+  const DEFAULT_HOME_MODULE_ORDER = 'limits,tool,model,session,modelspeed,device,trends';
 
   function normalizeHomeLimitDisplayMode(value) {
     return value === 'bars' ? 'bars' : 'text';
@@ -30,7 +30,8 @@
     for (const id of known) {
       if (seen.has(id)) continue;
       seen.add(id);
-      order.push(id);
+      if (id === 'modelspeed' && order.includes('session')) order.splice(order.indexOf('session') + 1, 0, id);
+      else order.push(id);
     }
     return order;
   }

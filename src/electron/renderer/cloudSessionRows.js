@@ -19,7 +19,7 @@
     observed: 'Last observed', activity: 'Last activity', parent: 'Engine parent', delegation: 'Delegated by', gaps: 'Connection gaps',
     accounting: 'Counted in total', includedNow: 'Yes — eligible counts are included', excludedLocal: 'No — matches a local session (no double count)', excludedParent: 'No — parent/child overlap unverified', accountingUnknown: 'Unknown for this thread', partialNote: 'counter reset or unknown components observed', bridgedNote: 'counted after a monitoring gap',
     includesCloud: 'Cloud included', baselinePart: 'lifetime baseline (TOTAL only)', excludedLabel: 'excluded', localMatchReason: 'local match', parentOverlapReason: 'parent overlap', partialPart: 'with resets/gaps',
-    accountingPaused: 'Cloud counting paused · saved values retained', partialComponents: 'Some cloud token components are unknown',
+    accountingPaused: 'Cloud counting paused · saved values retained', partialComponents: 'Some cloud token components are unknown', dismissNote: 'Dismiss this notice permanently',
     setting: 'Automatically monitor Codex cloud sessions', settingNote: 'Show cloud tasks and subagents in Sessions. Monitoring remains active when this window closes.',
     disabled: 'Monitoring stopped', enabled: 'Monitoring active', missing: 'Cloud monitoring service is not installed', error: 'Cloud monitoring data is unavailable', failed: 'Could not change monitoring. Refresh to retry.' };
   const ZH = { cloud: '云端', both: '本地 + 云端', lifetime: '累计 · 云端', unavailable: '未知',
@@ -32,7 +32,7 @@
     observed: '最近计数', activity: '最近活动', parent: '引擎父线程', delegation: '委派父线程', gaps: '连接缺口',
     accounting: '计入总量', includedNow: '是（符合条件的计数已计入）', excludedLocal: '否（与本地会话同一线程，不重复计数）', excludedParent: '否（父子计数重叠未验证，保守排除）', accountingUnknown: '该线程状态未知', partialNote: '观测到计数重置或未知分项', bridgedNote: '跨监听缺口后补记',
     includesCloud: '含云端', baselinePart: '历史基线仅计入 TOTAL', excludedLabel: '已排除', localMatchReason: '本地重复', parentOverlapReason: '父子重叠', partialPart: '项计数有重置/缺口',
-    accountingPaused: '云端计数暂停 · 已保存数值保留', partialComponents: '部分云端 Token 分项未知',
+    accountingPaused: '云端计数暂停 · 已保存数值保留', partialComponents: '部分云端 Token 分项未知', dismissNote: '关闭此提示，以后不再显示',
     setting: '自动监听 Codex 云会话', settingNote: '将云端任务和子代理显示在“会话”中。关闭窗口不会停止后台监听。',
     disabled: '监听已停止', enabled: '监听中', missing: '尚未安装云会话监听服务', error: '暂时无法取得云会话状态', failed: '监听设置未能更改，请刷新后重试。' };
   const labels = (locale) => String(locale || '').startsWith('zh') ? ZH : EN;

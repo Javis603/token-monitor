@@ -38,6 +38,39 @@ test('normalizeLanguage keeps supported choices and falls back to auto', () => {
   assert.equal(normalizeLanguage(''), 'auto');
 });
 
+test('model speed names the window it follows instead of offering its own range', () => {
+  // The detail has no day control: it reports the top-level DAY/MONTH/TOTAL
+  // selection, so each range label has to exist in every locale.
+  const expected = {
+    en: ['Today', 'This week', 'Last 7 days', 'This month', 'Last 30 days', 'All retained (90 days)'],
+    'zh-TW': ['今日', '本週', '近7天', '本月', '近30天', '全部保留（90 天）'],
+    'zh-CN': ['今天', '本周', '近7天', '本月', '近30天', '全部保留（90 天）'],
+    ko: ['오늘', '이번 주', '최근 7일', '이번 달', '최근 30일', '전체 보관(90일)'],
+    ja: ['今日', '今週', '過去7日間', '今月', '過去30日間', '全保持（90日）']
+  };
+  const periods = ['today', 'week', 'last7', 'month', 'last30', 'allTime'];
+  const names = { en: 'Model speed', 'zh-TW': '模型速度', 'zh-CN': '模型速度', ko: '모델 속도', ja: 'モデル速度' };
+  for (const [locale, labels] of Object.entries(expected)) {
+    assert.deepEqual(periods.map((period) => translate(locale, 'home.modelSpeed.range.' + period)), labels, locale);
+    assert.equal(translate(locale, 'home.modelSpeed.title'), names[locale]);
+    // The average caption interpolates the window name, never a fixed phrase.
+    assert.match(MESSAGES[locale]['home.modelSpeed.average'], /\{range\}/, locale);
+    for (const key of ['periodRange.label', 'home.viewAllSessions', 'home.modelSpeed.unmeasured', 'home.modelSpeed.unmeasuredReason', 'home.liveTokenRate.coverageCompact', 'home.liveTokenRate.noRateData']) {
+      assert.ok(MESSAGES[locale][key], locale + ' ' + key);
+    }
+    assert.doesNotMatch(translate(locale, 'periodRange.historyDisabled'), /\bWEEK\b|\b7D\b|\b30D\b/, locale);
+  }
+  assert.equal(translate('zh-CN', 'edgeDock.periodShort.today'), '今日');
+  assert.equal(translate('en', 'home.modelSpeed.range.last30'), 'Last 30 days');
+  assert.equal(translate('zh-CN', 'home.modelSpeed.average', { range: '近30天' }), '近30天平均速度');
+  assert.equal(translate('en', 'home.modelSpeed.average', { range: 'Today' }), 'Today average');
+  assert.equal(translate('zh-CN', 'dashboard.stat.totalTokens'), 'Token 总量');
+  assert.equal(translate('zh-CN', 'home.viewAllSessions'), '查看全部会话');
+  assert.equal(translate('zh-CN', 'home.liveTokenRate.coverageCompact'), '部分模型暂无速率');
+  assert.equal(translate('zh-CN', 'home.liveTokenRate.noRateData'), '暂无速率数据');
+  assert.equal(translate('zh-CN', 'home.modelSpeed.unmeasured'), '缺少耗时');
+});
+
 test('WSL SQLite recovery guidance is localized without English fallback', () => {
   for (const locale of LANGUAGE_OPTIONS.map((option) => option.value).filter((value) => value !== 'auto')) {
     assert.ok(MESSAGES[locale]['settings.collection.wslPanel.sqliteHelp'], locale);

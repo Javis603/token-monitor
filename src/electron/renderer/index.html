@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="edgeDock/composer.css" />
     <link rel="stylesheet" href="cloudSessions.css" />
+    <link rel="stylesheet" href="modelSpeed.css" />
   </head>
   <body>
     <main class="shell">
@@ -17,7 +18,7 @@
           <div id="status" class="status">Starting</div>
         </div>
         <div class="title-controls">
-          <nav class="tabs" aria-label="Period tabs">
+          <nav class="tabs" aria-label="Usage range" data-i18n-aria-label="periodRange.label">
             <span class="tab-indicator" aria-hidden="true"></span>
             <button class="tab active" data-period="today" data-period-slot="today">DAY</button>
             <button id="monthPeriodTab" class="tab" data-period="month" data-period-slot="month" aria-haspopup="menu" aria-expanded="false">MONTH</button>
@@ -1561,9 +1562,15 @@
 
       <section class="total-panel">
         <div class="label-row"><span>TOTAL TOKENS</span></div>
-        <div class="total-number-row"><div id="totalTokens" class="total-number">0</div><div id="totalTokensCompact" class="total-compact hidden" aria-hidden="true"></div></div>
-        <div id="cost" class="cost">$0.00</div>
-        <p id="cloudAccountingNote" class="cloud-accounting-note hidden"></p>
+        <div class="total-number-row"><div id="totalTokens" class="total-number">0</div></div>
+        <div class="total-summary-row">
+          <div id="cost" class="cost">$0.00</div>
+          <div id="totalTokensCompact" class="total-compact hidden" aria-hidden="true"></div>
+        </div>
+        <div id="cloudAccountingNote" class="cloud-accounting-note hidden">
+          <span id="cloudAccountingNoteText"></span>
+          <button id="dismissCloudAccountingNote" class="cloud-accounting-dismiss" type="button"><span aria-hidden="true">×</span></button>
+        </div>
       </section>
 
       <div id="viewBackRow" class="view-back-row hidden">
@@ -1576,7 +1583,11 @@
       <section id="fixedPeriodMessage" class="fixed-period-message hidden" role="status" aria-live="polite"></section>
 
       <section id="homePanel" class="home-panel hidden"></section>
-      <p id="cloudSessionsScope" class="cloud-sessions-scope hidden"></p>
+      <section id="modelSpeedPanel" class="home-panel model-speed-panel hidden" aria-label="Model speed" data-i18n-aria-label="home.modelSpeed.title" inert></section>
+      <div id="cloudSessionsScope" class="cloud-sessions-scope hidden">
+        <span id="cloudSessionsScopeText"></span>
+        <button id="dismissCloudSessionsScope" class="cloud-accounting-dismiss" type="button" aria-label="Dismiss explanation">×</button>
+      </div>
       <section id="breakdown" class="breakdown"></section>
       <div id="session-detail-head" class="detail-head hidden"></div>
       <div id="session-detail" class="session-detail hidden"></div>
@@ -1659,6 +1670,7 @@
     <script src="rowIconMasks.js"></script>
     <script src="../../shared/limits/providers.js"></script>
     <script src="../../shared/compactTokens.js"></script>
+    <script src="../../shared/modelSpeedRange.js"></script>
     <script src="../../shared/limits/balanceDisplay.js"></script>
     <script src="../../shared/limits/windowLabels.js"></script>
     <script src="../../shared/limits/usageItems.js"></script>
@@ -1667,6 +1679,8 @@
     <script src="trayBars.js"></script>
     <script src="usageCharts.js"></script>
     <script src="homeOverview.js"></script>
+    <script src="homeActivityModes.js"></script>
+    <script src="homeRowBudget.js"></script>
     <script src="themePresets.js"></script>
     <script src="trayProviderIcons.js"></script>
     <script src="limits/providerOrder.js"></script>
@@ -1729,6 +1743,9 @@
     <script src="edgeDock/composer.js"></script>
     <script src="../../shared/trayLayout.js"></script>
     <script src="tokenRatePresentation.js"></script>
+    <script src="chartMotion.js"></script>
+    <script src="modelSpeedView.js"></script>
+  <script src="scrollFade.js"></script>
     <script src="../motionPreference.js"></script>
     <script src="../windowsBackdropMode.js"></script>
     <script src="windowsGlass.js"></script>

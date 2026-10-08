@@ -87,6 +87,9 @@ test('cloud rows use the same existing session pagination', () => {
 test('cloud detail shows actual component values, the accounting status and nothing invented', () => {
   const d = api.detail(snapshot(), a, 'zh-CN'); assert.equal(d.fields[0][1], '1,000'); assert.equal(d.fields[2][1], '800');
   assert.ok(d.note.includes('计入上方总量')); assert.ok(!JSON.stringify(d).includes('$')); assert.ok(!JSON.stringify(d).includes('call'));
+  assert.ok(d.note.includes('首次累计快照计入 TOTAL'));
+  assert.ok(api.detail(snapshot(), a, 'zh-TW').note.includes('首次累计快照计入 TOTAL'));
+  assert.ok(api.labels('en').note.includes('counts toward TOTAL'));
   assert.equal(d.fields.at(-1)[0], '计入总量'); assert.equal(d.fields.at(-1)[1], '该线程状态未知');
   const accounting = { version: 1, threads: {
     [a]: { status: 'included', partial: false, bridged: false },
@@ -102,6 +105,7 @@ test('the headline accounting note only reports what was actually counted or exc
   const accounting = { version: 1, periods: { allTime: { totalTokens: 16000, threadCount: 1 } }, baselineTokens: 16000,
     excludedThreads: 1, excludedReasons: { matchedLocal: 0, parentOverlap: 1 }, partialThreads: 0 };
   assert.equal(api.accountingNote(accounting, 'allTime', 'zh-CN'), '含云端 16,000 · 历史基线仅计入 TOTAL · 已排除 1 父子重叠');
+  assert.ok(api.accountingNote(accounting, 'allTime', 'zh-TW').includes('历史基线仅计入 TOTAL'));
   assert.equal(api.accountingNote(accounting, 'today', 'zh-CN'), '');
   assert.equal(api.accountingNote(null, 'allTime', 'en'), '');
   assert.equal(api.accountingNote({ version: 1, periods: { allTime: { totalTokens: 0, threadCount: 0 } }, excludedReasons: {}, partialThreads: 0 }, 'allTime', 'en'), '');
@@ -336,4 +340,81 @@ test('a rejected control still records the failure and refreshes freshly', async
   control.resolve({ ok: false }); await run;
   assert.equal(context.cloudSessionControlError, true);
   assert.equal(refreshed, true);
+});
+
+test('Sessions scope dismissal is parsed after restart and survives unrelated setting writes', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const { parseBoolean } = require('../../src/shared/limits/collector');
+  const defaultValue = main.match(/cloudSessionScopeDismissed:\s*([^,\n]+),/)?.[1];
+  const load = main.match(/merged\.cloudSessionScopeDismissed\s*=\s*[^\n]+;/)?.[0];
+  const update = main.slice(main.indexOf('function applySettingsPatch('))
+    .match(/cloudSessionScopeDismissed:\s*([^\n]+),/)?.[1];
+  assert.ok(defaultValue && load && update, 'default, restart and patch paths all own the preference');
+  const initial = vm.runInNewContext(defaultValue);
+  const reopen = (saved) => {
+    const merged = { cloudSessionScopeDismissed: initial, ...JSON.parse(JSON.stringify(saved)) };
+    vm.runInNewContext(load, { merged, parseBoolean });
+    return merged;
+  };
+  const patch = (settings, change) => ({ ...settings, ...change,
+    cloudSessionScopeDismissed: vm.runInNewContext(update, { settings, patch: change, parseBoolean }) });
+  assert.equal(reopen({}).cloudSessionScopeDismissed, false, 'a new installation still explains cloud scope');
+  for (const [saved, expected] of [[true, true], ['true', true], [false, false], ['false', false]]) {
+    assert.equal(reopen({ cloudSessionScopeDismissed: saved }).cloudSessionScopeDismissed, expected);
+  }
+  const dismissed = patch(reopen({ currency: 'USD' }), { cloudSessionScopeDismissed: true });
+  const reloaded = reopen(dismissed);
+  assert.equal(reloaded.cloudSessionScopeDismissed, true);
+  const unrelated = reopen(patch(reloaded, { currency: 'CNY' }));
+  assert.equal(unrelated.currency, 'CNY');
+  assert.equal(unrelated.cloudSessionScopeDismissed, true, 'saving another preference cannot resurrect a dismissed note');
+  assert.equal(reopen(patch(unrelated, { cloudSessionScopeDismissed: false })).cloudSessionScopeDismissed, false);
+});
+
+test('a failed Sessions scope dismissal keeps the note visible and re-enables its close button', async () => {
+  const renderer = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const save = renderer.match(/async function saveSettings\(patch(?:, syncContentBase)?\) \{[\s\S]*?\n\}/)?.[0];
+  const renderScope = renderer.match(/function renderCloudSessionScope\(period\) \{[\s\S]*?\n\}/)?.[0];
+  const listener = renderer.match(/document\.getElementById\('dismissCloudSessionsScope'\)\.addEventListener\('click', async \(event\) => \{[\s\S]*?\n\}\);/)?.[0];
+  assert.ok(save && renderScope && listener);
+  let onClick, rejectWrite, errors = 0, recoveryReads = 0;
+  const scope = { hidden: false, classList: { toggle(_name, hidden) { scope.hidden = hidden; } } };
+  const button = { disabled: false, setAttribute() {}, addEventListener(_name, callback) { onClick = callback; } };
+  const text = {};
+  const state = { settingsPushRevision: 0, settings: { cloudSessionScopeDismissed: false }, breakdown: 'session', openSession: null };
+  const pendingSettingsPatches = new Set();
+  const context = {
+    state, pendingSettingsPatches, appearancePreview: {}, cloudSessionRowsApi: api, syncContentForm: null, setSyncContentEditError() {},
+    currentLocale: () => 'en', rawSessionRowsForPeriod: () => [{ cloudThreadId: a }],
+    document: { getElementById: id => id === 'dismissCloudSessionsScope' ? button : id === 'cloudSessionsScope' ? scope : text },
+    window: { tokenMonitor: {
+      updateSettings(patch) {
+        assert.equal(patch.cloudSessionScopeDismissed, true);
+        return new Promise((_resolve, reject) => { rejectWrite = reject; });
+      },
+      async getSettings() { recoveryReads++; throw Error('recovery unavailable'); }
+    } },
+    console: { error() { errors++; } },
+    applyEffectiveCurrencyRates() {}, syncSettingsForm() {},
+    preserveSettingsPanelScroll(callback) { callback(); },
+    isSettingsSurfaceVisible: () => false, statsRenderScheduler: { request() {} },
+    restartTimer() {}, maybeUpdateBarsIcon() {},
+    applyPersistedSettings() { assert.fail('a rejected write has no persisted reply'); }
+  };
+  context.render = () => context.renderCloudSessionScope({});
+  vm.runInNewContext(save + '\n' + renderScope + '\n' + listener, context);
+  context.render();
+  assert.equal(scope.hidden, false);
+  const pending = onClick({ currentTarget: button });
+  assert.equal(button.disabled, true, 'the write is still pending');
+  assert.equal(state.settings.cloudSessionScopeDismissed, false, 'the preference is not optimistically committed');
+  rejectWrite(Error('write failed'));
+  await pending;
+  assert.equal(button.disabled, false);
+  assert.equal(scope.hidden, false, 'a rejected close stays visibly uncommitted');
+  assert.equal(state.settings.cloudSessionScopeDismissed, false);
+  assert.equal(pendingSettingsPatches.size, 0);
+  assert.equal(recoveryReads, 1);
+  assert.equal(errors, 1);
+
 });

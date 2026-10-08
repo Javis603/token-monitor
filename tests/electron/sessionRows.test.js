@@ -258,7 +258,7 @@ test('session rows carry the model tooltip entries behind the "N models" label',
   ]);
 });
 
-test('a hovered background-review run tooltip holds the session repaint', () => {
+test('an open or closing background-review run tooltip holds the session repaint', () => {
   // The periodic rebuild of an open review detail replaces every run node;
   // sessionTooltipShouldHoldRender is what keeps a tooltip open through it.
   // The guard's selector must cover the run title, which carries the wrap
@@ -270,7 +270,9 @@ test('a hovered background-review run tooltip holds the session repaint', () => 
     source.indexOf('function flushPendingLimitDetailTooltipRender(')
   );
   const matchesPart = (part, el) => {
-    const compounds = part.trim().split(/\s+/);
+    const openTooltip = ':has(.limit-detail-tooltip:popover-open)';
+    if (part.includes(openTooltip) && !el.tooltipOpen) return false;
+    const compounds = part.replace(openTooltip, '').trim().split(/\s+/);
     const [cls, ...pseudos] = compounds.at(-1).split(':');
     if (!cls.split('.').filter(Boolean).every((c) => el.classes.includes(c))) return false;
     if (pseudos.includes('hover') && !el.hovered) return false;
@@ -294,12 +296,16 @@ test('a hovered background-review run tooltip holds the session repaint', () => 
   };
   const shouldHold = Function('document', `${body}\nreturn sessionTooltipShouldHoldRender;`)(document);
 
-  for (const flag of ['hovered', 'focusWithin']) {
-    document.element = { classes: ['detail-ex-title', 'limit-detail-tooltip-wrap'], [flag]: true, parent: null };
-    assert.equal(shouldHold(), true);
+  document.element = { classes: ['detail-ex-title', 'limit-detail-tooltip-wrap'], tooltipOpen: true, parent: null };
+  assert.equal(shouldHold(), true, 'a visible review tooltip survives the periodic repaint');
+  document.element = { classes: ['detail-ex-title', 'limit-detail-tooltip-wrap', 'is-closing'], parent: null };
+  assert.equal(shouldHold(), true, 'its host survives until the exit transition finishes');
+  // Escape can close a tooltip while the pointer or keyboard focus remains on
+  // its title. That stale engagement must not freeze session updates forever.
+  for (const engagement of [{}, { hovered: true }, { focusWithin: true }]) {
+    document.element = { classes: ['detail-ex-title', 'limit-detail-tooltip-wrap'], ...engagement, parent: null };
+    assert.equal(shouldHold(), false);
   }
-  document.element = { classes: ['detail-ex-title', 'limit-detail-tooltip-wrap'], parent: null };
-  assert.equal(shouldHold(), false);
 });
 
 test('the periodic review-detail rebuild defers to the tooltip hold', () => {
