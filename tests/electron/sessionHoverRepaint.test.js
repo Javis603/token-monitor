@@ -61,7 +61,8 @@ test('Home holds a real overflowing title and only flushes deferred stats on lea
       replaceChildren(module) { painted.push(module.revision); }, querySelector: () => null
     } },
     hideHomeActivityTooltip() {}, homeModuleIds: () => ['session'],
-    renderHomeSessionModule: () => ({ revision: state.stats.revision }), scheduleHomeSessionRepaint() {}
+    renderHomeSessionModule: () => ({ revision: state.stats.revision }), scheduleHomeSessionRepaint() {},
+    ensureHomeRowBudgetObserver() {}, applyHomeRowBudget() {}
   };
   const setup = app.slice(app.indexOf('const overflowText ='), app.indexOf('function bindHoverMarquee('));
   vm.runInNewContext(`let homeSessionRenderPending = false;\n${setup}\n${functionSource(app, 'sessionTooltipShouldHoldRender')}\n${functionSource(app, 'renderHome')}\nglobalThis.repaint = renderHome; globalThis.bind = overflowText.bind;`, context);
@@ -97,7 +98,7 @@ test('Edge Dock title hover permits pushes and clock repaints while tooltip hold
     state: { payload: null }, surface: 'bubble', limitTooltip: { active: false, pending: false },
     contentLayer: { querySelector: selector => {
       if (selector === '.fade-overflow:hover') return {};
-      if (selector === '.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within') {
+      if (selector === '.limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .limit-detail-tooltip-wrap.is-closing') {
         return tooltipHovered ? {} : null;
       }
       return null;

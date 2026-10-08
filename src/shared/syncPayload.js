@@ -242,7 +242,11 @@ function buildSyncPayload(summary, {
   }
   if (omitModelThroughput) {
     for (const period of ['today', 'month', 'allTime']) {
-      if (payload[period]) delete payload[period].modelThroughput;
+      if (payload[period]) {
+        delete payload[period].modelThroughput;
+        delete payload[period].modelSourceThroughput;
+        delete payload[period].modelUsageSources;
+      }
     }
   }
   return payload;
@@ -262,7 +266,8 @@ function serializeSyncPayload(summary, options = {}) {
   }
   let body = JSON.stringify(payload);
   if (Buffer.byteLength(body, 'utf8') > maxBytes
-    && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput)) {
+    && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput
+      || payload[period]?.modelSourceThroughput || payload[period]?.modelUsageSources)) {
     // Optional live attribution must never evict aggregate usage or session detail.
     // Omit the whole map so readers re-baseline rather than infer missing keys as zero.
     buildOptions.omitModelThroughput = true;

@@ -169,7 +169,9 @@ test('Home overview list markers use the shared tool icon path when enabled', ()
 test('Home activity heatmap lets vertical wheel gestures bubble to native Home scrolling', () => {
   const app = readRendererFile('app.js');
   const setupBody = functionBody(app, 'setupHomeActivityScroller', 'renderHomeTrendsModule');
-  assert.doesNotMatch(setupBody, /addEventListener\('wheel'/);
+  const wheelBody = setupBody.slice(setupBody.indexOf("scroller.addEventListener('wheel'"), setupBody.indexOf("scroller.addEventListener('keydown'"));
+  assert.match(wheelBody, /if \(!delta \|\| !Number\.isFinite\(delta\)\) return;[\s\S]*event\.preventDefault\(\)/);
+  assert.match(wheelBody, /passive: false/);
   assert.doesNotMatch(setupBody, /closest\('\.home-panel'\)/);
   assert.doesNotMatch(setupBody, /homeActivityWheelDelta\(event/);
   assert.doesNotMatch(setupBody, /homePanel\.scrollTop/);
@@ -333,7 +335,7 @@ test('Home-launched secondary views expose an accessible return action', () => {
   assert.match(homeModuleShellBody, /renderBreakdownChange\(viewId, \{ fromHome: true \}\)/);
   assert.equal((homeModuleShellBody.match(/\{ fromHome: true \}/g) || []).length, 2);
   assert.match(setBreakdownBody, /state\.homeReturnVisible = options\.fromHome === true && state\.breakdown === 'home' && next !== 'home'/);
-  assert.match(app, /els\.viewBackRow\?\.classList\.toggle\('hidden', state\.breakdown === 'home' \|\| !state\.homeReturnVisible\)/);
+  assert.match(app, /els\.viewBackRow\?\.classList\.toggle\('hidden', !modelSpeedVisible && \(state\.breakdown === 'home' \|\| !state\.homeReturnVisible\)\)/);
   assert.match(app, /els\.backHomeButton\?\.addEventListener\('click',[\s\S]*?renderBreakdownChange\('home'\)/);
   const backRowRule = cssRule(css, '.view-back-row');
   const backButtonRule = cssRule(css, '.back-home-button');

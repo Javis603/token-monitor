@@ -3175,6 +3175,184 @@ test('every limits tooltip flips below when the row has no room above it', () =>
   assert.doesNotMatch(styles, /\.subscription-tooltip\.is-below \{/);
 });
 
+function tooltipFadeAnimation(transitionProperty) {
+  let resolve;
+  let reject;
+  const finished = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return {
+    transitionProperty, finished, cancelled: 0, completed: 0,
+    finish() { this.completed += 1; resolve(); },
+    cancel() { this.cancelled += 1; reject(new Error('animation cancelled')); }
+  };
+}
+
+function tooltipFadeHarness() {
+  const handlers = new Map();
+  const classes = () => {
+    const values = new Set();
+    return {
+      add: (value) => values.add(value),
+      remove: (value) => values.delete(value),
+      contains: (value) => values.has(value),
+      toggle: (value, enabled) => enabled ? values.add(value) : values.delete(value)
+    };
+  };
+  const style = () => ({
+    values: new Map(),
+    setProperty(name, value) { this.values.set(name, value); }
+  });
+  const firstTrigger = {};
+  const secondTrigger = {};
+  const wrap = {
+    isConnected: true, classList: classes(), style: style(),
+    contains: (target) => target === firstTrigger || target === secondTrigger,
+    getBoundingClientRect: () => ({ top: 120, left: 20, width: 80, height: 14 }),
+    addEventListener(name, callback) { handlers.set(name, callback); }
+  };
+  let nextAnimations = [];
+  const tooltip = {
+    childElementCount: 1, classList: classes(), style: style(), attributes: new Map(),
+    offsetHeight: 40, popoverOpen: false, shows: 0, hides: 0,
+    setAttribute(name, value) { this.attributes.set(name, value); },
+    showPopover() { this.popoverOpen = true; this.shows += 1; },
+    hidePopover() { this.popoverOpen = false; this.hides += 1; },
+    getAnimations: () => nextAnimations
+  };
+  const audit = { opened: 0, released: 0, reduced: false };
+  const tooltipHost = {
+    markOpened() { audit.opened += 1; },
+    release() { audit.released += 1; },
+    prefersReducedMotion: () => audit.reduced
+  };
+  const context = { tooltipAnchorSeq: 0, tooltipHost, wrap, tooltip, positionCenteredDetailTooltip() {} };
+  vm.runInNewContext(viewBody('attachLimitDetailTooltip') + '\nattachLimitDetailTooltip(wrap, tooltip);', context);
+  return {
+    wrap, tooltip, audit, firstTrigger, secondTrigger,
+    animations(...items) { nextAnimations = items; },
+    fire(name, fields = {}) {
+      const event = { defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...fields };
+      handlers.get(name)?.(event);
+      return event;
+    },
+    flush: () => new Promise((resolve) => setImmediate(resolve))
+  };
+}
+
+test('limits tooltip first and repeated exits retain geometry until every native transition completes', async () => {
+  const h = tooltipFadeHarness();
+  h.fire('pointerenter');
+  assert.equal(h.tooltip.popoverOpen, true);
+  const anchor = [...h.tooltip.style.values];
+  const geometry = h.wrap.getBoundingClientRect();
+  for (let exit = 1; exit <= 2; exit += 1) {
+    const opacity = tooltipFadeAnimation('opacity');
+    const overlay = tooltipFadeAnimation('overlay');
+    h.animations(opacity, overlay);
+    h.fire('pointerleave');
+    assert.equal(h.wrap.classList.contains('is-closing'), true);
+    assert.equal(h.tooltip.popoverOpen, false, 'native discrete hide owns the closing visual');
+    assert.equal(h.tooltip.childElementCount, 1, 'closing does not remove tooltip content');
+    assert.deepEqual([...h.tooltip.style.values], anchor, 'the last anchor is not moved offscreen');
+    assert.deepEqual(h.wrap.getBoundingClientRect(), geometry);
+    assert.equal(h.audit.released, exit - 1, 'the host cannot rebuild the closing trigger');
+    opacity.finish();
+    await h.flush();
+    assert.equal(h.audit.released, exit - 1, 'opacity alone does not release an active overlay transition');
+    overlay.finish();
+    await h.flush();
+    assert.equal(h.audit.released, exit);
+    assert.equal(h.wrap.classList.contains('is-closing'), false);
+    if (exit === 1) h.fire('pointerenter');
+  }
+  assert.equal(h.tooltip.hides, 2);
+});
+
+test('limits tooltip reentry cancels an old exit without letting its callback release the reopened card', async () => {
+  const h = tooltipFadeHarness();
+  h.fire('pointerenter');
+  const previous = tooltipFadeAnimation('opacity');
+  h.animations(previous);
+  h.fire('pointerleave');
+  h.fire('pointerenter');
+  assert.equal(previous.cancelled, 1);
+  assert.equal(h.tooltip.popoverOpen, true);
+  assert.equal(h.wrap.classList.contains('is-closing'), false);
+  await h.flush();
+  assert.equal(h.audit.released, 0);
+  const current = tooltipFadeAnimation('opacity');
+  h.animations(current);
+  h.fire('pointerleave');
+  previous.finish();
+  await h.flush();
+  assert.equal(h.audit.released, 0, 'a stale completion cannot clear the current exit');
+  assert.equal(h.wrap.classList.contains('is-closing'), true);
+  current.finish();
+  await h.flush();
+  assert.equal(h.audit.released, 1);
+});
+
+test('limits tooltip retains either pointer or keyboard engagement and consumes only its own Escape', async () => {
+  const h = tooltipFadeHarness();
+  h.fire('pointerenter');
+  h.fire('focusin', { target: h.firstTrigger });
+  h.fire('pointerleave');
+  assert.equal(h.tooltip.popoverOpen, true, 'pointer leave must not close a keyboard-focused trigger');
+  h.fire('focusout', { relatedTarget: h.secondTrigger });
+  assert.equal(h.tooltip.popoverOpen, true, 'moving focus inside the same trigger wrapper is not an exit');
+  h.fire('pointerenter');
+  h.fire('focusout', { relatedTarget: null });
+  assert.equal(h.tooltip.popoverOpen, true, 'focus leave must not close a pointer-hovered trigger');
+  const animation = tooltipFadeAnimation('opacity');
+  h.animations(animation);
+  const escape = h.fire('keydown', { key: 'Escape' });
+  assert.equal(escape.defaultPrevented, true);
+  assert.equal(h.tooltip.popoverOpen, false);
+  assert.equal(h.wrap.classList.contains('is-closing'), true);
+  animation.finish();
+  await h.flush();
+  assert.equal(h.audit.released, 1);
+  assert.equal(h.fire('keydown', { key: 'Escape' }).defaultPrevented, false, 'a closed tooltip leaves Escape for its parent');
+});
+
+test('limits tooltip reads reduced motion on every close and finishes its exit immediately', async () => {
+  const h = tooltipFadeHarness();
+  h.fire('pointerenter');
+  const first = tooltipFadeAnimation('opacity');
+  h.animations(first);
+  h.audit.reduced = true;
+  h.fire('pointerleave');
+  assert.equal(first.completed, 1);
+  assert.equal(h.audit.released, 1, 'reduced motion does not wait for a transition promise');
+  assert.equal(h.wrap.classList.contains('is-closing'), false);
+  h.fire('pointerenter');
+  h.audit.reduced = false;
+  const next = tooltipFadeAnimation('opacity');
+  h.animations(next);
+  h.fire('pointerleave');
+  assert.equal(h.audit.released, 1, 'turning reduced motion off restores the native exit hold');
+  // The host settles running animations if reduced motion changes mid-exit.
+  h.audit.reduced = true;
+  next.finish();
+  await h.flush();
+  assert.equal(h.audit.released, 2);
+});
+
+test('limits tooltip cancels from a removed view without retaining its hold or reopening a detached trigger', async () => {
+  const h = tooltipFadeHarness();
+  h.fire('pointerenter');
+  const animation = tooltipFadeAnimation('opacity');
+  h.animations(animation);
+  h.fire('pointerleave');
+  h.wrap.isConnected = false;
+  animation.cancel();
+  await h.flush();
+  assert.equal(h.audit.released, 1);
+  assert.equal(h.wrap.classList.contains('is-closing'), false);
+  h.fire('pointerenter');
+  assert.equal(h.tooltip.shows, 1);
+  assert.equal(h.audit.opened, 1);
+});
+
 test('an attached subscription adds no resting decoration to the plan label', () => {
   const styles = readRendererFile('styles.css');
   assert.doesNotMatch(cssBlock(styles, '.subscription-plan-trigger'), /border-bottom/);

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
@@ -77,8 +78,7 @@ test('token rate divides matched numerator and denominator, never the whole peri
   const { tokenRatePerSecond } = tokenRateFunctions();
   const period = { outputTokens: 1200, totalTokens: 9000, timedOutputTokens: 600, timedTokens: 4500, timedDurationMs: 30_000 };
   assert.equal(tokenRatePerSecond(period), 20);
-  const code = tokenRateSource().replace(/^\s*\/\/.*$/gm, '');
-  const speedBody = code.slice(code.indexOf('function tokenRatePerSecond('));
+  const speedBody = tokenRatePerSecond.toString();
   assert.doesNotMatch(speedBody, /totalTokens/, 'the speed reading must not rebuild coverage from period totals');
 });
 
@@ -638,7 +638,27 @@ test('the live footer rate is opt-in, accessible, and shares the persisted mode'
   assert.match(app, /liveTokenRateScope: els\.liveTokenRateScopeInput\?\.value === 'device' \? 'device' : 'all'/);
   assert.match(app, /els\.showLiveTokenRateInput\.checked = state\.settings\.showLiveTokenRate === true/);
   assert.match(app, /els\.liveTokenRateScopeInput\.value = state\.settings\.liveTokenRateScope === 'device' \? 'device' : 'all'/);
-  assert.match(app, /els\.liveTokenRate\?\.addEventListener\('click', toggleTokenRateMode\)/);
+  const clickBinding = app.match(/els\.liveTokenRate\?\.addEventListener\('click',[\s\S]*?\n\}\);/);
+  assert.ok(clickBinding, 'the footer must register its click handler');
+  let footerClick, modeChanges = 0;
+  vm.runInNewContext(clickBinding[0], {
+    els: { liveTokenRate: { addEventListener(event, listener) {
+      assert.equal(event, 'click');
+      footerClick = listener;
+    } } },
+    toggleTokenRateMode: () => { modeChanges += 1; }
+  });
+  assert.equal(typeof footerClick, 'function');
+  const tooltip = {};
+  footerClick({ target: { closest(selector) {
+    assert.equal(selector, '.limit-detail-tooltip');
+    return tooltip;
+  } } });
+  assert.equal(modeChanges, 0, 'clicking a tooltip row must leave the displayed rate mode unchanged');
+  footerClick({ target: { closest: () => null } });
+  assert.equal(modeChanges, 1, 'clicking the footer button must still switch rate mode');
+  footerClick({ target: { closest: () => null } });
+  assert.equal(modeChanges, 2, 'ordinary button descendants must retain the same click action');
   assert.match(app, /state\.stats = sessionStatsForDisplay\(allTimeSessions\.attach\(payload\.data\.stats\)\);\s*observeLiveTokenRate\(state\.stats\);/);
   assert.match(app, /observeLiveTokenRate\(nextStats\);\s*allTimeSessions\.invalidate\(\);\s*state\.stats = sessionStatsForDisplay\(allTimeSessions\.attach\(nextStats\)\);/);
   assert.match(app, /createLiveTokenRateGroupTracker\([\s\S]*activeMs: LIVE_TOKEN_RATE_ACTIVE_MS[\s\S]*\)/);
@@ -648,7 +668,7 @@ test('the live footer rate is opt-in, accessible, and shares the persisted mode'
   assert.match(app, /selectLiveTokenRatePeriods\([\s\S]*stats,[\s\S]*state\.settings\?\.deviceId,[\s\S]*state\.settings\?\.hubMode,[\s\S]*effectiveLiveTokenRateScope\(\)[\s\S]*\)/);
   assert.match(app, /return syncMode && state\.settings\?\.liveTokenRateScope !== 'device' \? 'all' : 'device';/);
   assert.match(app, /function observeLiveTokenRate\(stats\) \{\s*if \(state\.settings\?\.showLiveTokenRate !== true\) return;/);
-  assert.match(app, /const result = liveTokenRateTracker\.observe\(selection\.entries\);\s*if \(!result\.changed\) return;\s*scheduleLiveTokenRateExpiry\(\);/);
+  assert.match(app, /const result = liveTokenRateTracker\.observe\(selection\.entries\);\s*if \(result\.changed\) scheduleLiveTokenRateExpiry\(\);\s*renderLiveTokenRate\(stats\);/);
   assert.match(app, /const idle = !sample \|\| sample\.idle === true;/);
   assert.match(app, /idle && sample[\s\S]*home\.liveTokenRate\.burnIdleTitle[\s\S]*home\.liveTokenRate\.speedIdleTitle/);
   assert.match(app, /els\.liveTokenRate\.tabIndex = enabled && !obscured \? 0 : -1;/);
@@ -950,4 +970,386 @@ test('changing a model alias cannot turn historical counters into a live model d
   assert.equal(first.speed, 20);
   assert.deepEqual(first.models, []);
   assert.deepEqual(tracker.observe(aliased(raw(10200, 4060, 102000))).models, [{ model: 'GPT', speed: 40, burn: 6000 }]);
+});
+
+function timedCoveragePeriod({ output = 100, timed = output, duration = 1000, model = 'gpt-6-astra', client = 'codex' } = {}) {
+  return {
+    capabilities: { tokenComponents: true, throughput: true },
+    totalTokens: output * 2,
+    outputTokens: output,
+    timedTokens: timed * 2,
+    timedOutputTokens: timed,
+    timedDurationMs: duration,
+    modelOutputs: { [model]: output },
+    modelThroughput: duration > 0 ? { [model]: { timedTokens: timed * 2, timedOutputTokens: timed, timedDurationMs: duration } } : {},
+    clientModels: { [client]: { [model]: output * 2 } }
+  };
+}
+
+const coverageLabels = {
+  timed: '最近计时样本', coverage: '今日有用量但暂无/部分耗时',
+  untimed: '暂无耗时', partial: '部分计时', unknown: '耗时覆盖未知'
+};
+
+test('today coverage includes untimed DSH usage beside a recent timed model without fabricating a rate', () => {
+  const period = timedCoveragePeriod();
+  period.totalTokens += 800;
+  period.outputTokens += 400;
+  period.modelOutputs.Muse = 400;
+  period.clientModels.dsh = { Muse: 800 };
+  const coverage = tokenRateApi.liveTokenRateCoverage([{ id: 'mac', name: 'Mac', period }]);
+  assert.equal(coverage.state, 'partial');
+  assert.equal(coverage.outputTokens, 500);
+  assert.equal(coverage.timedOutputTokens, 100);
+  assert.deepEqual(coverage.devices[0].models.find((model) => model.model === 'Muse'), {
+    model: 'Muse', clients: ['dsh'], state: 'partial', outputTokens: 400, timedOutputTokens: 0
+  });
+  const sample = { devices: [{ id: 'mac', name: 'Mac', models: [{ model: 'gpt-6-astra', speed: 2, burn: 13 }] }], deviceCount: 1 };
+  assert.deepEqual(tokenRateApi.liveTokenRateTooltipEntries(sample, 'speed', String, coverage, coverageLabels), [
+    { full: '最近计时样本' }, ['gpt-6-astra', '2 tok/s'],
+    { full: '今日有用量但暂无/部分耗时', separated: true }, ['Muse · dsh', '暂无耗时']
+  ]);
+  const burn = tokenRateApi.liveTokenRateTooltipEntries(sample, 'burn', String, coverage, coverageLabels);
+  assert.deepEqual(burn[1], ['gpt-6-astra', '13 TPM']);
+  assert.deepEqual(burn[3], ['Muse · dsh', '暂无耗时']);
+});
+
+test('coverage marks a raw model with timed and untimed output partial without assigning rates to its clients', () => {
+  const period = timedCoveragePeriod({ output: 400, timed: 100, model: 'Muse' });
+  period.clientModels = { codex: { Muse: 200 }, dsh: { Muse: 600 } };
+  const coverage = tokenRateApi.liveTokenRateCoverage([{ id: 'mac', period }]);
+  assert.deepEqual(coverage.devices[0].models, [{
+    model: 'Muse', clients: ['codex', 'dsh'], state: 'partial', outputTokens: 400, timedOutputTokens: 100
+  }]);
+  assert.deepEqual(tokenRateApi.liveTokenRateTooltipEntries(null, 'speed', String, coverage, coverageLabels), [
+    { full: '今日有用量但暂无/部分耗时', separated: false }, ['Muse · codex · dsh', '部分计时']
+  ]);
+});
+
+test('legacy throughput defaults are unknown coverage, never exact untimed or fully timed claims', () => {
+  for (const timed of [0, 100]) {
+    const period = timedCoveragePeriod({ timed });
+    period.capabilities.throughput = false;
+    const coverage = tokenRateApi.liveTokenRateCoverage([{ id: 'legacy', period }]);
+    assert.equal(coverage.state, 'unknown');
+    assert.equal(coverage.timedOutputTokens, null);
+    assert.equal(coverage.devices[0].models[0].state, 'unknown');
+    assert.equal(coverage.devices[0].models[0].timedOutputTokens, null);
+    assert.deepEqual(tokenRateApi.liveTokenRateTooltipEntries(null, 'speed', String, coverage, coverageLabels)[1],
+      ['gpt-6-astra · codex', '耗时覆盖未知']);
+  }
+});
+
+test('missing model attribution stays unknown while a genuine empty timing map proves no timed model output', () => {
+  const period = timedCoveragePeriod({ timed: 0, duration: 0 });
+  const known = tokenRateApi.liveTokenRateCoverage([{ id: 'mac', period }]);
+  assert.equal(known.devices[0].models[0].state, 'partial');
+  assert.equal(known.devices[0].models[0].timedOutputTokens, 0);
+  delete period.modelThroughput;
+  const unknown = tokenRateApi.liveTokenRateCoverage([{ id: 'mac', period }]);
+  assert.equal(unknown.state, 'unknown');
+  assert.equal(unknown.devices[0].models[0].timedOutputTokens, null);
+});
+
+test('today coverage follows the existing live-rate scope and stale-device selection exactly', () => {
+  const local = timedCoveragePeriod();
+  const remote = timedCoveragePeriod({ model: 'Muse', client: 'dsh', timed: 0, duration: 0 });
+  const unrelated = timedCoveragePeriod({ model: 'outside-scope', output: 9999 });
+  const stats = {
+    periods: { today: unrelated, month: unrelated, allTime: unrelated },
+    devices: [
+      { deviceId: 'local', hostname: 'Mac', periods: { today: local, month: unrelated } },
+      { deviceId: 'remote', hostname: 'Worker', periods: { today: remote } },
+      { deviceId: 'old', stale: true, periods: { today: unrelated } }
+    ]
+  };
+  for (const mode of ['client', 'host', 'icloud']) {
+    const all = tokenRateApi.liveTokenRateCoverage(tokenRateApi.selectLiveTokenRatePeriods(stats, 'local', mode, 'all').entries);
+    assert.deepEqual(all.devices.map((device) => device.id), ['device:local', 'device:remote']);
+    assert.equal(all.outputTokens, 200);
+    assert.equal(all.state, 'partial');
+    const device = tokenRateApi.liveTokenRateCoverage(tokenRateApi.selectLiveTokenRatePeriods(stats, 'local', mode, 'device').entries);
+    assert.deepEqual(device.devices.map((item) => item.id), ['device:local']);
+    assert.equal(device.state, 'complete');
+    assert.equal(device.outputTokens, 100);
+    const missing = tokenRateApi.liveTokenRateCoverage(tokenRateApi.selectLiveTokenRatePeriods(stats, 'missing', mode, 'device').entries);
+    assert.deepEqual(missing.devices, []);
+    assert.equal(missing.state, 'unknown');
+  }
+});
+
+test('untimed-only and duplicate pushes update coverage without refreshing the timed sample', () => {
+  let now = 1000;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now });
+  const entry = (period) => [{ id: 'mac', name: 'Mac', period }];
+  tracker.reset(entry(timedCoveragePeriod()));
+  now = 2000;
+  const fresh = timedCoveragePeriod({ output: 150, timed: 150, duration: 1500 });
+  const measured = tracker.observe(entry(fresh)).sample;
+  assert.equal(measured.speed, 100);
+  assert.equal(measured.sampledAt, 2000);
+  const later = structuredClone(fresh);
+  later.outputTokens += 5000;
+  later.totalTokens += 10000;
+  later.modelOutputs.Muse = 5000;
+  later.clientModels.dsh = { Muse: 10000 };
+  for (now of [3000, 4000]) {
+    const result = tracker.observe(entry(later));
+    assert.equal(result.changed, false);
+    assert.equal(result.sample.sampledAt, measured.sampledAt);
+    assert.equal(result.sample.revision, measured.revision);
+    assert.equal(result.sample.speed, measured.speed);
+    const coverage = tokenRateApi.liveTokenRateCoverage(entry(later));
+    assert.equal(coverage.state, 'partial');
+    assert.equal(coverage.outputTokens, 5150);
+  }
+  now = 10001;
+  assert.equal(tracker.getSample().idle, true);
+  const stale = tracker.observe(entry(later)).sample;
+  assert.equal(stale.idle, true);
+  assert.equal(stale.sampledAt, 2000);
+  assert.equal(stale.revision, measured.revision);
+  now = 182001;
+  assert.equal(tracker.getSample(), null);
+  const tooltip = tokenRateApi.liveTokenRateTooltipEntries(null, 'speed', String,
+    tokenRateApi.liveTokenRateCoverage(entry(later)), coverageLabels);
+  assert.deepEqual(tooltip[1], ['Muse · dsh', '暂无耗时']);
+});
+
+test('coverage groups missing timing by device even when the same model appears on both', () => {
+  const period = timedCoveragePeriod({ model: 'Muse', client: 'dsh', timed: 0, duration: 0 });
+  const coverage = tokenRateApi.liveTokenRateCoverage([
+    { id: 'a', name: 'Mac', period }, { id: 'b', name: 'Worker', period }
+  ]);
+  assert.deepEqual(tokenRateApi.liveTokenRateTooltipEntries(null, 'speed', String, coverage, coverageLabels), [
+    { full: '今日有用量但暂无/部分耗时', separated: false },
+    { full: 'Mac' }, ['Muse · dsh', '暂无耗时'], { full: 'Worker' }, ['Muse · dsh', '暂无耗时']
+  ]);
+});
+
+test('coverage treats incomplete components and impossible timing as unknown instead of claiming completeness', () => {
+  for (const mutate of [
+    (period) => { period.capabilities.tokenComponents = false; },
+    (period) => { period.timedOutputTokens = 200; period.modelThroughput['gpt-6-astra'].timedOutputTokens = 200; },
+    (period) => { period.timedDurationMs = 0; period.modelThroughput['gpt-6-astra'].timedDurationMs = 0; },
+    (period) => { period.outputTokens = null; period.modelOutputs['gpt-6-astra'] = null; }
+  ]) {
+    const period = timedCoveragePeriod();
+    mutate(period);
+    const coverage = tokenRateApi.liveTokenRateCoverage([{ id: 'mac', period }]);
+    assert.equal(coverage.state, 'unknown');
+    assert.equal(coverage.devices[0].models[0].state, 'unknown');
+  }
+});
+
+test('coverage is deterministic, deduplicates selected device identities, and does not mutate input', () => {
+  const period = timedCoveragePeriod();
+  const entries = [{ id: 'mac', period }, { id: 'mac', period }, { id: '', period }];
+  const before = structuredClone(entries);
+  const first = tokenRateApi.liveTokenRateCoverage(entries);
+  assert.deepEqual(tokenRateApi.liveTokenRateCoverage(entries), first);
+  assert.deepEqual(entries, before);
+  assert.equal(first.devices.length, 1);
+  assert.equal(first.outputTokens, 100);
+  assert.equal(first.state, 'complete');
+  assert.deepEqual(tokenRateApi.liveTokenRateTooltipEntries(null, 'speed', String, first, coverageLabels), []);
+  assert.deepEqual(tokenRateApi.liveTokenRateCoverage(null), {
+    state: 'unknown', outputTokens: null, timedOutputTokens: null, devices: []
+  });
+});
+
+test('known usage without model attribution or output timing stays visible when no live sample exists', () => {
+  const period = timedCoveragePeriod({ timed: 0, duration: 0 });
+  delete period.modelOutputs;
+  delete period.modelThroughput;
+  delete period.clientModels;
+  const coverage = tokenRateApi.liveTokenRateCoverage([{ id: 'mac', name: 'Mac', period }]);
+  assert.deepEqual(tokenRateApi.liveTokenRateTooltipEntries(null, 'speed', String, coverage, coverageLabels), [
+    { full: '今日有用量但暂无/部分耗时', separated: false }, ['Mac', '耗时覆盖未知']
+  ]);
+  const inputOnly = timedCoveragePeriod({ output: 0, timed: 0, duration: 0 });
+  inputOnly.totalTokens = 400;
+  inputOnly.clientModels = { dsh: { Muse: 400 } };
+  inputOnly.modelOutputs = {};
+  const inputs = tokenRateApi.liveTokenRateCoverage([{ id: 'mac', period: inputOnly }]);
+  assert.equal(inputs.state, 'unknown');
+  assert.deepEqual(inputs.devices[0].models[0], {
+    model: 'Muse', clients: ['dsh'], state: 'unknown', outputTokens: 0, timedOutputTokens: 0
+  });
+});
+
+test('untimed stats refresh footer coverage immediately without refreshing or relighting the last measured rate', () => {
+  let now = 1000;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now });
+  const statsFor = (period) => ({ periods: { today: period } });
+  const select = (stats) => tokenRateApi.selectLiveTokenRatePeriods(stats, 'mac', 'local', 'device').entries;
+  tracker.reset(select(statsFor(timedCoveragePeriod())));
+  now = 2000;
+  const previousStats = statsFor(timedCoveragePeriod({ output: 150, timed: 150, duration: 1500 }));
+  const measured = tracker.observe(select(previousStats)).sample;
+  const incoming = structuredClone(previousStats);
+  incoming.periods.today.outputTokens += 400;
+  incoming.periods.today.totalTokens += 800;
+  incoming.periods.today.modelOutputs.Muse = 400;
+  incoming.periods.today.clientModels.dsh = { Muse: 800 };
+  let expirySchedules = 0, timerClears = 0, flashes = 0, tooltip = [];
+  const classes = new Set();
+  const element = {
+    dataset: {},
+    classList: {
+      toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name),
+      remove: (name) => classes.delete(name),
+      add: (name) => { classes.add(name); if (name === 'is-fresh') flashes += 1; }
+    },
+    querySelectorAll: () => [],
+    setAttribute(name, value) { this[name] = value; }
+  };
+  const context = {
+    tokenRateApi,
+    state: { stats: previousStats, settings: { showLiveTokenRate: true, deviceId: 'mac', hubMode: 'local', tokenRateMode: 'speed' } },
+    els: { liveTokenRate: element, liveTokenRateValue: {} },
+    liveTokenRateTracker: tracker,
+    liveTokenRateContext: 'device:mac',
+    liveTokenRateRenderedRevision: measured.revision,
+    liveTokenRateSourceKey: (source) => source,
+    effectiveLiveTokenRateScope: () => 'device',
+    clearLiveTokenRateTimers: () => { timerClears += 1; },
+    scheduleLiveTokenRateExpiry: () => { expirySchedules += 1; },
+    syncLiveTokenRateFooterState() {},
+    formatLiveTokenRate: String,
+    t: (key) => key,
+    limitWindowsView: { setDetailTooltip: (_element, entries) => { tooltip = entries || []; } },
+    setTimeout: () => { throw new Error('coverage must not restart the freshness animation'); }
+  };
+  const observer = app.slice(app.indexOf('function observeLiveTokenRate('), app.indexOf('function formatLiveTokenRate('));
+  const renderer = app.slice(app.indexOf('function renderLiveTokenRate('), app.indexOf('function syncLiveTokenRateFooterState('));
+  vm.runInNewContext(`${observer}\n${renderer}`, context);
+  for (now of [3000, 4000, 10001]) {
+    context.observeLiveTokenRate(incoming);
+    assert.equal(element.dataset.coverage, 'partial');
+    assert.ok(tooltip.some((entry) => !Array.isArray(entry) && entry.full === 'home.liveTokenRate.coverageCompact'));
+    assert.ok(element['aria-label'].includes('home.liveTokenRate.coverageCompact'));
+    assert.equal(element['aria-label'].includes('Muse · dsh'), false);
+    assert.equal(context.els.liveTokenRateValue.textContent, '100 tok/s');
+    assert.equal(tracker.getSample().sampledAt, measured.sampledAt);
+    assert.equal(tracker.getSample().revision, measured.revision);
+    assert.equal(context.state.stats, previousStats, 'render must use its supplied snapshot without mutating global stats');
+  }
+  assert.equal(classes.has('is-idle'), true);
+  assert.equal(flashes, 0);
+  assert.equal(expirySchedules, 0);
+  assert.equal(timerClears, 0);
+  context.renderLiveTokenRate();
+  assert.equal(element.dataset.coverage, 'complete', 'ordinary renders still default to state.stats');
+  context.liveTokenRateContext = 'previous-scope';
+  context.observeLiveTokenRate(incoming);
+  assert.equal(timerClears, 1);
+  assert.equal(tracker.getSample(), null);
+  assert.equal(element.dataset.coverage, 'partial', 'a new source also renders its incoming snapshot');
+  assert.equal(context.els.liveTokenRateValue.textContent, '— tok/s');
+  assert.deepEqual(tooltip, [{ full: 'home.liveTokenRate.noRateData' }]);
+});
+
+
+function compactRateFixture(untimedCount = 12) {
+  const models = ['measured-a', 'measured-b', 'measured-c', 'measured-d']
+    .map((model, index) => ({ model, speed: 10 + index * 10, burn: 6000 - index * 1200 }));
+  const period = {
+    capabilities: { tokenComponents: true, throughput: true },
+    totalTokens: 280 + untimedCount * 10,
+    outputTokens: 100 + untimedCount * 2,
+    timedTokens: 280, timedOutputTokens: 100, timedDurationMs: 4000,
+    modelOutputs: Object.fromEntries(models.map((entry) => [entry.model, entry.speed])),
+    modelThroughput: Object.fromEntries(models.map((entry) => [entry.model, {
+      timedTokens: entry.burn / 60, timedOutputTokens: entry.speed, timedDurationMs: 1000
+    }])),
+    clientModels: { codex: Object.fromEntries(models.map((entry) => [entry.model, entry.burn / 60])), dsh: {} }
+  };
+  for (let i = 0; i < untimedCount; i += 1) {
+    period.modelOutputs['untimed-' + i] = 2;
+    period.clientModels.dsh['untimed-' + i] = 10;
+  }
+  return {
+    sample: { sampledAt: 1000, revision: 3, idle: false, deviceCount: 1, devices: [{ id: 'mac', name: 'Mac', models }] },
+    coverage: tokenRateApi.liveTokenRateCoverage([{ id: 'mac', name: 'Mac', period }])
+  };
+}
+
+const compactRateLabels = { partialSummary: '部分模型暂无速率', unavailable: '暂无速率数据' };
+
+test('compact rate tooltip shows only three measured models and one short coverage note', () => {
+  const fixture = compactRateFixture();
+  const before = structuredClone(fixture);
+  const entries = tokenRateApi.liveTokenRateTooltipEntries(
+    fixture.sample, 'speed', String, fixture.coverage, compactRateLabels, { compact: true, maxModels: 3 }
+  );
+  assert.deepEqual(entries, [
+    ['measured-d', '40 tok/s'], ['measured-c', '30 tok/s'], ['measured-b', '20 tok/s'],
+    { full: '部分模型暂无速率' }
+  ]);
+  assert.equal(fixture.coverage.devices[0].models.length, 16, 'all measured and untimed models remain in the coverage DTO');
+  assert.equal(fixture.coverage.state, 'partial');
+  assert.deepEqual(fixture, before, 'a compact presentation must not mutate measurement, freshness or coverage');
+  assert.equal(JSON.stringify(entries).includes('untimed-'), false);
+});
+
+test('compact rate rows retain device identity without merging the same model across devices', () => {
+  const { sample, coverage } = compactRateFixture(0);
+  sample.deviceCount = 2;
+  sample.devices.push({
+    id: 'worker', name: 'Worker',
+    models: [{ model: 'measured-d', speed: 45, burn: 2700 }, { model: 'remote', speed: 55, burn: 3300 }]
+  });
+  assert.deepEqual(tokenRateApi.liveTokenRateTooltipEntries(
+    sample, 'speed', String, coverage, compactRateLabels, { compact: true }
+  ), [
+    ['remote · Worker', '55 tok/s'], ['measured-d · Worker', '45 tok/s'], ['measured-d · Mac', '40 tok/s']
+  ]);
+  const singleAttributedDevice = { ...sample, devices: [sample.devices[0]] };
+  const entries = tokenRateApi.liveTokenRateTooltipEntries(
+    singleAttributedDevice, 'speed', String, coverage, compactRateLabels, { compact: true }
+  );
+  assert.equal(entries[0][0], 'measured-d · Mac', 'a legacy unattributed device does not erase the reporting device name');
+});
+
+test('compact rate tooltip without a sample shows one absence message regardless of untimed model count', () => {
+  const { coverage } = compactRateFixture();
+  for (const sample of [null, undefined, { deviceCount: 1, devices: [] }]) {
+    const entries = tokenRateApi.liveTokenRateTooltipEntries(
+      sample, 'speed', () => { throw new Error('no numeric rate may be manufactured'); },
+      coverage, compactRateLabels, { compact: true }
+    );
+    assert.deepEqual(entries, [{ full: '暂无速率数据' }]);
+  }
+});
+
+test('compact burn mode sorts its measured numerator and does not confuse truncation with missing timing', () => {
+  const { sample, coverage } = compactRateFixture(0);
+  assert.equal(coverage.state, 'complete');
+  assert.deepEqual(tokenRateApi.liveTokenRateTooltipEntries(
+    sample, 'burn', String, coverage, compactRateLabels, { compact: true }
+  ), [
+    ['measured-a', '6000 TPM'], ['measured-b', '4800 TPM'], ['measured-c', '3600 TPM']
+  ]);
+});
+
+test('compact presentation enforces a three-row ceiling while honoring a smaller requested count', () => {
+  const { sample, coverage } = compactRateFixture(0);
+  for (const [maxModels, expected] of [[18, 3], [3, 3], [2, 2], [1, 1], [0, 3], [undefined, 3]]) {
+    const entries = tokenRateApi.liveTokenRateTooltipEntries(
+      sample, 'speed', String, coverage, compactRateLabels, { compact: true, maxModels }
+    );
+    assert.equal(entries.length, expected);
+    assert.ok(entries.every(Array.isArray));
+  }
+});
+
+test('compact presentation omits unusable rates while preserving a measured numeric zero', () => {
+  const sample = { devices: [{ id: 'mac', models: [
+    { model: 'missing' }, { model: 'infinite', speed: Infinity }, { model: 'invalid', speed: NaN },
+    { model: 'negative', speed: -1 }, { model: 'null', speed: null }, { model: 'measured-zero', speed: 0 }
+  ] }] };
+  assert.deepEqual(tokenRateApi.liveTokenRateTooltipEntries(
+    sample, 'speed', String, undefined, compactRateLabels, { compact: true }
+  ), [['measured-zero', '0 tok/s']]);
 });

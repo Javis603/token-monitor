@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 
@@ -182,13 +183,134 @@ test('Home history visuals reveal left to right only when entering the view', ()
   assert.match(app, /delay: \(column - firstVisibleColumn\) \* heatColumnDelay/);
   assert.match(app, /duration: HOME_HEAT_CELL_MOTION_MS/);
   assert.match(app, /duration: HOME_HEAT_CELL_MOTION_MS,[\s\S]*?easing: 'cubic-bezier\(0\.22, 1, 0\.36, 1\)'/);
-  assert.match(app, /strokeDasharray: `\$\{length\} \$\{length\}`[\s\S]*?strokeDashoffset: length[\s\S]*?strokeDashoffset: 0/);
-  assert.equal((app.match(/duration: HOME_HISTORY_MOTION_MS/g) || []).length, 2);
-  assert.match(app, /clipPath: 'inset\(0 100% 0 0\)'[\s\S]*?clipPath: 'inset\(0 0 0 0\)'/);
+  assert.match(app, /TokenMonitorChartMotion\.reveal/);
+  const homeHistoryMotion = app.slice(app.indexOf('function animateHomeHistoryVisuals('), app.indexOf('function applyBarScale('));
+  assert.equal((homeHistoryMotion.match(/duration: HOME_HISTORY_MOTION_MS/g) || []).length, 1);
+  assert.match(read('chartMotion.js'), /clipPath: 'inset\(0 100% 0 0\)'[\s\S]*?clipPath: 'inset\(0 0% 0 0\)'/);
   assert.match(app, /if \(prefersReducedMotion\(\)\) return/);
   assert.match(app, /new ResizeObserver\(applySettledLayout\)/);
   assert.match(
     app,
     /setupHomeActivityScroller\(activityScroll,\s*\(\)\s*=>\s*\{[\s\S]*?animateHomeHistoryVisuals\(activityScroll, activityCanvas, chart\)[\s\S]*?\}\)/
   );
+});
+
+function headlineResizeHarness() {
+  const app = read('app.js');
+  const animationStart = app.indexOf('function easeOutQuart(');
+  const animationEnd = app.indexOf('const rowNumberAnimations', animationStart);
+  const resizeStart = app.indexOf('let resizeLayoutFrame = 0;');
+  const resizeEnd = app.indexOf("els.swapSettingsRefreshInput.addEventListener", resizeStart);
+  assert.ok(animationStart >= 0 && animationEnd > animationStart);
+  assert.ok(resizeStart >= 0 && resizeEnd > resizeStart);
+
+  let nextFrame = 0;
+  let onResize;
+  const frames = new Map();
+  const total = { textContent: '' };
+  const calls = { fits: 0, compact: [], bubbleRefreshes: 0 };
+  const context = {
+    els: { totalTokens: total },
+    state: { currentTotal: 111 },
+    performance: { now: () => 0 },
+    prefersReducedMotion: () => false,
+    formatNumber: value => String(Math.round(value)),
+    requestAnimationFrame(callback) {
+      const id = ++nextFrame;
+      frames.set(id, callback);
+      return id;
+    },
+    cancelAnimationFrame(id) { frames.delete(id); },
+    window: {
+      addEventListener(event, callback) {
+        assert.equal(event, 'resize');
+        onResize = callback;
+      }
+    },
+    fitTotalNumber() { calls.fits += 1; },
+    updateTotalCompact(value) {
+      calls.compact.push(value);
+      calls.fits += 1;
+    },
+    refreshFloatingBubbleBitmapForDeviceScale() { calls.bubbleRefreshes += 1; },
+    settleMotionAnimations() { throw new Error('A resize must only settle the headline'); }
+  };
+  vm.runInNewContext(
+    app.slice(animationStart, animationEnd) + app.slice(resizeStart, resizeEnd)
+      + '\nthis.animateForTest = animateTotalNumber;'
+      + '\nthis.readMotionForTest = () => ({ handle: numberAnimHandle, target: numberAnimTarget, value: numberAnimValue });',
+    context
+  );
+  return {
+    total, calls, frames, context,
+    resize: () => onResize(),
+    animate: (from, to) => context.animateForTest(total, from, to, 1000),
+    flush(now = 100) {
+      for (const id of [...frames.keys()]) {
+        const callback = frames.get(id);
+        if (!callback) continue;
+        frames.delete(id);
+        callback(now);
+      }
+    }
+  };
+}
+
+test('resize events coalesce and wait for the viewport font to settle', () => {
+  const harness = headlineResizeHarness();
+  for (let i = 0; i < 8; i += 1) harness.resize();
+  assert.equal(harness.frames.size, 1);
+  assert.equal(harness.calls.fits, 0);
+  harness.flush();
+  assert.equal(harness.calls.fits, 0, 'the first frame leaves viewport units time to settle');
+  assert.equal(harness.frames.size, 1);
+  harness.resize();
+  harness.flush();
+  assert.equal(harness.calls.fits, 1);
+  assert.equal(harness.calls.bubbleRefreshes, 1);
+  assert.equal(harness.frames.size, 0);
+  assert.deepEqual(harness.calls.compact, []);
+
+  harness.resize();
+  harness.flush(200);
+  assert.equal(harness.calls.fits, 1);
+  harness.flush(216);
+  assert.equal(harness.calls.fits, 2);
+  assert.equal(harness.calls.bubbleRefreshes, 2);
+});
+
+test('a resize settles and fits the active headline before another count frame can clip it', () => {
+  const harness = headlineResizeHarness();
+  harness.animate(100, 2000);
+  harness.resize();
+  harness.resize();
+  harness.flush();
+  assert.equal(harness.calls.fits, 0);
+  harness.flush();
+
+  assert.equal(harness.total.textContent, '2000');
+  assert.deepEqual(harness.calls.compact, [2000]);
+  assert.equal(harness.calls.fits, 1);
+  assert.equal(harness.calls.bubbleRefreshes, 1);
+  assert.deepEqual({ ...harness.context.readMotionForTest() }, { handle: 0, target: null, value: 2000 });
+  assert.equal(harness.frames.size, 0);
+  harness.flush(500);
+  assert.equal(harness.total.textContent, '2000');
+  assert.equal(harness.calls.fits, 1);
+});
+
+test('a target arriving before the resize frame wins over the previous headline target', () => {
+  const harness = headlineResizeHarness();
+  harness.animate(100, 2000);
+  harness.resize();
+  harness.animate(150, 3000);
+  harness.flush();
+  assert.equal(harness.calls.fits, 0);
+  harness.flush();
+
+  assert.equal(harness.total.textContent, '3000');
+  assert.deepEqual(harness.calls.compact, [3000]);
+  assert.equal(harness.calls.fits, 1);
+  assert.equal(harness.frames.size, 0);
+  assert.deepEqual({ ...harness.context.readMotionForTest() }, { handle: 0, target: null, value: 3000 });
 });

@@ -1,8 +1,9 @@
 ---
-summary: "Codex provider notes: rollout metadata/context, OAuth and RPC quota sources, managed workspaces and system-account switching."
+summary: "Codex provider notes: rollout metadata/context, historical usage source evidence, OAuth/RPC quota sources and managed workspaces."
 ids: [codex]
 read_when:
   - Changing Codex session metadata, T3 title lookup, context occupancy or turn state
+  - Changing Codex historical platform, account or subscription/API attribution
   - Changing Codex OAuth/RPC limits, managed accounts or workspace identity
   - Changing Codex login, system-account switching or reset forecasts
 ---
@@ -26,6 +27,21 @@ These requests appear under the existing `codex` client and use the actual threa
 Manual acceptance: run the updated widget with the experimental environment opt-in and Codex tracking enabled and the desktop local executor connected, ask Dots to create or continue a local project task, then verify its title/tokens in Sessions and its directory label in Projects. Restart Token Monitor and verify the same totals remain; continue the task and verify only the new consumption is added. Usage before observation began is deliberately outside this acceptance scope.
 
 Aggregate collection reuses cached catalog prices and performs at most four uncached or expired model lookups per tick, with a 1.5-second command timeout each. Pending models rotate across ticks so failures, cache expiry and eviction do not prevent later models from being queried. A deferred refresh or failed pricing command retains a previously successful price from the same revision; command failures retry after 30 seconds. A successful lookup that explicitly returns no pricing replaces the old rate with missing-price state. Models without a successful cached rate remain explicitly unpriced. Token counts are unaffected. Successful prices are cached for five minutes and missing prices for 30 seconds, partitioned by pricing revision; a changed revision never reuses an old price.
+
+## Historical usage source evidence
+
+`usageSources.js` enriches native Codex rows with historical source identity while tokscale remains the sole token/duration authority. It reads rollouts from `CODEX_HOME/sessions` or `<home>/.codex/sessions`, plus configured custom roots; an explicit `homeDir` ignores host environment roots. It retains only bounded derived usage events and request-accounting evidence. Files larger than 128 MiB are declined, lines over 1 MiB are skipped and more than 50,000 derived events declines the file. A stable stat snapshot is required; forks/subagent rollouts decline attribution because inherited replay has native global deduplication rules that this join cannot prove.
+
+Accepted `token_count` events follow the pinned native duplicate, regression, reset and timing-cursor rules. A request `token_usage_record` proves correspondence only when its response/thread/turn IDs are byte-exact, `thread_id` equals the native `session_meta.id`, and its last-usage plus cumulative-usage vectors match the accepted token-count event in the same turn. Required complete snapshots include input, output, cache and reasoning counters; missing fields or conflicting response IDs for one accounting key are not evidence. A model name, thread ID alone or nearby timestamp cannot establish the response join.
+
+An exact request proof may join Magpie's answering-provider ledger only when ledger input equals the accepted event's uncached input, ledger output equals its inclusive output, and request output equals the accepted event's output. The ledger's final platform may differ from the rollout's `model_provider` after routing/failover. Its sanitized account/access rules are described in [the shared provider rules](README.md#historical-usage-source-evidence); ledger durations are ignored. Without this proof, the event's observed platform remains and the account is empty. An OpenAI event may independently establish subscription access from that event's `rate_limits.plan_type` when it is `plus`, `pro`, `team`, `business`, `enterprise`, `edu` or `go`. This per-event plan is never sticky, identifies no account and does not come from today's quota response or authentication.
+
+Positive covered output within the native row bound becomes `usageSourceReferences`, retaining source-specific latest completion times. Native period ownership follows the event's native start/timing anchor, so a completion on another date does not move counters into a different period. Reference completion dates are used only for model-speed source filtering and cannot reconstruct every request date. A missing response proof, unsupported plan or incomplete accounting leaves unknown account/access evidence without dropping usage.
+
+A whole-row `usageSource` may attribute existing native timing only when every contributing accepted event, including zero-output events, has one identical source and exact input/output closure holds against the native row. Message count and native duration must also agree when the row reports positive values for those counters. Mixed accounts, partial coverage and closure failures retain output references but leave the row's speed unattributed. No per-account duration is apportioned from output ratios, and no Magpie `ms` or `ttft_ms` enters throughput. Current login, selected managed workspace, session creator and T3's current default provider never establish a historical owner. Credential-based evidence can distinguish historical credentials without establishing their billing-account equivalence. The detail DTO, anonymous identities and `referenceOnly` date behavior are documented in [model output speed](../model-output-speed.md#historical-source-attribution).
+
+## Task and delegated-thread usage
+
 
 Dots session details preserve each observed request's model and token buckets through the Worker message boundary. After the detail Worker returns, main reads the current custom-pricing/binary revision and resolves at most 16 distinct known models per open/refresh through the existing `tokscale pricing <model> --json` catalog lookup (1.5-second command timeout each); only model IDs are passed, without thread IDs, counters or conversation content. Tokscale may refresh its public pricing catalog; this is not model inference. Detail uses the same revision-keyed cache logic and command-failure fallback as aggregate pricing: a failed command retains the last successful same-revision rate, while a successful missing-price response clears it. Caches are thread-local: the usage Worker and main do not exchange prices, so a first detail lookup without a successful main-thread cached rate can still be unpriced. Detail refreshes still query the bounded model set. Native session details do not probe this pricing revision. Unknown models are never looked up. Each valid bucket rate contributes to the known subtotal while only missing-rate buckets are marked unpriced. No session subtotal is proportionally distributed onto Dots requests. Exchanges and turns preserve missing-price counts through grouping, period filtering and renderer adapters. This does not add actual-model evidence or change the raw ledger.
 
@@ -67,8 +83,18 @@ The optional reset forecast is display enrichment from `codex-resets.com`, not q
 
 ## Verification
 
+For historical attribution, run `node --test tests/shared/codexUsageSources.test.js tests/shared/magpieUsageLedger.test.js tests/electron/modelSpeedSources.test.js`. Fixtures cover exact accounting/response joins, event-specific plans, mixed accounts, native closure and timing, duplicate/reset/regression behavior, period ownership, bounded roots and snapshots, and untimed reference dates. They do not prove full historical account coverage for production rollouts.
+
 Run the Codex session, limits, login and account-switching tests when changing this note's scope:
 
 ```bash
 node --test tests/shared/codex*.test.js tests/shared/limitCollector.codex*.test.js tests/shared/sessionContext.test.js tests/electron/codex*.test.js
 ```
+
+## Automatic hosted-cloud observation
+
+`cloudAutoWatch.js` and `codex-cloud-auto-watch.js` automatically union the live cloud catalogs and attach to running tasks without manual IDs. Per-thread engine counters survive connection retries within the process; the observer never emits a combined sum. The app-side account ledger (`cloudLedgerRuntime.js`, `cloudPresentation.js`) consumes the report with TOTAL-only first-snapshot baselines, observation-dated increments, exact-thread local dedup and conservative parent/child exclusion, and overlays the result in the Electron presentation path only. A separate user LaunchAgent runs the tested observer with an explicit automatic-attachment flag. Scope, persistence limits, controls and real validation are documented in [automatic cloud monitoring](../codex-cloud-auto-watch.md); the accounting contract is in [the native integration note](../codex-cloud-native-integration.md).
+
+## Cloud sessions in the ordinary list
+
+Hosted Codex tasks and subagents join the existing Sessions view through `renderer/cloudSessionRows.js`; no separate cloud tab or footer button is shipped. Exact canonical Codex identity can annotate a local row instead of duplicating it, without adding an overlapping cumulative snapshot. Cloud-only clicks use the existing detail surface and do not look for local transcripts. The sender-guarded main-process bridge still returns only account-checked, bounded numeric metadata; it also exposes source creation/activity dates for period selection. The service toggle lives in Settings. See [native session integration and verification](../codex-cloud-native-integration.md).

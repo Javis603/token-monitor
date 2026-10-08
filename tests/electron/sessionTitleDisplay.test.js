@@ -43,7 +43,9 @@ test('main presentation caches restore titles from the same snapshot when re-ena
     settings: {}, ...modelAliases, withoutSessionTitles, withoutSessionTitleStats,
     presentationCache: createStatsPresentationCache(), allTimeSessionsCache: createStatsPresentationCache(),
     snapshotLocalDevices: new WeakMap(), syncProvenanceActive: () => false,
-    projectLimitStatsForDisplay: (value) => value, completeLocalSyncStats: (value) => value
+    projectLimitStatsForDisplay: (value) => value, completeLocalSyncStats: (value) => value,
+    // Cloud overlay is orthogonal to title policy; keep it a passthrough here.
+    withCloudAccounting: (_stats, projected) => projected
   };
   const presentationStart = source.indexOf('function electronPresentationStats(');
   const presentationEnd = source.indexOf('\nconst allTimeSessionsCache', presentationStart);
@@ -82,6 +84,7 @@ test('saving the title preference immediately republishes Today and Home data fr
     latestStats: original, mode: 'local', ...modelAliases, withoutSessionTitleStats,
     presentationCache: createStatsPresentationCache(), syncProvenanceActive: () => false,
     projectLimitStatsForDisplay: value => value,
+    withCloudAccounting: (_stats, projected) => projected,
     migrateCodexAdditionalLimits: noop, scheduleMacWidgetSnapshot: noop, captureMacWidgetProducerOwner: noop,
     repaintEdgeDockCells: noop, updateTrayDisplay: noop,
     rendererSnapshots: { stamp: (_raw, value) => value }, rendererStats: value => value,

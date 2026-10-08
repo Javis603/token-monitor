@@ -300,14 +300,16 @@ test('heatmap metric preserves the legacy cost default and normalizes settings',
   assert.match(html, /class="seg-btn active" data-val="cost" aria-pressed="true"/);
 });
 
-test('Home configures heatmap color in Settings while keeping token tooltips', () => {
+test('Home keeps its Settings metric and labels the selected activity aggregation', () => {
   const app = read('src', 'electron', 'renderer', 'app.js');
   const css = read('src', 'electron', 'renderer', 'styles.css');
   assert.match(app, /settings\.home\.configureActivity/);
   assert.match(app, /function renderHomeActivitySettings/);
   assert.match(app, /saveSettings\(\{ heatmapMetric: metric \}\)/);
-  assert.match(app, /data-home-activity-tooltip-count[^\n]*formatCompact\(Number\(cell\.dataset\.t/);
-  assert.match(app, /data-home-activity-tooltip-label[^\n]*textContent = 'tokens'/);
+  assert.match(app, /const value = Number\(cell\.dataset\.activityValue \?\? cell\.dataset\.t \?\? 0\)/);
+  assert.match(app, /cost \? formatCost\(value\) : formatCompact\(value\)/);
+  assert.match(app, /cell\.dataset\.activityMode/);
+  assert.match(app, /cell\.dataset\.rangeStart/);
   assert.doesNotMatch(app, /home-heatmap-metric/);
   assert.match(css, /\.home-activity-settings/);
   assert.doesNotMatch(css, /\.home-heatmap-metric/);

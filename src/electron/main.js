@@ -278,7 +278,7 @@ const {
   withDetectedMimoAccount
 } = require('../shared/providers/mimo/limits');
 const { createMimoAccountMetadataReader } = require('./providers/mimo/accountMetadata');
-const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
+const { deviceHistoryRevision, historyPreview, historyRevision, localDayKey } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
 const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
@@ -331,6 +331,10 @@ const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./servi
 const { createCodexResetForecastClient } = require('./providers/codex/resetForecast');
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
+const { createCloudAccountingRuntime } = require('./cloudLedgerRuntime');
+const { applyCloudAccounting, collectLocalCodexThreadUsage } = require('./cloudPresentation');
+const { createModelSpeedRuntime } = require('./modelSpeedRuntime');
+
 const {
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
@@ -496,7 +500,7 @@ const DEFAULT_COLLECTION_INTERVAL_MS = 5 * 60 * 1000;
 const HUB_DEFAULT_PORT = 17321;
 const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
 const DEFAULT_VIEW_LIST = ['home', 'limits', 'tool', 'model', 'project', 'session', 'device', 'trends', 'status'].map((id) => ({ id }));
-const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'model', 'session', 'device', 'trends'].map((id) => ({ id }));
+const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'model', 'session', 'modelspeed', 'device', 'trends'].map((id) => ({ id }));
 const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
 
 let mainWindow = null;
@@ -574,12 +578,15 @@ function defaultSettings() {
     titleIconOnly: true,
     showCompactTotalTokens: false,
     showLiveTokenRate: false,
+    cloudAccountingNoteDismissed: false,
+    cloudSessionScopeDismissed: false,
     liveTokenRateScope: 'all',
     compactTokenUnits: 'western',
     tokenRateMode: 'speed',
     heatmapMetric: 'cost',
     modelRankingMetric: 'tokens',
     homeActiveDaysWindow: 'all',
+    homeActivityMode: 'daily',
     // How a live session's context gauge reads. That direction is a choice the
     // gauge cannot make on its own, so it is stated here rather than assumed:
     // `used` is what the Sessions view and this app's own readouts show, while
@@ -730,6 +737,10 @@ function normalizeHeatmapMetric(value, fallback = 'cost') {
   const next = String(value || '').trim();
   if (next === 'tokens' || next === 'cost') return next;
   return fallback === 'tokens' ? 'tokens' : 'cost';
+}
+
+function normalizeHomeActivityMode(value) {
+  return ['daily', 'weekly', 'cumulative'].includes(value) ? value : 'daily';
 }
 
 function normalizeHomeActiveDaysWindow(value, fallback = 'all') {
@@ -2096,12 +2107,16 @@ function updateRendererViewState(patch) {
     ...rendererViewState,
     ...(patch || {})
   }, rendererViewState);
-  const changed = previous.period !== rendererViewState.period
-    || previous.breakdown !== rendererViewState.breakdown;
+  const periodChanged = previous.period !== rendererViewState.period;
+  const changed = periodChanged || previous.breakdown !== rendererViewState.breakdown;
   if (changed && settings) {
     settings.lastViewState = { ...rendererViewState };
     saveSettings();
   }
+  // A period change re-scopes the pushed model-speed summary, so Home's rows and
+  // their "window" label are republished together instead of the label moving
+  // while the numbers still describe the previous selection.
+  if (periodChanged) republishPresentationStats({ reason: 'presentation' });
   return rendererViewState;
 }
 
@@ -2558,10 +2573,13 @@ function readSettings() {
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
+    merged.homeActivityMode = normalizeHomeActivityMode(merged.homeActivityMode);
     merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
     merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
+    merged.cloudAccountingNoteDismissed = parseBoolean(merged.cloudAccountingNoteDismissed, false);
+    merged.cloudSessionScopeDismissed = parseBoolean(merged.cloudSessionScopeDismissed, false);
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
     merged.modelAliases = normalizeModelAliases(merged.modelAliases);
@@ -2761,7 +2779,16 @@ const usageTransform = createUsageTransform({
 // in-process collector and `usageTransform` above runs on this thread.
 let latestUsageHost = null;
 function createElectronUsageRuntime(options) {
-  latestUsageHost = createUsageHost(options, {
+  const meteredOptions = { ...options, onUpdate(summary, reason, meta) {
+    // Full collector updates only. Preview and presentation pushes cannot
+    // manufacture historical generation samples.
+    if (modelSpeedRuntime) modelSpeedRuntime.observe(summary, {
+      source: JSON.stringify([settings?.deviceId || 'local', settings?.clients || '', settings?.hubMode || 'local']),
+      preview: false
+    });
+    return options.onUpdate?.(summary, reason, meta);
+  } };
+  latestUsageHost = createUsageHost(meteredOptions, {
     agentPidPath: AGENT_PID_PATH,
     transformSettings: usageTransformSettings(settings)
   });
@@ -2958,6 +2985,64 @@ function syncProvenanceActive() {
 
 const presentationCache = createStatsPresentationCache();
 
+// Cloud accounting is a main-process overlay, never a Hub or device-ingest
+// change: the observer is account-wide, so feeding these counters into the
+// shared device record could double count them across machines. Every visible
+// surface (renderer, tray, Widget, edge dock) reads this projection, which is
+// why the totals agree wherever practical.
+let cloudAccountingRuntime = null;
+let modelSpeedRuntime = null;
+let modelSpeedTimer = null;
+const cloudLocalIdsCache = new WeakMap();
+const cloudOverlayCache = new WeakMap();
+
+// The speed window follows the window's own DAY/MONTH/TOTAL selection, which the
+// renderer reports through window:viewState. WEEK is a locale-dependent start,
+// so main resolves it with the same week rule the period menu uses.
+function modelSpeedRangeOptions(period) {
+  return {
+    period: period || rendererViewState?.period || 'today',
+    weekStartsOn: fixedPeriodWeekStart(trayMenuLocale())
+  };
+}
+function fixedPeriodWeekStart(locale) {
+  try {
+    const resolved = new Intl.Locale(String(locale || 'en'));
+    const info = typeof resolved.getWeekInfo === 'function' ? resolved.getWeekInfo() : resolved.weekInfo;
+    const firstDay = Number(info?.firstDay);
+    if (Number.isInteger(firstDay) && firstDay >= 1 && firstDay <= 7) return firstDay % 7;
+  } catch (_) { /* use ISO Monday */ }
+  return 1;
+}
+
+function cloudLocalThreadIds(stats) {
+  const cached = cloudLocalIdsCache.get(stats);
+  if (cached && cached.localDevice === localDevice && cached.collectedDevice === lastCollectedDevice) return cached.ids;
+  const ids = collectLocalCodexThreadUsage(stats, [
+    localDevice?.allTime?.sessions,
+    lastCollectedDevice?.allTime?.sessions
+  ]);
+  cloudLocalIdsCache.set(stats, { localDevice, collectedDevice: lastCollectedDevice, ids });
+  return ids;
+}
+
+function withCloudAccounting(stats, projected) {
+  if (!cloudAccountingRuntime || !projected || typeof projected !== 'object') return projected;
+  const ids = cloudLocalThreadIds(stats);
+  // Recheck the current account before reading a cached projection.
+  const summary = cloudAccountingRuntime.summary({ localThreadUsage: ids });
+  const revision = cloudAccountingRuntime.revision();
+  const dayKey = localDayKey(new Date());
+  const cached = cloudOverlayCache.get(stats);
+  if (cached && cached.revision === revision && cached.dayKey === dayKey && cached.projected === projected
+    && cached.localDevice === localDevice && cached.ids === ids) {
+    return cached.result;
+  }
+  const result = applyCloudAccounting(projected, summary);
+  cloudOverlayCache.set(stats, { revision, dayKey, projected, localDevice, ids, result });
+  return result;
+}
+
 // Every input besides `stats` belongs in the cache key, or a settings change
 // would keep serving the projection it replaced.
 function electronPresentationStats(stats) {
@@ -2969,11 +3054,14 @@ function electronPresentationStats(stats) {
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
   const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
-  return presentationCache.get(stats, key, () => projectModelAliasStats(
+  const projected = presentationCache.get(stats, key, () => projectModelAliasStats(
     projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(stats) : stats, limitOptions),
     aliases,
     { grouping }
   ));
+  const visible = withCloudAccounting(stats, projected);
+  return typeof modelSpeedRuntime !== 'undefined' && modelSpeedRuntime
+    ? { ...visible, modelSpeed: modelSpeedRuntime.summary(modelSpeedRangeOptions()) } : visible;
 }
 
 const allTimeSessionsCache = createStatsPresentationCache();
@@ -5732,7 +5820,16 @@ function syncEdgeDock(rendererSettings) {
 }
 
 function refreshLimitStatsPresentation() {
-  if (!latestStats) return;
+  republishPresentationStats({ reason: 'presentation' });
+}
+
+// Re-publish the newest raw stats through the normal presentation path. Used
+// when the presentation itself changed (limits migration, cloud ledger) while
+// the underlying Hub/collector snapshot did not. The reason stays
+// 'presentation' because the renderer reads it as "says nothing about the Hub
+// connection", exactly like a limits repaint.
+function republishPresentationStats({ reason = 'presentation' } = {}) {
+  if (!latestStats) return false;
   const visibleStats = electronPresentationStats(latestStats);
   migrateCodexAdditionalLimits(visibleStats);
   scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
@@ -5742,10 +5839,24 @@ function refreshLimitStatsPresentation() {
     try {
       mainWindow.webContents.send('stats:push', {
         event: 'stats',
-        data: { type: 'stats', reason: 'presentation', mode, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
+        data: { type: 'stats', reason, mode, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
       });
     } catch (_) {}
   }
+  return true;
+}
+
+// Durable cloud accounting: poll the independent observer's validated report,
+// fold it into the account ledger and republish so Home moves without any
+// cloud view being open. The observer service (launchd) is the only live
+// component; this never opens a cloud connection itself.
+function startCloudAccounting() {
+  if (cloudAccountingRuntime || process.platform !== 'darwin') return;
+  cloudAccountingRuntime = createCloudAccountingRuntime({
+    onUpdate: () => republishPresentationStats(),
+    logger: (message) => console.log(`[cloud-ledger] ${message}`)
+  });
+  cloudAccountingRuntime.start();
 }
 
 function sendMimoAccountsPush() {
@@ -7308,7 +7419,9 @@ app.whenReady().then(() => {
   ensureTray();
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
-  if (widgetRuntimeSupported) ensureMacWidgetDemand();
+  modelSpeedRuntime = createModelSpeedRuntime({ directory: app.getPath('userData') });
+  modelSpeedTimer = setInterval(() => republishPresentationStats(), 30000);
+  modelSpeedTimer.unref?.();  if (widgetRuntimeSupported) ensureMacWidgetDemand();
   startMode();
   void widgetRecovery.finally(() => {
     if (widgetRecoveryAbort) app.removeListener('before-quit', abortWidgetRecovery);
@@ -7317,6 +7430,7 @@ app.whenReady().then(() => {
       macWidgetSnapshotController?.resume();
     }
   });
+  startCloudAccounting();
   void hydrateCodexManagedWorkspaceLabels();
   if (settings.discordRpcEnabled) startDiscordRpc();
   rateCache = readRateCache();
@@ -7494,6 +7608,7 @@ app.whenReady().then(() => {
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
     if (patch.heatmapMetric !== undefined) normalizedPatch.heatmapMetric = normalizeHeatmapMetric(patch.heatmapMetric, settings.heatmapMetric);
     if (patch.homeActiveDaysWindow !== undefined) normalizedPatch.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(patch.homeActiveDaysWindow, settings.homeActiveDaysWindow);
+    if (patch.homeActivityMode !== undefined) normalizedPatch.homeActivityMode = normalizeHomeActivityMode(patch.homeActivityMode);
     if (patch.sessionContextMetric !== undefined) normalizedPatch.sessionContextMetric = normalizeSessionContextMetric(patch.sessionContextMetric, settings.sessionContextMetric);
     settings = normalizeWindowBehaviorSettings({
       ...settings,
@@ -7523,6 +7638,8 @@ app.whenReady().then(() => {
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
       showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, false),
       showLiveTokenRate: parseBoolean(patch.showLiveTokenRate ?? settings.showLiveTokenRate, false),
+      cloudAccountingNoteDismissed: parseBoolean(patch.cloudAccountingNoteDismissed ?? settings.cloudAccountingNoteDismissed, false),
+      cloudSessionScopeDismissed: parseBoolean(patch.cloudSessionScopeDismissed ?? settings.cloudSessionScopeDismissed, false),
       liveTokenRateScope: normalizeLiveTokenRateScope(patch.liveTokenRateScope ?? settings.liveTokenRateScope),
       compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
       modelAliases: normalizeModelAliases(patch.modelAliases ?? settings.modelAliases),
@@ -8996,6 +9113,20 @@ app.whenReady().then(() => {
     }
     actionWindowForEvent(BrowserWindow, event, mainWindow)?.close();
   });
+  ipcMain.handle('modelSpeed:list', (event, request = {}) => {
+    const { trustedSender } = require('./cloudUsageBridge');
+    if (!trustedSender(event, [mainWindow], path.join(__dirname, 'renderer'))) throw new Error('UNTRUSTED_SPEED_SENDER');
+    return modelSpeedRuntime?.list(modelSpeedRangeOptions(request?.period)) || null;
+  });
+  ipcMain.handle('modelSpeed:history', (event, request = {}) => {
+    const { trustedSender } = require('./cloudUsageBridge');
+    if (!trustedSender(event, [mainWindow], path.join(__dirname, 'renderer'))) throw new Error('UNTRUSTED_SPEED_SENDER');
+    return modelSpeedRuntime?.detail(request.id, modelSpeedRangeOptions(request?.period)) || null;
+  });
+  require('./cloudUsageBridge').registerCloudUsageIpc({
+    ipcMain, getWindows: () => [mainWindow, dashboardWindow],
+    rendererDir: path.join(__dirname, 'renderer'), open: () => openViewFromTray('session')
+  });
   ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
   ipcMain.on('dashboard:ready', (event) => {
@@ -9025,9 +9156,11 @@ app.whenReady().then(() => {
   });
   maybeRunBackgroundUpdateCheck();
   startAppUpdateBackgroundChecks();
+  if (process.argv.includes('--cloud-usage') || process.argv.includes('--sessions')) openViewFromTray('session');
 });
 
 app.on('second-instance', focusExistingWindow);
+app.on('second-instance', (_event, argv) => { if (argv.includes('--cloud-usage') || argv.includes('--sessions')) openViewFromTray('session'); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 // Every quit route (Cmd+Q, last window closed, system shutdown) lands here.
 // performQuit is synchronous through to the exit, so there is nothing to wait
@@ -9035,6 +9168,9 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 // OS-initiated logout or restart on macOS.
 app.on('before-quit', () => {
   quitRequested = true;
+  cloudAccountingRuntime?.stop();
+  if (modelSpeedTimer) clearInterval(modelSpeedTimer);
+  modelSpeedTimer = null;
   antigravityOAuthLoginController?.abort();
   resetMacWidgetReloadThrottle();
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);

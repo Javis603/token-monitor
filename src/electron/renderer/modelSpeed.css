@@ -1,0 +1,266 @@
+/* Model output speed: the Home module and its second-level detail pane.
+   Shared chrome (.home-module*, .home-list-*, .tabs/.tab) comes from styles.css;
+   only the feature-specific pieces live here. Colours use the theme tokens so the
+   light theme, custom accents and reduced-motion modes stay consistent. */
+
+.home-module-modelspeed { font: inherit; }
+.home-module-modelspeed .home-module-body { gap: 0; }
+.model-speed-note { margin: 2px 0; color: var(--muted); font-size: 0.625rem; line-height: 1.5; }
+.model-speed-note.model-speed-state { margin: 0; padding: 6px 0; }
+
+/* The head is a button when the module can enter its detail view; the jump icon
+   is the same one every other module head shows. Its hover is the Session rows'
+   rounded wash instead of a dimmed title, and it stops at the head box because
+   the first module starts on the panel's clip edge. */
+.model-speed-head {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.model-speed-head::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: 8px;
+  background: rgba(var(--overlay-rgb), 0.06);
+  content: '';
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.model-speed-head:hover::before,
+.model-speed-head:focus-visible::before { opacity: 1; }
+.model-speed-head:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.32); outline-offset: 3px; }
+
+/* One compact line per model: mark · name/status · latest TPS/latest TPM · spark. */
+.model-speed-row {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: 100%;
+  grid-template-columns: 10px minmax(0, 1fr) auto 44px;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+  border: 0;
+  border-bottom: 1px solid rgba(var(--line-rgb), 0.1);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+/* The wash is rounded while the separator below it stays straight, so the shape
+   comes from a pseudo-element (the Session rows' 8px / 0.06 / 120ms reference)
+   rather than a border-radius on the row itself. The wash fills the row's own
+   padding box, which already gives the text 5px (10px in the list) of air. */
+.model-speed-row::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 1px;
+  border-radius: 8px;
+  background: rgba(var(--overlay-rgb), 0.06);
+  content: '';
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.model-speed-row:last-child { border-bottom: 0; }
+.model-speed-row:hover::before,
+.model-speed-row:focus-visible::before { opacity: 1; }
+.model-speed-row:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.32); outline-offset: 1px; border-radius: 8px; }
+.model-speed-row-main { display: grid; min-width: 0; gap: 1px; }
+.model-speed-row-main .home-list-name { font-size: 0.6875rem; }
+.model-speed-row-sub { display: flex; min-width: 0; align-items: baseline; gap: 4px; overflow: hidden; }
+.model-speed-row-sub > * { flex: 0 0 auto; }
+.model-speed-row-sub .model-speed-samples { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.model-speed-sep { opacity: 0.55; }
+.model-speed-change { font-variant-numeric: tabular-nums; }
+.model-speed-row-metrics { display: grid; gap: 1px; justify-items: end; text-align: right; white-space: nowrap; }
+.model-speed-row-metrics .home-list-value { color: var(--number); font-size: 0.6875rem; }
+.model-speed-row-metrics .home-list-sub { font-size: 0.6875rem; font-variant-numeric: tabular-nums; }
+.model-speed-row-spark { display: flex; width: 44px; height: 16px; align-items: center; justify-content: flex-end; }
+.model-speed-row-spark svg { display: block; width: 44px; height: 16px; color: var(--blue); }
+.model-speed-row-spark svg.is-slower { color: var(--orange); }
+.model-speed-status { color: var(--muted); font-size: 0.625rem; white-space: nowrap; }
+.model-speed-status.stable { color: var(--success); }
+.model-speed-status.slower { color: var(--orange); }
+
+/* Host panel for the detail; mirrors .trends-panel/.limits-panel so the second
+   level scrolls inside the window instead of growing it. */
+#modelSpeedPanel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  align-content: start;
+  gap: 10px;
+  overflow: hidden auto;
+  padding: 0 2px 0 0;
+  scrollbar-width: none;
+}
+#modelSpeedPanel::-webkit-scrollbar { width: 0; height: 0; }
+
+/* Nothing here paints its own dark slab: the pane sits on the host glass. */
+.model-speed-detail { display: grid; min-width: 0; gap: 10px; padding: 0 2px 12px 0; background: transparent; color: inherit; font: inherit; }
+/* A detail fills the pane so its plot can claim the surplus height; the list
+   stays start-aligned because extra rows already consume the room. The body is
+   a flex column instead of fixed grid rows: a paused note, a waiting state or a
+   stats block can add or drop children between polls, and the plot must stay
+   the flexible one either way. */
+#modelSpeedPanel > .model-speed-detail { align-content: start; grid-template-rows: auto auto minmax(0, 1fr) auto; min-height: 100%; }
+#modelSpeedPanel > .model-speed-detail > .model-speed-body { display: flex; flex-direction: column; min-height: 0; }
+#modelSpeedPanel > .model-speed-detail > .model-speed-body > .model-speed-chart-plot { flex: 1 1 auto; }
+.model-speed-detail-head { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.model-speed-detail-title { display: grid; flex: 1 1 auto; min-width: 0; gap: 1px; }
+.model-speed-detail-name {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-speed-detail-raw { min-width: 0; color: var(--muted); font-size: 0.625rem; line-height: 1.35; overflow-wrap: anywhere; }
+.model-speed-detail-raw-label { text-transform: uppercase; letter-spacing: 0.03em; }
+/* The detail owns no range control: the window's DAY/MONTH/TOTAL tabs are the
+   only selector, and this caption names the window the figures describe. */
+.model-speed-range { text-transform: uppercase; letter-spacing: 0.04em; }
+.model-speed-body { display: grid; min-width: 0; gap: 8px; transition: opacity 180ms ease; }
+.model-speed-body.is-refreshing { opacity: 0.55; }
+.model-speed-caption { margin: 0; color: var(--muted); font-size: 0.625rem; line-height: 1.4; }
+.model-speed-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.model-speed-figure {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 1px solid rgba(var(--line-rgb), 0.1);
+  border-radius: 8px;
+  background: rgba(var(--panel-rgb), 0.35);
+}
+.model-speed-figure-value { overflow: hidden; color: var(--number); font-size: 0.75rem; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.15; text-overflow: ellipsis; }
+.model-speed-figure-label { color: var(--muted); font-size: 0.5625rem; letter-spacing: 0.04em; text-transform: uppercase; }
+/* The plot is the one part of the detail that should absorb spare height: a
+   taller window shows a taller curve instead of more empty pane. The 104px
+   floor keeps a short window readable. */
+.model-speed-chart-plot { display: grid; min-height: 104px; }
+.model-speed-chart { display: block; width: 100%; height: 100%; min-height: 104px; color: var(--blue); }
+.model-speed-chart.is-slower { color: var(--orange); }
+.model-speed-chart:focus-visible { outline: 1px solid rgba(var(--line-rgb), 0.28); outline-offset: 3px; border-radius: 4px; }
+.model-speed-chart-guide, .model-speed-chart-marker { opacity: 0; pointer-events: none; }
+.model-speed-chart-guide { stroke: currentColor; stroke-width: 1; stroke-dasharray: 3 4; }
+.model-speed-chart-marker { fill: var(--text); stroke: currentColor; stroke-width: 2; }
+.model-speed-chart.is-inspecting .model-speed-chart-guide { opacity: 0.36; }
+.model-speed-chart.is-inspecting .model-speed-chart-marker { opacity: 1; }
+.model-speed-chart-tooltip {
+  position: fixed;
+  z-index: 50;
+  display: grid;
+  gap: 4px;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  padding: 7px 9px;
+  border: 1px solid rgba(var(--line-rgb), 0.2);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)), rgba(var(--glass-rgb), 0.86);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(var(--overlay-rgb), 0.08);
+  -webkit-backdrop-filter: blur(18px) saturate(115%);
+  backdrop-filter: blur(18px) saturate(115%);
+  color: var(--muted);
+  font-size: 0.625rem;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.model-speed-chart-tooltip[hidden] { display: none; }
+.model-speed-chart-tooltip-date { font-size: 0.5625rem; overflow-wrap: anywhere; }
+.model-speed-chart-tooltip-values { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--number); }
+.model-speed-area { pointer-events: none; }
+.model-speed-area-top { stop-color: currentColor; stop-opacity: 0.22; }
+.model-speed-area-bottom { stop-color: currentColor; stop-opacity: 0; }
+.model-speed-dates { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); min-width: 0; gap: 8px; color: var(--muted); font-size: 0.5625rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.model-speed-dates > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-speed-dates > span:nth-child(2) { text-align: center; }
+.model-speed-dates > span:last-child:not(:first-child) { text-align: right; }
+.model-speed-stats { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; column-gap: 10px; row-gap: 2px; margin: 0; }
+.model-speed-stat-label { color: var(--muted); font-size: 0.625rem; }
+.model-speed-stat-value { min-width: 0; margin: 0; overflow: hidden; color: var(--text); font-size: 0.625rem; font-variant-numeric: tabular-nums; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.model-speed-sources { display: grid; min-width: 0; gap: 6px; border-top: 1px solid rgba(var(--line-rgb), 0.1); padding-top: 8px; }
+.model-speed-sources-title { margin: 0; color: var(--text); font-size: 0.625rem; font-weight: 600; }
+.model-speed-source-list { display: grid; min-width: 0; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.model-speed-source { display: flex; min-width: 0; align-items: baseline; gap: 10px; }
+.model-speed-source-identity { display: grid; flex: 1 1 auto; min-width: 0; gap: 2px; }
+.model-speed-source-title { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px; }
+.model-speed-source-platform { color: var(--text); font-size: 0.625rem; font-weight: 500; overflow-wrap: anywhere; }
+.model-speed-source-access { padding: 1px 5px; border: 1px solid rgba(var(--line-rgb), 0.12); border-radius: 4px; color: var(--muted); font-size: 0.5625rem; line-height: 1.2; }
+.model-speed-source-account { color: var(--text); font-size: 0.625rem; line-height: 1.35; overflow-wrap: anywhere; }
+.model-speed-source-client { color: var(--muted); font-size: 0.5625rem; line-height: 1.35; overflow-wrap: anywhere; }
+.model-speed-source-metric { display: grid; flex: 0 1 auto; min-width: 0; gap: 2px; color: var(--text); font-size: 0.625rem; font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.model-speed-source-samples { color: var(--muted); font-size: 0.5625rem; }
+.model-speed-method { border-top: 1px solid rgba(var(--line-rgb), 0.1); padding-top: 6px; }
+.model-speed-method-summary { color: var(--muted); cursor: pointer; font-size: 0.625rem; }
+.model-speed-method-summary:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.32); outline-offset: 1px; border-radius: 4px; }
+.model-speed-method .model-speed-note { margin: 4px 0 0; }
+
+/* Both Home and the full list query their actual inline width. Free the spark
+   and sample budget first; the compact tier also drops change and measured TPM. */
+@container home-module (max-width: 400px) {
+  .model-speed-row { grid-template-columns: 10px minmax(0, 1fr) minmax(0, auto); }
+  .model-speed-samples,
+  .model-speed-samples-sep,
+  .model-speed-row-spark { display: none; }
+  .model-speed-row-sub { flex-wrap: wrap; overflow: visible; white-space: normal; }
+  .model-speed-row-sub > .model-speed-status { flex-shrink: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  .model-speed-row-metrics { min-width: 0; max-width: 40cqi; }
+  .model-speed-row-metrics .home-list-value,
+  .model-speed-row-metrics .home-list-sub { white-space: normal; overflow-wrap: anywhere; }
+  .model-speed-range { white-space: normal; overflow-wrap: anywhere; }
+}
+@container home-module (max-width: 280px) {
+  .model-speed-change,
+  .model-speed-change-sep,
+  .model-speed-row-tpm { display: none; }
+  .model-speed-row { grid-template-columns: 10px minmax(0, 1fr); gap: 4px 8px; padding-block: 7px; }
+  .model-speed-row > .home-list-mark { grid-column: 1; grid-row: 1; align-self: start; margin-top: 1px; }
+  .model-speed-row-main { grid-column: 2; grid-row: 1; }
+  .model-speed-row-metrics { grid-column: 2; grid-row: 2; display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 2px 8px; max-width: none; text-align: left; }
+  .model-speed-row-metrics .home-list-value,
+  .model-speed-row-metrics .home-list-sub { font-size: 0.625rem; }
+}
+@media (max-width: 300px) {
+  .model-speed-stat-value { white-space: normal; overflow-wrap: anywhere; }
+}
+@media (min-width: 680px) {
+  .model-speed-detail { width: 100%; max-width: 760px; justify-self: center; }
+  /* Wider windows get a taller floor, then grow into whatever is left. */
+  .model-speed-chart-plot { min-height: 150px; }
+  .model-speed-chart { min-height: 150px; }
+}
+@media (max-height: 240px) {
+  #modelSpeedPanel { display: none; }
+}
+
+/* The full list is a regular second-level pane, never another Home-sized card. */
+.model-speed-list { display: grid; min-width: 0; gap: 10px; padding-bottom: 8px; container: home-module / inline-size; }
+.model-speed-list-head { display: flex; align-items: baseline; justify-content: space-between; min-width: 0; gap: 8px; }
+.model-speed-list-rows { display: grid; min-width: 0; }
+.model-speed-list .model-speed-row { min-height: 49px; padding-block: 10px; }
+.model-speed-list .home-list-name { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.model-speed-list-notice { color: var(--muted); font-size: 0.625rem; line-height: 1.5; }
+.model-speed-all-link { justify-self: start; padding: 2px 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: inherit; font-size: 0.625rem; cursor: pointer; transition: color 140ms ease; }
+.model-speed-all-link:hover { color: var(--text); }
+.model-speed-all-link:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.32); outline-offset: 2px; }

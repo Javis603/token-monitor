@@ -181,6 +181,7 @@ const subscriptionText = window.TokenMonitorSubscriptionText;
 const compactTokenApi = window.TokenMonitorCompactTokens;
 const trayLayoutApi = window.TokenMonitorTrayLayout;
 const sessionRowsApi = window.TokenMonitorSessionRows;
+const cloudSessionRowsApi = window.TokenMonitorCloudSessionRows;
 const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
 const {
   barScaleMax,
@@ -264,9 +265,13 @@ const HOME_MODULE_OPTIONS = [
   { id: 'tool', labelKey: 'home.tools', viewId: 'tool' },
   { id: 'model', labelKey: 'home.models', viewId: 'model' },
   { id: 'session', labelKey: 'home.sessions', viewId: 'session' },
+  { id: 'modelspeed', labelKey: 'home.modelSpeed.title', viewId: 'model' },
   { id: 'device', labelKey: 'home.devices', viewId: 'device' },
   { id: 'trends', labelKey: 'home.activity', viewId: 'trends' }
 ];
+// Row-list modules share the measured height budget (see HOME_ROW_BUDGET_SELECTORS
+// below); charts and meters do not compete for it, because their own layout
+// already absorbs extra room.
 const VIEW_SWITCHER_LONG_PRESS_MS = 420;
 const VIEW_SWITCHER_HOVER_CLOSE_MS = 160;
 const VIEW_ICON_CLASSES = {
@@ -306,7 +311,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, homeRowBudgetObserver: null, homeRowBudgetSize: '', homeRowBudgetPlan: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
@@ -334,6 +339,7 @@ state.pendingLimitProviderSelection = null;
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.homeReturnVisible = false;
+state.openModelSpeed = null;
 state.appUpdateNotesPresentedVersion = '';
 state.periodMotionActive = false;
 state.animateBarsFromZero = false;
@@ -390,6 +396,7 @@ Object.assign(els, {
 Object.assign(els, {
   appTitleMark: document.querySelector('.app-title-mark'),
   viewBackRow: document.getElementById('viewBackRow'),
+  modelSpeedPanel: document.getElementById('modelSpeedPanel'),
   backHomeButton: document.getElementById('backHomeButton'),
   systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
@@ -1120,13 +1127,12 @@ function observeLiveTokenRate(stats) {
     liveTokenRateContext = sourceKey;
     liveTokenRateTracker.reset(selection.entries);
     clearLiveTokenRateTimers();
-    renderLiveTokenRate();
+    renderLiveTokenRate(stats);
     return;
   }
   const result = liveTokenRateTracker.observe(selection.entries);
-  if (!result.changed) return;
-  scheduleLiveTokenRateExpiry();
-  renderLiveTokenRate();
+  if (result.changed) scheduleLiveTokenRateExpiry();
+  renderLiveTokenRate(stats);
 }
 
 function formatLiveTokenRate(value) {
@@ -1138,7 +1144,7 @@ function formatLiveTokenRate(value) {
   return formatCompact(rate, effectiveCompactTokenUnits(), currentLocale());
 }
 
-function renderLiveTokenRate() {
+function renderLiveTokenRate(stats = state.stats) {
   if (!els.liveTokenRate || !els.liveTokenRateValue) return;
   const enabled = state.settings?.showLiveTokenRate === true;
   if (!enabled) {
@@ -1151,6 +1157,11 @@ function renderLiveTokenRate() {
 
   const burn = state.settings?.tokenRateMode === 'burn';
   const sample = liveTokenRateTracker.getSample();
+  const selection = tokenRateApi.selectLiveTokenRatePeriods(
+    stats, state.settings?.deviceId, state.settings?.hubMode, effectiveLiveTokenRateScope()
+  );
+  const coverage = tokenRateApi.liveTokenRateCoverage(selection.entries);
+  els.liveTokenRate.dataset.coverage = coverage.state;
   const unit = burn ? 'TPM' : 'tok/s';
   const rate = sample ? (burn ? sample.burn : sample.speed) : null;
   const value = rate === null ? '—' : formatLiveTokenRate(rate);
@@ -1166,9 +1177,19 @@ function renderLiveTokenRate() {
   const labelKey = idle && sample
     ? (burn ? 'home.liveTokenRate.burnIdleTitle' : 'home.liveTokenRate.speedIdleTitle')
     : (burn ? 'home.liveTokenRate.burnTitle' : 'home.liveTokenRate.speedTitle');
-  const label = t(labelKey, { value: text, scope });
+  const coverageLabel = coverage.state === 'complete' ? ''
+    : t(coverage.state === 'partial' ? 'home.liveTokenRate.coveragePartial' : 'home.liveTokenRate.coverageUnknown');
+  const label = [t(labelKey, { value: text, scope }), coverageLabel].filter(Boolean).join(' ');
   const detailEntries = tokenRateApi.liveTokenRateTooltipEntries(
-    sample, burn ? 'burn' : 'speed', formatLiveTokenRate
+    sample, burn ? 'burn' : 'speed', formatLiveTokenRate, coverage, {
+      timed: t('home.liveTokenRate.coverageTimed'),
+      coverage: t('home.liveTokenRate.coverageToday'),
+      untimed: t('home.liveTokenRate.coverageUntimed'),
+      partial: t('home.liveTokenRate.coveragePartial'),
+      unknown: t('home.liveTokenRate.coverageUnknown'),
+      partialSummary: t('home.liveTokenRate.coverageCompact'),
+      unavailable: t('home.liveTokenRate.noRateData')
+    }, { compact: true, maxModels: 3 }
   );
   limitWindowsView.setDetailTooltip(els.liveTokenRate, detailEntries.length ? detailEntries : null);
   for (const cell of els.liveTokenRate.querySelectorAll('.limit-detail-tooltip-row span:first-child')) {
@@ -1276,10 +1297,8 @@ function toggleTokenRateMode() {
   // tick silently flips it back.
   saveSettings({ tokenRateMode: next }).catch(() => renderTokenRate());
 }
-// Scale the exact total to fit the width it is actually given instead of clipping
-// it to an ellipsis. The compact chip (when shown) is flex:0 0 auto and claims its
-// width first, so the number's clientWidth is its allotted box while scrollWidth is
-// its natural width; the ratio is how far the font must shrink to stay whole.
+// Scale only when the exact total itself exceeds the available line. The compact
+// approximation shares the summary row with cost and never reserves headline width.
 function totalNumberFontScale(availableWidth, naturalWidth, minScale = 0.5) {
   if (!(naturalWidth > 0) || !(availableWidth > 0)) return 1;
   return Math.min(1, Math.max(minScale, availableWidth / naturalWidth));
@@ -1943,27 +1962,18 @@ function animateHomeHistoryVisuals(activityScroll, activityCanvas, trendChart) {
     });
   });
 
-  const line = trendChart?.querySelector('.area-line-stroke');
-  const fill = trendChart?.querySelector('.area-line-fill');
-  const length = line?.getTotalLength?.() || 0;
-  if (length > 0) {
-    line.animate([
-      { strokeDasharray: `${length} ${length}`, strokeDashoffset: length },
-      { strokeDasharray: `${length} ${length}`, strokeDashoffset: 0 }
-    ], {
-      duration: HOME_HISTORY_MOTION_MS,
-      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-      fill: 'backwards'
-    });
-  }
-  fill?.animate([
-    { clipPath: 'inset(0 100% 0 0)' },
-    { clipPath: 'inset(0 0 0 0)' }
-  ], {
-    duration: HOME_HISTORY_MOTION_MS,
-    easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-    fill: 'backwards'
+  const animation = window.TokenMonitorChartMotion.reveal(trendChart?.querySelector('svg'), {
+    duration: HOME_HISTORY_MOTION_MS, reducedMotion: prefersReducedMotion()
   });
+  if (!animation) return;
+  const entry = { animation, pending: false };
+  state.homeHistoryReveal = entry;
+  const settled = () => {
+    if (state.homeHistoryReveal !== entry) return;
+    state.homeHistoryReveal = null;
+    if (entry.pending && state.breakdown === 'home' && !state.openModelSpeed) renderHome();
+  };
+  animation.finished.then(settled, settled);
 }
 
 function applyBarScale(fill, scale) {
@@ -2367,7 +2377,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime, cloudThreadId, cloudOnly, costLabel: metricLabel }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2386,6 +2396,8 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
   if (platform !== undefined) row.dataset.platform = platform || '';
   if (client !== undefined) row.dataset.client = client || '';
   if (kind !== undefined) row.dataset.kind = kind || '';
+  if (cloudThreadId) row.dataset.cloudThreadId = cloudThreadId; else delete row.dataset.cloudThreadId;
+  row.dataset.cloudOnly = String(cloudOnly === true);
   if (reviewGroup === true) row.dataset.reviewGroup = 'true';
   else delete row.dataset.reviewGroup;
   if (kind === 'session' && client === 'reasonix') {
@@ -2462,9 +2474,9 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
   row.dataset.motionValue = String(Number(value) || 0);
   const costEl = row.querySelector('.row-cost');
   const costLabelText = formatCost(cost || 0, unpricedTokens);
-  costEl.textContent = tokenDataUnavailable === true ? ''
-    : unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText;
-  costEl.title = tokenDataUnavailable === true ? '' : costLabelText;
+  costEl.textContent = metricLabel || (tokenDataUnavailable === true ? ''
+    : unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText);
+  costEl.title = cloudOnly ? cloudSessionRowsApi.labels(currentLocale()).lifetime : (tokenDataUnavailable === true ? '' : costLabelText);
   // The row builder already applied the shared gate (recent enough to have a
   // reading), so this draws whatever arrived rather than re-deciding from
   // `running` - that second gate is exactly what made the dock card and this
@@ -2539,7 +2551,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
   const tokenLabel = tokenDataUnavailable === true
     ? (t('detailTokenUnavailable') || 'Unavailable')
     : formatNumber(value);
-  const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0, unpricedTokens)}`;
+  const costLabel = metricLabel ? `, ${metricLabel}` : tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0, unpricedTokens)}`;
   sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
     interactive,
     hasAccordion,
@@ -2850,7 +2862,7 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
 }
 
 function rawSessionRowsForPeriod(period) {
-  return sessionRowsApi.sessionRowsForPeriod(period, {
+  const localRows = sessionRowsApi.sessionRowsForPeriod(period, {
     clientLabels,
     clientColors,
     modelColor,
@@ -2859,6 +2871,9 @@ function rawSessionRowsForPeriod(period) {
     archivedLabel: t('session.archived'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
+  });
+  return cloudSessionRowsApi.mergeRows(localRows, period, cloudSessionsSource.snapshot(), {
+    period: state.period, locale: currentLocale(), color: clientColors.codex
   });
 }
 
@@ -4015,11 +4030,11 @@ function missingLimitProviderStatus() {
 
 function limitDetailTooltipShouldHoldRender() {
   if (!state.limitDetailTooltipActive || !els.limitsPanel) return false;
-  return Boolean(els.limitsPanel.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
+  return Boolean(els.limitsPanel.querySelector('.limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .limit-detail-tooltip-wrap.is-closing'));
 }
 
 function sessionTooltipShouldHoldRender() {
-  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
+  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .home-session-meta .limit-detail-tooltip-wrap.is-closing, .row-context.limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .row-context.limit-detail-tooltip-wrap.is-closing, .row-label .limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .row-label .limit-detail-tooltip-wrap.is-closing, .detail-ex-title.limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .detail-ex-title.limit-detail-tooltip-wrap.is-closing'));
 }
 
 function flushPendingLimitDetailTooltipRender() {
@@ -4069,6 +4084,7 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   }),
   motion: limitResetMotionApi,
   tooltip: {
+    prefersReducedMotion,
     hasOpened: () => state.limitDetailTooltipHasOpened,
     markOpened() {
       state.limitDetailTooltipHasOpened = true;
@@ -4642,11 +4658,12 @@ function applySessionDetailResult(request, options) {
   renderSessionDetail(options);
 }
 
-async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null }) {
+async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null, cloudThreadId = null, cloudOnly = false }) {
   const request = { kind: 'session', client, sessionId, sessionCost,
     title: state.settings?.sessionTitlesEnabled === false && returnTo?.kind !== 'background-review-group' ? '' : title,
-    period: state.period, detail: null, returnTo };
+    period: state.period, detail: null, returnTo, cloudThreadId, cloudOnly };
   state.openSession = request;
+  if (cloudOnly) { renderSessionDetail({}); return; }
   renderSessionDetail({ loading: true });
   try {
     const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: request.period, sessionCost });
@@ -4657,6 +4674,25 @@ async function openSessionDetail({ client, sessionId, sessionCost, title, return
   } catch (_) {
     applySessionDetailResult(request, { error: true });
   }
+}
+
+function renderCloudSessionDetail() {
+  if (!state.openSession?.cloudThreadId) return;
+  const body = els.sessionDetail;
+  let section = body.querySelector('.cloud-session-detail');
+  if (!section) { section = document.createElement('section'); section.className = 'cloud-session-detail'; body.prepend(section); }
+  const data = cloudSessionRowsApi.detail(cloudSessionsSource.snapshot(), state.openSession.cloudThreadId, currentLocale(), state.stats?.cloudAccounting);
+  const signature = JSON.stringify(data);
+  if (section.dataset.signature === signature) return;
+  section.dataset.signature = signature;
+  const title = document.createElement('h3'); title.textContent = data.title;
+  const note = detailNote(data.note);
+  const fields = document.createElement('dl');
+  for (const [label, value] of data.fields) {
+    const key = document.createElement('dt'), item = document.createElement('dd');
+    key.textContent = label; item.textContent = value; fields.append(key, item);
+  }
+  section.replaceChildren(title, note, fields);
 }
 
 function toggleDetailSort() {
@@ -4684,6 +4720,7 @@ function sessionDetailBack() {
 }
 
 function renderSessionDetail({ detail, loading, error } = {}) {
+  document.getElementById('cloudSessionsScope')?.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
@@ -4696,6 +4733,8 @@ function renderSessionDetail({ detail, loading, error } = {}) {
 
   const idLabel = sessionRowsApi.sessionDetailIdLabel(state.openSession?.client, state.openSession?.sessionId, detail);
   if (idLabel) container.append(sessionIdLine(idLabel));
+  if (state.openSession?.cloudThreadId) renderCloudSessionDetail();
+  if (state.openSession?.cloudOnly) return;
 
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
   if (error || detail?.error) {
@@ -5084,6 +5123,8 @@ function openSettingsPanel() {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
+  cloudSessionsSource.setActive(!isRendererWindowHidden());
+  renderCloudSessionSettings();
   syncSettingsForm();
   ensureServiceStatusTicker();
   els.shell.style.transform = 'translateZ(0)';
@@ -5353,6 +5394,8 @@ function hidePeriodContentForMessage(message) {
   els.fixedPeriodMessage.textContent = message;
   els.fixedPeriodMessage.classList.remove('hidden');
   els.homePanel.classList.add('hidden');
+  els.modelSpeedPanel.classList.add('hidden');
+  els.modelSpeedPanel.inert = true;
   els.breakdown.classList.add('hidden');
   els.serviceStatusPanel?.classList.add('hidden');
   els.limitsPanel.classList.add('hidden');
@@ -5444,6 +5487,15 @@ function scheduleViewSwitcherHoverClose() {
   }, VIEW_SWITCHER_HOVER_CLOSE_MS);
 }
 
+function focusViewSwitcherControl() {
+  requestAnimationFrame(() => {
+    const disclosure = els.viewSwitcher?.querySelector('.view-switcher-disclosure');
+    const target = disclosure?.getClientRects().length
+      ? disclosure : els.viewSwitcher?.querySelector('.view-switcher-current');
+    target?.focus();
+  });
+}
+
 function updateViewSwitcherOpenState({ focusMenu = false, focusDisclosure = false } = {}) {
   if (!els.viewSwitcher) return false;
   const menu = els.viewSwitcher.querySelector('#viewSwitcherMenu');
@@ -5459,7 +5511,7 @@ function updateViewSwitcherOpenState({ focusMenu = false, focusDisclosure = fals
     item.tabIndex = state.viewSwitcherOpen && item.classList.contains('is-current') ? 0 : -1;
   }
   if (focusMenu) requestAnimationFrame(() => menu.querySelector('.is-current')?.focus());
-  if (focusDisclosure) requestAnimationFrame(() => disclosure.focus());
+  if (focusDisclosure) focusViewSwitcherControl();
   return true;
 }
 
@@ -5559,7 +5611,8 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
     item.addEventListener('click', () => {
       state.viewSwitcherOpen = false;
       updateViewSwitcherOpenState();
-      if (id === state.breakdown) renderViewSwitcher({ focusDisclosure: true });
+      if (id === 'home' && state.openModelSpeed) closeModelSpeedDetail({ toHome: true });
+      else if (id === state.breakdown) renderViewSwitcher({ focusDisclosure: true });
       else renderBreakdownChange(id);
     });
     menu.append(item);
@@ -5587,12 +5640,13 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
   els.viewSwitcher.classList.toggle('has-opened', state.viewSwitcherHasOpened);
   els.viewSwitcher.replaceChildren(current, disclosure, menu);
   if (focusMenu) requestAnimationFrame(() => menu.querySelector('.is-current')?.focus());
-  if (focusDisclosure) requestAnimationFrame(() => disclosure.focus());
+  if (focusDisclosure) focusViewSwitcherControl();
 }
 
 function homeModuleShell(kind, title, viewId, meta = '') {
   const module = document.createElement('section');
   module.className = `home-module home-module-${kind}`;
+  module.dataset.homeModule = kind;
   module.tabIndex = 0;
   module.setAttribute('role', 'button');
   module.setAttribute('aria-label', title);
@@ -5810,7 +5864,8 @@ function renderHomeLimitModule() {
 
 function renderHomeModelModule(period) {
   const { module, body } = homeModuleShell('model', t('home.models'), 'model');
-  const rows = homeOverviewApi.homeModelRows(modelRowsForPeriod(period, 'tokens'), period?.totalTokens, 5);
+  const modelRows = modelRowsForPeriod(period, 'tokens');
+  const rows = homeOverviewApi.homeModelRows(modelRows, period?.totalTokens, homeListLimit(5, modelRows.length));
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -5849,7 +5904,8 @@ function homeToolSourceRows(period) {
 
 function renderHomeToolModule(period) {
   const { module, body } = homeModuleShell('tool', t('home.tools'), 'tool');
-  const rows = homeOverviewApi.homeToolRows(homeToolSourceRows(period), period?.totalTokens, 5);
+  const toolRows = homeToolSourceRows(period);
+  const rows = homeOverviewApi.homeToolRows(toolRows, period?.totalTokens, homeListLimit(5, toolRows.length));
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -5930,6 +5986,8 @@ function scheduleHomeSessionRepaint() {
     const next = renderHomeSessionModule();
     current.replaceWith(next);
     if (hadFocus) next.focus();
+    // The fresh module node shows every candidate row again; re-plan it.
+    state.homeRowBudgetRefresh?.();
     scheduleHomeSessionRepaint();
   }, delay);
 }
@@ -5959,8 +6017,11 @@ function renderHomeSessionModule() {
     homeSessionRenderPending = true;
     return current;
   }
-  const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
-  const runningCount = rows.filter((row) => window.TokenMonitorSessionLive.sessionActivityState(row) === 'running').length;
+  const limit = homeListLimit(5, Number.MAX_SAFE_INTEGER);
+  const candidates = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, limit, { includeRunningBeyondCap: true });
+  const runningCount = candidates.filter((row) => window.TokenMonitorSessionLive.sessionActivityState(row) === 'running').length;
+  // Home is a stable preview; the Sessions view keeps the complete running list.
+  const rows = candidates.slice(0, limit);
   const meta = runningCount > 0 ? t('home.runningSessions', { count: runningCount }) : '';
   const { module, body } = homeModuleShell('session', t('home.sessions'), 'session', meta);
   if (rows.length === 0) {
@@ -6006,15 +6067,21 @@ function renderHomeSessionModule() {
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatCompact
     });
-    if (modelLabel && modelEntries.length > 1) {
+    if (modelLabel) {
       const models = document.createElement('span');
-      models.className = 'session-models';
+      models.className = 'home-session-model';
       models.textContent = modelLabel;
-      limitWindowsView.setDetailTooltip(models, modelEntries);
+      if (modelEntries.length > 1) {
+        models.classList.add('session-models');
+        limitWindowsView.setDetailTooltip(models, modelEntries);
+      }
       description.append(models);
-      if (age) description.append(document.createTextNode(` · ${age}`));
-    } else {
-      description.textContent = [modelLabel, age].filter(Boolean).join(' · ');
+    }
+    if (age) {
+      const ageText = document.createElement('span');
+      ageText.className = 'home-session-age';
+      ageText.textContent = `${modelLabel ? ' · ' : ''}${age}`;
+      description.append(ageText);
     }
     meta.append(description);
     const context = window.TokenMonitorSessionLive.sessionActivityState(row) !== 'idle' ? row.context : null;
@@ -6030,6 +6097,12 @@ function renderHomeSessionModule() {
     item.append(mark, stateMark, name, value, meta);
     body.append(item);
   }
+  if (candidates.length > rows.length) {
+    const more = document.createElement('span');
+    more.className = 'home-session-more';
+    more.textContent = t('home.viewAllSessions');
+    body.append(more);
+  }
   return module;
 }
 
@@ -6038,7 +6111,7 @@ function renderHomeDeviceModule() {
   const rows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
     localDeviceId: state.settings?.deviceId || '',
     period: state.period,
-    limit: 4
+    limit: homeListLimit(4, Number.MAX_SAFE_INTEGER)
   });
   if (rows.length === 0) {
     const empty = document.createElement('div');
@@ -6082,6 +6155,11 @@ function dailyWithHeatIntensity(daily) {
 }
 
 const homeActivityProgrammaticScrollers = new WeakSet();
+// The last applied or directly recorded position. Delayed scroll events landing here
+// add no user intent and must not overwrite the saved position during a layout clamp.
+const homeActivityPlacedScrolls = new WeakMap();
+// Keep the dimensions of that placement together with its position.
+const homeActivityPlacedGeometry = new WeakMap();
 
 function applyHomeActivityScroll(scroller) {
   const target = homeOverviewApi.homeActivityScrollTarget({
@@ -6090,6 +6168,8 @@ function applyHomeActivityScroll(scroller) {
     followEnd: state.homeActivityFollowEnd,
     savedLeft: state.homeActivityScrollLeft
   });
+  homeActivityPlacedScrolls.set(scroller, target);
+  homeActivityPlacedGeometry.set(scroller, { scrollWidth: scroller.scrollWidth, clientWidth: scroller.clientWidth });
   if (Math.abs(scroller.scrollLeft - target) > 0.5) {
     homeActivityProgrammaticScrollers.add(scroller);
     scroller.scrollLeft = target;
@@ -6099,7 +6179,32 @@ function applyHomeActivityScroll(scroller) {
 
 function setupHomeActivityScroller(scroller, onReady = null) {
   let drag = null;
+  let touch = null;
+  let nativeScrollUntil = 0;
+  let nativeScrollGeometry = null;
+  let nativeScrollLeft = 0;
+  let nativeScrollDirection = 0;
   let readySignaled = false;
+  const armNativeTouchScroll = (delta) => {
+    const max = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+    nativeScrollDirection = Math.sign(delta);
+    // Chromium may already have moved the compositor offset before touchmove.
+    // Measure intent from the last placed/recorded offset, not that new physical one.
+    nativeScrollLeft = homeActivityPlacedScrolls.get(scroller) ?? scroller.scrollLeft;
+    const canMove = nativeScrollDirection > 0 ? nativeScrollLeft < max - 0.5 : nativeScrollLeft > 0.5;
+    nativeScrollUntil = canMove ? Date.now() + 250 : 0;
+    nativeScrollGeometry = { scrollWidth: scroller.scrollWidth, clientWidth: scroller.clientWidth };
+  };
+  const recordUserScroll = () => {
+    const geometry = { scrollWidth: scroller.scrollWidth, clientWidth: scroller.clientWidth };
+    const record = homeOverviewApi.homeActivityScrollRecord({ scrollLeft: scroller.scrollLeft, ...geometry });
+    if (!record) return;
+    state.homeActivityScrollLeft = record.scrollLeft;
+    state.homeActivityFollowEnd = record.followEnd;
+    homeActivityPlacedScrolls.set(scroller, scroller.scrollLeft);
+    homeActivityPlacedGeometry.set(scroller, geometry);
+    scroller.classList.toggle('is-scrolled', scroller.scrollLeft > 2);
+  };
   const applySettledLayout = () => {
     applyHomeActivityScroll(scroller);
     if (readySignaled || typeof onReady !== 'function') return;
@@ -6110,27 +6215,94 @@ function setupHomeActivityScroller(scroller, onReady = null) {
   };
   scroller.addEventListener('scroll', () => {
     scroller.classList.toggle('is-scrolled', scroller.scrollLeft > 2);
-    const record = homeOverviewApi.homeActivityScrollRecord({
-      scrollLeft: scroller.scrollLeft,
-      scrollWidth: scroller.scrollWidth,
-      clientWidth: scroller.clientWidth
-    });
-    if (!record) return; // not laid out / panel hidden — don't persist a bogus position
-    state.homeActivityScrollLeft = record.scrollLeft;
-    state.homeActivityFollowEnd = record.followEnd;
+    const placed = homeActivityPlacedScrolls.get(scroller);
+    const geometry = { scrollWidth: scroller.scrollWidth, clientWidth: scroller.clientWidth };
+    if (Date.now() <= nativeScrollUntil && nativeScrollGeometry
+      && nativeScrollGeometry.scrollWidth === geometry.scrollWidth
+      && nativeScrollGeometry.clientWidth === geometry.clientWidth) {
+      if (placed != null && Math.abs(scroller.scrollLeft - placed) <= 0.5) return;
+      const movement = scroller.scrollLeft - nativeScrollLeft;
+      // Active native touch can reverse on the compositor before touchmove reaches
+      // the DOM. Its observed direction also governs inertia after the finger lifts.
+      if (touch || movement * nativeScrollDirection > 0) {
+        if (movement) nativeScrollDirection = Math.sign(movement);
+        recordUserScroll();
+        nativeScrollLeft = scroller.scrollLeft;
+        nativeScrollUntil = Date.now() + 250; // retain native touch inertia
+        return;
+      }
+    }
+    nativeScrollUntil = 0;
+    // A wide/narrow layout round trip can clamp scrollLeft while returning to exactly
+    // the same geometry before scroll or ResizeObserver delivery. Dimensions alone
+    // cannot prove user intent: only actual horizontal input may change the saved state.
+    if (!drag) applyHomeActivityScroll(scroller);
   });
+  const scrollFromInput = (left) => {
+    nativeScrollUntil = 0;
+    const max = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+    const target = Math.min(max, Math.max(0, left));
+    if (Math.abs(target - scroller.scrollLeft) <= 0.5) return;
+    scroller.scrollLeft = target;
+    recordUserScroll();
+  };
+  scroller.addEventListener('wheel', (event) => {
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey) return;
+    const horizontal = event.deltaX && Math.abs(event.deltaX) >= Math.abs(event.deltaY);
+    const delta = horizontal ? event.deltaX : event.shiftKey ? (event.deltaX || event.deltaY) : 0;
+    if (!delta || !Number.isFinite(delta)) return;
+    // Save horizontal intent in this input task; a later UA scroll event can also
+    // come from layout. Vertical gestures keep the browser's normal page scrolling.
+    event.preventDefault();
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? scroller.clientWidth : 1;
+    scrollFromInput(scroller.scrollLeft + delta * unit);
+  }, { passive: false });
+  scroller.addEventListener('keydown', (event) => {
+    if (event.target !== scroller || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+    let left;
+    if (event.key === 'ArrowLeft') left = scroller.scrollLeft - 40;
+    else if (event.key === 'ArrowRight') left = scroller.scrollLeft + 40;
+    else if (event.key === 'Home') left = 0;
+    else if (event.key === 'End') left = scroller.scrollWidth - scroller.clientWidth;
+    else return;
+    event.preventDefault();
+    scrollFromInput(left);
+  });
+  scroller.addEventListener('touchstart', (event) => {
+    const point = event.touches[0];
+    touch = point ? { x: point.clientX, y: point.clientY, lastX: point.clientX } : null;
+  }, { passive: true });
+  scroller.addEventListener('touchmove', (event) => {
+    const point = event.touches[0];
+    if (!touch || !point) return;
+    const dx = point.clientX - touch.x, dy = point.clientY - touch.y;
+    const delta = point.clientX - touch.lastX;
+    touch.lastX = point.clientX;
+    if (delta && Math.abs(dx) >= Math.abs(dy)) armNativeTouchScroll(-delta);
+  }, { passive: true });
+  const endTouch = () => { touch = null; };
+  scroller.addEventListener('touchend', endTouch);
+  scroller.addEventListener('touchcancel', endTouch);
+  const endNativeScroll = () => { nativeScrollUntil = 0; };
+  scroller.addEventListener('scrollend', endNativeScroll);
+  scroller.addEventListener('blur', endNativeScroll);
   scroller.addEventListener('click', (event) => event.stopPropagation());
   scroller.addEventListener('pointerdown', (event) => {
     if (event.button !== 0 || event.pointerType === 'touch') return;
     event.preventDefault();
-    drag = { x: event.clientX, left: scroller.scrollLeft };
+    nativeScrollUntil = 0;
+    drag = { x: event.clientX, lastX: event.clientX, left: scroller.scrollLeft };
     scroller.classList.add('is-dragging');
     scroller.setPointerCapture?.(event.pointerId);
   });
   scroller.addEventListener('pointermove', (event) => {
     if (!drag) return;
     event.preventDefault();
+    if (event.clientX === drag.lastX) return;
+    drag.lastX = event.clientX;
     scroller.scrollLeft = drag.left - (event.clientX - drag.x);
+    // Capture real drag intent now; the scroll event may arrive after pointerup or a rebuild.
+    recordUserScroll();
   });
   const endDrag = (event) => {
     if (!drag) return;
@@ -6150,6 +6322,11 @@ function setupHomeActivityScroller(scroller, onReady = null) {
   if (typeof ResizeObserver === 'function') {
     state.homeActivityResizeObserver = new ResizeObserver(applySettledLayout);
     state.homeActivityResizeObserver.observe(scroller);
+    // The canvas swaps between `width: max-content` (intrinsic, overflowing) and
+    // `width: 100%` at the 420px container-query boundary, so its box can change while
+    // the scroller's own box does not; observing it re-applies the target either way.
+    const canvas = scroller.querySelector('.home-activity-canvas');
+    if (canvas) state.homeActivityResizeObserver.observe(canvas);
   } else if (typeof requestAnimationFrame === 'function') {
     requestAnimationFrame(() => requestAnimationFrame(applySettledLayout));
   }
@@ -6220,7 +6397,7 @@ function setupHomeActivityHover(scroller) {
       spotlightFrame = 0;
       const dx = spotlightTarget.x - spotlightCurrent.x;
       const dy = spotlightTarget.y - spotlightCurrent.y;
-      if (Math.abs(dx) < 0.12 && Math.abs(dy) < 0.12) {
+      if (prefersReducedMotion() || (Math.abs(dx) < 0.12 && Math.abs(dy) < 0.12)) {
         spotlightCurrent.x = spotlightTarget.x;
         spotlightCurrent.y = spotlightTarget.y;
       } else {
@@ -6233,6 +6410,7 @@ function setupHomeActivityHover(scroller) {
   };
 
   const moveSpotlight = (x, y) => {
+    scroller.classList.add('is-spotlight-visible');
     spotlightTarget.x = x;
     spotlightTarget.y = y;
     if (!spotlightVisible) {
@@ -6245,24 +6423,24 @@ function setupHomeActivityHover(scroller) {
     scheduleSpotlight();
   };
 
-  const hide = ({ clearHover = true, concealTooltip = true } = {}) => {
+  const hide = ({ clearHover = true, concealTooltip = true, concealSpotlight = true } = {}) => {
     if (clearHover) {
       state.homeActivityHoverPoint = null;
       state.homeActivityHoverDate = '';
+      if (concealSpotlight) state.homeActivitySpotlightPoint = null;
     }
     if (concealTooltip) {
       tooltip.dataset.visible = 'false';
       tooltip.setAttribute('aria-hidden', 'true');
-      tooltip.style.transform = 'translate(-9999px, -9999px)';
     }
-    if (spotlightFrame) cancelAnimationFrame(spotlightFrame);
-    spotlightFrame = 0;
-    spotlightVisible = false;
-    spotlightTarget.x = -200;
-    spotlightTarget.y = -200;
-    spotlightCurrent.x = -200;
-    spotlightCurrent.y = -200;
-    setSpotlight(spotlightCurrent);
+    if (concealSpotlight) {
+      if (spotlightFrame) cancelAnimationFrame(spotlightFrame);
+      spotlightFrame = 0;
+      spotlightVisible = false;
+      // Keep the last geometry until opacity reaches zero. Moving the gradient
+      // outside the SVG here used to make the exit disappear on its first frame.
+      scroller.classList.remove('is-spotlight-visible');
+    }
     if (activeCell) activeCell.removeAttribute('data-active');
     activeCell = null;
   };
@@ -6272,6 +6450,8 @@ function setupHomeActivityHover(scroller) {
       hide();
       return;
     }
+    // The light follows the pointer even in gaps that have no date tooltip.
+    state.homeActivitySpotlightPoint = { x: clientX, y: clientY };
     const rect = svg.getBoundingClientRect();
     const view = svg.viewBox.baseVal;
     const x = view.x + (clientX - rect.left) * view.width / Math.max(1, rect.width);
@@ -6281,7 +6461,8 @@ function setupHomeActivityHover(scroller) {
     const targetCell = target instanceof Element ? target.closest('.heat[data-d]') : null;
     const cell = targetCell && canvas.contains(targetCell) ? targetCell : null;
     if (!cell) {
-      hide();
+      // Gaps between cells hide the label, not the cursor-following light.
+      hide({ concealSpotlight: false });
       return;
     }
     state.homeActivityHoverPoint = { x: clientX, y: clientY };
@@ -6290,9 +6471,14 @@ function setupHomeActivityHover(scroller) {
       activeCell?.removeAttribute('data-active');
       activeCell = cell;
       activeCell.setAttribute('data-active', 'true');
-      tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatCompact(Number(cell.dataset.t || 0));
-      tooltip.querySelector('[data-home-activity-tooltip-label]').textContent = 'tokens';
-      tooltip.querySelector('[data-home-activity-tooltip-date]').textContent = cell.dataset.d || '';
+      const value = Number(cell.dataset.activityValue ?? cell.dataset.t ?? 0);
+      const cost = cell.dataset.activityMetric === 'cost';
+      tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = cost ? formatCost(value) : formatCompact(value);
+      tooltip.querySelector('[data-home-activity-tooltip-label]').textContent = cell.dataset.activityMode
+        ? `${t(`home.activityMode.${cell.dataset.activityMode}`)}${cost ? '' : ' · tokens'}` : 'tokens';
+      const start = cell.dataset.rangeStart || cell.dataset.d || '';
+      const end = cell.dataset.rangeEnd || cell.dataset.d || '';
+      tooltip.querySelector('[data-home-activity-tooltip-date]').textContent = start === end ? start : `${start} — ${end}`;
     }
     tooltip.dataset.visible = 'true';
     tooltip.setAttribute('aria-hidden', 'false');
@@ -6303,6 +6489,13 @@ function setupHomeActivityHover(scroller) {
     showAtPoint(event.clientX, event.clientY, event.target);
   });
   scroller.addEventListener('pointerleave', () => hide());
+  // A stats rebuild can replace the hovered scroller before Chromium reconnects
+  // its hover chain. The replacement then gets no pointerleave; the next document
+  // move still identifies an exit, so release the preserved light there as well.
+  const hideOutsideScroller = (event) => {
+    if (spotlightVisible && !scroller.contains(event.target)) hide();
+  };
+  document.addEventListener('pointermove', hideOutsideScroller, { passive: true });
   scroller.addEventListener('scroll', () => {
     // Restoring the saved/right-edge position emits a delayed scroll event. It is not
     // user intent and must not clear the hover that renderHome just reconnected.
@@ -6316,14 +6509,24 @@ function setupHomeActivityHover(scroller) {
   // scroller, which renderHome() throws away on every rebuild. Preserve the visible
   // tooltip plus its semantic cell identity across that replacement, so live stats
   // refreshes do not fade or jump it before the new cell is ready.
-  state.homeActivityHoverTeardown = ({ preserveHover = false } = {}) => hide({
-    clearHover: !preserveHover,
-    concealTooltip: !preserveHover
-  });
+  state.homeActivityHoverTeardown = ({ preserveHover = false } = {}) => {
+    document.removeEventListener('pointermove', hideOutsideScroller);
+    hide({ clearHover: !preserveHover, concealTooltip: !preserveHover });
+  };
   state.homeActivityHoverRestore = () => {
-    const point = state.homeActivityHoverPoint;
+    const point = state.homeActivityHoverPoint || state.homeActivitySpotlightPoint;
     const date = state.homeActivityHoverDate;
-    if (!point || !date) return;
+    if (!point) return;
+    if (!date) {
+      const rect = scroller.getBoundingClientRect();
+      const inside = point.x >= rect.left && point.x <= rect.right
+        && point.y >= rect.top && point.y <= rect.bottom;
+      // A replacement under a stationary gap pointer restores only the light.
+      // Do not assign the nearest cell's date or show a tooltip the user left.
+      if (inside) showAtPoint(point.x, point.y, null);
+      else hide();
+      return;
+    }
     const cell = Array.from(canvas?.querySelectorAll('.heat[data-d]') || [])
       .find((candidate) => candidate.dataset.d === date);
     if (!cell) {
@@ -6355,12 +6558,12 @@ function hideHomeActivityTooltip({ preserveHover = false } = {}) {
   if (!preserveHover) {
     state.homeActivityHoverPoint = null;
     state.homeActivityHoverDate = '';
+    state.homeActivitySpotlightPoint = null;
     if (!teardown) {
       const tooltip = document.querySelector('.home-activity-tooltip');
       if (tooltip) {
         tooltip.dataset.visible = 'false';
         tooltip.setAttribute('aria-hidden', 'true');
-        tooltip.style.transform = 'translate(-9999px, -9999px)';
       }
     }
   }
@@ -6409,9 +6612,15 @@ function renderHomeTrendsModule() {
   const activityLayout = homeOverviewApi.homeActivityHeatmapLayout();
   const heatMetric = state.settings?.heatmapMetric || 'cost';
   const intensityField = heatMetric === 'cost' ? 'costIntensity' : 'tokenIntensity';
-  const intensityPoints = dailyWithHeatIntensity(points).map((p) => ({
-    ...p,
-    intensity: Number(p[intensityField] ?? p.intensity ?? 0)
+  const projection = window.TokenMonitorHomeActivityModes.project(points, {
+    endDate: today, metric: heatMetric, mode: state.settings?.homeActivityMode || 'daily'
+  });
+  const projectedDays = new Map(projection.points.map(point => [point.date, point]));
+  const intensityPoints = dailyWithHeatIntensity(projection.points.map(point => ({
+    ...point, [heatMetric]: point.displayValue
+  }))).map(point => ({
+    ...projectedDays.get(point.date),
+    intensity: Number(point[intensityField] ?? point.intensity ?? 0)
   }));
   const activity = charts.rollingYearHeatmap(intensityPoints, {
     endDate: today,
@@ -6428,10 +6637,47 @@ function renderHomeTrendsModule() {
   const activeDaysLabel = activeDaysWindow === 'year'
     ? t('home.activeDaysYear', { count: displayActiveDays })
     : t('home.activeDays', { count: displayActiveDays });
-  const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends', activeDaysLabel);
+  const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends');
+  const activeLabel = document.createElement('span');
+  activeLabel.className = 'home-module-subtitle';
+  activeLabel.textContent = activeDaysLabel;
+  module.querySelector('.home-module-title-wrap').append(activeLabel);
+  const controls = document.createElement('div');
+  controls.className = 'home-activity-modes';
+  controls.setAttribute('role', 'group');
+  controls.setAttribute('aria-label', t('home.activityModes'));
+  for (const mode of ['daily', 'weekly', 'cumulative']) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.activityMode = mode;
+    button.textContent = t(`home.activityMode.${mode}`);
+    button.title = t(`home.activityMode.${mode}Hint`);
+    button.setAttribute('aria-pressed', String(projection.mode === mode));
+    button.addEventListener('click', async event => {
+      event.stopPropagation();
+      if (state.settings?.homeActivityMode === mode) return;
+      const restoreFocus = document.activeElement === button;
+      button.disabled = true;
+      try {
+        await saveSettings({ homeActivityMode: mode });
+      } catch (_) {
+        // A failed save leaves the last persisted mode selected.
+      } finally {
+        button.disabled = false;
+        renderHomeIfVisible();
+        if (restoreFocus) requestAnimationFrame(() => {
+          els.homePanel.querySelector(`[data-activity-mode="${state.settings?.homeActivityMode || 'daily'}"]`)?.focus({ preventScroll: true });
+        });
+      }
+    });
+    controls.append(button);
+  }
+  module.querySelector('.home-module-head-end').prepend(controls);
+  const modeChanged = state.homeActivityRenderedMode && state.homeActivityRenderedMode !== projection.mode;
+  state.homeActivityRenderedMode = projection.mode;
   const activityScroll = document.createElement('div');
   activityScroll.className = 'home-activity-scroll';
-  if (state.homeActivityHoverPoint && state.homeActivityHoverDate) {
+  if (state.homeActivitySpotlightPoint || (state.homeActivityHoverPoint && state.homeActivityHoverDate)) {
     // This replacement is being inserted directly under a stationary pointer. Keep
     // the already-visible spotlight from replaying its hover fade on the new SVG.
     activityScroll.classList.add('is-restoring-hover');
@@ -6448,6 +6694,15 @@ function renderHomeTrendsModule() {
     spotlightId: 'homeActivitySpotlight',
     spotlightRadius: 82
   });
+  for (const cell of activityCanvas.querySelectorAll('.heat[data-d]')) {
+    const point = projectedDays.get(cell.dataset.d);
+    cell.dataset.activityValue = String(point?.displayValue || 0);
+    cell.dataset.activityMode = projection.mode;
+    cell.dataset.activityMetric = heatMetric;
+    cell.dataset.rangeStart = point?.rangeStart || cell.dataset.d;
+    cell.dataset.rangeEnd = point?.rangeEnd || cell.dataset.d;
+  }
+  activityScroll.dataset.activityMode = projection.mode;
   activityScroll.append(activityCanvas);
   const linePoints = charts.clampDaily(points, 45);
   const trendSummary = homeOverviewApi.homeTrendSummary(linePoints);
@@ -6485,13 +6740,321 @@ function renderHomeTrendsModule() {
     // briefly resolves against the oldest (left) edge and then drops the tooltip.
     state.homeActivityHoverRestore?.();
     animateHomeHistoryVisuals(activityScroll, activityCanvas, chart);
+    if (modeChanged && !prefersReducedMotion()) {
+      activityCanvas.animate([{ opacity: 0.35 }, { opacity: 1 }], { duration: 180, easing: 'ease-out' });
+    }
   });
   setupHomeActivityHover(activityScroll);
   return module;
 }
 
+// Every speed surface reports the window's own DAY/MONTH/TOTAL selection, so
+// main resolves one range and the summary, list and detail all describe it.
+function modelSpeedRangeFor() {
+  return state.period;
+}
+// A list module renders its full preview candidate set (its old base cap plus
+// the shared extra allowance); the measured height allocator below hides the
+// rows the panel cannot actually show. `available` is still bounded by the rows
+// the data carries, so a short list never renders blank rows.
+function homeListLimit(base, available) {
+  const budget = window.TokenMonitorHomeRowBudget;
+  if (!budget) return base;
+  return budget.previewCount(base, available);
+}
+// [home-row-budget] Height-responsive preview density for the Home lists.
+// The panel is a fixed-height scroller: a fixed 640px base with an assumed
+// 32px row clipped the bottom module on narrow windows, where session and
+// speed rows wrap taller. Instead the controller measures each module's real
+// chrome, row height and gap at the current width, charges a two-column grid
+// row its tallest member, and hides rendered preview rows until the plan fits
+// the measured panel height. It reruns on panel/window resize before any new
+// data arrives, and it reduces rows below the old fixed floor (never below one
+// row per non-empty list) when the window is too short.
+const HOME_ROW_BUDGET_SELECTORS = {
+  tool: '.home-module-body > .home-list-row',
+  model: '.home-module-body > .home-list-row',
+  session: '.home-module-body > .home-list-row',
+  device: '.home-module-body > .home-list-row',
+  modelspeed: '.home-module-body > .model-speed-row'
+};
+
+function homeRowBudgetRowsFor(module) {
+  const selector = HOME_ROW_BUDGET_SELECTORS[module.dataset?.homeModule || ''];
+  return selector ? Array.from(module.querySelectorAll(selector)) : [];
+}
+
+// Growth is neutralised (the activity chart's flex-grow would otherwise absorb
+// every spare pixel and the lists would never deepen) and every candidate row
+// is unhidden for one synchronous measurement pass; both are restored before
+// this function returns, so the browser never paints the expanded state.
+function measureHomeRowBudget(panel) {
+  const budget = window.TokenMonitorHomeRowBudget;
+  if (!budget || !panel || !panel.childElementCount) return null;
+  const panelStyle = getComputedStyle(panel);
+  const twoColumns = panelStyle.display === 'grid';
+  const restores = [];
+  if (twoColumns) {
+    if (panelStyle.gridTemplateRows && panelStyle.gridTemplateRows !== 'none') {
+      const previous = panel.style.gridTemplateRows;
+      restores.push(() => { panel.style.gridTemplateRows = previous; });
+      panel.style.gridTemplateRows = 'none';
+    }
+    // Paired modules normally stretch to their taller neighbour. Measure each
+    // at its intrinsic height so that borrowed space is not charged as chrome.
+    for (const child of panel.children) {
+      const previous = child.style.alignSelf;
+      restores.push(() => { child.style.alignSelf = previous; });
+      child.style.alignSelf = 'start';
+    }
+  } else {
+    for (const child of panel.children) {
+      const grow = Number.parseFloat(getComputedStyle(child).flexGrow);
+      if (Number.isFinite(grow) && grow > 0) {
+        const previous = child.style.flexGrow;
+        restores.push(() => { child.style.flexGrow = previous; });
+        child.style.flexGrow = '0';
+      }
+    }
+  }
+  const unhidden = [];
+  for (const child of panel.children) {
+    for (const row of homeRowBudgetRowsFor(child)) {
+      if (row.style.display === 'none') {
+        unhidden.push(row);
+        row.style.display = '';
+      }
+    }
+  }
+  try {
+    const panelHeight = panel.clientHeight;
+    const gap = Number.parseFloat(panelStyle.rowGap) || budget.DEFAULT_GAP;
+    const entries = [];
+    const modules = [];
+    for (const child of panel.children) {
+      const rows = homeRowBudgetRowsFor(child);
+      const rect = child.getBoundingClientRect();
+      if (rows.length) {
+        const rects = rows.map((row) => row.getBoundingClientRect());
+        const rowHeight = Math.max(...rects.map((rowRect) => rowRect.height));
+        const span = rects[rects.length - 1].bottom - rects[0].top;
+        entries.push({
+          id: child.dataset?.homeModule || '',
+          chromeHeight: Math.max(0, rect.height - span),
+          rowHeight,
+          innerGap: Number.parseFloat(getComputedStyle(rows[0].parentElement).rowGap) || 0,
+          minRows: 1,
+          maxRows: rows.length
+        });
+      } else {
+        // The limits panel and the activity chart keep their configured height:
+        // they consume the budget but do not preview rows.
+        entries.push({ id: child.dataset?.homeModule || '', chromeHeight: Math.max(0, rect.height) });
+      }
+      modules.push({ element: child, rows });
+    }
+    return { panelHeight, gap, twoColumns, entries, modules };
+  } finally {
+    for (const row of unhidden) row.style.display = 'none';
+    for (const restore of restores) restore();
+  }
+}
+
+function applyHomeRowBudget(panel = els.homePanel) {
+  if (!panel || panel.clientHeight <= 0) return null;
+  const measured = measureHomeRowBudget(panel);
+  if (!measured || measured.panelHeight <= 0) return null;
+  const budget = window.TokenMonitorHomeRowBudget;
+  const plan = budget.allocateHomeRows({
+    panelHeight: measured.panelHeight,
+    gap: measured.gap,
+    entries: measured.entries,
+    groups: budget.layoutGroups(measured.entries.length, measured.twoColumns ? 2 : 1)
+  });
+  state.homeRowBudgetPlan = plan;
+  for (let index = 0; index < measured.modules.length; index += 1) {
+    const rows = measured.modules[index].rows;
+    const visible = plan.rows[index] || 0;
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+      const row = rows[rowIndex];
+      const next = rowIndex < visible ? '' : 'none';
+      if (row.style.display === next) continue;
+      // Never blur a row that currently holds focus; the next pass (after focus
+      // moves or the panel resizes) hides it.
+      if (next && row.contains(document.activeElement)) continue;
+      row.style.display = next;
+    }
+  }
+  state.homeRowBudgetSize = `${panel.clientWidth}x${panel.clientHeight}`;
+  return plan;
+}
+
+let homeRowBudgetFrame = 0;
+function scheduleHomeRowBudgetRefresh(force = false) {
+  if (force) state.homeRowBudgetSize = '';
+  if (homeRowBudgetFrame) return;
+  homeRowBudgetFrame = requestAnimationFrame(() => {
+    homeRowBudgetFrame = 0;
+    const panel = els.homePanel;
+    if (!panel || state.breakdown !== 'home' || panel.classList.contains('hidden')) return;
+    if (`${panel.clientWidth}x${panel.clientHeight}` === state.homeRowBudgetSize) return;
+    applyHomeRowBudget(panel);
+  });
+}
+
+function ensureHomeRowBudgetObserver() {
+  if (!els.homePanel) return;
+  state.homeRowBudgetRefresh = () => scheduleHomeRowBudgetRefresh(true);
+  if (!state.homeRowBudgetResizeHooked) {
+    // The observer covers panel box changes; the window event also covers
+    // transitions the observer cannot see (window show/hide, zoom).
+    state.homeRowBudgetResizeHooked = true;
+    window.addEventListener('resize', scheduleHomeRowBudgetRefresh);
+  }
+  if (typeof ResizeObserver !== 'function') return;
+  state.homeRowBudgetObserver?.disconnect();
+  // The panel's own box is fixed by the shell, so hiding rows cannot resize it
+  // again; the observer only reacts to real layout changes.
+  state.homeRowBudgetObserver = new ResizeObserver(() => scheduleHomeRowBudgetRefresh());
+  state.homeRowBudgetObserver.observe(els.homePanel);
+}
+// [/home-row-budget]
+function modelSpeedViewOptions() {
+  // Display aliases follow the existing model list; history remains keyed by
+  // its raw ID. A label change must never combine two speed series.
+  const modelIds = [
+    ...Object.keys(state.stats?.periods?.allTime?.models || {}),
+    ...(state.stats?.modelSpeed?.models || []).map((row) => row.model)
+  ];
+  const displayModel = window.TokenMonitorModelAliases.createModelAliasResolver(
+    state.settings?.modelAliases, modelIds, state.settings?.modelAliasGrouping || 'off'
+  );
+  const speed = state.stats?.modelSpeed;
+  return {
+    t, displayModel, locale: currentLocale(), prefersReducedMotion,
+    rangeFor: modelSpeedRangeFor,
+    // Home stays a preview: the module renders its candidate rows and the
+    // measured height allocator hides the ones the panel cannot show.
+    rowLimit: homeListLimit(5, speed?.candidateCount),
+    listLimit: homeListLimit(5, speed?.candidateCount),
+    presentationKey: JSON.stringify([currentLocale(), state.settings?.modelAliases,
+      state.settings?.modelAliasGrouping, state.settings?.showToolIcons, state.settings?.themeColors]),
+    createMark: (model) => {
+      const mark = document.createElement('span');
+      applyHomeListMark(mark, iconKindFor({ key: model }, 'model'), modelColor(model));
+      mark.setAttribute('aria-hidden', 'true');
+      return mark;
+    }
+  };
+}
+
+function animateModelSpeedPanel(panel) {
+  if (prefersReducedMotion() || !panel?.animate) return;
+  // Match the existing breakdown row entry, without animating token counters.
+  panel.animate([
+    { opacity: 0, transform: 'translate3d(0, 7px, 0)' },
+    { opacity: 1, transform: 'translate3d(0, 0, 0)' }
+  ], { duration: 240, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'backwards' });
+}
+
+function animateModelSpeedChart(svg) {
+  return window.TokenMonitorChartMotion.reveal(svg, {
+    duration: HOME_HISTORY_MOTION_MS, reducedMotion: prefersReducedMotion()
+  });
+}
+
+function disposeModelSpeedDetail() {
+  const previous = state.openModelSpeed;
+  if (!previous) return null;
+  state.openModelSpeed = null;
+  previous.view.dispose();
+  for (const animation of els.modelSpeedPanel.getAnimations?.({ subtree: true }) || []) animation.cancel();
+  els.modelSpeedPanel.classList.add('hidden');
+  els.modelSpeedPanel.inert = true;
+  els.modelSpeedPanel.replaceChildren();
+  return previous;
+}
+
+function mountModelSpeedView(view, navigation) {
+  disposeModelSpeedDetail();
+  hideHomeActivityTooltip();
+  state.homeActivityResizeObserver?.disconnect();
+  state.homeActivityResizeObserver = null;
+  state.openModelSpeed = { ...navigation, view };
+  els.modelSpeedPanel.replaceChildren(view.element);
+  els.modelSpeedPanel.scrollTop = 0;
+  render();
+  animateModelSpeedPanel(els.modelSpeedPanel);
+  els.backHomeButton?.focus({ preventScroll: true });
+}
+
+function openModelSpeedList(restore = null) {
+  if (state.breakdown !== 'home') return;
+  const scrollTop = restore?.homeScrollTop ?? state.openModelSpeed?.scrollTop ?? els.homePanel.scrollTop;
+  const view = window.TokenMonitorModelSpeedView.createList({
+    ...modelSpeedViewOptions(),
+    get: (request) => window.tokenMonitor.getModelSpeedModels(request), onOpen: openModelSpeedDetail
+  }, restore?.data);
+  mountModelSpeedView(view, { kind: 'list', scrollTop, revision: state.stats?.modelSpeed?.revision });
+  if (restore) {
+    els.modelSpeedPanel.scrollTop = restore.scrollTop;
+    const row = [...els.modelSpeedPanel.querySelectorAll('[data-speed-id]')]
+      .find(node => node.dataset.speedId === restore.id);
+    row?.focus({ preventScroll: true });
+  }
+}
+
+function openModelSpeedDetail(id, model) {
+  if (state.breakdown !== 'home') return;
+  const previous = state.openModelSpeed;
+  const scrollTop = previous?.scrollTop ?? els.homePanel.scrollTop;
+  const fromList = previous?.kind === 'list'
+    ? { data: previous.view.snapshot(), scrollTop: els.modelSpeedPanel.scrollTop, homeScrollTop: scrollTop, id }
+    : previous?.fromList;
+  const view = window.TokenMonitorModelSpeedView.createDetail(id, model, {
+    ...modelSpeedViewOptions(), get: (request) => window.tokenMonitor.getModelSpeedHistory(request),
+    animateChart: animateModelSpeedChart
+  });
+  mountModelSpeedView(view, { kind: 'detail', id, model, scrollTop, fromList });
+}
+
+function closeModelSpeedDetail({ toHome = false } = {}) {
+  const previous = disposeModelSpeedDetail();
+  if (!previous) return false;
+  if (!toHome && previous.fromList) {
+    openModelSpeedList(previous.fromList);
+    return true;
+  }
+  render();
+  els.homePanel.scrollTop = previous.scrollTop;
+  const row = Array.from(els.homePanel.querySelectorAll('[data-speed-id]'))
+    .find((node) => node.dataset.speedId === previous.id);
+  const visibleRow = row?.getClientRects().length ? row : null;
+  (visibleRow || els.homePanel.querySelector('.model-speed-head')
+    || els.viewSwitcher?.querySelector('.view-switcher-current'))?.focus({ preventScroll: true });
+  animateModelSpeedPanel(els.homePanel);
+  return true;
+}
+
+// A DAY/MONTH/TOTAL change re-scopes every speed number. An open list or detail
+// is re-fetched rather than left describing the previous window, and the list
+// keeps its scroll position while it does.
+function refreshModelSpeedRange() {
+  const open = state.openModelSpeed;
+  if (!open) return false;
+  if (open.kind === 'detail') { void open.view.setRange?.(); return true; }
+  if (open.kind === 'list') { void open.view.refresh?.(); return true; }
+  return false;
+}
+
 function renderHome() {
   if (!els.homePanel) return;
+  // A collector push may land inside the entry's 920ms. Keep the visible SVG
+  // until that entry settles, then apply only the latest snapshot (no replay).
+  if (!state.animateChartsOnRender && window.TokenMonitorChartMotion?.running(state.homeHistoryReveal?.animation)) {
+    state.homeHistoryReveal.pending = true;
+    return;
+  }
   if (sessionTooltipShouldHoldRender()) {
     homeSessionRenderPending = true;
     return;
@@ -6531,9 +7094,20 @@ function renderHome() {
     if (id === 'device') return renderHomeDeviceModule();
     if (id === 'model') return renderHomeModelModule(period);
     if (id === 'session') return renderHomeSessionModule();
+    if (id === 'modelspeed') {
+      const speedModule = window.TokenMonitorModelSpeedView.renderModule(state.stats?.modelSpeed, {
+        ...modelSpeedViewOptions(), onOpen: openModelSpeedDetail, onOpenList: () => openModelSpeedList()
+      });
+      speedModule.dataset.homeModule = 'modelspeed';
+      return speedModule;
+    }
     return renderHomeTrendsModule();
   });
   els.homePanel.replaceChildren(...nodes);
+  // The list modules rendered their full candidate rows; hide the ones this
+  // panel's measured width/height cannot show before the browser paints.
+  if (!state.homeRowBudgetObserver) ensureHomeRowBudgetObserver();
+  applyHomeRowBudget(els.homePanel);
   if (moduleIds.includes('session')) scheduleHomeSessionRepaint();
   // setupHomeActivityScroller first runs while its module is detached, where
   // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
@@ -6568,10 +7142,12 @@ function setRendererSettings(next) {
 
 function render() {
   const surface = visibleStatsSurface();
+  cloudSessionsSource.setActive(surface === 'main' && (state.breakdown === 'session' || isSettingsPanelOpen()));
   if (surface !== 'main') {
     if (!surface) statsRenderScheduler.request();
     return;
   }
+  renderCloudSessionSettings();
   if (!state.stats) return;
   allTimeSessions.ensure();
   stopHomeSessionRepaint();
@@ -6601,6 +7177,7 @@ function render() {
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
+  renderCloudAccountingNote();
   const fixedUnavailable = derivedPeriod && state.fixedPeriodSnapshot?.status !== 'ready';
   const detailUnavailable = derivedPeriod
     && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
@@ -6648,14 +7225,43 @@ function render() {
   renderTokenRate();
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');
+  renderCloudSessionScope(period);
   els.shell.classList.toggle('home-mode', state.breakdown === 'home');
   if (state.breakdown !== 'session' || state.openSession) els.sessionPagerHost.classList.add('hidden');
-  els.viewBackRow?.classList.toggle('hidden', state.breakdown === 'home' || !state.homeReturnVisible);
+  const modelSpeedVisible = state.breakdown === 'home' && Boolean(state.openModelSpeed);
+  els.viewBackRow?.classList.toggle('hidden', !modelSpeedVisible && (state.breakdown === 'home' || !state.homeReturnVisible));
+  els.modelSpeedPanel.classList.toggle('hidden', !modelSpeedVisible);
+  els.modelSpeedPanel.inert = !modelSpeedVisible;
+  const speedBackKey = modelSpeedVisible && state.openModelSpeed.fromList ? 'home.modelSpeed.backList' : 'views.backHome';
+  if (els.backHomeButton) {
+    els.backHomeButton.dataset.i18nTitle = speedBackKey;
+    els.backHomeButton.dataset.i18nAriaLabel = speedBackKey;
+    els.backHomeButton.title = t(speedBackKey);
+    els.backHomeButton.setAttribute('aria-label', t(speedBackKey));
+    const label = els.backHomeButton.querySelector('[data-i18n]');
+    if (label) { label.dataset.i18n = speedBackKey; label.textContent = t(speedBackKey); }
+  }
+  if (modelSpeedVisible && state.openModelSpeed.kind === 'list') {
+    const current = state.openModelSpeed;
+    current.view.updateOptions(modelSpeedViewOptions());
+    if (current.revision !== state.stats?.modelSpeed?.revision) {
+      current.revision = state.stats?.modelSpeed?.revision;
+      void current.view.refresh();
+    }
+  }
   // Leaving Home only CSS-hides the panel, so its heatmap scroller never sees a
   // pointerleave — dismiss the body-level tooltip here (renderHome covers rerenders).
   if (state.breakdown !== 'home') hideHomeActivityTooltip();
   if (state.breakdown === 'status') ensureServiceStatusTicker(); else stopServiceStatusTicker();
-  if (state.breakdown === 'home') {
+  if (modelSpeedVisible) {
+    els.homePanel.classList.add('hidden');
+    els.breakdown.classList.add('hidden');
+    els.serviceStatusPanel?.classList.add('hidden');
+    els.trendsPanel.classList.add('hidden');
+    els.limitsPanel.classList.add('hidden');
+    // Keep the controller mounted across collector pushes: range, scroll,
+    // expanded notes and keyboard focus belong to the user, not the poll.
+  } else if (state.breakdown === 'home') {
     els.breakdown.classList.add('hidden');
     els.serviceStatusPanel?.classList.add('hidden');
     els.trendsPanel.classList.add('hidden');
@@ -6699,13 +7305,13 @@ function render() {
       // mid-read (and a keyboard focus with it); hold until it closes, as the
       // session and home lists already do.
       if (!sessionTooltipShouldHoldRender()) renderBackgroundReviewDetail(state.openSession);
-    }
-    refreshSessionDetailHeading();
+    } else refreshSessionDetailHeading();
     if (state.openSession.renderOptions) {
       const options = state.openSession.renderOptions;
       state.openSession.renderOptions = null;
       renderSessionDetail(options);
     }
+    if (state.openSession.cloudThreadId) renderCloudSessionDetail();
   } else {
     els.homePanel.classList.add('hidden');
     els.limitsPanel.classList.add('hidden');
@@ -6945,9 +7551,10 @@ function setPeriod(period) {
 function setBreakdown(breakdown, options = {}) {
   const next = normalizeInitialViewValue(breakdown, viewBreakdownValues, state.breakdown);
   directBreakdownOverride = options.allowHidden === true ? next : null;
+  const closedModelSpeed = Boolean(disposeModelSpeedDetail());
   if (next === state.breakdown) {
     publishViewState();
-    return false;
+    return closedModelSpeed;
   }
   state.homeReturnVisible = options.fromHome === true && state.breakdown === 'home' && next !== 'home';
   state.breakdown = next;
@@ -8379,7 +8986,7 @@ async function refreshHubBuildStatus() {
 }
 
 function syncPeriodTabs() {
-  const tabs = Array.from(document.querySelectorAll('.tab'));
+  const tabs = Array.from(document.querySelectorAll('.tab[data-period-slot]'));
   const activeSlot = fixedPeriodRangesApi.slotForSelection(state.period);
   const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.dataset.periodSlot === activeSlot));
   document.querySelector('.tabs')?.style.setProperty('--period-index', String(activeIndex));
@@ -8392,8 +8999,17 @@ function syncPeriodTabs() {
     const mode = activeSlot === 'month'
       ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
       : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
-    els.monthPeriodTab.textContent = fixedPeriodRangesApi.displayLabel(mode);
     els.monthPeriodTab.dataset.period = mode;
+  }
+  for (const tab of tabs) {
+    const period = tab.dataset.period;
+    const fullLabelKey = `edgeDock.period.${period}`;
+    delete tab.dataset.i18n;
+    tab.dataset.i18nTitle = fullLabelKey;
+    tab.dataset.i18nAriaLabel = fullLabelKey;
+    tab.textContent = fixedPeriodRangesApi.displayLabel(period);
+    tab.setAttribute('title', t(fullLabelKey));
+    tab.setAttribute('aria-label', t(fullLabelKey));
   }
   syncPeriodMenu();
 }
@@ -11895,6 +12511,7 @@ els.viewSwitcher?.addEventListener('pointerenter', clearViewSwitcherHoverClose);
 els.viewSwitcher?.addEventListener('pointerleave', scheduleViewSwitcherHoverClose);
 els.backHomeButton?.addEventListener('click', (event) => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
+  if (closeModelSpeedDetail()) return;
   if (!renderBreakdownChange('home')) return;
   if (event.detail === 0) {
     requestAnimationFrame(() => els.viewSwitcher?.querySelector('.view-switcher-current')?.focus());
@@ -12026,6 +12643,7 @@ for (const tab of document.querySelectorAll('.tab')) {
     state.periodMotionActive = true;
     render();
     state.periodMotionActive = false;
+    refreshModelSpeedRange();
     animateBreakdownFrom(snapshot, { duration: 800 });
   });
 }
@@ -12044,6 +12662,7 @@ for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]'
       state.periodMotionActive = true;
       render();
       state.periodMotionActive = false;
+      refreshModelSpeedRange();
     }
     await saveSettings({ periodMonthMode: selection });
   });
@@ -12091,6 +12710,14 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || event.defaultPrevented || !state.openModelSpeed
+    || state.viewSwitcherOpen || state.periodMenuOpen || isSettingsPanelOpen()
+    || els.modelSpeedPanel.classList.contains('hidden')) return;
+  event.preventDefault();
+  closeModelSpeedDetail();
+});
+
 els.breakdown.addEventListener('click', (event) => {
   if (state.breakdown !== 'session') return;
   const rowEl = event.target.closest('.row');
@@ -12103,6 +12730,12 @@ els.breakdown.addEventListener('click', (event) => {
       state.openSession = request;
       renderBackgroundReviewDetail(request);
     }
+    return;
+  }
+  if (rowEl.dataset.cloudOnly === 'true') {
+    openSessionDetail({ client: 'codex', sessionId: rowEl.dataset.cloudThreadId,
+      cloudThreadId: rowEl.dataset.cloudThreadId, cloudOnly: true,
+      title: rowEl.querySelector('.row-title')?.textContent || '' });
     return;
   }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
@@ -12120,7 +12753,8 @@ els.breakdown.addEventListener('click', (event) => {
     client,
     sessionId,
     sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
-    title: rowEl.querySelector('.row-title')?.textContent || ''
+    title: rowEl.querySelector('.row-title')?.textContent || '',
+    cloudThreadId: rowEl.dataset.cloudThreadId || null
   });
 });
 
@@ -12139,6 +12773,8 @@ els.settingsButton.addEventListener('click', (event) => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.toggle('hidden');
   const settingsOpen = isSettingsPanelOpen();
+  cloudSessionsSource.setActive(!isRendererWindowHidden() && (settingsOpen || state.breakdown === 'session'));
+  renderCloudSessionSettings();
   // Settings is an overlay over a surface that keeps rendering behind it, so
   // closing it needs no catch-up repaint. Only the panel's own DOM has to be
   // caught up when it opens, because its renderers idle while it is closed.
@@ -12229,7 +12865,10 @@ els.appTitleMark?.addEventListener('click', suppressTokenRateClickAfterHold);
 els.liveDot?.addEventListener('click', suppressTokenRateClickAfterHold);
 els.appTitleMark?.addEventListener('click', toggleTokenRateMode);
 els.liveDot?.addEventListener('click', toggleTokenRateMode);
-els.liveTokenRate?.addEventListener('click', toggleTokenRateMode);
+els.liveTokenRate?.addEventListener('click', (event) => {
+  if (event.target.closest('.limit-detail-tooltip')) return;
+  toggleTokenRateMode();
+});
 
 els.languageInput?.addEventListener('change', async () => {
   await saveSettings({ language: els.languageInput.value });
@@ -12580,9 +13219,28 @@ els.liveTokenRateScopeInput?.addEventListener('change', async () => {
 els.compactTokenUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
+let resizeLayoutFrame = 0;
 window.addEventListener('resize', () => {
-  if (!numberAnimHandle) fitTotalNumber();
-  refreshFloatingBubbleBitmapForDeviceScale();
+  if (resizeLayoutFrame) return;
+  // Viewport units settle during the first frame after the native resize. Fit
+  // on the following frame so the old font cannot steal space from Home rows.
+  resizeLayoutFrame = requestAnimationFrame(() => {
+    resizeLayoutFrame = requestAnimationFrame(() => {
+      resizeLayoutFrame = 0;
+      // A live count previously locked the font to the old viewport until its
+      // one-second tween ended. A user resize takes priority over that tween.
+      if (numberAnimHandle) {
+        const target = Number.isFinite(numberAnimTarget) ? numberAnimTarget : state.currentTotal;
+        cancelNumberAnimation();
+        numberAnimValue = target;
+        els.totalTokens.textContent = formatNumber(target);
+        updateTotalCompact(target);
+      } else {
+        fitTotalNumber();
+      }
+      refreshFloatingBubbleBitmapForDeviceScale();
+    });
+  });
 });
 els.swapSettingsRefreshInput.addEventListener('change', () => {
   applyControlLayout(els.swapSettingsRefreshInput.checked);
@@ -12915,6 +13573,14 @@ els.appUpdateReleaseNotesButton.addEventListener('click', async () => {
   if (url) await window.tokenMonitor.openExternal(url);
 });
 
+const scrollEdgeControllers = [
+  'homePanel', 'modelSpeedPanel', 'breakdown', 'limitsPanel',
+  'trendsPanel', 'serviceStatusPanel', 'session-detail'
+].map((id) => window.TokenMonitorScrollFade.observe(document.getElementById(id)));
+window.addEventListener('beforeunload', () => {
+  for (const controller of scrollEdgeControllers) controller.dispose();
+}, { once: true });
+
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
   state.settingsPushRevision += 1;
@@ -12930,6 +13596,10 @@ window.tokenMonitor.onSettingsPush?.((next) => {
 });
 
 window.tokenMonitor.codex.onActiveAccount?.((account) => {
+  // A successful switch makes every observed cloud row part of the previous
+  // login: drop the old rows and any open cloud detail synchronously and read
+  // fresh. A cleared account must invalidate before the early return below.
+  cloudSessionsSource.invalidate({ refetch: true });
   if (!account) return;
   applyCodexOptimisticActiveAccount(account);
   renderLimits();
@@ -13026,7 +13696,87 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   },
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
 });
+function renderCloudSessionScope(period) {
+  const scope = document.getElementById('cloudSessionsScope');
+  const close = document.getElementById('dismissCloudSessionsScope');
+  const labels = cloudSessionRowsApi.labels(currentLocale());
+  document.getElementById('cloudSessionsScopeText').textContent = labels.note;
+  close.title = labels.dismissNote;
+  close.setAttribute('aria-label', labels.dismissNote);
+  scope.classList.toggle('hidden', state.settings?.cloudSessionScopeDismissed === true
+    || state.breakdown !== 'session' || Boolean(state.openSession)
+    || !rawSessionRowsForPeriod(period).some((row) => row.cloudThreadId));
+}
+document.getElementById('dismissCloudSessionsScope').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    await saveSettings({ cloudSessionScopeDismissed: true });
+  } catch (_) {
+    // saveSettings restores the persisted preference and reports the error.
+  } finally {
+    button.disabled = false;
+    render();
+  }
+});
+function renderCloudAccountingNote() {
+  const note = document.getElementById('cloudAccountingNote');
+  if (!note) return;
+  const text = typeof cloudSessionRowsApi.accountingNote === 'function'
+    ? cloudSessionRowsApi.accountingNote(state.stats?.cloudAccounting, state.period, currentLocale())
+    : '';
+  document.getElementById('cloudAccountingNoteText').textContent = text;
+  const close = document.getElementById('dismissCloudAccountingNote');
+  const closeLabel = cloudSessionRowsApi.labels(currentLocale()).dismissNote;
+  close.title = closeLabel;
+  close.setAttribute('aria-label', closeLabel);
+  note.classList.toggle('hidden', !text || state.settings?.cloudAccountingNoteDismissed === true);
+}
+document.getElementById('dismissCloudAccountingNote').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    await saveSettings({ cloudAccountingNoteDismissed: true });
+    renderCloudAccountingNote();
+  } catch (_) {
+    // saveSettings restores the persisted preference and reports the error.
+    renderCloudAccountingNote();
+  } finally {
+    button.disabled = false;
+  }
+});
+let cloudSessionControlBusy = false;
+let cloudSessionControlError = false;
+function renderCloudSessionSettings() {
+  const text = cloudSessionRowsApi.labels(currentLocale()), snapshot = cloudSessionsSource.snapshot();
+  document.getElementById('cloudSessionsSettingTitle').textContent = text.setting;
+  document.getElementById('cloudSessionsSettingNote').textContent = text.settingNote;
+  const toggle = document.getElementById('cloudSessionsEnabled');
+  toggle.disabled = cloudSessionControlBusy || !snapshot?.service?.canControl;
+  if (!cloudSessionControlBusy) toggle.checked = snapshot?.service?.running === true;
+  document.getElementById('cloudSessionsSettingStatus').textContent = cloudSessionControlError ? text.failed
+    : !snapshot ? text.error : snapshot.errorCode === 'IPC_FAILED' ? text.error : !snapshot.service?.installed ? text.missing : snapshot.errorCode ? text.error : snapshot.service.running ? text.enabled : text.disabled;
+}
+const cloudSessionsSource = cloudSessionRowsApi.createSource({
+  get: () => window.tokenMonitor.cloudUsage.get(),
+  onChange: () => { statsRenderScheduler.request(); renderCloudSessionSettings(); }
+});
+document.getElementById('cloudSessionsEnabled').addEventListener('change', async (event) => {
+  if (cloudSessionControlBusy) return;
+  cloudSessionControlBusy = true; cloudSessionControlError = false;
+  const action = event.target.checked ? 'start' : 'stop';
+  // A read that started before this flip describes the pre-control service; it
+  // must neither publish nor be reused as the post-control read below.
+  cloudSessionsSource.invalidate({ clear: false });
+  renderCloudSessionSettings();
+  try { const result = await window.tokenMonitor.cloudUsage.control(action); if (!result?.ok) throw new Error('Not confirmed'); }
+  catch (_) { cloudSessionControlError = true; }
+  finally { cloudSessionControlBusy = false; await cloudSessionsSource.refresh({ fresh: true }); }
+});
+window.addEventListener('beforeunload', () => cloudSessionsSource.dispose(), { once: true });
+
 function handleWindowVisibilityChange() {
+  cloudSessionsSource.setActive(visibleStatsSurface() === 'main' && (state.breakdown === 'session' || isSettingsPanelOpen()));
   if (els.syncPanelSignal) els.syncPanelSignal.dataset.windowHidden = String(isRendererWindowHidden());
   if (!statsRenderScheduler.visibilityChanged()) return;
   if (isRendererWindowHidden()) cancelTokenRateBoost();
