@@ -46,5 +46,7 @@ The full model list, Home summary and detail share the top-level period selectio
 
 Run `npm run verify`, then run `scripts/verify-model-speed-ui.js` and `scripts/verify-model-speed-list.js` with Electron and `TM_SPEED_VERIFY_DIR` set to an absolute private output directory. Both use actual preload/renderer code with synthetic IPC, independent user data and no real-account connection. The UI harness covers responsive geometry, repeated resizing, measured/untimed navigation, shared periods, request generations, retry, keyboard inspection, motion, tooltip positioning and saved dismissal choices. This establishes controlled source behavior; it does not establish installed-app migration, real-account sampling completeness or provider throttling.
 
+History writes request POSIX mode `0600`; that mode assertion applies on POSIX hosts. Windows access control follows the existing user-data directory ACL and is not verified by the POSIX mode bits. Bounded history reads reject named symlinks and mismatched file identities even without `O_NOFOLLOW`; native Windows UI and ACL acceptance still require separate validation.
+
 ![Synthetic responsive Home](images/model-speed-home.png)
 ![Synthetic model-speed detail](images/model-speed-detail.png)

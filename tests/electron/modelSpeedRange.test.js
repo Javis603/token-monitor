@@ -71,7 +71,9 @@ test('a range stops a runtime detail from describing a window the top tabs do no
   const clock = { at: NOW };
   const runtime = createModelSpeedRuntime({ directory, now: () => clock.at });
   const model = 'group/auto-deepseek-v4-1-flash';
-  const day0 = Math.floor(day('2026-10-05') / core.FIVE_MINUTES) * core.FIVE_MINUTES;
+  // Stored old points use UTC-aligned hourly buckets even in quarter-hour
+  // local offsets. Select the first whole bucket inside the local Monday.
+  const day0 = Math.ceil(day('2026-10-05') / core.HOUR) * core.HOUR;
   // Two paired readings two days back plus a today anchor, so the windows
   // differ: the week holds samples, today holds none.
   const history = { version: 1, kind: 'model-output-speed-history', retentionDays: 90, activeSource: null, series: {} };

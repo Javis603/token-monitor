@@ -58,18 +58,24 @@
     return date.getTime();
   }
 
+  function localDaysBefore(at, days) {
+    const date = new Date(localMidnight(at));
+    date.setDate(date.getDate() - days);
+    return date.getTime();
+  }
+
   // DAY is local midnight to now, never a rolling 24 hours. TOTAL stops at the
   // retention floor rather than implying samples that were already pruned.
   function rangeForPeriod(period, options = {}) {
     const key = normalizePeriod(period);
     const now = Number.isFinite(options.now) ? options.now : Date.now();
     const today = localMidnight(now);
-    const floor = today - (RETENTION_DAYS - 1) * DAY;
+    const floor = localDaysBefore(today, RETENTION_DAYS - 1);
     let start = today;
     if (key === 'week') start = localWeekStart(now, options.weekStartsOn);
-    else if (key === 'last7') start = today - 6 * DAY;
+    else if (key === 'last7') start = localDaysBefore(today, 6);
     else if (key === 'month') start = localMonthStart(now);
-    else if (key === 'last30') start = today - 29 * DAY;
+    else if (key === 'last30') start = localDaysBefore(today, 29);
     else if (key === 'allTime') start = floor;
     if (start < floor) start = floor;
     return {

@@ -117,7 +117,7 @@ test('main runtime persists privately and ignores preview; corrupt originals are
   assert.equal(runtime.observe(record, { source: 'local', preview: true }), false);
   assert.equal(fs.existsSync(runtime.file), false);
   runtime.observe(record, { source: 'local' });
-  assert.equal(fs.statSync(runtime.file).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(runtime.file).mode & 0o777, 0o600, 'POSIX private mode; Windows uses ACLs');
   at += 1000; runtime.observe({ allTime: period(300, 3000), today: period(300, 3000) }, { source: 'local' });
   const reloaded = createModelSpeedRuntime({ directory, now: () => at });
   assert.equal(reloaded.summary().models[0].samples, 1);

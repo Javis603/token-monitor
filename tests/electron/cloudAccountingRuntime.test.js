@@ -51,7 +51,7 @@ test('the ledger is written atomically with private permissions and reloads iden
   first.start();
   const file = path.join(dir, 'cloud-ledger.json');
   const stat = fs.statSync(file);
-  assert.equal(stat.mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal(stat.mode & 0o777, 0o600, 'POSIX private mode; Windows uses ACLs');
   assert.deepEqual([...new Set(fs.readdirSync(dir).filter((name) => name.includes('.tmp')))], []);
   const before = first.summary({});
   assert.equal(before.periods.allTime.totalTokens, 1100);
@@ -311,8 +311,21 @@ test('the ledger file reader refuses oversized, foreign-owned or symlinked files
   const link = path.join(dir, 'link.json');
   fs.symlinkSync(real, link);
   assert.throws(() => readFileLimited(link, 1024, fs), /UNSAFE_CLOUD_LEDGER_FILE|ENOENT|ELOOP/);
+  const withoutNoFollow = { ...fs, constants: { ...fs.constants, O_NOFOLLOW: 0 } };
+  assert.throws(() => readFileLimited(link, 1024, withoutNoFollow), { code: 'UNSAFE_CLOUD_LEDGER_FILE' });
   const big = path.join(dir, 'big.json');
   fs.writeFileSync(big, Buffer.alloc(2048, 0x20), { mode: 0o600 });
   assert.throws(() => readFileLimited(big, 1024, fs), { code: 'UNSAFE_CLOUD_LEDGER_FILE' });
   assert.deepEqual(readFileLimited(real, 1024, fs), { hello: 1 });
+});
+
+test('file replacement during open is refused before any ledger bytes are read', (t) => {
+  const dir = temp(t), first = path.join(dir, 'first.json'), second = path.join(dir, 'second.json');
+  fs.writeFileSync(first, '{"first":1}'); fs.writeFileSync(second, '{"second":2}');
+  let reads = 0;
+  const swapped = { ...fs, constants: { ...fs.constants, O_NOFOLLOW: 0 },
+    openSync: () => fs.openSync(second, 'r'),
+    readSync: (...args) => { reads++; return fs.readSync(...args); } };
+  assert.throws(() => readFileLimited(first, 1024, swapped), { code: 'UNSAFE_CLOUD_LEDGER_FILE' });
+  assert.equal(reads, 0);
 });

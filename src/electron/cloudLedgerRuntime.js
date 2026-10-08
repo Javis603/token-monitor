@@ -31,10 +31,13 @@ function fault(code) { return Object.assign(new Error(code), { code }); }
 function safeCode(error) { return /^[A-Z_]{1,60}$/.test(error?.code || '') ? error.code : 'CLOUD_LEDGER_UNAVAILABLE'; }
 
 function readFileLimited(file, maxBytes, fsImpl) {
+  const named = fsImpl.lstatSync(file);
+  if (!named.isFile() || named.isSymbolicLink()) throw fault('UNSAFE_CLOUD_LEDGER_FILE');
   const fd = fsImpl.openSync(file, fsImpl.constants.O_RDONLY | (fsImpl.constants.O_NOFOLLOW || 0));
   try {
     const before = fsImpl.fstatSync(fd);
-    if (!before.isFile() || before.size > maxBytes || (process.getuid && before.uid !== process.getuid())) throw fault('UNSAFE_CLOUD_LEDGER_FILE');
+    if (!before.isFile() || before.dev !== named.dev || before.ino !== named.ino
+      || before.size > maxBytes || (process.getuid && before.uid !== process.getuid())) throw fault('UNSAFE_CLOUD_LEDGER_FILE');
     const buffer = Buffer.alloc(Math.min(before.size + 1, maxBytes + 1));
     let read = 0;
     while (read < buffer.length) {
@@ -43,7 +46,9 @@ function readFileLimited(file, maxBytes, fsImpl) {
       read += size;
     }
     const after = fsImpl.fstatSync(fd);
-    if (read !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs) throw fault('CLOUD_LEDGER_FILE_CHANGED');
+    const stillNamed = fsImpl.lstatSync(file);
+    if (!stillNamed.isFile() || stillNamed.isSymbolicLink() || stillNamed.dev !== before.dev || stillNamed.ino !== before.ino
+      || read !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs) throw fault('CLOUD_LEDGER_FILE_CHANGED');
     return JSON.parse(buffer.subarray(0, read).toString('utf8'));
   } finally {
     fsImpl.closeSync(fd);
