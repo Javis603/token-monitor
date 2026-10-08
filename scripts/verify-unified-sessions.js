@@ -85,6 +85,7 @@ app.whenReady().then(async () => {
   await waitFor('document.querySelectorAll("#breakdown .row").length === 4');
   const state = await evaluate(`({ rows:document.querySelectorAll('#breakdown .row').length, cloudRows:document.querySelectorAll('#breakdown [data-cloud-only="true"]').length, total:document.getElementById('totalTokens').textContent, separateCloudButton:!!document.getElementById('cloudUsageButton'), activeSession:document.querySelector('.shell').classList.contains('session-mode') })`);
   assert.equal(state.cloudRows, 2); assert.equal(state.total, '42,800'); assert.equal(state.separateCloudButton, false); assert.equal(state.activeSession, true);
+  await waitFor(`document.querySelector('[data-cloud-thread-id="${ids[1]}"] .row-value')?.textContent === '18,300'`);
   const dots = await evaluate(`(() => { const row = document.querySelector('[data-cloud-thread-id="${ids[1]}"]'); return { count: document.querySelectorAll('[data-cloud-thread-id="${ids[1]}"]').length, cloudOnly: row?.dataset.cloudOnly, value: row?.querySelector('.row-value').textContent, cost: row?.querySelector('.row-cost').textContent, costTitle: row?.querySelector('.row-cost').title }; })()`);
   assert.equal(dots.count, 1); assert.equal(dots.cloudOnly, 'false'); assert.equal(dots.value, '18,300');
   assert.match(dots.cost, /\+ \?/); assert.doesNotMatch(dots.costTitle, /云端|cloud/i);
