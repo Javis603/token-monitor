@@ -33,7 +33,7 @@ const {
   createWorkbuddyLocalAuth,
   isSupportedWorkbuddyLocalAppPlatform
 } = require('./providers/workbuddy/localAuth');
-const { PARTITION: STEPFUN_PARTITION, signInStepFunWithBrowser } = require('./providers/stepfun/login');
+const { PARTITION: STEPFUN_PARTITION, readOasisSession, signInStepFunWithBrowser } = require('./providers/stepfun/login');
 const { createElectronLimitsFetch } = require('./limits/fetch');
 const {
   expandedBoundsForCollapse,
@@ -80,15 +80,21 @@ function ensureMimoExchangeFetch() {
 // supplies the signer and limits.js calls it — the headless agent has no
 // BrowserWindow, and there a pasted token stays the only lane.
 //
+// A stored password makes every probe able to re-sign-in, which would mean a
+// login window on every collection tick. The sign-in partition persists, so
+// its Oasis cookies usually outlive the gap between ticks: read them first and
+// only open a window when Chromium says the session is gone. The cookie jar
+// does the expiry bookkeeping, which is exactly what a hand-rolled timer here
+// would get wrong.
+//
 // `fromPartition` is resolved per call rather than cached because it only
 // exists once the app is ready, and the partition constant is shared with the
 // sign-in window so the window and the cookie reader cannot drift apart.
-function electronStepfunSignIn(options) {
-  return signInStepFunWithBrowser({
-    ...options,
-    BrowserWindow,
-    session: session.fromPartition(STEPFUN_PARTITION)
-  });
+async function electronStepfunSignIn(options) {
+  const loginSession = session.fromPartition(STEPFUN_PARTITION);
+  const reusable = await readOasisSession(loginSession);
+  if (reusable.token) return reusable;
+  return signInStepFunWithBrowser({ ...options, BrowserWindow, session: loginSession });
 }
 
 // Settings-side provider probes take the same transport as the collector's.
