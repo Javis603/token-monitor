@@ -2495,6 +2495,32 @@ test('the running arc resumes its phase rather than restarting on every repaint'
   assert.match(ring, /spinner\.setAttribute\('aria-hidden', 'true'\)/);
 });
 
+test('waiting ring entry survives live renewals and resets after waiting clears', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const body = dock.slice(dock.indexOf('function waitingRingStart('), dock.indexOf('function ringNode('));
+  const starts = new Map();
+  let clock = 100;
+  let reduced = false;
+  const start = Function('waitingRingStarts', 'performance', 'prefersReducedMotion', 'WAITING_PULSE_MS', 'WAITING_PULSE_COUNT', `return (${body})`)(
+    starts, { now: () => clock }, () => reduced, 1800, 2
+  );
+  assert.equal(start('claude', true), 100);
+  clock = 1500;
+  assert.equal(start('claude', true), 100, 'a heartbeat must not replay the entry');
+  assert.equal(start('codex', true), 1500, 'providers enter waiting independently');
+  clock = 5000;
+  assert.equal(start('claude', true), 100, 'finished pulses stay finished across repaints');
+  assert.equal(start('claude', false), null);
+  assert.equal(starts.has('claude'), false);
+  assert.equal(start('claude', true), 5000, 'a later wait gets its own entry');
+  assert.equal(start('codex', true), 1500, 'another provider remains undisturbed');
+
+  reduced = true;
+  assert.equal(start('cursor', true), 1400, 'reduced motion consumes the entry without playing it');
+  reduced = false;
+  assert.equal(start('cursor', true), 1400, 'changing the preference must not replay a skipped entry');
+});
+
 // The handle's exit is a move now rather than a blink. The window's fade is the main
 // process's and outlasts it, so the retreat leads the fade - shorter and front-loaded
 // - or the glass dims past the movement before it has travelled, the same cancellation

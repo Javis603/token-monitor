@@ -208,7 +208,7 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   stroke-width: 1.5;
   stroke-linecap: round;
 }
-.edge-dock-cell[data-running="yes"] .edge-dock-ring-spinner {
+.edge-dock-cell[data-running="yes"]:not([data-waiting="yes"]) .edge-dock-ring-spinner {
   opacity: 1;
   animation: edge-dock-running-spin 1400ms linear infinite;
 }
@@ -217,17 +217,24 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   to { transform: rotate(270deg); }
 }
 .edge-dock-ring-waiting {
-  display: none;
-  position: absolute;
-  top: 1px;
-  right: 1px;
-  width: 11px;
-  height: 11px;
-  background: var(--orange);
-  -webkit-mask: url("../icons/actions/attention.svg") center / contain no-repeat;
-  mask: url("../icons/actions/attention.svg") center / contain no-repeat;
+  pointer-events: none;
+  opacity: 0;
 }
-.edge-dock-cell[data-waiting="yes"] .edge-dock-ring-waiting { display: block; }
+.edge-dock-ring-waiting circle {
+  fill: none;
+  stroke: var(--orange);
+  stroke-width: 1.5;
+}
+/* Waiting takes priority over work in another session. Two soft pulses invite
+   a response, then the complete inner ring stays still until waiting clears. */
+.edge-dock-cell[data-waiting="yes"] .edge-dock-ring-waiting { opacity: 1; }
+.edge-dock-cell[data-waiting="yes"] .edge-dock-ring-waiting.is-entering {
+  animation: edge-dock-waiting-pulse 1800ms ease-in-out 2 both;
+}
+@keyframes edge-dock-waiting-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
 
 /* The flare a quota refill lands with — the ring's counterpart to the meter's
    `.limit-meter-completion` (its keyframes and timing are driven by the same

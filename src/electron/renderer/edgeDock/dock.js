@@ -60,6 +60,11 @@ const DRAG_THRESHOLD_PX = 4;
 const BREAKDOWN_VISIBLE_ROWS = 6;
 // Keep the phase anchor in sync with edge-dock-running-spin in dock.css.
 const RUNNING_SPIN_MS = 1400;
+// Match the bounded waiting pulse in dock.css. Keep its entry clock across
+// rail rebuilds so usage pushes and live-status renewals do not repeat it.
+const WAITING_PULSE_MS = 1800;
+const WAITING_PULSE_COUNT = 2;
+const waitingRingStarts = new Map();
 
 const root = document.getElementById('edgeDockRoot');
 const query = new URLSearchParams(window.location.search);
@@ -564,7 +569,19 @@ if (surface === 'peek') {
 
 // ---- Rail ----------------------------------------------------------------
 
-function ringNode(remainingPercent, color, mark) {
+function waitingRingStart(cellId, isWaiting) {
+  if (!isWaiting) {
+    waitingRingStarts.delete(cellId);
+    return null;
+  }
+  if (!waitingRingStarts.has(cellId)) {
+    const skipped = prefersReducedMotion() ? WAITING_PULSE_MS * WAITING_PULSE_COUNT : 0;
+    waitingRingStarts.set(cellId, performance.now() - skipped);
+  }
+  return waitingRingStarts.get(cellId);
+}
+
+function ringNode(remainingPercent, color, mark, waitingStartedAt = null) {
   const ring = el('div', 'edge-dock-ring');
   ring.style.setProperty('--ring-color', color);
   const svg = document.createElementNS(SVG_NS, 'svg');
@@ -590,8 +607,22 @@ function ringNode(remainingPercent, color, mark) {
   fill.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE * (1 - remaining / 100)));
   if (remainingPercent === null) fill.style.opacity = '0';
   svg.append(track, fill);
-  const waiting = el('span', 'edge-dock-ring-waiting');
+  const waiting = document.createElementNS(SVG_NS, 'svg');
+  waiting.setAttribute('class', 'edge-dock-ring-waiting');
+  waiting.setAttribute('viewBox', '0 0 42 42');
   waiting.setAttribute('aria-hidden', 'true');
+  const waitingCircle = document.createElementNS(SVG_NS, 'circle');
+  waitingCircle.setAttribute('cx', '21');
+  waitingCircle.setAttribute('cy', '21');
+  waitingCircle.setAttribute('r', '14');
+  waiting.append(waitingCircle);
+  if (waitingStartedAt !== null && !prefersReducedMotion()) {
+    const elapsed = Math.max(0, performance.now() - waitingStartedAt);
+    if (elapsed < WAITING_PULSE_MS * WAITING_PULSE_COUNT) {
+      waiting.classList.add('is-entering');
+      waiting.style.animationDelay = `-${elapsed}ms`;
+    }
+  }
   if (appearance().edgeDockRunningIndicatorEnabled === false) {
     ring.append(svg, mark, waiting);
     return ring;
@@ -650,7 +681,7 @@ function providerCellNode(cell) {
   // Splitting the two lets a tight secondary window warn without turning the
   // headline into whichever window is lowest this minute.
   value.dataset.severity = displaySeverity(cell.severityPercent ?? cell.remainingPercent);
-  node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider)), value);
+  node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider), waitingRingStart(cell.id, waiting > 0)), value);
   // The spinner is decorative and carries no text, so the state it announces is
   // spoken here instead, from the same reading it is drawn from.
   const spoken = [providerLabel(cell.provider), value.textContent];
@@ -1085,6 +1116,10 @@ function renderRail(payload) {
     node.classList.toggle('is-focused', payload.focusCellId === cell.id);
     nodes.push(node);
   });
+  const providerIds = new Set((payload.cells || []).filter((cell) => cell.kind !== 'stat').map((cell) => cell.id));
+  for (const id of waitingRingStarts.keys()) {
+    if (!providerIds.has(id)) waitingRingStarts.delete(id);
+  }
   const ringSnapshot = captureRingResetMotion();
   railNode.replaceChildren(...nodes);
   animateRingResets(ringSnapshot);
