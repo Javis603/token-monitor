@@ -98,23 +98,30 @@ test('native Cursor WAL writes arrive while read-only SQLite SHM changes stay ig
     });
     // ready can precede native-stream delivery on loaded CI runners. Retry a
     // real committed write until delivery, without asserting platform latency.
-    await new Promise((resolve, reject) => {
+    const waitForWalWrite = () => new Promise((resolve, reject) => {
       let retry;
+      let finished = false;
       const deadline = setTimeout(() => finish(new Error('no native Cursor WAL event')), 45_000);
       const onEvent = (_event, file) => { if (path.basename(file) === 'state.vscdb-wal') finish(); };
       function finish(error) {
+        if (finished) return;
+        finished = true;
         clearTimeout(deadline);
         clearInterval(retry);
         watcher.off('all', onEvent);
         watcher.off('error', finish);
         if (error) reject(error); else resolve();
       }
-      const write = () => db.exec('INSERT INTO fixture VALUES (1)');
+      const write = () => {
+        try { db.exec('INSERT INTO fixture VALUES (1)'); }
+        catch (error) { finish(error); }
+      };
       watcher.on('all', onEvent);
       watcher.on('error', finish);
       retry = setInterval(write, 1500);
       write();
     });
+    await waitForWalWrite();
     const shmBeforeRead = fs.readFileSync(databasePath + '-shm');
     const readOnly = new DatabaseSync(databasePath, { readOnly: true });
     try { assert.ok(readOnly.prepare('SELECT COUNT(*) AS count FROM fixture').get().count > 0); }
@@ -127,7 +134,13 @@ test('native Cursor WAL writes arrive while read-only SQLite SHM changes stay ig
     // unrelated sibling after the stream has proved live.
     fs.utimesSync(databasePath + '-shm', new Date(), new Date());
     fs.writeFileSync(path.join(f.roots[0], 'storage.json'), '{}');
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    // A fresh allowed write is a positive delivery barrier after the excluded
+    // writes, including awaitWriteFinish's stability window. Check registration
+    // as well as delivery so delayed forbidden events cannot give a false pass.
+    await waitForWalWrite();
+    const watchedFiles = Object.values(watcher.getWatched()).flat();
+    assert.equal(watchedFiles.includes('state.vscdb-shm'), false);
+    assert.equal(watchedFiles.includes('storage.json'), false);
     assert.ok(events.includes('state.vscdb-wal'));
     assert.equal(events.includes('state.vscdb-shm'), false);
     assert.equal(events.includes('storage.json'), false);
@@ -218,6 +231,10 @@ test('Cursor WAL writes retain a targeted cloud-sync catch-up and exact period d
   await waitFor(() => f.updates.length === 2);
   assert.equal(f.syncCalls, 1, 'dense writes inside the source floor do not spam syncs');
   assert.deepEqual(f.operations.at(-1), { kind: 'scan', clients: 'cursor', flags: ['--today'] });
+  for (const period of ['today', 'month', 'allTime']) {
+    assert.deepEqual(f.updates[1].summary[period], f.updates[0].summary[period],
+      'a throttled source event retains the cached totals until its catch-up sync');
+  }
 
   f.at(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000);
   await waitFor(() => f.updates.length === 3);
@@ -251,6 +268,31 @@ test('an overlapping recursive client root cannot turn extension data into a Cur
   f.event('change', path.join('extension', 'state.vscdb'));
   await waitFor(() => f.updates.length === 2);
   assert.equal(f.syncCalls, 1, 'nested databases do not request a Cursor cloud sync');
+});
+
+test('Cursor desktop titles refresh while cloud usage sync is throttled', async (t) => {
+  const f = runtimeFixture(t);
+  await waitFor(() => f.updates.length === 1);
+  const db = new DatabaseSync(path.join(f.roots[0], 'state.vscdb'));
+  try {
+    db.exec('CREATE TABLE composerHeaders (composerId TEXT PRIMARY KEY, value TEXT)');
+    db.prepare('INSERT INTO composerHeaders (composerId, value) VALUES (?, ?)').run(
+      'cursor-session', JSON.stringify({ name: 'Updated desktop title' })
+    );
+  } finally { db.close(); }
+
+  f.at(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS - 300);
+  f.event('change', 'state.vscdb');
+  await waitFor(() => f.updates.length === 2);
+  assert.equal(f.syncCalls, 1, 'local titles do not bypass the cloud-sync floor');
+  const before = f.updates[0].summary;
+  const after = f.updates[1].summary;
+  assert.equal(Object.values(after.today.sessions).find((session) => session.client === 'cursor').title,
+    'Updated desktop title');
+  for (const period of ['today', 'month', 'allTime']) {
+    assert.deepEqual(after[period].clients, before[period].clients);
+    assert.equal(after[period].totalTokens, before[period].totalTokens);
+  }
 });
 
 test('a failed Cursor source sync keeps its event on the failure backoff', async (t) => {
