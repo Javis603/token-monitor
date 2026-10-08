@@ -1,20 +1,22 @@
 ---
-summary: "DeepSeek Harness (dsh) provider notes: where the harness stores transcripts, how usage, session metadata and Session Detail read them, and why usage totals still come from tokscale."
+summary: "DeepSeek Harness (dsh) provider notes: transcript discovery, session detail, historical source evidence and authoritative tokscale totals."
 ids: [dsh]
 read_when:
   - Changing or debugging DeepSeek Harness (dsh) session discovery, titles or Session Detail
   - Investigating DSH usage that is missing from the widget
-  - Touching providers/dsh/sessionFiles.js, providers/dsh/sessionDetail.js or paths.js
+  - Changing DSH historical platform, account or subscription/API attribution
+  - Touching providers/dsh/sessionFiles.js, providers/dsh/sessionDetail.js, providers/dsh/usageSources.js or paths.js
 ---
 
 # DeepSeek Harness (dsh) provider
 
-DSH has three data planes, and they are deliberately separate:
+DSH has four data planes with separate authority:
 
 | Data plane | Read by | Source |
 | --- | --- | --- |
 | Token usage (periods, dashboard, history) | the shared usage collector, through `tokscale` | DSH session transcripts, parsed by tokscale's `dsh.rs` |
 | Local session metadata (timestamps, persisted title) | collector metadata enrichment in `collector.js`, through `providers/dsh/sessionFiles.js` | transcript header, file metadata and the latest `session/title`, parsed locally |
+| Historical usage source (platform, anonymous account, access) | `providers/dsh/usageSources.js`, after native usage collection | accepted transcript turns joined by response ID to Magpie's local answering-provider ledger |
 | Session Detail (per-turn breakdown, prompts) | `providers/dsh/sessionDetail.js`, on demand | the same transcripts, parsed locally |
 
 ## Where the data lives
@@ -103,10 +105,19 @@ and tokscale subtracts then re-adds reasoning, so the net total is reasoning-inc
 Subtracting here would under-count every reasoning-heavy session by exactly its reasoning
 tokens.
 
+## Historical usage source evidence
+
+`usageSources.js` enriches only DSH rows already returned by tokscale. It discovers the preferred transcript through the existing header index, honors the same explicit home and custom scan roots, and calls `parseDshDetailRecords(records, { includeUsageSource: true })`. The parser's native turn acceptance, replay deduplication and inherited-prefix rules remain authoritative. Successful messages use top-level usage when present; attempts use final stream usage. Compaction summary turns are supported. The source fields come from `data.message.source.{provider,model,replayState.response.responseId}`; message/account proximity does not substitute for an ID.
+
+For each accepted positive-output turn in the native scan's local calendar window, the normalized model must match the row. Its response ID must match a non-conflicting Magpie ledger `response_id`, and the ledger's final platform and inclusive output count must exactly equal the transcript's provider and output. Input is deliberately not a matching key because cache inclusion differs between the schemas. The ledger's answering account, rather than the session creator or current login, supplies the anonymized account/access evidence described in [the shared provider rules](README.md#historical-usage-source-evidence). Failed joins preserve the transcript platform with an empty account and `accessType: 'unknown'`.
+
+DSH emits only `usageSourceReferences: [{ usageSource, outputTokens, lastUsedAt }]`, grouped by source and retaining each source's latest turn time. These references can identify multiple platforms/accounts in one model row without assigning native duration to any of them. It does not set a whole-row `usageSource` or timed `usageSources`; account-attributed output speed is therefore unavailable from this enrichment alone. Original native throughput, where present, stays unattributed. Ledger `ms` and `ttft_ms` are never imported, and references neither replace tokscale output nor add another token total. Shared validation rejects an over-allocation and places uncovered native output on the row's observed or unknown source.
+
+The attribution reader skips `user/message` records, bounds each scan to 50,000 retained records and reuses up to 256 stable file snapshots. File identity, size and timestamps must remain unchanged during parsing. Oversized, unstable, unreadable or unavailable transcript/ledger evidence leaves provenance unknown; aborts propagate. It shares the existing JSONL/Zstd reader but retains only derived turn time, counters and source evidence in its cache. Calendar-window references use the accepted turn time; they do not create speed observation times. The model-speed detail's `referenceOnly` rows and selected-range limitations are documented in [model output speed](../model-output-speed.md#historical-source-attribution).
+
 ## Usage totals stay on the tokscale path
 
-The collector does not read dsh transcripts for period or dashboard totals. The pinned tokscale
-build already discovers the versioned name, so those sessions stay on the normal usage path:
+The collector's local transcript reads enrich metadata, detail and historical identity; period and dashboard token/duration totals still come only from tokscale. The pinned build already discovers the versioned name, so those sessions stay on the normal usage path:
 
 - tokscale's `dsh.rs` parses these records correctly once they are exposed under a name it
   matches — verified by exposing a v3 transcript under the unversioned name, which reproduced
@@ -118,3 +129,7 @@ build already discovers the versioned name, so those sessions stay on the normal
 
 Native scans honor `DSH_HOME`. An explicit `--home <dir>` disables host environment roots and
 uses `<dir>/.dsh` instead, so per-home WSL scans remain scoped to the requested distro home.
+
+## Verification
+
+Run `node --test tests/shared/dshUsageSources.test.js tests/shared/dshSessionDetail.test.js tests/shared/magpieUsageLedger.test.js` for exact response/provider/output joins, multiple historical identities, unknown fallbacks, native period ownership, custom roots, seeded-prefix/replay handling, ledger cache refresh and cancellation. The source/ledger fixture tests also assert that ledger durations do not populate native timing; they do not establish complete coverage of a real user's historical requests.

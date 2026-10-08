@@ -125,7 +125,7 @@ function resolveDshSessionsRoot(options = {}) {
   }));
 }
 
-function dshSessionFiles(root) {
+function dshSessionFiles(root, { onDirectory } = {}) {
   // Collected per directory so a session holding several transcripts yields its
   // live one first: every caller that stops at the first match (session detail,
   // the header index) then reads the same file, while callers that aggregate
@@ -134,6 +134,7 @@ function dshSessionFiles(root) {
   const stack = [{ dir: root, depth: 0 }];
   while (stack.length > 0) {
     const { dir, depth } = stack.pop();
+    onDirectory?.(dir);
     let entries;
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });

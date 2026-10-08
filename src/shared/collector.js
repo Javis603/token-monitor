@@ -51,6 +51,8 @@ const {
   sessionMetadataMap
 } = require('./sessionMetadata');
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
+const { applyDshUsageSources } = require('./providers/dsh/usageSources');
+const { applyCodexUsageSources } = require('./providers/codex/usageSources');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
 const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
 const { createLocalUsageSource } = require('./providers/codex/localUsageSource');
@@ -843,6 +845,10 @@ async function collectUsageOnce(options) {
   const runTokscaleFn = async (input) => {
     const json = await runTokscaleScan(input);
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
+    const sourceOptions = { homeDir: options.homeDir, customScanPaths: options.customScanPaths,
+      ledgerPath: options.usageLedgerPath, flags: input.flags, now: collectedAt, signal: options.signal };
+    await applyDshUsageSources(json, sourceOptions);
+    await applyCodexUsageSources(json, sourceOptions);
     return json;
   };
   const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({

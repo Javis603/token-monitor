@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { hashKey } = require('./hashKey');
 const { normalizeSessionContext } = require('./sessionContext');
+const { applyRowUsageSource } = require('./usageSource');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
 const codebuddySession = require('./providers/codebuddy/sessionMetadata');
 const codexSession = require('./providers/codex/sessionMetadata');
@@ -100,10 +101,9 @@ function applyTokscaleSessionMetadata(json, { resolveProjects = true } = {}) {
       ? { projectId: identity.projectId, projectLabel: identity.projectLabel || String(entry?.label || '').trim() }
       : null);
   }
-  if (sessionMeta.size === 0 && identities.size === 0) return result;
-
   for (const row of rows) {
     if (!row || typeof row !== 'object') continue;
+    applyRowUsageSource(row);
     const client = String(row.client || '').trim();
     const sessionId = String(row.sessionId ?? row.session_id ?? '').trim();
     const meta = client && sessionId ? sessionMeta.get(`${client}:${sessionId}`) : null;

@@ -106,7 +106,33 @@ function parseDshDetailEvents(text) {
   return parseDshDetailRecords(records);
 }
 
-function parseDshDetailRecords(inputRecords) {
+function nativeStreamUsage(stream) {
+  if (!Array.isArray(stream)) return null;
+  for (let index = stream.length - 1; index >= 0; index -= 1) {
+    const record = stream[index];
+    if (record?.type === 'chunk' && record.chunk?.type === 'usage' && record.chunk.usage !== undefined) return record.chunk.usage;
+  }
+  return null;
+}
+
+const nonEmptyString = value => typeof value === 'string' ? value.trim() : '';
+function nativeUsageIdentity(record, sessionId, time) {
+  const data = record.data || {};
+  if (record.type === 'assistant/attempt') {
+    const id = nonEmptyString(data.attemptId !== undefined ? data.attemptId : data.retryId);
+    if (id) return `attempt-id:${id}`;
+    if (Number.isSafeInteger(record.seq)) return `attempt-session:${sessionId}:seq:${record.seq}`;
+    if (Number.isSafeInteger(data.turn) && Number.isSafeInteger(data.step)) return `attempt-session:${sessionId}:turn:${data.turn}:step:${data.step}:${time}`;
+    return `attempt-session:${sessionId}`;
+  }
+  const messageId = nonEmptyString(data.message?.id);
+  if (messageId) return `msg:${messageId}`;
+  const compactionId = record.type === 'compaction/summary' ? nonEmptyString(data.compactionId) : '';
+  if (compactionId) return `cmp:${compactionId}`;
+  return Number.isSafeInteger(record.seq) ? `seq:${record.seq}` : `sid:${sessionId}`;
+}
+
+function parseDshDetailRecords(inputRecords, { includeUsageSource = false, sessionId = 'unknown' } = {}) {
   const events = [];
   // dsh's own persistence layer can replay an already-flushed line back into
   // the file (crash/retry on the writer side); tokscale's dsh parser guards
@@ -132,18 +158,36 @@ function parseDshDetailRecords(inputRecords) {
   // tagged marker belongs to this session. Untagged end-seed markers are resume
   // lifecycle boundaries and must never hide history in an unseeded session.
   const hasLegacySeedLength = header?.seedLength !== undefined && header?.seedLength !== null;
-  const headerSeedLength = Number(header?.seedLength);
-  let inheritedCut = hasLegacySeedLength && Number.isFinite(headerSeedLength) ? headerSeedLength : null;
-  const needsTaggedCut = inheritedCut === null && header?.isSeeded === true;
+  const headerSeedLength = includeUsageSource ? header?.seedLength : Number(header?.seedLength);
+  let inheritedCut = hasLegacySeedLength && (includeUsageSource
+    ? Number.isSafeInteger(headerSeedLength) && headerSeedLength > 0 : Number.isFinite(headerSeedLength)) ? headerSeedLength : null;
+  const needsTaggedCut = (includeUsageSource ? !hasLegacySeedLength : inheritedCut === null) && header?.isSeeded === true;
   if (needsTaggedCut) {
     for (const record of records) {
       if (record?.type !== 'session/end-seed' || record.data?.inherited !== true) continue;
-      if (Number.isFinite(record.seq)) inheritedCut = record.seq;
+      if (includeUsageSource ? Number.isSafeInteger(record.seq) : Number.isFinite(record.seq)) inheritedCut = record.seq;
     }
   }
 
+  let fallbackProvider;
+  let fallbackModel;
+  let nativeSessionId = sessionId;
+  let lastSettlement;
   for (const [recordIndex, record] of records.entries()) {
-    if (record?.type === 'session') continue;
+    if (record?.type === 'session') {
+      if (typeof record.id === 'string') nativeSessionId = record.id;
+      continue;
+    }
+    if (includeUsageSource && record?.type === 'request/header') {
+      const config = record.data?.header?.config;
+      fallbackProvider = typeof config?.provider === 'string' ? config.provider : undefined;
+      fallbackModel = nonEmptyString(config?.model);
+      continue;
+    }
+    if (includeUsageSource && record?.type === 'llm/retry-started') {
+      if (lastSettlement && record.data?.turn === lastSettlement.turn && record.data?.step === lastSettlement.step) lastSettlement = undefined;
+      continue;
+    }
     // tokscale's own loop never gates user/assistant processing on having
     // seen the header first (dsh.rs): every line is matched by its own
     // `type` independently, and seed_length simply stays its 0 default until
@@ -158,7 +202,9 @@ function parseDshDetailRecords(inputRecords) {
     // prefix to the child. Legacy seq-less usage retains its prior behaviour.
     const recordSeq = Number.isFinite(record?.seq) ? record.seq : null;
     const inheritedCutApplies = headerRecordIndex >= 0 && recordIndex > headerRecordIndex;
-    if (inheritedCutApplies && needsTaggedCut && inheritedCut === null) continue;
+    // Historical identity needs a complete fork boundary even when a torn
+    // header appeared late; native detail totals retain their prior behaviour.
+    if (needsTaggedCut && inheritedCut === null && (includeUsageSource || inheritedCutApplies)) continue;
     if (inheritedCutApplies && inheritedCut !== null && recordSeq !== null && recordSeq < inheritedCut) continue;
     // An event without a usable time cannot be placed in the exchange
     // timeline correctly — defaulting it to epoch 0 would either sort it out
@@ -166,8 +212,8 @@ function parseDshDetailRecords(inputRecords) {
     // tokscale applies the identical `timestamp <= 0` skip to assistant/message
     // (dsh.rs); applying it to user/message too is a Session Detail-specific
     // need tokscale itself doesn't have, since it never renders prompts.
-    const time = numberValue(record?.time);
-    if (time <= 0) continue;
+    const time = includeUsageSource ? record?.time : numberValue(record?.time);
+    if (time <= 0 || (includeUsageSource && !Number.isSafeInteger(time))) continue;
     if (record?.type === 'user/message') {
       if (record.data?.source?.kind !== 'user') continue;
       const promptText = promptFromContent(record.data?.content);
@@ -182,34 +228,56 @@ function parseDshDetailRecords(inputRecords) {
       // stream. A successful assistant/message normally promotes usage to the
       // top level; that value is authoritative when present, with the stream as
       // a fallback for partially-promoted/current records.
-      const usage = !isAttempt && record.data?.usage
-        ? record.data.usage
-        : lastStreamUsage(record.data?.stream);
+      const usage = includeUsageSource
+        ? (isAttempt ? nativeStreamUsage(record.data?.stream)
+          : (record.data?.usage !== undefined ? record.data.usage : (isSummary ? null : nativeStreamUsage(record.data?.stream))))
+        : (!isAttempt && record.data?.usage ? record.data.usage : lastStreamUsage(record.data?.stream));
       if (!usage) continue;
-      const tokens = usageTokens(usage);
+      const nativeInt = key => Number.isSafeInteger(usage[key]) ? usage[key] : 0;
+      const tokens = includeUsageSource ? makeTokens({
+        input: nativeInt('inputTokens'), output: Math.max(0, nativeInt('outputTokens'), nativeInt('reasoningTokens')),
+        cacheRead: nativeInt('cacheReadTokens'), cacheWrite: nativeInt('cacheWriteTokens'), reasoning: Math.max(0, nativeInt('reasoningTokens'))
+      }) : usageTokens(usage);
       if (tokens.total === 0) continue;
       const source = record.data?.message?.source;
       const messageId = String(record.data?.message?.id || '').trim();
-      const identity = messageId
-        ? `msg:${messageId}`
-        : (recordSeq !== null ? `seq:${recordSeq}` : `sid:${header?.id || ''}`);
+      const identity = includeUsageSource ? nativeUsageIdentity(record, nativeSessionId, time)
+        : (messageId ? `msg:${messageId}` : (recordSeq !== null ? `seq:${recordSeq}` : `sid:${header?.id || ''}`));
+      // Attribution follows the pinned native parser's route. Detail rendering
+      // keeps its existing contract unless this evidence-only mode is requested.
+      const provider = typeof source?.provider === 'string' ? source.provider : (fallbackProvider ?? 'unknown');
+      const model = nonEmptyString(source?.replayState?.response?.responseModel)
+        || nonEmptyString(source?.model) || fallbackModel || 'unknown';
       const dedupKey = [
         isSummary ? `summary:${identity}` : (isAttempt ? `attempt:${identity}` : identity),
-        time, source?.provider || '', source?.model || '',
-        tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite, tokens.reasoning
+        time, includeUsageSource ? provider : source?.provider || '', includeUsageSource ? model : source?.model || '',
+        tokens.input, includeUsageSource ? tokens.output - tokens.reasoning : tokens.output, tokens.cacheRead, tokens.cacheWrite, tokens.reasoning
       ].join(':');
       if (seenUsageKeys.has(dedupKey)) continue;
       seenUsageKeys.add(dedupKey);
       const tools = !isSummary && Array.isArray(record.data?.message?.content)
         ? record.data.message.content.filter((block) => block && block.type === 'tool-call' && typeof block.name === 'string').map((block) => block.name)
         : [];
-      events.push({
+      const event = {
         kind: 'turn',
         type: isSummary ? 'compaction-summary' : (isAttempt ? 'assistant-attempt' : 'reply'),
         timestamp: new Date(time).toISOString(),
         tokens,
-        tools
-      });
+        tools,
+        ...(includeUsageSource ? { usageSource: { provider, model,
+          responseId: typeof source?.replayState?.response?.responseId === 'string' ? source.replayState.response.responseId : '' } } : {})
+      };
+      const turn = record.data?.turn, step = record.data?.step;
+      if (includeUsageSource && !isSummary && Number.isSafeInteger(turn) && Number.isSafeInteger(step)) {
+        if (lastSettlement?.turn === turn && lastSettlement.step === step) events[lastSettlement.index] = event;
+        else {
+          lastSettlement = { turn, step, index: events.length };
+          events.push(event);
+        }
+      } else {
+        events.push(event);
+        if (includeUsageSource && !isSummary) lastSettlement = undefined;
+      }
     }
   }
   return events;
@@ -253,5 +321,6 @@ async function readDshSessionDetail({ sessionId, period = 'total', sessionCost =
 module.exports = {
   findDshSessionFile,
   parseDshDetailEvents,
+  parseDshDetailRecords,
   readDshSessionDetail
 };

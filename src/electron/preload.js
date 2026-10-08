@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     return () => ipcRenderer.removeListener('appearance:nativeMaterial', listener);
   },
   getStats: (options) => ipcRenderer.invoke('stats:get', options),
+  getModelSpeedModels: (request) => ipcRenderer.invoke('modelSpeed:list', request),
+  getModelSpeedHistory: (request) => ipcRenderer.invoke('modelSpeed:history', request),
   deleteDevice: (deviceId) => ipcRenderer.invoke('devices:delete', deviceId),
   getAllTimeSessions: (snapshotId) => ipcRenderer.invoke('stats:allTimeSessions', snapshotId),
   getSessionDetail: (args) => ipcRenderer.invoke('session:getDetail', args),

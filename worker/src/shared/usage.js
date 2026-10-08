@@ -4,6 +4,7 @@
 'use strict';
 
 const PERIODS = ['today', 'month', 'allTime'];
+const MODEL_USAGE_SOURCE_LIMIT = 128;
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
@@ -211,6 +212,8 @@ function emptyPeriod() {
     timedOutputTokens: 0,
     timedDurationMs: 0,
     modelThroughput: Object.create(null),
+    modelSourceThroughput: Object.create(null),
+    modelUsageSources: Object.create(null),
     clients: {},
     clientCosts: {},
     clientCacheReads: {},
@@ -848,6 +851,8 @@ function normalizePeriod(input, options = {}) {
     // is different: its zero counters are synthetic and must never seed a live delta.
     period.capabilities.throughput = false;
     delete period.modelThroughput;
+    delete period.modelSourceThroughput;
+    delete period.modelUsageSources;
     return period;
   }
   const projectsEnabled = options.projectsEnabled !== false;
@@ -963,6 +968,10 @@ function normalizePeriod(input, options = {}) {
   }
   period.modelThroughput = normalizeModelThroughput(input.modelThroughput, period);
   if (!period.modelThroughput) delete period.modelThroughput;
+  period.modelSourceThroughput = normalizeModelSourceThroughput(input.modelSourceThroughput, period);
+  if (!period.modelSourceThroughput) delete period.modelSourceThroughput;
+  period.modelUsageSources = normalizeModelUsageSources(input.modelUsageSources, period);
+  if (!period.modelUsageSources) delete period.modelUsageSources;
   if (input.modelCosts && typeof input.modelCosts === 'object') {
     for (const [model, value] of Object.entries(input.modelCosts)) {
       const key = normalizeModelName(model);
@@ -1050,6 +1059,170 @@ function normalizeModelThroughput(value, period) {
 }
 
 
+function normalizeUsageSource(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const platform = typeof source.platform === 'string' ? source.platform.trim().toLowerCase() : '';
+  const accountId = typeof source.accountId === 'string' && /^sha256:[a-f0-9]{64}$/.test(source.accountId)
+    ? source.accountId : '';
+  const accessType = typeof source.accessType === 'string' ? source.accessType.trim().toLowerCase() : '';
+  return {
+    platform: /^[a-z0-9][a-z0-9._-]{0,63}$/.test(platform) ? platform : '',
+    accountId,
+    // Free-form labels may contain email addresses or credentials. Publish only
+    // an anonymous alias derived from the already hashed collector identity.
+    accountLabel: accountId ? `账号 ${accountId.slice(7, 15)}` : '',
+    accessType: ['subscription', 'api'].includes(accessType) ? accessType : 'unknown'
+  };
+}
+
+function modelSourceKey(source) {
+  return JSON.stringify([source.model, source.client, source.platform, source.accountId, source.accessType]);
+}
+
+// Keep a bounded deterministic catalog independent of extraction/merge order.
+// Larger canonical keys are evicted; original period/model counters stay complete.
+function modelSourceEntry(target, source, initial) {
+  const key = modelSourceKey(source);
+  if (hasOwn(target, key)) return target[key];
+  const keys = Object.keys(target);
+  if (keys.length >= MODEL_USAGE_SOURCE_LIMIT) {
+    const largest = keys.sort().at(-1);
+    if (key >= largest) return null;
+    delete target[largest];
+  }
+  return target[key] = { ...source, ...initial };
+}
+
+function addModelSourceCounters(target, source, timedOutputTokens, timedDurationMs) {
+  const entry = modelSourceEntry(target, source, { timedOutputTokens: 0, timedDurationMs: 0 });
+  if (!entry) return;
+  entry.timedOutputTokens += timedOutputTokens;
+  entry.timedDurationMs += timedDurationMs;
+}
+
+function normalizedSourceEntries(value, fields) {
+  const entries = [];
+  for (const entry of Object.values(value)) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || !fields.every((field) => hasOwn(entry, field))) continue;
+    const client = normalizeClientName(entry.client) || '';
+    const model = normalizeModelNameForClient(entry.model, client);
+    if (!model) continue;
+    const identity = { model, client, ...normalizeUsageSource(entry) };
+    entries.push({ entry, identity, key: modelSourceKey(identity) });
+  }
+  return entries.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+}
+
+function normalizeModelSourceThroughput(value, period) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const result = Object.create(null);
+  let outputRemaining = period.timedOutputTokens;
+  let durationRemaining = period.timedDurationMs;
+  const modelRemaining = Object.create(null);
+  for (const { entry, identity, key } of normalizedSourceEntries(value, ['timedOutputTokens', 'timedDurationMs'])) {
+    if (!hasOwn(result, key) && Object.keys(result).length >= MODEL_USAGE_SOURCE_LIMIT) break;
+    const limits = modelRemaining[identity.model] ||= {
+      output: period.modelThroughput?.[identity.model]?.timedOutputTokens ?? period.timedOutputTokens,
+      duration: period.modelThroughput?.[identity.model]?.timedDurationMs ?? period.timedDurationMs
+    };
+    const duration = Math.min(durationRemaining, limits.duration, Math.max(0, Math.round(asNumber(entry.timedDurationMs))));
+    const output = normalizeTimedOutputTokens(entry.timedOutputTokens, Math.min(outputRemaining, limits.output), duration);
+    addModelSourceCounters(result, identity, output, duration);
+    outputRemaining -= output;
+    durationRemaining -= duration;
+    limits.output -= output;
+    limits.duration -= duration;
+  }
+  if (Object.keys(value).length && !Object.keys(result).length) return undefined;
+  return result;
+}
+
+function addModelUsageSource(target, source, outputTokens, lastUsedAt = '') {
+  const entry = modelSourceEntry(target, source, { outputTokens: 0 });
+  if (!entry) return;
+  entry.outputTokens += outputTokens;
+  const timestamp = normalizeIsoTimestamp(lastUsedAt);
+  if (timestamp && (!entry.lastUsedAt || timestamp > entry.lastUsedAt)) entry.lastUsedAt = timestamp;
+}
+
+function normalizeModelUsageSources(value, period) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const result = Object.create(null);
+  let outputRemaining = period.outputTokens;
+  const modelRemaining = Object.create(null);
+  for (const { entry, identity, key } of normalizedSourceEntries(value, ['outputTokens'])) {
+    if (!hasOwn(result, key) && Object.keys(result).length >= MODEL_USAGE_SOURCE_LIMIT) break;
+    const model = identity.model;
+    if (!hasOwn(modelRemaining, model)) modelRemaining[model] = period.modelOutputs[model] ?? period.outputTokens;
+    const output = Math.min(outputRemaining, modelRemaining[model], Math.max(0, Math.round(asNumber(entry.outputTokens))));
+    addModelUsageSource(result, identity, output, entry.lastUsedAt);
+    outputRemaining -= output;
+    modelRemaining[model] -= output;
+  }
+  if (Object.keys(value).length && !Object.keys(result).length) return undefined;
+  return result;
+}
+
+function rowUsageSource(row) {
+  return normalizeUsageSource(row?.usageSource || {
+    platform: row?.provider ?? row?.providerId ?? row?.provider_id
+  });
+}
+
+function addRowUsageSources(period, row, model, client, outputTokens) {
+  const parts = Array.isArray(row?.usageSourceReferences) ? row.usageSourceReferences : [];
+  let assigned = 0;
+  const valid = parts.every((part) => {
+    if (!part || typeof part.outputTokens !== 'number' || !Number.isFinite(part.outputTokens) || part.outputTokens < 0) return false;
+    assigned += Math.round(part.outputTokens);
+    return assigned <= outputTokens;
+  });
+  const identity = { model, client: client || '' };
+  const lastUsedAt = firstString(row, LAST_USED_AT_KEYS);
+  if (!valid) {
+    addModelUsageSource(period.modelUsageSources, { ...identity, ...rowUsageSource(row) }, outputTokens, lastUsedAt);
+    return;
+  }
+  for (const part of parts) {
+    addModelUsageSource(period.modelUsageSources,
+      { ...identity, ...normalizeUsageSource(part.usageSource) }, Math.round(part.outputTokens), part.lastUsedAt || lastUsedAt);
+  }
+  if (!parts.length || assigned < outputTokens) {
+    addModelUsageSource(period.modelUsageSources, { ...identity, ...rowUsageSource(row) }, outputTokens - assigned, lastUsedAt);
+  }
+}
+
+function addRowSourceThroughput(period, row, model, client, timedOutputTokens, timedDurationMs) {
+  const fallback = rowUsageSource(row);
+  const parts = Array.isArray(row?.usageSources) ? row.usageSources : [];
+  let output = 0;
+  let duration = 0;
+  const valid = parts.every((part) => {
+    if (!part || ![part.timedOutputTokens, part.timedDurationMs].every((value) =>
+      typeof value === 'number' && Number.isFinite(value) && value >= 0)
+      || part.timedDurationMs <= 0) return false;
+    output += Math.round(part.timedOutputTokens);
+    duration += Math.round(part.timedDurationMs);
+    return output <= timedOutputTokens && duration <= timedDurationMs;
+  });
+  // A split cannot borrow tokens or time from other rows. Unproven or oversized
+  // splits remain an explicit unknown source, never current-account attribution.
+  if (!valid || (duration === timedDurationMs && output !== timedOutputTokens)) {
+    addModelSourceCounters(period.modelSourceThroughput, { model, client: client || '', ...fallback }, timedOutputTokens, timedDurationMs);
+    return;
+  }
+  for (const part of parts) {
+    addModelSourceCounters(period.modelSourceThroughput,
+      { model, client: client || '', ...normalizeUsageSource(part.usageSource) },
+      Math.round(part.timedOutputTokens), Math.round(part.timedDurationMs));
+  }
+  if (duration < timedDurationMs) {
+    addModelSourceCounters(period.modelSourceThroughput, { model, client: client || '', ...fallback },
+      timedOutputTokens - output, timedDurationMs - duration);
+  }
+}
+
 // One tokscale entry's throughput counters. An entry contributes its output to
 // the numerator exactly when it contributes a duration to the denominator, so
 // the two always describe the same entries. Gating rather than scaling by
@@ -1094,7 +1267,9 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
     counters.timedTokens += timedTokens;
     counters.timedOutputTokens += timedOutputTokens;
     counters.timedDurationMs += timedDurationMs;
+    addRowSourceThroughput(period, row, model, client, timedOutputTokens, timedDurationMs);
   }
+  if (model) addRowUsageSources(period, row, model, client, output);
   if (client && tokens > 0) {
     period.clients[client] = (period.clients[client] || 0) + Math.round(tokens);
     if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
@@ -1131,6 +1306,10 @@ function fallbackUsagePeriod(json) {
   period.capabilities.tokenComponents = period.totalTokens === 0;
   period.capabilities.throughput = period.totalTokens === 0;
   period.unclassifiedTokens = period.totalTokens;
+  if (period.totalTokens > 0) {
+    delete period.modelUsageSources;
+    delete period.modelSourceThroughput;
+  }
   return period;
 }
 
@@ -1656,6 +1835,20 @@ function addPeriodInto(target, source) {
       for (const field of ['timedTokens', 'timedOutputTokens', 'timedDurationMs']) merged[field] += counters[field];
     }
   }
+  if (!source.modelSourceThroughput) delete target.modelSourceThroughput;
+  if (target.modelSourceThroughput) {
+    for (const counters of Object.values(source.modelSourceThroughput)) {
+      const { timedOutputTokens, timedDurationMs, ...identity } = counters;
+      addModelSourceCounters(target.modelSourceThroughput, identity, timedOutputTokens, timedDurationMs);
+    }
+  }
+  if (!source.modelUsageSources) delete target.modelUsageSources;
+  if (target.modelUsageSources) {
+    for (const counters of Object.values(source.modelUsageSources)) {
+      const { outputTokens, lastUsedAt, ...identity } = counters;
+      addModelUsageSource(target.modelUsageSources, identity, outputTokens, lastUsedAt);
+    }
+  }
   for (const [client, tokens] of Object.entries(source.clients)) {
     target.clients[client] = (target.clients[client] || 0) + tokens;
     if (source.clientCacheReads?.[client]) target.clientCacheReads[client] = (target.clientCacheReads[client] || 0) + source.clientCacheReads[client];
@@ -1827,6 +2020,12 @@ function applyPeriodDelta(base, freshToday, anchorToday) {
   if (result && (!base?.modelThroughput || !freshToday?.modelThroughput || !anchorToday?.modelThroughput)) {
     delete result.modelThroughput;
   }
+  if (result && (!base?.modelSourceThroughput || !freshToday?.modelSourceThroughput || !anchorToday?.modelSourceThroughput)) {
+    delete result.modelSourceThroughput;
+  }
+  if (result && (!base?.modelUsageSources || !freshToday?.modelUsageSources || !anchorToday?.modelUsageSources)) {
+    delete result.modelUsageSources;
+  }
   // Older anchors may still contain the pre-native Reasonix stats-path rows.
   // They are not authoritative session detail and must not survive a warm tick
   // merely because the aggregate totals remain valid.
@@ -1837,6 +2036,36 @@ function applyPeriodDelta(base, freshToday, anchorToday) {
 }
 
 function deltaValue(base, fresh, anchor, key) {
+  if (key === 'modelUsageSources') {
+    const result = Object.create(null);
+    const keys = new Set([...Object.keys(base || {}), ...Object.keys(fresh || {}), ...Object.keys(anchor || {})]);
+    for (const sourceKey of keys) {
+      const identity = fresh?.[sourceKey] || base?.[sourceKey] || anchor?.[sourceKey];
+      if (!identity) continue;
+      const output = Math.max(0, asNumber(base?.[sourceKey]?.outputTokens)
+        + asNumber(fresh?.[sourceKey]?.outputTokens) - asNumber(anchor?.[sourceKey]?.outputTokens));
+      const lastUsedAt = [base?.[sourceKey]?.lastUsedAt, fresh?.[sourceKey]?.lastUsedAt]
+        .map(normalizeIsoTimestamp).sort().at(-1) || '';
+      if (output > 0 || fresh?.[sourceKey] || (base?.[sourceKey] && !anchor?.[sourceKey])) addModelUsageSource(result,
+        { model: identity.model, client: identity.client, ...normalizeUsageSource(identity) }, output, lastUsedAt);
+    }
+    return result;
+  }
+  if (key === 'modelSourceThroughput') {
+    const result = Object.create(null);
+    const keys = new Set([...Object.keys(base || {}), ...Object.keys(fresh || {}), ...Object.keys(anchor || {})]);
+    for (const sourceKey of keys) {
+      const identity = fresh?.[sourceKey] || base?.[sourceKey] || anchor?.[sourceKey];
+      if (!identity) continue;
+      const duration = Math.max(0, asNumber(base?.[sourceKey]?.timedDurationMs)
+        + asNumber(fresh?.[sourceKey]?.timedDurationMs) - asNumber(anchor?.[sourceKey]?.timedDurationMs));
+      const output = duration > 0 ? Math.max(0, asNumber(base?.[sourceKey]?.timedOutputTokens)
+        + asNumber(fresh?.[sourceKey]?.timedOutputTokens) - asNumber(anchor?.[sourceKey]?.timedOutputTokens)) : 0;
+      if (duration > 0) addModelSourceCounters(result,
+        { model: identity.model, client: identity.client, ...normalizeUsageSource(identity) }, output, duration);
+    }
+    return result;
+  }
   // Cache observations are snapshots, never additive accounting. Missing
   // metadata retains the base; only an explicit null clears an observation.
   if (key === 'promptCache') return fresh === undefined ? base : normalizePromptCache(fresh);
@@ -1904,6 +2133,7 @@ module.exports = {
   normalizeModelNameForClient,
   normalizeDeviceRecord,
   normalizePeriod,
+  normalizeUsageSource,
   projectRollupFromSessions,
   stripSessionTextFromDeviceRecord,
   stripSessionTextFromPeriod
