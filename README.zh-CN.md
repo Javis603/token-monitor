@@ -90,7 +90,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 - MiniMax Code 读取 CLI 写入的本地会话记录，位于 `~/.minimax` 或 `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR`（也包括 `~/.mavis` 与 `~/.minimax-<profile>` / `~/.mavis-<profile>`），并加上通过 `tokscale headless mcode` 捕获的运行；两边都有的同一轮只计一次。
 
 - Command Code transcript 不包含实际 Token 数或每条消息的模型信息。Token 用量根据 transcript 文本估算；模型归属与推算成本可能反映当前配置的模型，而不是每次请求当时实际使用的模型。
-- Cursor 缓存来自 Cursor 的账号层级用量导出，因此涵盖 Cursor IDE、Cursor CLI 与 Grok Bot 的用量。Token Monitor 会自动检测 Cursor 桌面版已登录的账号，也可在设置中手动新增。缓存过期时会自动重新同步；在实时采集模式下，桌面版的本地数据库发生变化也会触发云端同步。刚完成的 session 仍可能需要几分钟才会出现在 Cursor 控制台，因此总用量要等云端记录可用并完成同步后才会更新。
+- Cursor 缓存来自 Cursor 的账号层级用量导出，因此涵盖 Cursor IDE、Cursor CLI 与 Grok Bot 的用量。Token Monitor 会自动检测 Cursor 桌面版已登录的账号，也可在设置中手动新增。缓存过期时会自动重新同步，但刚完成的 session 可能需要几分钟才会出现在 Cursor 控制台，因此最新用量仍可能延迟显示。
 
 - Custom 会从一个 GET 余额端点映射数值 JSON 字段；仅兼容 OpenAI 或 Anthropic API 并不足够。
 
@@ -131,7 +131,7 @@ Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settin
 
 ### 用量追踪
 
-- **实时 Token 追踪**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 35+ 种 AI 工具，实时模式下本地用量文件的变化会在数秒内显示；云端同步用量取决于提供商何时提供记录（完整列表见上方表格）
+- **实时 Token 追踪**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 35+ 种 AI 工具，每轮对话后 UI 在数秒内刷新（完整列表见上方表格）
 - **实时 Token 速率**：可选显示的实时读数，以 `tok/s` 显示生成速度或以 `tok/min` 显示总消耗
 - **单个 session 明细**：点进某个 session，可看每条提问的 Token 消耗，并展开查看每次回复的 Token 拆分与用到的工具（打开时才实时读取本机 transcript 或数据库，绝不同步）
 - **缓存命中统计**：点击任何工具或模型，展开查看输入 Token（缓存命中与未命中）、输出 Token 的详细分类及命中率百分比
