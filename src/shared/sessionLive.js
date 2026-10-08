@@ -92,6 +92,7 @@
     if (!last) return 'idle';
     const recent = nowMs(now) - last <= RUNNING_WINDOW_MS;
     if (session?.turnEnded === true) return recent ? 'ended' : 'idle';
+    if (recent && session?.client === 'codex' && session.waitingForInput === true) return 'waiting';
     return recent ? 'running' : 'idle';
   }
 

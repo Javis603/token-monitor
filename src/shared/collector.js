@@ -694,6 +694,9 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       } else {
         delete target.turnEnded;
       }
+      if (session.client === 'codex' && typeof session.waitingForInput === 'boolean') {
+        target.waitingForInput = session.waitingForInput;
+      }
       if (session.startedAt && (!target.startedAt || Date.parse(session.startedAt) < Date.parse(target.startedAt))) {
         target.startedAt = session.startedAt;
       }

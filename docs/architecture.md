@@ -43,6 +43,8 @@ Claude and Codex derive prompt-cache observations in their existing provider-own
 
 Catalog-only title updates must preserve transcript-derived activity, context, cache and attribution; subsequent transcript reads must resume normal metadata updates. Keep title provenance in local metadata caches and anchors, never in published session rows. Confirmed T3 title removals clear only the matching override and restore any native fallback; missing or unreadable stores preserve the latest known state.
 
+Codex question waiting shares the context/turn/cache rollout index. Match outstanding `request_user_input` calls to their results by protocol id and clear them at turn boundaries; do not infer waiting from question text, collaboration-mode errors or shell escalation arguments. Only `waitingForInput` is projected, propagated through anchored watch periods and normalized for sync. It follows transcript recency and is omitted from historical session archives; see [Codex](providers/codex.md#session-metadata-and-context) for freshness and approval limits.
+
 Watch title changes and confirmed removals must survive later read misses and restarts without changing token/cost baselines or the full-scan timestamp. Persist anchors only when title state changes. Watch metadata refresh covers sessions present in today, including retained client partitions; month/allTime-only sessions refresh on the next full scan.
 
 ### Watching

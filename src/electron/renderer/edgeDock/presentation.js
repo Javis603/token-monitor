@@ -208,6 +208,7 @@
         // re-derives the state at paint time and needs the boundary to do it.
         turnEnded: session.turnEnded === true,
         liveActivity: session.liveActivity || null,
+        waitingForInput: session.client === 'codex' && session.waitingForInput === true,
         // The archive flags ride along for the same reason, and their absence was a
         // real bug: `sessionActivityState()` reads them first, so a projection that
         // dropped them let an archived row - idle by definition, whatever its
@@ -306,7 +307,8 @@
       const expiry = sessionLive.liveActivityExpiryAt(row, now);
       if (expiry && (!soonest || expiry < soonest)) soonest = expiry;
     }
-    for (const row of runningSessionSummary(sessions, now).rows) {
+    const active = (sessions || []).filter((row) => ['running', 'waiting'].includes(sessionLive.sessionActivityState(row, now)));
+    for (const row of active) {
       const last = Date.parse(String(row?.lastUsedAt || ''));
       if (!Number.isFinite(last)) continue;
       // The first millisecond at which this row is NOT running, not the last one at

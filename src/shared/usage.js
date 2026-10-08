@@ -653,6 +653,14 @@ function mergeSession(target, source) {
     if (sourceLastUsed > targetLastUsed) target.turnEnded = sourceEnded;
     else if (sourceEnded && sourceLastUsed === targetLastUsed) target.turnEnded = true;
   }
+  // Question state follows transcript activity. At equal timestamps a cleared
+  // request wins, preventing an older period from resurrecting an answered call.
+  if (source.client === 'codex' && typeof source.waitingForInput === 'boolean') {
+    if (sourceLastUsed > targetLastUsed || (sourceLastUsed === targetLastUsed
+      && (target.waitingForInput !== false || source.waitingForInput === false))) {
+      target.waitingForInput = source.waitingForInput;
+    }
+  }
   // Registry observations have their own clock: waiting can change without a
   // token or transcript write. An explicit unknown reading clears old evidence.
   if (source.client === 'claude') {
@@ -760,6 +768,9 @@ function normalizeSession(input, fallbackKey) {
   // when the same session arrives from a source that had no evidence.
   if (input.turnEnded === true) session.turnEnded = true;
   else if (input.turnEnded === false) session.turnEnded = false;
+  if (client === 'codex' && typeof input.waitingForInput === 'boolean') {
+    session.waitingForInput = input.waitingForInput;
+  }
   if (client === 'claude') {
     const activity = normalizeLiveActivity(input.liveActivity);
     if (activity) session.liveActivity = activity;

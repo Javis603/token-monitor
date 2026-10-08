@@ -362,6 +362,9 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
       if (Object.prototype.hasOwnProperty.call(meta, 'promptCache')) session.promptCache = meta.promptCache;
+      if (session.client === 'codex' && typeof meta.waitingForInput === 'boolean') {
+        session.waitingForInput = meta.waitingForInput;
+      }
       // The three states mean different things and are copied as they are:
       // `true` is a finished turn, `false` is one that is open, and absent is a
       // client that reports no boundary at all. Only the last may leave an

@@ -440,6 +440,8 @@ Session `promptCache` is optional and additive: `{ "observedAt": "<ISO timestamp
 
 Session `liveActivity` is optional and additive for Claude only: `{ "state": "running" | "waiting" | "idle" | "unknown", "observedAt": "<ISO timestamp>" }`. Merge the whole observation by `observedAt`, independently of token activity timestamps; an explicit `unknown` clears older evidence while omission preserves compatibility with older producers. Consumers use a recognized observation only for thirty seconds, suppress future observations and archived sessions, then fall back to transcript activity. It contains no prompt text or process identity. Collectors validate native process identity locally before publishing it. Historical local session archives omit it.
 
+Codex sessions may carry `waitingForInput: true | false`, derived from outstanding native question calls. Merge this boolean by `lastUsedAt`; on equal timestamps `false` wins, while omission preserves older-producer compatibility. A completed turn or archived session suppresses waiting, and the existing ten-minute activity window bounds it. This is question waiting, not an approval signal. No question content, answers or call ids cross the wire; historical session archives omit this field.
+
 
 
 ## `GET /api/sync/content`
