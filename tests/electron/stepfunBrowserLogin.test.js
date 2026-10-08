@@ -59,13 +59,21 @@ const PASSWORD = 'hunter2';
 // #login-account rather than #login-email, and the submit button carries no
 // type attribute.
 function fakePage(options = {}) {
-  const { passwordTab = true, destroyOnSubmit = false, noTabs = false } = options;
+  const {
+    passwordTab = true,
+    destroyOnSubmit = false,
+    noTabs = false,
+    // Whether the site lands on the redirect target after a successful submit.
+    // A failed sign-in stays put, which is how the flow tells the two apart.
+    navigateOnSubmit = true
+  } = options;
   const log = [];
   const state = {
     destroyed: false,
     passwordVisible: false,
     submitted: false,
     consent: false,
+    navigated: false,
     values: {}
   };
 
@@ -116,6 +124,7 @@ function fakePage(options = {}) {
     // Submitting.
     if (script.includes('querySelectorAll')) {
       state.submitted = true;
+      state.navigated = navigateOnSubmit;
       if (destroyOnSubmit) state.destroyed = true;
       return true;
     }
@@ -131,10 +140,22 @@ function fakeWindowClass(page, created = []) {
     constructor(options) {
       this.options = options;
       this.page = page;
-      this.webContents = { executeJavaScript: (script) => page.executeJavaScript(script) };
+      this.webContents = {
+        executeJavaScript: (script) => page.executeJavaScript(script),
+        getURL: () => this.getURL()
+      };
       this.destroyed = false;
       this.visible = options.show !== false;
+      this.url = 'https://account.stepfun.com/login';
       created.push(options);
+    }
+
+    // The site issues an anonymous token for platform.stepfun.com before any
+    // sign-in, so the flow only accepts a cookie once the page has actually
+    // left the login screen.
+    getURL() {
+      if (this.page.state.destroyed) return '';
+      return this.page.state.navigated ? 'https://platform.stepfun.com/step-plan' : this.url;
     }
 
     isDestroyed() { return this.page.state.destroyed || this.destroyed; }
@@ -262,7 +283,8 @@ test('signInStepFunWithBrowser fills the password form and returns the session c
   assert.equal(page.state.values.password, 'hunter2');
   assert.ok(page.state.submitted, 'the form is actually submitted, not just filled');
   assert.ok(page.log.some((entry) => String(entry).startsWith('load:https://account.stepfun.com/login?')));
-  assert.equal(cookieReads.length, 1, 'it polls the session and stops as soon as the token lands');
+  // One read to snapshot the pre-submit cookie, then the post-navigation polls.
+  assert.ok(cookieReads.length >= 2, 'it snapshots before submitting and reads again after');
 
   assert.equal(created.length, 1);
   assert.equal(created[0].title, WINDOW_TITLE);
@@ -348,11 +370,92 @@ test('signInStepFunWithBrowser reports a closed window as cancelled, not as bad 
   );
 });
 
+test('the sign-in waits for the page to leave the login screen before trusting a token', async () => {
+  // platform.stepfun.com is issued an ANONYMOUS Oasis-Token when the page
+  // loads. Returning that one makes the quota call fail with "not a logined
+  // oasis account" — a credential that looks freshly minted and is not.
+  const cookiesSeen = [];
+  const session = {
+    cookies: {
+      get: async () => {
+        cookiesSeen.push(Date.now());
+        // The anonymous cookie exists from the start; the signed-in one only
+        // after the page leaves the login screen.
+        return [{ name: OASIS_TOKEN, value: 'anonymous-token', expires: 0 }];
+      }
+    }
+  };
+  const page = fakePage({ navigateOnSubmit: false });
+  const created = [];
+  // Long enough that the flow actually reaches the polling loop — a short
+  // budget expires during form filling and never reads a cookie at all, which
+  // would make this assertion pass for the wrong reason. The elapsed time is
+  // asserted so that shortcut cannot happen silently.
+  const startedAt = Date.now();
+  await assert.rejects(
+    signInStepFunWithBrowser({
+      username: ACCOUNT, password: PASSWORD,
+      BrowserWindow: fakeWindowClass(page, created),
+      session, timeoutMs: 6000
+    }),
+    (error) => /did not complete before the timeout/.test(error.message)
+  );
+  assert.ok(Date.now() - startedAt >= 5000, 'the polling loop really did run to its deadline');
+  // Exactly one read is allowed while the page is still on the login screen:
+  // the pre-submit snapshot that lets the wait tell a replaced cookie from the
+  // anonymous one it started with.
+  assert.equal(cookiesSeen.length, 1,
+    'no cookie is read for sign-in purposes while the page is still on the login screen');
+});
+
+test('a sign-in that never navigates fails instead of returning an anonymous token', async () => {
+  const page = fakePage({ navigateOnSubmit: false });
+  await assert.rejects(
+    runSignIn({
+      page,
+      // The anonymous cookie is present from the moment the page loads.
+      cookies: () => [cookie(OASIS_TOKEN, 'anonymous')],
+      options: { timeoutMs: 6000 }
+    }),
+    (error) => /did not complete before the timeout/.test(error.message)
+  );
+});
+
+test('a completed sign-in returns the token from after the navigation', async () => {
+  const page = fakePage();
+  const { result } = await runSignIn({
+    page,
+    // The anonymous cookie is present from page load; the signed-in one only
+    // once the redirect target has been reached.
+    cookies: () => (page.state.navigated ? [cookie(OASIS_TOKEN, 'signed-in')] : [cookie(OASIS_TOKEN, 'anonymous')])
+  });
+  assert.equal(result.token, 'signed-in',
+    'returning the cookie that existed before submitting is the whole bug this guards');
+});
+
+test('the sign-in waits for the anonymous cookie to be replaced', async () => {
+  // Observed live: right after the redirect the jar still holds the anonymous
+  // token (657 chars, rejected as "not a logined oasis account"), and the
+  // signed-in one (656 chars) only lands a second or two later.
+  const page = fakePage();
+  let reads = 0;
+  const { result } = await runSignIn({
+    page,
+    cookies: () => {
+      reads += 1;
+      // Two more reads land the anonymous value, mimicking the swap delay.
+      return reads <= 2 ? [cookie(OASIS_TOKEN, 'anonymous')] : [cookie(OASIS_TOKEN, 'signed-in')];
+    }
+  });
+  assert.equal(result.token, 'signed-in');
+  assert.ok(reads >= 3, 'it kept polling instead of taking the first cookie it saw');
+});
+
 test('signInStepFunWithBrowser times out instead of polling forever', async () => {
   const page = fakePage();
   await assert.rejects(
     runSignIn({ page, cookies: () => [], options: { timeoutMs: 300 } }),
-    (error) => error.status === 'unavailable' && /did not produce a token/.test(error.message)
+    (error) => error.status === 'unavailable' && /did not complete before the timeout/.test(error.message)
   );
 });
 

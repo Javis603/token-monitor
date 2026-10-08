@@ -183,13 +183,23 @@ async function fetchStepfunLimits(options = {}, deps = {}) {
     if (!webid) webid = deviceId(token);
 
     const request = async (url, signal, activeToken) => {
-      const response = await run(url, {
-        method: 'POST', body: '{}', signal, redirect: 'error', credentials: 'omit',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json',
-          'User-Agent': BROWSER_USER_AGENT, 'oasis-appid': '10300', 'oasis-platform': 'web',
-          ...(webid ? { 'oasis-webid': webid } : {}),
-          Cookie: `Oasis-Token=${activeToken}${webid ? `; Oasis-Webid=${webid}` : ''}` }
-      });
+      const startedAt = (deps.now || Date.now)();
+      const log = (line) => { if (typeof deps.logger === 'function') deps.logger(line); };
+      let response;
+      try {
+        response = await run(url, {
+          method: 'POST', body: '{}', signal, redirect: 'error', credentials: 'omit',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json',
+            'User-Agent': BROWSER_USER_AGENT, 'oasis-appid': '10300', 'oasis-platform': 'web',
+            ...(webid ? { 'oasis-webid': webid } : {}),
+            Cookie: `Oasis-Token=${activeToken}${webid ? `; Oasis-Webid=${webid}` : ''}` }
+        });
+      } catch (error) {
+        log(`stepfun request to ${url.slice(-28)} threw after ${(deps.now || Date.now)() - startedAt}ms: ${error.message}`);
+        throw error;
+      }
+      const elapsedMs = (deps.now || Date.now)() - startedAt;
+      log(`stepfun ${url.slice(-28)} -> ${response.status} in ${elapsedMs}ms (token ${activeToken.length} chars, webid ${webid || 'none'})`);
       if (!response.ok) throw errorWithStatus(response.status === 401 || response.status === 403 ? 'unauthorized' : response.status === 429 ? 'sourceRateLimited' : 'unavailable', `StepFun returned ${response.status}`);
       try { return await response.json(); } catch { throw errorWithStatus('unavailable', 'Invalid StepFun response'); }
     };
@@ -236,6 +246,9 @@ async function fetchStepfunLimits(options = {}, deps = {}) {
       : hashKey('stepfun', token);
     return normalizeLimitProvider({ ...base, status: 'ok', accountKey, accountLabel, windows });
   } catch (error) {
+    if (typeof deps.logger === 'function') {
+      deps.logger(`stepfun probe finished as ${providerStatusFromError(error)}: ${error.message || error}`);
+    }
     return normalizeLimitProvider({ ...base, status: providerStatusFromError(error), windows: [] });
   }
 }

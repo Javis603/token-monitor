@@ -36,6 +36,10 @@ const WINDOW_TITLE = '正在登录 StepFun…';
 // the user can finish a challenge that needs a click. limits.js wraps this in
 // a slightly longer deadline and reports the failure as a sign-in failure.
 const DEFAULT_TIMEOUT_MS = 110_000;
+// How long after the redirect the site needs before the anonymous cookie is
+// replaced by the signed-in one. Measured against the live account; see the
+// note where it is used.
+const TOKEN_SETTLE_MS = 1_500;
 // Exported so the caller can hand `session.fromPartition(PARTITION)` to this
 // module. A window and the session that reads it must share one partition, and
 // a typo'd literal in two files is how a sign-in silently returns no token.
@@ -229,6 +233,17 @@ async function signInStepFunWithBrowser(options = {}) {
       true
     );
 
+    // Remember what the session holds BEFORE submitting. The site issues an
+    // ANONYMOUS Oasis-Token for platform.stepfun.com when the page loads, long
+    // before anyone signs in, and only swaps in the signed-in one a few seconds
+    // after the redirect — observed against the live account as a token that
+    // changed from 657 to 656 characters while the quota call was already
+    // failing with "auth failed: not a logined oasis account". Reading the
+    // cookie the moment the page navigates hands back that anonymous one: a
+    // credential that looks freshly minted and is not. Knowing what was there
+    // beforehand is what lets the wait below tell the two apart.
+    const beforeSubmit = (await readOasisSession(session)).token;
+
     // Match the button by label, not by type: the submit control carries no
     // type attribute, and its label is localized per tab ("登录" here,
     // "登录 / 注册" on the phone tab).
@@ -244,22 +259,38 @@ async function signInStepFunWithBrowser(options = {}) {
       })()`
     );
 
-    // Poll the session for the token rather than watching navigation: the
-    // site finishes the exchange and stores the cookie without necessarily
-    // navigating this window, and a failed sign-in also does not navigate.
+    // Poll for the token only after the page has left the login screen.
     onStatus('signing-in');
+    let navigatedAt = 0;
     while (Date.now() < deadline) {
-      const outcome = await readOasisSession(session);
-      if (outcome.token) {
-        logger('StepFun sign-in completed');
-        onStatus('done');
-        signedIn = true;
-        return outcome;
-      }
       if (win.isDestroyed()) break;
-      await delay(750);
+      let navigated = false;
+      try {
+        const url = String(win.webContents.getURL() || '');
+        navigated = Boolean(url) && !/^https:\/\/account\.stepfun\.com\/login/i.test(url);
+      } catch { /* the window can go away between the check and the read */ }
+      if (navigated && !navigatedAt) navigatedAt = Date.now();
+      if (navigatedAt) {
+        const settledMs = Date.now() - navigatedAt;
+        // Give the site a beat to replace the anonymous cookie before reading,
+        // then accept a changed token, or the current one once it has clearly
+        // stopped changing.
+        if (settledMs >= TOKEN_SETTLE_MS) {
+          const outcome = await readOasisSession(session);
+          const replaced = Boolean(outcome.token) && outcome.token !== beforeSubmit;
+          if (outcome.token && (replaced || settledMs >= TOKEN_SETTLE_MS * 4)) {
+            logger('StepFun sign-in completed');
+            onStatus('done');
+            signedIn = true;
+            return outcome;
+          }
+        }
+      }
+      await delay(400);
     }
-    const error = new Error('StepFun sign-in did not produce a token before the timeout');
+    const error = new Error(win.isDestroyed()
+      ? 'StepFun sign-in was cancelled'
+      : 'StepFun sign-in did not complete before the timeout');
     error.status = 'unavailable';
     throw error;
   } catch (error) {

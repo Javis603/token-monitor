@@ -97,6 +97,23 @@ async function electronStepfunSignIn(options) {
   return signInStepFunWithBrowser({ ...options, BrowserWindow, session: loginSession });
 }
 
+// StepFun fails in ways the panel cannot explain — a stuck transport and a
+// rejected credential both surface as the same yellow "unavailable". Keep a
+// short trail on disk so the next report is a cause, not a guess.
+function appendStepFunDiagnostic(line) {
+  try {
+    const path = require('node:path').join(app.getPath('userData'), 'stepfun-diagnostic.log');
+    fs.appendFileSync(path, `${new Date().toISOString()} ${line}\n`);
+  } catch { /* diagnostics must never break the probe */ }
+}
+
+function stepfunErrorLogger(logger) {
+  return (message) => {
+    appendStepFunDiagnostic(message);
+    if (typeof logger === 'function') logger(message);
+  };
+}
+
 // Settings-side provider probes take the same transport as the collector's.
 // Most of them are what an account save is gated on, so leaving one on the
 // global fetch refuses to save an account on exactly the machines this
@@ -106,10 +123,11 @@ function electronProviderDeps(deps = {}) {
     ...deps,
     fetch: electronLimitsFetch(),
     mimoExchangeFetch: ensureMimoExchangeFetch(),
-    // Unlike the two above, this one only defaults when the caller left it out
-    // — a caller that supplies its own signer (tests, and any future headless
-    // transport) must keep it.
-    signIn: deps.signIn || electronStepfunSignIn
+    // Unlike the two above, these only default when the caller left them out
+    // — a caller that supplies its own signer or logger (tests, and any future
+    // headless transport) must keep them.
+    signIn: deps.signIn || electronStepfunSignIn,
+    logger: deps.logger || stepfunErrorLogger(deps.logger)
   };
 }
 const {
@@ -926,7 +944,16 @@ function electronLimitsDeps() {
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
     onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
     onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
-    onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey
+    onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey,
+    // StepFun's quota can only be renewed through a real browser window, and
+    // the scheduled collection — not the save-time probe — is what feeds the
+    // panel. Without this the collector had no signer at all: it reported
+    // "unavailable" on every tick and, having no window to open, never even
+    // asked the user to sign in. The save path goes through
+    // electronProviderDeps() and already had one, which is exactly why saving
+    // appeared to work while the panel stayed yellow.
+    signIn: electronStepfunSignIn,
+    logger: stepfunErrorLogger()
   };
 }
 

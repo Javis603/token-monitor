@@ -2765,6 +2765,14 @@ test('main collectors share one live GUI limit credential resolver in every widg
   assert.match(limitsDeps, /fetch: electronLimitsFetch\(\)/);
   assert.match(limitsDeps, /resolveConfigSnapshot: \(\) => electronLimitsConfig\(\)/);
   assert.match(limitsDeps, /onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal/);
+  // The scheduled collection, not the save-time probe, is what fills the
+  // panel. StepFun can only renew its token through a BrowserWindow, so a
+  // collector without a signer reports "unavailable" forever and — having no
+  // window to open — never even prompts. Saving goes through
+  // electronProviderDeps() and already had one, which is exactly why the
+  // symptom looked like "login works, quota never appears".
+  assert.match(limitsDeps, /signIn: electronStepfunSignIn/);
+  assert.match(limitsDeps, /logger: stepfunErrorLogger\(\)/);
   const renewalPersistence = functionBody(
     main,
     'persistClaudeWebCookieRenewal',
