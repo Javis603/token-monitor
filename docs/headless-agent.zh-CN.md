@@ -26,7 +26,6 @@ git clone https://github.com/Javis603/token-monitor.git
 cd token-monitor
 npm ci
 cp .env.example .env
-chmod 600 .env   # macOS/Linux：之后会存放 hub 密钥
 ```
 
 `npm ci` 会安装上游 tokscale 包。第一次运行 `npm run agent` 或 `npm run agent:once`（包括 `--dry-run`）时，会把其中的二进制替换为本平台固定版本的 tokscale 并校验 checksum；之后的运行会跳过下载。没有固定版本的平台会保留 npm 安装的二进制。

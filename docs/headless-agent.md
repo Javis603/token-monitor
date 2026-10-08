@@ -26,7 +26,6 @@ git clone https://github.com/Javis603/token-monitor.git
 cd token-monitor
 npm ci
 cp .env.example .env
-chmod 600 .env   # macOS/Linux: it will hold the hub secret
 ```
 
 `npm ci` installs the upstream tokscale package. The first `npm run agent` or `npm run agent:once` (including `--dry-run`) replaces its binary with the pinned build for this platform and verifies the checksum; later runs skip the download. Platforms without a pinned build keep the npm binary.
