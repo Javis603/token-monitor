@@ -134,6 +134,6 @@ test('a binary without the fork client module fails closed', () => {
       spawn,
       log: () => {}
     }),
-    /does not accept the fork-only client ids proma, qodercn \(scan exited 2/
+    /does not accept the fork-only client ids proma, qodercn, codearts \(scan exited 2/
   );
 });

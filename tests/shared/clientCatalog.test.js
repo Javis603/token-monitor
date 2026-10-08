@@ -51,7 +51,7 @@ test('derived KNOWN_CLIENTS keeps the established id order', () => {
   assert.equal(KNOWN_CLIENTS, CLIENT_IDS.join(','));
   assert.equal(
     KNOWN_CLIENTS,
-    'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,amp,droid,kimi,qwen,grok,copilot,pi,omp,zed,kilo,commandcode,mimo,muse,zcode,kiro,codebuddy,workbuddy,proma,qodercn,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin,fx,mcode'
+    'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,amp,droid,kimi,qwen,grok,copilot,pi,omp,zed,kilo,commandcode,mimo,muse,zcode,kiro,codebuddy,workbuddy,proma,qodercn,codearts,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin,fx,mcode'
   );
 });
 
@@ -59,12 +59,12 @@ test('derived DEFAULT_CLIENTS keeps the existing default-tracked CSV', () => {
   assert.equal(DEFAULT_CLIENTS, DEFAULT_CLIENT_IDS.join(','));
   assert.equal(
     DEFAULT_CLIENTS,
-    'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,amp,droid,kimi,qwen,grok,copilot,pi,omp,zed,kilo,commandcode,mimo,muse,zcode,kiro,codebuddy,workbuddy,proma,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin,fx,mcode'
+    'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,amp,droid,kimi,qwen,grok,copilot,pi,omp,zed,kilo,commandcode,mimo,muse,zcode,kiro,codebuddy,workbuddy,proma,codearts,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin,fx,mcode'
   );
 });
 
 test('derived FORK_ONLY_CLIENT_IDS lists exactly the clients the tokscale fork owns', () => {
-  assert.deepEqual([...FORK_ONLY_CLIENT_IDS], ['proma', 'qodercn']);
+  assert.deepEqual([...FORK_ONLY_CLIENT_IDS], ['proma', 'qodercn', 'codearts']);
 });
 
 test('default-tracked clients are a subset of the catalog, in catalog order', () => {

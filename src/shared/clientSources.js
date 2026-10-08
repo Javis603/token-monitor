@@ -358,6 +358,12 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl. The fork
   // parses it from tokscale's effective home, like the Qoder CN paths below.
   add('proma', ['proma-sessions', path.join(tokscaleHome, '.proma', 'agent-sessions')]);
+  // CodeArts CLI (Huawei Cloud) — OpenCode-schema SQLite store under the CLI
+  // home, read by the fork from tokscale's effective home like Proma above.
+  // The exact opencode.db file is the source; its WAL/SHM sidecars sit in the
+  // same directory, so watching the directory catches every commit.
+  const codeartsDataDir = path.join(tokscaleHome, '.codeartsdoer', 'codearts-data');
+  add('codearts', ['codearts-db', codeartsDataDir, path.join(codeartsDataDir, 'opencode.db')]);
   // Qoder CN — legacy SQLite DB under the platform Application Support dir,
   // or the JSONL transcript tree used by current builds.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform, env });

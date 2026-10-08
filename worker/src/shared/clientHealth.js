@@ -186,6 +186,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'claude-transcripts',
   'cline-cli-sessions',
   'cline-tasks',
+  'codearts-db',
   'codebuddy-extension-logs',
   'codebuddy-projects',
   'codex-sessions',

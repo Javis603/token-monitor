@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { EventEmitter } = require('node:events');
 const { referencedTerminationOptions } = require('../helpers/referencedTerminationTimers');
+const { FORK_ONLY_CLIENT_IDS } = require('../../src/shared/clientCatalog');
 
 const collectorPath = require.resolve('../../src/shared/collector');
 
@@ -54,9 +55,13 @@ function exitChild(code, stderr = '') {
 }
 
 // The capability probe also runs one empty scan of the fork-only ids, which
-// never appear in --help (see forkOnlyClientsAccepted in collector.js).
+// never appear in --help (see forkOnlyClientsAccepted in collector.js). The
+// csv is derived from the catalog, the same source the collector uses, so a
+// new fork-only client cannot stale this helper again.
+const FORK_ONLY_PROBE_CSV = FORK_ONLY_CLIENT_IDS.join(',');
+
 function isForkOnlyProbe(args) {
-  return args.includes('--home') && args[args.indexOf('--client') + 1] === 'proma,qodercn';
+  return args.includes('--home') && args[args.indexOf('--client') + 1] === FORK_ONLY_PROBE_CSV;
 }
 
 function helpChild(possibleValues) {

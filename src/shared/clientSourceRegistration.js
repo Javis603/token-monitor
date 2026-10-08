@@ -48,6 +48,7 @@ const SOURCE_MARKERS = [
   { marker: '.workbuddy', client: 'workbuddy' },
   { marker: '.workbuddy-ai', client: 'workbuddy' },
   { marker: '.proma/agent-sessions', client: 'proma' },
+  { marker: '.codeartsdoer/codearts-data/opencode.db', client: 'codearts' },
   { marker: '.lmstudio/server-logs', client: 'lmstudio' },
   { marker: '.unsloth/studio/studio.db', client: 'unsloth' },
   { marker: '.local/share/devin/cli/sessions.db', client: 'devin' },

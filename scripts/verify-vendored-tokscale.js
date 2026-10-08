@@ -247,6 +247,53 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
     }
   },
   {
+    // Fork-only client (crates/tokscale-core/src/token_monitor/codearts.rs):
+    // CodeArts CLI stores assistant turns in OpenCode's SQLite schema under
+    // `~/.codeartsdoer/codearts-data/opencode.db`. Anthropic-shaped usage —
+    // input excludes the cache buckets, reasoning is a disjoint additive
+    // bucket — and neither the payload's `total` nor its zero `cost` reach
+    // the wire row.
+    client: 'codearts',
+    expectedRow: { model: 'glm-5.2', input: 1200, output: 340, cacheRead: 500, cacheWrite: 80, reasoning: 60 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 2180, clientTokens: 2180, clientOutputTokens: 340 },
+    expectedSession: { id: 'tm-contract-sess', totalTokens: 2180, outputTokens: 340, reasoningTokens: 60 },
+    writeFixture(home) {
+      const { DatabaseSync } = require('node:sqlite');
+      const dir = path.join(home, '.codeartsdoer', 'codearts-data');
+      fs.mkdirSync(dir, { recursive: true });
+      const db = new DatabaseSync(path.join(dir, 'opencode.db'));
+      try {
+        db.exec(`CREATE TABLE session (
+            id TEXT PRIMARY KEY, directory TEXT, title TEXT,
+            time_created INTEGER, time_updated INTEGER);
+          CREATE TABLE message (
+            id TEXT PRIMARY KEY, session_id TEXT NOT NULL, data TEXT NOT NULL,
+            time_created INTEGER, time_updated INTEGER);
+          INSERT INTO session VALUES
+            ('tm-contract-sess', '/tmp/codearts-workspace', 'Contract session',
+             1787196900000, 1787196905040);`);
+        const assistant = {
+          id: 'msg_1',
+          parentID: 'msg_parent',
+          role: 'assistant',
+          mode: 'build',
+          agent: 'build',
+          path: { cwd: '/tmp/codearts-workspace', root: '/' },
+          cost: 0,
+          tokens: { total: 2180, input: 1200, output: 340, reasoning: 60, cache: { write: 80, read: 500 } },
+          modelID: 'glm-5.2',
+          providerID: 'inferhub-provider',
+          time: { created: 1787196900000, completed: 1787196905040 }
+        };
+        db.prepare('INSERT INTO message VALUES (?, ?, ?, ?, ?)')
+          .run('msg_1', 'tm-contract-sess', JSON.stringify(assistant), 1787196900000, 1787196905040);
+      } finally {
+        db.close();
+      }
+    }
+  },
+  {
     // The fork's `mcode` supplement (crates/tokscale-core/src/token_monitor/
     // mcode.rs) reads MiniMax Code's runtime store. Pi usage keeps cache reads
     // out of `input`, and a message retained across compaction appears in both
@@ -383,6 +430,7 @@ function hermeticEnv(home) {
   for (const key of [
     'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'DSH_HOME',
     'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
+    'TOKEN_MONITOR_CODEARTS_DB_PATH',
     'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR'
   ]) {
     delete env[key];
