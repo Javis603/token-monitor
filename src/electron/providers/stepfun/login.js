@@ -26,7 +26,9 @@
 // Token Monitor is already an Electron app, so this costs no new dependency.
 
 const LOGIN_URL = 'https://account.stepfun.com/login';
-const COOKIE_DOMAIN = '.stepfun.com';
+// The cookie read is filtered by the URL the quota page is served from, so the
+// jar answers exactly "what would Chromium send to platform.stepfun.com?".
+const COOKIE_URL = 'https://platform.stepfun.com/';
 const OASIS_TOKEN = 'Oasis-Token';
 const OASIS_WEBID = 'Oasis-Webid';
 const WINDOW_TITLE = '正在登录 StepFun…';
@@ -61,12 +63,17 @@ function tokenExpiryMs(cookies, nowMs) {
   return expires * 1000;
 }
 
+// `session.cookies` is a Cookies instance, not a function: the read is
+// `cookies.get(filter)`. Filtering by URL rather than by domain asks Chromium
+// exactly which cookies it would send to the quota page, which is what the
+// request has to reproduce — a domain filter would also return entries for
+// hosts the API never talks to.
 // Both cookies come out of the same sign-in, and both have to travel together:
 // the quota endpoints pair `Oasis-Token` with the device id the session was
 // registered under, and a mismatched pair is rejected. Reading them in one
 // pass keeps them from ever being sampled a rotation apart.
 async function readOasisSession(session, { nowMs = Date.now() } = {}) {
-  const cookies = await session.cookies({ domain: COOKIE_DOMAIN });
+  const cookies = await session.cookies.get({ url: COOKIE_URL });
   const hit = cookies.find((c) => c.name === OASIS_TOKEN && String(c.value || '').trim());
   if (!hit) return { token: '', webid: '' };
   const value = String(hit.value).trim();
@@ -140,52 +147,96 @@ async function signInStepFunWithBrowser(options = {}) {
     logger('opening the StepFun sign-in page');
     onStatus('opening');
     await win.loadURL(loginUrl());
-    // The form is client-rendered; wait for the email field before touching it.
-    await waitForSelector(win, '#login-email', deadline);
+    // The form is client-rendered. Wait for the tab strip, not for a field: the
+    // page opens on the phone-code tab, so the password field does not exist
+    // yet — waiting for it first would hang until the timeout.
+    await waitForSelector(win, '[role="tab"]', deadline);
 
-    // Switch to the password tab. Its trigger carries a generated id, so fall
-    // back to matching the tab by its position when the id is not the expected
-    // one — a rebuilt page must not be able to strand the sign-in.
-    const switched = await win.webContents.executeJavaScript(
-      `(() => {
-        const byId = document.querySelector(${JSON.stringify(PASSWORD_TAB_TRIGGER)});
-        const tab = byId || [...document.querySelectorAll('[role="tab"]')].find((el) =>
-          /密码|password|pwd|senha/i.test(el.textContent || ''));
-        if (!tab) return false;
-        tab.click();
-        return true;
-      })()`
-    );
+    // Radix Tabs switches its value on mousedown, so a bare click() is ignored
+    // and the phone-code form stays on screen forever. The trigger id is
+    // generated, so fall back to the tab's label — which is localized, hence
+    // matched against several languages.
+    //
+    // The tab strip itself is present in the server-rendered HTML while its
+    // click handler only exists once React hydrates, so switching on first
+    // sight silently does nothing. Switch, verify the password field showed up,
+    // and retry while the page is still settling.
+    const switched = await selectPasswordTabUntilReady(win, deadline, logger);
     if (!switched) throw new Error('could not find the password sign-in tab');
     onStatus('filling');
-    await waitForSelector(win, '#login-password', deadline);
 
     logger('filling the StepFun credentials');
+    const account = JSON.stringify(String(username).trim());
+    const secret = JSON.stringify(String(password));
     await win.webContents.executeJavaScript(
       `(() => {
-        const set = (selector, value) => {
-          const el = document.querySelector(selector);
-          if (!el) throw new Error('missing ' + selector);
-          const setter = Object.getOwnPropertyDescriptor(
-            window.HTMLInputElement.prototype, 'value').set;
+        const inputs = [...document.querySelectorAll('input')];
+        const passwordEl = document.querySelector('#login-password')
+          || document.querySelector('input[type="password"]');
+        // The account box is id'd login-account, not login-email — the email
+        // id belongs to the email-code tab. Fall back to the first input that
+        // is neither the password box nor a verification-code field.
+        const accountEl = document.querySelector('#login-account')
+          || inputs.find((el) => el !== passwordEl
+            && el.type !== 'password'
+            && !/(code|otp|verify)/i.test(el.id || ''));
+        if (!passwordEl) throw new Error('missing the password field');
+        if (!accountEl) throw new Error('missing the account field');
+        const setter = Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype, 'value').set;
+        const set = (el, value) => {
           setter.call(el, value);
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));
         };
-        set('#login-email', ${JSON.stringify(String(username).trim())});
-        set('#login-password', ${JSON.stringify(String(password))});
+        set(accountEl, ${account});
+        set(passwordEl, ${secret});
         return true;
       })()`
     );
+    // Confirm the values actually landed. React re-renders controlled inputs
+    // from state, and submitting before it has caught up sends empty fields.
+    const filled = await waitForExpression(
+      win,
+      `(() => {
+        const pw = document.querySelector('#login-password') || document.querySelector('input[type="password"]');
+        const acc = document.querySelector('#login-account')
+          || [...document.querySelectorAll('input')].find((el) => el !== pw && el.type !== 'password');
+        return Boolean(pw && acc && pw.value === ${secret} && acc.value === ${account});
+      })()`,
+      Math.min(deadline, Date.now() + 8000)
+    );
+    if (!filled) throw new Error('the StepFun form did not accept the credentials');
 
-    // The consent checkbox gates the submit button; click it when present.
+    // Tick consent and confirm it stuck. The control is a <button
+    // role="checkbox"> and, unlike the tab, it wants a plain click(): the
+    // pointer sequence Radix needs for a tab cancels this one back out.
     await win.webContents.executeJavaScript(
       `(() => {
         const box = document.querySelector('[role="checkbox"]');
         if (box && box.getAttribute('aria-checked') !== 'true') box.click();
-        const button = [...document.querySelectorAll('button')]
-          .find((el) => (el.textContent || '').trim() === '登录')
-          || [...document.querySelectorAll('button[type="submit"]')][0];
+        return true;
+      })()`
+    );
+    await waitForExpression(
+      win,
+      `(() => {
+        const box = document.querySelector('[role="checkbox"]');
+        return !box || box.getAttribute('aria-checked') === 'true';
+      })()`,
+      Math.min(deadline, Date.now() + 5000),
+      true
+    );
+
+    // Match the button by label, not by type: the submit control carries no
+    // type attribute, and its label is localized per tab ("登录" here,
+    // "登录 / 注册" on the phone tab).
+    await win.webContents.executeJavaScript(
+      `(() => {
+        const buttons = [...document.querySelectorAll('button')];
+        const button = buttons.find((el) =>
+          /^(登录|sign in|log in)/i.test((el.textContent || '').trim()))
+          || document.querySelector('button[type="submit"]');
         if (!button) throw new Error('could not find the sign-in button');
         button.click();
         return true;
@@ -229,22 +280,65 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Switch to the password tab and confirm it actually took effect. Returns
+// false when the tab itself was never found, so the caller can tell "the page
+// never offered a password tab" from "the page is still hydrating".
+async function selectPasswordTabUntilReady(win, deadline, logger = () => {}) {
+  const script = `(() => {
+    const byId = document.querySelector(${JSON.stringify(PASSWORD_TAB_TRIGGER)});
+    const tab = byId || [...document.querySelectorAll('[role="tab"]')].find((el) =>
+      /密码|password|pwd|senha/i.test(el.textContent || ''));
+    if (!tab) return false;
+    for (const type of ['pointerdown', 'mousedown']) {
+      tab.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0 }));
+    }
+    tab.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 }));
+    tab.click();
+    return true;
+  })()`;
+
+  let sawTab = false;
+  for (let attempt = 0; attempt < 4 && Date.now() < deadline; attempt += 1) {
+    const clicked = await win.webContents.executeJavaScript(script).catch(() => false);
+    if (!clicked) return sawTab;
+    sawTab = true;
+    // The password box is the proof the switch landed; matched by type so a
+    // rebuilt id cannot strand the sign-in.
+    if (await waitForSelector(win, 'input[type="password"]', Math.min(deadline, Date.now() + 6000), true)) {
+      return true;
+    }
+    logger('the password tab did not switch yet, retrying');
+    await delay(1200);
+  }
+  return sawTab;
+}
+
 // did-finish-load resolves before client-side routes settle, so poll for the
-// element instead of racing a single event.
-async function waitForSelector(win, selector, deadline) {
+// condition instead of racing a single event.
+async function waitForExpression(win, script, deadline) {
   while (Date.now() < deadline) {
     if (win.isDestroyed()) return false;
-    const found = await win.webContents.executeJavaScript(
-      `Boolean(document.querySelector(${JSON.stringify(selector)}))`
-    ).catch(() => false);
-    if (found) return true;
+    const done = await win.webContents.executeJavaScript(script).catch(() => false);
+    if (done) return true;
     await delay(200);
   }
+  return false;
+}
+
+async function waitForSelector(win, selector, deadline, soft = false) {
+  const found = await waitForExpression(
+    win,
+    `Boolean(document.querySelector(${JSON.stringify(selector)}))`,
+    deadline
+  );
+  if (found) return true;
+  // `soft` is for callers that retry; the rest treat a miss as fatal.
+  if (soft) return false;
   throw new Error(`timed out waiting for ${selector}`);
 }
 
 module.exports = {
-  COOKIE_DOMAIN,
+  COOKIE_URL,
   DEFAULT_TIMEOUT_MS,
   LOGIN_URL,
   OASIS_TOKEN,

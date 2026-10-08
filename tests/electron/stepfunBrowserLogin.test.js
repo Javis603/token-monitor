@@ -1,10 +1,10 @@
-'use strict';
+﻿'use strict';
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
-  COOKIE_DOMAIN,
+  COOKIE_URL,
   DEFAULT_TIMEOUT_MS,
   OASIS_TOKEN,
   OASIS_WEBID,
@@ -31,22 +31,41 @@ function cookie(name, value, { expiresIn = HOUR, now = Date.now() } = {}) {
   return { name, value, expires: (now + expiresIn) / 1000 };
 }
 
+// Electron's `session.cookies` is a Cookies instance, not a function — calling
+// it directly is the mistake this mock is shaped to prevent.
 function fakeSession(getCookies, seen = []) {
   return {
-    cookies: async (options) => {
-      seen.push(options);
-      return typeof getCookies === 'function' ? getCookies() : getCookies;
+    cookies: {
+      get: async (filter) => {
+        seen.push(filter);
+        return typeof getCookies === 'function' ? getCookies() : getCookies;
+      }
     }
   };
 }
 
+const ACCOUNT = 'me@example.com';
+const PASSWORD = 'hunter2';
+
 // A stand-in for the login page. It answers the same selector probes and DOM
 // writes the automation issues, and records what was typed, so a test can
 // assert the flow reached the submit step rather than only that it returned.
+//
+// The behaviour mirrors the real page, which is what makes these tests worth
+// having: the phone-code tab is the default, the password tab only appears
+// after a mousedown (a bare click() is ignored by Radix), the account box is
+// #login-account rather than #login-email, and the submit button carries no
+// type attribute.
 function fakePage(options = {}) {
-  const { passwordTab = true, destroyOnSubmit = false, noEmailField = false } = options;
+  const { passwordTab = true, destroyOnSubmit = false, noTabs = false } = options;
   const log = [];
-  const state = { destroyed: false, passwordVisible: false, submitted: false, values: {} };
+  const state = {
+    destroyed: false,
+    passwordVisible: false,
+    submitted: false,
+    consent: false,
+    values: {}
+  };
 
   async function executeJavaScript(script) {
     log.push(script);
@@ -54,28 +73,48 @@ function fakePage(options = {}) {
     const probe = /^Boolean\(document\.querySelector\((".*?")\)\)$/.exec(script.trim());
     if (probe) {
       const selector = JSON.parse(probe[1]);
-      if (selector === '#login-email') return !noEmailField;
-      if (selector === '#login-password') return state.passwordVisible;
+      if (selector === '[role="tab"]') return !noTabs;
+      if (selector === 'input[type="password"]') return state.passwordVisible;
       return false;
     }
 
+    // Filling the form.
     if (script.includes('HTMLInputElement')) {
-      for (const id of ['login-email', 'login-password']) {
-        const match = new RegExp(`set\\('#${id}',\\s*("(?:[^"\\\\]|\\\\.)*")\\)`).exec(script);
-        if (match) state.values[id] = JSON.parse(match[1]);
-      }
+      if (!state.passwordVisible) throw new Error('missing the password field');
+      state.values.account = JSON.parse(/set\(accountEl,\s*("(?:[^"\\]|\\.)*")\)/.exec(script)[1]);
+      state.values.password = JSON.parse(/set\(passwordEl,\s*("(?:[^"\\]|\\.)*")\)/.exec(script)[1]);
       return true;
     }
 
-    if (script.includes('role="checkbox"')) {
-      state.submitted = true;
-      if (destroyOnSubmit) state.destroyed = true;
+    // Reading the values back: the automation only submits once the
+    // controlled inputs actually hold what it wrote.
+    if (script.includes('.value ===')) {
+      const wantAccount = JSON.parse(/acc\.value === ("(?:[^"\\]|\\.)*")/.exec(script)[1]);
+      const wantPassword = JSON.parse(/pw\.value === ("(?:[^"\\]|\\.)*")/.exec(script)[1]);
+      return state.values.account === wantAccount && state.values.password === wantPassword;
+    }
+
+    // Reading consent back.
+    if (script.includes("aria-checked') === 'true'")) return state.consent;
+
+    // Ticking consent — a plain click, unlike the tab.
+    if (script.includes('role="checkbox"') && !script.includes('querySelectorAll')) {
+      if (!state.consent) state.consent = true;
       return true;
     }
 
+    // Switching tabs — only a mousedown does it, exactly like Radix. Checked
+    // before the submit branch because this script also uses querySelectorAll.
     if (script.includes('role="tab"')) {
       if (!passwordTab) return false;
-      state.passwordVisible = true;
+      state.passwordVisible = script.includes('mousedown');
+      return true;
+    }
+
+    // Submitting.
+    if (script.includes('querySelectorAll')) {
+      state.submitted = true;
+      if (destroyOnSubmit) state.destroyed = true;
       return true;
     }
 
@@ -109,8 +148,8 @@ async function runSignIn({ page, cookies, options = {}, now } = {}) {
   const created = [];
   const cookieReads = [];
   const result = await signInStepFunWithBrowser({
-    username: 'me@example.com',
-    password: 'hunter2',
+    username: ACCOUNT,
+    password: PASSWORD,
     BrowserWindow: fakeWindowClass(page, created),
     session: fakeSession(cookies, cookieReads),
     timeoutMs: 4000,
@@ -149,8 +188,19 @@ test('readOasisSession reads the token and its device id together', async () => 
 
   assert.deepEqual(out, { token: 'tok-1', webid: 'web-1' });
   // One pass for both: sampling them separately can catch them a rotation
-  // apart, which the quota endpoint rejects as a mismatched pair.
-  assert.deepEqual(seen, [{ domain: COOKIE_DOMAIN }]);
+  // apart, which the quota endpoint rejects as a mismatched pair. And the
+  // filter is the URL Chromium would send to, not a bare domain.
+  assert.deepEqual(seen, [{ url: COOKIE_URL }]);
+});
+
+test('readOasisSession is not fooled by a session whose cookies is not callable', async () => {
+  // Regression guard: `session.cookies` is a Cookies instance. Calling it
+  // throws a TypeError that the sign-in reports as "unavailable", which is
+  // exactly the state a silently broken sign-in looks like from the UI.
+  const notAFunction = { cookies: { get: async () => [cookie(OASIS_TOKEN, 'tok')] } };
+  assert.equal(typeof notAFunction.cookies, 'object');
+  assert.deepEqual(await readOasisSession(notAFunction), { token: 'tok', webid: '' });
+  await assert.rejects(readOasisSession({ cookies: async () => [] }), TypeError);
 });
 
 test('readOasisSession reports a missing token as empty rather than throwing', async () => {
@@ -187,8 +237,8 @@ test('signInStepFunWithBrowser fills the password form and returns the session c
   });
 
   assert.deepEqual(result, { token: 'tok-live', webid: 'web-live' });
-  assert.equal(page.state.values['login-email'], 'me@example.com');
-  assert.equal(page.state.values['login-password'], 'hunter2');
+  assert.equal(page.state.values.account, 'me@example.com');
+  assert.equal(page.state.values.password, 'hunter2');
   assert.ok(page.state.submitted, 'the form is actually submitted, not just filled');
   assert.ok(page.log.some((entry) => String(entry).startsWith('load:https://account.stepfun.com/login?')));
   assert.equal(cookieReads.length, 1, 'it polls the session and stops as soon as the token lands');
@@ -196,6 +246,24 @@ test('signInStepFunWithBrowser fills the password form and returns the session c
   assert.equal(created.length, 1);
   assert.equal(created[0].title, WINDOW_TITLE);
   assert.ok(created[0].show, 'the window is visible: an escalated WAF challenge needs a human');
+});
+
+test('the tab is switched with a mousedown but consent with a plain click', async () => {
+  // Both verified against the live page: Radix Tabs changes value on mousedown
+  // (a bare click() leaves the phone-code form on screen), while the consent
+  // button toggles off again if given the same pointer sequence.
+  const page = fakePage();
+  await runSignIn({ page, cookies: () => (page.state.submitted ? [cookie(OASIS_TOKEN, 'tok')] : []) });
+
+  const tabScript = page.log.find((entry) => entry.includes('role="tab"'));
+  assert.ok(tabScript, 'the password tab is clicked');
+  assert.match(tabScript, /mousedown/, 'Radix switches the tab on mousedown, not on click');
+
+  const consentScript = page.log.find((entry) =>
+    entry.includes('role="checkbox"') && !entry.includes('querySelectorAll'));
+  assert.ok(consentScript, 'consent is ticked');
+  assert.ok(!consentScript.includes('mousedown'),
+    'the consent control wants a plain click — the pointer sequence cancels it back out');
 });
 
 test('the sign-in window is isolated from the widget session', async () => {
@@ -241,11 +309,28 @@ test('signInStepFunWithBrowser times out instead of polling forever', async () =
 });
 
 test('signInStepFunWithBrowser times out when the form never renders', async () => {
-  const page = fakePage({ noEmailField: true });
+  const page = fakePage({ noTabs: true });
   await assert.rejects(
     runSignIn({ page, cookies: () => [], options: { timeoutMs: 300 } }),
-    (error) => /timed out waiting for #login-email/.test(error.message)
+    (error) => /timed out waiting for \[role="tab"\]/.test(error.message)
   );
+});
+
+test('the sign-in waits for the tab strip, not for a password field', async () => {
+  // Regression guard: the page opens on the phone-code tab, where no password
+  // input exists. Waiting for that field first hung until the timeout, so the
+  // wait has to be for the tab strip that is actually there.
+  const page = fakePage();
+  const probeOrder = [];
+  const realExecute = page.executeJavaScript;
+  page.executeJavaScript = async (script) => {
+    const probe = /^Boolean\(document\.querySelector\((".*?")\)\)$/.exec(script.trim());
+    if (probe) probeOrder.push(JSON.parse(probe[1]));
+    return realExecute(script);
+  };
+  await runSignIn({ page, cookies: () => (page.state.submitted ? [cookie(OASIS_TOKEN, 'tok')] : []) });
+  assert.deepEqual(probeOrder.slice(0, 2), ['[role="tab"]', 'input[type="password"]']);
+  assert.ok(!probeOrder.includes('#login-email'), 'the email-code tab id never appears in this flow');
 });
 
 test('signInStepFunWithBrowser refuses incomplete credentials before opening a window', async () => {
