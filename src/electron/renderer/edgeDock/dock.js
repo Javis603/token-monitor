@@ -60,10 +60,9 @@ const DRAG_THRESHOLD_PX = 4;
 const BREAKDOWN_VISIBLE_ROWS = 6;
 // Keep the phase anchor in sync with edge-dock-running-spin in dock.css.
 const RUNNING_SPIN_MS = 1400;
-// Match the bounded waiting pulse in dock.css. Keep its entry clock across
-// rail rebuilds so usage pushes and live-status renewals do not repeat it.
-const WAITING_PULSE_MS = 1800;
-const WAITING_PULSE_COUNT = 2;
+// Match the waiting pulse in dock.css. Keep its entry clock across rail
+// rebuilds so usage pushes and live-status renewals preserve the breathing phase.
+const WAITING_PULSE_MS = 2400;
 const waitingRingStarts = new Map();
 
 const root = document.getElementById('edgeDockRoot');
@@ -575,8 +574,7 @@ function waitingRingStart(cellId, isWaiting) {
     return null;
   }
   if (!waitingRingStarts.has(cellId)) {
-    const skipped = prefersReducedMotion() ? WAITING_PULSE_MS * WAITING_PULSE_COUNT : 0;
-    waitingRingStarts.set(cellId, performance.now() - skipped);
+    waitingRingStarts.set(cellId, performance.now());
   }
   return waitingRingStarts.get(cellId);
 }
@@ -616,12 +614,9 @@ function ringNode(remainingPercent, color, mark, waitingStartedAt = null) {
   waitingCircle.setAttribute('cy', '21');
   waitingCircle.setAttribute('r', '14');
   waiting.append(waitingCircle);
-  if (waitingStartedAt !== null && !prefersReducedMotion()) {
+  if (waitingStartedAt !== null) {
     const elapsed = Math.max(0, performance.now() - waitingStartedAt);
-    if (elapsed < WAITING_PULSE_MS * WAITING_PULSE_COUNT) {
-      waiting.classList.add('is-entering');
-      waiting.style.animationDelay = `-${elapsed}ms`;
-    }
+    waiting.style.animationDelay = `-${elapsed % WAITING_PULSE_MS}ms`;
   }
   if (appearance().edgeDockRunningIndicatorEnabled === false) {
     ring.append(svg, mark, waiting);
