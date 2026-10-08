@@ -3250,9 +3250,9 @@ function startCollector(options) {
     // and unions the self-synced ones on top regardless. Their tokscale cache
     // dirs are deliberately unwatched to avoid a self-triggering loop, so a sync
     // can refresh what tokscale reads without any event naming the client it
-    // belongs to. Antigravity's source roots are watched and do name it, but that
-    // tracks the IDE writing rather than the sync landing, so targeting alone
-    // would still miss the sync output.
+    // belongs to. Native Cursor and Antigravity source roots are watched and do
+    // name the client, but that tracks the IDE writing rather than the sync
+    // landing, so targeting alone would still miss the sync output.
     const targetClients = activityGated ? takeWatchClients(selfSyncedClients) : [];
     runTick('interval', {
       ...(anchorToday ? { todayOnly: true, refreshWsl: true, targetClients } : {}),
