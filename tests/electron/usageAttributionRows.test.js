@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   attributionRows,
@@ -51,6 +52,34 @@ test('attribution rows expose totals without a tool or model identity as Unclass
   );
   assert.equal(attributionValue({ codex: 60 }, 90, UNATTRIBUTED_KEY), 30);
   assert.equal(attributionValue({ codex: 60 }, 90, 'codex'), 60);
+});
+
+test('unpriced counts missing from attribution maps stay on the remainder row', () => {
+  const rows = attributionRows({}, {}, {
+    totalValue: 50,
+    totalUnpricedTokens: 50
+  });
+
+  assert.deepEqual(rows, [
+    {
+      key: UNATTRIBUTED_KEY,
+      value: 50,
+      cost: 0,
+      unpricedTokens: 50,
+      unattributed: true
+    }
+  ]);
+
+  const zeroValueRemainder = attributionRows({ codex: 100 }, { codex: 1 }, {
+    totalValue: 100,
+    totalCost: 1,
+    totalUnpricedTokens: 50
+  });
+  assert.equal(zeroValueRemainder.at(-1).unpricedTokens, 50);
+  assert.deepEqual(
+    visibleAttributionRows(zeroValueRemainder, (value) => `$${Number(value || 0).toFixed(4)}`),
+    zeroValueRemainder
+  );
 });
 
 test('display rows hide a zero-token synthetic residual that formats as zero', () => {
@@ -174,10 +203,12 @@ test('Tool and Model breakdowns consume the shared token-or-cost rows', () => {
   const index = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   assert.ok(index.indexOf('usageAttributionRows.js') < index.indexOf('app.js'));
-  assert.match(app, /periodAttributionRows\(period, period\?\.clients, period\?\.clientCosts\)/);
-  assert.match(app, /periodAttributionRows\(period, period\?\.models, period\?\.modelCosts\)/);
+  assert.match(app, /periodAttributionRows\(period, period\?\.clients, period\?\.clientCosts, period\?\.clientUnpricedTokens\)/);
+  assert.match(app, /periodAttributionRows\(period, period\?\.models, period\?\.modelCosts, period\?\.modelUnpricedTokens\)/);
   assert.match(app, /visibleAttributionRows\(rows, formatCost\)/);
   assert.match(app, /attributionValue\(/);
+  assert.match(app, /totalUnpricedTokens:\s*period\?\.unpricedTokens/);
+  assert.match(app, /cost:\s*Number\(period\.costUsd \|\| 0\),\s*unpricedTokens:\s*Number\(period\.unpricedTokens \|\| 0\),/);
 });
 
 test('Model settings expose and persist the ranking metric without changing the default', () => {
@@ -204,4 +235,72 @@ test('Model rows use the selected ranking metric for order and bar scale', () =>
   assert.match(app, /const width = rowWidth\(barValue, max\)/);
   assert.match(app, /const max = barScaleMax\(rows\)/);
   assert.match(app, /homeModelRows\(modelRowsForPeriod\(period, 'tokens'\), period\?\.totalTokens, 5\)/);
+});
+
+
+test('unknown prices show a missing subtotal instead of a free cost', () => {
+  const { usageCostLabel } = require('../../src/electron/renderer/usageAttributionRows');
+  const money = (value) => `$${value.toFixed(2)}`;
+  const tokens = (value) => String(value);
+  assert.equal(usageCostLabel(0, 200, money, tokens, 'unpriced tokens'), '— (200 unpriced tokens)');
+  assert.equal(usageCostLabel(1.5, 200, money, tokens, 'unpriced tokens'), '$1.50 + 200 unpriced tokens');
+  assert.equal(usageCostLabel(0, 0, money, tokens, 'unpriced tokens'), '$0.00');
+  assert.equal(attributionRows({ unknown: 200 }, {}, { unpricedTokens: { unknown: 200 } })[0].unpricedTokens, 200);
+});
+
+test('compact costs retain missing-cost semantics without an inline token count', () => {
+  const { compactUsageCostLabel } = require('../../src/electron/renderer/usageAttributionRows');
+  const money = (value) => `$${value.toFixed(2)}`;
+  assert.equal(compactUsageCostLabel(0, 200, money), '—');
+  assert.equal(compactUsageCostLabel(1.5, 200, money), '$1.50 + ?');
+  assert.equal(compactUsageCostLabel(1.5, 0, money), '$1.50');
+});
+
+test('unknown source requires complete Codex attribution and rejects mixed or missing attribution', () => {
+  const { unknownModelSource } = require('../../src/electron/renderer/usageAttributionRows');
+  assert.equal(unknownModelSource({ models: { unknown: 200 }, clientModels: { codex: { unknown: 200 } } }), 'codex');
+  for (const clientModels of [undefined, {}, { codex: { unknown: 150 } },
+    { codex: { unknown: 200 }, claude: { unknown: 10 } }, { opencode: { unknown: 200 } }]) {
+    assert.equal(unknownModelSource({ models: { unknown: 200 }, clientModels }), null);
+  }
+  assert.equal(unknownModelSource({ models: { unknown: 0 }, clientModels: { codex: { unknown: 0 } } }), null);
+});
+
+test('headline tooltip follows unpriced usage and clears on priced or unavailable periods', () => {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const body = app.slice(app.indexOf('function setTotalCost('), app.indexOf('function applyEffectiveCurrencyRates('));
+  const cost = {
+    classList: { toggle(_name, enabled) { cost.hasUnpriced = enabled; } },
+    querySelector: (selector) => selector === '.usage-cost-info' ? cost.info : cost.label,
+    replaceChildren(label) { this.label = label; },
+    append(info) { this.info = info; }
+  };
+  const context = vm.createContext({
+    els: { cost }, document: { createElement: () => ({}) },
+    usageAttributionRowsApi: require('../../src/electron/renderer/usageAttributionRows'),
+    formatCost: (value, missing) => `$${value.toFixed(2)}${missing > 0 ? ` + ${missing} unpriced tokens` : ''}`,
+    formatNumber: String,
+    t: (_key, { tokens }) => `${tokens} tokens excluded from the cost estimate`,
+    limitWindowsView: { setDetailTooltip(element, entries) { element.tooltip = entries; } }
+  });
+  vm.runInContext(body, context);
+  context.setTotalCost(1.5, 200);
+  assert.equal(cost.label.textContent, '$1.50');
+  assert.equal(cost.hasUnpriced, true);
+  assert.equal(cost.info.hidden, false);
+  assert.equal(cost.info.tooltip.length, 1);
+  assert.equal(cost.info.tooltip[0].full, '200 tokens excluded from the cost estimate');
+  const label = cost.label;
+  context.setTotalCost(0, 200);
+  assert.equal(cost.label, label);
+  assert.equal(cost.label.textContent, '—');
+  context.setTotalCost(1.5, 0);
+  assert.equal(cost.label.textContent, '$1.50');
+  assert.equal(cost.info.tooltip, null);
+  assert.equal(cost.info.hidden, true);
+  assert.equal(cost.hasUnpriced, false);
+  context.setTotalCost(1.5, 200, false);
+  assert.equal(cost.label.textContent, '');
+  assert.equal(cost.info.tooltip, null);
+  assert.equal(cost.hasUnpriced, false);
 });

@@ -299,3 +299,17 @@ test('runtime control wrappers do not delegate after stop', async () => {
 
   assert.deepEqual(calls, [['usageStop'], ['limitsStop']]);
 });
+
+test('Dots visibility delegates to the active producer without stopping it', async () => {
+  const { runtime, calls, usageOptionsHistory } = harness({
+    createUsageRuntime(_options, handle) {
+      handle.setCodexDotsVisible = (value) => { calls.push(['dotsVisibility', value]); return Promise.resolve(true); };
+      return handle;
+    }
+  });
+  assert.equal(await runtime.setCodexDotsVisible(false), true);
+  assert.equal(usageOptionsHistory.length, 1);
+  assert.deepEqual(calls, [['dotsVisibility', false]]);
+  runtime.stop();
+  assert.equal(await runtime.setCodexDotsVisible(true), false);
+});

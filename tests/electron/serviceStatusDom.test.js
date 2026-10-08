@@ -162,7 +162,7 @@ test('Home overview list markers use the shared tool icon path when enabled', ()
   const app = readRendererFile('app.js');
   assert.match(app, /function applyHomeListMark/);
   assert.match(app, /iconKindFor\(\{ key: row\.iconId \|\| row\.providerId \|\| row\.key \}, 'limits'\)/);
-  assert.match(app, /iconKindFor\(\{ key: row\.key \|\| row\.name \}, 'model'\)/);
+  assert.match(app, /iconKindFor\(\{ key: row\.key \|\| row\.name, modelSource: row\.modelSource \}, 'model'\)/);
   assert.match(app, /home-list-mark row-icon/);
 });
 
@@ -404,7 +404,7 @@ test('row accordions expose keyboard and aria interactions', () => {
   assert.match(app, /hasAccordion,/);
   assert.match(app, /expanded: row\.classList\.contains\('expanded'\)/);
   assert.match(app, /\$\{name\}, \$\{t\('dashboard\.stat\.totalTokens'\)\}/);
-  assert.match(app, /\$\{t\('dashboard\.stat\.totalCost'\)\}: \$\{formatCost\(cost \|\| 0\)\}/);
+  assert.match(app, /\$\{t\('dashboard\.stat\.totalCost'\)\}: \$\{formatCost\(cost \|\| 0, unpricedTokens\)\}/);
 });
 
 test('project accordions retain unchanged DOM between live refreshes', () => {

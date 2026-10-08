@@ -83,7 +83,7 @@ test('saving the title preference immediately republishes Today and Home data fr
     presentationCache: createStatsPresentationCache(), syncProvenanceActive: () => false,
     projectLimitStatsForDisplay: value => value,
     migrateCodexAdditionalLimits: noop, scheduleMacWidgetSnapshot: noop, captureMacWidgetProducerOwner: noop,
-    updateEdgeDockCells: noop, updateTrayDisplay: noop,
+    repaintEdgeDockCells: noop, updateTrayDisplay: noop,
     rendererSnapshots: { stamp: (_raw, value) => value }, rendererStats: value => value,
     pushSettingsToRenderer() { events.push('settings'); },
     mainWindow: { isDestroyed: () => false, webContents: { send(_channel, payload) {

@@ -35,6 +35,7 @@
       value: finiteNumber(turn.tokens && turn.tokens.total),
       tokensAvailable: turn.tokensAvailable !== false,
       cost: finiteNumber(turn.costEstimate),
+      ...(turn.unpricedTokens > 0 ? { unpricedTokens: finiteNumber(turn.unpricedTokens) } : {}),
       tokens: turn.tokens || {},
       tools: formatToolList(turn.tools)
     };
@@ -74,6 +75,7 @@
         value: finiteNumber(ex.tokens && ex.tokens.total),
         tokensAvailable: ex.tokensAvailable !== false,
         cost: finiteNumber(ex.costEstimate),
+        ...(ex.unpricedTokens > 0 ? { unpricedTokens: finiteNumber(ex.unpricedTokens) } : {}),
         startTime: timeValue(ex.startedAt),
         turnCount,
         turns: turnRows(ex.turns) // usage entries stay chronological; summaries do not consume reply numbers

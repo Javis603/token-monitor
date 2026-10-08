@@ -310,6 +310,12 @@ function createUsageHostCoordinator(deps = {}) {
       // it would be in-process, where the save itself waits behind that work.
       transformSettingsApplied: () => settingsApplied,
       refreshClient: (clientId, refreshOptions = {}) => call('refreshClient', [clientId, refreshOptions]),
+      setCodexDotsVisible(visible) {
+        // A failed worker must resume with the latest projection selection.
+        options.codexDotsVisible = visible !== false;
+        workerData.options.codexDotsVisible = visible !== false;
+        return call('setCodexDotsVisible', [visible]);
+      },
       tick: (reason = 'manual', tickOptions = {}) => call('tick', [reason, tickOptions]),
       // Synchronous like the collector's stop(): nothing this runtime reports
       // afterwards reaches the owner as a live update, because the device runtime

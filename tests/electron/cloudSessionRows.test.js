@@ -7,6 +7,8 @@ const vm = require('node:vm');
 const api = require('../../src/electron/renderer/cloudSessionRows');
 const sessions = require('../../src/electron/renderer/sessionRows');
 const { breakdownPage } = require('../../src/electron/renderer/breakdownRenderPolicy');
+const { buildLocalUsageView } = require('../../src/shared/providers/codex/localUsage');
+const { projectReport } = require('../../src/electron/cloudUsageBridge');
 const a = '01900000-0000-7000-8000-000000000001', b = '01900000-0000-7000-8000-000000000002';
 const now = new Date(2026, 9, 5, 12, 0, 0);
 const iso = (day, hour = 9) => new Date(2026, 9, day, hour).toISOString();
@@ -36,6 +38,52 @@ test('explicit zero remains a measured count', () => {
 test('exact local/cloud identity is one row with local period counts and an attached cloud detail', () => {
   const rows = merge(localPeriod(a)); assert.equal(rows.length, 2); assert.equal(rows[0].cloudThreadId, a); assert.equal(rows[0].cloudOnly, false);
   assert.equal(rows[0].value, 70); assert.equal(rows[0].cost, 1); assert.ok(rows[0].subtitle.includes('本地 + 云端'));
+});
+test('Dots observed periods keep their accounting when the same thread is discovered in cloud snapshots', () => {
+  const view = buildLocalUsageView([{ threadId: a, model: 'gpt-fixture', cwd: '/fixture/project',
+    title: 'Observed local Dot', observedAt: iso(5), turnEnded: true,
+    usage: { input: 40, cacheRead: 20, cacheWrite: 0, output: 10, reasoning: 4, total: 70 }
+  }], { now, projectIdentity: () => ({ projectId: 'fixture', projectLabel: 'Fixture' }) });
+  const before = JSON.stringify(view);
+  for (const period of ['today', 'month', 'allTime']) {
+    const p = view[period], session = p.sessions[`codex:${a}`];
+    assert.equal(session.usageSource, 'codex-dots-local');
+    assert.equal(session.usageCoverage, 'observed-only');
+    assert.equal(p.totalTokens, 70);
+    for (const lifetime of [1000, 2000, 2000]) {
+      const s = snapshot(); s.threads[0].total = { inputTokens: lifetime - 10, outputTokens: 10, totalTokens: lifetime };
+      const rows = merge(p, s, { ...options, period });
+      assert.equal(rows.length, 2);
+      const local = rows.find(r => r.cloudThreadId === a);
+      assert.equal(local.cloudOnly, false); assert.equal(local.value, 70);
+      assert.equal(local.name, 'Observed local Dot'); assert.equal(local.cost, 0);
+      assert.equal(local.unpricedTokens, 70);
+    }
+  }
+  assert.equal(JSON.stringify(view), before, 'cloud rendering must leave periods, models, projects and history unchanged');
+});
+test('native rollout precedence suppresses a Dots contribution before cloud rows are joined', () => {
+  const native = localPeriod(a);
+  const view = buildLocalUsageView([{ threadId: a, model: 'gpt-fixture', observedAt: iso(5),
+    usage: { input: 900, cacheRead: 0, cacheWrite: 0, output: 100, reasoning: 0, total: 1000 }
+  }], { now, nativePeriod: native, projectsEnabled: false });
+  assert.equal(view.allTime.totalTokens, 0); assert.deepEqual(view.sessionKeys, []);
+  const rows = merge(native);
+  assert.equal(rows.filter(r => r.cloudThreadId === a).length, 1);
+  assert.equal(rows.find(r => r.cloudThreadId === a).value, 70);
+  assert.equal(native.totalTokens, 70);
+});
+test('a rejected cloud account leaves a matching observed local Dot available', () => {
+  const p = localPeriod(a); p.sessions[`codex:${a}`].usageSource = 'codex-dots-local';
+  p.sessions[`codex:${a}`].usageCoverage = 'observed-only';
+  const rejected = projectReport({ version: 1, kind: 'codex-cloud-auto-watch', state: 'listening',
+    scopeFingerprint: 'previous-account', observedAt: now.toISOString(), threads: snapshot().threads
+  }, { scopeFingerprint: 'current-account', now: now.getTime() });
+  assert.equal(rejected.errorCode, 'CLOUD_ACCOUNT_MISMATCH');
+  const rows = merge(p, rejected);
+  assert.equal(rows.length, 1); assert.equal(rows[0].value, 70);
+  assert.equal(rows[0].cloudThreadId, undefined);
+  assert.equal(p.sessions[`codex:${a}`].usageCoverage, 'observed-only');
 });
 test('UUID fragments in names or unrelated clients are never treated as shared identity', () => {
   assert.equal(api.localIdentity({ client: 'claude', sessionId: a }, 'claude:' + a), null);

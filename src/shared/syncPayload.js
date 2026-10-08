@@ -220,6 +220,7 @@ function buildSyncPayload(summary, {
   delete payload.allTimeProjectsIncomplete;
   delete payload.sessionDetailsOmitted;
   delete payload.periodProjectsOmitted;
+  delete payload.codexLocalSessionKeys;
 
   for (const periodName of ['today', 'month']) {
     const period = payload[periodName];

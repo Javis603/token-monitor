@@ -1,10 +1,13 @@
 'use strict';
 
 (function exposeSyncDevicePanel(root, factory) {
-  const api = factory();
+  const deviceBreakdownApi = typeof module === 'object' && module.exports
+    ? require('./deviceBreakdown')
+    : root?.TokenMonitorDeviceBreakdown;
+  const api = factory(deviceBreakdownApi);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorSyncDevicePanel = api;
-})(typeof window !== 'undefined' ? window : null, function createSyncDevicePanelApi() {
+})(typeof window !== 'undefined' ? window : null, function createSyncDevicePanelApi(deviceBreakdownApi) {
   function hasOwn(object, key) {
     return Object.prototype.hasOwnProperty.call(object || {}, key);
   }
@@ -35,7 +38,7 @@
         const stale = device.stale === true;
         return {
           key,
-          name: String(device.displayName || key).trim(),
+          name: deviceBreakdownApi.deviceLabel(device),
           hostname: String(device.hostname || '').trim(),
           platform: String(device.platform || ''),
           osName: String(device.osName || ''),

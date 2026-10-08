@@ -163,7 +163,8 @@
       name: row.name || '',
       value: Math.max(0, Number(row.value || 0)),
       share: total > 0 ? Math.max(0, Number(row.value || 0)) / total : 0,
-      color: row.color || ''
+      color: row.color || '',
+      ...(row.modelSource ? { modelSource: row.modelSource } : {})
     }));
   }
 

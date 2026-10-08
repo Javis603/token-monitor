@@ -4,7 +4,88 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { deviceBreakdownForPeriod, devicePlatformLabel } = require('../../src/electron/renderer/deviceBreakdown');
+const vm = require('node:vm');
+const { deviceBreakdownForPeriod, deviceLabel, devicePlatformLabel } = require('../../src/electron/renderer/deviceBreakdown');
+
+test('device labels use the first nonblank display name, device ID or hostname', () => {
+  assert.equal(deviceLabel({ displayName: ' Studio ', deviceId: 'remote', hostname: 'remote.local' }), 'Studio');
+  assert.equal(deviceLabel({ displayName: ' \t ', deviceId: ' remote ', hostname: 'remote.local' }), 'remote');
+  assert.equal(deviceLabel({ displayName: '', deviceId: ' ', hostname: ' Legacy.local ' }), 'Legacy.local');
+  assert.equal(deviceLabel({}), 'device');
+  assert.equal(deviceLabel(null), 'device');
+});
+
+test('Devices, sync settings and TPS agree on labels in Node and browser entrypoints', () => {
+  const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const rowsSource = app.slice(app.indexOf('function deviceRowsForPeriod('), app.indexOf('function attributionComponent('));
+  const period = { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000, modelThroughput: {
+    alpha: { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000 }
+  } };
+  const devices = [
+    { deviceId: 'remote', displayName: ' Studio ', hostname: 'remote.local', periods: { today: period } },
+    { deviceId: 'desktop', displayName: ' \t ', hostname: 'desktop.local', periods: { today: period } },
+    { hostname: ' Legacy.local ', periods: { today: period } },
+    { periods: { today: period } }
+  ];
+  const expectedNames = ['Studio', 'desktop', 'Legacy.local', 'device'];
+  const settingsNames = expectedNames.slice(0, 2);
+  const nodeApi = {
+    TokenMonitorDeviceBreakdown: require('../../src/electron/renderer/deviceBreakdown'),
+    TokenMonitorSyncDevicePanel: require('../../src/electron/renderer/syncDevicePanel'),
+    TokenMonitorTokenRate: require('../../src/electron/renderer/tokenRatePresentation')
+  };
+  const contexts = [nodeApi];
+  for (const entrypoint of ['index.html', 'edgeDock/index.html']) {
+    const html = fs.readFileSync(path.join(rendererDir, entrypoint), 'utf8');
+    const window = {};
+    const context = vm.createContext({ window });
+    const scripts = [...html.matchAll(/<script src="([^"]+)"/g)]
+      .map((match) => path.resolve(rendererDir, path.dirname(entrypoint), match[1]))
+      .filter((file) => ['deviceBreakdown.js', 'syncDevicePanel.js', 'tokenRatePresentation.js'].includes(path.basename(file)));
+    for (const file of scripts) vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: file });
+    assert.ok(window.TokenMonitorDeviceBreakdown);
+    assert.ok(window.TokenMonitorTokenRate);
+    contexts.push(window);
+  }
+  for (const api of contexts) {
+    if (api.TokenMonitorSyncDevicePanel) {
+      const settings = api.TokenMonitorSyncDevicePanel.deviceRows(devices, { localDeviceId: 'remote' });
+      assert.equal(JSON.stringify(settings.map((row) => row.name)), JSON.stringify(settingsNames));
+      assert.equal(JSON.stringify(settings.map((row) => row.key)), JSON.stringify(['remote', 'desktop']));
+    }
+    const context = vm.createContext({
+      state: { settings: { deviceId: 'remote' }, period: 'today' },
+      fixedPeriodDevices: () => devices,
+      deviceBreakdownApi: api.TokenMonitorDeviceBreakdown,
+      clientLabels: {}, clientColors: {},
+      deviceRuntimeLabel: () => '', deviceSyncedLabel: () => '', deviceColor: () => '', t: (key) => key
+    });
+    const rows = vm.runInContext(`${rowsSource}\ndeviceRowsForPeriod()`, context);
+    assert.equal(JSON.stringify(rows.map((row) => row.name)), JSON.stringify(expectedNames));
+    for (const hubMode of ['client', 'host', 'icloud']) {
+      const selection = api.TokenMonitorTokenRate.selectLiveTokenRatePeriods({ devices }, 'remote', hubMode, 'all');
+      assert.equal(JSON.stringify(selection.entries.map((entry) => entry.name)), JSON.stringify(expectedNames));
+      // Display names never become partition keys.
+      assert.equal(selection.entries[0].id, 'device:remote');
+    }
+    for (const hubMode of ['local', 'client', 'host', 'icloud']) {
+      const selection = api.TokenMonitorTokenRate.selectLiveTokenRatePeriods({ devices }, 'remote', hubMode, 'device');
+      assert.equal(selection.entries[0].name, 'Studio');
+    }
+    const tracker = api.TokenMonitorTokenRate.createLiveTokenRateGroupTracker({ now: () => 100 });
+    const twoDevices = devices.slice(0, 2);
+    const base = twoDevices.map((device) => ({ ...device, periods: { today: {
+      timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0, modelThroughput: {}
+    } } }));
+    tracker.reset(api.TokenMonitorTokenRate.selectLiveTokenRatePeriods({ devices: base }, 'remote', 'client', 'all').entries);
+    tracker.observe(api.TokenMonitorTokenRate.selectLiveTokenRatePeriods({ devices: twoDevices }, 'remote', 'client', 'all').entries);
+    assert.equal(tracker.getSample().speed, 80);
+    const headings = api.TokenMonitorTokenRate.liveTokenRateTooltipEntries(tracker.getSample(), 'speed', String)
+      .filter((entry) => !Array.isArray(entry)).map((entry) => entry.full);
+    assert.equal(JSON.stringify(headings), JSON.stringify(settingsNames));
+  }
+});
 
 test('deviceBreakdownForPeriod nests sorted models under each tool', () => {
   const result = deviceBreakdownForPeriod({ periods: { month: {

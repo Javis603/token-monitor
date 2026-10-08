@@ -118,7 +118,7 @@ test('mac release scripts build native Apple Silicon and Intel artifacts with th
 });
 
 test('release workflow pins Electron only for the Linux artifact', () => {
-  assert.equal(rootPackage.devDependencies.electron, '43.4.0');
+  assert.equal(rootPackage.devDependencies.electron, '43.7.9');
   assert.match(
     rootPackage.scripts['dist:linux'],
     /^npm run ensure:tokscale -- --platform=linux-x64 && electron-builder --config scripts\/electron-builder\.config\.js --linux --x64 --publish never$/
