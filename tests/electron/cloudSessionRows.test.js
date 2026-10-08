@@ -23,11 +23,12 @@ test('cloud and local sessions join the same row array without changing totals o
   const p = localPeriod(), before = JSON.stringify(p), rows = merge(p);
   assert.equal(rows.length, 3); assert.equal(rows[0].name, 'Local task');
   const cloud = rows.find(r => r.cloudOnly); assert.equal(cloud.client, 'codex'); assert.equal(cloud.kind, 'session'); assert.equal(cloud.value, 1000);
-  assert.equal(cloud.barValue, 0); assert.equal(cloud.cost, 0); assert.equal(cloud.costLabel, '累计 · 云端'); assert.equal(cloud.periodTokenDataUnavailable, true);
+  assert.equal(cloud.barValue, 0); assert.equal(cloud.cost, null); assert.equal(cloud.costLabel, '费用待确认'); assert.equal(cloud.periodTokenDataUnavailable, true);
+  assert.ok(cloud.subtitle.includes('累计 · 云端'));
   assert.equal(JSON.stringify(p), before); assert.equal(p.totalTokens, 70);
 });
 test('unknown cloud counters are visible rather than dropped or formatted as zero', () => {
-  const row = merge().find(r => r.cloudThreadId === b); assert.ok(row); assert.equal(row.tokenDataUnavailable, true); assert.equal(row.costLabel, '累计 · 云端');
+  const row = merge().find(r => r.cloudThreadId === b); assert.ok(row); assert.equal(row.tokenDataUnavailable, true); assert.equal(row.costLabel, '费用待确认');
 });
 test('explicit zero remains a measured count', () => {
   const s = snapshot(); s.threads[0].total = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
@@ -36,6 +37,15 @@ test('explicit zero remains a measured count', () => {
 test('exact local/cloud identity is one row with local period counts and an attached cloud detail', () => {
   const rows = merge(localPeriod(a)); assert.equal(rows.length, 2); assert.equal(rows[0].cloudThreadId, a); assert.equal(rows[0].cloudOnly, false);
   assert.equal(rows[0].value, 70); assert.equal(rows[0].cost, 1); assert.ok(rows[0].subtitle.includes('本地 + 云端'));
+});
+test('cloud fees stay unknown for every task kind without price evidence', () => {
+  for (const kind of ['aeon', 'aeon_child', 'subagent', 'dreaming', 'user', 'other']) {
+    const row = merge(localPeriod(), snapshot([{ ...snapshot().threads[0], kind }])).find(r => r.cloudOnly);
+    assert.equal(row.value, 1000);
+    assert.equal(row.cost, null);
+    assert.equal(row.costLabel, '费用待确认');
+    assert.equal(row.costDataUnavailable, true);
+  }
 });
 test('UUID fragments in names or unrelated clients are never treated as shared identity', () => {
   assert.equal(api.localIdentity({ client: 'claude', sessionId: a }, 'claude:' + a), null);
@@ -74,10 +84,35 @@ test('cloud rows use the same existing session pagination', () => {
   const rows = merge(localPeriod(), s); const page = breakdownPage(rows, { breakdown: 'session', page: 1 });
   assert.equal(page.total, 121); assert.equal(page.pageCount, 2); assert.equal(page.rows.length, 21);
 });
-test('cloud detail shows actual component values and no invented cost or requests', () => {
+test('cloud detail shows actual component values, the accounting status and nothing invented', () => {
   const d = api.detail(snapshot(), a, 'zh-CN'); assert.equal(d.fields[0][1], '1,000'); assert.equal(d.fields[2][1], '800');
-  assert.ok(d.note.includes('未加入')); assert.ok(!JSON.stringify(d).includes('$')); assert.ok(!JSON.stringify(d).includes('call'));
+  assert.ok(d.note.includes('计入上方总量')); assert.ok(!JSON.stringify(d).includes('$')); assert.ok(!JSON.stringify(d).includes('call'));
+  assert.equal(d.fields.at(-1)[0], '计入总量'); assert.equal(d.fields.at(-1)[1], '该线程状态未知');
+  const accounting = { version: 1, threads: {
+    [a]: { status: 'included', partial: false, bridged: false },
+    [b]: { status: 'parent-overlap', partial: false, bridged: false }
+  } };
+  assert.equal(api.detail(snapshot(), a, 'zh-CN', accounting).fields.at(-1)[1], '是（符合条件的计数已计入）');
+  assert.equal(api.detail(snapshot(), b, 'zh-CN', accounting).fields.at(-1)[1], '否（父子计数重叠未验证，保守排除）');
+  assert.equal(api.detail(snapshot(), a, 'zh-CN', { version: 1, threads: { [a]: { status: 'included', partial: true } } }).fields.at(-1)[1],
+    '是（符合条件的计数已计入） · 观测到计数重置或未知分项');
   assert.equal(api.detail(snapshot(), b).fields[0][1], 'Unknown');
+});
+test('the headline accounting note only reports what was actually counted or excluded', () => {
+  const accounting = { version: 1, periods: { allTime: { totalTokens: 16000, threadCount: 1 } }, baselineTokens: 16000,
+    excludedThreads: 1, excludedReasons: { matchedLocal: 0, parentOverlap: 1 }, partialThreads: 0 };
+  assert.equal(api.accountingNote(accounting, 'allTime', 'zh-CN'), '含云端 16,000 · 历史基线仅计入 TOTAL · 已排除 1 父子重叠');
+  assert.equal(api.accountingNote(accounting, 'today', 'zh-CN'), '');
+  assert.equal(api.accountingNote(null, 'allTime', 'en'), '');
+  assert.equal(api.accountingNote({ version: 1, periods: { allTime: { totalTokens: 0, threadCount: 0 } }, excludedReasons: {}, partialThreads: 0 }, 'allTime', 'en'), '');
+});
+test('paused and partial cloud accounting explains retained values without exposing technical reasons', () => {
+  const inactive = { version: 1, state: 'inactive', reason: 'LEDGER_CORRUPT_INTERNAL', periods: {} };
+  assert.equal(api.accountingNote(inactive, 'today', 'zh-CN'), '云端计数暂停 · 已保存数值保留');
+  assert.equal(api.accountingNote(inactive, 'today', 'en'), 'Cloud counting paused · saved values retained');
+  const partial = { version: 1, state: 'active', periods: { today: { totalTokens: 100 } }, partialComponents: true };
+  assert.equal(api.accountingNote(partial, 'today', 'zh-CN'), '含云端 100 · 部分云端 Token 分项未知');
+  assert.equal(api.accountingNote({ ...inactive, reason: null }, 'today', 'zh-CN'), '');
 });
 test('a changed-login detail clears data instead of looking for a local transcript', () => {
   const s = snapshot(); s.errorCode = 'CLOUD_ACCOUNT_CHANGED'; const d = api.detail(s, a); assert.equal(d.fields.length, 0); assert.ok(d.note.includes('No local transcript'));

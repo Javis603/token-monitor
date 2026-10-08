@@ -199,7 +199,7 @@ class AutoCloudMonitor {
   report() {
     const threads = [...this.rows.values()].map((r) => {
       const meter = r.meter.report();
-      return { threadId: r.threadId, kind: r.kind, engineParentId: r.engineParentId || null, delegationParentId: r.delegationParentId || null,
+      return { threadId: r.threadId, kind: r.kind, engineParentId: r.engineParentId || null, delegationParentId: r.delegationParentId || null, parentConflict: r.parentConflict === true,
         runtimeStatus: r.runtimeStatus, discoveredAt: r.detectedAt, createdMs: r.createdMs, updatedMs: r.updatedMs, archived: !!r.archived,
         listening: this.listening.has(r.threadId), attachedAt: r.attachedAt, attachAttempts: r.attachAttempts, gapCount: r.gapCount,
         status: meter.status, total: meter.total, lastRequest: meter.lastRequest, lastTurnId: meter.lastTurnId,

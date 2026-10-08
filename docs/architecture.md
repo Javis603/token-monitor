@@ -98,6 +98,12 @@ The widget runs the collector, the usage transform (`src/shared/usage/usageTrans
 
 `windows[].metric === 'credits'` marks a money quota (`remaining` + `currency`). `src/shared/limits/balanceDisplay.js` is the single display entry point for Home, the tray and the limits page: key off the marker, never a provider whitelist. The top-up meter percentage is a display derivation and stays out of the wire shape.
 
+## Hosted Codex accounting in Electron
+
+The independent cloud observer owns authenticated discovery and event capture. Electron's `cloudLedgerRuntime.js` owns the private account ledger and reads the observer's numeric report every five seconds; it does not open another cloud connection. `cloudAccounting.js` keeps lifetime baselines, observed period deltas and high-water anchors across restart. `cloudPresentation.js` reconciles exact local thread totals per period and publishes the cloud-inclusive view through the existing renderer, tray, dock and widget path. The collector, Hub/device wire, public stats and headless agent retain their existing local aggregation, avoiding duplicate account-wide ingestion across devices.
+
+Account scope is rechecked around reads and before serving cached presentation. Scope/status/date/metadata changes invalidate the overlay, and corrupt or over-capacity persistence pauses recording while retaining originals. Known local fees retain upstream catalog pricing; cloud counters without model/rate evidence retain unknown fees. See `docs/codex-cloud-native-integration.md` for the counting, overlap and observation-date boundaries.
+
 ## Session title display
 
 `sessionTitlesEnabled` defaults to `true` and controls Electron presentation only. Hide titles from cached snapshots and all-time pulls through `src/electron/sessionTitleDisplay.js`; ordinary detail headings derive their title from current presentation stats and honor the same preference. Keep collection, metadata caches and local archives unchanged. Titles continue to be collected and saved locally while hidden. Sync consent is separate, defaults off and requires the server/device protocol below.

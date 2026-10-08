@@ -6,3 +6,4 @@
 .cloud-session-detail dt { opacity: .6; }
 .cloud-session-detail dd { margin: 0; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 #cloudSessionsSettingStatus { width: 100%; }
+.cloud-accounting-note { font-size: 11px; line-height: 1.5; opacity: .65; margin: 6px 0 0; text-align: center; }

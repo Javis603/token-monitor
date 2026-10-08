@@ -75,7 +75,7 @@ node --test tests/shared/codex*.test.js tests/shared/limitCollector.codex*.test.
 
 ## Automatic hosted-cloud observation
 
-`cloudAutoWatch.js` and `codex-cloud-auto-watch.js` automatically union the live cloud catalogs and attach to running tasks without manual IDs. Per-thread engine counters survive connection retries within the process, but are not summed into local/account totals. A separate user LaunchAgent runs the tested observer with an explicit automatic-attachment flag. Scope, persistence limits, controls and real validation are documented in [automatic cloud monitoring](../codex-cloud-auto-watch.md).
+`cloudAutoWatch.js` and `codex-cloud-auto-watch.js` automatically union the live cloud catalogs and attach to running tasks without manual IDs. Per-thread engine counters survive connection retries within the process; the observer never emits a combined sum. The app-side account ledger (`cloudLedgerRuntime.js`, `cloudPresentation.js`) consumes the report with TOTAL-only first-snapshot baselines, observation-dated increments, exact-thread local dedup and conservative parent/child exclusion, and overlays the result in the Electron presentation path only. A separate user LaunchAgent runs the tested observer with an explicit automatic-attachment flag. Scope, persistence limits, controls and real validation are documented in [automatic cloud monitoring](../codex-cloud-auto-watch.md); the accounting contract is in [the native integration note](../codex-cloud-native-integration.md).
 
 ## Cloud sessions in the ordinary list
 

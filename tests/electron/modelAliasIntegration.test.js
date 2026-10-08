@@ -28,7 +28,11 @@ test('Electron presentation applies aliases after limit projection without chang
     // variable, so the sandbox stands in for the helper instead.
     syncProvenanceActive: () => false,
     projectLimitStatsForDisplay: (stats) => stats,
-    presentationCache: createStatsPresentationCache()
+    presentationCache: createStatsPresentationCache(),
+    // The cloud ledger overlay is its own module with its own tests; inside
+    // this sandbox it must stay a passthrough so the alias assertions read the
+    // alias projection alone.
+    withCloudAccounting: (_stats, projected) => projected
   });
   assert.deepEqual(project(raw).periods.today.models, { 'claude-opus-5': 50 });
   assert.equal(project(raw).periods.today.costUsd, 9);

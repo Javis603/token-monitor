@@ -18,8 +18,15 @@ const local = {
   [`claude:${ids[0]}`]: { client: 'claude', sessionId: ids[0], title: '剪辑工作流测试', totalTokens: 24500, inputTokens: 20000, outputTokens: 500, cacheReadTokens: 4000, costUsd: 0.12, models: { 'claude-model': 24500 }, messageCount: 4, lastUsedAt: iso(2), startedAt: iso(15) },
   [`codex:${ids[1]}`]: { client: 'codex', sessionId: ids[1], title: '修复会话筛选', totalTokens: 18300, inputTokens: 11000, outputTokens: 300, cacheReadTokens: 7000, costUsd: 0.08, models: { 'codex-model': 18300 }, messageCount: 3, lastUsedAt: iso(7), startedAt: iso(20) }
 };
-const period = { totalTokens: 42800, costUsd: 0.2, models: { 'claude-model': 24500, 'codex-model': 18300 }, clients: { claude: 24500, codex: 18300 }, sessions: local };
-const stats = { snapshot: { id: 'ui-fixture', source: 'ui-fixture' }, periods: { today: period, month: period, allTime: period }, devices: [], updatedAt: iso(0), nativeSessions: {}, historyEnabled: true };
+const period = { totalTokens: 58800, costUsd: 0.2, models: { 'claude-model': 24500, 'codex-model': 18300 }, clients: { claude: 24500, codex: 34300 }, sessions: local };
+const cloudAccounting = { version: 1, state: 'active', reason: null, observedAt: iso(0), reportAt: iso(0), updatedAt: iso(0),
+  periods: { today: { totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, threadCount: 0 },
+    month: { totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, threadCount: 0 },
+    allTime: { totalTokens: 16000, inputTokens: 15400, cachedInputTokens: 12000, outputTokens: 600, reasoningOutputTokens: 120, threadCount: 1, partialComponents: false } },
+  baselineTokens: 16000, observedTokens: 0, excludedThreads: 1, excludedReasons: { matchedLocal: 0, parentOverlap: 1 }, partialThreads: 0, bridgedThreads: 0, partialComponents: false, unknownCost: true,
+  threads: { [ids[2]]: { threadId: ids[2], status: 'included', partial: false, bridged: false, includedTokens: 16000, baselineTokens: 16000, observedTokens: 0, resetCount: 0, overflowCount: 0, lastObservedAt: iso(0) },
+    [ids[3]]: { threadId: ids[3], status: 'parent-overlap', partial: false, bridged: false, includedTokens: 0, baselineTokens: 0, observedTokens: 0, resetCount: 0, overflowCount: 0, lastObservedAt: null } } };
+const stats = { snapshot: { id: 'ui-fixture', source: 'ui-fixture' }, periods: { today: { ...period, totalTokens: 42800, clients: { claude: 24500, codex: 18300 } }, month: { ...period, totalTokens: 42800, clients: { claude: 24500, codex: 18300 } }, allTime: period }, cloudAccounting, devices: [], updatedAt: iso(0), nativeSessions: {}, historyEnabled: true };
 const cloud = { version: 1, state: 'listening', errorCode: null, service: { installed: true, running: true, canControl: true }, stale: false, observedAt: iso(0), threads: [
   { threadId: ids[2], kind: 'aeon_child', engineParentId: null, delegationParentId: ids[3], runtimeStatus: 'active', listening: true, status: 'observed', total: { inputTokens: 15400, cachedInputTokens: 12000, outputTokens: 600, reasoningOutputTokens: 120, totalTokens: 16000 }, observedAt: iso(0), createdAt: iso(3), lastActivityAt: iso(1), gapCount: 0 },
   { threadId: ids[3], kind: 'subagent', engineParentId: ids[2], delegationParentId: null, runtimeStatus: 'idle', listening: false, status: 'no-usage-notification', total: null, observedAt: null, createdAt: iso(5), lastActivityAt: iso(4), gapCount: 1 }
@@ -83,7 +90,7 @@ app.whenReady().then(async () => {
   win.show();
   await waitFor('document.querySelectorAll("#breakdown .row").length === 4');
   const state = await evaluate(`({ rows:document.querySelectorAll('#breakdown .row').length, cloudRows:document.querySelectorAll('#breakdown [data-cloud-only="true"]').length, total:document.getElementById('totalTokens').textContent, separateCloudButton:!!document.getElementById('cloudUsageButton'), activeSession:document.querySelector('.shell').classList.contains('session-mode') })`);
-  assert.equal(state.cloudRows, 2); assert.equal(state.total, '42,800'); assert.equal(state.separateCloudButton, false); assert.equal(state.activeSession, true);
+  assert.equal(state.cloudRows, 2); assert.equal(state.total, '58,800'); assert.equal(state.separateCloudButton, false); assert.equal(state.activeSession, true);
   await capture('unified-sessions.png');
   await evaluate(`document.querySelector('#breakdown [data-cloud-only="true"]').click()`);
   await waitFor(`document.querySelector('#session-detail .cloud-session-detail') !== null`);
@@ -95,7 +102,18 @@ app.whenReady().then(async () => {
   await evaluate(`document.querySelector('#session-detail-head .detail-back').click()`);
   cloud.threads[0].total.inputTokens = 16400; cloud.threads[0].total.totalTokens = 17000;
   await waitFor(`document.querySelector('[data-cloud-only="true"] .row-value')?.textContent === '17,000'`);
-  assert.equal(await evaluate(`document.getElementById('totalTokens').textContent`), '42,800');
+  assert.equal(await evaluate(`document.getElementById('totalTokens').textContent`), '58,800');
+  // Main-process republish: when the ledger changes, republishPresentationStats
+  // pushes projected stats with no new local usage and no Sessions/Settings
+  // interaction. The Home header and its cloud note must move on that push alone.
+  const pushed = JSON.parse(JSON.stringify(stats));
+  pushed.periods.allTime = { ...pushed.periods.allTime, totalTokens: 60800, clients: { ...pushed.periods.allTime.clients, codex: 36300 } };
+  pushed.cloudAccounting = { ...pushed.cloudAccounting, observedTokens: 2000,
+    periods: { ...pushed.cloudAccounting.periods, allTime: { ...pushed.cloudAccounting.periods.allTime, totalTokens: 18000, observedTokens: 2000 } },
+    threads: { ...pushed.cloudAccounting.threads, [ids[2]]: { ...pushed.cloudAccounting.threads[ids[2]], includedTokens: 18000, observedTokens: 2000 } } };
+  win.webContents.send('stats:push', { event: 'stats', data: { type: 'stats', reason: 'presentation', mode: 'local', stats: pushed } });
+  await waitFor(`document.getElementById('totalTokens').textContent === '60,800'`);
+  assert.match(await evaluate(`document.getElementById('cloudAccountingNote').textContent`), /含云端\s*18,000/);
   cloud.threads[1].lastActivityAt = new Date(now - 10 * 86400000).toISOString();
   cloud.threads[0].lastActivityAt = new Date().toISOString();
   await evaluate(`document.querySelector('.tab[data-period="today"]').click()`);
@@ -155,7 +173,7 @@ app.whenReady().then(async () => {
   await waitFor(`document.getElementById('cloudSessionsSettingStatus').textContent === window.TokenMonitorCloudSessionRows.labels('zh-CN').error`);
   assert.equal(await evaluate(`document.getElementById('cloudSessionsEnabled').disabled`), true);
   assert.deepEqual(errors, []);
-  const result = { actualRenderer: true, actualPreload: true, syntheticData: true, rows: state.rows, cloudRows: state.cloudRows, totalUnchanged: 42800, cloudDetailNoLocalRead: true, localDetailPreserved: true, pollingUpdatesRows: true, periodFilterByActivity: true, settingsControls: audit.controls, cloudReads: audit.cloudReads, noCloudTabOrButton: true, loginSwitchClearedRowsSynchronously: true, controlHeldStaleReadSuppressed: true };
+  const result = { actualRenderer: true, actualPreload: true, syntheticData: true, rows: state.rows, cloudRows: state.cloudRows, totalIncludesCloud: 58800, cloudDetailNoLocalRead: true, localDetailPreserved: true, pollingUpdatesRows: true, periodFilterByActivity: true, settingsControls: audit.controls, cloudReads: audit.cloudReads, noCloudTabOrButton: true, homeAutoRefresh: true, cloudNoteUpdated: true, loginSwitchClearedRowsSynchronously: true, controlHeldStaleReadSuppressed: true };
   fs.writeFileSync(path.join(output, 'acceptance.json'), JSON.stringify(result, null, 2), { mode: 0o600 });
   console.log('UNIFIED_SESSIONS_PASS', JSON.stringify(result)); finish();
 }).catch(finish);

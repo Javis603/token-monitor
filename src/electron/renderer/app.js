@@ -2468,7 +2468,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
   const costLabelText = formatCost(cost || 0, unpricedTokens);
   costEl.textContent = metricLabel || (tokenDataUnavailable === true ? ''
     : unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText);
-  costEl.title = tokenDataUnavailable === true ? '' : costLabelText);
+  costEl.title = metricLabel || (tokenDataUnavailable === true ? '' : costLabelText);
 
   // The row builder already applied the shared gate (recent enough to have a
   // reading), so this draws whatever arrived rather than re-deciding from
@@ -4674,7 +4674,7 @@ function renderCloudSessionDetail() {
   const body = els.sessionDetail;
   let section = body.querySelector('.cloud-session-detail');
   if (!section) { section = document.createElement('section'); section.className = 'cloud-session-detail'; body.prepend(section); }
-  const data = cloudSessionRowsApi.detail(cloudSessionsSource.snapshot(), state.openSession.cloudThreadId, currentLocale());
+  const data = cloudSessionRowsApi.detail(cloudSessionsSource.snapshot(), state.openSession.cloudThreadId, currentLocale(), state.stats?.cloudAccounting);
   const signature = JSON.stringify(data);
   if (section.dataset.signature === signature) return;
   section.dataset.signature = signature;
@@ -6637,6 +6637,7 @@ function render() {
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
+  renderCloudAccountingNote();
   const fixedUnavailable = derivedPeriod && state.fixedPeriodSnapshot?.status !== 'ready';
   const detailUnavailable = derivedPeriod
     && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
@@ -13079,6 +13080,15 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   },
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
 });
+function renderCloudAccountingNote() {
+  const note = document.getElementById('cloudAccountingNote');
+  if (!note) return;
+  const text = typeof cloudSessionRowsApi.accountingNote === 'function'
+    ? cloudSessionRowsApi.accountingNote(state.stats?.cloudAccounting, state.period, currentLocale())
+    : '';
+  note.textContent = text;
+  note.classList.toggle('hidden', !text);
+}
 let cloudSessionControlBusy = false;
 let cloudSessionControlError = false;
 function renderCloudSessionSettings() {

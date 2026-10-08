@@ -278,7 +278,7 @@ const {
   withDetectedMimoAccount
 } = require('../shared/providers/mimo/limits');
 const { createMimoAccountMetadataReader } = require('./providers/mimo/accountMetadata');
-const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
+const { deviceHistoryRevision, historyPreview, historyRevision, localDayKey } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
 const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
@@ -331,6 +331,8 @@ const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./servi
 const { createCodexResetForecastClient } = require('./providers/codex/resetForecast');
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
+const { createCloudAccountingRuntime } = require('./cloudLedgerRuntime');
+const { applyCloudAccounting, collectLocalCodexThreadUsage } = require('./cloudPresentation');
 const {
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
@@ -2958,6 +2960,43 @@ function syncProvenanceActive() {
 
 const presentationCache = createStatsPresentationCache();
 
+// Cloud accounting is a main-process overlay, never a Hub or device-ingest
+// change: the observer is account-wide, so feeding these counters into the
+// shared device record could double count them across machines. Every visible
+// surface (renderer, tray, Widget, edge dock) reads this projection, which is
+// why the totals agree wherever practical.
+let cloudAccountingRuntime = null;
+const cloudLocalIdsCache = new WeakMap();
+const cloudOverlayCache = new WeakMap();
+
+function cloudLocalThreadIds(stats) {
+  const cached = cloudLocalIdsCache.get(stats);
+  if (cached && cached.localDevice === localDevice && cached.collectedDevice === lastCollectedDevice) return cached.ids;
+  const ids = collectLocalCodexThreadUsage(stats, [
+    localDevice?.allTime?.sessions,
+    lastCollectedDevice?.allTime?.sessions
+  ]);
+  cloudLocalIdsCache.set(stats, { localDevice, collectedDevice: lastCollectedDevice, ids });
+  return ids;
+}
+
+function withCloudAccounting(stats, projected) {
+  if (!cloudAccountingRuntime || !projected || typeof projected !== 'object') return projected;
+  const ids = cloudLocalThreadIds(stats);
+  // Recheck the current account before reading a cached projection.
+  const summary = cloudAccountingRuntime.summary({ localThreadUsage: ids });
+  const revision = cloudAccountingRuntime.revision();
+  const dayKey = localDayKey(new Date());
+  const cached = cloudOverlayCache.get(stats);
+  if (cached && cached.revision === revision && cached.dayKey === dayKey && cached.projected === projected
+    && cached.localDevice === localDevice && cached.ids === ids) {
+    return cached.result;
+  }
+  const result = applyCloudAccounting(projected, summary);
+  cloudOverlayCache.set(stats, { revision, dayKey, projected, localDevice, ids, result });
+  return result;
+}
+
 // Every input besides `stats` belongs in the cache key, or a settings change
 // would keep serving the projection it replaced.
 function electronPresentationStats(stats) {
@@ -2969,11 +3008,12 @@ function electronPresentationStats(stats) {
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
   const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
-  return presentationCache.get(stats, key, () => projectModelAliasStats(
+  const projected = presentationCache.get(stats, key, () => projectModelAliasStats(
     projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(stats) : stats, limitOptions),
     aliases,
     { grouping }
   ));
+  return withCloudAccounting(stats, projected);
 }
 
 const allTimeSessionsCache = createStatsPresentationCache();
@@ -5732,7 +5772,16 @@ function syncEdgeDock(rendererSettings) {
 }
 
 function refreshLimitStatsPresentation() {
-  if (!latestStats) return;
+  republishPresentationStats({ reason: 'presentation' });
+}
+
+// Re-publish the newest raw stats through the normal presentation path. Used
+// when the presentation itself changed (limits migration, cloud ledger) while
+// the underlying Hub/collector snapshot did not. The reason stays
+// 'presentation' because the renderer reads it as "says nothing about the Hub
+// connection", exactly like a limits repaint.
+function republishPresentationStats({ reason = 'presentation' } = {}) {
+  if (!latestStats) return false;
   const visibleStats = electronPresentationStats(latestStats);
   migrateCodexAdditionalLimits(visibleStats);
   scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
@@ -5742,10 +5791,24 @@ function refreshLimitStatsPresentation() {
     try {
       mainWindow.webContents.send('stats:push', {
         event: 'stats',
-        data: { type: 'stats', reason: 'presentation', mode, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
+        data: { type: 'stats', reason, mode, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
       });
     } catch (_) {}
   }
+  return true;
+}
+
+// Durable cloud accounting: poll the independent observer's validated report,
+// fold it into the account ledger and republish so Home moves without any
+// cloud view being open. The observer service (launchd) is the only live
+// component; this never opens a cloud connection itself.
+function startCloudAccounting() {
+  if (cloudAccountingRuntime || process.platform !== 'darwin') return;
+  cloudAccountingRuntime = createCloudAccountingRuntime({
+    onUpdate: () => republishPresentationStats(),
+    logger: (message) => console.log(`[cloud-ledger] ${message}`)
+  });
+  cloudAccountingRuntime.start();
 }
 
 function sendMimoAccountsPush() {
@@ -7317,6 +7380,7 @@ app.whenReady().then(() => {
       macWidgetSnapshotController?.resume();
     }
   });
+  startCloudAccounting();
   void hydrateCodexManagedWorkspaceLabels();
   if (settings.discordRpcEnabled) startDiscordRpc();
   rateCache = readRateCache();
@@ -9041,6 +9105,7 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 // OS-initiated logout or restart on macOS.
 app.on('before-quit', () => {
   quitRequested = true;
+  cloudAccountingRuntime?.stop();
   antigravityOAuthLoginController?.abort();
   resetMacWidgetReloadThrottle();
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
