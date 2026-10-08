@@ -72,7 +72,7 @@ npm run agent
 如需无人值守运行，请交给所在平台的服务管理器启动，例如 systemd 用户服务、launchd agent 或任务计划程序。无论用哪一种：
 
 - 以你自己的用户身份、在 checkout 目录中运行。agent 读取的是运行账户主目录下的工具数据。
-- 让 Node 位于它的 `PATH` 中。服务管理器启动时的 `PATH` 很精简，请加入 `dirname "$(command -v node)"` 输出的目录。nvm 等版本管理器的路径里带有 Node 版本号，升级 Node 后要同步更新。
+- 让 Node 位于它的 `PATH` 中。服务管理器启动时的 `PATH` 很精简，请加入 `node` 所在的目录（macOS 和 Linux 上可用 `dirname "$(command -v node)"` 查看）。nvm 等版本管理器的路径里带有 Node 版本号，升级 Node 后要同步更新。
 - 无论以何种方式退出都要重启。agent 收到 SIGTERM 和 SIGHUP 时以状态 0 退出，所以只在失败时重启的策略（例如 systemd 的 `Restart=on-failure`）会让它停下；请使用 `Restart=always` 或服务管理器中的等效设置。
 
 在 Windows 桌面上，通常直接用 widget 更合适。

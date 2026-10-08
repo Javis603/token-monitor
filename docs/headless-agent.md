@@ -72,7 +72,7 @@ The long-running agent watches tool data and posts updates within seconds, with 
 To keep it running unattended, start it from your platform's service manager, such as a systemd user service, a launchd agent, or Task Scheduler. Whichever you use:
 
 - Run it as your own user, from the checkout directory. The agent reads tool data from the home directory of the account it runs as.
-- Put Node on its `PATH`. Service managers start with a minimal `PATH`; add the directory printed by `dirname "$(command -v node)"`. Version managers such as nvm put the Node version in that path, so update it after upgrading Node.
+- Put Node on its `PATH`. Service managers start with a minimal `PATH`; add the directory that contains `node` (`dirname "$(command -v node)"` on macOS and Linux). Version managers such as nvm put the Node version in that path, so update it after upgrading Node.
 - Restart it whenever it exits. The agent exits with status 0 on SIGTERM and SIGHUP, so a restart-on-failure policy such as systemd's `Restart=on-failure` leaves it stopped; use `Restart=always` or your manager's equivalent.
 
 On a Windows desktop, the widget is usually the better choice.
