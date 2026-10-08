@@ -241,15 +241,10 @@ function buildSyncPayload(summary, {
       payload.allTimeProjectsOmitted = true;
     }
   }
-  if (omitClientThroughput) {
-    for (const period of ['today', 'month', 'allTime']) {
-      if (payload[period]) delete payload[period].clientThroughput;
-    }
-  }
-  if (omitModelThroughput) {
-    for (const period of ['today', 'month', 'allTime']) {
-      if (payload[period]) delete payload[period].modelThroughput;
-    }
+  for (const period of ['today', 'month', 'allTime']) {
+    if (!payload[period]) continue;
+    if (omitClientThroughput) delete payload[period].clientThroughput;
+    if (omitModelThroughput) delete payload[period].modelThroughput;
   }
   return payload;
 }

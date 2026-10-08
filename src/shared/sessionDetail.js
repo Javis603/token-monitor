@@ -12,7 +12,6 @@ const {
 const codebuddyExtension = require('./providers/codebuddy/extension');
 const opencodeSession = require('./providers/opencode/session');
 const { readReasonixSessionEvents } = require('./providers/reasonix/sessionDetail');
-const { conversationFile, readConversation } = require('./providers/antigravity/throughput');
 const { createLocalUsageStore } = require('./providers/codex/localUsageStore');
 
 function* readTranscriptLines(filePath) {
@@ -592,32 +591,6 @@ function readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, h
 }
 
 function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, env, useEnvRoots, deps = {} }) {
-  if (client === 'antigravity') {
-    const sourceEnv = useEnvRoots === false ? {} : env || process.env;
-    const file = conversationFile(sessionId, home, false, sourceEnv)
-      || conversationFile(sessionId, home, true, sourceEnv);
-    const data = file ? readConversation(file) : null;
-    if (!data) return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], 0), ...(file ? { error: 'read-failed' } : {}) };
-    const now = new Date((deps.now || Date.now)());
-    const exchanges = [];
-    for (const task of data.tasks) {
-      const selected = task.generations.filter(generation => withinPeriod(generation.startedAt ? new Date(generation.startedAt).toISOString() : '', period, now));
-      if (!selected.length) continue;
-      const exchange = newExchange('', task.startedAt ? new Date(task.startedAt).toISOString() : '');
-      exchange.taskNumber = task.taskNumber;
-      exchange.durationMs = selected.length === task.generations.length ? task.durationMs : null;
-      exchange.endedAt = task.endedAt ? new Date(task.endedAt).toISOString() : '';
-      for (const generation of selected) {
-        exchange.turns.push({ tokens: generation.tokens, durationMs: generation.durationMs, model: generation.model, tools: [], costEstimate: 0 });
-        addTokens(exchange.tokens, generation.tokens);
-      }
-      finalizeExchange(exchange);
-      exchange.tokensAvailable = data.complete;
-      exchanges.push(exchange);
-    }
-    distributeCost(exchanges, sessionCost);
-    return { found: true, client, sessionId, period, exchanges, totals: totalsOf(exchanges, sessionCost), tokenDataUnavailable: !data.complete };
-  }
   if (client === 'opencode') return readOpenCodeSessionDetail({ sessionId, period, deps });
   if (client === 'reasonix') return readReasonixSessionDetail({ sessionId, period, home, deps });
   const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots });

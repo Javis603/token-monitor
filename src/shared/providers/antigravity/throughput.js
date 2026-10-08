@@ -10,33 +10,34 @@ const { tokscaleHomeDir } = require('../../tokscaleConfig');
 const databaseCache = new Map();
 let sqlite;
 
+function readVarint(buffer, cursor) {
+  let value = 0n;
+  for (let shift = 0n; shift < 70n && cursor.offset < buffer.length; shift += 7n) {
+    const byte = buffer[cursor.offset++];
+    if (shift === 63n && byte > 1) break;
+    value |= BigInt(byte & 127) << shift;
+    if (byte < 128) return value;
+  }
+  throw new Error('Invalid protobuf varint');
+}
+
 // Decode only wire fields, never conversation text or tool payloads.
 function protobufFields(input) {
   const buffer = Buffer.from(input.buffer, input.byteOffset, input.byteLength);
   const fields = new Map();
-  let offset = 0;
-  function varint() {
-    let value = 0n;
-    for (let shift = 0n; shift < 70n && offset < buffer.length; shift += 7n) {
-      const byte = buffer[offset++];
-      if (shift === 63n && byte > 1) break;
-      value |= BigInt(byte & 127) << shift;
-      if (byte < 128) return value;
-    }
-    throw new Error('Invalid protobuf varint');
-  }
-  while (offset < buffer.length) {
-    const tag = varint();
+  const cursor = { offset: 0 };
+  while (cursor.offset < buffer.length) {
+    const tag = readVarint(buffer, cursor);
     const field = Number(tag >> 3n);
     const wire = Number(tag & 7n);
     if (!field || field > 0x1fffffff) throw new Error('Invalid protobuf field');
-    if (wire === 0) { fields.set(field, varint()); continue; }
-    const size = wire === 2 ? Number(varint()) : wire === 1 ? 8 : wire === 5 ? 4 : -1;
-    if (!Number.isSafeInteger(size) || size < 0 || offset + size > buffer.length) {
+    if (wire === 0) { fields.set(field, readVarint(buffer, cursor)); continue; }
+    const size = wire === 2 ? Number(readVarint(buffer, cursor)) : wire === 1 ? 8 : wire === 5 ? 4 : -1;
+    if (!Number.isSafeInteger(size) || size < 0 || cursor.offset + size > buffer.length) {
       throw new Error('Invalid protobuf length');
     }
-    if (wire === 2) fields.set(field, buffer.subarray(offset, offset + size));
-    offset += size;
+    if (wire === 2) fields.set(field, buffer.subarray(cursor.offset, cursor.offset + size));
+    cursor.offset += size;
   }
   return fields;
 }
@@ -61,13 +62,7 @@ function timeMs(fields) {
 function stepIndex(fields) {
   let value = fields.get(2);
   // Older databases encode the repeated step index as a packed varint.
-  if (Buffer.isBuffer(value)) {
-    let result = 0n;
-    for (let index = 0; index < Math.min(value.length, 10); index += 1) {
-      result |= BigInt(value[index] & 127) << BigInt(index * 7);
-      if (value[index] < 128) { value = result; break; }
-    }
-  }
+  if (Buffer.isBuffer(value)) value = value.length ? readVarint(value, { offset: 0 }) : undefined;
   return typeof value === 'bigint' && value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER)
     ? Number(value) : null;
 }
@@ -132,53 +127,29 @@ function readConversation(file) {
   try {
     database = new sqlite.DatabaseSync(file, { readOnly: true });
     database.exec('PRAGMA busy_timeout = 100; BEGIN');
-    const tasks = [];
     const steps = new Map();
-    let current = null;
     let complete = true;
     const hasSteps = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='steps'").get();
     if (hasSteps) {
-      for (const row of database.prepare('SELECT idx,step_type,status,CASE WHEN length(metadata)<=8388608 THEN metadata END AS metadata FROM steps ORDER BY idx').iterate()) {
+      for (const row of database.prepare('SELECT idx,CASE WHEN length(metadata)<=8388608 THEN metadata END AS metadata FROM steps').iterate()) {
         let meta;
         try { meta = row.metadata ? protobufFields(row.metadata) : new Map(); }
         catch (_) { meta = new Map(); complete = false; }
-        const startedAt = timeMs(nested(meta, 1)) || 0;
-        const endedAt = Math.max(...[7, 8, 32].map(field => timeMs(nested(meta, field)) || 0));
-        if (row.step_type === 14) {
-          current = { startedAt, endedAt: 0, completed: true, generations: [], taskNumber: tasks.length + 1 };
-          tasks.push(current);
-        }
-        if (current) {
-          current.endedAt = Math.max(current.endedAt, endedAt);
-          // Unknown or pending statuses cannot certify task completion.
-          if (![3, 4, 5, 6, 7, 10].includes(row.status) || (row.step_type !== 14 && !endedAt)) current.completed = false;
-        }
-        steps.set(row.idx, { startedAt, task: current });
+        steps.set(row.idx, timeMs(nested(meta, 1)) || 0);
       }
     }
     const generations = [];
-    const orphaned = [];
     const seen = new Set();
     for (const row of database.prepare('SELECT CASE WHEN length(data)<=8388608 THEN data END AS data FROM gen_metadata ORDER BY idx DESC').iterate()) {
       const generation = decodeGeneration(row.data);
       if (!generation) { complete = false; continue; }
       if (generation.responseId && seen.has(generation.responseId)) continue;
       if (generation.responseId) seen.add(generation.responseId);
-      const step = steps.get(generation.stepIdx);
-      generation.startedAt ||= step?.startedAt || 0;
-      const task = generation.stepIdx !== null ? step?.task
-        : tasks.findLast(candidate => generation.startedAt && candidate.startedAt <= generation.startedAt);
-      if (task) task.generations.unshift(generation);
-      else orphaned.unshift({ startedAt: generation.startedAt, endedAt: 0, completed: false, taskNumber: null, generations: [generation] });
+      generation.startedAt ||= steps.get(generation.stepIdx) || 0;
       generations.unshift(generation);
     }
-    tasks.push(...orphaned);
-    for (const task of tasks) {
-      task.durationMs = complete && task.completed && task.startedAt > 0 && task.endedAt > task.startedAt
-        ? task.endedAt - task.startedAt : null;
-    }
     database.exec('COMMIT');
-    const value = { tasks, generations, complete };
+    const value = { generations, complete };
     if (key === stamp()) {
       databaseCache.set(file, { key, value });
       if (databaseCache.size > 128) databaseCache.delete(databaseCache.keys().next().value);
@@ -241,4 +212,4 @@ function applyAntigravityThroughput(json, { home, env = process.env, flags = [],
   }
 }
 
-module.exports = { applyAntigravityThroughput, conversationFile, decodeGeneration, protobufFields, readConversation };
+module.exports = { applyAntigravityThroughput, conversationFile, decodeGeneration, readConversation };

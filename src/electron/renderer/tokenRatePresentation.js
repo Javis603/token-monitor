@@ -79,6 +79,19 @@
       .filter(([, counters]) => counters));
   }
 
+  function attributedReadings(counters, previous, delta, key) {
+    // Missing attribution is unknown, not an exact zero baseline. Historical
+    // reassignment cannot add more than the entire matched snapshot delta.
+    if (!previous) return [];
+    return Object.entries(counters || {}).flatMap(([name, current]) => {
+      const baseline = previous[name] || { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+      const change = Object.fromEntries(Object.keys(current).map((field) => [field, current[field] - baseline[field]]));
+      if (Object.keys(change).some((field) => change[field] < 0 || change[field] > delta[field])
+        || !(change.timedDurationMs > 0)) return [];
+      return [{ [key]: name, speed: tokenRatePerSecond(change), burn: tokenBurnPerMinute(change) }];
+    });
+  }
+
   // A period is cumulative, so its ratio is necessarily an average. Live rate is the ratio
   // of the counters added by one successful snapshot: the duration comes from the same
   // tokscale performance entries as both token numerators, never from watcher or wall time.
@@ -89,6 +102,7 @@
     let baseline = null;
     let modelBaseline = null;
     let clientBaseline = null;
+    let clientSamples = [];
     let sample = null;
     let revision = 0;
 
@@ -96,6 +110,7 @@
       baseline = period ? usageCounters(period) : null;
       modelBaseline = period?.modelThroughput ? modelCounters(period) : null;
       clientBaseline = period?.clientThroughput ? modelCounters(period, 'clientThroughput') : null;
+      clientSamples = [];
       sample = null;
     }
 
@@ -107,9 +122,13 @@
       const clients = period?.clientThroughput ? modelCounters(period, 'clientThroughput') : null;
       const previousClients = clientBaseline;
       clientBaseline = clients;
+      const retained = clientSamples.filter(({ client }) => clients?.[client]
+        && !Object.keys(clients[client]).some((field) => clients[client][field] < previousClients?.[client]?.[field]));
+      if (retained.length !== clientSamples.length) clientSamples = retained;
       if (!current) {
         baseline = null;
         sample = null;
+        clientSamples = [];
         return null;
       }
       if (!baseline) {
@@ -126,35 +145,26 @@
 
       if (Object.values(delta).some((value) => value < 0)) {
         sample = null;
+        clientSamples = [];
         return null;
       }
       if (!(delta.timedDurationMs > 0)) return sample;
 
       revision += 1;
+      const sampledAt = Number(now()) || 0;
+      const readings = attributedReadings(clients, previousClients, delta, 'client');
+      if (readings.length) {
+        const retainedClients = new Map(clientSamples.map((reading) => [reading.client, reading]));
+        for (const reading of readings) retainedClients.set(reading.client, { ...reading, sampledAt });
+        clientSamples = [...retainedClients.values()];
+      }
       sample = {
         speed: tokenRatePerSecond(delta),
         burn: tokenBurnPerMinute(delta),
-        sampledAt: Number(now()) || 0,
+        sampledAt,
         revision,
-        models: Object.entries(models || {}).flatMap(([model, counters]) => {
-          // Missing attribution is unknown, not an exact zero baseline.
-          if (!previousModels) return [];
-          const previous = previousModels[model] || { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
-          const change = Object.fromEntries(Object.keys(counters).map((field) => [field, counters[field] - previous[field]]));
-          // A renamed/retroactively attributed model may appear with historical
-          // counters. It cannot have added more than this snapshot's entire delta.
-          if (Object.keys(change).some((field) => change[field] < 0 || change[field] > delta[field])
-            || !(change.timedDurationMs > 0)) return [];
-          return [{ model, speed: tokenRatePerSecond(change), burn: tokenBurnPerMinute(change) }];
-        }),
-        ...(clients ? { clients: Object.entries(clients).flatMap(([client, counters]) => {
-          if (!previousClients) return [];
-          const previous = previousClients[client] || { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
-          const change = Object.fromEntries(Object.keys(counters).map((field) => [field, counters[field] - previous[field]]));
-          if (Object.keys(change).some((field) => change[field] < 0 || change[field] > delta[field])
-            || !(change.timedDurationMs > 0)) return [];
-          return [{ client, speed: tokenRatePerSecond(change), burn: tokenBurnPerMinute(change) }];
-        }) } : {}),
+        models: attributedReadings(models, previousModels, delta, 'model'),
+        ...(clients ? { clients: readings } : {}),
         ...delta
       };
       return sample;
@@ -169,7 +179,7 @@
       return mode === 'burn' ? sample.burn : sample.speed;
     }
 
-    return { getSample, observe, reset, value };
+    return { getSample, getClientSamples: () => clientSamples, observe, reset, value };
   }
 
   // Hub devices publish independently. Taking one delta from the aggregate would make the
@@ -204,7 +214,7 @@
       for (const entry of normalizedEntries(entries)) {
         const tracker = createLiveTokenRateTracker({ now });
         tracker.reset(entry.period);
-        trackers.set(entry.id, { tracker, name: entry.name, clientSamples: new Map(), clientCounters: modelCounters(entry.period || {}, 'clientThroughput') });
+        trackers.set(entry.id, { tracker, name: entry.name });
       }
     }
 
@@ -228,29 +238,16 @@
         if (!device) {
           const tracker = createLiveTokenRateTracker({ now });
           tracker.reset(entry.period);
-          trackers.set(entry.id, { tracker, name: entry.name, clientSamples: new Map(), clientCounters: modelCounters(entry.period || {}, 'clientThroughput') });
+          trackers.set(entry.id, { tracker, name: entry.name });
           continue;
         }
         device.name = entry.name;
-        const { tracker, clientSamples, clientCounters } = device;
-        const counters = modelCounters(entry.period || {}, 'clientThroughput');
-        for (const client of clientSamples.keys()) {
-          const previousCounters = clientCounters[client];
-          const currentCounters = counters[client];
-          if (!currentCounters || (previousCounters && Object.keys(previousCounters)
-            .some((field) => currentCounters[field] < previousCounters[field]))) {
-            clientSamples.delete(client);
-            changed = true;
-          }
-        }
-        device.clientCounters = counters;
+        const { tracker } = device;
         const previous = tracker.getSample();
+        const previousClients = tracker.getClientSamples();
         const sample = tracker.observe(entry.period);
+        if (previousClients !== tracker.getClientSamples()) changed = true;
         if (sample === previous) continue;
-        if (!sample) clientSamples.clear();
-        else for (const client of sample.clients || []) {
-          clientSamples.set(client.client, { ...client, sampledAt: sample.sampledAt });
-        }
         changed = true;
         if (sample) fresh = true;
         else if (previous) invalidated = true;
@@ -261,8 +258,7 @@
       return { changed, sample: getSample() };
     }
 
-    function activeSamples() {
-      const timestamp = Number(now()) || 0;
+    function activeSamples(timestamp) {
       return [...trackers.entries()]
         .map(([id, { tracker, name }]) => {
           const sample = tracker.getSample();
@@ -271,21 +267,38 @@
         .filter((sample) => sample && timestamp < sample.sampledAt + lifetime);
     }
 
-    // Each tool retains its own latest matched delta. A Codex-only push must not
-    // erase Antigravity's still-live reading, and unknown legacy attribution never
-    // becomes a zero baseline for a tool that later starts reporting counters.
-    function clientReadings() {
+    function getSample() {
       const timestamp = Number(now()) || 0;
+      const samples = activeSamples(timestamp);
+      if (samples.length) {
+        lastDisplaySample = {
+          speed: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.speed, 0)),
+          burn: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.burn, 0)),
+          sampledAt: Math.max(...samples.map((sample) => sample.sampledAt)),
+          samples,
+          deviceCount: samples.length,
+          revision
+        };
+      }
+
+      // Keep the last aggregate dimmed until clearAfter, without adding expired
+      // device readings to live throughput. Each client's clock remains separate.
+      if (!lastDisplaySample || timestamp >= lastDisplaySample.sampledAt + clearAfter) return null;
+      const idle = !samples.length;
+      const expiresAt = idle ? lastDisplaySample.sampledAt + clearAfter
+        : Math.min(...samples.map((sample) => sample.sampledAt + lifetime));
       const grouped = new Map();
-      for (const device of trackers.values()) {
-        for (const sample of device.clientSamples.values()) {
-          if (timestamp >= sample.sampledAt + clearAfter) continue;
+      const deviceClients = new Map();
+      for (const [id, { tracker }] of trackers) {
+        const retained = tracker.getClientSamples().filter((sample) => timestamp < sample.sampledAt + clearAfter);
+        deviceClients.set(id, retained);
+        for (const sample of retained) {
           const readings = grouped.get(sample.client) || [];
           readings.push(sample);
           grouped.set(sample.client, readings);
         }
       }
-      return [...grouped].map(([client, readings]) => {
+      const clients = [...grouped].map(([client, readings]) => {
         const active = readings.filter((sample) => timestamp < sample.sampledAt + lifetime);
         const selected = active.length ? active : readings;
         return {
@@ -298,55 +311,17 @@
           deviceCount: selected.length
         };
       });
-    }
-
-    function withClientReadings(sample) {
-      const clients = clientReadings();
-      const result = { ...sample };
-      if (sample.devices) result.devices = sample.devices.map((device) => {
-        const next = { ...device };
-        const retained = [...(trackers.get(device.id)?.clientSamples.values() || [])]
-          .filter((client) => (Number(now()) || 0) < client.sampledAt + clearAfter);
-        if (retained.length) next.clients = retained;
-        else delete next.clients;
-        return next;
-      }).filter((device) => device.models?.length || device.clients?.length);
-      if (clients.length) {
-        result.clients = clients;
-        result.expiresAt = Math.min(result.expiresAt, ...clients.map((client) => client.expiresAt));
-      } else delete result.clients;
-      return result;
-    }
-
-    function getSample() {
-      const samples = activeSamples();
-      if (samples.length) {
-        lastDisplaySample = {
-          speed: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.speed, 0)),
-          burn: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.burn, 0)),
-          sampledAt: Math.max(...samples.map((sample) => sample.sampledAt)),
-          devices: samples.map(({ id, name, models }) => {
-            const clients = [...trackers.get(id).clientSamples.values()]
-              .filter((client) => (Number(now()) || 0) < client.sampledAt + clearAfter);
-            return { id, name, models, ...(clients.length ? { clients } : {}) };
-          }).filter((device) => device.models?.length || device.clients?.length),
-          deviceCount: samples.length,
-          revision
-        };
-        return withClientReadings({
-          ...lastDisplaySample,
-          expiresAt: Math.min(...samples.map((sample) => sample.sampledAt + lifetime)),
-          idle: false
-        });
-      }
-
-      // The retained aggregate is presentation-only: expired device samples no longer
-      // contribute to live throughput, but the last useful reading stays visible in the
-      // dimmed state until it is old enough to be genuinely unavailable.
-      const timestamp = Number(now()) || 0;
-      const expiresAt = lastDisplaySample?.sampledAt + clearAfter;
-      if (!lastDisplaySample || timestamp >= expiresAt) return null;
-      return withClientReadings({ ...lastDisplaySample, expiresAt, idle: true });
+      const display = lastDisplaySample;
+      return {
+        speed: display.speed, burn: display.burn, sampledAt: display.sampledAt,
+        devices: display.samples.map(({ id, name, models }) => {
+          const retained = deviceClients.get(id) || [];
+          return { id, name, models, ...(retained.length ? { clients: retained } : {}) };
+        }).filter((device) => device.models?.length || device.clients?.length),
+        deviceCount: display.deviceCount, revision: display.revision, idle,
+        expiresAt: Math.min(expiresAt, ...clients.map((client) => client.expiresAt)),
+        ...(clients.length ? { clients } : {})
+      };
     }
 
     function nextExpiryAt() {

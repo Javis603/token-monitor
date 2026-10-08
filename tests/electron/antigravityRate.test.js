@@ -115,6 +115,27 @@ test('merged, separate and single-source displays share the same samples and kee
   assert.equal(rate.normalizeLiveTokenRateDisplay('unsupported'), 'all');
 });
 
+test('a growing combined snapshot cannot hide a source regression or preserve unknown attribution', () => {
+  const clock = { value: 100 };
+  const tracker = group(clock);
+  tracker.observe([{ id: 'local', period: period() }]);
+  const reassigned = period(200);
+  reassigned.clientThroughput.antigravity = { timedTokens: 85, timedOutputTokens: 60, timedDurationMs: 1000 };
+  tracker.observe([{ id: 'local', period: reassigned }]);
+  assert.equal(tracker.getSample().speed, 50);
+  assert.equal(rate.selectLiveTokenRateSample(tracker.getSample(), 'codex').speed, 50);
+  assert.equal(rate.selectLiveTokenRateSample(tracker.getSample(), 'antigravity'), null);
+  const legacy = period(300);
+  delete legacy.clientThroughput;
+  tracker.observe([{ id: 'local', period: legacy }]);
+  assert.equal(tracker.getSample().speed, 50);
+  assert.equal(rate.selectLiveTokenRateSample(tracker.getSample(), 'codex'), null);
+  tracker.observe([{ id: 'local', period: period(400) }]);
+  assert.equal(rate.selectLiveTokenRateSample(tracker.getSample(), 'codex'), null);
+  tracker.observe([{ id: 'local', period: period(500) }]);
+  assert.equal(rate.selectLiveTokenRateSample(tracker.getSample(), 'codex').speed, 50);
+});
+
 test('tool throughput adds per-device live rates while legacy devices retain only a combined reading', () => {
   const clock = { value: 100 };
   const tracker = rate.createLiveTokenRateGroupTracker({ now: () => clock.value });

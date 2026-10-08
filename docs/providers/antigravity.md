@@ -57,8 +57,6 @@ The collector supplements an untimed Tokscale row only when its session, model, 
 
 Generation timing feeds the existing realtime-rate footer and Edge Dock. The footer can show all timed tools together, separate GPT (Codex) and Antigravity readings, GPT (Codex) only, or Antigravity only. Edge Dock selects its own combined or individual source, while its hover card retains separate tool and model readings. Source selection uses optional raw clientThroughput counters, independent of model names and aliases; an older device without these counters remains available in the combined rate, with unavailable individual readings. Combined rate keeps the existing matched-snapshot calculation, rather than summing the separate tool ratios. Each tool retains and expires its own last sample. No extra tab or Antigravity detail navigation is added.
 
-The local metadata reader also groups generations at user-input steps (type 14). Task duration spans the user-step start to the final step end and includes tool waits. Running, incomplete, or partially selected tasks have unavailable task timing. These task clocks remain separate from generation timing and are not substituted into realtime throughput.
-
 ### Boundary with quota collection
 
 Token/session totals are machine-local activity. They are not deduplicated by Google email and do not use the standalone OAuth credentials described below. Changes to quota identity or account aggregation must not alter usage attribution.
