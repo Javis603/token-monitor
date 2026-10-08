@@ -396,6 +396,9 @@ Object.assign(els, {
   edgeDockFeature: document.getElementById('edgeDockFeature'),
   edgeDockInput: document.getElementById('edgeDockInput'),
   edgeDockOptions: document.getElementById('edgeDockOptions'),
+  edgeDockMoreOptionsGroup: document.getElementById('edgeDockMoreOptionsGroup'),
+  edgeDockMoreOptionsToggle: document.getElementById('edgeDockMoreOptionsToggle'),
+  edgeDockMoreOptionsDetails: document.getElementById('edgeDockMoreOptionsDetails'),
   edgeDockSideInputs: Array.from(document.querySelectorAll('input[name="edgeDockSide"]')),
   edgeDockModeInputs: Array.from(document.querySelectorAll('input[name="edgeDockMode"]')),
   edgeDockSizeInputs: Array.from(document.querySelectorAll('input[name="edgeDockSize"]')),
@@ -404,6 +407,7 @@ Object.assign(els, {
   edgeDockHapticRow: document.getElementById('edgeDockHapticRow'),
   edgeDockHapticInput: document.getElementById('edgeDockHapticInput'),
   edgeDockWarnColorsInput: document.getElementById('edgeDockWarnColorsInput'),
+  edgeDockRunningIndicatorInput: document.getElementById('edgeDockRunningIndicatorInput'),
   edgeDockMacBackdropRow: document.getElementById('edgeDockMacBackdropRow'),
   edgeDockMacBackdropInput: document.getElementById('edgeDockMacBackdropInput'),
   edgeDockComposer: document.getElementById('edgeDockComposer'),
@@ -12534,6 +12538,7 @@ setupSettingsAccordion(els.appUpdateNotes, els.appUpdateNotesToggle, els.appUpda
 setupSettingsAccordion(els.advancedSettingsGroup, els.advancedSettingsToggle, els.advancedSettingsDetails);
 setupSettingsAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails);
 setupSettingsAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails);
+setupSettingsAccordion(els.edgeDockMoreOptionsGroup, els.edgeDockMoreOptionsToggle, els.edgeDockMoreOptionsDetails);
 for (const input of els.systemGlassInputs || []) {
   input.addEventListener('change', () => {
     if (input.checked) saveAppearanceFromControls();
@@ -12627,6 +12632,7 @@ function syncEdgeDockControls() {
   els.edgeDockHapticRow?.classList.toggle('hidden', state.appInfo?.platform !== 'darwin');
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
   if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
+  if (els.edgeDockRunningIndicatorInput) els.edgeDockRunningIndicatorInput.checked = state.settings?.edgeDockRunningIndicatorEnabled !== false;
   if (els.edgeDockMacBackdropInput) {
     els.edgeDockMacBackdropInput.value = macBackdropApi.normalizeEdgeDockBackdropMode(state.settings?.edgeDockMacBackdrop);
   }
@@ -12685,6 +12691,9 @@ for (const input of els.edgeDockSideInputs || []) {
 }
 els.edgeDockWarnColorsInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockWarnColors: els.edgeDockWarnColorsInput.checked });
+});
+els.edgeDockRunningIndicatorInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockRunningIndicatorEnabled: els.edgeDockRunningIndicatorInput.checked });
 });
 els.edgeDockMacBackdropInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockMacBackdrop: macBackdropApi.normalizeEdgeDockBackdropMode(els.edgeDockMacBackdropInput.value) });

@@ -589,6 +589,10 @@ function ringNode(remainingPercent, color, mark) {
   fill.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE * (1 - remaining / 100)));
   if (remainingPercent === null) fill.style.opacity = '0';
   svg.append(track, fill);
+  if (appearance().edgeDockRunningIndicatorEnabled === false) {
+    ring.append(svg, mark);
+    return ring;
+  }
   // A separate inner arc reports work without moving the quota reading. Rail
   // pushes rebuild these nodes, so anchor rotation to the clock to avoid restarting
   // the spinner each time new usage arrives.
