@@ -72,7 +72,7 @@ npm run agent:once
 npm run agent
 ```
 
-如需無人值守執行，請參考[持續執行](headless-agent.zh-TW.md#持續執行)中的 systemd 服務範例。
+如需無人值守執行，請依照[持續執行](headless-agent.zh-TW.md#持續執行)交給服務管理器啟動。
 
 ## 疑難排解
 

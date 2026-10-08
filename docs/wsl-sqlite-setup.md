@@ -72,7 +72,7 @@ Confirm that a second device appears in Token Monitor and that the SQLite-backed
 npm run agent
 ```
 
-For unattended use, see [Run continuously](headless-agent.md#run-continuously) for a systemd service example.
+For unattended use, start it from a service manager as described in [Run continuously](headless-agent.md#run-continuously).
 
 ## Troubleshooting
 

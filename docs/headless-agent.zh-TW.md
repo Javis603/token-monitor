@@ -42,7 +42,7 @@ TOKEN_MONITOR_DEVICE_ID=build-server
 ```
 
 - `TOKEN_MONITOR_DEVICE_ID` 預設是主機名稱，必須在所有裝置之間唯一：hub 會把相同 ID 當作同一台裝置，後傳送的紀錄會覆蓋另一台。
-- `TOKEN_MONITOR_CLIENTS` 限制要採集的工具（以逗號分隔）。不設定則採集所有支援的工具。
+- `TOKEN_MONITOR_CLIENTS` 列出要採集的工具（以逗號分隔）。`.env.example` 已列出預設的工具，刪掉不需要的即可。Qoder CN 預設關閉，需要時加入 `qodercn`。
 - 額度所需的服務商憑證、代理設定以及其他所有選項，見 [`.env.example`](../.env.example) 與 [configuration.md](configuration.md#headless-agent--hub-env)。優先順序為 CLI 參數 → 環境變數 → 內建預設值。
 
 無論從哪個目錄啟動，agent 都會讀取 checkout 根目錄下的 `.env`。
@@ -67,85 +67,17 @@ npm run agent:once
 npm run agent
 ```
 
-常駐的 agent 會監看工具資料，幾秒內回報更新，並定期重新掃描作為備援。按 Ctrl-C 停止。如需無人值守執行，請交給服務管理器啟動。以下範例假設 checkout 位於 `~/token-monitor`；如果複製到別處，請相應修改路徑。
+常駐的 agent 會監看工具資料，幾秒內回報更新，並定期重新掃描作為備援。按 Ctrl-C 停止。
 
-服務管理器啟動時的 `PATH` 很精簡，所以範例都明確設定了它。請把 Node 目錄換成 `dirname "$(command -v node)"` 的輸出；透過 nvm、fnm 或 Homebrew 安裝 Node 時尤其需要。版本管理器的路徑裡帶有版本號，升級 Node 後要一併更新。
+如需無人值守執行，請交給所在平台的服務管理器啟動，例如 systemd 使用者服務、launchd agent 或工作排程器。無論用哪一種：
 
-### Linux（systemd 使用者服務）
+- 以你自己的使用者身分、在 checkout 目錄中執行。agent 讀取的是執行帳號主目錄下的工具資料。
+- 讓 Node 位於它的 `PATH` 中。服務管理器啟動時的 `PATH` 很精簡，請加入 `dirname "$(command -v node)"` 輸出的目錄。nvm 等版本管理器的路徑裡帶有 Node 版本號，升級 Node 後要一併更新。
+- 無論以何種方式結束都要重新啟動。agent 收到 SIGTERM 和 SIGHUP 時以狀態 0 結束，所以只在失敗時重啟的策略（例如 systemd 的 `Restart=on-failure`）會讓它停下；請使用 `Restart=always` 或服務管理器中的對應設定。
 
-建立 `~/.config/systemd/user/token-monitor-agent.service`：
+在 Windows 桌面上，通常直接用小工具更合適。
 
-```ini
-[Unit]
-Description=Token Monitor headless agent
-
-[Service]
-WorkingDirectory=%h/token-monitor
-Environment=PATH=/path/to/node/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/env npm run agent
-Restart=always
-RestartSec=30
-
-[Install]
-WantedBy=default.target
-```
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now token-monitor-agent
-loginctl enable-linger "$USER"   # 登出後仍保持執行
-journalctl --user -u token-monitor-agent -f
-```
-
-在 WSL 中，需要先在 `/etc/wsl.conf` 啟用 systemd（`[boot]` → `systemd=true`），再在 Windows 中執行 `wsl --shutdown` 使其生效。不使用 systemd 時，請改為從 shell 設定檔啟動 agent。WSL 不會隨 Windows 自動啟動，所以 agent 只在發行版執行時運作。
-
-### macOS（launchd agent）
-
-建立 `~/Library/LaunchAgents/com.token-monitor.agent.plist`，把 `YOU` 換成你的使用者名稱：
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>com.token-monitor.agent</string>
-  <key>WorkingDirectory</key><string>/Users/YOU/token-monitor</string>
-  <key>ProgramArguments</key>
-  <array><string>/usr/bin/env</string><string>npm</string><string>run</string><string>agent</string></array>
-  <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>/path/to/node/bin:/usr/bin:/bin</string></dict>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/Users/YOU/Library/Logs/token-monitor-agent.log</string>
-  <key>StandardErrorPath</key><string>/Users/YOU/Library/Logs/token-monitor-agent.log</string>
-</dict>
-</plist>
-```
-
-```bash
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.token-monitor.agent.plist
-launchctl bootout "gui/$(id -u)/com.token-monitor.agent"   # 停止
-```
-
-`gui` 網域只在你登入桌面時存在，所以 agent 會在登入時啟動、登出時停止。重新開機後要等下次登入桌面才會執行。
-
-### Windows（工作排程器）
-
-```powershell
-schtasks /Create /TN "Token Monitor agent" /SC ONLOGON /TR "cmd /c cd /d %USERPROFILE%\token-monitor && npm run agent"
-```
-
-請保留 `%USERPROFILE%` 原樣：工作執行時由 `cmd` 展開。這個工作會在登入時開啟主控台視窗，關閉視窗即停止 agent，當機後也不會自動重新啟動。在 Windows 桌面上，通常直接用小工具更合適。
-
-### 排程單次執行
-
-如果無法常駐程序，可以改為排程執行 `npm run agent:once`，例如用 cron：
-
-```cron
-*/10 * * * * cd "$HOME/token-monitor" && PATH=/path/to/node/bin:/usr/bin:/bin npm run agent:once >> "$HOME/token-monitor-agent.log" 2>&1
-```
-
-每次都會完整掃描，因此更新頻率取決於排程間隔。
+如果無法常駐程序，可以改為用 cron 等排程器定時執行 `npm run agent:once`。每次都會完整掃描，因此更新頻率取決於排程間隔。
 
 ## 更新
 
@@ -167,7 +99,6 @@ npm ci
 
 - **裝置一直沒有出現**：檢查 `TOKEN_MONITOR_HUB_URL` 與 `TOKEN_MONITOR_SECRET`，以及本機能否連到 hub 連接埠（防火牆、區域網路或 VPN）。啟動時出現 `TOKEN_MONITOR_SECRET` 警告，表示 agent 正在不帶密鑰傳送。
 - **`No such built-in module: node:sqlite`**：Node 版本低於需求。升級後重新開啟終端機，確認 `node --version` 顯示新版本。
-- **`systemctl --user` 出現 `Failed to connect to bus`**：目前的 shell 沒有使用者工作階段，常見於 `su` 或 `sudo -u` 之後。請以該使用者透過 SSH 或桌面登入後再執行，或先執行 `export XDG_RUNTIME_DIR=/run/user/$(id -u)`。
 - **請求經過代理**：把 hub 主機加入 `NO_PROXY` 與 `no_proxy`，或為 agent 取消代理環境變數。
 - **兩台裝置互相覆蓋**：為每台機器設定不同的 `TOKEN_MONITOR_DEVICE_ID`。
 - **總量翻倍**：有兩個採集器讀取了同一份工具資料，例如 Windows 小工具的 WSL 掃描與 WSL 內的 agent。請在其中一邊縮小 `TOKEN_MONITOR_CLIENTS`；hub 只會相加裝置總量，不會跨裝置去除重複的 session。
