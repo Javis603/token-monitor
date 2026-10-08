@@ -8,18 +8,26 @@ const {
   edgeDockBubbleBounds,
   edgeDockCellAt,
   edgeDockCorridorBounds,
+  edgeDockFittingScale,
+  edgeDockHandleBounds,
+  edgeDockHandleZones,
   edgeDockPeekBounds,
   edgeDockPlacementForDrop,
   edgeDockRailBounds,
+  edgeDockRefreshBounds,
+  edgeDockRefreshCorridor,
+  edgeDockScale,
   edgeDockTriggerBounds,
+  normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
   normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
-  rectContains
+  rectContains,
+  scaledEdgeDockMetrics
 } = require('./geometry');
 const { shapeRectsFromPolygons } = require('./mask');
-const { bubbleCommands, peekCommands, railCommands, toPolygons, toSvgPath } = require('../renderer/edgeDock/shapes');
+const { bubbleCommands, peekCommands, railCommands, refreshCommands, toPolygons, toSvgPath } = require('../renderer/edgeDock/shapes');
 
 const SURFACES = Object.freeze(['peek', 'rail', 'bubble']);
 const POLL_IDLE_MS = 90;
@@ -31,6 +39,8 @@ const POLL_DRAG_MS = 16;
 const FULL_SCREEN_POLL_MS = 500;
 const FADE_IN_MS = 150;
 const FADE_OUT_MS = 120;
+const REFRESH_RESULT_HOLD_MS = 900;
+const REFRESH_FADE_OUT_MS = 200;
 const FADE_STEP_MS = 16;
 
 function edgeDockSupported(platform = process.platform) {
@@ -71,6 +81,8 @@ function createEdgeDockController(deps) {
     primaryButtonDown = () => null,
     onToggleRateMode,
     onSwitchCodexAccount,
+    canRefreshLimits = () => false,
+    onRefreshLimits,
     onOpenResetForecastSource,
     performHaptic = () => false,
     // (display) => whether another app is full screen on that display.
@@ -96,7 +108,8 @@ function createEdgeDockController(deps) {
   let bubblePlaced = null;
   let bubbleVisible = false;
   let railVisible = false;
-  let hapticCellId = null;
+  const refreshHapticTarget = Symbol('refresh');
+  let hapticTarget = null;
   // How many times the rail has been revealed, as an event the page can key the
   // entrance on. See revealRail: the page cannot derive this from `railVisible`,
   // because the retract that takes the rail away never re-renders it.
@@ -105,6 +118,26 @@ function createEdgeDockController(deps) {
   // `railVisible` is: the handle's exit is an effect the page plays, so the
   // payload has to be able to say which push is the one that takes it away.
   let peeking = false;
+  // The pointer is near the resting handle, which draws it larger ahead of a
+  // reveal. The growth is the silhouette itself, so the mask and window region
+  // have to move with it: it is stepped here rather than left to a CSS
+  // transition, which could only animate the tint over a material already at
+  // its final size.
+  let peekNear = false;
+  let handleGrowth = 0;
+  let handleGrowthTimer = null;
+  let pointerOnHandle = false;
+  // Whether the Windows region is what clips the handle's hit test.
+  let peekRegionClips = false;
+  let peekMode = 'handle';
+  let peekPaintPending = false;
+  let peekTargetVisible = false;
+  let refreshVisible = false;
+  let refreshHovered = false;
+  let refreshInFlight = null;
+  let refreshInFlightWindow = null;
+  let refreshFeedbackUntil = 0;
+  let refreshFeedbackWindow = null;
   let drag = null;
   let placementOverride = null;
   let fullScreen = false;
@@ -186,18 +219,70 @@ function createEdgeDockController(deps) {
     } catch (_) { return null; }
   }
 
+  // The dock's own size, applied to its windows' geometry here and to their
+  // pages as a zoom factor, so a page lays out in the same units at any size.
+  // Lengths that cross between the two (card heights, the drag's grab offset)
+  // are kept in page units and converted at the window's edge. The size is the
+  // one asked for, or the largest that fits the display (edgeDockFittingScale).
+  let scaled = { key: '', scale: 1, metrics: EDGE_DOCK_METRICS };
+  // A size still being dragged on the Settings slider, shown but not yet saved.
+  let previewScale = null;
+  function requestedScale() {
+    return previewScale ?? edgeDockScale(settings());
+  }
+
+  function dockScale() {
+    const requested = requestedScale();
+    const workArea = display()?.workArea || null;
+    const kinds = cellKinds();
+    const key = `${requested}:${workArea?.height ?? ''}:${kinds.join(',')}`;
+    if (key !== scaled.key) {
+      const scale = edgeDockFittingScale({ workArea, cellKinds: kinds, scale: requested });
+      scaled = { key, scale, metrics: scale === scaled.scale ? scaled.metrics : scaledEdgeDockMetrics(scale) };
+    }
+    return scaled.scale;
+  }
+
+  function metrics() {
+    dockScale();
+    return scaled.metrics;
+  }
+
+  // The pages' zoom follows the size whenever the geometry is placed, since the
+  // fitted size moves with the cells and the display as well as the setting.
+  function syncPageZoom() {
+    const scale = dockScale();
+    for (const surface of SURFACES) {
+      const win = windows[surface];
+      if (alive(win) && win.webContents.getZoomFactor?.() !== scale) win.webContents.setZoomFactor(scale);
+    }
+  }
+
+  function maxCardHeight() {
+    const workArea = display()?.workArea;
+    return workArea ? Math.floor((workArea.height - EDGE_DOCK_METRICS.screenMargin * 2) / dockScale()) : null;
+  }
+
   function layout() {
     const current = display();
     if (!current) return null;
     const { side, offset } = placement();
     const workArea = current.workArea;
-    const rail = edgeDockRailBounds({ workArea, side, offset, cellKinds: cellKinds() });
-    const peek = edgeDockPeekBounds({ workArea, side, railBounds: rail });
-    const trigger = edgeDockTriggerBounds({ workArea, displayBounds: current.bounds, side, railBounds: rail });
+    const m = metrics();
+    const rail = edgeDockRailBounds({ workArea, side, offset, cellKinds: cellKinds(), metrics: m });
+    const peek = edgeDockPeekBounds({ workArea, side, railBounds: rail, metrics: m });
+    // The handle as drawn takes the pointer; the resting handle alone decides the
+    // fast reveal, so how soon the rail opens never depends on how far the
+    // handle has grown under the pointer.
+    const handle = edgeDockHandleBounds({ side, peekBounds: peek, handle: handleSize(), metrics: m });
+    const restingHandle = edgeDockHandleBounds({ side, peekBounds: peek, metrics: m });
+    const trigger = edgeDockTriggerBounds({ workArea, displayBounds: current.bounds, side, railBounds: rail, metrics: m });
+    const zones = edgeDockHandleZones({ side, peekBounds: peek, metrics: m });
     const bubble = bubbleCell !== null
-      ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: bubbleHeight, workArea, side })
+      ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: Math.round(Math.min(bubbleHeight, maxCardHeight() ?? Infinity) * dockScale()), workArea, side, metrics: m })
       : null;
-    return { side, workArea, rail, peek, trigger, bubble };
+    const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail, metrics: m });
+    return { side, workArea, rail, peek, handle, restingHandle, trigger, wake: zones?.wake || null, approach: zones?.approach || null, bubble, refresh };
   }
 
   function alive(win) {
@@ -251,13 +336,22 @@ function createEdgeDockController(deps) {
   function setVisible(surface, visible, duration) {
     const win = windows[surface];
     if (!alive(win)) return;
-    win.setIgnoreMouseEvents(!visible);
+    const ignore = !(visible && (surface !== 'peek' || peekTakesPointer()));
+    if (surface === 'peek') setPeekIgnoresMouse(win, ignore, visible);
+    else win.setIgnoreMouseEvents(ignore);
     if (!win.isVisible()) {
       win.setOpacity(0);
       win.showInactive();
       // Reassert native topmost after showInactive. The floating level can be
       // demoted when Electron moves the HWND behind a non-topmost taskbar.
       if (platform === 'win32') win.setAlwaysOnTop(true, 'pop-up-menu');
+    }
+    // The nested refresh circle overlaps the rail's transparent shoulder, but
+    // macOS still hit-tests that rail rectangle. Keep the action above it,
+    // including when the rail finishes loading after the refresh frame.
+    if (visible && peekMode === 'refresh' && !peekPaintPending
+      && (surface === 'peek' || (surface === 'rail' && refreshVisible))) {
+      windows.peek?.moveTop?.();
     }
     fade(win, visible ? 1 : 0, duration);
   }
@@ -269,13 +363,104 @@ function createEdgeDockController(deps) {
   function setPeekVisible(visible, duration) {
     peeking = visible;
     render('peek');
-    setVisible('peek', visible, duration);
+    showPeekWindow(visible, duration);
+  }
+
+  // The handle's window is larger than the handle. On Windows its region clips
+  // the hit test to the handle, but macOS hit-tests the whole window rectangle
+  // whatever is painted in it, so the margin would take clicks meant for the app
+  // beneath. There the window passes the pointer through unless it is on the
+  // handle itself, with the pointer's moves forwarded so the page can report it
+  // arriving before the next cursor poll. Windows forwards through a system-wide
+  // mouse hook, so a Windows window left without its region falls back to the
+  // poll alone.
+  function peekTakesPointer() {
+    return peekMode !== 'handle' || peekRegionClips || pointerOnHandle;
+  }
+
+  function setPeekIgnoresMouse(win, ignore, shown) {
+    if (ignore && shown && peekMode === 'handle' && platform === 'darwin') win.setIgnoreMouseEvents(true, { forward: true });
+    else win.setIgnoreMouseEvents(ignore);
+  }
+
+  function syncPeekPointer() {
+    const win = windows.peek;
+    if (alive(win) && peekMode === 'handle' && peekTargetVisible && !peekPaintPending) setPeekIgnoresMouse(win, !peekTakesPointer(), true);
+  }
+
+  function setPointerOnHandle(on) {
+    if (on === pointerOnHandle) return;
+    pointerOnHandle = on;
+    syncPeekPointer();
+  }
+
+  // The handle's own reading of the pointer, shared by the cursor poll and the
+  // page's pointer reports so the two cannot disagree.
+  function trackHandlePointer(point, current) {
+    const revealed = intent.snapshot().revealed;
+    setPeekNear(!revealed && peekMode === 'handle' && rectContains(current.approach, point));
+    setPointerOnHandle(!revealed && rectContains(current.handle, point));
+  }
+
+  function setPeekNear(near) {
+    if (near === peekNear) return;
+    peekNear = near;
+    growHandle(near ? 1 : 0);
+  }
+
+  function stopHandleGrowth() {
+    clearInterval(handleGrowthTimer);
+    handleGrowthTimer = null;
+  }
+
+  // Eased like the window fades, on the same step.
+  function growHandle(target) {
+    stopHandleGrowth();
+    const placeHandle = () => {
+      if (peekMode === 'handle') placeSurface('peek', layout()?.peek);
+    };
+    if (prefersReducedMotion()) {
+      handleGrowth = target;
+      placeHandle();
+      return;
+    }
+    const from = handleGrowth;
+    const steps = Math.max(1, Math.round(FADE_IN_MS / FADE_STEP_MS));
+    let step = 0;
+    handleGrowthTimer = setInterval(() => {
+      step += 1;
+      handleGrowth = from + (target - from) * (1 - Math.pow(1 - step / steps, 3));
+      placeHandle();
+      if (step >= steps) stopHandleGrowth();
+    }, FADE_STEP_MS);
+  }
+
+  // Quarter-pixel steps: fine enough to read as continuous at 2x, coarse enough
+  // that the mask is not rebuilt for a change no display can show.
+  function handleSize() {
+    const m = metrics();
+    const lerp = (a, b) => Math.round((a + (b - a) * handleGrowth) * 4) / 4;
+    return { width: lerp(m.handleWidth, m.handleNearWidth), length: lerp(m.handleLength, m.handleNearLength) };
+  }
+
+  function showPeekWindow(visible, duration) {
+    peekTargetVisible = visible;
+    setVisible('peek', visible && !peekPaintPending, peekPaintPending ? 0 : duration);
+  }
+
+  function pageCellLayout(layout) {
+    if (!layout) return null;
+    const scale = dockScale();
+    if (scale === 1) return layout;
+    const toPage = (values) => values.map((value) => value / scale);
+    return { ...layout, tops: toPage(layout.tops), heights: toPage(layout.heights), length: layout.length / scale };
   }
 
   function renderPayload(surface) {
     const { side } = placement();
-    const shapedGlass = nativeMaterial[surface] === true && glasses[surface] !== null;
-    const base = { surface, side, platform, osRelease: os.release(), appearance, glass: nativeMaterial[surface] === true, liquidGlass: shapedGlass, shape: shapes[surface] };
+    const shapedGlass = nativeMaterial[surface] === true && glasses[surface] !== null
+      && (surface !== 'peek' || peekMode === 'refresh');
+    const base = { surface, side, platform, osRelease: os.release(), appearance, glass: nativeMaterial[surface] === true, liquidGlass: shapedGlass, shape: shapes[surface], zoom: dockScale() };
     if (surface === 'rail') {
       return {
         ...base,
@@ -287,19 +472,18 @@ function createEdgeDockController(deps) {
         // rather than `railVisible` because only the reveal renders: the page would
         // never be told about the retract, and would read the next reveal as no change.
         reveal: railReveal,
-        cellLayout: layout()?.rail?.cells || null
+        cellLayout: pageCellLayout(layout()?.rail?.cells)
       };
     }
     if (surface === 'bubble') {
-      const workArea = display()?.workArea;
       return {
         ...base,
         cell: bubbleCell !== null ? cells[bubbleCell] || null : null,
         placed: bubblePlaced,
-        maxCardHeight: workArea ? workArea.height - EDGE_DOCK_METRICS.screenMargin * 2 : null
+        maxCardHeight: maxCardHeight()
       };
     }
-    return { ...base, peeking };
+    return { ...base, peeking, peekMode, refreshable: canRefreshLimits() === true };
   }
 
   // Stats arrive every few seconds and mostly change nothing a surface shows;
@@ -318,13 +502,14 @@ function createEdgeDockController(deps) {
     const win32 = platform === 'win32';
     const material = materialKey !== 'none';
     const macMaterial = mac && material;
-    // A 7px handle leaves no room for Liquid Glass's own bright edge highlight:
-    // it reads as a second grip at the display edge. Keep its masked HUD material
-    // so the renderer's grip stays in the same place in both glass styles.
+    // A handle this narrow leaves no room for Liquid Glass's own bright edge
+    // highlight: it reads as a second edge beside the display's. The handle keeps
+    // the masked HUD material in both glass styles; the refresh button takes
+    // Liquid Glass when the peek window becomes one (setPeekMode).
     const macGlass = materialKey === 'mac-glass' && surface !== 'peek';
     nativeMaterial[surface] = macMaterial;
     const win = new BrowserWindow({
-      width: surface === 'bubble' ? EDGE_DOCK_METRICS.bubbleWidth : EDGE_DOCK_METRICS.railWidth,
+      width: surface === 'bubble' ? metrics().bubbleWidth : metrics().railWidth,
       height: 80,
       show: false,
       frame: false,
@@ -357,7 +542,8 @@ function createEdgeDockController(deps) {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
-        backgroundThrottling: false
+        backgroundThrottling: false,
+        zoomFactor: dockScale()
       }
     });
     if (mac) {
@@ -434,6 +620,16 @@ function createEdgeDockController(deps) {
     }
     railVisible = false;
     peeking = false;
+    peekNear = false;
+    pointerOnHandle = false;
+    peekRegionClips = false;
+    stopHandleGrowth();
+    handleGrowth = 0;
+    peekMode = 'handle';
+    peekPaintPending = false;
+    peekTargetVisible = false;
+    refreshVisible = false;
+    refreshHovered = false;
     bubbleVisible = false;
     bubbleCell = null;
     bubblePlaced = null;
@@ -446,7 +642,7 @@ function createEdgeDockController(deps) {
   }
 
   function commandsFor(surface, bounds, side) {
-    const m = EDGE_DOCK_METRICS;
+    const m = metrics();
     if (surface === 'bubble') {
       return bubbleCommands({
         width: bounds.width,
@@ -459,7 +655,14 @@ function createEdgeDockController(deps) {
       });
     }
     if (surface === 'peek') {
-      const options = { width: bounds.width, height: bounds.height, side };
+      if (peekMode === 'refresh') return refreshCommands(bounds);
+      const options = {
+        width: bounds.width,
+        height: bounds.height,
+        side,
+        handleWidth: handleSize().width,
+        handleLength: handleSize().length
+      };
       return { closed: peekCommands(options), outline: peekCommands({ ...options, open: true }) };
     }
     const options = { width: bounds.width, height: bounds.height, side, shoulder: m.shoulder, radius: m.railRadius };
@@ -473,17 +676,20 @@ function createEdgeDockController(deps) {
     const win = windows[surface];
     if (!alive(win) || !bounds) return;
     const { x, y, width, height } = bounds;
-    win.setBounds({ x, y, width, height });
+    const previousBounds = win.getBounds();
+    if (previousBounds.x !== x || previousBounds.y !== y || previousBounds.width !== width || previousBounds.height !== height) {
+      win.setBounds({ x, y, width, height });
+    }
     const { side } = placement();
     const currentDisplay = display();
     const displayKey = `${currentDisplay?.id ?? ''}:${currentDisplay?.scaleFactor ?? ''}`;
-    const key = `${displayKey}:${side}:${width}x${height}:${bounds.tailY ?? ''}`;
+    const key = `${displayKey}:${side}:${width}x${height}:${bounds.tailY ?? ''}:${surface === 'peek' ? `${peekMode}${peekMode === 'handle' ? `:${handleSize().width}x${handleSize().length}` : ''}` : ''}`;
     if (shapes[surface]?.key === key) return;
     const built = commandsFor(surface, bounds, side);
     const closed = Array.isArray(built) ? built : built.closed;
     const outline = Array.isArray(built) ? built : built.outline;
     shapes[surface] = { key, width, height, d: toSvgPath(closed), outline: toSvgPath(outline) };
-    if (glasses[surface] && shapeGlass(surface, closed, width, height)) {
+    if (glasses[surface] && (surface !== 'peek' || peekMode === 'refresh') && shapeGlass(surface, closed, width, height)) {
       // Shaped Liquid Glass needs no mask.
     } else if (builtGlass && platform === 'darwin' && nativeMaterial[surface]) {
       let masked = false;
@@ -499,10 +705,18 @@ function createEdgeDockController(deps) {
         logger(`[edge-dock] ${surface} native material mask unavailable; showing the tinted silhouette only`);
       }
     } else if (platform === 'win32') {
+      let shaped = false;
       try {
-        win.setShape?.(shapeRectsFromPolygons(toPolygons(closed), width, height));
+        if (win.setShape) {
+          win.setShape(shapeRectsFromPolygons(toPolygons(closed), width, height));
+          shaped = true;
+        }
       } catch (error) {
         logger(`[edge-dock] ${surface} shape failed: ${error.message}`);
+      }
+      if (surface === 'peek' && shaped !== peekRegionClips) {
+        peekRegionClips = shaped;
+        syncPeekPointer();
       }
     }
     render(surface);
@@ -528,6 +742,11 @@ function createEdgeDockController(deps) {
     const current = layout();
     const peek = windows.peek;
     if (!current || !alive(peek)) return;
+    if (railVisible) {
+      syncRefresh(current);
+      return;
+    }
+    setPeekMode('handle');
     placeSurface('peek', current.peek);
     // An always-visible rail has nothing to hide behind a handle, and a revealed
     // rail is what the handle was hiding behind: a settings push that landed while
@@ -535,10 +754,79 @@ function createEdgeDockController(deps) {
     setPeekVisible(!alwaysVisible() && !railVisible, FADE_IN_MS);
   }
 
+  // Swap the hidden peek's role in place. Keep the native glass view retained
+  // across hovers, so changing role does not create another renderer or glass.
+  function setPeekMode(mode) {
+    if (peekMode === mode) return;
+    setVisible('peek', false, 0);
+    peekMode = mode;
+    // Wait for the reused renderer's new frame before revealing a different
+    // size and role. Native opacity alone could expose its old handle frame.
+    peekPaintPending = true;
+    peekTargetVisible = false;
+    peeking = false;
+    peekNear = false;
+    pointerOnHandle = false;
+    stopHandleGrowth();
+    handleGrowth = 0;
+    refreshVisible = false;
+    const win = windows.peek;
+    if (builtMaterial === 'mac-glass' && alive(win)) {
+      if (mode === 'refresh') {
+        win.setVibrancy?.(null);
+        nativeMaterial.peek = true;
+        try {
+          if (!glasses.peek) glasses.peek = createGlass(win);
+          glasses.peek.update({ dark: liquidGlass()?.dark !== false, visible: true });
+        } catch (error) {
+          logger(`[edge-dock] refresh Liquid Glass unavailable: ${error.message}`);
+          disposeGlass('peek');
+          win.setVibrancy?.('hud');
+        }
+      } else {
+        try { glasses.peek?.update({ dark: liquidGlass()?.dark !== false, visible: false }); }
+        catch { disposeGlass('peek'); }
+        win.setVibrancy?.('hud');
+        nativeMaterial.peek = true;
+      }
+    }
+  }
+
+  function refreshKeepsButtonVisible() {
+    return (Boolean(refreshInFlight) && windows.peek === refreshInFlightWindow)
+      || (Date.now() < refreshFeedbackUntil && windows.peek === refreshFeedbackWindow);
+  }
+
+  function syncRefresh(current = layout()) {
+    if (!current || !alive(windows.peek)) return;
+    const visible = settings().edgeDockRefreshEnabled === true
+      && railVisible && !drag && canRefreshLimits() === true
+      && (!alwaysVisible() || refreshHovered || refreshKeepsButtonVisible());
+    if (!visible) {
+      if (!windows.peek.isVisible() || refreshVisible) {
+        showPeekWindow(false, alwaysVisible() ? REFRESH_FADE_OUT_MS : FADE_OUT_MS);
+      }
+      refreshVisible = false;
+      if (settings().edgeDockRefreshEnabled !== true) {
+        refreshFeedbackUntil = 0;
+        refreshFeedbackWindow = null;
+      }
+      if (hapticTarget === refreshHapticTarget) hapticTarget = null;
+      return;
+    }
+    setPeekMode('refresh');
+    placeSurface('peek', current.refresh);
+    render('peek');
+    if (!refreshVisible) showPeekWindow(true, FADE_IN_MS);
+    refreshVisible = true;
+  }
+
   function positionRail(current = layout()) {
     if (!current || !alive(windows.rail)) return;
+    syncPageZoom();
     placeSurface('rail', current.rail);
-    placeSurface('peek', current.peek);
+    if (peekMode === 'handle' && !railVisible) placeSurface('peek', current.peek);
+    if (railVisible) syncRefresh(current);
     if (bubbleCell !== null) placeBubble();
   }
 
@@ -557,7 +845,7 @@ function createEdgeDockController(deps) {
     // re-reveals an already-visible rail does not replay the slide.
     if (entering) {
       railReveal += 1;
-      hapticCellId = null;
+      hapticTarget = null;
     }
     render('rail');
     positionRail();
@@ -565,7 +853,8 @@ function createEdgeDockController(deps) {
       setVisible('rail', true, FADE_IN_MS);
       if (withHaptic) hapticTick('generic');
     }
-    setPeekVisible(false, FADE_OUT_MS);
+    if (peekMode === 'handle') setPeekVisible(false, 0);
+    syncRefresh();
   }
 
   function retractRail() {
@@ -576,7 +865,7 @@ function createEdgeDockController(deps) {
       return;
     }
     railVisible = false;
-    hapticCellId = null;
+    hapticTarget = null;
     setVisible('rail', false, FADE_OUT_MS);
     showPeek();
   }
@@ -644,7 +933,9 @@ function createEdgeDockController(deps) {
     if (!running) return;
     clearTimeout(pollTimer);
     const snapshot = intent.snapshot();
-    const delay = drag ? POLL_DRAG_MS : (snapshot.revealed ? POLL_ACTIVE_MS : POLL_IDLE_MS);
+    // The approach zone is on the way to the handle, and only the poll lets the
+    // handle take the pointer, so it runs at the active rate from there on.
+    const delay = drag ? POLL_DRAG_MS : (snapshot.revealed || peekNear ? POLL_ACTIVE_MS : POLL_IDLE_MS);
     pollTimer = setTimeout(poll, delay);
   }
 
@@ -669,20 +960,40 @@ function createEdgeDockController(deps) {
         }
         const revealed = intent.snapshot().revealed;
         const bubbleRect = bubbleVisible ? current.bubble : null;
+        const inRefresh = refreshVisible && rectContains(current.refresh, point);
+        const inRefreshCorridor = refreshVisible && rectContains(edgeDockRefreshCorridor(current.rail, current.refresh), point);
+        // On a full-height rail the button can share the bottom card's bounds.
+        // Give the action precedence and clear intent too, so returning to the
+        // same cell can open its card again after the normal hover delay.
+        if (inRefresh) {
+          intent.focusCell(null);
+          hideBubble();
+        }
         const input = {
           inTrigger: rectContains(current.trigger, point),
-          inPeek: !revealed && rectContains(current.peek, point),
-          inRail: revealed && rectContains(current.rail, point),
+          inPeek: !revealed && rectContains(current.restingHandle, point),
+          // Only with the button known to be up: a held one is a scrollbar or a
+          // selection being dragged past the handle, not a reach for it, and an
+          // unreadable state is treated as held.
+          inWake: !revealed && rectContains(current.wake, point) && primaryButtonDown() === false,
+          inRail: revealed && (rectContains(current.rail, point) || inRefresh || inRefreshCorridor),
           inBubble: Boolean(bubbleRect && rectContains(bubbleRect, point)),
           inCorridor: Boolean(bubbleRect && rectContains(edgeDockCorridorBounds(current.rail, bubbleRect), point)),
-          cellIndex: revealed ? edgeDockCellAt(point, current.rail, cells.length) : null
+          cellIndex: revealed ? edgeDockCellAt(point, current.rail, cells.length, metrics()) : null
         };
-        const hoveredCellId = Number.isInteger(input.cellIndex) ? cells[input.cellIndex]?.id || null : null;
-        if (hoveredCellId !== hapticCellId) {
-          if (hoveredCellId) hapticTick('alignment', 'now');
-          hapticCellId = hoveredCellId;
+        // The refresh action shares the readouts' enter-once hover feedback.
+        const hoveredTarget = inRefresh
+          ? (!peekPaintPending && settings().edgeDockRefreshEnabled === true && canRefreshLimits() === true
+            ? refreshHapticTarget : null)
+          : (Number.isInteger(input.cellIndex) ? cells[input.cellIndex]?.id || null : null);
+        if (hoveredTarget !== hapticTarget) {
+          if (hoveredTarget) hapticTick('alignment', 'now');
+          hapticTarget = hoveredTarget;
         }
+        trackHandlePointer(point, current);
         applyEffects(intent.tick(input, Date.now()), { hapticReveal: !alwaysVisible() });
+        refreshHovered = input.inRail || input.inBubble || input.inCorridor;
+        syncRefresh(current);
       }
     } catch (error) {
       logger(`[edge-dock] poll failed: ${error.message}`);
@@ -693,11 +1004,17 @@ function createEdgeDockController(deps) {
   function followDrag(point, current) {
     let targetDisplay;
     try { targetDisplay = screen.getDisplayNearestPoint?.(point) || display(); } catch (_) { targetDisplay = display(); }
+    // Sized for the display the rail is landing on, which can fit a different
+    // size than the one it is leaving; the grab point is kept in page units so
+    // it stays under the pointer at either size.
+    const workArea = targetDisplay?.workArea || current.workArea;
+    const scale = edgeDockFittingScale({ workArea, cellKinds: cellKinds(), scale: requestedScale() });
     const next = edgeDockPlacementForDrop({
-      workArea: targetDisplay?.workArea || current.workArea,
+      workArea,
       pointer: point,
-      grabOffsetY: drag.grabOffsetY,
-      cellKinds: cellKinds()
+      grabOffsetY: drag.grabOffsetY * scale,
+      cellKinds: cellKinds(),
+      metrics: scaledEdgeDockMetrics(scale)
     });
     if (!next) return;
     next.displayId = normalizeEdgeDockDisplayId(targetDisplay?.id);
@@ -713,6 +1030,7 @@ function createEdgeDockController(deps) {
     drag = { grabOffsetY: Math.max(0, Number(grabOffsetY) || 0), startedAt: Date.now() };
     placementOverride = placement();
     hideBubble();
+    syncRefresh();
     intent.tick({ dragging: true }, Date.now());
     schedulePoll();
   }
@@ -747,6 +1065,7 @@ function createEdgeDockController(deps) {
     ipcMain.on('edgeDock:click', (event, payload) => {
       const surface = surfaceFor(event.sender);
       if (surface === 'peek') {
+        if (peekMode !== 'handle') return;
         applyEffects(intent.reveal(), { hapticReveal: !alwaysVisible() });
         return;
       }
@@ -764,6 +1083,47 @@ function createEdgeDockController(deps) {
         showBubble(index);
       }
     });
+    ipcMain.on('edgeDock:pointer', (event) => {
+      if (surfaceFor(event.sender) !== 'peek' || peekMode !== 'handle' || drag) return;
+      const current = layout();
+      if (current) trackHandlePointer(screen.getCursorScreenPoint(), current);
+    });
+    ipcMain.removeHandler('edgeDock:refreshLimits');
+    ipcMain.on('edgeDock:peekPainted', (event, payload) => {
+      if (surfaceFor(event.sender) !== 'peek' || !peekPaintPending
+        || payload?.mode !== peekMode || payload?.shapeKey !== shapes.peek?.key) return;
+      peekPaintPending = false;
+      setVisible('peek', peekTargetVisible, FADE_IN_MS);
+    });
+    ipcMain.handle('edgeDock:refreshLimits', async (event) => {
+      if (surfaceFor(event.sender) !== 'peek' || peekMode !== 'refresh' || !refreshVisible || peekPaintPending
+        || settings().edgeDockRefreshEnabled !== true || canRefreshLimits() !== true || !onRefreshLimits) return { ok: false, error: 'Not refreshable' };
+      // A rebuilt renderer can join the same backend request. Bind its busy and
+      // result visibility to the current window only after it requests the action.
+      refreshInFlightWindow = windows.peek;
+      if (!refreshInFlight) {
+        refreshFeedbackUntil = 0;
+        refreshFeedbackWindow = null;
+        refreshInFlight = Promise.resolve().then(() => onRefreshLimits())
+          .then((result) => {
+            if (result?.ok === true && running && windows.peek === refreshInFlightWindow
+              && settings().edgeDockRefreshEnabled === true) hapticTick('generic');
+            return result;
+          })
+          .catch((error) => ({ ok: false, error: error?.message || 'Refresh failed' }))
+          .finally(() => {
+            // Let the renderer's result be readable before an unhovered action fades out.
+            if (running && windows.peek === refreshInFlightWindow && alwaysVisible()
+              && settings().edgeDockRefreshEnabled === true) {
+              refreshFeedbackUntil = Date.now() + REFRESH_RESULT_HOLD_MS;
+              refreshFeedbackWindow = refreshInFlightWindow;
+            }
+            refreshInFlight = null;
+            refreshInFlightWindow = null;
+          });
+      }
+      return refreshInFlight;
+    });
     ipcMain.on('edgeDock:dragStart', (event, payload) => {
       if (surfaceFor(event.sender) !== 'rail') return;
       handleDragStart(payload?.grabOffsetY);
@@ -778,7 +1138,7 @@ function createEdgeDockController(deps) {
       if (bubbleCell === null || cells[bubbleCell]?.id !== cellId) return;
       const height = Math.round(Number(payload?.height));
       if (!Number.isFinite(height) || height <= 0) return;
-      const maxHeight = Math.max(40, (display()?.workArea?.height || 720) - EDGE_DOCK_METRICS.screenMargin * 2);
+      const maxHeight = Math.max(40, maxCardHeight() ?? 720);
       bubbleHeight = Math.min(height, maxHeight);
       // Store the clamped height: reopening this card restores it verbatim, so
       // keeping the raw value here would place a card taller than the work area.
@@ -862,6 +1222,8 @@ function createEdgeDockController(deps) {
 
   function stop() {
     running = false;
+    refreshFeedbackUntil = 0;
+    refreshFeedbackWindow = null;
     clearTimeout(pollTimer);
     pollTimer = null;
     drag = null;
@@ -873,13 +1235,24 @@ function createEdgeDockController(deps) {
   }
 
   return {
+    // Shows a custom size while its slider is dragged; the save that follows
+    // the release goes through sync(), which drops the preview.
+    previewScale(scale) {
+      previewScale = scale === null || scale === undefined ? null : normalizeEdgeDockCustomScale(scale);
+      if (!running) return;
+      positionRail();
+      if (!railVisible) showPeek();
+      for (const surface of SURFACES) render(surface);
+    },
     // Settings changed: start, stop, rebuild for a material change, or move.
     sync() {
+      previewScale = null;
       if (!canUseEdgeDock(settings(), platform)) {
         if (running) stop();
         return;
       }
       start();
+      syncPageZoom();
       refreshFullScreen(Date.now(), true);
       syncAlwaysVisible();
       if (!drag) {
@@ -936,7 +1309,7 @@ function createEdgeDockController(deps) {
       const wanted = liquidGlass();
       for (const surface of SURFACES) {
         try {
-          glasses[surface]?.update({ dark: wanted?.dark !== false });
+          glasses[surface]?.update({ dark: wanted?.dark !== false, visible: surface !== 'peek' || peekMode === 'refresh' });
         } catch (error) {
           logger(`[edge-dock] ${surface} Liquid Glass appearance failed: ${error.message}`);
         }

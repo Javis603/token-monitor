@@ -360,10 +360,80 @@ test('the public session detail resolver uses the worker boundary', async () => 
   }
 
   const args = { client: 'claude', sessionId: 'missing' };
-  const result = readSessionDetailForPlatform(args, { Worker: FakeWorker });
+  const result = readSessionDetailForPlatform(args, {
+    Worker: FakeWorker, getPricingRevision: () => { throw new Error('native details must not probe Dots pricing'); }
+  });
   assert.ok(result instanceof Promise);
   assert.deepEqual(await result, { found: false });
   assert.equal(workerArgs, args);
+});
+
+test('Dots details retain shared same-revision prices on command failure and invalidate them on revision changes', async () => {
+  const { resolveLocalUsagePricing } = require('../../src/shared/providers/codex/localUsage');
+  const models = ['resolver-dots-priced', 'resolver-dots-free'];
+  const rates = [{ inputCostPerToken: 0.01 }, { inputCostPerToken: 0 }];
+  const makeDetail = () => ({
+    found: true, usageSource: 'codex-dots-local', totals: {}, exchanges: [{ turns:
+      [...models, 'unknown'].map((model) => ({ model, tokens: { input: 100, total: 100 } }))
+    }]
+  });
+  const workerArgs = [];
+  class DotsWorker {
+    constructor(_path, options) {
+      workerArgs.push(options.workerData);
+      this.listeners = new Map();
+      queueMicrotask(() => this.listeners.get('message')?.({ ok: true, detail: makeDetail() }));
+    }
+    once(event, listener) { this.listeners.set(event, listener); return this; }
+  }
+  let behavior = 'success';
+  const lookups = [];
+  const lookupModelPricing = async (model, timeout) => {
+    lookups.push({ model, timeout });
+    if (behavior === 'throw') throw new Error('temporary pricing timeout');
+    return { pricing: behavior === 'missing' ? null : rates[models.indexOf(model)] };
+  };
+  const revision = 'resolver-dots-shared-v1';
+  await resolveLocalUsagePricing(models.map((model) => ({ model })), { pricingRevision: revision, lookupModelPricing });
+  const args = { client: 'codex', sessionId: 'dots-test', period: 'total' };
+  const deps = { Worker: DotsWorker, lookupModelPricing, getPricingRevision: () => {
+    assert.ok(workerArgs.length > 0, 'pricing revision is read after the worker result');
+    return revision;
+  } };
+  behavior = 'throw';
+  const aggregateFallback = await readSessionDetailForPlatform(args, deps);
+  assert.equal(aggregateFallback.totals.costUsd, 1);
+  assert.equal(aggregateFallback.totals.unpricedTokens, 100, 'only the unknown-model request is unpriced');
+  assert.equal(aggregateFallback.exchanges[0].turns[0].costEstimate, 1);
+  assert.equal(aggregateFallback.exchanges[0].turns[1].costEstimate, 0);
+  assert.equal(aggregateFallback.exchanges[0].turns[1].unpricedTokens, undefined, 'explicit zero pricing survives failures');
+
+  behavior = 'success';
+  await readSessionDetailForPlatform(args, deps);
+  behavior = 'throw';
+  const detailFallback = await readSessionDetailForPlatform(args, deps);
+  assert.equal(detailFallback.totals.costUsd, 1);
+  assert.equal(detailFallback.totals.unpricedTokens, 100);
+  const changedRevision = await readSessionDetailForPlatform(args, { ...deps, pricingRevision: 'resolver-dots-shared-v2' });
+  assert.equal(changedRevision.totals.costUsd, 0);
+  assert.equal(changedRevision.totals.unpricedTokens, 300, 'old-revision cache is never reused');
+
+  behavior = 'missing';
+  const confirmedMissing = await readSessionDetailForPlatform(args, deps);
+  assert.equal(confirmedMissing.totals.costUsd, 0);
+  assert.equal(confirmedMissing.totals.unpricedTokens, 300);
+  behavior = 'throw';
+  const failureAfterMiss = await readSessionDetailForPlatform(args, deps);
+  assert.equal(failureAfterMiss.totals.costUsd, 0, 'a confirmed miss does not resurrect an earlier success');
+  assert.equal(failureAfterMiss.totals.unpricedTokens, 300);
+  behavior = 'success';
+  await readSessionDetailForPlatform(args, deps);
+  const cached = await resolveLocalUsagePricing(models.map((model) => ({ model })), {
+    pricingRevision: revision, lookupModelPricing: () => { throw new Error('warm aggregate must not look up prices'); }
+  });
+  assert.deepEqual(models.map((model) => cached[model]), rates, 'detail successes update the aggregate cache too');
+  assert.ok(lookups.every(({ model, timeout }) => models.includes(model) && timeout === 1500));
+  assert.ok(workerArgs.every((value) => value === args), 'pricing stays in main, outside worker data');
 });
 
 // dsh reads its own transcript format directly, so it always dispatches to

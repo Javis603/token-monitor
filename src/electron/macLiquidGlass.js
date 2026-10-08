@@ -136,9 +136,14 @@ function createMacLiquidGlass(win, { shaped = false } = {}) {
     let lastDark;
     let lastRadius;
     let lastShape;
+    let lastVisible;
     return {
-      update({ dark, radius, shape }) {
+      update({ dark, radius, shape, visible = true }) {
         if (disposed) return;
+        if (visible !== lastVisible) {
+          api.put(glass, 'setHidden:', visible ? 0 : 1);
+          lastVisible = visible;
+        }
         if (dark !== lastDark) {
           api.put(glass, 'setAppearance:', api.appearance(dark));
           lastDark = dark;

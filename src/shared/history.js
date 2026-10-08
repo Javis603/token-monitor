@@ -71,6 +71,15 @@ function num(value) {
   return 0;
 }
 
+function unpricedTokensFor(value) {
+  return Math.min(Math.max(0, num(value?.tokens)), Math.max(0, Math.round(num(value?.unpricedTokens))));
+}
+
+function addUnpricedTokens(target, source) {
+  const count = unpricedTokensFor(source);
+  if (count > 0) target.unpricedTokens = num(target.unpricedTokens) + count;
+}
+
 function normalizeTimeMetrics(value) {
   if (!value || typeof value !== 'object') return null;
   return {
@@ -151,6 +160,7 @@ function parseGraphResult(raw) {
     const perModel = {};
     let tokens = 0;
     let cost = 0;
+    let unpricedTokens = 0;
     let messages = 0;
     let cacheReadTokens = 0;
     let cacheWriteTokens = 0;
@@ -164,6 +174,7 @@ function parseGraphResult(raw) {
       const model = normalizeTokscaleModelNameForClient(c.modelId || c.model || c.model_id || 'unknown', client);
       const t = sumTokens(c.tokens, client);
       const cst = num(c.cost);
+      const unpriced = unpricedTokensFor({ tokens: t, unpricedTokens: c.unpricedTokens });
       const cacheRead = num(c.tokens?.cacheRead ?? c.tokens?.cache_read);
       const cacheWrite = num(c.tokens?.cacheWrite ?? c.tokens?.cache_write);
       const output = sumOutputTokens(c.tokens, client);
@@ -179,6 +190,7 @@ function parseGraphResult(raw) {
       const msg = String(client).trim().toLowerCase() === REASONIX_CLIENT ? 0 : num(c.messages);
       tokens += t;
       cost += cst;
+      unpricedTokens += unpriced;
       messages += msg;
       cacheReadTokens += cacheRead;
       cacheWriteTokens += cacheWrite;
@@ -190,6 +202,7 @@ function parseGraphResult(raw) {
         tokens: 0, cost: 0, messages: 0, unclassifiedTokens: 0
       });
       pc.tokens += t; pc.cost += cst; pc.messages += msg;
+      addUnpricedTokens(pc, { tokens: t, unpricedTokens: unpriced });
       if (cacheRead > 0) pc.cacheReadTokens = num(pc.cacheReadTokens) + cacheRead;
       if (cacheWrite > 0) pc.cacheWriteTokens = num(pc.cacheWriteTokens) + cacheWrite;
       if (output > 0) pc.outputTokens = num(pc.outputTokens) + output;
@@ -198,6 +211,7 @@ function parseGraphResult(raw) {
         tokens: 0, cost: 0, unclassifiedTokens: 0
       });
       pm.tokens += t; pm.cost += cst;
+      addUnpricedTokens(pm, { tokens: t, unpricedTokens: unpriced });
       if (cacheRead > 0) pm.cacheReadTokens = num(pm.cacheReadTokens) + cacheRead;
       if (cacheWrite > 0) pm.cacheWriteTokens = num(pm.cacheWriteTokens) + cacheWrite;
       if (output > 0) pm.outputTokens = num(pm.outputTokens) + output;
@@ -234,6 +248,7 @@ function parseGraphResult(raw) {
       date,
       tokens,
       cost,
+      ...(unpricedTokens > 0 ? { unpricedTokens } : {}),
       messages,
       cacheReadTokens,
       cacheWriteTokens,
@@ -323,6 +338,7 @@ function addPerClient(target, source, includeTokenComponents = false) {
     const client = normalizeTokscaleClientName(rawClient) || rawClient;
     const t = target[client] || (target[client] = { tokens: 0, cost: 0, messages: 0 });
     t.tokens += num(v.tokens); t.cost += num(v.cost); t.messages += num(v.messages);
+    addUnpricedTokens(t, v);
     if (includeTokenComponents) {
       if (num(v.cacheReadTokens) > 0) t.cacheReadTokens = num(t.cacheReadTokens) + num(v.cacheReadTokens);
       if (num(v.cacheWriteTokens) > 0) t.cacheWriteTokens = num(t.cacheWriteTokens) + num(v.cacheWriteTokens);
@@ -337,6 +353,7 @@ function addPerModel(target, source, includeTokenComponents = false) {
   for (const [model, v] of Object.entries(source || {})) {
     const t = target[model] || (target[model] = { tokens: 0, cost: 0 });
     t.tokens += num(v.tokens); t.cost += num(v.cost);
+    addUnpricedTokens(t, v);
     if (includeTokenComponents) {
       if (num(v.cacheReadTokens) > 0) t.cacheReadTokens = num(t.cacheReadTokens) + num(v.cacheReadTokens);
       if (num(v.cacheWriteTokens) > 0) t.cacheWriteTokens = num(t.cacheWriteTokens) + num(v.cacheWriteTokens);
@@ -371,6 +388,7 @@ function monthlyRollup(days) {
     if (month.length !== 7) continue;
     const m = byMonth.get(month) || { month, tokens: 0, cost: 0, activeTimeMs: 0, perClient: {}, perModel: {} };
     m.tokens += num(d.tokens); m.cost += num(d.cost); m.activeTimeMs += num(d.activeTimeMs);
+    addUnpricedTokens(m, d);
     addPerClient(m.perClient, d.perClient);
     addPerModel(m.perModel, d.perModel);
     byMonth.set(month, m);
@@ -421,6 +439,7 @@ function normalizeHistory(graphData, options = {}) {
   const monthly = monthlyRollup(full);
   const totalTokens = full.reduce((s, d) => s + num(d.tokens), 0);
   const totalCost = full.reduce((s, d) => s + num(d.cost), 0);
+  const unpricedTokens = full.reduce((s, d) => s + unpricedTokensFor(d), 0);
   const messages = full.reduce((s, d) => s + num(d.messages), 0);
   const activeDays = full.reduce((s, d) => s + (num(d.tokens) > 0 ? 1 : 0), 0);
   const peakDayTokens = full.reduce((m, d) => Math.max(m, num(d.tokens)), 0);
@@ -433,6 +452,7 @@ function normalizeHistory(graphData, options = {}) {
     monthly,
     summary: {
       totalTokens, totalCost, activeDays, currentStreak, longestStreak,
+      ...(unpricedTokens > 0 ? { unpricedTokens } : {}),
       peakDayTokens, favoriteModel: favoriteModelOf(full), messages,
       activeTimeMs,
       ...(timeMetrics ? { timeMetrics } : {})
@@ -452,6 +472,7 @@ function mergeDailyMaps(histories) {
           perClient: {}, perModel: {}
         };
       cur.tokens += num(d.tokens); cur.cost += num(d.cost); cur.messages += num(d.messages); cur.activeTimeMs += num(d.activeTimeMs);
+      addUnpricedTokens(cur, d);
       cur.cacheReadTokens += num(d.cacheReadTokens);
       cur.cacheWriteTokens += num(d.cacheWriteTokens);
       cur.outputTokens += num(d.outputTokens);
@@ -471,6 +492,7 @@ function mergeMonthlyMaps(histories) {
     for (const m of (h && Array.isArray(h.monthly) ? h.monthly : [])) {
       const cur = byMonth.get(m.month) || { month: m.month, tokens: 0, cost: 0, activeTimeMs: 0, perClient: {}, perModel: {} };
       cur.tokens += num(m.tokens); cur.cost += num(m.cost); cur.activeTimeMs += num(m.activeTimeMs);
+      addUnpricedTokens(cur, m);
       addPerClient(cur.perClient, m.perClient);
       addPerModel(cur.perModel, m.perModel);
       byMonth.set(m.month, cur);
@@ -496,6 +518,7 @@ function mergeHistories(histories, options = {}) {
 
   const totalTokens = monthly.reduce((s, m) => s + num(m.tokens), 0);
   const totalCost = monthly.reduce((s, m) => s + num(m.cost), 0);
+  const unpricedTokens = monthly.reduce((s, m) => s + unpricedTokensFor(m), 0);
   const messages = monthly.reduce((s, m) => {
     for (const v of Object.values(m.perClient || {})) s += num(v.messages);
     return s;
@@ -511,6 +534,7 @@ function mergeHistories(histories, options = {}) {
     monthly,
     summary: {
       totalTokens, totalCost, activeDays, currentStreak, longestStreak,
+      ...(unpricedTokens > 0 ? { unpricedTokens } : {}),
       peakDayTokens, favoriteModel, messages, activeTimeMs
     }
   };
@@ -531,8 +555,9 @@ function historyPreview(history, options = {}) {
   const dailyDays = Number.isFinite(options.dailyDays) ? options.dailyDays : 30;
   const monthlyMonths = Number.isFinite(options.monthlyMonths) ? options.monthlyMonths : 12;
   const h = coerceHistory(history);
-  const daily = h.daily.slice(-dailyDays).map((d) => ({ date: d.date, tokens: num(d.tokens), cost: num(d.cost), activeTimeMs: num(d.activeTimeMs) }));
-  const monthly = h.monthly.slice(-monthlyMonths).map((m) => ({ month: m.month, tokens: num(m.tokens), cost: num(m.cost), activeTimeMs: num(m.activeTimeMs) }));
+  const missingPrice = (row) => unpricedTokensFor(row) > 0 ? { unpricedTokens: unpricedTokensFor(row) } : {};
+  const daily = h.daily.slice(-dailyDays).map((d) => ({ date: d.date, tokens: num(d.tokens), cost: num(d.cost), activeTimeMs: num(d.activeTimeMs), ...missingPrice(d) }));
+  const monthly = h.monthly.slice(-monthlyMonths).map((m) => ({ month: m.month, tokens: num(m.tokens), cost: num(m.cost), activeTimeMs: num(m.activeTimeMs), ...missingPrice(m) }));
   return { daily, monthly, summary: h.summary };
 }
 

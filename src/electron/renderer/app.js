@@ -68,6 +68,11 @@ function iconKindFor(rowData, breakdown) {
     return os ? { kind: 'icon', iconClass: `row-icon-os-${os}` } : { kind: 'dot' };
   }
   if (breakdown === 'model') {
+    if (rowData.key === 'unknown') {
+      return rowData.modelSource === 'codex'
+        ? { kind: 'icon', iconClass: 'row-icon-codex' }
+        : { kind: 'dot' };
+    }
     const vendor = modelVendorFor(rowData.key);
     return vendor && clientsWithIcon.has(vendor)
       ? { kind: 'icon', iconClass: `row-icon-${vendor}` }
@@ -392,11 +397,18 @@ Object.assign(els, {
   edgeDockFeature: document.getElementById('edgeDockFeature'),
   edgeDockInput: document.getElementById('edgeDockInput'),
   edgeDockOptions: document.getElementById('edgeDockOptions'),
+  edgeDockMoreOptionsGroup: document.getElementById('edgeDockMoreOptionsGroup'),
+  edgeDockMoreOptionsToggle: document.getElementById('edgeDockMoreOptionsToggle'),
+  edgeDockMoreOptionsDetails: document.getElementById('edgeDockMoreOptionsDetails'),
   edgeDockSideInputs: Array.from(document.querySelectorAll('input[name="edgeDockSide"]')),
   edgeDockModeInputs: Array.from(document.querySelectorAll('input[name="edgeDockMode"]')),
+  edgeDockSizeInputs: Array.from(document.querySelectorAll('input[name="edgeDockSize"]')),
+  edgeDockCustomScaleRow: document.getElementById('edgeDockCustomScaleRow'),
+  edgeDockCustomScaleInput: document.getElementById('edgeDockCustomScaleInput'),
   edgeDockHapticRow: document.getElementById('edgeDockHapticRow'),
   edgeDockHapticInput: document.getElementById('edgeDockHapticInput'),
   edgeDockWarnColorsInput: document.getElementById('edgeDockWarnColorsInput'),
+  edgeDockRunningIndicatorInput: document.getElementById('edgeDockRunningIndicatorInput'),
   edgeDockMacBackdropRow: document.getElementById('edgeDockMacBackdropRow'),
   edgeDockMacBackdropInput: document.getElementById('edgeDockMacBackdropInput'),
   edgeDockComposer: document.getElementById('edgeDockComposer'),
@@ -1295,7 +1307,33 @@ function compactMonthLabel(label) {
     .format(new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1)));
 }
 function currentCurrency() { return currencyApi.normalizeCurrency(state.settings?.currency); }
-function formatCost(value) { return currencyApi.formatCurrencyFromUsd(value, currentCurrency()); }
+function formatCost(value, unpricedTokens) {
+  return usageAttributionRowsApi.usageCostLabel(value, unpricedTokens,
+    (cost) => currencyApi.formatCurrencyFromUsd(cost, currentCurrency()), formatNumber, t('usage.unpricedTokens'));
+}
+function setTotalCost(cost, unpricedTokens, available = true) {
+  let label = els.cost.querySelector('.usage-cost-value');
+  if (!label) {
+    label = document.createElement('span');
+    label.className = 'usage-cost-value';
+    els.cost.replaceChildren(label);
+  }
+  const hasUnpriced = available && unpricedTokens > 0;
+  els.cost.classList.toggle('has-unpriced', hasUnpriced);
+  label.textContent = available
+    ? (hasUnpriced && !(cost > 0) ? '—' : formatCost(cost)) : '';
+  let info = els.cost.querySelector('.usage-cost-info');
+  if (!info && hasUnpriced) {
+    info = document.createElement('span');
+    info.className = 'usage-cost-info';
+    els.cost.append(info);
+  }
+  if (!info) return;
+  info.hidden = !hasUnpriced;
+  limitWindowsView.setDetailTooltip(info, hasUnpriced
+    ? [{ full: t('usage.excludedFromCost', { tokens: formatNumber(unpricedTokens) }) }]
+    : null, { centered: true });
+}
 function applyEffectiveCurrencyRates() {
   if (state.settings?.currencyRatesEffective) currencyApi.configureRates(state.settings.currencyRatesEffective);
 }
@@ -2330,7 +2368,8 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime, cloudThreadId, cloudOnly, costLabel: metricLabel }) {
+function updateRow(row, { name, subtitle, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime, cloudThreadId, cloudOnly, costLabel: metricLabel }) {
+
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2363,7 +2402,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
     && ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy'].includes(client)
   ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
   const mark = row.querySelector('.row-mark');
-  const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '' }, state.breakdown);
+  const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '', modelSource }, state.breakdown);
   if (iconKind.kind === 'icon') {
     mark.className = `row-mark row-icon ${iconKind.iconClass}`;
     mark.style.background = '';
@@ -2425,7 +2464,12 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
-  row.querySelector('.row-cost').textContent = metricLabel || (tokenDataUnavailable === true ? '' : formatCost(cost || 0));
+  const costEl = row.querySelector('.row-cost');
+  const costLabelText = formatCost(cost || 0, unpricedTokens);
+  costEl.textContent = metricLabel || (tokenDataUnavailable === true ? ''
+    : unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText);
+  costEl.title = tokenDataUnavailable === true ? '' : costLabelText);
+
   // The row builder already applied the shared gate (recent enough to have a
   // reading), so this draws whatever arrived rather than re-deciding from
   // `running` - that second gate is exactly what made the dock card and this
@@ -2500,7 +2544,8 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   const tokenLabel = tokenDataUnavailable === true
     ? (t('detailTokenUnavailable') || 'Unavailable')
     : formatNumber(value);
-  const costLabel = metricLabel ? `, ${metricLabel}` : tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0)}`;
+  const costLabel = metricLabel ? `, ${metricLabel}` : tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0, unpricedTokens)}`;
+
   sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
     interactive,
     hasAccordion,
@@ -2658,10 +2703,6 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
   if (liveMotionSnapshot) animateBreakdownFrom(liveMotionSnapshot, { duration: 600 });
 }
 
-function deviceLabel(device) {
-  return device.deviceId || device.hostname || 'device';
-}
-
 function deviceColor(stale) {
   return stale ? deviceStaleColor : deviceAccent;
 }
@@ -2733,9 +2774,10 @@ function deviceRowsForPeriod() {
     const metaParts = [deviceBreakdownApi.devicePlatformLabel(device.platform, device.osName, device.osVersion), version, deviceSyncedLabel(device.updatedAt)].filter(Boolean);
     return {
       key: device.deviceId,
-      name: deviceLabel(device),
+      name: deviceBreakdownApi.deviceLabel(device),
       value: breakdown.totalTokens,
       cost: Number(period.costUsd || 0),
+      unpricedTokens: Number(period.unpricedTokens || 0),
       color: deviceColor(Boolean(device.stale)),
       stale: Boolean(device.stale),
       platform: device.platform || '',
@@ -2768,17 +2810,19 @@ function attributionComponent(period, field, key) {
   );
 }
 
-function periodAttributionRows(period, values, costs) {
+function periodAttributionRows(period, values, costs, unpricedTokens) {
   const rows = usageAttributionRowsApi.attributionRows(values, costs, {
     totalValue: period?.totalTokens,
-    totalCost: period?.costUsd
+    totalCost: period?.costUsd,
+    totalUnpricedTokens: period?.unpricedTokens,
+    unpricedTokens
   });
   return usageAttributionRowsApi.visibleAttributionRows(rows, formatCost);
 }
 
 function toolRowsForPeriod(period) {
-  const clientRows = periodAttributionRows(period, period?.clients, period?.clientCosts)
-    .map(({ key: client, value, cost }) => ({ key: client, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client), modelRows: toolDetailsApi.visibleModelRowsForTool(period, client, formatCost) }));
+  const clientRows = periodAttributionRows(period, period?.clients, period?.clientCosts, period?.clientUnpricedTokens)
+    .map(({ key: client, value, cost, unpricedTokens }) => ({ key: client, unpricedTokens, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client), modelRows: toolDetailsApi.visibleModelRowsForTool(period, client, formatCost) }));
   if (clientRows.length > 0) {
     const usageSortedRows = clientRows.sort((a, b) => b.value - a.value);
     return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, state.settings?.clientDisplayOrder, state.settings?.hiddenClients, KNOWN_CLIENTS, state.settings?.pinnedClients);
@@ -2788,13 +2832,16 @@ function toolRowsForPeriod(period) {
 }
 
 function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRankingMetric) {
-  const modelRows = periodAttributionRows(period, period?.models, period?.modelCosts).map(({ key: model, value, cost, unattributed }) => ({
+  const unknownSource = usageAttributionRowsApi.unknownModelSource(period);
+  const modelRows = periodAttributionRows(period, period?.models, period?.modelCosts, period?.modelUnpricedTokens).map(({ key: model, value, cost, unpricedTokens, unattributed }) => ({
     key: model,
+    unpricedTokens,
     name: model === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : model,
     value,
     cost,
     unattributed,
-    color: modelColor(model),
+    modelSource: model === 'unknown' ? unknownSource : null,
+    color: model === 'unknown' ? (unknownSource ? clientColors[unknownSource] : 'var(--muted)') : modelColor(model),
     stale: false,
     cacheReadTokens: attributionComponent(period, 'modelCacheReads', model),
     cacheWriteTokens: attributionComponent(period, 'modelCacheWrites', model),
@@ -4798,7 +4845,7 @@ function backgroundReviewRunNode(row, max, parent) {
   }
   wrap.querySelector('.detail-ex-sub').textContent = row.detail || '';
   wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
-  wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0);
+  wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0, row.unpricedTokens);
   applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
   const open = () => openSessionDetail({
     client: row.client,
@@ -4891,7 +4938,7 @@ function exchangeNode(row, max) {
   wrap.querySelector('.detail-ex-value').textContent = tokensAvailable
     ? formatNumber(row.value)
     : (t('detailTokenUnavailable') || 'Unavailable');
-  wrap.querySelector('.detail-ex-cost').textContent = tokensAvailable ? formatCost(row.cost) : '';
+  wrap.querySelector('.detail-ex-cost').textContent = tokensAvailable ? formatCost(row.cost, row.unpricedTokens) : '';
   applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
 
   const turnsEl = wrap.querySelector('.detail-turns');
@@ -4925,7 +4972,7 @@ function turnNode(turn) {
   el.querySelector('.detail-turn-value').textContent = tokensAvailable
     ? formatNumber(turn.value)
     : (t('detailTokenUnavailable') || 'Unavailable');
-  el.querySelector('.detail-turn-cost').textContent = tokensAvailable ? formatCost(turn.cost) : '';
+  el.querySelector('.detail-turn-cost').textContent = tokensAvailable ? formatCost(turn.cost, turn.unpricedTokens) : '';
   return el;
 }
 
@@ -5809,7 +5856,7 @@ function renderHomeModelModule(period) {
     const item = document.createElement('div');
     item.className = 'home-list-row home-model-row';
     const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ key: row.key || row.name }, 'model'), row.color);
+    applyHomeListMark(mark, iconKindFor({ key: row.key || row.name, modelSource: row.modelSource }, 'model'), row.color);
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.name;
@@ -5826,7 +5873,7 @@ function renderHomeModelModule(period) {
 }
 
 function homeToolSourceRows(period) {
-  return periodAttributionRows(period, period?.clients, period?.clientCosts).map(({ key: client, value }) => ({
+  return periodAttributionRows(period, period?.clients, period?.clientCosts, period?.clientUnpricedTokens).map(({ key: client, value }) => ({
     key: client,
     name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client,
     value: Number(value || 0),
@@ -6599,7 +6646,7 @@ function render() {
     cancelNumberAnimation();
     els.totalTokens.textContent = fixedUnavailable ? '—' : formatNumber(Number(period.totalTokens || 0));
     updateTotalCompact(fixedUnavailable ? 0 : Number(period.totalTokens || 0));
-    els.cost.textContent = fixedUnavailable ? '' : formatCost(period.costUsd || 0);
+    setTotalCost(period.costUsd || 0, period.unpricedTokens, !fixedUnavailable);
     state.currentTotal = fixedUnavailable ? 0 : Number(period.totalTokens || 0);
     hidePeriodContentForMessage(fixedPeriodMessage(state.fixedPeriodSnapshot, detailUnavailable ? state.breakdown : ''));
     renderFloatingBubbleContent();
@@ -6633,7 +6680,7 @@ function render() {
     updateTotalCompact(nextTotal);
   }
   state.currentTotal = nextTotal;
-  els.cost.textContent = formatCost(period.costUsd || 0);
+  setTotalCost(period.costUsd || 0, period.unpricedTokens);
   renderTokenRate();
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');
@@ -9987,6 +10034,9 @@ function patchRenderedNode(current, next) {
     const value = next.getAttribute(name);
     if (current.getAttribute(name) !== value) current.setAttribute(name, value);
   }
+  if (current instanceof HTMLInputElement && current.id.startsWith('codexDots') && current.type === 'checkbox') {
+    current.checked = next.checked;
+  }
   const currentChildren = Array.from(current.childNodes);
   const nextChildren = Array.from(next.childNodes);
   for (let index = 0; index < nextChildren.length; index += 1) {
@@ -10115,6 +10165,17 @@ async function removeCustomScanPath(clientId, dir) {
 
 // Values are formatted here and nowhere else — the presentation helper returns
 // three semantic groups containing only raw numbers, timestamps and i18n keys.
+function codexDotsSettingState(key) {
+  let checked = key === 'codexDotsEnabled' ? state.settings?.[key] === true : state.settings?.[key] !== false;
+  let pending = false;
+  for (const patch of pendingSettingsPatches) {
+    if (!Object.prototype.hasOwnProperty.call(patch, key)) continue;
+    checked = patch[key] === true;
+    pending = true;
+  }
+  return { checked, pending };
+}
+
 function clientHealthGroup(group, notes, clientId) {
   const section = document.createElement('section');
   section.className = `tool-health-group tool-health-group-${group.id}`;
@@ -10190,6 +10251,64 @@ function clientHealthGroup(group, notes, clientId) {
     summary.className = 'tool-health-group-summary';
     summary.textContent = t(`settings.tools.health.sync.${group.state}`);
     body.append(summary);
+    if (clientId === 'codex') {
+      const row = document.createElement('label');
+      row.className = 'checkbox-label codex-dots-setting';
+      const label = document.createElement('span');
+      label.textContent = t('settings.tools.codexDots');
+      const input = document.createElement('input');
+      input.id = 'codexDotsInput';
+      input.type = 'checkbox';
+      const collectionState = codexDotsSettingState('codexDotsEnabled');
+      input.checked = collectionState.checked;
+      input.disabled = collectionState.pending;
+      input.setAttribute('aria-describedby', 'codexDotsNote');
+      input.addEventListener('change', async () => {
+        if (codexDotsSettingState('codexDotsEnabled').pending) return;
+        input.disabled = true;
+        try {
+          await saveSettings({ codexDotsEnabled: input.checked });
+        } catch (_) {
+          input.checked = state.settings?.codexDotsEnabled === true;
+        } finally {
+          input.disabled = false;
+          refillOpenClientHealthPanel();
+        }
+      });
+      const note = document.createElement('div');
+      note.id = 'codexDotsNote';
+      note.className = 'tool-health-group-meta';
+      note.textContent = t('settings.tools.codexDotsNote');
+      row.append(label, input);
+      const visibility = document.createElement('label');
+      visibility.className = 'checkbox-label codex-dots-setting';
+      const visibilityLabel = document.createElement('span');
+      visibilityLabel.textContent = t('settings.tools.codexDotsVisible');
+      const visibilityInput = document.createElement('input');
+      visibilityInput.id = 'codexDotsVisibleInput';
+      visibilityInput.type = 'checkbox';
+      const visibilityState = codexDotsSettingState('codexDotsVisible');
+      visibilityInput.checked = visibilityState.checked;
+      visibilityInput.disabled = visibilityState.pending;
+      visibilityInput.setAttribute('aria-describedby', 'codexDotsNote');
+      visibilityInput.addEventListener('change', async () => {
+        if (codexDotsSettingState('codexDotsVisible').pending) return;
+        visibilityInput.disabled = true;
+        try {
+          await saveSettings({ codexDotsVisible: visibilityInput.checked });
+        } catch (_) {
+          visibilityInput.checked = state.settings?.codexDotsVisible !== false;
+        } finally {
+          visibilityInput.disabled = false;
+          refillOpenClientHealthPanel();
+        }
+      });
+      visibility.append(visibilityLabel, visibilityInput);
+      const dots = document.createElement('div');
+      dots.className = 'codex-dots-settings';
+      dots.append(row, visibility, note);
+      body.append(dots);
+    }
     const stamps = [
       ['lastAttemptAt', 'settings.tools.health.lastAttempt'],
       ['lastSuccessAt', 'settings.tools.health.lastSuccess']
@@ -10524,6 +10643,8 @@ function toolPreferenceRenderSignature() {
       state.settings?.locale || state.settings?.language || '',
       state.settings?.currency || '',
       state.settings?.compactTokenUnits || '',
+      state.settings?.codexDotsEnabled === true,
+      state.settings?.codexDotsVisible !== false,
       JSON.stringify(state.settings?.customScanPaths || {})
     ],
     query: toolPreferenceQuery(),
@@ -12462,6 +12583,7 @@ setupSettingsAccordion(els.appUpdateNotes, els.appUpdateNotesToggle, els.appUpda
 setupSettingsAccordion(els.advancedSettingsGroup, els.advancedSettingsToggle, els.advancedSettingsDetails);
 setupSettingsAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails);
 setupSettingsAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails);
+setupSettingsAccordion(els.edgeDockMoreOptionsGroup, els.edgeDockMoreOptionsToggle, els.edgeDockMoreOptionsDetails);
 for (const input of els.systemGlassInputs || []) {
   input.addEventListener('change', () => {
     if (input.checked) saveAppearanceFromControls();
@@ -12544,9 +12666,18 @@ function syncEdgeDockControls() {
   const modes = (els.edgeDockModeInputs || []).map((input) => input.value);
   const mode = modes.includes(state.settings?.edgeDockMode) ? state.settings.edgeDockMode : 'autoHide';
   for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
+  const sizes = (els.edgeDockSizeInputs || []).map((input) => input.value);
+  const size = sizes.includes(state.settings?.edgeDockSize) ? state.settings.edgeDockSize : 'medium';
+  for (const input of els.edgeDockSizeInputs || []) input.checked = input.value === size;
+  els.edgeDockCustomScaleRow?.classList.toggle('hidden', size !== 'custom');
+  if (els.edgeDockCustomScaleInput && document.activeElement !== els.edgeDockCustomScaleInput) {
+    els.edgeDockCustomScaleInput.value = String(Math.round((Number(state.settings?.edgeDockCustomScale) || 1) * 100));
+    syncSliderRow(els.edgeDockCustomScaleInput);
+  }
   els.edgeDockHapticRow?.classList.toggle('hidden', state.appInfo?.platform !== 'darwin');
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
   if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
+  if (els.edgeDockRunningIndicatorInput) els.edgeDockRunningIndicatorInput.checked = state.settings?.edgeDockRunningIndicatorEnabled !== false;
   if (els.edgeDockMacBackdropInput) {
     els.edgeDockMacBackdropInput.value = macBackdropApi.normalizeEdgeDockBackdropMode(state.settings?.edgeDockMacBackdrop);
   }
@@ -12606,6 +12737,9 @@ for (const input of els.edgeDockSideInputs || []) {
 els.edgeDockWarnColorsInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockWarnColors: els.edgeDockWarnColorsInput.checked });
 });
+els.edgeDockRunningIndicatorInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockRunningIndicatorEnabled: els.edgeDockRunningIndicatorInput.checked });
+});
 els.edgeDockMacBackdropInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockMacBackdrop: macBackdropApi.normalizeEdgeDockBackdropMode(els.edgeDockMacBackdropInput.value) });
 });
@@ -12617,6 +12751,22 @@ for (const input of els.edgeDockModeInputs || []) {
     if (input.checked) void saveSettings({ edgeDockMode: input.value });
   });
 }
+for (const input of els.edgeDockSizeInputs || []) {
+  input.addEventListener('change', () => {
+    if (!input.checked) return;
+    els.edgeDockCustomScaleRow?.classList.toggle('hidden', input.value !== 'custom');
+    void saveSettings({ edgeDockSize: input.value });
+  });
+}
+// Like the Zoom slider: the dock previews each step while the slider is dragged
+// and the size is saved on release, since a save redraws the settings form.
+els.edgeDockCustomScaleInput?.addEventListener('input', () => {
+  syncSliderRow(els.edgeDockCustomScaleInput);
+  window.tokenMonitor.previewAppearance?.({ edgeDockCustomScale: Number(els.edgeDockCustomScaleInput.value) / 100 }).catch(() => {});
+});
+els.edgeDockCustomScaleInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockCustomScale: Number(els.edgeDockCustomScaleInput.value) / 100 });
+});
 
 for (const input of els.floatingBubbleTriggerInputs || []) {
   input.addEventListener('change', () => {

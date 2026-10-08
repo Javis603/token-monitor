@@ -32,6 +32,9 @@
     // Selection and the open add menu live here rather than in the DOM, because
     // every settings save repaints the whole form.
     const ui = { selected: '', menuOpen: false };
+    const refreshItem = { type: 'action', action: 'refresh' };
+    const idFor = (item) => item.type === 'action' ? 'action:refresh' : itemsApi.itemId(item);
+    const refreshEnabled = () => getSettings()?.edgeDockRefreshEnabled === true;
     let drag = null;
     let renderedSignature = '';
 
@@ -91,6 +94,7 @@
     }
 
     function itemLabel(item) {
+      if (item.type === 'action') return t('settings.common.refresh');
       if (item.type === 'stat') {
         if (item.metric === 'liveRate') return t('edgeDock.stat.liveRate');
         if (item.metric === itemsApi.SESSIONS_METRIC) return t('edgeDock.sessions');
@@ -101,6 +105,10 @@
 
     function markFor(item, className = 'edge-dock-composer-mark') {
       const mark = el('span', className);
+      if (item.type === 'action') {
+        mark.classList.add('is-refresh');
+        return mark;
+      }
       if (item.type === 'stat') {
         mark.classList.add('is-stat');
         mark.textContent = item.metric === 'liveRate'
@@ -117,10 +125,11 @@
     }
 
     function railItem(item, count) {
-      const id = itemsApi.itemId(item);
+      const id = idFor(item);
       const button = el('button', 'edge-dock-composer-item');
       button.type = 'button';
-      button.dataset.itemId = id;
+      if (item.type === 'action') button.classList.add('is-action');
+      else button.dataset.itemId = id;
       button.classList.toggle('is-selected', ui.selected === id);
       button.classList.toggle('is-stat', item.type === 'stat');
       button.title = itemLabel(item);
@@ -132,7 +141,7 @@
         ui.menuOpen = false;
         render();
       });
-      if (count > 1) button.addEventListener('pointerdown', (event) => drag?.startRowDrag(event, id));
+      if (count > 1 && item.type !== 'action') button.addEventListener('pointerdown', (event) => drag?.startRowDrag(event, id));
       return button;
     }
 
@@ -151,8 +160,9 @@
           option.append(el('span', '', itemLabel(item)));
           option.addEventListener('click', () => {
             ui.menuOpen = false;
-            ui.selected = itemsApi.itemId(item);
-            void persist([...items, item]);
+            ui.selected = idFor(item);
+            if (item.type === 'action') void save({ edgeDockRefreshEnabled: true });
+            else void persist([...items.filter((entry) => entry.type !== 'action'), item]);
           });
           group.append(option);
         }
@@ -175,6 +185,7 @@
       section('settings.edgeDock.addSessions', present.has(itemsApi.itemId({ type: 'stat', metric: itemsApi.SESSIONS_METRIC }))
         ? []
         : [{ type: 'stat', metric: itemsApi.SESSIONS_METRIC, runningOnly: false, groupBy: 'none' }]);
+      section('settings.edgeDock.addActions', refreshEnabled() ? [] : [refreshItem]);
       if (!menu.childElementCount) menu.append(el('div', 'edge-dock-composer-empty', t('settings.edgeDock.nothingToAdd')));
       return menu;
     }
@@ -276,25 +287,30 @@
         pane.append(addMenu(items));
         return pane;
       }
-      const item = items.find((entry) => itemsApi.itemId(entry) === ui.selected);
+      const item = items.find((entry) => idFor(entry) === ui.selected);
       if (!item) {
         pane.append(el('p', 'edge-dock-composer-hint', t(isAutomatic()
           ? 'settings.edgeDock.automaticHint'
           : (items.length ? 'settings.edgeDock.selectHint' : 'settings.edgeDock.emptyHint'))));
         return pane;
       }
-      const id = itemsApi.itemId(item);
+      const id = idFor(item);
       const head = el('div', 'edge-dock-composer-detail-head');
       head.append(markFor(item, 'edge-dock-composer-mark is-small'), el('span', 'edge-dock-composer-detail-title', itemLabel(item)));
       const remove = el('button', 'edge-dock-composer-remove', t('settings.edgeDock.remove'));
       remove.type = 'button';
       remove.addEventListener('click', () => {
         ui.selected = '';
-        void persist(items.filter((entry) => itemsApi.itemId(entry) !== id));
+        if (item.type === 'action') void save({ edgeDockRefreshEnabled: false });
+        else void persist(items.filter((entry) => entry.type !== 'action' && idFor(entry) !== id));
       });
       head.append(remove);
       pane.append(head);
 
+      if (item.type === 'action') {
+        pane.append(el('p', 'edge-dock-composer-hint', t('settings.edgeDock.refreshNote')));
+        return pane;
+      }
       if (item.type === 'stat') {
         if (item.metric === itemsApi.SESSIONS_METRIC) {
           pane.append(el('p', 'edge-dock-composer-hint', t('settings.edgeDock.statNote.sessions')));
@@ -377,9 +393,10 @@
     function render() {
       if (!root) return;
       if (drag?.deferRender()) return;
-      const items = effectiveItems();
-      if (ui.selected && !items.some((item) => itemsApi.itemId(item) === ui.selected)) ui.selected = '';
-      const selectedItem = items.find((item) => itemsApi.itemId(item) === ui.selected);
+      // Refresh is a fixed footer action; it does not freeze the automatic provider list.
+      const items = [...effectiveItems(), ...(refreshEnabled() ? [refreshItem] : [])];
+      if (ui.selected && !items.some((item) => idFor(item) === ui.selected)) ui.selected = '';
+      const selectedItem = items.find((item) => idFor(item) === ui.selected);
       // A stats tick can change token totals without changing any control here.
       // Replacing the native select on every tick closes its open menu.
       const signature = JSON.stringify({
@@ -403,13 +420,13 @@
       heading.append(el('span', '', t('settings.edgeDock.items')));
       const actions = el('span', 'edge-dock-composer-heading-actions');
       actions.append(el('span', 'edge-dock-composer-heading-hint', t('settings.edgeDock.itemsHint')));
-      if (!isAutomatic()) {
+      if (!isAutomatic() || refreshEnabled()) {
         const reset = el('button', 'edge-dock-composer-reset', t('settings.edgeDock.reset'));
         reset.type = 'button';
         reset.addEventListener('click', () => {
           ui.selected = '';
           ui.menuOpen = false;
-          void persist(null);
+          void save({ edgeDockItems: null, edgeDockRefreshEnabled: false });
         });
         actions.append(reset);
       }
@@ -443,7 +460,8 @@
       // Ids come back lower-cased from the drag sort; see reorderEdgeDockItems.
       applyOrder: (order) => {
         const rail = root.querySelector('.edge-dock-composer-rail');
-        const add = rail?.querySelector('.edge-dock-composer-add');
+        const add = rail?.querySelector('.edge-dock-composer-item.is-action')
+          || rail?.querySelector('.edge-dock-composer-add');
         const nodes = new Map([...(rail?.querySelectorAll('[data-item-id]') || [])]
           .map((node) => [node.dataset.itemId.toLowerCase(), node]));
         for (const id of order) {

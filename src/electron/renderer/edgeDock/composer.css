@@ -270,3 +270,10 @@
   white-space: nowrap;
 }
 .edge-dock-composer-account-plan { flex: 0 0 auto; color: var(--muted); font-size: 0.625rem; }
+
+/* Refresh stays below the sortable readouts, matching its fixed dock position. */
+.edge-dock-composer-item.is-action { cursor: pointer; }
+.edge-dock-composer-mark.is-refresh {
+  -webkit-mask-image: url('../icons/actions/refresh.svg');
+  mask-image: url('../icons/actions/refresh.svg');
+}

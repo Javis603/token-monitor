@@ -80,7 +80,7 @@ collector = startCollector({
 });
 post({ type: 'diagnostics', diagnostics: diagnostics() });
 
-const CALLS = new Set(['tick', 'refreshClient', 'whenIdle']);
+const CALLS = new Set(['tick', 'refreshClient', 'whenIdle', 'setCodexDotsVisible']);
 
 function call(message) {
   Promise.resolve()

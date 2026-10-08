@@ -11,6 +11,20 @@ const {
 } = require('../../src/electron/modelAliasPresentation');
 
 const aliases = { 'anthropic/claude-opus-5': 'claude-opus-5' };
+
+test('model aliases keep unpriced attribution attached to the displayed model', () => {
+  const today = {
+    totalTokens: 100, costUsd: 0, unpricedTokens: 100,
+    models: { 'anthropic/claude-opus-5': 40, 'claude-opus-5': 60 },
+    modelUnpricedTokens: { 'anthropic/claude-opus-5': 40, 'claude-opus-5': 60 },
+    clientModelUnpricedTokens: { codex: { 'anthropic/claude-opus-5': 40, 'claude-opus-5': 60 } }
+  };
+  const projected = projectModelAliasStats({ periods: { today } }, aliases).periods.today;
+  assert.deepEqual(projected.modelUnpricedTokens, { 'claude-opus-5': 100 });
+  assert.deepEqual(projected.clientModelUnpricedTokens, { codex: { 'claude-opus-5': 100 } });
+  assert.equal(projected.unpricedTokens, 100);
+  assert.equal(today.modelUnpricedTokens['anthropic/claude-opus-5'], 40, 'presentation does not mutate source attribution');
+});
 const period = {
   totalTokens: 100, costUsd: 7, clients: { claude: 60, opencode: 40 }, clientCosts: { claude: 3, opencode: 4 },
   models: { 'anthropic/claude-opus-5': 40, 'claude-opus-5': 30, 'gpt-5.5-pro': 30 },

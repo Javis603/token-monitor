@@ -304,9 +304,7 @@ function createSourceSyncQueue(options = {}) {
   // The one place the catch-up deadline is decided. Everything that changes the
   // pending set calls this and passes nothing: the deadline is always the
   // earliest across whatever is pending now. Handing a single client's delay in
-  // is what would let one client's backoff overwrite another's nearer deadline —
-  // unreachable while antigravity is the only source-sync client, but the same
-  // shape of divergence that has already cost this state machine a bug.
+  // is what would let one client's backoff overwrite another's nearer deadline.
   function rearm() {
     if (catchUpTimer) {
       clearTimer(catchUpTimer);

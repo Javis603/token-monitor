@@ -71,40 +71,72 @@ html.edge-dock-liquid-glass .edge-dock-shape-line { stroke: transparent; }
 
 /* ---- Peek handle ------------------------------------------------------- */
 
+/* The handle is a silhouette like the rail's, with the same material, tint and
+   outline, so it reads as the rail folded away. Its shape comes from the main
+   process, which draws it larger while the pointer approaches. */
 .edge-dock-root[data-surface="peek"] { cursor: pointer; }
-.edge-dock-grip {
-  position: absolute;
-  top: 50%;
-  width: 2px;
-  height: 14px;
-  margin-top: -7px;
-  border-radius: 999px;
-  background: rgba(var(--accent-rgb), 0.75);
-  /* The return takes the window's own FADE_IN_MS, so the handle grows back out on
-     the beat the glass comes back. The retreat below overrides this with a shorter,
+.edge-dock-root[data-surface="peek"][data-peek-mode="handle"] .edge-dock-shape {
+  /* The return takes the window's own FADE_IN_MS, so the handle comes back out on
+     the beat the window does. The retreat below overrides this with a shorter,
      front-loaded curve, because the main process's fade-out outlasts the movement
      and the window would otherwise dim past it before it had travelled. */
   transition: opacity 150ms ease, transform 150ms cubic-bezier(0.33, 1, 0.68, 1);
 }
-.edge-dock-root[data-side="right"] .edge-dock-grip { right: 2px; }
-.edge-dock-root[data-side="left"] .edge-dock-grip { left: 2px; }
-.edge-dock-root[data-surface="peek"]:hover .edge-dock-grip { transform: scaleY(1.3); }
 /* Withdrawn: the handle retreats into the edge it hangs off, the way the rail slides
-   out of that same edge when it takes the handle's place. It shrinks along its own
-   length as it goes, because the window is only 7px wide - the grip has 4px of travel
-   before it is past the edge and clipped, which on its own is not a movement anyone
-   would see. The page holds this as a state rather than replaying an animation, so one
-   transition carries it both ways and a page that loads with the rail already open
-   starts here instead of animating into it. */
-.edge-dock-root[data-side="right"] { --edge-dock-grip-retreat: 4px; }
-.edge-dock-root[data-side="left"] { --edge-dock-grip-retreat: -4px; }
-.edge-dock-root[data-surface="peek"].is-handle-hidden .edge-dock-grip {
+   out of that same edge when it takes the handle's place, shrinking along its own
+   length as it goes. The page holds this as a state rather than replaying an
+   animation, so one transition carries it both ways and a page that loads with the
+   rail already open starts here instead of animating into it. */
+/* The window's whole width, which clears the handle at either size. */
+.edge-dock-root[data-side="right"] { --edge-dock-handle-retreat: 100%; }
+.edge-dock-root[data-side="left"] { --edge-dock-handle-retreat: -100%; }
+.edge-dock-root[data-surface="peek"][data-peek-mode="handle"].is-handle-hidden .edge-dock-shape {
   opacity: 0;
-  transform: translateX(var(--edge-dock-grip-retreat)) scaleY(0.2);
+  transform: translateX(var(--edge-dock-handle-retreat)) scaleY(0.2);
   transition: opacity 110ms ease-out, transform 110ms ease-out;
 }
 
 /* ---- Rail --------------------------------------------------------------- */
+
+.edge-dock-refresh {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease;
+}
+.edge-dock-refresh:hover:not(:disabled) { background: rgba(var(--overlay-rgb), 0.08); }
+.edge-dock-refresh:active:not(:disabled) .edge-dock-refresh-icon { transform: scale(0.9); }
+.edge-dock-refresh:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
+.edge-dock-refresh:disabled { cursor: default; }
+.edge-dock-refresh-icon {
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: url("../icons/actions/refresh.svg") center / contain no-repeat;
+  mask: url("../icons/actions/refresh.svg") center / contain no-repeat;
+  transition: transform 120ms ease;
+}
+.edge-dock-refresh[data-state="busy"] .edge-dock-refresh-icon {
+  width: 16px;
+  height: 16px;
+  -webkit-mask-image: url("../icons/actions/spinner.svg");
+  mask-image: url("../icons/actions/spinner.svg");
+}
+.edge-dock-refresh[data-state="success"] { color: var(--success); }
+.edge-dock-refresh[data-state="error"] { color: var(--red); }
+html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-refresh-icon {
+  -webkit-mask-image: url("../icons/actions/refresh.svg");
+  mask-image: url("../icons/actions/refresh.svg");
+  opacity: 0.6;
+}
 
 .edge-dock-rail {
   position: absolute;
@@ -124,7 +156,7 @@ html.edge-dock-liquid-glass .edge-dock-shape-line { stroke: transparent; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 7px;
   border-radius: 12px;
   transition: background-color 140ms ease;
 }
@@ -152,70 +184,37 @@ html.edge-dock-liquid-glass .edge-dock-shape-line { stroke: transparent; }
 .edge-dock-ring-track {
   fill: none;
   stroke: rgba(var(--overlay-rgb), 0.12);
-  stroke-width: 3.5;
+  stroke-width: 4;
 }
 .edge-dock-ring-fill {
   fill: none;
   stroke: var(--ring-color, var(--accent));
-  stroke-width: 3.5;
+  stroke-width: 4;
   stroke-linecap: round;
   transition: stroke-dashoffset 420ms cubic-bezier(0.2, 0.8, 0.2, 1), filter 180ms ease;
 }
 .edge-dock-cell[data-status="stale"] .edge-dock-ring-fill,
 .edge-dock-cell[data-status="error"] .edge-dock-ring-fill { opacity: 0.35; }
 
-/* Running: a halo behind the provider's mark while that tool has work in flight.
-   It sits on the mark and not on the arc because a running session does not prove
-   this quota is what is draining (the tokens may be billed elsewhere), so it is a
-   fact about the tool rather than about the reading - see providerCellNode for the
-   full reasoning.
-
-   Opacity and transform only: this is the one animation in the dock that runs
-   whenever work is in flight rather than only while a card is open, in an
-   always-on-top window, so it has to stay on the compositor. Animating the arc's
-   `drop-shadow` instead would repaint a blur every frame for the whole life of a
-   session.
-
-   The halo has to out-reach the glyph it sits behind, and only just: the mark is
-   17px across a 42px ring, so a glow that dies at the mark's own 8.5px half-width
-   is left with nothing to show beside the letterform but whatever comes through
-   its counters. The gradient carries no hold stop, so it is brightest at the
-   centre and spends itself from there out - and at 62% of the ring the last of
-   the colour lands at 9.4px, just clear of the glyph, with the band beside it
-   being the falloff's own tail. Holding colour out to a stop and spending the
-   falloff after it was what made an earlier cut read as a second, larger circle
-   behind the ring rather than as light around the mark. It stays sized against
-   the ring rather than the mark so the compact rail keeps the same proportion. */
-.edge-dock-ring-glow {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: 62%;
-  height: 62%;
-  border-radius: 50%;
+/* Running work has its own inner arc, independent of the quota ring. Only
+   transform animates; reduced motion leaves the same short arc still. */
+.edge-dock-ring-spinner {
   pointer-events: none;
   opacity: 0;
-  background: radial-gradient(closest-side, var(--ring-color, var(--accent)), transparent 72%);
-  transition: opacity 240ms ease;
 }
-/* The mark is an in-flow grid item and the halo is positioned, so without this the
-   halo paints over the glyph it is meant to sit behind - painting order puts a
-   positioned element above an in-flow sibling whatever the DOM order. Scoped to the
-   ring: the same class is drawn flat in the card's rows and its lists. */
-.edge-dock-ring .edge-dock-mark { position: relative; }
-/* The lit state is a still halo, and the keyframes only modulate it. Reduced
-   motion stops the animation but not the declaration, so it falls back to a
-   steady glow rather than to nothing - the same trade the session dot makes when
-   it swaps its spinner for a solid dot. The still value is the midpoint of the
-   breath, so the state that replaces the animation is the one the animation
-   spends most of its time near rather than either end of the swing. */
-.edge-dock-cell[data-running="yes"] .edge-dock-ring-glow {
-  opacity: 0.45;
-  animation: edge-dock-mark-breathe 2600ms ease-in-out infinite;
+.edge-dock-ring-spinner circle {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1.5;
+  stroke-linecap: round;
 }
-@keyframes edge-dock-mark-breathe {
-  0%, 100% { opacity: 0.24; transform: scale(0.93); }
-  50%      { opacity: 0.66; transform: scale(1.06); }
+.edge-dock-cell[data-running="yes"] .edge-dock-ring-spinner {
+  opacity: 1;
+  animation: edge-dock-running-spin 1400ms linear infinite;
+}
+@keyframes edge-dock-running-spin {
+  from { transform: rotate(-90deg); }
+  to { transform: rotate(270deg); }
 }
 
 /* The flare a quota refill lands with — the ring's counterpart to the meter's
@@ -251,7 +250,7 @@ html.edge-dock-liquid-glass .edge-dock-shape-line { stroke: transparent; }
 
 .edge-dock-value {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 650;
   line-height: 1;
   letter-spacing: -0.01em;
   color: var(--text);
@@ -983,3 +982,5 @@ html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge
 .edge-dock-rate-model-value { color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .edge-dock-rate-device { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .edge-dock-rate-device.is-separated { margin-top: 2px; padding-top: 8px; border-top: 1px solid rgba(var(--line-rgb), 0.16); }
+
+.edge-dock-cost-reading { display: inline-flex; align-items: center; gap: 3px; }
