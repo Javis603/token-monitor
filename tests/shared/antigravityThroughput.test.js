@@ -107,6 +107,31 @@ test('date-window coverage excludes earlier output and leaves missing generation
   assert.equal(filtered.entries[0].performance.totalDurationMs, 2000);
 });
 
+test('unresolved generation timestamps reject partial coverage and recover when step metadata arrives', t => {
+  for (const missingStep of [true, false]) {
+    const f = fixture(t, { wal: true });
+    f.step(1, start);
+    f.add(1, { stepIdx: 1 });
+    f.add(2, { stepIdx: 2, duration: 12000 });
+    if (!missingStep) f.db.prepare('INSERT INTO steps VALUES(?,?)').run(2, null);
+    const data = readConversation(f.file);
+    assert.equal(data.complete, false);
+    assert.deepEqual(data.generations.map(generation => generation.startedAt), [start, 0]);
+    for (const flags of [[], ['--today'], ['--month'], ['--since', '2026-10-01']]) {
+      const json = scan();
+      const original = structuredClone(json);
+      applyAntigravityThroughput(json, { home: f.home, flags, now: start + 10000 });
+      assert.deepEqual(json, original);
+    }
+    f.db.prepare('INSERT OR REPLACE INTO steps VALUES(?,?)').run(2, proto({ 1: timestamp(start + 1000) }));
+    assert.equal(readConversation(f.file).complete, true);
+    const restored = scan(240, { input: 100, cacheRead: 40 });
+    applyAntigravityThroughput(restored, { home: f.home, flags: ['--today'], now: start + 10000 });
+    assert.equal(restored.entries[0].performance.totalDurationMs, 14000);
+    assert.equal(extractUsageFromTokscale(restored).timedOutputTokens, 240);
+  }
+});
+
 test('legacy databases without steps still retain generation timing and response deduplication', t => {
   const f = fixture(t, { steps: false });
   f.add(1, { legacyStart: start, responseId: 'duplicate', output: 10 });

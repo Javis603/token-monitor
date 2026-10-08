@@ -146,6 +146,7 @@ function readConversation(file) {
       if (generation.responseId && seen.has(generation.responseId)) continue;
       if (generation.responseId) seen.add(generation.responseId);
       generation.startedAt ||= steps.get(generation.stepIdx) || 0;
+      if (!generation.startedAt) complete = false;
       generations.unshift(generation);
     }
     database.exec('COMMIT');
