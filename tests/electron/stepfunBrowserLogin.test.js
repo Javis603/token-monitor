@@ -10,8 +10,10 @@ const {
   OASIS_WEBID,
   PARTITION,
   WINDOW_TITLE,
+  disposeStepFunWindow,
   loginUrl,
   readOasisSession,
+  retainedStepFunWindow,
   signInStepFunWithBrowser,
   tokenExpiryMs
 } = require('../../src/electron/providers/stepfun/login');
@@ -130,12 +132,31 @@ function fakeWindowClass(page, created = []) {
       this.options = options;
       this.page = page;
       this.webContents = { executeJavaScript: (script) => page.executeJavaScript(script) };
+      this.destroyed = false;
+      this.visible = options.show !== false;
       created.push(options);
     }
 
-    isDestroyed() { return this.page.state.destroyed; }
+    isDestroyed() { return this.page.state.destroyed || this.destroyed; }
 
-    destroy() { this.page.state.destroyed = true; }
+    isVisible() { return this.visible; }
+
+    show() { this.visible = true; }
+
+    hide() { this.visible = false; }
+
+    once(event, handler) { this.handlers = this.handlers || {}; (this.handlers[event] ||= []).push(handler); }
+
+    off() {}
+
+    destroy() {
+      this.destroyCount_ = (this.destroyCount_ || 0) + 1;
+      this.destroyed = true;
+      this.page.state.destroyed = true;
+      (this.handlers?.closed || []).forEach((h) => h());
+    }
+
+    destroyCount() { return this.destroyCount_ || 0; }
 
     loadURL(url) {
       this.page.log.push(`load:${url}`);
@@ -264,6 +285,33 @@ test('the tab is switched with a mousedown but consent with a plain click', asyn
   assert.ok(consentScript, 'consent is ticked');
   assert.ok(!consentScript.includes('mousedown'),
     'the consent control wants a plain click — the pointer sequence cancels it back out');
+});
+
+test('a successful sign-in keeps its window, because destroying it breaks the network', async () => {
+  // Measured on Electron 43.4: after a BrowserWindow on a persistent
+  // partition is destroyed, every later net.fetch and loadURL hangs. The
+  // quota probe that follows a sign-in would then time out and report the
+  // provider unavailable, so the window is hidden and kept instead.
+  disposeStepFunWindow();
+  const page = fakePage();
+  const { created } = await runSignIn({
+    page,
+    cookies: () => (page.state.submitted ? [cookie(OASIS_TOKEN, 'tok')] : [])
+  });
+
+  const win = retainedStepFunWindow();
+  assert.ok(win, 'the sign-in window is retained for the quota read to reuse');
+  assert.equal(win.options, created[0], 'it is the window that signed in, not a second one');
+  assert.equal(win.destroyCount(), 0, 'a successful sign-in must not destroy its window');
+  disposeStepFunWindow();
+  assert.equal(retainedStepFunWindow(), null, 'dispose clears it');
+});
+
+test('a failed sign-in destroys its window', async () => {
+  disposeStepFunWindow();
+  const page = fakePage({ passwordTab: false });
+  await assert.rejects(runSignIn({ page, cookies: () => [] }));
+  assert.equal(retainedStepFunWindow(), null, 'a failed attempt has nothing worth keeping');
 });
 
 test('the sign-in window is isolated from the widget session', async () => {

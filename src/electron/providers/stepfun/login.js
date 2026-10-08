@@ -142,6 +142,7 @@ async function signInStepFunWithBrowser(options = {}) {
 
   const deadline = Date.now() + Number(timeoutMs || DEFAULT_TIMEOUT_MS);
   const cleanup = () => { if (!win.isDestroyed()) win.destroy(); };
+  let signedIn = false;
 
   try {
     logger('opening the StepFun sign-in page');
@@ -252,6 +253,7 @@ async function signInStepFunWithBrowser(options = {}) {
       if (outcome.token) {
         logger('StepFun sign-in completed');
         onStatus('done');
+        signedIn = true;
         return outcome;
       }
       if (win.isDestroyed()) break;
@@ -272,12 +274,45 @@ async function signInStepFunWithBrowser(options = {}) {
     if (!error.status) error.status = 'unavailable';
     throw error;
   } finally {
-    cleanup();
+    // A successful sign-in keeps its window: destroying it takes the network
+    // stack down and the quota read that follows can no longer reach the site.
+    // A failed attempt has nothing worth keeping.
+    if (signedIn && !win.isDestroyed()) retainStepFunWindow(win);
+    else cleanup();
   }
 }
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// A destroyed window takes Chromium's network stack down with it: measured on
+// Electron 43.4, once a BrowserWindow on a persistent partition is destroyed,
+// every later `net.fetch` from the default session and every later `loadURL`
+// in a new window hangs indefinitely — which is exactly the shape of a quota
+// probe that times out right after signing in. So the sign-in window is hidden
+// and kept instead, and reused for the quota read (see quota.js). It costs one
+// idle renderer; it buys a working network stack.
+let retainedWindow = null;
+
+function retainedStepFunWindow() {
+  return retainedWindow && !retainedWindow.isDestroyed() ? retainedWindow : null;
+}
+
+function retainStepFunWindow(win) {
+  if (!win || win.isDestroyed()) return null;
+  retainedWindow = win;
+  // The user may close it at any time; forget it rather than hand out a corpse.
+  win.once('closed', () => {
+    if (retainedWindow === win) retainedWindow = null;
+  });
+  if (win.isVisible()) win.hide();
+  return win;
+}
+
+function disposeStepFunWindow() {
+  if (retainedWindow && !retainedWindow.isDestroyed()) retainedWindow.destroy();
+  retainedWindow = null;
 }
 
 // Switch to the password tab and confirm it actually took effect. Returns
@@ -345,9 +380,12 @@ module.exports = {
   OASIS_WEBID,
   PARTITION,
   WINDOW_TITLE,
+  disposeStepFunWindow,
   loginUrl,
   readOasisSession,
   readOasisToken,
+  retainStepFunWindow,
+  retainedStepFunWindow,
   signInStepFunWithBrowser,
   tokenExpiryMs
 };
