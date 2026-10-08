@@ -99,6 +99,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     copilotApiToken: ['providers', 'copilot', 'apiToken'],
     zedCookie: ['providers', 'zed', 'cookie'],
     typesafeCookie: ['providers', 'typesafe', 'cookie'],
+    stepfunPassword: ['providers', 'stepfun', 'password'],
     stepfunToken: ['providers', 'stepfun', 'token'],
     commandcodeCookie: ['providers', 'commandcode', 'cookie'],
     zaiApiKey: ['providers', 'zai', 'apiKey'],
@@ -161,7 +162,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     deepseek: ['deepseekApiKey'],
     devin: ['devinBearerToken', 'devinOrganization'],
     typesafe: ['typesafeCookie'],
-    stepfun: ['stepfunToken'],
+    stepfun: ['stepfunUsername', 'stepfunPassword', 'stepfunToken'],
     openrouter: ['openrouterProfiles'],
     minimax: ['minimaxApiKey', 'minimaxApiRegion'],
     volcengine: [
@@ -273,7 +274,8 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineSecretAccessKey', 'volcengineRegion', 'volcengineAgentAccessKeyId',
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
-    'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
+    'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie',
+    'stepfunUsername', 'stepfunPassword', 'stepfunToken',
     'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie'
   ].sort());
   for (const key of normalizedKeys) {

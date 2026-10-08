@@ -81,7 +81,7 @@ test('Claude organization choice starts hidden before a cookie is checked', () =
   assert.equal(group.byId('claudeWebOrganizationRow').classList.contains('hidden'), true);
 });
 
-test('StepFun setup copy points to its button, request header and save action', () => {
+test('StepFun setup copy points to its button, request header and both credential lanes', () => {
   const form = limitAccountFormsForRenderer().find((entry) => entry.id === 'stepfun');
   const { group } = renderPanel(form);
   const steps = form.manual[0].steps;
@@ -91,7 +91,17 @@ test('StepFun setup copy points to its button, request header and save action', 
   assert.match(i18n.translate('en', steps[1][0]), /DevTools \(F12 or Cmd\+Opt\+I\) -> Network/);
   assert.match(group.text, /QueryStepPlanRateLimit/);
   assert.match(i18n.translate('en', steps[2]), /Headers -> Request Headers.*Oasis-Token/);
-  assert.match(i18n.translate('zh-TW', steps[3]), /儲存 token/);
+  // The final step names the password lane first, because that is what keeps
+  // the quota from expiring; the pasted token stays as the fallback it is.
+  assert.match(i18n.translate('zh-TW', steps[3]), /帳號信箱與密碼/);
+  assert.match(i18n.translate('en', steps[3]), /email and password/);
+  // Username + password are the primary fields; the pasted token is optional.
+  assert.deepEqual(form.fields.map((entry) => entry.key),
+    ['stepfunUsername', 'stepfunPassword', 'stepfunToken']);
+  assert.equal(form.fields.find((entry) => entry.key === 'stepfunPassword').input, 'password');
+  assert.equal(form.fields.find((entry) => entry.key === 'stepfunToken').required, false,
+    'a pasted token is optional when a password is stored');
+  assert.match(i18n.translate('zh-TW', 'settings.stepfun.manualToken'), /選填/);
 });
 
 for (const form of limitAccountFormsForRenderer()) {

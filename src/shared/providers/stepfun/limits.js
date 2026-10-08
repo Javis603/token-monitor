@@ -5,17 +5,33 @@ const { normalizeLimitProvider } = require('../../limits/core');
 const { errorWithStatus, numberOrNull, providerStatusFromError } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
+const { loginStepFun, normalizeOasisToken } = require('./login');
 
 const ORIGIN = 'https://platform.stepfun.com';
 const RATE_URL = `${ORIGIN}/api/step.openapi.devcenter.Dashboard/QueryStepPlanRateLimit`;
 const PLAN_URL = `${ORIGIN}/api/step.openapi.devcenter.Dashboard/GetStepPlanStatus`;
 const DEFAULT_WEBID = 'c8a1002d2c457e758785a9979832217c7c0b884c';
 
+// A pasted or environment token still wins when present — it is the manual
+// escape hatch. Otherwise the stored username + password drive loginStepFun(),
+// which is what keeps the quota live: an Oasis-Token is a short-lived session
+// JWT with no refresh, so a stored token alone expires and the provider goes
+// unauthorized until the user re-pastes one. Cached tokens are only used when
+// no password is stored, and a 401/403 from the quota probe invalidates the
+// cache and retries once through the password flow.
 function stepfunToken(env = process.env, options = {}) {
   const input = String(options.stepfunToken || env?.TOKEN_MONITOR_STEPFUN_TOKEN || env?.STEPFUN_TOKEN || '').trim();
-  const cookieValue = /(?:^|;)\s*Oasis-Token=([^;]+)/iu.exec(input)?.[1];
-  const raw = String(cookieValue || input).replace(/^Oasis-Token\s*:\s*/iu, '').trim();
-  return raw && !/[\u0000-\u001f\u007f;]/u.test(raw) ? raw : '';
+  return normalizeOasisToken(input);
+}
+
+function stepfunCredentials(env = process.env, options = {}) {
+  const username = String(
+    options.stepfunUsername || env?.TOKEN_MONITOR_STEPFUN_USERNAME || env?.STEPFUN_USERNAME || ''
+  ).trim();
+  const password = String(
+    options.stepfunPassword || env?.TOKEN_MONITOR_STEPFUN_PASSWORD || env?.STEPFUN_PASSWORD || ''
+  );
+  return username && password ? { username, password } : null;
 }
 
 function deviceId(token) {
@@ -95,28 +111,71 @@ function parseStepfunUsage(body) {
 async function fetchStepfunLimits(options = {}, deps = {}) {
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
   const base = { provider: 'stepfun', source: 'web', updatedAt };
-  const token = stepfunToken(deps.env || process.env, options);
-  if (!token) return normalizeLimitProvider({ ...base, status: 'notConfigured', windows: [] });
+  const env = deps.env || process.env;
+  const run = deps.fetch || fetch;
+  const credentials = stepfunCredentials(env, options);
+  // An explicit/env token is authoritative when present; otherwise a cached
+  // token from a previous password login keeps the probe cheap, and the
+  // credentials are what make it renewable.
+  let token = stepfunToken(env, options) || (deps.cachedToken ? normalizeOasisToken(deps.cachedToken) : '');
+  if (!token && !credentials) {
+    return normalizeLimitProvider({ ...base, status: 'notConfigured', windows: [] });
+  }
+
   try {
     const webid = deviceId(token);
-    const request = async (url, signal) => {
-      const response = await (deps.fetch || fetch)(url, {
+    const request = async (url, signal, activeToken) => {
+      const response = await run(url, {
         method: 'POST', body: '{}', signal, redirect: 'error', credentials: 'omit',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json',
           'User-Agent': BROWSER_USER_AGENT, 'oasis-appid': '10300', 'oasis-platform': 'web',
-          'oasis-webid': webid, Cookie: `Oasis-Token=${token}; Oasis-Webid=${webid}` }
+          'oasis-webid': webid, Cookie: `Oasis-Token=${activeToken}; Oasis-Webid=${webid}` }
       });
       if (!response.ok) throw errorWithStatus(response.status === 401 || response.status === 403 ? 'unauthorized' : response.status === 429 ? 'sourceRateLimited' : 'unavailable', `StepFun returned ${response.status}`);
       try { return await response.json(); } catch { throw errorWithStatus('unavailable', 'Invalid StepFun response'); }
     };
-    const windows = await runWithProbeDeadline(
-      async ({ signal }) => parseStepfunUsage(await request(RATE_URL, signal)),
-      { signal: deps.signal, deadlineMs: Number(deps.stepfunFetchTimeoutMs || 15000) }
-    );
+
+    // Mint a token before probing when we have credentials and none cached:
+    // an expired cached token would otherwise cost a wasted 401 round trip.
+    if (!token && credentials) {
+      token = await runWithProbeDeadline(
+        ({ signal }) => loginStepFun(credentials, { fetch: run, signal, webid }),
+        { signal: deps.signal, deadlineMs: Number(deps.stepfunLoginTimeoutMs || 20000) }
+      );
+      if (deps.onTokenRefreshed) {
+        try { deps.onTokenRefreshed(token); } catch { /* persisting is best-effort */ }
+      }
+    }
+
+    let body;
+    try {
+      body = await runWithProbeDeadline(
+        async ({ signal }) => request(RATE_URL, signal, token),
+        { signal: deps.signal, deadlineMs: Number(deps.stepfunFetchTimeoutMs || 15000) }
+      );
+    } catch (error) {
+      // A 401/403 on a token we did not mint this call means the cached one
+      // aged out. Re-login once and retry, so a stale cache self-heals instead
+      // of waiting for the next manual paste.
+      if (!credentials || providerStatusFromError(error) !== 'unauthorized') throw error;
+      token = await runWithProbeDeadline(
+        ({ signal }) => loginStepFun(credentials, { fetch: run, signal, webid }),
+        { signal: deps.signal, deadlineMs: Number(deps.stepfunLoginTimeoutMs || 20000) }
+      );
+      if (deps.onTokenRefreshed) {
+        try { deps.onTokenRefreshed(token); } catch { /* persisting is best-effort */ }
+      }
+      body = await runWithProbeDeadline(
+        async ({ signal }) => request(RATE_URL, signal, token),
+        { signal: deps.signal, deadlineMs: Number(deps.stepfunFetchTimeoutMs || 15000) }
+      );
+    }
+
+    const windows = parseStepfunUsage(body);
     let accountLabel = '';
     try {
       const plan = await runWithProbeDeadline(
-        ({ signal }) => request(PLAN_URL, signal),
+        ({ signal }) => request(PLAN_URL, signal, token),
         { signal: deps.signal, deadlineMs: Number(deps.stepfunPlanFetchTimeoutMs || 1500) }
       );
       if ((plan.status === 1 || plan.status == null) && typeof plan.subscription?.name === 'string') accountLabel = plan.subscription.name;
@@ -124,10 +183,15 @@ async function fetchStepfunLimits(options = {}, deps = {}) {
       if (deps.signal?.aborted) throw error;
       // Plan name is optional; quota remains authoritative.
     }
-    return normalizeLimitProvider({ ...base, status: 'ok', accountKey: hashKey('stepfun', token), accountLabel, windows });
+    // Keyed on the account, not the token: a rotated token is the same
+    // account, and keying on it would fork one login into several rows.
+    const accountKey = credentials
+      ? hashKey('stepfun', `password:${credentials.username.toLowerCase()}`)
+      : hashKey('stepfun', token);
+    return normalizeLimitProvider({ ...base, status: 'ok', accountKey, accountLabel, windows });
   } catch (error) {
     return normalizeLimitProvider({ ...base, status: providerStatusFromError(error), windows: [] });
   }
 }
 
-module.exports = { fetchStepfunLimits, parseStepfunUsage, stepfunToken, deviceId };
+module.exports = { fetchStepfunLimits, parseStepfunUsage, stepfunToken, stepfunCredentials, deviceId };
