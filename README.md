@@ -151,6 +151,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Real-time multi-device sync** — hub-backed sync uses Server-Sent Events to push updates to other devices within seconds; iCloud Drive sync is eventually consistent
 - **Local-first** — no servers needed for single-device use
 - **Self-hosted sync backend** — in-widget hub, Node CLI hub, or Cloudflare Worker
+- **Headless agent** — reports usage from servers, SSH hosts, and WSL without the desktop app; see [Headless agent](#headless-agent)
 - **iOS widget support** — Widgy and Scriptable through the Worker hub
 - **Privacy-first** — prompts, responses, source code, and file contents stay on your machine
 
@@ -190,7 +191,7 @@ Local mode is the default: launch the app and it starts tracking this device. No
 
 ## Multi-device sync
 
-Pick ONE multi-device sync backend for your devices (and any headless agents). On each device, open the widget and pick a mode under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget. iCloud Drive is a macOS-widget-only option and does not support headless agents.
+Pick ONE multi-device sync backend for your devices (and any headless agents). On each device, open the widget and pick a mode under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run the [headless agent](#headless-agent) only on machines without a widget. iCloud Drive is a macOS-widget-only option and does not support headless agents.
 
 #### Option A — Host the hub from the widget (easiest, no CLI)
 
@@ -227,6 +228,21 @@ Paste the deployed URL into each device's widget at Settings → Multi-device Sy
 
 On each Mac signed into the same Apple ID, choose **iCloud Drive** in Settings → Multi-device Sync. This is an opt-in macOS-only path: Token Monitor writes one atomic snapshot per device and one subscription snapshot per writer under `iCloud Drive/Token Monitor/sync-v1/`, then each Mac aggregates the valid files locally. It uses no Token Monitor server, CloudKit, or credentials; provider API keys, cookies, and tokens stay local. iCloud Drive is eventually consistent, so another Mac may take a moment to appear or update, and a missing or malformed file never clears the last-good aggregate.
 
+### Headless agent
+
+Run the headless agent on servers, SSH hosts, or inside WSL — anywhere you use AI tools without the desktop widget. It collects usage on that machine and posts it to your hub (Option A, B, or C). Requires Node.js 22.15+ and git.
+
+```bash
+git clone https://github.com/Javis603/token-monitor.git
+cd token-monitor
+npm ci
+cp .env.example .env              # set TOKEN_MONITOR_HUB_URL, TOKEN_MONITOR_SECRET, and a unique TOKEN_MONITOR_DEVICE_ID
+npm run agent:once -- --dry-run   # print the summary without posting it
+npm run agent                     # run continuously
+```
+
+See [docs/headless-agent.md](docs/headless-agent.md) for running it as a service, updating, uninstalling, and troubleshooting. For SQLite-backed tools inside WSL, follow the [WSL SQLite setup](docs/wsl-sqlite-setup.md).
+
 ## App data
 
 App state lives in the OS user-data dir — delete it along with the app to fully uninstall.
@@ -261,9 +277,9 @@ Mode A — Local (default, no setup)
     widget (Electron) ──▶ tokscale ──▶ ~/.claude, ~/.codex, $HERMES_HOME
 
 Mode B — Sync (opt-in, multi-device)
-    device A agent ──▶
-    device B agent ──▶  hub  ──▶  widget on any device
-    device C agent ──▶
+    device A widget ──▶
+    device B widget ──▶  hub  ──▶  widget on any device
+    device C agent  ──▶
 ```
 
 The widget chooses local vs sync mode based on Settings → Multi-device Sync. The hub itself can run as a separate `npm run hub` process, a Cloudflare Worker, or directly inside one of the widgets (Host mode). In Hub Client and Host modes, the hub pushes aggregated stats to every connected widget over Server-Sent Events, so updates on one device usually appear on the others within a few seconds. iCloud Drive mode syncs files directly; propagation is eventually consistent and may take longer.
@@ -296,7 +312,7 @@ This archive only covers days Token Monitor has already observed; data deleted b
 There are two places to configure Token Monitor; day-to-day use only needs the first:
 
 - **Widget (GUI)** — click the `⚙` button in the bottom-right corner. Sections, in order: General (language, launch at login, updates), Main (Home modules and display currency), Window (window behavior, menu bar and floating-bubble layout, tray mode, shortcut), Appearance (theme and vendor colours), Collection (tracked tools, collection cadence, Preserve deleted session usage, data export), AI Tool Limits (provider selection, limits, and credentials), Subscriptions (what you pay per account), and Multi-device Sync. The `⇧` button in the title bar cycles the window behavior.
-- **Headless agent & hub** — no UI; configured with a `.env` file at the project root (copy from `.env.example`), precedence CLI flag → env var → built-in default.
+- **Headless agent & hub** — no UI; configured with a `.env` file at the project root (copy from `.env.example`), precedence CLI flag → env var → built-in default. See [docs/configuration.md](docs/configuration.md#headless-agent--hub-env).
 
 See the [configuration reference](docs/configuration.md) for every setting and all environment variables.
 

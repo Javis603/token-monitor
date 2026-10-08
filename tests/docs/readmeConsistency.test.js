@@ -322,17 +322,26 @@ test('localized README WSL claims disclose the SQLite agent boundary', () => {
   for (const file of files) {
     const line = read(file).split('\n').find((value) => value.includes('**WSL')) || '';
     assert.match(line, /SQLite/, file);
-    assert.match(line, /docs\/wsl-sqlite-setup(?:\.zh-CN)?\.md/, file);
+    assert.match(line, /docs\/wsl-sqlite-setup(?:\.zh-(?:CN|TW))?\.md/, file);
   }
 });
 
-test('WSL SQLite guides keep English and Chinese entry points connected', () => {
-  assert.match(read('docs/wsl-sqlite-setup.md'), /\[简体中文\]\(wsl-sqlite-setup\.zh-CN\.md\)/);
-  assert.match(read('docs/wsl-sqlite-setup.zh-CN.md'), /\[English\]\(wsl-sqlite-setup\.md\)/);
+test('translated guides link every locale from their language switcher', () => {
+  const locales = ['', '.zh-CN', '.zh-TW'];
+  for (const guide of ['headless-agent', 'wsl-sqlite-setup']) {
+    for (const current of locales) {
+      const file = `docs/${guide}${current}.md`;
+      const switcher = read(file).split('\n').slice(0, 3).join('\n');
+      for (const other of locales) {
+        if (other === current) continue;
+        assert.ok(switcher.includes(`href="./${guide}${other}.md"`), `${file} → ${guide}${other}.md`);
+      }
+    }
+  }
 });
 
 test('WSL SQLite guides state and verify the Node.js prerequisite', () => {
-  for (const file of ['docs/wsl-sqlite-setup.md', 'docs/wsl-sqlite-setup.zh-CN.md']) {
+  for (const file of ['docs/wsl-sqlite-setup.md', 'docs/wsl-sqlite-setup.zh-CN.md', 'docs/wsl-sqlite-setup.zh-TW.md']) {
     const guide = read(file);
     assert.match(guide, /Node\.js 22\.15\.0/, file);
     assert.match(guide, /node --version\nnpm --version\n/, file);

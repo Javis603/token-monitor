@@ -156,6 +156,7 @@ Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settin
 - **多设备同步**：Hub 同步通过 Server-Sent Events 在数秒内推送更新；iCloud Drive 同步具有最终一致性
 - **本地优先**：单设备使用完全无需服务器
 - **自托管同步后端**：小部件内 hub、Node CLI hub 或 Cloudflare Worker
+- **Headless agent**：不装桌面 app 也能从服务器、SSH 主机与 WSL 上报用量，见 [Headless agent](#headless-agent)
 - **iOS 小部件支持**：通过 Worker hub 搭配 Widgy、Scriptable
 - **隐私优先**：提示词、回复、源代码和文件内容都留在你的设备上
 
@@ -195,7 +196,7 @@ brew install --cask token-monitor
 
 ## 多设备同步
 
-挑一个供设备（与任何无头代理）使用的多设备同步后端。在每台设备上打开小部件，在 设置 → 多设备同步 选一个模式。小部件会自动上报本机用量；只在没有小部件的机器上跑 `npm run agent`。iCloud Drive 仅供 macOS 小部件使用，不支持无头代理。
+挑一个供设备（与任何无头代理）使用的多设备同步后端。在每台设备上打开小部件，在 设置 → 多设备同步 选一个模式。小部件会自动上报本机用量；只在没有小部件的机器上跑 [headless agent](#headless-agent)。iCloud Drive 仅供 macOS 小部件使用，不支持无头代理。
 
 #### 方案 A——直接在小部件内开 hub（最简单，无需命令行）
 
@@ -232,6 +233,21 @@ npx wrangler deploy
 
 在每台登录同一 Apple ID 的 Mac 上，进入 设置 → 多设备同步并选择 **iCloud Drive**。这是可选的 macOS 专属模式：Token Monitor 会在 iCloud Drive 的 `Token Monitor/sync-v1/` 下为每台设备和每个写入者保存原子快照，再由每台 Mac 聚合有效文件。不使用 Token Monitor 服务器、CloudKit 或凭据；提供方 API key、Cookie 和 token 保留在本机。iCloud Drive 采用最终一致性，其他 Mac 的更新可能需要一点时间才会出现，损坏或暂时缺失的文件也不会清空最后一次有效的聚合结果。
 
+### Headless agent
+
+在服务器、SSH 主机或 WSL 内——任何使用 AI 工具但没有桌面小部件的地方——运行 headless agent。它会采集该机器的用量并上传到你的 hub（方案 A、B 或 C）。需要 Node.js 22.15+ 与 git。
+
+```bash
+git clone https://github.com/Javis603/token-monitor.git
+cd token-monitor
+npm ci
+cp .env.example .env              # 设置 TOKEN_MONITOR_HUB_URL、TOKEN_MONITOR_SECRET 与不重复的 TOKEN_MONITOR_DEVICE_ID
+npm run agent:once -- --dry-run   # 打印摘要但不上传
+npm run agent                     # 持续运行
+```
+
+以服务方式运行、更新、卸载与排查，请见 [docs/headless-agent.zh-CN.md](docs/headless-agent.zh-CN.md)。WSL 内的 SQLite 工具请按照 [WSL SQLite 指南](docs/wsl-sqlite-setup.zh-CN.md)。
+
 ## App 数据
 
 App 状态保存在系统的用户数据目录——卸载时一并删除该目录即可完整移除。
@@ -266,9 +282,9 @@ npm run pack         # 未打包的 app 目录（无安装包），方便本机�
     小部件 (Electron) ──▶ tokscale ──▶ ~/.claude、~/.codex、$HERMES_HOME
 
 模式 B——同步（可选，多设备）
-    设备 A agent ──▶
-    设备 B agent ──▶  hub  ──▶  任一设备上的小部件
-    设备 C agent ──▶
+    设备 A 小部件 ──▶
+    设备 B 小部件 ──▶  hub  ──▶  任一设备上的小部件
+    设备 C agent  ──▶
 ```
 
 小部件会根据 设置 → 多设备同步 决定走本地还是同步模式。hub 本身可以是单独的 `npm run hub` 进程、Cloudflare Worker，或直接跑在某一个小部件里（Host 模式）。在 Hub Client 和 Host 模式下，hub 通过 Server-Sent Events 把聚合后的统计推送给每个连接中的小部件，所以一台设备上的更新通常会在数秒内出现在其他设备上。iCloud Drive 模式直接同步文件，具有最终一致性，更新可能需要更长时间才会出现。
@@ -301,7 +317,7 @@ npm run pack         # 未打包的 app 目录（无安装包），方便本机�
 设置分两处，日常使用只需要前者：
 
 - **小部件（GUI）**——点右下角的 `⚙` 打开，分区依次为：常规（语言、登录启动、更新）、主画面（首页模块与显示币别）、窗口（窗口行为、菜单栏与悬浮小窗排版、托盘模式、快捷键）、外观（主题与厂商色）、采集（追踪的工具、采集频率、保留已删除会话用量、数据导出）、AI 工具额度（提供方选择、额度与凭据）、订阅资料（每个账号实际付多少）、多设备同步。标题栏的 `⇧` 按钮可循环切换窗口行为。
-- **无头代理与 hub**——没有 UI，用项目根目录的 `.env` 配置（从 `.env.example` 复制）；优先级为 CLI 参数 → 环境变量 → 内置默认。
+- **无头代理与 hub**——没有 UI，用项目根目录的 `.env` 配置（从 `.env.example` 复制）；优先级为 CLI 参数 → 环境变量 → 内置默认。详见 [docs/configuration.md](docs/configuration.md#headless-agent--hub-env)。
 
 每一项设置与所有环境变量的完整说明，请见[设置参考文档](docs/configuration.md)。
 
