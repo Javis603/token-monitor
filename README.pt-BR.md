@@ -268,7 +268,7 @@ npm run pack         # unpacked app dir (no installer), for quick local testing
 
 A saída vai para `dist/`. Windows e Linux usam o script `dist:*` correspondente acima no SO de destino. Empacotar a versão de lançamento do macOS exige uma identidade de assinatura local do tipo Developer ID Application; use `npm start` para desenvolvimento local ou em plataformas sem suporte.
 
-Os scripts de execução e de empacotamento garantem explicitamente o binário fixado do tokscale nos quatro alvos vendorizados. As demais plataformas de origem mantêm o binário do npm e filtram os clientes que ele não suporta; `npm install`, o lint e os testes não baixam esse binário.
+Os scripts de execução e de empacotamento garantem explicitamente o binário fixado do tokscale em cada alvo com um build vendorizado. As demais plataformas de origem mantêm o binário do npm e filtram os clientes que ele não suporta; `npm install`, o lint e os testes não baixam esse binário.
 
 ## Como funciona
 

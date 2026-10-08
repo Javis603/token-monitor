@@ -26,9 +26,10 @@ git clone https://github.com/Javis603/token-monitor.git
 cd token-monitor
 npm ci
 cp .env.example .env
+chmod 600 .env   # it will hold the hub secret
 ```
 
-`npm ci` installs the upstream tokscale package. The first `npm run agent` or `npm run agent:once` (including `--dry-run`) replaces its binary with the pinned build for this platform and verifies the checksum; later runs skip the download.
+`npm ci` installs the upstream tokscale package. The first `npm run agent` or `npm run agent:once` (including `--dry-run`) replaces its binary with the pinned build for this platform and verifies the checksum; later runs skip the download. Platforms without a pinned build keep the npm binary.
 
 ## Configure
 
@@ -96,7 +97,7 @@ loginctl enable-linger "$USER"   # keep it running while you are logged out
 journalctl --user -u token-monitor-agent -f
 ```
 
-In WSL, systemd must be enabled in `/etc/wsl.conf` (`[boot]` → `systemd=true`); otherwise start the agent from your shell profile instead.
+In WSL, enable systemd in `/etc/wsl.conf` (`[boot]` → `systemd=true`), then run `wsl --shutdown` from Windows so it takes effect. Without systemd, start the agent from your shell profile instead. WSL does not start with Windows, so the agent runs only while the distro is running.
 
 ### macOS (launchd agent)
 
@@ -126,6 +127,8 @@ launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.token-monitor.agen
 launchctl bootout "gui/$(id -u)/com.token-monitor.agent"   # to stop it
 ```
 
+The `gui` domain exists only while you are signed in to the desktop. On a Mac you reach only over SSH, turn on automatic login so the agent starts after a reboot.
+
 ### Windows (Task Scheduler)
 
 ```powershell
@@ -146,13 +149,15 @@ Each run does a full scan, so updates arrive only as often as the schedule fires
 
 ## Update
 
+Stop the agent or its service first: `npm ci` replaces `node_modules`, including the tokscale binary the agent runs.
+
 ```bash
 cd ~/token-monitor
 git pull
 npm ci
 ```
 
-Then restart the agent or its service. The next start fetches the pinned tokscale build if it changed.
+Then start it again. The next start fetches the pinned tokscale build if it changed.
 
 ## Uninstall
 

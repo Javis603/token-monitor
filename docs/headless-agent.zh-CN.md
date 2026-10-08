@@ -26,9 +26,10 @@ git clone https://github.com/Javis603/token-monitor.git
 cd token-monitor
 npm ci
 cp .env.example .env
+chmod 600 .env   # 之后会存放 hub 密钥
 ```
 
-`npm ci` 会安装上游 tokscale 包。第一次运行 `npm run agent` 或 `npm run agent:once`（包括 `--dry-run`）时，会把其中的二进制替换为本平台固定版本的 tokscale 并校验 checksum；之后的运行会跳过下载。
+`npm ci` 会安装上游 tokscale 包。第一次运行 `npm run agent` 或 `npm run agent:once`（包括 `--dry-run`）时，会把其中的二进制替换为本平台固定版本的 tokscale 并校验 checksum；之后的运行会跳过下载。没有固定版本的平台会保留 npm 安装的二进制。
 
 ## 配置
 
@@ -96,7 +97,7 @@ loginctl enable-linger "$USER"   # 注销后仍保持运行
 journalctl --user -u token-monitor-agent -f
 ```
 
-在 WSL 中，需要先在 `/etc/wsl.conf` 启用 systemd（`[boot]` → `systemd=true`）；否则请改为从 shell 配置文件启动 agent。
+在 WSL 中，需要先在 `/etc/wsl.conf` 启用 systemd（`[boot]` → `systemd=true`），再在 Windows 中运行 `wsl --shutdown` 使其生效。不使用 systemd 时，请改为从 shell 配置文件启动 agent。WSL 不会随 Windows 自动启动，所以 agent 只在发行版运行时工作。
 
 ### macOS（launchd agent）
 
@@ -126,6 +127,8 @@ launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.token-monitor.agen
 launchctl bootout "gui/$(id -u)/com.token-monitor.agent"   # 停止
 ```
 
+`gui` 域只在你登录桌面时存在。只通过 SSH 访问的 Mac，请开启自动登录，让 agent 在重启后也能启动。
+
 ### Windows（任务计划程序）
 
 ```powershell
@@ -146,13 +149,15 @@ schtasks /Create /TN "Token Monitor agent" /SC ONLOGON /TR "cmd /c cd /d %USERPR
 
 ## 更新
 
+先停止 agent 或其服务：`npm ci` 会替换 `node_modules`，包括 agent 正在使用的 tokscale 二进制。
+
 ```bash
 cd ~/token-monitor
 git pull
 npm ci
 ```
 
-然后重启 agent 或其服务。如果固定的 tokscale 版本有变化，下次启动时会自动获取。
+然后重新启动。如果固定的 tokscale 版本有变化，下次启动时会自动获取。
 
 ## 卸载
 
