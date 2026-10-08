@@ -181,7 +181,7 @@ app.whenReady().then(async () => {
   await waitFor(`document.getElementById('cloudSessionsSettingStatus').textContent === window.TokenMonitorCloudSessionRows.labels('zh-CN').error`);
   assert.equal(await evaluate(`document.getElementById('cloudSessionsEnabled').disabled`), true);
   assert.deepEqual(errors, []);
-  const result = { actualRenderer: true, actualPreload: true, syntheticData: true, rows: state.rows, cloudRows: state.cloudRows, totalUnchanged: 42800, dotsSameThreadSingleRow: true, dotsPeriodValuePreserved: true, dotsUnpricedCostPreserved: true, cloudCostTooltipIsLifetime: true, cloudDetailNoLocalRead: true, localDetailPreserved: true, pollingUpdatesRows: true, periodFilterByActivity: true, settingsControls: audit.controls, cloudReads: audit.cloudReads, noCloudTabOrButton: true, loginSwitchClearedRowsSynchronously: true, controlHeldStaleReadSuppressed: true };
+  const result = { actualRenderer: true, actualPreload: true, syntheticData: true, rows: state.rows, cloudRows: state.cloudRows, totalIncludesCloud: 58800, homeAutoRefresh: true, cloudNoteUpdated: true, dotsSameThreadSingleRow: true, dotsPeriodValuePreserved: true, dotsUnpricedCostPreserved: true, cloudCostTooltipIsLifetime: true, cloudDetailNoLocalRead: true, localDetailPreserved: true, pollingUpdatesRows: true, periodFilterByActivity: true, settingsControls: audit.controls, cloudReads: audit.cloudReads, noCloudTabOrButton: true, loginSwitchClearedRowsSynchronously: true, controlHeldStaleReadSuppressed: true };
   fs.writeFileSync(path.join(output, 'acceptance.json'), JSON.stringify(result, null, 2), { mode: 0o600 });
   console.log('UNIFIED_SESSIONS_PASS', JSON.stringify(result)); finish();
 }).catch(finish);
