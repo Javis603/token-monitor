@@ -2472,7 +2472,10 @@ test('the running arc clears the mark and stays inside the quota ring', () => {
   const spinWidth = Number(css.match(/\.edge-dock-ring-spinner circle \{[^}]*?stroke-width: ([\d.]+)/)[1]);
   assert.ok(spinRadius - spinWidth / 2 > mark / Math.sqrt(2), 'the rotating arc must clear the mark corners');
   assert.ok(spinRadius + spinWidth / 2 < quotaRadius - quotaWidth / 2, 'work and quota must have separate rings');
-  const spinner = css.slice(css.indexOf('.edge-dock-ring-spinner {'), css.indexOf('/* The flare'));
+  const spinnerStart = css.indexOf('.edge-dock-ring-spinner {');
+  const spinnerEnd = css.indexOf('.edge-dock-ring-complete {', spinnerStart);
+  assert.ok(spinnerStart >= 0 && spinnerEnd > spinnerStart, 'spinner CSS must have valid boundaries');
+  const spinner = css.slice(spinnerStart, spinnerEnd);
   assert.match(spinner, /stroke: var\(--text\)/);
   assert.match(spinner, /opacity: 0;/);
   assert.match(spinner, /data-running="yes"[^}]*opacity: 1;/);
