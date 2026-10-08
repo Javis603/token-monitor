@@ -109,6 +109,8 @@ test('merged, separate and single-source displays share the same samples and kee
   assert.equal(rate.liveTokenRateReadouts(sample, 'all')[0].sample.speed, 55);
   assert.deepEqual(rate.liveTokenRateReadouts(sample, 'separate').map(entry => [entry.client, entry.sample.speed]), [['codex', 50], ['antigravity', 60]]);
   assert.equal(rate.liveTokenRateReadouts(sample, 'antigravity')[0].sample.speed, 60);
+  const withOtherTool = { ...sample, clients: [...sample.clients, { client: 'claude', speed: 10, burn: 600 }] };
+  assert.deepEqual(rate.liveTokenRateReadouts(withOtherTool, 'separate').map(entry => entry.client), ['codex', 'antigravity'], 'other tools must not expand the original two-line footer');
   assert.equal(rate.liveTokenRateReadouts(null, 'separate')[1].sample, null);
   assert.equal(rate.normalizeLiveTokenRateDisplay('unsupported'), 'all');
 });

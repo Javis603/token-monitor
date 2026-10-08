@@ -404,8 +404,7 @@
   function liveTokenRateReadouts(sample, display) {
     const selected = normalizeLiveTokenRateDisplay(display);
     if (selected !== 'separate') return [{ client: selected === 'all' ? '' : selected, sample: selectLiveTokenRateSample(sample, selected) }];
-    const clients = new Set(['codex', 'antigravity', ...(sample?.clients || []).map((entry) => entry.client)]);
-    return [...clients].map((client) => ({ client, sample: selectLiveTokenRateSample(sample, client) }));
+    return ['codex', 'antigravity'].map((client) => ({ client, sample: selectLiveTokenRateSample(sample, client) }));
   }
 
   function liveTokenRateTooltipEntries(sample, mode, formatRate, options = {}) {
