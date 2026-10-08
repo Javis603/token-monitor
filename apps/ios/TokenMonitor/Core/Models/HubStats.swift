@@ -9,6 +9,7 @@ nonisolated struct HubStats: Decodable, Sendable {
     let historyRevision: String?
     let staleAfterMs: Double?
     let projectsIncomplete: Bool?
+    var syncSettingsRevisions: [String: Int]? = nil
 
     func sourceUpdatedAt(now: Date = .now) -> Date? {
         let sources = devices ?? []
@@ -38,6 +39,18 @@ nonisolated struct HubStats: Decodable, Sendable {
                 return !lhsStale
             }
             return lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
+        }
+    }
+
+    func usageDevices(for period: UsagePeriodKey) -> [DeviceSnapshot] {
+        (devices ?? []).sorted { lhs, rhs in
+            let left = lhs.period(period).totalTokens
+            let right = rhs.period(period).totalTokens
+            let leftValue = left.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+            let rightValue = right.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+            if leftValue != rightValue { return (leftValue ?? -1) > (rightValue ?? -1) }
+            if (lhs.stale == true) != (rhs.stale == true) { return lhs.stale != true }
+            return lhs.id < rhs.id
         }
     }
 

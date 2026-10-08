@@ -7,6 +7,8 @@ struct LimitProviderOrderEditor: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(TokenMonitorStore.self) private var store
 
+    @ScaledMetric(relativeTo: .subheadline) private var markSize = 18.0
+
     var body: some View {
         @Bindable var preferences = preferences
 
@@ -47,8 +49,9 @@ struct LimitProviderOrderEditor: View {
     private func row(for id: String) -> some View {
         let hidden = preferences.hiddenLimitProviders.contains(id)
         return HStack(spacing: 12) {
-            ProviderMark(provider: id)
+            ProviderMark(provider: id, size: markSize)
             Text(ProviderPresentation.displayName(for: id))
+                .font(DesignTokens.rowTitle)
                 .foregroundStyle(hidden ? .secondary : .primary)
             Spacer()
             Button {

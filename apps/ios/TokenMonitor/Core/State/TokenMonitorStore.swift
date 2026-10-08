@@ -9,6 +9,13 @@ final class TokenMonitorStore {
     var phase: ConnectionPhase = .idle
     var selectedPeriod: UsagePeriodKey = .today
     var isRefreshing = false
+    private var displayPeriods: [String: UsagePeriod] = [:]
+    private var modelAliases = ModelAliasSettings()
+    @ObservationIgnored private var aliasTask: Task<Void, Never>?
+    @ObservationIgnored private var aliasRequestID: UUID?
+    @ObservationIgnored private var aliasRevision: Int?
+    @ObservationIgnored private var requestedAliasRevision: Int?
+    @ObservationIgnored private var aliasesLoaded = false
 
     @ObservationIgnored
     private let client: any HubDataClient
@@ -41,10 +48,63 @@ final class TokenMonitorStore {
     deinit {
         connectionTask?.cancel()
         historyTask?.cancel()
+        aliasTask?.cancel()
     }
 
     var currentPeriod: UsagePeriod {
-        stats?.period(selectedPeriod) ?? .unknown
+        displayPeriod(selectedPeriod)
+    }
+
+    func displayPeriod(_ period: UsagePeriodKey) -> UsagePeriod {
+        displayPeriods[period.rawValue] ?? stats?.period(period) ?? .unknown
+    }
+
+    private func projectModelNames() {
+        guard let stats else { displayPeriods = [:]; return }
+        let allPeriods = Array((stats.periods ?? [:]).values) + (stats.devices ?? []).flatMap { Array(($0.periods ?? [:]).values) }
+        let modelIDs = allPeriods.flatMap { period in
+            Array((period.models ?? [:]).keys) + (period.sessions ?? [:]).values.flatMap { Array(($0.models ?? [:]).keys) }
+        }
+        let resolver = modelAliases.resolver(modelIDs: modelIDs)
+        displayPeriods = (stats.periods ?? [:]).mapValues { period in
+            var result = period
+            result.models = ModelAliasSettings.fold(period.models, using: resolver)
+            result.modelCosts = ModelAliasSettings.fold(period.modelCosts, using: resolver)
+            result.sessions = period.sessions?.mapValues { session in
+                var result = session
+                result.models = ModelAliasSettings.fold(session.models, using: resolver)
+                return result
+            }
+            return result
+        }
+    }
+
+    private func syncModelAliases(configuration: HubConfiguration, generation: UUID) {
+        let revision = stats?.syncSettingsRevisions?["modelAliases"]
+        if aliasesLoaded && (revision == nil || revision == aliasRevision) { return }
+        if aliasTask != nil && requestedAliasRevision == revision { return }
+        aliasTask?.cancel()
+        let requestID = UUID()
+        aliasRequestID = requestID
+        requestedAliasRevision = revision
+        aliasTask = Task { [weak self, client] in
+            do {
+                let document = try await client.fetchModelAliases(configuration: configuration)
+                guard let self, self.isCurrent(generation), self.aliasRequestID == requestID else { return }
+                self.aliasTask = nil
+                self.aliasRequestID = nil
+                if let revision, let document, document.revision < revision { return }
+                self.modelAliases = document?.value ?? ModelAliasSettings()
+                self.aliasRevision = document?.revision ?? revision
+                self.aliasesLoaded = true
+                self.projectModelNames()
+            } catch {
+                guard let self, self.isCurrent(generation), self.aliasRequestID == requestID else { return }
+                self.aliasTask = nil
+                self.aliasRequestID = nil
+                // Keep the last valid map. A later frame/manual refresh retries.
+            }
+        }
     }
 
     var currentHistory: UsageHistory {
@@ -64,6 +124,14 @@ final class TokenMonitorStore {
         refreshID = nil
         isRefreshing = false
         self.configuration = configuration
+        aliasTask?.cancel()
+        aliasTask = nil
+        aliasRequestID = nil
+        aliasRevision = nil
+        requestedAliasRevision = nil
+        aliasesLoaded = false
+        modelAliases = ModelAliasSettings()
+        displayPeriods = [:]
         stats = nil
         history = nil
         historyRevision = nil
@@ -142,6 +210,8 @@ final class TokenMonitorStore {
         publication += 1
         let publication = publication
         stats = incoming
+        projectModelNames()
+        syncModelAliases(configuration: configuration, generation: generation)
         phase = .live
         // Publish stats immediately; history must not block fresh usage or widgets.
         await systemSurfaces.publish(stats: incoming, history: currentHistory, configuration: configuration)

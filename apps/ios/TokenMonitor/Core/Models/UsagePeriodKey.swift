@@ -18,8 +18,8 @@ nonisolated enum UsagePeriodKey: String, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .today: "Today"
-        case .month: "This Month"
-        case .allTime: "All Time"
+        case .month: "This month"
+        case .allTime: "All time"
         }
     }
 }

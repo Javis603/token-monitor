@@ -30,6 +30,13 @@ nonisolated enum MetricFormatter {
         return currency.symbol + decimalCurrency(value * currency.rateFromUSD)
     }
 
+    static func usageCostFromUSD(_ value: Double, currency: AppCurrency) -> String {
+        guard value.isFinite else { return "—" }
+        let amount = (value * currency.rateFromUSD * 1_000_000).rounded() / 1_000_000
+        let digits = abs(amount) >= (currency == .usd ? 10 : 1) ? 2 : 4
+        return currency.symbol + amount.formatted(.number.precision(.fractionLength(digits)))
+    }
+
     static func currency(
         _ value: Double,
         sourceCode: String,
@@ -57,6 +64,43 @@ nonisolated enum MetricFormatter {
         case "ko": "\(percentage) 남음"
         default: "\(percentage) left"
         }
+    }
+
+    static func resetCount(_ count: Int, locale: Locale) -> String {
+        switch language(for: locale) {
+        case "zh-Hant": "\(count) 次重設"
+        case "zh-Hans": "\(count) 次重置"
+        case "ja": "リセット \(count) 回"
+        case "ko": "재설정 \(count)회"
+        default: count == 1 ? "1 reset" : "\(count) resets"
+        }
+    }
+
+    static func limitCountdown(to date: Date, now: Date = .now, locale: Locale) -> String {
+        let seconds = date.timeIntervalSince(now)
+        guard seconds > 0 else {
+            return switch language(for: locale) {
+            case "zh-Hant": "現在"
+            case "zh-Hans": "现在"
+            case "ja": "今"
+            case "ko": "지금"
+            default: "Now"
+            }
+        }
+        let totalMinutes = Int((seconds / 60).rounded())
+        let days = totalMinutes / 1440
+        let hours = (totalMinutes % 1440) / 60
+        let minutes = totalMinutes % 60
+        let units: (String, String, String) = switch language(for: locale) {
+        case "zh-Hant": ("日", "小時", "分鐘")
+        case "zh-Hans": ("天", "小时", "分钟")
+        case "ja": ("日", "時間", "分")
+        case "ko": ("일", "시간", "분")
+        default: ("d", "h", "m")
+        }
+        if days > 0 { return "\(days)\(units.0) \(hours)\(units.1)" }
+        if hours > 0 { return "\(hours)\(units.1) \(minutes)\(units.2)" }
+        return minutes > 0 ? "\(minutes)\(units.2)" : "<1\(units.2)"
     }
 
     static func accountCount(_ count: Int, locale: Locale) -> String {

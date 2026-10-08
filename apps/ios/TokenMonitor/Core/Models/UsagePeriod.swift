@@ -8,8 +8,8 @@ nonisolated struct UsagePeriod: Decodable, Sendable {
     let outputTokens: Double?
     let clients: [String: Double]?
     let clientCosts: [String: Double]?
-    let models: [String: Double]?
-    let modelCosts: [String: Double]?
+    var models: [String: Double]?
+    var modelCosts: [String: Double]?
     var sessions: [String: SessionUsage]? = nil
     var sessionDetailsOmitted: Int? = nil
     var capabilities: Capabilities? = nil

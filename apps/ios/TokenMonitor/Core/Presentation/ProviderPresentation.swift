@@ -54,42 +54,7 @@ nonisolated enum ProviderPresentation {
     }
 
     static func assetName(for provider: String?) -> String {
-        switch normalizedID(provider) {
-        case "claude": "VendorClaude"
-        case "codex": "VendorCodex"
-        case "cursor": "VendorCursor"
-        case "antigravity": "VendorAntigravity"
-        case "opencode": "VendorOpenCode"
-        case "openrouter": "VendorOpenRouter"
-        case "deepseek", "dsh": "VendorDeepSeek"
-        case "minimax", "mcode": "VendorMiniMax"
-        case "mimo", "micode", "xiaomi": "VendorXiaomi"
-        case "grok", "xai": "VendorGrok"
-        case "copilot": "VendorCopilot"
-        case "kiro": "VendorKiro"
-        case "zai", "zaiteam", "zcode": "VendorZai"
-        case "volcengine": "VendorVolcengine"
-        case "qoder", "qodercn": "VendorQoder"
-        case "kimi": "VendorKimi"
-        case "ollama": "VendorOllama"
-        case "hermes": "VendorHermes"
-        case "gemini": "VendorGemini"
-        case "cline": "VendorCline"
-        case "cohere": "VendorCohere"
-        case "meta", "muse": "VendorMeta"
-        case "mistral": "VendorMistral"
-        case "moonshot": "VendorMoonshot"
-        case "qwen", "alibaba": "VendorQwen"
-        case "pi", "omp": "VendorPi"
-        case "zed": "VendorZed"
-        case "kilocode", "kilo": "VendorKiloCode"
-        case "codebuddy": "VendorCodeBuddy"
-        case "workbuddy": "VendorWorkBuddy"
-        case "proma": "VendorProma"
-        case "openclaw": "VendorOpenClaw"
-        case "doubao": "VendorDoubao"
-        default: "VendorNewAPI"
-        }
+        WidgetPresentation.assetName(for: provider)
     }
 
     /// Raw Desktop brand colors from src/shared/vendorPresentation.js.
@@ -137,25 +102,6 @@ nonisolated enum ProviderPresentation {
     }
 
     /// Use related bundled artwork where available, and meaningful SF Symbols otherwise.
-    static func fallbackSymbol(for provider: String?) -> String? {
-        switch normalizedID(provider) {
-        case "factory", "droid": "terminal"
-        case "commandcode": "command"
-        case "amp", "fx": "chevron.left.forwardslash.chevron.right"
-        case "devin": "person.crop.square"
-        case "typesafe": "checkmark.shield"
-        case "trae": "curlybraces"
-        case "stepfun": "square.stack.3d.up"
-        case "reasonix": "brain"
-        case "cherrystudio": "bubble.left.and.bubble.right"
-        case "lmstudio": "desktopcomputer"
-        case "unsloth": "leaf"
-        case "hunyuan": "sparkles"
-        case "nvidia": "cpu"
-        default: nil
-        }
-    }
-
     private static func normalizedID(_ provider: String?) -> String? {
         provider?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }

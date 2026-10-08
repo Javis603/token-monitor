@@ -1,43 +1,40 @@
 import SwiftUI
 
 struct BreakdownDetailView: View {
-    @Environment(AppPreferences.self) private var preferences
     @Environment(TokenMonitorStore.self) private var store
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
     let kind: BreakdownKind
 
     var body: some View {
         @Bindable var store = store
-
         ZStack {
             AppBackground()
-
             ScrollView {
-                LazyVStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: DesignTokens.sectionSpacing) {
                     PeriodPicker(selection: $store.selectedPeriod)
-                        .padding(.bottom, 18)
-
                     if entries.isEmpty {
-                        ContentUnavailableView(
-                            "No breakdown available",
-                            systemImage: "chart.bar.xaxis"
-                        )
-                        .padding(.vertical, 56)
+                        ContentUnavailableView("No breakdown available", systemImage: "chart.bar.xaxis")
+                            .padding(.vertical, 56)
                     } else {
-                        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                            if index > 0 {
-                                Divider()
+                        SurfaceCard {
+                            LazyVStack(alignment: .leading, spacing: DesignTokens.rowDividerSpacing) {
+                                ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                                    if index > 0 { Divider() }
+                                    BreakdownItem(kind: kind, entry: entry,
+                                                  total: store.currentPeriod.totalTokens ?? 0,
+                                                  barMaximum: maximum, showsCost: true)
+                                }
                             }
-                            detailRow(entry)
                         }
                     }
                 }
                 .padding(.horizontal, DesignTokens.screenPadding)
+                .padding(.top, 8)
                 .padding(.bottom, DesignTokens.sectionSpacing)
             }
+            .refreshable { await store.refresh() }
         }
         .navigationTitle(Text(LocalizedStringKey(kind.title)))
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var entries: [BreakdownEntry] {
@@ -47,59 +44,5 @@ struct BreakdownDetailView: View {
         }
     }
 
-    private var total: Double {
-        max(0, store.currentPeriod.totalTokens ?? 0)
-    }
-
-    private func detailRow(_ entry: BreakdownEntry) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            let layout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
-            layout {
-                Text(kind.displayName(for: entry.id))
-                    .font(.headline)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 30)
-                    .overlay(alignment: .leading) {
-                        Image(kind.assetName(for: entry.id))
-                            .renderingMode(.template)
-                            .resizable()
-                            .scaledToFit()
-                            .foregroundStyle(.primary)
-                            .frame(width: 20, height: 20)
-                            .accessibilityHidden(true)
-                    }
-                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
-                Text(MetricFormatter.tokens(entry.value))
-                    .font(.headline)
-                    .monospacedDigit()
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-
-            ProgressView(value: share(for: entry), total: 1)
-                .tint(kind.color(for: entry.id))
-                .accessibilityHidden(true)
-
-            HStack(alignment: .firstTextBaseline) {
-                Text(MetricFormatter.percent(share(for: entry) * 100))
-                Spacer()
-                Text(
-                    MetricFormatter.currencyFromUSD(
-                        entry.cost,
-                        currency: preferences.currency
-                    )
-                )
-            }
-            .font(.footnote.monospacedDigit())
-            .foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 14)
-        .accessibilityElement(children: .combine)
-    }
-
-    private func share(for entry: BreakdownEntry) -> Double {
-        guard total > 0 else { return 0 }
-        return min(1, max(0, entry.value / total))
-    }
+    private var maximum: Double { UsageRowPresentation.maximum(entries.map(\.value)) }
 }

@@ -55,7 +55,7 @@ struct InsightsView: View {
                                 PeriodPicker(selection: $store.selectedPeriod)
                             }
 
-                            section("Tools") {
+                            section("Tools", destination: .tool) {
                                 BreakdownCard(
                                     kind: .tool,
                                     entries: store.currentPeriod.clientEntries,
@@ -63,7 +63,7 @@ struct InsightsView: View {
                                 )
                             }
 
-                            section("Models") {
+                            section("Models", destination: .model) {
                                 BreakdownCard(
                                     kind: .model,
                                     entries: store.currentPeriod.modelEntries,
@@ -114,6 +114,7 @@ struct InsightsView: View {
             }
         }
         .navigationTitle("Insights")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var heatmapModel: HeatmapModel {
@@ -126,10 +127,15 @@ struct InsightsView: View {
 
     private func section<Content: View>(
         _ title: String,
+        destination: BreakdownKind? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.headerToCardSpacing) {
-            SectionHeader(title)
+            SectionHeader(title) {
+                if let destination {
+                    SectionNavigationLink(title: title) { BreakdownDetailView(kind: destination) }
+                }
+            }
             SurfaceCard(content: content)
         }
     }

@@ -7,6 +7,8 @@ struct LifetimeCard: View {
     @Environment(\.locale) private var locale
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    @ScaledMetric(relativeTo: .subheadline) private var markSize = 18.0
+
     let summary: HistorySummary?
 
     var body: some View {
@@ -94,11 +96,9 @@ struct LifetimeCard: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 8)
-                    ProviderMark(provider: ProviderPresentation.modelVendor(for: model))
-                        .scaleEffect(0.8)
-                        .frame(width: 18, height: 18)
+                    ProviderMark(provider: ProviderPresentation.modelVendor(for: model), size: markSize)
                     Text(model)
-                        .font(.subheadline.weight(.medium))
+                        .font(DesignTokens.rowTitle)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                 }

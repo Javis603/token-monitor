@@ -74,6 +74,7 @@ struct LimitsView: View {
             }
         }
         .navigationTitle("AI Limits")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Customize AI Limits", systemImage: "slider.horizontal.3") {

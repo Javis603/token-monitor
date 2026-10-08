@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// Top-N breakdown rows in a card, with a "Show all" row into the detail view.
-/// The card title lives in the SectionHeader above it.
+/// The section header owns navigation; the glass card contains only usage rows.
 struct BreakdownCard: View {
     let kind: BreakdownKind
     let entries: [BreakdownEntry]
@@ -11,29 +10,9 @@ struct BreakdownCard: View {
     var body: some View {
         if entries.isEmpty {
             Label("No breakdown available", systemImage: "chart.bar.xaxis")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.subheadline).foregroundStyle(.secondary)
         } else {
-            VStack(alignment: .leading, spacing: 14) {
-                BreakdownList(kind: kind, entries: entries, total: total, limit: limit)
-                Divider()
-                NavigationLink {
-                    BreakdownDetailView(kind: kind)
-                } label: {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Show all")
-                            .font(.subheadline.weight(.semibold))
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .foregroundStyle(.primary)
-                    .frame(minHeight: DesignTokens.controlHeight, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
+            BreakdownList(kind: kind, entries: entries, total: total, limit: limit)
         }
     }
 }

@@ -192,7 +192,7 @@ extension HubStats {
                     LimitWindow(
                         kind: "weekly",
                         metric: nil,
-                        label: "Weekly",
+                        label: "",
                         used: nil,
                         limit: nil,
                         remaining: nil,
@@ -357,7 +357,11 @@ extension HubStats {
                     resetDescription: "", detail: "", currency: nil, showMeter: true
                 )
             ],
-            balanceUsd: nil, balance: nil, sourceDeviceId: "macbook-m5", stale: false
+            balanceUsd: nil, balance: nil, sourceDeviceId: "macbook-m5", stale: false,
+            resetCredits: ProviderResetCredits(
+                availableCount: 3,
+                expirations: [14.0, 21.0, 29.0].map { Date.now.addingTimeInterval($0 * 86_400).formatted(.iso8601) }
+            )
         )
     }
 }

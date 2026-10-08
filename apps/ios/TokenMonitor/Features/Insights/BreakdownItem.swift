@@ -4,52 +4,50 @@ struct BreakdownItem: View {
     let kind: BreakdownKind
     let entry: BreakdownEntry
     let total: Double
+    var barMaximum: Double? = nil
+    var showsCost = false
 
+    @Environment(AppPreferences.self) private var preferences
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .subheadline) private var markSize = 18.0
+    @ScaledMetric(relativeTo: .subheadline) private var markInset = 26.0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignTokens.rowBarSpacing) {
             let layout = dynamicTypeSize.isAccessibilitySize
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+                : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
             layout {
                 Text(kind.displayName(for: entry.id))
-                    .font(.subheadline.weight(.medium))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 30)
+                    .font(DesignTokens.rowTitle)
+                    .lineLimit(1).truncationMode(.tail)
+                    .padding(.leading, markInset)
                     .overlay(alignment: .leading) {
                         Image(kind.assetName(for: entry.id))
                             .renderingMode(.template)
-                            .resizable()
-                            .scaledToFit()
-                            .foregroundStyle(.primary)
-                            .frame(width: 20, height: 20)
+                            .resizable().scaledToFit()
+                            .frame(width: markSize, height: markSize)
                             .accessibilityHidden(true)
                     }
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
-                Text(MetricFormatter.tokens(entry.value))
-                    .font(.subheadline.weight(.semibold))
-                    .monospacedDigit()
-                    .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 2) {
+                    Text(showsCost ? MetricFormatter.exactTokens(entry.value) : MetricFormatter.tokens(entry.value))
+                        .font(DesignTokens.rowValue)
+                    if showsCost {
+                        Text(MetricFormatter.usageCostFromUSD(entry.cost, currency: preferences.currency))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(MetricFormatter.percent(UsageRowPresentation.share(entry.value, total: total) * 100))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                .monospacedDigit()
+                .fixedSize(horizontal: true, vertical: false)
             }
-            HStack(spacing: 12) {
-                ProgressView(value: share, total: 1)
-                    .tint(kind.color(for: entry.id))
-                    .accessibilityHidden(true)
-                Text(MetricFormatter.percent(share * 100))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 42, alignment: .trailing)
-            }
+            UsageMeter(value: entry.value, maximum: barMaximum ?? total, color: kind.color(for: entry.id))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-    }
-
-    private var share: Double {
-        guard total > 0 else {
-            return 0
-        }
-        return min(1, max(0, entry.value / total))
     }
 }

@@ -125,6 +125,23 @@
 		2E42BB9BF22D5EE202F5D0B5 /* LiveActivityRegistrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80B3D026387241393F6C526C /* LiveActivityRegistrationTests.swift */; };
 		2A377900BF4D26C7B2FFC9B6 /* SystemSurfaceCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7559F17E1F57D6559528151D /* SystemSurfaceCoordinatorTests.swift */; };
 		44AA5EFAB278F352F5908652 /* TokenMonitorStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EAABE2993B014DE0B472F43 /* TokenMonitorStoreTests.swift */; };
+		AC3DB95EAB64A2B5944962F1 /* ProviderResetCredits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90AA54B53CBBE85C4F9876A3 /* ProviderResetCredits.swift */; };
+		A6E2AB8897F3A4C9D5EDBB4D /* ProviderResetGrant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0369340BF8A3D4F7C8A9DE /* ProviderResetGrant.swift */; };
+		602BA11DA7FD3F5D82F61945 /* LimitWindowSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 113FACDC485BA70FA2CE7BB4 /* LimitWindowSection.swift */; };
+		744692F5F4492B3604BC52A4 /* ResetCreditsRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9187B837385ED94283D5C534 /* ResetCreditsRow.swift */; };
+		621CD8AA9F4F1C12766407BA /* ResetCreditsDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96C5F9A831A504D188D0933B /* ResetCreditsDetail.swift */; };
+		45AED9B7374B27AB3611553C /* LimitsPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B264BF86B50DCA57045A17ED /* LimitsPresentationTests.swift */; };
+		454D4257B2286CEEA5610A56 /* UsageRowPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC69302032156BE4BE8C3376 /* UsageRowPresentation.swift */; };
+		62658D3CB8FE131FC80391F7 /* UsageMeter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBCCCBB6EA32B2A704BDFBB8 /* UsageMeter.swift */; };
+		D50769BE706CF8C0639A5B23 /* DevicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2086A9FF1E0C2FFE3891E207 /* DevicesView.swift */; };
+		CA93CA7100B5E7AB40897DFC /* SessionRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A0B9E476850644686225683 /* SessionRow.swift */; };
+		E7086CE48545FD99F10464B6 /* ModelAliasSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DFA338A564582B393A71D1F /* ModelAliasSettings.swift */; };
+		E77FFC4DB2084F7F890A3C36 /* ModelAliasDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD5A7EAFABB248C2EFFD1CCA /* ModelAliasDocument.swift */; };
+		C41276EC57FBD4E34B6B449D /* PromptCacheObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EDEF8E189DF44A86741F303 /* PromptCacheObservation.swift */; };
+		5661717C97186CA0A3EA43DB /* SessionListEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = F972DB43B5C4EAA5BE8ABA46 /* SessionListEntry.swift */; };
+		11ECF1ABF41F36286F771FC7 /* SectionNavigationLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB9764CF2B94387551C10A9F /* SectionNavigationLink.swift */; };
+		CDEB662348E56C4660A79FEB /* SessionStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 678AFAB952EF878C66E3E823 /* SessionStatusView.swift */; };
+		6A7BB656501C6E66014BA6F7 /* BackgroundReviewGroupRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FCD73906B9103A0E6567659 /* BackgroundReviewGroupRow.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -275,6 +292,23 @@
 		80B3D026387241393F6C526C /* LiveActivityRegistrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityRegistrationTests.swift; sourceTree = "<group>"; };
 		7559F17E1F57D6559528151D /* SystemSurfaceCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSurfaceCoordinatorTests.swift; sourceTree = "<group>"; };
 		8EAABE2993B014DE0B472F43 /* TokenMonitorStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorStoreTests.swift; sourceTree = "<group>"; };
+		90AA54B53CBBE85C4F9876A3 /* ProviderResetCredits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Core/Models/ProviderResetCredits.swift"; sourceTree = SOURCE_ROOT; };
+		7F0369340BF8A3D4F7C8A9DE /* ProviderResetGrant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Core/Models/ProviderResetGrant.swift"; sourceTree = SOURCE_ROOT; };
+		113FACDC485BA70FA2CE7BB4 /* LimitWindowSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Core/Models/LimitWindowSection.swift"; sourceTree = SOURCE_ROOT; };
+		9187B837385ED94283D5C534 /* ResetCreditsRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Limits/ResetCreditsRow.swift"; sourceTree = SOURCE_ROOT; };
+		96C5F9A831A504D188D0933B /* ResetCreditsDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Limits/ResetCreditsDetail.swift"; sourceTree = SOURCE_ROOT; };
+		B264BF86B50DCA57045A17ED /* LimitsPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitsPresentationTests.swift; sourceTree = "<group>"; };
+		AC69302032156BE4BE8C3376 /* UsageRowPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Core/Presentation/UsageRowPresentation.swift"; sourceTree = SOURCE_ROOT; };
+		DBCCCBB6EA32B2A704BDFBB8 /* UsageMeter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/DesignSystem/UsageMeter.swift"; sourceTree = SOURCE_ROOT; };
+		2086A9FF1E0C2FFE3891E207 /* DevicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Overview/DevicesView.swift"; sourceTree = SOURCE_ROOT; };
+		5A0B9E476850644686225683 /* SessionRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Sessions/SessionRow.swift"; sourceTree = SOURCE_ROOT; };
+		7DFA338A564582B393A71D1F /* ModelAliasSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Core/Models/ModelAliasSettings.swift"; sourceTree = SOURCE_ROOT; };
+		BD5A7EAFABB248C2EFFD1CCA /* ModelAliasDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Core/Models/ModelAliasDocument.swift"; sourceTree = SOURCE_ROOT; };
+		9EDEF8E189DF44A86741F303 /* PromptCacheObservation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Core/Models/PromptCacheObservation.swift"; sourceTree = SOURCE_ROOT; };
+		F972DB43B5C4EAA5BE8ABA46 /* SessionListEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Core/Presentation/SessionListEntry.swift"; sourceTree = SOURCE_ROOT; };
+		EB9764CF2B94387551C10A9F /* SectionNavigationLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/DesignSystem/SectionNavigationLink.swift"; sourceTree = SOURCE_ROOT; };
+		678AFAB952EF878C66E3E823 /* SessionStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Sessions/SessionStatusView.swift"; sourceTree = SOURCE_ROOT; };
+		1FCD73906B9103A0E6567659 /* BackgroundReviewGroupRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Sessions/BackgroundReviewGroupRow.swift"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -290,6 +324,9 @@
 				20FA5F2729465E56F3D222A7 /* HubStats+Sample.swift */,
 				AA9277927F9024B51067B143 /* HubStreamEvent.swift */,
 				3F43B72A681FC31E8DD30576 /* LimitProvider.swift */,
+				113FACDC485BA70FA2CE7BB4 /* LimitWindowSection.swift */,
+				7F0369340BF8A3D4F7C8A9DE /* ProviderResetGrant.swift */,
+				90AA54B53CBBE85C4F9876A3 /* ProviderResetCredits.swift */,
 				90A266099249876C9E03A203 /* LimitsSummary.swift */,
 				9143856A90ADED92E26DA6EB /* LimitWindow.swift */,
 				513888980D24576FDAEBC182 /* ProviderBalance.swift */,
@@ -324,6 +361,7 @@
 				8EAABE2993B014DE0B472F43 /* TokenMonitorStoreTests.swift */,
 				7559F17E1F57D6559528151D /* SystemSurfaceCoordinatorTests.swift */,
 				80B3D026387241393F6C526C /* LiveActivityRegistrationTests.swift */,
+				B264BF86B50DCA57045A17ED /* LimitsPresentationTests.swift */,
 				851BE1E11A2FFE0503C0D2AE /* SourceFreshnessTests.swift */,
 				110000000000000000000030 /* AppPreferencesTests.swift */,
 				A587C66837238C4A5784FF24 /* CreditsMeterTests.swift */,
@@ -421,6 +459,8 @@
 				688BF62BE23B46A2E27A160F /* LimitsView.swift */,
 				740427D2593A45BA914D2AC6 /* LimitWindowRow.swift */,
 				8A198D4E2D18CF0BB636E754 /* ProviderLimitCard.swift */,
+				96C5F9A831A504D188D0933B /* ResetCreditsDetail.swift */,
+				9187B837385ED94283D5C534 /* ResetCreditsRow.swift */,
 			);
 			path = Limits;
 			sourceTree = "<group>";
@@ -547,6 +587,17 @@
 		F5BF7D03C052D45A3D1879C1 /* TokenMonitor */ = {
 			isa = PBXGroup;
 			children = (
+				1FCD73906B9103A0E6567659 /* BackgroundReviewGroupRow.swift */,
+				678AFAB952EF878C66E3E823 /* SessionStatusView.swift */,
+				EB9764CF2B94387551C10A9F /* SectionNavigationLink.swift */,
+				F972DB43B5C4EAA5BE8ABA46 /* SessionListEntry.swift */,
+				9EDEF8E189DF44A86741F303 /* PromptCacheObservation.swift */,
+				BD5A7EAFABB248C2EFFD1CCA /* ModelAliasDocument.swift */,
+				7DFA338A564582B393A71D1F /* ModelAliasSettings.swift */,
+				5A0B9E476850644686225683 /* SessionRow.swift */,
+				2086A9FF1E0C2FFE3891E207 /* DevicesView.swift */,
+				DBCCCBB6EA32B2A704BDFBB8 /* UsageMeter.swift */,
+				AC69302032156BE4BE8C3376 /* UsageRowPresentation.swift */,
 				9680EE6F5D06E8DD04A946F2 /* Assets.xcassets */,
 				E61328BFB3E8256CE5486CE3 /* App */,
 				DC67CF08568D5908CD48CC5F /* Core */,
@@ -687,6 +738,7 @@
 				44AA5EFAB278F352F5908652 /* TokenMonitorStoreTests.swift in Sources */,
 				2A377900BF4D26C7B2FFC9B6 /* SystemSurfaceCoordinatorTests.swift in Sources */,
 				2E42BB9BF22D5EE202F5D0B5 /* LiveActivityRegistrationTests.swift in Sources */,
+				45AED9B7374B27AB3611553C /* LimitsPresentationTests.swift in Sources */,
 				37E8EE307686E4AB453BCC73 /* SourceFreshnessTests.swift in Sources */,
 				2A40487F6695C3C6D9B7A1FD /* SessionUsageTests.swift in Sources */,
 				120000000000000000000030 /* AppPreferencesTests.swift in Sources */,
@@ -726,6 +778,17 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6A7BB656501C6E66014BA6F7 /* BackgroundReviewGroupRow.swift in Sources */,
+				CDEB662348E56C4660A79FEB /* SessionStatusView.swift in Sources */,
+				11ECF1ABF41F36286F771FC7 /* SectionNavigationLink.swift in Sources */,
+				5661717C97186CA0A3EA43DB /* SessionListEntry.swift in Sources */,
+				C41276EC57FBD4E34B6B449D /* PromptCacheObservation.swift in Sources */,
+				E77FFC4DB2084F7F890A3C36 /* ModelAliasDocument.swift in Sources */,
+				E7086CE48545FD99F10464B6 /* ModelAliasSettings.swift in Sources */,
+				CA93CA7100B5E7AB40897DFC /* SessionRow.swift in Sources */,
+				D50769BE706CF8C0639A5B23 /* DevicesView.swift in Sources */,
+				62658D3CB8FE131FC80391F7 /* UsageMeter.swift in Sources */,
+				454D4257B2286CEEA5610A56 /* UsageRowPresentation.swift in Sources */,
 				CC181F20300DA01F7A8FC9AE /* LiveActivityRegistrationCoordinator.swift in Sources */,
 				B98FDDE9593EBA60F3B18123 /* SessionsView.swift in Sources */,
 				FC354E2A0C4163ECF1D71E83 /* SessionUsage.swift in Sources */,
@@ -775,6 +838,11 @@
 				120000000000000000000005 /* LiveActivityController.swift in Sources */,
 				CC349439DBAC95967F46CE72 /* LimitPreviewSection.swift in Sources */,
 				812A9011526AC43976E9EE51 /* LimitProvider.swift in Sources */,
+				621CD8AA9F4F1C12766407BA /* ResetCreditsDetail.swift in Sources */,
+				744692F5F4492B3604BC52A4 /* ResetCreditsRow.swift in Sources */,
+				602BA11DA7FD3F5D82F61945 /* LimitWindowSection.swift in Sources */,
+				A6E2AB8897F3A4C9D5EDBB4D /* ProviderResetGrant.swift in Sources */,
+				AC3DB95EAB64A2B5944962F1 /* ProviderResetCredits.swift in Sources */,
 				4354798727C8AF4FF4560240 /* LimitWindow.swift in Sources */,
 				FC3B6B26403B8E1339595AAD /* LimitWindowRow.swift in Sources */,
 				13188ADE465A1882B8A28721 /* LimitsSummary.swift in Sources */,

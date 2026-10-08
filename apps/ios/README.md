@@ -31,6 +31,12 @@ When the Hub has APNs ActivityKit credentials configured, the app registers its 
 
 The display language can follow the system or be set to English, Traditional Chinese, Simplified Chinese, Japanese, or Korean. Costs can be shown in USD, TWD, HKD, or CNY using the same display rates as the Desktop app; USD uses the compact `$` symbol.
 
+## Quota presentation
+
+The Limits screen preserves the existing Liquid Glass card for each provider group, and Overview keeps its shared quota card. Account dividers remain inside the cards. Quota readings use compact system text with monospaced digits; paired headers adapt together when space is limited, keeping the meters aligned. Fixed quota labels (Session, Weekly, Monthly, Reset), percentages, countdown units and freshness follow the desktop English presentation; navigation, settings and explanatory details remain localized. It preserves the desktop window relationships: primary Session/Weekly lanes sit side by side, lone lanes and Monthly/additional pools use a full row, Cursor windows each use a full row, and Antigravity groups pair their own rolling and weekly windows. Accessibility text sizes stack paired lanes. Supplied windows with unknown usage remain visible rather than disappearing.
+
+Authenticated `resetCredits` data adds the available reset count and sorted expiry countdowns beneath each account. An anchored popover shows exact dates and Claude grant coverage/restrictions without opening a full-page sheet. Missing or zero available counts do not create a reset row. Quota countdowns retain days/hours or hours/minutes and refresh every minute.
+
 ## System surfaces and freshness
 
 Home Screen widgets use WidgetKit's system container and accented rendering, so the same layout adapts to full color, tinted and clear appearances. Small widgets prioritize one metric; larger widgets add breakdowns or quota windows. Lock Screen accessories show compact usage or quota readings. Live Activities provide separate Lock Screen and Dynamic Island layouts, and mark expired content as stale.
@@ -57,3 +63,7 @@ Debug builds accept `--sample-data` and `--sample-tab=overview|limits|insights|s
 The refreshed app and Widget extension build successfully with Xcode 27 on the iPhone 18 Pro simulator. The full native test target passes 33 tests in 11 suites, including Hub destination races, SSE ordering, trailing surface updates, Activity registration cleanup, source freshness, missing-vs-zero readings, sessions and credits balances. Root `npm run verify` passes 5,917 tests with two skips. Hub and Worker generated sources were refreshed and match their build identities.
 
 Simulator screenshots and runtime accessibility snapshots are saved under `/private/tmp/ios-refresh-artifacts`; these use illustrative data. The final rebuild also compiles complete Traditional Chinese, Simplified Chinese, Japanese and Korean translations for the redesigned surfaces. Hardware APNs delivery and system-selected widget clear/tinted appearances still need a configured device check.
+
+### Shared model presentation
+
+The app reads authenticated `/api/sync/settings/modelAliases` and refreshes its cached map when `syncSettingsRevisions.modelAliases` changes. It follows desktop manual aliases and `off` / `duplicates` / `prefix` grouping for model and session lists. Grouping folds the Hub's model tokens and model costs together without changing source records or repricing them. Custom pricing stays with the collecting device and Tokscale; iOS displays the resulting Hub USD costs. Session cache estimates use the optional `promptCache` observation, expire locally, and never infer an estimate from cache-hit percentages. Source-tagged background reviews form one expandable group at the end of the list.

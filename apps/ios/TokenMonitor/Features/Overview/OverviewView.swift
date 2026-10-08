@@ -20,9 +20,8 @@ struct OverviewView: View {
                             spacing: DesignTokens.sectionSpacing
                         ) {
                             ConnectionStatusNotice(phase: store.phase, retry: refresh)
-                            PeriodPicker(selection: $store.selectedPeriod)
                             HeroSummaryCard(
-                                periodKey: store.selectedPeriod,
+                                selectedPeriod: $store.selectedPeriod,
                                 period: store.currentPeriod,
                                 updatedAt: stats.updatedAt
                             )
@@ -34,22 +33,27 @@ struct OverviewView: View {
                                 InsightTrendCard(history: store.currentHistory, compact: true)
                             }
                             .id("overview-trend")
-                            section("Tools") {
+                            section("Tools", destination: .tool) {
                                 BreakdownCard(
                                     kind: .tool,
                                     entries: store.currentPeriod.clientEntries,
                                     total: store.currentPeriod.totalTokens ?? 0, limit: 3
                                 )
                             }
-                            section("Models") {
+                            section("Models", destination: .model) {
                                 BreakdownCard(
                                     kind: .model,
                                     entries: store.currentPeriod.modelEntries,
                                     total: store.currentPeriod.totalTokens ?? 0, limit: 3
                                 )
                             }
-                            section("Devices") {
-                                DeviceListCard(devices: stats.sortedDevices, period: store.selectedPeriod)
+                            VStack(alignment: .leading, spacing: DesignTokens.headerToCardSpacing) {
+                                SectionHeader("Devices") {
+                                    SectionNavigationLink(title: "Devices") { DevicesView() }
+                                }
+                                SurfaceCard {
+                                    DeviceListCard(devices: stats.usageDevices(for: store.selectedPeriod), period: store.selectedPeriod)
+                                }
                             }
                             .id("overview-bottom")
                         }
@@ -79,6 +83,7 @@ struct OverviewView: View {
             }
         }
         .navigationTitle("Overview")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Refresh", systemImage: "arrow.clockwise", action: refresh)
@@ -98,10 +103,15 @@ struct OverviewView: View {
 
     private func section<Content: View>(
         _ title: String,
+        destination: BreakdownKind? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.headerToCardSpacing) {
-            SectionHeader(title)
+            SectionHeader(title) {
+                if let destination {
+                    SectionNavigationLink(title: title) { BreakdownDetailView(kind: destination) }
+                }
+            }
             SurfaceCard(content: content)
         }
     }

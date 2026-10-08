@@ -30,26 +30,65 @@ nonisolated enum WidgetPresentation {
         }
     }
 
+    // Artwork matches the desktop row icons for tools, models, and limits.
     static func assetName(for providerID: String?) -> String {
-        switch providerID?.lowercased() {
+        switch providerID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "claude": "VendorClaude"
         case "codex": "VendorCodex"
+        case "opencode": "VendorOpenCode"
+        case "hermes": "VendorHermes"
+        case "openclaw": "VendorOpenClaw"
         case "cursor": "VendorCursor"
         case "antigravity": "VendorAntigravity"
-        case "opencode": "VendorOpenCode"
-        case "openrouter": "VendorOpenRouter"
-        case "deepseek": "VendorDeepSeek"
-        case "minimax": "VendorMiniMax"
-        case "mimo", "micode", "xiaomi": "VendorXiaomi"
-        case "grok", "xai": "VendorGrok"
-        case "copilot": "VendorCopilot"
-        case "kiro": "VendorKiro"
-        case "zai", "zaiteam": "VendorZai"
-        case "volcengine": "VendorVolcengine"
-        case "qoder": "VendorQoder"
+        case "cline": "VendorCline"
+        case "amp": "VendorAmp"
+        case "droid", "factory": "VendorDroid"
         case "kimi": "VendorKimi"
+        case "qwen": "VendorQwen"
+        case "grok": "VendorGrok"
+        case "copilot": "VendorCopilot"
+        case "pi": "VendorPi"
+        case "omp": "VendorOMP"
+        case "zed": "VendorZed"
+        case "kilo", "kilocode": "VendorKiloCode"
+        case "commandcode": "VendorCommandCode"
+        case "mimo", "xiaomi", "micode": "VendorXiaomi"
+        case "muse", "meta": "VendorMeta"
+        case "zcode", "zai", "zaiteam": "VendorZai"
+        case "kiro": "VendorKiro"
+        case "codebuddy": "VendorCodeBuddy"
+        case "workbuddy": "VendorWorkBuddy"
+        case "proma": "VendorProma"
+        case "qodercn": "VendorQoderCN"
+        case "reasonix": "VendorReasonix"
+        case "dsh": "VendorDSH"
+        case "cherrystudio": "VendorCherryStudio"
+        case "lmstudio": "VendorLMStudio"
+        case "unsloth": "VendorUnsloth"
+        case "devin": "VendorDevin"
+        case "fx": "VendorFX"
+        case "mcode", "minimax": "VendorMiniMax"
+        case "openrouter": "VendorOpenRouter"
+        case "gemini": "VendorGemini"
+        case "qoder": "VendorQoder"
+        case "deepseek": "VendorDeepSeek"
+        case "xai": "VendorXAI"
+        case "mistral": "VendorMistral"
+        case "moonshot": "VendorMoonshot"
+        case "cohere": "VendorCohere"
+        case "doubao": "VendorDoubao"
+        case "hunyuan": "VendorHunyuan"
+        case "volcengine": "VendorVolcengine"
         case "ollama": "VendorOllama"
-        default: "VendorNewAPI"
+        case "trae": "VendorTrae"
+        case "alibaba": "VendorAlibaba"
+        case "stepfun": "VendorStepFun"
+        case "nvidia": "VendorNvidia"
+        case "typesafe": "VendorTypeSafe"
+        case "thirdparty": "VendorThirdParty"
+        case "newapi": "VendorNewAPI"
+        case "sub2api": "VendorSub2API"
+        default: "VendorTokenMonitor"
         }
     }
 
@@ -84,7 +123,7 @@ nonisolated enum WidgetPresentation {
         if name.contains("mistral") || name.contains("codestral") {
             return "VendorMistral"
         }
-        return "VendorNewAPI"
+        return "VendorTokenMonitor"
     }
 
     static func tokens(_ value: Double, locale: Locale = .autoupdatingCurrent) -> String {

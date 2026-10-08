@@ -2,6 +2,7 @@ import Foundation
 
 nonisolated struct DeviceSnapshot: Decodable, Identifiable, Sendable {
     let deviceId: String?
+    var name: String? = nil
     let hostname: String?
     let platform: String?
     let osName: String?
@@ -18,11 +19,17 @@ nonisolated struct DeviceSnapshot: Decodable, Identifiable, Sendable {
     }
 
     var displayName: String {
-        let candidate = hostname?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let candidate, !candidate.isEmpty {
+        if let candidate = [name, hostname].compactMap({ $0?.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .first(where: { !$0.isEmpty }) {
             return candidate
         }
         return id
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case deviceId, hostname, platform, osName, osVersion, agentVersion
+        case updatedAt, receivedAt, ageMs, stale, periods
+        case name = "displayName"
     }
 
     func period(_ key: UsagePeriodKey) -> UsagePeriod {

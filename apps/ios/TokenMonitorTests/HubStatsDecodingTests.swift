@@ -3,6 +3,16 @@ import Testing
 @testable import TokenMonitor
 
 struct HubStatsDecodingTests {
+    @Test func deviceRowsUseConfiguredNamesAndSelectedPeriodUsageOrder() throws {
+        let json = #"{"devices":[{"deviceId":"unknown","displayName":"","hostname":"Host"},{"deviceId":"small","displayName":"Work Mac","hostname":"system-host","stale":false,"periods":{"today":{"totalTokens":1},"month":{"totalTokens":100}}},{"deviceId":"large","stale":true,"periods":{"today":{"totalTokens":100},"month":{"totalTokens":1}}}]}"#
+        let stats = try JSONDecoder().decode(HubStats.self, from: Data(json.utf8))
+        #expect(stats.usageDevices(for: .today).map(\.id) == ["large", "small", "unknown"])
+        #expect(stats.usageDevices(for: .month).map(\.id) == ["small", "large", "unknown"])
+        #expect(stats.devices?[0].displayName == "Host")
+        #expect(stats.devices?[1].displayName == "Work Mac")
+        #expect(stats.devices?[0].period(.today).totalTokens == nil)
+    }
+
     @Test
     func decodesCurrentHubShapeAndToleratesMissingOptionalFields() throws {
         let json = """

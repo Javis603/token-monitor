@@ -17,7 +17,7 @@ struct SectionHeader<Accessory: View>: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(LocalizedStringKey(title))
-                .font(.title3.weight(.semibold))
+                .font(DesignTokens.sectionTitle)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
             accessory

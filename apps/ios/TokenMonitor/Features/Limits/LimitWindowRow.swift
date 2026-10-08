@@ -2,30 +2,24 @@ import SwiftUI
 
 struct LimitWindowRow: View {
     @Environment(AppPreferences.self) private var preferences
-    @Environment(\.locale) private var locale
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let provider: LimitProvider
     let window: LimitWindow
+    var stacksHeadline = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 5) {
+            if dynamicTypeSize.isAccessibilitySize || stacksHeadline {
                 VStack(alignment: .leading, spacing: 4) {
                     title
                     value
                 }
             } else {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        title.fixedSize(horizontal: true, vertical: false)
-                        Spacer(minLength: 4)
-                        value.fixedSize(horizontal: true, vertical: false)
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        title
-                        value
-                    }
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    title.fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: 4)
+                    value.fixedSize(horizontal: true, vertical: false)
                 }
             }
 
@@ -36,7 +30,7 @@ struct LimitWindowRow: View {
                         .fill(color.opacity(0.14))
                         .overlay(alignment: .leading) {
                             Capsule()
-                                .fill(color)
+                                .fill(color.opacity(window.kind == "session" || window.kind == "daily" ? 0.95 : 0.68))
                                 .frame(width: geometry.size.width * min(100, max(0, remainingPercent)) / 100)
                         }
                 }
@@ -46,8 +40,11 @@ struct LimitWindowRow: View {
 
             if let resetDate = Date.hubTimestamp(from: window.resetsAt) {
                 HStack(spacing: 4) {
-                    Text("Reset")
-                    Text(resetDate, format: .relative(presentation: .numeric))
+                    Text(verbatim: "Reset")
+                    TimelineView(.periodic(from: .now, by: 60)) { context in
+                        Text(MetricFormatter.limitCountdown(to: resetDate, now: context.date, locale: Locale(identifier: "en")))
+                            .monospacedDigit()
+                    }
                 }
                 .font(dynamicTypeSize.isAccessibilitySize ? .footnote : .caption2)
                 .foregroundStyle(.secondary)
@@ -93,7 +90,7 @@ struct LimitWindowRow: View {
             )
         }
         if let remainingPercent {
-            return MetricFormatter.remaining(remainingPercent, locale: locale)
+            return MetricFormatter.remaining(remainingPercent, locale: Locale(identifier: "en"))
         }
         if let remaining = window.remaining {
             return remaining.formatted(.number.precision(.fractionLength(0...2)))
@@ -105,14 +102,14 @@ struct LimitWindowRow: View {
     }
 
     private var title: some View {
-        Text(LocalizedStringKey(windowTitle))
-            .font(dynamicTypeSize.isAccessibilitySize ? .subheadline : .caption)
+        Text(verbatim: windowTitle)
+            .font(dynamicTypeSize.isAccessibilitySize ? .body : .caption)
             .foregroundStyle(.secondary)
     }
 
     private var value: some View {
         Text(headline ?? "—")
-            .font(dynamicTypeSize.isAccessibilitySize ? .subheadline.weight(.semibold) : .caption.weight(.semibold))
+            .font(dynamicTypeSize.isAccessibilitySize ? .body.weight(.semibold) : .caption.weight(.medium))
             .monospacedDigit()
             .foregroundStyle(.primary)
             .contentTransition(.numericText())
@@ -134,16 +131,38 @@ struct LimitWindowGrid: View {
     let windows: [LimitWindow]
 
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-            ForEach(windows) { window in
-                LimitWindowRow(provider: provider, window: window)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(LimitWindowSection.make(provider: provider, windows: windows)) { section in
+                if let title = section.title {
+                    Text(title)
+                        .font(.subheadline.weight(.medium))
+                        .accessibilityAddTraits(.isHeader)
+                }
+                ForEach(Array(section.rows.enumerated()), id: \.offset) { _, row in
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 16) {
+                            ForEach(row) { window in
+                                LimitWindowRow(provider: provider, window: window)
+                            }
+                        }
+                    } else {
+                        // Fit the pair together, keeping both meters on one baseline.
+                        ViewThatFits(in: .horizontal) {
+                            windowPair(row, stacksHeadline: false)
+                            windowPair(row, stacksHeadline: true)
+                        }
+                    }
+                }
             }
         }
     }
 
-    private var columns: [GridItem] {
-        let count = dynamicTypeSize.isAccessibilitySize || windows.count == 1 ? 1 : 2
-        return Array(repeating: GridItem(.flexible(minimum: 0), spacing: 12, alignment: .top), count: count)
+    private func windowPair(_ row: [LimitWindow], stacksHeadline: Bool) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            ForEach(row) { window in
+                LimitWindowRow(provider: provider, window: window, stacksHeadline: stacksHeadline)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+        }
     }
 }

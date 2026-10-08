@@ -17,6 +17,7 @@ nonisolated struct LimitProvider: Decodable, Identifiable, Sendable {
     let balance: ProviderBalance?
     let sourceDeviceId: String?
     let stale: Bool?
+    var resetCredits: ProviderResetCredits? = nil
 
     var id: String {
         [
@@ -115,13 +116,8 @@ nonisolated struct LimitProvider: Decodable, Identifiable, Sendable {
     }
 
     var displayWindows: [LimitWindow] {
-        (windows ?? []).filter { window in
-            window.isCredits
-                || window.effectiveRemainingPercent != nil
-                || window.remaining != nil
-                || window.used != nil
-                || !(window.detail ?? "").isEmpty
-        }
+        // A supplied window with unknown usage still has a label/reset to show.
+        windows ?? []
     }
 
     func remainingPercent(for window: LimitWindow) -> Double? {

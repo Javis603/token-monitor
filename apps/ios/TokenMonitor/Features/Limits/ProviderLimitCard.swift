@@ -26,6 +26,9 @@ struct ProviderLimitCard: View {
     @Environment(\.locale) private var locale
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    @ScaledMetric(relativeTo: .subheadline) private var markSize = 18.0
+    @ScaledMetric(relativeTo: .subheadline) private var markInset = 26.0
+
     let providers: [LimitProvider]
     var compact = false
 
@@ -49,24 +52,29 @@ struct ProviderLimitCard: View {
     /// Single-account provider: name + plan on the header row, freshness under
     /// the name, then windows. No redundant account line.
     private func singleAccount(_ provider: LimitProvider) -> some View {
-        VStack(alignment: .leading, spacing: compact ? 10 : 12) {
-            let layout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
-            layout {
-                providerName(provider)
-                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
-                planCellText(provider)
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                    : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+                layout {
+                    providerName(provider)
+                    if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
+                    planCellText(provider)
+                }
+                freshnessLine(provider)
             }
-            freshnessLine(provider)
             windows(for: provider)
+            if let credits = provider.resetCredits {
+                ResetCreditsRow(credits: credits)
+            }
         }
     }
 
     /// Multi-account group: name + "N accounts", then one divided block per
     /// account (title + plan baseline, freshness, windows).
     private var multiAccount: some View {
-        VStack(alignment: .leading, spacing: compact ? 10 : 12) {
+        VStack(alignment: .leading, spacing: 10) {
             if let first = providers.first {
                 let layout = dynamicTypeSize.isAccessibilitySize
                     ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
@@ -75,13 +83,13 @@ struct ProviderLimitCard: View {
                     providerName(first)
                     if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
                     Text(MetricFormatter.accountCount(providers.count, locale: locale))
-                        .font(.subheadline)
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
             }
             ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
                 if index > 0 {
-                    Divider()
+                    Divider().padding(.vertical, 4)
                 }
                 LimitAccountSection(provider: provider, compact: compact)
             }
@@ -90,10 +98,10 @@ struct ProviderLimitCard: View {
 
     private func providerName(_ provider: LimitProvider) -> some View {
         Text(ProviderPresentation.displayName(for: provider.provider))
-            .font(compact ? .subheadline.weight(.semibold) : .headline)
-            .padding(.leading, 32)
+            .font(DesignTokens.rowTitle)
+            .padding(.leading, markInset)
             .overlay(alignment: .leading) {
-                ProviderMark(provider: provider.provider)
+                ProviderMark(provider: provider.provider, size: markSize)
             }
             .accessibilityAddTraits(.isHeader)
     }
@@ -109,7 +117,7 @@ struct ProviderLimitCard: View {
             Text("")
         }
         text
-            .font(.subheadline)
+            .font(.footnote)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
     }
@@ -117,11 +125,10 @@ struct ProviderLimitCard: View {
     @ViewBuilder
     private func freshnessLine(_ provider: LimitProvider) -> some View {
         if provider.showsFreshnessLine,
-           let text = provider.freshnessText(locale: locale) {
-            Text(text)
-                .font(.caption)
+           let text = provider.freshnessText(locale: Locale(identifier: "en")) {
+            Text(verbatim: text)
+                .font(.caption2)
                 .foregroundStyle(.secondary)
-                .padding(.leading, 32)
         }
     }
 
@@ -131,7 +138,6 @@ struct ProviderLimitCard: View {
             Text("No quota windows available")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .padding(.leading, 32)
         } else {
             LimitWindowGrid(
                 provider: provider,
@@ -156,9 +162,9 @@ private struct LimitAccountSection: View {
             VStack(alignment: .leading, spacing: 3) {
                 accountHeading
                 if provider.showsFreshnessLine,
-                   let text = provider.freshnessText(locale: locale) {
-                    Text(text)
-                        .font(.caption)
+                   let text = provider.freshnessText(locale: Locale(identifier: "en")) {
+                    Text(verbatim: text)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -176,6 +182,9 @@ private struct LimitAccountSection: View {
                         : provider.displayWindows
                 )
             }
+            if let credits = provider.resetCredits {
+                ResetCreditsRow(credits: credits)
+            }
         }
     }
 
@@ -185,20 +194,20 @@ private struct LimitAccountSection: View {
             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
         return layout {
             Text(provider.accountTitle(maskingEmails: preferences.masksAccountEmails))
-                .font(.subheadline.weight(.medium))
+                .font(.footnote.weight(.medium))
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 .privacySensitive()
             switch provider.planCell {
             case let .plan(plan):
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
                 Text(plan)
-                    .font(.subheadline)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
             case let .status(key):
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
                 Text(LocalizedStringKey(key))
-                    .font(.subheadline)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
             case nil:

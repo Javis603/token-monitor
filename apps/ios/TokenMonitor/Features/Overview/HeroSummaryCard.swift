@@ -6,46 +6,35 @@ struct HeroSummaryCard: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .largeTitle) private var headlineSize = 40
 
-    let periodKey: UsagePeriodKey
+    @Binding var selectedPeriod: UsagePeriodKey
     let period: UsagePeriod
     let updatedAt: String?
 
     var body: some View {
         SurfaceCard {
-            VStack(alignment: .leading, spacing: 20) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline) {
-                        periodTitle
-                        Spacer(minLength: 8)
-                        freshness
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        periodTitle
-                        freshness
-                    }
-                }
+            VStack(alignment: .leading, spacing: 16) {
+                summaryHeader
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(period.totalTokens.map(MetricFormatter.tokens) ?? "—")
-                        .font(.system(size: headlineSize, weight: .semibold, design: .rounded))
+                    Text(period.totalTokens.map(MetricFormatter.exactTokens) ?? "—")
+                        .font(.system(size: headlineSize, weight: .semibold))
                         .monospacedDigit()
                         .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+                        .minimumScaleFactor(0.5)
                         .accessibilityLabel(period.totalTokens.map {
                             "\(MetricFormatter.exactTokens($0)) tokens"
                         } ?? String(localized: "No data"))
-                    Text(period.costUsd.map {
-                        MetricFormatter.currencyFromUSD($0, currency: preferences.currency)
-                    } ?? "—")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .accessibilityLabel("Total cost")
-                        .accessibilityValue(period.costUsd.map {
-                            MetricFormatter.currencyFromUSD($0, currency: preferences.currency)
-                        } ?? String(localized: "No data"))
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            costReading.fixedSize(horizontal: true, vertical: false)
+                            Spacer(minLength: 0)
+                            freshness.fixedSize(horizontal: true, vertical: false)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            costReading
+                            freshness
+                        }
+                    }
                 }
                 Divider()
                 let metricsLayout = dynamicTypeSize.isAccessibilitySize
@@ -73,14 +62,53 @@ struct HeroSummaryCard: View {
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .padding(.bottom, -10)
             }
         }
     }
 
-    private var periodTitle: some View {
-        Text(LocalizedStringKey(periodKey.title))
-            .font(.subheadline.weight(.semibold))
+    @ViewBuilder
+    private var summaryHeader: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            expandedHeader
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    totalTitle.fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: 0)
+                    PeriodPicker(selection: $selectedPeriod, compact: true)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                expandedHeader
+            }
+        }
+    }
+
+    private var expandedHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            totalTitle
+            PeriodPicker(selection: $selectedPeriod)
+        }
+    }
+
+    private var costReading: some View {
+        Text(period.costUsd.map {
+            MetricFormatter.currencyFromUSD($0, currency: preferences.currency)
+        } ?? "—")
+            .font(.title2)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .accessibilityLabel("Total cost")
+            .accessibilityValue(period.costUsd.map {
+                MetricFormatter.currencyFromUSD($0, currency: preferences.currency)
+            } ?? String(localized: "No data"))
+    }
+
+    private var totalTitle: some View {
+        Text("Total tokens")
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
@@ -95,6 +123,7 @@ struct HeroSummaryCard: View {
     private func metric(_ title: LocalizedStringKey, value: Double?) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
+                .lineLimit(1)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text(value.map(MetricFormatter.tokens) ?? "—")
@@ -102,6 +131,8 @@ struct HeroSummaryCard: View {
                 .monospacedDigit()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(value.map { MetricFormatter.exactTokens($0) + " tokens" } ?? String(localized: "No data"))
     }
 }

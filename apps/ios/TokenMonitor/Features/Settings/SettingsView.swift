@@ -15,6 +15,7 @@ struct SettingsView: View {
                 AppBackground()
             }
             .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
     }
 
     @ViewBuilder

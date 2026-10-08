@@ -3,7 +3,7 @@ import Foundation
 nonisolated struct LimitWindow: Decodable, Identifiable, Sendable {
     let kind: String?
     let metric: String?
-    let label: String?
+    var label: String?
     let used: Double?
     let limit: Double?
     let remaining: Double?

@@ -49,15 +49,15 @@ The canvas uses the pale blue light and ink dark tokens in `DesignTokens`. Prima
 
 ## Typography
 
-Use the system font and semantic SwiftUI text styles for titles, body and metadata. Native large navigation titles establish page identity. Section headings use headline or semibold title styles; caption and footnote styles distinguish supporting information.
+Use the system font and semantic SwiftUI text styles for titles, body and metadata. Compact inline navigation titles establish page identity without reserving a separate large-title row. Section headings use headline or semibold title styles; caption and footnote styles distinguish supporting information.
 
-`HeroSummaryCard` has a rounded semibold token reading, scaled from its existing large-title-relative base; cost has a medium title treatment. Use monospaced digits for measured values, with localized currency and numeric formatting. Prose stays in the system proportional font. Preserve exact-value accessibility labels alongside abbreviated display values.
+`HeroSummaryCard` labels the measured value as Total tokens, independent of the selected period. The native segmented period selector sits beside the label, with a full-width or menu fallback when the width or Dynamic Type requires it. Freshness supports the cost reading below the total. Its exact token reading uses standard system semibold type, scaled from its large-title-relative base; cost has a secondary title treatment. Use monospaced digits for measured values, with localized currency and numeric formatting. Prose stays in the system proportional font. Preserve exact-value accessibility labels alongside abbreviated display values.
 
 Dynamic Type determines layout, not just font size. Accessibility sizes stack paired metrics, account metadata and quota windows; maintain readable labels and VoiceOver grouping rather than shrinking the whole interface.
 
 ## Layout
 
-Use the frontmatter spacing and shape values from `DesignTokens`; they are native points, not CSS pixels. Scrollable pages use a single reading column with continuous sections and shared screen edges. Dividers separate the readings without enclosing every section in a card. Native tabs and per-tab navigation stacks provide the persistent frame. The first Overview viewport establishes the native large title, period selector and unified reading panel; connection notices appear when needed. Limits opens onto provider accounts.
+Use the frontmatter spacing and shape values from `DesignTokens`; they are native points, not CSS pixels. Scrollable pages use a single reading column with continuous sections and shared screen edges. Dividers separate the readings without enclosing every section in a card. Native tabs and per-tab navigation stacks provide the persistent frame. The first Overview viewport establishes compact native navigation, a compact period selector in the unified reading panel header; connection notices appear when needed. Limits opens onto provider accounts.
 
 Page composition stays local to its surface:
 
