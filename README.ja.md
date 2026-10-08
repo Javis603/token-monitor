@@ -242,6 +242,7 @@ git clone https://github.com/Javis603/token-monitor.git
 cd token-monitor
 npm ci
 cp .env.example .env              # TOKEN_MONITOR_HUB_URL、TOKEN_MONITOR_SECRET、重複しない TOKEN_MONITOR_DEVICE_ID を設定
+chmod 600 .env                    # macOS/Linux: シークレットを他のユーザーから保護
 npm run agent:once -- --dry-run   # 送信せずにサマリーを表示
 npm run agent                     # 常駐実行
 ```

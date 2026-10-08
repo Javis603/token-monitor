@@ -237,6 +237,7 @@ git clone https://github.com/Javis603/token-monitor.git
 cd token-monitor
 npm ci
 cp .env.example .env              # set TOKEN_MONITOR_HUB_URL, TOKEN_MONITOR_SECRET, and a unique TOKEN_MONITOR_DEVICE_ID
+chmod 600 .env                    # macOS/Linux: keep the secret private
 npm run agent:once -- --dry-run   # print the summary without posting it
 npm run agent                     # run continuously
 ```

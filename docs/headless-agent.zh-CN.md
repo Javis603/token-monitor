@@ -26,7 +26,7 @@ git clone https://github.com/Javis603/token-monitor.git
 cd token-monitor
 npm ci
 cp .env.example .env
-chmod 600 .env   # 之后会存放 hub 密钥
+chmod 600 .env   # macOS/Linux：之后会存放 hub 密钥
 ```
 
 `npm ci` 会安装上游 tokscale 包。第一次运行 `npm run agent` 或 `npm run agent:once`（包括 `--dry-run`）时，会把其中的二进制替换为本平台固定版本的 tokscale 并校验 checksum；之后的运行会跳过下载。没有固定版本的平台会保留 npm 安装的二进制。
@@ -127,7 +127,7 @@ launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.token-monitor.agen
 launchctl bootout "gui/$(id -u)/com.token-monitor.agent"   # 停止
 ```
 
-`gui` 域只在你登录桌面时存在。只通过 SSH 访问的 Mac，请开启自动登录，让 agent 在重启后也能启动。
+`gui` 域只在你登录桌面时存在，所以 agent 会在登录时启动、注销时停止。重启后要等下次登录桌面才会运行。
 
 ### Windows（任务计划程序）
 

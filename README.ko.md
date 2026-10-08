@@ -242,6 +242,7 @@ git clone https://github.com/Javis603/token-monitor.git
 cd token-monitor
 npm ci
 cp .env.example .env              # TOKEN_MONITOR_HUB_URL, TOKEN_MONITOR_SECRET, 겹치지 않는 TOKEN_MONITOR_DEVICE_ID 설정
+chmod 600 .env                    # macOS/Linux: 다른 사용자가 시크릿을 읽지 못하게 함
 npm run agent:once -- --dry-run   # 전송하지 않고 요약만 출력
 npm run agent                     # 계속 실행
 ```

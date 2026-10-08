@@ -26,7 +26,7 @@ git clone https://github.com/Javis603/token-monitor.git
 cd token-monitor
 npm ci
 cp .env.example .env
-chmod 600 .env   # it will hold the hub secret
+chmod 600 .env   # macOS/Linux: it will hold the hub secret
 ```
 
 `npm ci` installs the upstream tokscale package. The first `npm run agent` or `npm run agent:once` (including `--dry-run`) replaces its binary with the pinned build for this platform and verifies the checksum; later runs skip the download. Platforms without a pinned build keep the npm binary.
@@ -127,7 +127,7 @@ launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.token-monitor.agen
 launchctl bootout "gui/$(id -u)/com.token-monitor.agent"   # to stop it
 ```
 
-The `gui` domain exists only while you are signed in to the desktop. On a Mac you reach only over SSH, turn on automatic login so the agent starts after a reboot.
+The `gui` domain exists only while you are signed in to the desktop, so the agent starts when you sign in and stops when you sign out. After a reboot it waits for the next desktop sign-in.
 
 ### Windows (Task Scheduler)
 
