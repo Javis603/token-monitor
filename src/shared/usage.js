@@ -1,6 +1,7 @@
 'use strict';
 
 const PERIODS = ['today', 'month', 'allTime'];
+const { normalizeLiveActivity } = require('./sessionLive');
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
@@ -652,6 +653,14 @@ function mergeSession(target, source) {
     if (sourceLastUsed > targetLastUsed) target.turnEnded = sourceEnded;
     else if (sourceEnded && sourceLastUsed === targetLastUsed) target.turnEnded = true;
   }
+  // Registry observations have their own clock: waiting can change without a
+  // token or transcript write. An explicit unknown reading clears old evidence.
+  if (source.client === 'claude') {
+    const reading = normalizeLiveActivity(source.liveActivity);
+    if (reading && timestampMs(reading.observedAt) >= timestampMs(target.liveActivity?.observedAt)) {
+      target.liveActivity = reading;
+    }
+  }
   if (!target.title && source.title) target.title = normalizeSessionTitle(source.title);
   if (!target.sessionKind && source.sessionKind) target.sessionKind = normalizeSessionKind(source.sessionKind);
   if (source.usageSource === 'codex-dots-local') {
@@ -751,6 +760,10 @@ function normalizeSession(input, fallbackKey) {
   // when the same session arrives from a source that had no evidence.
   if (input.turnEnded === true) session.turnEnded = true;
   else if (input.turnEnded === false) session.turnEnded = false;
+  if (client === 'claude') {
+    const activity = normalizeLiveActivity(input.liveActivity);
+    if (activity) session.liveActivity = activity;
+  }
   session.projectId = String(input.projectId || input.project_id || '').trim();
   session.projectLabel = String(input.projectLabel || input.project_label || '').trim();
   session.title = normalizeSessionTitle(input.title || input.sessionTitle || input.session_title);

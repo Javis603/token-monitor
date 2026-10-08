@@ -35,6 +35,14 @@ An explicit `[1m]` model marker, supported native Claude 1M model ids and recogn
 
 Cache warmth is an optional `promptCache: { observedAt, ttlSeconds }` estimate from the same incremental transcript index used for title, context and turn state, with no extra file read or JSON parse, requiring cache activity and a reported 5-minute or 1-hour write tier in the newest serving response. Mixed tiers use the shorter TTL; unknown tiers and compaction hide the estimate. Duplicate assistant records do not refresh it, and sidechain responses are excluded. The anchor is the first available response observation, not the unrecorded request time, so remaining time may be overstated. No status line, plugin or Claude settings changes are needed. Home, Edge Dock and Sessions share one metrics slot: recent context takes priority, with the context token/window counts and cache countdown available in the shared detail tooltip by hovering its bar or percentage; then a still-valid cache estimate appears after 10 minutes of inactivity, with the last recorded context counts still available on hover. Turn completion alone clears neither reading; the cache countdown ends at the observed TTL.
 
+## Live waiting status
+
+Native Claude Code sessions can supply explicit activity through `<configDir>/sessions/<pid>.json`. Only recognized `waiting`/`busy`/`idle` states (or `blocked`/`active`/`idle` tempo values) are accepted, matched to an existing usage session by `sessionId`. The reader validates the native PID domain and process start time (`procStart`, UTC), so a dead process or recycled PID cannot keep a session waiting. Desktop-hosted records, scoped WSL homes, missing/unknown states, unsupported process probes and unreadable or partially written records use the existing transcript fallback. Older Claude versions need no settings changes.
+
+The collector polls this small directory every three seconds, independently of token scans and collection mode. State changes publish immutable metadata updates across today/month/allTime, without changing counters or scan anchors. Valid observations renew about every ten seconds; the shared `liveActivity` reading expires after thirty seconds without renewal. This prevents a stopped collector or offline device from holding a waiting marker indefinitely. A missing record sends an explicit `unknown` observation to clear older evidence through merges. No prompts, paths, PID, socket names or peer keys enter the wire data; local historical session archives omit this transient field.
+
+Sessions, Home and Edge Dock show a static attention mark for waiting, and waiting rows do not count as running. Edge Dock keeps waiting rows through its ordinary list cap; its running-only filter still shows only running work. Without current registry evidence, the existing ten-minute transcript/turn-boundary rules remain unchanged.
+
 ## Limits source order
 
 `fetchClaudeLimits()` uses these mutually exclusive paths:

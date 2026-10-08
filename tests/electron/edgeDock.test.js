@@ -256,13 +256,13 @@ test('the card takes the forecast separator from the page instead of redrawing i
   );
 });
 
-test('the Sessions list uses a plain dot, not the dock card glyph stack', () => {
+test('the Sessions list keeps the running dot and adds a static waiting mark', () => {
   // This row already leads with the client's own icon, so a spinner or check
   // drawn at its corner reads as part of that logo. The card has no such icon,
   // which is why the richer states live there and the old dot idiom stays here.
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  assert.match(app, /rowLiveMarkup = '<span class="row-live-dot"><\/span>'/);
+  assert.match(app, /rowLiveMarkup = '<span class="row-live-dot"><\/span><span class="row-live-waiting"><\/span>'/);
   const sessionList = app.slice(app.indexOf('function updateRowLive('), app.indexOf('function updateRow(', app.indexOf('function updateRowLive(')));
   assert.doesNotMatch(sessionList, /sessionStateMarkup\(\{/);
   assert.doesNotMatch(styles, /row-live-spin|row-live-check|row-live-idle/);

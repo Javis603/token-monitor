@@ -47,7 +47,8 @@ const overflowText = window.TokenMonitorOverflowText.create({
 const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
   spin: 'edge-dock-session-spin',
   check: 'edge-dock-session-check',
-  idle: 'edge-dock-session-idle'
+  idle: 'edge-dock-session-idle',
+  waiting: 'edge-dock-session-waiting'
 });
 
 const BRAND_VENDOR_COLORS = { ...clientColors };
@@ -589,8 +590,10 @@ function ringNode(remainingPercent, color, mark) {
   fill.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE * (1 - remaining / 100)));
   if (remainingPercent === null) fill.style.opacity = '0';
   svg.append(track, fill);
+  const waiting = el('span', 'edge-dock-ring-waiting');
+  waiting.setAttribute('aria-hidden', 'true');
   if (appearance().edgeDockRunningIndicatorEnabled === false) {
-    ring.append(svg, mark);
+    ring.append(svg, mark, waiting);
     return ring;
   }
   // A separate inner arc reports work without moving the quota reading. Rail
@@ -607,7 +610,7 @@ function ringNode(remainingPercent, color, mark) {
   arc.setAttribute('r', '14');
   arc.setAttribute('stroke-dasharray', `${7 * Math.PI} ${21 * Math.PI}`);
   spinner.append(arc);
-  ring.append(svg, spinner, mark);
+  ring.append(svg, spinner, mark, waiting);
   return ring;
 }
 
@@ -620,7 +623,9 @@ function providerCellNode(cell) {
   // endpoint. It also remains visible when the quota is empty or stale. Hiding
   // the card's session list does not hide the running signal.
   const running = runningSessionSummary(cell.sessions).count;
+  const waiting = presentation.waitingSessionSummary(cell.sessions).count;
   if (running > 0) node.dataset.running = 'yes';
+  if (waiting > 0) node.dataset.waiting = 'yes';
   const color = providerColor(cell.provider);
   const shown = presentation.displayPercent(cell.remainingPercent, appearance().showLimitUsed === true);
   const value = el('span', 'edge-dock-value');
@@ -650,6 +655,7 @@ function providerCellNode(cell) {
   // spoken here instead, from the same reading it is drawn from.
   const spoken = [providerLabel(cell.provider), value.textContent];
   if (running > 0) spoken.push(t('edgeDock.runningCount', { count: running }));
+  if (waiting > 0) spoken.push(t('edgeDock.waitingCount', { count: waiting }));
   node.setAttribute('aria-label', spoken.join(' '));
   return node;
 }
@@ -1212,6 +1218,7 @@ function stateMark(session, key, state) {
   dot.innerHTML = SESSION_STATE_GLYPHS;
   dot.dataset.state = state;
   if (state === 'running') dot.title = t('session.running');
+  else if (state === 'waiting') dot.title = t('session.waiting');
   else if (state === 'ended') dot.title = t('session.finished');
   const previous = lastActivityBySession.get(key) || 0;
   const next = Date.parse(session.lastUsedAt || '') || 0;
@@ -1288,7 +1295,7 @@ function sessionsContainer(sessions, options = {}) {
     // translated state is rendered as real text for assistive technology. It
     // cannot go on the row itself: a plain `div` has the generic role and
     // Chromium ignores an accessible name set on one.
-    const stateLabel = state === 'running' ? t('session.running')
+    const stateLabel = state === 'waiting' ? t('session.waiting') : state === 'running' ? t('session.running')
       : state === 'ended' ? t('session.finished')
         : t('session.idle');
     nameNode.append(el('span', 'sr-only', ` ${stateLabel}`));

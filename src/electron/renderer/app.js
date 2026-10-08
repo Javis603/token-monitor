@@ -2343,19 +2343,20 @@ function updateRowContext(row, context, promptCache, contextSnapshot) {
 // The old idiom is kept - a green dot means "active right now" - with the dot
 // simply not drawn once the transcript says the turn is over. No spinner, no
 // check, no idle placeholder: a quiet row shows nothing, exactly as before.
-const rowLiveMarkup = '<span class="row-live-dot"></span>';
+const rowLiveMarkup = '<span class="row-live-dot"></span><span class="row-live-waiting"></span>';
 
 function updateRowLive(row, activityState, activityAt) {
   const dot = row.querySelector('.row-live');
   if (!dot) return;
-  // Only one thing is drawn here, and only while the agent is working: the dot
-  // is absent for every other state, which is what a session list full of past
-  // sessions should look like. The turn-end boundary is still read, so the dot
-  // clears the moment the transcript says the answer is finished rather than
-  // holding green until the recency window expires.
+  // Running keeps the green dot; explicit waiting gets a static attention mark.
+  // Finished and historical rows stay quiet.
   const active = activityState === 'running';
   dot.classList.toggle('is-active', active);
-  dot.title = active ? (t('session.running') || 'Running') : '';
+  dot.classList.toggle('is-waiting', activityState === 'waiting');
+  dot.title = activityState === 'waiting' ? t('session.waiting') : active ? (t('session.running') || 'Running') : '';
+  dot.setAttribute('aria-label', dot.title);
+  dot.setAttribute('role', 'img');
+  dot.setAttribute('aria-hidden', dot.title ? 'false' : 'true');
   const previous = Number(row.dataset.activityAt || 0);
   const next = Number(activityAt) || 0;
   if (next > 0) row.dataset.activityAt = String(next);
@@ -5984,12 +5985,18 @@ function renderHomeSessionModule() {
     stateMark.className = 'home-session-state';
     stateMark.dataset.state = activityState;
     stateMark.setAttribute('aria-hidden', 'true');
+    if (activityState === 'waiting') {
+      stateMark.setAttribute('aria-hidden', 'false');
+      stateMark.setAttribute('role', 'img');
+      stateMark.setAttribute('aria-label', t('session.waiting'));
+    }
     stateMark.innerHTML = window.TokenMonitorSessionLive.sessionStateMarkup({
       spin: 'home-session-spin',
       check: 'home-session-check',
-      idle: 'home-session-idle'
+      idle: 'home-session-idle',
+      waiting: 'home-session-waiting'
     });
-    stateMark.title = t(activityState === 'running' ? 'session.running'
+    stateMark.title = t(activityState === 'waiting' ? 'session.waiting' : activityState === 'running' ? 'session.running'
       : activityState === 'ended' ? 'session.finished' : 'session.idle');
     const name = document.createElement('span');
     name.className = 'home-list-name';

@@ -51,6 +51,7 @@ const {
   sessionMetadataMap
 } = require('./sessionMetadata');
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
+const claudeActivity = require('./providers/claude/sessionActivity');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
 const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
 const { createLocalUsageSource } = require('./providers/codex/localUsageSource');
@@ -1259,6 +1260,19 @@ async function collectUsageOnce(options) {
     )
   });
   if (clientHealth) summary.clientHealth = clientHealth;
+  const activityPeriods = [summary.today, summary.month, summary.allTime];
+  const activityIds = claudeActivity.sessionIdsForPeriods(activityPeriods);
+  const activityObservedAt = Date.now();
+  const readings = await claudeActivity.readSessionActivity(activityIds, {
+    ...options.sessionMetadataDeps,
+    env: options.env || options.sessionMetadataDeps?.env,
+    homeDir: options.homeDir || os.homedir(),
+    platform: options.platform,
+    now: activityObservedAt
+  });
+  throwIfAborted(options.signal);
+  claudeActivity.applySessionActivity(activityPeriods, readings,
+    activityObservedAt, true);
   return summary;
 }
 
@@ -2388,6 +2402,9 @@ function startCollector(options) {
   let watchDeadlineAt = 0;
   let intervalTimer = null;
   let stopped = false;
+  let activityTimer = null;
+  let activityUpdate = null;
+  let latestActivitySummary = null;
   let lastTickAttemptAt = 0;
   let lastTickSuccessAt = 0;
   let lastTickFailureAt = 0;
@@ -2800,6 +2817,7 @@ function startCollector(options) {
         if (titlesChanged) persistAnchor(tickPricingRevision);
       }
       const transformedSummary = await onUpdate?.(summary, reason);
+      latestActivitySummary = summary;
       publishedCodexVisibilityRevision = visibilityRevision;
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'
         ? transformedSummary
@@ -2892,6 +2910,8 @@ function startCollector(options) {
   }
 
   async function runTick(reason, tickOptions = {}) {
+    // Metadata-only publications share the same output lane as token scans.
+    if (activityUpdate) await activityUpdate;
     if (stopped || runtimeSignal.aborted) return false;
     if (startBarrier) {
       const barrier = startBarrier;
@@ -3264,6 +3284,34 @@ function startCollector(options) {
     });
   }
 
+  function pollClaudeActivity() {
+    if (stopped || !trackedClients.has('claude')) return;
+    activityUpdate = (async () => {
+      if (tickInFlight || !latestActivitySummary) return;
+      // Published snapshots are immutable. Replace only the affected maps;
+      // counters, history and the exact scan anchor stay untouched.
+      const previous = latestActivitySummary;
+      const periods = ['today', 'month', 'allTime'];
+      const ids = claudeActivity.sessionIdsForPeriods(periods.map((name) => previous[name]));
+      if (!ids.size) return;
+      const readings = await claudeActivity.readSessionActivity(ids, {
+        ...options.sessionMetadataDeps,
+        ...sourceOptions,
+        homeDir: options.homeDir || os.homedir()
+      });
+      if (stopped || tickInFlight || latestActivitySummary !== previous) return;
+      const next = claudeActivity.projectSessionActivity(previous, readings);
+      if (!next) return;
+      await onUpdate?.(next, 'session-activity');
+      if (!stopped) latestActivitySummary = next;
+    })().catch((error) => {
+      if (!stopped) log(`Claude activity update failed: ${error.message}`);
+    }).finally(() => {
+      activityUpdate = null;
+      if (!stopped) activityTimer = setTimeout(pollClaudeActivity, claudeActivity.POLL_INTERVAL_MS);
+    });
+  }
+
   // Stays synchronous and never returns a promise: startMode() and friends rely
   // on stop() having severed the old collector by the time it returns. Setting
   // `stopped` is what does the severing, so a watcher left alive by
@@ -3275,6 +3323,7 @@ function startCollector(options) {
     codexLocalSource?.stop();
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
+    if (activityTimer) { clearTimeout(activityTimer); activityTimer = null; }
     clearRolloverHistoryRetry();
     sourceSyncQueue.stop();
     closeWatchers({ skipClose: options.skipCloseWatchers === true });
@@ -3288,7 +3337,7 @@ function startCollector(options) {
     // test pins that startup ordering because reversing it would microtask-spin.
     if (startBarrier) return Promise.resolve(startBarrier).then(() => whenIdle());
     const usageIdle = !tickInFlight ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(resolve));
-    return usageIdle.then(() => stopped ? codexLocalSource?.whenIdle() : undefined);
+    return usageIdle.then(() => activityUpdate).then(() => stopped ? codexLocalSource?.whenIdle() : undefined);
   }
 
   function getDiagnostics() {
@@ -3334,6 +3383,7 @@ function startCollector(options) {
 
   setupWatchers();
   loop();
+  if (trackedClients.has('claude')) activityTimer = setTimeout(pollClaudeActivity, claudeActivity.POLL_INTERVAL_MS);
   if (trackedClients.has('codex') && options.codexLocalUsageEnabled !== false
     && (options.codexDotsEnabled === true || (options.codexDotsEnabled === undefined
       && (options.env || process.env).TOKEN_MONITOR_CODEX_LOCAL_USAGE === '1'))) {

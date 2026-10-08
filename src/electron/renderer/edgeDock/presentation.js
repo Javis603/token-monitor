@@ -207,6 +207,7 @@
         // Carried onto the projected row, not just used here: the dock renderer
         // re-derives the state at paint time and needs the boundary to do it.
         turnEnded: session.turnEnded === true,
+        liveActivity: session.liveActivity || null,
         // The archive flags ride along for the same reason, and their absence was a
         // real bug: `sessionActivityState()` reads them first, so a projection that
         // dropped them let an archived row - idle by definition, whatever its
@@ -240,12 +241,13 @@
   function cappedSessionRows(entries, cap, runningOnly = false, order = 'running-first') {
     const stateByKey = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
     const running = entries.filter(({ key }) => stateByKey.get(key) === 'running');
+    const waiting = runningOnly ? [] : entries.filter(({ key }) => stateByKey.get(key) === 'waiting');
     const quiet = runningOnly
       ? []
       : entries
-        .filter(({ key }) => stateByKey.get(key) !== 'running')
-        .slice(0, Math.max(0, cap - running.length));
-    let ordered = [...running, ...quiet];
+        .filter(({ key }) => !['running', 'waiting'].includes(stateByKey.get(key)))
+        .slice(0, Math.max(0, cap - running.length - waiting.length));
+    let ordered = [...waiting, ...running, ...quiet];
     if (order === 'timeline') {
       // `entries` arrives newest-first (see sessionSourceRows) and a timeline prints in
       // that order. Composing the selection directly would hoist every running row above
@@ -261,7 +263,7 @@
     const entries = sessionSourceRows(stats);
     if (options.includeRunningBeyondCap === true) {
       const states = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
-      const selected = entries.filter((entry, index) => index < cap || states.get(entry.key) === 'running');
+      const selected = entries.filter((entry, index) => index < cap || ['running', 'waiting'].includes(states.get(entry.key)));
       return sessionRowsFor(selected, states);
     }
     const runningOnly = options.runningOnly === true;
@@ -290,12 +292,20 @@
     return { count: running.length, clients, clientCount: clients.length, rows: running };
   }
 
-  // When the earliest still-running row stops reading as running, so the caller
-  // can re-project at that moment instead of leaving a stale count on screen.
-  // 0 when nothing is running: a quiet row never becomes running on its own, so
-  // there is nothing to wait for and a scheduler reading this cannot loop.
+  function waitingSessionSummary(sessions, now = Date.now()) {
+    const rows = (Array.isArray(sessions) ? sessions : [])
+      .filter((row) => sessionLive.sessionActivityState(row, now) === 'waiting');
+    return { count: rows.length, rows };
+  }
+
+  // Re-project when a running window or registry observation expires. Waiting
+  // and explicit idle can fall back to running too, so every lease matters.
   function nextRunningExpiryAt(sessions, now = Date.now()) {
     let soonest = 0;
+    for (const row of sessions || []) {
+      const expiry = sessionLive.liveActivityExpiryAt(row, now);
+      if (expiry && (!soonest || expiry < soonest)) soonest = expiry;
+    }
     for (const row of runningSessionSummary(sessions, now).rows) {
       const last = Date.parse(String(row?.lastUsedAt || ''));
       if (!Number.isFinite(last)) continue;
@@ -688,6 +698,7 @@
     nextRunningExpiryAt,
     recentSessionRows,
     runningSessionSummary,
+    waitingSessionSummary,
     connectedLimitProviders,
     displayPercent,
     edgeDockCellSignature,

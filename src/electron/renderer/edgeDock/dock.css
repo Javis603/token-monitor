@@ -216,6 +216,18 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   from { transform: rotate(-90deg); }
   to { transform: rotate(270deg); }
 }
+.edge-dock-ring-waiting {
+  display: none;
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 11px;
+  height: 11px;
+  background: var(--orange);
+  -webkit-mask: url("../icons/actions/attention.svg") center / contain no-repeat;
+  mask: url("../icons/actions/attention.svg") center / contain no-repeat;
+}
+.edge-dock-cell[data-waiting="yes"] .edge-dock-ring-waiting { display: block; }
 
 /* The flare a quota refill lands with — the ring's counterpart to the meter's
    `.limit-meter-completion` (its keyframes and timing are driven by the same
@@ -588,7 +600,9 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
 }
 .edge-dock-session-dot[data-state="running"] .edge-dock-session-spin,
 .edge-dock-session-dot[data-state="ended"] .edge-dock-session-check,
+.edge-dock-session-dot[data-state="waiting"] .edge-dock-session-waiting,
 .edge-dock-session-dot[data-state="idle"] .edge-dock-session-idle { display: block; }
+.edge-dock-session-waiting { color: var(--orange); }
 
 /* Running: the only perpetual animation in the dock, and it is bounded by real
    work rather than by the card being open. The shape is the repo's own

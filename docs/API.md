@@ -438,6 +438,9 @@ An accepted write also broadcasts stats to connected stream clients with `reason
 
 Session `promptCache` is optional and additive: `{ "observedAt": "<ISO timestamp>", "ttlSeconds": 300 | 1800 | 3600 }`, or `null` to clear a previous observation. It is a transcript-based estimate, not server expiry state. Merge it as one snapshot using the session’s `lastUsedAt`; do not sum it or let an older snapshot replace a newer one. Consumers must suppress it for archived sessions, clock-skewed future observations and elapsed TTLs. Missing fields on older producers are supported.
 
+Session `liveActivity` is optional and additive for Claude only: `{ "state": "running" | "waiting" | "idle" | "unknown", "observedAt": "<ISO timestamp>" }`. Merge the whole observation by `observedAt`, independently of token activity timestamps; an explicit `unknown` clears older evidence while omission preserves compatibility with older producers. Consumers use a recognized observation only for thirty seconds, suppress future observations and archived sessions, then fall back to transcript activity. It contains no prompt text or process identity. Collectors validate native process identity locally before publishing it. Historical local session archives omit it.
+
+
 
 ## `GET /api/sync/content`
 
