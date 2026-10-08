@@ -73,8 +73,8 @@
     return Object.values(counters).every((value) => value !== null) ? counters : null;
   }
 
-  function modelCounters(period) {
-    return Object.fromEntries(Object.entries(period.modelThroughput || {})
+  function modelCounters(period, map = 'modelThroughput') {
+    return Object.fromEntries(Object.entries(period[map] || {})
       .map(([model, counters]) => [model, usageCounters(counters)])
       .filter(([, counters]) => counters));
   }
@@ -88,12 +88,14 @@
     if (typeof now !== 'function') throw new TypeError('now must be a function');
     let baseline = null;
     let modelBaseline = null;
+    let clientBaseline = null;
     let sample = null;
     let revision = 0;
 
     function reset(period) {
       baseline = period ? usageCounters(period) : null;
       modelBaseline = period?.modelThroughput ? modelCounters(period) : null;
+      clientBaseline = period?.clientThroughput ? modelCounters(period, 'clientThroughput') : null;
       sample = null;
     }
 
@@ -102,6 +104,9 @@
       const models = period?.modelThroughput ? modelCounters(period) : null;
       const previousModels = modelBaseline;
       modelBaseline = models;
+      const clients = period?.clientThroughput ? modelCounters(period, 'clientThroughput') : null;
+      const previousClients = clientBaseline;
+      clientBaseline = clients;
       if (!current) {
         baseline = null;
         sample = null;
@@ -142,6 +147,14 @@
             || !(change.timedDurationMs > 0)) return [];
           return [{ model, speed: tokenRatePerSecond(change), burn: tokenBurnPerMinute(change) }];
         }),
+        ...(clients ? { clients: Object.entries(clients).flatMap(([client, counters]) => {
+          if (!previousClients) return [];
+          const previous = previousClients[client] || { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+          const change = Object.fromEntries(Object.keys(counters).map((field) => [field, counters[field] - previous[field]]));
+          if (Object.keys(change).some((field) => change[field] < 0 || change[field] > delta[field])
+            || !(change.timedDurationMs > 0)) return [];
+          return [{ client, speed: tokenRatePerSecond(change), burn: tokenBurnPerMinute(change) }];
+        }) } : {}),
         ...delta
       };
       return sample;
@@ -191,7 +204,7 @@
       for (const entry of normalizedEntries(entries)) {
         const tracker = createLiveTokenRateTracker({ now });
         tracker.reset(entry.period);
-        trackers.set(entry.id, { tracker, name: entry.name });
+        trackers.set(entry.id, { tracker, name: entry.name, clientSamples: new Map(), clientCounters: modelCounters(entry.period || {}, 'clientThroughput') });
       }
     }
 
@@ -215,14 +228,29 @@
         if (!device) {
           const tracker = createLiveTokenRateTracker({ now });
           tracker.reset(entry.period);
-          trackers.set(entry.id, { tracker, name: entry.name });
+          trackers.set(entry.id, { tracker, name: entry.name, clientSamples: new Map(), clientCounters: modelCounters(entry.period || {}, 'clientThroughput') });
           continue;
         }
         device.name = entry.name;
-        const { tracker } = device;
+        const { tracker, clientSamples, clientCounters } = device;
+        const counters = modelCounters(entry.period || {}, 'clientThroughput');
+        for (const client of clientSamples.keys()) {
+          const previousCounters = clientCounters[client];
+          const currentCounters = counters[client];
+          if (!currentCounters || (previousCounters && Object.keys(previousCounters)
+            .some((field) => currentCounters[field] < previousCounters[field]))) {
+            clientSamples.delete(client);
+            changed = true;
+          }
+        }
+        device.clientCounters = counters;
         const previous = tracker.getSample();
         const sample = tracker.observe(entry.period);
         if (sample === previous) continue;
+        if (!sample) clientSamples.clear();
+        else for (const client of sample.clients || []) {
+          clientSamples.set(client.client, { ...client, sampledAt: sample.sampledAt });
+        }
         changed = true;
         if (sample) fresh = true;
         else if (previous) invalidated = true;
@@ -243,6 +271,53 @@
         .filter((sample) => sample && timestamp < sample.sampledAt + lifetime);
     }
 
+    // Each tool retains its own latest matched delta. A Codex-only push must not
+    // erase Antigravity's still-live reading, and unknown legacy attribution never
+    // becomes a zero baseline for a tool that later starts reporting counters.
+    function clientReadings() {
+      const timestamp = Number(now()) || 0;
+      const grouped = new Map();
+      for (const device of trackers.values()) {
+        for (const sample of device.clientSamples.values()) {
+          if (timestamp >= sample.sampledAt + clearAfter) continue;
+          const readings = grouped.get(sample.client) || [];
+          readings.push(sample);
+          grouped.set(sample.client, readings);
+        }
+      }
+      return [...grouped].map(([client, readings]) => {
+        const active = readings.filter((sample) => timestamp < sample.sampledAt + lifetime);
+        const selected = active.length ? active : readings;
+        return {
+          client,
+          speed: cappedTokenRate(selected.reduce((sum, sample) => sum + sample.speed, 0)),
+          burn: cappedTokenRate(selected.reduce((sum, sample) => sum + sample.burn, 0)),
+          sampledAt: Math.max(...selected.map((sample) => sample.sampledAt)),
+          expiresAt: Math.min(...selected.map((sample) => sample.sampledAt + (active.length ? lifetime : clearAfter))),
+          idle: !active.length,
+          deviceCount: selected.length
+        };
+      });
+    }
+
+    function withClientReadings(sample) {
+      const clients = clientReadings();
+      const result = { ...sample };
+      if (sample.devices) result.devices = sample.devices.map((device) => {
+        const next = { ...device };
+        const retained = [...(trackers.get(device.id)?.clientSamples.values() || [])]
+          .filter((client) => (Number(now()) || 0) < client.sampledAt + clearAfter);
+        if (retained.length) next.clients = retained;
+        else delete next.clients;
+        return next;
+      }).filter((device) => device.models?.length || device.clients?.length);
+      if (clients.length) {
+        result.clients = clients;
+        result.expiresAt = Math.min(result.expiresAt, ...clients.map((client) => client.expiresAt));
+      } else delete result.clients;
+      return result;
+    }
+
     function getSample() {
       const samples = activeSamples();
       if (samples.length) {
@@ -250,16 +325,19 @@
           speed: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.speed, 0)),
           burn: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.burn, 0)),
           sampledAt: Math.max(...samples.map((sample) => sample.sampledAt)),
-          devices: samples.filter((sample) => sample.models?.length)
-            .map(({ id, name, models }) => ({ id, name, models })),
+          devices: samples.map(({ id, name, models }) => {
+            const clients = [...trackers.get(id).clientSamples.values()]
+              .filter((client) => (Number(now()) || 0) < client.sampledAt + clearAfter);
+            return { id, name, models, ...(clients.length ? { clients } : {}) };
+          }).filter((device) => device.models?.length || device.clients?.length),
           deviceCount: samples.length,
           revision
         };
-        return {
+        return withClientReadings({
           ...lastDisplaySample,
           expiresAt: Math.min(...samples.map((sample) => sample.sampledAt + lifetime)),
           idle: false
-        };
+        });
       }
 
       // The retained aggregate is presentation-only: expired device samples no longer
@@ -268,7 +346,7 @@
       const timestamp = Number(now()) || 0;
       const expiresAt = lastDisplaySample?.sampledAt + clearAfter;
       if (!lastDisplaySample || timestamp >= expiresAt) return null;
-      return { ...lastDisplaySample, expiresAt, idle: true };
+      return withClientReadings({ ...lastDisplaySample, expiresAt, idle: true });
     }
 
     function nextExpiryAt() {
@@ -313,16 +391,41 @@
     return { entries: [], source: `device:${normalizedDeviceId || 'unavailable'}` };
   }
 
-  function liveTokenRateTooltipEntries(sample, mode, formatRate) {
+  function normalizeLiveTokenRateDisplay(value) {
+    return ['separate', 'codex', 'antigravity'].includes(value) ? value : 'all';
+  }
+
+  function selectLiveTokenRateSample(sample, display) {
+    if (!sample || !display || display === 'all' || display === 'separate') return sample || null;
+    const client = sample.clients?.find((entry) => entry.client === display);
+    return client ? { ...sample, ...client } : null;
+  }
+
+  function liveTokenRateReadouts(sample, display) {
+    const selected = normalizeLiveTokenRateDisplay(display);
+    if (selected !== 'separate') return [{ client: selected === 'all' ? '' : selected, sample: selectLiveTokenRateSample(sample, selected) }];
+    const clients = new Set(['codex', 'antigravity', ...(sample?.clients || []).map((entry) => entry.client)]);
+    return [...clients].map((client) => ({ client, sample: selectLiveTokenRateSample(sample, client) }));
+  }
+
+  function liveTokenRateTooltipEntries(sample, mode, formatRate, options = {}) {
     const burn = mode === 'burn';
     const unit = burn ? 'TPM' : 'tok/s';
     const devices = sample?.devices || [];
     const grouped = (sample?.deviceCount || devices.length) > 1;
     const entries = [];
     for (const device of devices) {
-      if (!device.models?.length) continue;
+      if (!device.models?.length && !device.clients?.length) continue;
       if (grouped) entries.push({ full: device.name, separated: entries.length > 0 });
-      const models = device.models.slice().sort((a, b) =>
+      if (device.clients?.length) {
+        entries.push(...device.clients.map((entry) => [
+          options.clientLabel ? options.clientLabel(entry.client) : entry.client,
+          formatRate(burn ? entry.burn : entry.speed) + ' ' + unit,
+          entry.client
+        ]));
+        if (device.models?.length) entries.push({ full: options.modelsLabel || 'Models', separated: true });
+      }
+      const models = (device.models || []).slice().sort((a, b) =>
         (burn ? b.burn - a.burn : b.speed - a.speed) || a.model.localeCompare(b.model));
       entries.push(...models.map((entry) => [entry.model, `${formatRate(burn ? entry.burn : entry.speed)} ${unit}`]));
     }
@@ -547,6 +650,9 @@
     createTokenRateBoostController,
     isSharedSyncMode,
     liveTokenRateTooltipEntries,
+    liveTokenRateReadouts,
+    normalizeLiveTokenRateDisplay,
+    selectLiveTokenRateSample,
     positiveNumber,
     selectLiveTokenRatePeriods,
     tokenBurnPerMinute,

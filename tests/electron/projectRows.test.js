@@ -135,3 +135,17 @@ test('projectRowsForPeriod labels unattributed tool usage', () => {
     { key: 'unknown', name: 'Unknown tool', value: 10, percent: 100, color: '#73bdf5' }
   ]);
 });
+
+
+test('project missing-price counts stay finite and bounded for rollups and session fallback', () => {
+  for (const missing of [Infinity, NaN, 'bad', -10, 500, '50']) {
+    const expected = missing === 500 ? 100 : missing === '50' ? 50 : 0;
+    for (const period of [
+      { projects: { fixture: { label: 'Fixture', tokens: 100, unpricedTokens: missing } } },
+      { sessions: { fixture: { client: 'codex', projectLabel: 'Fixture', totalTokens: 100, unpricedTokens: missing } } }
+    ]) {
+      const [row] = projectRowsForPeriod(period);
+      assert.equal(row.unpricedTokens || 0, expected);
+    }
+  }
+});

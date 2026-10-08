@@ -191,6 +191,11 @@ function createDeviceRuntime(options = {}, deps = {}) {
     }),
     getSnapshot: () => deviceState.getSnapshot(),
     reconfigureUsage,
+    setCodexDotsVisible: (visible) => {
+      if (!active) return Promise.resolve(false);
+      activeUsageOptions = { ...activeUsageOptions, codexDotsVisible: visible !== false };
+      return usageRuntime.setCodexDotsVisible(visible);
+    },
     reconfigureLimits: (next) => active ? limitsRuntime.reconfigure(next) : null,
     refreshClient: (clientId, refreshOptions) => active
       ? usageRuntime.refreshClient(clientId, refreshOptions)

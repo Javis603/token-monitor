@@ -632,7 +632,7 @@
   function statsCardsHtml(cards, options) {
     const o = Object.assign({ label: (k) => k, format: (c) => String(c.value) }, options || {});
     return (Array.isArray(cards) ? cards : []).map((c) =>
-      `<div class="dash-card"><span class="dash-card-v">${escapeXml(o.format(c))}</span><span class="dash-card-k">${escapeXml(o.label(c.key))}</span></div>`
+      `<div class="dash-card" data-stat="${escapeXml(c.key)}"><span class="dash-card-v">${escapeXml(o.format(c))}</span><span class="dash-card-k">${escapeXml(o.label(c.key))}</span></div>`
     ).join('');
   }
 

@@ -12,26 +12,60 @@
     return Number.isFinite(number) ? number : 0;
   }
 
+  function usageCostLabel(cost, unpricedTokens, formatCost, formatTokens, unpricedLabel) {
+    if (!(finiteNumber(unpricedTokens) > 0)) return formatCost(finiteNumber(cost));
+    const missing = `${formatTokens(unpricedTokens)} ${unpricedLabel}`;
+    return finiteNumber(cost) > 0 ? `${formatCost(cost)} + ${missing}` : `— (${missing})`;
+  }
+
+  function compactUsageCostLabel(cost, unpricedTokens, formatCost) {
+    if (!(finiteNumber(unpricedTokens) > 0)) return formatCost(finiteNumber(cost));
+    return finiteNumber(cost) > 0 ? `${formatCost(cost)} + ?` : '—';
+  }
+
+  // A client can identify the source of unknown usage without identifying its
+  // execution model. Only use the Codex mark when the entire bucket is covered.
+  function unknownModelSource(period) {
+    const total = Number(period?.models?.unknown);
+    if (!Number.isFinite(total) || total <= 0) return null;
+    if (Number(period?.clientModels?.codex?.unknown) !== total) return null;
+    for (const [client, models] of Object.entries(period?.clientModels || {})) {
+      const value = Number(models?.unknown ?? 0);
+      if (!Number.isFinite(value) || value < 0 || (client !== 'codex' && value > 0)) return null;
+    }
+    return 'codex';
+  }
+
   function attributionRows(values, costs, options = {}) {
     const valueMap = values && typeof values === 'object' ? values : {};
     const costMap = costs && typeof costs === 'object' ? costs : {};
-    const keys = new Set([...Object.keys(valueMap), ...Object.keys(costMap)]);
+    const unpricedMap = options.unpricedTokens && typeof options.unpricedTokens === 'object'
+      ? options.unpricedTokens
+      : {};
+    const keys = new Set([...Object.keys(valueMap), ...Object.keys(costMap), ...Object.keys(unpricedMap)]);
     const rows = Array.from(keys, (key) => ({
       key,
       value: finiteNumber(valueMap[key]),
-      cost: finiteNumber(costMap[key])
-    })).filter((row) => row.value > 0 || row.cost > 0);
+      cost: finiteNumber(costMap[key]),
+      ...(unpricedMap[key] > 0 ? { unpricedTokens: finiteNumber(unpricedMap[key]) } : {})
+    })).filter((row) => row.value > 0 || row.cost > 0 || row.unpricedTokens > 0);
     const attributedValue = rows.reduce((sum, row) => sum + Math.max(0, row.value), 0);
     const attributedCost = rows.reduce((sum, row) => sum + Math.max(0, row.cost), 0);
+    const attributedUnpricedTokens = rows.reduce((sum, row) => sum + Math.max(0, finiteNumber(row.unpricedTokens)), 0);
     const remainderValue = Math.max(0, finiteNumber(options.totalValue) - attributedValue);
     const remainderCost = Math.max(0, Number(
       (finiteNumber(options.totalCost) - attributedCost).toFixed(6)
     ));
-    if (remainderValue > 0 || remainderCost > 0) {
+    const remainderUnpricedTokens = Math.max(
+      0,
+      finiteNumber(options.totalUnpricedTokens) - attributedUnpricedTokens
+    );
+    if (remainderValue > 0 || remainderCost > 0 || remainderUnpricedTokens > 0) {
       rows.push({
         key: options.unattributedKey || UNATTRIBUTED_KEY,
         value: remainderValue,
         cost: remainderCost,
+        ...(remainderUnpricedTokens > 0 ? { unpricedTokens: remainderUnpricedTokens } : {}),
         unattributed: true
       });
     }
@@ -45,6 +79,7 @@
     return sourceRows.filter((row) => (
       row?.unattributed !== true
       || finiteNumber(row.value) > 0
+      || finiteNumber(row.unpricedTokens) > 0
       || String(formatCost(row.cost)) !== zeroCost
     ));
   }
@@ -98,6 +133,9 @@
   }
 
   return {
+    usageCostLabel,
+    compactUsageCostLabel,
+    unknownModelSource,
     attributionRows,
     visibleAttributionRows,
     attributionValue,

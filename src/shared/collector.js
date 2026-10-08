@@ -33,7 +33,7 @@ const {
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { createWatcherHost } = require('./watcherHost');
-const { localDayKey, parseGraphResult, normalizeHistory } = require('./history');
+const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const {
   createSubprocessTermination,
@@ -52,6 +52,8 @@ const {
 } = require('./sessionMetadata');
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
+const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
+const { createLocalUsageSource } = require('./providers/codex/localUsageSource');
 const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
@@ -766,6 +768,16 @@ async function collectHistoryOnce(options) {
       if (typeof options.logger === 'function') options.logger(`tokscale graph failed: ${error.message}`);
     }
   }
+  // Keep the supplemental ledger out of generic history retention too: a
+  // retained maximum would survive when a native rollout replaces this thread.
+  const withLocalHistory = (history) => {
+    // A failed native scan without retained history is no update, not a new
+    // Dots-only replacement for the device's last successful full history.
+    if (!history && failureCode === 'history-graph-failed') return null;
+    return options.codexLocalGraph
+      ? mergeHistories([history, normalizeHistory(parseGraphResult(options.codexLocalGraph), { capDays, todayKey })].filter(Boolean), { capDays, todayKey })
+      : history;
+  };
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -780,7 +792,7 @@ async function collectHistoryOnce(options) {
       const retained = normalizeHistory(parseGraphResult(retainedGraph), { capDays, todayKey });
       const result = retained.daily.length || retained.monthly.length ? retained : null;
       reportStatus(failureCode === null);
-      return result;
+      return withLocalHistory(result);
     } catch (error) {
       failureCode = failureCode || 'daily-history-archive-failed';
       if (typeof options.logger === 'function') options.logger(`daily history archive failed: ${error.message}`);
@@ -788,11 +800,11 @@ async function collectHistoryOnce(options) {
   }
   if (!liveHistory) {
     reportStatus(false);
-    return null;
+    return withLocalHistory(null);
   }
   const result = liveHistory.daily.length || liveHistory.monthly.length ? liveHistory : null;
   reportStatus(failureCode === null);
-  return result;
+  return withLocalHistory(result);
 }
 
 function shouldIncludeHistory(nowMs, lastHistoryAtMs, historyIntervalMs, force, enabled = true) {
@@ -1113,6 +1125,37 @@ async function collectUsageOnce(options) {
     }
   }
 
+  // This contribution is durable but has no rollout file. Keep it outside
+  // windowsPeriods/todayPartitions so exact native watch deltas stay native.
+  let codexLocalView = null;
+  if (trackedClientSet.has('codex') && options.codexLocalUsageEnabled !== false
+    && options.codexDotsVisible !== false) {
+    try {
+      codexLocalView = await readLocalUsageView({
+        ...options, store: options.codexLocalUsageStore, now: collectedAt,
+        nativePeriod: allTime, projectIdentity,
+        resolvePricing: (rows) => resolveLocalUsagePricing(rows, {
+          ...options, lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs, pricingRevision: options.pricingRevision ?? pricingFingerprint(options)
+        })
+      });
+      throwIfAborted(options.signal);
+      if (codexLocalView.sessionKeys.length) {
+        today = mergePeriods(today, codexLocalView.today);
+        month = mergePeriods(month, codexLocalView.month);
+        allTime = mergePeriods(allTime, codexLocalView.allTime);
+      }
+      options.onCodexLocalUsageComputed?.(codexLocalView);
+    } catch (_error) {
+      if (options.signal?.aborted) throw abortReason(options.signal);
+      try {
+        options.onDiagnosticEvent?.({ subsystem: 'collector', code: 'codex-local-usage-read-failed' });
+      } catch (_) {
+        // Diagnostic observers must not turn a recoverable ledger error into a failed tick.
+      }
+    }
+  }
+
   // One filesystem probe per tick, shared by the legacy status and the health
   // record below. Probing twice cost a second pass over every client's roots —
   // including the per-workspace walk Copilot needs — and let one snapshot report
@@ -1144,6 +1187,9 @@ async function collectUsageOnce(options) {
     month,
     allTime
   };
+  // The request ledger is this source's archive. A second per-session archive
+  // would resurrect its contribution after a native rollout takes precedence.
+  if (codexLocalView) summary.codexLocalSessionKeys = codexLocalView.sessionKeys;
   if (options.reasonixNativeSessionsEnabled === true && trackedClientSet.has('reasonix')) {
     try {
       const nativeCache = options.reasonixNativeSessionCache || createReasonixNativeSessionCache({
@@ -1186,6 +1232,7 @@ async function collectUsageOnce(options) {
     throwIfAborted(options.signal);
     const history = await collectHistoryOnce({
       clients: normalizedClients,
+      codexLocalGraph: codexLocalView?.graph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -2314,6 +2361,12 @@ function startCollector(options) {
   // rather than kept as a second copy, so the two cannot drift; a restart simply
   // relearns them from the first tick, which always includes history.
   let activityDaysAnchor = {};
+  let codexLocalView = null;
+  let codexLocalViewDay = null;
+  let codexLocalSource = null;
+  let codexDotsVisible = options.codexDotsVisible !== false;
+  let codexVisibilityRevision = 0;
+  let publishedCodexVisibilityRevision = 0;
   // Keep the highest complete live day in this collector even when another
   // process owns the shared archive. A watch tick can then hand its value to a
   // later full/history tick instead of losing it at the tick boundary.
@@ -2512,6 +2565,7 @@ function startCollector(options) {
   const pricingChangedDuringScan = Symbol('pricing changed during scan');
 
   async function performTick(reason, tickOptions = {}) {
+    const visibilityRevision = codexVisibilityRevision;
     const tickStartedAt = Date.now();
     const collectedAt = collectionDate(options.now);
     const todayKey = localTodayKey(collectedAt);
@@ -2553,8 +2607,10 @@ function startCollector(options) {
     lastTickScope = tickScopeCode(tickOptions);
     try {
       let captured = null;
+      let tickLocalView = null;
       const summary = await collectUsageOnce({
         ...options,
+        codexDotsVisible,
         signal: runtimeSignal,
         clients,
         allTimeSince,
@@ -2584,6 +2640,13 @@ function startCollector(options) {
         sourceSelfSync: tickOptions.sourceSelfSync ?? null,
         reasonixNativeSessionsEnabled,
         reasonixNativeSessionCache,
+        codexLocalUsageStore: codexLocalSource?.store || options.codexLocalUsageStore,
+        onCodexLocalUsageComputed: (view) => {
+          if (visibilityRevision !== codexVisibilityRevision) return;
+          codexLocalView = view;
+          codexLocalViewDay = todayKey;
+          tickLocalView = view;
+        },
         // Both selections name clients whose pending source event this tick has
         // already consumed — the queue's drain for one, its acknowledgement for
         // the other — so either is a legitimate restore.
@@ -2599,6 +2662,8 @@ function startCollector(options) {
         refreshWsl: anchored ? refreshWsl : false,
         onAnchorComputed: (x) => { captured = x; },
         onProgress: (partial) => {
+          if (visibilityRevision !== codexVisibilityRevision) return;
+          if (visibilityRevision !== publishedCodexVisibilityRevision) return;
           if (!partial.today) return;
           if (pricingChanged || pricingFingerprint(options) !== tickPricingRevision) return;
           try {
@@ -2640,6 +2705,12 @@ function startCollector(options) {
               if (partial.allTime) {
                 preview.clientStatus = deriveClientStatus(clients, partial.allTime);
               }
+              if (codexLocalView && codexLocalViewDay === todayKey) {
+                for (const name of ['today', 'month', 'allTime']) {
+                  if (preview[name]) preview[name] = mergePeriods(preview[name], codexLocalView[name]);
+                }
+                preview.codexLocalSessionKeys = codexLocalView.sessionKeys;
+              }
               onPreview(preview);
             }
           } catch (_) {
@@ -2649,6 +2720,18 @@ function startCollector(options) {
         }
       });
       if (stopped) return;
+      // A visibility change queues a fresh projection, but must neither stop
+      // the observer nor publish an in-flight result under the old selection.
+      if (visibilityRevision !== codexVisibilityRevision) return false;
+      if (includeHistory && !summary.history
+        && (!codexDotsVisible || visibilityRevision !== publishedCodexVisibilityRevision)) {
+        // An empty successful graph normally omits history so DeviceState can
+        // keep its last snapshot. A visibility change must replace that old
+        // projection, including when all its history was Dots-only. A newly
+        // created hidden collector must do the same after replacement/fallback:
+        // its local revision starts at zero, but DeviceState keeps old history.
+        summary.history = historyScanSucceeded ? normalizeHistory([], { todayKey }) : null;
+      }
       // A settings save can land between the serial period scans. Discard that
       // mixed result and replay all windows against one pricing revision.
       if (pricingFingerprint(options) !== tickPricingRevision) {
@@ -2711,6 +2794,7 @@ function startCollector(options) {
         if (titlesChanged) persistAnchor(tickPricingRevision);
       }
       const transformedSummary = await onUpdate?.(summary, reason);
+      publishedCodexVisibilityRevision = visibilityRevision;
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'
         ? transformedSummary
         : summary;
@@ -2721,7 +2805,10 @@ function startCollector(options) {
           const visibleDateKey = Number.isFinite(visibleDate.getTime())
             ? localTodayKey(visibleDate)
             : todayKey;
-          const retainedLive = retainLiveDailyHistory(visibleSummary.today, {
+          const retainedToday = tickLocalView?.sessionKeys?.length
+            ? applyPeriodDelta(visibleSummary.today, emptyPeriod(), tickLocalView.today)
+            : visibleSummary.today;
+          const retainedLive = retainLiveDailyHistory(retainedToday, {
             ...(options.dailyHistoryArchiveOptions || {}),
             liveDays: liveDailyHistoryDays,
             todayKey: visibleDateKey,
@@ -3173,6 +3260,7 @@ function startCollector(options) {
     if (stopped) return;
     stopped = true;
     runtimeAbortController.abort(new Error('collector stopped'));
+    codexLocalSource?.stop();
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
     clearRolloverHistoryRetry();
@@ -3187,8 +3275,8 @@ function startCollector(options) {
     // It clears startBarrier before this continuation asks again; the regression
     // test pins that startup ordering because reversing it would microtask-spin.
     if (startBarrier) return Promise.resolve(startBarrier).then(() => whenIdle());
-    if (!tickInFlight) return Promise.resolve();
-    return new Promise((resolve) => idleWaiters.push(resolve));
+    const usageIdle = !tickInFlight ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(resolve));
+    return usageIdle.then(() => stopped ? codexLocalSource?.whenIdle() : undefined);
   }
 
   function getDiagnostics() {
@@ -3227,12 +3315,29 @@ function startCollector(options) {
       lastHistoryFailureCode,
       lastHistoryScanDurationMs,
       lastFailureCode: lastTickFailureCode,
+      ...(codexLocalSource ? { codexLocalUsage: codexLocalSource.getDiagnostics() } : {}),
       wslStatus: cloneDiagnosticValue(wslStatusAnchor)
     };
   }
 
   setupWatchers();
   loop();
+  if (trackedClients.has('codex') && options.codexLocalUsageEnabled !== false
+    && (options.codexDotsEnabled === true || (options.codexDotsEnabled === undefined
+      && (options.env || process.env).TOKEN_MONITOR_CODEX_LOCAL_USAGE === '1'))) {
+    codexLocalSource = createLocalUsageSource({
+      ...sourceOptions,
+      agentRuntime: options.agentRuntime,
+      store: options.codexLocalUsageStore,
+      onChange() {
+        if (stopped) return;
+        activityRevision += 1;
+        if (watchTriggersCollection) scheduleTick('watch:codex-local-usage', ['codex']);
+        else recordWatchClients(['codex']);
+      }
+    });
+    codexLocalSource.start();
+  }
 
   // A rescan of one tool. Was cursor-only because a Cursor sign-in was the only
   // caller; the machinery underneath was always per-client, so the guard was a
@@ -3255,6 +3360,15 @@ function startCollector(options) {
   return {
     getDiagnostics,
     refreshClient,
+    setCodexDotsVisible(visible) {
+      if (stopped) return Promise.resolve(false);
+      const next = visible !== false;
+      if (next === codexDotsVisible) return Promise.resolve(true);
+      codexDotsVisible = next;
+      codexVisibilityRevision += 1;
+      codexLocalView = null;
+      return runTick('dots-visibility', { todayOnly: true, targetClients: ['codex'], forceHistory: true });
+    },
     stop,
     tick: (reason = 'manual', tickOptions = {}) => runTick(reason, tickOptions),
     whenIdle

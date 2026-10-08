@@ -180,6 +180,7 @@ function buildSyncPayload(summary, {
   omitAllTimeProjects = false,
   omitHistoryTokenComponents = false,
   omitModelThroughput = false,
+  omitClientThroughput = false,
   syncSessionTitles = false,
   sessionTitleSyncGeneration
 } = {}) {
@@ -220,6 +221,7 @@ function buildSyncPayload(summary, {
   delete payload.allTimeProjectsIncomplete;
   delete payload.sessionDetailsOmitted;
   delete payload.periodProjectsOmitted;
+  delete payload.codexLocalSessionKeys;
 
   for (const periodName of ['today', 'month']) {
     const period = payload[periodName];
@@ -237,6 +239,11 @@ function buildSyncPayload(summary, {
     if (omitAllTimeProjects && hasOwn(payload.allTime, 'projects')) {
       delete payload.allTime.projects;
       payload.allTimeProjectsOmitted = true;
+    }
+  }
+  if (omitClientThroughput) {
+    for (const period of ['today', 'month', 'allTime']) {
+      if (payload[period]) delete payload[period].clientThroughput;
     }
   }
   if (omitModelThroughput) {
@@ -261,10 +268,11 @@ function serializeSyncPayload(summary, options = {}) {
   }
   let body = JSON.stringify(payload);
   if (Buffer.byteLength(body, 'utf8') > maxBytes
-    && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput)) {
+    && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput || payload[period]?.clientThroughput)) {
     // Optional live attribution must never evict aggregate usage or session detail.
     // Omit the whole map so readers re-baseline rather than infer missing keys as zero.
     buildOptions.omitModelThroughput = true;
+    buildOptions.omitClientThroughput = true;
     payload = buildSyncPayload(summary, buildOptions);
     body = JSON.stringify(payload);
   }
@@ -324,7 +332,8 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, sy
         ...syncOptions,
         omitHistoryTokenComponents: true,
         omitAllTimeProjects: true,
-        omitModelThroughput: true
+        omitModelThroughput: true,
+        omitClientThroughput: true
       })
     : null;
   const canRetryReduced = response.status === 413

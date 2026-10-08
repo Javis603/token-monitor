@@ -208,6 +208,7 @@ function emptyPeriod() {
     timedOutputTokens: 0,
     timedDurationMs: 0,
     modelThroughput: Object.create(null),
+    clientThroughput: Object.create(null),
     clients: {},
     clientCosts: {},
     clientCacheReads: {},
@@ -313,6 +314,61 @@ function emptyProject(label = '') {
   };
 }
 
+// costUsd remains the known subtotal. Missing prices are explicit token counts,
+// never inferred from a zero cost (which can be a valid rate).
+function addUnpricedTokens(target, source, maximum = Infinity) {
+  const count = Math.min(maximum, Math.max(0, Math.round(asNumber(source?.unpricedTokens))));
+  if (count > 0) target.unpricedTokens = (target.unpricedTokens || 0) + count;
+}
+
+function unpricedMapTotal(map) {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return 0;
+  return Object.values(map).reduce(
+    (sum, value) => sum + Math.max(0, Math.round(asNumber(value))),
+    0
+  );
+}
+
+function mergeUnpricedMaps(target, source) {
+  for (const field of ['clientUnpricedTokens', 'modelUnpricedTokens']) {
+    const existingMap = target[field] || Object.create(null);
+    let remaining = Math.max(0, (target.unpricedTokens || 0) - unpricedMapTotal(existingMap));
+    for (const [rawKey, value] of Object.entries(source[field] || {})) {
+      const key = field === 'clientUnpricedTokens' ? normalizeClientName(rawKey) : normalizeModelName(rawKey);
+      if (!key) continue;
+      const count = Math.min(remaining, Math.max(0, Math.round(asNumber(value))));
+      if (!count) continue;
+      const map = target[field] ||= Object.create(null);
+      map[key] = (map[key] || 0) + count;
+      remaining -= count;
+    }
+  }
+  const existingClientModels = target.clientModelUnpricedTokens || Object.create(null);
+  let remaining = Math.max(
+    0,
+    (target.unpricedTokens || 0)
+      - Object.values(existingClientModels).reduce((sum, models) => sum + unpricedMapTotal(models), 0)
+  );
+  for (const [rawClient, models] of Object.entries(source.clientModelUnpricedTokens || {})) {
+    const client = normalizeClientName(rawClient);
+    if (!client) continue;
+    const existingModels = existingClientModels[client] || Object.create(null);
+    let clientRemaining = hasOwn(target.clientUnpricedTokens, client)
+      ? Math.max(0, asNumber(target.clientUnpricedTokens[client]) - unpricedMapTotal(existingModels))
+      : remaining;
+    for (const [rawModel, value] of Object.entries(models || {})) {
+      const model = normalizeModelNameForClient(rawModel, client);
+      if (!model) continue;
+      const count = Math.min(remaining, clientRemaining, Math.max(0, Math.round(asNumber(value))));
+      if (!count) continue;
+      const map = (target.clientModelUnpricedTokens ||= Object.create(null))[client] ||= Object.create(null);
+      map[model] = (map[model] || 0) + count;
+      remaining -= count;
+      clientRemaining -= count;
+    }
+  }
+}
+
 function addProjectInto(projects, rawKey, source) {
   if (!source || typeof source !== 'object') return;
   const label = String(source.label || rawKey || '').trim().normalize('NFC');
@@ -323,6 +379,7 @@ function addProjectInto(projects, rawKey, source) {
   target.label = deterministicProjectLabel(target.label, label || rawKey);
   target.tokens += Math.max(0, Math.round(asNumber(source.tokens ?? source.totalTokens)));
   target.costUsd += asNumber(source.costUsd ?? source.cost);
+  addUnpricedTokens(target, source, Math.max(0, asNumber(source.tokens ?? source.totalTokens)));
   for (const [client, tokens] of Object.entries(source.clients || {})) {
     const clientKey = normalizeClientName(client);
     if (!clientKey) continue;
@@ -351,6 +408,7 @@ function projectRollupFromSessions(sessions) {
     const tokens = Math.max(0, Math.round(asNumber(session.totalTokens)));
     project.tokens += tokens;
     project.costUsd += asNumber(session.costUsd);
+    addUnpricedTokens(project, session, tokens);
     const client = normalizeClientName(session.client);
     if (client && tokens > 0) {
       project.clients[client] = (hasOwn(project.clients, client) ? project.clients[client] : 0) + tokens;
@@ -532,8 +590,10 @@ function emptySession(client, id) {
 const sessionsWithLiveSource = new WeakSet();
 
 function mergeSession(target, source) {
-  target.totalTokens += Math.max(0, Math.round(asNumber(source.totalTokens)));
+  const sourceTokens = Math.max(0, Math.round(asNumber(source.totalTokens)));
+  target.totalTokens += sourceTokens;
   target.costUsd += asNumber(source.costUsd);
+  addUnpricedTokens(target, source, sourceTokens);
   target.messageCount += Math.max(0, Math.round(asNumber(source.messageCount)));
   target.inputTokens += Math.max(0, Math.round(asNumber(source.inputTokens)));
   target.outputTokens += Math.max(0, Math.round(asNumber(source.outputTokens)));
@@ -595,6 +655,10 @@ function mergeSession(target, source) {
   }
   if (!target.title && source.title) target.title = normalizeSessionTitle(source.title);
   if (!target.sessionKind && source.sessionKind) target.sessionKind = normalizeSessionKind(source.sessionKind);
+  if (source.usageSource === 'codex-dots-local') {
+    target.usageSource = 'codex-dots-local';
+    target.usageCoverage = 'observed-only';
+  }
   for (const [model, tokens] of Object.entries(source.models || {})) {
     const key = normalizeModelNameForClient(model, target.client);
     if (key) target.models[key] = (target.models[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
@@ -633,6 +697,7 @@ function sessionFromRow(row) {
   const session = emptySession(client, id);
   session.totalTokens = Math.max(0, Math.round(tokenValueForClient(row, client)));
   session.costUsd = costValue(row);
+  addUnpricedTokens(session, row, session.totalTokens);
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
   Object.assign(session, sessionTokenComponents(row));
   session.outputTokens = Math.max(0, Math.round(outputValueForClient(row, client)));
@@ -670,6 +735,7 @@ function normalizeSession(input, fallbackKey) {
   const componentTotal = components.inputTokens + components.outputTokens + components.cacheReadTokens + components.cacheWriteTokens; // reasoning is a subset of output — see TOKEN_COMPONENT_KEYS
   session.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? input.tokens ?? componentTotal)));
   session.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
+  addUnpricedTokens(session, input, session.totalTokens);
   session.messageCount = Math.max(0, Math.round(firstNumber(input, MESSAGE_COUNT_KEYS)));
   session.timedDurationMs = Math.max(0, Math.round(asNumber(input.timedDurationMs ?? input.timed_duration_ms ?? 0)));
   session.timedOutputTokens = normalizeTimedOutputTokens(
@@ -690,6 +756,10 @@ function normalizeSession(input, fallbackKey) {
   session.projectLabel = String(input.projectLabel || input.project_label || '').trim();
   session.title = normalizeSessionTitle(input.title || input.sessionTitle || input.session_title);
   session.sessionKind = normalizeSessionKind(input.sessionKind || input.session_kind);
+  if (client === 'codex' && input.usageSource === 'codex-dots-local') {
+    session.usageSource = 'codex-dots-local';
+    session.usageCoverage = 'observed-only';
+  }
   if (input.models && typeof input.models === 'object') {
     for (const [model, value] of Object.entries(input.models)) {
       const key = normalizeModelNameForClient(model, client);
@@ -735,8 +805,14 @@ function reconcileCursorAutoGlobalModels(period, input) {
     if (period.models[raw] === 0) delete period.models[raw];
     period.models['cursor-auto'] = (period.models['cursor-auto'] || 0) + moved;
     if (exclusive) {
-      for (const key of ['modelCacheReads', 'modelCacheWrites', 'modelOutputs', 'modelUnclassifiedTokens']) {
-        if (!period[key][raw]) continue;
+      for (const key of [
+        'modelCacheReads',
+        'modelCacheWrites',
+        'modelOutputs',
+        'modelUnclassifiedTokens',
+        'modelUnpricedTokens'
+      ]) {
+        if (!period[key]?.[raw]) continue;
         period[key]['cursor-auto'] = (period[key]['cursor-auto'] || 0) + period[key][raw];
         delete period[key][raw];
       }
@@ -770,6 +846,7 @@ function normalizePeriod(input, options = {}) {
     // is different: its zero counters are synthetic and must never seed a live delta.
     period.capabilities.throughput = false;
     delete period.modelThroughput;
+    delete period.clientThroughput;
     return period;
   }
   const projectsEnabled = options.projectsEnabled !== false;
@@ -790,6 +867,8 @@ function normalizePeriod(input, options = {}) {
   period.capabilities.tokenComponents = componentCapability === true
     || (componentCapability !== false && (period.totalTokens === 0 || hasLegacyComponentShape));
   period.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
+  addUnpricedTokens(period, input, period.totalTokens);
+  mergeUnpricedMaps(period, input);
   period.cacheReadTokens = Math.max(0, Math.round(asNumber(input.cacheReadTokens ?? input.cache_read_tokens ?? 0)));
   period.cacheWriteTokens = Math.max(0, Math.round(asNumber(input.cacheWriteTokens ?? input.cache_write_tokens ?? 0)));
   period.outputTokens = Math.max(0, Math.round(asNumber(input.outputTokens ?? input.output_tokens ?? 0)));
@@ -881,8 +960,10 @@ function normalizePeriod(input, options = {}) {
       }
     }
   }
-  period.modelThroughput = normalizeModelThroughput(input.modelThroughput, period);
+  period.modelThroughput = normalizeThroughput(input.modelThroughput, period, normalizeModelName, period.modelOutputs);
   if (!period.modelThroughput) delete period.modelThroughput;
+  period.clientThroughput = normalizeThroughput(input.clientThroughput, period, normalizeClientName, period.clientOutputs);
+  if (!period.clientThroughput) delete period.clientThroughput;
   if (input.modelCosts && typeof input.modelCosts === 'object') {
     for (const [model, value] of Object.entries(input.modelCosts)) {
       const key = normalizeModelName(model);
@@ -944,11 +1025,11 @@ function normalizeTimedOutputTokens(value, outputTokens, durationMs) {
   return durationMs > 0 ? Math.min(outputTokens, Math.max(0, Math.round(asNumber(value)))) : 0;
 }
 
-function normalizeModelThroughput(value, period) {
+function normalizeThroughput(value, period, normalizeKey, outputs) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const result = Object.create(null);
   for (const [model, counters] of Object.entries(value)) {
-    const key = normalizeModelName(model);
+    const key = normalizeKey(model);
     if (!key || !counters || typeof counters !== 'object' || Array.isArray(counters)
       || !['timedTokens', 'timedOutputTokens', 'timedDurationMs'].every((field) => hasOwn(counters, field))) continue;
     const durationMs = Math.max(0, Math.round(asNumber(counters.timedDurationMs)));
@@ -961,7 +1042,7 @@ function normalizeModelThroughput(value, period) {
     counters.timedTokens = Math.min(counters.timedTokens, period.timedTokens);
     counters.timedDurationMs = Math.min(counters.timedDurationMs, period.timedDurationMs);
     const outputBound = Math.min(period.timedOutputTokens,
-      hasOwn(period.modelOutputs, model) ? period.modelOutputs[model] : period.outputTokens);
+      hasOwn(outputs, model) ? outputs[model] : period.outputTokens);
     counters.timedOutputTokens = normalizeTimedOutputTokens(counters.timedOutputTokens, outputBound, counters.timedDurationMs);
   }
   // A malformed map is unavailable; a genuine empty map is an exact zero baseline.
@@ -994,6 +1075,15 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const model = detectModel(row, client);
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;
+  const unpriced = Math.min(Math.max(0, Math.round(tokens)), Math.max(0, Math.round(asNumber(row.unpricedTokens))));
+  addUnpricedTokens(period, { unpricedTokens: unpriced });
+  if (unpriced > 0) {
+    mergeUnpricedMaps(period, {
+      clientUnpricedTokens: client ? { [client]: unpriced } : {},
+      modelUnpricedTokens: model ? { [model]: unpriced } : {},
+      clientModelUnpricedTokens: client && model ? { [client]: { [model]: unpriced } } : {}
+    });
+  }
   period.cacheReadTokens += cacheRead;
   period.cacheWriteTokens += cacheWrite;
   period.outputTokens += output;
@@ -1002,6 +1092,12 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   period.timedDurationMs += timedDurationMs;
   if (model && timedDurationMs > 0) {
     const counters = period.modelThroughput[model] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+    counters.timedTokens += timedTokens;
+    counters.timedOutputTokens += timedOutputTokens;
+    counters.timedDurationMs += timedDurationMs;
+  }
+  if (client && timedDurationMs > 0) {
+    const counters = period.clientThroughput[client] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
     counters.timedTokens += timedTokens;
     counters.timedOutputTokens += timedOutputTokens;
     counters.timedDurationMs += timedDurationMs;
@@ -1256,6 +1352,23 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
       target.clients[client] = tokens;
       preservedClients.add(client);
       if (cost > 0) target.clientCosts[client] = cost;
+      // Global model buckets may include live clients too. Restore only this
+      // client's explicit missing-price attribution, not the global bucket.
+      const unpriced = Math.min(tokens, asNumber(source.clientUnpricedTokens?.[client]));
+      addUnpricedTokens(target, { unpricedTokens: unpriced }, tokens);
+      const modelUnpriced = Object.create(null);
+      let remainingUnpriced = unpriced;
+      for (const [model, count] of Object.entries(source.clientModelUnpricedTokens?.[client] || {})) {
+        const retained = Math.min(remainingUnpriced, asNumber(source.clientModels?.[client]?.[model]), count);
+        if (retained <= 0) continue;
+        modelUnpriced[model] = retained;
+        remainingUnpriced -= retained;
+      }
+      mergeUnpricedMaps(target, {
+        clientUnpricedTokens: { [client]: unpriced },
+        modelUnpricedTokens: modelUnpriced,
+        clientModelUnpricedTokens: { [client]: modelUnpriced }
+      });
       const cacheRead = Math.min(tokens, asNumber(source.clientCacheReads?.[client]));
       const cacheWrite = Math.min(tokens - cacheRead, asNumber(source.clientCacheWrites?.[client]));
       const output = Math.min(tokens - cacheRead - cacheWrite, asNumber(source.clientOutputs?.[client]));
@@ -1532,6 +1645,8 @@ function addPeriodInto(target, source) {
     && source.capabilities?.throughput === true;
   target.totalTokens += source.totalTokens;
   target.costUsd += source.costUsd;
+  addUnpricedTokens(target, source, source.totalTokens);
+  mergeUnpricedMaps(target, source);
   target.cacheReadTokens += source.cacheReadTokens;
   target.cacheWriteTokens += source.cacheWriteTokens;
   target.outputTokens += source.outputTokens;
@@ -1541,10 +1656,11 @@ function addPeriodInto(target, source) {
   target.timedDurationMs += source.timedDurationMs;
   // Absence is unknown attribution, not an exact empty map. It stays unknown
   // through partition/WSL merges and device aggregation, regardless of input order.
-  if (!source.modelThroughput) delete target.modelThroughput;
-  if (target.modelThroughput) {
-    for (const [model, counters] of Object.entries(source.modelThroughput)) {
-      const merged = target.modelThroughput[model] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+  for (const map of ['modelThroughput', 'clientThroughput']) {
+    if (!source[map]) delete target[map];
+    if (!target[map]) continue;
+    for (const [key, counters] of Object.entries(source[map])) {
+      const merged = target[map][key] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
       for (const field of ['timedTokens', 'timedOutputTokens', 'timedDurationMs']) merged[field] += counters[field];
     }
   }
@@ -1716,8 +1832,8 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
 // grow (clients/models/clientModels/sessions/...) without per-field bookkeeping.
 function applyPeriodDelta(base, freshToday, anchorToday) {
   const result = deltaValue(base, freshToday, anchorToday, '');
-  if (result && (!base?.modelThroughput || !freshToday?.modelThroughput || !anchorToday?.modelThroughput)) {
-    delete result.modelThroughput;
+  for (const map of ['modelThroughput', 'clientThroughput']) {
+    if (result && (!base?.[map] || !freshToday?.[map] || !anchorToday?.[map])) delete result[map];
   }
   // Older anchors may still contain the pre-native Reasonix stats-path rows.
   // They are not authoritative session detail and must not survive a warm tick

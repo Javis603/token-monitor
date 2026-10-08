@@ -60,6 +60,7 @@ function waitForUpdates(updates, count) {
 }
 
 const baseOptions = {
+  codexLocalUsageEnabled: false, // Synthetic scans must not import a real supplementary ledger.
   clients: 'claude',
   allTimeSince: '2024-01-01',
   commandTimeoutMs: 1000,

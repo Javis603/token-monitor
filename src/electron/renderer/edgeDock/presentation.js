@@ -127,14 +127,16 @@
   function periodUsageFor(period, provider) {
     let tokens = 0;
     let costUsd = 0;
+    let unpricedTokens = 0;
     let seen = false;
     for (const [client, value] of Object.entries(period?.clients || {})) {
       if (providerForClient(normalizedId(client)) !== provider) continue;
       seen = true;
       tokens += finite(value) || 0;
       costUsd += finite(period?.clientCosts?.[client]) || 0;
+      unpricedTokens += finite(period?.clientUnpricedTokens?.[client]) || 0;
     }
-    return seen ? { tokens, costUsd } : null;
+    return seen ? { tokens, costUsd, ...(unpricedTokens > 0 ? { unpricedTokens } : {}) } : null;
   }
 
   const RECENT_SESSION_COUNT = 3;
@@ -199,6 +201,7 @@
         contextWindow: finite(session.contextWindow),
         totalTokens: finite(session.totalTokens) || 0,
         costUsd: finite(session.costUsd) || 0,
+        ...(session.unpricedTokens > 0 ? { unpricedTokens: finite(session.unpricedTokens) || 0 } : {}),
         lastUsedAt: session.lastUsedAt || null,
         startedAt: session.startedAt || null,
         // Carried onto the projected row, not just used here: the dock renderer
@@ -460,12 +463,15 @@
   function clientBreakdown(period, metric) {
     return usageAttributionRows.attributionRows(period?.clients, period?.clientCosts, {
       totalValue: period?.totalTokens,
-      totalCost: period?.costUsd
+      totalCost: period?.costUsd,
+      totalUnpricedTokens: period?.unpricedTokens,
+      unpricedTokens: period?.clientUnpricedTokens
     })
       .map((entry) => ({
         client: normalizedId(entry.key),
         tokens: finite(entry.value) || 0,
         costUsd: finite(entry.cost) || 0,
+        ...(entry.unpricedTokens > 0 ? { unpricedTokens: entry.unpricedTokens } : {}),
         unattributed: entry.unattributed === true
       }))
       .filter((entry) => entry.client && (metric === 'cost' ? entry.costUsd > 0 : entry.tokens > 0))
@@ -475,12 +481,15 @@
   function modelBreakdown(period) {
     return usageAttributionRows.attributionRows(period?.models, period?.modelCosts, {
       totalValue: period?.totalTokens,
-      totalCost: period?.costUsd
+      totalCost: period?.costUsd,
+      totalUnpricedTokens: period?.unpricedTokens,
+      unpricedTokens: period?.modelUnpricedTokens
     })
       .map((entry) => ({
         model: entry.key,
         tokens: finite(entry.value) || 0,
         costUsd: finite(entry.cost) || 0,
+        ...(entry.unpricedTokens > 0 ? { unpricedTokens: entry.unpricedTokens } : {}),
         unattributed: entry.unattributed === true
       }))
       .filter((entry) => entry.tokens > 0)
@@ -497,7 +506,9 @@
         id: `stat:${metric}`,
         kind: 'stat',
         metric,
-        rateDevices: sample?.devices || [],
+        rateDevices: (options.liveRateDetails || sample)?.devices || [],
+        ...(options.liveRateDetails ? { rateDetailDeviceCount: options.liveRateDetails.deviceCount } : {}),
+        ...(options.liveRateClient ? { rateClient: options.liveRateClient } : {}),
         rateMode: options.tokenRateMode === 'burn' ? 'burn' : 'speed',
         rate: sample ? (options.tokenRateMode === 'burn' ? sample.burn : sample.speed) : null,
         speed: sample ? finite(sample.speed) : null,
@@ -530,6 +541,7 @@
         // The sample rides the cell because it moves on its own timer, and the
         // dock renderer has no stats access to derive one from.
         cellDetail: options.cellDetail === 'rate' ? 'rate' : 'clients',
+        ...(wantsRate && options.liveRateClient ? { rateClient: options.liveRateClient } : {}),
         rateMode: options.tokenRateMode === 'burn' ? 'burn' : 'speed',
         rate: sample ? finite(options.tokenRateMode === 'burn' ? sample.burn : sample.speed) : null,
         rateIdle: !sample || sample.idle === true,
@@ -555,6 +567,7 @@
       available: Boolean(period),
       totalTokens: period ? finite(period.totalTokens) || 0 : null,
       costUsd: period ? finite(period.costUsd) || 0 : null,
+      ...(period?.unpricedTokens > 0 ? { unpricedTokens: finite(period.unpricedTokens) || 0 } : {}),
       clients,
       models
     };

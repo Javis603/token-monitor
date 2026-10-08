@@ -649,7 +649,7 @@ test('the live footer rate is opt-in, accessible, and shares the persisted mode'
   assert.match(app, /return syncMode && state\.settings\?\.liveTokenRateScope !== 'device' \? 'all' : 'device';/);
   assert.match(app, /function observeLiveTokenRate\(stats\) \{\s*if \(state\.settings\?\.showLiveTokenRate !== true\) return;/);
   assert.match(app, /const result = liveTokenRateTracker\.observe\(selection\.entries\);\s*if \(!result\.changed\) return;\s*scheduleLiveTokenRateExpiry\(\);/);
-  assert.match(app, /const idle = !sample \|\| sample\.idle === true;/);
+  assert.match(app, /const idle = readouts\.every\(\(\{ sample: reading \}\) => !reading \|\| reading\.idle === true\);/);
   assert.match(app, /idle && sample[\s\S]*home\.liveTokenRate\.burnIdleTitle[\s\S]*home\.liveTokenRate\.speedIdleTitle/);
   assert.match(app, /els\.liveTokenRate\.tabIndex = enabled && !obscured \? 0 : -1;/);
   assert.match(app, /els\.liveTokenRate\.setAttribute\('aria-hidden', String\(!enabled \|\| obscured\)\);/);

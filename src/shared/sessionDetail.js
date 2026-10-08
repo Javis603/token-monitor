@@ -13,6 +13,7 @@ const codebuddyExtension = require('./providers/codebuddy/extension');
 const opencodeSession = require('./providers/opencode/session');
 const { readReasonixSessionEvents } = require('./providers/reasonix/sessionDetail');
 const { conversationFile, readConversation } = require('./providers/antigravity/throughput');
+const { createLocalUsageStore } = require('./providers/codex/localUsageStore');
 
 function* readTranscriptLines(filePath) {
   const fd = fs.openSync(filePath, 'r');
@@ -412,6 +413,8 @@ function finalizeExchange(ex) {
   ex.turnCount = ex.turns.filter((turn) => turn.type !== 'compaction-summary' && turn.type !== 'assistant-attempt').length;
   ex.tools = uniqueTools(ex.turns.flatMap((t) => t.tools));
   ex.tokensAvailable = ex.turns.every((turn) => turn.tokensAvailable !== false);
+  const unpriced = ex.turns.reduce((sum, turn) => sum + num(turn.unpricedTokens), 0);
+  if (unpriced > 0) ex.unpricedTokens = unpriced;
   return ex;
 }
 
@@ -432,7 +435,9 @@ function groupEvents(events) {
         tokens: event.tokens,
         tokensAvailable: event.tokensAvailable !== false,
         tools: event.tools,
-        costEstimate: num(event.cost)
+        costEstimate: num(event.cost),
+        ...(event.model ? { model: event.model } : {}),
+        ...(event.unpricedTokens > 0 ? { unpricedTokens: num(event.unpricedTokens) } : {})
       };
       current.turns.push(turnEntry);
       addTokens(current.tokens, event.tokens);
@@ -618,6 +623,27 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
   const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots });
   if (!filePath && client === 'codebuddy') {
     return readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, home, env, deps });
+  }
+  if (!filePath && client === 'codex') {
+    const store = createLocalUsageStore({ homeDir: home, env, ...(deps.codexLocalUsageOptions || {}) });
+    try {
+      const rows = store.rows().filter((row) => row.threadId === sessionId && !row.nativeBacked);
+      if (rows.length) {
+        const events = rows.map((row) => ({
+          kind: 'turn', type: 'assistant-attempt', timestamp: row.observedAt,
+          tokens: makeTokens(row.usage), tools: [], model: row.model, unpricedTokens: row.usage.total
+        }));
+        const grouped = filterExchangesByPeriod(groupEvents(events), period, new Date((deps.now || Date.now)()));
+        // A session subtotal cannot price unknown requests. The parent process
+        // may resolve catalog rates for these per-request models after the
+        // worker returns; until then every ledger request is explicitly unpriced.
+        const unpricedTokens = grouped.reduce((sum, ex) => sum + num(ex.unpricedTokens), 0);
+        return { found: true, client, sessionId, canonicalSessionId: sessionId, period,
+          usageSource: 'codex-dots-local', usageCoverage: 'observed-only',
+          exchanges: grouped, totals: { ...totalsOf(grouped, 0), unpricedTokens } };
+      }
+    } catch (_) { /* A damaged supplemental ledger must not break native details. */ }
+    finally { store.close(); }
   }
   if (!filePath) return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
   let parsed;

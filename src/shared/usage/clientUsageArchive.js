@@ -26,15 +26,32 @@ function clientSet(value) {
   return new Set(String(value || '').split(',').map(normalizeClientId).filter(Boolean));
 }
 
-function archivedPeriod(input, client) {
+function archivedPeriod(input, client, ledgerKeys = new Set()) {
   const normalized = normalizePeriod({ sessions: input?.sessions });
-  return {
+  const period = {
     totalTokens: Math.max(0, Math.round(numberValue(input?.totalTokens))),
     costUsd: numberValue(input?.costUsd),
     models: normalizedModelMap(input?.models, client),
     modelCosts: normalizedModelMap(input?.modelCosts, client, false),
     sessions: normalized.sessions
   };
+  // The Dots ledger already retains these requests. A frozen client snapshot
+  // would bypass visibility and native-rollout precedence on later replay.
+  // Also scrub older snapshots, using their explicit session provenance only.
+  for (const [key, session] of Object.entries(period.sessions)) {
+    if (session.usageSource !== 'codex-dots-local' && !ledgerKeys.has(key)) continue;
+    period.totalTokens = Math.max(0, period.totalTokens - numberValue(session.totalTokens));
+    period.costUsd = Math.max(0, period.costUsd - numberValue(session.costUsd));
+    for (const [field, sessionField] of [['models', 'models'], ['modelCosts', 'modelCosts']]) {
+      for (const [model, value] of Object.entries(session[sessionField] || {})) {
+        const name = normalizeTokscaleModelNameForClient(model, client);
+        period[field][name] = Math.max(0, numberValue(period[field][name]) - numberValue(value));
+        if (!period[field][name]) delete period[field][name];
+      }
+    }
+    delete period.sessions[key];
+  }
+  return period;
 }
 
 function hasUsage(period) {
@@ -54,7 +71,7 @@ function normalizedModelMap(input, client, roundTokens = true) {
   return result;
 }
 
-function clientUsageFromPeriod(period, client) {
+function clientUsageFromPeriod(period, client, ledgerKeys) {
   const sessions = {};
   for (const [key, session] of Object.entries(period?.sessions || {})) {
     if (session?.client === client) sessions[key] = session;
@@ -65,7 +82,7 @@ function clientUsageFromPeriod(period, client) {
     models: period?.clientModels?.[client],
     modelCosts: period?.clientModelCosts?.[client],
     sessions
-  }, client);
+  }, client, ledgerKeys);
 }
 
 // The session id half of a `client:sessionId` key, preferring the session's own
@@ -117,11 +134,12 @@ function captureArchivedClientUsage(existingArchive, deviceRecord, clients, capt
   if (!deviceRecord || typeof deviceRecord !== 'object') return archive;
 
   const captureDate = toDate(capturedAt);
+  const ledgerKeys = new Set(deviceRecord.codexLocalSessionKeys || []);
   for (const client of clientSet(clients)) {
     const periods = {};
     let includesUsage = false;
     for (const periodName of PERIODS) {
-      const usage = clientUsageFromPeriod(periodFor(deviceRecord, periodName), client);
+      const usage = clientUsageFromPeriod(periodFor(deviceRecord, periodName), client, ledgerKeys);
       periods[periodName] = usage;
       includesUsage = includesUsage || hasUsage(usage);
     }

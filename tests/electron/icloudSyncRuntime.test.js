@@ -908,7 +908,9 @@ test('iCloud writer identity persists before startup and cannot be patched from 
   assert.match(start, /writerId: settings\.icloudWriterId/);
   const renderer = main.slice(main.indexOf('function settingsForRenderer()'), main.indexOf('\nfunction ', main.indexOf('function settingsForRenderer()') + 1));
   assert.match(renderer, /delete rendererSettings\.icloudWriterId/);
-  const patch = main.slice(main.indexOf('function applySettingsPatch(patch)'));
+  const patchStart = main.indexOf('function applySettingsPatch(');
+  assert.ok(patchStart >= 0);
+  const patch = main.slice(patchStart);
   assert.match(patch, /delete normalizedPatch\.icloudWriterId/);
   assert.match(patch, /icloudWriterId: String\(settings\.icloudWriterId \|\| ''\)/);
 });
@@ -963,7 +965,9 @@ test('successive settings edits retain all former identities and ignore renderer
   const reverted = retainIdentity(c, { hubMode: 'icloud', deviceId: 'mac-a' });
   assert.deepEqual(Array.from(reverted.icloudRetiredDeviceIds), ['mac-a', 'mac-b', 'mac-c']);
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
-  const handler = main.slice(main.indexOf('function applySettingsPatch(patch)'));
+  const patchStart = main.indexOf('function applySettingsPatch(');
+  assert.ok(patchStart >= 0);
+  const handler = main.slice(patchStart);
   assert.ok(handler.indexOf('retainIcloudDeviceIdentity(previousSettingsState, settings)') < handler.indexOf('saveSettings({ throwOnError: true })'));
   assert.match(main, /runtime.writeDevice\(visibleSummary, \{ retiredDeviceIds \}\)/);
 });

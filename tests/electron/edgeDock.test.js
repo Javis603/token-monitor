@@ -163,14 +163,23 @@ const {
   edgeDockCellAt,
   edgeDockCellLayout,
   edgeDockCorridorBounds,
+  edgeDockHandleBounds,
+  edgeDockHandleZones,
   edgeDockPeekBounds,
   edgeDockPlacementForDrop,
   edgeDockRailBounds,
+  edgeDockRefreshBounds,
+  edgeDockRefreshCorridor,
   edgeDockTriggerBounds,
   normalizeEdgeDockDisplayId,
   normalizeEdgeDockOffset,
+  edgeDockFittingScale,
+  edgeDockScale,
+  normalizeEdgeDockCustomScale,
   normalizeEdgeDockSide,
-  railLength
+  normalizeEdgeDockSize,
+  railLength,
+  scaledEdgeDockMetrics
 } = require('../../src/electron/edgeDock/geometry');
 const { canUseEdgeDock } = require('../../src/electron/edgeDock/controller');
 const { bubbleCommands, peekCommands, railCommands, toPolygons, toSvgPath } = require('../../src/electron/renderer/edgeDock/shapes');
@@ -1188,7 +1197,8 @@ test('rail hugs the chosen edge and its peek handle is flush with it', () => {
   assert.equal(right.height, railLength(3));
   const peek = edgeDockPeekBounds({ workArea, side: 'right', railBounds: right });
   assert.equal(peek.x + peek.width, workArea.width);
-  assert.equal(peek.height, 48);
+  assert.equal(peek.height, EDGE_DOCK_METRICS.peekLength);
+  assert.equal(peek.y + peek.height / 2, right.y + right.height / 2);
 
   const left = edgeDockRailBounds({ workArea, side: 'left', offset: 1, cellCount: 3 });
   assert.equal(left.x, EDGE_DOCK_METRICS.edgeInset);
@@ -1266,6 +1276,48 @@ test('an explicit empty cell list keeps the rail empty instead of reserving a ce
   assert.equal(edgeDockCellLayout(workArea, null).kinds.length, 1);
 });
 
+test('the handle sits flush and centred inside its larger window, and grows in place', () => {
+  const m = EDGE_DOCK_METRICS;
+  const rail = edgeDockRailBounds({ workArea, side: 'right', offset: 0.5, cellCount: 3 });
+  const peek = edgeDockPeekBounds({ workArea, side: 'right', railBounds: rail });
+  const rest = edgeDockHandleBounds({ side: 'right', peekBounds: peek });
+  assert.equal(rest.x + rest.width, peek.x + peek.width);
+  assert.equal(rest.y + rest.height / 2, peek.y + peek.height / 2);
+  assert.deepEqual([rest.width, rest.height], [m.handleWidth, m.handleLength]);
+  assert.ok(rest.width < peek.width && rest.height < peek.height, 'the window margin is not the handle');
+  const near = edgeDockHandleBounds({ side: 'right', peekBounds: peek, handle: { width: m.handleNearWidth, length: m.handleNearLength } });
+  assert.equal(near.x, peek.x + peek.width - m.handleNearWidth);
+  const leftPeek = edgeDockPeekBounds({ workArea, side: 'left', railBounds: rail });
+  assert.equal(edgeDockHandleBounds({ side: 'left', peekBounds: leftPeek }).x, leftPeek.x);
+});
+
+test('handle zones reach into the desktop from the handle, not along the whole rail', () => {
+  const m = EDGE_DOCK_METRICS;
+  const rail = edgeDockRailBounds({ workArea, side: 'right', offset: 0.5, cellCount: 3 });
+  const peek = edgeDockPeekBounds({ workArea, side: 'right', railBounds: rail });
+  const right = edgeDockHandleZones({ side: 'right', peekBounds: peek });
+  assert.deepEqual(right.wake, { x: workArea.x + workArea.width - m.wakeDepth, y: peek.y, width: m.wakeDepth, height: peek.height });
+  assert.equal(right.approach.x + right.approach.width, workArea.x + workArea.width);
+  assert.equal(right.approach.width, m.approachDepth);
+  assert.equal(right.approach.y, peek.y - m.approachSlack);
+  assert.equal(right.approach.height, peek.height + m.approachSlack * 2);
+  assert.ok(right.approach.height < rail.height);
+
+  const leftPeek = edgeDockPeekBounds({ workArea, side: 'left', railBounds: rail });
+  const left = edgeDockHandleZones({ side: 'left', peekBounds: leftPeek });
+  assert.equal(left.wake.x, workArea.x);
+  assert.equal(left.approach.x, workArea.x);
+  assert.equal(left.approach.width, m.approachDepth);
+  assert.equal(edgeDockHandleZones({ side: 'right', peekBounds: null }), null);
+});
+
+test('intent: the wake zone reveals after the deliberate delay, not the handle fast path', () => {
+  const intent = createEdgeDockIntent();
+  assert.deepEqual(intent.tick({ inWake: true }, 0), []);
+  assert.deepEqual(intent.tick({ inWake: true }, 60), []);
+  assert.deepEqual(intent.tick({ inWake: true }, EDGE_DOCK_TIMING.revealDelayMs), [{ type: 'reveal' }]);
+});
+
 test('intent: always-visible mode reveals once and only lets the card go', () => {
   const intent = createEdgeDockIntent();
   assert.deepEqual(intent.setAlways(true), [{ type: 'reveal' }]);
@@ -1307,19 +1359,22 @@ test('rail silhouette starts and ends on the screen edge and mirrors for the lef
   assert.match(toSvgPath(right), /^M64 0 C/);
 });
 
-test('peek handle curves into either screen edge without a visible tip', () => {
-  const right = peekCommands({ width: 7, height: 48 });
-  assert.deepEqual(right[0], ['M', 11, 0]);
-  assert.deepEqual(right.at(-2).slice(-2), [11, 48]);
-  assert.equal(right[3][2] - right[2][6], 27, 'the visible straight section keeps its original length');
+test('the handle is a tab flush with either screen edge, centred in its window', () => {
+  const right = peekCommands({ width: 10, height: 88, handleWidth: 6, handleLength: 72 });
+  assert.deepEqual(right[0], ['M', 10, 8]);
+  assert.deepEqual(right.at(-2), ['L', 10, 80]);
   assert.deepEqual(right.at(-1), ['Z']);
-  assert.notDeepEqual(peekCommands({ width: 7, height: 48, open: true }).at(-1), ['Z']);
-  const left = peekCommands({ width: 7, height: 48, side: 'left' });
-  assert.deepEqual(left[0], ['M', -4, 0]);
-  const { buffer, pixelWidth } = rasterizeMask(toPolygons(right), 7, 48);
+  assert.notDeepEqual(peekCommands({ width: 10, height: 88, open: true }).at(-1), ['Z']);
+  assert.deepEqual(peekCommands({ width: 10, height: 88, side: 'left', handleWidth: 6, handleLength: 72 })[0], ['M', 0, 8]);
+  const { buffer, pixelWidth } = rasterizeMask(toPolygons(right), 10, 88);
   const alpha = (x, y) => buffer[(y * pixelWidth + x) * 4 + 3];
-  assert.equal(alpha(6, 0), 0, 'the hidden curve tip does not touch the screen corner');
-  assert.equal(alpha(6, 24), 255, 'the handle remains flush along the screen edge');
+  assert.equal(alpha(9, 4), 0, 'the window leaves room around the resting handle');
+  assert.equal(alpha(3, 44), 0);
+  assert.equal(alpha(4, 8), 0, 'the corner facing the desktop is rounded');
+  assert.equal(alpha(9, 9), 255, 'the screen-edge side stays square');
+  assert.equal(alpha(4, 44), 255);
+  const near = rasterizeMask(toPolygons(peekCommands({ width: 10, height: 88, handleWidth: 8, handleLength: 80 })), 10, 88);
+  assert.equal(near.buffer[(44 * near.pixelWidth + 3) * 4 + 3], 255, 'the approached handle reaches further in');
 });
 
 test('bubble tail tip lands on tailY and stays clear of the corners', () => {
@@ -1763,7 +1818,7 @@ test('provider cards list the newest sessions of their own clients this month', 
   assert.deepEqual(hidden.sessions.map((entry) => entry.sessionId), ['t', 'b', 'd']);
 });
 
-// The card's list and the rail's breathing mark read the same rows, so a switch
+// The card's list and the rail's spinning arc read the same rows, so a switch
 // labelled "Show recent sessions in card" is a choice about the card. Emptying the
 // cell instead made it an off switch for the mark - a reading the label never
 // mentions, and one the card was never asked about.
@@ -2405,65 +2460,39 @@ test('the rail entrance moves the whole surface and stops under reduced motion',
   assert.match(dock, /if \(railReveal !== null && reveal !== railReveal\) playRailReveal\(\);/);
 });
 
-// The halo the running mark breathes is bounded on both sides, and both bounds are
-// invisible in a diff because every number involved is deliberate. It fades out too
-// early and it is already at zero where the glyph ends, showing only through the
-// counters of the letterform; it reaches too far and it stops reading as light around
-// the mark and becomes a second, larger circle behind the ring. The numbers were
-// re-tuned once by eye against the real stylesheet; these bounds are what has to hold
-// whatever they are re-tuned to.
-test('the running halo lights the mark without becoming the ring', () => {
+// The work indicator must fit between the provider mark and the quota reading,
+// including the corners of a square mark as the arc rotates around it.
+test('the running arc clears the mark and stays inside the quota ring', () => {
   const css = readRendererFile(path.join('edgeDock', 'dock.css')).replace(/\/\*[\s\S]*?\*\//g, ' ');
-  const ring = Number(css.match(/\n\.edge-dock-ring \{[^}]*?width: ([\d.]+)px/)[1]);
-  const mark = Number(css.match(/\n\.edge-dock-mark \{[^}]*?width: ([\d.]+)px/)[1]);
-  const arcWidth = Number(css.match(/\n\.edge-dock-ring-fill \{[^}]*?stroke-width: ([\d.]+)/)[1]);
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const arcRadius = Number(dock.match(/const RING_RADIUS = ([\d.]+);/)[1]);
-  const glow = css.slice(css.indexOf('.edge-dock-ring-glow {'), css.indexOf('.edge-dock-cell[data-running="yes"]'));
-  const size = Number(glow.match(/width: ([\d.]+)%/)[1]) / 100;
-  // Both gradient forms are legal here: a held stop (`colour 30%, transparent 100%`) and
-  // the plain falloff this uses (`colour, transparent 72%`), which holds nothing at all.
-  const stops = glow.match(/(?:([\d.]+)%, )?transparent ([\d.]+)%/);
-  assert.ok(stops, 'the halo should be a falloff this can read');
-  const hold = Number(stops[1] ?? 0) / 100;
-  const zero = Number(stops[2]) / 100;
-
-  const radius = (size * ring) / 2;
-  // It has to reach past the mark, or there is nothing beside the glyph to see.
-  assert.ok(radius * zero > mark / 2, `the halo is spent at ${radius * zero}px, inside the mark's ${mark / 2}px`);
-  // Anything that is held at full colour has to be held *under* the glyph, so what shows
-  // beside the letterform is always falloff rather than the flat edge of a disc.
-  assert.ok(hold * radius < mark / 2, `colour is held to ${hold * radius}px, past the mark's ${mark / 2}px`);
-  // And it has to be spent inside the arc, or the halo laps under the ring and the
-  // arc stops being the ring's outer edge - the arc is the quota reading, so a glow
-  // that reaches it reads as a fatter, brighter version of the same circle. The bound
-  // is the midpoint between the two landmarks this sits between: a halo that reaches
-  // past it has crossed from light around the glyph into a disc behind the ring.
-  const arcInner = arcRadius - arcWidth / 2;
-  assert.ok(
-    radius * zero < (mark / 2 + arcInner) / 2,
-    `the halo reaches ${radius * zero}px, into the ring's half of the space at ${(mark / 2 + arcInner) / 2}px`
-  );
+  const mark = Number(css.match(/\n\.edge-dock-mark \{[^}]*?width: ([\d.]+)px/)[1]);
+  const quotaWidth = Number(css.match(/\n\.edge-dock-ring-fill \{[^}]*?stroke-width: ([\d.]+)/)[1]);
+  const quotaRadius = Number(dock.match(/const RING_RADIUS = ([\d.]+);/)[1]);
+  const spinRadius = Number(dock.match(/arc\.setAttribute\('r', '([\d.]+)'\)/)[1]);
+  const spinWidth = Number(css.match(/\.edge-dock-ring-spinner circle \{[^}]*?stroke-width: ([\d.]+)/)[1]);
+  assert.ok(spinRadius - spinWidth / 2 > mark / Math.sqrt(2), 'the rotating arc must clear the mark corners');
+  assert.ok(spinRadius + spinWidth / 2 < quotaRadius - quotaWidth / 2, 'work and quota must have separate rings');
+  const spinnerStart = css.indexOf('.edge-dock-ring-spinner {');
+  const spinnerEnd = css.indexOf('.edge-dock-ring-complete {', spinnerStart);
+  assert.ok(spinnerStart >= 0 && spinnerEnd > spinnerStart, 'spinner CSS must have valid boundaries');
+  const spinner = css.slice(spinnerStart, spinnerEnd);
+  assert.match(spinner, /stroke: var\(--text\)/);
+  assert.match(spinner, /opacity: 0;/);
+  assert.match(spinner, /data-running="yes"[^}]*opacity: 1;/);
+  assert.doesNotMatch(spinner, /edge-dock-ring-fill/);
 });
 
-// The breath is the dock's longest-running animation and the rail rebuilds every cell
-// on every stats push, so the element it is declared on is new each time. A phase that
-// lived on that element restarted at 0% with each push - and the pushes come closest
-// together while a session is working, which is exactly when the mark is worth
-// something, so it could stutter or never reach the top of the swing at all. It is
-// anchored to the clock instead, which means the two numbers that anchor it have to
-// agree: the modulo has to be the animation's own period.
-test('the running halo resumes its phase rather than restarting on every repaint', () => {
+// Stats pushes rebuild the rail. The rotation must retain its phase across those
+// swaps, including frequent pushes while an agent is working.
+test('the running arc resumes its phase rather than restarting on every repaint', () => {
   const css = readRendererFile(path.join('edgeDock', 'dock.css'));
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const period = Number(css.match(/animation: edge-dock-mark-breathe (\d+)ms/)[1]);
-  assert.equal(Number(dock.match(/const BREATH_MS = (\d+);/)[1]), period, 'the phase anchor has to be the animation\'s period');
-  // A negative delay is what starts a fresh node partway through the cycle - the
-  // point of the whole thing, since a delay of zero is the restart this avoids.
-  assert.match(dock, /glow\.style\.animationDelay = `-\$\{Date\.now\(\) % BREATH_MS\}ms`;/);
-  // And it is set where the glow is made, so no node can reach the document without it.
+  const period = Number(css.match(/animation: edge-dock-running-spin (\d+)ms/)[1]);
+  assert.equal(Number(dock.match(/const RUNNING_SPIN_MS = (\d+);/)[1]), period, 'the phase anchor must use the animation period');
+  assert.match(dock, /spinner\.style\.animationDelay = `-\$\{Date\.now\(\) % RUNNING_SPIN_MS\}ms`;/);
   const ring = dock.slice(dock.indexOf('function ringNode('), dock.indexOf('function providerCellNode('));
-  assert.match(ring, /glow\.style\.animationDelay/);
+  assert.match(ring, /spinner\.style\.animationDelay/);
+  assert.match(ring, /spinner\.setAttribute\('aria-hidden', 'true'\)/);
 });
 
 // The handle's exit is a move now rather than a blink. The window's fade is the main
@@ -2473,11 +2502,11 @@ test('the running halo resumes its phase rather than restarting on every repaint
 // the retreat lives on the withdrawn state and one transition carries it both ways.
 test('the handle retreats into the edge while the window can still show it', () => {
   const css = readRendererFile(path.join('edgeDock', 'dock.css')).replace(/\/\*[\s\S]*?\*\//g, ' ');
-  assert.match(css, /\.edge-dock-root\[data-side="right"\] \{ --edge-dock-grip-retreat: 4px; \}/);
-  assert.match(css, /\.edge-dock-root\[data-side="left"\] \{ --edge-dock-grip-retreat: -4px; \}/);
+  assert.match(css, /\.edge-dock-root\[data-side="right"\] \{ --edge-dock-handle-retreat: 100%; \}/);
+  assert.match(css, /\.edge-dock-root\[data-side="left"\] \{ --edge-dock-handle-retreat: -100%; \}/);
   assert.match(
     css,
-    /\.is-handle-hidden \.edge-dock-grip \{\s*opacity: 0;\s*transform: translateX\(var\(--edge-dock-grip-retreat\)\) scaleY\(0\.2\);\s*transition: opacity 110ms ease-out, transform 110ms ease-out;/
+    /\.is-handle-hidden \.edge-dock-shape \{\s*opacity: 0;\s*transform: translateX\(var\(--edge-dock-handle-retreat\)\) scaleY\(0\.2\);\s*transition: opacity 110ms ease-out, transform 110ms ease-out;/
   );
   assert.match(css, /transition: opacity 150ms ease, transform 150ms cubic-bezier\(0\.33, 1, 0\.68, 1\);/);
 
@@ -2495,9 +2524,10 @@ test('live rate card renders device model rows with vendor marks and retains eve
   const body = dock.slice(dock.indexOf('function appendLiveRateDetails('), dock.indexOf('function statCard('));
   const node = (tag, className, text) => ({ tag, className, text, children: [], classes: new Set(), classList: { toggle(name, enabled) { if (enabled) this.owner.classes.add(name); else this.owner.classes.delete(name); } }, setAttribute() {}, append(...children) { this.children.push(...children); } });
   const createNode = (...args) => { const result = node(...args); result.classList.owner = result; return result; };
-  const render = Function('window', 'el', 'formatRate', 'markNode', 'modelVendorFor', `return (${body})`)(
+  const render = Function('window', 'el', 'formatRate', 'markNode', 'modelVendorFor', 't', 'clientLabel', `return (${body})`)(
     { TokenMonitorTokenRate: require('../../src/electron/renderer/tokenRatePresentation') }, createNode, String,
-    (vendor) => createNode('span', vendor), require('../../src/electron/renderer/usageCharts').modelVendorFor
+    (vendor) => createNode('span', vendor), require('../../src/electron/renderer/usageCharts').modelVendorFor,
+    key => key, id => id
   );
   const card = node('section', '');
   render(card, cell);
@@ -2518,4 +2548,98 @@ test('live rate card renders device model rows with vendor marks and retains eve
   const empty = node('section', '');
   render(empty, { rateDevices: [] });
   assert.equal(empty.children.length, 0);
+});
+
+test('refresh placement preserves rail bounds and stays accessible at either display edge', () => {
+  const area = { x: -1200, y: 80, width: 1200, height: 700 };
+  for (const side of ['left', 'right']) {
+    for (const offset of [0, 0.3, 1]) {
+      const rail = edgeDockRailBounds({ workArea: area, side, offset, cellKinds: ['provider', 'provider'] });
+      const before = structuredClone(rail);
+      const button = edgeDockRefreshBounds({ workArea: area, railBounds: rail });
+      assert.deepEqual(rail, before);
+      if (offset === 1) {
+        assert.equal(button.y + button.height, rail.y + rail.height);
+      } else {
+        assert.equal(button.x + button.width / 2, rail.x + rail.width / 2);
+        assert.equal(rail.y + rail.height - button.y, Math.round(EDGE_DOCK_METRICS.shoulder * 0.7) - EDGE_DOCK_METRICS.refreshGap);
+      }
+      assert.equal(button.x + button.width / 2, rail.x + rail.width / 2);
+      assert.ok(button.y >= area.y + EDGE_DOCK_METRICS.screenMargin);
+      assert.ok(button.y + button.height <= area.y + area.height - EDGE_DOCK_METRICS.screenMargin);
+      const corridor = edgeDockRefreshCorridor(rail, button);
+      assert.equal(corridor.width, 0);
+    }
+    const full = edgeDockRailBounds({ workArea: area, side, offset: 1, cellKinds: Array(30).fill('provider') });
+    const button = edgeDockRefreshBounds({ workArea: area, railBounds: full });
+    assert.equal(button.x + button.width / 2, full.x + full.width / 2);
+    assert.ok(button.y + button.height <= area.y + area.height - EDGE_DOCK_METRICS.screenMargin);
+    assert.equal(edgeDockRefreshCorridor(full, button).width, 0);
+    for (const count of [2, 12, 30]) {
+      for (const offset of [0, 0.3, 0.75, 0.95, 1]) {
+        const rail = edgeDockRailBounds({ workArea: area, side, offset, cellKinds: Array(count).fill('provider') });
+        const action = edgeDockRefreshBounds({ workArea: area, railBounds: rail });
+        assert.equal(action.x + action.width / 2, rail.x + rail.width / 2);
+        assert.ok(action.y >= rail.y + rail.height - action.height, 'refresh must stay at the bottom, never above the rail');
+        assert.ok(action.y + action.height <= area.y + area.height - EDGE_DOCK_METRICS.screenMargin);
+      }
+    }
+  }
+});
+
+test('refresh retains its original bottom position when the display extends below the work area', () => {
+  const area = { x: 0, y: 24, width: 1200, height: 820 };
+  const displayBounds = { x: 0, y: 0, width: 1200, height: 900 };
+  for (const side of ['left', 'right']) {
+    const rail = edgeDockRailBounds({ workArea: area, side, offset: 1, cellKinds: Array(12).fill('provider') });
+    const button = edgeDockRefreshBounds({ workArea: area, displayBounds, railBounds: rail });
+    assert.equal(button.x + button.width / 2, rail.x + rail.width / 2);
+    assert.equal(button.y, rail.y + rail.height - Math.round(EDGE_DOCK_METRICS.shoulder * 0.7) + EDGE_DOCK_METRICS.refreshGap);
+    assert.ok(button.y + button.height > area.y + area.height - EDGE_DOCK_METRICS.screenMargin);
+    assert.ok(button.y + button.height <= displayBounds.y + displayBounds.height - EDGE_DOCK_METRICS.screenMargin);
+  }
+});
+
+test('the dock size resolves to a preset or the custom scale, which survives a preset', () => {
+  assert.equal(normalizeEdgeDockSize('large'), 'large');
+  assert.equal(normalizeEdgeDockSize('huge'), 'medium');
+  assert.equal(normalizeEdgeDockSize(undefined), 'medium');
+  assert.equal(normalizeEdgeDockCustomScale(1.234), 1.25, 'snapped to the slider step');
+  assert.equal(normalizeEdgeDockCustomScale(9), 1.5);
+  assert.equal(normalizeEdgeDockCustomScale(0.1), 0.75);
+  assert.equal(normalizeEdgeDockCustomScale('x'), 1);
+  assert.equal(edgeDockScale({}), 1, 'settings from before the option keep today\'s size');
+  assert.equal(edgeDockScale({ edgeDockSize: 'small' }), 0.85);
+  assert.equal(edgeDockScale({ edgeDockSize: 'large', edgeDockCustomScale: 0.8 }), 1.25);
+  assert.equal(edgeDockScale({ edgeDockSize: 'custom', edgeDockCustomScale: 0.8 }), 0.8);
+});
+
+test('scaled metrics grow the dock but not the distances the pointer opens it from', () => {
+  assert.equal(scaledEdgeDockMetrics(1), EDGE_DOCK_METRICS);
+  const large = scaledEdgeDockMetrics(1.5);
+  assert.equal(large.railWidth, 96);
+  assert.equal(large.cellHeight, 105);
+  assert.equal(large.bubbleWidth, 420);
+  for (const key of ['wakeDepth', 'approachDepth', 'approachSlack', 'triggerDepth', 'screenMargin', 'edgeInset']) {
+    assert.equal(large[key], EDGE_DOCK_METRICS[key], key);
+  }
+  for (const value of Object.values(large)) assert.equal(Number.isInteger(value), true);
+
+  const small = scaledEdgeDockMetrics(0.75);
+  assert.equal(small.peekWidth, EDGE_DOCK_METRICS.peekWidth, 'the handle window stays as wide as AppKit allows');
+  assert.ok(small.handleWidth >= 5, 'the handle stays wide enough to find');
+  assert.ok(small.handleNearWidth > small.handleWidth, 'and still grows on approach');
+});
+
+test('a larger dock that would not fit shrinks to the largest size that keeps full density', () => {
+  const kinds = ['stat', 'provider', 'provider', 'provider', 'provider', 'provider', 'provider', 'stat', 'stat'];
+  const workArea = { x: 0, y: 33, width: 1280, height: 799 };
+  const fitted = edgeDockFittingScale({ workArea, cellKinds: kinds, scale: 1.25 });
+  assert.ok(fitted > 1 && fitted < 1.25, `fitted ${fitted}`);
+  assert.equal(edgeDockCellLayout(workArea, kinds, scaledEdgeDockMetrics(fitted)).compact, false);
+  assert.equal(edgeDockCellLayout(workArea, kinds, scaledEdgeDockMetrics(fitted + 0.01)).compact, true, 'and no larger');
+
+  assert.equal(edgeDockFittingScale({ workArea, cellKinds: ['provider'], scale: 1.25 }), 1.25, 'a dock that fits keeps its size');
+  assert.equal(edgeDockFittingScale({ workArea, cellKinds: kinds, scale: 0.85 }), 0.85, 'a smaller one is left alone');
+  assert.equal(edgeDockFittingScale({ workArea: { ...workArea, height: 400 }, cellKinds: kinds, scale: 1.5 }), 1, 'one too long even at 100% keeps today\'s density');
 });

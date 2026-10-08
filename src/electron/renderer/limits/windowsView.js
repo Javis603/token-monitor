@@ -426,6 +426,16 @@
   // surfaces can share one measurement.
   let tooltipAnchorSeq = 0;
 
+  function positionCenteredDetailTooltip(tooltip) {
+    if (!tooltip.classList.contains('is-centered') || !tooltip.matches(':popover-open')) return;
+    tooltip.style.setProperty('--tooltip-shift', '0px');
+    const rect = tooltip.getBoundingClientRect();
+    const viewportWidth = document.documentElement.clientWidth;
+    const shift = rect.left < 8 ? 8 - rect.left
+      : rect.right > viewportWidth - 8 ? viewportWidth - 8 - rect.right : 0;
+    tooltip.style.setProperty('--tooltip-shift', `${shift}px`);
+  }
+
   function attachLimitDetailTooltip(wrap, tooltip) {
     // A popover has no positioned ancestor to lay out against, so it is anchored
     // to its own trigger. Anchor names are per-element and the panel draws many
@@ -445,6 +455,7 @@
       tooltip.showPopover?.();
       // Measured after opening: a closed popover has no box to measure.
       tooltip.classList.toggle('is-below', wrap.getBoundingClientRect().top < tooltip.offsetHeight + 8);
+      positionCenteredDetailTooltip(tooltip);
     };
     const close = () => {
       tooltip.hidePopover?.();
@@ -525,7 +536,7 @@
   }
 
   // A gauge or plan label can be the trigger itself; no extra info icon needed.
-  function setDetailTooltip(wrap, entries) {
+  function setDetailTooltip(wrap, entries, { centered = false } = {}) {
     let tooltip = wrap.querySelector('.limit-detail-tooltip');
     if (!entries?.length) {
       tooltip?.hidePopover?.();
@@ -551,11 +562,14 @@
       0
     );
     const next = detailTooltipNode(entries, columns);
+    next.classList.toggle('is-centered', centered);
     if (tooltip) {
       // Sync only the layout class: is-below is positional state the tooltip
       // manages itself, and overwriting it mid-hover flips an open popover.
       tooltip.classList.toggle('limit-detail-tooltip-triple', next.classList.contains('limit-detail-tooltip-triple'));
+      tooltip.classList.toggle('is-centered', centered);
       tooltip.replaceChildren(...next.children);
+      positionCenteredDetailTooltip(tooltip);
     } else {
       tooltip = next;
       wrap.append(tooltip);

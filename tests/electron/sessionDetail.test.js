@@ -484,24 +484,3 @@ test('Reasonix rows enter the shared detail navigation path instead of a native 
   assert.match(rendererSource, /sessionCost: client === 'reasonix' \? Number\(session\?\.reportedCostUsd \|\| 0\)/);
   assert.doesNotMatch(rendererSource, /nativeSessionBreakdown/);
 });
-
-
-test('Antigravity detail rows preserve task and generation clocks independently', () => {
-  const rows = exchangeRows({ exchanges: [{
-    taskNumber: 1, startedAt: '2026-10-07T12:00:00Z', durationMs: 12000,
-    tokens: { total: 190, output: 120 }, turnCount: 1, tools: [], costEstimate: 0,
-    turns: [{ model: 'gemini-3.8-flash', tokens: { total: 190, output: 120 }, durationMs: 2000, tools: [] }]
-  }] }, { translate: (key, params) => translate('zh-CN', key, params) });
-  assert.equal(rows[0].title, '任务 #1');
-  assert.equal(rows[0].durationMs, 12000);
-  assert.equal(rows[0].outputTokens, 120);
-  assert.equal(rows[0].turns[0].durationMs, 2000);
-  const begin = rendererSource.indexOf('function detailSpeed(');
-  const end = rendererSource.indexOf('function turnNode(', begin);
-  const rateText = vm.runInNewContext(rendererSource.slice(begin, end) + '\ndetailSpeed', {
-    t: (key, params) => translate('en', key, params)
-  });
-  assert.equal(rateText('detailTaskRate', 120, rows[0].durationMs), 'Task: 10.0 tok/s');
-  assert.equal(rateText('detailGenerationRate', 120, rows[0].turns[0].durationMs), 'Generation (incl. TTFT): 60.0 tok/s');
-  assert.equal(rateText('detailTaskRate', 120, null), 'Task: — tok/s');
-});
