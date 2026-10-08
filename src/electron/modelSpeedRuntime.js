@@ -9,6 +9,14 @@ const { localDayKey } = require('../shared/history');
 const { rangeForPeriod, normalizePeriod } = require('../shared/modelSpeedRange');
 const { readFileLimited, writeJsonAtomic } = require('./cloudLedgerRuntime');
 const MAX_BYTES = 32 * 1024 * 1024;
+let lastSource = null;
+function opaqueSource(source) {
+  const identity = String(source);
+  if (lastSource?.identity !== identity) {
+    lastSource = { identity, fingerprint: crypto.pbkdf2Sync(identity, 'token-monitor/model-speed-source/v2', 600000, 32, 'sha256').toString('hex') };
+  }
+  return lastSource.fingerprint;
+}
 function createModelSpeedRuntime({ directory, now = Date.now, io = fs } = {}) {
   const file = path.join(directory, 'model-output-speed.json');
   let state = core.fresh(), sources = sourceHistory.fresh(), fault = null, revision = 0, dirty = false;
@@ -27,7 +35,7 @@ function createModelSpeedRuntime({ directory, now = Date.now, io = fs } = {}) {
   } catch (e) { if (e.code !== 'ENOENT') fault = 'CORRUPT_HISTORY'; }
   function observe(record, { preview = false, source = '' } = {}) {
     if (preview || fault === 'CORRUPT_HISTORY' || !record) return false;
-    const sourceHash = crypto.createHash('sha256').update(String(source)).digest('hex');
+    const sourceHash = opaqueSource(source);
     try {
       const at = now();
       const observation = { source: sourceHash, day: localDayKey(new Date(at)),

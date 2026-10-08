@@ -48,5 +48,7 @@ Run `npm run verify`, then run `scripts/verify-model-speed-ui.js` and `scripts/v
 
 History writes request POSIX mode `0600`; that mode assertion applies on POSIX hosts. Windows access control follows the existing user-data directory ACL and is not verified by the POSIX mode bits. Bounded history reads reject named symlinks and mismatched file identities even without `O_NOFOLLOW`; native Windows UI and ACL acceptance still require separate validation.
 
+The current device/client/mode source is persisted as a deterministic PBKDF2-HMAC-SHA256 v2 identifier (600,000 iterations and a dedicated domain salt). One source is cached in memory to avoid repeating derivation on every poll. A v2 observation does not relabel or merge legacy fast-hash source history: the old file rows are retained, and the newly active source re-anchors. Upgrading an installed app while preserving prior-source visibility is not accepted by these source regressions.
+
 ![Synthetic responsive Home](images/model-speed-home.png)
 ![Synthetic model-speed detail](images/model-speed-detail.png)

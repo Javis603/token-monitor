@@ -52,6 +52,23 @@ test('a restart rebuilds historical membership from its own source and refuses o
   assert.deepEqual(reloaded.list().models.map(row => row.model), ['another']);
   assert.equal(reloaded.detail(oldId, { period: 'last7' }), null);
 });
+test('persisted source identity is opaque, stable on restart and cannot bridge a changed source', t => {
+  const { runtime, directory, clock } = fixture(t);
+  const source = 'fixture-private-device-and-client-scope';
+  const record = out => { const p = { modelThroughput: { timed: { timedOutputTokens: out, timedDurationMs: out * 10 } } }; return { allTime: p, today: p }; };
+  runtime.observe(record(100), { source }); clock.at += 1000; runtime.observe(record(300), { source });
+  const old = runtime.list().models[0];
+  assert.equal(old.samples, 1);
+  assert.match(old.id, /^[a-f0-9]{64}:timed$/);
+  assert.ok(!fs.readFileSync(runtime.file, 'utf8').includes(source));
+  const reloaded = createModelSpeedRuntime({ directory, now: () => clock.at });
+  reloaded.observe(record(300), { source });
+  assert.equal(reloaded.list().models[0].id, old.id);
+  assert.equal(reloaded.list().models[0].samples, 1);
+  clock.at += 1000; reloaded.observe(record(900), { source: 'fixture-other-device' });
+  assert.equal(reloaded.detail(old.id), null);
+  assert.equal(reloaded.list().models[0].samples, 0, 'changed sources re-anchor instead of manufacturing output');
+});
 test('measured history remains visible even when current model usage maps omit it', t => {
   const { runtime, clock } = fixture(t);
   const record = out => { const p = { modelThroughput: { timed: { timedOutputTokens: out, timedDurationMs: out * 10 } } }; return { allTime: p, today: p }; };
