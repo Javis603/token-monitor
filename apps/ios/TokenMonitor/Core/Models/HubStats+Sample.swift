@@ -187,7 +187,8 @@ extension HubStats {
                         resetDescription: "",
                         detail: "",
                         currency: nil,
-                        showMeter: true
+                        showMeter: true,
+                        windowMinutes: 300
                     ),
                     LimitWindow(
                         kind: "weekly",
@@ -202,7 +203,8 @@ extension HubStats {
                         resetDescription: "",
                         detail: "",
                         currency: nil,
-                        showMeter: true
+                        showMeter: true,
+                        windowMinutes: 10080
                     )
                 ],
                 balanceUsd: nil,
@@ -239,7 +241,8 @@ extension HubStats {
                         resetDescription: "",
                         detail: "",
                         currency: nil,
-                        showMeter: true
+                        showMeter: true,
+                        windowMinutes: 300
                     ),
                     LimitWindow(
                         kind: "weekly",
@@ -254,7 +257,8 @@ extension HubStats {
                         resetDescription: "",
                         detail: "",
                         currency: nil,
-                        showMeter: true
+                        showMeter: true,
+                        windowMinutes: 10080
                     )
                 ],
                 balanceUsd: nil,
@@ -306,7 +310,8 @@ extension HubStats {
                         resetDescription: "",
                         detail: "",
                         currency: nil,
-                        showMeter: true
+                        showMeter: true,
+                        windowMinutes: 300
                     ),
                     LimitWindow(
                         kind: "monthly",
@@ -348,13 +353,15 @@ extension HubStats {
                     kind: "session", metric: nil, label: "Session",
                     used: nil, limit: nil, remaining: nil, usedPercent: 2, remainingPercent: 98,
                     resetsAt: Date.now.addingTimeInterval(15_420).formatted(.iso8601),
-                    resetDescription: "", detail: "", currency: nil, showMeter: true
+                    resetDescription: "", detail: "", currency: nil, showMeter: true,
+                    windowMinutes: 300
                 ),
                 LimitWindow(
                     kind: "weekly", metric: nil, label: "Weekly",
                     used: nil, limit: nil, remaining: nil, usedPercent: 100 - weekly, remainingPercent: weekly,
                     resetsAt: Date.now.addingTimeInterval(410_400).formatted(.iso8601),
-                    resetDescription: "", detail: "", currency: nil, showMeter: true
+                    resetDescription: "", detail: "", currency: nil, showMeter: true,
+                    windowMinutes: 10080
                 )
             ],
             balanceUsd: nil, balance: nil, sourceDeviceId: "macbook-m5", stale: false,

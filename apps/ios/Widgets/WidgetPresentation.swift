@@ -131,11 +131,14 @@ nonisolated enum WidgetPresentation {
         return value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(locale))
     }
 
-    static func currencyFromUSD(_ value: Double, displayCode: String, locale: Locale = .autoupdatingCurrent) -> String {
-        currency(value, sourceCode: "USD", displayCode: displayCode, locale: locale)
+    static func currencyFromUSD(_ value: Double, displayCode: String, locale: Locale = .autoupdatingCurrent,
+                                compact: Bool = false) -> String {
+        currency(value, sourceCode: "USD", displayCode: displayCode, locale: locale, compact: compact)
     }
 
-    static func currency(_ value: Double, sourceCode: String, displayCode: String, locale: Locale = .autoupdatingCurrent) -> String {
+    /// `compact` drops the cents from amounts of 100 or more, for the Dynamic Island.
+    static func currency(_ value: Double, sourceCode: String, displayCode: String, locale: Locale = .autoupdatingCurrent,
+                         compact: Bool = false) -> String {
         guard value.isFinite else { return "—" }
         let source = sourceCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         let display = displayCode.uppercased()
@@ -143,8 +146,10 @@ nonisolated enum WidgetPresentation {
         let rates: [String: Double] = ["USD": 1, "TWD": 31.5, "HKD": 7.8, "CNY": 6.8]
         let symbols = ["USD": "$", "TWD": "NT$", "HKD": "HK$", "CNY": "¥"]
         if let sourceRate = rates[source], let displayRate = rates[display], let symbol = symbols[display] {
-            return symbol + (value / sourceRate * displayRate).formatted(
-                .number.grouping(.automatic).precision(.fractionLength(2)).locale(locale)
+            let converted = value / sourceRate * displayRate
+            let digits = compact && abs(converted) >= 100 ? 0 : 2
+            return symbol + converted.formatted(
+                .number.grouping(.automatic).precision(.fractionLength(digits)).locale(locale)
             )
         }
         return value.formatted(.currency(code: source).presentation(.isoCode).precision(.fractionLength(0...2)).locale(locale))

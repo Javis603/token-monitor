@@ -2,6 +2,8 @@ import SwiftUI
 
 struct OverviewUnavailableView: View {
     let phase: ConnectionPhase
+    let isRefreshing: Bool
+    let refresh: () -> Void
     let openSettings: () -> Void
 
     var body: some View {
@@ -10,8 +12,20 @@ struct OverviewUnavailableView: View {
         } description: {
             Text(LocalizedStringKey(message))
         } actions: {
+            if canRefresh {
+                Button("Refresh", action: refresh)
+                    .modifier(AppActionStyle())
+                    .disabled(isRefreshing)
+            }
             Button("Open Settings", action: openSettings)
                 .modifier(AppActionStyle())
+        }
+    }
+
+    private var canRefresh: Bool {
+        switch phase {
+        case .failed, .live: true
+        case .idle, .connecting: false
         }
     }
 

@@ -9,11 +9,7 @@ struct InsightsView: View {
     @State private var activityCardWidth: Double = 0
 
     var body: some View {
-        @Bindable var store = store
-
-        ZStack {
-            AppBackground()
-
+        Group {
             if store.stats != nil {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -49,27 +45,6 @@ struct InsightsView: View {
                                 InsightTrendCard(history: store.currentHistory)
                             }
                             .id("insights-trend")
-
-                            VStack(alignment: .leading, spacing: DesignTokens.headerToCardSpacing) {
-                                SectionHeader("Usage breakdown")
-                                PeriodPicker(selection: $store.selectedPeriod)
-                            }
-
-                            section("Tools", destination: .tool) {
-                                BreakdownCard(
-                                    kind: .tool,
-                                    entries: store.currentPeriod.clientEntries,
-                                    total: store.currentPeriod.totalTokens ?? 0, limit: 5
-                                )
-                            }
-
-                            section("Models", destination: .model) {
-                                BreakdownCard(
-                                    kind: .model,
-                                    entries: store.currentPeriod.modelEntries,
-                                    total: store.currentPeriod.totalTokens ?? 0, limit: 5
-                                )
-                            }
 
                             section("Monthly history") {
                                 MonthlyHistoryCard(
@@ -107,14 +82,16 @@ struct InsightsView: View {
                     "No Insights",
                     systemImage: "chart.xyaxis.line",
                     description: Text(
-                        "Connect a Hub to explore usage trends, tools, and models."
+                        "Connect a Hub to explore usage history and trends."
                     )
                 )
                 .padding(DesignTokens.screenPadding)
             }
         }
-        .navigationTitle("Insights")
-        .navigationBarTitleDisplayMode(.inline)
+        .modifier(RootPageHeader("Insights"))
+        .background {
+            AppBackground()
+        }
     }
 
     private var heatmapModel: HeatmapModel {
@@ -127,15 +104,10 @@ struct InsightsView: View {
 
     private func section<Content: View>(
         _ title: String,
-        destination: BreakdownKind? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.headerToCardSpacing) {
-            SectionHeader(title) {
-                if let destination {
-                    SectionNavigationLink(title: title) { BreakdownDetailView(kind: destination) }
-                }
-            }
+            SectionHeader(title)
             SurfaceCard(content: content)
         }
     }

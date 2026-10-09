@@ -29,8 +29,52 @@ extension TokenMonitorSharedPayload.Snapshot {
                     cost: day.cost ?? .nan
                 )
             },
-            sourceStale: stats.allSourcesStale
+            sourceStale: stats.allSourcesStale,
+            agents: agents(from: stats, now: now),
+            recent: recent(from: stats)
         )
+    }
+
+    /// The most recently used client — the desktop's "most recently active
+    /// tool" — with its own share of each period, as the Hub pushes it.
+    private static func recent(from stats: HubStats) -> TokenMonitorActivityAttributes.ContentState.Recent? {
+        var seen = Set<String>()
+        var latest: (client: String, at: Date)?
+        for key in [UsagePeriodKey.today, .month] {
+            for (id, session) in stats.period(key).sessions ?? [:] where seen.insert(id).inserted {
+                guard let client = session.client?.lowercased(), !client.isEmpty,
+                      let at = Date.hubTimestamp(from: session.lastUsedAt) else { continue }
+                if latest.map({ at > $0.at }) ?? true { latest = (client, at) }
+            }
+        }
+        guard let client = latest?.client else { return nil }
+        func share(_ key: UsagePeriodKey) -> TokenMonitorActivityAttributes.ContentState.PeriodUsage {
+            let period = stats.period(key)
+            return .init(tokens: period.clients?[client], costUSD: period.clientCosts?[client])
+        }
+        return .init(client: client, today: share(.today), month: share(.month))
+    }
+
+    /// Running sessions under the same rule the Hub pushes: today and month
+    /// detail merged by session key, newest first.
+    private static func agents(
+        from stats: HubStats,
+        now: Date
+    ) -> TokenMonitorActivityAttributes.ContentState.Agents {
+        var seen = Set<String>()
+        var running: [(client: String?, last: Date)] = []
+        for key in [UsagePeriodKey.today, .month] {
+            for (id, session) in stats.period(key).sessions ?? [:] where seen.insert(id).inserted {
+                guard session.isRunning(at: now) else { continue }
+                running.append((session.client?.lowercased(), session.lastActivity ?? .distantPast))
+            }
+        }
+        running.sort { $0.last > $1.last }
+        var clients: [String] = []
+        for client in running.compactMap(\.client) where !clients.contains(client) {
+            clients.append(client)
+        }
+        return .init(running: running.count, clients: Array(clients.prefix(3)))
     }
 
     private static func usage(
@@ -51,7 +95,8 @@ extension TokenMonitorSharedPayload.Snapshot {
             costKnown: period.costUsd != nil,
             tokenComponentsKnown: period.capabilities?.tokenComponents,
             throughputKnown: period.capabilities?.throughput,
-            unclassifiedTokens: period.unclassifiedTokens
+            unclassifiedTokens: period.unclassifiedTokens,
+            outputTokensPerSecond: period.averageOutputTokensPerSecond
         )
     }
 
@@ -79,7 +124,9 @@ extension TokenMonitorSharedPayload.Snapshot {
                             ? window.remaining ?? provider.balance?.amount
                             : nil,
                         currency: window.currency ?? provider.balance?.currency,
-                        resetAt: Date.hubTimestamp(from: window.resetsAt)
+                        resetAt: Date.hubTimestamp(from: window.resetsAt),
+                        windowMinutes: window.windowMinutes.flatMap { $0 > 0 ? $0 : nil },
+                        kind: window.kind?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                     )
                 }
             return TokenMonitorSharedPayload.Limit(
@@ -89,7 +136,8 @@ extension TokenMonitorSharedPayload.Snapshot {
                 status: provider.status,
                 updatedAt: Date.hubTimestamp(from: provider.updatedAt).flatMap { $0 <= now ? $0 : nil },
                 windows: windows,
-                sourceStale: provider.stale
+                sourceStale: provider.stale,
+                accountKey: provider.accountKey?.trimmingCharacters(in: .whitespacesAndNewlines)
             )
         }
     }

@@ -35,6 +35,7 @@ struct BreakdownDetailView: View {
         }
         .navigationTitle(Text(LocalizedStringKey(kind.title)))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarVisibility(.visible, for: .navigationBar)
     }
 
     private var entries: [BreakdownEntry] {

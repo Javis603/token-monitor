@@ -3,15 +3,14 @@ import SwiftUI
 struct OverviewView: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(TokenMonitorStore.self) private var store
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @Binding var selectedTab: AppTab
 
     var body: some View {
         @Bindable var store = store
 
-        ZStack {
-            AppBackground()
-
+        Group {
             if let stats = store.stats {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -21,9 +20,7 @@ struct OverviewView: View {
                         ) {
                             ConnectionStatusNotice(phase: store.phase, retry: refresh)
                             HeroSummaryCard(
-                                selectedPeriod: $store.selectedPeriod,
-                                period: store.currentPeriod,
-                                updatedAt: stats.updatedAt
+                                period: store.currentPeriod
                             )
                             LimitPreviewSection(
                                 groups: Array(limitGroups.prefix(preferences.homeLimitCount)),
@@ -77,18 +74,43 @@ struct OverviewView: View {
             } else {
                 OverviewUnavailableView(
                     phase: store.phase,
+                    isRefreshing: store.isRefreshing,
+                    refresh: refresh,
                     openSettings: showSettings
                 )
                 .padding(DesignTokens.screenPadding)
             }
         }
-        .navigationTitle("Overview")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Refresh", systemImage: "arrow.clockwise", action: refresh)
-                    .disabled(store.isRefreshing)
+        .modifier(RootPageHeader("Overview", brandMark: "Σ.") {
+            ViewThatFits(in: .horizontal) {
+                if !dynamicTypeSize.isAccessibilitySize {
+                    PeriodPicker(selection: $store.selectedPeriod, compact: true)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                Menu {
+                    Picker("Period", selection: $store.selectedPeriod) {
+                        ForEach(UsagePeriodKey.allCases) { period in
+                            Text(LocalizedStringKey(period.shortLabel)).tag(period)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(LocalizedStringKey(store.selectedPeriod.shortLabel))
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .frame(minWidth: DesignTokens.controlHeight, minHeight: DesignTokens.controlHeight)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Period")
+                .accessibilityValue(Text(LocalizedStringKey(store.selectedPeriod.shortLabel)))
             }
+        })
+        .background {
+            AppBackground()
         }
     }
 

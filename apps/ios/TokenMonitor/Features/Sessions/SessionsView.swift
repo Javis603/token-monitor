@@ -77,6 +77,7 @@ struct SessionsView: View {
         }
         .navigationTitle("Sessions")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarVisibility(.visible, for: .navigationBar)
         .searchable(text: $query, prompt: "Search sessions")
         .onChange(of: query) { page = 0 }
         .onChange(of: period) { page = 0 }

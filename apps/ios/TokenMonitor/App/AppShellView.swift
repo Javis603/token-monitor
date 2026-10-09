@@ -69,6 +69,7 @@ struct AppShellView: View {
                 }
             } label: {
                 Label("Overview", systemImage: "house")
+                    .environment(\.symbolVariants, .none)
             }
 
             Tab(value: .limits) {
@@ -77,6 +78,7 @@ struct AppShellView: View {
                 }
             } label: {
                 Label("Limits", systemImage: "gauge")
+                    .environment(\.symbolVariants, .none)
             }
 
             Tab(value: .insights) {
@@ -85,6 +87,7 @@ struct AppShellView: View {
                 }
             } label: {
                 Label("Insights", systemImage: "chart.line.uptrend.xyaxis")
+                    .environment(\.symbolVariants, .none)
             }
 
             Tab(value: .settings) {
@@ -104,6 +107,7 @@ struct AppShellView: View {
                 }
             } label: {
                 Label("Settings", systemImage: "gearshape")
+                    .environment(\.symbolVariants, .none)
             }
         }
         .tint(DesignTokens.accent)

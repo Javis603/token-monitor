@@ -73,8 +73,7 @@ final class LiveActivityRegistrationCoordinator {
     }
 
     func register(activityID: String, pushToken: Data,
-                  preferences: TokenMonitorSharedPayload.Preferences,
-                  locale: String) async throws -> Bool? {
+                  preferences: TokenMonitorSharedPayload.Preferences) async throws -> Bool? {
         guard let configuration else { return nil }
         let generation = generation
         let previous = operation
@@ -97,7 +96,7 @@ final class LiveActivityRegistrationCoordinator {
             do {
                 let enabled = try await self.client.registerLiveActivity(
                     activityID: activityID, pushToken: pushToken,
-                    preferences: preferences, locale: locale, configuration: configuration)
+                    preferences: preferences, configuration: configuration)
                 guard self.generation == generation,
                       self.bindings[activityID] == configuration else {
                     self.queueCleanup(activityID, configuration)

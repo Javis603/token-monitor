@@ -77,9 +77,9 @@ struct SourceFreshnessTests {
         )
         #expect(state.sourceStale == true)
         #expect(state.updatedAt == snapshot.updatedAt)
-        #expect(state.quota?.providerID == "codex")
-        #expect(state.quota?.stale == true)
-        #expect(state.quota?.windows.first?.remainingPercent == 80)
+        #expect(state.quotas.first?.providerID == "codex")
+        #expect(state.quotas.first?.stale == true)
+        #expect(state.quotas.first?.windows.first?.remainingPercent == 80)
         let decoded = try JSONDecoder().decode(
             TokenMonitorActivityAttributes.ContentState.self,
             from: JSONEncoder().encode(state)
@@ -96,33 +96,85 @@ struct SourceFreshnessTests {
             preferences: .default,
             now: now
         )
-        #expect(state.quota?.providerID == "codex")
+        #expect(state.quotas.first?.providerID == "codex")
 
-        var specific = TokenMonitorSharedPayload.Preferences.default
-        specific.liveProviderID = "absent"
-        #expect(
-            LiveActivityController.contentState(
-                snapshot: snapshot,
-                preferences: specific,
-                now: now
-            ).quota == nil
-        )
+        #expect(state.quotas.map(\.providerID) == ["codex", "claude", "cursor"])
+
+    }
+
+    @Test func activitySourcesResolveLikeTheDesktopComposer() throws {
+        let now = Date.now
+        func ago(_ minutes: Double) -> String { now.addingTimeInterval(-minutes * 60).formatted(.iso8601) }
+        let stats = try decode("""
+        {"periods":{"today":{"clients":{"cursor":400},"clientCosts":{"cursor":1.5},"sessions":{
+          "cursor:a":{"client":"cursor","lastUsedAt":"\(ago(1))","turnEnded":true}}}},
+        "limits":{"providers":[
+          {"provider":"claude","status":"ok","windows":[{"kind":"session","remainingPercent":90},{"kind":"weekly","remainingPercent":30}]},
+          {"provider":"codex","accountKey":"a","status":"ok","windows":[{"kind":"weekly","remainingPercent":60}]},
+          {"provider":"codex","accountKey":"b","status":"ok","windows":[{"kind":"weekly","remainingPercent":20}]},
+          {"provider":"kiro","status":"ok","windows":[{"remainingPercent":70}]},
+          {"provider":"cursor","status":"ok","windows":[{"kind":"billing","remainingPercent":95}]}]}}
+        """)
+        let snapshot = TokenMonitorSharedPayload.Snapshot.make(stats: stats, history: .empty, now: now)
+        var preferences = TokenMonitorSharedPayload.Preferences.default
+        preferences.liveLayout.compactLeading.source = .init(providerID: "kiro")
+        preferences.liveLayout.compactTrailing.source = .init(accountKey: "a")
+        let state = LiveActivityController.contentState(snapshot: snapshot, preferences: preferences, now: now)
+        // Three ranked records, then the named provider, the named account and the recent tool.
+        #expect(state.quotas.map { "\($0.providerID):\($0.accountKey ?? "")" }
+            == ["codex:b", "claude:", "codex:a", "kiro:", "cursor:"])
+        #expect(state.recent?.client == "cursor")
+        #expect(state.recent?.today.tokens == 400)
+
+        let context = ActivityContext(state: state, layout: LiveActivityLayout(), isStale: false, now: now)
+        // Automatic lowest: the tightest primary window anywhere.
+        #expect(context.reading(.init())?.quota.accountKey == "b")
+        // Primary prefers the session window; secondary is the next one.
+        #expect(context.reading(.init(providerID: "claude"))?.window.kind == "session")
+        #expect(context.reading(.init(providerID: "claude", window: .secondary))?.window.kind == "weekly")
+        #expect(context.reading(.init(window: .session))?.quota.providerID == "claude")
+        // A named account wins over the provider's lowest one.
+        #expect(context.reading(.init(providerID: "codex", accountKey: "a"))?.window.remainingPercent == 60)
+        // Most recently used tool, and its own usage share.
+        #expect(context.reading(.init(automatic: .recent))?.quota.providerID == "cursor")
+        #expect(context.usage(.init(scope: .recent)).costUSD == 1.5)
+        // A named provider without the window never becomes another provider.
+        #expect(context.reading(.init(providerID: "kiro", window: .weekly)) == nil)
+        // Used flips the reading.
+        let used = try #require(context.reading(.init(providerID: "claude", value: .used)))
+        #expect(context.valueText(used.window, used.value) == "10% used")
+    }
+
+    @Test func activityAgentsCountRunningSessionsAndSpeedFollowsTimedOutput() throws {
+        let now = Date.now
+        func ago(_ minutes: Double) -> String { now.addingTimeInterval(-minutes * 60).formatted(.iso8601) }
+        let stats = try decode("""
+        {"periods":{"today":{"outputTokens":500,"timedOutputTokens":1000,"timedDurationMs":20000,"sessions":{
+          "claude:a":{"client":"claude","lastUsedAt":"\(ago(1))"},
+          "codex:b":{"client":"codex","lastUsedAt":"\(ago(3))"},
+          "claude:c":{"client":"claude","lastUsedAt":"\(ago(2))"},
+          "claude:done":{"client":"claude","lastUsedAt":"\(ago(1))","turnEnded":true},
+          "cursor:old":{"client":"cursor","lastUsedAt":"\(ago(30))"}}},
+        "month":{"sessions":{"claude:a":{"client":"claude","lastUsedAt":"\(ago(1))"}}}}}
+        """)
+        let snapshot = TokenMonitorSharedPayload.Snapshot.make(stats: stats, history: .empty, now: now)
+        let state = LiveActivityController.contentState(snapshot: snapshot, preferences: .default, now: now)
+        #expect(state.agents == .init(running: 3, clients: ["claude", "codex"]))
+        #expect(state.usage.today.outputTPS == 25)
     }
 
     @Test func activityQuotaExposesCreditsWindowsAsAmounts() throws {
         let now = Date.now
         let stats = try decode(#"{"limits":{"providers":[{"provider":"deepseek","status":"ok","balance":{"amount":20,"currency":"USD","monthSpend":80},"windows":[{"kind":"billing","metric":"credits"}]}]}}"#)
         let snapshot = TokenMonitorSharedPayload.Snapshot.make(stats: stats, history: .empty, now: now)
-        var preferences = TokenMonitorSharedPayload.Preferences.default
-        preferences.liveProviderID = "deepseek"
         let state = LiveActivityController.contentState(
             snapshot: snapshot,
-            preferences: preferences,
+            preferences: .default,
             now: now
         )
-        #expect(state.quota?.windows.first?.creditsAmount == 20)
-        #expect(state.quota?.windows.first?.creditsCurrency == "USD")
-        #expect(state.quota?.windows.first?.remainingPercent == 20)
+        #expect(state.quotas.first?.windows.first?.creditsAmount == 20)
+        #expect(state.quotas.first?.windows.first?.creditsCurrency == "USD")
+        #expect(state.quotas.first?.windows.first?.remainingPercent == 20)
     }
     #endif
 }

@@ -39,7 +39,7 @@ Authenticated `resetCredits` data adds the available reset count and sorted expi
 
 ## System surfaces and freshness
 
-Home Screen widgets use WidgetKit's system container and accented rendering, so the same layout adapts to full color, tinted and clear appearances. Small widgets prioritize one metric; larger widgets add breakdowns or quota windows. Lock Screen accessories show compact usage or quota readings. Live Activities provide separate Lock Screen and Dynamic Island layouts, and mark expired content as stale.
+Home Screen widgets use WidgetKit's system container and accented rendering, so the same layout adapts to full color, tinted and clear appearances. Small widgets prioritize one metric; larger widgets add breakdowns or quota windows. Lock Screen accessories show compact usage or quota readings. Live Activities provide separate Lock Screen and Dynamic Island layouts, and mark expired content as stale. In Settings → Live Activity, each side of the compact island, the presentation shown beside other activities, and the expanded and Lock Screen layouts each pair an appearance with a data source — like the desktop menu bar: an automatic AI tool (lowest remaining or most recently used) or a named one, an account, a quota window, remaining or used, a period, and all tools or only the recent one.
 
 Widgets read the latest App Group snapshot. The app publishes while connected, and iOS may run a background refresh; WidgetKit and Background Tasks choose their own update budgets. A widget timeline is not a continuous Hub connection. Remote Live Activity updates require APNs configuration on the Hub and a successful push-token registration. A simulator build or local Activity update does not verify remote delivery.
 

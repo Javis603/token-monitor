@@ -32,23 +32,6 @@ final class AppPreferences {
         }
     }
 
-    // Live Activity layout values — the wire values the Hub pushes back in
-    // `content-state.layout`; defaults match the documented fallbacks.
-    enum LiveCompactLeading: String, CaseIterable, Identifiable {
-        case mark, ring, tokens, cost
-        var id: String { rawValue }
-    }
-
-    enum LiveCompactTrailing: String, CaseIterable, Identifiable {
-        case percent, reset, tokens, cost, ring
-        var id: String { rawValue }
-    }
-
-    enum LiveSurfaceStyle: String, CaseIterable, Identifiable {
-        case quota, usage, combined
-        var id: String { rawValue }
-    }
-
     var appearance: AppAppearance {
         didSet { persistLocalPreferences() }
     }
@@ -121,27 +104,9 @@ final class AppPreferences {
         didSet { persistSharedPreferences() }
     }
 
-    var livePeriod: UsagePeriodKey {
-        didSet { persistSharedPreferences() }
-    }
-
-    var liveProviderID: String {
-        didSet { persistSharedPreferences() }
-    }
-
-    var liveCompactLeading: LiveCompactLeading {
-        didSet { persistSharedPreferences() }
-    }
-
-    var liveCompactTrailing: LiveCompactTrailing {
-        didSet { persistSharedPreferences() }
-    }
-
-    var liveExpandedStyle: LiveSurfaceStyle {
-        didSet { persistSharedPreferences() }
-    }
-
-    var liveLockScreenStyle: LiveSurfaceStyle {
+    /// Device-side Live Activity presentation; the widget extension reads it
+    /// from the app group, so it never reaches the Hub.
+    var liveLayout: LiveActivityLayout {
         didSet { persistSharedPreferences() }
     }
 
@@ -184,12 +149,7 @@ final class AppPreferences {
         widgetShowsCost = shared.widgetShowsCost
         widgetShowsUpdateTime = shared.widgetShowsUpdateTime
         liveActivityEnabled = shared.liveActivityEnabled
-        livePeriod = UsagePeriodKey(rawValue: shared.livePeriod) ?? .today
-        liveProviderID = shared.liveProviderID ?? ""
-        liveCompactLeading = LiveCompactLeading(rawValue: shared.liveCompactLeading) ?? .mark
-        liveCompactTrailing = LiveCompactTrailing(rawValue: shared.liveCompactTrailing) ?? .percent
-        liveExpandedStyle = LiveSurfaceStyle(rawValue: shared.liveExpandedStyle) ?? .quota
-        liveLockScreenStyle = LiveSurfaceStyle(rawValue: shared.liveLockScreenStyle) ?? .combined
+        liveLayout = shared.liveLayout
     }
 
     var sharedPreferences: TokenMonitorSharedPayload.Preferences {
@@ -200,12 +160,7 @@ final class AppPreferences {
             widgetShowsCost: widgetShowsCost,
             widgetShowsUpdateTime: widgetShowsUpdateTime,
             liveActivityEnabled: liveActivityEnabled,
-            livePeriod: livePeriod.rawValue,
-            liveProviderID: liveProviderID.nilIfEmpty,
-            liveCompactLeading: liveCompactLeading.rawValue,
-            liveCompactTrailing: liveCompactTrailing.rawValue,
-            liveExpandedStyle: liveExpandedStyle.rawValue,
-            liveLockScreenStyle: liveLockScreenStyle.rawValue,
+            liveLayout: liveLayout,
             currencyCode: currency.rawValue,
             languageCode: language.rawValue,
             limitProviderOrder: limitProviderOrder,

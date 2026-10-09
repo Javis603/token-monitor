@@ -70,36 +70,34 @@ struct TokenMonitorApp: App {
             WidgetCenter.shared.reloadAllTimelines()
 
             if ProcessInfo.processInfo.arguments.contains("--sample-live-activity") {
-                surfacePreferences.liveActivityEnabled = true
                 // Debug layout overrides for screenshots, e.g.
-                // --sample-live-lock=combined --sample-live-expanded=usage
-                // --sample-live-leading=ring --sample-live-trailing=cost
+                // --sample-live-leading=ring --sample-live-trailing=reset
+                // --sample-live-expanded=gauge --sample-live-lock=rings
                 let arguments = ProcessInfo.processInfo.arguments
                 func option(_ name: String) -> String? {
                     let prefix = "--sample-live-\(name)="
                     return arguments.first(where: { $0.hasPrefix(prefix) })
                         .map { String($0.dropFirst(prefix.count)) }
                 }
-                if let value = option("lock") {
-                    surfacePreferences.liveLockScreenStyle = value
-                    preferences.liveLockScreenStyle =
-                        .init(rawValue: value) ?? preferences.liveLockScreenStyle
+                var layout = preferences.liveLayout
+                if let value = option("leading").flatMap(LiveActivityLayout.CompactStyle.init) {
+                    layout.compactLeading.style = value
                 }
-                if let value = option("expanded") {
-                    surfacePreferences.liveExpandedStyle = value
-                    preferences.liveExpandedStyle =
-                        .init(rawValue: value) ?? preferences.liveExpandedStyle
+                if let value = option("trailing").flatMap(LiveActivityLayout.CompactStyle.init) {
+                    layout.compactTrailing.style = value
                 }
-                if let value = option("leading") {
-                    surfacePreferences.liveCompactLeading = value
-                    preferences.liveCompactLeading =
-                        .init(rawValue: value) ?? preferences.liveCompactLeading
+                if let value = option("minimal").flatMap(LiveActivityLayout.MinimalStyle.init) {
+                    layout.minimal = value
                 }
-                if let value = option("trailing") {
-                    surfacePreferences.liveCompactTrailing = value
-                    preferences.liveCompactTrailing =
-                        .init(rawValue: value) ?? preferences.liveCompactTrailing
+                if let value = option("expanded").flatMap(LiveActivityLayout.ExpandedTemplate.init) {
+                    layout.expanded = value
                 }
+                if let value = option("lock").flatMap(LiveActivityLayout.LockScreenTemplate.init) {
+                    layout.lockScreen = value
+                }
+                preferences.liveLayout = layout
+                surfacePreferences = preferences.sharedPreferences
+                surfacePreferences.liveActivityEnabled = true
                 try? snapshotStore.updatePreferences(surfacePreferences)
                 await liveActivityController.setEnabled(
                     true,

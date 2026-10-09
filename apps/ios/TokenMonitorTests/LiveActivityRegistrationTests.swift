@@ -20,7 +20,7 @@ private actor ControlledActivityClient: LiveActivityClient {
     var deleteFails = false
     func setDeleteFailure(_ fails: Bool) { deleteFails = fails }
     func registerLiveActivity(activityID: String, pushToken: Data,
-        preferences: TokenMonitorSharedPayload.Preferences, locale: String,
+        preferences: TokenMonitorSharedPayload.Preferences,
         configuration: HubConfiguration) async throws -> Bool {
         posts.append(configuration)
         return try await withCheckedThrowingContinuation { pending.append($0) }
@@ -46,7 +46,7 @@ struct LiveActivityRegistrationTests {
         let coordinator = LiveActivityRegistrationCoordinator(client: client, bindingStore: journal)
         let a = destination("a"), b = destination("b")
         coordinator.configure(a)
-        let post = Task { try await coordinator.register(activityID: "activity", pushToken: Data([1]), preferences: .default, locale: "en") }
+        let post = Task { try await coordinator.register(activityID: "activity", pushToken: Data([1]), preferences: .default) }
         try #require(await coreEventually { await client.posts.count == 1 })
         #expect(journal.entries.first?.configuration == a)
         coordinator.configure(b)
@@ -63,7 +63,7 @@ struct LiveActivityRegistrationTests {
         let coordinator = LiveActivityRegistrationCoordinator(client: client, bindingStore: journal)
         let destination = destination("a")
         coordinator.configure(destination)
-        let post = Task { try await coordinator.register(activityID: "activity", pushToken: Data([1]), preferences: .default, locale: "en") }
+        let post = Task { try await coordinator.register(activityID: "activity", pushToken: Data([1]), preferences: .default) }
         try #require(await coreEventually { await client.posts.count == 1 })
         coordinator.retireAll()
         await client.complete(0, result: .failure(HubClientError.invalidResponse))
@@ -95,7 +95,7 @@ struct LiveActivityRegistrationTests {
         let coordinator = LiveActivityRegistrationCoordinator(client: client, bindingStore: journal)
         coordinator.configure(destination("a"))
         await #expect(throws: (any Error).self) {
-            _ = try await coordinator.register(activityID: "activity", pushToken: Data([1]), preferences: .default, locale: "en")
+            _ = try await coordinator.register(activityID: "activity", pushToken: Data([1]), preferences: .default)
         }
         #expect(await client.posts.isEmpty)
     }

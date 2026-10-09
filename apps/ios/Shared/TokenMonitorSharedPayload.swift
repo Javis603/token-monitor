@@ -25,6 +25,10 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
         let limits: [Limit]
         let activity: [Day]
         var sourceStale: Bool? = nil
+        /// Running sessions for the Live Activity; nil in caches written before it existed.
+        var agents: TokenMonitorActivityAttributes.ContentState.Agents? = nil
+        /// The most recently used client and its share of usage, for Live Activity slots.
+        var recent: TokenMonitorActivityAttributes.ContentState.Recent? = nil
 
         func usage(for period: String) -> Usage {
             switch period {
@@ -51,6 +55,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
         var tokenComponentsKnown: Bool? = nil
         var throughputKnown: Bool? = nil
         var unclassifiedTokens: Double? = nil
+        var outputTokensPerSecond: Double? = nil
 
         static let empty = Usage(
             tokens: 0,
@@ -75,6 +80,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
         let updatedAt: Date?
         let windows: [LimitWindow]
         var sourceStale: Bool? = nil
+        var accountKey: String? = nil
     }
 
     struct LimitWindow: Codable, Equatable, Identifiable, Sendable {
@@ -84,6 +90,8 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
         let amount: Double?
         let currency: String?
         let resetAt: Date?
+        var windowMinutes: Double? = nil
+        var kind: String? = nil
     }
 
     struct Day: Codable, Equatable, Identifiable, Sendable {
@@ -101,12 +109,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
         var widgetShowsCost: Bool
         var widgetShowsUpdateTime: Bool
         var liveActivityEnabled: Bool
-        var livePeriod: String
-        var liveProviderID: String?
-        var liveCompactLeading: String
-        var liveCompactTrailing: String
-        var liveExpandedStyle: String
-        var liveLockScreenStyle: String
+        var liveLayout: LiveActivityLayout
         var currencyCode: String?
         var languageCode: String?
         var limitProviderOrder: [String]?
@@ -119,12 +122,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             widgetShowsCost: Bool = true,
             widgetShowsUpdateTime: Bool = true,
             liveActivityEnabled: Bool = false,
-            livePeriod: String = "today",
-            liveProviderID: String? = nil,
-            liveCompactLeading: String = "mark",
-            liveCompactTrailing: String = "percent",
-            liveExpandedStyle: String = "quota",
-            liveLockScreenStyle: String = "combined",
+            liveLayout: LiveActivityLayout = LiveActivityLayout(),
             currencyCode: String? = "USD",
             languageCode: String? = "auto",
             limitProviderOrder: [String]? = nil,
@@ -136,12 +134,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             self.widgetShowsCost = widgetShowsCost
             self.widgetShowsUpdateTime = widgetShowsUpdateTime
             self.liveActivityEnabled = liveActivityEnabled
-            self.livePeriod = livePeriod
-            self.liveProviderID = liveProviderID
-            self.liveCompactLeading = liveCompactLeading
-            self.liveCompactTrailing = liveCompactTrailing
-            self.liveExpandedStyle = liveExpandedStyle
-            self.liveLockScreenStyle = liveLockScreenStyle
+            self.liveLayout = liveLayout
             self.currencyCode = currencyCode
             self.languageCode = languageCode
             self.limitProviderOrder = limitProviderOrder
@@ -151,70 +144,18 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             self.init(
-                widgetContent: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .widgetContent
-                ) ?? "overview",
-                widgetPeriod: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .widgetPeriod
-                ) ?? "today",
-                widgetProviderID: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .widgetProviderID
-                ),
-                widgetShowsCost: try container.decodeIfPresent(
-                    Bool.self,
-                    forKey: .widgetShowsCost
-                ) ?? true,
-                widgetShowsUpdateTime: try container.decodeIfPresent(
-                    Bool.self,
-                    forKey: .widgetShowsUpdateTime
-                ) ?? true,
-                liveActivityEnabled: try container.decodeIfPresent(
-                    Bool.self,
-                    forKey: .liveActivityEnabled
-                ) ?? false,
-                livePeriod: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .livePeriod
-                ) ?? "today",
-                liveProviderID: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .liveProviderID
-                ),
-                liveCompactLeading: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .liveCompactLeading
-                ) ?? "mark",
-                liveCompactTrailing: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .liveCompactTrailing
-                ) ?? "percent",
-                liveExpandedStyle: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .liveExpandedStyle
-                ) ?? "quota",
-                liveLockScreenStyle: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .liveLockScreenStyle
-                ) ?? "combined",
-                currencyCode: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .currencyCode
-                ) ?? "USD",
-                languageCode: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .languageCode
-                ) ?? "auto",
-                limitProviderOrder: try container.decodeIfPresent(
-                    [String].self,
-                    forKey: .limitProviderOrder
-                ),
-                hiddenLimitProviders: try container.decodeIfPresent(
-                    [String].self,
-                    forKey: .hiddenLimitProviders
-                )
+                widgetContent: try container.decodeIfPresent(String.self, forKey: .widgetContent) ?? "overview",
+                widgetPeriod: try container.decodeIfPresent(String.self, forKey: .widgetPeriod) ?? "today",
+                widgetProviderID: try container.decodeIfPresent(String.self, forKey: .widgetProviderID),
+                widgetShowsCost: try container.decodeIfPresent(Bool.self, forKey: .widgetShowsCost) ?? true,
+                widgetShowsUpdateTime: try container.decodeIfPresent(Bool.self, forKey: .widgetShowsUpdateTime) ?? true,
+                liveActivityEnabled: try container.decodeIfPresent(Bool.self, forKey: .liveActivityEnabled) ?? false,
+                liveLayout: (try? container.decodeIfPresent(LiveActivityLayout.self, forKey: .liveLayout))
+                    ?? LiveActivityLayout(),
+                currencyCode: try container.decodeIfPresent(String.self, forKey: .currencyCode) ?? "USD",
+                languageCode: try container.decodeIfPresent(String.self, forKey: .languageCode) ?? "auto",
+                limitProviderOrder: try container.decodeIfPresent([String].self, forKey: .limitProviderOrder),
+                hiddenLimitProviders: try container.decodeIfPresent([String].self, forKey: .hiddenLimitProviders)
             )
         }
 
@@ -226,22 +167,11 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             try container.encode(widgetShowsCost, forKey: .widgetShowsCost)
             try container.encode(widgetShowsUpdateTime, forKey: .widgetShowsUpdateTime)
             try container.encode(liveActivityEnabled, forKey: .liveActivityEnabled)
-            try container.encode(livePeriod, forKey: .livePeriod)
-            try container.encodeIfPresent(liveProviderID, forKey: .liveProviderID)
-            try container.encode(liveCompactLeading, forKey: .liveCompactLeading)
-            try container.encode(liveCompactTrailing, forKey: .liveCompactTrailing)
-            try container.encode(liveExpandedStyle, forKey: .liveExpandedStyle)
-            try container.encode(liveLockScreenStyle, forKey: .liveLockScreenStyle)
+            try container.encode(liveLayout, forKey: .liveLayout)
             try container.encodeIfPresent(currencyCode, forKey: .currencyCode)
             try container.encodeIfPresent(languageCode, forKey: .languageCode)
-            try container.encodeIfPresent(
-                limitProviderOrder,
-                forKey: .limitProviderOrder
-            )
-            try container.encodeIfPresent(
-                hiddenLimitProviders,
-                forKey: .hiddenLimitProviders
-            )
+            try container.encodeIfPresent(limitProviderOrder, forKey: .limitProviderOrder)
+            try container.encodeIfPresent(hiddenLimitProviders, forKey: .hiddenLimitProviders)
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -251,34 +181,14 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             case widgetShowsCost
             case widgetShowsUpdateTime
             case liveActivityEnabled
-            case livePeriod
-            case liveProviderID
-            case liveCompactLeading
-            case liveCompactTrailing
-            case liveExpandedStyle
-            case liveLockScreenStyle
+            case liveLayout
             case currencyCode
             case languageCode
             case limitProviderOrder
             case hiddenLimitProviders
         }
 
-        static let `default` = Preferences(
-            widgetContent: "overview",
-            widgetPeriod: "today",
-            widgetProviderID: nil,
-            widgetShowsCost: true,
-            widgetShowsUpdateTime: true,
-            liveActivityEnabled: false,
-            livePeriod: "today",
-            liveProviderID: nil,
-            liveCompactLeading: "mark",
-            liveCompactTrailing: "percent",
-            liveExpandedStyle: "quota",
-            liveLockScreenStyle: "combined",
-            currencyCode: "USD",
-            languageCode: "auto"
-        )
+        static let `default` = Preferences()
     }
 }
 
@@ -286,6 +196,7 @@ nonisolated extension TokenMonitorSharedPayload.Usage {
     private enum CodingKeys: String, CodingKey {
         case tokens, cost, cacheReadTokens, outputTokens, tools, models
         case tokensKnown, costKnown, tokenComponentsKnown, throughputKnown, unclassifiedTokens
+        case outputTokensPerSecond
     }
 
     init(from decoder: Decoder) throws {
@@ -301,7 +212,8 @@ nonisolated extension TokenMonitorSharedPayload.Usage {
             costKnown: try values.decodeIfPresent(Bool.self, forKey: .costKnown),
             tokenComponentsKnown: try values.decodeIfPresent(Bool.self, forKey: .tokenComponentsKnown),
             throughputKnown: try values.decodeIfPresent(Bool.self, forKey: .throughputKnown),
-            unclassifiedTokens: try values.decodeIfPresent(Double.self, forKey: .unclassifiedTokens)
+            unclassifiedTokens: try values.decodeIfPresent(Double.self, forKey: .unclassifiedTokens),
+            outputTokensPerSecond: try values.decodeIfPresent(Double.self, forKey: .outputTokensPerSecond)
         )
     }
 
@@ -319,6 +231,7 @@ nonisolated extension TokenMonitorSharedPayload.Usage {
         try values.encodeIfPresent(tokenComponentsKnown, forKey: .tokenComponentsKnown)
         try values.encodeIfPresent(throughputKnown, forKey: .throughputKnown)
         try values.encodeIfPresent(unclassifiedTokens, forKey: .unclassifiedTokens)
+        try values.encodeIfPresent(outputTokensPerSecond, forKey: .outputTokensPerSecond)
     }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
@@ -331,6 +244,7 @@ nonisolated extension TokenMonitorSharedPayload.Usage {
             && lhs.tokensKnown == rhs.tokensKnown && lhs.costKnown == rhs.costKnown
             && lhs.tokenComponentsKnown == rhs.tokenComponentsKnown && lhs.throughputKnown == rhs.throughputKnown
             && lhs.unclassifiedTokens == rhs.unclassifiedTokens
+            && lhs.outputTokensPerSecond == rhs.outputTokensPerSecond
     }
 }
 

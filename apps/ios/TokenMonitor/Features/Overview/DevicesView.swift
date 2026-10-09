@@ -32,6 +32,7 @@ struct DevicesView: View {
         }
         .navigationTitle("Devices")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarVisibility(.visible, for: .navigationBar)
     }
 
     private var devices: [DeviceSnapshot] { store.stats?.usageDevices(for: store.selectedPeriod) ?? [] }

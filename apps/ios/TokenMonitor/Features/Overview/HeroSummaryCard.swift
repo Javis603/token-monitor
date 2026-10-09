@@ -2,38 +2,35 @@ import SwiftUI
 
 struct HeroSummaryCard: View {
     @Environment(AppPreferences.self) private var preferences
-    @Environment(\.locale) private var locale
+    @Environment(TokenMonitorStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .largeTitle) private var headlineSize = 40
 
-    @Binding var selectedPeriod: UsagePeriodKey
+    @State private var showsCacheDetails = false
+
     let period: UsagePeriod
-    let updatedAt: String?
 
     var body: some View {
         SurfaceCard {
-            VStack(alignment: .leading, spacing: 16) {
-                summaryHeader
-
+            VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 8) {
+                    summaryHeader
                     Text(period.totalTokens.map(MetricFormatter.exactTokens) ?? "—")
                         .font(.system(size: headlineSize, weight: .semibold))
                         .monospacedDigit()
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
+                        .contentTransition(reduceMotion ? .identity : .numericText(value: period.totalTokens ?? 0))
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: period.totalTokens)
                         .accessibilityLabel(period.totalTokens.map {
                             "\(MetricFormatter.exactTokens($0)) tokens"
                         } ?? String(localized: "No data"))
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            costReading.fixedSize(horizontal: true, vertical: false)
-                            Spacer(minLength: 0)
-                            freshness.fixedSize(horizontal: true, vertical: false)
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            costReading
-                            freshness
-                        }
+                    costReading
+                    if store.stats?.allSourcesStale == true {
+                        Label("Usage data is stale", systemImage: "clock.badge.exclamationmark")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Divider()
@@ -41,52 +38,75 @@ struct HeroSummaryCard: View {
                     ? AnyLayout(VStackLayout(alignment: .leading, spacing: 14))
                     : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
                 metricsLayout {
-                    metric("Cache read", value: period.cacheReadTokens)
-                    metric("Cache write", value: period.cacheWriteTokens)
-                    metric("Output", value: period.outputTokens)
+                    cacheHitMetric
+                    let messages = store.currentHistory.messageCount(for: store.selectedPeriod)
+                    metric("Messages", value: messages.map(MetricFormatter.tokens),
+                           accessibleValue: messages.map(MetricFormatter.exactTokens))
+                    metric("Average speed", value: period.averageOutputTokensPerSecond.map {
+                        $0.formatted(.number.precision(.fractionLength(0...1))) + " tok/s"
+                    })
+                    .accessibilityHint("Average output speed for requests with reported timing in the selected period.")
                 }
-                Divider()
-                NavigationLink {
-                    SessionsView()
-                } label: {
-                    HStack(spacing: 8) {
-                        Label("Sessions", systemImage: "bubble.left.and.bubble.right")
-                            .font(.subheadline.weight(.medium))
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .foregroundStyle(.primary)
-                    .frame(minHeight: DesignTokens.controlHeight)
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
             }
+        }
+        .onChange(of: store.selectedPeriod) {
+            showsCacheDetails = false
         }
     }
 
     @ViewBuilder
-    private var summaryHeader: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            expandedHeader
-        } else {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    totalTitle.fixedSize(horizontal: true, vertical: false)
-                    Spacer(minLength: 0)
-                    PeriodPicker(selection: $selectedPeriod, compact: true)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-                expandedHeader
+    private var cacheHitMetric: some View {
+        let value = period.cacheHitPercent.map(MetricFormatter.percent)
+        if period.cacheHitUsesPartialData {
+            Button {
+                showsCacheDetails = true
+            } label: {
+                metric("Cache hit rate", value: value, showsInfo: true)
             }
+            .buttonStyle(.plain)
+            .contentShape(.rect.inset(by: -4))
+            .accessibilityLabel("Cache hit rate")
+            .accessibilityValue(value ?? String(localized: "No data"))
+            .accessibilityHint("Cache hit rate uses classified data only.")
+            .popover(isPresented: $showsCacheDetails) {
+                Text("Cache hit rate uses classified data only.")
+                    .font(.footnote)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(16)
+                    .frame(idealWidth: 260, maxWidth: 280, alignment: .leading)
+                    .presentationCompactAdaptation(.popover)
+            }
+        } else {
+            metric("Cache hit rate", value: value)
         }
     }
 
-    private var expandedHeader: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private var sessionsLink: some View {
+        NavigationLink {
+            SessionsView()
+        } label: {
+            HStack(spacing: 5) {
+                Text("Sessions")
+                    .font(.caption)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(.primary)
+            .frame(minWidth: DesignTokens.controlHeight, minHeight: DesignTokens.controlHeight, alignment: .leading)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var summaryHeader: some View {
+        HStack(spacing: 12) {
             totalTitle
-            PeriodPicker(selection: $selectedPeriod)
+            Spacer(minLength: 8)
+        }
+        // The expanded hit area must not add space between the label and reading.
+        .overlay(alignment: .trailing) {
+            sessionsLink
         }
     }
 
@@ -94,7 +114,7 @@ struct HeroSummaryCard: View {
         Text(period.costUsd.map {
             MetricFormatter.currencyFromUSD($0, currency: preferences.currency)
         } ?? "—")
-            .font(.title2)
+            .font(.title3)
             .foregroundStyle(.secondary)
             .monospacedDigit()
             .lineLimit(1)
@@ -111,28 +131,26 @@ struct HeroSummaryCard: View {
             .foregroundStyle(.secondary)
     }
 
-    @ViewBuilder
-    private var freshness: some View {
-        if let updatedDate = Date.hubTimestamp(from: updatedAt) {
-            Text(updatedDate.updateDescription(locale: locale))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func metric(_ title: LocalizedStringKey, value: Double?) -> some View {
+    private func metric(_ title: LocalizedStringKey, value: String?, accessibleValue: String? = nil, showsInfo: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .lineLimit(1)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value.map(MetricFormatter.tokens) ?? "—")
+            HStack(spacing: 4) {
+                Text(title)
+                    .lineLimit(1)
+                if showsInfo {
+                    Image(systemName: "info.circle")
+                        .font(.caption2)
+                        .accessibilityHidden(true)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Text(value ?? "—")
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(title))
-        .accessibilityValue(value.map { MetricFormatter.exactTokens($0) + " tokens" } ?? String(localized: "No data"))
+        .accessibilityValue(accessibleValue ?? value ?? String(localized: "No data"))
     }
 }

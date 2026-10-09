@@ -7,9 +7,7 @@ struct LimitsView: View {
     @State private var showsOrderEditor = false
 
     var body: some View {
-        ZStack {
-            AppBackground()
-
+        Group {
             if let stats = store.stats {
                 let providers = stats.orderedLimits(
                     order: preferences.limitProviderOrder,
@@ -38,6 +36,22 @@ struct LimitsView: View {
                                     .id(group.id)
                                 }
                             }
+
+                            ViewThatFits(in: .horizontal) {
+                                HStack {
+                                    customizationButton
+                                    Spacer()
+                                    refreshButton
+                                }
+                                VStack(alignment: .leading, spacing: 4) {
+                                    customizationButton
+                                    refreshButton
+                                }
+                            }
+                            .font(.footnote)
+                            .labelStyle(.titleAndIcon)
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
                         }
                         .padding(.horizontal, DesignTokens.screenPadding)
                         .padding(.top, 8)
@@ -73,30 +87,40 @@ struct LimitsView: View {
                 .padding(DesignTokens.screenPadding)
             }
         }
-        .navigationTitle("AI Limits")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Customize AI Limits", systemImage: "slider.horizontal.3") {
-                    showsOrderEditor = true
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Refresh", systemImage: "arrow.clockwise", action: refresh)
-                    .disabled(store.isRefreshing)
-            }
+        .modifier(RootPageHeader("AI Limits"))
+        .background {
+            AppBackground()
         }
         .sheet(isPresented: $showsOrderEditor) {
             NavigationStack {
                 LimitProviderOrderEditor()
                     .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
+                        ToolbarItem(placement: .topBarLeading) {
                             Button("Done") { showsOrderEditor = false }
                                 .fontWeight(.semibold)
                         }
                     }
             }
         }
+    }
+
+    private var customizationButton: some View {
+        Button {
+            showsOrderEditor = true
+        } label: {
+            Label("Customize AI Limits", systemImage: "slider.horizontal.3")
+                .frame(minHeight: DesignTokens.controlHeight)
+                .contentShape(.rect)
+        }
+    }
+
+    private var refreshButton: some View {
+        Button(action: refresh) {
+            Label("Refresh", systemImage: "arrow.clockwise")
+                .frame(minHeight: DesignTokens.controlHeight)
+                .contentShape(.rect)
+        }
+        .disabled(store.isRefreshing)
     }
 
     private func refresh() {

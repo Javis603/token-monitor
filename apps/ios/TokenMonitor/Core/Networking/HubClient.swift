@@ -13,7 +13,7 @@ extension HubDataClient {
 
 nonisolated protocol LiveActivityClient: Sendable {
     func registerLiveActivity(activityID: String, pushToken: Data,
-        preferences: TokenMonitorSharedPayload.Preferences, locale: String,
+        preferences: TokenMonitorSharedPayload.Preferences,
         configuration: HubConfiguration) async throws -> Bool
     func unregisterLiveActivity(activityID: String, configuration: HubConfiguration) async throws
 }
@@ -67,14 +67,17 @@ actor HubClient: HubDataClient, LiveActivityClient {
         activityID: String,
         pushToken: Data,
         preferences: TokenMonitorSharedPayload.Preferences,
-        locale: String,
         configuration: HubConfiguration
     ) async throws -> Bool {
         let payload = LiveActivityRegistrationPayload(
             activityID: activityID,
             token: pushToken.map { String(format: "%02x", $0) }.joined(),
-            preferences: preferences,
-            locale: locale
+            preferences: .init(
+                liveActivityEnabled: preferences.liveActivityEnabled,
+                hiddenLimitProviders: preferences.hiddenLimitProviders ?? [],
+                providerIDs: preferences.liveLayout.referencedProviderIDs,
+                accountKeys: preferences.liveLayout.referencedAccountKeys
+            )
         )
         var request = request(
             path: "api/live-activities/register",
@@ -179,11 +182,18 @@ actor HubClient: HubDataClient, LiveActivityClient {
     }
 }
 
+/// Only data choices cross to the Hub; presentation stays in the app group.
 nonisolated struct LiveActivityRegistrationPayload: Encodable, Sendable {
+    struct Preferences: Encodable, Sendable {
+        let liveActivityEnabled: Bool
+        let hiddenLimitProviders: [String]
+        let providerIDs: [String]
+        let accountKeys: [String]
+    }
+
     let activityID: String
     let token: String
-    let preferences: TokenMonitorSharedPayload.Preferences
-    let locale: String
+    let preferences: Preferences
 }
 
 nonisolated struct LiveActivityRegistrationResponse: Decodable, Sendable {

@@ -5,17 +5,19 @@ struct SettingsView: View {
     @Environment(TokenMonitorStore.self) private var store
     @Environment(AppPreferences.self) private var preferences
     @Environment(LiveActivityController.self) private var liveActivity
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         settingsForm
             .formStyle(.grouped)
-            .listSectionSpacing(24)
+            .listSectionSpacing(DesignTokens.sectionSpacing)
             .scrollContentBackground(.hidden)
             .background {
                 AppBackground()
             }
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
+            .contentMargins(.top, 8, for: .scrollContent)
+            .contentMargins(.horizontal, DesignTokens.screenPadding, for: .scrollContent)
+            .modifier(RootPageHeader("Settings"))
     }
 
     @ViewBuilder
@@ -25,19 +27,25 @@ struct SettingsView: View {
                 NavigationLink {
                     HubConnectionView()
                 } label: {
-                    HStack(spacing: 12) {
-                        SettingsIcon(systemImage: "network", tint: DesignTokens.accent)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Hub")
-                            Text(LocalizedStringKey(hubHost))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                    let layout = dynamicTypeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                        : AnyLayout(HStackLayout(spacing: 12))
+                    layout {
+                        HStack(spacing: 12) {
+                            SettingsIcon(systemImage: "network", tint: DesignTokens.accent)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Hub")
+                                Text(LocalizedStringKey(hubHost))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
                         }
-                        Spacer(minLength: 8)
+                        .layoutPriority(1)
+                        if !dynamicTypeSize.isAccessibilitySize {
+                            Spacer(minLength: 8)
+                        }
                         if sampleMode && !hubConfigured {
-                            // Sample mode has no Hub — never claim a live
-                            // connection.
                             Text("Sample data")
                                 .font(.caption)
                                 .bold()
@@ -50,6 +58,8 @@ struct SettingsView: View {
                                 )
                         } else {
                             ConnectionBadge(phase: store.phase)
+                                .labelStyle(.titleAndIcon)
+                                .fixedSize()
                         }
                     }
                 }
@@ -59,21 +69,24 @@ struct SettingsView: View {
                 customizeRow(
                     "Appearance",
                     icon: "circle.lefthalf.filled",
-                    tint: Color(red: 0.42, green: 0.45, blue: 0.95)
+                    tint: Color(red: 0.42, green: 0.45, blue: 0.95),
+                    value: Text(LocalizedStringKey(preferences.appearance.title))
                 ) {
                     appearanceSection(preferences: preferences)
                 }
                 customizeRow(
                     "Language & Region",
                     icon: "globe",
-                    tint: Color(red: 0.16, green: 0.6, blue: 0.86)
+                    tint: Color(red: 0.16, green: 0.6, blue: 0.86),
+                    value: Text("\(Text(LocalizedStringKey(preferences.language.displayName))) · \(preferences.currency.rawValue)")
                 ) {
                     regionalSection(preferences: preferences)
                 }
                 customizeRow(
                     "Overview",
                     icon: "house.fill",
-                    tint: Color(red: 0.95, green: 0.58, blue: 0.2)
+                    tint: Color(red: 0.95, green: 0.58, blue: 0.2),
+                    value: Text("\(preferences.homeLimitCount) providers")
                 ) {
                     overviewSection(preferences: preferences)
                 }
@@ -81,37 +94,34 @@ struct SettingsView: View {
                     LimitProviderOrderEditor()
                         .navigationBarTitleDisplayMode(.inline)
                 } label: {
-                    Label {
-                        Text("AI Limits")
-                    } icon: {
-                        SettingsIcon(
-                            systemImage: "gauge.with.needle",
-                            tint: Color(red: 0.25, green: 0.62, blue: 0.55)
-                        )
-                    }
+                    settingsLabel(
+                        "AI Limits",
+                        icon: "gauge.with.needle",
+                        tint: Color(red: 0.25, green: 0.62, blue: 0.55),
+                        value: Text("\(visibleLimitProviderCount) visible")
+                    )
                 }
                 customizeRow(
                     "Widgets",
                     icon: "widget.small.badge.plus",
-                    tint: Color(red: 0.62, green: 0.4, blue: 0.92)
+                    tint: Color(red: 0.62, green: 0.4, blue: 0.92),
+                    value: Text(LocalizedStringKey(preferences.widgetContent.title))
                 ) {
                     widgetSection(preferences: preferences)
                 }
                 NavigationLink {
                     LiveActivityCustomizerView()
                 } label: {
-                    Label {
-                        Text("Live Activity")
-                    } icon: {
-                        SettingsIcon(
-                            systemImage: "platter.filled.bottom.and.arrow.down.iphone",
-                            tint: Color(red: 0.28, green: 0.7, blue: 0.4)
-                        )
-                    }
+                    settingsLabel(
+                        "Live Activity",
+                        icon: "platter.filled.bottom.and.arrow.down.iphone",
+                        tint: Color(red: 0.28, green: 0.7, blue: 0.4),
+                        value: Text(LocalizedStringKey(liveActivity.isActive ? "Active" : preferences.liveActivityEnabled ? "Waiting" : "Off"))
+                    )
                 }
             }
 
-            Section {
+            Section("Information") {
                 NavigationLink {
                     settingsPage("Status") { statusSection }
                 } label: {
@@ -127,26 +137,22 @@ struct SettingsView: View {
                 NavigationLink {
                     settingsPage("Privacy") { privacySection }
                 } label: {
-                    Label {
-                        Text("Privacy")
-                    } icon: {
-                        SettingsIcon(
-                            systemImage: "lock.shield.fill",
-                            tint: Color(red: 0.2, green: 0.55, blue: 0.85)
-                        )
-                    }
+                    settingsLabel(
+                        "Privacy",
+                        icon: "lock.shield.fill",
+                        tint: Color(red: 0.2, green: 0.55, blue: 0.85),
+                        value: Text(LocalizedStringKey(preferences.masksAccountEmails ? "Emails masked" : "Emails visible"))
+                    )
                 }
                 NavigationLink {
                     settingsPage("About") { aboutSection }
                 } label: {
-                    Label {
-                        Text("About")
-                    } icon: {
-                        SettingsIcon(
-                            systemImage: "info.circle.fill",
-                            tint: Color(red: 0.55, green: 0.6, blue: 0.66)
-                        )
-                    }
+                    settingsLabel(
+                        "About",
+                        icon: "info.circle.fill",
+                        tint: Color(red: 0.55, green: 0.6, blue: 0.66),
+                        value: Text(appVersion)
+                    )
                 }
             }
         }
@@ -176,17 +182,58 @@ struct SettingsView: View {
         _ title: LocalizedStringKey,
         icon: String,
         tint: Color,
+        value: Text? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         NavigationLink {
             settingsPage(title, content: content)
         } label: {
-            Label {
+            settingsLabel(title, icon: icon, tint: tint, value: value)
+        }
+    }
+
+    private func settingsLabel(
+        _ title: LocalizedStringKey,
+        icon: String,
+        tint: Color,
+        value: Text? = nil
+    ) -> some View {
+        HStack(spacing: 12) {
+            SettingsIcon(systemImage: icon, tint: tint)
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                : AnyLayout(HStackLayout(spacing: 8))
+            layout {
                 Text(title)
-            } icon: {
-                SettingsIcon(systemImage: icon, tint: tint)
+                    .foregroundStyle(.primary)
+                    .layoutPriority(1)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Spacer(minLength: 8)
+                }
+                if let value {
+                    value
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                }
             }
         }
+    }
+
+    private var visibleLimitProviderCount: Int {
+        let ids = (store.stats?.limits?.providers ?? []).map(\.normalizedProviderID)
+            + preferences.limitProviderOrder
+            + Array(preferences.hiddenLimitProviders)
+        return LimitProviderOrder.sortedIDs(ids, order: preferences.limitProviderOrder)
+            .filter { !preferences.hiddenLimitProviders.contains($0) }.count
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    }
+
+    private var appBuild: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
     }
 
     private func settingsPage<Content: View>(
@@ -195,11 +242,12 @@ struct SettingsView: View {
     ) -> some View {
         Form { content() }
             .formStyle(.grouped)
-            .listSectionSpacing(24)
+            .listSectionSpacing(DesignTokens.sectionSpacing)
             .scrollContentBackground(.hidden)
             .background { AppBackground() }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarVisibility(.visible, for: .navigationBar)
             .tint(DesignTokens.accent)
     }
 
@@ -210,7 +258,7 @@ struct SettingsView: View {
         Section {
             Picker("Language", selection: $preferences.language) {
                 ForEach(AppLanguage.allCases) { language in
-                    Text(language.displayName).tag(language)
+                    Text(LocalizedStringKey(language.displayName)).tag(language)
                 }
             }
 
@@ -312,13 +360,13 @@ struct SettingsView: View {
                 }
             }
             .pickerStyle(.inline)
-        } header: {
-            Label("Appearance", systemImage: "circle.lefthalf.filled")
+        } footer: {
+            Text("System follows your iPhone’s appearance. Display preferences do not change your desktop app.")
         }
     }
 
     private var statusSection: some View {
-        Section("Status") {
+        Section {
             LabeledContent("Connection") {
                 ConnectionBadge(phase: store.phase)
             }
@@ -333,48 +381,77 @@ struct SettingsView: View {
                 Text(store.stats?.devices.map { $0.count.formatted() } ?? "—")
                     .monospacedDigit()
             }
+
+            if case let .failed(message) = store.phase {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(DesignTokens.critical)
+            }
+        } header: {
+            Text("Status")
+        } footer: {
+            Text("Connection status describes the link to your Hub. Provider update times are shown with each account’s limits.")
         }
     }
 
+    @ViewBuilder
     private var privacySection: some View {
-        Section("Privacy") {
+        @Bindable var preferences = preferences
+
+        Section {
+            Toggle("Mask account emails", isOn: $preferences.masksAccountEmails)
+        } footer: {
+            Text("Hide parts of account email addresses when displaying limits in the app.")
+        }
+
+        Section("Data protection") {
             Label(
                 "The shared secret is stored in the iOS Keychain.",
                 systemImage: "key.fill"
             )
+            .accessibilityElement(children: .combine)
             Label(
                 "Widgets receive only a versioned, privacy-safe usage snapshot.",
                 systemImage: "rectangle.3.group.bubble.left.fill"
             )
+            .accessibilityElement(children: .combine)
             Label(
                 "Provider credentials stay on your reporting devices.",
                 systemImage: "lock.shield.fill"
             )
+            .accessibilityElement(children: .combine)
         }
     }
 
+    @ViewBuilder
     private var aboutSection: some View {
         Section("About") {
             LabeledContent("App", value: "Token Monitor for iOS")
+            LabeledContent("Version", value: appVersion)
+            LabeledContent("Build", value: appBuild)
             LabeledContent("Minimum version", value: "iOS 26")
             LabeledContent("Data source", value: "Token Monitor Hub")
+        }
+        Section("Support") {
+            if let url = URL(string: "https://github.com/Javis603/token-monitor") {
+                Link(destination: url) {
+                    Label("Project website", systemImage: "safari")
+                }
+            }
+            if let url = URL(string: "https://github.com/Javis603/token-monitor/issues") {
+                Link(destination: url) {
+                    Label("Report an issue", systemImage: "bubble.left.and.exclamationmark.bubble.right")
+                }
+            }
         }
     }
 
     private var providerIDs: [String] {
         LimitProviderOrder.sortedIDs(
             (store.stats?.limits?.providers ?? []).map(\.normalizedProviderID)
-                + [preferences.widgetProviderID, preferences.liveProviderID].filter { !$0.isEmpty },
+                + [preferences.widgetProviderID].filter { !$0.isEmpty },
             order: preferences.limitProviderOrder
         )
-    }
-
-    private func saveAndConnect() {
-        guard let configuration = settings.save() else {
-            return
-        }
-        liveActivity.configure(configuration)
-        store.configure(configuration)
     }
 }
 
@@ -388,14 +465,28 @@ struct HubConnectionView: View {
         @Bindable var settings = settings
         Form {
             Section {
-                TextField("Hub URL", text: $settings.hubURL)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Hub URL")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField(text: $settings.hubURL, prompt: Text(verbatim: "https://your-hub.example")) {
+                        Text("Hub URL")
+                    }
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .textContentType(.URL)
+                }
 
-                SecureField("Shared secret", text: $settings.secret)
-                    .textContentType(.password)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Shared secret")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    SecureField("Shared secret", text: $settings.secret)
+                        .textContentType(.password)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
 
                 Button("Save & Connect", systemImage: "link") {
                     guard let configuration = settings.save() else { return }
@@ -418,13 +509,25 @@ struct HubConnectionView: View {
                     "The iOS app reads your existing Token Monitor Hub. It never runs local collectors."
                 )
             }
+
+            Section("Status") {
+                LabeledContent("Connection") {
+                    ConnectionBadge(phase: store.phase)
+                }
+                if case let .failed(message) = store.phase {
+                    Label(message, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(DesignTokens.critical)
+                }
+            }
         }
         .formStyle(.grouped)
-        .listSectionSpacing(24)
+        .listSectionSpacing(DesignTokens.sectionSpacing)
         .scrollContentBackground(.hidden)
         .background { AppBackground() }
         .navigationTitle("Hub")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarVisibility(.visible, for: .navigationBar)
         .tint(DesignTokens.accent)
     }
 }
@@ -434,11 +537,13 @@ private struct SettingsIcon: View {
     let systemImage: String
     let tint: Color
 
+    @ScaledMetric(relativeTo: .subheadline) private var size = 30.0
+
     var body: some View {
         Image(systemName: systemImage)
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.white)
-            .frame(width: 30, height: 30)
+            .frame(width: size, height: size)
             .background(tint, in: .rect(cornerRadius: 8, style: .continuous))
             .accessibilityHidden(true)
     }

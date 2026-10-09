@@ -45,11 +45,14 @@ struct AppPreferencesTests {
         preferences.widgetPeriod = .month
         preferences.widgetProviderID = "claude"
         preferences.liveActivityEnabled = true
-        preferences.liveProviderID = "codex"
-        preferences.liveCompactLeading = .ring
-        preferences.liveCompactTrailing = .cost
-        preferences.liveExpandedStyle = .usage
-        preferences.liveLockScreenStyle = .combined
+        var layout = LiveActivityLayout()
+        layout.compactLeading = .init(style: .percentReset, source: .init(providerID: "codex", accountKey: "work", window: .weekly, value: .used))
+        layout.compactTrailing = .init(style: .tokens, source: .init(period: .month, scope: .recent))
+        layout.expanded = .providers
+        layout.lockScreen = .quota
+        layout.minimal = .percent
+        layout.lockScreenSource = .init(automatic: .recent)
+        preferences.liveLayout = layout
         preferences.currency = .hkd
         preferences.language = .traditionalChinese
 
@@ -58,11 +61,9 @@ struct AppPreferencesTests {
         #expect(persisted.widgetPeriod == "month")
         #expect(persisted.widgetProviderID == "claude")
         #expect(persisted.liveActivityEnabled)
-        #expect(persisted.liveProviderID == "codex")
-        #expect(persisted.liveCompactLeading == "ring")
-        #expect(persisted.liveCompactTrailing == "cost")
-        #expect(persisted.liveExpandedStyle == "usage")
-        #expect(persisted.liveLockScreenStyle == "combined")
+        #expect(persisted.liveLayout.referencedProviderIDs == ["codex"])
+        #expect(persisted.liveLayout.referencedAccountKeys == ["work"])
+        #expect(persisted.liveLayout == layout)
         #expect(persisted.currencyCode == "HKD")
         #expect(persisted.languageCode == "zh-TW")
     }
@@ -114,8 +115,8 @@ struct AppPreferencesTests {
 
     @Test
     func legacySurfacePreferencesDecodeWithLayoutDefaults() throws {
-        // Old payloads carry the removed live*Field keys; unknown keys are
-        // ignored and the layout options fall back to the documented defaults.
+        // Old payloads carry removed live* keys; unknown keys are ignored and
+        // the layout falls back to its defaults.
         let data = Data(
             """
             {
@@ -129,6 +130,7 @@ struct AppPreferencesTests {
               "liveIconProviderID": "claude",
               "liveCompactTrailingField": "cost",
               "liveLockScreenBottomField": "progress",
+              "liveCompactLeading": "mark",
               "currencyCode": "USD",
               "languageCode": "auto"
             }
@@ -140,11 +142,21 @@ struct AppPreferencesTests {
             from: data
         )
 
-        #expect(preferences.liveProviderID == nil)
-        #expect(preferences.liveCompactLeading == "mark")
-        #expect(preferences.liveCompactTrailing == "percent")
-        #expect(preferences.liveExpandedStyle == "quota")
-        #expect(preferences.liveLockScreenStyle == "combined")
+        #expect(preferences.liveLayout == LiveActivityLayout())
+    }
+
+    @Test
+    func liveLayoutDecodesUnknownValuesFieldByField() throws {
+        let data = Data(#"{"compactLeading":{"style":"agents","source":{"providerID":"claude","window":"hourly","value":"used"}},"compactTrailing":"bogus","expanded":"usage","lockScreenSource":{"scope":7}}"#.utf8)
+        let layout = try JSONDecoder().decode(LiveActivityLayout.self, from: data)
+        #expect(layout.compactLeading.style == .agents)
+        #expect(layout.compactLeading.source.providerID == "claude")
+        #expect(layout.compactLeading.source.window == .primary)
+        #expect(layout.compactLeading.source.value == .used)
+        #expect(layout.compactTrailing == LiveActivityLayout().compactTrailing)
+        #expect(layout.expanded == .usage)
+        #expect(layout.lockScreenSource == .init())
+        #expect(layout.lockScreen == .overview)
     }
 
     @Test

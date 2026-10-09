@@ -206,8 +206,7 @@ final class LiveActivityController {
             let result = try await registrations.register(
                 activityID: activityID,
                 pushToken: pushToken,
-                preferences: preferences,
-                locale: resolvedLocaleIdentifier(for: preferences)
+                preferences: preferences
             )
             guard self.generation == generation, !Task.isCancelled, let pushEnabled = result else { return }
             remoteUpdatesEnabled = pushEnabled
@@ -231,75 +230,68 @@ final class LiveActivityController {
         }
     }
 
-    private func resolvedLocaleIdentifier(
-        for preferences: TokenMonitorSharedPayload.Preferences
-    ) -> String {
-        switch preferences.languageCode {
-        case "en": return "en"
-        case "zh-TW": return "zh-Hant"
-        case "zh-CN": return "zh-Hans"
-        case "ja": return "ja"
-        case "ko": return "ko"
-        default: return Locale.autoupdatingCurrent.identifier
-        }
-    }
-
-    /// Structured ContentState v2 — identical selection semantics to
-    /// `buildLiveActivityContentState` in `src/shared/liveActivity.js` so the
-    /// locally driven and APNs-driven updates draw the same thing.
+    /// Structured ContentState v4 — the same record selection as
+    /// `buildLiveActivityContentState` in `src/shared/liveActivity.js`, so the
+    /// locally driven and APNs-driven updates draw the same thing. The snapshot
+    /// limits arrive already ordered and filtered by the user's hidden list.
     nonisolated static func contentState(
         snapshot: TokenMonitorSharedPayload.Snapshot,
         preferences: TokenMonitorSharedPayload.Preferences,
         now: Date = .now
     ) -> TokenMonitorActivityAttributes.ContentState {
-        let usage = snapshot.usage(for: preferences.livePeriod)
-        let limit = quotaLimit(in: snapshot.limits, providerID: preferences.liveProviderID)
+        typealias State = TokenMonitorActivityAttributes.ContentState
+        func periodUsage(_ usage: TokenMonitorSharedPayload.Usage) -> State.PeriodUsage {
+            State.PeriodUsage(
+                tokens: usage.tokens.isFinite ? usage.tokens : nil,
+                costUSD: usage.cost.isFinite ? usage.cost : nil,
+                outputTPS: usage.outputTokensPerSecond.map { ($0 * 10).rounded() / 10 }
+            )
+        }
         let sourceDate = snapshot.updatedAt <= now ? snapshot.updatedAt : .distantPast
         let sourceStale = snapshot.sourceStale == true
             || sourceDate == .distantPast
             || now.timeIntervalSince(sourceDate) >= 900
-        return TokenMonitorActivityAttributes.ContentState(
+        let limits = selectedLimits(
+            snapshot.limits,
+            providerIDs: preferences.liveLayout.referencedProviderIDs,
+            accountKeys: preferences.liveLayout.referencedAccountKeys,
+            recentClient: snapshot.recent?.client
+        )
+        return State(
             updatedAt: sourceDate,
             sourceStale: sourceStale,
-            period: preferences.livePeriod,
-            tokens: usage.tokens.isFinite ? usage.tokens : nil,
-            costUSD: usage.cost.isFinite ? usage.cost : nil,
-            quota: limit.map { limit in
-                TokenMonitorActivityAttributes.ContentState.Quota(
+            usage: State.Usage(today: periodUsage(snapshot.today), month: periodUsage(snapshot.month)),
+            recent: snapshot.recent,
+            quotas: limits.map { limit in
+                State.Quota(
                     providerID: limit.providerID,
+                    accountKey: limit.accountKey,
                     planLabel: limit.planLabel,
                     updatedAt: limit.updatedAt,
                     stale: limit.sourceStale,
-                    windows: limit.windows.prefix(2).map { window in
+                    windows: limit.windows.prefix(3).map { window in
                         .init(
                             label: window.label,
+                            kind: window.kind,
                             remainingPercent: window.remainingPercent,
                             resetsAt: window.resetAt,
+                            windowMinutes: window.windowMinutes,
                             creditsAmount: window.amount,
                             creditsCurrency: window.currency
                         )
                     }
                 )
             },
-            layout: .init(
-                compactLeading: preferences.liveCompactLeading,
-                compactTrailing: preferences.liveCompactTrailing,
-                expanded: preferences.liveExpandedStyle,
-                lockScreen: preferences.liveLockScreenStyle,
-                currencyCode: preferences.currencyCode ?? "USD",
-                languageCode: preferences.languageCode ?? "auto"
-            )
+            agents: snapshot.agents ?? .none
         )
     }
 
-    /// Quota selection shared with the Hub: a specific id picks that provider's
-    /// lowest-remaining account; Auto considers only `ok`, non-stale providers,
-    /// lowest canonical remaining wins, and ties or an empty pool fall back to
-    /// the default catalog order.
-    nonisolated private static func quotaLimit(
-        in limits: [TokenMonitorSharedPayload.Limit],
-        providerID: String?
-    ) -> TokenMonitorSharedPayload.Limit? {
+    /// Ranking shared with the Hub: healthy (`ok`, non-stale) providers first,
+    /// lowest canonical remaining wins, ties and meterless rows fall back to the
+    /// default catalog order.
+    nonisolated static func rankedLimits(
+        _ limits: [TokenMonitorSharedPayload.Limit]
+    ) -> [TokenMonitorSharedPayload.Limit] {
         func remaining(_ limit: TokenMonitorSharedPayload.Limit) -> Double? {
             limit.windows.compactMap(\.remainingPercent).min()
         }
@@ -307,32 +299,41 @@ final class LiveActivityController {
             LimitProviderOrder.defaultOrder.firstIndex(of: limit.providerID)
                 ?? LimitProviderOrder.defaultOrder.count
         }
-        if let providerID, !providerID.isEmpty {
-            return limits
-                .filter { $0.providerID == providerID.lowercased() }
-                .min { left, right in
-                    switch (remaining(left), remaining(right)) {
-                    case let (left?, right?): return left < right
-                    case (_?, nil): return true
-                    default: return false
-                    }
-                }
-        }
-        let eligible = limits.filter {
-            ($0.status ?? "ok") == "ok" && $0.sourceStale != true
-        }
-        let pool = eligible.isEmpty ? limits : eligible
-        return pool.min { left, right in
+        func ordered(_ left: TokenMonitorSharedPayload.Limit, _ right: TokenMonitorSharedPayload.Limit) -> Bool {
             switch (remaining(left), remaining(right)) {
-            case let (left?, right?) where left != right:
-                return left < right
-            case (_?, nil):
-                return true
-            case (nil, _?):
-                return false
-            default:
-                return catalogRank(left) < catalogRank(right)
+            case let (left?, right?) where left != right: left < right
+            case (_?, nil): true
+            case (nil, _?): false
+            default: catalogRank(left) < catalogRank(right)
             }
         }
+        let healthy = { (limit: TokenMonitorSharedPayload.Limit) in
+            (limit.status ?? "ok") == "ok" && limit.sourceStale != true
+        }
+        return limits.filter(healthy).sorted(by: ordered)
+            + limits.filter { !healthy($0) }.sorted(by: ordered)
+    }
+
+    /// The records a push carries: the three most constrained, then each named
+    /// provider's lowest accounts, named accounts and the recent client's records.
+    nonisolated static func selectedLimits(
+        _ limits: [TokenMonitorSharedPayload.Limit],
+        providerIDs: [String],
+        accountKeys: [String],
+        recentClient: String?
+    ) -> [TokenMonitorSharedPayload.Limit] {
+        let ranked = rankedLimits(limits)
+        var selected = Array(ranked.prefix(3))
+        func add(_ limit: TokenMonitorSharedPayload.Limit?) {
+            guard let limit, selected.count < 8, !selected.contains(where: { $0.id == limit.id }) else { return }
+            selected.append(limit)
+        }
+        for id in providerIDs + [recentClient].compactMap(\.self) {
+            ranked.filter { $0.providerID == id }.prefix(3).forEach(add)
+        }
+        for key in accountKeys {
+            add(ranked.first { $0.accountKey == key })
+        }
+        return selected
     }
 }
