@@ -202,7 +202,9 @@ async function readSessionActivity(summary, options = {}) {
     }
     if (reading) readings.set(session.sessionId, reading);
   }
-  const ids = new Set([...files.keys()].filter((id) => !hasKnownSession(summary, 'codex', id, 'today', false)));
+  const ids = new Set([...files]
+    .filter(([id, file]) => file.nativeId && !hasKnownSession(summary, 'codex', id, 'today', false))
+    .map(([id]) => id));
   const generatedTitleIds = new Map();
   const metadata = readSessionMeta(ids, { ...options, titleSourceById: generatedTitleIds });
   const t3Metadata = readT3SessionMeta(ids, options);

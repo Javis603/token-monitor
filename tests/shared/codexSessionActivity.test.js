@@ -97,6 +97,61 @@ test('large Codex session metadata verifies T3 identity with bounded header read
   assert.equal(bytesRead, 8 * 1024 * 1024, 'oversized headers retain the hard read ceiling');
 });
 
+test('native Codex activity requires a verified metadata header before admitting archived rows', async t => {
+  t.mock.method(Date, 'now', () => now);
+  const headers = [
+    ['valid', entry('session_meta', { id: nativeId }), true],
+    ['malformed', '{invalid-json}', false],
+    ['incomplete', '{"type":"session_meta","payload":', false],
+    ['missing metadata', entry('event_msg', { type: 'irrelevant' }), false],
+    ['missing id', entry('session_meta', {}), false],
+    ['empty id', entry('session_meta', { id: '' }), false],
+    ['oversized', entry('session_meta', { id: nativeId, instructions: 'x'.repeat(8 * 1024 * 1024) }), false]
+  ];
+  for (const [label, header, verified] of headers) for (const expected of ['running', 'waiting']) {
+    await t.test(`${label}/${expected}`, async t => {
+      const f = fixture(t); fs.unlinkSync(f.runtimeFile);
+      const original = f.summary();
+      for (const name of ['today', 'month', 'allTime']) original[name] = {
+        ...usage.emptyPeriod(), totalTokens: 100, costUsd: 1,
+        sessions: { [f.key]: { ...original[name].sessions[f.key], costUsd: 1, turnEnded: true } }
+      };
+      const retained = archive.captureSessionUsageArchive({}, original, new Date(now));
+      const summary = archive.applySessionUsageArchive(Object.fromEntries(['today', 'month', 'allTime']
+        .map(name => [name, usage.emptyPeriod()])), retained, { now: new Date(now) });
+      assert.equal(summary.today.sessions[f.key].archived, true);
+      const before = JSON.stringify(summary);
+      fs.writeFileSync(f.file, [header, started, ...(expected === 'waiting' ? [question] : [])].join('\n') + '\n');
+      fs.utimesSync(f.file, new Date(now), new Date(now));
+      const result = await activity.readSessionActivity(summary, f.options);
+      assert.equal(Object.keys(result.sessions).length, verified ? 1 : 0);
+      assert.equal(result.readings.size, verified ? 1 : 0);
+      const next = activity.projectSessionActivity(summary, result, now) || summary;
+      for (const name of ['today', 'month', 'allTime']) {
+        const list = rows.sessionRowsForPeriod(next[name], { nativeSessions: next.nativeSessions?.[name], now: new Date(now) });
+        assert.equal(list.length, 1);
+        assert.equal(list[0].activityState, verified ? expected : 'idle');
+        assert.equal(list[0].value, 100); assert.equal(list[0].cost, 1);
+        assert.equal(next[name].sessions, summary[name].sessions);
+        assert.equal(next[name].totalTokens, 100); assert.equal(next[name].costUsd, 1);
+      }
+      const display = { periods: next, nativeSessions: next.nativeSessions };
+      const views = [presentation.recentSessionRows(display), ...presentation.buildEdgeDockCells(display, {
+        items: [{ type: 'limit', provider: 'codex' }, { type: 'stat', metric: presentation.SESSIONS_METRIC }]
+      }).map(cell => cell.sessions)];
+      for (const view of views) {
+        assert.equal(view.length, 1);
+        assert.equal(live.sessionActivityState(view[0], now), verified ? expected : 'idle');
+        assert.equal(presentation.waitingSessionSummary(view, now).count, verified && expected === 'waiting' ? 1 : 0);
+      }
+      assert.equal(JSON.stringify(summary), before);
+      // The same gate also protects new pre-token sessions without usage rows.
+      const empty = Object.fromEntries(['today', 'month', 'allTime'].map(name => [name, usage.emptyPeriod()]));
+      assert.equal(Object.keys((await activity.readSessionActivity(empty, f.options)).sessions).length, verified ? 1 : 0);
+    });
+  }
+});
+
 test('resumed historical Codex question appears in Today before new usage without duplicating other periods', async t => {
   const f = fixture(t); fs.unlinkSync(f.runtimeFile); f.write([started, question]);
   const clock = new Date(2026, 9, 9, 0, 1).getTime();
