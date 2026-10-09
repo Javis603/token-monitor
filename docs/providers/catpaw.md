@@ -35,9 +35,9 @@ The watcher keeps the edition root for new-account discovery and accepts only di
 - Model ids are edition-specific. A valid persisted model selection takes precedence over the legacy id, with initial selection as fallback. Auto, routing tiers, unknown ids and inconsistent selections remain unpriced rather than guessing a catalog model.
 - Model selection is session state, not historical per-message attribution; changing a session's model can relabel historical usage. Rate multipliers are not API prices.
 - The account-set fingerprint covers whole-database additions/removals. Changes to older days within an existing database (including deletion or model relabeling) reach historical periods at the next full reconciliation; today-only watch deltas cannot repair those older days.
-- Workspace, session title, context occupancy and IDE usage are not provided by this prototype.
+- Workspace, session title, context occupancy and IDE usage are not provided by this parser.
 - macOS domestic and overseas app bundles and Windows domestic installer were inspected. Overseas Windows compatibility is inferred from the shared product contract, not verified on a Windows runtime. Custom Electron user-data directories are not supported.
-- The repository's current binary pin predates the CatPaw parser. Wiring can be validated against the local fork build, but production support requires publishing that fork build and updating the real manifest checksums. Do not substitute local hashes or claim the existing pinned binary supports CatPaw.
+- The bundled fork pin carries the CatPaw parser (`token-monitor-572394ee`). Windows file-lock and WAL behaviour still lacks a runtime check, and the overseas Windows installer was not inspected; both remain declaration-level boundaries, not verified claims.
 - Runtime capability fallback probes fork clients individually after a rejected batch, so a pre-CatPaw fork keeps its supported Proma/Qoder CN clients. The packaging gate still requires every registered client.
 
 ## Icons
