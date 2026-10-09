@@ -416,6 +416,36 @@ test('T3 Claude formal waiting supersedes registry and resolves without transcri
   assert.equal(Object.keys((await activity.readSummaryActivity({}, f.options)).sessions).length, 0);
 });
 
+test('a late T3 Claude message answer clears newer waiting through projection and patches', async t => {
+  const f = fixture(t); const db = t3Fixture(f);
+  db.prepare("UPDATE orchestration_v2_projection_runs SET status = 'completed', completed_at = ?")
+    .run(new Date(now).toISOString());
+  db.exec("UPDATE orchestration_v2_projection_runtime_requests SET kind = 'user_input'");
+  db.prepare('UPDATE orchestration_v2_projection_runtime_requests SET payload_json = ?')
+    .run(JSON.stringify({ responseCapability: { type: 'message' } }));
+  const key = 'claude:test-session';
+  const baseline = { month: { sessions: { [key]: session('running', { liveActivity: undefined }) } } };
+  const waitingClock = now + 10_000;
+  const projection = require('../../src/shared/sessionActivityProjection');
+  const waiting = projection.materializeActivity(activity.projectActivity(baseline,
+    await activity.readSummaryActivity(baseline, { ...f.options, now: waitingClock }), waitingClock));
+  const resolvedClock = waitingClock + 1000;
+  const resolvedAt = new Date(resolvedClock).toISOString();
+  db.prepare("UPDATE orchestration_v2_projection_runtime_requests SET status = 'resolved', resolved_at = ?").run(resolvedAt);
+  const cleared = activity.projectActivity(waiting,
+    await activity.readSummaryActivity(waiting, { ...f.options, now: resolvedClock }), resolvedClock);
+  const patch = projection.activityPatch(waiting, cleared);
+  assert.deepEqual(patch.observations, [{ client: 'claude', sessionId: 'test-session',
+    liveActivity: { state: 'idle', observedAt: resolvedAt } }]);
+  const received = projection.applyActivityPatch(projection.applyActivityPatch(baseline,
+    projection.activityPatch(baseline, waiting)), patch);
+  assert.equal(live.sessionActivityState(live.sessionWithActivity(received.month, key), resolvedClock), 'idle');
+  assert.equal(received.month.sessions, baseline.month.sessions);
+  const later = { ...f.options, now: resolvedClock + 12_000 };
+  assert.equal(activity.projectActivity(cleared, await activity.readSummaryActivity(cleared, later), later.now), null);
+  assert.equal((await activity.readSummaryActivity(cleared, { ...f.options, now: resolvedClock + 31_000 })).readings.size, 0);
+});
+
 test('T3 Claude answerable message questions survive completion until answered', async t => {
   const f = fixture(t); const db = t3Fixture(f);
   db.exec("UPDATE orchestration_v2_projection_runs SET status = 'completed'; UPDATE orchestration_v2_projection_provider_threads SET status = 'idle'; UPDATE orchestration_v2_projection_runtime_requests SET kind = 'user_input'");

@@ -61,7 +61,17 @@ async function readT3Activities(options = {}, drivers = SESSION_ACTIVITY_PROVIDE
                    AND (c.runStatus = 'running' OR
                      (c.runStatus = 'completed' AND q.kind = 'user_input'
                        AND json_extract(q.payload_json, '$.responseCapability.type') = 'message'))
-               ) AS waiting
+               ) AS waiting,
+               CASE WHEN c.runStatus = 'completed' THEN (
+                 SELECT MAX(q.resolved_at) FROM orchestration_v2_projection_runtime_requests q
+                 JOIN orchestration_v2_projection_nodes n ON n.node_id = q.node_id
+                 WHERE n.provider_thread_id = c.providerThreadId AND n.run_id = c.runId
+                   AND q.thread_id = c.threadId AND q.kind = 'user_input'
+                   AND q.status IN ('resolved', 'cancelled', 'expired') AND q.resolved_at IS NOT NULL
+                   AND json_valid(q.payload_json)
+                   AND json_extract(q.payload_json, '$.responseCapability.type') = 'message'
+                   AND q.created_at >= ?
+               ) END AS resolvedAt
         FROM (
           SELECT p.provider_thread_id AS providerThreadId, p.thread_id AS threadId,
                  p.payload_json AS payloadJson, p.status AS providerStatus,
@@ -79,7 +89,7 @@ async function readT3Activities(options = {}, drivers = SESSION_ACTIVITY_PROVIDE
       `);
       for (const driver of drivers) {
         const result = results.get(driver);
-        const rows = statement.all(...REQUEST_KINDS, runtime.startedAt, driver, runtime.startedAt, MAX_SESSIONS);
+        const rows = statement.all(...REQUEST_KINDS, runtime.startedAt, runtime.startedAt, driver, runtime.startedAt, MAX_SESSIONS);
         for (const row of rows) {
           if (typeof row.nativeId !== 'string' || !row.nativeId || result.has(row.nativeId)
             || Date.parse(row.requestedAt) > clock) continue;
@@ -90,9 +100,15 @@ async function readT3Activities(options = {}, drivers = SESSION_ACTIVITY_PROVIDE
             : row.providerStatus === 'active' && row.runStatus === 'running'
               ? 'running' : null;
           if (!state) continue;
-          // Completion is an event, not proof that this session remains idle.
-          // Keep its original lease so a later CLI resume can supersede it.
-          const observedAt = state === 'idle' ? Date.parse(row.deleted || row.completedAt) : clock;
+          // Completion and a later answer are events, not renewable ownership.
+          // Resolution must supersede waiting observed after model completion.
+          let observedAt = clock;
+          if (state === 'idle') {
+            const completedAt = Date.parse(row.deleted || row.completedAt);
+            const resolvedAt = Date.parse(row.resolvedAt);
+            observedAt = Math.max(Number.isFinite(completedAt) ? completedAt : -Infinity,
+              Number.isFinite(resolvedAt) ? resolvedAt : -Infinity);
+          }
           if (!Number.isFinite(observedAt) || observedAt > clock || observedAt < Date.parse(row.requestedAt)
             || observedAt + LIVE_ACTIVITY_TTL_MS <= clock) continue;
           result.set(row.nativeId, { state, observedAt: new Date(observedAt).toISOString() });

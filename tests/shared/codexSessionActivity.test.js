@@ -118,7 +118,8 @@ test('resumed historical Codex question appears in Today before new usage withou
     assert.equal(next[name].sessions[f.key].totalTokens, 100);
     assert.equal(summary[name].sessions[f.key].liveActivity, undefined);
   }
-  t.mock.method(Date, 'now', () => clock);
+  let displayClock = clock;
+  t.mock.method(Date, 'now', () => displayClock);
   const display = { periods: next, nativeSessions: next.nativeSessions };
   const homeRows = presentation.recentSessionRows(display, 5, { includeRunningBeyondCap: true });
   const dockCells = presentation.buildEdgeDockCells(display, { items: [
@@ -142,7 +143,7 @@ test('resumed historical Codex question appears in Today before new usage withou
     f.write(lines);
     const observedAt = clock + offset;
     fs.utimesSync(f.file, new Date(observedAt), new Date(observedAt));
-    t.mock.method(Date, 'now', () => observedAt);
+    displayClock = observedAt;
     current = activity.projectSessionActivity(current,
       await activity.readSessionActivity(current, { ...options, now: observedAt }), observedAt);
     for (const name of ['month', 'allTime']) {
@@ -522,6 +523,42 @@ test('local display deduplicates no-token activity once usage arrives and omits 
   assert.equal(Object.keys(stats.nativeSessions.today).length, 1);
   assert.equal(Object.keys(attachLocalNativeViews({ nativeSessions: first.nativeSessions }, {}).nativeSessions || {}).length, 0);
   assert.equal(rows.sessionRowsForPeriod(known.today, { nativeSessions: first.nativeSessions.today, now: new Date(now) }).length, 1);
+});
+
+test('a late T3 message answer clears newer waiting through projection and patches without renewing idle', async t => {
+  const f = fixture(t); f.write([started]);
+  f.db.prepare("UPDATE orchestration_v2_projection_runs SET status = 'completed', completed_at = ?")
+    .run(new Date(now).toISOString());
+  f.db.prepare('UPDATE orchestration_v2_projection_runtime_requests SET payload_json = ?')
+    .run(JSON.stringify({ responseCapability: { type: 'message' } }));
+  const baseline = f.summary();
+  const waitingClock = now + 10_000;
+  const projection = require('../../src/shared/sessionActivityProjection');
+  const waiting = projection.materializeActivity(activity.projectSessionActivity(baseline,
+    await activity.readSessionActivity(baseline, { ...f.options, now: waitingClock }), waitingClock));
+  const receivedWaiting = projection.applyActivityPatch(baseline, projection.activityPatch(baseline, waiting));
+  const resolvedClock = waitingClock + 1000;
+  const resolvedAt = new Date(resolvedClock).toISOString();
+  f.db.prepare("UPDATE orchestration_v2_projection_runtime_requests SET status = 'resolved', resolved_at = ?").run(resolvedAt);
+  const cleared = activity.projectSessionActivity(waiting,
+    await activity.readSessionActivity(waiting, { ...f.options, now: resolvedClock }), resolvedClock);
+  const patch = projection.activityPatch(waiting, cleared);
+  assert.deepEqual(patch.observations, [{ client: 'codex', sessionId: f.id,
+    liveActivity: { state: 'idle', observedAt: resolvedAt } }]);
+  const received = projection.applyActivityPatch(receivedWaiting, patch);
+  for (const [summary, accounting] of [[cleared, waiting], [received, baseline]]) for (const name of ['today', 'month', 'allTime']) {
+    const row = live.sessionWithActivity(summary[name], f.key);
+    assert.equal(live.sessionActivityState(row, resolvedClock), 'idle');
+    assert.equal(row.liveActivity.observedAt, resolvedAt);
+    assert.equal(summary[name].sessions, accounting[name].sessions);
+  }
+  const unchangedClock = resolvedClock + 12_000;
+  assert.equal(activity.projectSessionActivity(cleared,
+    await activity.readSessionActivity(cleared, { ...f.options, now: unchangedClock }), unchangedClock), null);
+  assert.equal((await activity.readT3Activity({ ...f.options, now: resolvedClock + 31_000 })).size, 0);
+  f.db.exec("UPDATE orchestration_v2_projection_nodes SET run_id = 'different-run'");
+  assert.equal((await activity.readT3Activity({ ...f.options, now: resolvedClock })).get(nativeId).observedAt,
+    new Date(now).toISOString(), 'an unrelated response cannot renew the current run');
 });
 
 test('T3 answerable message questions survive model completion until actually answered', async t => {
