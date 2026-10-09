@@ -464,9 +464,10 @@ test('the limits collector dispatches the WorkBuddy provider through the shared 
 });
 
 // The app owns the credential and sealed it, so signing in again cannot change
-// the outcome. The row has to name that instead of reusing the sign-in prompt.
-test('fetchWorkbuddyLimits names an app-sealed credential instead of asking for a sign-in', async () => {
-  let requests = 0;
+// the outcome. The request path stays live though — the host's WBIPC channel
+// can proxy billing under the daemon's own session — and when that proxy also
+// fails the row names the sealed credential instead of a sign-in prompt.
+test('fetchWorkbuddyLimits names an app-sealed credential when the proxy fails', async () => {
   const provider = await fetchWorkbuddyLimits(
     {
       workbuddyDesktopSessionEnabled: true,
@@ -475,18 +476,35 @@ test('fetchWorkbuddyLimits names an app-sealed credential instead of asking for 
     {
       env: {},
       workbuddyFetch: async () => {
-        requests += 1;
-        return response({});
+        throw Object.assign(new Error('WorkBuddy client channel is not available'), { status: 'notConfigured' });
       }
     }
   );
 
-  assert.equal(requests, 0);
   assert.equal(provider.status, 'notConfigured');
   assert.equal(provider.actionRequired, 'appSessionEncrypted');
   assert.equal(provider.source, 'local');
   assert.equal(provider.sourceDetail, 'app');
   assert.doesNotMatch(JSON.stringify(provider), /encrypted"|envelope|eyJ/);
+});
+
+test('fetchWorkbuddyLimits accepts the host proxy for a sealed credential', async () => {
+  const provider = await fetchWorkbuddyLimits(
+    {
+      workbuddyDesktopSessionEnabled: true,
+      workbuddyLocalSessionReason: 'encrypted'
+    },
+    {
+      env: {},
+      workbuddyFetch: async () => response({
+        data: { Response: { Data: { Accounts: [{ CycleCapacitySizePrecise: 20, CycleCapacityRemainPrecise: 15 }] } } }
+      })
+    }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(Object.hasOwn(provider, 'actionRequired'), false);
+  assert.equal(provider.windows[0].remaining, 15);
 });
 
 test('other WorkBuddy session read reasons keep the existing sign-in row', async () => {

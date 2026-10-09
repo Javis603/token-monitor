@@ -130,8 +130,12 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
   // The Electron widget uses the WorkBuddy app's local sign-in state. Keep the
   // raw token fallback available to the headless agent, but never let a desktop
   // .env or legacy settings value silently bypass the app-owned session.
-  const workbuddySettings = context.workbuddyDesktopSessionOnly === true ? {} : settings;
-  const workbuddyEnv = context.workbuddyDesktopSessionOnly === true ? {} : env;
+  // One exception: an app credential the app itself sealed (encrypted) can
+  // never be fixed by signing in again, so an explicitly provided token is the
+  // only way left to keep monitoring that account.
+  const workbuddySessionUnreadable = context.workbuddyLocalSession?.reason === 'encrypted';
+  const workbuddySettings = context.workbuddyDesktopSessionOnly === true && !workbuddySessionUnreadable ? {} : settings;
+  const workbuddyEnv = context.workbuddyDesktopSessionOnly === true && !workbuddySessionUnreadable ? {} : env;
   const workbuddyLocalSession = context.workbuddyLocalSession && typeof context.workbuddyLocalSession === 'object'
     ? context.workbuddyLocalSession
     : {};

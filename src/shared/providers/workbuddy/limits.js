@@ -378,13 +378,11 @@ async function fetchWorkbuddyLimits(options = {}, deps = {}) {
   };
 
   if (localAppUnsupported) return normalizeLimitProvider({ ...source, status: 'unavailable' });
-  if (localAppSessionEncrypted) {
-    return normalizeLimitProvider({
-      ...source,
-      status: 'notConfigured',
-      actionRequired: WORKBUDDY_SESSION_ENCRYPTED_ACTION
-    });
-  }
+  // A sealed app credential used to short-circuit here (#738): signing in
+  // again cannot fix it, so the generic sign-in row would be a lie. The host
+  // can still act for us though — its WBIPC channel proxies billing requests
+  // under the daemon's own session — so the request path stays live and the
+  // dedicated hint is re-attached when that proxy also fails (see the catch).
   if (!token && !useLocalApp) return normalizeLimitProvider({ ...source, status: 'notConfigured' });
 
   const endpoint = WORKBUDDY_DEFAULT_ENDPOINT;
@@ -447,7 +445,17 @@ async function fetchWorkbuddyLimits(options = {}, deps = {}) {
       ...(balance ? { balance } : {})
     });
   } catch (error) {
-    return normalizeLimitProvider({ ...source, accountKey, status: workbuddyStatus(error) });
+    const status = workbuddyStatus(error);
+    return normalizeLimitProvider({
+      ...source,
+      accountKey,
+      status,
+      // #738: a sealed app credential is not a signed-out app. When the proxy
+      // path also failed, keep the dedicated hint instead of a sign-in row.
+      ...(localAppSessionEncrypted && status === 'notConfigured'
+        ? { actionRequired: WORKBUDDY_SESSION_ENCRYPTED_ACTION }
+        : {})
+    });
   }
 }
 

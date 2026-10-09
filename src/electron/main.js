@@ -33,6 +33,7 @@ const {
   createWorkbuddyLocalAuth,
   isSupportedWorkbuddyLocalAppPlatform
 } = require('./providers/workbuddy/localAuth');
+const { wbipcProxyFetch } = require('./providers/workbuddy/wbipcClient');
 const { createElectronLimitsFetch } = require('./limits/fetch');
 const {
   expandedBoundsForCollapse,
@@ -884,12 +885,37 @@ function electronLimitsDeps() {
     mimoExchangeFetch: ensureMimoExchangeFetch(),
     claudeWebFetch: electronClaudeWebFetch,
     workbuddyFetch: async (url, init = {}, expectedSession = null) => {
-      const result = await electronWorkbuddyLocalAuth.request(url, init, expectedSession);
-      return {
-        status: result.status,
-        ok: result.ok,
-        json: () => result.json()
-      };
+      const asMinimalResponse = (response) => ({
+        status: response.status,
+        ok: response.ok,
+        json: () => response.json()
+      });
+      try {
+        const result = await electronWorkbuddyLocalAuth.request(url, init, expectedSession);
+        return asMinimalResponse(result);
+      } catch (error) {
+        // The app's own credential can be sealed beyond this process's reach
+        // (and absent means the app is not signed in either). When the
+        // request died for one of those reasons — not because the billing
+        // endpoint rejected us — delegate the call to the running client's
+        // WBIPC channel, which proxies billing paths under the host's own
+        // session. Unavailable host keeps the not-configured semantics.
+        const unreadableSession = error?.status === 'notConfigured';
+        const recoverableWbipc = error?.code === 'E_NOT_WORKBUDDY'
+          || error?.code === 'E_CONSENT_REQUIRED'
+          || /wbipc/i.test(String(error?.message));
+        if (!unreadableSession || recoverableWbipc) throw error;
+        try {
+          return asMinimalResponse(await wbipcProxyFetch(url, init));
+        } catch (proxyError) {
+          if (proxyError?.code === 'E_NOT_WORKBUDDY' || /connect |handshake|timeout|wbipc/i.test(String(proxyError?.message))) {
+            const unavailable = new Error('WorkBuddy client channel is not available: ' + proxyError.message);
+            unavailable.status = 'notConfigured';
+            throw unavailable;
+          }
+          throw proxyError;
+        }
+      }
     },
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
