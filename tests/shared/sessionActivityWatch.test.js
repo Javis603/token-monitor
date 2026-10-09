@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
+const { createRequire } = require('node:module');
 const { activityWatchSources, activityClientsForPath, activityWatchIgnored } = require('../../src/shared/sessionActivityWatch');
 
 test('activity watches prune unrelated data and SQLite shm while retaining WAL, runtime and new directories', t => {
@@ -54,7 +56,7 @@ test('activity allowlists preserve usage pruning and directory boundaries', () =
   }
   for (const relative of ['claude/sessions/123.JSON', 'claude/sessions/123.json/child',
     'claude/projects-other/log.jsonl', 't3/usage-other/log.jsonl', 't3/userdata/statev2.sqlite-shm']) {
-    assert.equal(ignored(file(relative)), true, relative);
+    assert.equal(ignored(file(relative)), relative === 'claude/sessions/123.JSON' ? path.sep !== '\\' : true, relative);
   }
   assert.deepEqual(calls, [], 'activity-only paths never consult usage policy');
   for (const relative of ['claude/projects/log.jsonl', 't3/usage/log.jsonl', 't3-other/log.jsonl']) {
@@ -63,4 +65,35 @@ test('activity allowlists preserve usage pruning and directory boundaries', () =
   assert.equal(ignored(file('claude/projects/log.tmp')), true);
   assert.equal(calls.length, 4, 'usage and unrelated paths retain the existing policy');
   assert.equal(activityWatchIgnored(usageIgnored, [], []), usageIgnored);
+});
+
+test('Windows activity allowlists and event attribution accept mixed case without broadening sources', () => {
+  const filename = require.resolve('../../src/shared/sessionActivityWatch');
+  const localRequire = createRequire(filename);
+  const module = { exports: {} };
+  vm.runInNewContext(fs.readFileSync(filename, 'utf8'), {
+    module, require: (id) => id === 'node:path' ? path.win32 : localRequire(id)
+  }, { filename });
+  const api = module.exports;
+  const file = (relative) => path.win32.join('C:\\Users\\MixedCase', relative);
+  const sources = [
+    { dir: file('Claude'), target: file('Claude/Sessions'), kind: 'pid-registry', clients: ['claude'] },
+    { dir: file('T3'), target: file('T3/Userdata/StateV2.sqlite'), kind: 'sqlite',
+      runtimeFile: file('T3/Userdata/Server-Runtime.json'), clients: ['claude', 'codex'] }
+  ];
+  const ignored = api.activityWatchIgnored(() => true, [], sources);
+  for (const relative of ['Claude/Sessions', 'Claude/Sessions/123.json', 'T3/Userdata',
+    'T3/Userdata/StateV2.sqlite', 'T3/Userdata/StateV2.sqlite-wal', 'T3/Userdata/Server-Runtime.json']) {
+    for (const event of [file(relative).toLowerCase(), file(relative).toUpperCase()]) {
+      assert.equal(ignored(event), false, event);
+      const expected = relative.startsWith('Claude') ? ['claude'] : ['claude', 'codex'];
+      assert.deepEqual([...api.activityClientsForPath(event, sources)], expected, event);
+    }
+  }
+  for (const relative of ['Claude/Sessions/auth.json', 'Claude/Sessions/123.json/child',
+    'Claude/Sessions-other/123.json', 'T3/Userdata/StateV2.sqlite-shm', 'T3/Userdata/StateV2.sqlite-wal/child']) {
+    const event = file(relative).toUpperCase();
+    assert.equal(ignored(event), true, event);
+    assert.deepEqual([...api.activityClientsForPath(event, sources)], [], event);
+  }
 });

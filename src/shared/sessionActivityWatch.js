@@ -5,6 +5,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { sessionActivityProvidersFor } = require('./sessionActivityRegistry');
 const { discoverT3DbPaths } = require('./t3SessionMetadata');
+const comparablePath = path.sep === '\\' ? (value) => value.toLowerCase() : (value) => value;
 
 function inside(root, file) {
   const relative = path.relative(root, file);
@@ -45,16 +46,17 @@ function activityWatchSources(clients, options = {}) {
 }
 
 function matches(source, file) {
-  const target = source.target;
+  const target = comparablePath(source.target);
   // Keep just the ancestor chain so a missing sessions/userdata directory can
   // appear later. A registry's children are numeric PID files only.
   if (inside(file, target)) return true;
   if (source.kind === 'pid-registry') return path.dirname(file) === target && /^[1-9]\d*\.json$/.test(path.basename(file));
-  return file === target || file === `${target}-wal` || file === source.runtimeFile;
+  return file === target || file === `${target}-wal`
+    || (source.runtimeFile && file === comparablePath(source.runtimeFile));
 }
 
 function activityClientsForPath(filePath, sources) {
-  const file = path.resolve(filePath || '.');
+  const file = comparablePath(path.resolve(filePath || '.'));
   return [...new Set(sources.filter((source) => matches(source, file)).flatMap((source) => source.clients))];
 }
 
@@ -63,10 +65,9 @@ function activityWatchIgnored(usageIgnored, usageDirs, sources) {
   // chokidar calls this for every path, often before and after stat. Compile the
   // small activity allowlist once instead of allocating path.relative strings
   // against every activity source for the whole historical transcript tree.
-  const comparable = path.sep === '\\' ? (value) => value.toLowerCase() : (value) => value;
   const prefix = (root) => root.endsWith(path.sep) ? root : root + path.sep;
   const directory = (root) => {
-    const dir = comparable(path.resolve(root));
+    const dir = comparablePath(path.resolve(root));
     return { dir, prefix: prefix(dir) };
   };
   const usage = usageDirs.map(directory);
@@ -74,24 +75,23 @@ function activityWatchIgnored(usageIgnored, usageDirs, sources) {
   const files = new Set();
   const registries = [];
   const roots = sources.map((source) => {
-    const target = path.resolve(source.target);
+    const target = comparablePath(path.resolve(source.target));
     for (let dir = target; ; dir = path.dirname(dir)) {
-      ancestors.add(comparable(dir));
+      ancestors.add(dir);
       if (path.dirname(dir) === dir) break;
     }
     if (source.kind === 'pid-registry') registries.push(prefix(target));
     else {
       files.add(target);
       files.add(`${target}-wal`);
-      if (source.runtimeFile) files.add(path.resolve(source.runtimeFile));
+      if (source.runtimeFile) files.add(comparablePath(path.resolve(source.runtimeFile)));
     }
     return directory(source.dir);
   });
   return (filePath) => {
-    const file = path.resolve(filePath);
-    const resolved = comparable(file);
-    if (ancestors.has(resolved) || files.has(file)
-      || registries.some((root) => file.startsWith(root) && /^[1-9]\d*\.json$/.test(file.slice(root.length)))) return false;
+    const resolved = comparablePath(path.resolve(filePath));
+    if (ancestors.has(resolved) || files.has(resolved)
+      || registries.some((root) => resolved.startsWith(root) && /^[1-9]\d*\.json$/.test(resolved.slice(root.length)))) return false;
     if (roots.some((root) => resolved === root.dir || resolved.startsWith(root.prefix))
       && !usage.some((root) => resolved === root.dir || resolved.startsWith(root.prefix))) return true;
     return usageIgnored?.(filePath) || false;

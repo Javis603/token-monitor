@@ -332,6 +332,7 @@
       color: colors[client] || stable(key, palette),
       stale: false,
       client,
+      backgroundReview: isBackgroundReviewSession(session) || undefined,
       sortTime: sessionTimestampValue(session),
       title: `${clientLabel} session ${sessionIdLabel(session?.sessionId || key)}`
     };
