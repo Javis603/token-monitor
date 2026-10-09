@@ -3848,8 +3848,10 @@ test('watch roots reach chokidar canonicalised on Windows and untouched elsewher
   const chokidar = require('chokidar');
   const originalWatch = chokidar.watch;
   let watchedDirs = null;
-  chokidar.watch = (dirs) => {
+  let watchOptions = null;
+  chokidar.watch = (dirs, options) => {
     watchedDirs = dirs;
+    watchOptions = options;
     return { on: () => {}, close: () => {} };
   };
 
@@ -3879,11 +3881,13 @@ test('watch roots reach chokidar canonicalised on Windows and untouched elsewher
       // The junction must have been resolved away. Handing libuv a path it will
       // report events under in a different form is what fires the fs-event
       // assert, and that abort is not something the watcher can recover from.
-      assert.deepEqual(watchedDirs, [path.join(real, '.claude', 'projects')]);
+      assert.deepEqual(watchedDirs, [path.join(real, '.claude', 'projects'), path.join(real, '.claude')]);
+      assert.equal(watchOptions.ignored(path.join(real, '.claude', 'sessions', '123.json')), false);
     } else {
       // Off Windows this must be identity: resolving here would make the watch
       // roots disagree with the paths tokscale is pointed at.
-      assert.deepEqual(watchedDirs, [path.join(alias, '.claude', 'projects')]);
+      assert.deepEqual(watchedDirs, [path.join(alias, '.claude', 'projects'), path.join(alias, '.claude')]);
+      assert.equal(watchOptions.ignored(path.join(alias, '.claude', 'sessions', '123.json')), false);
     }
   } finally {
     if (handle) handle.stop();

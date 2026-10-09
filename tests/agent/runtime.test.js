@@ -179,3 +179,14 @@ test('once rejects and stops when the initial usage collection fails', async () 
   harness.usageError(new Error('usage failed'));
   await assert.rejects(running, /usage failed/);
 });
+
+test('headless runtime observes status with usage scans without a local activity heartbeat', () => {
+  let configured;
+  const runtime = runAgent({ usageOptions: { clients: 'claude,codex' } }, {
+    createDeviceRuntime: options => { configured = options; return { stop() {} }; },
+    createOrderedSink: () => ({})
+  });
+  assert.equal(configured.usageOptions.sessionActivityPolling, false);
+  assert.equal(configured.usageOptions.clients, 'claude,codex');
+  runtime.stop();
+});

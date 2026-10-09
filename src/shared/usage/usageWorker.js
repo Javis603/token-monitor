@@ -63,6 +63,7 @@ collector = startCollector({
     ? { dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive() }
     : {}),
   onUpdate: (summary, reason) => transformed('update', summary, reason),
+  ...(callbacks.activity ? { onSessionActivity: (patch) => post({ type: 'activity', patch }) } : {}),
   ...(callbacks.preview ? { onPreview: (summary, reason) => { transformed('preview', summary, reason); } } : {}),
   ...(callbacks.error
     ? {

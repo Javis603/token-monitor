@@ -33,6 +33,8 @@ const {
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { createWatcherHost } = require('./watcherHost');
+const { createSessionActivityScheduler } = require('./sessionActivityScheduler');
+const { activityWatchSources, activityClientsForPath, activityWatchIgnored } = require('./sessionActivityWatch');
 const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const {
@@ -52,6 +54,9 @@ const {
 } = require('./sessionMetadata');
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const claudeActivity = require('./providers/claude/sessionActivity');
+const codexActivity = require('./providers/codex/sessionActivity');
+const { readT3Activities } = require('./t3SessionActivity');
+const { createProcessStartBatch } = require('./processStarts');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
 const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
 const { createLocalUsageSource } = require('./providers/codex/localUsageSource');
@@ -1263,20 +1268,42 @@ async function collectUsageOnce(options) {
     )
   });
   if (clientHealth) summary.clientHealth = clientHealth;
-  const activityPeriods = [summary.today, summary.month, summary.allTime];
-  const activityIds = claudeActivity.sessionIdsForPeriods(activityPeriods);
   const activityObservedAt = Date.now();
-  const readings = await claudeActivity.readSessionActivity(activityIds, {
-    ...options.sessionMetadataDeps,
-    env: options.env || options.sessionMetadataDeps?.env,
-    homeDir: options.homeDir || os.homedir(),
-    platform: options.platform,
-    now: activityObservedAt
-  });
-  throwIfAborted(options.signal);
-  claudeActivity.applySessionActivity(activityPeriods, readings,
-    activityObservedAt, true);
-  return summary;
+  let activitySummary = summary;
+  const activityOptions = (trackedClientSet.has('claude') || trackedClientSet.has('codex')) ? activityReadOptions(options, {
+    env: options.env || options.sessionMetadataDeps?.env, homeDir: options.homeDir || os.homedir(),
+    customScanPaths: options.customScanPaths, platform: options.platform, now: activityObservedAt
+  }, trackedClientSet) : {};
+  if (trackedClientSet.has('claude')) {
+    const activity = await claudeActivity.readSummaryActivity(summary, {
+      ...options.sessionMetadataDeps?.claudeMetadataDeps, ...activityOptions,
+      env: options.env || options.sessionMetadataDeps?.env,
+      homeDir: options.homeDir || os.homedir(), platform: options.platform,
+      now: activityObservedAt
+    });
+    throwIfAborted(options.signal);
+    activitySummary = claudeActivity.projectSessionActivity(summary, activity.readings,
+      activityObservedAt, activity.sessions) || summary;
+  }
+  if (trackedClientSet.has('codex')) {
+    const activity = await codexActivity.readSessionActivity(activitySummary, {
+      ...options.sessionMetadataDeps?.codexDeps, ...activityOptions,
+      homeDir: options.homeDir || os.homedir(), env: options.env,
+      customScanPaths: options.customScanPaths, platform: options.platform,
+      now: activityObservedAt
+    });
+    throwIfAborted(options.signal);
+    return require('./sessionActivityProjection').materializeActivity(codexActivity.projectSessionActivity(activitySummary, activity, activityObservedAt) || activitySummary);
+  }
+  return require('./sessionActivityProjection').materializeActivity(activitySummary);
+}
+
+function activityReadOptions(options, extras = {}, clients) {
+  const base = { ...options.sessionMetadataDeps, ...extras };
+  const readProcessStarts = createProcessStartBatch(base.readProcessStarts);
+  const shared = { ...base, readProcessStarts };
+  const drivers = ['claudeAgent', 'codex'].filter((driver) => !clients || clients.has(driver === 'claudeAgent' ? 'claude' : driver));
+  return { ...shared, t3Activity: readT3Activities(shared, drivers) };
 }
 
 // Sources that remain part of collection, health, and diagnostics but are too
@@ -2216,10 +2243,10 @@ const WATCH_REFUSAL_CODES = new Set([WATCH_POLLING_LIMIT_CODE, WATCH_POLLING_UNA
 // because the host can switch to polling on its own (a watch process that never
 // confirmed its exit), and a check the host can route around bounds nothing.
 function openWatch(chokidar, config = {}) {
-  const ignored = watchIgnoreMatcher(config.clients, {
+  const ignored = activityWatchIgnored(watchIgnoreMatcher(config.clients, {
     customScanPaths: config.customScanPaths,
     cursorDesktopRoots: config.cursorDesktopRoots
-  });
+  }), config.usageDirs || config.dirs || [], config.activitySources || []);
   const limit = Number.isInteger(config.pollingEntryLimit) && config.pollingEntryLimit >= 0
     ? config.pollingEntryLimit
     : WATCH_POLLING_ENTRY_LIMIT;
@@ -2405,7 +2432,8 @@ function startCollector(options) {
   let watchDeadlineAt = 0;
   let intervalTimer = null;
   let stopped = false;
-  let activityTimer = null;
+  let activityScheduler = null;
+  let activityWatchReady = false;
   let activityUpdate = null;
   let latestActivitySummary = null;
   let lastTickAttemptAt = 0;
@@ -2820,11 +2848,14 @@ function startCollector(options) {
         if (titlesChanged) persistAnchor(tickPricingRevision);
       }
       const transformedSummary = await onUpdate?.(summary, reason);
-      latestActivitySummary = summary;
       publishedCodexVisibilityRevision = visibilityRevision;
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'
         ? transformedSummary
         : summary;
+      // Use the actual visible baseline whether archive projection mutated the
+      // input or returned a copy. Retained identities suppress temporary rows.
+      require('./sessionActivityProjection').invalidateActivityIndex(visibleSummary);
+      latestActivitySummary = visibleSummary;
       if (historyEnabled !== false && options.dailyHistoryArchiveEnabled) {
         try {
           const visibleAt = visibleSummary.updatedAt || summary.updatedAt;
@@ -3081,6 +3112,7 @@ function startCollector(options) {
   // is the quit path: descriptors go with the process, so there is nothing to
   // wait for.
   function closeWatchers({ skipClose = false } = {}) {
+    activityWatchReady = false;
     for (const host of watchers) {
       try { host.close({ skipClose }); } catch (_) {}
     }
@@ -3103,6 +3135,8 @@ function startCollector(options) {
   }
 
   function handleWatchError(error) {
+    activityWatchReady = false;
+    activityScheduler?.request();
     log(`chokidar error: ${error.message}`);
     if (stopped) return;
     if (WATCH_REFUSAL_CODES.has(error?.code)) {
@@ -3155,12 +3189,18 @@ function startCollector(options) {
       Object.entries(selfSyncSourceRootsForClients(clients, sourceOptions))
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
     );
-    const dirs = [...new Set(Object.values(rootsByClient).flat())];
-    const directoryKey = dirs.join('\0');
+    const usageDirs = [...new Set(Object.values(rootsByClient).flat())];
+    const activitySources = options.sessionActivityPolling === false ? [] : activityWatchSources(trackedClients, {
+      ...options.sessionMetadataDeps, ...sourceOptions, homeDir: options.homeDir || os.homedir()
+    }).map((source) => ({ ...source, dir: canonicalWatchPath(source.dir),
+      target: path.resolve(canonicalWatchPath(source.dir), path.relative(source.dir, source.target)) }));
+    const dirs = [...new Set([...usageDirs, ...activitySources.map((source) => source.dir)])];
+    const directoryKey = JSON.stringify([dirs, activitySources]);
     if (directoryKey === watchedDirectoryKey) return;
     closeWatchers();
     if (dirs.length === 0) {
       watchedDirectoryKey = directoryKey;
+      activityWatchReady = true; // no existing sources; slow discovery is enough
       lastWatchFailureCode = null;
       log('No watchable client data directories found; relying on fallback interval only.');
       return;
@@ -3173,13 +3213,23 @@ function startCollector(options) {
       // the collector cannot re-trigger itself. See
       // SELF_WATCHED_SQLITE_SIDECAR_CLIENTS for the measured per-client evidence.
       if (isSelfWatchSqliteSidecarEvent(filePath, rootsByClient)) return;
+      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient);
+      const activityClients = activityClientsForPath(filePath, activitySources);
+      if (activityClients.length || eventClients.some((client) => ['claude', 'codex'].includes(client))) {
+        activityScheduler?.request();
+      }
+      // The read-only T3 reader can recreate -shm itself. Neither it nor other
+      // activity-only writes are token usage, so they cannot request a scan.
+      if (eventClients.length === 0 && activitySources.some((source) => {
+        const relative = path.relative(source.dir, path.resolve(filePath || '.'));
+        return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+      })) return;
       activityRevision += 1;
       if (tickPending) {
         pendingActivityRevision = pendingActivityRevision === null
           ? activityRevision
           : Math.max(pendingActivityRevision, activityRevision);
       }
-      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient);
       if (
         reasonixNativeSessionCache
         && isReasonixNativeSessionSidecar(filePath)
@@ -3213,6 +3263,8 @@ function startCollector(options) {
       const host = createWatcherHost(
         {
           dirs,
+          usageDirs,
+          activitySources,
           clients,
           customScanPaths: sourceOptions.customScanPaths,
           cursorDesktopRoots: sourceSyncRootsByClient.cursor || [],
@@ -3221,6 +3273,8 @@ function startCollector(options) {
         },
         {
           onHostFallback: (error, fallback = {}) => {
+            activityWatchReady = false;
+            activityScheduler?.request();
             // The host moves to polling by itself when a watch process never
             // confirmed its exit; diagnostics have to say so.
             if (fallback.usePolling === true) watchHostPolling = true;
@@ -3228,6 +3282,7 @@ function startCollector(options) {
             log(`Watch worker unavailable (${error.message}); watching on this thread.`);
           },
           onError: handleWatchError,
+          onReady: () => { activityWatchReady = !usePolling && !watchHostPolling; },
           onEvent: handleWatchEvent
         }
       );
@@ -3287,32 +3342,45 @@ function startCollector(options) {
     });
   }
 
-  function pollClaudeActivity() {
-    if (stopped || !trackedClients.has('claude')) return;
+  function pollSessionActivity() {
+    if (stopped || (!trackedClients.has('claude') && !trackedClients.has('codex'))) return true;
     activityUpdate = (async () => {
-      if (tickInFlight || !latestActivitySummary) return;
+      if (tickInFlight || !latestActivitySummary) return false;
       // Published snapshots are immutable. Replace only the affected maps;
       // counters, history and the exact scan anchor stay untouched.
       const previous = latestActivitySummary;
-      const periods = ['today', 'month', 'allTime'];
-      const ids = claudeActivity.sessionIdsForPeriods(periods.map((name) => previous[name]));
-      if (!ids.size) return;
-      const readings = await claudeActivity.readSessionActivity(ids, {
-        ...options.sessionMetadataDeps,
-        ...sourceOptions,
-        homeDir: options.homeDir || os.homedir()
-      });
-      if (stopped || tickInFlight || latestActivitySummary !== previous) return;
-      const next = claudeActivity.projectSessionActivity(previous, readings);
-      if (!next) return;
-      await onUpdate?.(next, 'session-activity');
-      if (!stopped) latestActivitySummary = next;
+      let next = previous;
+      const activityOptions = activityReadOptions(options, { ...sourceOptions, homeDir: options.homeDir || os.homedir() }, trackedClients);
+      if (trackedClients.has('claude')) {
+        const activity = await claudeActivity.readSummaryActivity(previous, {
+          ...options.sessionMetadataDeps?.claudeMetadataDeps, ...activityOptions
+        });
+        if (stopped || tickInFlight || latestActivitySummary !== previous) return false;
+        next = claudeActivity.projectSessionActivity(previous, activity.readings,
+          Date.now(), activity.sessions) || previous;
+      }
+      if (trackedClients.has('codex')) {
+        const activity = await codexActivity.readSessionActivity(next, {
+          ...options.sessionMetadataDeps?.codexDeps, ...activityOptions
+        });
+        if (stopped || tickInFlight || latestActivitySummary !== previous) return false;
+        next = codexActivity.projectSessionActivity(next, activity) || next;
+      }
+      if (next === previous) return;
+      // Hosts that understand activity patches bypass accounting transforms,
+      // archive writes and whole-summary IPC. Legacy callers retain onUpdate.
+      if (typeof options.onSessionActivity === 'function') {
+        const { activityPatch } = require('./sessionActivityProjection');
+        await options.onSessionActivity(activityPatch(previous, next));
+      } else await onUpdate?.(require('./sessionActivityProjection').materializeActivity(next), 'session-activity');
+      if (!stopped && latestActivitySummary === previous) latestActivitySummary = next;
     })().catch((error) => {
-      if (!stopped) log(`Claude activity update failed: ${error.message}`);
+      if (!stopped) log(`Session activity update failed: ${error.message}`);
+      return false;
     }).finally(() => {
       activityUpdate = null;
-      if (!stopped) activityTimer = setTimeout(pollClaudeActivity, claudeActivity.POLL_INTERVAL_MS);
     });
+    return activityUpdate;
   }
 
   // Stays synchronous and never returns a promise: startMode() and friends rely
@@ -3326,7 +3394,7 @@ function startCollector(options) {
     codexLocalSource?.stop();
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
-    if (activityTimer) { clearTimeout(activityTimer); activityTimer = null; }
+    activityScheduler?.stop();
     clearRolloverHistoryRetry();
     sourceSyncQueue.stop();
     closeWatchers({ skipClose: options.skipCloseWatchers === true });
@@ -3386,7 +3454,14 @@ function startCollector(options) {
 
   setupWatchers();
   loop();
-  if (trackedClients.has('claude')) activityTimer = setTimeout(pollClaudeActivity, claudeActivity.POLL_INTERVAL_MS);
+  if (options.sessionActivityPolling !== false && (trackedClients.has('claude') || trackedClients.has('codex'))) {
+    activityScheduler = createSessionActivityScheduler({
+      refresh: pollSessionActivity,
+      nativeEventsReady: () => activityWatchReady,
+      needsRenewal: () => require('./sessionActivityProjection').needsActivityRenewal(latestActivitySummary)
+    });
+    activityScheduler.start();
+  }
   if (trackedClients.has('codex') && options.codexLocalUsageEnabled !== false
     && (options.codexDotsEnabled === true || (options.codexDotsEnabled === undefined
       && (options.env || process.env).TOKEN_MONITOR_CODEX_LOCAL_USAGE === '1'))) {

@@ -105,6 +105,7 @@ const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { actionWindowForEvent, activateWindowAction, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
 const { applyCodexAdditionalLimitsMigration } = require('./codexAdditionalLimitsMigration');
+const { applyActivityPatch } = require('../shared/sessionActivityProjection');
 const { createDeviceRuntime } = require('../shared/usage/deviceRuntime');
 const { externalAgentActive } = require('../shared/usage/agentPid');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
@@ -336,7 +337,9 @@ const {
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
   composeLocalOnlySummary,
-  composeLocalSyncSummary
+  composeLocalSyncSummary,
+  projectLocalActivity,
+  localActivityPatch
 } = require('./syncDisplayStats');
 const {
   createRendererSnapshots,
@@ -4296,6 +4299,7 @@ async function startIcloudCollector() {
       transformUsage: usageTransform.transform,
       usageOptions,
       sink,
+      onSessionActivity: publishLocalSessionActivity,
       onDiagnosticEvent: recordDiagnosticEvent,
       onError: (error, reason) => console.log(`[icloud-collector] ${reason}: ${error.message}`)
     }, {
@@ -4377,6 +4381,7 @@ function startSyncCollector() {
     transformUsage: usageTransform.transform,
     usageOptions,
     sink,
+    onSessionActivity: publishLocalSessionActivity,
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
   }, {
@@ -4434,6 +4439,7 @@ function startHostCollector() {
     transformUsage: usageTransform.transform,
     usageOptions,
     sink,
+    onSessionActivity: publishLocalSessionActivity,
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
   }, {
@@ -4719,6 +4725,29 @@ function scheduleMacWidgetSnapshot(stats, producerOwner) {
   return ensureMacWidgetSnapshotController()?.enqueue({ stats, producerOwner }) || false;
 }
 
+function publishLocalSessionActivity(patch) {
+  if (!lastCollectedDevice || isExternalAgentActive()) return;
+  const previousDevice = lastCollectedDevice;
+  lastCollectedDevice = applyActivityPatch(lastCollectedDevice, patch);
+  if (localDevice) localDevice = localDevice === previousDevice ? lastCollectedDevice : applyActivityPatch(localDevice, patch);
+  if (!latestStats) return;
+  const previous = latestStats;
+  latestStats = projectLocalActivity(previous, patch);
+  if (localStats === previous) localStats = latestStats;
+  const snapshot = rendererSnapshots.updateActivity(previous, latestStats);
+  edgeDockManualStats = null;
+  // Only activity metadata crosses IPC. Accounting freshness, sync uploads,
+  // exports, History and rate samples remain on the usage publication lane.
+  const displayPatch = localActivityPatch(latestStats);
+  const visiblePatch = settings.sessionTitlesEnabled === false
+    ? { ...displayPatch, nativeSessions: Object.fromEntries(Object.entries(displayPatch.nativeSessions)
+        .map(([name, sessions]) => [name, withoutSessionTitles(sessions)])) }
+    : displayPatch;
+  presentationCache.updateActivity(previous, latestStats, (stats) => applyActivityPatch(stats, visiblePatch));
+  updateEdgeDockCells(electronPresentationStats(latestStats));
+  sendPush({ event: 'session-activity', data: { patch: visiblePatch, snapshot } });
+}
+
 // Two options, both for the cold-start seed and neither for live stats.
 // `skipExport` keeps a republished snapshot from spending the auto-export
 // interval that this run's first real scan needs. `deferToRenderer` waits for
@@ -4975,6 +5004,7 @@ function startLocalCollector() {
     transformUsage: usageTransform.transform,
     usageOptions,
     progressive: true,
+    onSessionActivity: publishLocalSessionActivity,
     onRecord: (summary, meta) => {
       seedInitialLimitProviders(summary);
       const reason = meta.reason;

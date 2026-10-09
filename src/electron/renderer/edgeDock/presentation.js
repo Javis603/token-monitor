@@ -161,7 +161,15 @@
   // aggregate drops all-time session detail (the sessions there are one
   // machine's own view), so a list built from it would silently mean "some"
   // rather than "all".
-  function sessionSourceRows(stats) {
+  const EMPTY_SESSIONS = {};
+  const sourceRowsCache = new WeakMap();
+  function accountingSessionSources(stats) {
+    const month = stats?.periods?.month?.sessions || EMPTY_SESSIONS;
+    const today = stats?.periods?.today?.sessions || EMPTY_SESSIONS;
+    let byToday = sourceRowsCache.get(month);
+    if (!byToday) { byToday = new WeakMap(); sourceRowsCache.set(month, byToday); }
+    let cached = byToday.get(today);
+    if (cached) return cached;
     const byKey = new Map();
     for (const periodKey of ['month', 'today']) {
       for (const [key, session] of Object.entries(stats?.periods?.[periodKey]?.sessions || {})) {
@@ -169,12 +177,31 @@
         if (session?.sessionKind === 'background-review') continue;
         const lastUsedMs = Date.parse(session?.lastUsedAt || session?.startedAt || '');
         if (!Number.isFinite(lastUsedMs)) continue;
-        byKey.set(key, { session, lastUsedMs });
+        byKey.set(key, { key, session, lastUsedMs, periodKey });
       }
     }
-    return [...byKey.entries()]
-      .map(([key, value]) => ({ key, ...value }))
-      .sort((a, b) => b.lastUsedMs - a.lastUsedMs);
+    cached = { keys: new Set(byKey.keys()), rows: [...byKey.values()].sort((a, b) => b.lastUsedMs - a.lastUsedMs) };
+    byToday.set(today, cached);
+    return cached;
+  }
+  function sessionSourceRows(stats) {
+    const base = accountingSessionSources(stats);
+    const native = new Map();
+    for (const periodKey of ['month', 'today']) for (const [key, session] of Object.entries(stats?.nativeSessions?.[periodKey] || {})) {
+      if (base.keys.has(key) || native.has(key) || session.client !== 'codex' || session.sessionKind === 'background-review') continue;
+      const lastUsedMs = Date.parse(session.lastUsedAt || session.startedAt || '');
+      if (Number.isFinite(lastUsedMs)) native.set(key, { key, session, lastUsedMs });
+    }
+    const additions = [...native.values()].sort((a, b) => b.lastUsedMs - a.lastUsedMs);
+    const rows = [];
+    let index = 0;
+    for (const entry of base.rows) {
+      while (index < additions.length && additions[index].lastUsedMs > entry.lastUsedMs) rows.push(additions[index++]);
+      rows.push({ key: entry.key, lastUsedMs: entry.lastUsedMs,
+        session: sessionLive.sessionWithActivity(stats?.periods?.[entry.periodKey], entry.key, entry.session) });
+    }
+    rows.push(...additions.slice(index));
+    return rows;
   }
 
   // One row shape for both callers. `client` rides the row because the Sessions

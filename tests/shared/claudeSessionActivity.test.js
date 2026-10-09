@@ -24,7 +24,8 @@ function fixture(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-activity-'));
   const root = path.join(home, '.claude', 'sessions');
   fs.mkdirSync(root, { recursive: true });
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const cleanups = [];
+  t.after(() => { for (const cleanup of cleanups) cleanup(); fs.rmSync(home, { recursive: true, force: true }); });
   const write = (extra = {}, pid = 1234) => {
     const record = {
       pid, sessionId: 'test-session', status: 'waiting', pidDomain: 'darwin',
@@ -38,7 +39,7 @@ function fixture(t) {
     homeDir: home, env: {}, platform: 'darwin', now,
     readProcessStarts: async (pids) => new Map(pids.map((pid) => [pid, start]))
   };
-  return { home, root, write, options, read: (extra = {}) => activity.readSessionActivity(new Set(['test-session']), { ...options, ...extra }) };
+  return { home, root, write, options, cleanups, read: (extra = {}) => activity.readSessionActivity(new Set(['test-session']), { ...options, ...extra }) };
 }
 
 test('registry recognizes explicit states and publishes only a sanitized observation', async (t) => {
@@ -117,7 +118,7 @@ test('activity applies to every period, renews without token changes, and explic
   assert.equal(activity.applySessionActivity(periods, new Map(), now + 14_000, true), false);
 });
 
-test('unchanged polling keeps object identity and changed observations clone only affected session maps', () => {
+test('unchanged polling keeps object identity and changed observations share the accounting maps', () => {
   const row = session();
   const codex = { ...session(), client: 'codex', sessionId: 'codex-session' };
   const summary = { today: { totalTokens: 200, sessions: { claude: row, codex } }, month: usage.emptyPeriod() };
@@ -126,7 +127,8 @@ test('unchanged polling keeps object identity and changed observations clone onl
   readings.get('test-session').state = 'running';
   const next = activity.projectSessionActivity(summary, readings, now + 2000);
   assert.notEqual(next, summary);
-  assert.notEqual(next.today.sessions, summary.today.sessions);
+  assert.equal(next.today.sessions, summary.today.sessions);
+  assert.equal(live.sessionWithActivity(next.today, 'claude').liveActivity.state, 'running');
   assert.equal(next.today.sessions.codex, codex);
   assert.equal(next.month, summary.month);
   assert.equal(summary.today.sessions.claude.liveActivity.state, 'waiting');
@@ -145,7 +147,7 @@ test('explicit activity overrides transcript recency but expires, clears and res
   }
   const recent = { lastUsedAt: new Date(now).toISOString(), turnEnded: false };
   assert.equal(live.sessionActivityState(session('unknown', recent), now), 'running');
-  assert.equal(live.sessionActivityState(session('waiting', { ...recent, client: 'codex' }), now), 'running');
+  assert.equal(live.sessionActivityState(session('waiting', { ...recent, client: 'opencode' }), now), 'running');
   assert.equal(live.nextSessionStatusChangeAt([session()], now), now + live.LIVE_ACTIVITY_TTL_MS);
 });
 
@@ -162,7 +164,7 @@ test('normalization strips private fields and merging follows the activity clock
   assert.equal(usage.mergePeriods(period(old), period(without)).sessions['claude:test-session'].liveActivity.state, 'waiting');
   const record = usage.normalizeDeviceRecord({ deviceId: 'test', today: { sessions: { 'claude:test-session': old } } });
   assert.deepEqual(record.periods.today.sessions['claude:test-session'].liveActivity, normalized.liveActivity);
-  assert.equal(period(session('waiting', { client: 'codex' })).sessions['codex:test-session'].liveActivity, undefined);
+  assert.equal(period(session('waiting', { client: 'opencode' })).sessions['opencode:test-session'].liveActivity, undefined);
 });
 
 test('historical archives omit transient activity and heartbeat updates do not rewrite history', () => {
@@ -250,4 +252,256 @@ test('collector publishes waiting changes without rescanning usage or mutating e
   collector.stop();
   await collector.whenIdle();
   assert.equal(collector.getDiagnostics().state, 'stopped');
+});
+
+test('zero-token registry sessions reach local rows without changing accounting or sync', async t => {
+  const f = fixture(t); f.write();
+  const empty = Object.fromEntries(['today', 'month', 'allTime'].map(name => [name, usage.emptyPeriod()]));
+  const observed = await activity.readSummaryActivity(empty, f.options);
+  const next = activity.projectSessionActivity(empty, observed.readings, now, observed.sessions);
+  const key = 'claude:test-session';
+  assert.equal(next.nativeSessions.today[key].tokenDataUnavailable, true);
+  assert.equal(next.nativeSessions.today[key].sessionDetailAvailable, false);
+  const [row] = sessionRows.sessionRowsForPeriod(next.today, { nativeSessions: next.nativeSessions.today, clientLabels: { claude: 'Claude Code' }, now: new Date(now) });
+  assert.equal(row.activityState, 'waiting');
+  assert.equal(row.client, 'claude');
+  assert.match(row.title, /Claude Code/);
+  for (const name of ['today', 'month', 'allTime']) {
+    assert.equal(next[name], empty[name]);
+    assert.equal(next[name].totalTokens, 0);
+    assert.equal(Object.keys(next[name].sessions).length, 0);
+  }
+  const { serializeSyncPayload } = require('../../src/shared/syncPayload');
+  assert.equal(Object.hasOwn(serializeSyncPayload(next).payload, 'nativeSessions'), false);
+  const unchanged = await activity.readSummaryActivity(next, { ...f.options, now: now + 1000 });
+  assert.equal(activity.projectSessionActivity(next, unchanged.readings, now + 1000, unchanged.sessions), null);
+  f.write({ status: 'idle' });
+  const ended = await activity.readSummaryActivity(next, f.options);
+  assert.equal(Object.keys(activity.projectSessionActivity(next, ended.readings, now + 1000, ended.sessions).nativeSessions.today).length, 0);
+});
+
+test('usage and archived identities suppress temporary rows and preserve other native clients', async t => {
+  const f = fixture(t); f.write();
+  const previous = { nativeSessions: { today: { reasonix: { client: 'reasonix' } } }, today: usage.emptyPeriod() };
+  const observed = await activity.readSummaryActivity(previous, f.options);
+  const projected = activity.projectSessionActivity(previous, observed.readings, now, observed.sessions);
+  for (const archived of [false, true]) {
+    const summary = { ...projected, today: { sessions: { 'claude:test-session': session('waiting', { archived }) } } };
+    const withUsage = await activity.readSummaryActivity(summary, f.options);
+    assert.equal(Object.keys(withUsage.sessions).length, 0);
+    const next = activity.projectSessionActivity(summary, withUsage.readings, now, withUsage.sessions);
+    assert.equal(next.nativeSessions.today.reasonix, previous.nativeSessions.today.reasonix);
+    assert.equal(next.nativeSessions.today['claude:test-session'], undefined);
+  }
+  assert.equal(Object.keys((await activity.readSummaryActivity(previous, { ...f.options, readProcessStarts: async () => new Map() })).sessions).length, 0);
+  assert.equal(Object.keys((await activity.readSummaryActivity(previous, { ...f.options, scopedHome: true })).sessions).length, 0);
+});
+
+function t3Fixture(f) {
+  const { DatabaseSync } = require('node:sqlite');
+  const dir = path.join(f.home, '.t3', 'userdata');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'server-runtime.json'), JSON.stringify({ version: 1, pid: 1234, startedAt: new Date(start).toISOString() }));
+  const db = new DatabaseSync(path.join(dir, 'statev2.sqlite'));
+  db.exec(`
+    CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT PRIMARY KEY, title TEXT, deleted_at TEXT, updated_at TEXT);
+    CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT PRIMARY KEY, thread_id TEXT, driver TEXT, provider TEXT, status TEXT, last_run_ordinal INTEGER, updated_at TEXT, payload_json TEXT);
+    CREATE TABLE orchestration_v2_projection_runs (run_id TEXT PRIMARY KEY, provider_thread_id TEXT, ordinal INTEGER, status TEXT, requested_at TEXT);
+    CREATE TABLE orchestration_v2_projection_nodes (node_id TEXT PRIMARY KEY, thread_id TEXT, provider_thread_id TEXT, run_id TEXT, status TEXT, completed_at TEXT);
+    CREATE TABLE orchestration_v2_projection_runtime_requests (node_id TEXT, thread_id TEXT, status TEXT, resolved_at TEXT, kind TEXT, created_at TEXT, payload_json TEXT);
+  `);
+  const stamp = new Date(now).toISOString();
+  db.prepare('INSERT INTO orchestration_v2_projection_threads VALUES (?, ?, NULL, ?)').run('app', 'Claude test title', stamp);
+  db.prepare('INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run('provider', 'app', 'claudeAgent', 'custom-claude', 'active', 1, stamp, JSON.stringify({ nativeThreadRef: { nativeId: 'test-session' } }));
+  db.prepare('INSERT INTO orchestration_v2_projection_runs VALUES (?, ?, ?, ?, ?)').run('run', 'provider', 1, 'running', stamp);
+  db.prepare('INSERT INTO orchestration_v2_projection_nodes VALUES (?, ?, ?, ?, ?, NULL)').run('node', 'app', 'provider', 'run', 'waiting');
+  db.prepare('INSERT INTO orchestration_v2_projection_runtime_requests VALUES (?, ?, ?, NULL, ?, ?, ?)').run('node', 'app', 'pending', 'permission', stamp, JSON.stringify({ responseCapability: { type: 'live' }, prompt: 'private question' }));
+  // Close before the home cleanup, including on Windows.
+  f.cleanups.push(() => db.close());
+  return db;
+}
+
+test('T3 Claude formal waiting supersedes registry and resolves without transcript writes', async t => {
+  const f = fixture(t); const db = t3Fixture(f); f.write({ status: 'busy' });
+  for (const kind of ['command', 'file-read', 'file-change', 'permission', 'mcp-elicitation', 'user_input']) {
+    db.prepare('UPDATE orchestration_v2_projection_runtime_requests SET kind = ?').run(kind);
+    const result = await activity.readSummaryActivity({}, f.options);
+    assert.equal(result.readings.get('test-session').state, 'waiting', kind);
+    assert.equal(result.sessions['claude:test-session'].title, 'Claude test title');
+    assert.equal(JSON.stringify(result.sessions).includes('private question'), false);
+  }
+  db.exec("UPDATE orchestration_v2_projection_runtime_requests SET status = 'resolved'");
+  assert.equal((await activity.readSummaryActivity({}, f.options)).readings.get('test-session').state, 'running');
+  db.exec("UPDATE orchestration_v2_projection_runs SET status = 'cancelled'");
+  assert.equal(Object.keys((await activity.readSummaryActivity({}, f.options)).sessions).length, 0);
+  db.exec("UPDATE orchestration_v2_projection_runs SET status = 'running'; UPDATE orchestration_v2_projection_provider_threads SET driver = 'codex'");
+  f.write({ status: 'idle' });
+  assert.equal(Object.keys((await activity.readSummaryActivity({}, f.options)).sessions).length, 0);
+});
+
+test('T3 Claude answerable message questions survive completion until answered', async t => {
+  const f = fixture(t); const db = t3Fixture(f);
+  db.exec("UPDATE orchestration_v2_projection_runs SET status = 'completed'; UPDATE orchestration_v2_projection_provider_threads SET status = 'idle'; UPDATE orchestration_v2_projection_runtime_requests SET kind = 'user_input'");
+  db.prepare('UPDATE orchestration_v2_projection_runtime_requests SET payload_json = ?').run(JSON.stringify({ responseCapability: { type: 'message' } }));
+  assert.equal((await activity.readSummaryActivity({}, f.options)).readings.get('test-session').state, 'waiting');
+  db.exec("UPDATE orchestration_v2_projection_runtime_requests SET status = 'resolved'");
+  assert.equal(Object.keys((await activity.readSummaryActivity({}, f.options)).sessions).length, 0);
+  db.exec("UPDATE orchestration_v2_projection_runtime_requests SET status = 'pending'");
+  assert.equal((await activity.readSummaryActivity({}, { ...f.options, readProcessStarts: async () => new Map() })).readings.size, 0);
+});
+
+test('collector discovers zero-token Claude waiting and polling removes it without scans or anchor changes', { timeout: 12_000 }, async t => {
+  const f = fixture(t); f.write();
+  const { startCollector, collectUsageOnce } = require('../../src/shared/collector');
+  const updates = [];
+  let scans = 0;
+  let anchor;
+  let resolveUpdate;
+  const collector = startCollector({
+    clients: 'claude', allTimeSince: '2024-01-01', deviceId: 'zero-claude', agentVersion: 'test',
+    homeDir: f.home, env: {}, platform: 'darwin', intervalMs: 300_000,
+    historyEnabled: false, limitsEnabled: false, projectsEnabled: false, watchEnabled: false,
+    codexLocalUsageEnabled: false, anchorPersistenceEnabled: false,
+    sessionMetadataDeps: { readProcessStarts: f.options.readProcessStarts },
+    runTokscale: async () => { scans += 1; return { entries: [] }; },
+    onAnchorComputed: value => { anchor = value; },
+    onUpdate: (summary, reason) => { updates.push({ summary, reason }); resolveUpdate?.(); },
+    onError: error => { throw error; }
+  });
+  f.cleanups.unshift(() => collector.stop());
+  await collector.whenIdle();
+  assert.equal(scans, 3);
+  await collectUsageOnce({ clients: 'claude', deviceId: 'zero-anchor', agentVersion: 'test',
+    homeDir: f.home, env: {}, platform: 'darwin', historyEnabled: false, limitsEnabled: false,
+    projectsEnabled: false, codexLocalUsageEnabled: false, anchorPersistenceEnabled: false,
+    sessionMetadataDeps: { readProcessStarts: f.options.readProcessStarts },
+    runTokscale: async () => ({ entries: [] }), onAnchorComputed: value => { anchor = value; } });
+  const first = updates[0].summary;
+  assert.equal(first.nativeSessions.today['claude:test-session'].liveActivity.state, 'waiting');
+  for (const name of ['today', 'month', 'allTime']) {
+    assert.equal(first[name].totalTokens, 0);
+    assert.equal(Object.keys(first[name].sessions).length, 0);
+    assert.equal(Object.keys(anchor.windowsPeriods[name].sessions).length, 0);
+  }
+  assert.equal(anchor.nativeSessions, undefined);
+  const changed = new Promise(resolve => { resolveUpdate = resolve; });
+  fs.unlinkSync(path.join(f.root, '1234.json'));
+  await changed;
+  assert.equal(scans, 3);
+  assert.equal(updates[1].reason, 'session-activity');
+  assert.equal(Object.keys(updates[1].summary.nativeSessions.today).length, 0);
+  assert.equal(first.nativeSessions.today['claude:test-session'].liveActivity.state, 'waiting');
+  collector.stop(); await collector.whenIdle();
+});
+
+test('temporary Claude rows reuse native titles and remain outside recursive subagent discovery', async t => {
+  const f = fixture(t); f.write();
+  const project = path.join(f.home, '.claude', 'projects', 'project');
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, 'test-session.jsonl'), JSON.stringify({ type: 'custom-title', customTitle: 'Native Claude title', sessionId: 'test-session' }) + '\n');
+  const observed = await activity.readSummaryActivity({}, f.options);
+  assert.equal(observed.sessions['claude:test-session'].title, 'Native Claude title');
+  assert.equal(observed.sessions['claude:test-session'].sessionDetailAvailable, true);
+  const nested = path.join(project, 'nested', 'subagents');
+  fs.mkdirSync(nested, { recursive: true });
+  fs.renameSync(path.join(project, 'test-session.jsonl'), path.join(nested, 'test-session.jsonl'));
+  const shallow = await activity.readSummaryActivity({}, f.options);
+  assert.equal(shallow.sessions['claude:test-session'].sessionDetailAvailable, false);
+});
+
+test('collector patch observers receive state changes without a usage publication or scan', async (t) => {
+  const f = fixture(t);
+  f.write();
+  let scans = 0;
+  const updates = [];
+  const patches = [];
+  let resolvePatch;
+  const collector = require('../../src/shared/collector').startCollector({
+    clients: 'claude', allTimeSince: '2024-01-01', deviceId: 'test', agentVersion: 'test',
+    historyEnabled: false, limitsEnabled: false, projectsEnabled: false, watchEnabled: false,
+    intervalMs: 300_000, codexLocalUsageEnabled: false, anchorPersistenceEnabled: false,
+    homeDir: f.home, platform: 'darwin', env: {},
+    sessionMetadataDeps: { readProcessStarts: f.options.readProcessStarts },
+    runTokscale: async () => { scans += 1; return { entries: [{ client: 'claude', sessionId: 'test-session', model: 'claude-sonnet-4-6', input: 100, output: 0, cost: 0 }] }; },
+    onUpdate: (summary) => updates.push(summary),
+    onSessionActivity: (patch) => { patches.push(patch); resolvePatch?.(); },
+    onError: (error) => { throw error; }
+  });
+  t.after(async () => { collector.stop(); await collector.whenIdle(); });
+  await collector.whenIdle();
+  const changed = new Promise((resolve) => { resolvePatch = resolve; });
+  f.write({ status: 'busy' });
+  await changed;
+  assert.equal(scans, 3);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].today.sessions['claude:test-session'].liveActivity.state, 'waiting');
+  assert.deepEqual(patches[0].observations.map((row) => [row.client, row.sessionId, row.liveActivity.state]), [['claude', 'test-session', 'running']]);
+  assert.ok(JSON.stringify(patches[0]).length < 500);
+});
+
+test('the existing watcher routes registry changes into activity without scheduling token scans', async (t) => {
+  const { EventEmitter } = require('node:events');
+  const chokidar = require('chokidar');
+  const f = fixture(t); f.write();
+  const original = chokidar.watch;
+  const prior = process.env.TOKEN_MONITOR_WATCH_IN_PROCESS;
+  process.env.TOKEN_MONITOR_WATCH_IN_PROCESS = '1';
+  let watchOptions;
+  const watcher = new EventEmitter(); watcher.close = async () => {};
+  chokidar.watch = (_dirs, options) => { watchOptions = options; queueMicrotask(() => watcher.emit('ready')); return watcher; };
+  t.after(() => { chokidar.watch = original; if (prior === undefined) delete process.env.TOKEN_MONITOR_WATCH_IN_PROCESS; else process.env.TOKEN_MONITOR_WATCH_IN_PROCESS = prior; });
+  let scans = 0; let updates = 0; let resolvePatch;
+  const changed = new Promise(resolve => { resolvePatch = resolve; });
+  const collector = require('../../src/shared/collector').startCollector({
+    clients: 'claude', allTimeSince: '2024-01-01', deviceId: 'test', agentVersion: 'test',
+    historyEnabled: false, limitsEnabled: false, projectsEnabled: false,
+    watchEnabled: true, watchTriggersCollection: true, intervalMs: 300_000,
+    codexLocalUsageEnabled: false, anchorPersistenceEnabled: false,
+    homeDir: f.home, platform: 'darwin', env: {},
+    sessionMetadataDeps: { readProcessStarts: f.options.readProcessStarts, t3DbPaths: [] },
+    runTokscale: async () => { scans++; return { entries: [{ client: 'claude', sessionId: 'test-session', model: 'claude-sonnet-4-6', input: 100, output: 0, cost: 0 }] }; },
+    onUpdate: () => { updates++; }, onSessionActivity: resolvePatch,
+    onError: error => { throw error; }
+  });
+  t.after(async () => { collector.stop(); await collector.whenIdle(); });
+  await collector.whenIdle();
+  const registry = path.join(f.root, '1234.json');
+  assert.equal(watchOptions.ignored(registry), false);
+  assert.equal(watchOptions.ignored(path.join(f.root, 'secret.json')), true);
+  f.write({ status: 'busy' });
+  watcher.emit('all', 'change', registry);
+  watcher.emit('all', 'change', registry);
+  const patch = await changed; await collector.whenIdle();
+  assert.equal(scans, 3); assert.equal(updates, 1);
+  assert.deepEqual(patch.observations.map(row => row.liveActivity.state), ['running']);
+  collector.stop(); watcher.emit('all', 'change', registry);
+  assert.equal(scans, 3);
+});
+
+test('a copied archive projection remains the activity baseline and suppresses no-token duplicates', async (t) => {
+  const f = fixture(t); f.write();
+  let resolvePatch;
+  const patches = [];
+  const collector = require('../../src/shared/collector').startCollector({
+    clients: 'claude', allTimeSince: '2024-01-01', deviceId: 'test', agentVersion: 'test',
+    historyEnabled: false, limitsEnabled: false, projectsEnabled: false, watchEnabled: false,
+    intervalMs: 300_000, codexLocalUsageEnabled: false, anchorPersistenceEnabled: false,
+    homeDir: f.home, platform: 'darwin', env: {},
+    sessionMetadataDeps: { readProcessStarts: f.options.readProcessStarts },
+    runTokscale: async () => ({ entries: [] }),
+    onUpdate(summary) {
+      const visible = { ...summary };
+      for (const name of ['today', 'month', 'allTime']) visible[name] = { ...summary[name], sessions: {
+        'claude:test-session': { client: 'claude', sessionId: 'test-session', totalTokens: 100, archived: true }
+      } };
+      return visible;
+    },
+    onSessionActivity: (patch) => { patches.push(patch); resolvePatch?.(); },
+    onError: (error) => { throw error; }
+  });
+  t.after(async () => { collector.stop(); await collector.whenIdle(); });
+  await collector.whenIdle();
+  await new Promise((resolve) => { resolvePatch = resolve; });
+  assert.deepEqual(patches[0].observations, []);
+  assert.deepEqual(patches[0].nativeSessions.today, {});
 });

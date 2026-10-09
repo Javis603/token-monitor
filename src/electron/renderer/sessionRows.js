@@ -279,7 +279,7 @@
     const { clientLabel, titleParts, modelLabel } = sessionTitleParts(
       { ...session, client },
       labels,
-      'Reasonix',
+      client === 'codex' ? 'Codex' : client === 'claude' ? 'Claude Code' : 'Reasonix',
       session?.model
     );
     // Native Reasonix prompt totals include cache hits; explicit misses win,
@@ -347,6 +347,7 @@
     const now = options.now || new Date();
     const rows = Object.entries(period?.sessions || {})
       .map(([key, session]) => {
+        session = sessionLive.sessionWithActivity(period, key, session);
         if (isReasonixSyntheticSession(session, key)) return null;
         const value = finiteNumber(session?.totalTokens);
         if (value <= 0) return null;
@@ -396,7 +397,9 @@
         };
       })
       .filter(Boolean);
+    const usageKeys = new Set(rows.map((row) => row.key));
     for (const [key, session] of Object.entries(options.nativeSessions || {})) {
+      if (usageKeys.has(`session:${key}`)) continue;
       const row = nativeSessionRow(session, key, options, now);
       if (row) rows.push(row);
     }

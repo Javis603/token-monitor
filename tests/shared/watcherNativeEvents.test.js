@@ -27,6 +27,26 @@ const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 
 installSourceEnvGuard(test);
 
+test('the shared native watcher delivers activity-only registry and T3 WAL writes', async (t) => {
+  const { openWatch } = require('../../src/shared/collector');
+  const { activityWatchSources } = require('../../src/shared/sessionActivityWatch');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-activity-native-'));
+  const registry = path.join(home, '.claude', 'sessions');
+  const userdata = path.join(home, '.t3', 'userdata');
+  fs.mkdirSync(registry, { recursive: true }); fs.mkdirSync(userdata, { recursive: true });
+  const sources = activityWatchSources(['claude', 'codex'], { homeDir: home, env: {} });
+  const watcher = openWatch(chokidar, { dirs: [...new Set(sources.map(source => source.dir))],
+    usageDirs: [], activitySources: sources, clients: '', usePolling: false });
+  t.after(async () => { await watcher.close(); fs.rmSync(home, { recursive: true, force: true }); });
+  await new Promise((resolve, reject) => { watcher.once('ready', resolve); watcher.once('error', reject); });
+  for (const file of [path.join(registry, '123.json'), path.join(userdata, 'statev2.sqlite-wal')]) {
+    const observed = new Promise(resolve => watcher.on('all', (_event, filePath) => {
+      if (path.resolve(filePath) === path.resolve(file)) resolve();
+    }));
+    await writeUntilObserved(file, '{"state":"waiting"}\n', observed, 'the activity source');
+  }
+});
+
 // awaitWriteFinish holds an event for stabilityThreshold (500 ms) before it is
 // emitted, so the floor is already half a second before any scheduling noise.
 // The bound is generous on purpose: this asserts that events arrive at all, so

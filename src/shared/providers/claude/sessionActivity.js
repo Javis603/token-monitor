@@ -3,9 +3,15 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFile } = require('node:child_process');
-const { resolveClaudeConfigDir } = require('./paths');
+const { processStarts } = require('../../processStarts');
+const { resolveClaudeConfigDir, claudeSessionRoots } = require('./paths');
+const { isSafeSessionId } = require('../../sessionFiles');
+const { readT3Activity } = require('../../t3SessionActivity');
+const { readT3SessionMeta } = require('../../t3SessionMetadata');
+const { readSessionTitle } = require('./sessionMetadata');
 const { isArchivedSession } = require('../../sessionLive');
+
+const { hasKnownSession, activityEntries, rememberProjection, compactActivity } = require('../../sessionActivityProjection');
 
 const POLL_INTERVAL_MS = 3000;
 const RENEW_INTERVAL_MS = 10_000;
@@ -34,48 +40,17 @@ function registryState(record) {
   return null;
 }
 
-function processStarts(pids, platform) {
-  if (!pids.length) return Promise.resolve(new Map());
-  let command;
-  let args;
-  if (platform === 'darwin' || platform === 'linux') {
-    command = 'ps';
-    args = ['-p', pids.join(','), '-o', 'pid=', '-o', 'lstart='];
-  } else if (platform === 'win32') {
-    command = 'powershell.exe';
-    // All interpolated values have already been validated as positive integers.
-    const filter = pids.map((pid) => `ProcessId=${pid}`).join(' OR ');
-    args = ['-NoProfile', '-NonInteractive', '-Command',
-      `Get-CimInstance Win32_Process -Filter '${filter}' | ForEach-Object { Write-Output ($_.ProcessId.ToString() + ' ' + $_.CreationDate.ToUniversalTime().ToString('o')) }`];
-  } else return Promise.resolve(new Map());
-  return new Promise((resolve) => {
-    execFile(command, args, {
-      timeout: 2000, maxBuffer: 128 * 1024, windowsHide: true,
-      env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' }
-    }, (_error, stdout) => {
-      const result = new Map();
-      for (const line of String(stdout || '').split('\n')) {
-        const match = line.trim().match(/^(\d+)\s+(.+)$/);
-        if (!match) continue;
-        const time = Date.parse(platform === 'win32' ? match[2] : `${match[2]} UTC`);
-        if (Number.isFinite(time)) result.set(Number(match[1]), time);
-      }
-      resolve(result);
-    });
-  });
-}
-
 // Only the three states and our observation time leave this provider. Registry
 // names, prompts, working directories, sockets and peer keys are never copied.
 async function readSessionActivity(sessionIds, options = {}) {
   const result = new Map();
-  if (!sessionIds.size || options.scopedHome) return result;
+  if (sessionIds?.size === 0 || options.scopedHome) return result;
   const platform = options.platform || process.platform;
   const root = path.join(resolveClaudeConfigDir({ ...options, homeDir: options.homeDir || os.homedir() }), 'sessions');
   let names;
   try { names = fs.readdirSync(root); } catch (_) { return result; }
   const candidates = [];
-  for (const name of names) {
+  for (const name of names.filter((name) => /^[1-9]\d*\.json$/.test(name)).sort().slice(0, 256)) {
     if (!/^[1-9]\d*\.json$/.test(name)) continue;
     try {
       const file = path.join(root, name);
@@ -85,7 +60,8 @@ async function readSessionActivity(sessionIds, options = {}) {
       if (!record) continue;
       const pid = record.pid;
       if (!Number.isSafeInteger(pid) || pid <= 0 || pid > 2147483647
-        || `${pid}.json` !== name || !sessionIds.has(record.sessionId)
+        || `${pid}.json` !== name || !isSafeSessionId(record.sessionId)
+        || (sessionIds && !sessionIds.has(record.sessionId))
         || record.pidDomain !== platform) continue;
       const state = registryState(record);
       if (!state) continue;
@@ -149,21 +125,86 @@ function applySessionActivity(periods, readings, now = Date.now(), renew = false
   return changed;
 }
 
-function projectSessionActivity(summary, readings, now = Date.now()) {
+function projectSessionActivity(summary, readings, now = Date.now(), nativeSessions) {
   let next = null;
+  const observations = [];
+  const entries = activityEntries(summary, 'claude', readings.keys());
   for (const name of ['today', 'month', 'allTime']) {
     let sessions = null;
-    for (const [key, session] of Object.entries(summary[name]?.sessions || {})) {
+    for (const { key, session } of entries.filter((row) => row.name === name)) {
       const observation = nextObservation(session, readings, now, true);
       if (!observation) continue;
-      sessions ||= { ...summary[name].sessions };
-      sessions[key] = { ...session, liveActivity: observation };
+      sessions ||= compactActivity(summary[name], now);
+      sessions[key] = observation;
+      observations.push({ client: 'claude', sessionId: session.sessionId, liveActivity: observation });
     }
     if (!sessions) continue;
     next ||= { ...summary, updatedAt: new Date(now).toISOString() };
-    next[name] = { ...summary[name], sessions };
+    next[name] = { ...summary[name], sessionActivity: sessions };
   }
+  if (nativeSessions) {
+    const oldNative = summary.nativeSessions || {};
+    const claudeOnly = (view) => Object.fromEntries(Object.entries(view || {}).filter(([, session]) => session.client === 'claude'));
+    const withoutClock = (view) => JSON.stringify(view, (key, value) => key === 'observedAt' ? undefined : value);
+    const changed = ['today', 'month', 'allTime'].some((name) => withoutClock(claudeOnly(oldNative[name])) !== withoutClock(nativeSessions));
+    const renew = Object.values(claudeOnly(oldNative.today)).some((session) => now - Date.parse(session.liveActivity?.observedAt) >= RENEW_INTERVAL_MS);
+    if (changed || renew) {
+      next ||= { ...summary, updatedAt: new Date(now).toISOString() };
+      next.nativeSessions = { ...oldNative };
+      for (const name of ['today', 'month', 'allTime']) {
+        const existing = Object.fromEntries(Object.entries(oldNative[name] || {}).filter(([, session]) => session.client !== 'claude'));
+        next.nativeSessions[name] = { ...existing, ...nativeSessions };
+      }
+    }
+  }
+  rememberProjection(summary, next, observations);
   return next;
 }
 
-module.exports = { POLL_INTERVAL_MS, applySessionActivity, projectSessionActivity, readSessionActivity, sessionIdsForPeriods };
+// Native metadata is optional. Probe only main transcripts in the configured
+// root and immediate project folders, never the recursive historical tree.
+function activityFiles(roots, ids) {
+  const found = new Map();
+  if (!ids.size) return found;
+  for (const root of [roots.projects, roots.transcripts]) {
+    let dirs;
+    try {
+      dirs = [root, ...fs.readdirSync(root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory()).slice(0, 256).map((entry) => path.join(root, entry.name))];
+    } catch (_) { continue; }
+    for (const dir of dirs) for (const id of ids) {
+      if (found.has(id)) continue;
+      const file = path.join(dir, `${id}.jsonl`);
+      try { if (fs.lstatSync(file).isFile()) found.set(id, file); } catch (_) { /* Not yet written. */ }
+    }
+  }
+  return found;
+}
+
+// Registry discovery includes sessions before the first usage response. These
+// rows are local presentation only; an existing usage/archive identity wins.
+async function readSummaryActivity(summary, options = {}) {
+  const readings = await readSessionActivity(null, options);
+  const t3 = await readT3Activity(options, 'claudeAgent');
+  for (const [id, reading] of t3) if (isSafeSessionId(id)) readings.set(id, reading);
+  const ids = new Set([...readings].filter(([id, reading]) => !hasKnownSession(summary, 'claude', id)
+    && ['running', 'waiting'].includes(reading.state)).map(([id]) => id));
+  const roots = claudeSessionRoots({ ...options, homeDir: options.homeDir || os.homedir(), useEnvRoots: !options.scopedHome });
+  const files = activityFiles(roots, ids);
+  const titles = readT3SessionMeta(ids, { ...options, driver: 'claudeAgent' });
+  const sessions = {};
+  for (const id of ids) {
+    const file = files.get(id);
+    const title = titles.get(id)?.title || (file && readSessionTitle(file, options.claudeMetadataDeps));
+    sessions[`claude:${id}`] = {
+      client: 'claude', sessionId: id, native: true,
+      totalTokens: 0, costUsd: 0, models: {}, tokenDataUnavailable: true,
+      sessionDetailAvailable: Boolean(file), ...(title ? { title } : {}),
+      lastUsedAt: summary.nativeSessions?.today?.[`claude:${id}`]?.lastUsedAt || readings.get(id).observedAt,
+      liveActivity: readings.get(id)
+    };
+  }
+  return { readings, sessions };
+}
+
+module.exports = { POLL_INTERVAL_MS, applySessionActivity, projectSessionActivity, readSessionActivity, readSummaryActivity, sessionIdsForPeriods };

@@ -59,6 +59,11 @@ function createDeviceRuntime(options = {}, deps = {}) {
     const configured = {
       ...nextUsageOptions,
       ...runtimeOptions,
+      ...(typeof options.onSessionActivity === 'function' ? { onSessionActivity(patch) {
+        if (!active || generation !== usageGeneration) return;
+        if (!deviceState.updateActivity(patch, { epoch })) return;
+        options.onSessionActivity?.(patch);
+      } } : {}),
       // A worker-hosted runtime (usageHost.js) has already run the transform
       // where the session archive lives, and says so in `meta`.
       onUpdate(summary, reason, meta) {

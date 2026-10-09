@@ -4,7 +4,7 @@
 'use strict';
 
 const PERIODS = ['today', 'month', 'allTime'];
-const { normalizeLiveActivity } = require('./sessionLive');
+const { normalizeLiveActivity, sessionWithActivity } = require('./sessionLive');
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
@@ -666,7 +666,7 @@ function mergeSession(target, source) {
   }
   // Registry observations have their own clock: waiting can change without a
   // token or transcript write. An explicit unknown reading clears old evidence.
-  if (source.client === 'claude') {
+  if (source.client === 'claude' || source.client === 'codex') {
     const reading = normalizeLiveActivity(source.liveActivity);
     if (reading && timestampMs(reading.observedAt) >= timestampMs(target.liveActivity?.observedAt)) {
       target.liveActivity = reading;
@@ -774,7 +774,7 @@ function normalizeSession(input, fallbackKey) {
   if (client === 'codex' && typeof input.waitingForInput === 'boolean') {
     session.waitingForInput = input.waitingForInput;
   }
-  if (client === 'claude') {
+  if (client === 'claude' || client === 'codex') {
     const activity = normalizeLiveActivity(input.liveActivity);
     if (activity) session.liveActivity = activity;
   }
@@ -1020,7 +1020,7 @@ function normalizePeriod(input, options = {}) {
   reconcileCursorAutoGlobalModels(period, input);
   if (input.sessions && typeof input.sessions === 'object') {
     for (const [key, value] of Object.entries(input.sessions)) {
-      const session = normalizeSession(value, key);
+      const session = normalizeSession(sessionWithActivity(input, key, value), key);
       if (!session) continue;
       if (!projectsEnabled) {
         session.projectId = '';

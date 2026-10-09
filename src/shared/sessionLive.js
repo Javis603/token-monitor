@@ -45,8 +45,18 @@
     return observedAt ? { state: value.state, observedAt: new Date(observedAt).toISOString() } : null;
   }
 
+  // Local activity overlays leave the accounting session map untouched. Resolve
+  // one row at the presentation/normalization boundary; wire rows stay ordinary.
+  function sessionWithActivity(period, key, session = period?.sessions?.[key]) {
+    if (!session || isArchivedSession(session)) return session;
+    const observation = normalizeLiveActivity(period?.sessionActivity?.[key]);
+    if (!observation || !['claude', 'codex'].includes(session.client)
+      || timestampMs(session.liveActivity?.observedAt) > timestampMs(observation.observedAt)) return session;
+    return { ...session, liveActivity: observation };
+  }
+
   function liveActivityExpiryAt(session, now = Date.now()) {
-    if (session?.client !== 'claude' || isArchivedSession(session)) return 0;
+    if (!['claude', 'codex'].includes(session?.client) || isArchivedSession(session)) return 0;
     const reading = normalizeLiveActivity(session.liveActivity);
     if (!reading || reading.state === 'unknown') return 0;
     const observedAt = timestampMs(reading.observedAt);
@@ -68,7 +78,7 @@
     return sessionActivityState(session, now) === 'running';
   }
 
-  // Transcript activity is running, ended or idle. A validated Claude registry
+  // Transcript activity is running, ended or idle. A validated live provider
   // observation can override it with explicit running, waiting or idle while
   // its short lease is current. Unknown and expired observations fall back.
   // A live session's transcript says whether the agent
@@ -227,6 +237,7 @@
     RUNNING_WINDOW_MS,
     LIVE_ACTIVITY_TTL_MS,
     normalizeLiveActivity,
+    sessionWithActivity,
     liveActivityExpiryAt,
     contextTone,
     isArchivedSession,
