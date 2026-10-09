@@ -1267,6 +1267,11 @@ for (const change of ['stop', 'restart', 'remove', 'disable haptics']) {
 for (const mode of ['always', 'alwaysExceptFullScreen']) {
   for (const outcome of ['success', 'failure', 'throw']) {
     test(`${mode} refresh stays visible after pointer leave until ${outcome}`, async (t) => {
+      t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+      // Advance through frames so feedback expiry and opacity steps share one clock.
+      const advance = (ms) => {
+        for (let elapsed = 0; elapsed < ms; elapsed += 16) t.mock.timers.tick(Math.min(16, ms - elapsed));
+      };
       let finish;
       let fail;
       const animated = mode === 'always' && outcome === 'success';
@@ -1280,12 +1285,12 @@ for (const mode of ['always', 'alwaysExceptFullScreen']) {
       const peek = fixture.windowFor('peek');
       const rail = fixture.windowFor('rail');
       fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 40 };
-      await new Promise((resolve) => setTimeout(resolve, 105));
+      advance(105);
       fixture.paintPeek();
       const request = fixture.ipcMain.handlers.get('edgeDock:refreshLimits')({ sender: peek.webContents });
       await Promise.resolve();
       fixture.screen.point = { x: 100, y: 100 };
-      await new Promise((resolve) => setTimeout(resolve, 450));
+      advance(450);
       assert.equal(peek.ignoreMouse, false, 'the busy button remains visible after the normal leave grace');
       assert.equal(peek.opacity, 1);
       assert.equal(rail.ignoreMouse, false);
@@ -1294,10 +1299,10 @@ for (const mode of ['always', 'alwaysExceptFullScreen']) {
       else finish({ ok: outcome === 'success' });
       assert.equal((await request).ok, outcome === 'success');
       peek.opacityChanges.length = 0;
-      await new Promise((resolve) => setTimeout(resolve, 450));
+      advance(450);
       assert.equal(peek.ignoreMouse, false, 'the result remains visible long enough to read');
       assert.equal(peek.opacity, 1);
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      advance(800);
       assert.equal(peek.ignoreMouse, true, 'the unhovered button hides after the result hold');
       assert.equal(peek.opacity, 0);
       if (animated) assert.ok(peek.opacityChanges.some((opacity) => opacity > 0 && opacity < 1),
