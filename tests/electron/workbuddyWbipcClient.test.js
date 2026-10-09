@@ -71,10 +71,15 @@ test('readDiscovery honors WORKBUDDY_CONFIG_DIR and rejects malformed files', ()
 });
 
 // 本地假 daemon：完整握手（服务端先自证 + 客户端 prove）+ 一次 http.fetch，
-// 验证客户端线协议实现与 wbipc/v1 一致。
+// 验证客户端线协议实现与 wbipc/v1 一致。传输按平台选：Windows 是命名管道，
+// 其他平台是临时目录里的 unix socket —— 线协议与传输无关，客户端只把
+// endpoint 原样交给 net.connect。
 test('client completes handshake and proxies a fetch against a local daemon', async () => {
   const ticket = 'probe-ticket';
-  const endpoint = '\\\\.\\pipe\\wbipc-test-' + crypto.randomBytes(6).toString('hex');
+  const dumpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wbipc-'));
+  const endpoint = process.platform === 'win32'
+    ? '\\\\.\\pipe\\wbipc-test-' + crypto.randomBytes(6).toString('hex')
+    : path.join(dumpDir, 'wbipc-test.sock');
   const rpcRequests = [];
   const server = net.createServer((socket) => {
     let buffer = Buffer.alloc(0);
@@ -126,7 +131,6 @@ test('client completes handshake and proxies a fetch against a local daemon', as
     server.on('error', reject);
     server.listen(endpoint, resolve);
   });
-  const dumpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wbipc-'));
   fs.mkdirSync(path.join(dumpDir, 'wbipc'), { recursive: true });
   fs.writeFileSync(path.join(dumpDir, 'wbipc', 'endpoint.json'), JSON.stringify({ endpoint, ticket }));
   try {
