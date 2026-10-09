@@ -5,14 +5,16 @@ const path = require('node:path');
 const { resolveSqlite, openDb } = require('./sqliteReadOnly');
 const { processStarts } = require('./processStarts');
 const { discoverT3DbPaths } = require('./t3SessionMetadata');
+const { SESSION_ACTIVITY_PROVIDERS } = require('./sessionActivityProviders');
 
 const MAX_SESSIONS = 256;
 const REQUEST_KINDS = ['command', 'file-read', 'file-change', 'permission', 'mcp-elicitation', 'user_input'];
 
 // A durable pending request alone is not evidence that its owner survived a
 // crash. Validate the server incarnation before renewing any observation.
-async function readT3Activities(options = {}, drivers = ['claudeAgent', 'codex']) {
+async function readT3Activities(options = {}, drivers = SESSION_ACTIVITY_PROVIDERS.map((entry) => entry.t3Driver).filter(Boolean)) {
   const results = new Map(drivers.map((driver) => [driver, new Map()]));
+  if (!drivers.length) return results;
   const sqlite = resolveSqlite(options);
   if (!sqlite || options.scopedHome) return results;
   const clock = Number(new Date(options.now ?? Date.now()));

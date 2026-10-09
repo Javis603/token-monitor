@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { resolveClaudeConfigDir } = require('./providers/claude/paths');
+const { sessionActivityProvidersFor } = require('./sessionActivityRegistry');
 const { discoverT3DbPaths } = require('./t3SessionMetadata');
 
 function inside(root, file) {
@@ -23,23 +23,23 @@ function existingParent(target, floor) {
 
 function activityWatchSources(clients, options = {}) {
   if (options.scopedHome) return [];
-  const enabled = new Set(clients);
+  const providers = sessionActivityProvidersFor(clients);
   const home = options.homeDir || os.homedir();
   const sources = [];
-  if (enabled.has('claude')) {
-    const config = path.resolve(resolveClaudeConfigDir({ ...options, homeDir: home }));
-    const target = path.join(config, 'sessions');
-    const dir = existingParent(target, config);
-    if (dir) sources.push({ dir, target, kind: 'claude', clients: ['claude'] });
+  for (const entry of providers) for (const source of entry.watchTargets({ ...options, homeDir: home })) {
+    const target = path.resolve(source.target);
+    const dir = existingParent(target, path.resolve(source.floor));
+    if (dir && dir !== path.resolve(home)) sources.push({ ...source, dir, target, clients: [entry.id] });
   }
-  const t3Clients = ['claude', 'codex'].filter((client) => enabled.has(client));
+  const t3Clients = providers.filter((entry) => entry.t3Driver).map((entry) => entry.id);
   if (t3Clients.length) for (const file of discoverT3DbPaths(options)) {
     if (path.basename(file) !== 'statev2.sqlite') continue;
     const target = path.resolve(file);
     // Never watch the user's entire home when T3 is not installed.
     const parent = path.dirname(target);
     const dir = existingParent(parent, path.dirname(path.dirname(parent)));
-    if (dir && dir !== path.resolve(home)) sources.push({ dir, target, kind: 't3', clients: t3Clients });
+    if (dir && dir !== path.resolve(home)) sources.push({ dir, target, kind: 'sqlite',
+      runtimeFile: path.join(parent, 'server-runtime.json'), clients: t3Clients });
   }
   return sources;
 }
@@ -49,9 +49,8 @@ function matches(source, file) {
   // Keep just the ancestor chain so a missing sessions/userdata directory can
   // appear later. A registry's children are numeric PID files only.
   if (inside(file, target)) return true;
-  if (source.kind === 'claude') return path.dirname(file) === target && /^[1-9]\d*\.json$/.test(path.basename(file));
-  return file === target || file === `${target}-wal`
-    || file === path.join(path.dirname(target), 'server-runtime.json');
+  if (source.kind === 'pid-registry') return path.dirname(file) === target && /^[1-9]\d*\.json$/.test(path.basename(file));
+  return file === target || file === `${target}-wal` || file === source.runtimeFile;
 }
 
 function activityClientsForPath(filePath, sources) {
@@ -80,11 +79,11 @@ function activityWatchIgnored(usageIgnored, usageDirs, sources) {
       ancestors.add(comparable(dir));
       if (path.dirname(dir) === dir) break;
     }
-    if (source.kind === 'claude') registries.push(prefix(target));
+    if (source.kind === 'pid-registry') registries.push(prefix(target));
     else {
       files.add(target);
       files.add(`${target}-wal`);
-      files.add(path.join(path.dirname(target), 'server-runtime.json'));
+      if (source.runtimeFile) files.add(path.resolve(source.runtimeFile));
     }
     return directory(source.dir);
   });

@@ -45,8 +45,8 @@ test('activity allowlists preserve usage pruning and directory boundaries', () =
   const calls = [];
   const usageIgnored = (value) => { calls.push(value); return value.endsWith('.tmp'); };
   const sources = [
-    { dir: file('claude'), target: file('claude/sessions'), kind: 'claude' },
-    { dir: file('t3'), target: file('t3/userdata/statev2.sqlite'), kind: 't3' }
+    { dir: file('claude'), target: file('claude/sessions'), kind: 'pid-registry' },
+    { dir: file('t3'), target: file('t3/userdata/statev2.sqlite'), kind: 'sqlite' }
   ];
   const ignored = activityWatchIgnored(usageIgnored, [file('claude/projects'), file('t3/usage')], sources);
   for (const relative of ['claude/sessions/123.json', 't3/userdata', 't3/userdata/statev2.sqlite-wal']) {

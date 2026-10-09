@@ -207,4 +207,14 @@ async function readSummaryActivity(summary, options = {}) {
   return { readings, sessions };
 }
 
-module.exports = { POLL_INTERVAL_MS, applySessionActivity, projectSessionActivity, readSessionActivity, readSummaryActivity, sessionIdsForPeriods };
+function projectActivity(summary, activity, now) {
+  return projectSessionActivity(summary, activity.readings, now, activity.sessions);
+}
+
+function activityWatchTargets(options) {
+  const config = path.resolve(resolveClaudeConfigDir({ ...options, homeDir: options.homeDir || os.homedir() }));
+  return [{ target: path.join(config, 'sessions'), floor: config, kind: 'pid-registry' }];
+}
+
+module.exports = { POLL_INTERVAL_MS, applySessionActivity, projectSessionActivity, readSessionActivity, readSummaryActivity,
+  sessionIdsForPeriods, readActivity: readSummaryActivity, projectActivity, activityWatchTargets };

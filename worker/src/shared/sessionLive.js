@@ -15,10 +15,12 @@
 // so a session that pauses mid-task keeps its reading) and what a valid pair
 // looks like; this module owns what the UI does with the answer.
 (function exposeSessionLive(root, factory) {
-  const api = factory();
+  const providers = typeof module === 'object' && module.exports
+    ? require('./sessionActivityProviders') : root.TokenMonitorSessionActivityProviders;
+  const api = factory(providers);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorSessionLive = api;
-})(typeof window !== 'undefined' ? window : null, function createSessionLiveApi() {
+})(typeof window !== 'undefined' ? window : null, function createSessionLiveApi(providers) {
   function finiteNumber(value) {
     const number = Number(value);
     return Number.isFinite(number) ? number : 0;
@@ -53,13 +55,13 @@
   function sessionWithActivity(period, key, session = period?.sessions?.[key]) {
     if (!session || isArchivedSession(session)) return session;
     const observation = normalizeLiveActivity(period?.sessionActivity?.[key]);
-    if (!observation || !['claude', 'codex'].includes(session.client)
+    if (!observation || !providers.isSessionActivityClient(session.client)
       || timestampMs(session.liveActivity?.observedAt) > timestampMs(observation.observedAt)) return session;
     return { ...session, liveActivity: observation };
   }
 
   function liveActivityExpiryAt(session, now = Date.now()) {
-    if (!['claude', 'codex'].includes(session?.client) || isArchivedSession(session)) return 0;
+    if (!providers.isSessionActivityClient(session?.client) || isArchivedSession(session)) return 0;
     const reading = normalizeLiveActivity(session.liveActivity);
     if (!reading || reading.state === 'unknown') return 0;
     const observedAt = timestampMs(reading.observedAt);

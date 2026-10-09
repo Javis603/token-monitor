@@ -236,4 +236,5 @@ function projectSessionActivity(summary, activity, now = Date.now()) {
   return next;
 }
 
-module.exports = { readT3Activity, readSessionActivity, projectSessionActivity };
+module.exports = { readT3Activity, readSessionActivity, projectSessionActivity,
+  readActivity: readSessionActivity, projectActivity: projectSessionActivity };

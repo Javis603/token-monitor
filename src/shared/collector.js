@@ -53,8 +53,8 @@ const {
   sessionMetadataMap
 } = require('./sessionMetadata');
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
-const claudeActivity = require('./providers/claude/sessionActivity');
-const codexActivity = require('./providers/codex/sessionActivity');
+const { sessionActivityProvidersFor, refreshSessionActivity } = require('./sessionActivityRegistry');
+const { isSessionActivityClient } = require('./sessionActivityProviders');
 const { readT3Activities } = require('./t3SessionActivity');
 const { createProcessStartBatch } = require('./processStarts');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
@@ -1269,41 +1269,24 @@ async function collectUsageOnce(options) {
   });
   if (clientHealth) summary.clientHealth = clientHealth;
   const activityObservedAt = Date.now();
-  let activitySummary = summary;
-  const activityOptions = (trackedClientSet.has('claude') || trackedClientSet.has('codex')) ? activityReadOptions(options, {
+  const activityProviders = sessionActivityProvidersFor(trackedClientSet);
+  const activityOptions = activityProviders.length ? activityReadOptions(options, {
     env: options.env || options.sessionMetadataDeps?.env, homeDir: options.homeDir || os.homedir(),
     customScanPaths: options.customScanPaths, platform: options.platform, now: activityObservedAt
-  }, trackedClientSet) : {};
-  if (trackedClientSet.has('claude')) {
-    const activity = await claudeActivity.readSummaryActivity(summary, {
-      ...options.sessionMetadataDeps?.claudeMetadataDeps, ...activityOptions,
-      env: options.env || options.sessionMetadataDeps?.env,
-      homeDir: options.homeDir || os.homedir(), platform: options.platform,
-      now: activityObservedAt
-    });
-    throwIfAborted(options.signal);
-    activitySummary = claudeActivity.projectSessionActivity(summary, activity.readings,
-      activityObservedAt, activity.sessions) || summary;
-  }
-  if (trackedClientSet.has('codex')) {
-    const activity = await codexActivity.readSessionActivity(activitySummary, {
-      ...options.sessionMetadataDeps?.codexDeps, ...activityOptions,
-      homeDir: options.homeDir || os.homedir(), env: options.env,
-      customScanPaths: options.customScanPaths, platform: options.platform,
-      now: activityObservedAt
-    });
-    throwIfAborted(options.signal);
-    return require('./sessionActivityProjection').materializeActivity(codexActivity.projectSessionActivity(activitySummary, activity, activityObservedAt) || activitySummary);
-  }
+  }, activityProviders) : {};
+  const activitySummary = await refreshSessionActivity(summary, activityProviders, options, activityOptions, {
+    isCurrent: () => { throwIfAborted(options.signal); return true; },
+    now: () => activityObservedAt
+  });
   return require('./sessionActivityProjection').materializeActivity(activitySummary);
 }
 
-function activityReadOptions(options, extras = {}, clients) {
+function activityReadOptions(options, extras, providers) {
   const base = { ...options.sessionMetadataDeps, ...extras };
   const readProcessStarts = createProcessStartBatch(base.readProcessStarts);
   const shared = { ...base, readProcessStarts };
-  const drivers = ['claudeAgent', 'codex'].filter((driver) => !clients || clients.has(driver === 'claudeAgent' ? 'claude' : driver));
-  return { ...shared, t3Activity: readT3Activities(shared, drivers) };
+  const drivers = [...new Set(providers.map((entry) => entry.t3Driver).filter(Boolean))];
+  return { ...shared, ...(drivers.length ? { t3Activity: readT3Activities(shared, drivers) } : {}) };
 }
 
 // Sources that remain part of collection, health, and diagnostics but are too
@@ -3193,7 +3176,8 @@ function startCollector(options) {
     const activitySources = options.sessionActivityPolling === false ? [] : activityWatchSources(trackedClients, {
       ...options.sessionMetadataDeps, ...sourceOptions, homeDir: options.homeDir || os.homedir()
     }).map((source) => ({ ...source, dir: canonicalWatchPath(source.dir),
-      target: path.resolve(canonicalWatchPath(source.dir), path.relative(source.dir, source.target)) }));
+      target: path.resolve(canonicalWatchPath(source.dir), path.relative(source.dir, source.target)),
+      ...(source.runtimeFile ? { runtimeFile: path.resolve(canonicalWatchPath(source.dir), path.relative(source.dir, source.runtimeFile)) } : {}) }));
     const dirs = [...new Set([...usageDirs, ...activitySources.map((source) => source.dir)])];
     const directoryKey = JSON.stringify([dirs, activitySources]);
     if (directoryKey === watchedDirectoryKey) return;
@@ -3215,7 +3199,7 @@ function startCollector(options) {
       if (isSelfWatchSqliteSidecarEvent(filePath, rootsByClient)) return;
       const eventClients = clientsForWatchPath(filePath, attributionRootsByClient);
       const activityClients = activityClientsForPath(filePath, activitySources);
-      if (activityClients.length || eventClients.some((client) => ['claude', 'codex'].includes(client))) {
+      if (activityClients.length || eventClients.some(isSessionActivityClient)) {
         activityScheduler?.request();
       }
       // The read-only T3 reader can recreate -shm itself. Neither it nor other
@@ -3343,29 +3327,18 @@ function startCollector(options) {
   }
 
   function pollSessionActivity() {
-    if (stopped || (!trackedClients.has('claude') && !trackedClients.has('codex'))) return true;
+    const providers = sessionActivityProvidersFor(trackedClients);
+    if (stopped || !providers.length) return true;
     activityUpdate = (async () => {
       if (tickInFlight || !latestActivitySummary) return false;
       // Published snapshots are immutable. Replace only the affected maps;
       // counters, history and the exact scan anchor stay untouched.
       const previous = latestActivitySummary;
-      let next = previous;
-      const activityOptions = activityReadOptions(options, { ...sourceOptions, homeDir: options.homeDir || os.homedir() }, trackedClients);
-      if (trackedClients.has('claude')) {
-        const activity = await claudeActivity.readSummaryActivity(previous, {
-          ...options.sessionMetadataDeps?.claudeMetadataDeps, ...activityOptions
-        });
-        if (stopped || tickInFlight || latestActivitySummary !== previous) return false;
-        next = claudeActivity.projectSessionActivity(previous, activity.readings,
-          Date.now(), activity.sessions) || previous;
-      }
-      if (trackedClients.has('codex')) {
-        const activity = await codexActivity.readSessionActivity(next, {
-          ...options.sessionMetadataDeps?.codexDeps, ...activityOptions
-        });
-        if (stopped || tickInFlight || latestActivitySummary !== previous) return false;
-        next = codexActivity.projectSessionActivity(next, activity) || next;
-      }
+      const activityOptions = activityReadOptions(options, { ...sourceOptions, homeDir: options.homeDir || os.homedir() }, providers);
+      const next = await refreshSessionActivity(previous, providers, options, activityOptions, {
+        isCurrent: () => !stopped && !tickInFlight && latestActivitySummary === previous
+      });
+      if (!next) return false;
       if (next === previous) return;
       // Hosts that understand activity patches bypass accounting transforms,
       // archive writes and whole-summary IPC. Legacy callers retain onUpdate.
@@ -3454,7 +3427,7 @@ function startCollector(options) {
 
   setupWatchers();
   loop();
-  if (options.sessionActivityPolling !== false && (trackedClients.has('claude') || trackedClients.has('codex'))) {
+  if (options.sessionActivityPolling !== false && sessionActivityProvidersFor(trackedClients).length) {
     activityScheduler = createSessionActivityScheduler({
       refresh: pollSessionActivity,
       nativeEventsReady: () => activityWatchReady,

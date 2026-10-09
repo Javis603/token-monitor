@@ -3,6 +3,8 @@
 
 'use strict';
 
+const { isSessionActivityClient } = require('./sessionActivityProviders');
+
 const PERIODS = ['today', 'month', 'allTime'];
 const { normalizeLiveActivity, sessionWithActivity } = require('./sessionLive');
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
@@ -666,7 +668,7 @@ function mergeSession(target, source) {
   }
   // Registry observations have their own clock: waiting can change without a
   // token or transcript write. An explicit unknown reading clears old evidence.
-  if (source.client === 'claude' || source.client === 'codex') {
+  if (isSessionActivityClient(source.client)) {
     const reading = normalizeLiveActivity(source.liveActivity);
     if (reading && timestampMs(reading.observedAt) >= timestampMs(target.liveActivity?.observedAt)) {
       target.liveActivity = reading;
@@ -774,7 +776,7 @@ function normalizeSession(input, fallbackKey) {
   if (client === 'codex' && typeof input.waitingForInput === 'boolean') {
     session.waitingForInput = input.waitingForInput;
   }
-  if (client === 'claude' || client === 'codex') {
+  if (isSessionActivityClient(client)) {
     const activity = normalizeLiveActivity(input.liveActivity);
     if (activity) session.liveActivity = activity;
   }

@@ -5,14 +5,16 @@
 // needing clearing. Historical accounting maps remain the source of truth.
 (function expose(root, factory) {
   const live = typeof module === 'object' && module.exports ? require('./sessionLive') : root.TokenMonitorSessionLive;
-  const api = factory(live);
+  const providers = typeof module === 'object' && module.exports ? require('./sessionActivityProviders') : root.TokenMonitorSessionActivityProviders;
+  const api = factory(live, providers);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorSessionActivityProjection = api;
-})(typeof window !== 'undefined' ? window : null, function createApi(live) {
+})(typeof window !== 'undefined' ? window : null, function createApi(live, providers) {
   const indexes = new WeakMap();
   const names = ['today', 'month', 'allTime'];
   const LOOKUP_CACHE_LIMIT = 512;
-  const clients = ['claude', 'codex'];
+  const clients = providers.SESSION_ACTIVITY_CLIENTS;
+  const { isSessionActivityClient } = providers;
   function periods(summary) { return summary?.periods || summary; }
   function remember(cache, key, value) {
     cache.delete(key);
@@ -161,7 +163,7 @@
   }
   function activityPatch(previous, next) {
     const observations = new Map();
-    for (const client of ['claude', 'codex']) {
+    for (const client of clients) {
       const ids = new Set([...indexFor(previous).leased.get(client), ...indexFor(next).leased.get(client)]);
       for (const { name, key, session } of activityEntries(next, client, ids)) {
         const before = live.sessionWithActivity(periods(previous)?.[name], key)?.liveActivity;
@@ -172,7 +174,7 @@
     }
     const nativeSessions = {};
     for (const name of names) nativeSessions[name] = Object.fromEntries(Object.entries(next.nativeSessions?.[name] || {})
-      .filter(([, row]) => ['claude', 'codex'].includes(row.client)));
+      .filter(([, row]) => isSessionActivityClient(row.client)));
     return { observations: [...observations.values()], nativeSessions };
   }
   function applyActivityPatch(summary, patch) {
@@ -182,7 +184,7 @@
     const maps = new Map();
     const accepted = [];
     for (const row of patch.observations || []) {
-      if (!['claude', 'codex'].includes(row.client)) continue;
+      if (!isSessionActivityClient(row.client)) continue;
       const observation = live.normalizeLiveActivity(row.liveActivity);
       if (!observation) continue;
       for (const { name, key, session } of activityEntries(summary, row.client, [row.sessionId], false)) {
@@ -202,7 +204,7 @@
       const nativeSessions = {};
       for (const name of names) {
         const other = Object.fromEntries(Object.entries(summary.nativeSessions?.[name] || {})
-          .filter(([, row]) => !['claude', 'codex'].includes(row.client)));
+          .filter(([, row]) => !isSessionActivityClient(row.client)));
         nativeSessions[name] = { ...other, ...patch.nativeSessions[name] };
       }
       result = { ...result, nativeSessions };
@@ -216,13 +218,13 @@
   }
   function needsActivityRenewal(summary) {
     if (!summary) return false;
-    for (const client of ['claude', 'codex']) for (const { session } of activityEntries(summary, client, [])) {
+    for (const client of clients) for (const { session } of activityEntries(summary, client, [])) {
       const state = session.liveActivity?.state;
       if (state === 'running' || state === 'waiting') return true;
       if (state === 'idle' && ['running', 'waiting'].includes(live.sessionActivityState({ ...session, liveActivity: undefined }))) return true;
     }
     return Object.values(summary.nativeSessions?.today || {}).some((row) =>
-      ['claude', 'codex'].includes(row.client) && ['running', 'waiting'].includes(live.sessionActivityState(row)));
+      isSessionActivityClient(row.client) && ['running', 'waiting'].includes(live.sessionActivityState(row)));
   }
   function materializeActivity(summary) {
     if (!summary) return summary;

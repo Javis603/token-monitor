@@ -78,6 +78,18 @@ Targeted watch ticks make the client id a correctness surface, because the scan 
 
 The first two are correctness: break either and a watch tick zeroes a client's partition, feeding a negative delta into month/allTime until the next full scan. The third is performance — `synthetic` makes tokscale enable *every* client, so the targeted scan silently degrades into a full one with correct numbers and none of the saving. Don't diagnose one as the other. `tests/shared/clientPartitionInvariants.test.js` enforces all three.
 
+## Adding a live activity adapter
+
+Live activity is separate from usage parsing and limits. Register only when the client supplies reliable state and resolution evidence; absent evidence must clear the prior observation to `unknown` and fall back to existing transcript behavior. Do not infer approval waiting from shell arguments or question text.
+
+1. Add the canonical tracked-client id to `SESSION_ACTIVITY_PROVIDERS` in `src/shared/sessionActivityProviders.js`. Declare `metadataDepsKey` for adapter-specific injected dependencies and `t3Driver` only when that driver's native identity can be verified. This module stays portable and has no native imports: it also controls renderer/Hub observation admission and expiry.
+2. Add its explicit lazy loader to `src/shared/sessionActivityRegistry.js`. The registry is static; never load modules from user-configured paths. Disabled adapters do not load or probe native state.
+3. Implement `readActivity(summary, options)` and `projectActivity(summary, activity, now)` in `src/shared/providers/<id>/sessionActivity.js`. The reader returns `{ readings: Map<sessionId, liveActivity>, sessions: localZeroTokenRows }`; verify identities before matching accounting keys. The projector returns a new snapshot or `null` when unchanged, shares accounting maps, renews observations through the existing lease and clears vanished evidence. Reuse `sessionActivityProjection` lookup/overlay helpers, preserving bounded caches and archive exclusions.
+4. If existing transcript events are insufficient, expose `activityWatchTargets(options)` returning bounded `{ target, floor, kind }` declarations (`pid-registry` or `sqlite`). The common watcher finds an existing ancestor within `floor` and compiles the allowlist once. SQLite watches admit the database and WAL, exclude SHM, and admit an optional `runtimeFile` only when explicitly declared. No adapter owns a second watcher or heartbeat. A new source shape needs its own bounded matcher and tests rather than a broad recursive root.
+5. Add fixtures for running/waiting/idle, explicit clearing, stale/future observations, archived rows, zero-token replacement and collector cancellation. Test identity and pending-request resolution from the actual protocol. Run `npm run verify` and `npm run update:hub-build` after the portable declarations change, which also vendors the Worker copy.
+
+UI status rendering, patch transport and accounting normalization consume the declarations and need no new client-specific branch. Provider-native transcript fallbacks remain provider-specific; registering live activity does not make an unsupported native state reliable.
+
 ## Adding a limits provider
 
 Provider identity lives in **one** place: `LIMIT_PROVIDER_CATALOG` in `src/shared/limits/providers.js`. The catalog order is the new-install order; a changed default must not overwrite a saved custom order. A tracked client is something tokscale counts tokens for, a limits provider is an account whose quota we read, and only some ids are both — the two catalogs and checklists are separate. Everything below is either a hand-wired registration point that must agree with that id, or a provider-specific surface to add only where it applies.
