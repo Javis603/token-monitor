@@ -47,16 +47,6 @@ The generated `antigravity-cache` directory is deliberately not watched. Token M
 
 On Windows, running WSL distros are checked during full scans only. WSL discovery uses the same Antigravity source markers and never starts a stopped distro.
 
-### Local speed measurements
-
-Generation timing is parsed by the Tokscale fork alongside the native Antigravity token records. Token Monitor consumes its existing `performance.totalDurationMs` and `performance.timedTokens` JSON fields through the shared usage pipeline, without opening another SQLite connection or matching generations itself.
-
-Tokscale reports disjoint visible-output and reasoning buckets; usage and history fold these into the public output count exactly once for all Antigravity aliases. Generation duration is the sum of `chat[11]` and `chat[12]`, including TTFT. The native parser associates newer records with `steps.metadata[1]` through the root step index and retains older per-generation timestamp fallbacks. Session timestamps and database mtime alone cannot qualify a generation for speed measurements.
-
-Native-reader locking, response-ID deduplication, cache invalidation and WAL handling remain Tokscale-owned. This requires a fork build containing the duration parser; older binaries continue to report usage without generation speed. Mixed timed and untimed generations retain the existing shared throughput behavior: Tokscale's aggregate report has no timed-output subtotal, so the application cannot yet isolate the output belonging to the timed generations. Correcting that accounting remains separate follow-up work.
-
-Generation timing feeds the existing combined realtime-rate footer and Edge Dock, with the existing model breakdown on hover. It uses the same timed-output delta divided by the matching duration delta as other clients. The application UI and rate settings are unchanged.
-
 ### Boundary with quota collection
 
 Token/session totals are machine-local activity. They are not deduplicated by Google email and do not use the standalone OAuth credentials described below. Changes to quota identity or account aggregation must not alter usage attribution.
