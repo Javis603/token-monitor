@@ -107,9 +107,11 @@ function nextObservation(session, readings, now, renew) {
   const reading = readings.get(session.sessionId);
   if (!reading && (!previous || previous.state === 'unknown')) return null;
   const state = reading?.state || 'unknown';
+  const observedAt = state === 'idle' && reading ? reading.observedAt : new Date(now).toISOString();
+  if (previous?.state === state && previous.observedAt === observedAt) return null;
   if (previous?.state === state && (!renew || state === 'unknown'
     || now - Date.parse(previous.observedAt) < RENEW_INTERVAL_MS)) return null;
-  return { state, observedAt: new Date(now).toISOString() };
+  return { state, observedAt };
 }
 
 function applySessionActivity(periods, readings, now = Date.now(), renew = false) {
@@ -188,7 +190,10 @@ function activityFiles(roots, ids) {
 async function readSummaryActivity(summary, options = {}) {
   const readings = await readSessionActivity(null, options);
   const t3 = await readT3Activity(options, 'claudeAgent');
-  for (const [id, reading] of t3) if (isSafeSessionId(id)) readings.set(id, reading);
+  for (const [id, reading] of t3) {
+    if (!isSafeSessionId(id) || (reading.state === 'idle' && readings.has(id))) continue;
+    readings.set(id, reading);
+  }
   const ids = new Set([...readings].filter(([id, reading]) => !hasKnownSession(summary, 'claude', id, 'today')
     && ['running', 'waiting'].includes(reading.state)).map(([id]) => id));
   const roots = claudeSessionRoots({ ...options, homeDir: options.homeDir || os.homedir(), useEnvRoots: !options.scopedHome });

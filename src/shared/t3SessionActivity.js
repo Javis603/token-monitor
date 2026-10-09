@@ -6,6 +6,7 @@ const { resolveSqlite, openDb } = require('./sqliteReadOnly');
 const { processStarts } = require('./processStarts');
 const { discoverT3DbPaths } = require('./t3SessionMetadata');
 const { SESSION_ACTIVITY_PROVIDERS } = require('./sessionActivityProviders');
+const { LIVE_ACTIVITY_TTL_MS } = require('./sessionLive');
 
 const MAX_SESSIONS = 256;
 const REQUEST_KINDS = ['command', 'file-read', 'file-change', 'permission', 'mcp-elicitation', 'user_input'];
@@ -38,13 +39,15 @@ async function readT3Activities(options = {}, drivers = SESSION_ACTIVITY_PROVIDE
     let db;
     try {
       db = openDb(file, sqlite);
+      const completedAtColumn = db.prepare('PRAGMA table_info(orchestration_v2_projection_runs)').all()
+        .some((column) => column.name === 'completed_at') ? 'r.completed_at' : 'NULL';
       // Select the bounded newest sessions before evaluating correlated request
       // lookups. ORDER BY/LIMIT in the subquery lets SQLite defer that work until
       // after sorting, rather than evaluating it for every historical candidate.
       // Join through the request's node and run, never a shared session id.
       const statement = db.prepare(`
         SELECT json_extract(c.payloadJson, '$.nativeThreadRef.nativeId') AS nativeId,
-               c.providerStatus, c.runStatus, c.requestedAt, c.deleted,
+               c.providerStatus, c.runStatus, c.requestedAt, c.completedAt, c.deleted,
                EXISTS (
                  SELECT 1 FROM orchestration_v2_projection_runtime_requests q
                  JOIN orchestration_v2_projection_nodes n ON n.node_id = q.node_id
@@ -63,6 +66,7 @@ async function readT3Activities(options = {}, drivers = SESSION_ACTIVITY_PROVIDE
           SELECT p.provider_thread_id AS providerThreadId, p.thread_id AS threadId,
                  p.payload_json AS payloadJson, p.status AS providerStatus,
                  r.run_id AS runId, r.status AS runStatus, r.requested_at AS requestedAt,
+                 ${completedAtColumn} AS completedAt,
                  t.deleted_at AS deleted
           FROM orchestration_v2_projection_provider_threads p
           JOIN orchestration_v2_projection_threads t ON t.thread_id = p.thread_id
@@ -85,7 +89,13 @@ async function readT3Activities(options = {}, drivers = SESSION_ACTIVITY_PROVIDE
             : terminal ? 'idle'
             : row.providerStatus === 'active' && row.runStatus === 'running'
               ? 'running' : null;
-          if (state) result.set(row.nativeId, { state, observedAt: new Date(clock).toISOString() });
+          if (!state) continue;
+          // Completion is an event, not proof that this session remains idle.
+          // Keep its original lease so a later CLI resume can supersede it.
+          const observedAt = state === 'idle' ? Date.parse(row.deleted || row.completedAt) : clock;
+          if (!Number.isFinite(observedAt) || observedAt > clock || observedAt < Date.parse(row.requestedAt)
+            || observedAt + LIVE_ACTIVITY_TTL_MS <= clock) continue;
+          result.set(row.nativeId, { state, observedAt: new Date(observedAt).toISOString() });
         }
       }
     } catch (_) { /* Missing and incompatible stores provide no live evidence. */ }

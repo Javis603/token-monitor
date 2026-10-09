@@ -165,7 +165,17 @@ function discoverFiles(options, activity, summary) {
   return files;
 }
 
+function transcriptReading(state, lastUsedAt, clock) {
+  const modifiedAt = Date.parse(lastUsedAt);
+  if (!Number.isFinite(modifiedAt) || modifiedAt > clock || clock - modifiedAt > RUNNING_WINDOW_MS
+    || (typeof state.turnEnded !== 'boolean' && state.waitingForInput !== true)) return undefined;
+  const nativeState = sessionActivityState({ client: 'codex', lastUsedAt,
+    turnEnded: state.turnEnded, waitingForInput: state.waitingForInput }, clock);
+  return { state: nativeState === 'ended' ? 'idle' : nativeState, observedAt: new Date(clock).toISOString() };
+}
+
 async function readSessionActivity(summary, options = {}) {
+  const clock = Number(new Date(options.now ?? Date.now()));
   const activity = await readT3Activity(options);
   const files = discoverFiles(options, activity, summary);
   const readings = new Map();
@@ -178,7 +188,17 @@ async function readSessionActivity(summary, options = {}) {
       codexHome: codexHomeDir(options)
     });
     const nativeId = files.get(session.sessionId)?.nativeId || (file && nativeIdForFile(file));
-    const reading = activity.get(nativeId);
+    let reading = activity.get(nativeId);
+    if (reading?.state === 'idle') {
+      const lastUsedAt = files.get(session.sessionId)?.lastUsedAt;
+      let modifiedAt = Date.parse(lastUsedAt);
+      if (!Number.isFinite(modifiedAt)) {
+        try { modifiedAt = fs.statSync(file).mtimeMs; } catch (_) { /* No newer native evidence. */ }
+      }
+      if (modifiedAt > Date.parse(reading.observedAt)) {
+        reading = transcriptReading(readCodexSessionState(file, options.codexDeps), new Date(modifiedAt).toISOString(), clock);
+      }
+    }
     if (reading) readings.set(session.sessionId, reading);
   }
   const ids = new Set([...files.keys()].filter((id) => !hasKnownSession(summary, 'codex', id, 'today')));
@@ -189,7 +209,15 @@ async function readSessionActivity(summary, options = {}) {
   for (const id of ids) {
     const { file, nativeId, lastUsedAt } = files.get(id);
     const state = readCodexSessionState(file, options.codexDeps);
-    const reading = activity.get(nativeId);
+    const t3Reading = activity.get(nativeId);
+    const reading = readings.get(id) || (t3Reading?.state === 'idle'
+      && Date.parse(lastUsedAt) > Date.parse(t3Reading.observedAt) ? undefined : t3Reading);
+    // A resumed historical rollout can report a question before today's first
+    // token. Project that same protocol state onto its existing accounting rows.
+    if (!reading && hasKnownSession(summary, 'codex', id)) {
+      const nativeReading = transcriptReading(state, lastUsedAt, clock);
+      if (nativeReading) readings.set(id, nativeReading);
+    }
     if (state.turnEnded !== false && !reading) continue;
     const session = {
       client: 'codex', sessionId: id, totalTokens: 0, costUsd: 0, models: {},
@@ -217,10 +245,12 @@ function projectSessionActivity(summary, activity, now = Date.now()) {
       const reading = activity.readings.get(session.sessionId);
       const previous = session.liveActivity;
       const state = reading?.state || 'unknown';
+      const observedAt = state === 'idle' && reading ? reading.observedAt : new Date(now).toISOString();
+      if (previous?.state === state && previous.observedAt === observedAt) continue;
       if ((!reading && (!previous || previous.state === 'unknown'))
         || (previous?.state === state && (state === 'unknown' || now - Date.parse(previous.observedAt) < RENEW_INTERVAL_MS))) continue;
       sessions ||= require('../../sessionActivityProjection').compactActivity(summary[name], now);
-      const liveActivity = { state, observedAt: new Date(now).toISOString() };
+      const liveActivity = { state, observedAt };
       sessions[key] = liveActivity;
       observations.push({ client: 'codex', sessionId: session.sessionId, liveActivity });
     }

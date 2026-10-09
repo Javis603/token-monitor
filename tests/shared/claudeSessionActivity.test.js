@@ -358,20 +358,44 @@ function t3Fixture(f) {
   db.exec(`
     CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT PRIMARY KEY, title TEXT, deleted_at TEXT, updated_at TEXT);
     CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT PRIMARY KEY, thread_id TEXT, driver TEXT, provider TEXT, status TEXT, last_run_ordinal INTEGER, updated_at TEXT, payload_json TEXT);
-    CREATE TABLE orchestration_v2_projection_runs (run_id TEXT PRIMARY KEY, provider_thread_id TEXT, ordinal INTEGER, status TEXT, requested_at TEXT);
+    CREATE TABLE orchestration_v2_projection_runs (run_id TEXT PRIMARY KEY, provider_thread_id TEXT, ordinal INTEGER, status TEXT, requested_at TEXT, completed_at TEXT);
     CREATE TABLE orchestration_v2_projection_nodes (node_id TEXT PRIMARY KEY, thread_id TEXT, provider_thread_id TEXT, run_id TEXT, status TEXT, completed_at TEXT);
     CREATE TABLE orchestration_v2_projection_runtime_requests (node_id TEXT, thread_id TEXT, status TEXT, resolved_at TEXT, kind TEXT, created_at TEXT, payload_json TEXT);
   `);
   const stamp = new Date(now).toISOString();
   db.prepare('INSERT INTO orchestration_v2_projection_threads VALUES (?, ?, NULL, ?)').run('app', 'Claude test title', stamp);
   db.prepare('INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run('provider', 'app', 'claudeAgent', 'custom-claude', 'active', 1, stamp, JSON.stringify({ nativeThreadRef: { nativeId: 'test-session' } }));
-  db.prepare('INSERT INTO orchestration_v2_projection_runs VALUES (?, ?, ?, ?, ?)').run('run', 'provider', 1, 'running', stamp);
+  db.prepare('INSERT INTO orchestration_v2_projection_runs (run_id, provider_thread_id, ordinal, status, requested_at) VALUES (?, ?, ?, ?, ?)').run('run', 'provider', 1, 'running', stamp);
   db.prepare('INSERT INTO orchestration_v2_projection_nodes VALUES (?, ?, ?, ?, ?, NULL)').run('node', 'app', 'provider', 'run', 'waiting');
   db.prepare('INSERT INTO orchestration_v2_projection_runtime_requests VALUES (?, ?, ?, NULL, ?, ?, ?)').run('node', 'app', 'pending', 'permission', stamp, JSON.stringify({ responseCapability: { type: 'live' }, prompt: 'private question' }));
   // Close before the home cleanup, including on Windows.
   f.cleanups.push(() => db.close());
   return db;
 }
+
+test('T3 terminal runs yield to native Claude registry and expire without renewing idle', async t => {
+  const f = fixture(t); const db = t3Fixture(f); f.write({ status: 'busy' });
+  const completedAt = new Date(now - 1000).toISOString();
+  db.prepare("UPDATE orchestration_v2_projection_runs SET status = 'cancelled', completed_at = ?, requested_at = ?")
+    .run(completedAt, new Date(now - 5000).toISOString());
+  db.exec("UPDATE orchestration_v2_projection_runtime_requests SET status = 'resolved'");
+  const resumed = await activity.readSummaryActivity({}, f.options);
+  assert.equal(resumed.readings.get('test-session').state, 'running');
+  assert.equal(resumed.sessions['claude:test-session'].liveActivity.state, 'running');
+  fs.unlinkSync(path.join(f.root, '1234.json'));
+  const reading = await activity.readSummaryActivity({}, f.options);
+  assert.deepEqual(reading.readings.get('test-session'), { state: 'idle', observedAt: completedAt });
+  const summary = { month: { sessions: { 'claude:test-session': session('running', {
+    liveActivity: { state: 'running', observedAt: new Date(now - 2000).toISOString() }
+  }) } } };
+  const projected = activity.projectActivity(summary, reading, now);
+  assert.equal(live.sessionWithActivity(projected.month, 'claude:test-session').liveActivity.observedAt, completedAt);
+  const later = { ...f.options, now: now + 12_000 };
+  assert.equal(activity.projectActivity(projected, await activity.readSummaryActivity(projected, later), later.now), null);
+  const expired = { ...f.options, now: now + 31_000 };
+  const cleared = activity.projectActivity(projected, await activity.readSummaryActivity(projected, expired), expired.now);
+  assert.equal(live.sessionWithActivity(cleared.month, 'claude:test-session').liveActivity.state, 'unknown');
+});
 
 test('T3 Claude formal waiting supersedes registry and resolves without transcript writes', async t => {
   const f = fixture(t); const db = t3Fixture(f); f.write({ status: 'busy' });
@@ -385,6 +409,7 @@ test('T3 Claude formal waiting supersedes registry and resolves without transcri
   db.exec("UPDATE orchestration_v2_projection_runtime_requests SET status = 'resolved'");
   assert.equal((await activity.readSummaryActivity({}, f.options)).readings.get('test-session').state, 'running');
   db.exec("UPDATE orchestration_v2_projection_runs SET status = 'cancelled'");
+  f.write({ status: 'idle' });
   assert.equal(Object.keys((await activity.readSummaryActivity({}, f.options)).sessions).length, 0);
   db.exec("UPDATE orchestration_v2_projection_runs SET status = 'running'; UPDATE orchestration_v2_projection_provider_threads SET driver = 'codex'");
   f.write({ status: 'idle' });

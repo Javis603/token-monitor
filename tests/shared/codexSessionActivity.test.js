@@ -41,14 +41,14 @@ function fixture(t) {
   db.exec(`
     CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT PRIMARY KEY, title TEXT, deleted_at TEXT, updated_at TEXT);
     CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT PRIMARY KEY, thread_id TEXT, driver TEXT, provider TEXT, status TEXT, last_run_ordinal INTEGER, updated_at TEXT, payload_json TEXT);
-    CREATE TABLE orchestration_v2_projection_runs (run_id TEXT PRIMARY KEY, provider_thread_id TEXT, ordinal INTEGER, status TEXT, requested_at TEXT);
+    CREATE TABLE orchestration_v2_projection_runs (run_id TEXT PRIMARY KEY, provider_thread_id TEXT, ordinal INTEGER, status TEXT, requested_at TEXT, completed_at TEXT);
     CREATE TABLE orchestration_v2_projection_nodes (node_id TEXT PRIMARY KEY, thread_id TEXT, provider_thread_id TEXT, run_id TEXT, status TEXT, completed_at TEXT);
     CREATE TABLE orchestration_v2_projection_runtime_requests (node_id TEXT, thread_id TEXT, status TEXT, resolved_at TEXT, kind TEXT, created_at TEXT, payload_json TEXT);
   `);
   db.prepare('INSERT INTO orchestration_v2_projection_threads VALUES (?, ?, NULL, ?)').run('app', 'T3 title', new Date(now).toISOString());
   db.prepare('INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
     'provider', 'app', 'codex', 'custom-codex', 'active', 1, new Date(now).toISOString(), JSON.stringify({ nativeThreadRef: { nativeId } }));
-  db.prepare('INSERT INTO orchestration_v2_projection_runs VALUES (?, ?, ?, ?, ?)').run('run', 'provider', 1, 'running', new Date(now - 5000).toISOString());
+  db.prepare('INSERT INTO orchestration_v2_projection_runs (run_id, provider_thread_id, ordinal, status, requested_at) VALUES (?, ?, ?, ?, ?)').run('run', 'provider', 1, 'running', new Date(now - 5000).toISOString());
   db.prepare('INSERT INTO orchestration_v2_projection_nodes VALUES (?, ?, ?, ?, ?, NULL)').run('node', 'app', 'provider', 'run', 'waiting');
   db.prepare('INSERT INTO orchestration_v2_projection_runtime_requests VALUES (?, ?, ?, NULL, ?, ?, ?)').run(
     'node', 'app', 'pending', 'user_input', new Date(now - 1000).toISOString(), JSON.stringify({ responseCapability: { type: 'live' }, prompt: 'PRIVATE' }));
@@ -101,6 +101,9 @@ test('resumed historical Codex question appears in Today before new usage withou
   const clock = new Date(2026, 9, 9, 0, 1).getTime();
   fs.utimesSync(f.file, new Date(clock), new Date(clock));
   const summary = f.summary(); summary.today = usage.emptyPeriod();
+  for (const name of ['month', 'allTime']) Object.assign(summary[name].sessions[f.key], {
+    turnEnded: true, lastUsedAt: new Date(clock - 86400_000).toISOString()
+  });
   const options = { ...f.options, now: clock };
   const next = activity.projectSessionActivity(summary, await activity.readSessionActivity(summary, options), clock);
   const [row] = rows.sessionRowsForPeriod(next.today, { nativeSessions: next.nativeSessions.today, now: new Date(clock) });
@@ -109,10 +112,94 @@ test('resumed historical Codex question appears in Today before new usage withou
   assert.equal(next.today.totalTokens, 0);
   assert.equal(next.nativeSessions.month[f.key], undefined);
   assert.equal(next.nativeSessions.allTime[f.key], undefined);
+  for (const name of ['month', 'allTime']) {
+    assert.equal(next[name].sessions, summary[name].sessions, 'accounting maps remain shared');
+    assert.equal(live.sessionActivityState(live.sessionWithActivity(next[name], f.key), clock), 'waiting');
+    assert.equal(next[name].sessions[f.key].totalTokens, 100);
+    assert.equal(summary[name].sessions[f.key].liveActivity, undefined);
+  }
+  t.mock.method(Date, 'now', () => clock);
+  const display = { periods: next, nativeSessions: next.nativeSessions };
+  const homeRows = presentation.recentSessionRows(display, 5, { includeRunningBeyondCap: true });
+  const dockCells = presentation.buildEdgeDockCells(display, { items: [
+    { type: 'limit', provider: 'codex' }, { type: 'stat', metric: presentation.SESSIONS_METRIC }
+  ] });
+  for (const view of [homeRows, ...dockCells.map((cell) => cell.sessions)]) {
+    assert.equal(view.length, 1);
+    assert.equal(live.sessionActivityState(view[0], clock), 'waiting');
+    assert.equal(view[0].totalTokens, 100);
+    assert.equal(presentation.waitingSessionSummary(view, clock).count, 1);
+  }
   const accounted = { ...next, today: summary.month };
   const replaced = activity.projectSessionActivity(accounted, await activity.readSessionActivity(accounted, options), clock + 1000);
   assert.equal(replaced.nativeSessions.today[f.key], undefined);
   assert.equal(rows.sessionRowsForPeriod(replaced.today, { nativeSessions: replaced.nativeSessions.today }).length, 1);
+  let current = next;
+  for (const [lines, expected, offset] of [
+    [[started, question, answer], 'running', 2000],
+    [[started, question, answer, entry('event_msg', { type: 'task_complete' })], 'idle', 4000]
+  ]) {
+    f.write(lines);
+    const observedAt = clock + offset;
+    fs.utimesSync(f.file, new Date(observedAt), new Date(observedAt));
+    t.mock.method(Date, 'now', () => observedAt);
+    current = activity.projectSessionActivity(current,
+      await activity.readSessionActivity(current, { ...options, now: observedAt }), observedAt);
+    for (const name of ['month', 'allTime']) {
+      assert.equal(live.sessionActivityState(live.sessionWithActivity(current[name], f.key), observedAt), expected);
+      assert.equal(current[name].sessions, summary[name].sessions);
+    }
+    const views = presentation.recentSessionRows({ periods: current, nativeSessions: current.nativeSessions });
+    assert.equal(views.length, 1);
+    assert.equal(live.sessionActivityState(views[0], observedAt), expected);
+    assert.equal(presentation.waitingSessionSummary(views, observedAt).count, 0);
+  }
+});
+
+test('T3 terminal observations keep completion time, expire and yield to a resumed native Codex question', async t => {
+  const f = fixture(t); f.write([started]);
+  fs.utimesSync(f.file, new Date(now - 2000), new Date(now - 2000));
+  const completedAt = new Date(now - 1000).toISOString();
+  f.db.prepare("UPDATE orchestration_v2_projection_runs SET status = 'completed', completed_at = ?").run(completedAt);
+  f.db.exec("UPDATE orchestration_v2_projection_runtime_requests SET status = 'resolved'");
+  const first = await activity.readSessionActivity(f.summary(), f.options);
+  assert.deepEqual(first.readings.get(f.id), { state: 'idle', observedAt: completedAt });
+  const projected = activity.projectSessionActivity(f.summary(), first, now);
+  assert.equal(live.sessionWithActivity(projected.month, f.key).liveActivity.observedAt, completedAt);
+  const later = { ...f.options, now: now + 12_000 };
+  const unchanged = await activity.readSessionActivity(projected, later);
+  assert.equal(activity.projectSessionActivity(projected, unchanged, later.now), null,
+    'rereading a terminal run cannot renew its observation');
+  f.write([started, question]);
+  fs.utimesSync(f.file, new Date(now + 2000), new Date(now + 2000));
+  const withTodayUsage = f.summary();
+  const nativeQuestion = activity.projectSessionActivity(withTodayUsage,
+    await activity.readSessionActivity(withTodayUsage, later), later.now);
+  assert.equal(live.sessionActivityState(live.sessionWithActivity(nativeQuestion.today, f.key), later.now), 'waiting',
+    'a newer native question supersedes a terminal T3 run even when today has usage');
+  const historical = f.summary(); historical.today = usage.emptyPeriod();
+  const resumed = activity.projectSessionActivity(historical,
+    await activity.readSessionActivity(historical, later), later.now);
+  assert.equal(live.sessionActivityState(live.sessionWithActivity(resumed.month, f.key), later.now), 'waiting');
+  assert.equal(live.sessionActivityState(resumed.nativeSessions.today[f.key], later.now), 'waiting');
+  assert.equal((await activity.readT3Activity({ ...f.options, now: now + 31_000 })).size, 0);
+  const cleared = activity.projectSessionActivity(projected,
+    await activity.readSessionActivity(projected, { ...f.options, now: now + 31_000 }), now + 31_000);
+  assert.equal(live.sessionWithActivity(cleared.month, f.key).liveActivity.state, 'unknown');
+});
+
+test('T3 terminal runs without a valid completion timestamp provide no current idle evidence', async t => {
+  const f = fixture(t);
+  f.db.exec("UPDATE orchestration_v2_projection_runs SET status = 'cancelled'");
+  assert.equal((await activity.readT3Activity(f.options)).size, 0);
+  for (const stamp of ['invalid', new Date(now + 1000).toISOString(), new Date(now - 30_000).toISOString()]) {
+    f.db.prepare('UPDATE orchestration_v2_projection_runs SET completed_at = ?').run(stamp);
+    assert.equal((await activity.readT3Activity(f.options)).size, 0);
+  }
+  f.db.exec('ALTER TABLE orchestration_v2_projection_runs DROP COLUMN completed_at');
+  f.db.exec("UPDATE orchestration_v2_projection_runs SET status = 'running'");
+  assert.equal((await activity.readT3Activity(f.options)).get(nativeId).state, 'waiting',
+    'older stores still provide live pending requests');
 });
 
 test('T3 formal request kinds wait and resolution/cancellation/expiry clear without transcript writes', async t => {
@@ -127,7 +214,7 @@ test('T3 formal request kinds wait and resolution/cancellation/expiry clear with
   }
   f.db.exec("UPDATE orchestration_v2_projection_runtime_requests SET kind = 'dynamic_tool_call', status = 'pending'");
   assert.equal((await activity.readT3Activity(f.options)).get(nativeId).state, 'running');
-  f.db.exec("UPDATE orchestration_v2_projection_runs SET status = 'completed'");
+  f.db.prepare("UPDATE orchestration_v2_projection_runs SET status = 'completed', completed_at = ?").run(new Date(now).toISOString());
   assert.equal((await activity.readT3Activity(f.options)).get(nativeId).state, 'idle');
   assert.equal(JSON.stringify([...await activity.readT3Activity(f.options)]).includes('PRIVATE'), false);
 });
@@ -151,7 +238,7 @@ test('T3 requests belong to the native provider, current run and server incarnat
 test('T3 request evaluation is bounded before sorting a large set of recent runs', async t => {
   const f = fixture(t);
   const insertProvider = f.db.prepare('INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-  const insertRun = f.db.prepare('INSERT INTO orchestration_v2_projection_runs VALUES (?, ?, ?, ?, ?)');
+  const insertRun = f.db.prepare('INSERT INTO orchestration_v2_projection_runs (run_id, provider_thread_id, ordinal, status, requested_at) VALUES (?, ?, ?, ?, ?)');
   f.db.exec('BEGIN');
   for (let i = 0; i < 600; i += 1) {
     const id = `recent-${i}`;
@@ -411,7 +498,7 @@ test('T3 polling updates waiting, response and terminal states without rescannin
   assert.equal(updates[1].summary.today.sessions[f.key].liveActivity.state, 'running');
   assert.equal(scans, 3);
   changed = new Promise(resolve => { nextUpdate = resolve; });
-  f.db.exec("UPDATE orchestration_v2_projection_runs SET status = 'cancelled'");
+  f.db.prepare("UPDATE orchestration_v2_projection_runs SET status = 'cancelled', completed_at = ?").run(new Date(Date.now()).toISOString());
   await changed;
   for (const name of ['today', 'month', 'allTime']) {
     assert.equal(updates[2].summary[name].sessions[f.key].liveActivity.state, 'idle');
@@ -440,8 +527,11 @@ test('local display deduplicates no-token activity once usage arrives and omits 
 test('T3 answerable message questions survive model completion until actually answered', async t => {
   const f = fixture(t);
   f.db.exec("UPDATE orchestration_v2_projection_runs SET status = 'completed'; UPDATE orchestration_v2_projection_provider_threads SET status = 'idle'");
+  f.db.prepare('UPDATE orchestration_v2_projection_runs SET completed_at = ?').run(new Date(now).toISOString());
   f.db.prepare('UPDATE orchestration_v2_projection_runtime_requests SET payload_json = ?').run(JSON.stringify({ responseCapability: { type: 'message' } }));
   assert.equal((await activity.readT3Activity(f.options)).get(nativeId).state, 'waiting');
+  assert.equal((await activity.readT3Activity({ ...f.options, now: now + 3600_000 })).get(nativeId).state, 'waiting',
+    'an answerable message is current ownership evidence even after the completion lease expires');
   f.db.exec("UPDATE orchestration_v2_projection_runtime_requests SET status = 'resolved'");
   assert.equal((await activity.readT3Activity(f.options)).get(nativeId).state, 'idle');
   f.db.exec("UPDATE orchestration_v2_projection_runtime_requests SET status = 'pending'; UPDATE orchestration_v2_projection_runs SET status = 'cancelled'");
