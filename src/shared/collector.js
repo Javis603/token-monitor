@@ -11,7 +11,7 @@ const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const { FORK_ONLY_CLIENT_IDS } = require('./clientCatalog');
-const { antigravityCliDataDir, canonicalWatchPath, cherryStudioTranscriptRoots, clientSourceRoots, copilotExporterWatch } = require('./clientSources');
+const { antigravityCliDataDir, canonicalWatchPath, canonicalWatchFilePath, cherryStudioTranscriptRoots, clientSourceRoots, copilotExporterWatch } = require('./clientSources');
 const { clientDiagnosticRoots, clientSourceChecks, dirExists, visibleDiagnosticRoots } = require('./clientSourceObservations');
 const {
   CLIENT_HEALTH_VERSION,
@@ -40,6 +40,7 @@ const {
   terminationUnconfirmedError
 } = require('./subprocessTermination');
 const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
+const { antigravityConversationSummaryCandidates } = require('./providers/antigravity/sessionMetadata');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
 const { cursorDesktopWatchRoots, isCursorDesktopStateWrite } = require('./providers/cursor/desktopState');
@@ -1316,6 +1317,16 @@ function selfSyncSourceRootsForClients(clientsCsv, options = {}) {
   return rootsByClient;
 }
 
+function antigravitySummaryWatchSources(options = {}) {
+  return antigravityConversationSummaryCandidates({
+    home: options.homeDir || os.homedir(),
+    env: options.env || process.env
+  }).map((candidate) => {
+    const file = canonicalWatchFilePath(candidate);
+    return { file, dir: path.dirname(file) };
+  });
+}
+
 function watchClientRootsForClients(clientsCsv, options = {}) {
   const rootsByClient = {};
   const customScanPaths = normalizeCustomScanPaths(options.customScanPaths, {
@@ -1341,6 +1352,14 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
   if (enabled.has('antigravity') && dirExists(antigravityCliDir)) {
     rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), antigravityCliDir])];
   }
+  if (enabled.has('antigravity')) {
+    // Watch the parent so a summary DB or WAL created after startup is seen.
+    // Its policy below admits only those exact files, never the surrounding tree.
+    const summaryDirs = antigravitySummaryWatchSources(options).map(({ dir }) => dir).filter(dirExists);
+    if (summaryDirs.length > 0) {
+      rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), ...summaryDirs])];
+    }
+  }
   if (enabled.has('reasonix')) {
     const nativeRoots = reasonixNativeSessionWatchRoots();
     const existingNativeRoots = nativeRoots.filter(dirExists);
@@ -1356,8 +1375,8 @@ function watchPathsForClients(clientsCsv, options = {}) {
 }
 
 // The same roots, but as attribution prefixes rather than watch targets. The two
-// differ in exactly one place: a custom Copilot exporter has to be *watched* by
-// its parent directory (the file can appear later), while attributing by that
+// differ for exact-file sources: a custom Copilot exporter or summary database
+// has to be *watched* by its parent (the file can appear later), while attributing by that
 // parent would be wrong — it is an arbitrary user-chosen path, and one pointing
 // at a file in $HOME would make every other client's event also target copilot,
 // turning each targeted scan into a two-client scan. The exact file attributes
@@ -1369,18 +1388,36 @@ function watchPathsForClients(clientsCsv, options = {}) {
 // other — the same "two derivations of one thing" trap the exporter had.
 function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options = {}) {
   const rootsByClient = watchRoots || watchClientRootsForClients(clientsCsv, options);
+  const attributed = { ...rootsByClient };
   const exporter = copilotExporterWatch(os.homedir());
-  if (!exporter || !rootsByClient.copilot) return rootsByClient;
-  const exporterDir = path.resolve(exporter.dir);
-  const ownedByOtherSource = new Set(
-    (clientSourceRoots(clientsCsv, options).copilot || [])
-      .filter((root) => root.id !== 'copilot-otel-exporter')
-      .map((root) => path.resolve(root.dir))
-  );
-  const copilot = rootsByClient.copilot
-    .filter((root) => path.resolve(root) !== exporterDir || ownedByOtherSource.has(exporterDir));
-  copilot.push(exporter.canonicalFile);
-  return { ...rootsByClient, copilot: [...new Set(copilot)] };
+  if (exporter && rootsByClient.copilot) {
+    const exporterDir = path.resolve(exporter.dir);
+    const ownedByOtherSource = new Set(
+      (clientSourceRoots(clientsCsv, options).copilot || [])
+        .filter((root) => root.id !== 'copilot-otel-exporter')
+        .map((root) => path.resolve(root.dir))
+    );
+    const copilot = rootsByClient.copilot
+      .filter((root) => path.resolve(root) !== exporterDir || ownedByOtherSource.has(exporterDir));
+    copilot.push(exporter.canonicalFile);
+    attributed.copilot = [...new Set(copilot)];
+  }
+  if (rootsByClient.antigravity) {
+    const canonicalRoot = (dir) => path.resolve(canonicalWatchPath(dir));
+    const usageRoots = new Set([
+      ...antigravityDataRoots(), antigravityCliDataDir(),
+      ...(normalizeCustomScanPaths(options.customScanPaths, options).antigravity || [])
+    ].map(canonicalRoot));
+    const summaries = antigravitySummaryWatchSources(options);
+    const summaryDirs = new Set(summaries.map(({ dir }) => dir));
+    const watched = new Set(rootsByClient.antigravity.map(canonicalRoot));
+    const antigravity = rootsByClient.antigravity.filter((dir) => !summaryDirs.has(canonicalRoot(dir)) || usageRoots.has(canonicalRoot(dir)));
+    for (const { file, dir } of summaries) {
+      if (watched.has(dir)) antigravity.push(file, `${file}-wal`);
+    }
+    attributed.antigravity = [...new Set(antigravity)];
+  }
+  return attributed;
 }
 
 function clientsForWatchPath(filePath, rootsByClient) {
@@ -1634,6 +1671,12 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     if (ANTIGRAVITY_SHALLOW_SOURCE_DIRS.has(firstChild)) return parts.length > 2;
     return false;
   });
+  if (antigravityEnabled) {
+    for (const { file, dir } of antigravitySummaryWatchSources(options)) {
+      const name = path.basename(file);
+      bound('antigravity', [dir], directChildOnly((child) => child === name || child === `${name}-wal`));
+    }
+  }
 
   const reasonixEnabled = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).includes('reasonix');
   bound(
@@ -2201,7 +2244,8 @@ const WATCH_REFUSAL_CODES = new Set([WATCH_POLLING_LIMIT_CODE, WATCH_POLLING_UNA
 function openWatch(chokidar, config = {}) {
   const ignored = watchIgnoreMatcher(config.clients, {
     customScanPaths: config.customScanPaths,
-    cursorDesktopRoots: config.cursorDesktopRoots
+    cursorDesktopRoots: config.cursorDesktopRoots,
+    homeDir: config.homeDir
   });
   const limit = Number.isInteger(config.pollingEntryLimit) && config.pollingEntryLimit >= 0
     ? config.pollingEntryLimit
@@ -3193,6 +3237,7 @@ function startCollector(options) {
           clients,
           customScanPaths: sourceOptions.customScanPaths,
           cursorDesktopRoots: sourceSyncRootsByClient.cursor || [],
+          homeDir: sourceOptions.homeDir,
           usePolling,
           pollingEntryLimit: watchPollingEntryLimit
         },

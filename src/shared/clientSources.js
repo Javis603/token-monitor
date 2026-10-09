@@ -499,6 +499,7 @@ function antigravityCliDataDir() {
 module.exports = {
   antigravityCliDataDir,
   canonicalWatchPath,
+  canonicalWatchFilePath,
   cherryStudioTranscriptRoots,
   clientSourceRoots,
   copilotExporterWatch

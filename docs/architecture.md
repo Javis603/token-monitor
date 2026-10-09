@@ -43,6 +43,8 @@ Claude and Codex derive prompt-cache observations in their existing provider-own
 
 Catalog-only title updates must preserve transcript-derived activity, context, cache and attribution; subsequent transcript reads must resume normal metadata updates. Keep title provenance in local metadata caches and anchors, never in published session rows. Confirmed T3 title removals clear only the matching override and restore any native fallback; missing or unreadable stores preserve the latest known state.
 
+Summary catalog metadata may fill a missing decoded workspace, but must not replace a scan's existing project or use a catalog modification time as session activity. The internal `catalogOnly` resolver marker applies this boundary without entering the published row.
+
 Watch title changes and confirmed removals must survive later read misses and restarts without changing token/cost baselines or the full-scan timestamp. Persist anchors only when title state changes. Watch metadata refresh covers sessions present in today, including retained client partitions; month/allTime-only sessions refresh on the next full scan.
 
 ### Watching

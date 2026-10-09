@@ -5,6 +5,7 @@ const os = require('node:os');
 const { hashKey } = require('./hashKey');
 const { normalizeSessionContext } = require('./sessionContext');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
+const antigravitySessionMetadata = require('./providers/antigravity/sessionMetadata');
 const codebuddySession = require('./providers/codebuddy/sessionMetadata');
 const codexSession = require('./providers/codex/sessionMetadata');
 const cursorSessionMetadata = require('./providers/cursor/sessionMetadata');
@@ -225,6 +226,7 @@ function fileSessionMetadata(sessionId, filePath, context, existing = {}) {
 // after tokscale first exposes a session id. Kimi and unknown clients retain the
 // existing one-shot id-timestamp fallback.
 const SESSION_METADATA_RESOLVERS = new Map([
+  ['antigravity', { resolve: antigravitySessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['claude', { resolve: claudeSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['codebuddy', { resolve: codebuddySession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['codex', { resolve: codexSession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
@@ -356,6 +358,15 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (meta.title) session.title = meta.title;
       // A catalog title is not evidence about transcript state or activity.
       if (meta.titleOnly === true) continue;
+      if (meta.catalogOnly === true) {
+        // A summary may supply a missing workspace, but a decoded scan path
+        // remains authoritative. Catalog changes never clear turn state.
+        if (!session.projectId && meta.projectId) {
+          session.projectId = meta.projectId;
+          if (meta.projectLabel) session.projectLabel = meta.projectLabel;
+        }
+        continue;
+      }
       if (meta.startedAt && (!session.startedAt || Date.parse(meta.startedAt) < Date.parse(session.startedAt))) session.startedAt = meta.startedAt;
       if (meta.lastUsedAt && (!session.lastUsedAt || Date.parse(meta.lastUsedAt) > Date.parse(session.lastUsedAt))) session.lastUsedAt = meta.lastUsedAt;
       if (meta.projectId) session.projectId = meta.projectId;

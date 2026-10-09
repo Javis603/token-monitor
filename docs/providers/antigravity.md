@@ -45,7 +45,19 @@ The native roots are watched so that a change there triggers an Antigravity-targ
 
 The generated `antigravity-cache` directory is deliberately not watched. Token Monitor's own sync writes it, so watching it would create a refresh loop.
 
-On Windows, running WSL distros are checked during full scans only. WSL discovery uses the same Antigravity source markers and never starts a stopped distro.
+### Session titles and project resolution
+
+Antigravity session entries are joined against the local `conversation_summaries.db` SQLite database located under the Antigravity configuration roots (`~/.gemini/antigravity`, or paths specified via `ANTIGRAVITY_HOME`/`ANTIGRAVITY_DATA_DIR`).
+
+For each conversation ID:
+
+- The title is resolved from the `title` column (falling back to `preview` when the title is empty). Titles are trimmed and limited to 96 code points.
+- A missing project association is resolved from `workspace_uris` (file URLs); an existing decoded scan path remains authoritative. WSL workspace URLs are decoded as POSIX paths even though the reader runs on Windows.
+- Summary updates preserve transcript activity timestamps, turn state, context and cache observations. `last_modified_time` is not a generation timestamp: renaming a conversation must not make it appear running.
+
+The reader opens the database read-only, queries only requested session IDs, and caches source rows and misses per database/WAL fingerprint. Project identities are derived on each lookup so changing the Projects setting does not require a database write. WSL lookups ignore host environment overrides.
+
+The database and its WAL are watched, including under the environment overrides and the default CLI root. Discovery and watch policies follow the collector's configured home. Summary-only directories admit those exact files and attribute events to them rather than to the whole parent; unrelated runtime files and the reader's SHM writes do not trigger collection. Watch ticks refresh sessions present in today; month/all-time-only titles refresh on the next full scan.
 
 ### Boundary with quota collection
 
@@ -141,6 +153,7 @@ Token/session tracking remains dependent on local source data. OAuth does not ma
 | Concern | Primary files |
 | --- | --- |
 | Usage source roots, health and watch mapping | `src/shared/clientSources.js`, `src/shared/clientSourceObservations.js`, `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/clientHealth.js`, `src/shared/usage.js` |
+| Session metadata and conversation titles | `src/shared/providers/antigravity/sessionMetadata.js`, `src/shared/sessionMetadata.js` |
 | Self-sync and the tokscale sync lock | `src/shared/providers/antigravity/selfSync.js`, `src/shared/selfSyncThrottle.js` |
 | Local RPC and remote quota requests | `src/shared/providers/antigravity/probe.js`, `src/shared/providers/antigravity/oauth.js`, `src/shared/providers/antigravity/limits.js` |
 | Browser OAuth lifecycle | `src/electron/providers/antigravity/oauthLogin.js`, `src/electron/main.js`, `src/electron/preload.js` |
