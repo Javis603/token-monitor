@@ -156,6 +156,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 - **멀티 디바이스 동기화** — Hub 동기화는 Server-Sent Events로 수 초 내 다른 기기에 반영되며, iCloud Drive 동기화는 eventual consistency 방식입니다
 - **로컬 우선** — 단일 기기는 서버 불필요
 - **자체 호스트 동기화** — 위젯 내 hub, Node CLI hub, Cloudflare Worker
+- **Headless agent** — 데스크톱 앱 없이 서버, SSH 호스트, WSL의 사용량을 보고합니다. [Headless agent](#headless-agent) 참고
 - **iOS 위젯** — Worker hub + Widgy, Scriptable
 - **프라이버시 우선** — 프롬프트, 응답, 소스 코드, 파일 내용은 모두 기기에만 보관
 
@@ -195,7 +196,7 @@ brew install --cask token-monitor
 
 ## 멀티 디바이스 동기화
 
-기기(및 headless agent)에 사용할 **멀티 디바이스 동기화 방식 하나**를 고릅니다. 각 기기에서 위젯을 열고 **설정 → 멀티 디바이스 동기화**에서 모드를 선택합니다. 위젯이 이 기기 사용량을 자동으로 올리며, 위젯이 없는 기기에서만 `npm run agent`를 실행하면 됩니다. iCloud Drive는 macOS 위젯 전용이며 headless agent를 지원하지 않습니다.
+기기(및 headless agent)에 사용할 **멀티 디바이스 동기화 방식 하나**를 고릅니다. 각 기기에서 위젯을 열고 **설정 → 멀티 디바이스 동기화**에서 모드를 선택합니다. 위젯이 이 기기 사용량을 자동으로 올리며, 위젯이 없는 기기에서만 [headless agent](#headless-agent)를 실행하면 됩니다. iCloud Drive는 macOS 위젯 전용이며 headless agent를 지원하지 않습니다.
 
 #### 옵션 A — 위젯에서 hub 호스트 (가장 쉬움, CLI 불필요)
 
@@ -232,6 +233,20 @@ npx wrangler deploy
 
 같은 Apple ID로 로그인한 각 Mac에서 **설정 → 멀티 디바이스 동기화 → iCloud Drive**를 선택합니다. 선택 사항인 macOS 전용 방식으로, Token Monitor는 iCloud Drive의 `Token Monitor/sync-v1/` 아래에 기기별·작성자별 원자 스냅샷을 저장하고 각 Mac에서 유효한 파일을 집계합니다. Token Monitor 서버, CloudKit 또는 자격 증명을 사용하지 않으며 제공업체 API 키, Cookie와 token은 로컬에 남습니다. iCloud Drive는 최종 일관성이므로 다른 Mac의 업데이트가 나타나기까지 시간이 걸릴 수 있고, 손상되거나 일시적으로 사라진 파일이 마지막 정상 집계를 지우지 않습니다.
 
+### Headless agent
+
+서버, SSH 호스트, WSL 내부처럼 AI 도구는 쓰지만 데스크톱 위젯을 실행하지 않는 기기에서는 headless agent를 실행합니다. 해당 기기의 사용량을 수집해 hub(옵션 A, B, C)로 보냅니다. Node.js 22.15+와 git이 필요합니다.
+
+```bash
+git clone https://github.com/Javis603/token-monitor.git
+cd token-monitor
+npm ci
+cp .env.example .env              # TOKEN_MONITOR_HUB_URL, TOKEN_MONITOR_SECRET, 겹치지 않는 TOKEN_MONITOR_DEVICE_ID 설정
+npm run agent                     # 계속 실행
+```
+
+서비스로 실행, 업데이트, 제거, 문제 해결은 [docs/headless-agent.md](docs/headless-agent.md)를 참고하세요. WSL 내부의 SQLite 기반 도구는 [WSL SQLite 설정](docs/wsl-sqlite-setup.md)을 따르세요.
+
 ## 앱 데이터
 
 앱 상태는 OS 사용자 데이터 디렉터리에 저장됩니다. 앱과 함께 해당 폴더를 삭제하면 완전히 제거됩니다.
@@ -257,7 +272,7 @@ npm run pack         # 설치 없이 앱 디렉터리만 (로컬 테스트)
 
 결과물은 `dist/`에 생성됩니다. Windows와 Linux는 대상 OS에서 위의 해당 `dist:*` 스크립트를 사용하세요. macOS 릴리스 빌드를 패키징하려면 이 Mac에 Developer ID Application 서명 ID가 있어야 합니다. 로컬 개발 또는 지원되지 않는 플랫폼에서는 `npm start`를 사용하세요.
 
-런타임 및 패키징 스크립트는 네 가지 vendored 대상에서 pinned tokscale binary를 명시적으로 보장합니다. 그 밖의 소스 플랫폼에서는 npm binary를 사용하고 지원하지 않는 client를 필터링합니다. `npm install`, lint, 테스트에서는 다운로드하지 않습니다.
+런타임 및 패키징 스크립트는 vendored 빌드가 있는 각 대상에서 pinned tokscale binary를 명시적으로 보장합니다. 그 밖의 소스 플랫폼에서는 npm binary를 사용하고 지원하지 않는 client를 필터링합니다. `npm install`, lint, 테스트에서는 다운로드하지 않습니다.
 
 ## 동작 방식
 
@@ -266,8 +281,8 @@ npm run pack         # 설치 없이 앱 디렉터리만 (로컬 테스트)
     위젯 (Electron) ──▶ tokscale ──▶ ~/.claude, ~/.codex, $HERMES_HOME
 
 모드 B — 동기화 (옵트인, 멀티 디바이스)
-    기기 A agent ──▶
-    기기 B agent ──▶  hub  ──▶  아무 기기의 위젯
+    기기 A 위젯  ──▶
+    기기 B 위젯  ──▶  hub  ──▶  아무 기기의 위젯
     기기 C agent ──▶
 ```
 
@@ -301,7 +316,7 @@ npm run pack         # 설치 없이 앱 디렉터리만 (로컬 테스트)
 Token Monitor 설정은 두 곳에 있으며, 일상 사용에는 앞의 것만 필요합니다.
 
 - **위젯 (GUI)** — 오른쪽 아래 `⚙` 버튼으로 엽니다. 섹션 순서: 일반(언어, 로그인 시 시작, 업데이트), 메인 화면(홈 모듈과 표시 통화), 창(창 동작, 메뉴 막대·플로팅 버블 레이아웃, 트레이 모드, 단축키), 외관(테마와 도구별 색), 수집(추적 도구, 수집 주기, 삭제된 세션 사용량 유지, 데이터 내보내기), AI 도구 한도(공급자 선택, 한도, 자격 증명), 구독(계정별 지불 금액), 멀티 디바이스 동기화. 타이틀 바의 `⇧` 버튼으로 창 동작을 전환합니다.
-- **Headless agent와 hub** — UI 없음. 프로젝트 루트의 `.env`(`.env.example` 복사)로 설정하며, 우선순위는 CLI 플래그 → 환경 변수 → 기본값입니다.
+- **Headless agent와 hub** — UI 없음. 프로젝트 루트의 `.env`(`.env.example` 복사)로 설정하며, 우선순위는 CLI 플래그 → 환경 변수 → 기본값입니다. 자세한 내용은 [docs/configuration.md](docs/configuration.md#headless-agent--hub-env)를 참고하세요.
 
 모든 설정과 환경 변수의 자세한 내용은 [설정 레퍼런스](docs/configuration.md)를 참고하세요.
 

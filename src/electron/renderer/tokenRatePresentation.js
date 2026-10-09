@@ -1,10 +1,13 @@
 'use strict';
 
 (function exposeTokenRate(root, factory) {
-  const api = factory();
+  const deviceBreakdownApi = typeof module === 'object' && module.exports
+    ? require('./deviceBreakdown')
+    : root?.TokenMonitorDeviceBreakdown;
+  const api = factory(deviceBreakdownApi);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorTokenRate = api;
-})(typeof window !== 'undefined' ? window : null, function createTokenRateApi() {
+})(typeof window !== 'undefined' ? window : null, function createTokenRateApi(deviceBreakdownApi) {
   const TOKEN_RATE_BOOST_DOUBLING_MS = 520;
   const TOKEN_RATE_HOLD_THRESHOLD_MS = 180;
   const TOKEN_RATE_SETTLE_MS = 720;
@@ -291,7 +294,7 @@
       return {
         entries: devices
           .filter((device) => device?.stale !== true && device?.periods?.today && typeof device.periods.today === 'object')
-          .map((device) => ({ id: `device:${String(device.deviceId || 'unknown')}`, ...(device.hostname ? { name: device.hostname } : {}), period: device.periods.today })),
+          .map((device) => ({ id: `device:${String(device.deviceId || 'unknown')}`, name: deviceBreakdownApi.deviceLabel(device), period: device.periods.today })),
         source: 'devices:all'
       };
     }
@@ -306,7 +309,7 @@
       || (!syncMode ? stats?.periods?.today : null);
     if (localPeriod && typeof localPeriod === 'object') {
       return {
-        entries: [{ id: `device:${normalizedDeviceId}`, ...(localDevice?.hostname ? { name: localDevice.hostname } : {}), period: localPeriod }],
+        entries: [{ id: `device:${normalizedDeviceId}`, name: deviceBreakdownApi.deviceLabel(localDevice || { deviceId: normalizedDeviceId }), period: localPeriod }],
         source: `device:${normalizedDeviceId}`
       };
     }

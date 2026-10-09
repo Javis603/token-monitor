@@ -300,23 +300,11 @@
       },
       {
         "revision": 75,
-        "buildId": "sha256:06d6ac737745e02cc6b59c74f628fb99fdba16eb6b9477ebfdc96873b1509eed"
+        "buildId": "sha256:6808386d1f1dd37caaf1640cbe41c3b9be803c8dfd5952bb3dbb009a6756e345"
       },
       {
         "revision": 76,
-        "buildId": "sha256:b34d5abe851995dbe69bf96006b8c267821332e966f003a902e61e1ebb6d094b"
-      },
-      {
-        "revision": 77,
-        "buildId": "sha256:b0acee2adabe889e4041bf04351e5e1c3315f6612902f437ac9157b0fdd0c469"
-      },
-      {
-        "revision": 78,
-        "buildId": "sha256:d579bd1e8e70b501faa031e42833f76845216f7b7dad5b87551d1e279d4c3fec"
-      },
-      {
-        "revision": 79,
-        "buildId": "sha256:706e527b99881759dc10ae329b29aed9bc42f6c199fd01cca6bcdb0baf96c6ff"
+        "buildId": "sha256:c00567a09654839e66d50716fe656261fae985b1fe23cd5eda533a29c7c5ebce"
       }
     ],
     "node-hub": [

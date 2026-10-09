@@ -2698,10 +2698,6 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
   if (liveMotionSnapshot) animateBreakdownFrom(liveMotionSnapshot, { duration: 600 });
 }
 
-function deviceLabel(device) {
-  return device.deviceId || device.hostname || 'device';
-}
-
 function deviceColor(stale) {
   return stale ? deviceStaleColor : deviceAccent;
 }
@@ -2773,7 +2769,7 @@ function deviceRowsForPeriod() {
     const metaParts = [deviceBreakdownApi.devicePlatformLabel(device.platform, device.osName, device.osVersion), version, deviceSyncedLabel(device.updatedAt)].filter(Boolean);
     return {
       key: device.deviceId,
-      name: deviceLabel(device),
+      name: deviceBreakdownApi.deviceLabel(device),
       value: breakdown.totalTokens,
       cost: Number(period.costUsd || 0),
       unpricedTokens: Number(period.unpricedTokens || 0),

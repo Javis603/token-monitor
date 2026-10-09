@@ -1,6 +1,8 @@
-# WSL SQLite 用量配置指南
+<p align="right">
+   <a href="./wsl-sqlite-setup.md">EN</a> | <strong>简</strong> | <a href="./wsl-sqlite-setup.zh-TW.md">繁</a>
+</p>
 
-[English](wsl-sqlite-setup.md)
+# WSL SQLite 用量配置指南
 
 ## 什么时候需要这样配置
 
@@ -52,7 +54,7 @@ TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode
 Hub 会直接相加不同设备的总量，不会跨设备去重同一个 session。请选择一种配置：
 
 - 推荐：保留 Windows 的 WSL 扫描，只让 WSL agent 采集 Windows 无法可靠读取的 SQLite 工具，例如 `TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode`。
-- 另一种方式：让 WSL agent 采集全部 WSL 工具，然后在 Windows widget 的 **设置 → 采集** 中关闭 **扫描 WSL 内的工具**。
+- 另一种方式：让 WSL agent 采集全部 WSL 工具，然后在 Windows widget 的 **设置 → 采集** 中关闭 **扫描 WSL 里的工具**。
 
 不要让两个采集器同时上报相同的 Codex、Claude Code 或其他文件型 session。
 
@@ -70,7 +72,7 @@ npm run agent:once
 npm run agent
 ```
 
-如需无人值守运行，请通过你平时使用的 WSL 服务管理器或登录启动项执行该命令，并把工作目录设为 Token Monitor checkout，确保 `.env` 会被加载。
+如需无人值守运行，请按照[持续运行](headless-agent.zh-CN.md#持续运行)交给服务管理器启动。
 
 ## 排查
 
