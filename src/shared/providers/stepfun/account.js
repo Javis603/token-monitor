@@ -159,6 +159,11 @@ module.exports = {
     // parked three rows under the diagnostic note.
     top: [
       { field: 'stepfunUsername' },
+      // The panel's row identity IS the username, so changing it starts a new
+      // record rather than moving the old one — the old row keeps its last
+      // known values where it is. Say so here, or a renamed account looks
+      // like the app silently lost the account's history.
+      { note: 'settings.stepfun.renameNote' },
       { field: 'stepfunPassword' },
       { field: 'stepfunRememberLogin' }
     ],

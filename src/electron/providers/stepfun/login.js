@@ -1,5 +1,7 @@
 'use strict';
 
+const { hashKey } = require('../../../shared/hashKey');
+
 // StepFun sign-in driven by a real browser window.
 //
 // The OAuth flow cannot be reproduced over plain HTTP. Two findings from
@@ -90,9 +92,27 @@ const PARTITION_BASE = 'stepfun-login';
  * Passing `remember: false` falls back to a throwaway in-memory partition, for
  * a user who would rather re-authenticate each launch than leave a session on
  * disk.
+ *
+ * An `account` scopes the partition to ONE username. The jar holds a single
+ * signed-in pair per origin, so a partition shared by every account means the
+ * most recent password login evicts the previous account's session, and only
+ * that account can ever be renewed again — the rest of the panel's StepFun
+ * rows are left with a manual paste as their only lane. Keying the partition
+ * on the same identity the account key uses keeps each account's session in
+ * its own jar, renewable on its own, and a sign-in window for one account can
+ * no longer overwrite another's cookies. Without an account the name stays the
+ * unsuffixed one, which is what a token-only setup reads.
  */
-function stepfunPartition({ remember = true } = {}) {
-  return remember ? `persist:${PARTITION_BASE}` : PARTITION_BASE;
+function stepfunPartition({ remember = true, account } = {}) {
+  // Lowercased like the account key, so the same account spelled with
+  // different capitals is one partition and one row rather than two.
+  const identity = String(account || '').trim().toLowerCase();
+  // A digest rather than the raw username: the partition name becomes a
+  // directory under the user-data folder, and an email address in a path
+  // leaks the account to every backup and every bug report.
+  const suffix = identity ? `-${hashKey('stepfun', `partition:${identity}`).replace(/^sha256:/, '')}` : '';
+  const base = `${PARTITION_BASE}${suffix}`;
+  return remember ? `persist:${base}` : base;
 }
 
 // The default, so a caller that never states a preference still persists.
@@ -105,7 +125,11 @@ function loginUrl({ redirect } = {}) {
 
 // `session.cookies()` answers the same shape as the cookies table, so an
 // expired entry can be told from a live one without a request.
-function tokenExpiryMs(cookies, nowMs) {
+//
+// The current time is NOT taken here: this only reads the announced expiry,
+// and the comparison against "now" belongs to the caller that owns the clock
+// (readOasisSessions). Passing it in was dead weight that eslint flagged.
+function tokenExpiryMs(cookies) {
   const hit = cookies.find((c) => c.name === OASIS_TOKEN);
   if (!hit) return null;
   const expires = Number(hit.expires);
@@ -145,7 +169,7 @@ async function readOasisSessions(session, { nowMs = Date.now(), urls = SESSION_C
     if (!hit) continue;
     const token = String(hit.value).trim();
     if (seen.has(token)) continue;
-    const expiresAt = tokenExpiryMs(cookies, nowMs);
+    const expiresAt = tokenExpiryMs(cookies);
     if (expiresAt !== null && expiresAt <= nowMs) continue;
     seen.add(token);
     const webid = cookies.find((c) => c.name === OASIS_WEBID);
@@ -173,10 +197,10 @@ async function readOasisSession(session, options = {}) {
  * @param {{username: string, password: string, BrowserWindow: object,
  *          session: object, partition?: string, timeoutMs?: number,
  *          tokenReplaceDeadlineMs?: number, logger?: (m: string) => void,
- *          verifySession?: (s: {token: string, webid: string}) => boolean}} options
- * @returns {Promise<{token: string, webid: string}>} The Oasis-Token and the
- *   device id issued with it, or `{token: '', webid: ''}` when the window was
- *   closed before sign-in completed.
+ *          verifySession?: (s: {token: string, webid: string}) => boolean | {ok: boolean, body?: object|null}}} options
+ * @returns {Promise<{token: string, webid: string, plan: object|null}>} The Oasis-Token and the
+ *   device id issued with it, plus the PLAN_URL body the site's verdict carried when the verifier
+ *   answers with one (`null` when it does not, or when no verifier was supplied).
  */
 async function signInStepFunWithBrowser(options = {}) {
   const {
@@ -192,6 +216,11 @@ async function signInStepFunWithBrowser(options = {}) {
     // main.js, which owns the transport. When it is absent the flow falls back
     // to comparing against what the jar held before submitting, which cannot
     // tell a replaced token from one that was already there.
+    //
+    // It answers either a bare boolean or the full `{ok, body}` verdict the
+    // shared checker returns; both are accepted, and the body — the PLAN_URL
+    // response that verdict just spent a request on — is carried out with an
+    // accepted session rather than dropped and fetched again.
     verifySession = null
   } = options;
 
@@ -367,9 +396,18 @@ async function signInStepFunWithBrowser(options = {}) {
         if (Date.now() - navigatedAt >= TOKEN_SETTLE_MS) {
           for (const candidate of await readOasisSessions(session)) {
             if (!candidate.token || rejected.has(candidate.token)) continue;
+            // The verdict arrives either as a bare boolean or as the full
+            // `{ok, body}` descriptor the shared checker answers with. The
+            // body is the PLAN_URL response that verdict just cost, so an
+            // accepted candidate hands it on: the login round that had to ask
+            // the site for a session would otherwise throw that body away and
+            // the probe would fetch the same endpoint again moments later for
+            // the account label.
+            let verdict = null;
             let accepted;
             if (typeof verifySession === 'function') {
-              accepted = await verifySession(candidate);
+              verdict = await verifySession(candidate);
+              accepted = typeof verdict === 'boolean' ? verdict : Boolean(verdict?.ok);
               if (!accepted) rejected.add(candidate.token);
             } else {
               // No way to ask the site: the fallback is "this is not the
@@ -382,7 +420,8 @@ async function signInStepFunWithBrowser(options = {}) {
             if (!accepted) continue;
             logger('StepFun sign-in: the site accepted the session');
             signedIn = true;
-            return { token: candidate.token, webid: candidate.webid };
+            const plan = verdict && typeof verdict === 'object' ? verdict.body ?? null : null;
+            return { token: candidate.token, webid: candidate.webid, plan };
           }
           // Every candidate the jar holds was already there before the submit
           // or has been rejected by the site. Returning one of those hands the

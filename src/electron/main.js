@@ -128,7 +128,14 @@ function stepfunRememberLogin() {
 // wants for the account label, so it is handed back on the session and the
 // probe can skip repeating the request.
 async function electronStepfunSignIn(options) {
-  const partition = stepfunPartition({ remember: stepfunRememberLogin() });
+  // The partition is scoped to the account being signed in — see
+  // stepfunPartition. A jar shared by every account means the newest password
+  // login evicts the previous account's session, so only the most recent
+  // account could ever be renewed and every other StepFun row was left with a
+  // manual paste. This naming is new: an install whose session sits in the old
+  // unsuffixed partition signs in once through the window after the upgrade,
+  // then reuses the account's own jar from there on.
+  const partition = stepfunPartition({ remember: stepfunRememberLogin(), account: options?.username });
   const loginSession = session.fromPartition(partition);
   const logger = typeof options?.logger === 'function' ? options.logger : undefined;
   const deps = { fetch: electronLimitsFetch(), logger };
@@ -148,14 +155,18 @@ async function electronStepfunSignIn(options) {
   }
   // Hand the same verdict down into the window flow, so a candidate the jar
   // already holds is accepted or refused by the site there too instead of being
-  // judged by comparing cookie strings.
+  // judged by comparing cookie strings. The whole verdict crosses rather than
+  // just its boolean: the 200 behind an acceptance is a PLAN_URL response, and
+  // the login round that had to ask the site for a session would otherwise
+  // discard that body and fetch the same endpoint again moments later for the
+  // account label.
   return signInStepFunWithBrowser({
     ...options,
     BrowserWindow,
     session: loginSession,
     partition,
     logger,
-    verifySession: async (candidate) => (await verifyStepfunSession(candidate, deps)).ok
+    verifySession: async (candidate) => verifyStepfunSession(candidate, deps)
   });
 }
 
@@ -229,6 +240,13 @@ function stepfunErrorLogger(logger) {
 // destroyed window takes the network stack down with it, but a CLEAR is a
 // deliberate teardown, so destroy is right here.
 //
+// The account's own partition is cleared alongside the two unsuffixed ones:
+// the partition a sign-in lands in is now scoped to the username, so wiping
+// only the shared name would leave the very session being cleared alive in
+// `persist:stepfun-login-<hash>`. A username-less setup (token-only) has no
+// account partition, and clearing it twice would be a no-op rather than a
+// second pass, so the empty identity is skipped.
+//
 // One name per call, and that is not a style choice. Measured on the Electron
 // this app ships (43.4.0): `cookies.remove(url, filter)` accepts a single
 // string and rejects a string ARRAY, a `{ name }` object and a Cookie object —
@@ -239,15 +257,20 @@ function stepfunErrorLogger(logger) {
 // said to remove. A mock that accepts whatever it is handed cannot catch that,
 // so the test for this asserts the CALL SHAPE rather than that a call happened.
 async function clearStepfunLoginSession() {
+  const identities = [''];
+  const account = String(settings?.stepfunUsername || '').trim();
+  if (account) identities.push(account);
   for (const remember of [true, false]) {
-    const partition = stepfunPartition({ remember });
-    disposeStepFunWindow(partition);
-    for (const url of [ACCOUNT_COOKIE_URL, COOKIE_URL]) {
-      for (const name of [OASIS_TOKEN, OASIS_WEBID]) {
-        try {
-          await session.fromPartition(partition).cookies.remove(url, name);
-        } catch (error) {
-          appendStepFunDiagnostic(`stepfun clear failed on ${partition} ${url} ${name}: ${error.message}`);
+    for (const identity of identities) {
+      const partition = stepfunPartition({ remember, account: identity });
+      disposeStepFunWindow(partition);
+      for (const url of [ACCOUNT_COOKIE_URL, COOKIE_URL]) {
+        for (const name of [OASIS_TOKEN, OASIS_WEBID]) {
+          try {
+            await session.fromPartition(partition).cookies.remove(url, name);
+          } catch (error) {
+            appendStepFunDiagnostic(`stepfun clear failed on ${partition} ${url} ${name}: ${error.message}`);
+          }
         }
       }
     }

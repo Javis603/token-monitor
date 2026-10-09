@@ -224,7 +224,7 @@ function fakeWindowClass(page, created = []) {
 // otherwise inherits the last test's window, and the fake page driving it. So
 // the default is a clean slate and a test that wants to exercise reuse passes
 // `keepRetained` and manages the lifecycle itself.
-async function runSignIn({ page, cookies, options = {}, now } = {}) {
+async function runSignIn({ page, cookies, options = {} } = {}) {
   if (options.keepRetained) {
     // Reuse is under test here, so hand the retained window this attempt's
     // page — see the loadURL seam in fakeWindowClass.
@@ -258,12 +258,15 @@ test('loginUrl carries the quota page as the post-login redirect', () => {
 });
 
 test('tokenExpiryMs distinguishes a session cookie from a live one', () => {
-  assert.equal(tokenExpiryMs([{ name: OASIS_TOKEN, expires: 0 }], 1000), null,
+  // No clock argument: tokenExpiryMs only reads the announced expiry, and the
+  // "is it past" comparison lives in readOasisSessions. Passing a time here
+  // used to be ignored — which is exactly why eslint flagged it.
+  assert.equal(tokenExpiryMs([{ name: OASIS_TOKEN, expires: 0 }]), null,
     'Chromium reports a session cookie as expires 0, which announces no lifetime');
-  assert.equal(tokenExpiryMs([{ name: OASIS_TOKEN, expires: -1 }], 1000), null);
-  assert.equal(tokenExpiryMs([{ name: OASIS_TOKEN }], 1000), null, 'an absent expiry is not a lifetime');
-  assert.equal(tokenExpiryMs([{ name: 'other', expires: 90 }], 1000), null);
-  assert.equal(tokenExpiryMs([{ name: OASIS_TOKEN, expires: 90.5 }], 1000), 90_500);
+  assert.equal(tokenExpiryMs([{ name: OASIS_TOKEN, expires: -1 }]), null);
+  assert.equal(tokenExpiryMs([{ name: OASIS_TOKEN }]), null, 'an absent expiry is not a lifetime');
+  assert.equal(tokenExpiryMs([{ name: 'other', expires: 90 }]), null);
+  assert.equal(tokenExpiryMs([{ name: OASIS_TOKEN, expires: 90.5 }]), 90_500);
 });
 
 test('readOasisSession reads the token and its device id together', async () => {
@@ -380,6 +383,59 @@ test('verifySession, not a cookie diff, decides whether the sign-in worked', asy
   assert.ok(judged.length >= 1, 'the site was actually asked');
 });
 
+test('the plan body the site verdict carried rides out with the session', async () => {
+  // The session check IS a PLAN_URL call: accepting a candidate spends that
+  // request, so its 200 body has to leave with the session. Dropping it here
+  // is what made the login round log a GetStepPlanStatus call the probe then
+  // immediately repeated for the account label — three requests where the
+  // reuse path made do with two.
+  const page = fakePage();
+  const { result } = await runSignIn({
+    page,
+    cookies: () => [cookie(OASIS_TOKEN, 'tok'), cookie(OASIS_WEBID, 'web')],
+    options: {
+      verifySession: async () => ({ ok: true, body: { status: 1, subscription: { name: 'Step Pro' } } })
+    }
+  });
+  assert.equal(result.token, 'tok');
+  assert.equal(result.webid, 'web');
+  assert.deepEqual(result.plan, { status: 1, subscription: { name: 'Step Pro' } },
+    'the body the verdict paid for is handed on, not thrown away');
+});
+
+test('a verdict descriptor that refuses is the same refusal a boolean gives', async () => {
+  // The shared checker answers {ok, body}; the window flow has to read that
+  // shape as readily as the bare boolean a test double may return.
+  const page = fakePage();
+  await assert.rejects(
+    runSignIn({
+      page,
+      cookies: () => [cookie(OASIS_TOKEN, 'anonymous')],
+      options: {
+        timeoutMs: 4000,
+        tokenReplaceDeadlineMs: 900,
+        verifySession: async () => ({ ok: false, body: null })
+      }
+    }),
+    (error) => /did not replace the anonymous session/.test(error.message)
+  );
+});
+
+test('an accepted verdict with no body still returns the session', async () => {
+  // A 200 whose payload is not JSON answers {ok: true, body: null}; the
+  // session is live either way and must not be held back by a missing body.
+  const page = fakePage();
+  const { result } = await runSignIn({
+    page,
+    cookies: () => [cookie(OASIS_TOKEN, 'tok'), cookie(OASIS_WEBID, 'web')],
+    options: {
+      verifySession: async () => ({ ok: true, body: null })
+    }
+  });
+  assert.equal(result.token, 'tok');
+  assert.equal(result.plan, null);
+});
+
 test('an anonymous cookie the site refuses is not handed back as a session', async () => {
   // The other direction: with a verifier in hand the flow must not fall back to
   // "the cookie looks new" after the site has already said no.
@@ -467,7 +523,8 @@ test('signInStepFunWithBrowser fills the password form and returns the session c
       : [])
   });
 
-  assert.deepEqual(result, { token: 'tok-live', webid: 'web-live' });
+  assert.deepEqual(result, { token: 'tok-live', webid: 'web-live', plan: null },
+    'no verifier was supplied, so there is no PLAN_URL body to carry');
   assert.equal(page.state.values.account, 'me@example.com');
   assert.equal(page.state.values.password, 'hunter2');
   assert.ok(page.state.submitted, 'the form is actually submitted, not just filled');

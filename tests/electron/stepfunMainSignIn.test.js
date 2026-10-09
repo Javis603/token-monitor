@@ -194,8 +194,28 @@ test('the window is handed the same site verdict the reuse check uses', async ()
 
   assert.equal(typeof opened[0].verifySession, 'function',
     'the window flow has to be able to ask the site too');
-  assert.equal(await opened[0].verifySession({ token: 'tok', webid: 'web' }), false,
+  // The whole verdict crosses, not just its boolean: the body behind a 200 is
+  // a PLAN_URL response, and the login round would otherwise fetch that same
+  // endpoint again moments later for the account label.
+  const verdict = await opened[0].verifySession({ token: 'tok', webid: 'web' });
+  assert.equal(verdict.ok, false,
     'and it answers with that candidate\'s own verdict');
+  assert.equal(verdict.body, null);
+});
+
+test('the verdict handed to the window carries the plan body on acceptance', async () => {
+  // The whole verdict crosses, not just its boolean: the 200 behind an
+  // acceptance is a PLAN_URL response the login round already paid for, and
+  // handing only `.ok` on would make the probe fetch that same endpoint again
+  // moments later for the account label.
+  const { signIn, opened } = loadSigner({ cookies: [], signedIn: true });
+
+  await signIn({ username: 'me', password: 'pw' });
+
+  const verdict = await opened[0].verifySession({ token: 'tok', webid: 'web' });
+  assert.equal(verdict.ok, true);
+  assert.equal(verdict.body?.subscription?.name, 'Step Pro',
+    'the plan body the session check produced rides along with the verdict');
 });
 
 test('an anonymous cookie is not reused, even though it is a valid cookie', async () => {
@@ -240,6 +260,26 @@ test('the remembered-session setting decides whether the partition persists', as
   assert.deepEqual(forgotten.partitions, ['stepfun-login'],
     'opting out must actually give up the on-disk session');
   assert.equal(forgotten.opened[0].partition, 'stepfun-login');
+});
+
+test('the partition is scoped to the account being signed in', async () => {
+  // One jar per account: a shared partition means the newest password login
+  // evicts the previous account's session, and only the most recent account
+  // could ever be renewed — every other StepFun row was stuck on a manual
+  // paste. A token-only setup has no username and keeps the shared name.
+  const scoped = loadSigner({ cookies: [], settings: {} });
+  await scoped.signIn({ username: 'me@example.com', password: 'pw' });
+  const accountPartition = login.stepfunPartition({ account: 'me@example.com' });
+  assert.deepEqual(scoped.partitions, [accountPartition]);
+  assert.equal(scoped.opened[0].partition, accountPartition,
+    'the window and the cookie reader share the account-scoped jar');
+  assert.ok(accountPartition.startsWith('persist:stepfun-login-'),
+    'an account partition is its own on-disk jar, still persisted');
+
+  const other = loadSigner({ cookies: [], settings: {} });
+  await other.signIn({ username: 'other@example.com', password: 'pw' });
+  assert.notEqual(other.partitions[0], accountPartition,
+    'a second account must not sign in over the first account\'s jar');
 });
 
 test('only an explicit opt-out turns off the persisted session', async () => {
@@ -288,6 +328,22 @@ test('stepfunPartition yields the same partition for every caller that persists'
   assert.ok(!login.stepfunPartition({ remember: false }).startsWith('persist:'));
 });
 
+test('stepfunPartition scopes the jar to one account', () => {
+  const scoped = login.stepfunPartition({ account: 'Me@Example.com' });
+  assert.equal(login.stepfunPartition({ account: 'me@example.com' }), scoped,
+    'the identity is lowercased, exactly like the account key');
+  assert.ok(scoped.startsWith('persist:stepfun-login-'),
+    'an account partition is a distinct on-disk jar');
+  assert.notEqual(scoped, login.stepfunPartition({ account: 'other@example.com' }),
+    'two accounts are two jars, so neither login can evict the other');
+  assert.ok(!scoped.includes('example.com'),
+    'the username itself must not land in a directory name');
+  assert.equal(login.stepfunPartition({ account: '  ' }), 'persist:stepfun-login',
+    'a blank account is no account at all');
+  assert.ok(!login.stepfunPartition({ account: 'me', remember: false }).startsWith('persist:'),
+    'and opting out still gives up the on-disk session');
+});
+
 test('clearing the account also forgets the browser session', async () => {
   // The cookie jar IS the session. Wiping only the stored values leaves a
   // still-authenticated partition behind, so the next probe signs in again from
@@ -296,7 +352,7 @@ test('clearing the account also forgets the browser session', async () => {
   const removed = [];
   const failures = [];
   const context = {
-    settings: {},
+    settings: { stepfunUsername: 'me@example.com' },
     stepfunPartition: login.stepfunPartition,
     disposeStepFunWindow: (partition) => disposed.push(partition),
     ACCOUNT_COOKIE_URL: login.ACCOUNT_COOKIE_URL,
@@ -305,7 +361,7 @@ test('clearing the account also forgets the browser session', async () => {
     OASIS_WEBID: login.OASIS_WEBID,
     appendStepFunDiagnostic: (line) => failures.push(line),
     session: {
-      fromPartition: () => ({
+      fromPartition: (name) => ({
         cookies: {
           // Shaped to the real Electron 43.4 signature on purpose. Measured:
           // cookies.remove(url, filter) takes ONE string there — a string array,
@@ -318,7 +374,7 @@ test('clearing the account also forgets the browser session', async () => {
             if (typeof filter !== 'string') {
               throw new TypeError(`Error processing argument at index 1, conversion failure from ${typeof filter}`);
             }
-            removed.push([url, filter]);
+            removed.push([name, url, filter]);
           }
         }
       })
@@ -332,33 +388,26 @@ test('clearing the account also forgets the browser session', async () => {
 
   await clear();
 
-  // BOTH partitions. Switching "remember this login" off leaves the persisted
-  // cookies on disk by design — but Clear says "forget this login", and a user
-  // who cleared while the option was off would otherwise find the old session
-  // still sitting there, one toggle away from returning.
-  assert.deepEqual(disposed, ['persist:stepfun-login', 'stepfun-login'],
-    'both partitions release their retained window, not just the active one');
-  // Both origins too: the signed-in pair is host-only on account.stepfun.com,
-  // so removing only the platform-scoped entry leaves a working session behind.
-  assert.deepEqual(
-    removed.map((entry) => entry[0]),
-    [
-      login.ACCOUNT_COOKIE_URL, login.ACCOUNT_COOKIE_URL,
-      login.COOKIE_URL, login.COOKIE_URL,
-      login.ACCOUNT_COOKIE_URL, login.ACCOUNT_COOKIE_URL,
-      login.COOKIE_URL, login.COOKIE_URL
-    ]
-  );
-  assert.deepEqual(
-    removed.map((entry) => entry[1]),
-    [
-      login.OASIS_TOKEN, login.OASIS_WEBID,
-      login.OASIS_TOKEN, login.OASIS_WEBID,
-      login.OASIS_TOKEN, login.OASIS_WEBID,
-      login.OASIS_TOKEN, login.OASIS_WEBID
-    ],
-    'one cookie name per call — the array form is rejected by the real API'
-  );
+  // BOTH partitions of BOTH kinds. Switching "remember this login" off leaves
+  // the persisted cookies on disk by design — but Clear says "forget this
+  // login", and a user who cleared while the option was off would otherwise
+  // find the old session still sitting there, one toggle away from returning.
+  // The account's own partition comes along too: it is where a sign-in lands
+  // now, so wiping only the shared name would leave the very session being
+  // cleared alive under persist:stepfun-login-<hash>.
+  const accountPersist = login.stepfunPartition({ remember: true, account: 'me@example.com' });
+  const accountThrowaway = login.stepfunPartition({ remember: false, account: 'me@example.com' });
+  assert.deepEqual(disposed, ['persist:stepfun-login', accountPersist, 'stepfun-login', accountThrowaway],
+    'every partition that can hold a session releases its retained window, not just the active one');
+  assert.deepEqual([...new Set(removed.map((entry) => entry[0]))],
+    ['persist:stepfun-login', accountPersist, 'stepfun-login', accountThrowaway],
+    'the account-scoped partition is wiped alongside the shared ones');
+  assert.equal(removed.length, 16, 'four partitions × two origins × two cookie names');
+  // Both origins: the signed-in pair is host-only on account.stepfun.com, so
+  // removing only the platform-scoped entry leaves a working session behind.
+  assert.deepEqual([...new Set(removed.map((entry) => entry[1]))], [login.ACCOUNT_COOKIE_URL, login.COOKIE_URL]);
+  assert.deepEqual([...new Set(removed.map((entry) => entry[2]))], [login.OASIS_TOKEN, login.OASIS_WEBID],
+    'one cookie name per call — the array form is rejected by the real API');
   assert.deepEqual(failures, [],
     'nothing threw: a swallowed failure here is exactly how Clear came to remove nothing');
 });
