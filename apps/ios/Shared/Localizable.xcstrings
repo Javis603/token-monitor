@@ -1740,6 +1740,7 @@
       }
     },
     "Choose how many provider limits appear on the Overview tab. The default is three." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -2196,7 +2197,6 @@
       }
     },
     "Connection" : {
-      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -4393,6 +4393,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "即時動態與動態島預覽，示範資料"
+          }
+        }
+      }
+    },
+    "Live speed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リアルタイム速度"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "실시간 속도"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时速率"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "即時速率"
           }
         }
       }
@@ -7533,6 +7562,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "顯示費用"
+          }
+        }
+      }
+    },
+    "Show new timed output near the top of Overview. The rate returns to a dash when updates stop." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "概要の上部に新しく計測された出力速度を表示します。更新が止まるとダッシュに戻ります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개요 상단에 새로 측정된 출력 속도를 표시합니다. 업데이트가 멈추면 대시로 돌아갑니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在总览顶部显示新计时输出的速率；停止更新后会显示破折号。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在總覽頂部顯示新計時輸出的速率；停止更新後會顯示破折號。"
           }
         }
       }

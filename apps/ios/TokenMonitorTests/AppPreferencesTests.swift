@@ -17,12 +17,17 @@ struct AppPreferencesTests {
         )
 
         #expect(preferences.homeLimitCount == 3)
+        #expect(preferences.showsLiveTokenRate)
 
         preferences.homeLimitCount = 0
         #expect(preferences.homeLimitCount == 1)
 
         preferences.homeLimitCount = 99
         #expect(preferences.homeLimitCount == 8)
+
+        preferences.showsLiveTokenRate = false
+        let reloaded = AppPreferences(defaults: defaults, snapshotStore: SharedSnapshotStore(fileURL: nil))
+        #expect(!reloaded.showsLiveTokenRate)
     }
 
     @Test

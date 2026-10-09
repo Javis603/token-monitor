@@ -10,6 +10,7 @@ struct LiveActivityCustomizerView: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(TokenMonitorStore.self) private var store
     @Environment(LiveActivityController.self) private var liveActivity
+    @Environment(\.colorScheme) private var colorScheme
 
     private let snapshotStore = SharedSnapshotStore()
 
@@ -665,14 +666,25 @@ struct LiveActivityCustomizerView: View {
                 if needs.quota || needs.provider {
                     Section {
                         Picker("AI tool", selection: toolBinding(source)) {
-                            Text("Automatic · lowest remaining").tag("auto:lowest")
-                            Text("Automatic · most recently used").tag("auto:recent")
+                            Label {
+                                Text("Automatic · lowest remaining")
+                            } icon: {
+                                Image(uiImage: ProviderMenuArtwork.symbol("arrow.down.circle", colorScheme: colorScheme))
+                            }
+                                .tag("auto:lowest")
+                            Label {
+                                Text("Automatic · most recently used")
+                            } icon: {
+                                Image(uiImage: ProviderMenuArtwork.symbol("clock.arrow.circlepath", colorScheme: colorScheme))
+                            }
+                                .tag("auto:recent")
                             Divider()
                             ForEach(quotaProviderIDs, id: \.self) { providerID in
-                                Label(
-                                    ProviderPresentation.displayName(for: providerID),
-                                    image: ProviderPresentation.assetName(for: providerID)
-                                )
+                                Label {
+                                    Text(verbatim: ProviderPresentation.displayName(for: providerID))
+                                } icon: {
+                                    Image(uiImage: ProviderMenuArtwork.image(for: providerID, colorScheme: colorScheme))
+                                }
                                 .tag("provider:\(providerID)")
                             }
                         }

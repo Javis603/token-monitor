@@ -3,7 +3,7 @@ import SwiftUI
 struct WidgetSurfacePreview: View {
     let content: AppPreferences.WidgetContent
     let period: UsagePeriodKey
-    let providerName: String
+    let providerName: Text
     let showsCost: Bool
     let showsUpdateTime: Bool
 
@@ -33,7 +33,7 @@ struct WidgetSurfacePreview: View {
             case .limits:
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text(providerName)
+                        providerName
                             .font(.subheadline.weight(.semibold))
                         Spacer()
                         Text("90% left")

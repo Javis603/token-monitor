@@ -47,6 +47,10 @@ final class AppPreferences {
         }
     }
 
+    var showsLiveTokenRate: Bool {
+        didSet { persistLocalPreferences() }
+    }
+
     /// Limits provider order; empty means the desktop catalog order.
     var limitProviderOrder: [String] {
         didSet {
@@ -130,6 +134,7 @@ final class AppPreferences {
             8,
             max(1, defaults.object(forKey: Keys.homeLimitCount) as? Int ?? 3)
         )
+        showsLiveTokenRate = defaults.object(forKey: Keys.showsLiveTokenRate) as? Bool ?? true
         limitProviderOrder = defaults.stringArray(forKey: Keys.limitProviderOrder) ?? []
         hiddenLimitProviders = Set(
             defaults.stringArray(forKey: Keys.hiddenLimitProviders) ?? []
@@ -171,6 +176,7 @@ final class AppPreferences {
     private func persistLocalPreferences() {
         defaults.set(appearance.rawValue, forKey: Keys.appearance)
         defaults.set(homeLimitCount, forKey: Keys.homeLimitCount)
+        defaults.set(showsLiveTokenRate, forKey: Keys.showsLiveTokenRate)
         defaults.set(currency.rawValue, forKey: Keys.currency)
         defaults.set(language.rawValue, forKey: Keys.language)
         defaults.set(limitProviderOrder, forKey: Keys.limitProviderOrder)
@@ -186,6 +192,7 @@ final class AppPreferences {
     private enum Keys {
         static let appearance = "appearance"
         static let homeLimitCount = "homeLimitCount"
+        static let showsLiveTokenRate = "showsLiveTokenRate"
         static let currency = "currency"
         static let language = "language"
         static let limitProviderOrder = "limitProviderOrder"

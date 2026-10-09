@@ -19,29 +19,42 @@ struct SessionRow: View {
                 : AnyLayout(HStackLayout(alignment: .top, spacing: 8))
             layout {
                 VStack(alignment: .leading, spacing: DesignTokens.rowLineSpacing) {
-                    Button { showsTitle = true } label: {
-                        Text(session.displayTitle ?? clientName)
-                            .font(DesignTokens.rowTitle)
-                            .lineLimit(1).truncationMode(.tail)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .popover(isPresented: $showsTitle) {
-                        Text(session.displayTitle ?? clientName)
-                            .font(.subheadline).fixedSize(horizontal: false, vertical: true)
-                            .padding(16).frame(idealWidth: 280, maxWidth: 280, alignment: .leading)
-                            .presentationCompactAdaptation(.popover)
-                    }
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        if session.displayTitle != nil { Text(clientName) }
-                        if !session.modelEntries.isEmpty {
-                            if session.displayTitle != nil { Text("·") }
-                            modelLabel
+                    if let title = session.displayTitle {
+                        Button { showsTitle = true } label: {
+                            Text(title)
+                                .font(DesignTokens.rowTitle)
+                                .lineLimit(1).truncationMode(.tail)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(.rect)
                         }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showsTitle) {
+                            Text(title)
+                                .font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                                .padding(16).frame(idealWidth: 280, maxWidth: 280, alignment: .leading)
+                                .presentationCompactAdaptation(.popover)
+                        }
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text(clientName)
+                            if !session.modelEntries.isEmpty {
+                                Text("·")
+                                modelLabel
+                            }
+                        }
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.tail)
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text(clientName).fixedSize(horizontal: true, vertical: false)
+                            if !session.modelEntries.isEmpty {
+                                Text("·")
+                                modelLabel
+                            }
+                        }
+                        .font(DesignTokens.rowTitle)
+                        .lineLimit(1).truncationMode(.tail)
+                        .accessibilityElement(children: .combine)
                     }
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.tail)
                     Text(activity).font(.caption2).foregroundStyle(.secondary)
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                         .minimumScaleFactor(0.9)

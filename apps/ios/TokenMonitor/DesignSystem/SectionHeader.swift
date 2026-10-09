@@ -27,19 +27,34 @@ struct SectionHeader<Accessory: View>: View {
 }
 
 /// A shared compact title inside the system navigation bar for the four root tabs.
-struct RootPageHeader<Controls: View>: ViewModifier {
+struct RootPageHeader<Controls: View, BrandAccessory: View>: ViewModifier {
     let title: LocalizedStringKey
     let brandMark: String?
+    let brandAccessory: BrandAccessory
     let controls: Controls
     @State private var contentWidth: CGFloat = 0
 
-    init(_ title: LocalizedStringKey, brandMark: String? = nil, @ViewBuilder controls: () -> Controls) {
+    init(
+        _ title: LocalizedStringKey,
+        brandMark: String? = nil,
+        @ViewBuilder brandAccessory: () -> BrandAccessory,
+        @ViewBuilder controls: () -> Controls
+    ) {
         self.title = title
         self.brandMark = brandMark
+        self.brandAccessory = brandAccessory()
         self.controls = controls()
     }
 
-    init(_ title: LocalizedStringKey) where Controls == EmptyView {
+    init(
+        _ title: LocalizedStringKey,
+        brandMark: String? = nil,
+        @ViewBuilder controls: () -> Controls
+    ) where BrandAccessory == EmptyView {
+        self.init(title, brandMark: brandMark, brandAccessory: { EmptyView() }, controls: controls)
+    }
+
+    init(_ title: LocalizedStringKey) where Controls == EmptyView, BrandAccessory == EmptyView {
         self.init(title) { EmptyView() }
     }
 
@@ -55,7 +70,7 @@ struct RootPageHeader<Controls: View>: ViewModifier {
             .toolbarVisibility(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 0) {
                         Group {
                             if let brandMark {
                                 Text(verbatim: brandMark)
@@ -70,6 +85,8 @@ struct RootPageHeader<Controls: View>: ViewModifier {
                             .minimumScaleFactor(0.8)
                             .layoutPriority(1)
                             .accessibilityAddTraits(.isHeader)
+                        Spacer(minLength: 8)
+                        brandAccessory
                         Spacer(minLength: 8)
                         controls
                     }

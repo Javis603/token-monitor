@@ -82,6 +82,12 @@ struct OverviewView: View {
             }
         }
         .modifier(RootPageHeader("Overview", brandMark: "Σ.") {
+            if preferences.showsLiveTokenRate {
+                TimelineView(.periodic(from: .now, by: 2)) { timeline in
+                    LiveSpeedBadge(reading: store.liveOutputRate(at: timeline.date))
+                }
+            }
+        } controls: {
             ViewThatFits(in: .horizontal) {
                 if !dynamicTypeSize.isAccessibilitySize {
                     PeriodPicker(selection: $store.selectedPeriod, compact: true)
@@ -150,6 +156,40 @@ struct OverviewView: View {
 
     private func showSettings() {
         selectedTab = .settings
+    }
+}
+
+private struct LiveSpeedBadge: View {
+    let reading: LiveTokenRateTracker.Reading?
+
+    private var value: String {
+        guard let reading else { return "—" }
+        let rate = reading.tokensPerSecond
+        if rate > 0 && rate < 0.1 { return "<0.1" }
+        if rate > 0 && rate < 1 {
+            return rate.formatted(.number.precision(.fractionLength(1)))
+        }
+        let rounded = rate.rounded()
+        return rounded < 10_000
+            ? MetricFormatter.exactTokens(rounded)
+            : MetricFormatter.tokens(rounded)
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 11, weight: .semibold))
+            Text(verbatim: "\(value) tok/s")
+                .monospacedDigit()
+                .contentTransition(.numericText())
+        }
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundStyle(reading?.isIdle == false ? Color.primary : Color.secondary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Live speed")
+        .accessibilityValue(Text(verbatim: "\(value) tok/s"))
     }
 }
 

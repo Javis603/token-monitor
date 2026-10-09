@@ -54,6 +54,32 @@ private actor ControlledHubClient: HubDataClient {
 
 @MainActor
 struct TokenMonitorStoreTests {
+    @Test func liveRateUsesPerDeviceDeltasAndExpiresWithoutInventingAnAverage() throws {
+        func snapshot(_ aOutput: Int, _ aDuration: Int, _ bOutput: Int, _ bDuration: Int) throws -> HubStats {
+            try JSONDecoder().decode(HubStats.self, from: Data("""
+            {"devices":[
+              {"deviceId":"a","stale":false,"periods":{"today":{"timedOutputTokens":\(aOutput),"timedDurationMs":\(aDuration)}}},
+              {"deviceId":"b","stale":false,"periods":{"today":{"timedOutputTokens":\(bOutput),"timedDurationMs":\(bDuration)}}}
+            ]}
+            """.utf8))
+        }
+        var tracker = LiveTokenRateTracker()
+        let start = Date(timeIntervalSince1970: 1_000)
+        tracker.observe(try snapshot(1_000, 10_000, 2_000, 20_000), at: start)
+        #expect(tracker.reading(at: start) == nil)
+
+        tracker.observe(try snapshot(1_200, 11_000, 2_000, 20_000), at: start.addingTimeInterval(1))
+        #expect(tracker.reading(at: start.addingTimeInterval(1))?.tokensPerSecond == 200)
+        tracker.observe(try snapshot(1_200, 11_000, 2_300, 22_000), at: start.addingTimeInterval(2))
+        #expect(tracker.reading(at: start.addingTimeInterval(2))?.tokensPerSecond == 350)
+        #expect(tracker.reading(at: start.addingTimeInterval(9.5))?.tokensPerSecond == 150)
+        #expect(tracker.reading(at: start.addingTimeInterval(11))?.isIdle == true)
+        #expect(tracker.reading(at: start.addingTimeInterval(183)) == nil)
+
+        tracker.observe(try snapshot(10, 100, 2_300, 22_000), at: start.addingTimeInterval(184))
+        #expect(tracker.reading(at: start.addingTimeInterval(184)) == nil)
+    }
+
     private func configuration(_ host: String) -> HubConfiguration {
         HubConfiguration(baseURL: URL(string: "https://\(host).example")!, secret: host)
     }

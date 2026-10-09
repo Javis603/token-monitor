@@ -4,7 +4,7 @@ struct PeriodPicker: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding var selection: UsagePeriodKey
     var compact = false
-    @ScaledMetric(relativeTo: .caption) private var compactWidth = 216
+    @ScaledMetric(relativeTo: .caption) private var compactWidth = 204
 
     var body: some View {
         Group {

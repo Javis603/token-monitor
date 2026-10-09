@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(LiveActivityController.self) private var liveActivity
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         settingsForm
@@ -291,10 +292,11 @@ struct SettingsView: View {
                         .foregroundStyle(DesignTokens.accent)
                 }
             }
+            Toggle("Live speed", isOn: $preferences.showsLiveTokenRate)
         } header: {
             Label("Overview", systemImage: "house")
         } footer: {
-            Text("Choose how many provider limits appear on the Overview tab. The default is three.")
+            Text("Show new timed output near the top of Overview. The rate returns to a dash when updates stop.")
         }
     }
 
@@ -307,10 +309,10 @@ struct SettingsView: View {
                 content: preferences.widgetContent,
                 period: preferences.widgetPeriod,
                 providerName: preferences.widgetProviderID.isEmpty
-                    ? "Automatic"
-                    : ProviderPresentation.displayName(
+                    ? Text("Automatic")
+                    : Text(verbatim: ProviderPresentation.displayName(
                         for: preferences.widgetProviderID
-                    ),
+                    )),
                 showsCost: preferences.widgetShowsCost,
                 showsUpdateTime: preferences.widgetShowsUpdateTime
             )
@@ -330,10 +332,11 @@ struct SettingsView: View {
             Picker("Limit provider", selection: $preferences.widgetProviderID) {
                 Text("Automatic").tag("")
                 ForEach(providerIDs, id: \.self) { providerID in
-                    Label(
-                        ProviderPresentation.displayName(for: providerID),
-                        image: ProviderPresentation.assetName(for: providerID)
-                    )
+                    Label {
+                        Text(verbatim: ProviderPresentation.displayName(for: providerID))
+                    } icon: {
+                        Image(uiImage: ProviderMenuArtwork.image(for: providerID, colorScheme: colorScheme))
+                    }
                     .tag(providerID)
                 }
             }
@@ -367,9 +370,14 @@ struct SettingsView: View {
 
     private var statusSection: some View {
         Section {
-            LabeledContent("Connection") {
+            HStack(spacing: 12) {
+                Text("Connection")
+                Spacer(minLength: 8)
                 ConnectionBadge(phase: store.phase)
             }
+            .frame(minHeight: DesignTokens.controlHeight)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
 
             if let updatedDate = Date.hubTimestamp(from: store.stats?.updatedAt) {
                 LabeledContent("Last update") {
@@ -453,6 +461,7 @@ struct SettingsView: View {
             order: preferences.limitProviderOrder
         )
     }
+
 }
 
 /// The Hub connection page — URL, secret, Save & Connect, last error.
@@ -488,14 +497,17 @@ struct HubConnectionView: View {
                         .autocorrectionDisabled()
                 }
 
-                Button("Save & Connect", systemImage: "link") {
+                Button {
                     guard let configuration = settings.save() else { return }
                     liveActivity.configure(configuration)
                     store.configure(configuration)
+                } label: {
+                    Label("Save & Connect", systemImage: "link")
+                        .labelStyle(.titleAndIcon)
+                        .frame(maxWidth: .infinity, minHeight: DesignTokens.controlHeight)
                 }
                 .modifier(AppActionStyle())
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
+                .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
 
                 if let validationMessage = settings.validationMessage {
                     Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
@@ -511,9 +523,13 @@ struct HubConnectionView: View {
             }
 
             Section("Status") {
-                LabeledContent("Connection") {
+                HStack(spacing: 12) {
+                    Text("Connection")
+                    Spacer(minLength: 8)
                     ConnectionBadge(phase: store.phase)
                 }
+                .frame(minHeight: DesignTokens.controlHeight)
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                 if case let .failed(message) = store.phase {
                     Label(message, systemImage: "exclamationmark.triangle")
                         .font(.footnote)
@@ -522,7 +538,7 @@ struct HubConnectionView: View {
             }
         }
         .formStyle(.grouped)
-        .listSectionSpacing(DesignTokens.sectionSpacing)
+        .listSectionSpacing(DesignTokens.cardPadding)
         .scrollContentBackground(.hidden)
         .background { AppBackground() }
         .navigationTitle("Hub")

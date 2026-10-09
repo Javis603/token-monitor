@@ -34,7 +34,7 @@ extension HubStats {
             ]
         )
 
-        let sampleSessions = Data(#"{"design":{"client":"codex","sessionId":"design","title":"Refine usage dashboard","projectLabel":"Token Monitor","totalTokens":128400,"costUsd":0.42,"models":{"gpt-5.5":128400},"turnEnded":false},"widget":{"client":"claude","sessionId":"widget","title":"Improve widget layouts","projectLabel":"Token Monitor","totalTokens":84200,"costUsd":0.31,"models":{"claude-opus-4-8":84200},"turnEnded":true}}"#.utf8)
+        let sampleSessions = Data(#"{"design":{"client":"codex","sessionId":"design","title":"Refine usage dashboard","projectLabel":"Token Monitor","totalTokens":128400,"costUsd":0.42,"models":{"gpt-5.5":128400},"turnEnded":false},"widget":{"client":"claude","sessionId":"widget","title":"Improve widget layouts","projectLabel":"Token Monitor","totalTokens":84200,"costUsd":0.31,"models":{"claude-opus-4-8":84200},"turnEnded":true},"untitled":{"client":"cursor","sessionId":"sample-untitled","totalTokens":9320,"costUsd":0.02,"models":{"grok-bot-default":9320},"turnEnded":true}}"#.utf8)
         today.sessions = try? JSONDecoder().decode([String: SessionUsage].self, from: sampleSessions)
 
         var month = UsagePeriod(
