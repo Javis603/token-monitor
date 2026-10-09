@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The activity card body: a readout line, a width-filling weekday × week grid
 /// you can scrub, and a Less → More legend. The model comes from the caller so
@@ -18,6 +19,7 @@ struct ActivityHeatmap: View {
     @State private var dragStartSelection: Date?
     @State private var isDragging = false
     @State private var gridWidth = 0.0
+    @State private var selectionFeedback = UISelectionFeedbackGenerator()
 
     private let cellGap = 3.0
 
@@ -39,7 +41,6 @@ struct ActivityHeatmap: View {
             legend
         }
         .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: selectedDay)
-        .sensoryFeedback(.selection, trigger: selectedDay)
         .task {
             #if DEBUG
             guard ProcessInfo.processInfo.arguments.contains("--sample-heatmap-select") else { return }
@@ -185,9 +186,10 @@ struct ActivityHeatmap: View {
                 if !isDragging {
                     isDragging = true
                     dragStartSelection = selectedDay
+                    selectionFeedback.prepare()
                 }
                 if let cell = cell(at: value.location) {
-                    selectedDay = cell.date
+                    select(cell.date)
                 }
             }
             .onEnded { value in
@@ -224,12 +226,19 @@ struct ActivityHeatmap: View {
         }
         switch direction {
         case .increment:
-            selectedDay = days[min(days.count - 1, (index ?? days.count - 1) + 1)].date
+            select(days[min(days.count - 1, (index ?? days.count - 1) + 1)].date)
         case .decrement:
-            selectedDay = days[max(0, (index ?? days.count) - 1)].date
+            select(days[max(0, (index ?? days.count) - 1)].date)
         @unknown default:
             break
         }
+    }
+
+    private func select(_ date: Date) {
+        guard selectedDay != date else { return }
+        selectedDay = date
+        selectionFeedback.selectionChanged()
+        selectionFeedback.prepare()
     }
 
     private var accessibilityReadout: String {

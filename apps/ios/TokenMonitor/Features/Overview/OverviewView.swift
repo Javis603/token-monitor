@@ -111,6 +111,7 @@ struct OverviewView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .sensoryFeedback(.selection, trigger: store.selectedPeriod)
                 .accessibilityLabel("Period")
                 .accessibilityValue(Text(LocalizedStringKey(store.selectedPeriod.shortLabel)))
             }

@@ -104,6 +104,8 @@ struct InsightTrendCard: View {
             .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 176)
         }
         .labelsHidden()
+        .sensoryFeedback(.selection, trigger: metric)
+        .sensoryFeedback(.selection, trigger: range)
     }
 
     /// Big value: the selected bucket while scrubbing, else the range total.

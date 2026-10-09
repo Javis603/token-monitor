@@ -124,18 +124,6 @@ struct SettingsView: View {
 
             Section("Information") {
                 NavigationLink {
-                    settingsPage("Status") { statusSection }
-                } label: {
-                    Label {
-                        Text("Status")
-                    } icon: {
-                        SettingsIcon(
-                            systemImage: "waveform.path.ecg",
-                            tint: Color(red: 0.9, green: 0.3, blue: 0.35)
-                        )
-                    }
-                }
-                NavigationLink {
                     settingsPage("Privacy") { privacySection }
                 } label: {
                     settingsLabel(
@@ -363,42 +351,9 @@ struct SettingsView: View {
                 }
             }
             .pickerStyle(.inline)
+            .labelsHidden()
         } footer: {
             Text("System follows your iPhone’s appearance. Display preferences do not change your desktop app.")
-        }
-    }
-
-    private var statusSection: some View {
-        Section {
-            HStack(spacing: 12) {
-                Text("Connection")
-                Spacer(minLength: 8)
-                ConnectionBadge(phase: store.phase)
-            }
-            .frame(minHeight: DesignTokens.controlHeight)
-            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-            .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
-
-            if let updatedDate = Date.hubTimestamp(from: store.stats?.updatedAt) {
-                LabeledContent("Last update") {
-                    Text(updatedDate.updateDescription(locale: preferences.language.locale))
-                }
-            }
-
-            LabeledContent("Devices") {
-                Text(store.stats?.devices.map { $0.count.formatted() } ?? "—")
-                    .monospacedDigit()
-            }
-
-            if case let .failed(message) = store.phase {
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .font(.footnote)
-                    .foregroundStyle(DesignTokens.critical)
-            }
-        } header: {
-            Text("Status")
-        } footer: {
-            Text("Connection status describes the link to your Hub. Provider update times are shown with each account’s limits.")
         }
     }
 
@@ -530,10 +485,29 @@ struct HubConnectionView: View {
                 }
                 .frame(minHeight: DesignTokens.controlHeight)
                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                if let updatedDate = Date.hubTimestamp(from: store.stats?.updatedAt) {
+                    LabeledContent("Last update") {
+                        Text(updatedDate, style: .relative)
+                    }
+                }
                 if case let .failed(message) = store.phase {
                     Label(message, systemImage: "exclamationmark.triangle")
                         .font(.footnote)
                         .foregroundStyle(DesignTokens.critical)
+                }
+            }
+
+            if let devices = store.stats?.sortedDevices, !devices.isEmpty {
+                Section("Devices") {
+                    if devices.allSatisfy({ $0.stale != nil }) {
+                        LabeledContent("Online") {
+                            Text("\(devices.filter { $0.stale == false }.count) / \(devices.count)")
+                                .monospacedDigit()
+                        }
+                    }
+                    ForEach(devices) { device in
+                        HubDeviceStatusRow(device: device)
+                    }
                 }
             }
         }
@@ -545,6 +519,54 @@ struct HubConnectionView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarVisibility(.visible, for: .navigationBar)
         .tint(DesignTokens.accent)
+    }
+}
+
+private struct HubDeviceStatusRow: View {
+    let device: DeviceSnapshot
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: DevicePresentation.symbol(for: device.platform))
+                .frame(width: 22)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(device.displayName)
+                    .font(.subheadline.weight(.medium))
+                if !deviceDetails.isEmpty {
+                    Text(verbatim: deviceDetails)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 3) {
+                if let stale = device.stale {
+                    Text(stale ? "Offline" : "Online")
+                        .font(.caption)
+                        .foregroundStyle(Color(uiColor: stale ? .secondaryLabel : .systemGreen))
+                }
+                if let received = Date.hubTimestamp(from: device.receivedAt) {
+                    Text(received, style: .relative)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Last sync")
+                        .accessibilityValue(Text(received, style: .relative))
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var deviceDetails: String {
+        let os = [device.osName, device.osVersion]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return [os, device.agentVersion.map { "v\($0)" } ?? ""]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
     }
 }
 

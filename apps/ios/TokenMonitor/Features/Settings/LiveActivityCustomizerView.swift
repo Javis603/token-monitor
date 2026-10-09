@@ -103,6 +103,8 @@ struct LiveActivityCustomizerView: View {
         .onChange(of: dataSignature) { _, _ in
             Task { await refresh() }
         }
+        .sensoryFeedback(.selection, trigger: surface)
+        .sensoryFeedback(.selection, trigger: slot)
     }
 
     /// Data choices re-push the running activity; layout changes only re-render,

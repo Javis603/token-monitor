@@ -1,5 +1,6 @@
 import Charts
 import SwiftUI
+import UIKit
 
 /// Smooth desktop-style trend: accent area + line over date buckets (days or
 /// weeks), three x-axis labels (start / middle / end), and a scrubbed rule +
@@ -12,6 +13,7 @@ struct UsageTrendChart: View {
     let days: [HistoryDay]
     let metric: TrendMetric
     @Binding var selection: Date?
+    @State private var selectionFeedback = UISelectionFeedbackGenerator()
 
     var body: some View {
         Chart {
@@ -77,8 +79,14 @@ struct UsageTrendChart: View {
         Binding(
             get: { selection },
             set: { newValue in
-                selection = newValue.flatMap { date in
+                let snapped = newValue.flatMap { date in
                     nearestDay(to: date)?.dateValue
+                }
+                guard snapped != selection else { return }
+                selection = snapped
+                if snapped != nil {
+                    selectionFeedback.selectionChanged()
+                    selectionFeedback.prepare()
                 }
             }
         )

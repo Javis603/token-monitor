@@ -96,5 +96,6 @@ struct SessionsView: View {
                 picker.pickerStyle(.segmented)
             }
         }
+        .sensoryFeedback(.selection, trigger: period)
     }
 }
