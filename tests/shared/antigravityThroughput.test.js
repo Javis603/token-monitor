@@ -30,30 +30,12 @@ test('Antigravity native aliases feed existing speed with reasoning counted once
   }
 });
 
-test('partial Antigravity timing preserves usage while withholding mismatched speed', () => {
-  const period = extractUsageFromTokscale({ entries: [generation({
-    inputTokens: 100, outputTokens: 160, reasoningTokens: 80, cacheReadTokens: 40
-  })] });
-  assert.equal(period.totalTokens, 380);
-  assert.equal(period.outputTokens, 240);
-  assert.equal(period.costUsd, 0.01);
-  assert.equal(period.timedTokens, 0);
-  assert.equal(period.timedOutputTokens, 0);
-  assert.equal(period.timedDurationMs, 0);
-  assert.equal(tokenRatePerSecond(period), 0);
-  assert.equal(tokenBurnPerMinute(period), 0);
-  const tracker = createLiveTokenRateTracker();
-  assert.equal(tracker.observe(period), null);
-  assert.equal(tracker.getSample(), null);
-  assert.deepEqual(Object.keys(period.modelThroughput), []);
-});
-
-test('unavailable or overcovered Antigravity timing never changes token totals', () => {
-  for (const performance of [undefined, { totalDurationMs: 0, timedTokens: 190 },
-    { totalDurationMs: 2_000, timedTokens: 380 }, { totalDurationMs: 2_000 }]) {
+test('Antigravity without generation timing retains usage and cost', () => {
+  for (const performance of [undefined, { totalDurationMs: 0, timedTokens: 0 }]) {
     const period = extractUsageFromTokscale({ entries: [generation({ performance })] });
     assert.equal(period.totalTokens, 190);
     assert.equal(period.outputTokens, 120);
+    assert.equal(period.costUsd, 0.01);
     assert.equal(period.timedTokens, 0);
     assert.equal(period.timedOutputTokens, 0);
     assert.equal(period.timedDurationMs, 0);
@@ -85,14 +67,27 @@ test('a native generation refresh reaches the existing live tracker and model ho
   assert.deepEqual(sample.models, [{ model: 'gemini-3-flash', speed: 60, burn: 5_700 }]);
 });
 
-test('partial Antigravity timing cannot inflate another client speed or burn', () => {
-  const period = extractUsageFromTokscale({ entries: [generation({ outputTokens: 160 }), {
-    client: 'codex', model: 'gpt-5', inputTokens: 100, outputTokens: 100,
-    performance: { totalDurationMs: 1_000, timedTokens: 200 }
-  }] });
-  assert.equal(period.totalTokens, 470);
-  assert.equal(period.outputTokens, 300);
-  assert.equal(tokenRatePerSecond(period), 100);
-  assert.equal(tokenBurnPerMinute(period), 12_000);
-  assert.deepEqual(Object.keys(period.modelThroughput), ['gpt-5']);
+test('an untimed Antigravity input does not subtract prior timing from another client live delta', () => {
+  const tracker = createLiveTokenRateTracker();
+  const snapshot = (refreshed) => extractUsageFromTokscale({ entries: [
+    generation({
+      inputTokens: refreshed ? 150 : 50,
+      performance: { totalDurationMs: 2_000, timedTokens: 190, tokenCoverage: refreshed ? 190 / 290 : 1 }
+    }),
+    {
+      client: 'codex', model: 'gpt-5', inputTokens: refreshed ? 200 : 100,
+      outputTokens: refreshed ? 220 : 100,
+      performance: { totalDurationMs: refreshed ? 5_000 : 1_000, timedTokens: refreshed ? 420 : 200 }
+    }
+  ] });
+  const before = snapshot(false);
+  const after = snapshot(true);
+  assert.equal(after.totalTokens - before.totalTokens, 320);
+  assert.equal(tracker.observe(before), null);
+  const sample = tracker.observe(after);
+  assert.equal(sample.timedOutputTokens, 120);
+  assert.equal(sample.timedDurationMs, 4_000);
+  assert.equal(sample.speed, 30);
+  assert.equal(sample.burn, 3_300);
+  assert.deepEqual(sample.models, [{ model: 'gpt-5', speed: 30, burn: 3_300 }]);
 });

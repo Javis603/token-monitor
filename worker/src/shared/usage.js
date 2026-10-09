@@ -1069,15 +1069,8 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const cacheWrite = Math.max(0, Math.round(firstNumber(row, CACHE_WRITE_TOKEN_KEYS)));
   const output = Math.max(0, Math.round(outputValueForClient(row, client)));
   const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
-  let timedTokens = Math.max(0, Math.round(firstNumber(performance, TIMED_TOKEN_KEYS)));
-  let { timedOutputTokens, timedDurationMs } = entryThroughput(row, output);
-  // Antigravity reports may mix timed native generations and untimed history.
-  // Without a timed-output subtotal, only complete coverage has a matched numerator.
-  if (client === 'antigravity' && (!timedDurationMs || !timedTokens || timedTokens !== Math.max(0, Math.round(tokens)))) {
-    timedTokens = 0;
-    timedOutputTokens = 0;
-    timedDurationMs = 0;
-  }
+  const timedTokens = Math.max(0, Math.round(firstNumber(performance, TIMED_TOKEN_KEYS)));
+  const { timedOutputTokens, timedDurationMs } = entryThroughput(row, output);
   const model = detectModel(row, client);
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;
