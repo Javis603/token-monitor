@@ -50,13 +50,22 @@
     return observedAt ? { state: value.state, observedAt: new Date(observedAt).toISOString() } : null;
   }
 
+  // A future peer clock is not newer evidence. Apply the same ordering at the
+  // aggregate, local overlay and renderer joins so it cannot poison a cache.
+  function canReplaceLiveActivity(previous, next, now = Date.now()) {
+    const incoming = timestampMs(next?.observedAt);
+    const prior = timestampMs(previous?.observedAt);
+    const clock = nowMs(now);
+    return incoming > 0 && incoming <= clock && (prior > clock || incoming >= prior);
+  }
+
   // Local activity overlays leave the accounting session map untouched. Resolve
   // one row at the presentation/normalization boundary; wire rows stay ordinary.
   function sessionWithActivity(period, key, session = period?.sessions?.[key]) {
     if (!session || isArchivedSession(session)) return session;
     const observation = normalizeLiveActivity(period?.sessionActivity?.[key]);
     if (!observation || !providers.isSessionActivityClient(session.client)
-      || timestampMs(session.liveActivity?.observedAt) > timestampMs(observation.observedAt)) return session;
+      || !canReplaceLiveActivity(session.liveActivity, observation)) return session;
     return { ...session, liveActivity: observation };
   }
 
@@ -242,6 +251,7 @@
     RUNNING_WINDOW_MS,
     LIVE_ACTIVITY_TTL_MS,
     normalizeLiveActivity,
+    canReplaceLiveActivity,
     sessionWithActivity,
     liveActivityExpiryAt,
     contextTone,

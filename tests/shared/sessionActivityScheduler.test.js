@@ -19,6 +19,7 @@ function clock() {
         if (!entry) break;
         tasks.delete(entry[0]); time = entry[1].at; entry[1].fn();
         for (let i = 0; i < 8; i++) await Promise.resolve();
+        await new Promise(resolve => setImmediate(resolve));
       }
       time = until;
     }
@@ -104,5 +105,50 @@ test('a busy tick or read error keeps the three-second retry even when another e
     await timer.advance(1); assert.equal(calls, 2);
     assert.equal(errors.length, failed instanceof Error ? 1 : 0);
     scheduler.stop();
+  }
+});
+
+
+test('collector interval mode reconciles idle once per minute and live leases every ten seconds', async t => {
+  const schedulerModule = require('../../src/shared/sessionActivityScheduler');
+  const registry = require('../../src/shared/sessionActivityRegistry');
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const saved = require.cache[collectorPath];
+  t.after(() => { delete require.cache[collectorPath]; if (saved) require.cache[collectorPath] = saved; });
+  const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'activity-interval-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  let timer; let reads; let live;
+  t.mock.method(schedulerModule, 'createSessionActivityScheduler', options => createSessionActivityScheduler(options, timer));
+  t.mock.method(registry, 'refreshSessionActivity', async summary => {
+    reads.push(timer.now());
+    return live ? { ...summary, today: { ...summary.today, sessions: {
+      'claude:live': { client: 'claude', sessionId: 'live', liveActivity: { state: 'running', observedAt: new Date().toISOString() } }
+    } } } : summary;
+  });
+  delete require.cache[collectorPath];
+  const { startCollector } = require(collectorPath);
+  for (live of [false, true]) {
+    timer = clock(); reads = [];
+    let ready;
+    const initial = new Promise(resolve => { ready = resolve; });
+    const handle = startCollector({
+      clients: 'claude', deviceId: 'interval', agentVersion: 'test', homeDir: home, env: {},
+      intervalMs: 3600000, watchEnabled: false, anchorPersistenceEnabled: false, wslScanEnabled: false,
+      limitsEnabled: false, historyEnabled: false, projectsEnabled: false, codexLocalUsageEnabled: false,
+      runTokscale: async () => ({ entries: [] }), onUpdate: () => ready()
+    });
+    try {
+      await initial;
+      await new Promise(resolve => setImmediate(resolve));
+      const initialReads = reads.length;
+      await timer.advance(13000);
+      assert.equal(reads.length - initialReads, live ? 2 : 1);
+      await timer.advance(live ? 10000 : 50000);
+      assert.equal(reads.length - initialReads, live ? 3 : 2);
+      handle.stop();
+      await timer.advance(60000);
+      assert.equal(reads.length - initialReads, live ? 3 : 2);
+    } finally { handle.stop(); }
   }
 });

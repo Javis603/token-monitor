@@ -13086,10 +13086,10 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
     state.streamFailure = state.streamConnected ? null : (payload.data?.reason ? { reason: payload.data.reason, detail: payload.data.detail ?? null } : state.streamFailure);
   } else if (payload.data?.stats) {
-    // Local collector overlays update client-mode data independently of the
+    // Local overlays and adopted reads update data independently of the
     // Hub SSE transport. Preserve its current Offline/error state until a
     // real stream status or remote stats event proves the connection changed.
-    if (payload.data?.reason !== 'local' && payload.data?.reason !== 'presentation') {
+    if (!['local', 'presentation', 'read'].includes(payload.data?.reason)) {
       state.streamConnected = true;
       state.streamFailure = null;
     }

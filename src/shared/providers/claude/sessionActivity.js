@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { processStarts } = require('../../processStarts');
+const { readLinuxPidDomain, readLinuxProcessStarts } = require('./linuxProcessIdentity');
 const { resolveClaudeConfigDir, claudeSessionRoots } = require('./paths');
 const { isSafeSessionId } = require('../../sessionFiles');
 const { readT3Activity } = require('../../t3SessionActivity');
@@ -49,8 +50,14 @@ async function readSessionActivity(sessionIds, options = {}) {
   const root = path.join(resolveClaudeConfigDir({ ...options, homeDir: options.homeDir || os.homedir() }), 'sessions');
   let names;
   try { names = fs.readdirSync(root); } catch (_) { return result; }
+  names = names.filter((name) => /^[1-9]\d*\.json$/.test(name)).sort().slice(0, 256);
+  if (!names.length) return result;
+  const pidDomain = platform === 'linux'
+    ? readLinuxPidDomain({ procRoot: options.linuxProcRoot, machineIdFile: options.linuxMachineIdFile })
+    : platform;
+  if (!pidDomain) return result;
   const candidates = [];
-  for (const name of names.filter((name) => /^[1-9]\d*\.json$/.test(name)).sort().slice(0, 256)) {
+  for (const name of names) {
     if (!/^[1-9]\d*\.json$/.test(name)) continue;
     try {
       const file = path.join(root, name);
@@ -62,28 +69,37 @@ async function readSessionActivity(sessionIds, options = {}) {
       if (!Number.isSafeInteger(pid) || pid <= 0 || pid > 2147483647
         || `${pid}.json` !== name || !isSafeSessionId(record.sessionId)
         || (sessionIds && !sessionIds.has(record.sessionId))
-        || record.pidDomain !== platform) continue;
+        || record.pidDomain !== pidDomain) continue;
       const state = registryState(record);
       if (!state) continue;
       // procStart names the process, unlike startedAt (session registration).
       // Without a start time we cannot rule out a recycled PID.
-      const startedAt = typeof record.procStart === 'string'
-        ? Date.parse(`${record.procStart} UTC`) : NaN;
-      if (!Number.isFinite(startedAt)) continue;
-      candidates.push({ pid, sessionId: record.sessionId, state, startedAt });
+      const processStart = platform === 'linux'
+        ? (typeof record.procStart === 'string' && /^\d+$/.test(record.procStart)
+          ? { ticks: record.procStart } : null)
+        : (typeof record.procStart === 'string'
+          ? { timestamp: Date.parse(`${record.procStart} UTC`) } : null);
+      if (!processStart || (processStart.timestamp !== undefined && !Number.isFinite(processStart.timestamp))) continue;
+      candidates.push({ pid, sessionId: record.sessionId, state, processStart });
     } catch (_) { /* Missing files and partial writes fall back to the transcript. */ }
   }
   let starts;
   try {
-    starts = await (options.readProcessStarts || processStarts)([...new Set(candidates.map((row) => row.pid))], platform);
+    starts = platform === 'linux'
+      ? readLinuxProcessStarts([...new Set(candidates.map((row) => row.pid))], { procRoot: options.linuxProcRoot })
+      : await (options.readProcessStarts || processStarts)([...new Set(candidates.map((row) => row.pid))], platform);
   } catch (_) { return result; }
   const observedAt = new Date(options.now ?? Date.now()).toISOString();
   const newest = new Map();
   for (const record of candidates) {
     const actualStart = starts.get(record.pid);
-    if (!Number.isFinite(actualStart) || Math.abs(actualStart - record.startedAt) > 1000) continue;
-    if ((newest.get(record.sessionId) ?? -Infinity) >= actualStart) continue;
-    newest.set(record.sessionId, actualStart);
+    const matches = platform === 'linux'
+      ? typeof actualStart === 'string' && BigInt(actualStart) === BigInt(record.processStart.ticks)
+      : Number.isFinite(actualStart) && Math.abs(actualStart - record.processStart.timestamp) <= 1000;
+    if (!matches) continue;
+    const orderingStart = platform === 'linux' ? BigInt(actualStart) : actualStart;
+    if ((newest.get(record.sessionId) ?? (platform === 'linux' ? -1n : -Infinity)) >= orderingStart) continue;
+    newest.set(record.sessionId, orderingStart);
     result.set(record.sessionId, { state: record.state, observedAt });
   }
   return result;

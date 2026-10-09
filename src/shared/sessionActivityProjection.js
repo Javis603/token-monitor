@@ -197,7 +197,7 @@
       const observation = live.normalizeLiveActivity(row.liveActivity);
       if (!observation) continue;
       for (const { name, key, session } of activityEntries(summary, row.client, [row.sessionId], false)) {
-        if (Date.parse(session.liveActivity?.observedAt) > Date.parse(observation.observedAt)) continue;
+        if (!live.canReplaceLiveActivity(session.liveActivity, observation)) continue;
         if (session.liveActivity?.state === observation.state && session.liveActivity?.observedAt === observation.observedAt) continue;
         if (!maps.has(name)) maps.set(name, compactActivity(source[name], Date.parse(observation.observedAt)));
         maps.get(name)[key] = observation;

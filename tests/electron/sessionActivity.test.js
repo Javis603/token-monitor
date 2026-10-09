@@ -112,10 +112,10 @@ function mainActivityHarness(hubMode, externalAgent = false) {
   let get;
   const context = {
     console, Date, settings: { hubMode }, mode: 'sync', hubModeGeneration: 1,
-    lastCollectedDevice: local, localDevice: null, localStats: null, latestStats: null,
+    lastCollectedDevice: local, localDevice: null, localStats: null, latestStats: null, latestStatsSource: null,
     statsPushRevision: 0, lastExportAt: 0, edgeDockManualStats: null, deviceRuntimeHandle: {},
     ...projection, ...syncDisplay, rendererStats: publisher.rendererStats,
-    rendererSnapshots: publisher.createRendererSnapshots({ source: () => hubMode }),
+    rendererSnapshots: publisher.createRendererSnapshots({ source: () => context.currentHubStatsIdentity() }),
     snapshotLocalDevices: new WeakMap(), presentationCache: publisher.createStatsPresentationCache(),
     isExternalAgentActive: () => externalAgent,
     canRefreshUsageRuntime: require('../../src/electron/deviceRuntimeCoordinator').canRefreshUsageRuntime,
@@ -123,7 +123,7 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     currentHubStatsCache: () => null, currentHubStatsIdentity: () => hubMode,
     effectiveHubConfig: () => ({ url: 'https://fixture.invalid' }),
     fetch: async () => ({ ok: true, json: async () => aggregate() }),
-    hubModeRequestIsCurrent: () => true, setLatestHubStatsCache() {},
+    hubModeRequestIsCurrent: (generation, expectedMode, identity) => generation === context.hubModeGeneration && expectedMode === context.settings.hubMode && identity === context.currentHubStatsIdentity(), modeQueue: Promise.resolve(), setLatestHubStatsCache() {},
     getSyncContentRuntime: () => ({ notifyStats() {} }), electronPresentationStats: stats => stats,
     migrateCodexAdditionalLimits() {}, scheduleMacWidgetSnapshot() {}, updateEdgeDockCells() {},
     syncCodexPresentationActiveAccount() {}, updateTrayDisplay() {}, statsHistoryRevision: () => '',
@@ -198,4 +198,41 @@ test('activity follows existing Electron runtime ownership with an HTTP agent al
     f.context.publishLocalSessionActivity(f.patch('waiting'));
     assert.equal(f.state(f.context.latestStats), mode === 'icloud' ? 'waiting' : 'running');
   }
+});
+
+
+test('a retried stats read adopts the new Hub even after the old Hub pushed', async () => {
+  for (const changeGeneration of [false, true]) {
+    const f = mainActivityHarness('client');
+    let hub = 'A'; let resolve;
+    f.context.currentHubStatsIdentity = () => hub;
+    f.context.fetch = () => hub === 'A' ? new Promise(done => { resolve = done; })
+      : Promise.resolve({ ok: true, json: async () => ({ ...f.aggregate(), hub: 'B' }) });
+    const pending = f.get(null, {});
+    f.context.sendPush({ event: 'stats', data: { stats: { ...f.aggregate(), hub: 'A' } } });
+    hub = 'B';
+    if (changeGeneration) f.context.hubModeGeneration++;
+    resolve({ ok: true, json: async () => ({ ...f.aggregate(), hub: 'A' }) });
+    const result = await pending;
+    assert.equal(result.hub, 'B');
+    assert.equal(f.context.latestStats.hub, 'B');
+    assert.equal(result.snapshot.source, 'B');
+    assert.equal(result.snapshot.id, f.pushes.at(-1).data.stats.snapshot.id);
+  }
+});
+
+
+test('a push from the new Hub still supersedes its pending retried read', async () => {
+  const f = mainActivityHarness('client');
+  let hub = 'A'; let resolveA; let resolveB;
+  f.context.currentHubStatsIdentity = () => hub;
+  f.context.fetch = () => new Promise(done => { if (hub === 'A') resolveA = done; else resolveB = done; });
+  const pending = f.get(null, {});
+  f.context.sendPush({ event: 'stats', data: { stats: { ...f.aggregate(), hub: 'A' } } });
+  hub = 'B'; f.context.hubModeGeneration++;
+  resolveA({ ok: true, json: async () => f.aggregate() });
+  await new Promise(resolve => setImmediate(resolve));
+  f.context.sendPush({ event: 'stats', data: { stats: { ...f.aggregate(), hub: 'B-push' } } });
+  resolveB({ ok: true, json: async () => ({ ...f.aggregate(), hub: 'B-read' }) });
+  assert.equal((await pending).hub, 'B-push');
 });

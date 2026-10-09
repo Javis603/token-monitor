@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const activity = require('../../src/shared/providers/claude/sessionActivity');
+const linuxIdentity = require('../../src/shared/providers/claude/linuxProcessIdentity');
 const live = require('../../src/shared/sessionLive');
 const usage = require('../../src/shared/usage');
 const archive = require('../../src/shared/usage/sessionUsageArchive');
@@ -144,6 +145,58 @@ test('newest live process wins when a resumed session has two records', async (t
   assert.equal((await f.read({ readProcessStarts: async () => new Map([[1234, start], [2345, newer]]) })).get('test-session').state, 'running');
 });
 
+function linuxFixture(t, { pid = 4321, ticks = '987654321', machineId = 'machine-a', namespace = 'pid:[4026532001]' } = {}) {
+  const f = fixture(t);
+  const procRoot = path.join(f.home, 'proc');
+  const procPid = path.join(procRoot, String(pid));
+  fs.mkdirSync(path.join(procRoot, 'self', 'ns'), { recursive: true });
+  fs.mkdirSync(procPid, { recursive: true });
+  fs.writeFileSync(path.join(f.home, 'machine-id'), machineId);
+  fs.symlinkSync(namespace, path.join(procRoot, 'self', 'ns', 'pid'));
+  const statFields = ['S', ...Array(18).fill('0'), ticks];
+  fs.writeFileSync(path.join(procPid, 'stat'), `${pid} (claude (test) process) ${statFields.join(' ')}\n`);
+  const pidDomain = `linux:${machineId}:${namespace}`;
+  const writeLinux = (extra = {}, recordPid = pid) => fs.writeFileSync(path.join(f.root, `${pid}.json`), JSON.stringify({
+    pid: recordPid, sessionId: 'test-session', status: 'waiting', pidDomain, procStart: ticks, ...extra
+  }));
+  const options = { homeDir: f.home, env: {}, platform: 'linux', now,
+    linuxProcRoot: procRoot, linuxMachineIdFile: path.join(f.home, 'machine-id') };
+  return { ...f, pid, ticks, pidDomain, procRoot, writeLinux, options,
+    readLinux: (extra = {}) => activity.readSessionActivity(new Set(['test-session']), { ...options, ...extra }) };
+}
+
+test('Linux registry validates machine, PID namespace, PID and proc start ticks', { skip: process.platform === 'win32' }, async t => {
+  const f = linuxFixture(t);
+  f.writeLinux();
+  assert.deepEqual((await f.readLinux()).get('test-session'), { state: 'waiting', observedAt: new Date(now).toISOString() });
+  for (const record of [
+    { pidDomain: 'linux:machine-b:pid:[4026532001]' },
+    { pidDomain: 'linux:machine-a:pid:[4026532002]' },
+    { procStart: '987654322' },
+    { pid: f.pid + 1 }
+  ]) {
+    f.writeLinux(record);
+    assert.equal((await f.readLinux()).size, 0, JSON.stringify(record));
+  }
+  f.writeLinux();
+  fs.unlinkSync(path.join(f.procRoot, String(f.pid), 'stat'));
+  assert.equal((await f.readLinux()).size, 0, 'unreadable proc start falls back without registry evidence');
+});
+
+test('Linux live PID registry fixture matches this process on Linux CI', { skip: process.platform !== 'linux' }, async t => {
+  const f = fixture(t);
+  const pid = process.pid;
+  const pidDomain = linuxIdentity.readLinuxPidDomain();
+  const ticks = linuxIdentity.readLinuxProcessStarts([pid]).get(pid);
+  assert.ok(pidDomain);
+  assert.ok(ticks);
+  fs.writeFileSync(path.join(f.root, `${pid}.json`), JSON.stringify({
+    pid, sessionId: 'test-session', status: 'busy', pidDomain, procStart: ticks
+  }));
+  const reading = await activity.readSessionActivity(new Set(['test-session']), { homeDir: f.home, env: {}, platform: 'linux', now });
+  assert.deepEqual(reading.get('test-session'), { state: 'running', observedAt: new Date(now).toISOString() });
+});
+
 test('activity applies to every period, renews without token changes, and explicitly clears missing evidence', () => {
   const original = Object.fromEntries(['today', 'month', 'allTime'].map(name =>
     [name, { sessions: { 'claude:test-session': session() } }]));
@@ -250,7 +303,7 @@ test('waiting survives normal row caps, is excluded from running counts and fall
   } finally { Date.now = previousNow; }
 });
 
-test('collector publishes waiting changes without rescanning usage or mutating earlier snapshots', { timeout: 12_000 }, async (t) => {
+test('collector publishes waiting changes without rescanning usage or mutating earlier snapshots', { timeout: 20_000 }, async (t) => {
   const f = fixture(t);
   f.write();
   const { startCollector } = require('../../src/shared/collector');

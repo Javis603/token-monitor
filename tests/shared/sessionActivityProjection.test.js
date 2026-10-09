@@ -226,9 +226,11 @@ test('successive activity detail pulls compose the accounting baseline only once
   assert.equal(compositions, 2); // initial summary and one lazy baseline composition
 });
 
-test('Dock reuses accounting rows while resolving fresh activity and native rows', () => {
+test('Dock reuses accounting rows while resolving fresh activity and native rows', t => {
   const dock = require('../../src/electron/renderer/edgeDock/presentation');
   const clock = Date.now();
+  let wall = clock;
+  t.mock.method(Date, 'now', () => wall);
   const summary = fixture(100);
   let traversals = 0;
   summary.month.sessions = new Proxy(summary.month.sessions, {
@@ -241,7 +243,8 @@ test('Dock reuses accounting rows while resolving fresh activity and native rows
   const patch = (state, time) => ({ observations: [{ client: 'claude', sessionId: 'id-4', liveActivity: observation(state, time) }] });
   const waiting = projection.applyActivityPatch(stats, patch('waiting', clock));
   assert.equal(dock.recentSessionRows(waiting).find(row => row.sessionId === 'id-4').liveActivity.state, 'waiting');
-  const running = projection.applyActivityPatch(waiting, patch('running', clock + 1000));
+  wall += 1000;
+  const running = projection.applyActivityPatch(waiting, patch('running', wall));
   assert.equal(dock.recentSessionRows(running).find(row => row.sessionId === 'id-4').liveActivity.state, 'running');
   assert.equal(traversals, warmed);
 
@@ -256,4 +259,40 @@ test('Dock reuses accounting rows while resolving fresh activity and native rows
   const updated = { ...running, periods: { ...running.periods, month: nextMonth } };
   assert.equal(dock.recentSessionRows(updated, 100).find(row => row.sessionId === 'id-4').title, 'Updated usage title');
   assert.equal(dock.recentSessionRows(waiting).find(row => row.sessionId === 'id-4').liveActivity.state, 'waiting');
+});
+
+test('clock-skewed synced observations cannot poison Hub merge or block a local waiting patch', t => {
+  const clock = Date.now();
+  t.mock.method(Date, 'now', () => clock);
+  const { createHub } = require('../../src/hub/server');
+  const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'activity-skew-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const make = (deviceId, state, time) => ({ deviceId, updatedAt: new Date(clock).toISOString(),
+    ...Object.fromEntries(['today', 'month', 'allTime'].map(name => [name, { totalTokens: 100, sessions: {
+      'claude:shared': { client: 'claude', sessionId: 'shared', totalTokens: 100,
+        lastUsedAt: new Date(clock - 1000).toISOString(), turnEnded: false, liveActivity: observation(state, time) }
+    } }])) });
+  for (const reverse of [false, true]) {
+    const hub = createHub({ dataFile: path.join(dir, String(reverse) + '.json') });
+    const local = make('local', 'running', clock - 1000);
+    const remote = make('remote', 'idle', clock + 60000);
+    for (const record of reverse ? [remote, local] : [local, remote]) hub.ingest(record);
+    const aggregate = hub.getStats();
+    assert.equal(aggregate.periods.month.sessions['claude:shared'].liveActivity.state, 'running');
+    const { composeLocalSyncSummary } = require('../../src/electron/syncDisplayStats');
+    const stats = composeLocalSyncSummary(aggregate, local, { nowMs: clock });
+    // Exercise a cached aggregate from an older peer as well as the fixed merge.
+    stats.periods.month.sessions['claude:shared'].liveActivity = observation('idle', clock + 60000);
+    const patch = { observations: [{ client: 'claude', sessionId: 'shared', liveActivity: observation('waiting', clock) }] };
+    const next = projectLocalActivity(stats, patch, clock);
+    const row = sessionWithActivity(next.periods.month, 'claude:shared');
+    assert.equal(row.liveActivity.state, 'waiting');
+    assert.equal(next.periods.month.totalTokens, 200);
+    assert.equal(next.periods.month.sessions, stats.periods.month.sessions);
+    const cleared = projectLocalActivity(next, { observations: [{ ...patch.observations[0], liveActivity: observation('unknown', clock) }] }, clock + 1);
+
+    assert.equal(sessionWithActivity(cleared.periods.month, 'claude:shared').liveActivity.state, 'unknown');
+    hub.server.close();
+  }
 });

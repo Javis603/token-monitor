@@ -3,7 +3,7 @@
 const { isSessionActivityClient } = require('./sessionActivityProviders');
 
 const PERIODS = ['today', 'month', 'allTime'];
-const { normalizeLiveActivity, sessionWithActivity } = require('./sessionLive');
+const { normalizeLiveActivity, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
@@ -667,7 +667,7 @@ function mergeSession(target, source) {
   // token or transcript write. An explicit unknown reading clears old evidence.
   if (isSessionActivityClient(source.client)) {
     const reading = normalizeLiveActivity(source.liveActivity);
-    if (reading && timestampMs(reading.observedAt) >= timestampMs(target.liveActivity?.observedAt)) {
+    if (reading && canReplaceLiveActivity(target.liveActivity, reading)) {
       target.liveActivity = reading;
     }
   }

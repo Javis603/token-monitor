@@ -3433,7 +3433,7 @@ function startCollector(options) {
   if (options.sessionActivityPolling !== false && sessionActivityProvidersFor(trackedClients).length) {
     activityScheduler = createSessionActivityScheduler({
       refresh: pollSessionActivity,
-      nativeEventsReady: () => activityWatchReady,
+      nativeEventsReady: () => activityWatchReady || !watchEnabled,
       needsRenewal: () => require('./sessionActivityProjection').needsActivityRenewal(latestActivitySummary)
     });
     activityScheduler.start();

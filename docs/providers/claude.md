@@ -37,7 +37,7 @@ Cache warmth is an optional `promptCache: { observedAt, ttlSeconds }` estimate f
 
 ## Live waiting status
 
-Native Claude Code supplies state through `<configDir>/sessions/<pid>.json`: recognized `waiting`/`busy`/`idle` states or `blocked`/`active`/`idle` tempo values map to activity by `sessionId`. Validate the PID domain and UTC process start time on each read; dead or recycled PIDs are not evidence. Desktop-hosted records, scoped WSL homes, unreadable records and unsupported probes retain transcript fallback. No Claude settings changes are required.
+Native Claude Code supplies state through `<configDir>/sessions/<pid>.json`: recognized `waiting`/`busy`/`idle` states or `blocked`/`active`/`idle` tempo values map to activity by `sessionId`. Validate the PID domain and process start identity on each read; dead or recycled PIDs are not evidence. Linux records use `linux:<machine-id>:<pid-namespace>` and compare `procStart` with field 22 from `/proc/<pid>/stat` (start-time ticks). Darwin and Windows retain their existing process-start checks. Desktop-hosted records, scoped WSL homes, unreadable records and unsupported probes retain transcript fallback. No Claude settings changes are required.
 
 T3 V2 pending approvals and questions match the `claudeAgent` driver and `nativeThreadRef.nativeId` to the current run. Validate the server incarnation and request response capability; verified T3 running/waiting takes precedence over the registry. Terminal idle uses the latest run completion or message-question resolution time, expires without renewal and yields to a live native registry. A message-answerable question can remain waiting after model completion until answered or cancelled.
 
