@@ -13,6 +13,7 @@ function processApi() {
     api = {
       open: kernel32.func('void * __stdcall OpenProcess(uint32_t access, int inherit, uint32_t pid)'),
       times: kernel32.func('__stdcall', 'GetProcessTimes', 'int', ['void *', output, output, output, output]),
+      wait: kernel32.func('uint32_t __stdcall WaitForSingleObject(void *handle, uint32_t milliseconds)'),
       close: kernel32.func('int __stdcall CloseHandle(void *handle)')
     };
   } catch (_) { /* No native binding: leave identity unverified. */ }
@@ -26,10 +27,13 @@ function readWindowsProcessStarts(pids, native = processApi()) {
     if (!Number.isInteger(pid) || pid <= 0 || pid > 0xffffffff) continue;
     let handle;
     try {
-      handle = native.open(0x1000, 0, pid); // PROCESS_QUERY_LIMITED_INFORMATION
+      handle = native.open(0x101000, 0, pid); // QUERY_LIMITED_INFORMATION | SYNCHRONIZE
       if (!handle) continue;
       const created = {};
       if (!native.times(handle, created, {}, {}, {})) continue;
+      // Creation time can still be read after exit while another handle keeps
+      // the process object alive. Only a nonsignaled process is still running.
+      if (native.wait(handle, 0) !== 0x102) continue; // WAIT_TIMEOUT, no blocking
       const ticks = (BigInt(created.high) << 32n) | BigInt(created.low);
       // FILETIME is 100 ns since 1601; match Date.parse's Unix milliseconds.
       const time = Number((ticks - 116444736000000000n) / 10000n);

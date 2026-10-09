@@ -38,7 +38,7 @@ test('Windows native reads validate fresh creation times and release each handle
   let time = Date.parse('2026-10-09T12:34:56.123Z');
   const opened = []; const closed = [];
   const api = {
-    open(access, inherit, pid) { assert.equal(access, 0x1000); assert.equal(inherit, 0); opened.push(pid); return pid; },
+    open(access, inherit, pid) { assert.equal(access, 0x101000); assert.equal(inherit, 0); opened.push(pid); return pid; },
     times(handle, created) {
       if (handle === 456) return 0;
       if (handle === 789) throw new Error('process exited');
@@ -46,6 +46,7 @@ test('Windows native reads validate fresh creation times and release each handle
       created.low = Number(ticks & 0xffffffffn); created.high = Number(ticks >> 32n);
       return 1;
     },
+    wait(_handle, milliseconds) { assert.equal(milliseconds, 0); return 0x102; },
     close(handle) { closed.push(handle); }
   };
   assert.deepEqual(readWindowsProcessStarts([123, 456, 789, -1, 2 ** 32, 1.5], api), new Map([[123, time]]));
@@ -55,6 +56,21 @@ test('Windows native reads validate fresh creation times and release each handle
   assert.equal(readWindowsProcessStarts([123], api).get(123), time, 'no PID result is cached across reads');
   assert.equal(readWindowsProcessStarts([123], null).size, 0, 'a missing binding leaves identity unverified');
   assert.equal(readWindowsProcessStarts([123], { open: () => null }).size, 0, 'inaccessible PID');
+});
+
+test('Windows retained terminated process and failed liveness check yield no identity', () => {
+  const { readWindowsProcessStarts } = require('../../src/shared/windowsProcessStarts');
+  const ticks = BigInt(Date.parse('2026-10-09T12:34:56Z')) * 10000n + 116444736000000000n;
+  const closed = [];
+  const api = {
+    open: (_access, _inherit, pid) => pid,
+    times(_handle, created) { created.low = Number(ticks & 0xffffffffn); created.high = Number(ticks >> 32n); return 1; },
+    wait(handle, milliseconds) { assert.equal(milliseconds, 0); return handle === 123 ? 0 : 0xffffffff; },
+    close(handle) { closed.push(handle); }
+  };
+  assert.equal(readWindowsProcessStarts([123, 456], api).size, 0,
+    'birth time is valid, but terminated/unverified processes cannot renew activity');
+  assert.deepEqual(closed, [123, 456]);
 });
 
 // Retain the previous PowerShell probe in this platform-only comparison. It is
@@ -121,4 +137,41 @@ test('Windows native PID probe matches CIM and reports both measured costs', { s
   }
   t.diagnostic('Legacy 2-second successes: ' + samples.filter(sample =>
     sample.label === 'legacy-2s' && sample.reading && !sample.killed).length + '/5');
+});
+
+test('Windows terminated child with a retained native handle cannot renew activity', {
+  skip: process.platform !== 'win32', timeout: 15_000
+}, async t => {
+  const { once } = require('node:events');
+  const koffi = require('koffi');
+  const kernel32 = koffi.load('kernel32.dll');
+  const open = kernel32.func('void * __stdcall OpenProcess(uint32_t access, int inherit, uint32_t pid)');
+  const close = kernel32.func('int __stdcall CloseHandle(void *handle)');
+  const wait = kernel32.func('uint32_t __stdcall WaitForSingleObject(void *handle, uint32_t milliseconds)');
+  const fileTime = koffi.struct({ low: 'uint32_t', high: 'uint32_t' });
+  const output = koffi.out(koffi.pointer(fileTime));
+  const times = kernel32.func('__stdcall', 'GetProcessTimes', 'int', ['void *', output, output, output, output]);
+  const { processStarts } = require('../../src/shared/processStarts');
+  const child = childProcess.spawn(process.execPath, ['-e',
+    "process.on('message', () => process.exit(259)); process.send('ready');"], {
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true
+  });
+  let retained;
+  t.after(() => { child.kill(); if (retained) close(retained); });
+  await once(child, 'message');
+  retained = open(0x101000, 0, child.pid);
+  assert.ok(retained);
+  assert.equal(wait(retained, 0), 0x102);
+  assert.ok(Number.isFinite((await processStarts([child.pid], 'win32')).get(child.pid)));
+  const exited = once(child, 'exit');
+  child.send('exit');
+  await exited;
+  assert.equal(wait(retained, 0), 0);
+  const created = {};
+  assert.equal(times(retained, created, {}, {}, {}), 1,
+    'GetProcessTimes alone still succeeds on the retained terminated object');
+  const reopened = open(0x101000, 0, child.pid);
+  if (reopened) close(reopened);
+  t.diagnostic('Terminated child retained-handle probe: reopenByPid=' + Boolean(reopened));
+  assert.equal((await processStarts([child.pid], 'win32')).size, 0);
 });
