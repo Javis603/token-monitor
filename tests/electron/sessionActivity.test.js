@@ -112,7 +112,7 @@ function mainActivityHarness(hubMode, externalAgent = false) {
   let get;
   const context = {
     console, Date, settings: { hubMode }, mode: 'sync', hubModeGeneration: 1,
-    lastCollectedDevice: local, localDevice: null, localStats: null, latestStats: null, latestStatsSource: null,
+    lastCollectedDevice: local, localDevice: null, localStats: null, latestStats: null, statsPushSource: null,
     statsPushRevision: 0, lastExportAt: 0, edgeDockManualStats: null, deviceRuntimeHandle: {},
     ...projection, ...syncDisplay, rendererStats: publisher.rendererStats,
     rendererSnapshots: publisher.createRendererSnapshots({ source: () => context.currentHubStatsIdentity() }),
@@ -123,7 +123,7 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     currentHubStatsCache: () => null, currentHubStatsIdentity: () => hubMode,
     effectiveHubConfig: () => ({ url: 'https://fixture.invalid' }),
     fetch: async () => ({ ok: true, json: async () => aggregate() }),
-    hubModeRequestIsCurrent: (generation, expectedMode, identity) => generation === context.hubModeGeneration && expectedMode === context.settings.hubMode && identity === context.currentHubStatsIdentity(), modeQueue: Promise.resolve(), setLatestHubStatsCache() {},
+    modeQueue: Promise.resolve(), setLatestHubStatsCache() {},
     getSyncContentRuntime: () => ({ notifyStats() {} }), electronPresentationStats: stats => stats,
     migrateCodexAdditionalLimits() {}, scheduleMacWidgetSnapshot() {}, updateEdgeDockCells() {},
     syncCodexPresentationActiveAccount() {}, updateTrayDisplay() {}, statsHistoryRevision: () => '',
@@ -132,7 +132,8 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     dashboardWindow: null,
     ipcMain: { handle: (channel, handler) => { if (channel === 'stats:get') get = handler; } }
   };
-  vm.runInNewContext(body('function ownsUsageRuntime(', '\nasync function deleteDeviceFromHub(')
+  vm.runInNewContext(body('function hubModeRequestIsCurrent(', '\nfunction currentHubStatsIdentity(')
+    + body('function ownsUsageRuntime(', '\nasync function deleteDeviceFromHub(')
     + body('function injectLocalDeviceStatus(', '\nfunction macWidgetConfiguration(')
     + body('function publishLocalSessionActivity(', '\n// Two options')
     + body('function sendPush(', '\nfunction statsHistoryRevision(')
@@ -235,4 +236,55 @@ test('a push from the new Hub still supersedes its pending retried read', async 
   f.context.sendPush({ event: 'stats', data: { stats: { ...f.aggregate(), hub: 'B-push' } } });
   resolveB({ ok: true, json: async () => ({ ...f.aggregate(), hub: 'B-read' }) });
   assert.equal((await pending).hub, 'B-push');
+});
+
+test('a new Hub local collector batch cannot attribute the old Hub push revision to itself', async () => {
+  for (const changeGeneration of [false, true]) {
+    const f = mainActivityHarness('client');
+    const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+    let hub = 'A'; let resolveA; let resolveB; let sink; let batch;
+    Object.assign(f.context, {
+      latestHubStats: null,
+      currentHubStatsIdentity: () => hub,
+      setLatestHubStatsCache: stats => { f.context.latestHubStats = stats; },
+      fetch: () => new Promise(done => { if (hub === 'A') resolveA = done; else resolveB = done; }),
+      createStatsPublicationBatcher: options => {
+        batch = publisher.createStatsPublicationBatcher({ ...options, setTimeout: () => 1, clearTimeout() {} });
+        return batch;
+      },
+      createSyncUploadScheduler: () => ({ enqueue: async () => {}, flush() {}, stop() {} }),
+      createDeviceRuntime: options => { sink = options.sink; return {}; },
+      createElectronUsageRuntime() {}, stopSyncCollector() {}, updateDiscordRpcDisplay() {},
+      captureMacWidgetProducerOwner() {}, syncUploadIntervalMs: () => 300_000, postToHub() {},
+      seedInitialLimitProviders() {}, usageTransform: { transform: record => record },
+      electronUsageConfig: () => ({}), electronDeviceEnvelope: () => ({}),
+      electronLimitsConfig: () => ({}), electronLimitsDeps: () => ({}),
+      recordDiagnosticEvent() {}, drainPendingRuntimeActions() {}, usageConfigFingerprint: () => '',
+      usageRuntimeReconciler: { setActiveKey() {} }
+    });
+    vm.runInNewContext(source.slice(source.indexOf('const SYNC_STATS_PUBLISH_WINDOW_MS ='),
+      source.indexOf('// Host mode:', source.indexOf('function startSyncCollector('))), f.context);
+    const pending = f.get(null, {});
+    f.context.sendPush({ event: 'stats', data: { stats: { ...f.aggregate(), hub: 'A' } } });
+    const revisionA = f.context.statsPushRevision;
+    hub = 'B';
+    if (changeGeneration) f.context.hubModeGeneration++;
+    resolveA({ ok: true, json: async () => f.aggregate() });
+    await new Promise(resolve => setImmediate(resolve));
+    f.context.startSyncCollector();
+    await sink.enqueue(f.local, 1);
+    batch.flush();
+    assert.equal(f.pushes.at(-1).data.reason, 'local', 'the real collector batch published');
+    assert.equal(f.pushes.at(-1).data.stats.snapshot.source, 'B');
+    assert.equal(f.context.statsPushRevision, revisionA, 'local batches do not supersede remote reads');
+    assert.deepEqual(Array.from(f.context.latestStats.devices, device => device.deviceId), ['local']);
+    const remote = { ...f.local, deviceId: 'remote' };
+    const fromB = require('../../src/shared/usage').aggregateDevices([f.local, remote], 600_000);
+    resolveB({ ok: true, json: async () => fromB });
+    const result = await pending;
+    assert.deepEqual(Array.from(result.devices, device => device.deviceId).sort(), ['local', 'remote']);
+    assert.deepEqual(Array.from(f.context.latestStats.devices, device => device.deviceId).sort(), ['local', 'remote']);
+    assert.equal(result.snapshot.source, 'B');
+    assert.equal(result.snapshot.id, f.pushes.at(-1).data.stats.snapshot.id);
+  }
 });

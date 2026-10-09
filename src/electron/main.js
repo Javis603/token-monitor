@@ -2943,7 +2943,7 @@ let latestHubStatsIdentity = null;
 let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
-let latestStatsSource = null;
+let statsPushSource = null;
 let statsPushRevision = 0;
 let macWidgetSnapshotController = null;
 let macWidgetDemand = null;
@@ -4768,10 +4768,12 @@ function sendPush(payload, options = {}) {
   if (payload?.data?.stats) {
     payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
-    latestStatsSource = { generation: hubModeGeneration, identity: currentHubStatsIdentity() };
     // Client local batches overlay usage on the cached Hub snapshot; they do
     // not supersede an in-flight read of fresh remote stats.
-    if (!(settings?.hubMode === 'client' && payload.data.reason === 'local')) statsPushRevision += 1;
+    if (!(settings?.hubMode === 'client' && payload.data.reason === 'local')) {
+      statsPushRevision += 1;
+      statsPushSource = { generation: hubModeGeneration, identity: currentHubStatsIdentity() };
+    }
     edgeDockManualStats = null;
     getSyncContentRuntime().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
@@ -7947,8 +7949,10 @@ app.whenReady().then(() => {
     const fetched = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
     // A push from the same source/generation supersedes its pending read. A
     // retried read after a Hub switch must adopt the new source instead.
-    const sameSource = latestStatsSource?.generation === hubModeGeneration
-      && latestStatsSource.identity === currentHubStatsIdentity();
+    // Compare the source of the revision, not the latest local composition:
+    // a local B publication must not relabel a revision advanced by Hub A.
+    const sameSource = statsPushSource?.generation === hubModeGeneration
+      && statsPushSource.identity === currentHubStatsIdentity();
     const current = sameSource && statsPushRevision !== revision && latestStats ? latestStats : fetched;
     if (current !== latestStats) sendPush({ event: 'stats', data: { stats: current, reason: 'read' } }, { skipExport: true });
     const stats = latestStats || current;
