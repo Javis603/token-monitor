@@ -139,6 +139,21 @@ function tokenExpiryMs(cookies) {
   return expires * 1000;
 }
 
+// Identity of a credential the SITE will judge, used to key both the dedupe in
+// readOasisSessions and the rejected set in the sign-in wait.
+//
+// The pair, not the token: `verifyStepfunSession` sends `Oasis-Webid` beside
+// `Oasis-Token`, so the same token under a different device id is a different
+// credential to the site. A token-keyed set collapses those two, and in the
+// rejected set the collapse is not merely lossy but a deadlock — the site can
+// rotate the webid while a token stays put (RegisterDevice issues a fresh
+// device id), and once the first pair has been refused, the replacement pair is
+// never even offered. Keying on both halves makes each session verifiable on
+// its own, which is the only property the wait needs.
+function sessionKeyFor(token, webid) {
+  return JSON.stringify([String(token || ''), String(webid || '').trim()]);
+}
+
 /**
  * Every Oasis cookie pair the jar currently holds, one entry per origin that
  * has one.
@@ -148,12 +163,13 @@ function tokenExpiryMs(cookies) {
  * registered under, and a mismatched pair is rejected. Reading them in one pass
  * keeps them from ever being sampled a rotation apart.
  *
- * More than one candidate is the normal case, not an edge case: the anonymous
- * token lives on platform.stepfun.com while the signed-in pair lives on
- * account.stepfun.com, so the origin that answers "already logged in" is not
- * the origin the login page runs on. Returning a list instead of guessing
- * leaves the decision to `verifySession`, which is the only thing that can
- * make it.
+ * More than one candidate is the normal case, not an edge case. Measured on
+ * the Electron this app ships: after the redirect the signed-in pair is
+ * host-only on account.stepfun.com, while platform.stepfun.com has been seen
+ * carrying an anonymous one of its own in other flows. Which origin answers
+ * "already logged in" is therefore not something to read off the order, so both
+ * are returned and the decision is left to `verifySession` — the only thing
+ * that can make it.
  *
  * @returns {Promise<Array<{token: string, webid: string, source: string}>>}
  */
@@ -168,12 +184,15 @@ async function readOasisSessions(session, { nowMs = Date.now(), urls = SESSION_C
     const hit = cookies.find((c) => c.name === OASIS_TOKEN && String(c.value || '').trim());
     if (!hit) continue;
     const token = String(hit.value).trim();
-    if (seen.has(token)) continue;
+    // Read the device id in the SAME pass as its token — sampling them in two
+    // passes is how a rotated webid ends up paired with the token it replaced.
+    const webidValue = String(cookies.find((c) => c.name === OASIS_WEBID)?.value || '').trim();
+    const sessionKey = sessionKeyFor(token, webidValue);
+    if (seen.has(sessionKey)) continue;
     const expiresAt = tokenExpiryMs(cookies);
     if (expiresAt !== null && expiresAt <= nowMs) continue;
-    seen.add(token);
-    const webid = cookies.find((c) => c.name === OASIS_WEBID);
-    found.push({ token, webid: String(webid?.value || '').trim(), source: url });
+    seen.add(sessionKey);
+    found.push({ token, webid: webidValue, source: url });
   }
   return found;
 }
@@ -395,7 +414,7 @@ async function signInStepFunWithBrowser(options = {}) {
         // Give the site a beat to write the signed-in cookie before reading.
         if (Date.now() - navigatedAt >= TOKEN_SETTLE_MS) {
           for (const candidate of await readOasisSessions(session)) {
-            if (!candidate.token || rejected.has(candidate.token)) continue;
+            if (!candidate.token || rejected.has(sessionKeyFor(candidate.token, candidate.webid))) continue;
             // The verdict arrives either as a bare boolean or as the full
             // `{ok, body}` descriptor the shared checker answers with. The
             // body is the PLAN_URL response that verdict just cost, so an
@@ -408,7 +427,7 @@ async function signInStepFunWithBrowser(options = {}) {
             if (typeof verifySession === 'function') {
               verdict = await verifySession(candidate);
               accepted = typeof verdict === 'boolean' ? verdict : Boolean(verdict?.ok);
-              if (!accepted) rejected.add(candidate.token);
+              if (!accepted) rejected.add(sessionKeyFor(candidate.token, candidate.webid));
             } else {
               // No way to ask the site: the fallback is "this is not the
               // cookie that was already there". Weaker than a verdict — a token
@@ -628,6 +647,7 @@ module.exports = {
   readOasisSession,
   readOasisSessions,
   retainedStepFunWindow,
+  sessionKeyFor,
   signInStepFunWithBrowser,
   stepfunPartition,
   tokenExpiryMs

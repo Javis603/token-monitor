@@ -16,6 +16,7 @@ const {
   readOasisSession,
   readOasisSessions,
   retainedStepFunWindow,
+  sessionKeyFor,
   signInStepFunWithBrowser,
   tokenExpiryMs
 } = require('../../src/electron/providers/stepfun/login');
@@ -317,6 +318,31 @@ test('readOasisSessions skips an expired origin and never pairs a stale token', 
   assert.deepEqual(out, [{ token: 'fresh', webid: 'web-fresh', source: COOKIE_URL }]);
 });
 
+test('readOasisSessions keeps both pairs when one token sits under two device ids', async () => {
+  // The site judges the PAIR: verifyStepfunSession sends oasis-webid beside
+  // Oasis-Token, so the same token under another device id is a different
+  // credential, not a duplicate. A token-keyed dedupe lets whichever origin is
+  // read first silence the other, and the second pair is then never offered.
+  const out = await readOasisSessions(sessionByUrl({
+    [ACCOUNT_COOKIE_URL]: [cookie(OASIS_TOKEN, 'shared-token'), cookie(OASIS_WEBID, 'web-a')],
+    [COOKIE_URL]: [cookie(OASIS_TOKEN, 'shared-token'), cookie(OASIS_WEBID, 'web-b')]
+  }), { nowMs: 1000 });
+
+  assert.deepEqual(out.map((entry) => entry.webid), ['web-a', 'web-b'],
+    'both pairs survive, each in the pass that read its own token');
+  assert.deepEqual(out.map((entry) => entry.source), [ACCOUNT_COOKIE_URL, COOKIE_URL]);
+});
+
+test('sessionKeyFor treats a rotated webid as a new credential, not the old one', () => {
+  assert.equal(sessionKeyFor('tok', 'web-a'), sessionKeyFor('tok', 'web-a'),
+    'the same pair always keys the same way');
+  assert.notEqual(sessionKeyFor('tok', 'web-a'), sessionKeyFor('tok', 'web-b'),
+    'the whole point: the device id is part of the identity');
+  assert.notEqual(sessionKeyFor('tok-a', 'web'), sessionKeyFor('tok-b', 'web'));
+  // Trimming keeps a whitespace-only difference from reading as a new session.
+  assert.equal(sessionKeyFor('tok', ' web-a '), sessionKeyFor('tok', 'web-a'));
+});
+
 test('readOasisSessions reports an empty jar as an empty list', async () => {
   assert.deepEqual(await readOasisSessions(fakeSession([]), { nowMs: 1000 }), []);
 });
@@ -478,6 +504,39 @@ test('the site is asked about a rejected pair once, not on every poll', async ()
     (error) => /did not replace the anonymous session/.test(error.message)
   );
   assert.equal(calls, 1, 'a refused value is remembered rather than re-asked about');
+});
+
+test('a webid rotated mid-wait is asked about again, not silenced by the old refusal', async () => {
+  // The deadlock this guards. The site can rotate Oasis-Webid while the token
+  // stays put — RegisterDevice issues a fresh device id — so the jar hands out
+  // (tok, web-old) first and (tok, web-new) a moment later. Caching the refusal
+  // by token alone then skips (tok, web-new) for the rest of the settle window:
+  // the one pair the site would accept is never offered, and a live session
+  // times out as a failed sign-in.
+  const page = fakePage();
+  const judged = [];
+  let refused = 0;
+  const { result } = await runSignIn({
+    page,
+    // The jar rotates once the site has seen the first pair.
+    cookies: () => (refused > 0
+      ? [cookie(OASIS_TOKEN, 'tok'), cookie(OASIS_WEBID, 'web-new')]
+      : [cookie(OASIS_TOKEN, 'tok'), cookie(OASIS_WEBID, 'web-old')]),
+    options: {
+      timeoutMs: 9000,
+      tokenReplaceDeadlineMs: 4000,
+      verifySession: async (candidate) => {
+        judged.push(candidate.webid);
+        refused += 1;
+        return candidate.webid === 'web-new';
+      }
+    }
+  });
+
+  assert.equal(result.webid, 'web-new',
+    'the rotated pair is the one that got through, not the first one refused');
+  assert.deepEqual(judged, ['web-old', 'web-new'],
+    'the refusal applied to the pair it was given, and no further');
 });
 
 test('readOasisSession is not fooled by a session whose cookies is not callable', async () => {
