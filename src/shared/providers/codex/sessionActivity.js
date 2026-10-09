@@ -57,6 +57,12 @@ function sessionRoots(options) {
   return [...new Set([path.join(codexHomeDir(options), 'sessions'), ...custom].map((root) => path.resolve(root)))];
 }
 
+function localDayParts(clock, offset = 0) {
+  const date = new Date(clock);
+  date.setDate(date.getDate() - offset);
+  return [String(date.getFullYear()), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')];
+}
+
 function discoverFilesUncached(options, activity, summary) {
   const files = new Map();
   const roots = sessionRoots(options);
@@ -105,9 +111,7 @@ function discoverFilesUncached(options, activity, summary) {
   // New sessions need not be registered with usage or the thread catalog yet.
   // Scan just the current/previous date folders, not the whole transcript tree.
   for (const root of roots) for (const offset of [0, 1]) {
-    const date = new Date(now - offset * 86400_000);
-    const day = date.toISOString().slice(0, 10).split('-');
-    const dir = path.join(root, ...day);
+    const dir = path.join(root, ...localDayParts(now, offset));
     try {
       const names = fs.readdirSync(dir).filter((name) => /^rollout-.+\.jsonl$/.test(name)).sort().reverse().slice(0, MAX_SESSIONS);
       for (const name of names) accept(path.join(dir, name));
@@ -122,7 +126,7 @@ function discoverFiles(options, activity, summary) {
   const catalogs = discoverDbPaths(options);
   const maps = ['today', 'month', 'allTime'].map((name) => summary[name]?.sessions);
   const key = maps[2] || maps[1] || maps[0] || summary;
-  const config = JSON.stringify([roots, catalogs, new Date(clock).toISOString().slice(0, 10),
+  const config = JSON.stringify([roots, catalogs, localDayParts(clock),
     [...activity].map(([id, reading]) => [id, reading.state]).sort(([a], [b]) => a.localeCompare(b))]);
   const previous = discoveryCache.get(key);
   const sqlite = resolveSqlite(options);
@@ -133,7 +137,7 @@ function discoverFiles(options, activity, summary) {
 
   const paths = new Set([...roots, ...catalogs.flatMap((file) => [file, `${file}-wal`])]);
   for (const root of roots) for (const offset of [0, 1]) {
-    paths.add(path.join(root, ...new Date(clock - offset * 86400_000).toISOString().slice(0, 10).split('-')));
+    paths.add(path.join(root, ...localDayParts(clock, offset)));
   }
   const signatures = new Map([...paths].map((file) => [file, fileSignature(file)]));
   const files = discoverFilesUncached(options, activity, summary);

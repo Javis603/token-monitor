@@ -14,11 +14,12 @@
     node ? require('../accountIdentity') : root?.TokenMonitorAccountIdentity,
     node ? require('../../../shared/sessionLive') : root?.TokenMonitorSessionLive,
     node ? require('../usageAttributionRows') : root?.TokenMonitorUsageAttributionRows,
-    node ? require('../limits/resetMotion') : root?.TokenMonitorLimitResetMotion
+    node ? require('../limits/resetMotion') : root?.TokenMonitorLimitResetMotion,
+    node ? require('../../../shared/sessionActivityProviders') : root?.TokenMonitorSessionActivityProviders
   );
   if (node) module.exports = api;
   if (root) root.TokenMonitorEdgeDockPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive, usageAttributionRows, limitResetMotion) {
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive, usageAttributionRows, limitResetMotion, activityProviders) {
   // Every account is listed; the card scrolls when they outgrow the screen.
   const MAX_BUBBLE_ACCOUNTS = 50;
 
@@ -188,7 +189,7 @@
     const base = accountingSessionSources(stats);
     const native = new Map();
     for (const periodKey of ['month', 'today']) for (const [key, session] of Object.entries(stats?.nativeSessions?.[periodKey] || {})) {
-      if (base.keys.has(key) || native.has(key) || session.client !== 'codex' || session.sessionKind === 'background-review') continue;
+      if (base.keys.has(key) || native.has(key) || !activityProviders.isSessionActivityClient(session.client) || session.sessionKind === 'background-review') continue;
       const lastUsedMs = Date.parse(session.lastUsedAt || session.startedAt || '');
       if (Number.isFinite(lastUsedMs)) native.set(key, { key, session, lastUsedMs });
     }

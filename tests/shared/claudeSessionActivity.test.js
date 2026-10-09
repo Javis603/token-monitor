@@ -266,6 +266,15 @@ test('zero-token registry sessions reach local rows without changing accounting 
   assert.equal(row.activityState, 'waiting');
   assert.equal(row.client, 'claude');
   assert.match(row.title, /Claude Code/);
+  const saved = Date.now; Date.now = () => now;
+  try {
+    const dockRows = presentation.recentSessionRows({ periods: { today: next.today, month: next.month }, nativeSessions: next.nativeSessions });
+    assert.equal(dockRows.length, 1);
+    assert.equal(dockRows[0].client, 'claude');
+    assert.equal(presentation.waitingSessionSummary(dockRows, now).count, 1);
+    const withUsage = presentation.recentSessionRows({ periods: { today: { sessions: { [key]: session() } } }, nativeSessions: next.nativeSessions });
+    assert.equal(withUsage.length, 1, 'usage rows replace native rows rather than duplicating them');
+  } finally { Date.now = saved; }
   for (const name of ['today', 'month', 'allTime']) {
     assert.equal(next[name], empty[name]);
     assert.equal(next[name].totalTokens, 0);

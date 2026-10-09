@@ -247,6 +247,42 @@ test('a no-token native question reaches local Sessions and Dock without account
   assert.equal(Object.keys(ended.nativeSessions.today).length, 0);
 });
 
+test('date-folder discovery and its cache follow local midnight without a catalog', async t => {
+  const prior = process.env.TZ;
+  process.env.TZ = 'Asia/Hong_Kong';
+  t.after(() => { if (prior === undefined) delete process.env.TZ; else process.env.TZ = prior; });
+  const f = fixture(t);
+  const clock = new Date(2026, 9, 8, 23, 59, 58).getTime();
+  const summary = Object.fromEntries(['today', 'month', 'allTime'].map(name => [name, usage.emptyPeriod()]));
+  const options = { ...f.options, now: clock, sqlite: null, t3DbPaths: [] };
+  assert.equal(Object.keys((await activity.readSessionActivity(summary, options)).sessions).length, 0);
+  const dir = path.join(f.home, '.codex', 'sessions', '2026', '10', '09');
+  fs.mkdirSync(dir, { recursive: true });
+  const id = 'rollout-2026-10-09T00-00-02-local-midnight';
+  const file = path.join(dir, id + '.jsonl');
+  fs.writeFileSync(file, entry('session_meta', { id: 'local-midnight' }) + '\n' + started + '\n' + question + '\n');
+  fs.utimesSync(file, new Date(clock + 4000), new Date(clock + 4000));
+  const observed = await activity.readSessionActivity(summary, { ...options, now: clock + 4000 });
+  assert.equal(observed.sessions['codex:' + id].waitingForInput, true);
+});
+
+test('previous date-folder discovery uses calendar subtraction across daylight saving', async t => {
+  const prior = process.env.TZ;
+  process.env.TZ = 'America/New_York';
+  t.after(() => { if (prior === undefined) delete process.env.TZ; else process.env.TZ = prior; });
+  const f = fixture(t);
+  const clock = new Date(2026, 2, 9, 0, 1).getTime();
+  const dir = path.join(f.home, '.codex', 'sessions', '2026', '03', '08');
+  fs.mkdirSync(dir, { recursive: true });
+  const id = 'rollout-2026-03-08T23-59-00-previous-local-day';
+  const file = path.join(dir, id + '.jsonl');
+  fs.writeFileSync(file, entry('session_meta', { id: 'previous-local-day' }) + '\n' + started + '\n' + question + '\n');
+  fs.utimesSync(file, new Date(clock - 120000), new Date(clock - 120000));
+  const summary = Object.fromEntries(['today', 'month', 'allTime'].map(name => [name, usage.emptyPeriod()]));
+  const observed = await activity.readSessionActivity(summary, { ...f.options, now: clock, sqlite: null, t3DbPaths: [] });
+  assert.equal(observed.sessions['codex:' + id].waitingForInput, true);
+});
+
 test('no-token discovery respects root scope, archive suppression and transcript freshness', async t => {
   const f = fixture(t);
   fs.unlinkSync(f.runtimeFile);
