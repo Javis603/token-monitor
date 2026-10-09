@@ -885,14 +885,13 @@ function electronLimitsDeps() {
     mimoExchangeFetch: ensureMimoExchangeFetch(),
     claudeWebFetch: electronClaudeWebFetch,
     workbuddyFetch: async (url, init = {}, expectedSession = null) => {
-      const asMinimalResponse = (response) => ({
-        status: response.status,
-        ok: response.ok,
-        json: () => response.json()
-      });
       try {
         const result = await electronWorkbuddyLocalAuth.request(url, init, expectedSession);
-        return asMinimalResponse(result);
+        return {
+          status: result.status,
+          ok: result.ok,
+          json: () => result.json()
+        };
       } catch (error) {
         // The app's own credential can be sealed beyond this process's reach
         // (and absent means the app is not signed in either). When the
@@ -906,7 +905,12 @@ function electronLimitsDeps() {
           || /wbipc/i.test(String(error?.message));
         if (!unreadableSession || recoverableWbipc) throw error;
         try {
-          return asMinimalResponse(await wbipcProxyFetch(url, init));
+          const response = await wbipcProxyFetch(url, init);
+          return {
+            status: response.status,
+            ok: response.ok,
+            json: () => response.json()
+          };
         } catch (proxyError) {
           if (proxyError?.code === 'E_NOT_WORKBUDDY' || /connect |handshake|timeout|wbipc/i.test(String(proxyError?.message))) {
             const unavailable = new Error('WorkBuddy client channel is not available: ' + proxyError.message);
