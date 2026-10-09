@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  ACCOUNT_COOKIE_URL,
   COOKIE_URL,
   DEFAULT_TIMEOUT_MS,
   OASIS_TOKEN,
@@ -13,6 +14,7 @@ const {
   disposeStepFunWindow,
   loginUrl,
   readOasisSession,
+  readOasisSessions,
   retainedStepFunWindow,
   signInStepFunWithBrowser,
   tokenExpiryMs
@@ -41,6 +43,20 @@ function fakeSession(getCookies, seen = []) {
       get: async (filter) => {
         seen.push(filter);
         return typeof getCookies === 'function' ? getCookies() : getCookies;
+      }
+    }
+  };
+}
+
+// A session whose jar answers differently per origin, which is the real
+// situation: the login page's cookies live on account.stepfun.com while
+// platform.stepfun.com keeps the anonymous token its own page load issued.
+function sessionByUrl(byUrl, seen = []) {
+  return {
+    cookies: {
+      get: async (filter) => {
+        seen.push(filter);
+        return byUrl[filter.url] || [];
       }
     }
   };
@@ -141,11 +157,15 @@ function fakeWindowClass(page, created = []) {
       this.options = options;
       this.page = page;
       this.webContents = {
-        executeJavaScript: (script) => page.executeJavaScript(script),
+        // Reads `this.page`, not the `page` parameter: a reused window swaps its
+        // page in loadURL, and a closure over the constructor argument would
+        // keep driving the first attempt's page forever.
+        executeJavaScript: (script) => this.page.executeJavaScript(script),
         getURL: () => this.getURL()
       };
       this.destroyed = false;
       this.visible = options.show !== false;
+      this.minimized = false;
       this.url = 'https://account.stepfun.com/login';
       created.push(options);
     }
@@ -162,7 +182,13 @@ function fakeWindowClass(page, created = []) {
 
     isVisible() { return this.visible; }
 
+    isMinimized() { return this.minimized; }
+
     show() { this.visible = true; }
+
+    restore() { this.minimized = false; }
+
+    minimize() { this.minimized = true; }
 
     hide() { this.visible = false; }
 
@@ -180,13 +206,33 @@ function fakeWindowClass(page, created = []) {
     destroyCount() { return this.destroyCount_ || 0; }
 
     loadURL(url) {
+      // A real loadURL replaces the document, so a REUSED window has to start
+      // driving a fresh page — without this seam the second attempt would keep
+      // answering out of the first attempt's fake page and could never submit.
+      if (this.swapPageTo) {
+        this.page = this.swapPageTo;
+        this.swapPageTo = null;
+      }
       this.page.log.push(`load:${url}`);
       return Promise.resolve();
     }
   };
 }
 
+// Every sign-in attempt now REUSES the window the previous one left behind —
+// that is the point of the fix, but it also means a test that does not say
+// otherwise inherits the last test's window, and the fake page driving it. So
+// the default is a clean slate and a test that wants to exercise reuse passes
+// `keepRetained` and manages the lifecycle itself.
 async function runSignIn({ page, cookies, options = {}, now } = {}) {
+  if (options.keepRetained) {
+    // Reuse is under test here, so hand the retained window this attempt's
+    // page — see the loadURL seam in fakeWindowClass.
+    const existing = retainedStepFunWindow(options.partition);
+    if (existing) existing.swapPageTo = page;
+  } else {
+    disposeStepFunWindow();
+  }
   const created = [];
   const cookieReads = [];
   const result = await signInStepFunWithBrowser({
@@ -229,10 +275,153 @@ test('readOasisSession reads the token and its device id together', async () => 
   ], seen), { nowMs: 1000 });
 
   assert.deepEqual(out, { token: 'tok-1', webid: 'web-1' });
-  // One pass for both: sampling them separately can catch them a rotation
-  // apart, which the quota endpoint rejects as a mismatched pair. And the
-  // filter is the URL Chromium would send to, not a bare domain.
-  assert.deepEqual(seen, [{ url: COOKIE_URL }]);
+  // Both origins are read. The login page runs on account.stepfun.com and the
+  // Oasis cookies land there HOST-ONLY, while platform.stepfun.com keeps only
+  // the anonymous token its own page load issued — so a platform-scoped read
+  // sees the pre-login state and nothing else. Asking for one URL answers half
+  // the question.
+  assert.deepEqual(seen, [{ url: ACCOUNT_COOKIE_URL }, { url: COOKIE_URL }]);
+});
+
+test('readOasisSessions returns one candidate per origin, each with its own pair', async () => {
+  // This is the shape that made the sign-in unreliable. After a successful
+  // login the jar holds a signed-in pair on account.stepfun.com AND an
+  // anonymous token on platform.stepfun.com. Neither origin alone tells you
+  // which is real, so both have to be offered up and let the site decide.
+  const seen = [];
+  const out = await readOasisSessions(sessionByUrl({
+    [ACCOUNT_COOKIE_URL]: [cookie(OASIS_TOKEN, 'tok-login'), cookie(OASIS_WEBID, 'web-login')],
+    [COOKIE_URL]: [cookie(OASIS_TOKEN, 'tok-anon'), cookie(OASIS_WEBID, 'web-anon')]
+  }, seen), { nowMs: 1000 });
+
+  assert.deepEqual(out.map((entry) => entry.token), ['tok-login', 'tok-anon']);
+  // The device id is read in the SAME pass as its token. Sampling them in two
+  // calls can catch them a rotation apart, which the endpoint rejects as a
+  // mismatched pair.
+  assert.deepEqual(out.map((entry) => entry.webid), ['web-login', 'web-anon']);
+  assert.deepEqual(out.map((entry) => entry.source), [ACCOUNT_COOKIE_URL, COOKIE_URL]);
+  assert.deepEqual(seen, [{ url: ACCOUNT_COOKIE_URL }, { url: COOKIE_URL }]);
+});
+
+test('readOasisSessions skips an expired origin and never pairs a stale token', async () => {
+  const out = await readOasisSessions(sessionByUrl({
+    // account holds a dead session from an earlier run; platform holds a live one.
+    [ACCOUNT_COOKIE_URL]: [cookie(OASIS_TOKEN, 'stale', { expiresIn: -10, now: 1000 }),
+      cookie(OASIS_WEBID, 'web-stale')],
+    [COOKIE_URL]: [cookie(OASIS_TOKEN, 'fresh', { now: 1000 }), cookie(OASIS_WEBID, 'web-fresh')]
+  }), { nowMs: 1000 });
+
+  assert.deepEqual(out, [{ token: 'fresh', webid: 'web-fresh', source: COOKIE_URL }]);
+});
+
+test('readOasisSessions reports an empty jar as an empty list', async () => {
+  assert.deepEqual(await readOasisSessions(fakeSession([]), { nowMs: 1000 }), []);
+});
+
+test('the pre-submit snapshot covers BOTH origins', async () => {
+  // The regression this guards: the old code snapshotted one URL. On a first run
+  // account.stepfun.com has no token at all, so `beforeSubmit` came back '' and
+  // its guard collapsed to `Boolean(token)` — which passes on the ANONYMOUS
+  // cookie that platform.stepfun.com hands out on page load. The flow then
+  // accepted an unauthenticated token as a fresh sign-in.
+  //
+  // Here the jar holds a token on account.stepfun.com BEFORE submitting and the
+  // post-submit state keeps exactly that value. A single-origin snapshot would
+  // see a change on the platform origin and wrongly call it signed in.
+  const page = fakePage();
+  const readsByUrl = [];
+  const session = {
+    cookies: {
+      get: async (filter) => {
+        readsByUrl.push(filter.url);
+        // account: an old, still-present token. platform: an anonymous one.
+        if (filter.url === ACCOUNT_COOKIE_URL) {
+          return page.state.submitted
+            ? [cookie(OASIS_TOKEN, 'old-account'), cookie(OASIS_WEBID, 'web')]
+            : [cookie(OASIS_TOKEN, 'old-account'), cookie(OASIS_WEBID, 'web')];
+        }
+        return [cookie(OASIS_TOKEN, 'anonymous')];
+      }
+    }
+  };
+  await assert.rejects(
+    signInStepFunWithBrowser({
+      username: ACCOUNT, password: PASSWORD,
+      BrowserWindow: fakeWindowClass(page, []),
+      session,
+      timeoutMs: 4000,
+      tokenReplaceDeadlineMs: 900
+    }),
+    // Nothing changed on either origin, so there is no session to accept.
+    (error) => /did not replace the anonymous session/.test(error.message)
+  );
+  assert.ok(readsByUrl.includes(ACCOUNT_COOKIE_URL),
+    'the account origin is part of the snapshot, not just the platform one');
+});
+
+test('verifySession, not a cookie diff, decides whether the sign-in worked', async () => {
+  // A site that re-issues the SAME token value after a successful login is
+  // exactly the case a string diff gets wrong in the dangerous direction: it
+  // never reports "changed", so a real sign-in is reported as a failure. The
+  // site's own verdict has to be what ends the wait.
+  const page = fakePage();
+  const judged = [];
+  const { result } = await runSignIn({
+    page,
+    cookies: () => [cookie(OASIS_TOKEN, 'same-value-every-time'), cookie(OASIS_WEBID, 'web')],
+    options: {
+      verifySession: async (candidate) => {
+        judged.push(candidate.token);
+        return true;
+      }
+    }
+  });
+  assert.equal(result.token, 'same-value-every-time');
+  assert.ok(judged.length >= 1, 'the site was actually asked');
+});
+
+test('an anonymous cookie the site refuses is not handed back as a session', async () => {
+  // The other direction: with a verifier in hand the flow must not fall back to
+  // "the cookie looks new" after the site has already said no.
+  const page = fakePage();
+  const judged = [];
+  await assert.rejects(
+    runSignIn({
+      page,
+      cookies: () => [cookie(OASIS_TOKEN, 'anonymous')],
+      options: {
+        timeoutMs: 9000,
+        tokenReplaceDeadlineMs: 900,
+        verifySession: async (candidate) => {
+          judged.push(candidate.token);
+          return false;
+        }
+      }
+    }),
+    (error) => /did not replace the anonymous session/.test(error.message)
+  );
+  assert.ok(judged.includes('anonymous'), 'the candidate was put to the site');
+});
+
+test('the site is asked about a rejected pair once, not on every poll', async () => {
+  // Re-verifying the same refused value every 400ms would cost one network
+  // round trip per tick for the whole settle window, on a provider whose whole
+  // complaint is that it is slow.
+  const page = fakePage();
+  let calls = 0;
+  await assert.rejects(
+    runSignIn({
+      page,
+      cookies: () => [cookie(OASIS_TOKEN, 'anonymous')],
+      options: {
+        timeoutMs: 4000,
+        tokenReplaceDeadlineMs: 3000,
+        verifySession: async () => { calls += 1; return false; }
+      }
+    }),
+    (error) => /did not replace the anonymous session/.test(error.message)
+  );
+  assert.equal(calls, 1, 'a refused value is remembered rather than re-asked about');
 });
 
 test('readOasisSession is not fooled by a session whose cookies is not callable', async () => {
@@ -301,6 +490,14 @@ test('the tab is switched with a mousedown but consent with a plain click', asyn
   const tabScript = page.log.find((entry) => entry.includes('role="tab"'));
   assert.ok(tabScript, 'the password tab is clicked');
   assert.match(tabScript, /mousedown/, 'Radix switches the tab on mousedown, not on click');
+  // Matched by label only. An earlier version also tried a hardcoded
+  // `#radix-\xABR3nndl9b\xBB-trigger-password` id first: React's useId generates
+  // that per component instance, so it belongs to whichever tree the build
+  // happened to render and silently stops matching on the next one — with a
+  // label match already sitting right behind it. The mutation harness restores
+  // that id and this assertion is what turns red.
+  assert.doesNotMatch(tabScript, /radix-/i,
+    'the Radix useId trigger must not be matched: it is generated per build, not stable across them');
 
   const consentScript = page.log.find((entry) =>
     entry.includes('role="checkbox"') && !entry.includes('querySelectorAll'));
@@ -339,12 +536,12 @@ test('retained windows are keyed by partition, so one sign-in cannot displace an
   await runSignIn({
     page: first,
     cookies: () => (first.state.submitted ? [cookie(OASIS_TOKEN, 'tok-a')] : []),
-    options: { partition: 'persist:stepfun-login' }
+    options: { keepRetained: true, partition: 'persist:stepfun-login' }
   });
   await runSignIn({
     page: second,
     cookies: () => (second.state.submitted ? [cookie(OASIS_TOKEN, 'tok-b')] : []),
-    options: { partition: 'throwaway' }
+    options: { keepRetained: true, partition: 'throwaway' }
   });
 
   const winA = retainedStepFunWindow('persist:stepfun-login');
@@ -363,11 +560,74 @@ test('retained windows are keyed by partition, so one sign-in cannot displace an
   assert.equal(retainedStepFunWindow('persist:stepfun-login'), null);
 });
 
-test('a failed sign-in destroys its window', async () => {
+test('a failed sign-in keeps its window VISIBLE, so the user can finish by hand', async () => {
+  // The failure path used to DESTROY its window. That contradicts the
+  // measurement recorded in login.js: on Electron 43.4 a destroyed BrowserWindow
+  // takes the network stack down with it, so every later net.fetch and loadURL
+  // hangs — which is exactly how a failed sign-in turns into a permanently
+  // "unavailable" quota provider with no way back.
+  //
+  // Keeping it visible (not merely retained) is the other half: the automation
+  // gave up on a page it could not drive, and the user standing in front of the
+  // browser is the only route left.
   disposeStepFunWindow();
   const page = fakePage({ passwordTab: false });
   await assert.rejects(runSignIn({ page, cookies: () => [] }));
-  assert.equal(retainedStepFunWindow(), null, 'a failed attempt has nothing worth keeping');
+  const win = retainedStepFunWindow();
+  assert.ok(win, 'a failed attempt keeps its window too — destroying it is the network hazard');
+  assert.equal(win.destroyCount(), 0, 'no code path may destroy this window');
+  assert.equal(win.isVisible(), true, 'and it is left on screen for a manual sign-in');
+  disposeStepFunWindow();
+});
+
+test('a second sign-in reuses the retained window instead of opening another', async () => {
+  // One window per partition. Every earlier version built a new one per call,
+  // so a user whose automation kept failing accumulated a stack of orphaned
+  // windows — and the attempt that finally worked left all of them alive.
+  disposeStepFunWindow();
+  const first = fakePage();
+  await runSignIn({
+    page: first,
+    cookies: () => (first.state.submitted ? [cookie(OASIS_TOKEN, 'tok-a')] : []),
+    options: { keepRetained: true }
+  });
+  const kept = retainedStepFunWindow();
+  assert.ok(kept);
+
+  const second = fakePage();
+  const { created } = await runSignIn({
+    page: second,
+    cookies: () => (second.state.submitted ? [cookie(OASIS_TOKEN, 'tok-b')] : []),
+    options: { keepRetained: true }
+  });
+
+  assert.equal(created.length, 0, 'no second BrowserWindow was constructed');
+  assert.equal(retainedStepFunWindow(), kept, 'the same window is still the retained one');
+  assert.equal(kept.destroyCount(), 0);
+  assert.ok(second.log.some((entry) => String(entry).startsWith('load:https://account.stepfun.com/login?')),
+    'the retained window is re-pointed at the sign-in page for the new attempt');
+  disposeStepFunWindow();
+});
+
+test('a reused window is brought back on screen before it is driven', async () => {
+  // A window kept from a failed attempt may have been minimized behind
+  // something else. Driving a window the user cannot see looks exactly like a
+  // hang, so it is restored first.
+  disposeStepFunWindow();
+  const first = fakePage({ passwordTab: false });
+  await assert.rejects(runSignIn({ page: first, cookies: () => [], options: { keepRetained: true } }));
+  const kept = retainedStepFunWindow();
+  kept.minimize();
+  assert.equal(kept.isMinimized(), true);
+
+  const second = fakePage();
+  await runSignIn({
+    page: second,
+    cookies: () => (second.state.submitted ? [cookie(OASIS_TOKEN, 'tok-b')] : []),
+    options: { keepRetained: true }
+  });
+  assert.equal(kept.minimized, false, 'the window is restored, not driven while minimized');
+  disposeStepFunWindow();
 });
 
 test('the sign-in window is isolated from the widget session', async () => {
@@ -421,6 +681,10 @@ test('the sign-in waits for the page to leave the login screen before trusting a
   };
   const page = fakePage({ navigateOnSubmit: false });
   const created = [];
+  // This one calls the sign-in directly, so the shared harness does not clear
+  // the retained window for it — and a leftover window from the previous test
+  // would be reused here, which is the very thing under test elsewhere.
+  disposeStepFunWindow();
   // Long enough that the flow actually reaches the polling loop — a short
   // budget expires during form filling and never reads a cookie at all, which
   // would make this assertion pass for the wrong reason. The elapsed time is
@@ -435,11 +699,13 @@ test('the sign-in waits for the page to leave the login screen before trusting a
     (error) => /did not complete before the timeout/.test(error.message)
   );
   assert.ok(Date.now() - startedAt >= 5000, 'the polling loop really did run to its deadline');
-  // Exactly one read is allowed while the page is still on the login screen:
-  // the pre-submit snapshot that lets the wait tell a replaced cookie from the
-  // anonymous one it started with.
-  assert.equal(cookiesSeen.length, 1,
+  // While the page is still on the login screen the only reads are the
+  // pre-submit snapshot, and it has to ask BOTH origins — that is what lets the
+  // wait tell a replaced cookie from the one that was already there. One read
+  // per origin, once.
+  assert.equal(cookiesSeen.length, 2,
     'no cookie is read for sign-in purposes while the page is still on the login screen');
+  disposeStepFunWindow();
 });
 
 test('a sign-in that never navigates fails instead of returning an anonymous token', async () => {

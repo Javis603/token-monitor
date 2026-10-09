@@ -97,14 +97,19 @@ test('StepFun setup copy leads with automatic sign-in and keeps the manual lane 
   assert.match(i18n.translate('en', steps[1][0]), /DevTools \(F12 or Cmd\+Opt\+I\) -> Network/);
   assert.match(group.text, /QueryStepPlanRateLimit/);
   // Both halves of the manual lane, because the device id is not optional: the
-  // endpoint answers a token without it with the same 401 as a wrong token.
-  assert.match(i18n.translate('en', steps[2]), /Headers -> Request Headers.*Oasis-Token/);
-  assert.match(i18n.translate('en', steps[2]), /Oasis-Webid/);
-  assert.match(i18n.translate('en', steps[3]), /Paste both below/);
+  // endpoint answers a token without it with the same 401 as a wrong token. They
+  // now arrive as ONE pasted cookie string, so the copy has to say so — telling
+  // the user to copy the two values separately is what produced a paste that
+  // carried one without the other.
+  assert.match(i18n.translate('en', steps[2]), /Headers -> Request Headers.*Oasis-Token=/);
+  assert.match(i18n.translate('en', steps[2]), /Oasis-Webid=/);
+  assert.match(i18n.translate('en', steps[3]), /Paste that string below/);
+  assert.doesNotMatch(i18n.translate('en', steps[3]), /Paste both/,
+    'there is no second value to paste any more');
   assert.equal(steps.length, 4);
 
   assert.deepEqual(form.fields.map((entry) => entry.key),
-    ['stepfunUsername', 'stepfunPassword', 'stepfunToken', 'stepfunWebid', 'stepfunRememberLogin']);
+    ['stepfunUsername', 'stepfunPassword', 'stepfunToken', 'stepfunRememberLogin']);
   assert.equal(form.fields.find((entry) => entry.key === 'stepfunPassword').input, 'password');
   // No secret field is required: `required` would reject a save outright, and
   // the pasted token is the only lane without a BrowserWindow.

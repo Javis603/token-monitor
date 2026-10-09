@@ -10,14 +10,51 @@ const ORIGIN = 'https://platform.stepfun.com';
 const RATE_URL = `${ORIGIN}/api/step.openapi.devcenter.Dashboard/QueryStepPlanRateLimit`;
 const PLAN_URL = `${ORIGIN}/api/step.openapi.devcenter.Dashboard/GetStepPlanStatus`;
 
-// Oasis-Token is a JWT; the dashboard accepts it as a bare cookie value or with
-// the `Oasis-Token:` prefix a devtools copy usually carries. Normalizing here
-// keeps a whole pasted cookie jar usable instead of only its token field.
-function normalizeOasisToken(value) {
+// Oasis-Token is a JWT, and it does not travel alone: the quota endpoints pair
+// it with `Oasis-Webid`, the device id the session was registered under, and
+// answer 401 "oasis-token is embezzled" without one. What a user pastes is
+// nearly always a whole cookie string copied out of devtools, which carries
+// both halves:
+//
+//   Oasis-Token=eyJ…; Oasis-Webid=0c1f…; INGRESSCOOKIE=…
+//
+// so both are parsed out of that one paste here. Keeping them in a single
+// field is what makes the pair survive the round trip: they are stored
+// together, resolved together, and can never be half-present.
+//
+// Reading them apart costs more than it looks. The webid used to be its own
+// setting, and the form framework marks every text/textarea field as a secret
+// (accountPanels maps `fields` to `{secret: input !== 'select'}`), which meant
+// the webid was stored through the credential path, could satisfy
+// credentialCommands' "at least one secret holds something" floor on its own —
+// so "username alone" could be saved as if it were a working login — and was
+// re-masked on every save, so the panel could never read it back.
+function normalizeOasisCookie(value) {
   const raw = String(value || '').trim();
-  const fromCookie = /(?:^|;)\s*Oasis-Token=([^;]+)/iu.exec(raw)?.[1];
-  const token = String(fromCookie || raw).replace(/^Oasis-Token\s*:\s*/iu, '').trim();
-  return token && !/[\u0000-\u001f\u007f;]/u.test(token) ? token : '';
+  const field = (name) => {
+    const hit = new RegExp(`(?:^|;)\\s*${name}=([^;]*)`, 'iu').exec(raw)?.[1];
+    return String(hit || '').trim();
+  };
+  // A bare token with no `Oasis-Token=` prefix is the other shape devtools
+  // produces, and has to keep working.
+  const token = String(field('Oasis-Token') || raw).replace(/^Oasis-Token\s*:\s*/iu, '').trim();
+  // A control character or a `;` means the paste is a header fragment rather
+  // than a value; sending it on would smuggle a second cookie into the header.
+  const clean = (text) => (text && !/[\u0000-\u001f\u007f;]/u.test(text) ? text : '');
+  return { token: clean(token), webid: clean(field('Oasis-Webid')) };
+}
+
+function normalizeOasisToken(value) {
+  return normalizeOasisCookie(value).token;
+}
+
+// The token + device id a manual paste (or the environment) supplies, read as
+// one pair so neither half can be used without the other being available.
+function stepfunSession(env = process.env, options = {}) {
+  const input = String(
+    options.stepfunToken || env?.TOKEN_MONITOR_STEPFUN_TOKEN || env?.STEPFUN_TOKEN || ''
+  ).trim();
+  return normalizeOasisCookie(input);
 }
 
 // A pasted or environment token wins when present — it is the manual escape
@@ -26,8 +63,15 @@ function normalizeOasisToken(value) {
 // refresh, so a stored token alone expires and the provider goes unauthorized
 // until the user re-pastes one.
 function stepfunToken(env = process.env, options = {}) {
-  const input = String(options.stepfunToken || env?.TOKEN_MONITOR_STEPFUN_TOKEN || env?.STEPFUN_TOKEN || '').trim();
-  return normalizeOasisToken(input);
+  return stepfunSession(env, options).token;
+}
+
+// The username is an account identity, not a credential, so it is read on its
+// own rather than only out of a complete username+password pair.
+function stepfunAccount(env = process.env, options = {}) {
+  return String(
+    options.stepfunUsername || env?.TOKEN_MONITOR_STEPFUN_USERNAME || env?.STEPFUN_USERNAME || ''
+  ).trim();
 }
 
 function stepfunCredentials(env = process.env, options = {}) {
@@ -40,13 +84,13 @@ function stepfunCredentials(env = process.env, options = {}) {
   return username && password ? { username, password } : null;
 }
 
-// The device id pasted next to a manual token. Separate from the secret itself
-// because it is an identifier rather than a credential, and because the manual
-// lane otherwise has no way to satisfy a check that the token alone cannot.
-function stepfunWebid(env = process.env, options = {}) {
-  return String(
-    options.stepfunWebid || env?.TOKEN_MONITOR_STEPFUN_WEBID || env?.STEPFUN_WEBID || ''
-  ).trim();
+// `STEPFUN_WEBID` stays as an environment override for a deployment that
+// cannot paste a cookie string. There is no longer a settings FIELD for it: the
+// webid is parsed out of the same paste as the token (normalizeOasisCookie), so
+// the two are stored and resolved as one pair and a half-filled form is no
+// longer a reachable state.
+function stepfunWebid(env = process.env) {
+  return String(env?.TOKEN_MONITOR_STEPFUN_WEBID || env?.STEPFUN_WEBID || '').trim();
 }
 
 // `oasis-webid` must be the device id this session was registered under — the
@@ -93,16 +137,24 @@ function resetAt(value) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function parseStepfunUsage(body) {
+function parseStepfunUsage(body, deps = {}) {
+  const log = (line) => { if (typeof deps.logger === 'function') deps.logger(line); };
   if (!body || body.status !== 1) throw errorWithStatus(body?.status === 0 && /auth|token|login|登录/i.test(`${body?.message || ''} ${body?.desc || ''}`) ? 'unauthorized' : 'unavailable', 'StepFun rate limit request failed');
   const credit = body.plan_credit_rate_limit;
   const sessionReset = resetAt(body.five_hour_usage_reset_time);
   const weeklyReset = resetAt(body.weekly_usage_reset_time);
-  const isCredit = !sessionReset && !weeklyReset && (
-    credit?.subscription_credit_left_rate != null || credit?.topup_credit_left_rate != null
+  const hasCreditShape = credit?.subscription_credit_left_rate != null
+    || credit?.topup_credit_left_rate != null
     || (Array.isArray(credit?.credit_buckets) && credit.credit_buckets.length > 0)
-    || numberOrNull(body.plan_family) === 2
-  );
+    || numberOrNull(body.plan_family) === 2;
+  const isCredit = !sessionReset && !weeklyReset && hasCreditShape;
+  // A plan that carries BOTH rate windows and a credit balance is not a shape
+  // any live capture has shown, so the branch that reports the windows and
+  // drops the credit balance is a guess. Say so on every occurrence rather than
+  // letting a silently under-reported account look like a complete one.
+  if (!isCredit && hasCreditShape) {
+    log('stepfun returned both rate windows and a credit balance; the rate windows are reported and the credit balance is dropped (mixed-plan shape unverified)');
+  }
   if (isCredit) {
     let left = null;
     const buckets = credit?.credit_buckets;
@@ -173,14 +225,20 @@ function oasisHeaders(token, webid) {
  * The site's own answer is the verdict. Timing and string comparison cannot do
  * better: both states look like a well-formed cookie.
  *
- * @returns {Promise<boolean>} true only on a 200. A transport failure answers
- *   false as well — "could not check" must send the caller to the window rather
- *   than trust a cookie it never validated.
+ * The 200 response is also `PLAN_URL`, so the body is returned alongside the
+ * verdict rather than thrown away. The caller is about to fetch exactly that
+ * endpoint for the account label; handing the body back saves one round trip
+ * per probe, which on the happy path is the difference between two requests and
+ * three.
+ *
+ * @returns {Promise<{ok: boolean, body: object|null}>} ok is true only on a 200.
+ *   A transport failure answers false as well — "could not check" must send the
+ *   caller to the window rather than trust a cookie it never validated.
  */
 async function verifyStepfunSession({ token, webid } = {}, deps = {}) {
   const normalized = normalizeOasisToken(token);
   const log = (line) => { if (typeof deps.logger === 'function') deps.logger(line); };
-  if (!normalized) return false;
+  if (!normalized) return { ok: false, body: null };
   const run = deps.fetch || fetch;
   try {
     const response = await run(PLAN_URL, {
@@ -189,10 +247,17 @@ async function verifyStepfunSession({ token, webid } = {}, deps = {}) {
       ...(deps.signal ? { signal: deps.signal } : {})
     });
     log(`stepfun session check -> ${response.status} (token ${normalized.length} chars)`);
-    return response.status === 200;
+    if (response.status !== 200) return { ok: false, body: null };
+    // A 200 that is not the documented envelope is still a signed-in session —
+    // it is the status code that decides that, not the payload shape.
+    try {
+      return { ok: true, body: await response.json() };
+    } catch {
+      return { ok: true, body: null };
+    }
   } catch (error) {
     log(`stepfun session check failed: ${error.message || error}`);
-    return false;
+    return { ok: false, body: null };
   }
 }
 
@@ -205,7 +270,14 @@ async function fetchStepfunLimits(options = {}, deps = {}) {
   const log = (line) => { if (typeof deps.logger === 'function') deps.logger(line); };
   // An explicit/env token is authoritative when present; otherwise the stored
   // credentials mint one here, which is what makes the lane renewable.
-  let token = stepfunToken(env, options);
+  //
+  // The paste is read as a PAIR, so a manual token that arrived with its
+  // device id already has `oasis-webid` before anything is attempted — without
+  // it the quota call 401s with a message that names neither a missing header
+  // nor a wrong token.
+  const pasted = stepfunSession(env, options);
+  let token = pasted.token;
+  let pastedWebid = pasted.webid;
   if (!token && !credentials) {
     return normalizeLimitProvider({ ...base, status: 'notConfigured', windows: [] });
   }
@@ -235,26 +307,47 @@ async function fetchStepfunLimits(options = {}, deps = {}) {
     // The sign-in answers with a bare token, or with a session descriptor when
     // the implementation also read the device id the site issued next to it.
     // Accept both so `oasis-webid` can be a real value rather than a guess.
+    //
+    // `plan` rides along when the sign-in had to ask the site whether its
+    // candidate session was signed in — that check is a PLAN_URL call, and its
+    // 200 body is the very account label this probe would otherwise fetch for
+    // itself a moment later.
     const value = normalizeOasisToken(typeof fresh === 'string' ? fresh : fresh?.token);
     if (!value) {
       const error = new Error('StepFun sign-in returned no token');
       error.status = 'unavailable';
       throw error;
     }
-    return { token: value, webid: String(fresh?.webid || '').trim() };
+    return {
+      token: value,
+      webid: String(fresh?.webid || '').trim(),
+      plan: fresh && typeof fresh === 'object' ? fresh.plan ?? null : null
+    };
   };
 
-  // Which device id to pair with the token. A session that came out of the
-  // browser login already carries the real one; a pasted token has whatever the
-  // user stated next to it; only if both are absent does the JWT get decoded,
-  // and that last resort announces itself to the log so an unexplained 401 is
-  // traceable to the guess rather than to a rejected credential.
+  // Which device id to pair with the token, in descending order of trust:
+  //   1. the cookie issued alongside a browser sign-in (readOasisSessions
+  //      returns it, so the pair cannot drift apart);
+  //   2. the webid parsed out of the pasted cookie string;
+  //   3. the environment override;
+  //   4. the JWT payload, decoded as a last resort.
+  //
+  // Source 4 is a heuristic, not a verified contract: `device_id` was read off a
+  // payload shape that no live capture has confirmed, and a wrong value fails
+  // the same way as a missing one (401 "oasis-token is embezzled"). It is used
+  // only after the real sources come up empty, and whatever it decides is
+  // written to the diagnostic log so a failure can be told apart from a wrong
+  // token instead of being guessed at.
   const resolveWebid = (sessionWebid, activeToken) => {
     const fromSession = String(sessionWebid || '').trim();
     if (fromSession) return fromSession;
-    const declared = stepfunWebid(env, options);
+    if (pastedWebid) {
+      log(`stepfun webid taken from the pasted cookie string (${pastedWebid.length} chars)`);
+      return pastedWebid;
+    }
+    const declared = stepfunWebid(env);
     if (declared) {
-      log(`stepfun webid taken from the configured value (${declared.length} chars)`);
+      log(`stepfun webid taken from the environment (${declared.length} chars)`);
       return declared;
     }
     const decoded = deviceId(activeToken);
@@ -268,10 +361,14 @@ async function fetchStepfunLimits(options = {}, deps = {}) {
     // Mint a token before probing when we have credentials and none pasted:
     // an absent token would otherwise cost a wasted 401 round trip.
     let webid = '';
+    // Carries the PLAN_URL body the sign-in already fetched, if any, so the
+    // label lookup below can be skipped instead of repeating that request.
+    let planFromSignIn = null;
     if (!token && credentials) {
       const session = await login();
       token = session.token;
       webid = session.webid;
+      planFromSignIn = session.plan;
     }
     webid = resolveWebid(webid, token);
 
@@ -310,34 +407,64 @@ async function fetchStepfunLimits(options = {}, deps = {}) {
       // would fail the retry for a second, unrelated reason and hide the real
       // one behind a misleading "wrong credentials" status.
       webid = resolveWebid(session.webid, token);
+      planFromSignIn = session.plan;
       body = await runWithProbeDeadline(
         async ({ signal }) => request(RATE_URL, signal, token),
         { signal: deps.signal, deadlineMs: Number(deps.stepfunFetchTimeoutMs || 15000) }
       );
     }
 
-    const windows = parseStepfunUsage(body);
+    const windows = parseStepfunUsage(body, { logger: deps.logger });
     let accountLabel = '';
     try {
-      const plan = await runWithProbeDeadline(
+      // Reuse the body the sign-in already pulled from PLAN_URL rather than
+      // asking for the same endpoint a second time in the same probe. Only the
+      // sign-in that actually verified a session has one to hand over; a
+      // pasted token has no such call behind it and still fetches it.
+      const plan = planFromSignIn ?? await runWithProbeDeadline(
         ({ signal }) => request(PLAN_URL, signal, token),
         { signal: deps.signal, deadlineMs: Number(deps.stepfunPlanFetchTimeoutMs || 1500) }
       );
-      if ((plan.status === 1 || plan.status == null) && typeof plan.subscription?.name === 'string') accountLabel = plan.subscription.name;
+      if (plan && (plan.status === 1 || plan.status == null) && typeof plan.subscription?.name === 'string') {
+        accountLabel = plan.subscription.name;
+      }
     } catch (error) {
       if (deps.signal?.aborted) throw error;
       // Plan name is optional; quota remains authoritative.
     }
-    // Keyed on the account, not the token: a rotated token is the same
-    // account, and keying on it would fork one login into several rows.
-    const accountKey = credentials
-      ? hashKey('stepfun', `password:${credentials.username.toLowerCase()}`)
-      : hashKey('stepfun', token);
-    return normalizeLimitProvider({ ...base, status: 'ok', accountKey, accountLabel, windows });
+    // Keyed on the account, not on the credential that happened to reach it.
+//
+// `credentials` requires a username AND a password, so gating on it split one
+// account into two rows: the probe that ran the browser login was keyed on the
+// username, and the very next probe — after the user pasted a token, or after
+// the password was removed from the form — keyed on the token and became a
+// second row for the same person. The username alone is the stable identity
+// and does not depend on which lane is currently winning.
+//
+// The `password:` prefix is kept so existing rows keep their key; only the
+// condition behind it changes.
+const accountIdentity = stepfunAccount(env, options).toLowerCase();
+const accountKey = accountIdentity
+  ? hashKey('stepfun', `password:${accountIdentity}`)
+  : hashKey('stepfun', token);
+return normalizeLimitProvider({ ...base, status: 'ok', accountKey, accountLabel, windows });
   } catch (error) {
     log(`stepfun probe finished as ${providerStatusFromError(error)}: ${error.message || error}`);
     return normalizeLimitProvider({ ...base, status: providerStatusFromError(error), windows: [] });
   }
 }
 
-module.exports = { fetchStepfunLimits, parseStepfunUsage, stepfunToken, stepfunCredentials, stepfunWebid, deviceId, normalizeOasisToken, oasisHeaders, verifyStepfunSession };
+module.exports = {
+  deviceId,
+  fetchStepfunLimits,
+  normalizeOasisCookie,
+  normalizeOasisToken,
+  oasisHeaders,
+  parseStepfunUsage,
+  stepfunAccount,
+  stepfunCredentials,
+  stepfunSession,
+  stepfunToken,
+  stepfunWebid,
+  verifyStepfunSession
+};

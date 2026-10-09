@@ -29,9 +29,23 @@
 // see the note above `beforeSubmit` before touching the polling loop.
 
 const LOGIN_URL = 'https://account.stepfun.com/login';
-// The cookie read is filtered by the URL the quota page is served from, so the
-// jar answers exactly "what would Chromium send to platform.stepfun.com?".
+// Two origins, one session. The quota endpoints are served from
+// platform.stepfun.com, so filtering the jar by that URL answers exactly "what
+// would Chromium send to the quota page". But the LOGIN page runs on
+// account.stepfun.com, and there the Oasis cookies land HOST-ONLY: measured
+// against the live page, `Oasis-Token@account.stepfun.com` and
+// `Oasis-Webid@account.stepfun.com` exist while platform.stepfun.com still
+// carries only the anonymous token its own page load issued. A platform-scoped
+// read therefore sees the pre-login state and nothing else — which is what made
+// `beforeSubmit` always come back empty (so its guard degraded into a
+// meaningless `Boolean(token)`), and what made a successful login look like a
+// token that never changed.
 const COOKIE_URL = 'https://platform.stepfun.com/';
+const ACCOUNT_COOKIE_URL = 'https://account.stepfun.com/';
+// account first: the pair a login mints lives there. Both are still read,
+// because which origin holds the live one depends on where the page ended up
+// after the redirect, and `verifySession` is what decides rather than the order.
+const SESSION_COOKIE_URLS = [ACCOUNT_COOKIE_URL, COOKIE_URL];
 const OASIS_TOKEN = 'Oasis-Token';
 const OASIS_WEBID = 'Oasis-Webid';
 const WINDOW_TITLE = '正在登录 StepFun…';
@@ -39,16 +53,25 @@ const WINDOW_TITLE = '正在登录 StepFun…';
 // the user can finish a challenge that needs a click. limits.js wraps this in
 // a slightly longer deadline and reports the failure as a sign-in failure.
 const DEFAULT_TIMEOUT_MS = 110_000;
-// How long after the redirect the site needs before the anonymous cookie is
-// replaced by the signed-in one. Measured against the live account; see the
-// note where it is used.
+// How long after the redirect the site needs before the signed-in cookie is
+// readable. Measured against the live account; see the note where it is used.
 const TOKEN_SETTLE_MS = 1_500;
-// How long to keep waiting for that replacement before declaring the sign-in
-// failed. Deliberately far longer than the settle window: the swap has been
-// seen to take a few seconds, and giving up early would surface as a bad
-// credential when the real cause is a slow site. Injectable so a test can
+// How long to keep waiting for a session the SITE accepts before declaring
+// the sign-in failed. Deliberately far longer than the settle window: the swap
+// has been seen to take a few seconds, and giving up early would surface as a
+// bad credential when the real cause is a slow site. Injectable so a test can
 // exercise the deadline without spending the real one in wall-clock time.
+//
+// This counts from the redirect, and it is the ONLY deadline the polling loop
+// enforces on itself: with `verifySession` in hand, "the cookie looks new" is
+// no longer evidence, so a slow-but-correct site gets waited out instead of
+// being failed on a heuristic.
 const TOKEN_REPLACE_DEADLINE_MS = 20_000;
+// How long a single `executeJavaScript` may hang before it is treated as a
+// miss. Without it a renderer that stops answering (a page navigating away
+// mid-call, a renderer that crashed) parks the sign-in forever: the outer
+// deadline is only checked between polls, and the poll itself never returns.
+const PAGE_SCRIPT_TIMEOUT_MS = 15_000;
 // Exported so the caller can hand `session.fromPartition(partition)` to this
 // module. A window and the session that reads it must share one partition, and
 // a typo'd literal in two files is how a sign-in silently returns no token.
@@ -75,11 +98,6 @@ function stepfunPartition({ remember = true } = {}) {
 // The default, so a caller that never states a preference still persists.
 const PARTITION = stepfunPartition();
 
-// The password tab is a Radix tab; its trigger id is stable across the locale
-// because it comes from the component, not the translated label. Selecting it
-// before filling keeps the automation independent of the UI language.
-const PASSWORD_TAB_TRIGGER = '#radix-\xABR3nndl9b\xBB-trigger-password';
-
 function loginUrl({ redirect } = {}) {
   const target = String(redirect || 'https://platform.stepfun.com/step-plan');
   return `${LOGIN_URL}?redirect=${encodeURIComponent(target)}&source_app=platform-cn`;
@@ -97,27 +115,55 @@ function tokenExpiryMs(cookies, nowMs) {
   return expires * 1000;
 }
 
-// `session.cookies` is a Cookies instance, not a function: the read is
-// `cookies.get(filter)`. Filtering by URL rather than by domain asks Chromium
-// exactly which cookies it would send to the quota page, which is what the
-// request has to reproduce — a domain filter would also return entries for
-// hosts the API never talks to.
-// Both cookies come out of the same sign-in, and both have to travel together:
-// the quota endpoints pair `Oasis-Token` with the device id the session was
-// registered under, and a mismatched pair is rejected. Reading them in one
-// pass keeps them from ever being sampled a rotation apart.
-async function readOasisSession(session, { nowMs = Date.now() } = {}) {
-  const cookies = await session.cookies.get({ url: COOKIE_URL });
-  const hit = cookies.find((c) => c.name === OASIS_TOKEN && String(c.value || '').trim());
-  if (!hit) return { token: '', webid: '' };
-  const value = String(hit.value).trim();
-  const expiresAt = tokenExpiryMs(cookies, nowMs);
-  // An expired cookie is still returned by cookies(); treating it as a
-  // credential would send the next quota probe into a guaranteed 401 and
-  // report a fresh-looking credential as rejected.
-  if (expiresAt !== null && expiresAt <= nowMs) return { token: '', webid: '' };
-  const webid = cookies.find((c) => c.name === OASIS_WEBID);
-  return { token: value, webid: String(webid?.value || '').trim() };
+/**
+ * Every Oasis cookie pair the jar currently holds, one entry per origin that
+ * has one.
+ *
+ * Both cookies come out of the same sign-in, and both have to travel together:
+ * the quota endpoints pair `Oasis-Token` with the device id the session was
+ * registered under, and a mismatched pair is rejected. Reading them in one pass
+ * keeps them from ever being sampled a rotation apart.
+ *
+ * More than one candidate is the normal case, not an edge case: the anonymous
+ * token lives on platform.stepfun.com while the signed-in pair lives on
+ * account.stepfun.com, so the origin that answers "already logged in" is not
+ * the origin the login page runs on. Returning a list instead of guessing
+ * leaves the decision to `verifySession`, which is the only thing that can
+ * make it.
+ *
+ * @returns {Promise<Array<{token: string, webid: string, source: string}>>}
+ */
+async function readOasisSessions(session, { nowMs = Date.now(), urls = SESSION_COOKIE_URLS } = {}) {
+  const found = [];
+  const seen = new Set();
+  for (const url of urls) {
+    // An expired cookie is still returned by cookies(); treating it as a
+    // credential would send the next quota probe into a guaranteed 401 and
+    // report a fresh-looking credential as rejected.
+    const cookies = await session.cookies.get({ url });
+    const hit = cookies.find((c) => c.name === OASIS_TOKEN && String(c.value || '').trim());
+    if (!hit) continue;
+    const token = String(hit.value).trim();
+    if (seen.has(token)) continue;
+    const expiresAt = tokenExpiryMs(cookies, nowMs);
+    if (expiresAt !== null && expiresAt <= nowMs) continue;
+    seen.add(token);
+    const webid = cookies.find((c) => c.name === OASIS_WEBID);
+    found.push({ token, webid: String(webid?.value || '').trim(), source: url });
+  }
+  return found;
+}
+
+/**
+ * The first live Oasis pair in the jar, or empty strings.
+ *
+ * A thin convenience over readOasisSessions for callers that only want to know
+ * whether the jar holds something. Anything that has to tell a signed-in
+ * session from an anonymous one must use the plural form.
+ */
+async function readOasisSession(session, options = {}) {
+  const [first] = await readOasisSessions(session, options);
+  return first ? { token: first.token, webid: first.webid } : { token: '', webid: '' };
 }
 
 /**
@@ -126,8 +172,8 @@ async function readOasisSession(session, { nowMs = Date.now() } = {}) {
  *
  * @param {{username: string, password: string, BrowserWindow: object,
  *          session: object, partition?: string, timeoutMs?: number,
- *          tokenReplaceDeadlineMs?: number,
- *          logger?: (m: string) => void, onStatus?: (m: string) => void}} options
+ *          tokenReplaceDeadlineMs?: number, logger?: (m: string) => void,
+ *          verifySession?: (s: {token: string, webid: string}) => boolean}} options
  * @returns {Promise<{token: string, webid: string}>} The Oasis-Token and the
  *   device id issued with it, or `{token: '', webid: ''}` when the window was
  *   closed before sign-in completed.
@@ -142,7 +188,11 @@ async function signInStepFunWithBrowser(options = {}) {
     timeoutMs = DEFAULT_TIMEOUT_MS,
     tokenReplaceDeadlineMs = TOKEN_REPLACE_DEADLINE_MS,
     logger = () => {},
-    onStatus = () => {}
+    // Asks the SITE whether a candidate pair is a signed-in session. Supplied by
+    // main.js, which owns the transport. When it is absent the flow falls back
+    // to comparing against what the jar held before submitting, which cannot
+    // tell a replaced token from one that was already there.
+    verifySession = null
   } = options;
 
   if (!BrowserWindow) throw new Error('BrowserWindow is required');
@@ -153,7 +203,14 @@ async function signInStepFunWithBrowser(options = {}) {
     throw error;
   }
 
-  const win = new BrowserWindow({
+  // One window per partition, reused across attempts. The previous behaviour
+  // built a window per call and destroyed it whenever the sign-in did not
+  // succeed, which is the one thing this file must not do — see the note on
+  // `retainedWindows`. Reusing also means a window left on screen after a
+  // failure is the same window the next attempt drives, so the user who wants
+  // to finish by hand is not left with a growing pile of them.
+  const reused = retainedStepFunWindow(partition);
+  const win = reused || new BrowserWindow({
     width: 520,
     height: 720,
     title: WINDOW_TITLE,
@@ -174,12 +231,18 @@ async function signInStepFunWithBrowser(options = {}) {
   });
 
   const deadline = Date.now() + Number(timeoutMs || DEFAULT_TIMEOUT_MS);
-  const cleanup = () => { if (!win.isDestroyed()) win.destroy(); };
   let signedIn = false;
 
   try {
-    logger('opening the StepFun sign-in page');
-    onStatus('opening');
+    logger(reused
+      ? 'StepFun sign-in: reusing the retained window for a new attempt'
+      : 'StepFun sign-in: opening the sign-in page');
+    // A window kept from an earlier attempt can be minimized or behind others;
+    // a reused one has to come back on screen or the user is looking at a
+    // sign-in they cannot see. Optional call: `isMinimized` is an Electron
+    // API, and the guard keeps a window object that predates it from throwing.
+    if (win.isMinimized?.()) win.restore?.();
+    else if (!win.isVisible()) win.show?.();
     await win.loadURL(loginUrl());
     // The form is client-rendered. Wait for the tab strip, not for a field: the
     // page opens on the phone-code tab, so the password field does not exist
@@ -187,9 +250,8 @@ async function signInStepFunWithBrowser(options = {}) {
     await waitForSelector(win, '[role="tab"]', deadline);
 
     // Radix Tabs switches its value on mousedown, so a bare click() is ignored
-    // and the phone-code form stays on screen forever. The trigger id is
-    // generated, so fall back to the tab's label — which is localized, hence
-    // matched against several languages.
+    // and the phone-code form stays on screen forever. Matched on the tab's
+    // label, which is localized, hence several languages.
     //
     // The tab strip itself is present in the server-rendered HTML while its
     // click handler only exists once React hydrates, so switching on first
@@ -197,37 +259,34 @@ async function signInStepFunWithBrowser(options = {}) {
     // and retry while the page is still settling.
     const switched = await selectPasswordTabUntilReady(win, deadline, logger);
     if (!switched) throw new Error('could not find the password sign-in tab');
-    onStatus('filling');
+    logger('StepFun sign-in: filling the stored credentials');
 
-    logger('filling the StepFun credentials');
     const account = JSON.stringify(String(username).trim());
     const secret = JSON.stringify(String(password));
-    await win.webContents.executeJavaScript(
-      `(() => {
-        const inputs = [...document.querySelectorAll('input')];
-        const passwordEl = document.querySelector('#login-password')
-          || document.querySelector('input[type="password"]');
-        // The account box is id'd login-account, not login-email — the email
-        // id belongs to the email-code tab. Fall back to the first input that
-        // is neither the password box nor a verification-code field.
-        const accountEl = document.querySelector('#login-account')
-          || inputs.find((el) => el !== passwordEl
-            && el.type !== 'password'
-            && !/(code|otp|verify)/i.test(el.id || ''));
-        if (!passwordEl) throw new Error('missing the password field');
-        if (!accountEl) throw new Error('missing the account field');
-        const setter = Object.getOwnPropertyDescriptor(
-          window.HTMLInputElement.prototype, 'value').set;
-        const set = (el, value) => {
-          setter.call(el, value);
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        };
-        set(accountEl, ${account});
-        set(passwordEl, ${secret});
-        return true;
-      })()`
-    );
+    await runPageScript(win, `(() => {
+      const inputs = [...document.querySelectorAll('input')];
+      const passwordEl = document.querySelector('#login-password')
+        || document.querySelector('input[type="password"]');
+      // The account box is id'd login-account, not login-email — the email
+      // id belongs to the email-code tab. Fall back to the first input that
+      // is neither the password box nor a verification-code field.
+      const accountEl = document.querySelector('#login-account')
+        || inputs.find((el) => el !== passwordEl
+          && el.type !== 'password'
+          && !/(code|otp|verify)/i.test(el.id || ''));
+      if (!passwordEl) throw new Error('missing the password field');
+      if (!accountEl) throw new Error('missing the account field');
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype, 'value').set;
+      const set = (el, value) => {
+        setter.call(el, value);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      set(accountEl, ${account});
+      set(passwordEl, ${secret});
+      return true;
+    })()`, false);
     // Confirm the values actually landed. React re-renders controlled inputs
     // from state, and submitting before it has caught up sends empty fields.
     const filled = await waitForExpression(
@@ -245,13 +304,11 @@ async function signInStepFunWithBrowser(options = {}) {
     // Tick consent and confirm it stuck. The control is a <button
     // role="checkbox"> and, unlike the tab, it wants a plain click(): the
     // pointer sequence Radix needs for a tab cancels this one back out.
-    await win.webContents.executeJavaScript(
-      `(() => {
-        const box = document.querySelector('[role="checkbox"]');
-        if (box && box.getAttribute('aria-checked') !== 'true') box.click();
-        return true;
-      })()`
-    );
+    await runPageScript(win, `(() => {
+      const box = document.querySelector('[role="checkbox"]');
+      if (box && box.getAttribute('aria-checked') !== 'true') box.click();
+      return true;
+    })()`, false);
     await waitForExpression(
       win,
       `(() => {
@@ -262,34 +319,40 @@ async function signInStepFunWithBrowser(options = {}) {
       true
     );
 
-    // Remember what the session holds BEFORE submitting. The site issues an
-    // ANONYMOUS Oasis-Token for platform.stepfun.com when the page loads, long
-    // before anyone signs in, and only swaps in the signed-in one a few seconds
-    // after the redirect — observed against the live account as a token that
-    // changed from 657 to 656 characters while the quota call was already
-    // failing with "auth failed: not a logined oasis account". Reading the
-    // cookie the moment the page navigates hands back that anonymous one: a
-    // credential that looks freshly minted and is not. Knowing what was there
-    // beforehand is what lets the wait below tell the two apart.
-    const beforeSubmit = (await readOasisSession(session)).token;
+    // Remember what the session holds BEFORE submitting, on EVERY origin that
+    // holds anything. The site issues an ANONYMOUS Oasis-Token for
+    // platform.stepfun.com when the page loads, long before anyone signs in,
+    // and only swaps in the signed-in one a few seconds after the redirect —
+    // observed against the live account as a token that changed from 657 to 656
+    // characters while the quota call was already failing with "auth failed:
+    // not a logined oasis account". Reading a single origin hands back a
+    // half-answer: account.stepfun.com has no token at all on a first run, so
+    // the comparison below was against `''` and its guard collapsed into
+    // `Boolean(token)` — a check that passes on the anonymous cookie.
+    const beforeSubmit = new Set(
+      (await readOasisSessions(session)).map((candidate) => candidate.token).filter(Boolean)
+    );
 
     // Match the button by label, not by type: the submit control carries no
     // type attribute, and its label is localized per tab ("登录" here,
     // "登录 / 注册" on the phone tab).
-    await win.webContents.executeJavaScript(
-      `(() => {
-        const buttons = [...document.querySelectorAll('button')];
-        const button = buttons.find((el) =>
-          /^(登录|sign in|log in)/i.test((el.textContent || '').trim()))
-          || document.querySelector('button[type="submit"]');
-        if (!button) throw new Error('could not find the sign-in button');
-        button.click();
-        return true;
-      })()`
-    );
+    await runPageScript(win, `(() => {
+      const buttons = [...document.querySelectorAll('button')];
+      const button = buttons.find((el) =>
+        /^(登录|sign in|log in)/i.test((el.textContent || '').trim()))
+        || document.querySelector('button[type="submit"]');
+      if (!button) throw new Error('could not find the sign-in button');
+      button.click();
+      return true;
+    })()`, false);
 
-    // Poll for the token only after the page has left the login screen.
-    onStatus('signing-in');
+    // Poll for a session the SITE accepts, only after the page has left the
+    // login screen.
+    logger('StepFun sign-in: waiting for the site to issue a session');
+    // Candidates the site has already rejected this round. A rejected pair is
+    // not re-verified on every 400ms tick — otherwise a stale anonymous cookie
+    // costs one network round trip per poll for the whole settle window.
+    const rejected = new Set();
     let navigatedAt = 0;
     while (Date.now() < deadline) {
       if (win.isDestroyed()) break;
@@ -300,23 +363,34 @@ async function signInStepFunWithBrowser(options = {}) {
       } catch { /* the window can go away between the check and the read */ }
       if (navigated && !navigatedAt) navigatedAt = Date.now();
       if (navigatedAt) {
-        const settledMs = Date.now() - navigatedAt;
-        // Give the site a beat to replace the anonymous cookie before reading.
-        if (settledMs >= TOKEN_SETTLE_MS) {
-          const outcome = await readOasisSession(session);
-          if (outcome.token && outcome.token !== beforeSubmit) {
-            logger('StepFun sign-in completed');
-            onStatus('done');
+        // Give the site a beat to write the signed-in cookie before reading.
+        if (Date.now() - navigatedAt >= TOKEN_SETTLE_MS) {
+          for (const candidate of await readOasisSessions(session)) {
+            if (!candidate.token || rejected.has(candidate.token)) continue;
+            let accepted;
+            if (typeof verifySession === 'function') {
+              accepted = await verifySession(candidate);
+              if (!accepted) rejected.add(candidate.token);
+            } else {
+              // No way to ask the site: the fallback is "this is not the
+              // cookie that was already there". Weaker than a verdict — a token
+              // that was present before the submit and still is now reads as
+              // unchanged, and a replaced one reads as new — which is exactly
+              // why main.js always supplies verifySession.
+              accepted = !beforeSubmit.has(candidate.token);
+            }
+            if (!accepted) continue;
+            logger('StepFun sign-in: the site accepted the session');
             signedIn = true;
-            return outcome;
+            return { token: candidate.token, webid: candidate.webid };
           }
-          // The anonymous token is still there. Returning it would hand the
-          // quota probe a credential that looks freshly minted and is not —
-          // the exact failure this wait exists to prevent. So keep waiting,
-          // and if the site never switches, fail with a message that names the
-          // cause instead of a generic timeout. A credential stuck in the
-          // wrong state is not something a longer wait fixes.
-          if (settledMs >= Number(tokenReplaceDeadlineMs)) {
+          // Every candidate the jar holds was already there before the submit
+          // or has been rejected by the site. Returning one of those hands the
+          // quota probe a credential that looks freshly minted and is not — the
+          // exact failure this wait exists to prevent. So keep waiting, and if
+          // the site never switches, fail with a message that names the cause
+          // instead of a generic timeout.
+          if (Date.now() - navigatedAt >= Number(tokenReplaceDeadlineMs)) {
             throw new Error('StepFun did not replace the anonymous session after sign-in');
           }
         }
@@ -338,18 +412,54 @@ async function signInStepFunWithBrowser(options = {}) {
       throw cancelled;
     }
     if (!error.status) error.status = 'unavailable';
+    // The window is deliberately left open below, so say so. Silently keeping a
+    // visible window is worse than not keeping one: the user has no way to tell
+    // it is still theirs to use.
+    error.manualFallback = true;
     throw error;
   } finally {
-    // A successful sign-in keeps its window: destroying it takes the network
-    // stack down and the quota read that follows can no longer reach the site.
-    // A failed attempt has nothing worth keeping.
-    if (signedIn && !win.isDestroyed()) retainStepFunWindow(win, partition);
-    else cleanup();
+    // NEVER destroy this window. On success it is hidden and kept so the
+    // renderer — and the network stack it owns — stays alive for the quota read
+    // that follows. On failure it is kept VISIBLE: the user can finish the
+    // sign-in by hand, which is the only route left when the automation gives
+    // up on a page it cannot drive.
+    //
+    // The earlier version destroyed the window on the failure path, which
+    // contradicted the measurement recorded on `retainedWindows` below and is
+    // the same network-stack hazard the success path avoids.
+    if (win.isDestroyed()) {
+      // Already gone (the user closed it) — there is nothing to keep, and a
+      // `return` here would swallow the try/catch result, so just fall through.
+    } else if (signedIn) {
+      retainStepFunWindow(win, partition);
+    } else {
+      retainStepFunWindow(win, partition, { hide: false });
+      logger('StepFun sign-in: the window is still open, finish the sign-in there');
+    }
   }
 }
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// `executeJavaScript` resolves when the renderer answers and rejects when it
+// throws, but a renderer that is navigating away, or has crashed, can leave the
+// promise pending forever. Every page probe goes through here so one dead
+// renderer costs a single miss instead of parking the sign-in.
+async function runPageScript(win, script, fallback = undefined, timeoutMs = PAGE_SCRIPT_TIMEOUT_MS) {
+  if (win.isDestroyed()) return fallback;
+  let timer = null;
+  try {
+    return await Promise.race([
+      win.webContents.executeJavaScript(script),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), timeoutMs); })
+    ]);
+  } catch {
+    return fallback;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 // A destroyed window takes Chromium's network stack down with it: measured on
@@ -375,7 +485,7 @@ function retainedStepFunWindow(partition = PARTITION) {
   return null;
 }
 
-function retainStepFunWindow(win, partition) {
+function retainStepFunWindow(win, partition, { hide = true } = {}) {
   if (!win || win.isDestroyed()) return null;
   const key = partition || win.webContents?.session?.name || PARTITION;
   retainedWindows.set(key, win);
@@ -383,7 +493,7 @@ function retainStepFunWindow(win, partition) {
   win.once('closed', () => {
     if (retainedWindows.get(key) === win) retainedWindows.delete(key);
   });
-  if (win.isVisible()) win.hide();
+  if (hide && win.isVisible()) win.hide();
   return win;
 }
 
@@ -403,10 +513,15 @@ function disposeStepFunWindow(partition) {
 // Switch to the password tab and confirm it actually took effect. Returns
 // false when the tab itself was never found, so the caller can tell "the page
 // never offered a password tab" from "the page is still hydrating".
+//
+// The trigger is found by LABEL only. An earlier version also tried a hardcoded
+// `#radix-\xABR3nndl9b\xBB-trigger-password` id first: React's useId generates
+// that id per component instance, so it belongs to whichever tree the build
+// happened to render, and matching on it silently stopped the moment the id
+// changed — with a label match still sitting right behind it.
 async function selectPasswordTabUntilReady(win, deadline, logger = () => {}) {
   const script = `(() => {
-    const byId = document.querySelector(${JSON.stringify(PASSWORD_TAB_TRIGGER)});
-    const tab = byId || [...document.querySelectorAll('[role="tab"]')].find((el) =>
+    const tab = [...document.querySelectorAll('[role="tab"]')].find((el) =>
       /密码|password|pwd|senha/i.test(el.textContent || ''));
     if (!tab) return false;
     for (const type of ['pointerdown', 'mousedown']) {
@@ -419,7 +534,7 @@ async function selectPasswordTabUntilReady(win, deadline, logger = () => {}) {
 
   let sawTab = false;
   for (let attempt = 0; attempt < 4 && Date.now() < deadline; attempt += 1) {
-    const clicked = await win.webContents.executeJavaScript(script).catch(() => false);
+    const clicked = await runPageScript(win, script, false);
     if (!clicked) return sawTab;
     sawTab = true;
     // The password box is the proof the switch landed; matched by type so a
@@ -427,7 +542,7 @@ async function selectPasswordTabUntilReady(win, deadline, logger = () => {}) {
     if (await waitForSelector(win, 'input[type="password"]', Math.min(deadline, Date.now() + 6000), true)) {
       return true;
     }
-    logger('the password tab did not switch yet, retrying');
+    logger('StepFun sign-in: the password tab did not switch yet, retrying');
     await delay(1200);
   }
   return sawTab;
@@ -438,7 +553,7 @@ async function selectPasswordTabUntilReady(win, deadline, logger = () => {}) {
 async function waitForExpression(win, script, deadline) {
   while (Date.now() < deadline) {
     if (win.isDestroyed()) return false;
-    const done = await win.webContents.executeJavaScript(script).catch(() => false);
+    const done = await runPageScript(win, script, false);
     if (done) return true;
     await delay(200);
   }
@@ -458,6 +573,7 @@ async function waitForSelector(win, selector, deadline, soft = false) {
 }
 
 module.exports = {
+  ACCOUNT_COOKIE_URL,
   COOKIE_URL,
   DEFAULT_TIMEOUT_MS,
   LOGIN_URL,
@@ -465,11 +581,13 @@ module.exports = {
   OASIS_WEBID,
   PARTITION,
   PARTITION_BASE,
+  SESSION_COOKIE_URLS,
   TOKEN_REPLACE_DEADLINE_MS,
   WINDOW_TITLE,
   disposeStepFunWindow,
   loginUrl,
   readOasisSession,
+  readOasisSessions,
   retainedStepFunWindow,
   signInStepFunWithBrowser,
   stepfunPartition,

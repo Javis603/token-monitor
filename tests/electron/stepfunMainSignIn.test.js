@@ -70,7 +70,19 @@ const cookie = (name, value) => ({ name, value, expires: (Date.now() + HOUR) / 1
 // Builds the real electronStepfunSignIn with only its Electron edges replaced.
 // `stepfunRememberLogin` comes along because the body calls it, and
 // `appendStepFunDiagnostic` is the boundary marker rather than a dependency.
-function loadSigner({ cookies = [], signedIn = false, settings = {}, windowResult = null } = {}) {
+//
+// `cookiesByUrl` is the default shape of the world: the login page's cookies
+// live on account.stepfun.com while platform.stepfun.com keeps the anonymous
+// token its own page load issued. Handing one flat list to both origins is the
+// simplification that hid the bug this file exists to catch.
+function loadSigner({
+  cookies = [],
+  cookiesByUrl = null,
+  signedIn = false,
+  acceptToken = null,
+  settings = {},
+  windowResult = null
+} = {}) {
   const opened = [];
   const verifications = [];
   const partitions = [];
@@ -79,18 +91,26 @@ function loadSigner({ cookies = [], signedIn = false, settings = {}, windowResul
     settings,
     BrowserWindow: { marker: 'BrowserWindow' },
     stepfunPartition: login.stepfunPartition,
-    readOasisSession: login.readOasisSession,
+    readOasisSessions: (target) => login.readOasisSessions(target),
     session: {
       fromPartition: (name) => {
         partitions.push(name);
-        const created = { cookies: { get: async () => cookies }, name };
+        const created = {
+          cookies: {
+            get: async (filter) => (cookiesByUrl ? (cookiesByUrl[filter.url] || []) : cookies)
+          },
+          name
+        };
         sessions.push(created);
         return created;
       }
     },
+    // `acceptToken` lets one candidate be accepted and another refused, which is
+    // the whole point of putting more than one origin in front of the site.
     verifyStepfunSession: async (candidate) => {
       verifications.push(candidate);
-      return signedIn;
+      const ok = acceptToken ? acceptToken.includes(candidate.token) : signedIn;
+      return { ok, body: ok ? { status: 1, subscription: { name: 'Step Pro' } } : null };
     },
     electronLimitsFetch: () => async () => ({ status: signedIn ? 200 : 401 }),
     signInStepFunWithBrowser: async (options) => {
@@ -114,10 +134,68 @@ test('a signed-in session is reused instead of opening a window', async () => {
 
   const result = await signIn({ username: 'me', password: 'pw' });
 
-  assert.deepEqual(result, { token: 'tok', webid: 'web' });
+  // The PLAN_URL body that proved the session rides along, so the quota probe can
+  // skip asking the same endpoint again a moment later. Compared field by field:
+  // these crossed a vm realm boundary, where deepEqual rejects reference-equal
+  // looking objects.
+  assert.equal(result.token, 'tok');
+  assert.equal(result.webid, 'web');
+  assert.equal(result.plan?.subscription?.name, 'Step Pro');
   assert.equal(opened.length, 0, 'a live session must not interrupt the user');
   assert.equal(verifications.length, 1, 'reuse is decided by asking the site, not by the jar');
-  assert.deepEqual(verifications[0], { token: 'tok', webid: 'web' });
+  assert.equal(verifications[0].token, 'tok');
+  assert.equal(verifications[0].webid, 'web');
+});
+
+test('the live session is found on the account origin, not just the platform one', async () => {
+  // The reason the origin list exists. After a real sign-in the signed-in pair
+  // lives on account.stepfun.com (host-only) while platform.stepfun.com keeps
+  // the anonymous token. A reader scoped to platform alone sees only the
+  // anonymous one and reports a live session as dead, popping the window on
+  // every single probe.
+  const { signIn, opened, verifications } = loadSigner({
+    cookiesByUrl: {
+      [login.ACCOUNT_COOKIE_URL]: [cookie(login.OASIS_TOKEN, 'tok-live'), cookie(login.OASIS_WEBID, 'web-live')],
+      [login.COOKIE_URL]: [cookie(login.OASIS_TOKEN, 'tok-anon'), cookie(login.OASIS_WEBID, 'web-anon')]
+    },
+    acceptToken: ['tok-live']
+  });
+
+  const result = await signIn({ username: 'me', password: 'pw' });
+
+  assert.equal(result.token, 'tok-live');
+  assert.equal(opened.length, 0, 'no window: the account origin held the live session');
+  assert.deepEqual(verifications.map((entry) => entry.token), ['tok-live'],
+    'the account origin is tried first and is accepted, so the anonymous one is never asked about');
+});
+
+test('a refused candidate does not stop the next origin being tried', async () => {
+  const { signIn, opened } = loadSigner({
+    cookiesByUrl: {
+      [login.ACCOUNT_COOKIE_URL]: [cookie(login.OASIS_TOKEN, 'tok-stale'), cookie(login.OASIS_WEBID, 'web-a')],
+      [login.COOKIE_URL]: [cookie(login.OASIS_TOKEN, 'tok-live'), cookie(login.OASIS_WEBID, 'web-b')]
+    },
+    acceptToken: ['tok-live']
+  });
+
+  const result = await signIn({});
+
+  assert.equal(result.token, 'tok-live');
+  assert.equal(result.webid, 'web-b', 'the device id travels with its own token, not the other one');
+  assert.equal(opened.length, 0);
+});
+
+test('the window is handed the same site verdict the reuse check uses', async () => {
+  // Otherwise the flow falls back to comparing cookie strings inside the window
+  // — which is the thing that reported a successful sign-in as a failure.
+  const { signIn, opened } = loadSigner({ cookies: [cookie(login.OASIS_TOKEN, 'tok')] });
+
+  await signIn({ username: 'me', password: 'pw' });
+
+  assert.equal(typeof opened[0].verifySession, 'function',
+    'the window flow has to be able to ask the site too');
+  assert.equal(await opened[0].verifySession({ token: 'tok', webid: 'web' }), false,
+    'and it answers with that candidate\'s own verdict');
 });
 
 test('an anonymous cookie is not reused, even though it is a valid cookie', async () => {
@@ -164,6 +242,31 @@ test('the remembered-session setting decides whether the partition persists', as
   assert.equal(forgotten.opened[0].partition, 'stepfun-login');
 });
 
+test('only an explicit opt-out turns off the persisted session', async () => {
+  // The form stores '1'/'0' because the framework has no checkbox, but the same
+  // key can arrive as a number or a boolean from a hand-edited settings file.
+  // The old `!== '0'` test read `false` as "remember", so a user who had turned
+  // the option off by hand still got a session written to disk, with no symptom
+  // that explained why.
+  const read = (value) => {
+    const context = {
+      settings: value === undefined ? {} : { stepfunRememberLogin: value }
+    };
+    const body = extractFunction(main, 'stepfunRememberLogin');
+    return vm.runInNewContext(`${body}\nstepfunRememberLogin`, context)();
+  };
+
+  for (const off of ['0', 0, false, 'false', 'OFF', ' off ', 'no']) {
+    assert.equal(read(off), false, `${JSON.stringify(off)} must opt out`);
+  }
+  // Absent, empty and unrecognised values keep the default: a fresh install, or
+  // a settings file written by a future version, must not silently wipe the
+  // login the user already has.
+  for (const on of ['1', 1, true, 'true', '', undefined, null, 'whatever']) {
+    assert.equal(read(on), true, `${JSON.stringify(on)} must persist`);
+  }
+});
+
 test('the window and the cookie reader always share one partition', async () => {
   const { signIn, partitions, opened, sessions } = loadSigner({ cookies: [] });
   await signIn({});
@@ -191,14 +294,35 @@ test('clearing the account also forgets the browser session', async () => {
   // a session the user just told the app to remove.
   const disposed = [];
   const removed = [];
+  const failures = [];
   const context = {
     settings: {},
     stepfunPartition: login.stepfunPartition,
     disposeStepFunWindow: (partition) => disposed.push(partition),
+    ACCOUNT_COOKIE_URL: login.ACCOUNT_COOKIE_URL,
     COOKIE_URL: login.COOKIE_URL,
     OASIS_TOKEN: login.OASIS_TOKEN,
     OASIS_WEBID: login.OASIS_WEBID,
-    session: { fromPartition: () => ({ cookies: { remove: async (...args) => removed.push(args) } }) }
+    appendStepFunDiagnostic: (line) => failures.push(line),
+    session: {
+      fromPartition: () => ({
+        cookies: {
+          // Shaped to the real Electron 43.4 signature on purpose. Measured:
+          // cookies.remove(url, filter) takes ONE string there — a string array,
+          // a { name } object and a Cookie object all throw "conversion failure
+          // from". The old call passed an array, so it threw every time, the
+          // try/catch swallowed it, and Clear reported success while removing
+          // nothing. A mock that accepts whatever it is handed agrees with all
+          // of that, which is why this one refuses the shapes Electron refuses.
+          remove: async (url, filter) => {
+            if (typeof filter !== 'string') {
+              throw new TypeError(`Error processing argument at index 1, conversion failure from ${typeof filter}`);
+            }
+            removed.push([url, filter]);
+          }
+        }
+      })
+    }
   };
   const body = [
     extractFunction(main, 'stepfunRememberLogin'),
@@ -208,12 +332,99 @@ test('clearing the account also forgets the browser session', async () => {
 
   await clear();
 
-  assert.deepEqual(disposed, ['persist:stepfun-login'], 'the retained window goes with the session');
-  assert.equal(removed.length, 1, 'the cookies go too, not just the settings');
-  // Compared element-wise: these values crossed a vm realm boundary, where
-  // deepEqual rejects reference-equal-looking arrays.
-  assert.equal(removed[0][0], login.COOKIE_URL);
-  assert.equal(removed[0][1].join(','), `${login.OASIS_TOKEN},${login.OASIS_WEBID}`);
+  // BOTH partitions. Switching "remember this login" off leaves the persisted
+  // cookies on disk by design — but Clear says "forget this login", and a user
+  // who cleared while the option was off would otherwise find the old session
+  // still sitting there, one toggle away from returning.
+  assert.deepEqual(disposed, ['persist:stepfun-login', 'stepfun-login'],
+    'both partitions release their retained window, not just the active one');
+  // Both origins too: the signed-in pair is host-only on account.stepfun.com,
+  // so removing only the platform-scoped entry leaves a working session behind.
+  assert.deepEqual(
+    removed.map((entry) => entry[0]),
+    [
+      login.ACCOUNT_COOKIE_URL, login.ACCOUNT_COOKIE_URL,
+      login.COOKIE_URL, login.COOKIE_URL,
+      login.ACCOUNT_COOKIE_URL, login.ACCOUNT_COOKIE_URL,
+      login.COOKIE_URL, login.COOKIE_URL
+    ]
+  );
+  assert.deepEqual(
+    removed.map((entry) => entry[1]),
+    [
+      login.OASIS_TOKEN, login.OASIS_WEBID,
+      login.OASIS_TOKEN, login.OASIS_WEBID,
+      login.OASIS_TOKEN, login.OASIS_WEBID,
+      login.OASIS_TOKEN, login.OASIS_WEBID
+    ],
+    'one cookie name per call — the array form is rejected by the real API'
+  );
+  assert.deepEqual(failures, [],
+    'nothing threw: a swallowed failure here is exactly how Clear came to remove nothing');
+});
+
+test('saving a pasted cookie keeps BOTH halves of it', () => {
+  // This one is worth stating as its own test rather than trusting the generic
+  // wiring suite: that suite computes the expected value BY CALLING the same
+  // normalizer the code uses, so it agrees with whatever the normalizer does —
+  // including the bug this guards.
+  //
+  // The registry derives a write-time normalizer from a field's `resolve` when
+  // the field declares none (registry.js: `normalize || resolverNormalize`), and
+  // `stepfunToken` is the function that squeezes a pasted cookie string down to
+  // its token field. So saving a paste used to store only the token and drop
+  // Oasis-Webid — the device id the endpoint answers 401 "oasis-token is
+  // embezzled" without. The manual lane broke on the act of saving it.
+  const { normalizeAccountField } = require('../../src/electron/limits/accountSettings');
+  const paste = '  Oasis-Token=eyJabc; Oasis-Webid=dev-9; INGRESSCOOKIE=ing  ';
+  const stored = normalizeAccountField('stepfunToken', paste);
+
+  assert.equal(typeof stored, 'string', 'a credential slot must hold a string, not the parsed pair');
+  assert.match(stored, /Oasis-Token=eyJabc/, 'the token half survives');
+  assert.match(stored, /Oasis-Webid=dev-9/,
+    'the device id survives the save — it is the half the endpoint cannot do without');
+  assert.equal(stored, stored.trim(), 'and the surrounding whitespace is trimmed');
+});
+
+test('a refused candidate is reported with the origin it came from', async () => {
+  // The site check answers a bare status code, and the two origins hold
+  // different things: account.stepfun.com is where the login page issues its
+  // pair, platform.stepfun.com is where the quota page's own anonymous token
+  // lives. Which one the site just refused is the first thing needed when this
+  // stops working, and "401" alone cannot answer it.
+  const lines = [];
+  const { signIn } = loadSigner({
+    cookiesByUrl: {
+      [login.ACCOUNT_COOKIE_URL]: [cookie(login.OASIS_TOKEN, 'tok-stale'), cookie(login.OASIS_WEBID, 'web-a')],
+      [login.COOKIE_URL]: [cookie(login.OASIS_TOKEN, 'tok-live'), cookie(login.OASIS_WEBID, 'web-b')]
+    },
+    acceptToken: ['tok-live']
+  });
+
+  await signIn({ logger: (line) => lines.push(line) });
+
+  assert.ok(
+    lines.some((line) => /refused the cookie held on account\.stepfun\.com/.test(line)),
+    `the refused origin has to be named, got: ${JSON.stringify(lines)}`
+  );
+  assert.ok(!lines.some((line) => /held on platform\.stepfun\.com/.test(line)),
+    'and the origin that was accepted must not be reported as refused');
+});
+
+test('a probe with nothing to refuse writes no refusal line', async () => {
+  // This log is capped at a few hundred lines and every probe appends to it, so
+  // a diagnostic that fires on the healthy path is a diagnostic that crowds out
+  // the one you actually wanted.
+  const lines = [];
+  const { signIn, opened } = loadSigner({
+    cookies: [cookie(login.OASIS_TOKEN, 'tok'), cookie(login.OASIS_WEBID, 'web')],
+    signedIn: true
+  });
+
+  await signIn({ logger: (line) => lines.push(line) });
+
+  assert.equal(opened.length, 0);
+  assert.deepEqual(lines.filter((line) => /refused/.test(line)), []);
 });
 
 test('a caller-supplied logger is still recorded, not swapped out', async () => {

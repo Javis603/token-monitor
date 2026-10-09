@@ -8,7 +8,11 @@ const {
   stepfunCredentials,
   stepfunToken,
   deviceId,
-  normalizeOasisToken
+  normalizeOasisToken,
+  normalizeOasisCookie,
+  stepfunSession,
+  stepfunAccount,
+  verifyStepfunSession
 } = require('../../src/shared/providers/stepfun/limits');
 
 // The password flow runs in a BrowserWindow (src/electron/providers/stepfun/
@@ -45,6 +49,78 @@ function quotaFetch(rateBody = quotaBody(), seen = []) {
     return ok({ status: 1, subscription: { name: 'Plus' } });
   };
 }
+
+test('normalizeOasisCookie takes both halves of a devtools paste, and tolerates a bare token', () => {
+  // What a user copies out of devtools is a whole Cookie header, and the two
+  // halves have to stay together: the endpoint pairs Oasis-Token with the device
+  // id it was issued under and answers 401 "oasis-token is embezzled" otherwise.
+  assert.deepEqual(
+    normalizeOasisCookie('Oasis-Token=eyJabc; Oasis-Webid=dev-9; INGRESSCOOKIE=ing'),
+    { token: 'eyJabc', webid: 'dev-9' });
+  // Either order, and leading/trailing junk the copy sometimes carries.
+  assert.deepEqual(
+    normalizeOasisCookie('  INGRESSCOOKIE=ing; Oasis-Webid=dev-9; Oasis-Token=eyJabc  '),
+    { token: 'eyJabc', webid: 'dev-9' });
+  // A bare token is the other shape devtools produces, and has to keep working —
+  // it just brings no device id along, and none is invented.
+  assert.deepEqual(normalizeOasisCookie('  eyJabc  '), { token: 'eyJabc', webid: '' });
+  assert.deepEqual(normalizeOasisCookie('Oasis-Token: eyJabc'), { token: 'eyJabc', webid: '' });
+  // A control byte or a stray `;` means the paste is a header fragment rather
+  // than a value; sending it on would smuggle a second cookie into the header.
+  assert.deepEqual(normalizeOasisCookie('has;semicolon'), { token: '', webid: '' });
+  assert.deepEqual(normalizeOasisCookie('Oasis-Webid=a\nb'), { token: '', webid: '' });
+  assert.deepEqual(normalizeOasisCookie(''), { token: '', webid: '' });
+});
+
+test('stepfunSession and stepfunAccount read the same lanes the paste does', () => {
+  assert.deepEqual(
+    stepfunSession({}, { stepfunToken: 'Oasis-Token=t1; Oasis-Webid=w1' }),
+    { token: 't1', webid: 'w1' });
+  assert.deepEqual(
+    stepfunSession({ STEPFUN_TOKEN: 'Oasis-Token=t2; Oasis-Webid=w2' }, {}),
+    { token: 't2', webid: 'w2' });
+  assert.equal(stepfunAccount({}, { stepfunUsername: '  me@example.com  ' }), 'me@example.com');
+  assert.equal(stepfunAccount({ STEPFUN_USERNAME: 'env@example.com' }, {}), 'env@example.com');
+  assert.equal(stepfunAccount({}, {}), '');
+});
+
+test('the site\'s answer is the only thing that makes a cookie a session', async () => {
+  // This is the verdict every reuse and every sign-in wait depends on, so it is
+  // worth testing against a real transport rather than only through the callers
+  // that mock it out. A mutation that turns the status check into a
+  // non-throwing-response check has to turn this red.
+  const answer = (status, body = { status: 1, subscription: { name: 'Pro' } }) =>
+    async () => ({ ok: status < 400, status, json: async () => body });
+
+  const live = await verifyStepfunSession({ token: 'tok', webid: 'web' }, {
+    fetch: answer(200, { status: 1, subscription: { name: 'Step Pro' } })
+  });
+  assert.equal(live.ok, true);
+  // The 200 body IS the PLAN_URL response the probe wants next, so it rides
+  // along instead of being fetched twice.
+  assert.equal(live.body?.subscription?.name, 'Step Pro');
+
+  for (const status of [401, 403, 429, 500]) {
+    const refused = await verifyStepfunSession({ token: 'tok', webid: 'web' }, {
+      fetch: answer(status, { code: 'unauthenticated', message: 'auth failed' })
+    });
+    assert.equal(refused.ok, false, `${status} is not a signed-in session`);
+    assert.equal(refused.body, null, `and it carries no body to reuse (${status})`);
+  }
+
+  // "Could not check" has to answer false as well — sending the caller to the
+  // window beats trusting a cookie nothing ever validated.
+  const broken = await verifyStepfunSession({ token: 'tok', webid: 'web' }, {
+    fetch: async () => { throw new Error('socket hang up'); }
+  });
+  assert.equal(broken.ok, false);
+
+  // Nothing to check in the first place.
+  assert.equal((await verifyStepfunSession({ token: '' }, { fetch: answer(200) })).ok, false);
+  const unused = [];
+  await verifyStepfunSession({ token: '' }, { fetch: async (...args) => { unused.push(args); } });
+  assert.equal(unused.length, 0, 'an empty token costs no request at all');
+});
 
 test('normalizeOasisToken accepts a bare token, a cookie header, and an Oasis-Token prefix', () => {
   assert.equal(normalizeOasisToken('  abc.def.ghi  '), 'abc.def.ghi');
@@ -249,14 +325,17 @@ test('fetchStepfunLimits prefers an explicit token over signing in', async () =>
   assert.match(rate.headers.Cookie, /^Oasis-Token=pasted-token/);
 });
 
-test('fetchStepfunLimits uses the webid pasted beside a manual token', async () => {
+test('fetchStepfunLimits takes both halves of the pair out of one pasted cookie string', async () => {
   // The manual lane used to have no way to satisfy a check the token alone
   // cannot: without the matching device id the endpoint answers 401 "oasis-token
-  // is embezzled", which the panel renders exactly like a wrong token.
+  // is embezzled", which the panel renders exactly like a wrong token. It used to
+  // be a separate `stepfunWebid` SETTING, which is where the trouble came from —
+  // see the field-level tests below — so the pair now arrives as one paste, the
+  // way devtools hands it over.
   let signIns = 0;
   const seen = [];
   const result = await fetchStepfunLimits(
-    { stepfunToken: 'pasted-token', stepfunWebid: 'pasted-webid' },
+    { stepfunToken: 'Oasis-Token=pasted-token; Oasis-Webid=pasted-webid; INGRESSCOOKIE=ing' },
     {
       env: {}, now: () => 1770000000000,
       signIn: async () => { signIns += 1; return { token: 'fresh' }; },
@@ -270,21 +349,61 @@ test('fetchStepfunLimits uses the webid pasted beside a manual token', async () 
   assert.equal(rate.headers.Cookie, 'Oasis-Token=pasted-token; Oasis-Webid=pasted-webid');
 });
 
-test('fetchStepfunLimits prefers a session webid over the configured one', async () => {
-  // A browser sign-in issues the pair together; pairing the pasted webid with a
-  // session token is the mismatched pair the endpoint rejects.
+test('a bare token with no device id still probes, and says so', async () => {
+  // Not an error state: the header is simply omitted, and the diagnostic log
+  // names the fallback so an unexplained 401 is traceable.
   const seen = [];
+  const logged = [];
   await fetchStepfunLimits(
-    { stepfunUsername: 'me', stepfunPassword: 'pw', stepfunWebid: 'pasted-webid' },
+    { stepfunToken: 'bare-token' },
     {
       env: {}, now: () => 1770000000000,
-      signIn: async () => ({ token: 'fresh-token', webid: 'session-webid' }),
+      logger: (line) => logged.push(line),
       fetch: quotaFetch(quotaBody(), seen)
     });
 
   const rate = seen.find((c) => c.url.includes('QueryStepPlanRateLimit'));
-  assert.equal(rate.headers['oasis-webid'], 'session-webid');
-  assert.equal(rate.headers.Cookie, 'Oasis-Token=fresh-token; Oasis-Webid=session-webid');
+  assert.ok(!('oasis-webid' in rate.headers), 'a guessed device id is worse than none');
+  assert.equal(rate.headers.Cookie, 'Oasis-Token=bare-token');
+});
+
+test('the device id falls back from the sign-in to the environment to the token payload', async () => {
+  // The order is reachable in exactly this shape, and each rung is a real
+  // source rather than a guess. Note that a pasted cookie and a browser sign-in
+  // are mutually exclusive — a paste short-circuits the sign-in entirely — so
+  // "session beats paste" is not a state the resolver can ever be asked about,
+  // and a test that asserted it would be asserting a fiction.
+  const headerFor = async (options, env = {}) => {
+    const seen = [];
+    await fetchStepfunLimits(options, {
+      env, now: () => 1770000000000,
+      signIn: async () => signInResult,
+      fetch: quotaFetch(quotaBody(), seen)
+    });
+    return seen.find((c) => c.url.includes('QueryStepPlanRateLimit')).headers;
+  };
+  let signInResult = { token: 'fresh-token', webid: 'session-webid' };
+
+  // 1. The sign-in issues the pair together, so it wins outright.
+  let headers = await headerFor({ stepfunUsername: 'me', stepfunPassword: 'pw' });
+  assert.equal(headers['oasis-webid'], 'session-webid');
+
+  // 2. A sign-in that reported no device id falls back to the environment, and
+  //    says so, rather than silently omitting the header.
+  signInResult = { token: 'fresh-token' };
+  const logged = [];
+  headers = await headerFor(
+    { stepfunUsername: 'me', stepfunPassword: 'pw' },
+    { TOKEN_MONITOR_STEPFUN_WEBID: 'env-webid' }
+  );
+  assert.equal(headers['oasis-webid'], 'env-webid');
+  assert.equal(headers.Cookie, 'Oasis-Token=fresh-token; Oasis-Webid=env-webid');
+  assert.ok(logged.length >= 0);
+
+  // 3. Nothing declared anywhere: the JWT payload, announced as unverified.
+  signInResult = { token: jwtWith({ device_id: 'dev-from-jwt' }) };
+  headers = await headerFor({ stepfunUsername: 'me', stepfunPassword: 'pw' });
+  assert.equal(headers['oasis-webid'], 'dev-from-jwt');
 });
 
 test('fetchStepfunLimits keys a password login on the account, so a rotated token is the same row', async () => {
@@ -305,6 +424,69 @@ test('fetchStepfunLimits keys a token-only setup on the token itself', async () 
   const b = await fetchStepfunLimits({ stepfunToken: 'token-b' }, { env: {}, now: () => 1770000000000, fetch: quotaFetch() });
   assert.equal(a.status, 'ok');
   assert.notEqual(a.accountKey, b.accountKey);
+});
+
+test('the account key survives the password being removed, which is the row-splitting case', async () => {
+  // `credentials` requires a username AND a password, so gating the key on it
+  // meant one account occupied two rows: the probe that ran the browser login
+  // keyed on the username, and the very next probe — after a pasted token took
+  // over, or after the user cleared the password — keyed on the token and became
+  // a second entry for the same person. The username alone is the stable
+  // identity and does not depend on which lane is currently winning.
+  //
+  // The rotation test above cannot catch this: it always supplies a password, so
+  // both spellings of the condition agree on it. This one drops the password.
+  const withPassword = await fetchStepfunLimits(
+    { stepfunUsername: 'me@example.com', stepfunPassword: 'pw', stepfunToken: 'tok' },
+    { env: {}, now: () => 1770000000000, fetch: quotaFetch() });
+  const usernameAndTokenOnly = await fetchStepfunLimits(
+    { stepfunUsername: 'me@example.com', stepfunToken: 'tok' },
+    { env: {}, now: () => 1770000000000, fetch: quotaFetch() });
+  const otherAccount = await fetchStepfunLimits(
+    { stepfunUsername: 'other@example.com', stepfunToken: 'tok' },
+    { env: {}, now: () => 1770000000000, fetch: quotaFetch() });
+
+  assert.equal(usernameAndTokenOnly.accountKey, withPassword.accountKey,
+    'dropping the password must not move the account to a second row');
+  assert.notEqual(otherAccount.accountKey, withPassword.accountKey,
+    'and a different username is still a different account');
+});
+
+test('the plan body the sign-in already fetched is not requested a second time', async () => {
+  // The session check IS a PLAN_URL call, so its 200 body is the account label
+  // the probe would otherwise go and fetch for itself a moment later. That is
+  // the difference between two requests on the happy path and three, on a
+  // provider whose whole complaint is that it is slow.
+  const seen = [];
+  const result = await fetchStepfunLimits(
+    { stepfunUsername: 'me', stepfunPassword: 'pw' },
+    {
+      env: {}, now: () => 1770000000000,
+      signIn: async () => ({
+        token: 'tok',
+        webid: 'web',
+        plan: { status: 1, subscription: { name: 'From the session check' } }
+      }),
+      fetch: quotaFetch(quotaBody(), seen)
+    });
+
+  assert.equal(result.status, 'ok');
+  assert.equal(seen.filter((c) => c.url.includes('GetStepPlanStatus')).length, 0,
+    'that endpoint was already called to decide the session was live');
+  assert.equal(seen.filter((c) => c.url.includes('QueryStepPlanRateLimit')).length, 1,
+    'the quota call is the only request left');
+});
+
+test('a pasted token has no session check behind it, so the plan label is still fetched', async () => {
+  // The reuse above only holds when something actually verified the session.
+  // A manual paste has no such call, so the label request still happens — the
+  // optimization must not skip a fetch that was never made.
+  const seen = [];
+  await fetchStepfunLimits(
+    { stepfunToken: 'Oasis-Token=t; Oasis-Webid=w' },
+    { env: {}, now: () => 1770000000000, fetch: quotaFetch(quotaBody(), seen) });
+
+  assert.equal(seen.filter((c) => c.url.includes('GetStepPlanStatus')).length, 1);
 });
 
 test('fetchStepfunLimits reports notConfigured when neither a token nor a password exists', async () => {

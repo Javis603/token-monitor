@@ -33,7 +33,7 @@ const {
   createWorkbuddyLocalAuth,
   isSupportedWorkbuddyLocalAppPlatform
 } = require('./providers/workbuddy/localAuth');
-const { COOKIE_URL, OASIS_TOKEN, OASIS_WEBID, disposeStepFunWindow, readOasisSession, signInStepFunWithBrowser, stepfunPartition } = require('./providers/stepfun/login');
+const { ACCOUNT_COOKIE_URL, COOKIE_URL, OASIS_TOKEN, OASIS_WEBID, disposeStepFunWindow, readOasisSessions, signInStepFunWithBrowser, stepfunPartition } = require('./providers/stepfun/login');
 const { verifyStepfunSession } = require('../shared/providers/stepfun/limits');
 const { createElectronLimitsFetch } = require('./limits/fetch');
 const {
@@ -97,8 +97,17 @@ function ensureMimoExchangeFetch() {
 // into the user-data Cookies file so a restart does not log out, while the
 // throwaway variant keeps them in memory only. A missing setting means persist,
 // which is what a fresh install gets.
+//
+// Only an EXPLICIT negative opts out. The form stores '1'/'0' because the form
+// framework has no checkbox, but the same key can also arrive as a number or a
+// boolean from a hand-edited settings file, and the old `!== '0'` test read
+// `false` as "remember" — so a user who had switched the option off by hand got
+// a session written to disk and no way to see why. An unrecognised value keeps
+// the default rather than silently wiping the login the user already has.
 function stepfunRememberLogin() {
-  return settings?.stepfunRememberLogin !== '0';
+  const value = settings?.stepfunRememberLogin;
+  if (value === null || value === undefined || value === '') return true;
+  return !['0', 'false', 'off', 'no'].includes(String(value).trim().toLowerCase());
 }
 
 // Reuse the stored cookies only if the site confirms they are a signed-in
@@ -108,18 +117,46 @@ function stepfunRememberLogin() {
 // small inefficiency: the re-login path asks for a session again, reads the very
 // same anonymous cookie back, and the provider stays unauthorized with no
 // window ever shown to the user.
+//
+// Every origin that holds a pair is tried, not just one: after a sign-in the
+// live session lives on account.stepfun.com while platform.stepfun.com keeps
+// the anonymous token, so a single-origin read has a one-in-two chance of
+// looking at the wrong jar. `readOasisSessions` returns both, and the site
+// decides which is real.
+//
+// The 200 that proves the session is also the PLAN_URL body the quota probe
+// wants for the account label, so it is handed back on the session and the
+// probe can skip repeating the request.
 async function electronStepfunSignIn(options) {
   const partition = stepfunPartition({ remember: stepfunRememberLogin() });
   const loginSession = session.fromPartition(partition);
-  const reusable = await readOasisSession(loginSession);
-  if (reusable.token) {
-    const signedIn = await verifyStepfunSession(reusable, {
-      fetch: electronLimitsFetch(),
-      logger: typeof options?.logger === 'function' ? options.logger : undefined
-    });
-    if (signedIn) return reusable;
+  const logger = typeof options?.logger === 'function' ? options.logger : undefined;
+  const deps = { fetch: electronLimitsFetch(), logger };
+  for (const candidate of await readOasisSessions(loginSession)) {
+    if (!candidate.token) continue;
+    const verdict = await verifyStepfunSession(candidate, deps);
+    // `source` is which origin answered, which is diagnostic only — the session
+    // descriptor that crosses this boundary carries just the pair and the body.
+    if (verdict.ok) return { token: candidate.token, webid: candidate.webid, plan: verdict.body ?? null };
+    // Which origin the refused cookie came from is the first thing anyone needs
+    // when this stops working: the two hold different things (account.stepfun.com
+    // is where the login page issues its pair, platform.stepfun.com is where the
+    // quota page's own anonymous token lives) and the site check above reports a
+    // bare status code. Only written when something is actually refused, so a
+    // healthy probe still logs nothing beyond the two requests it makes.
+    logger?.(`stepfun refused the cookie held on ${String(candidate.source).replace(/^https:\/\//, '').replace(/\/$/, '')}`);
   }
-  return signInStepFunWithBrowser({ ...options, BrowserWindow, session: loginSession, partition });
+  // Hand the same verdict down into the window flow, so a candidate the jar
+  // already holds is accepted or refused by the site there too instead of being
+  // judged by comparing cookie strings.
+  return signInStepFunWithBrowser({
+    ...options,
+    BrowserWindow,
+    session: loginSession,
+    partition,
+    logger,
+    verifySession: async (candidate) => (await verifyStepfunSession(candidate, deps)).ok
+  });
 }
 
 // StepFun fails in ways the panel cannot explain — a stuck transport and a
@@ -130,25 +167,40 @@ async function electronStepfunSignIn(options) {
 // would grow by a few hundred lines a day forever. Past the cap the oldest
 // half is dropped rather than rotated into a second file, because a second
 // file just moves the problem.
+// The cap counts LINES, not probes. A happy probe writes three of them (session
+// check, quota, plan), so 400 lines is roughly 130 probes of history — worth
+// stating, because "400" reads like far more than it is.
 const STEPFUN_DIAGNOSTIC_LIMIT = 400;
+const STEPFUN_DIAGNOSTIC_KEEP = Math.floor(STEPFUN_DIAGNOSTIC_LIMIT / 2);
 let stepfunDiagnosticPath = null;
+// Maintained incrementally. Every write below is synchronous, so nothing can
+// interleave and no counted line can go missing between two appends.
+let stepfunDiagnosticLines = 0;
 
 function appendStepFunDiagnostic(line) {
   try {
     const path = require('node:path');
-    if (!stepfunDiagnosticPath) stepfunDiagnosticPath = path.join(app.getPath('userData'), 'stepfun-diagnostic.log');
-    const stamp = `${new Date().toISOString()} ${line}\n`;
-    // Happy probes log nothing, so the common case is a file that never
-    // exists — read it only once there is something in it.
-    if (!fs.existsSync(stepfunDiagnosticPath)) {
-      fs.writeFileSync(stepfunDiagnosticPath, stamp);
-      return;
+    if (!stepfunDiagnosticPath) {
+      stepfunDiagnosticPath = path.join(app.getPath('userData'), 'stepfun-diagnostic.log');
+      // A file left behind by an earlier run has to be counted once, here.
+      // Happy probes log nothing, so the common case is no file at all.
+      stepfunDiagnosticLines = fs.existsSync(stepfunDiagnosticPath)
+        ? fs.readFileSync(stepfunDiagnosticPath, 'utf8').split('\n').filter(Boolean).length
+        : 0;
     }
-    fs.appendFileSync(stepfunDiagnosticPath, stamp);
-    const lines = fs.readFileSync(stepfunDiagnosticPath, 'utf8').split('\n');
-    if (lines.length <= STEPFUN_DIAGNOSTIC_LIMIT + 1) return;
-    const kept = lines.slice(Math.ceil(lines.length / 2)).join('\n');
-    fs.writeFileSync(stepfunDiagnosticPath, kept);
+    fs.appendFileSync(stepfunDiagnosticPath, `${new Date().toISOString()} ${line}\n`);
+    stepfunDiagnosticLines += 1;
+    // The file is re-read only once the cap is actually passed. The previous
+    // version read it and rewrote half of it on EVERY append, so from the moment
+    // it crossed the cap each line cost a full read plus a half-file write —
+    // and with three lines per probe that is three rewrites per collection tick,
+    // on the main-process thread, forever.
+    if (stepfunDiagnosticLines <= STEPFUN_DIAGNOSTIC_LIMIT) return;
+    const kept = fs.readFileSync(stepfunDiagnosticPath, 'utf8')
+      .split('\n')
+      .slice(-STEPFUN_DIAGNOSTIC_KEEP);
+    stepfunDiagnosticLines = kept.filter(Boolean).length;
+    fs.writeFileSync(stepfunDiagnosticPath, `${kept.join('\n')}\n`);
   } catch { /* diagnostics must never break the probe */ }
 }
 
@@ -167,12 +219,39 @@ function stepfunErrorLogger(logger) {
 // jar IS the session, so dropping the settings while keeping an authenticated
 // partition lets the next probe sign in again from a session the user just
 // said to remove. Clearing the stored values alone is not enough.
+//
+// BOTH partitions are cleared, not just the one the current setting selects.
+// Switching "remember this login" off leaves the persisted cookies where they
+// were, which is the point of the switch; but Clear says "forget this login",
+// and a user who cleared it while the option was off would otherwise find the
+// old session still sitting in the persist partition, one toggle away from
+// coming back. Both also have to have their retained window released — a
+// destroyed window takes the network stack down with it, but a CLEAR is a
+// deliberate teardown, so destroy is right here.
+//
+// One name per call, and that is not a style choice. Measured on the Electron
+// this app ships (43.4.0): `cookies.remove(url, filter)` accepts a single
+// string and rejects a string ARRAY, a `{ name }` object and a Cookie object —
+// all three throw `Error processing argument at index 1, conversion failure`.
+// The array form this used to pass therefore threw every single time, and the
+// try/catch below swallowed it: Clear reported success, removed nothing, and
+// the next probe signed straight back in from the session the user had just
+// said to remove. A mock that accepts whatever it is handed cannot catch that,
+// so the test for this asserts the CALL SHAPE rather than that a call happened.
 async function clearStepfunLoginSession() {
-  const partition = stepfunPartition({ remember: stepfunRememberLogin() });
-  disposeStepFunWindow(partition);
-  try {
-    await session.fromPartition(partition).cookies.remove(COOKIE_URL, [OASIS_TOKEN, OASIS_WEBID]);
-  } catch { /* the partition may not exist yet on a first run */ }
+  for (const remember of [true, false]) {
+    const partition = stepfunPartition({ remember });
+    disposeStepFunWindow(partition);
+    for (const url of [ACCOUNT_COOKIE_URL, COOKIE_URL]) {
+      for (const name of [OASIS_TOKEN, OASIS_WEBID]) {
+        try {
+          await session.fromPartition(partition).cookies.remove(url, name);
+        } catch (error) {
+          appendStepFunDiagnostic(`stepfun clear failed on ${partition} ${url} ${name}: ${error.message}`);
+        }
+      }
+    }
+  }
 }
 
 // Settings-side provider probes take the same transport as the collector's.
@@ -8228,9 +8307,13 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
-  ipcMain.handle('limits:clearCredential', (_event, providerId) => {
-    const result = credentialCommands.clearCredential(providerId);
-    if (providerId === 'stepfun') void clearStepfunLoginSession();
+  // Clear is the one credential action that has to finish before the renderer
+// reports success: the reply goes back over IPC, and an unawaited cookie wipe
+// races it, so a user who cleared a StepFun login and immediately hit Refresh
+// could still be signed in from the jar the wipe had not reached yet.
+ipcMain.handle('limits:clearCredential', async (_event, providerId) => {
+    const result = await credentialCommands.clearCredential(providerId);
+    if (providerId === 'stepfun') await clearStepfunLoginSession();
     return result;
   });
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {

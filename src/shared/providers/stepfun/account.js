@@ -42,22 +42,35 @@ module.exports = {
       storePath: ['providers', 'stepfun', 'token'],
       resolve: 'stepfunToken',
       envFallback: ['TOKEN_MONITOR_STEPFUN_TOKEN', 'STEPFUN_TOKEN'],
+      // `trim`, NOT left to the resolver. The registry derives a write-time
+      // normalizer from `resolve` whenever the field declares none
+      // (registry.js: `bound.normalize = normalize || bound.resolverNormalize`),
+      // and `stepfunToken` is exactly the function that squeezes a pasted
+      // cookie string down to its token field. So a bare `resolve` silently
+      // threw away Oasis-Webid on the way to storage — the device id the
+      // endpoint answers 401 without — and the manual lane was broken by the
+      // act of saving it. Declaring the normalizer explicitly wins over the
+      // derived one, and the stored value stays the whole paste for
+      // normalizeOasisCookie to take apart at probe time.
+      normalize: 'trim',
       // A manual token is a deliberate override, so it outranks the password
       // lane in the resolver. Clearing it hands control back to the login flow.
-      project: 'set'
-    },
-    {
-      // The device id the session was registered under. The quota endpoints
-      // pair Oasis-Token with it and reject a foreign one: without it the
-      // answer is 401 "oasis-token is embezzled", which the panel renders
-      // identically to a wrong token, so a pasted token had no way to say
-      // "this webid goes with it". Left unset, limits.js omits the header
-      // rather than guessing.
-      key: 'stepfunWebid',
-      kind: 'credential',
-      storePath: ['providers', 'stepfun', 'webid'],
-      envFallback: ['TOKEN_MONITOR_STEPFUN_WEBID', 'STEPFUN_WEBID'],
-      normalize: 'trim',
+      //
+      // `resolve` is `stepfunToken` and NOT `stepfunSession`: the framework hands
+      // a resolver's return value straight back as this key's effective value
+      // (currentAccountField), and then compares it against a string, so
+      // returning the parsed pair here would put an object where a credential
+      // belongs. The pair is assembled inside fetchStepfunLimits, which sees the
+      // untouched paste and can take both halves out of it.
+      //
+      // There used to be a separate `stepfunWebid` field for the device id, and
+      // it was a trap in three ways — it is declared as a text input, which this
+      // form framework marks `secret: true` (accountPanels maps every non-select
+      // field that way), so it alone satisfied credentialCommands' "at least one
+      // secret holds something" floor and let "username alone" be saved as a
+      // working login; it was re-masked on every save so the panel could never
+      // read it back; and a token and a webid saved in separate actions can be a
+      // rotation apart, which the endpoint rejects as a mismatched pair.
       project: 'set'
     },
     {
@@ -110,8 +123,17 @@ module.exports = {
       // to notConfigured, because stepfunCredentials() needs both halves.
       { key: 'stepfunUsername', input: 'text', labelKey: 'settings.stepfun.username', placeholderKey: 'settings.stepfun.usernamePlaceholder', required: false },
       { key: 'stepfunPassword', input: 'password', labelKey: 'settings.stepfun.password', placeholderKey: 'settings.stepfun.passwordPlaceholder', required: false },
-      { key: 'stepfunToken', input: 'textarea', labelKey: 'settings.stepfun.manualToken', placeholderKey: 'settings.stepfun.tokenPlaceholder', required: false },
-      { key: 'stepfunWebid', input: 'text', labelKey: 'settings.stepfun.webid', placeholderKey: 'settings.stepfun.webidPlaceholder', required: false },
+      {
+        // The pasted Cookie header. BOTH halves of the pair live in this one
+        // field: `oasis-webid` has to match the token or the endpoint answers
+        // 401 "oasis-token is embezzled", and keeping them apart in the UI only
+        // makes it possible to save one without the other.
+        key: 'stepfunToken',
+        input: 'textarea',
+        labelKey: 'settings.stepfun.manualToken',
+        placeholderKey: 'settings.stepfun.tokenPlaceholder',
+        required: false
+      },
       {
         // A setting beside the credential: saved on its own, and left alone by
         // Clear, which must not silently opt the user back into persisting.
@@ -129,7 +151,17 @@ module.exports = {
     ],
     // Username and password sit above the fold because they are what keeps the
     // quota live; the pasted token stays below as the manual escape hatch.
-    top: [{ field: 'stepfunUsername' }, { field: 'stepfunPassword' }],
+    //
+    // "Remember this login" is up here too, not down with the manual escape
+    // hatch. It is a setting about the automatic login, so a user who cannot
+    // find it under a heading about pasting tokens has no way to discover that
+    // the option they want — do not log in again every launch — is a select
+    // parked three rows under the diagnostic note.
+    top: [
+      { field: 'stepfunUsername' },
+      { field: 'stepfunPassword' },
+      { field: 'stepfunRememberLogin' }
+    ],
     manual: [
       { steps: [
         'settings.stepfun.step1',
@@ -138,8 +170,6 @@ module.exports = {
         'settings.stepfun.step4'
       ] },
       { field: 'stepfunToken' },
-      { field: 'stepfunWebid' },
-      { field: 'stepfunRememberLogin' },
       // Diagnostics nobody can find are the same as diagnostics that do not
       // exist: the whole reason the log exists is that the panel reports
       // "unavailable" for a dozen different causes.
