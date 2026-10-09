@@ -336,7 +336,15 @@ test('stepfunPartition scopes the jar to one account', () => {
     'an account partition is a distinct on-disk jar');
   assert.notEqual(scoped, login.stepfunPartition({ account: 'other@example.com' }),
     'two accounts are two jars, so neither login can evict the other');
-  assert.ok(!scoped.includes('example.com'),
+  // The name is a digest, so no part of the address can reach a directory name
+  // — an email sitting in a path leaks the account into every backup and every
+  // bug report. Asserted on the whole address rather than with
+  // `scoped.includes('example.com')`: that shape is what CodeQL reads as a URL
+  // host check (js/incomplete-url-substring-sanitization, high) and it raised
+  // an alert on every push, even though this string is never a URL. Checking
+  // for `@` says the stronger thing anyway — the partition is `persist:
+  // stepfun-login-<hex>`, which cannot hold one.
+  assert.doesNotMatch(scoped, /@/,
     'the username itself must not land in a directory name');
   assert.equal(login.stepfunPartition({ account: '  ' }), 'persist:stepfun-login',
     'a blank account is no account at all');
