@@ -3005,9 +3005,22 @@ function limitProvidersForSubscriptions() {
 // a toggle because the form could only describe a subscription; now the record
 // kind says which shape is being recorded, so hiding the accounts only got in
 // the way of reaching them.
+//
+// A probe that failed does not make the account disappear from the form. The
+// WorkBuddy app can seal its credential file, the row then reports
+// notConfigured while still being this machine's only account, and hiding it
+// left the picker with nothing to offer and the form unable to save. But a
+// signed-out row that names nothing cannot stand for any account — deduping it
+// against a hub's named accounts once dropped those — so it is offered only
+// when the provider has no live row to offer instead.
 function subscriptionAccountChoices() {
-  const visible = limitProvidersForSubscriptions()
-    .filter((provider) => provider?.provider && provider.status !== 'notConfigured');
+  const records = limitProvidersForSubscriptions();
+  const liveProviders = new Set(records
+    .filter((provider) => provider?.provider && provider.status !== 'notConfigured')
+    .map((provider) => provider.provider));
+  const visible = records
+    .filter((provider) => provider?.provider
+      && (provider.status !== 'notConfigured' || !liveProviders.has(provider.provider)));
   return visible.map((provider, index) => ({
     provider,
     value: subscriptionAccountValue(provider),
