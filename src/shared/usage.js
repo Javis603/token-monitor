@@ -208,7 +208,6 @@ function emptyPeriod() {
     timedOutputTokens: 0,
     timedDurationMs: 0,
     modelThroughput: Object.create(null),
-    clientThroughput: Object.create(null),
     clients: {},
     clientCosts: {},
     clientCacheReads: {},
@@ -846,7 +845,6 @@ function normalizePeriod(input, options = {}) {
     // is different: its zero counters are synthetic and must never seed a live delta.
     period.capabilities.throughput = false;
     delete period.modelThroughput;
-    delete period.clientThroughput;
     return period;
   }
   const projectsEnabled = options.projectsEnabled !== false;
@@ -960,10 +958,8 @@ function normalizePeriod(input, options = {}) {
       }
     }
   }
-  period.modelThroughput = normalizeThroughput(input.modelThroughput, period, normalizeModelName, period.modelOutputs);
+  period.modelThroughput = normalizeModelThroughput(input.modelThroughput, period);
   if (!period.modelThroughput) delete period.modelThroughput;
-  period.clientThroughput = normalizeThroughput(input.clientThroughput, period, normalizeClientName, period.clientOutputs);
-  if (!period.clientThroughput) delete period.clientThroughput;
   if (input.modelCosts && typeof input.modelCosts === 'object') {
     for (const [model, value] of Object.entries(input.modelCosts)) {
       const key = normalizeModelName(model);
@@ -1025,11 +1021,11 @@ function normalizeTimedOutputTokens(value, outputTokens, durationMs) {
   return durationMs > 0 ? Math.min(outputTokens, Math.max(0, Math.round(asNumber(value)))) : 0;
 }
 
-function normalizeThroughput(value, period, normalizeKey, outputs) {
+function normalizeModelThroughput(value, period) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const result = Object.create(null);
   for (const [model, counters] of Object.entries(value)) {
-    const key = normalizeKey(model);
+    const key = normalizeModelName(model);
     if (!key || !counters || typeof counters !== 'object' || Array.isArray(counters)
       || !['timedTokens', 'timedOutputTokens', 'timedDurationMs'].every((field) => hasOwn(counters, field))) continue;
     const durationMs = Math.max(0, Math.round(asNumber(counters.timedDurationMs)));
@@ -1042,7 +1038,7 @@ function normalizeThroughput(value, period, normalizeKey, outputs) {
     counters.timedTokens = Math.min(counters.timedTokens, period.timedTokens);
     counters.timedDurationMs = Math.min(counters.timedDurationMs, period.timedDurationMs);
     const outputBound = Math.min(period.timedOutputTokens,
-      hasOwn(outputs, model) ? outputs[model] : period.outputTokens);
+      hasOwn(period.modelOutputs, model) ? period.modelOutputs[model] : period.outputTokens);
     counters.timedOutputTokens = normalizeTimedOutputTokens(counters.timedOutputTokens, outputBound, counters.timedDurationMs);
   }
   // A malformed map is unavailable; a genuine empty map is an exact zero baseline.
@@ -1070,8 +1066,15 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const cacheWrite = Math.max(0, Math.round(firstNumber(row, CACHE_WRITE_TOKEN_KEYS)));
   const output = Math.max(0, Math.round(outputValueForClient(row, client)));
   const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
-  const timedTokens = Math.max(0, Math.round(firstNumber(performance, TIMED_TOKEN_KEYS)));
-  const { timedOutputTokens, timedDurationMs } = entryThroughput(row, output);
+  let timedTokens = Math.max(0, Math.round(firstNumber(performance, TIMED_TOKEN_KEYS)));
+  let { timedOutputTokens, timedDurationMs } = entryThroughput(row, output);
+  // Antigravity reports may mix timed native generations and untimed history.
+  // Without a timed-output subtotal, only complete coverage has a matched numerator.
+  if (client === 'antigravity' && (!timedDurationMs || !timedTokens || timedTokens !== Math.max(0, Math.round(tokens)))) {
+    timedTokens = 0;
+    timedOutputTokens = 0;
+    timedDurationMs = 0;
+  }
   const model = detectModel(row, client);
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;
@@ -1092,12 +1095,6 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   period.timedDurationMs += timedDurationMs;
   if (model && timedDurationMs > 0) {
     const counters = period.modelThroughput[model] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
-    counters.timedTokens += timedTokens;
-    counters.timedOutputTokens += timedOutputTokens;
-    counters.timedDurationMs += timedDurationMs;
-  }
-  if (client && timedDurationMs > 0) {
-    const counters = period.clientThroughput[client] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
     counters.timedTokens += timedTokens;
     counters.timedOutputTokens += timedOutputTokens;
     counters.timedDurationMs += timedDurationMs;
@@ -1656,11 +1653,10 @@ function addPeriodInto(target, source) {
   target.timedDurationMs += source.timedDurationMs;
   // Absence is unknown attribution, not an exact empty map. It stays unknown
   // through partition/WSL merges and device aggregation, regardless of input order.
-  for (const map of ['modelThroughput', 'clientThroughput']) {
-    if (!source[map]) delete target[map];
-    if (!target[map]) continue;
-    for (const [key, counters] of Object.entries(source[map])) {
-      const merged = target[map][key] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+  if (!source.modelThroughput) delete target.modelThroughput;
+  if (target.modelThroughput) {
+    for (const [model, counters] of Object.entries(source.modelThroughput)) {
+      const merged = target.modelThroughput[model] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
       for (const field of ['timedTokens', 'timedOutputTokens', 'timedDurationMs']) merged[field] += counters[field];
     }
   }
@@ -1832,8 +1828,8 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
 // grow (clients/models/clientModels/sessions/...) without per-field bookkeeping.
 function applyPeriodDelta(base, freshToday, anchorToday) {
   const result = deltaValue(base, freshToday, anchorToday, '');
-  for (const map of ['modelThroughput', 'clientThroughput']) {
-    if (result && (!base?.[map] || !freshToday?.[map] || !anchorToday?.[map])) delete result[map];
+  if (result && (!base?.modelThroughput || !freshToday?.modelThroughput || !anchorToday?.modelThroughput)) {
+    delete result.modelThroughput;
   }
   // Older anchors may still contain the pre-native Reasonix stats-path rows.
   // They are not authoritative session detail and must not survive a warm tick

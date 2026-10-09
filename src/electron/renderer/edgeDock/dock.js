@@ -688,7 +688,7 @@ function formatRailCost(value, unpricedTokens) {
 }
 
 function statShortLabel(cell) {
-  if (cell.metric === 'liveRate') return cell.rateClient ? (cell.rateClient === 'codex' ? 'GPT' : clientLabel(cell.rateClient)) : t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit');
+  if (cell.metric === 'liveRate') return t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit');
   if (cell.metric === presentation.SESSIONS_METRIC) return t('edgeDock.statGlyph.sessions');
   return t(`edgeDock.periodShort.${cell.metric}`);
 }
@@ -1418,8 +1418,7 @@ function appendLiveRate(card, head, cell) {
 
 function appendLiveRateDetails(card, cell) {
   const entries = window.TokenMonitorTokenRate.liveTokenRateTooltipEntries(
-    { devices: cell.rateDevices, deviceCount: cell.rateDetailDeviceCount ?? cell.deviceCount }, cell.rateMode, formatRate,
-    { clientLabel: (client) => client === 'codex' ? 'GPT (Codex)' : clientLabel(client), modelsLabel: t('dashboard.stack.model') }
+    { devices: cell.rateDevices, deviceCount: cell.deviceCount }, cell.rateMode, formatRate
   );
   if (!entries.length) return;
   const list = el('div', 'edge-dock-accounts edge-dock-clients edge-dock-rate-details');
@@ -1431,7 +1430,7 @@ function appendLiveRateDetails(card, cell) {
       continue;
     }
     const row = el('div', 'edge-dock-rate-model');
-    const mark = markNode(entry[2] || modelVendorFor(entry[0]) || 'token-monitor');
+    const mark = markNode(modelVendorFor(entry[0]) || 'token-monitor');
     mark.setAttribute('aria-hidden', 'true');
     row.append(mark, el('span', 'edge-dock-rate-model-name', entry[0]), el('span', 'edge-dock-rate-model-value', entry[1]));
     list.append(row);

@@ -491,8 +491,8 @@ function clientSourceRoots(clientsCsv, options = {}) {
 
 // The Antigravity CLI's parse-local directory is watched and checked as a
 // source; unlike the IDE cache, it is written by agy rather than our self-sync.
-function antigravityCliDataDir({ homeDir = os.homedir(), env = process.env } = {}) {
-  const geminiHome = env.GEMINI_CLI_HOME || path.join(homeDir, '.gemini');
+function antigravityCliDataDir() {
+  const geminiHome = process.env.GEMINI_CLI_HOME || path.join(os.homedir(), '.gemini');
   return path.join(geminiHome, 'antigravity-cli', 'conversations');
 }
 

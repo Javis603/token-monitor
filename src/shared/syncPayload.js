@@ -180,7 +180,6 @@ function buildSyncPayload(summary, {
   omitAllTimeProjects = false,
   omitHistoryTokenComponents = false,
   omitModelThroughput = false,
-  omitClientThroughput = false,
   syncSessionTitles = false,
   sessionTitleSyncGeneration
 } = {}) {
@@ -241,10 +240,10 @@ function buildSyncPayload(summary, {
       payload.allTimeProjectsOmitted = true;
     }
   }
-  for (const period of ['today', 'month', 'allTime']) {
-    if (!payload[period]) continue;
-    if (omitClientThroughput) delete payload[period].clientThroughput;
-    if (omitModelThroughput) delete payload[period].modelThroughput;
+  if (omitModelThroughput) {
+    for (const period of ['today', 'month', 'allTime']) {
+      if (payload[period]) delete payload[period].modelThroughput;
+    }
   }
   return payload;
 }
@@ -263,11 +262,10 @@ function serializeSyncPayload(summary, options = {}) {
   }
   let body = JSON.stringify(payload);
   if (Buffer.byteLength(body, 'utf8') > maxBytes
-    && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput || payload[period]?.clientThroughput)) {
+    && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput)) {
     // Optional live attribution must never evict aggregate usage or session detail.
     // Omit the whole map so readers re-baseline rather than infer missing keys as zero.
     buildOptions.omitModelThroughput = true;
-    buildOptions.omitClientThroughput = true;
     payload = buildSyncPayload(summary, buildOptions);
     body = JSON.stringify(payload);
   }
@@ -327,8 +325,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, sy
         ...syncOptions,
         omitHistoryTokenComponents: true,
         omitAllTimeProjects: true,
-        omitModelThroughput: true,
-        omitClientThroughput: true
+        omitModelThroughput: true
       })
     : null;
   const canRetryReduced = response.status === 413

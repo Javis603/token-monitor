@@ -5707,12 +5707,6 @@ html.is-windows .limit-live-badge {
   white-space: nowrap;
   transition: color 140ms ease, background-color 140ms ease, opacity 180ms ease;
 }
-.live-token-rate:is(.is-separated, .has-client) { max-width: 156px; }
-.live-token-rate.is-separated .live-token-rate-value {
-  font-size: 0.5625rem;
-  line-height: 1.25;
-  white-space: pre;
-}
 .live-token-rate.limit-detail-tooltip-wrap {
   position: absolute;
   height: 30px;

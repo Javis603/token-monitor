@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const { customPricingPath, tokscaleHomeDir } = require('./tokscaleConfig');
+const { customPricingPath } = require('./tokscaleConfig');
 const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
@@ -40,7 +40,6 @@ const {
   terminationUnconfirmedError
 } = require('./subprocessTermination');
 const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
-const { applyAntigravityThroughput } = require('./providers/antigravity/throughput');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
 const {
@@ -843,12 +842,6 @@ async function collectUsageOnce(options) {
   const runTokscaleFn = async (input) => {
     const json = await runTokscaleScan(input);
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
-    const homeIndex = input.flags?.indexOf('--home') ?? -1;
-    const scanHome = homeIndex >= 0 ? input.flags[homeIndex + 1]
-      : tokscaleHomeDir({ homeDir: options.homeDir, platform: platformValue });
-    if (!options.customScanPaths?.antigravity?.length) {
-      applyAntigravityThroughput(json, { home: scanHome, env: homeIndex >= 0 ? {} : process.env, flags: input.flags, now: collectedAt.getTime() });
-    }
     return json;
   };
   const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({

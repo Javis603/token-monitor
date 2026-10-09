@@ -575,8 +575,6 @@ function defaultSettings() {
     showCompactTotalTokens: false,
     showLiveTokenRate: false,
     liveTokenRateScope: 'all',
-    liveTokenRateDisplay: 'all',
-    edgeDockRateDisplay: 'all',
     compactTokenUnits: 'western',
     tokenRateMode: 'speed',
     heatmapMetric: 'cost',
@@ -722,10 +720,6 @@ function normalizeCollectionMode(value, fallback = 'live') {
 // the framing, and neither costs an extra scan.
 function normalizeTokenRateMode(value) {
   return value === 'burn' ? 'burn' : 'speed';
-}
-
-function normalizeEdgeDockRateDisplay(value) {
-  return value === 'codex' || value === 'antigravity' ? value : 'all';
 }
 
 function normalizeLiveTokenRateScope(value) {
@@ -2569,8 +2563,6 @@ function readSettings() {
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
-    merged.liveTokenRateDisplay = tokenRateApi.normalizeLiveTokenRateDisplay(merged.liveTokenRateDisplay);
-    merged.edgeDockRateDisplay = normalizeEdgeDockRateDisplay(merged.edgeDockRateDisplay);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
     merged.modelAliases = normalizeModelAliases(merged.modelAliases);
     merged.syncContentState = normalizeSyncContentState(merged.syncContentState);
@@ -5573,8 +5565,6 @@ function edgeDockCellsFor(visibleStats) {
   refreshEdgeDockDerivedPeriods(visibleStats);
   refreshEdgeDockForecast();
   syncCodexPresentationActiveAccount();
-  const rateSample = edgeDockLiveRateSample(visibleStats);
-  const rateClient = normalizeEdgeDockRateDisplay(settings?.edgeDockRateDisplay);
   return buildEdgeDockCells(visibleStats, {
     derivedPeriods: edgeDockDerivedPeriods,
     codexResetForecast: edgeDockForecastWanted() ? edgeDockForecast : null,
@@ -5589,9 +5579,7 @@ function edgeDockCellsFor(visibleStats) {
     limitsEnabled: settings?.limitsEnabled !== false,
     limitProviders: settings?.limitProviders,
     limitProviderOrder: settings?.limitProviderOrder,
-    liveRate: tokenRateApi.selectLiveTokenRateSample(rateSample, rateClient),
-    liveRateDetails: rateSample,
-    liveRateClient: rateClient === 'all' ? '' : rateClient,
+    liveRate: edgeDockLiveRateSample(visibleStats),
     tokenRateMode: settings?.tokenRateMode
   });
 }
@@ -7536,8 +7524,6 @@ app.whenReady().then(() => {
       showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, false),
       showLiveTokenRate: parseBoolean(patch.showLiveTokenRate ?? settings.showLiveTokenRate, false),
       liveTokenRateScope: normalizeLiveTokenRateScope(patch.liveTokenRateScope ?? settings.liveTokenRateScope),
-      liveTokenRateDisplay: tokenRateApi.normalizeLiveTokenRateDisplay(patch.liveTokenRateDisplay ?? settings.liveTokenRateDisplay),
-      edgeDockRateDisplay: normalizeEdgeDockRateDisplay(patch.edgeDockRateDisplay ?? settings.edgeDockRateDisplay),
       compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
       modelAliases: normalizeModelAliases(patch.modelAliases ?? settings.modelAliases),
       modelAliasGrouping: normalizeModelAliasGrouping(patch.modelAliasGrouping ?? settings.modelAliasGrouping),

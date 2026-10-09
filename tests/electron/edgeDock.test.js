@@ -2524,10 +2524,9 @@ test('live rate card renders device model rows with vendor marks and retains eve
   const body = dock.slice(dock.indexOf('function appendLiveRateDetails('), dock.indexOf('function statCard('));
   const node = (tag, className, text) => ({ tag, className, text, children: [], classes: new Set(), classList: { toggle(name, enabled) { if (enabled) this.owner.classes.add(name); else this.owner.classes.delete(name); } }, setAttribute() {}, append(...children) { this.children.push(...children); } });
   const createNode = (...args) => { const result = node(...args); result.classList.owner = result; return result; };
-  const render = Function('window', 'el', 'formatRate', 'markNode', 'modelVendorFor', 't', 'clientLabel', `return (${body})`)(
+  const render = Function('window', 'el', 'formatRate', 'markNode', 'modelVendorFor', `return (${body})`)(
     { TokenMonitorTokenRate: require('../../src/electron/renderer/tokenRatePresentation') }, createNode, String,
-    (vendor) => createNode('span', vendor), require('../../src/electron/renderer/usageCharts').modelVendorFor,
-    key => key, id => id
+    (vendor) => createNode('span', vendor), require('../../src/electron/renderer/usageCharts').modelVendorFor
   );
   const card = node('section', '');
   render(card, cell);

@@ -505,9 +505,6 @@ Object.assign(els, {
   showLiveTokenRateInput: document.getElementById('showLiveTokenRateInput'),
   liveTokenRateScopeRow: document.getElementById('liveTokenRateScopeRow'),
   liveTokenRateScopeInput: document.getElementById('liveTokenRateScopeInput'),
-  liveTokenRateDisplayRow: document.getElementById('liveTokenRateDisplayRow'),
-  liveTokenRateDisplayInput: document.getElementById('liveTokenRateDisplayInput'),
-  edgeDockRateDisplayInput: document.getElementById('edgeDockRateDisplayInput'),
   compactTokenUnitsRow: document.getElementById('compactTokenUnitsRow'),
   compactTokenUnitsInput: document.getElementById('compactTokenUnitsInput'),
   swapSettingsRefreshInput: document.getElementById('swapSettingsRefreshInput'),
@@ -1141,10 +1138,6 @@ function formatLiveTokenRate(value) {
   return formatCompact(rate, effectiveCompactTokenUnits(), currentLocale());
 }
 
-function liveTokenRateClientLabel(client) {
-  return client === 'codex' ? 'GPT' : clientLabels[client] || client;
-}
-
 function renderLiveTokenRate() {
   if (!els.liveTokenRate || !els.liveTokenRateValue) return;
   const enabled = state.settings?.showLiveTokenRate === true;
@@ -1159,16 +1152,10 @@ function renderLiveTokenRate() {
   const burn = state.settings?.tokenRateMode === 'burn';
   const sample = liveTokenRateTracker.getSample();
   const unit = burn ? 'TPM' : 'tok/s';
-  const display = tokenRateApi.normalizeLiveTokenRateDisplay(state.settings?.liveTokenRateDisplay);
-  const readouts = tokenRateApi.liveTokenRateReadouts(sample, display);
-  const text = readouts.map(({ client, sample: reading }) => {
-    const rate = reading ? (burn ? reading.burn : reading.speed) : null;
-    const value = rate === null ? '—' : formatLiveTokenRate(rate);
-    return (client ? liveTokenRateClientLabel(client) + ' ' : '') + value + ' ' + unit;
-  }).join(display === 'separate' ? '\n' : ' · ');
-  const idle = readouts.every(({ sample: reading }) => !reading || reading.idle === true);
-  els.liveTokenRate.classList.toggle('is-separated', display === 'separate');
-  els.liveTokenRate.classList.toggle('has-client', readouts.some(({ client }) => client));
+  const rate = sample ? (burn ? sample.burn : sample.speed) : null;
+  const value = rate === null ? '—' : formatLiveTokenRate(rate);
+  const text = `${value} ${unit}`;
+  const idle = !sample || sample.idle === true;
   els.liveTokenRateValue.textContent = text;
   els.liveTokenRate.dataset.mode = burn ? 'burn' : 'speed';
   els.liveTokenRate.classList.toggle('is-idle', idle);
@@ -1181,16 +1168,13 @@ function renderLiveTokenRate() {
     : (burn ? 'home.liveTokenRate.burnTitle' : 'home.liveTokenRate.speedTitle');
   const label = t(labelKey, { value: text, scope });
   const detailEntries = tokenRateApi.liveTokenRateTooltipEntries(
-    sample, burn ? 'burn' : 'speed', formatLiveTokenRate,
-    { clientLabel: liveTokenRateClientLabel, modelsLabel: t('dashboard.stack.model') }
+    sample, burn ? 'burn' : 'speed', formatLiveTokenRate
   );
-  limitWindowsView.setDetailTooltip(els.liveTokenRate, detailEntries.length
-    ? detailEntries.map((entry) => Array.isArray(entry) ? entry.slice(0, 2) : entry) : null);
+  limitWindowsView.setDetailTooltip(els.liveTokenRate, detailEntries.length ? detailEntries : null);
   for (const cell of els.liveTokenRate.querySelectorAll('.limit-detail-tooltip-row span:first-child')) {
     const model = cell.textContent;
     const icon = document.createElement('span');
-    const client = detailEntries.find((entry) => Array.isArray(entry) && entry[0] === model)?.[2];
-    icon.className = 'row-icon row-icon-' + (client || modelVendorFor(model) || 'token-monitor');
+    icon.className = `row-icon row-icon-${modelVendorFor(model) || 'token-monitor'}`;
     icon.setAttribute('aria-hidden', 'true');
     const name = document.createElement('span');
     name.className = 'live-token-rate-model-label';
@@ -1200,7 +1184,7 @@ function renderLiveTokenRate() {
   }
   if (!detailEntries.length) els.liveTokenRate.title = label;
   els.liveTokenRate.setAttribute('aria-label', [label, ...detailEntries.map((entry) =>
-    Array.isArray(entry) ? entry.slice(0, 2).join(': ') : entry.full)].join(', '));
+    Array.isArray(entry) ? entry.join(': ') : entry.full)].join(', '));
   syncLiveTokenRateFooterState();
 
   if (!idle && sample.revision !== liveTokenRateRenderedRevision) {
@@ -7835,7 +7819,6 @@ function appearancePatchFromControls() {
     showCompactTotalTokens: Boolean(els.showCompactTotalTokensInput.checked),
     showLiveTokenRate: Boolean(els.showLiveTokenRateInput.checked),
     liveTokenRateScope: els.liveTokenRateScopeInput?.value === 'device' ? 'device' : 'all',
-    liveTokenRateDisplay: tokenRateApi.normalizeLiveTokenRateDisplay(els.liveTokenRateDisplayInput?.value),
     compactTokenUnits: els.compactTokenUnitsInput?.value === 'localized' ? 'localized' : 'western',
     settingsInTitlebar: Boolean(els.swapSettingsRefreshInput.checked),
     glassOpacity: Number(els.glassInput.value === '' ? defaultAppearance.glassOpacity : els.glassInput.value),
@@ -8760,8 +8743,6 @@ function syncSettingsForm() {
   els.titleIconInput.checked = state.settings.titleIconOnly === true;
   els.showCompactTotalTokensInput.checked = state.settings.showCompactTotalTokens === true;
   els.showLiveTokenRateInput.checked = state.settings.showLiveTokenRate === true;
-  if (els.liveTokenRateDisplayInput) els.liveTokenRateDisplayInput.value = tokenRateApi.normalizeLiveTokenRateDisplay(state.settings.liveTokenRateDisplay);
-  els.liveTokenRateDisplayRow?.classList.toggle('hidden', !state.settings.showLiveTokenRate);
   if (els.liveTokenRateScopeInput) {
     els.liveTokenRateScopeInput.value = state.settings.liveTokenRateScope === 'device' ? 'device' : 'all';
   }
@@ -12584,7 +12565,6 @@ els.showCompactTotalTokensInput.addEventListener('change', async () => {
 });
 els.showLiveTokenRateInput.addEventListener('change', async () => {
   state.settings.showLiveTokenRate = els.showLiveTokenRateInput.checked;
-  els.liveTokenRateDisplayRow?.classList.toggle('hidden', !state.settings.showLiveTokenRate);
   const liveRateHasScope = state.settings.showLiveTokenRate
     && tokenRateApi.isSharedSyncMode(state.settings.hubMode);
   els.liveTokenRateScopeRow?.classList.toggle('hidden', !liveRateHasScope);
@@ -12593,11 +12573,6 @@ els.showLiveTokenRateInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();
   if (state.settings.showLiveTokenRate) observeLiveTokenRate(state.stats);
   renderLiveTokenRate();
-});
-els.liveTokenRateDisplayInput?.addEventListener('change', async () => {
-  state.settings.liveTokenRateDisplay = tokenRateApi.normalizeLiveTokenRateDisplay(els.liveTokenRateDisplayInput.value);
-  renderLiveTokenRate();
-  await saveAppearanceFromControls();
 });
 els.liveTokenRateScopeInput?.addEventListener('change', async () => {
   state.settings.liveTokenRateScope = els.liveTokenRateScopeInput.value === 'device' ? 'device' : 'all';
@@ -12658,7 +12633,6 @@ function syncEdgeDockControls() {
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
   if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
   if (els.edgeDockRunningIndicatorInput) els.edgeDockRunningIndicatorInput.checked = state.settings?.edgeDockRunningIndicatorEnabled !== false;
-  if (els.edgeDockRateDisplayInput) els.edgeDockRateDisplayInput.value = ['codex', 'antigravity'].includes(state.settings?.edgeDockRateDisplay) ? state.settings.edgeDockRateDisplay : 'all';
   if (els.edgeDockMacBackdropInput) {
     els.edgeDockMacBackdropInput.value = macBackdropApi.normalizeEdgeDockBackdropMode(state.settings?.edgeDockMacBackdrop);
   }
@@ -12717,9 +12691,6 @@ for (const input of els.edgeDockSideInputs || []) {
 }
 els.edgeDockWarnColorsInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockWarnColors: els.edgeDockWarnColorsInput.checked });
-});
-els.edgeDockRateDisplayInput?.addEventListener('change', () => {
-  void saveSettings({ edgeDockRateDisplay: els.edgeDockRateDisplayInput.value });
 });
 els.edgeDockRunningIndicatorInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockRunningIndicatorEnabled: els.edgeDockRunningIndicatorInput.checked });

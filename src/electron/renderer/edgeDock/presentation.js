@@ -506,9 +506,7 @@
         id: `stat:${metric}`,
         kind: 'stat',
         metric,
-        rateDevices: (options.liveRateDetails || sample)?.devices || [],
-        ...(options.liveRateDetails ? { rateDetailDeviceCount: options.liveRateDetails.deviceCount } : {}),
-        ...(options.liveRateClient ? { rateClient: options.liveRateClient } : {}),
+        rateDevices: sample?.devices || [],
         rateMode: options.tokenRateMode === 'burn' ? 'burn' : 'speed',
         rate: sample ? (options.tokenRateMode === 'burn' ? sample.burn : sample.speed) : null,
         speed: sample ? finite(sample.speed) : null,
@@ -541,7 +539,6 @@
         // The sample rides the cell because it moves on its own timer, and the
         // dock renderer has no stats access to derive one from.
         cellDetail: options.cellDetail === 'rate' ? 'rate' : 'clients',
-        ...(wantsRate && options.liveRateClient ? { rateClient: options.liveRateClient } : {}),
         rateMode: options.tokenRateMode === 'burn' ? 'burn' : 'speed',
         rate: sample ? finite(options.tokenRateMode === 'burn' ? sample.burn : sample.speed) : null,
         rateIdle: !sample || sample.idle === true,

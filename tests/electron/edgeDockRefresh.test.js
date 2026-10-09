@@ -12,7 +12,6 @@ const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'),
 const refreshSource = main.slice(main.indexOf('let manualStatsRefreshInFlight ='), main.indexOf('function managedPricingSidecarPath('));
 const dockSource = main.slice(main.indexOf('// Week / last-7 / last-30 are not collector periods'), main.indexOf('// Hand cells to the controller'));
 const pushSource = main.slice(main.indexOf('function sendPush('), main.indexOf('function statsHistoryRevision('));
-const rateDisplaySource = main.slice(main.indexOf('function normalizeEdgeDockRateDisplay('), main.indexOf('function normalizeLiveTokenRateScope('));
 
 function deferred() {
   let resolve;
@@ -60,7 +59,6 @@ function fixture() {
     codexPresentationPendingAccountId: '',
     codexPresentationActiveAccountId: '',
     edgeDockLiveRateSample: () => null,
-    tokenRateApi: require('../../src/electron/renderer/tokenRatePresentation'),
     statsHistoryRevision: (stats) => stats?.historyRevision,
     injectLocalDeviceStatus: (stats) => stats,
     getSyncContentRuntime: () => ({ notifyStats() {} }),
@@ -74,7 +72,7 @@ function fixture() {
     maybeAdoptSharedSubscriptionRevision() {},
     console: { log() {} }
   };
-  vm.runInNewContext(`${rateDisplaySource}\n${refreshSource}\n${dockSource}\n${pushSource}`, context);
+  vm.runInNewContext(`${refreshSource}\n${dockSource}\n${pushSource}`, context);
   return { context, usage, limits, history, calls };
 }
 
