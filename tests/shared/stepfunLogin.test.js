@@ -92,8 +92,8 @@ test('stepfunCredentials reads the settings pair and the env pair, and needs bot
 
 test('fetchStepfunLimits signs in through deps.signIn and uses the webid it returns', async () => {
   const seen = [];
-  const refreshed = [];
   const signInCalls = [];
+  const logged = [];
   const result = await fetchStepfunLimits({ stepfunUsername: 'me@example.com', stepfunPassword: 'pw' }, {
     env: {}, now: () => 1770000000000,
     signIn: async (options) => {
@@ -101,7 +101,7 @@ test('fetchStepfunLimits signs in through deps.signIn and uses the webid it retu
       return { token: 'fresh-token', webid: 'web-9' };
     },
     fetch: quotaFetch(quotaBody(), seen),
-    onTokenRefreshed: (token) => refreshed.push(token)
+    logger: (line) => logged.push(line)
   });
 
   assert.equal(result.status, 'ok');
@@ -119,7 +119,8 @@ test('fetchStepfunLimits signs in through deps.signIn and uses the webid it retu
   const rate = seen.find((c) => c.url.includes('QueryStepPlanRateLimit'));
   assert.equal(rate.headers['oasis-webid'], 'web-9');
   assert.equal(rate.headers.Cookie, 'Oasis-Token=fresh-token; Oasis-Webid=web-9');
-  assert.deepEqual(refreshed, ['fresh-token'], 'the minted token is handed back so it can be cached');
+  assert.ok(logged.some((line) => /stepfun .*QueryStepPlanRateLimit -> 200/.test(line)),
+    'the probe leaves a trail, which is the only way a later "unavailable" can be explained');
 });
 
 test('fetchStepfunLimits falls back to the token payload for the webid', async () => {
@@ -164,56 +165,60 @@ test('fetchStepfunLimits reports unavailable without a browser to sign in throug
   assert.deepEqual(result.windows, []);
 });
 
-test('fetchStepfunLimits re-signs-in once when a cached token comes back unauthorized', async () => {
+test('fetchStepfunLimits re-signs-in once when a pasted token comes back unauthorized', async () => {
+  // The manual token lane has no renewal of its own, so a token that ages out
+  // is exactly the case the stored password exists to heal — provided the
+  // probe is willing to spend a login on it.
   let rateCalls = 0;
   let signIns = 0;
-  const refreshed = [];
-  const result = await fetchStepfunLimits({ stepfunUsername: 'me', stepfunPassword: 'pw' }, {
-    env: {}, now: () => 1770000000000, cachedToken: 'stale-token',
-    signIn: async () => { signIns += 1; return { token: 'fresh-token', webid: 'web-2' }; },
-    fetch: async (url, init = {}) => {
-      if (String(url).includes('QueryStepPlanRateLimit')) {
-        rateCalls += 1;
-        assert.equal(init.headers.Cookie, rateCalls === 1
-          ? 'Oasis-Token=stale-token'
-          : 'Oasis-Token=fresh-token; Oasis-Webid=web-2');
-        return rateCalls === 1
-          ? { ok: false, status: 401, json: async () => ({}) }
-          : ok(quotaBody({ five_hour_usage_left_rate: 0.9, weekly_usage_left_rate: 0.9 }));
+  const result = await fetchStepfunLimits(
+    { stepfunUsername: 'me', stepfunPassword: 'pw', stepfunToken: 'stale-token' },
+    {
+      env: {}, now: () => 1770000000000,
+      signIn: async () => { signIns += 1; return { token: 'fresh-token', webid: 'web-2' }; },
+      fetch: async (url, init = {}) => {
+        if (String(url).includes('QueryStepPlanRateLimit')) {
+          rateCalls += 1;
+          assert.equal(init.headers.Cookie, rateCalls === 1
+            ? 'Oasis-Token=stale-token'
+            : 'Oasis-Token=fresh-token; Oasis-Webid=web-2');
+          return rateCalls === 1
+            ? { ok: false, status: 401, json: async () => ({}) }
+            : ok(quotaBody({ five_hour_usage_left_rate: 0.9, weekly_usage_left_rate: 0.9 }));
+        }
+        return ok({ status: 1 });
       }
-      return ok({ status: 1 });
-    },
-    onTokenRefreshed: (token) => refreshed.push(token)
-  });
+    });
 
-  assert.equal(result.status, 'ok', 'a stale cache self-heals instead of surfacing unauthorized');
+  assert.equal(result.status, 'ok', 'an aged-out token self-heals instead of surfacing unauthorized');
   assert.equal(rateCalls, 2, 'the probe retries once after re-login');
   assert.equal(signIns, 1, 'a second failure is not retried forever');
-  assert.deepEqual(refreshed, ['fresh-token']);
 });
 
 test('fetchStepfunLimits picks up the new webid on the re-login retry', async () => {
   let rateCalls = 0;
-  await fetchStepfunLimits({ stepfunUsername: 'me', stepfunPassword: 'pw' }, {
-    env: {}, now: () => 1770000000000, cachedToken: jwtWith({ device_id: 'dev-old' }),
-    signIn: async () => ({ token: jwtWith({ device_id: 'dev-new' }), webid: 'web-new' }),
-    fetch: async (url, init = {}) => {
-      if (String(url).includes('QueryStepPlanRateLimit')) {
-        rateCalls += 1;
-        // Reusing the aged-out session's device id would fail the retry for a
-        // second, unrelated reason and mask the real outcome.
-        assert.equal(init.headers['oasis-webid'], rateCalls === 1 ? 'dev-old' : 'web-new');
-        return rateCalls === 1 ? { ok: false, status: 401, json: async () => ({}) } : ok(quotaBody());
+  await fetchStepfunLimits(
+    { stepfunUsername: 'me', stepfunPassword: 'pw', stepfunToken: jwtWith({ device_id: 'dev-old' }) },
+    {
+      env: {}, now: () => 1770000000000,
+      signIn: async () => ({ token: jwtWith({ device_id: 'dev-new' }), webid: 'web-new' }),
+      fetch: async (url, init = {}) => {
+        if (String(url).includes('QueryStepPlanRateLimit')) {
+          rateCalls += 1;
+          // Reusing the aged-out session's device id would fail the retry for a
+          // second, unrelated reason and mask the real outcome.
+          assert.equal(init.headers['oasis-webid'], rateCalls === 1 ? 'dev-old' : 'web-new');
+          return rateCalls === 1 ? { ok: false, status: 401, json: async () => ({}) } : ok(quotaBody());
+        }
+        return ok({ status: 1 });
       }
-      return ok({ status: 1 });
-    }
-  });
+    });
   assert.equal(rateCalls, 2);
 });
 
 test('fetchStepfunLimits stays unauthorized when re-login cannot fix a bad password', async () => {
   const result = await fetchStepfunLimits({ stepfunUsername: 'me', stepfunPassword: 'wrong' }, {
-    env: {}, now: () => 1770000000000, cachedToken: 'stale-token',
+    env: {}, now: () => 1770000000000, stepfunToken: 'stale-token',
     signIn: async () => {
       const error = new Error('StepFun rejected the credentials');
       error.status = 'unauthorized';
@@ -244,26 +249,48 @@ test('fetchStepfunLimits prefers an explicit token over signing in', async () =>
   assert.match(rate.headers.Cookie, /^Oasis-Token=pasted-token/);
 });
 
-test('fetchStepfunLimits uses a cached token without signing in', async () => {
+test('fetchStepfunLimits uses the webid pasted beside a manual token', async () => {
+  // The manual lane used to have no way to satisfy a check the token alone
+  // cannot: without the matching device id the endpoint answers 401 "oasis-token
+  // is embezzled", which the panel renders exactly like a wrong token.
   let signIns = 0;
   const seen = [];
-  const result = await fetchStepfunLimits({ stepfunUsername: 'me', stepfunPassword: 'pw' }, {
-    env: {}, now: () => 1770000000000, cachedToken: 'cached-token',
-    signIn: async () => { signIns += 1; return { token: 'fresh' }; },
-    fetch: quotaFetch(quotaBody(), seen)
-  });
+  const result = await fetchStepfunLimits(
+    { stepfunToken: 'pasted-token', stepfunWebid: 'pasted-webid' },
+    {
+      env: {}, now: () => 1770000000000,
+      signIn: async () => { signIns += 1; return { token: 'fresh' }; },
+      fetch: quotaFetch(quotaBody(), seen)
+    });
 
   assert.equal(result.status, 'ok');
-  assert.equal(signIns, 0, 'a live cache is the cheap path');
+  assert.equal(signIns, 0, 'a pasted token is a deliberate override');
   const rate = seen.find((c) => c.url.includes('QueryStepPlanRateLimit'));
-  assert.match(rate.headers.Cookie, /^Oasis-Token=cached-token/);
+  assert.equal(rate.headers['oasis-webid'], 'pasted-webid');
+  assert.equal(rate.headers.Cookie, 'Oasis-Token=pasted-token; Oasis-Webid=pasted-webid');
+});
+
+test('fetchStepfunLimits prefers a session webid over the configured one', async () => {
+  // A browser sign-in issues the pair together; pairing the pasted webid with a
+  // session token is the mismatched pair the endpoint rejects.
+  const seen = [];
+  await fetchStepfunLimits(
+    { stepfunUsername: 'me', stepfunPassword: 'pw', stepfunWebid: 'pasted-webid' },
+    {
+      env: {}, now: () => 1770000000000,
+      signIn: async () => ({ token: 'fresh-token', webid: 'session-webid' }),
+      fetch: quotaFetch(quotaBody(), seen)
+    });
+
+  const rate = seen.find((c) => c.url.includes('QueryStepPlanRateLimit'));
+  assert.equal(rate.headers['oasis-webid'], 'session-webid');
+  assert.equal(rate.headers.Cookie, 'Oasis-Token=fresh-token; Oasis-Webid=session-webid');
 });
 
 test('fetchStepfunLimits keys a password login on the account, so a rotated token is the same row', async () => {
-  const run = (cachedToken) => fetchStepfunLimits({ stepfunUsername: 'me@example.com', stepfunPassword: 'pw' }, {
-    env: {}, now: () => 1770000000000, cachedToken,
-    fetch: quotaFetch()
-  });
+  const run = (stepfunToken) => fetchStepfunLimits(
+    { stepfunUsername: 'me@example.com', stepfunPassword: 'pw', stepfunToken },
+    { env: {}, now: () => 1770000000000, fetch: quotaFetch() });
 
   const before = await run('old');
   const after = await run('rotated');

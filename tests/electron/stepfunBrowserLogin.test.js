@@ -329,6 +329,40 @@ test('a successful sign-in keeps its window, because destroying it breaks the ne
   assert.equal(retainedStepFunWindow(), null, 'dispose clears it');
 });
 
+test('retained windows are keyed by partition, so one sign-in cannot displace another', async () => {
+  // The partition is a user setting, so two windows can be live at once. A
+  // single module-level slot would let the second sign-in evict the first —
+  // and destroying a window is exactly what takes the network stack down.
+  disposeStepFunWindow();
+  const first = fakePage();
+  const second = fakePage();
+  await runSignIn({
+    page: first,
+    cookies: () => (first.state.submitted ? [cookie(OASIS_TOKEN, 'tok-a')] : []),
+    options: { partition: 'persist:stepfun-login' }
+  });
+  await runSignIn({
+    page: second,
+    cookies: () => (second.state.submitted ? [cookie(OASIS_TOKEN, 'tok-b')] : []),
+    options: { partition: 'throwaway' }
+  });
+
+  const winA = retainedStepFunWindow('persist:stepfun-login');
+  const winB = retainedStepFunWindow('throwaway');
+  assert.ok(winA && winB, 'both partitions keep their own window');
+  assert.notEqual(winA, winB);
+  assert.equal(winA.destroyCount(), 0);
+  assert.equal(winB.destroyCount(), 0);
+
+  disposeStepFunWindow('throwaway');
+  assert.equal(retainedStepFunWindow('throwaway'), null);
+  assert.equal(retainedStepFunWindow('persist:stepfun-login'), winA,
+    'releasing one partition must not take the other with it');
+  assert.equal(winA.destroyCount(), 0);
+  disposeStepFunWindow();
+  assert.equal(retainedStepFunWindow('persist:stepfun-login'), null);
+});
+
 test('a failed sign-in destroys its window', async () => {
   disposeStepFunWindow();
   const page = fakePage({ passwordTab: false });
@@ -449,6 +483,47 @@ test('the sign-in waits for the anonymous cookie to be replaced', async () => {
   });
   assert.equal(result.token, 'signed-in');
   assert.ok(reads >= 3, 'it kept polling instead of taking the first cookie it saw');
+});
+
+test('the sign-in never returns the anonymous token, however long the site takes', async () => {
+  // The whole point of the settle wait: an unreplaced anonymous cookie must
+  // fail loudly rather than be handed to the quota probe, which rejects it
+  // with "not a logined oasis account" and looks like bad credentials.
+  //
+  // The replacement deadline is injected rather than waited out — the real one
+  // is 20s, and a test that had to sit through it would only be able to fail
+  // on a slow machine. `timeoutMs` stays well above it so the failure this
+  // asserts is the replacement deadline and not the outer one.
+  const page = fakePage();
+  await assert.rejects(
+    runSignIn({
+      page,
+      cookies: () => [cookie(OASIS_TOKEN, 'anonymous')],
+      options: { timeoutMs: 9000, tokenReplaceDeadlineMs: 900 }
+    }),
+    (error) => /did not replace the anonymous session/.test(error.message)
+  );
+});
+
+test('the anonymous-token wait outlives the settle window so a slow swap still wins', async () => {
+  // A regression guard on the shape of the wait: if the replacement deadline
+  // were not strictly longer than the settle window, the loop would declare
+  // failure before it ever got a chance to look at a second cookie.
+  assert.ok(
+    require('../../src/electron/providers/stepfun/login').TOKEN_REPLACE_DEADLINE_MS > 1500,
+    'TOKEN_SETTLE_MS is 1500ms; the deadline must give the site room past it'
+  );
+});
+
+test('a sign-in whose page never leaves the login screen is not a credential error', async () => {
+  // Staying on account.stepfun.com means the submit never succeeded — a bad
+  // password, a WAF challenge, anything. It must not be reported as though
+  // the stored credential were accepted.
+  const page = fakePage({ navigateOnSubmit: false });
+  await assert.rejects(
+    runSignIn({ page, cookies: () => [cookie(OASIS_TOKEN, 'anonymous')], options: { timeoutMs: 2500 } }),
+    (error) => error.status === 'unavailable'
+  );
 });
 
 test('signInStepFunWithBrowser times out instead of polling forever', async () => {

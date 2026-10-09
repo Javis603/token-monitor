@@ -1405,7 +1405,11 @@ test('Factory account form keeps its setup copy and validates before saving', ()
   assert.match(preload, /saveCredential: \(providerId, values\) => ipcRenderer\.invoke\('limits:saveCredential', providerId, values\)/);
   assert.match(preload, /clearCredential: \(providerId\) => ipcRenderer\.invoke\('limits:clearCredential', providerId\)/);
   assert.match(main, /ipcMain\.handle\('limits:saveCredential', \(_event, providerId, values\) => credentialCommands\.saveCredential\(providerId, values\)\)/);
-  assert.match(main, /ipcMain\.handle\('limits:clearCredential', \(_event, providerId\) => credentialCommands\.clearCredential\(providerId\)\)/);
+  // Clear is no longer a one-liner: StepFun's browser session lives in a
+  // cookie jar rather than in settings, so clearing the stored values alone
+  // would leave a still-authenticated partition behind.
+  assert.match(main, /ipcMain\.handle\('limits:clearCredential',[\s\S]{0,400}?credentialCommands\.clearCredential\(providerId\)/);
+  assert.match(main, /if \(providerId === 'stepfun'\) void clearStepfunLoginSession\(\);/);
   assert.doesNotMatch(main + preload, /limits:validateCredential|validateLimitCredential/);
   assert.equal(normalizeAccountField('factoryApiKey', ' " fk-live " '), 'fk-live');
   const projected = accountStatusProjection({ factoryApiKey: '' }, { FACTORY_API_KEY: 'auto-detected-key' });

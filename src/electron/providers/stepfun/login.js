@@ -20,10 +20,13 @@
 // So the login runs where the WAF challenge can actually execute: an Electron
 // BrowserWindow loads the real login page, the site's own JavaScript performs
 // the exchange, and the resulting `Oasis-Token` is read back with
-// `session.cookies()` — which resolves inside the browser process, so the
+// `session.cookies.get()` — which resolves inside the browser process, so the
 // app-bound cookie encryption that stops every external reader does not apply.
 //
 // Token Monitor is already an Electron app, so this costs no new dependency.
+//
+// What the returned token is worth depends on reading it at the right moment;
+// see the note above `beforeSubmit` before touching the polling loop.
 
 const LOGIN_URL = 'https://account.stepfun.com/login';
 // The cookie read is filtered by the URL the quota page is served from, so the
@@ -40,10 +43,37 @@ const DEFAULT_TIMEOUT_MS = 110_000;
 // replaced by the signed-in one. Measured against the live account; see the
 // note where it is used.
 const TOKEN_SETTLE_MS = 1_500;
-// Exported so the caller can hand `session.fromPartition(PARTITION)` to this
+// How long to keep waiting for that replacement before declaring the sign-in
+// failed. Deliberately far longer than the settle window: the swap has been
+// seen to take a few seconds, and giving up early would surface as a bad
+// credential when the real cause is a slow site. Injectable so a test can
+// exercise the deadline without spending the real one in wall-clock time.
+const TOKEN_REPLACE_DEADLINE_MS = 20_000;
+// Exported so the caller can hand `session.fromPartition(partition)` to this
 // module. A window and the session that reads it must share one partition, and
 // a typo'd literal in two files is how a sign-in silently returns no token.
-const PARTITION = 'stepfun-login';
+const PARTITION_BASE = 'stepfun-login';
+
+/**
+ * The session partition the sign-in window and the cookie reader share.
+ *
+ * `persist:` is what makes the sign-in survive an app restart: without it
+ * Chromium keeps the partition in memory only, so every launch started from an
+ * empty jar and popped the login window again. With it the Oasis cookies land
+ * in the user-data Cookies file, encrypted with the OS key store the same way
+ * Chromium encrypts any persisted cookie — readable by this user on this
+ * machine, and by nothing else.
+ *
+ * Passing `remember: false` falls back to a throwaway in-memory partition, for
+ * a user who would rather re-authenticate each launch than leave a session on
+ * disk.
+ */
+function stepfunPartition({ remember = true } = {}) {
+  return remember ? `persist:${PARTITION_BASE}` : PARTITION_BASE;
+}
+
+// The default, so a caller that never states a preference still persists.
+const PARTITION = stepfunPartition();
 
 // The password tab is a Radix tab; its trigger id is stable across the locale
 // because it comes from the component, not the translated label. Selecting it
@@ -90,17 +120,14 @@ async function readOasisSession(session, { nowMs = Date.now() } = {}) {
   return { token: value, webid: String(webid?.value || '').trim() };
 }
 
-function readOasisToken(session, options) {
-  return readOasisSession(session, options).then((s) => s.token);
-}
-
 /**
  * Open the StepFun sign-in page, fill the stored credentials, and return the
  * resulting Oasis-Token.
  *
  * @param {{username: string, password: string, BrowserWindow: object,
- *          session: object, timeoutMs?: number, logger?: (m: string) => void,
- *          onStatus?: (m: string) => void}} options
+ *          session: object, partition?: string, timeoutMs?: number,
+ *          tokenReplaceDeadlineMs?: number,
+ *          logger?: (m: string) => void, onStatus?: (m: string) => void}} options
  * @returns {Promise<{token: string, webid: string}>} The Oasis-Token and the
  *   device id issued with it, or `{token: '', webid: ''}` when the window was
  *   closed before sign-in completed.
@@ -111,7 +138,9 @@ async function signInStepFunWithBrowser(options = {}) {
     password,
     BrowserWindow,
     session,
+    partition = PARTITION,
     timeoutMs = DEFAULT_TIMEOUT_MS,
+    tokenReplaceDeadlineMs = TOKEN_REPLACE_DEADLINE_MS,
     logger = () => {},
     onStatus = () => {}
   } = options;
@@ -140,7 +169,7 @@ async function signInStepFunWithBrowser(options = {}) {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
-      partition: PARTITION
+      partition
     }
   });
 
@@ -272,17 +301,23 @@ async function signInStepFunWithBrowser(options = {}) {
       if (navigated && !navigatedAt) navigatedAt = Date.now();
       if (navigatedAt) {
         const settledMs = Date.now() - navigatedAt;
-        // Give the site a beat to replace the anonymous cookie before reading,
-        // then accept a changed token, or the current one once it has clearly
-        // stopped changing.
+        // Give the site a beat to replace the anonymous cookie before reading.
         if (settledMs >= TOKEN_SETTLE_MS) {
           const outcome = await readOasisSession(session);
-          const replaced = Boolean(outcome.token) && outcome.token !== beforeSubmit;
-          if (outcome.token && (replaced || settledMs >= TOKEN_SETTLE_MS * 4)) {
+          if (outcome.token && outcome.token !== beforeSubmit) {
             logger('StepFun sign-in completed');
             onStatus('done');
             signedIn = true;
             return outcome;
+          }
+          // The anonymous token is still there. Returning it would hand the
+          // quota probe a credential that looks freshly minted and is not —
+          // the exact failure this wait exists to prevent. So keep waiting,
+          // and if the site never switches, fail with a message that names the
+          // cause instead of a generic timeout. A credential stuck in the
+          // wrong state is not something a longer wait fixes.
+          if (settledMs >= Number(tokenReplaceDeadlineMs)) {
+            throw new Error('StepFun did not replace the anonymous session after sign-in');
           }
         }
       }
@@ -308,7 +343,7 @@ async function signInStepFunWithBrowser(options = {}) {
     // A successful sign-in keeps its window: destroying it takes the network
     // stack down and the quota read that follows can no longer reach the site.
     // A failed attempt has nothing worth keeping.
-    if (signedIn && !win.isDestroyed()) retainStepFunWindow(win);
+    if (signedIn && !win.isDestroyed()) retainStepFunWindow(win, partition);
     else cleanup();
   }
 }
@@ -318,32 +353,51 @@ function delay(ms) {
 }
 
 // A destroyed window takes Chromium's network stack down with it: measured on
-// Electron 43.4, once a BrowserWindow on a persistent partition is destroyed,
+// Electron 43.4.0, once a BrowserWindow on a persistent partition is destroyed,
 // every later `net.fetch` from the default session and every later `loadURL`
 // in a new window hangs indefinitely — which is exactly the shape of a quota
 // probe that times out right after signing in. So the sign-in window is hidden
-// and kept instead, and reused for the quota read (see quota.js). It costs one
-// idle renderer; it buys a working network stack.
-let retainedWindow = null;
+// and kept instead of closed. It costs one idle renderer; it buys a working
+// network stack. `disposeStepFunWindow` is the only way out, and main.js calls
+// it on quit — nothing else owns this window.
+//
+// Keyed by partition rather than held as one module-level slot: the partition
+// is a caller-supplied setting (`persist:stepfun-login` vs the throwaway
+// partition), so a single slot would let one sign-in silently displace
+// another's window and leave the displaced partition's cookie jar readable by
+// a window that is about to be torn down.
+const retainedWindows = new Map();
 
-function retainedStepFunWindow() {
-  return retainedWindow && !retainedWindow.isDestroyed() ? retainedWindow : null;
+function retainedStepFunWindow(partition = PARTITION) {
+  const win = retainedWindows.get(partition);
+  if (win && !win.isDestroyed()) return win;
+  if (win) retainedWindows.delete(partition);
+  return null;
 }
 
-function retainStepFunWindow(win) {
+function retainStepFunWindow(win, partition) {
   if (!win || win.isDestroyed()) return null;
-  retainedWindow = win;
+  const key = partition || win.webContents?.session?.name || PARTITION;
+  retainedWindows.set(key, win);
   // The user may close it at any time; forget it rather than hand out a corpse.
   win.once('closed', () => {
-    if (retainedWindow === win) retainedWindow = null;
+    if (retainedWindows.get(key) === win) retainedWindows.delete(key);
   });
   if (win.isVisible()) win.hide();
   return win;
 }
 
-function disposeStepFunWindow() {
-  if (retainedWindow && !retainedWindow.isDestroyed()) retainedWindow.destroy();
-  retainedWindow = null;
+function disposeStepFunWindow(partition) {
+  if (partition !== undefined) {
+    const one = retainedWindows.get(partition);
+    if (one && !one.isDestroyed()) one.destroy();
+    retainedWindows.delete(partition);
+    return;
+  }
+  for (const win of retainedWindows.values()) {
+    if (win && !win.isDestroyed()) win.destroy();
+  }
+  retainedWindows.clear();
 }
 
 // Switch to the password tab and confirm it actually took effect. Returns
@@ -410,13 +464,14 @@ module.exports = {
   OASIS_TOKEN,
   OASIS_WEBID,
   PARTITION,
+  PARTITION_BASE,
+  TOKEN_REPLACE_DEADLINE_MS,
   WINDOW_TITLE,
   disposeStepFunWindow,
   loginUrl,
   readOasisSession,
-  readOasisToken,
-  retainStepFunWindow,
   retainedStepFunWindow,
   signInStepFunWithBrowser,
+  stepfunPartition,
   tokenExpiryMs
 };

@@ -33,7 +33,8 @@ const {
   createWorkbuddyLocalAuth,
   isSupportedWorkbuddyLocalAppPlatform
 } = require('./providers/workbuddy/localAuth');
-const { PARTITION: STEPFUN_PARTITION, readOasisSession, signInStepFunWithBrowser } = require('./providers/stepfun/login');
+const { COOKIE_URL, OASIS_TOKEN, OASIS_WEBID, disposeStepFunWindow, readOasisSession, signInStepFunWithBrowser, stepfunPartition } = require('./providers/stepfun/login');
+const { verifyStepfunSession } = require('../shared/providers/stepfun/limits');
 const { createElectronLimitsFetch } = require('./limits/fetch');
 const {
   expandedBoundsForCollapse,
@@ -83,35 +84,95 @@ function ensureMimoExchangeFetch() {
 // A stored password makes every probe able to re-sign-in, which would mean a
 // login window on every collection tick. The sign-in partition persists, so
 // its Oasis cookies usually outlive the gap between ticks: read them first and
-// only open a window when Chromium says the session is gone. The cookie jar
+// only open a window when the site says the session is gone. The cookie jar
 // does the expiry bookkeeping, which is exactly what a hand-rolled timer here
-// would get wrong.
+// would get wrong — and expiry is not the only thing the jar can be wrong
+// about. See the check below.
 //
 // `fromPartition` is resolved per call rather than cached because it only
-// exists once the app is ready, and the partition constant is shared with the
-// sign-in window so the window and the cookie reader cannot drift apart.
+// exists once the app is ready, and the partition is passed to the sign-in
+// window so the window and the cookie reader cannot drift apart.
+//
+// The partition depends on a user setting: `persist:` writes the Oasis cookies
+// into the user-data Cookies file so a restart does not log out, while the
+// throwaway variant keeps them in memory only. A missing setting means persist,
+// which is what a fresh install gets.
+function stepfunRememberLogin() {
+  return settings?.stepfunRememberLogin !== '0';
+}
+
+// Reuse the stored cookies only if the site confirms they are a signed-in
+// session. platform.stepfun.com issues an anonymous Oasis-Token on page load,
+// so "the jar has a token" is true in a state that answers every quota call
+// with 401 "not a logined oasis account". Reusing one on that basis is not a
+// small inefficiency: the re-login path asks for a session again, reads the very
+// same anonymous cookie back, and the provider stays unauthorized with no
+// window ever shown to the user.
 async function electronStepfunSignIn(options) {
-  const loginSession = session.fromPartition(STEPFUN_PARTITION);
+  const partition = stepfunPartition({ remember: stepfunRememberLogin() });
+  const loginSession = session.fromPartition(partition);
   const reusable = await readOasisSession(loginSession);
-  if (reusable.token) return reusable;
-  return signInStepFunWithBrowser({ ...options, BrowserWindow, session: loginSession });
+  if (reusable.token) {
+    const signedIn = await verifyStepfunSession(reusable, {
+      fetch: electronLimitsFetch(),
+      logger: typeof options?.logger === 'function' ? options.logger : undefined
+    });
+    if (signedIn) return reusable;
+  }
+  return signInStepFunWithBrowser({ ...options, BrowserWindow, session: loginSession, partition });
 }
 
 // StepFun fails in ways the panel cannot explain — a stuck transport and a
 // rejected credential both surface as the same yellow "unavailable". Keep a
 // short trail on disk so the next report is a cause, not a guess.
+//
+// Bounded on purpose: this is written on every probe, so an unbounded file
+// would grow by a few hundred lines a day forever. Past the cap the oldest
+// half is dropped rather than rotated into a second file, because a second
+// file just moves the problem.
+const STEPFUN_DIAGNOSTIC_LIMIT = 400;
+let stepfunDiagnosticPath = null;
+
 function appendStepFunDiagnostic(line) {
   try {
-    const path = require('node:path').join(app.getPath('userData'), 'stepfun-diagnostic.log');
-    fs.appendFileSync(path, `${new Date().toISOString()} ${line}\n`);
+    const path = require('node:path');
+    if (!stepfunDiagnosticPath) stepfunDiagnosticPath = path.join(app.getPath('userData'), 'stepfun-diagnostic.log');
+    const stamp = `${new Date().toISOString()} ${line}\n`;
+    // Happy probes log nothing, so the common case is a file that never
+    // exists — read it only once there is something in it.
+    if (!fs.existsSync(stepfunDiagnosticPath)) {
+      fs.writeFileSync(stepfunDiagnosticPath, stamp);
+      return;
+    }
+    fs.appendFileSync(stepfunDiagnosticPath, stamp);
+    const lines = fs.readFileSync(stepfunDiagnosticPath, 'utf8').split('\n');
+    if (lines.length <= STEPFUN_DIAGNOSTIC_LIMIT + 1) return;
+    const kept = lines.slice(Math.ceil(lines.length / 2)).join('\n');
+    fs.writeFileSync(stepfunDiagnosticPath, kept);
   } catch { /* diagnostics must never break the probe */ }
 }
 
+// Always records and always forwards. Wrapping only when the caller left the
+// logger out meant the settings-side probe — the one a user reaches for by
+// clicking Save — wrote no diagnostics at all, so the failure a user actually
+// reports was the one with no trail on disk.
 function stepfunErrorLogger(logger) {
   return (message) => {
     appendStepFunDiagnostic(message);
     if (typeof logger === 'function') logger(message);
   };
+}
+
+// Forget the browser login the way Clear forgets the credential: the cookie
+// jar IS the session, so dropping the settings while keeping an authenticated
+// partition lets the next probe sign in again from a session the user just
+// said to remove. Clearing the stored values alone is not enough.
+async function clearStepfunLoginSession() {
+  const partition = stepfunPartition({ remember: stepfunRememberLogin() });
+  disposeStepFunWindow(partition);
+  try {
+    await session.fromPartition(partition).cookies.remove(COOKIE_URL, [OASIS_TOKEN, OASIS_WEBID]);
+  } catch { /* the partition may not exist yet on a first run */ }
 }
 
 // Settings-side provider probes take the same transport as the collector's.
@@ -124,10 +185,12 @@ function electronProviderDeps(deps = {}) {
     fetch: electronLimitsFetch(),
     mimoExchangeFetch: ensureMimoExchangeFetch(),
     // Unlike the two above, these only default when the caller left them out
-    // — a caller that supplies its own signer or logger (tests, and any future
-    // headless transport) must keep them.
+    // — a caller that supplies its own signer must keep it.
     signIn: deps.signIn || electronStepfunSignIn,
-    logger: deps.logger || stepfunErrorLogger(deps.logger)
+    // The logger is wrapped even when the caller supplied one: recording and
+    // forwarding are not either/or, and skipping the record is what left the
+    // save-time failures unreported.
+    logger: stepfunErrorLogger(deps.logger)
   };
 }
 const {
@@ -8165,7 +8228,11 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
-  ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
+  ipcMain.handle('limits:clearCredential', (_event, providerId) => {
+    const result = credentialCommands.clearCredential(providerId);
+    if (providerId === 'stepfun') void clearStepfunLoginSession();
+    return result;
+  });
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
     const cookie = opencodeWeb.sanitizeCookieHeader(raw);
     if (!cookie) {
@@ -9101,6 +9168,10 @@ app.on('before-quit', () => {
   unregisterWindowToggleShortcut();
   edgeDockController?.stop();
   electronWorkbuddyLocalAuth.dispose();
+  // The StepFun sign-in window is retained on purpose (destroying it takes
+  // Chromium's network stack down), so it has to be released explicitly —
+  // nothing else owns it.
+  disposeStepFunWindow();
   if (skipForcedQuit) return;
   performQuit();
 });

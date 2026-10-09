@@ -81,27 +81,49 @@ test('Claude organization choice starts hidden before a cookie is checked', () =
   assert.equal(group.byId('claudeWebOrganizationRow').classList.contains('hidden'), true);
 });
 
-test('StepFun setup copy points to its button, request header and both credential lanes', () => {
+test('StepFun setup copy leads with automatic sign-in and keeps the manual lane complete', () => {
   const form = limitAccountFormsForRenderer().find((entry) => entry.id === 'stepfun');
   const { group } = renderPanel(form);
   const steps = form.manual[0].steps;
   assert.equal(steps.length, 4);
-  assert.match(i18n.translate('zh-TW', steps[0]), /使用上方按鈕/);
-  assert.match(i18n.translate('en', steps[0]), /button above/);
+  // Step 1 is the default path now: the password lane drives a real browser
+  // window, so the copy has to say that first instead of sending every user
+  // into DevTools.
+  assert.match(i18n.translate('zh-TW', steps[0]), /自動登入是預設方式/);
+  assert.match(i18n.translate('en', steps[0]), /Automatic sign-in is the default/);
+  // The manual steps survive below it, and the button still points the way.
+  assert.match(i18n.translate('zh-TW', steps[1][0]), /上方按鈕/);
+  assert.match(i18n.translate('en', steps[1][0]), /button above/);
   assert.match(i18n.translate('en', steps[1][0]), /DevTools \(F12 or Cmd\+Opt\+I\) -> Network/);
   assert.match(group.text, /QueryStepPlanRateLimit/);
+  // Both halves of the manual lane, because the device id is not optional: the
+  // endpoint answers a token without it with the same 401 as a wrong token.
   assert.match(i18n.translate('en', steps[2]), /Headers -> Request Headers.*Oasis-Token/);
-  // The final step names the password lane first, because that is what keeps
-  // the quota from expiring; the pasted token stays as the fallback it is.
-  assert.match(i18n.translate('zh-TW', steps[3]), /帳號信箱與密碼/);
-  assert.match(i18n.translate('en', steps[3]), /email and password/);
-  // Username + password are the primary fields; the pasted token is optional.
+  assert.match(i18n.translate('en', steps[2]), /Oasis-Webid/);
+  assert.match(i18n.translate('en', steps[3]), /Paste both below/);
+  assert.equal(steps.length, 4);
+
   assert.deepEqual(form.fields.map((entry) => entry.key),
-    ['stepfunUsername', 'stepfunPassword', 'stepfunToken']);
+    ['stepfunUsername', 'stepfunPassword', 'stepfunToken', 'stepfunWebid', 'stepfunRememberLogin']);
   assert.equal(form.fields.find((entry) => entry.key === 'stepfunPassword').input, 'password');
-  assert.equal(form.fields.find((entry) => entry.key === 'stepfunToken').required, false,
-    'a pasted token is optional when a password is stored');
+  // No secret field is required: `required` would reject a save outright, and
+  // the pasted token is the only lane without a BrowserWindow.
+  assert.deepEqual(form.fields.filter((entry) => entry.required).map((entry) => entry.key), [],
+    'requiring anything would weld shut the manual escape hatch');
   assert.match(i18n.translate('zh-TW', 'settings.stepfun.manualToken'), /選填/);
+
+  // The remembered-session choice is a setting, saved on its own and left
+  // alone by Clear — opting back in silently would defeat the user's click.
+  const remember = form.fields.find((entry) => entry.key === 'stepfunRememberLogin');
+  assert.equal(remember.input, 'select');
+  assert.equal(remember.submitWithCredential, false);
+  assert.deepEqual(remember.options.map((option) => option.value), ['1', '0']);
+
+  // Diagnostics nobody can locate are the same as diagnostics that do not
+  // exist, which is the whole reason the log is written.
+  assert.ok(form.manual.some((block) => block.note === 'settings.stepfun.diagnosticHint'),
+    'the panel has to say where a failed check is recorded');
+  assert.match(group.text, /stepfun-diagnostic\.log/);
 });
 
 for (const form of limitAccountFormsForRenderer()) {
