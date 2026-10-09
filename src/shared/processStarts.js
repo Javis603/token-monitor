@@ -4,17 +4,14 @@ const { execFile } = require('node:child_process');
 
 function processStarts(pids, platform) {
   if (!pids.length) return Promise.resolve(new Map());
+  if (platform === 'win32') {
+    return Promise.resolve(require('./windowsProcessStarts').readWindowsProcessStarts(pids));
+  }
   let command;
   let args;
   if (platform === 'darwin' || platform === 'linux') {
     command = 'ps';
     args = ['-p', pids.join(','), '-o', 'pid=', '-o', 'lstart='];
-  } else if (platform === 'win32') {
-    command = 'powershell.exe';
-    // All interpolated values have already been validated as positive integers.
-    const filter = pids.map((pid) => `ProcessId=${pid}`).join(' OR ');
-    args = ['-NoProfile', '-NonInteractive', '-Command',
-      `Get-CimInstance Win32_Process -Filter '${filter}' | ForEach-Object { Write-Output ($_.ProcessId.ToString() + ' ' + $_.CreationDate.ToUniversalTime().ToString('o')) }`];
   } else return Promise.resolve(new Map());
   return new Promise((resolve) => {
     execFile(command, args, {
@@ -25,7 +22,7 @@ function processStarts(pids, platform) {
       for (const line of String(stdout || '').split('\n')) {
         const match = line.trim().match(/^(\d+)\s+(.+)$/);
         if (!match) continue;
-        const time = Date.parse(platform === 'win32' ? match[2] : `${match[2]} UTC`);
+        const time = Date.parse(`${match[2]} UTC`);
         if (Number.isFinite(time)) result.set(Number(match[1]), time);
       }
       resolve(result);
