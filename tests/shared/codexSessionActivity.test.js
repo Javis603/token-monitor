@@ -311,11 +311,13 @@ test('native asynchronous ACK or shell escalation arguments never invent an unre
 
 test('collector discovers a native question before token_count and preserves exact scan anchors', async t => {
   const f = fixture(t); fs.unlinkSync(f.runtimeFile); f.write([started, question]);
-  // Files and collection use the real observation clock, as a live collector does.
-  fs.utimesSync(f.file, new Date(), new Date());
+  // Keep the file's local date folder and observation clock aligned in every TZ.
+  const clock = new Date(2026, 9, 8, 12);
+  t.mock.method(Date, 'now', () => clock.getTime());
+  fs.utimesSync(f.file, clock, clock);
   let captured;
   const summary = await collectUsageOnce({ clients: 'codex', deviceId: 'zero', agentVersion: 'test',
-    homeDir: f.home, env: {}, projectsEnabled: false, limitsEnabled: false, historyEnabled: false,
+    homeDir: f.home, env: {}, now: clock, projectsEnabled: false, limitsEnabled: false, historyEnabled: false,
     codexLocalUsageEnabled: false, anchorPersistenceEnabled: false,
     runTokscale: async () => ({ entries: [] }), onAnchorComputed: value => { captured = value; },
     collectWslUsage: async () => ({ bundle: { today: {}, month: {}, allTime: {} }, detected: [] }) });
