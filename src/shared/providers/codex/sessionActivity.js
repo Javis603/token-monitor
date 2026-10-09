@@ -88,7 +88,7 @@ function discoverFilesUncached(options, activity, summary) {
     const id = path.basename(file, '.jsonl');
     // Today's usage rows get native metadata through the normal collector.
     // A historical session resumed without new tokens still needs a Today row.
-    if (!activity.size && hasKnownSession(summary, 'codex', id, 'today')) return;
+    if (!activity.size && hasKnownSession(summary, 'codex', id, 'today', false)) return;
     try {
       const real = fs.realpathSync(file);
       if (!realRoots.some((root) => isPathInside(root, real))) return;
@@ -202,7 +202,7 @@ async function readSessionActivity(summary, options = {}) {
     }
     if (reading) readings.set(session.sessionId, reading);
   }
-  const ids = new Set([...files.keys()].filter((id) => !hasKnownSession(summary, 'codex', id, 'today')));
+  const ids = new Set([...files.keys()].filter((id) => !hasKnownSession(summary, 'codex', id, 'today', false)));
   const generatedTitleIds = new Map();
   const metadata = readSessionMeta(ids, { ...options, titleSourceById: generatedTitleIds });
   const t3Metadata = readT3SessionMeta(ids, options);

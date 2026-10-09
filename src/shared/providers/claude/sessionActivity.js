@@ -179,7 +179,7 @@ function activityFiles(roots, ids) {
 }
 
 // Registry discovery includes sessions before the first usage response. These
-// rows are local presentation only; usage/archive identities win per period.
+// rows are local presentation only; unarchived usage identities win per period.
 async function readSummaryActivity(summary, options = {}) {
   const readings = await readSessionActivity(null, options);
   const t3 = await readT3Activity(options, 'claudeAgent');
@@ -187,7 +187,7 @@ async function readSummaryActivity(summary, options = {}) {
     if (!isSafeSessionId(id) || (reading.state === 'idle' && readings.has(id))) continue;
     readings.set(id, reading);
   }
-  const ids = new Set([...readings].filter(([id, reading]) => !hasKnownSession(summary, 'claude', id, 'today')
+  const ids = new Set([...readings].filter(([id, reading]) => !hasKnownSession(summary, 'claude', id, 'today', false)
     && ['running', 'waiting'].includes(reading.state)).map(([id]) => id));
   const roots = claudeSessionRoots({ ...options, homeDir: options.homeDir || os.homedir(), useEnvRoots: !options.scopedHome });
   const files = activityFiles(roots, ids);

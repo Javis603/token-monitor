@@ -17,6 +17,25 @@ const {
   sessionRowsForPeriod
 } = require('../../src/electron/renderer/sessionRows');
 
+test('archived usage joins only matching active native state while retaining its token and cost values', () => {
+  const now = new Date('2026-10-10T00:00:00Z');
+  const key = 'claude:resumed';
+  const accounting = { client: 'claude', sessionId: 'resumed', totalTokens: 100, costUsd: 1,
+    archived: true, turnEnded: true, lastUsedAt: '2026-10-09T00:00:00Z' };
+  const native = { client: 'claude', sessionId: 'resumed', native: true, totalTokens: 0, costUsd: 0,
+    liveActivity: { state: 'waiting', observedAt: now.toISOString() } };
+  for (const [candidate, state] of [[native, 'waiting'], [{ ...native, client: 'codex' }, 'idle'],
+    [{ ...native, sessionId: 'another' }, 'idle'],
+    [{ ...native, liveActivity: { state: 'idle', observedAt: now.toISOString() } }, 'idle']]) {
+    const [row, ...others] = sessionRowsForPeriod({ sessions: { [key]: accounting } }, {
+      now, nativeSessions: { [key]: candidate }
+    });
+    assert.equal(row.activityState, state); assert.equal(others.length, 0);
+    assert.equal(row.value, 100); assert.equal(row.cost, 1);
+    assert.equal(accounting.archived, true); assert.equal(accounting.liveActivity, undefined);
+  }
+});
+
 const clientLabels = { claude: 'Claude Code', codex: 'Codex' };
 const clientColors = { claude: '#cc7c5e', codex: '#49a3b0', default: '#6ab4f0' };
 

@@ -19,6 +19,16 @@ function fixture(count = 5000) {
     month: { sessions, totalTokens: count * 100 }, allTime: { sessions, totalTokens: count * 100 } };
 }
 
+test('native admission distinguishes archived accounting from current usage without changing identity lookup', () => {
+  const baseline = fixture(2);
+  baseline.month.sessions['claude:id-0'].archived = true;
+  assert.equal(projection.hasKnownSession(baseline, 'claude', 'id-0', 'month'), true);
+  assert.equal(projection.hasKnownSession(baseline, 'claude', 'id-0', 'month', false), false);
+  assert.equal(projection.hasKnownSession(baseline, 'claude', 'id-1', 'month', false), true);
+  const native = Object.fromEntries([0, 1].map(i => [`claude:id-${i}`, { client: 'claude', sessionId: `id-${i}` }]));
+  assert.deepEqual(Object.keys(projection.nativeSessionsForPeriod(baseline, 'claude', native, 'month')), ['claude:id-0']);
+});
+
 test('historical and cross-midnight activity uses the index without enumerating history again', () => {
   const summary = fixture();
   let traversals = 0;

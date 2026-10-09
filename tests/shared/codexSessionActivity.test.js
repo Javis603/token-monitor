@@ -12,6 +12,7 @@ const usage = require('../../src/shared/usage');
 const { collectUsageOnce, startCollector } = require('../../src/shared/collector');
 const presentation = require('../../src/electron/renderer/edgeDock/presentation');
 const rows = require('../../src/electron/renderer/sessionRows');
+const archive = require('../../src/shared/usage/sessionUsageArchive');
 const { serializeSyncPayload } = require('../../src/shared/syncPayload');
 
 const now = Date.parse('2026-10-08T12:00:00Z');
@@ -192,6 +193,55 @@ test('archived historical rows do not hide a resumed native question in Home or 
       assert.equal(live.sessionActivityState(view[0], clock), 'waiting');
       assert.equal(view[0].totalTokens, 10);
     }
+  }
+});
+
+test('same-day archived Codex question survives discovery and Sessions dedup without changing usage', async t => {
+  let clock = now;
+  t.mock.method(Date, 'now', () => clock);
+  const projection = require('../../src/shared/sessionActivityProjection');
+  for (const flag of ['archived', 'deleted', 'sourceDeleted']) {
+    clock = now;
+    const f = fixture(t); fs.unlinkSync(f.runtimeFile); f.write([started, question]);
+    const original = f.summary();
+    for (const name of ['today', 'month', 'allTime']) {
+      original[name] = { ...usage.emptyPeriod(), totalTokens: 100, costUsd: 1,
+        sessions: { [f.key]: { ...original[name].sessions[f.key], costUsd: 1, models: { test: 100 } } } };
+    }
+    const retained = archive.captureSessionUsageArchive({}, original, new Date(now));
+    const summary = archive.applySessionUsageArchive(Object.fromEntries(['today', 'month', 'allTime']
+      .map(name => [name, usage.emptyPeriod()])), retained, { now: new Date(now) });
+    assert.equal(summary.today.sessions[f.key].archived, true);
+    if (flag !== 'archived') for (const name of ['today', 'month', 'allTime']) {
+      delete summary[name].sessions[f.key].archived; summary[name].sessions[f.key][flag] = true;
+    }
+    const before = JSON.stringify(summary);
+    let current = summary;
+    for (const [lines, expected, offset] of [
+      [[started, question], 'waiting', 0], [[started, question, answer], 'running', 1000],
+      [[started, question, answer, entry('event_msg', { type: 'task_complete' })], 'idle', 2000]
+    ]) {
+      clock = now + offset; f.write(lines); fs.utimesSync(f.file, new Date(clock), new Date(clock));
+      const projected = activity.projectSessionActivity(current,
+        await activity.readSessionActivity(current, { ...f.options, now: clock }), clock);
+      current = projection.applyActivityPatch(current, projection.activityPatch(current, projected));
+      for (const name of ['today', 'month', 'allTime']) {
+        const list = rows.sessionRowsForPeriod(current[name], { nativeSessions: current.nativeSessions[name], now: new Date(clock) });
+        assert.equal(list.length, 1, `${flag}/${name}`); assert.equal(list[0].activityState, expected);
+        assert.equal(list[0].value, 100); assert.equal(list[0].cost, 1);
+        assert.equal(current[name].sessions, summary[name].sessions);
+        assert.equal(current[name].totalTokens, 100); assert.equal(current[name].costUsd, 1);
+      }
+      const display = { periods: current, nativeSessions: current.nativeSessions };
+      const views = [presentation.recentSessionRows(display), ...presentation.buildEdgeDockCells(display, {
+        items: [{ type: 'limit', provider: 'codex' }, { type: 'stat', metric: presentation.SESSIONS_METRIC }]
+      }).map(cell => cell.sessions)];
+      for (const view of views) {
+        assert.equal(view.length, 1); assert.equal(live.sessionActivityState(view[0], clock), expected);
+        assert.equal(presentation.waitingSessionSummary(view, clock).count, expected === 'waiting' ? 1 : 0);
+      }
+    }
+    assert.equal(JSON.stringify(summary), before);
   }
 });
 
@@ -507,7 +557,7 @@ test('previous date-folder discovery uses calendar subtraction across daylight s
   assert.equal(observed.sessions['codex:' + id].waitingForInput, true);
 });
 
-test('no-token discovery respects root scope, archive suppression and transcript freshness', async t => {
+test('no-token discovery respects root scope and freshness while admitting resumed archived sources', async t => {
   const f = fixture(t);
   fs.unlinkSync(f.runtimeFile);
   f.write([started, question]);
@@ -515,7 +565,7 @@ test('no-token discovery respects root scope, archive suppression and transcript
   assert.equal(Object.keys((await activity.readSessionActivity(empty, f.options)).sessions).length, 1);
   assert.equal(Object.keys((await activity.readSessionActivity(empty, { ...f.options, now: now + live.RUNNING_WINDOW_MS + 1 })).sessions).length, 0);
   const archived = f.summary(); archived.today.sessions[f.key].archived = true;
-  assert.equal(Object.keys((await activity.readSessionActivity(archived, f.options)).sessions).length, 0);
+  assert.equal(Object.keys((await activity.readSessionActivity(archived, f.options)).sessions).length, 1);
   if (process.platform === 'win32') return;
   const outside = path.join(f.home, 'outside.jsonl'); fs.writeFileSync(outside, started + '\n' + question);
   fs.unlinkSync(f.file); fs.symlinkSync(outside, f.file);

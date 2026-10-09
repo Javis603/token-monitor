@@ -11,7 +11,7 @@ function processStarts(pids, platform) {
   let args;
   if (platform === 'darwin' || platform === 'linux') {
     command = 'ps';
-    args = ['-p', pids.join(','), '-o', 'pid=', '-o', 'lstart='];
+    args = ['-p', pids.join(','), '-o', 'pid=', '-o', 'stat=', '-o', 'lstart='];
   } else return Promise.resolve(new Map());
   return new Promise((resolve) => {
     execFile(command, args, {
@@ -20,9 +20,9 @@ function processStarts(pids, platform) {
     }, (_error, stdout) => {
       const result = new Map();
       for (const line of String(stdout || '').split('\n')) {
-        const match = line.trim().match(/^(\d+)\s+(.+)$/);
-        if (!match) continue;
-        const time = Date.parse(`${match[2]} UTC`);
+        const match = line.trim().match(/^(\d+)\s+(\S+)\s+(.+)$/);
+        if (!match || /^[ZXx]/.test(match[2])) continue;
+        const time = Date.parse(`${match[3]} UTC`);
         if (Number.isFinite(time)) result.set(Number(match[1]), time);
       }
       resolve(result);

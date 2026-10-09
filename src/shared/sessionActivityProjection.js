@@ -81,13 +81,14 @@
     }
     return remember(lookup, key, result);
   }
-  function hasKnownSession(summary, client, id, periodName) {
+  function hasKnownSession(summary, client, id, periodName, includeArchived = true) {
     const locations = locationsFor(summary, client, id);
-    return periodName ? locations.some((row) => row.name === periodName) : locations.length > 0;
+    return locations.some((row) => (!periodName || row.name === periodName)
+      && (includeArchived || !live.isArchivedSession(periods(summary)[row.name].sessions[row.key])));
   }
   function nativeSessionsForPeriod(summary, client, sessions, name) {
     return Object.fromEntries(Object.entries(sessions).filter(([, row]) =>
-      !hasKnownSession(summary, client, row.sessionId, name)));
+      !hasKnownSession(summary, client, row.sessionId, name, false)));
   }
   function activityEntries(summary, client, ids, includeLeased = true) {
     const index = indexFor(summary);

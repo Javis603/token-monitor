@@ -349,6 +349,15 @@
     const rows = Object.entries(period?.sessions || {})
       .map(([key, session]) => {
         session = sessionLive.sessionWithActivity(period, key, session);
+        const native = options.nativeSessions?.[key];
+        // A resumed source can be active before accounting replaces its archive.
+        // Join only presentation activity; the retained token/cost values stay put.
+        if (sessionLive.isArchivedSession(session) && native?.client === session.client
+          && native.sessionId === session.sessionId && ['running', 'waiting'].includes(sessionActivityState(native, now))) {
+          session = { ...session, archived: false, deleted: false, sourceDeleted: false,
+            lastUsedAt: native.lastUsedAt, liveActivity: native.liveActivity,
+            turnEnded: native.turnEnded, waitingForInput: native.waitingForInput };
+        }
         if (isReasonixSyntheticSession(session, key)) return null;
         const value = finiteNumber(session?.totalTokens);
         if (value <= 0) return null;

@@ -18,12 +18,23 @@ test('POSIX process-start output parses UTC timestamps and batches PIDs', async 
   const starts = loadWithProbe(t, (command, args, options, done) => {
     assert.equal(command, 'ps');
     assert.equal(args[1], '123,456');
+    assert.ok(args.includes('stat='));
     assert.equal(options.timeout, 2000);
-    done(null, '123 Fri Oct  9 12:34:56 2026\n456 Fri Oct  9 12:34:57 2026\n');
+    done(null, '123 S Fri Oct  9 12:34:56 2026\n456 R+ Fri Oct  9 12:34:57 2026\n');
   });
   assert.deepEqual(await starts([123, 456], 'darwin'), new Map([
     [123, Date.parse('2026-10-09T12:34:56Z')], [456, Date.parse('2026-10-09T12:34:57Z')]
   ]));
+});
+
+test('POSIX process-start probes exclude zombie and dead states without excluding stopped processes', async t => {
+  const starts = loadWithProbe(t, (_command, _args, _options, done) => {
+    done(null, ['Z', 'Z+', 'X', 'x', 'T', 'S'].map((state, i) =>
+      `${i + 100} ${state} Fri Oct  9 12:34:56 2026`).join('\n'));
+  });
+  for (const platform of ['darwin', 'linux']) {
+    assert.deepEqual([...await starts([100, 101, 102, 103, 104, 105], platform)].map(([pid]) => pid), [104, 105]);
+  }
 });
 
 test('a killed process-start probe returns no identity instead of rejecting collection', async t => {
@@ -31,6 +42,13 @@ test('a killed process-start probe returns no identity instead of rejecting coll
     done(Object.assign(new Error('deadline'), { killed: true, signal: 'SIGTERM' }), '');
   });
   assert.equal((await starts([123], 'darwin')).size, 0);
+});
+
+test('native POSIX process-start and state columns still recognize a live PID', {
+  skip: !['darwin', 'linux'].includes(process.platform)
+}, async () => {
+  const { processStarts } = require('../../src/shared/processStarts');
+  assert.ok(Number.isFinite((await processStarts([process.pid], process.platform)).get(process.pid)));
 });
 
 test('Windows native reads validate fresh creation times and release each handle', () => {

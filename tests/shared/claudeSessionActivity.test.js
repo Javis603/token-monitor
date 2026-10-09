@@ -100,6 +100,48 @@ test('registry recognizes explicit states and publishes only a sanitized observa
   assert.equal((await f.read()).size, 1);
 });
 
+test('same-day archived Claude resumes across the patch lane without losing usage or duplicating Sessions', async t => {
+  let clock = now;
+  t.mock.method(Date, 'now', () => clock);
+  const projection = require('../../src/shared/sessionActivityProjection');
+  const key = 'claude:test-session';
+  for (const flag of ['archived', 'deleted', 'sourceDeleted']) {
+    clock = now;
+    const f = fixture(t); f.write();
+    const original = Object.fromEntries(['today', 'month', 'allTime'].map(name => [name, {
+      ...usage.emptyPeriod(), totalTokens: 100, costUsd: 1,
+      sessions: { [key]: session('unknown', { liveActivity: undefined, costUsd: 1, models: { test: 100 } }) }
+    }]));
+    const retained = archive.captureSessionUsageArchive({}, original, new Date(now));
+    const summary = archive.applySessionUsageArchive(Object.fromEntries(['today', 'month', 'allTime']
+      .map(name => [name, usage.emptyPeriod()])), retained, { now: new Date(now) });
+    assert.equal(summary.today.sessions[key].archived, true, 'use the actual archive producer');
+    if (flag !== 'archived') for (const name of ['today', 'month', 'allTime']) {
+      delete summary[name].sessions[key].archived; summary[name].sessions[key][flag] = true;
+    }
+    const before = JSON.stringify(summary);
+    let current = summary;
+    for (const [status, expected, offset] of [['waiting', 'waiting', 0], ['busy', 'running', 1000], ['idle', 'idle', 2000]]) {
+      clock = now + offset; f.write({ status });
+      const projected = activity.projectActivity(current, await activity.readSummaryActivity(current, { ...f.options, now: clock }), clock);
+      current = projection.applyActivityPatch(current, projection.activityPatch(current, projected));
+      for (const name of ['today', 'month', 'allTime']) {
+        const list = sessionRows.sessionRowsForPeriod(current[name], { nativeSessions: current.nativeSessions[name], now: new Date(clock) });
+        assert.equal(list.length, 1, `${flag}/${name}`);
+        assert.equal(list[0].activityState, expected);
+        assert.equal(list[0].value, 100); assert.equal(list[0].cost, 1);
+        assert.equal(current[name].sessions, summary[name].sessions);
+        assert.equal(current[name].totalTokens, 100); assert.equal(current[name].costUsd, 1);
+      }
+      const home = presentation.recentSessionRows({ periods: current, nativeSessions: current.nativeSessions });
+      assert.equal(home.length, 1);
+      assert.equal(live.sessionActivityState(home[0], clock), expected);
+      assert.equal(presentation.waitingSessionSummary(home, clock).count, expected === 'waiting' ? 1 : 0);
+    }
+    assert.equal(JSON.stringify(summary), before, 'neither the archive nor accounting rows are changed by presentation');
+  }
+});
+
 test('dead, reused, foreign and unrecognized registry records fall back', async (t) => {
   const f = fixture(t);
   f.write();
@@ -181,6 +223,23 @@ test('Linux registry validates machine, PID namespace, PID and proc start ticks'
   f.writeLinux();
   fs.unlinkSync(path.join(f.procRoot, String(f.pid), 'stat'));
   assert.equal((await f.readLinux()).size, 0, 'unreadable proc start falls back without registry evidence');
+});
+
+test('Linux dead registry owners clear Waiting even when their start ticks are retained', { skip: process.platform === 'win32' }, async t => {
+  const f = linuxFixture(t); f.writeLinux();
+  const key = 'claude:test-session';
+  for (const state of ['Z', 'X', 'x']) {
+    fs.writeFileSync(path.join(f.procRoot, String(f.pid), 'stat'),
+      `${f.pid} (claude (test) process) ${[state, ...Array(18).fill('0'), f.ticks].join(' ')}\n`);
+    assert.equal(linuxIdentity.readLinuxProcessStarts([f.pid], { procRoot: f.procRoot }).size, 0);
+    const readings = await f.readLinux();
+    assert.equal(readings.size, 0);
+    const summary = { today: { sessions: { [key]: session() }, totalTokens: 100 } };
+    const next = activity.projectSessionActivity(summary, readings, now + 1000);
+    assert.equal(live.sessionWithActivity(next.today, key).liveActivity.state, 'unknown');
+    assert.equal(sessionRows.sessionRowsForPeriod(next.today, { now: new Date(now + 1000) })[0].activityState, 'idle');
+    assert.equal(next.today.totalTokens, 100);
+  }
 });
 
 test('Linux live PID registry fixture matches this process on Linux CI', { skip: process.platform !== 'linux' }, async t => {
@@ -391,7 +450,7 @@ test('zero-token registry sessions reach local rows without changing accounting 
   assert.equal(Object.keys(activity.projectSessionActivity(next, ended.readings, now + 1000, ended.sessions).nativeSessions.today).length, 0);
 });
 
-test('usage and archived identities suppress temporary rows and preserve other native clients', async t => {
+test('only unarchived usage suppresses temporary rows and other native clients are preserved', async t => {
   const f = fixture(t); f.write();
   const previous = { nativeSessions: { today: { reasonix: { client: 'reasonix' } } }, today: usage.emptyPeriod() };
   const observed = await activity.readSummaryActivity(previous, f.options);
@@ -399,10 +458,10 @@ test('usage and archived identities suppress temporary rows and preserve other n
   for (const archived of [false, true]) {
     const summary = { ...projected, today: { sessions: { 'claude:test-session': session('waiting', { archived }) } } };
     const withUsage = await activity.readSummaryActivity(summary, f.options);
-    assert.equal(Object.keys(withUsage.sessions).length, 0);
-    const next = activity.projectSessionActivity(summary, withUsage.readings, now, withUsage.sessions);
+    assert.equal(Object.keys(withUsage.sessions).length, archived ? 1 : 0);
+    const next = activity.projectSessionActivity(summary, withUsage.readings, now, withUsage.sessions) || summary;
     assert.equal(next.nativeSessions.today.reasonix, previous.nativeSessions.today.reasonix);
-    assert.equal(next.nativeSessions.today['claude:test-session'], undefined);
+    assert.equal(next.nativeSessions.today['claude:test-session']?.liveActivity.state, archived ? 'waiting' : undefined);
   }
   assert.equal(Object.keys((await activity.readSummaryActivity(previous, { ...f.options, readProcessStarts: async () => new Map() })).sessions).length, 0);
   assert.equal(Object.keys((await activity.readSummaryActivity(previous, { ...f.options, scopedHome: true })).sessions).length, 0);
@@ -646,7 +705,7 @@ test('the existing watcher routes registry changes into activity without schedul
   assert.equal(scans, 3);
 });
 
-test('a copied archive projection remains the activity baseline and suppresses no-token duplicates', async (t) => {
+test('a copied archive projection keeps accounting while admitting resumed no-token activity', async (t) => {
   const f = fixture(t); f.write();
   let resolvePatch;
   const patches = [];
@@ -671,5 +730,11 @@ test('a copied archive projection remains the activity baseline and suppresses n
   await collector.whenIdle();
   await new Promise((resolve) => { resolvePatch = resolve; });
   assert.deepEqual(patches[0].observations, []);
-  assert.deepEqual(patches[0].nativeSessions.today, {});
+  assert.equal(patches[0].nativeSessions.today['claude:test-session'].liveActivity.state, 'waiting');
+  const list = sessionRows.sessionRowsForPeriod({ sessions: {
+    'claude:test-session': { client: 'claude', sessionId: 'test-session', totalTokens: 100, archived: true }
+  } }, { nativeSessions: patches[0].nativeSessions.today });
+  assert.equal(list.length, 1);
+  assert.equal(list[0].activityState, 'waiting');
+  assert.equal(list[0].value, 100);
 });

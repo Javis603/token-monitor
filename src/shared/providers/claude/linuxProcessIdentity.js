@@ -18,6 +18,7 @@ function parseLinuxStartTicks(stat) {
   const commandEnd = stat.lastIndexOf(')');
   if (commandEnd < 0) return null;
   const fields = stat.slice(commandEnd + 1).trim().split(/\s+/);
+  if (['Z', 'X', 'x'].includes(fields[0])) return null;
   const ticks = fields[19]; // /proc/<pid>/stat field 22; fields[0] is field 3.
   return typeof ticks === 'string' && /^\d+$/.test(ticks) ? ticks : null;
 }
