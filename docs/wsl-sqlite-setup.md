@@ -1,6 +1,8 @@
-# WSL SQLite usage setup
+<p align="right">
+   <strong>EN</strong> | <a href="./wsl-sqlite-setup.zh-CN.md">简</a> | <a href="./wsl-sqlite-setup.zh-TW.md">繁</a>
+</p>
 
-[简体中文](wsl-sqlite-setup.zh-CN.md)
+# WSL SQLite usage setup
 
 ## When this setup is needed
 
@@ -70,7 +72,7 @@ Confirm that a second device appears in Token Monitor and that the SQLite-backed
 npm run agent
 ```
 
-For unattended use, run that command from your normal WSL service manager or login startup. Keep its working directory set to the Token Monitor checkout so `.env` is loaded.
+For unattended use, start it from a service manager as described in [Run continuously](headless-agent.md#run-continuously).
 
 ## Troubleshooting
 

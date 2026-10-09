@@ -39,6 +39,39 @@ test('session normalization preserves bounded titles and recognized background-r
   assert.equal(period.sessions['codex:unknown'].sessionKind, '');
 });
 
+test('unpriced attribution maps stay within period and per-client token allowances', () => {
+  const total = (map) => Object.values(map || {}).reduce((sum, value) => sum + value, 0);
+  const input = {
+    totalTokens: 50,
+    unpricedTokens: 50,
+    clientUnpricedTokens: { codex: 20, claude: 30 },
+    modelUnpricedTokens: { 'model-a': 40, 'model-b': 40 },
+    clientModelUnpricedTokens: {
+      codex: { 'model-a': 15, 'model-b': 15 },
+      claude: { 'model-c': 30 }
+    }
+  };
+  const period = normalizePeriod(input);
+  const clientModelTotal = (maps) => Object.values(maps || {}).reduce((sum, models) => sum + total(models), 0);
+
+  assert.equal(total(period.clientUnpricedTokens), period.unpricedTokens);
+  assert.equal(total(period.modelUnpricedTokens), period.unpricedTokens);
+  assert.equal(clientModelTotal(period.clientModelUnpricedTokens), period.unpricedTokens);
+  for (const [client, models] of Object.entries(period.clientModelUnpricedTokens)) {
+    assert.ok(total(models) <= period.clientUnpricedTokens[client]);
+  }
+  assert.deepEqual(normalizePeriod(period), period);
+
+  const merged = mergePeriods(period, period);
+  assert.equal(merged.unpricedTokens, 100);
+  assert.equal(total(merged.clientUnpricedTokens), merged.unpricedTokens);
+  assert.equal(total(merged.modelUnpricedTokens), merged.unpricedTokens);
+  assert.equal(clientModelTotal(merged.clientModelUnpricedTokens), merged.unpricedTokens);
+  for (const [client, models] of Object.entries(merged.clientModelUnpricedTokens)) {
+    assert.ok(total(models) <= merged.clientUnpricedTokens[client]);
+  }
+});
+
 test('Hub ingress projection strips session text without mutating local records', () => {
   const record = {
     deviceId: 'macbook',
@@ -622,6 +655,31 @@ test('mergeDeviceRecord preserves usage for clients omitted by the active tracke
   });
 });
 
+test('preserved missing-price maps cannot exceed the untracked client token contribution', () => {
+  const merged = mergeDeviceRecord({
+    deviceId: 'fixture',
+    allTime: {
+      totalTokens: 100, unpricedTokens: 80,
+      clients: { codex: 20, claude: 80 },
+      clientUnpricedTokens: { codex: 80 },
+      models: { unknown: 100 }, modelUnpricedTokens: { unknown: 80 },
+      clientModels: { codex: { unknown: 20 }, claude: { unknown: 80 } },
+      clientModelUnpricedTokens: { codex: { unknown: 80 } }
+    }
+  }, {
+    deviceId: 'fixture', trackedClients: ['claude'],
+    allTime: {
+      totalTokens: 10, unpricedTokens: 10, clients: { claude: 10 }
+    }
+  });
+  const period = merged.periods.allTime;
+  assert.equal(period.totalTokens, 30);
+  assert.equal(period.unpricedTokens, 30);
+  assert.equal(period.clientUnpricedTokens.codex, 20);
+  assert.equal(period.modelUnpricedTokens.unknown, 20);
+  assert.equal(period.clientModelUnpricedTokens.codex.unknown, 20);
+});
+
 test('mergeDeviceRecord marks unrecoverable all-time project attribution incomplete', () => {
   const existing = {
     deviceId: 'macbook',
@@ -1188,15 +1246,34 @@ test('normalizePeriod reconciles old Cursor default global models using client a
   const cursorOnly = normalizePeriod({
     ...old,
     totalTokens: 7,
+    unpricedTokens: 4,
     clients: { cursor: 7 },
     models: { default: 7 },
     modelCosts: { default: 0.7 },
+    clientUnpricedTokens: { cursor: 4 },
+    modelUnpricedTokens: { default: 4 },
+    clientModelUnpricedTokens: { cursor: { default: 4 } },
     clientModels: { cursor: { default: 7 } },
     clientModelCosts: { cursor: { default: 0.7 } }
   });
   assert.equal(cursorOnly.models.default, undefined);
   assert.equal(cursorOnly.modelCacheReads['cursor-auto'], 4);
   assert.equal(cursorOnly.modelOutputs['cursor-auto'], 6);
+  assert.equal(cursorOnly.modelUnpricedTokens.default, undefined);
+  assert.equal(cursorOnly.modelUnpricedTokens['cursor-auto'], 4);
+  assert.equal(cursorOnly.clientModelUnpricedTokens.cursor.default, undefined);
+  assert.equal(cursorOnly.clientModelUnpricedTokens.cursor['cursor-auto'], 4);
+  assert.deepEqual(normalizePeriod(cursorOnly), cursorOnly);
+
+  const cursorOnlyWithoutUnpriced = normalizePeriod({
+    totalTokens: 7,
+    models: { default: 7 },
+    clientModels: { cursor: { default: 7 } }
+  });
+  assert.equal(cursorOnlyWithoutUnpriced.models.default, undefined);
+  assert.equal(cursorOnlyWithoutUnpriced.models['cursor-auto'], 7);
+  assert.equal(cursorOnlyWithoutUnpriced.modelUnpricedTokens, undefined);
+  assert.deepEqual(normalizePeriod(cursorOnlyWithoutUnpriced), cursorOnlyWithoutUnpriced);
 });
 
 test('extractUsageFromTokscale folds disjoint DSH reasoning into totals and output', () => {

@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const ROOT = path.resolve(__dirname, '../..');
 const main = fs.readFileSync(path.join(ROOT, 'src/electron/main.js'), 'utf8');
@@ -63,5 +64,66 @@ test('saving settings waits until a worker-hosted transform has applied them', (
   const start = main.indexOf("ipcMain.handle('settings:update', async (_event, patch) => {");
   assert.ok(start >= 0, 'settings:update handler not found or not async');
   const body = main.slice(start, main.indexOf('\n  });', start));
-  assert.ok(body.indexOf('applySettingsPatch(patch)') < body.indexOf('await latestUsageHost?.transformSettingsApplied?.()'));
+  assert.ok(body.indexOf('applySettingsPatch(patch,') < body.indexOf('await latestUsageHost?.transformSettingsApplied?.()'));
+});
+
+test('Dots visibility refresh only delays its own settings save, including after failure', async () => {
+  const start = main.indexOf("ipcMain.handle('settings:update', async (_event, patch) => {");
+  const registration = main.slice(start, main.indexOf('\n  });', start) + '\n  });'.length);
+  let update;
+  let failRefresh;
+  let saved;
+  const refresh = new Promise((_resolve, reject) => { failRefresh = reject; });
+  const contentRuntime = { status: () => ({ identity: 'test' }), publishPatch: async () => {} };
+  vm.runInNewContext(registration, {
+    ipcMain: { handle: (_name, handler) => { update = handler; } },
+    getSyncContentRuntime: () => contentRuntime,
+    latestUsageHost: { transformSettingsApplied: async () => {} },
+    settingsForRenderer: () => saved,
+    applySettingsPatch: (patch, onRefresh) => {
+      saved = patch;
+      if (patch.codexDotsVisible !== undefined) onRefresh(refresh);
+      return patch;
+    }
+  });
+  let visibilitySettled = false;
+  const visibility = update(null, { codexDotsVisible: false });
+  const failedVisibility = assert.rejects(visibility, /refresh failed/);
+  visibility.finally(() => { visibilitySettled = true; }).catch(() => {});
+  const currency = { currency: 'HKD' };
+  assert.equal(await update(null, currency), currency);
+  assert.equal(visibilitySettled, false);
+  failRefresh(new Error('refresh failed'));
+  await failedVisibility;
+  const language = { language: 'zh-TW' };
+  assert.equal(await update(null, language), language);
+});
+
+test('a delayed Dots visibility reply keeps the settings saved by a later write', async () => {
+  const start = main.indexOf("ipcMain.handle('settings:update', async (_event, patch) => {");
+  const registration = main.slice(start, main.indexOf('\n  });', start) + '\n  });'.length);
+  let update;
+  let release;
+  const refresh = new Promise((resolve) => { release = resolve; });
+  const contentRuntime = { status: () => ({ identity: 'test' }), publishPatch: async () => {} };
+  let saved = { codexDotsVisible: true, currency: 'USD', clients: 'codex' };
+  vm.runInNewContext(registration, {
+    ipcMain: { handle: (_name, handler) => { update = handler; } },
+    getSyncContentRuntime: () => contentRuntime,
+    latestUsageHost: { transformSettingsApplied: async () => {} },
+    settingsForRenderer: () => ({ ...saved }),
+    applySettingsPatch: (patch, onRefresh) => {
+      saved = { ...saved, ...patch };
+      if (patch.codexDotsVisible !== undefined) onRefresh(refresh);
+      return { ...saved };
+    }
+  });
+  const visibility = update(null, { codexDotsVisible: false });
+  const later = await update(null, { currency: 'HKD', clients: 'codex,claude' });
+  assert.equal(later.currency, 'HKD');
+  release();
+  const reply = await visibility;
+  assert.deepEqual(reply, later);
+  assert.equal(reply.codexDotsVisible, false);
+  assert.equal(reply.clients, 'codex,claude');
 });

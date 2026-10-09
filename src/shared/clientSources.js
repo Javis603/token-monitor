@@ -141,7 +141,7 @@ function clineCliSessionRoot(home) {
 
 // Per-client data-dir candidates, keyed by client. The collector projects these
 // into detection status and, after interval-only/self-synced filtering, the
-// chokidar watch list; it adds Antigravity's read-only source roots separately.
+// chokidar watch list; it adds native Cursor and Antigravity source roots separately.
 // The roots are tagged with a stable id for their *kind*. One id may
 // cover several paths: Copilot's workspaceStorage has a variant per platform and
 // Kiro's IDE globalStorage has four, but "the VS Code workspace storage is

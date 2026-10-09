@@ -262,8 +262,12 @@ function formatDurationCompact(ms) {
   if (minutes > 0) return `${minutes}m`;
   return '0m';
 }
-function formatCost(usd) { return currencyApi.formatCurrencyFromUsd(usd, currencyApi.normalizeCurrency(state.currency)); }
-function formatCostCompact(usd) {
+function formatCost(usd, unpricedTokens) {
+  if (unpricedTokens > 0 && !(usd > 0)) return '—';
+  return currencyApi.formatCurrencyFromUsd(usd, currencyApi.normalizeCurrency(state.currency));
+}
+function formatCostCompact(usd, unpricedTokens) {
+  if (unpricedTokens > 0 && !(usd > 0)) return '—';
   return compactMoneyApi.formatCompactCurrencyFromUsd(
     usd,
     state.currency,
@@ -507,7 +511,7 @@ function renderActivity() {
     ? charts.heatmapSvg(heat, { monthLabel: (m) => monthLabel(m.label), initialHidden: hideHeatmapForEntry })
     : '';
   animateHeatmapEntry();
-  state.dayMap = new Map((state.history?.daily || []).map((d) => [String(d.date).slice(0, 10), { tokens: Number(d.tokens || 0), cost: Number(d.cost || 0) }]));
+  state.dayMap = new Map((state.history?.daily || []).map((d) => [String(d.date).slice(0, 10), { tokens: Number(d.tokens || 0), cost: Number(d.cost || 0), unpricedTokens: Number(d.unpricedTokens || 0) }]));
   const cards = charts.statsCards(state.history?.summary || {});
   const LABELS = {
     totalTokens: 'dashboard.stat.totalTokens', totalCost: 'dashboard.stat.totalCost',
@@ -517,10 +521,20 @@ function renderActivity() {
   };
   els.cards.innerHTML = charts.statsCardsHtml(cards, {
     label: (k) => t(LABELS[k] || k),
-    format: (c) => (c.kind === 'cost' ? formatCostCompact(c.value)
+    format: (c) => (c.kind === 'cost' ? formatCostCompact(c.value, state.history?.summary?.unpricedTokens)
       : c.kind === 'duration' ? formatDurationCompact(c.value)
         : c.kind === 'model' ? (c.value || '—') : formatCompact(c.value))
   });
+  const missing = Number(state.history?.summary?.unpricedTokens || 0);
+  const costValue = els.cards.querySelector('[data-stat="totalCost"] .dash-card-v');
+  if (costValue && missing > 0) {
+    const info = document.createElement('span');
+    info.className = 'usage-cost-info';
+    info.title = t('usage.excludedFromCost', { tokens: Math.round(missing).toLocaleString('en-US') });
+    info.setAttribute('aria-label', info.title);
+    info.tabIndex = 0;
+    costValue.append(info);
+  }
   balanceStatCards();
   renderBreakdown();
 }
@@ -616,7 +630,9 @@ function showHeatTooltip(date, day, ev) {
   const costLabel = state.locale.startsWith('zh') ? '花費' : 'Cost';
   let html = `<div class="tt-head">${longDate(date)}</div>`;
   html += `<div class="tt-row"><span class="tt-name">${tokLabel}</span><span class="tt-val">${formatCompact(tokens)}</span></div>`;
-  if (cost > 0) html += `<div class="tt-row"><span class="tt-name">${costLabel}</span><span class="tt-val">${formatCost(cost)}</span></div>`;
+  const missing = Number(day?.unpricedTokens || 0);
+  if (cost > 0 || missing > 0) html += `<div class="tt-row"><span class="tt-name">${costLabel}</span><span class="tt-val">${formatCost(cost, missing)}</span></div>`;
+  if (missing > 0) html += `<div class="tt-row">${t('usage.excludedFromCost', { tokens: Math.round(missing).toLocaleString('en-US') })}</div>`;
   els.tooltip.innerHTML = html;
   positionTooltip(ev);
 }

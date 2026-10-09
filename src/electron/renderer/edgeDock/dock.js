@@ -52,13 +52,13 @@ const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
 
 const BRAND_VENDOR_COLORS = { ...clientColors };
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const RING_RADIUS = 19;
+// Inset the thicker quota stroke so its outer edge stays within the 42px ring.
+const RING_RADIUS = 18.5;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 const DRAG_THRESHOLD_PX = 4;
 const BREAKDOWN_VISIBLE_ROWS = 6;
-// The period of `edge-dock-mark-breathe` in dock.css, which the running halo's phase
-// is taken modulo (see ringNode). A test holds the two numbers together.
-const BREATH_MS = 2600;
+// Keep the phase anchor in sync with edge-dock-running-spin in dock.css.
+const RUNNING_SPIN_MS = 1400;
 
 const root = document.getElementById('edgeDockRoot');
 const query = new URLSearchParams(window.location.search);
@@ -275,6 +275,22 @@ function formatCost(value) {
   return currencyApi.formatCurrencyFromUsd(value, appearance().currency || 'USD');
 }
 
+// Keep the known subtotal compact; the shared info tooltip explains its omissions.
+function usageCostNode(className, usage) {
+  const node = el('span', className);
+  node.classList.add('edge-dock-cost-reading');
+  const missing = Number(usage.unpricedTokens || 0);
+  node.append(el('span', '', missing > 0 && !(usage.costUsd > 0) ? '—' : formatCost(usage.costUsd)));
+  if (missing > 0) {
+    const info = el('span', 'usage-cost-info');
+    limitWindowsView.setDetailTooltip(info, [{ full: t('usage.excludedFromCost', {
+      tokens: formatCardTokens(missing)
+    }) }], { centered: true });
+    node.append(info);
+  }
+  return node;
+}
+
 // Low and critical colours are opt-in (edgeDockWarnColors): by default every
 // figure reads in the normal text colour. Unknown values stay muted either way,
 // since `--` is an absence of data rather than a warning.
@@ -450,18 +466,100 @@ function updateShape(payload) {
 
 // ---- Peek ----------------------------------------------------------------
 
+let refreshButton = null;
+let refreshBusy = false;
+let refreshResult = '';
+let refreshFeedbackTimer = null;
+
+function paintRefreshButton() {
+  if (!refreshButton) return;
+  const key = refreshBusy ? 'refreshButton.refreshing'
+    : refreshResult === 'success' ? 'refreshButton.refreshed'
+      : refreshResult === 'error' ? 'refreshButton.failed' : 'edgeDock.refreshLimits';
+  refreshButton.title = t(key);
+  refreshButton.setAttribute('aria-label', t(key));
+  refreshButton.setAttribute('aria-busy', String(refreshBusy));
+  refreshButton.disabled = refreshBusy || state.payload?.refreshable !== true;
+  refreshButton.dataset.state = refreshBusy ? 'busy' : refreshResult;
+}
+
+async function refreshDockLimits() {
+  if (refreshBusy || state.payload?.peekMode !== 'refresh') return;
+  clearTimeout(refreshFeedbackTimer);
+  refreshBusy = true;
+  refreshResult = '';
+  paintRefreshButton();
+  try {
+    const result = await bridge.refreshLimits();
+    refreshResult = result?.ok === true ? 'success' : 'error';
+  } catch {
+    refreshResult = 'error';
+  } finally {
+    refreshBusy = false;
+    paintRefreshButton();
+    refreshFeedbackTimer = setTimeout(() => {
+      refreshResult = '';
+      paintRefreshButton();
+    }, 1800);
+  }
+}
+
 function renderPeek(payload) {
   root.dataset.side = payload.side;
+  root.dataset.peekMode = payload.peekMode || 'handle';
+  // Sized to the window's own geometry rather than the viewport, in case AppKit
+  // clamped the window wider than asked and the extra pixels lie off-screen.
+  // The geometry is in window pixels and the page is zoomed to the dock's size.
+  const zoom = payload.zoom || 1;
+  root.style.width = `${(payload.shape?.width || 10) / zoom}px`;
+  root.style.height = `${(payload.shape?.height || 88) / zoom}px`;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (state.payload === payload) bridge.peekPainted?.(payload.peekMode || 'handle', payload.shape?.key);
+  }));
+  if (payload.peekMode === 'refresh') {
+    root.title = '';
+    root.classList.remove('is-handle-hidden');
+    if (!refreshButton) {
+      refreshButton = el('button', 'edge-dock-refresh');
+      refreshButton.type = 'button';
+      const icon = el('span', 'edge-dock-refresh-icon');
+      icon.setAttribute('aria-hidden', 'true');
+      refreshButton.append(icon);
+      refreshButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        void refreshDockLimits();
+      });
+    }
+    if (contentLayer.firstChild !== refreshButton) contentLayer.replaceChildren(refreshButton);
+    paintRefreshButton();
+    return;
+  }
   root.title = t('settings.display.edgeDock');
-  if (!contentLayer.firstChild) contentLayer.append(el('span', 'edge-dock-grip'));
+  // The handle is the silhouette itself (updateShape), tinted and outlined as the
+  // rail is; the refresh button is the only content this window carries.
+  if (contentLayer.firstChild) contentLayer.replaceChildren();
   // The handle's exit is a move, not a blink, so the withdrawn pose is held as a
-  // class and one transition carries it both ways (see the grip's rules). The class
-  // goes on in the same frame the grip is built, which is what keeps a page that
-  // loads with the rail already open from animating into a pose it starts in.
+  // class and one transition carries it both ways (see the handle's rules). The
+  // class goes on with the first render, which is what keeps a page that loads
+  // with the rail already open from animating into a pose it starts in.
   root.classList.toggle('is-handle-hidden', payload.peeking !== true);
 }
 
-if (surface === 'peek') root.addEventListener('click', () => bridge.click(null));
+if (surface === 'peek') root.addEventListener('click', () => {
+  if (state.payload?.peekMode !== 'refresh') bridge.click(null);
+});
+
+// On macOS the handle's window passes the pointer through with its moves still
+// forwarded here, so reporting them lets the main process take the pointer as
+// it reaches the handle rather than at its next cursor poll. The report carries
+// no position: the main process reads the cursor itself.
+if (surface === 'peek') {
+  const reportPointer = () => {
+    if (state.payload?.peekMode !== 'refresh') bridge.pointer();
+  };
+  document.addEventListener('mousemove', reportPointer);
+  document.documentElement.addEventListener('mouseleave', reportPointer);
+}
 
 // ---- Rail ----------------------------------------------------------------
 
@@ -491,17 +589,25 @@ function ringNode(remainingPercent, color, mark) {
   fill.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE * (1 - remaining / 100)));
   if (remainingPercent === null) fill.style.opacity = '0';
   svg.append(track, fill);
-  // The halo the running state breathes (see dock.css). It is always emitted and
-  // transparent until the cell is marked running, so what decides whether it shows is
-  // the cell's state alone. What it cannot carry is its own phase: renderRail rebuilds
-  // every cell from the payload on every push, so a fresh node restarts the breath at
-  // 0% each time - and the pushes are closest together exactly while a session is
-  // working, which is when this mark is worth anything. Anchoring the phase to the
-  // clock instead puts it somewhere a rebuild cannot reach, and the swap between the
-  // two nodes is invisible because they are at the same point of the same cycle.
-  const glow = el('span', 'edge-dock-ring-glow');
-  glow.style.animationDelay = `-${Date.now() % BREATH_MS}ms`;
-  ring.append(svg, glow, mark);
+  if (appearance().edgeDockRunningIndicatorEnabled === false) {
+    ring.append(svg, mark);
+    return ring;
+  }
+  // A separate inner arc reports work without moving the quota reading. Rail
+  // pushes rebuild these nodes, so anchor rotation to the clock to avoid restarting
+  // the spinner each time new usage arrives.
+  const spinner = document.createElementNS(SVG_NS, 'svg');
+  spinner.setAttribute('class', 'edge-dock-ring-spinner');
+  spinner.setAttribute('viewBox', '0 0 42 42');
+  spinner.setAttribute('aria-hidden', 'true');
+  spinner.style.animationDelay = `-${Date.now() % RUNNING_SPIN_MS}ms`;
+  const arc = document.createElementNS(SVG_NS, 'circle');
+  arc.setAttribute('cx', '21');
+  arc.setAttribute('cy', '21');
+  arc.setAttribute('r', '14');
+  arc.setAttribute('stroke-dasharray', `${7 * Math.PI} ${21 * Math.PI}`);
+  spinner.append(arc);
+  ring.append(svg, spinner, mark);
   return ring;
 }
 
@@ -509,20 +615,10 @@ function providerCellNode(cell) {
   const node = el('div', 'edge-dock-cell');
   node.dataset.status = cell.status;
   // Work in flight for this provider's tools, asked of the rows at paint time for
-  // the same reason the sessions cell asks: running expires on a clock, so a count
-  // frozen into the payload would keep the mark breathing after the work stopped.
-  // The glow rides the mark rather than the ring's arc on purpose. A running
-  // session is not proof that this quota is what is draining - the tokens may be
-  // billed to an API key or another endpoint entirely, which is the same reason
-  // local usage is not an adaptive-polling trigger - so it is a fact about the
-  // tool, not about the arc. Keeping it off the arc also keeps the signal's
-  // strength independent of how much quota is left (an arc-confined glow is
-  // faintest at 5%, which is exactly when it matters most), leaves the focused
-  // ring's own glow unambiguous, and stays readable on a stale cell, where the
-  // dimmed arc means "this number is not to be trusted" while the tool really is
-  // working. It is read from the cell's rows whatever the card draws of them: whether
-  // a tool is working is not the card's list, so hiding that list is not an off switch
-  // for this. An item that genuinely has no session rows never breathes.
+  // same reason the sessions cell asks: running expires on a clock. The inner
+  // spinner is independent of quota, since tokens may be billed to another
+  // endpoint. It also remains visible when the quota is empty or stale. Hiding
+  // the card's session list does not hide the running signal.
   const running = runningSessionSummary(cell.sessions).count;
   if (running > 0) node.dataset.running = 'yes';
   const color = providerColor(cell.provider);
@@ -550,7 +646,7 @@ function providerCellNode(cell) {
   // headline into whichever window is lowest this minute.
   value.dataset.severity = displaySeverity(cell.severityPercent ?? cell.remainingPercent);
   node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider)), value);
-  // The halo is decorative and carries no text, so the state it announces is
+  // The spinner is decorative and carries no text, so the state it announces is
   // spoken here instead, from the same reading it is drawn from.
   const spoken = [providerLabel(cell.provider), value.textContent];
   if (running > 0) spoken.push(t('edgeDock.runningCount', { count: running }));
@@ -576,7 +672,8 @@ function statLabel(metric) {
 // full-precision figure. The compact form goes through the same shared helper
 // as the tray and dashboard, so it follows the token unit system — a localized
 // user sees 萬/億 here too, never 億 beside K.
-function formatRailCost(value) {
+function formatRailCost(value, unpricedTokens) {
+  if (unpricedTokens > 0) return '—';
   const code = appearance().currency || 'USD';
   const amount = Math.abs(currencyApi.convertUsd(value, code));
   if (amount >= 10_000) {
@@ -677,7 +774,7 @@ function statCellNode(cell) {
   } else {
     node.append(
       el('span', 'edge-dock-stat-value', formatTokens(cell.totalTokens)),
-      el('span', 'edge-dock-stat-cost', formatRailCost(cell.costUsd))
+      el('span', 'edge-dock-stat-cost', formatRailCost(cell.costUsd, cell.unpricedTokens))
     );
   }
   // The tool marks are decorative: the count beside them already says how many
@@ -1037,7 +1134,7 @@ function usageTile(label, usage) {
     el('span', 'edge-dock-usage-label', label),
     el('span', 'edge-dock-usage-tokens', usage ? formatBreakdownTokens(usage.tokens) : '—')
   );
-  if (usage) tile.append(el('span', 'edge-dock-usage-cost', formatCost(usage.costUsd)));
+  if (usage) tile.append(usageCostNode('edge-dock-usage-cost', usage));
   return tile;
 }
 
@@ -1366,7 +1463,7 @@ function statCard(cell) {
     compactNode.setAttribute('aria-hidden', 'true');
     totalRow.append(compactNode);
   }
-  total.append(totalRow, el('span', '', formatCost(cell.costUsd)));
+  total.append(totalRow, usageCostNode('', cell));
   card.append(total);
   if (!cell.clients.length && !(cell.models || []).length) {
     card.append(el('div', 'edge-dock-note', t('edgeDock.noUsagePeriod')));
@@ -1617,7 +1714,7 @@ bridge.onRender(render);
 // so this costs no IPC and asks the main process for nothing.
 // A cell whose reading moves with the sessions clock. Asked by "does it carry
 // rows" rather than by metric: the sessions item is not the only cell that reads
-// them any more - a provider cell breathes its mark while that tool is working,
+// them any more - a provider cell spins its inner arc while that tool is working,
 // and that has to stop on the same clock the count does.
 function cellReadsSessions(cell) {
   return Array.isArray(cell?.sessions) && cell.sessions.length > 0;

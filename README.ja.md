@@ -91,7 +91,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 - MiniMax Code は、CLI が書き込むローカルのセッション履歴（`~/.minimax` または `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR`、`~/.mavis` と `~/.minimax-<profile>` / `~/.mavis-<profile>` も含む）と、`tokscale headless mcode` でキャプチャした実行を読み取ります。両方にある同じターンは 1 回だけ集計されます。
 
 - Command Code の transcript には実際のトークン数やメッセージごとのモデル情報が含まれません。トークン使用量は transcript テキストから推定され、モデルの帰属と推定コストには各リクエストで過去に使用したモデルではなく、現在設定されているモデルが反映される場合があります。
-- Cursor キャッシュは Cursor のアカウント単位の使用量エクスポートから取得されるため、Cursor IDE、Cursor CLI、および Grok Bot の使用量が対象です。Token Monitor は Cursor デスクトップアプリでログイン済みのアカウントを自動検出し、設定から手動でアカウントを追加することもできます。古いキャッシュは自動的に再同期されますが、終了直後のセッションが Cursor ダッシュボードに届くまで数分かかる場合があるため、使用量は即時ではなく同期後に更新されます。
+- Cursor キャッシュは Cursor のアカウント単位の使用量エクスポートから取得されるため、Cursor IDE、Cursor CLI、および Grok Bot の使用量が対象です。Token Monitor は Cursor デスクトップアプリでログイン済みのアカウントを自動検出し、設定から手動でアカウントを追加することもできます。古いキャッシュは自動的に再同期されますが、終了直後のセッションが Cursor ダッシュボードに届くまで数分かかる場合があるため、最新の使用量の表示には引き続き遅延が生じることがあります。
 
 - Custom は1つの GET 残高エンドポイントから数値 JSON フィールドをマッピングします。OpenAI または Anthropic API 互換だけでは不十分です。
 
@@ -155,6 +155,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 - **マルチデバイス同期** — Hub 同期は Server-Sent Events で数秒以内に他のデバイスへ反映。iCloud Drive 同期は eventual consistency
 - **ローカルファースト** — 単一デバイスではサーバー不要
 - **セルフホスト同期** — ウィジェット内 hub、Node CLI hub、Cloudflare Worker
+- **Headless agent** — デスクトップアプリなしでサーバー、SSH ホスト、WSL の使用量を送信。[Headless agent](#headless-agent) を参照
 - **iOS ウィジェット** — Worker hub + Widgy、Scriptable
 - **プライバシー優先** — プロンプト、応答、ソースコード、ファイル内容はすべてデバイス内に保持
 
@@ -194,7 +195,7 @@ brew install --cask token-monitor
 
 ## マルチデバイス同期
 
-デバイス（および headless agent）で使う **マルチデバイス同期方式を 1 つ** 選びます。各デバイスでウィジェットを開き、**設定 → マルチデバイス同期** でモードを選択します。ウィジェットがこのデバイスの使用量を自動的にアップロードします。ウィジェットがないマシンでのみ `npm run agent` を実行してください。iCloud Drive は macOS ウィジェット専用で、headless agent には対応しません。
+デバイス（および headless agent）で使う **マルチデバイス同期方式を 1 つ** 選びます。各デバイスでウィジェットを開き、**設定 → マルチデバイス同期** でモードを選択します。ウィジェットがこのデバイスの使用量を自動的にアップロードします。ウィジェットがないマシンでのみ [headless agent](#headless-agent) を実行してください。iCloud Drive は macOS ウィジェット専用で、headless agent には対応しません。
 
 #### オプション A — ウィジェットから hub をホスト（最も簡単、CLI 不要）
 
@@ -231,6 +232,20 @@ npx wrangler deploy
 
 同じ Apple ID でサインインした各 Mac で、**設定 → マルチデバイス同期 → iCloud Drive** を選択します。任意で有効にする macOS 専用モードで、Token Monitor は iCloud Drive の `Token Monitor/sync-v1/` にデバイスごと・書き込み元ごとのアトミックスナップショットを保存し、各 Mac が有効なファイルを集計します。Token Monitor のサーバー、CloudKit、資格情報は使用せず、プロバイダーの API キー、Cookie、token はローカルに残ります。iCloud Drive は結果整合性のため、別の Mac の更新が表示されるまで時間がかかることがあり、壊れたファイルや一時的に見えないファイルで最後の正常な集計が消えることはありません。
 
+### Headless agent
+
+サーバー、SSH ホスト、WSL 内など、AI ツールは使うがデスクトップウィジェットを動かさないマシンでは headless agent を実行します。そのマシンの使用量を収集して hub（オプション A、B、C）に送信します。Node.js 22.15+ と git が必要です。
+
+```bash
+git clone https://github.com/Javis603/token-monitor.git
+cd token-monitor
+npm ci
+cp .env.example .env              # TOKEN_MONITOR_HUB_URL、TOKEN_MONITOR_SECRET、重複しない TOKEN_MONITOR_DEVICE_ID を設定
+npm run agent                     # 常駐実行
+```
+
+サービスとしての実行、更新、アンインストール、トラブルシューティングは [docs/headless-agent.md](docs/headless-agent.md) を参照してください。WSL 内の SQLite ベースのツールは [WSL SQLite セットアップ](docs/wsl-sqlite-setup.md) に従ってください。
+
 ## アプリデータ
 
 アプリの状態は OS のユーザーデータディレクトリに保存されます。アプリと一緒にそのフォルダを削除すると完全にアンインストールできます。
@@ -256,7 +271,7 @@ npm run pack         # インストーラーなしのアプリディレクトリ
 
 出力は `dist/` に生成されます。Windows と Linux は対象 OS 上で上記の対応する `dist:*` スクリプトを使います。macOS リリース版をパッケージングするには、この Mac に Developer ID Application の署名 ID が必要です。ローカル開発または未対応プラットフォームでは `npm start` を使ってください。
 
-ランタイムとパッケージングのスクリプトは、4 つの vendored 対象で pinned tokscale binary を明示的に確保します。それ以外のソースプラットフォームでは npm binary を使い、対応していない client をフィルタリングします。`npm install`、lint、テストではダウンロードしません。
+ランタイムとパッケージングのスクリプトは、vendored ビルドがある各対象で pinned tokscale binary を明示的に確保します。それ以外のソースプラットフォームでは npm binary を使い、対応していない client をフィルタリングします。`npm install`、lint、テストではダウンロードしません。
 
 ## 動作の仕組み
 
@@ -265,9 +280,9 @@ npm run pack         # インストーラーなしのアプリディレクトリ
     ウィジェット (Electron) ──▶ tokscale ──▶ ~/.claude, ~/.codex, $HERMES_HOME
 
 モード B — 同期（オプトイン、マルチデバイス）
-    デバイス A agent ──▶
-    デバイス B agent ──▶  hub  ──▶  任意のデバイスのウィジェット
-    デバイス C agent ──▶
+    デバイス A ウィジェット ──▶
+    デバイス B ウィジェット ──▶  hub  ──▶  任意のデバイスのウィジェット
+    デバイス C agent        ──▶
 ```
 
 ウィジェットは **設定 → マルチデバイス同期** に応じてローカル/同期を選択します。hub は `npm run hub`、Cloudflare Worker、またはウィジェット内 Host モードで実行できます。Hub Client/Host モードでは hub が SSE で集計統計をプッシュし、1 台の変更は通常数秒以内に他のデバイスに反映されます。iCloud Drive モードはファイルを直接同期する eventual consistency の方式で、反映に時間がかかる場合があります。
@@ -300,7 +315,7 @@ npm run pack         # インストーラーなしのアプリディレクトリ
 Token Monitor の設定は 2 か所にあります。日常利用に必要なのは前者だけです。
 
 - **ウィジェット (GUI)** — 右下の `⚙` ボタンで開きます。セクションは順に：一般（言語、ログイン時に起動、アップデート）、メイン画面（ホームモジュールと表示通貨）、ウィンドウ（ウィンドウ動作、メニューバー／フローティングバブルのレイアウト、トレイモード、ショートカット）、外観（テーマとツール別カラー）、収集（追跡ツール、収集間隔、削除されたセッション使用量を保持、データエクスポート）、AI ツール制限（プロバイダー選択、制限、認証情報）、サブスクリプション（アカウントごとの支払い額）、マルチデバイス同期。タイトルバーの `⇧` ボタンでウィンドウ動作を切り替えます。
-- **Headless agent と hub** — UI なし。プロジェクトルートの `.env`（`.env.example` をコピー）で設定します。優先順位は CLI フラグ → 環境変数 → 既定値。
+- **Headless agent と hub** — UI なし。プロジェクトルートの `.env`（`.env.example` をコピー）で設定します。優先順位は CLI フラグ → 環境変数 → 既定値。詳しくは [docs/configuration.md](docs/configuration.md#headless-agent--hub-env) を参照。
 
 すべての設定と環境変数の詳細は [設定リファレンス](docs/configuration.md) を参照してください。
 

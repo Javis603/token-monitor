@@ -5309,7 +5309,7 @@ test('a stats frame stamped with a newer subscription version is read back, once
   // The stamp is only useful if both stats paths consult it: the stream while it
   // is up, and the widget's own read when it is not.
   assert.match(functionBody(main, 'sendPush', 'statsHistoryRevision'), /maybeAdoptSharedSubscriptionRevision\(/);
-  assert.match(main, /const stats = await fetchStats\(options\);[\s\S]{0,240}maybeAdoptSharedSubscriptionRevision\(stats\);/);
+  assert.match(main, /const stats = await \(options\?\.force === true && options\?\.feedback === true \? refreshManualStats\(\) : fetchStats\(options\)\);[\s\S]{0,240}maybeAdoptSharedSubscriptionRevision\(stats\);/);
   // And there is no periodic subscription read left behind it. One existed while
   // the stamp did not; keeping it would spend a request every five minutes per
   // device to be told what every frame already says.

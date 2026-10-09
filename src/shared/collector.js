@@ -42,6 +42,7 @@ const {
 const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
+const { cursorDesktopWatchRoots, isCursorDesktopStateWrite } = require('./providers/cursor/desktopState');
 const {
   applySessionMetadata,
   applyTokscaleSessionMetadata,
@@ -51,6 +52,8 @@ const {
 } = require('./sessionMetadata');
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
+const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
+const { createLocalUsageSource } = require('./providers/codex/localUsageSource');
 const {
   buildGcmpHistoryGraph,
   buildGcmpPeriods,
@@ -778,6 +781,16 @@ async function collectHistoryOnce(options) {
     const gcmpHistory = normalizeHistory(parseGraphResult(options.gcmpGraph), { capDays, todayKey });
     liveHistory = liveHistory ? mergeHistories([liveHistory, gcmpHistory], { todayKey }) : gcmpHistory;
   }
+  // Keep the supplemental ledger out of generic history retention too: a
+  // retained maximum would survive when a native rollout replaces this thread.
+  const withLocalHistory = (history) => {
+    // A failed native scan without retained history is no update, not a new
+    // Dots-only replacement for the device's last successful full history.
+    if (!history && failureCode === 'history-graph-failed') return null;
+    return options.codexLocalGraph
+      ? mergeHistories([history, normalizeHistory(parseGraphResult(options.codexLocalGraph), { capDays, todayKey })].filter(Boolean), { capDays, todayKey })
+      : history;
+  };
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -792,7 +805,7 @@ async function collectHistoryOnce(options) {
       const retained = normalizeHistory(parseGraphResult(retainedGraph), { capDays, todayKey });
       const result = retained.daily.length || retained.monthly.length ? retained : null;
       reportStatus(failureCode === null);
-      return result;
+      return withLocalHistory(result);
     } catch (error) {
       failureCode = failureCode || 'daily-history-archive-failed';
       if (typeof options.logger === 'function') options.logger(`daily history archive failed: ${error.message}`);
@@ -800,11 +813,11 @@ async function collectHistoryOnce(options) {
   }
   if (!liveHistory) {
     reportStatus(false);
-    return null;
+    return withLocalHistory(null);
   }
   const result = liveHistory.daily.length || liveHistory.monthly.length ? liveHistory : null;
   reportStatus(failureCode === null);
-  return result;
+  return withLocalHistory(result);
 }
 
 function shouldIncludeHistory(nowMs, lastHistoryAtMs, historyIntervalMs, force, enabled = true) {
@@ -1158,6 +1171,37 @@ async function collectUsageOnce(options) {
     }
   }
 
+  // This contribution is durable but has no rollout file. Keep it outside
+  // windowsPeriods/todayPartitions so exact native watch deltas stay native.
+  let codexLocalView = null;
+  if (trackedClientSet.has('codex') && options.codexLocalUsageEnabled !== false
+    && options.codexDotsVisible !== false) {
+    try {
+      codexLocalView = await readLocalUsageView({
+        ...options, store: options.codexLocalUsageStore, now: collectedAt,
+        nativePeriod: allTime, projectIdentity,
+        resolvePricing: (rows) => resolveLocalUsagePricing(rows, {
+          ...options, lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs, pricingRevision: options.pricingRevision ?? pricingFingerprint(options)
+        })
+      });
+      throwIfAborted(options.signal);
+      if (codexLocalView.sessionKeys.length) {
+        today = mergePeriods(today, codexLocalView.today);
+        month = mergePeriods(month, codexLocalView.month);
+        allTime = mergePeriods(allTime, codexLocalView.allTime);
+      }
+      options.onCodexLocalUsageComputed?.(codexLocalView);
+    } catch (_error) {
+      if (options.signal?.aborted) throw abortReason(options.signal);
+      try {
+        options.onDiagnosticEvent?.({ subsystem: 'collector', code: 'codex-local-usage-read-failed' });
+      } catch (_) {
+        // Diagnostic observers must not turn a recoverable ledger error into a failed tick.
+      }
+    }
+  }
+
   // One filesystem probe per tick, shared by the legacy status and the health
   // record below. Probing twice cost a second pass over every client's roots —
   // including the per-workspace walk Copilot needs — and let one snapshot report
@@ -1189,6 +1233,9 @@ async function collectUsageOnce(options) {
     month,
     allTime
   };
+  // The request ledger is this source's archive. A second per-session archive
+  // would resurrect its contribution after a native rollout takes precedence.
+  if (codexLocalView) summary.codexLocalSessionKeys = codexLocalView.sessionKeys;
   if (options.reasonixNativeSessionsEnabled === true && trackedClientSet.has('reasonix')) {
     try {
       const nativeCache = options.reasonixNativeSessionCache || createReasonixNativeSessionCache({
@@ -1238,6 +1285,7 @@ async function collectUsageOnce(options) {
           rows: (!anchorUsed && gcmpRows) ? gcmpRows : collectGcmpRows({ homeDir: options.homeDir, logger: options.logger })
         })
         : null,
+      codexLocalGraph: codexLocalView?.graph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1305,20 +1353,21 @@ function clientWatchCandidates(clientsCsv, options = {}) {
 // Watching them turns every tick into the trigger for the next one (issue #15).
 const SELF_SYNCED_CLIENTS = new Set(SELF_SYNC_KINDS);
 
-// Watch roots that feed a self-sync, keyed by client. Antigravity's IDE cache is
-// written by our sync and must stay watch-excluded, but the native session roots
-// are read-only inputs to that sync (tokscale only ever readdir/stats them —
-// every write it makes lands in its own cache dir). Watching those gives the
-// collector an event to target without recreating the issue #15
-// cache-write -> watcher -> sync loop, and an event here is what earns the sync
-// its short source-event floor.
+// Native activity sources that request a self-sync, keyed by client. Cursor's
+// desktop database is a signal to fetch cloud usage, while Antigravity's native
+// sessions are inputs to its sync. Both caches written by us stay unwatched;
+// only external source changes earn the short source-event floor.
 //
 // The parse-local antigravity-cli dir is deliberately not in here even though it
 // shares the umbrella client id: tokscale reads it directly, so a CLI write has
 // nothing to re-sync and must not pay for the subprocess.
-function selfSyncSourceRootsForClients(clientsCsv) {
+function selfSyncSourceRootsForClients(clientsCsv, options = {}) {
   const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
   const rootsByClient = {};
+  if (enabled.has('cursor')) {
+    const sourceRoots = cursorDesktopWatchRoots(options).filter(dirExists);
+    if (sourceRoots.length > 0) rootsByClient.cursor = sourceRoots;
+  }
   if (enabled.has('antigravity')) {
     const sourceRoots = [...new Set(antigravityDataRoots().filter(dirExists))];
     if (sourceRoots.length > 0) rootsByClient.antigravity = sourceRoots;
@@ -1340,7 +1389,7 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
     const existing = [...new Set(candidates.filter(dirExists))];
     if (existing.length > 0) rootsByClient[client] = existing;
   }
-  for (const [client, dirs] of Object.entries(selfSyncSourceRootsForClients(clientsCsv))) {
+  for (const [client, dirs] of Object.entries(selfSyncSourceRootsForClients(clientsCsv, options))) {
     rootsByClient[client] = [...new Set([...(rootsByClient[client] || []), ...dirs])];
   }
   // The Antigravity CLI writes parse-local SQLite that tokscale reads directly,
@@ -1624,6 +1673,13 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // watchAttributionRootsForClients keeps it from becoming a copilot prefix.
   const exporter = copilotExporterWatch(os.homedir());
   if (exporter) bound('copilot', [exporter.dir], (_parts, resolved) => resolved !== exporter.canonicalFile);
+
+  const cursorEnabled = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).includes('cursor');
+  // Cursor owns this source; Tokscale only reads its credentials/titles and
+  // writes a separate usage cache. Never descend into extension storage, and
+  // never watch the wal-index our own read-only SQLite queries can recreate.
+  bound('cursor', cursorEnabled ? options.cursorDesktopRoots || cursorDesktopWatchRoots(options) : [],
+    directChildOnly(isCursorDesktopStateWrite));
 
   const antigravityEnabled = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).includes('antigravity');
   bound('antigravity', antigravityEnabled ? antigravityDataRoots() : [], (parts) => {
@@ -2202,7 +2258,10 @@ const WATCH_REFUSAL_CODES = new Set([WATCH_POLLING_LIMIT_CODE, WATCH_POLLING_UNA
 // because the host can switch to polling on its own (a watch process that never
 // confirmed its exit), and a check the host can route around bounds nothing.
 function openWatch(chokidar, config = {}) {
-  const ignored = watchIgnoreMatcher(config.clients, { customScanPaths: config.customScanPaths });
+  const ignored = watchIgnoreMatcher(config.clients, {
+    customScanPaths: config.customScanPaths,
+    cursorDesktopRoots: config.cursorDesktopRoots
+  });
   const limit = Number.isInteger(config.pollingEntryLimit) && config.pollingEntryLimit >= 0
     ? config.pollingEntryLimit
     : WATCH_POLLING_ENTRY_LIMIT;
@@ -2258,7 +2317,8 @@ function watcherOptions(usePolling, ignored) {
 // measured NOT to rewrite its sidecar (mimo) is deliberately absent here, and
 // adding a client to this list asserts a measurement rather than a hunch.
 // Cherry Studio also rewrites its wal-index on repeated read-only WAL scans.
-const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'cherrystudio', 'qodercn', 'zcode']);
+// Cursor's read-only desktop credential/title queries change state.vscdb-shm too.
+const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'cherrystudio', 'cursor', 'qodercn', 'zcode']);
 
 function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
   // Match SQLite's wal-index suffix, not one client's database basename: ZCode's
@@ -2267,7 +2327,7 @@ function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
   // the match cannot widen into an unrelated '-shm' sidecar, and it never matches
   // the -wal or the database itself.
   const name = path.basename(String(filePath || ''));
-  if (!/^[^/]+\.(?:db|sqlite|sqlite3)-shm$/.test(name)) return false;
+  if (!/^[^/]+\.(?:db|sqlite|sqlite3|vscdb)-shm$/.test(name)) return false;
   const resolved = path.resolve(filePath);
   return SELF_WATCHED_SQLITE_SIDECAR_CLIENTS.some((client) => (rootsByClient[client] || [])
     .some((root) => resolved.startsWith(path.resolve(root) + path.sep)));
@@ -2366,6 +2426,12 @@ function startCollector(options) {
   // rather than kept as a second copy, so the two cannot drift; a restart simply
   // relearns them from the first tick, which always includes history.
   let activityDaysAnchor = {};
+  let codexLocalView = null;
+  let codexLocalViewDay = null;
+  let codexLocalSource = null;
+  let codexDotsVisible = options.codexDotsVisible !== false;
+  let codexVisibilityRevision = 0;
+  let publishedCodexVisibilityRevision = 0;
   // Keep the highest complete live day in this collector even when another
   // process owns the shared archive. A watch tick can then hand its value to a
   // later full/history tick instead of losing it at the tick boundary.
@@ -2564,6 +2630,7 @@ function startCollector(options) {
   const pricingChangedDuringScan = Symbol('pricing changed during scan');
 
   async function performTick(reason, tickOptions = {}) {
+    const visibilityRevision = codexVisibilityRevision;
     const tickStartedAt = Date.now();
     const collectedAt = collectionDate(options.now);
     const todayKey = localTodayKey(collectedAt);
@@ -2605,8 +2672,10 @@ function startCollector(options) {
     lastTickScope = tickScopeCode(tickOptions);
     try {
       let captured = null;
+      let tickLocalView = null;
       const summary = await collectUsageOnce({
         ...options,
+        codexDotsVisible,
         signal: runtimeSignal,
         clients,
         allTimeSince,
@@ -2636,6 +2705,13 @@ function startCollector(options) {
         sourceSelfSync: tickOptions.sourceSelfSync ?? null,
         reasonixNativeSessionsEnabled,
         reasonixNativeSessionCache,
+        codexLocalUsageStore: codexLocalSource?.store || options.codexLocalUsageStore,
+        onCodexLocalUsageComputed: (view) => {
+          if (visibilityRevision !== codexVisibilityRevision) return;
+          codexLocalView = view;
+          codexLocalViewDay = todayKey;
+          tickLocalView = view;
+        },
         // Both selections name clients whose pending source event this tick has
         // already consumed — the queue's drain for one, its acknowledgement for
         // the other — so either is a legitimate restore.
@@ -2651,6 +2727,8 @@ function startCollector(options) {
         refreshWsl: anchored ? refreshWsl : false,
         onAnchorComputed: (x) => { captured = x; },
         onProgress: (partial) => {
+          if (visibilityRevision !== codexVisibilityRevision) return;
+          if (visibilityRevision !== publishedCodexVisibilityRevision) return;
           if (!partial.today) return;
           if (pricingChanged || pricingFingerprint(options) !== tickPricingRevision) return;
           try {
@@ -2692,6 +2770,12 @@ function startCollector(options) {
               if (partial.allTime) {
                 preview.clientStatus = deriveClientStatus(clients, partial.allTime);
               }
+              if (codexLocalView && codexLocalViewDay === todayKey) {
+                for (const name of ['today', 'month', 'allTime']) {
+                  if (preview[name]) preview[name] = mergePeriods(preview[name], codexLocalView[name]);
+                }
+                preview.codexLocalSessionKeys = codexLocalView.sessionKeys;
+              }
               onPreview(preview);
             }
           } catch (_) {
@@ -2701,6 +2785,18 @@ function startCollector(options) {
         }
       });
       if (stopped) return;
+      // A visibility change queues a fresh projection, but must neither stop
+      // the observer nor publish an in-flight result under the old selection.
+      if (visibilityRevision !== codexVisibilityRevision) return false;
+      if (includeHistory && !summary.history
+        && (!codexDotsVisible || visibilityRevision !== publishedCodexVisibilityRevision)) {
+        // An empty successful graph normally omits history so DeviceState can
+        // keep its last snapshot. A visibility change must replace that old
+        // projection, including when all its history was Dots-only. A newly
+        // created hidden collector must do the same after replacement/fallback:
+        // its local revision starts at zero, but DeviceState keeps old history.
+        summary.history = historyScanSucceeded ? normalizeHistory([], { todayKey }) : null;
+      }
       // A settings save can land between the serial period scans. Discard that
       // mixed result and replay all windows against one pricing revision.
       if (pricingFingerprint(options) !== tickPricingRevision) {
@@ -2763,6 +2859,7 @@ function startCollector(options) {
         if (titlesChanged) persistAnchor(tickPricingRevision);
       }
       const transformedSummary = await onUpdate?.(summary, reason);
+      publishedCodexVisibilityRevision = visibilityRevision;
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'
         ? transformedSummary
         : summary;
@@ -2773,7 +2870,10 @@ function startCollector(options) {
           const visibleDateKey = Number.isFinite(visibleDate.getTime())
             ? localTodayKey(visibleDate)
             : todayKey;
-          const retainedLive = retainLiveDailyHistory(visibleSummary.today, {
+          const retainedToday = tickLocalView?.sessionKeys?.length
+            ? applyPeriodDelta(visibleSummary.today, emptyPeriod(), tickLocalView.today)
+            : visibleSummary.today;
+          const retainedLive = retainLiveDailyHistory(retainedToday, {
             ...(options.dailyHistoryArchiveOptions || {}),
             liveDays: liveDailyHistoryDays,
             todayKey: visibleDateKey,
@@ -3088,7 +3188,7 @@ function startCollector(options) {
     // A subset of the same roots, matched separately so a write to a client's
     // parse-local data cannot pass for a write to its self-sync source.
     const sourceSyncRootsByClient = Object.fromEntries(
-      Object.entries(selfSyncSourceRootsForClients(clients))
+      Object.entries(selfSyncSourceRootsForClients(clients, sourceOptions))
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
     );
     const dirs = [...new Set(Object.values(rootsByClient).flat())];
@@ -3129,6 +3229,11 @@ function startCollector(options) {
         reasonixNativeSessionCache.invalidate(filePath);
       }
       for (const client of clientsForWatchPath(filePath, sourceSyncRootsByClient)) {
+        // Another client's scan root may overlap the desktop store. Its unrelated
+        // files can request a local scan, but only database/WAL writes earn a
+        // Cursor cloud sync.
+        if (client === 'cursor' && (!isCursorDesktopStateWrite(filePath)
+          || !sourceSyncRootsByClient.cursor.some((root) => path.dirname(path.resolve(filePath)) === path.resolve(root)))) continue;
         sourceSyncQueue.record(client);
       }
       if (watchTriggersCollection) {
@@ -3146,6 +3251,7 @@ function startCollector(options) {
           dirs,
           clients,
           customScanPaths: sourceOptions.customScanPaths,
+          cursorDesktopRoots: sourceSyncRootsByClient.cursor || [],
           usePolling,
           pollingEntryLimit: watchPollingEntryLimit
         },
@@ -3203,9 +3309,9 @@ function startCollector(options) {
     // and unions the self-synced ones on top regardless. Their tokscale cache
     // dirs are deliberately unwatched to avoid a self-triggering loop, so a sync
     // can refresh what tokscale reads without any event naming the client it
-    // belongs to. Antigravity's source roots are watched and do name it, but that
-    // tracks the IDE writing rather than the sync landing, so targeting alone
-    // would still miss the sync output.
+    // belongs to. Native Cursor and Antigravity source roots are watched and do
+    // name the client, but that tracks the IDE writing rather than the sync
+    // landing, so targeting alone would still miss the sync output.
     const targetClients = activityGated ? takeWatchClients(selfSyncedClients) : [];
     runTick('interval', {
       ...(anchorToday ? { todayOnly: true, refreshWsl: true, targetClients } : {}),
@@ -3225,6 +3331,7 @@ function startCollector(options) {
     if (stopped) return;
     stopped = true;
     runtimeAbortController.abort(new Error('collector stopped'));
+    codexLocalSource?.stop();
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
     clearRolloverHistoryRetry();
@@ -3239,8 +3346,8 @@ function startCollector(options) {
     // It clears startBarrier before this continuation asks again; the regression
     // test pins that startup ordering because reversing it would microtask-spin.
     if (startBarrier) return Promise.resolve(startBarrier).then(() => whenIdle());
-    if (!tickInFlight) return Promise.resolve();
-    return new Promise((resolve) => idleWaiters.push(resolve));
+    const usageIdle = !tickInFlight ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(resolve));
+    return usageIdle.then(() => stopped ? codexLocalSource?.whenIdle() : undefined);
   }
 
   function getDiagnostics() {
@@ -3279,12 +3386,29 @@ function startCollector(options) {
       lastHistoryFailureCode,
       lastHistoryScanDurationMs,
       lastFailureCode: lastTickFailureCode,
+      ...(codexLocalSource ? { codexLocalUsage: codexLocalSource.getDiagnostics() } : {}),
       wslStatus: cloneDiagnosticValue(wslStatusAnchor)
     };
   }
 
   setupWatchers();
   loop();
+  if (trackedClients.has('codex') && options.codexLocalUsageEnabled !== false
+    && (options.codexDotsEnabled === true || (options.codexDotsEnabled === undefined
+      && (options.env || process.env).TOKEN_MONITOR_CODEX_LOCAL_USAGE === '1'))) {
+    codexLocalSource = createLocalUsageSource({
+      ...sourceOptions,
+      agentRuntime: options.agentRuntime,
+      store: options.codexLocalUsageStore,
+      onChange() {
+        if (stopped) return;
+        activityRevision += 1;
+        if (watchTriggersCollection) scheduleTick('watch:codex-local-usage', ['codex']);
+        else recordWatchClients(['codex']);
+      }
+    });
+    codexLocalSource.start();
+  }
 
   // A rescan of one tool. Was cursor-only because a Cursor sign-in was the only
   // caller; the machinery underneath was always per-client, so the guard was a
@@ -3307,6 +3431,15 @@ function startCollector(options) {
   return {
     getDiagnostics,
     refreshClient,
+    setCodexDotsVisible(visible) {
+      if (stopped) return Promise.resolve(false);
+      const next = visible !== false;
+      if (next === codexDotsVisible) return Promise.resolve(true);
+      codexDotsVisible = next;
+      codexVisibilityRevision += 1;
+      codexLocalView = null;
+      return runTick('dots-visibility', { todayOnly: true, targetClients: ['codex'], forceHistory: true });
+    },
     stop,
     tick: (reason = 'manual', tickOptions = {}) => runTick(reason, tickOptions),
     whenIdle

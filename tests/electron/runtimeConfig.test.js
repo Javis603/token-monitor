@@ -124,6 +124,7 @@ test('usage config fingerprint dedupes raw settings with the same effective runt
 test('every usage structural setting maps to an effective fingerprint change', () => {
   const cases = {
     clients: { clients: 'claude,codex' },
+    codexDotsEnabled: { codexDotsEnabled: true },
     customScanPaths: { customScanPaths: { claude: [path.resolve('tmp', 'claude-sessions')] } },
     allTimeSince: { allTimeSince: '2025-01-01' },
     collectionIntervalMs: {
@@ -424,6 +425,15 @@ test('display-only settings do not restart producers or probe providers', () => 
   assert.equal(classification.limitsReconfigure, false);
   assert.equal(classification.sinkStructural, false);
   assert.deepEqual(classification.limitScopes, []);
+});
+
+test('Dots visibility changes projection without replacing the observer runtime', () => {
+  const previous = { codexDotsEnabled: true, codexDotsVisible: true };
+  const next = { ...previous, codexDotsVisible: false };
+  assert.equal(classifySettingsChange(previous, next).usageStructural, false);
+  assert.equal(usageConfigFingerprint(usageConfigFromSettings(previous)),
+    usageConfigFingerprint(usageConfigFromSettings(next)));
+  assert.equal(usageConfigFromSettings(next).codexDotsVisible, false);
 });
 
 test('OpenRouter profile changes invalidate only the OpenRouter limits lane', () => {

@@ -44,6 +44,32 @@ function deviceSource({
   };
 }
 
+test('fixed ranges preserve missing-price counts across live today and multiple devices', () => {
+  const source = deviceSource({ deviceId: 'a', todayTokens: 100 });
+  source.periods.today = {
+    totalTokens: 100, costUsd: 0, unpricedTokens: 100,
+    clients: { codex: 100 }, models: { unknown: 100 },
+    clientUnpricedTokens: { codex: 100 }, modelUnpricedTokens: { unknown: 100 }
+  };
+  source.history.daily = [{
+    ...day('2026-08-11', 50, 'codex', 'unknown'),
+    cost: 0, unpricedTokens: 50,
+    perClient: { codex: { tokens: 50, cost: 0, unpricedTokens: 50 } },
+    perModel: { unknown: { tokens: 50, cost: 0, unpricedTokens: 50 } }
+  }];
+  const snapshot = ranges.fixedPeriodSnapshotFromDevices('last7', [source, { ...source, deviceId: 'b' }], {
+    todayKey: '2026-08-12', now: Date.parse('2026-08-12T12:00:00Z'), historyAvailable: true
+  });
+  assert.equal(snapshot.status, 'ready');
+  assert.equal(snapshot.period.unpricedTokens, 300);
+  assert.equal(snapshot.period.clientUnpricedTokens.codex, 300);
+  assert.equal(snapshot.period.modelUnpricedTokens.unknown, 300);
+  assert.equal(snapshot.devices[0].period.unpricedTokens, 150);
+  const priced = ranges.dailyForRange([{ ...day('2026-08-12', 100), unpricedTokens: 100 }],
+    { start: '2026-08-12', end: '2026-08-12' }, { todayKey: '2026-08-12', todayPeriod: { totalTokens: 100, costUsd: 1 } });
+  assert.equal(priced[0].unpricedTokens, undefined, 'live repricing clears a previous missing-price count');
+});
+
 test('fixed period slots keep the existing three-button layout', () => {
   assert.equal(ranges.slotForSelection('today'), 'today');
   assert.equal(ranges.slotForSelection('last7'), 'month');

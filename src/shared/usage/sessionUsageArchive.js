@@ -166,6 +166,7 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
   const capturedAtIso = captureDate.toISOString();
   const day = localDay(captureDate);
   const month = localMonth(captureDate);
+  const sourceArchivedKeys = new Set(deviceRecord.codexLocalSessionKeys || []);
   for (const periodName of PERIODS) {
     if (periodName === 'today' && archive.prunedDay && day < archive.prunedDay) continue;
     if (periodName === 'month' && archive.prunedMonth && month < archive.prunedMonth) continue;
@@ -177,6 +178,7 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
       if (isReasonixSyntheticSession(session) || !hasSessionUsage(session)) continue;
       const archiveKey = sessionKey(session.client, session.sessionId);
       if (!archiveKey) continue;
+      if (sourceArchivedKeys.has(archiveKey)) continue;
       const entry = archive.sessions[archiveKey] || {
         client: session.client,
         sessionId: session.sessionId,

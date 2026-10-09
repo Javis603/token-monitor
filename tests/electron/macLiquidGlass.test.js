@@ -196,3 +196,16 @@ test('a shaped glass fails before allocating when the shape setter is missing', 
   assert.equal(native.calls().some((call) => call.selector === 'alloc'), false);
   assert.doesNotThrow(() => native.create());
 });
+
+test('role changes hide only the retained background glass and preserve its shape', () => {
+  const native = bridge('arm64');
+  const glass = native.create({ shaped: true });
+  glass.update({ dark: true, shape: railShape, visible: true });
+  glass.update({ dark: false, visible: false });
+  glass.update({ dark: false, visible: false });
+  glass.update({ dark: false, shape: railShape, visible: true });
+  assert.deepEqual(native.calls().filter((call) => call.selector === 'setHidden:')
+    .map((call) => [call.target, ...call.parameters]), [[40, 0], [40, 1], [40, 0]]);
+  assert.equal(native.calls().filter((call) => call.selector === 'alloc').length, 1);
+  assert.equal(native.calls().filter((call) => call.selector === '_setPath:').length, 1);
+});
