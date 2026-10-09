@@ -55,7 +55,7 @@ function fixture(t) {
   const catalog = new DatabaseSync(path.join(home, '.codex', 'state_5.sqlite'));
   catalog.exec('CREATE TABLE threads (id TEXT, rollout_path TEXT, updated_at INTEGER, title TEXT)');
   catalog.prepare('INSERT INTO threads VALUES (?, ?, ?, ?)').run(nativeId, file, Math.floor(now / 1000), 'Native title');
-  t.after(() => { db.close(); catalog.close(); fs.rmSync(home, { recursive: true, force: true }); });
+  t.after(() => { if (db.isOpen) db.close(); catalog.close(); fs.rmSync(home, { recursive: true, force: true }); });
   const options = { homeDir: home, env: {}, now, readProcessStarts: async () => new Map([[1234, boot - 1000]]) };
   const key = 'codex:' + id;
   const session = { client: 'codex', sessionId: id, totalTokens: 100, lastUsedAt: new Date(now).toISOString() };
@@ -129,6 +129,7 @@ test('T3 request evaluation is bounded before sorting a large set of recent runs
 test('a missing T3 database with a leftover runtime marker never probes a process', async t => {
   const f = fixture(t);
   const file = path.join(f.home, '.t3', 'userdata', 'statev2.sqlite');
+  f.db.close(); // Windows cannot rename a database while its handle is open.
   fs.renameSync(file, file + '.removed');
   let probes = 0;
   const result = await activity.readT3Activity({ ...f.options, readProcessStarts: async () => { probes += 1; return new Map(); } });

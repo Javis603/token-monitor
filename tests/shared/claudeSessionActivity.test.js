@@ -465,9 +465,11 @@ test('the existing watcher routes registry changes into activity without schedul
   });
   t.after(async () => { collector.stop(); await collector.whenIdle(); });
   await collector.whenIdle();
-  const registry = path.join(f.root, '1234.json');
+  // Watcher events use long paths, even when Windows temp uses an 8.3 alias.
+  const registryRoot = require('../../src/shared/clientSources').canonicalWatchPath(f.root);
+  const registry = path.join(registryRoot, '1234.json');
   assert.equal(watchOptions.ignored(registry), false);
-  assert.equal(watchOptions.ignored(path.join(f.root, 'secret.json')), true);
+  assert.equal(watchOptions.ignored(path.join(registryRoot, 'secret.json')), true);
   f.write({ status: 'busy' });
   watcher.emit('all', 'change', registry);
   watcher.emit('all', 'change', registry);
