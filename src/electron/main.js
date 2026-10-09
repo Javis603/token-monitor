@@ -105,7 +105,7 @@ const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { actionWindowForEvent, activateWindowAction, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
 const { applyCodexAdditionalLimitsMigration } = require('./codexAdditionalLimitsMigration');
-const { applyActivityPatch } = require('../shared/sessionActivityProjection');
+const { applyActivityPatch, materializeActivity } = require('../shared/sessionActivityProjection');
 const { createDeviceRuntime } = require('../shared/usage/deviceRuntime');
 const { externalAgentActive } = require('../shared/usage/agentPid');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
@@ -2999,7 +2999,7 @@ function rendererAllTimeSessions(stats) {
     const complete = completeLocalSyncStats(stats);
     const hubSnapshot = snapshotLocalDevices.get(stats);
     const sessions = hubSnapshot
-      ? mergedLocalAllTimeSessions(complete.periods, hubSnapshot.localDevice)
+      ? mergedLocalAllTimeSessions(complete.periods, materializeActivity(hubSnapshot.localDevice))
       : complete.periods?.allTime?.sessions || {};
     return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, aliases, { grouping });
   });
@@ -4733,6 +4733,10 @@ function publishLocalSessionActivity(patch) {
   if (!latestStats) return;
   const previous = latestStats;
   latestStats = projectLocalActivity(previous, patch);
+  const localSnapshot = snapshotLocalDevices.get(previous);
+  if (localSnapshot) snapshotLocalDevices.set(latestStats, {
+    ...localSnapshot, localDevice: applyActivityPatch(localSnapshot.localDevice, patch)
+  });
   if (localStats === previous) localStats = latestStats;
   const snapshot = rendererSnapshots.updateActivity(previous, latestStats);
   edgeDockManualStats = null;

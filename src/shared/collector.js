@@ -1278,7 +1278,10 @@ async function collectUsageOnce(options) {
     isCurrent: () => { throwIfAborted(options.signal); return true; },
     now: () => activityObservedAt
   });
-  return require('./sessionActivityProjection').materializeActivity(activitySummary);
+  // Activity is observed after scans; it must not re-date their accounting
+  // snapshot if that read crosses midnight. Observations retain their own clock.
+  const result = require('./sessionActivityProjection').materializeActivity(activitySummary);
+  return result.updatedAt === summary.updatedAt ? result : { ...result, updatedAt: summary.updatedAt };
 }
 
 function activityReadOptions(options, extras, providers) {

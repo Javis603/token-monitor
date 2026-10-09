@@ -63,6 +63,58 @@ function fixture(t) {
   return { home, db, catalog, file, id, key, write, options, summary, runtimeFile };
 }
 
+test('large Codex session metadata verifies T3 identity with bounded header reads', async t => {
+  const f = fixture(t);
+  const header = entry('session_meta', { instructions: 'x'.repeat(160_000), id: nativeId });
+  fs.writeFileSync(f.file, [header, started, 'x'.repeat(2 * 1024 * 1024)].join('\n') + '\n');
+  fs.utimesSync(f.file, new Date(now), new Date(now));
+  const open = fs.openSync, read = fs.readSync, close = fs.closeSync;
+  const watched = new Set();
+  let bytesRead = 0;
+  t.mock.method(fs, 'openSync', (file, ...args) => {
+    const fd = open(file, ...args);
+    if (file === fs.realpathSync(f.file)) watched.add(fd);
+    return fd;
+  });
+  t.mock.method(fs, 'readSync', (fd, ...args) => {
+    const bytes = read(fd, ...args);
+    if (watched.has(fd)) bytesRead += bytes;
+    return bytes;
+  });
+  t.mock.method(fs, 'closeSync', fd => { watched.delete(fd); return close(fd); });
+  const result = await activity.readSessionActivity(f.summary(), f.options);
+  assert.equal(result.readings.get(f.id)?.state, 'waiting');
+  assert.ok(bytesRead < 256 * 1024, 'discovery stops after the header rather than loading the transcript body');
+  fs.writeFileSync(f.file, [entry('session_meta', { instructions: 'x'.repeat(160_000), id: 'wrong-identity' }), started].join('\n') + '\n');
+  fs.utimesSync(f.file, new Date(now), new Date(now));
+  assert.equal((await activity.readSessionActivity(f.summary(), f.options)).readings.size, 0);
+  bytesRead = 0;
+  fs.writeFileSync(f.file, entry('session_meta', { instructions: 'x'.repeat(8 * 1024 * 1024), id: nativeId }) + '\n');
+  fs.utimesSync(f.file, new Date(now), new Date(now));
+  assert.equal((await activity.readSessionActivity(f.summary(), f.options)).readings.size, 0,
+    'an incomplete over-limit header never invents an identity from the filename');
+  assert.equal(bytesRead, 8 * 1024 * 1024, 'oversized headers retain the hard read ceiling');
+});
+
+test('resumed historical Codex question appears in Today before new usage without duplicating other periods', async t => {
+  const f = fixture(t); fs.unlinkSync(f.runtimeFile); f.write([started, question]);
+  const clock = new Date(2026, 9, 9, 0, 1).getTime();
+  fs.utimesSync(f.file, new Date(clock), new Date(clock));
+  const summary = f.summary(); summary.today = usage.emptyPeriod();
+  const options = { ...f.options, now: clock };
+  const next = activity.projectSessionActivity(summary, await activity.readSessionActivity(summary, options), clock);
+  const [row] = rows.sessionRowsForPeriod(next.today, { nativeSessions: next.nativeSessions.today, now: new Date(clock) });
+  assert.equal(row.activityState, 'waiting');
+  assert.equal(row.tokenDataUnavailable, true);
+  assert.equal(next.today.totalTokens, 0);
+  assert.equal(next.nativeSessions.month[f.key], undefined);
+  assert.equal(next.nativeSessions.allTime[f.key], undefined);
+  const accounted = { ...next, today: summary.month };
+  const replaced = activity.projectSessionActivity(accounted, await activity.readSessionActivity(accounted, options), clock + 1000);
+  assert.equal(replaced.nativeSessions.today[f.key], undefined);
+  assert.equal(rows.sessionRowsForPeriod(replaced.today, { nativeSessions: replaced.nativeSessions.today }).length, 1);
+});
+
 test('T3 formal request kinds wait and resolution/cancellation/expiry clear without transcript writes', async t => {
   const f = fixture(t);
   for (const kind of ['command', 'file-read', 'file-change', 'permission', 'mcp-elicitation', 'user_input']) {
@@ -418,9 +470,12 @@ test('a catalog-confirmed historical activity candidate is verified by its heade
   const summary = { allTime: { sessions: { [`codex:${id}`]: { client: 'codex', sessionId: id, totalTokens: 10 } } } };
   const read = await activity.readSessionActivity(summary, f.options);
   assert.equal(read.readings.get(id).state, 'waiting');
-  assert.deepEqual(read.sessions, {});
+  assert.equal(read.sessions[`codex:${id}`].tokenDataUnavailable, true,
+    'history-only identities can also supply a local Today presentation row');
   const next = activity.projectSessionActivity(summary, read, now);
   assert.equal(live.sessionWithActivity(next.allTime, `codex:${id}`).liveActivity.state, 'waiting');
+  assert.equal(next.nativeSessions.today[`codex:${id}`].liveActivity.state, 'waiting');
+  assert.equal(next.nativeSessions.allTime[`codex:${id}`], undefined);
   fs.writeFileSync(differentFile, entry('session_meta', { id: 'unrelated-native-session' }) + '\n' + started + '\n');
   fs.utimesSync(differentFile, new Date(old), new Date(old));
   assert.equal((await activity.readSessionActivity(summary, f.options)).readings.has(id), false);

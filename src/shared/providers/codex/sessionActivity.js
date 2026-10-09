@@ -10,9 +10,10 @@ const { RUNNING_WINDOW_MS, isArchivedSession, sessionActivityState } = require('
 const { readCodexSessionState } = require('./sessionContext');
 const { codexHomeDir, discoverDbPaths, readSessionMeta, readT3SessionMeta } = require('./sessionMetadata');
 
-const { hasKnownSession, activityEntries, codexActivityCandidates, rememberProjection } = require('../../sessionActivityProjection');
+const { hasKnownSession, nativeSessionsForPeriod, activityEntries, codexActivityCandidates, rememberProjection } = require('../../sessionActivityProjection');
 
 const MAX_SESSIONS = 256;
+const MAX_HEADER_BYTES = 8 * 1024 * 1024;
 const RENEW_INTERVAL_MS = 10_000;
 const discoveryCache = new WeakMap();
 
@@ -38,11 +39,22 @@ function nativeIdForFile(file) {
     const cached = identityCache.get(file);
     if (cached?.fingerprint === fingerprint) return cached.id;
     fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
-    const buffer = Buffer.alloc(64 * 1024);
-    const bytes = fs.readSync(fd, buffer, 0, buffer.length, 0);
-    const newline = buffer.indexOf(10, 0);
-    const first = JSON.parse(buffer.toString('utf8', 0, newline >= 0 && newline < bytes ? newline : bytes));
-    const id = first.type === 'session_meta' && typeof first.payload?.id === 'string' ? first.payload.id : '';
+    // Instructions/tool definitions can make session_meta larger than a chunk.
+    // Read only that complete first line, with a hard bound and no retained text.
+    const chunks = [];
+    let position = 0;
+    let complete = false;
+    while (position < MAX_HEADER_BYTES) {
+      const buffer = Buffer.alloc(Math.min(64 * 1024, MAX_HEADER_BYTES - position));
+      const bytes = fs.readSync(fd, buffer, 0, buffer.length, position);
+      if (!bytes) { complete = true; break; }
+      const newline = buffer.subarray(0, bytes).indexOf(10);
+      chunks.push(buffer.subarray(0, newline >= 0 ? newline : bytes));
+      position += bytes;
+      if (newline >= 0 || position >= stat.size) { complete = true; break; }
+    }
+    const first = complete ? JSON.parse((chunks.length === 1 ? chunks[0] : Buffer.concat(chunks)).toString('utf8')) : null;
+    const id = first?.type === 'session_meta' && typeof first.payload?.id === 'string' ? first.payload.id : '';
     identityCache.delete(file);
     identityCache.set(file, { fingerprint, id });
     if (identityCache.size > 512) identityCache.delete(identityCache.keys().next().value);
@@ -74,10 +86,9 @@ function discoverFilesUncached(options, activity, summary) {
   const accept = (file, catalogActive = false) => {
     if (files.size >= MAX_SESSIONS || !/^rollout-.+\.jsonl$/.test(path.basename(file))) return;
     const id = path.basename(file, '.jsonl');
-    // Existing usage rows already get native turn/question metadata from the
-    // normal collector. With no formal T3 observation, only unknown identities
-    // need this separate pre-token discovery and header read.
-    if (!activity.size && hasKnownSession(summary, 'codex', id)) return;
+    // Today's usage rows get native metadata through the normal collector.
+    // A historical session resumed without new tokens still needs a Today row.
+    if (!activity.size && hasKnownSession(summary, 'codex', id, 'today')) return;
     try {
       const real = fs.realpathSync(file);
       if (!realRoots.some((root) => isPathInside(root, real))) return;
@@ -170,7 +181,7 @@ async function readSessionActivity(summary, options = {}) {
     const reading = activity.get(nativeId);
     if (reading) readings.set(session.sessionId, reading);
   }
-  const ids = new Set([...files.keys()].filter((id) => !hasKnownSession(summary, 'codex', id)));
+  const ids = new Set([...files.keys()].filter((id) => !hasKnownSession(summary, 'codex', id, 'today')));
   const generatedTitleIds = new Map();
   const metadata = readSessionMeta(ids, { ...options, titleSourceById: generatedTitleIds });
   const t3Metadata = readT3SessionMeta(ids, options);
@@ -222,7 +233,9 @@ function projectSessionActivity(summary, activity, now = Date.now()) {
     ['observedAt', 'lastUsedAt', 'lastMessageAt'].includes(key) ? undefined : value);
   const oldNative = summary.nativeSessions || { today: {}, month: {}, allTime: {} };
   const codexOnly = (view) => Object.fromEntries(Object.entries(view || {}).filter(([, session]) => session.client === 'codex'));
-  const changed = ['today', 'month', 'allTime'].some((name) => withoutClock(codexOnly(oldNative[name])) !== withoutClock(activity.sessions));
+  const byPeriod = Object.fromEntries(['today', 'month', 'allTime'].map((name) =>
+    [name, nativeSessionsForPeriod(summary, 'codex', activity.sessions, name)]));
+  const changed = ['today', 'month', 'allTime'].some((name) => withoutClock(codexOnly(oldNative[name])) !== withoutClock(byPeriod[name]));
   const oldCodex = Object.values(codexOnly(oldNative.today));
   const renew = oldCodex.some((session) => session.liveActivity
     ? now - Date.parse(session.liveActivity.observedAt) >= RENEW_INTERVAL_MS
@@ -232,7 +245,7 @@ function projectSessionActivity(summary, activity, now = Date.now()) {
     next.nativeSessions = { ...summary.nativeSessions };
     for (const name of ['today', 'month', 'allTime']) {
       const existing = Object.fromEntries(Object.entries(oldNative[name] || {}).filter(([, session]) => session.client !== 'codex'));
-      next.nativeSessions[name] = { ...existing, ...activity.sessions };
+      next.nativeSessions[name] = { ...existing, ...byPeriod[name] };
     }
   }
   if (next) next.updatedAt = new Date(now).toISOString();

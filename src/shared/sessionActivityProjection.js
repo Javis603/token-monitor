@@ -81,7 +81,14 @@
     }
     return remember(lookup, key, result);
   }
-  function hasKnownSession(summary, client, id) { return locationsFor(summary, client, id).length > 0; }
+  function hasKnownSession(summary, client, id, periodName) {
+    const locations = locationsFor(summary, client, id);
+    return periodName ? locations.some((row) => row.name === periodName) : locations.length > 0;
+  }
+  function nativeSessionsForPeriod(summary, client, sessions, name) {
+    return Object.fromEntries(Object.entries(sessions).filter(([, row]) =>
+      !hasKnownSession(summary, client, row.sessionId, name)));
+  }
   function activityEntries(summary, client, ids, includeLeased = true) {
     const index = indexFor(summary);
     const selected = new Set(ids);
@@ -243,6 +250,6 @@
     return result;
   }
   function invalidateActivityIndex(summary) { if (summary) indexes.delete(summary); }
-  return { hasKnownSession, activityEntries, codexActivityCandidates, rememberProjection, activityPatch, applyActivityPatch,
+  return { hasKnownSession, nativeSessionsForPeriod, activityEntries, codexActivityCandidates, rememberProjection, activityPatch, applyActivityPatch,
     compactActivity, needsActivityRenewal, materializeActivity, invalidateActivityIndex };
 });

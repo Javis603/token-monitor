@@ -11,7 +11,7 @@ const { readT3SessionMeta } = require('../../t3SessionMetadata');
 const { readSessionTitle } = require('./sessionMetadata');
 const { isArchivedSession } = require('../../sessionLive');
 
-const { hasKnownSession, activityEntries, rememberProjection, compactActivity } = require('../../sessionActivityProjection');
+const { hasKnownSession, nativeSessionsForPeriod, activityEntries, rememberProjection, compactActivity } = require('../../sessionActivityProjection');
 
 const POLL_INTERVAL_MS = 3000;
 const RENEW_INTERVAL_MS = 10_000;
@@ -146,14 +146,16 @@ function projectSessionActivity(summary, readings, now = Date.now(), nativeSessi
     const oldNative = summary.nativeSessions || {};
     const claudeOnly = (view) => Object.fromEntries(Object.entries(view || {}).filter(([, session]) => session.client === 'claude'));
     const withoutClock = (view) => JSON.stringify(view, (key, value) => key === 'observedAt' ? undefined : value);
-    const changed = ['today', 'month', 'allTime'].some((name) => withoutClock(claudeOnly(oldNative[name])) !== withoutClock(nativeSessions));
+    const byPeriod = Object.fromEntries(['today', 'month', 'allTime'].map((name) =>
+      [name, nativeSessionsForPeriod(summary, 'claude', nativeSessions, name)]));
+    const changed = ['today', 'month', 'allTime'].some((name) => withoutClock(claudeOnly(oldNative[name])) !== withoutClock(byPeriod[name]));
     const renew = Object.values(claudeOnly(oldNative.today)).some((session) => now - Date.parse(session.liveActivity?.observedAt) >= RENEW_INTERVAL_MS);
     if (changed || renew) {
       next ||= { ...summary, updatedAt: new Date(now).toISOString() };
       next.nativeSessions = { ...oldNative };
       for (const name of ['today', 'month', 'allTime']) {
         const existing = Object.fromEntries(Object.entries(oldNative[name] || {}).filter(([, session]) => session.client !== 'claude'));
-        next.nativeSessions[name] = { ...existing, ...nativeSessions };
+        next.nativeSessions[name] = { ...existing, ...byPeriod[name] };
       }
     }
   }
@@ -182,12 +184,12 @@ function activityFiles(roots, ids) {
 }
 
 // Registry discovery includes sessions before the first usage response. These
-// rows are local presentation only; an existing usage/archive identity wins.
+// rows are local presentation only; usage/archive identities win per period.
 async function readSummaryActivity(summary, options = {}) {
   const readings = await readSessionActivity(null, options);
   const t3 = await readT3Activity(options, 'claudeAgent');
   for (const [id, reading] of t3) if (isSafeSessionId(id)) readings.set(id, reading);
-  const ids = new Set([...readings].filter(([id, reading]) => !hasKnownSession(summary, 'claude', id)
+  const ids = new Set([...readings].filter(([id, reading]) => !hasKnownSession(summary, 'claude', id, 'today')
     && ['running', 'waiting'].includes(reading.state)).map(([id]) => id));
   const roots = claudeSessionRoots({ ...options, homeDir: options.homeDir || os.homedir(), useEnvRoots: !options.scopedHome });
   const files = activityFiles(roots, ids);

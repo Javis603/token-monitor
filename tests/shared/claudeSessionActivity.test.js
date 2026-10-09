@@ -42,6 +42,49 @@ function fixture(t) {
   return { home, root, write, options, cleanups, read: (extra = {}) => activity.readSessionActivity(new Set(['test-session']), { ...options, ...extra }) };
 }
 
+test('activity after midnight preserves the accounting timestamp and scan windows', async t => {
+  const f = fixture(t); f.write();
+  const collectedAt = new Date(2026, 9, 8, 23, 59, 59);
+  const observedAt = new Date(2026, 9, 9, 0, 0, 1);
+  t.mock.method(Date, 'now', () => observedAt.getTime());
+  let anchor;
+  const summary = await require('../../src/shared/collector').collectUsageOnce({
+    clients: 'claude', deviceId: 'midnight', agentVersion: 'test', now: collectedAt,
+    homeDir: f.home, env: {}, platform: 'darwin', historyEnabled: false, limitsEnabled: false,
+    projectsEnabled: false, codexLocalUsageEnabled: false, anchorPersistenceEnabled: false,
+    sessionMetadataDeps: { readProcessStarts: f.options.readProcessStarts },
+    runTokscale: async () => ({ entries: [{ client: 'claude', sessionId: 'test-session', model: 'test',
+      input: 100, output: 0, cost: 0 }] }), onAnchorComputed: value => { anchor = value; }
+  });
+  assert.equal(summary.updatedAt, collectedAt.toISOString());
+  assert.deepEqual(summary.periodWindows, require('../../src/shared/collector').computePeriodWindows(collectedAt));
+  assert.equal(anchor.windowsPeriods.today.totalTokens, 100);
+  assert.equal(anchor.windowsPeriods.today.sessions['claude:test-session'].liveActivity, undefined);
+  assert.equal(summary.today.totalTokens, 100);
+  assert.equal(summary.today.sessions['claude:test-session'].liveActivity.observedAt, observedAt.toISOString());
+});
+
+test('resumed historical Claude waiting appears in Today before new usage without duplicating other periods', async t => {
+  const f = fixture(t); f.write();
+  const clock = new Date(2026, 9, 9, 0, 1).getTime();
+  const key = 'claude:test-session';
+  const prior = session('unknown', { lastUsedAt: new Date(clock - 120_000).toISOString(), liveActivity: undefined });
+  const summary = { today: usage.emptyPeriod(), month: { ...usage.emptyPeriod(), sessions: { [key]: prior } },
+    allTime: { ...usage.emptyPeriod(), sessions: { [key]: prior } } };
+  const options = { ...f.options, now: clock };
+  const next = activity.projectActivity(summary, await activity.readSummaryActivity(summary, options), clock);
+  const [row] = sessionRows.sessionRowsForPeriod(next.today, { nativeSessions: next.nativeSessions.today, now: new Date(clock) });
+  assert.equal(row.activityState, 'waiting');
+  assert.equal(row.tokenDataUnavailable, true);
+  assert.equal(next.today.totalTokens, 0);
+  assert.equal(next.nativeSessions.month[key], undefined);
+  assert.equal(next.nativeSessions.allTime[key], undefined);
+  const accounted = { ...next, today: { ...summary.today, sessions: { [key]: { ...prior, totalTokens: 10 } } } };
+  const replaced = activity.projectActivity(accounted, await activity.readSummaryActivity(accounted, options), clock + 1000);
+  assert.equal(replaced.nativeSessions.today[key], undefined);
+  assert.equal(sessionRows.sessionRowsForPeriod(replaced.today, { nativeSessions: replaced.nativeSessions.today }).length, 1);
+});
+
 test('registry recognizes explicit states and publishes only a sanitized observation', async (t) => {
   const f = fixture(t);
   for (const [fields, state] of [
