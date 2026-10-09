@@ -9,6 +9,7 @@ const { tokscaleConfigDir, tokscaleHomeDir } = require('./tokscaleConfig');
 const { claudeSessionRoots } = require('./providers/claude/paths');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
+const { catpawDataSources } = require('./providers/catpaw/paths');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
 const { MCODE_SOURCE_CHECK_ID, mcodeSessionDirs } = require('./providers/mcode/paths');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
@@ -358,6 +359,13 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl. The fork
   // parses it from tokscale's effective home, like the Qoder CN paths below.
   add('proma', ['proma-sessions', path.join(tokscaleHome, '.proma', 'agent-sessions')]);
+  if (enabled.has('catpaw')) {
+    const catpaw = catpawDataSources({ ...options, platform, env });
+    add('catpaw',
+      ...catpaw.roots.map((dir) => ['catpaw-data', dir, null, true]),
+      ...catpaw.dbPaths.map((file) => ['catpaw-db', path.dirname(file), file])
+    );
+  }
   // Qoder CN — legacy SQLite DB under the platform Application Support dir,
   // or the JSONL transcript tree used by current builds.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform, env });

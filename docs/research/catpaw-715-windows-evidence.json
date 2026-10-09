@@ -1,0 +1,76 @@
+{
+  "checkedAt": "2026-10-06",
+  "platform": "win32",
+  "edition": "domestic",
+  "version": "2026.0917.1230",
+  "verification": "static-installer-extraction",
+  "artifacts": {
+    "installer": {
+      "bytes": 471641384,
+      "sha256": "05710871ff31c93880b88fbc5f95a5879c9182eeff2ad244a54384b9fc6dc5fd"
+    },
+    "appAsar": {
+      "bytes": 396815209,
+      "sha256": "3244886833a39430dd19ffde606df5eb210b6d33faedb9fbde0dcae09f0a737d"
+    }
+  },
+  "tables": {
+    "ui_sdk_messages": {
+      "sameAsMacDomestic": true,
+      "sha256": "5aef178a9aab1a3bc5cbf634b716f2d42533f06d43e24b866be3172d94b11a60"
+    },
+    "sessions": {
+      "sameAsMacDomestic": true,
+      "sha256": "b120fbb3ef5a35f73188d9ae67644a0abbd5404f56f85275a6ca8f4656c91d1c"
+    },
+    "conversations": {
+      "sameAsMacDomestic": true,
+      "sha256": "a4116ecb74d1380dc03e07007b013db0e15fdc813a547cbc8228641b472b901b"
+    }
+  },
+  "sdkMethods": {
+    "catpaw-sdk-adapter.computeStreamMessageExtra": {
+      "sameAsMacDomestic": true,
+      "sha256": "0963ddf391d1e88e23419ce6b5c3a309705c5da24d3ba52061840a4b3b18d958"
+    },
+    "catpaw-sdk-adapter.recordAssistantExtra": {
+      "sameAsMacDomestic": true,
+      "sha256": "c5e0088c3dcefb71fe21fd267d64a22b269bf029f0c6594db7e060d8d5dcb687"
+    },
+    "catpaw-sdk-adapter.handleStreamResponse": {
+      "sameAsMacDomestic": true,
+      "sha256": "db7fe5e1a78b3a62c04e3fbd939eebf3299de035835e5df4ee0895398cfd48c0"
+    },
+    "catpaw-sdk-adapter.buildAssistantMessage": {
+      "sameAsMacDomestic": true,
+      "sha256": "a283cee9d3040786edb28355c96bedff3eff89029b64b790591753c276f0fbf1"
+    },
+    "catpaw-sdk-v2-adapter.computeStreamMessageExtra": {
+      "sameAsMacDomestic": true,
+      "sha256": "e4af4c6c9f820cf70e911f1035b769bb2b1f52f4d0d59b51f77614d1b65359bc"
+    },
+    "catpaw-sdk-v2-adapter.recordAssistantExtra": {
+      "sameAsMacDomestic": true,
+      "sha256": "bd8d4edcb1d6d8843f12a9a2288940d807dead0782b348e1ffc83926e8e17c93"
+    },
+    "catpaw-sdk-v2-adapter.handleStreamResponse": {
+      "sameAsMacDomestic": true,
+      "sha256": "98acb6cf849b0796573050d0fb8f89b4105997ae3fd76c71218f44cd8245e615"
+    },
+    "catpaw-sdk-v2-adapter.buildAssistantMessage": {
+      "sameAsMacDomestic": true,
+      "sha256": "4455ff88b57c0e89ef36f45862405bd2a4799aceaad0bca9f9a521ef5e22864c"
+    }
+  },
+  "sdkVersions": {
+    "catpaw-sdk-adapter": "1.2.3",
+    "catpaw-sdk-v2-adapter": "0.1.21"
+  },
+  "sourceFiles": [
+    "main-Bwpu7z8v.js",
+    "dataPathService-N484K7oM.js",
+    "storageService-BCgP9vM4.js",
+    "uiSdkStateHolder-BA5pXBfe.js",
+    "modelTypesService-SWfH4ab_.js"
+  ]
+}

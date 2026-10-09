@@ -222,6 +222,39 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
     }
   },
   {
+    client: 'catpaw',
+    platforms: ['darwin', 'win32'],
+    expectedRow: { model: 'glm-5.3-flash', input: 1200, output: 340, cacheRead: 500, cacheWrite: 80, reasoning: 0 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 2120, clientTokens: 2120, clientOutputTokens: 340 },
+    expectedSession: { id: /^catpaw:catpaw:[0-9a-f]{12}:catpaw-moon:[0-9a-f]{12}:tm-contract$/, totalTokens: 2120, outputTokens: 340, reasoningTokens: 0 },
+    writeFixture(home) {
+      const { DatabaseSync } = require('node:sqlite');
+      const support = process.platform === 'win32'
+        ? path.join(home, 'AppData', 'Roaming') : path.join(home, 'Library', 'Application Support');
+      const dir = path.join(support, 'catpaw-moon');
+      fs.mkdirSync(dir, { recursive: true });
+      const db = new DatabaseSync(path.join(dir, 'catpaw-memory-tm-contract.db'));
+      try {
+        db.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, extra TEXT NOT NULL,
+          conversation_id TEXT GENERATED ALWAYS AS (json_extract(extra, '$.conversationId')) STORED);
+          CREATE TABLE ui_sdk_messages (conversation_id TEXT NOT NULL, seq INTEGER NOT NULL,
+          message_id TEXT NOT NULL, role TEXT NOT NULL, payload TEXT NOT NULL, created_at_ms INTEGER,
+          updated_at_ms INTEGER NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1,
+          PRIMARY KEY(conversation_id, seq));`);
+        db.prepare('INSERT INTO sessions VALUES (?, ?)').run('s', JSON.stringify({
+          conversationId: 'tm-contract', persistedModelId: 91,
+          persistedModelSelection: { isAuto: false, modelId: 91 }
+        }));
+        db.prepare('INSERT INTO ui_sdk_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+          'tm-contract', 1, 'm1', 'assistant', JSON.stringify({ extra: { contextInfo: { usage: {
+            promptTokens: 1200, completionTokens: 340, cacheReadTokens: 500, cacheWriteTokens: 80, totalTokens: 2120
+          } } } }), 1789725600000, 1789725600000, 1
+        );
+      } finally { db.close(); }
+    }
+  },
+  {
     // Fork-only client (crates/tokscale-core/src/token_monitor/qodercn.rs):
     // JSONL input_tokens includes the cached prefix, which is split out into
     // cacheRead, and the qoder-custom-<profile>/ prefix is stripped.
@@ -326,6 +359,10 @@ const GROUP_BY_REJECTION = /invalid group-by value/i;
 // harness uses.
 const BLACKHOLE_PROXY = 'http://127.0.0.1:9';
 
+function applicableTokenContracts(platform = process.platform) {
+  return TOKEN_CONTRACT_CASES.filter((contract) => !contract.platforms || contract.platforms.includes(platform));
+}
+
 function writeFixtureHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-fixture-'));
   const sessionDir = path.join(home, '.dsh', 'sessions', FIXTURE_WORKSPACE_DIR, FIXTURE_SESSION_ID);
@@ -335,7 +372,7 @@ function writeFixtureHome() {
   // sniff the frame magic rather than assume compression, so this and a
   // zstd-compressed session.jsonl.zstd are equivalent inputs.
   fs.writeFileSync(path.join(sessionDir, 'session.jsonl'), `${FIXTURE_LINES.join('\n')}\n`);
-  for (const contract of TOKEN_CONTRACT_CASES) contract.writeFixture(home);
+  for (const contract of applicableTokenContracts()) contract.writeFixture(home);
   return home;
 }
 
@@ -391,7 +428,7 @@ function hermeticEnv(home) {
 }
 
 function spawnFixture(binPath, home, groupBy, client = FIXTURE_CLIENT) {
-  return spawnSync(binPath, ['--json', '--client', client, '--group-by', groupBy, '--no-spinner'], {
+  return spawnSync(binPath, ['--home', home, '--json', '--client', client, '--group-by', groupBy, '--no-spinner'], {
     encoding: 'utf8',
     timeout: 15_000,
     env: hermeticEnv(home)
@@ -511,7 +548,7 @@ function main() {
     } else {
       assertSessionMetadata(runAgainstFixture(binPath, home, SESSION_GROUP_BY));
     }
-    for (const contract of TOKEN_CONTRACT_CASES) {
+    for (const contract of applicableTokenContracts()) {
       assertTokenContract(runAgainstFixture(binPath, home, 'client,session,model', contract.client), contract);
     }
   } finally {
@@ -519,7 +556,7 @@ function main() {
   }
 
   console.log(
-    `Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): DSH and ${TOKEN_CONTRACT_CASES.length} tracked-client token contract fixture(s) parse correctly, and ${isUpstream ? `'${SESSION_GROUP_BY}' is rejected as the collector's fallback expects` : 'the joined grouping reports session and workspace metadata'}.`
+    `Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): DSH and ${applicableTokenContracts().length} tracked-client token contract fixture(s) applicable to ${process.platform} parse correctly, and ${isUpstream ? `'${SESSION_GROUP_BY}' is rejected as the collector's fallback expects` : 'the joined grouping reports session and workspace metadata'}.`
   );
 }
 
@@ -532,4 +569,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, TOKEN_CONTRACT_CASES };
+module.exports = { main, TOKEN_CONTRACT_CASES, applicableTokenContracts };

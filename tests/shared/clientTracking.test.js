@@ -75,8 +75,9 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in q
 // cross-check because it is hand-authored.
 test('tracked client defaults and README share one display order', () => {
   const known = KNOWN_CLIENTS.split(',');
-  assert.deepEqual(readmeTrackedClientIds(), known);
-  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => client !== 'qodercn'));
+  // CatPaw's public README entry is deferred to the owner while its fork is unpublished.
+  assert.deepEqual(readmeTrackedClientIds(), known.filter((client) => client !== 'catpaw'));
+  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => !['catpaw', 'qodercn'].includes(client)));
 });
 
 test('documented client CSV follows the canonical catalog order', () => {
