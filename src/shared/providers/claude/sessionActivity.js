@@ -89,16 +89,6 @@ async function readSessionActivity(sessionIds, options = {}) {
   return result;
 }
 
-function sessionIdsForPeriods(periods) {
-  const ids = new Set();
-  for (const period of periods) {
-    for (const session of Object.values(period?.sessions || {})) {
-      if (session.client === 'claude' && !isArchivedSession(session)) ids.add(session.sessionId);
-    }
-  }
-  return ids;
-}
-
 // A missing record explicitly clears a previous reading, including across Hub
 // merges where an omitted field means an older producer supplied no evidence.
 function nextObservation(session, readings, now, renew) {
@@ -112,19 +102,6 @@ function nextObservation(session, readings, now, renew) {
   if (previous?.state === state && (!renew || state === 'unknown'
     || now - Date.parse(previous.observedAt) < RENEW_INTERVAL_MS)) return null;
   return { state, observedAt };
-}
-
-function applySessionActivity(periods, readings, now = Date.now(), renew = false) {
-  let changed = false;
-  for (const period of periods) {
-    for (const session of Object.values(period?.sessions || {})) {
-      const observation = nextObservation(session, readings, now, renew);
-      if (!observation) continue;
-      session.liveActivity = observation;
-      changed = true;
-    }
-  }
-  return changed;
 }
 
 function projectSessionActivity(summary, readings, now = Date.now(), nativeSessions) {
@@ -223,5 +200,5 @@ function activityWatchTargets(options) {
   return [{ target: path.join(config, 'sessions'), floor: config, kind: 'pid-registry' }];
 }
 
-module.exports = { POLL_INTERVAL_MS, applySessionActivity, projectSessionActivity, readSessionActivity, readSummaryActivity,
-  sessionIdsForPeriods, readActivity: readSummaryActivity, projectActivity, activityWatchTargets };
+module.exports = { POLL_INTERVAL_MS, projectSessionActivity, readSessionActivity, readSummaryActivity,
+  readActivity: readSummaryActivity, projectActivity, activityWatchTargets };

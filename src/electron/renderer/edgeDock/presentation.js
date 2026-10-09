@@ -174,14 +174,15 @@
     const byKey = new Map();
     for (const periodKey of ['month', 'today']) {
       for (const [key, session] of Object.entries(stats?.periods?.[periodKey]?.sessions || {})) {
-        if (byKey.has(key)) continue;
+        const previous = byKey.get(key);
+        if (previous && (!sessionLive.isArchivedSession(previous.session) || sessionLive.isArchivedSession(session))) continue;
         if (session?.sessionKind === 'background-review') continue;
         const lastUsedMs = Date.parse(session?.lastUsedAt || session?.startedAt || '');
         if (!Number.isFinite(lastUsedMs)) continue;
         byKey.set(key, { key, session, lastUsedMs, periodKey });
       }
     }
-    cached = { keys: new Set(byKey.keys()), rows: [...byKey.values()].sort((a, b) => b.lastUsedMs - a.lastUsedMs) };
+    cached = { byKey, rows: [...byKey.values()].sort((a, b) => b.lastUsedMs - a.lastUsedMs) };
     byToday.set(today, cached);
     return cached;
   }
@@ -189,7 +190,11 @@
     const base = accountingSessionSources(stats);
     const native = new Map();
     for (const periodKey of ['month', 'today']) for (const [key, session] of Object.entries(stats?.nativeSessions?.[periodKey] || {})) {
-      if (base.keys.has(key) || native.has(key) || !activityProviders.isSessionActivityClient(session.client) || session.sessionKind === 'background-review') continue;
+      if (native.has(key) || !activityProviders.isSessionActivityClient(session.client) || session.sessionKind === 'background-review') continue;
+      const accounted = base.byKey.get(key);
+      if (accounted) {
+        if (!sessionLive.isArchivedSession(accounted.session) || !['running', 'waiting'].includes(sessionLive.sessionActivityState(session))) continue;
+      }
       const lastUsedMs = Date.parse(session.lastUsedAt || session.startedAt || '');
       if (Number.isFinite(lastUsedMs)) native.set(key, { key, session, lastUsedMs });
     }
@@ -197,6 +202,7 @@
     const rows = [];
     let index = 0;
     for (const entry of base.rows) {
+      if (native.has(entry.key)) continue;
       while (index < additions.length && additions[index].lastUsedMs > entry.lastUsedMs) rows.push(additions[index++]);
       rows.push({ key: entry.key, lastUsedMs: entry.lastUsedMs,
         session: sessionLive.sessionWithActivity(stats?.periods?.[entry.periodKey], entry.key, entry.session) });

@@ -4497,6 +4497,8 @@ function injectLocalDeviceStatus(stats) {
       if (lastCollectedDevice.clientHealth) device.clientHealth = lastCollectedDevice.clientHealth;
       if (lastCollectedDevice.wslStatus) device.wslStatus = lastCollectedDevice.wslStatus;
     }
+    const activity = localActivityPatch(lastCollectedDevice);
+    if (activity) stats = projectLocalActivity(stats, activity);
   }
   if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
   return stats;
@@ -4726,9 +4728,9 @@ function scheduleMacWidgetSnapshot(stats, producerOwner) {
 }
 
 function publishLocalSessionActivity(patch) {
-  if (!lastCollectedDevice || isExternalAgentActive()) return;
+  if (!lastCollectedDevice || !ownsUsageRuntime()) return;
   const previousDevice = lastCollectedDevice;
-  lastCollectedDevice = applyActivityPatch(lastCollectedDevice, patch);
+  lastCollectedDevice = projectLocalActivity(lastCollectedDevice, patch);
   if (localDevice) localDevice = localDevice === previousDevice ? lastCollectedDevice : applyActivityPatch(localDevice, patch);
   if (!latestStats) return;
   const previous = latestStats;
@@ -4763,7 +4765,7 @@ function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   let rendererPayload = payload;
   if (payload?.data?.stats) {
-    injectLocalDeviceStatus(payload.data.stats);
+    payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
     // Client local batches overlay usage on the cached Hub snapshot; they do
     // not supersede an in-flight read of fresh remote stats.
@@ -7939,7 +7941,13 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('stats:get', async (_event, options) => {
-    const stats = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
+    const revision = statsPushRevision;
+    const fetched = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
+    // A push received during this read is newer. Otherwise adopt and publish the
+    // read through the same snapshot lane, including when the stream is down.
+    const current = statsPushRevision !== revision && latestStats ? latestStats : fetched;
+    if (current !== latestStats) sendPush({ event: 'stats', data: { stats: current, reason: 'read' } }, { skipExport: true });
+    const stats = latestStats || current;
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);

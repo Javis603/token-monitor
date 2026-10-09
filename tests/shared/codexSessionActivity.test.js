@@ -55,7 +55,7 @@ function fixture(t) {
   const catalog = new DatabaseSync(path.join(home, '.codex', 'state_5.sqlite'));
   catalog.exec('CREATE TABLE threads (id TEXT, rollout_path TEXT, updated_at INTEGER, title TEXT)');
   catalog.prepare('INSERT INTO threads VALUES (?, ?, ?, ?)').run(nativeId, file, Math.floor(now / 1000), 'Native title');
-  t.after(() => { if (db.isOpen) db.close(); catalog.close(); fs.rmSync(home, { recursive: true, force: true }); });
+  t.after(() => { if (db.isOpen) db.close(); if (catalog.isOpen) catalog.close(); fs.rmSync(home, { recursive: true, force: true }); });
   const options = { homeDir: home, env: {}, now, readProcessStarts: async () => new Map([[1234, boot - 1000]]) };
   const key = 'codex:' + id;
   const session = { client: 'codex', sessionId: id, totalTokens: 100, lastUsedAt: new Date(now).toISOString() };
@@ -154,6 +154,90 @@ test('resumed historical Codex question appears in Today before new usage withou
     assert.equal(views.length, 1);
     assert.equal(live.sessionActivityState(views[0], observedAt), expected);
     assert.equal(presentation.waitingSessionSummary(views, observedAt).count, 0);
+  }
+});
+
+test('archived historical rows do not hide a resumed native question in Home or Dock', async t => {
+  let clock = now;
+  t.mock.method(Date, 'now', () => clock);
+  for (const flag of ['archived', 'deleted', 'sourceDeleted']) {
+    const f = fixture(t); fs.unlinkSync(f.runtimeFile); f.write([started, question]);
+    const summary = f.summary(); summary.today = usage.emptyPeriod();
+    for (const name of ['month', 'allTime']) Object.assign(summary[name].sessions[f.key], {
+      [flag]: true, turnEnded: true, lastUsedAt: new Date(now - 86400_000).toISOString()
+    });
+    const next = activity.projectSessionActivity(summary, await activity.readSessionActivity(summary, f.options), clock);
+    const views = display => [presentation.recentSessionRows(display),
+      ...presentation.buildEdgeDockCells(display, { items: [
+        { type: 'limit', provider: 'codex' }, { type: 'stat', metric: presentation.SESSIONS_METRIC }
+      ] }).map(cell => cell.sessions)];
+    for (const view of views({ periods: next, nativeSessions: next.nativeSessions })) {
+      assert.equal(view.length, 1, flag);
+      assert.equal(live.sessionActivityState(view[0], clock), 'waiting', flag);
+      assert.equal(presentation.waitingSessionSummary(view, clock).count, 1);
+    }
+    assert.equal(next.month.sessions, summary.month.sessions);
+    assert.equal(next.month.sessions[f.key][flag], true);
+    assert.equal(next.month.sessions[f.key].totalTokens, 100);
+    // The first new usage replaces the native row and also beats the archived
+    // Month presentation row, without changing the retained historical values.
+    const accounted = { ...next, today: { sessions: { [f.key]: {
+      ...summary.month.sessions[f.key], [flag]: false, totalTokens: 10,
+      turnEnded: false, waitingForInput: true, lastUsedAt: new Date(clock).toISOString()
+    } } } };
+    const replaced = activity.projectSessionActivity(accounted, await activity.readSessionActivity(accounted, f.options), clock);
+    assert.equal(replaced.nativeSessions.today[f.key], undefined);
+    for (const view of views({ periods: replaced, nativeSessions: replaced.nativeSessions })) {
+      assert.equal(view.length, 1);
+      assert.equal(live.sessionActivityState(view[0], clock), 'waiting');
+      assert.equal(view[0].totalTokens, 10);
+    }
+  }
+});
+
+test('completed resumed transcripts publish one idle observation without renewing its timestamp', async t => {
+  const f = fixture(t); fs.unlinkSync(f.runtimeFile); f.write([entry('event_msg', { type: 'task_complete' })]);
+  let summary = f.summary(); summary.today = usage.emptyPeriod();
+  const observations = [];
+  for (const offset of [1000, 12000, 23000]) {
+    const clock = now + offset;
+    const next = activity.projectSessionActivity(summary,
+      await activity.readSessionActivity(summary, { ...f.options, now: clock }), clock) || summary;
+    observations.push(require('../../src/shared/sessionActivityProjection').activityPatch(summary, next).observations.length);
+    assert.equal(live.sessionWithActivity(next.month, f.key).liveActivity.observedAt, new Date(now).toISOString());
+    summary = next;
+  }
+  assert.deepEqual(observations, [1, 0, 0]);
+});
+
+test('historical multi-UUID rollout candidates require the actual header identity', async t => {
+  for (const order of ['native-first', 'native-last']) {
+    const f = fixture(t);
+    f.catalog.close();
+    for (const name of fs.readdirSync(path.join(f.home, '.codex'))) {
+      if (name.startsWith('state_5.sqlite')) fs.rmSync(path.join(f.home, '.codex', name));
+    }
+    const other = '22222222-2222-4222-8222-222222222222';
+    const suffix = order === 'native-first' ? `${nativeId}-${other}` : `${other}-${nativeId}`;
+    const id = `rollout-2026-10-01T12-00-00-${suffix}`, key = `codex:${id}`;
+    const dir = path.join(f.home, '.codex', 'sessions', '2026', '10', '01');
+    fs.mkdirSync(dir, { recursive: true }); fs.rmSync(f.file, { force: true });
+    const file = path.join(dir, id + '.jsonl');
+    const write = headerId => {
+      fs.writeFileSync(file, [entry('session_meta', { id: headerId }), started].join('\n') + '\n');
+      fs.utimesSync(file, new Date(now - 7 * 86400_000), new Date(now - 7 * 86400_000));
+    };
+    const row = { client: 'codex', sessionId: id, totalTokens: 100,
+      turnEnded: true, lastUsedAt: new Date(now - 7 * 86400_000).toISOString() };
+    const summary = { today: usage.emptyPeriod(), month: { sessions: { [key]: row } }, allTime: { sessions: { [key]: row } } };
+    write(nativeId);
+    const read = await activity.readSessionActivity(summary, f.options);
+    const next = activity.projectSessionActivity(summary, read, now);
+    assert.equal(live.sessionActivityState(live.sessionWithActivity(next.month, key), now), 'waiting', order);
+    assert.equal(next.month.sessions, summary.month.sessions);
+    assert.equal(next.month.sessions[key].totalTokens, 100);
+    write(other);
+    assert.equal((await activity.readSessionActivity(summary, f.options)).readings.size, 0, 'a filename candidate is not proof');
   }
 });
 

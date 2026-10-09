@@ -145,20 +145,26 @@ test('newest live process wins when a resumed session has two records', async (t
 });
 
 test('activity applies to every period, renews without token changes, and explicitly clears missing evidence', () => {
-  const periods = [1, 2, 3].map(() => ({ sessions: { 'claude:test-session': session() } }));
+  const original = Object.fromEntries(['today', 'month', 'allTime'].map(name =>
+    [name, { sessions: { 'claude:test-session': session() } }]));
+  let summary = original;
   const readings = new Map([['test-session', { state: 'running' }]]);
-  assert.equal(activity.applySessionActivity(periods, readings, now + 1000, true), true);
-  for (const period of periods) {
-    const row = period.sessions['claude:test-session'];
+  summary = activity.projectSessionActivity(summary, readings, now + 1000);
+  assert.ok(summary);
+  for (const name of ['today', 'month', 'allTime']) {
+    const row = live.sessionWithActivity(summary[name], 'claude:test-session');
     assert.equal(row.totalTokens, 100);
     assert.equal(row.turnEnded, true);
     assert.equal(row.liveActivity.state, 'running');
+    assert.equal(summary[name].sessions, original[name].sessions);
   }
-  assert.equal(activity.applySessionActivity(periods, readings, now + 2000, true), false);
-  assert.equal(activity.applySessionActivity(periods, readings, now + 12_000, true), true);
-  assert.equal(activity.applySessionActivity(periods, new Map(), now + 13_000, true), true);
-  assert.equal(periods[0].sessions['claude:test-session'].liveActivity.state, 'unknown');
-  assert.equal(activity.applySessionActivity(periods, new Map(), now + 14_000, true), false);
+  assert.equal(activity.projectSessionActivity(summary, readings, now + 2000), null);
+  summary = activity.projectSessionActivity(summary, readings, now + 12_000);
+  assert.ok(summary);
+  summary = activity.projectSessionActivity(summary, new Map(), now + 13_000);
+  assert.equal(live.sessionWithActivity(summary.today, 'claude:test-session').liveActivity.state, 'unknown');
+  assert.equal(activity.projectSessionActivity(summary, new Map(), now + 14_000), null);
+  assert.equal(original.today.sessions['claude:test-session'].liveActivity.state, 'waiting');
 });
 
 test('unchanged polling keeps object identity and changed observations share the accounting maps', () => {

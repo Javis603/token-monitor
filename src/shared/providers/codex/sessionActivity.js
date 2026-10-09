@@ -171,7 +171,8 @@ function transcriptReading(state, lastUsedAt, clock) {
     || (typeof state.turnEnded !== 'boolean' && state.waitingForInput !== true)) return undefined;
   const nativeState = sessionActivityState({ client: 'codex', lastUsedAt,
     turnEnded: state.turnEnded, waitingForInput: state.waitingForInput }, clock);
-  return { state: nativeState === 'ended' ? 'idle' : nativeState, observedAt: new Date(clock).toISOString() };
+  const idle = nativeState === 'ended' || nativeState === 'idle';
+  return { state: idle ? 'idle' : nativeState, observedAt: new Date(idle ? modifiedAt : clock).toISOString() };
 }
 
 async function readSessionActivity(summary, options = {}) {

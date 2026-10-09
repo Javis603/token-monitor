@@ -145,9 +145,11 @@
         if (!Object.prototype.hasOwnProperty.call(sessions, key)) continue;
         const row = sessions[key];
         if (row?.client !== 'codex' || live.isArchivedSession(row)) continue;
-        const hint = String(row.sessionId).match(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)$/)?.[1]
-          || String(row.sessionId).match(/([0-9a-f]{8}-[0-9a-f-]{27})$/i)?.[1] || row.sessionId;
-        pending.get(hint)?.add(row.sessionId);
+        // Filenames can include more than one UUID. These are candidates only;
+        // the adapter verifies session_meta before accepting a native identity.
+        const suffix = String(row.sessionId).match(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)$/)?.[1] || row.sessionId;
+        const hints = String(suffix).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) || [suffix];
+        for (const hint of hints) pending.get(hint)?.add(row.sessionId);
       }
     }
     for (const [id, matches] of pending) {
