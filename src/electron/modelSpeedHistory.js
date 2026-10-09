@@ -113,6 +113,9 @@ function ingest(state, { source, day, allTime, today, at }) {
     const delta = { out: current.out - previous.out, ms: current.ms - previous.ms };
     if (delta.out < 0 || delta.ms < 0) {
       // Do not lower the high-water anchor: replaying an old counter is not a new sample.
+      // A corrected timing numerator cannot carry an unfinished old-basis
+      // sample into a later delta, even after the high-water mark is recovered.
+      if (row.pending.out || row.pending.ms) { row.pending = { out: 0, ms: 0 }; changed = true; }
       if (row.problem !== 'counter-reset') { row.problem = 'counter-reset'; row.rejected++; changed = true; }
       previous.at = at;
       continue;

@@ -6,11 +6,8 @@
 // across rows, clients, devices and the today-delta that a watch-triggered scan uses to
 // update month/allTime.
 //
-// timedOutputTokens is the one that has to be built per entry: an entry contributes its output
-// exactly when it contributes its duration. Whole clients report no durations at all, so
-// anything rebuilt from period totals lets one of them put its output on another client's clock.
-// Several tests below pin that specifically, because the failure is silent — the number stays
-// plausible and just drifts with the client mix.
+// New Tokscale reports provide exact per-message output subtotals. Fixtures
+// without them exercise compatibility with older binaries' whole-row behavior.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
@@ -112,12 +109,9 @@ test('a client that reports no durations cannot move a timed client rate', () =>
   assert.equal(speedFromPeriodTotals(result), 87.5);
 });
 
-test('a partly timed entry contributes its whole output and stays an integer', () => {
-  // tokscale would report tokenCoverage 0.9265 here, and this deliberately does not scale by
-  // it. Output is 1% of this entry's tokens while the untimed remainder is 7,350 — over seven
-  // times the entry's entire output — so the untimed part is cache, not generation. Scaling
-  // would discount output that was almost certainly timed, and would make the field a ratio
-  // instead of a counter.
+test('a legacy partly timed entry retains whole-row output until its binary is upgraded', () => {
+  // Older binaries do not expose the matched output subtotal. Preserve their
+  // established behavior without pretending that coverage proves all output is timed.
   const result = extractUsageFromTokscale({
     entries: [tokscaleEntry({
       output: 1_000,
@@ -383,11 +377,8 @@ test('a targeted watch tick lands on the same throughput as a full rescan', () =
   assert.equal(speedFromPeriodTotals(todayTargeted).toFixed(2), '76.98');
 });
 
-// A session spanning midnight is the only case where the delta path and a full rescan can
-// disagree, because a full `--month` scan folds that session's messages from both days into one
-// tokscale entry and re-gates it as a whole. These two pin where the line falls, since the
-// field's contract rests on it.
-function crossDaySession({ output, timedTokens, total, tokenCoverage, totalDurationMs }) {
+// Per-message subtotals keep cross-day session totals independent of grouping.
+function crossDaySession({ output, timedOutputTokens = output, timedTokens, total, tokenCoverage, totalDurationMs }) {
   return tokscaleEntry({
     client: 'claude',
     sessionId: 'spans-midnight',
@@ -395,43 +386,27 @@ function crossDaySession({ output, timedTokens, total, tokenCoverage, totalDurat
     output,
     cacheRead: total - output,
     cacheWrite: 0,
-    performance: { totalDurationMs, timedTokens, tokenCoverage }
+    performance: { totalDurationMs, timedTokens, timedOutputTokens, timedReasoningTokens: 0, tokenCoverage }
   });
 }
 const throughputOf = (entry) => extractUsageFromTokscale({ entries: [entry] }).timedOutputTokens;
 
 test('a session spanning midnight is exact under the delta while it keeps reporting durations', () => {
-  // The realistic regime, and the reason the gate beats an apportionment: a partly timed entry
-  // stays partly timed as it grows, so the gate holds on both sides and the sum is exact —
-  // even though tokscale's coverage moves (0.9965 → 0.9965 → 0.9965 only by construction here;
-  // real sessions drift within a narrow band and would break an apportionment, not a gate).
+  // Coverage can change independently of the precisely matched output.
   const yesterday = crossDaySession({ output: 500, timedTokens: 996_500, total: 1_000_000, tokenCoverage: 0.9965, totalDurationMs: 10_000 });
   const todayOnly = crossDaySession({ output: 90, timedTokens: 8_100_000, total: 9_000_000, tokenCoverage: 0.9, totalDurationMs: 2_000 });
   const wholeSession = crossDaySession({ output: 590, timedTokens: 9_096_500, total: 10_000_000, tokenCoverage: 0.9097, totalDurationMs: 12_000 });
 
   assert.equal(throughputOf(yesterday) + throughputOf(todayOnly), throughputOf(wholeSession));
-  assert.equal(throughputOf(wholeSession), 590, 'the whole session is timed, so all of its output counts');
+  assert.equal(throughputOf(wholeSession), 590, 'only the timed output of each day is added');
 });
 
-test('a session that stops reporting durations diverges by a bounded, self-correcting amount', () => {
-  // The adversarial regime: the client stops emitting durations partway through one session, so
-  // a full rescan still gates the combined entry on the durations it kept from the first half
-  // and picks up the later output too. Documented rather than engineered around — closing it
-  // needs a per-message timed-output counter from tokscale, and rescanning month on every watch
-  // tick would give back exactly the saving targeted partitions were introduced for.
+test('a session that stops reporting durations stays exact under delta and full scans', () => {
   const yesterday = crossDaySession({ output: 500, timedTokens: 1_000, total: 1_000, tokenCoverage: 1, totalDurationMs: 10_000 });
-  const todayOnly = crossDaySession({ output: 90, timedTokens: 0, total: 9_000, tokenCoverage: 0, totalDurationMs: 0 });
-  const wholeSession = crossDaySession({ output: 590, timedTokens: 1_000, total: 10_000, tokenCoverage: 0.1, totalDurationMs: 10_000 });
-
-  const viaDelta = throughputOf(yesterday) + throughputOf(todayOnly);
-  const viaFullScan = throughputOf(wholeSession);
-  assert.equal(viaDelta, 500);
-  assert.equal(viaFullScan, 590);
-  // Under-, not over-reporting, and by the later output alone — 18%, where scaling by coverage
-  // would have repriced the whole entry and landed on 59, an 8.5x gap. The next full scan
-  // reconciles either way, so the divergence is bounded by one anchor interval.
-  assert.ok(viaDelta < viaFullScan);
-  assert.equal(viaFullScan - viaDelta, 90);
+  const todayOnly = crossDaySession({ output: 90, timedOutputTokens: 0, timedTokens: 0, total: 9_000, tokenCoverage: 0, totalDurationMs: 0 });
+  const wholeSession = crossDaySession({ output: 590, timedOutputTokens: 500, timedTokens: 1_000, total: 10_000, tokenCoverage: 0.1, totalDurationMs: 10_000 });
+  assert.equal(throughputOf(yesterday) + throughputOf(todayOnly), 500);
+  assert.equal(throughputOf(wholeSession), 500);
 });
 
 test('applyPeriodDelta updates throughput exactly from a today-only rescan', () => {
@@ -471,7 +446,7 @@ test('applyPeriodDelta never drives throughput negative when the anchor is stale
   assert.equal(month.timedDurationMs, 0);
 });
 
-// Each session keeps its own share of the counters, under the same per-entry gate, so a
+// Each session keeps its own share of the counters, from the same timed messages, so a
 // Sessions row can divide them into that session's tok/s. They have to survive every hop
 // a session takes: merging entries, the wire normalizer, cross-device aggregation, and the
 // today-delta.

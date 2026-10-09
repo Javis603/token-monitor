@@ -70,6 +70,14 @@ function firstNumber(obj, keys) {
   return 0;
 }
 
+function firstPresent(obj, keys) {
+  if (!obj || typeof obj !== 'object') return undefined;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
+  }
+  return undefined;
+}
+
 function firstString(obj, keys) {
   if (!obj || typeof obj !== 'object') return '';
   for (const key of keys) {
@@ -560,9 +568,9 @@ function emptySession(client, id) {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     reasoningTokens: 0,
-    // The session's share of the period throughput counters: raw sums, gated
-    // per tokscale entry exactly as the period's are, so a row divides them at
-    // display time into its own tok/s. 0/0 means the client reported no
+    // The session's share of the period throughput counters: raw sums from
+    // the same timed messages, divided at display time into its own tok/s.
+    // 0/0 means the client reported no
     // durations for this session, not that it generated nothing.
     timedOutputTokens: 0,
     timedDurationMs: 0,
@@ -703,7 +711,7 @@ function sessionFromRow(row) {
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
   Object.assign(session, sessionTokenComponents(row));
   session.outputTokens = Math.max(0, Math.round(outputValueForClient(row, client)));
-  Object.assign(session, entryThroughput(row, session.outputTokens));
+  Object.assign(session, entryThroughput(row, session.outputTokens, client));
   session.startedAt = normalizeIsoTimestamp(firstString(row, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(row, LAST_USED_AT_KEYS));
   session.projectId = String(row.projectId || row.project_id || '').trim();
@@ -1220,15 +1228,20 @@ function addRowSourceThroughput(period, row, model, client, timedOutputTokens, t
   }
 }
 
-// One tokscale entry's throughput counters. An entry contributes its output to
-// the numerator exactly when it contributes a duration to the denominator, so
-// the two always describe the same entries. Gating rather than scaling by
-// tokscale's `tokenCoverage` keeps both plain counters that merge and delta
-// like every other token field.
-function entryThroughput(row, output) {
+// Exact per-message subtotals are authoritative, including zero. Older binaries
+// lack these fields, so retain their legacy whole-row behavior until upgraded.
+// Coverage measures all token buckets and cannot apportion generated output.
+function entryThroughput(row, output, client) {
   const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
   const timedDurationMs = Math.max(0, Math.round(firstNumber(performance, TIMED_DURATION_KEYS)));
-  return { timedOutputTokens: timedDurationMs > 0 ? output : 0, timedDurationMs };
+  const timedOutput = firstPresent(performance, ['timedOutputTokens', 'timed_output_tokens']);
+  if (timedOutput === undefined) return { timedOutputTokens: timedDurationMs > 0 ? output : 0, timedDurationMs };
+  const reasoning = hasDisjointReasoning(client)
+    ? Math.max(0, Math.round(asNumber(firstPresent(performance, ['timedReasoningTokens', 'timed_reasoning_tokens'])))) : 0;
+  return {
+    timedOutputTokens: normalizeTimedOutputTokens(Math.max(0, Math.round(asNumber(timedOutput))) + reasoning, output, timedDurationMs),
+    timedDurationMs
+  };
 }
 
 function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
@@ -1240,7 +1253,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const output = Math.max(0, Math.round(outputValueForClient(row, client)));
   const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
   const timedTokens = Math.max(0, Math.round(firstNumber(performance, TIMED_TOKEN_KEYS)));
-  const { timedOutputTokens, timedDurationMs } = entryThroughput(row, output);
+  const { timedOutputTokens, timedDurationMs } = entryThroughput(row, output, client);
   const model = detectModel(row, client);
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;
