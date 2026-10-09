@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { CLIENT_CATALOG } = require('../../src/shared/clientCatalog');
-const { TOKEN_CONTRACT_CASES } = require('../../scripts/verify-vendored-tokscale');
+const { TOKEN_CONTRACT_CASES, applicableTokenContracts } = require('../../scripts/verify-vendored-tokscale');
 
 // Existing Tokscale-parsed clients before this gate was introduced. Keep this
 // baseline fixed when adding a client: each new id needs a runnable contract
@@ -37,4 +37,12 @@ test('every newly added Tokscale-parsed client has a runnable token contract fix
 test('the token contract gate rejects an untested future Tokscale client', () => {
   const tokScaleClients = CLIENT_CATALOG.map(({ id }) => id);
   assert.deepEqual(missingContracts([...tokScaleClients, 'future-client']), ['future-client']);
+});
+
+
+test('CatPaw nonzero fixtures run only on supported app platforms', () => {
+  assert.ok(applicableTokenContracts('darwin').some(({ client }) => client === 'catpaw'));
+  assert.ok(applicableTokenContracts('win32').some(({ client }) => client === 'catpaw'));
+  assert.ok(!applicableTokenContracts('linux').some(({ client }) => client === 'catpaw'));
+  assert.ok(applicableTokenContracts('linux').some(({ client }) => client === 'qodercn'));
 });

@@ -8,7 +8,7 @@ const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 const { WSL_DATA_MARKERS, MARKER_CLIENTS } = require('./clientSourceRegistration');
 const { isMcodeProfileDir } = require('./providers/mcode/paths');
 
-const WSL_EXCLUDED_CLIENTS = new Set([REASONIX_CLIENT, 'qodercn']);
+const WSL_EXCLUDED_CLIENTS = new Set([REASONIX_CLIENT, 'catpaw', 'qodercn']);
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 
