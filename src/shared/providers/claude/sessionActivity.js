@@ -14,7 +14,6 @@ const { isArchivedSession } = require('../../sessionLive');
 
 const { hasKnownSession, nativeSessionsForPeriod, activityEntries, rememberProjection, compactActivity } = require('../../sessionActivityProjection');
 
-const POLL_INTERVAL_MS = 3000;
 const RENEW_INTERVAL_MS = 10_000;
 const MAX_RECORD_BYTES = 64 * 1024;
 
@@ -216,5 +215,5 @@ function activityWatchTargets(options) {
   return [{ target: path.join(config, 'sessions'), floor: config, kind: 'pid-registry' }];
 }
 
-module.exports = { POLL_INTERVAL_MS, projectSessionActivity, readSessionActivity, readSummaryActivity,
+module.exports = { projectSessionActivity, readSessionActivity, readSummaryActivity,
   readActivity: readSummaryActivity, projectActivity, activityWatchTargets };
