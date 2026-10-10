@@ -5,6 +5,7 @@ const os = require('node:os');
 const { hashKey } = require('./hashKey');
 const { normalizeSessionContext } = require('./sessionContext');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
+const antigravitySessionMetadata = require('./providers/antigravity/sessionMetadata');
 const codebuddySession = require('./providers/codebuddy/sessionMetadata');
 const codexSession = require('./providers/codex/sessionMetadata');
 const cursorSessionMetadata = require('./providers/cursor/sessionMetadata');
@@ -225,6 +226,7 @@ function fileSessionMetadata(sessionId, filePath, context, existing = {}) {
 // after tokscale first exposes a session id. Kimi and unknown clients retain the
 // existing one-shot id-timestamp fallback.
 const SESSION_METADATA_RESOLVERS = new Map([
+  ['antigravity', { resolve: antigravitySessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['claude', { resolve: claudeSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['codebuddy', { resolve: codebuddySession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['codex', { resolve: codexSession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
@@ -342,21 +344,52 @@ function sessionMetadataMap(periods, home = os.homedir(), deps = {}) {
 
 function applySessionMetadata(periods, home, deps = {}) {
   const metadata = sessionMetadataMap(periods, home, deps);
-  for (const period of Object.values(periods || {})) {
+  for (const [periodName, period] of Object.entries(periods || {})) {
     for (const [key, session] of Object.entries(period?.sessions || {})) {
       const meta = metadata.get(key);
+      const scanTitleFallbacks = deps.scanTitleFallbacks;
+      if (scanTitleFallbacks && !scanTitleFallbacks.has(session)) scanTitleFallbacks.set(session, session.title);
+      const titleFallback = scanTitleFallbacks ? scanTitleFallbacks.get(session) : meta?.titleFallback;
       // Restore only the catalog title we replaced, leaving newer native labels.
-      if (meta?.invalidatedTitle && session.title === meta.invalidatedTitle) {
-        if (meta.titleFallback) session.title = meta.titleFallback;
+      // A fresh scan's original title is native evidence, regardless of whether
+      // its text equals the invalidated catalog title.
+      if ((scanTitleFallbacks && (meta?.invalidatedTitle || deps.invalidatedTitleKeys?.has(key)))
+        || (meta?.invalidatedTitle && session.title === meta.invalidatedTitle)
+        || (deps.invalidatedTitleKeys?.has(key) && session.title === deps.t3Titles?.[key])) {
+        if (titleFallback) session.title = titleFallback;
         else delete session.title;
-      } else if (deps.invalidatedTitleKeys?.has(key) && session.title === deps.t3Titles?.[key]) delete session.title;
+      }
       if (!meta) continue;
-      if (meta.t3Title && !Object.prototype.hasOwnProperty.call(meta, 'titleFallback')) {
+      if ((meta.t3Title || meta.catalogTitle) && !Object.prototype.hasOwnProperty.call(meta, 'titleFallback')) {
         meta.titleFallback = session.title;
       }
       if (meta.title) session.title = meta.title;
       // A catalog title is not evidence about transcript state or activity.
       if (meta.titleOnly === true) continue;
+      if (meta.catalogOnly === true) {
+        // A summary may supply a missing workspace, but a decoded scan path
+        // remains authoritative. Catalog changes never clear turn state.
+        const sources = deps.catalogProjects?.[periodName];
+        const owned = deps.catalogProjectRows?.has(session);
+        if (meta.projectId && (!session.projectId || owned)) {
+          session.projectId = meta.projectId;
+          if (meta.projectLabel) session.projectLabel = meta.projectLabel;
+          deps.catalogProjectRows?.add(session);
+          if (sources) sources[key] = meta.projectId;
+        } else if (owned && meta.catalogProjectResolved) {
+          delete session.projectId;
+          delete session.projectLabel;
+          if (sources) delete sources[key];
+        } else if (!session.projectId && !meta.catalogProjectResolved && sources?.[key]) {
+          session.projectId = sources[key];
+          session.projectLabel = deps.catalogProjects?.labels?.[sources[key]]
+            || deps.catalogProjectFallbacks?.[periodName]?.sessions?.[key]?.projectLabel;
+          deps.catalogProjectRows?.add(session);
+        } else if (sources && !owned) {
+          delete sources[key];
+        }
+        continue;
+      }
       if (meta.startedAt && (!session.startedAt || Date.parse(meta.startedAt) < Date.parse(session.startedAt))) session.startedAt = meta.startedAt;
       if (meta.lastUsedAt && (!session.lastUsedAt || Date.parse(meta.lastUsedAt) > Date.parse(session.lastUsedAt))) session.lastUsedAt = meta.lastUsedAt;
       if (meta.projectId) session.projectId = meta.projectId;

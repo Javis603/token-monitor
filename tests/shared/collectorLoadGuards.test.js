@@ -421,6 +421,9 @@ test('watchIgnoreMatcher bounds Antigravity roots to source and metadata inputs'
     assert.equal(ignored(path.join(tmp, root, 'conversations', 'session-a.db-wal')), false);
     assert.equal(ignored(path.join(tmp, root, 'annotations', 'session-a.pbtxt')), false);
     assert.equal(ignored(path.join(tmp, root, 'agyhub_summaries_proto.pb')), false);
+    assert.equal(ignored(path.join(tmp, root, 'conversation_summaries.db')), false);
+    assert.equal(ignored(path.join(tmp, root, 'conversation_summaries.db-wal')), false);
+    assert.equal(ignored(path.join(tmp, root, 'conversation_summaries.db-shm')), true);
     assert.equal(ignored(path.join(tmp, root, 'builtin', 'keep.txt')), true);
     assert.equal(ignored(path.join(tmp, root, 'crashes', 'crash_1.log')), true);
     assert.equal(ignored(path.join(tmp, root, 'antigravity_state.pbtxt')), true);
@@ -430,6 +433,179 @@ test('watchIgnoreMatcher bounds Antigravity roots to source and metadata inputs'
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('Antigravity summary overrides watch and attribute only their exact database files', () => {
+  const tmp = withTmpHome(['catalog', path.join('.gemini', 'antigravity-cli', 'conversations')]);
+  const originalHome = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    process.env.ANTIGRAVITY_HOME = path.join(tmp, 'catalog');
+    process.env.ANTIGRAVITY_DATA_DIR = tmp;
+    const { watchPathsForClients, watchAttributionRootsForClients, watchIgnoreMatcher, clientsForWatchPath } = freshCollector();
+    const roots = { antigravity: watchPathsForClients('antigravity') };
+    const attributed = watchAttributionRootsForClients('antigravity', roots);
+    const ignored = watchIgnoreMatcher('antigravity');
+    for (const dir of [tmp, path.join(tmp, 'catalog'), path.join(tmp, '.gemini', 'antigravity-cli')]) {
+      assert.ok(roots.antigravity.includes(dir), 'the parent is watched before the DB exists');
+      for (const suffix of ['', '-wal']) {
+        const file = path.join(dir, `conversation_summaries.db${suffix}`);
+        assert.equal(ignored(file), false);
+        assert.deepEqual(clientsForWatchPath(file, attributed), ['antigravity']);
+      }
+      assert.equal(ignored(path.join(dir, 'conversation_summaries.db-shm')), true);
+      assert.deepEqual(clientsForWatchPath(path.join(dir, 'unrelated.json'), attributed), []);
+    }
+    assert.equal(ignored(path.join(tmp, 'catalog', 'runtime', 'nested.db')), true);
+    const cliWrite = path.join(tmp, '.gemini', 'antigravity-cli', 'conversations', 'session.db-wal');
+    assert.equal(ignored(cliWrite), false, 'the CLI transcript root retains its recursive policy');
+    assert.deepEqual(clientsForWatchPath(cliWrite, attributed), ['antigravity']);
+    assert.equal(watchPathsForClients('claude').includes(path.join(tmp, 'catalog')), false);
+  } finally {
+    os.homedir = originalHome;
+    delete require.cache[collectorPath];
+    const temp = fs.realpathSync.native(os.tmpdir());
+    assert.ok(path.resolve(tmp).startsWith(path.resolve(temp) + path.sep));
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Antigravity summary watches follow homeDir without replacing the process home', () => {
+  const roots = [path.join('.gemini', 'antigravity'), path.join('.gemini', 'antigravity-cli')];
+  const homeDir = withTmpHome(roots);
+  try {
+    const { watchPathsForClients, watchAttributionRootsForClients, watchIgnoreMatcher, clientsForWatchPath } = freshCollector();
+    const options = { homeDir, env: {} };
+    const watched = { antigravity: watchPathsForClients('antigravity', options) };
+    const attributed = watchAttributionRootsForClients('antigravity', watched, options);
+    const ignored = watchIgnoreMatcher('antigravity', options);
+    for (const root of roots) {
+      const dir = path.join(homeDir, root);
+      assert.ok(watched.antigravity.includes(dir));
+      for (const suffix of ['', '-wal']) {
+        const file = path.join(dir, `conversation_summaries.db${suffix}`);
+        assert.equal(ignored(file), false);
+        assert.deepEqual(clientsForWatchPath(file, attributed), ['antigravity']);
+      }
+      assert.equal(ignored(path.join(dir, 'conversation_summaries.db-shm')), true);
+      assert.equal(ignored(path.join(dir, 'unrelated.json')), true);
+      assert.deepEqual(clientsForWatchPath(path.join(dir, 'unrelated.json'), attributed),
+        root === path.join('.gemini', 'antigravity') ? ['antigravity'] : []);
+    }
+  } finally {
+    delete require.cache[collectorPath];
+    const temp = fs.realpathSync.native(os.tmpdir());
+    assert.ok(path.resolve(homeDir).startsWith(path.resolve(temp) + path.sep));
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+for (const source of ['native', 'override', 'configured-home', 'injected-env', 'metadata-env', 'env-precedence', 'cli-home']) {
+  test(`Antigravity ${source} summary WAL events refresh titles with an exact today delta`, async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    let sqlite;
+    try { sqlite = require('node:sqlite'); } catch (_) { t.skip('node:sqlite unavailable'); return; }
+    const sourceRoot = path.join('.gemini', 'antigravity');
+    const tmp = withTmpHome([sourceRoot, 'catalog', path.join('.config', 'tokscale', 'antigravity-cache')]);
+    const originalHome = os.homedir;
+    const chokidar = require('chokidar');
+    const originalWatch = chokidar.watch;
+    let handle;
+    let db;
+    t.after(() => {
+      handle?.stop();
+      db?.close();
+      os.homedir = originalHome;
+      chokidar.watch = originalWatch;
+      delete require.cache[collectorPath];
+      const temp = fs.realpathSync.native(os.tmpdir());
+      assert.ok(path.resolve(tmp).startsWith(path.resolve(temp) + path.sep));
+      fs.rmSync(tmp, { recursive: true, force: true });
+    });
+    if (source !== 'configured-home') os.homedir = () => tmp;
+    const cliHome = path.join(tmp, 'relocated-gemini');
+    if (source === 'cli-home') {
+      process.env.GEMINI_CLI_HOME = cliHome;
+      fs.mkdirSync(path.join(cliHome, 'antigravity-cli', 'conversations'), { recursive: true });
+    }
+    const dir = ['override', 'injected-env', 'metadata-env', 'env-precedence'].includes(source) ? path.join(tmp, 'catalog')
+      : source === 'cli-home' ? path.join(cliHome, 'antigravity-cli') : path.join(tmp, sourceRoot);
+    const depsDir = source === 'env-precedence' ? path.join(tmp, 'deps-catalog') : dir;
+    if (source === 'env-precedence') fs.mkdirSync(depsDir);
+    if (source === 'override') process.env.ANTIGRAVITY_HOME = dir;
+    const dbPath = path.join(dir, 'conversation_summaries.db');
+    db = new sqlite.DatabaseSync(dbPath);
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, workspace_uris TEXT)');
+    db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?)').run('title-session', 'Old title', '', null);
+    let watchHandler;
+    let ignored;
+    chokidar.watch = (dirs, options) => {
+      assert.ok(dirs.includes(dir), 'the summary parent is passed to the watch host');
+      if (source === 'env-precedence') assert.equal(dirs.includes(depsDir), false, 'top-level env takes precedence over metadata deps');
+      ignored = options.ignored;
+      const watcher = {
+        on(event, callback) { if (event === 'all') watchHandler = callback; return watcher; },
+        close() {}
+      };
+      return watcher;
+    };
+    const calls = [];
+    let syncs = 0;
+    const updates = [];
+    const { startCollector } = freshCollector();
+    handle = startCollector({
+      clients: 'antigravity', allTimeSince: '2024-01-01', commandTimeoutMs: 1000,
+      homeDir: source === 'configured-home' ? tmp : undefined,
+      env: source === 'injected-env' || source === 'env-precedence' ? { ANTIGRAVITY_HOME: dir } : undefined,
+      deviceId: 'fixture-device', agentVersion: 'fixture', intervalMs: 60 * 60 * 1000,
+      watchEnabled: true, watchUsePolling: false, watchTriggersCollection: true, watchDebounceMs: 10,
+      historyEnabled: false, dailyHistoryArchiveEnabled: false, anchorPersistenceEnabled: false,
+      codexLocalUsageEnabled: false, wslScanEnabled: false,
+      sessionMetadataDeps: {
+        sqlite, antigravityTitleCache: new Map(),
+        ...(['metadata-env', 'env-precedence'].includes(source) ? { env: { ANTIGRAVITY_HOME: depsDir } } : {})
+      }, runAntigravitySync: async () => { syncs += 1; },
+      runTokscale: async (input) => {
+        calls.push(input);
+        return { entries: [{ client: 'antigravity', sessionId: 'title-session', model: 'fixture-model', input: 100, output: 30, cost: 0.5 }] };
+      },
+      onUpdate: (summary) => updates.push(summary)
+    });
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(updates[0].today.sessions['antigravity:title-session'].title, 'Old title');
+    assert.equal(calls.length, 3);
+    const initialSyncs = syncs;
+    t.mock.timers.tick(11000);
+    db.prepare('UPDATE conversation_summaries SET title = ?').run('Renamed title');
+    assert.equal(ignored(`${dbPath}-wal`), false);
+    watchHandler('change', `${dbPath}-wal`);
+    await waitForCondition(() => updates.length === 2);
+    assert.equal(calls.length, 4, 'one today scan replaces the three full-period scans');
+    assert.equal(syncs, initialSyncs, 'a pure summary rename never earns a source self-sync');
+    assert.equal(ignored(path.join(dir, 'runtime.json')), true, 'the watch host receives the same environment as discovery');
+    assert.deepEqual(calls[3].flags, ['--today']);
+    assert.equal(calls[3].clients, 'antigravity');
+    for (const name of ['today', 'month', 'allTime']) {
+      assert.equal(updates[1][name].sessions['antigravity:title-session'].title, 'Renamed title');
+      assert.equal(updates[1][name].totalTokens, updates[0][name].totalTokens);
+      assert.equal(updates[1][name].costUsd, updates[0][name].costUsd);
+    }
+    assert.equal(ignored(`${dbPath}-shm`), true);
+    await handle.whenIdle();
+    watchHandler('change', `${dbPath}-shm`);
+    await new Promise((resolve) => setTimeout(resolve, handle.getDiagnostics().watchDebounceMs + 30));
+    assert.equal(calls.length, 4, 'reader-created SHM writes never schedule another scan');
+    if (source === 'native' || source === 'configured-home') {
+      t.mock.timers.tick(11000);
+      const usageFile = path.join(dir, 'conversations', 'title-session.pb');
+      assert.equal(ignored(usageFile), false);
+      watchHandler('change', usageFile);
+      await waitForCondition(() => updates.length === 3);
+      assert.equal(calls.length, 5);
+      assert.equal(syncs, initialSyncs + 1, 'genuine conversation writes retain source self-sync');
+    }
+  });
+}
 
 test('watchIgnoreMatcher watches brain session dirs but never recurses into them', () => {
   // A new session shows up as a new brain/<id> directory, so brain/ itself has
@@ -4870,6 +5046,27 @@ test('custom roots prune dependency and VCS trees without touching built-in root
     os.homedir = originalHomedir;
     if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = originalCodexHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Antigravity CLI polling counts overlapping summary parents and conversation roots once', () => {
+  const tmp = withTmpHome([path.join('.gemini', 'antigravity-cli', 'conversations')]);
+  try {
+    const { openWatch, watchPathsForClients } = freshCollector();
+    const conversations = path.join(tmp, '.gemini', 'antigravity-cli', 'conversations');
+    for (let index = 0; index < 10001; index += 1) fs.writeFileSync(path.join(conversations, `${index}.db`), '');
+    const options = { homeDir: tmp, env: {} };
+    const dirs = watchPathsForClients('antigravity', options);
+    assert.ok(dirs.includes(conversations));
+    assert.ok(dirs.includes(path.dirname(conversations)));
+    let opened = 0;
+    const chokidar = { watch: () => { opened += 1; return {}; } };
+    assert.doesNotThrow(() => openWatch(chokidar, { ...options, dirs, clients: 'antigravity', usePolling: true }));
+    assert.equal(opened, 1);
+    assert.throws(() => openWatch(chokidar, { ...options, dirs, clients: 'antigravity', usePolling: true, pollingEntryLimit: 10000 }), { code: 'watch-polling-limit' });
+  } finally {
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }

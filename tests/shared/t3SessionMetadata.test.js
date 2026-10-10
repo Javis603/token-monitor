@@ -9,7 +9,7 @@ const { readT3SessionMeta } = require('../../src/shared/t3SessionMetadata');
 const claude = require('../../src/shared/providers/claude/sessionMetadata');
 const { applySessionMetadata } = require('../../src/shared/sessionMetadata');
 const { sessionActivityState } = require('../../src/shared/sessionLive');
-const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+const { collectUsageOnce, localTodayKey, startCollector } = require('../../src/shared/collector');
 let sqlite;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
 const maybe = sqlite ? test : test.skip;
@@ -435,5 +435,64 @@ for (const unusable of [
       assert.equal(afterRemovalMiss[period].sessions['claude:missing-transcript'].title || '', '');
       assert.equal(afterRemovalMiss[period].sessions['claude:named-transcript'].title, 'Native title');
     }
+  });
+}
+
+
+for (const removal of ['tombstone', 'placeholder']) {
+  maybe(`Claude full scans preserve equal native titles after T3 ${removal}`, async (t) => {
+    const { home, db, v2 } = store(t);
+    const ids = ['equal-native', 'different-native', 'no-native', 'named-transcript'];
+    for (const id of ids) v2(`app-${id}`, id, 'Catalog title');
+    const projects = path.join(home, '.claude', 'projects', 'test-project');
+    fs.mkdirSync(projects, { recursive: true });
+    fs.writeFileSync(path.join(projects, 'named-transcript.jsonl'), JSON.stringify({ type: 'custom-title', customTitle: 'Transcript title' }) + '\n');
+    const shared = path.join(home, 'shared');
+    const oldShared = process.env.TOKEN_MONITOR_SHARED_DIR;
+    process.env.TOKEN_MONITOR_SHARED_DIR = shared;
+    let handle;
+    t.after(() => { handle?.stop(); if (oldShared === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR; else process.env.TOKEN_MONITOR_SHARED_DIR = oldShared; });
+    const updates = [];
+    const scans = [];
+    const options = {
+      clients: 'claude', homeDir: home, projectsEnabled: false, historyEnabled: false,
+      dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false, wslScanEnabled: false,
+      sessionActivityPolling: false, watchEnabled: false, intervalMs: 3600000, osInfo: {},
+      allTimeSince: '2024-01-01',
+      sessionMetadataDeps: { scopedHome: true, env: {}, claudeMetadataDeps: { sqlite, cache: new Map() } },
+      runTokscale: async ({ flags }) => {
+        scans.push(flags);
+        return {
+          entries: ids.map((sessionId) => ({ client: 'claude', sessionId, input: 10, output: 2, cost: 0.5 })),
+          sessions: [{ client: 'claude', sessionId: ids[0], title: 'Catalog title' },
+            { client: 'claude', sessionId: ids[1], title: 'Other native title' }]
+        };
+      },
+      onUpdate: (value) => updates.push(value)
+    };
+    try {
+      handle = startCollector(options);
+      for (let attempt = 0; attempt < 200 && !updates.length; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(updates.length, 1);
+      const initial = updates[0];
+      if (removal === 'tombstone') db.prepare('UPDATE orchestration_v2_projection_threads SET deleted_at = ?').run('2026-10-04');
+      else db.prepare('UPDATE orchestration_v2_projection_threads SET title = ?').run('New thread');
+      for (let refresh = 0; refresh < 2; refresh += 1) {
+        scans.length = 0;
+        await handle.tick();
+        assert.deepEqual(scans, [['--today'], ['--month'], ['--since', '2024-01-01']]);
+        for (const period of ['today', 'month', 'allTime']) {
+          const current = updates.at(-1)[period];
+          assert.equal(current.sessions[`claude:${ids[0]}`].title, 'Catalog title');
+          assert.equal(current.sessions[`claude:${ids[1]}`].title, 'Other native title');
+          assert.equal(current.sessions[`claude:${ids[2]}`].title || '', '');
+          assert.equal(current.sessions[`claude:${ids[3]}`].title, 'Transcript title');
+          assert.equal(current.totalTokens, initial[period].totalTokens);
+          assert.equal(current.costUsd, initial[period].costUsd);
+        }
+        const saved = JSON.parse(fs.readFileSync(path.join(shared, 'collector-anchor.json'), 'utf8'));
+        for (const id of ids) assert.equal(saved.t3Titles[`claude:${id}`], null);
+      }
+    } finally { handle?.stop(); handle = null; }
   });
 }
