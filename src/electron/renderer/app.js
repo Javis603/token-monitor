@@ -2856,6 +2856,7 @@ function rawSessionRowsForPeriod(period) {
     stableColor,
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived'),
+    subagentLabel: t('sessions.subagent'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
     sourcePeriods: state.stats?.periods,
     grokBotSessionIds: state.stats?.grokBotSessionIds,
@@ -2868,6 +2869,10 @@ function sessionRowsForPeriod(period) {
   if (rows.length > 0) {
     rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
     return sessionRowsApi.groupSessionRows(rows, {
+      subagents: {
+        countLabel: (count) => t('sessions.subagentCount', { count }),
+        unattributedLabel: t('dashboard.tooltip.unclassified')
+      },
       backgroundReviews: {
         label: t('sessions.backgroundReviews'),
         countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
@@ -4651,10 +4656,13 @@ function applySessionDetailResult(request, options) {
   renderSessionDetail(options);
 }
 
-async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null }) {
+async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null, titleFollowsSession = false }) {
+  // A review run is headed by model and time; a named group run (a subagent, a
+  // Grok Bot record) is headed by its session title and follows title display.
+  const fixedGroupHeading = returnTo?.kind === 'session-group' && titleFollowsSession !== true;
   const request = { kind: 'session', client, sessionId, sessionCost,
-    title: state.settings?.sessionTitlesEnabled === false && returnTo?.kind !== 'session-group' ? '' : title,
-    period: state.period, detail: null, returnTo };
+    title: state.settings?.sessionTitlesEnabled === false && !fixedGroupHeading ? '' : title,
+    period: state.period, detail: null, returnTo, titleFollowsSession: titleFollowsSession === true };
   state.openSession = request;
   renderSessionDetail({ loading: true });
   try {
@@ -4733,7 +4741,7 @@ function sessionDetailTitle() {
   const request = state.openSession;
   // Group runs use a model/time heading, which is independent of session
   // title visibility. Ordinary Details follow the current session metadata.
-  if (request?.returnTo?.kind === 'session-group') return request.title;
+  if (request?.returnTo?.kind === 'session-group' && request.titleFollowsSession !== true) return request.title;
   if (state.settings?.sessionTitlesEnabled === false) return '';
   const period = request?.period || state.period;
   const session = request?.client === 'reasonix'
@@ -4744,18 +4752,50 @@ function sessionDetailTitle() {
 
 function refreshSessionDetailHeading() {
   if (state.openSession?.kind !== 'session') return;
+  // The group a Details page returns to is labelled by its summary, and a
+  // subagent group's summary quotes the parent's title. Follow the current
+  // stats so the back label, and the group page it returns to, honour title
+  // display like every other surface.
+  const group = state.openSession.returnTo;
+  const period = group?.kind === 'session-group' && group.summary?.key
+    ? state.stats?.periods?.[group.period || state.period] : null;
+  if (period) {
+    const rows = sessionRowsForPeriod(period);
+    const latest = rows.find((row) => row.key === group.summary.key);
+    if (latest) {
+      group.summary = latest;
+    } else {
+      // The group is gone (its parent left the list, or the session now sits
+      // under another parent). A cached summary would keep quoting titles the
+      // current stats no longer carry, so return to whichever group holds this
+      // session now, or to Sessions when none does.
+      const memberKey = `session:${state.openSession.client}:${state.openSession.sessionId}`;
+      const holder = rows.find((row) => row.groupRows?.some((member) => member.key === memberKey));
+      state.openSession.returnTo = holder ? { kind: 'session-group', period: group.period, summary: holder } : null;
+    }
+  }
   const head = els.sessionDetailHead;
-  if ((head.querySelector('.detail-heading')?.textContent || '') === sessionDetailTitle()) return;
+  if (state.openSession.headingSignature === sessionDetailHeadingSignature()) return;
   // Retain the body, loading/error state and sort control. Unchanged headings
   // also retain their hover-reading motion through periodic stats updates.
   head.replaceChildren(sessionDetailBackButton(), ...Array.from(head.children).slice(1));
 }
 
+function sessionDetailBackLabel() {
+  return state.openSession?.returnTo?.kind === 'session-group'
+    ? state.openSession.returnTo.summary?.name || t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
+}
+
+function sessionDetailHeadingSignature() {
+  return JSON.stringify([sessionDetailTitle(), sessionDetailBackLabel()]);
+}
+
 function sessionDetailBackButton() {
   const back = document.createElement('button');
   const title = sessionDetailTitle();
-  const backLabel = state.openSession?.returnTo?.kind === 'session-group'
-    ? state.openSession.returnTo.summary?.name || t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
+  const backLabel = sessionDetailBackLabel();
+  // Every heading is built here, so the open request records what it shows.
+  if (state.openSession) state.openSession.headingSignature = JSON.stringify([title, backLabel]);
   back.type = 'button';
   back.className = title ? 'detail-back detail-back-titled' : 'detail-back';
   if (!title) back.textContent = `‹ ${backLabel}`;
@@ -4805,17 +4845,22 @@ function sessionGroupRunNode(row, max, parent) {
   wrap.className = 'detail-exchange session-group-run';
   const interactive = sessionRowsApi.sessionRowDetailAvailable(row);
   const botGroup = parent.summary?.sessionGroup === 'cursor-grok-bot';
+  // Subagent members are distinct conversations, so they read like Sessions
+  // rows (title, activity, id) rather than as runs of one review stream.
+  const subagentGroup = parent.summary?.subagentGroup === true;
+  const namedGroup = botGroup || subagentGroup;
+  const mainSession = subagentGroup && row.key === parent.summary.groupRows?.[0]?.key;
   if (interactive) {
     wrap.setAttribute('role', 'button');
     wrap.setAttribute('tabindex', '0');
   }
   wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">›</span>'
     + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span>'
-    + (botGroup ? '<span class="session-group-id"></span>' : '') + '</div>'
+    + (namedGroup ? '<span class="session-group-id"></span>' : '') + '</div>'
     + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
     + '<div class="bar"><div class="bar-fill"></div></div>';
   const time = sessionRowsApi.compactSessionTime(row.sortTime, new Date());
-  const title = (botGroup ? row.name : [row.modelLabel, time].filter(Boolean).join(' · '))
+  const title = (namedGroup ? row.name : [row.modelLabel, time].filter(Boolean).join(' · '))
     || parent.summary?.name || t('sessions.backgroundReviews');
   const titleEl = wrap.querySelector('.detail-ex-title');
   titleEl.textContent = title;
@@ -4828,10 +4873,11 @@ function sessionGroupRunNode(row, max, parent) {
   }
   if (!interactive) wrap.querySelector('.detail-chev').textContent = '';
   const sub = wrap.querySelector('.detail-ex-sub');
-  sub.textContent = botGroup ? [row.activity ? row.subtitle : '', row.activity || row.subtitle].filter(Boolean).join(' · ') : row.detail || '';
+  sub.textContent = namedGroup ? [mainSession ? t('sessions.mainSession') : '', row.activity ? row.subtitle : '',
+    row.activity || row.subtitle].filter(Boolean).join(' · ') : row.detail || '';
   sub.title = sub.textContent;
   bindHoverMarquee(sub);
-  if (botGroup) {
+  if (namedGroup) {
     const id = wrap.querySelector('.session-group-id');
     id.textContent = row.detail || '';
     id.title = row.detail || '';
@@ -4846,7 +4892,8 @@ function sessionGroupRunNode(row, max, parent) {
     sessionId: String(row.key || '').replace(/^session:[^:]+:/, ''),
     sessionCost: Number(row.cost || 0),
     title,
-    returnTo: parent
+    returnTo: parent,
+    titleFollowsSession: namedGroup
   });
   wrap.addEventListener('click', open);
   wrap.addEventListener('keydown', (event) => {
@@ -4893,7 +4940,7 @@ function renderSessionGroupDetail(request) {
   const overview = document.createElement('div');
   overview.className = 'session-group-overview';
   overview.innerHTML = '<span class="session-group-count"></span><span class="session-group-totals"></span>';
-  overview.querySelector('.session-group-count').textContent = request.summary.detail;
+  overview.querySelector('.session-group-count').textContent = request.summary.groupDetail || request.summary.detail;
   overview.querySelector('.session-group-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0, request.summary.unpricedTokens)}`;
   container.append(overview);
 

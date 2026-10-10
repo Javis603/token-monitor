@@ -138,6 +138,14 @@ function normalizeSessionKind(value) {
   return String(value || '').trim() === 'background-review' ? 'background-review' : '';
 }
 
+// The id of the session that started this one (a subagent or a background
+// review), in the same client's id space. Absent for top-level sessions and for
+// forks the user made themselves, so the field is only set when present.
+function normalizeParentSessionId(value, sessionId) {
+  const parent = normalizeSessionId(value);
+  return parent && parent !== sessionId ? parent : '';
+}
+
 function stripSessionTextFromPeriod(period, { preserveSessionTitles = false } = {}) {
   if (!period || typeof period !== 'object' || !period.sessions || typeof period.sessions !== 'object') {
     return period;
@@ -673,6 +681,10 @@ function mergeSession(target, source) {
   }
   if (!target.title && source.title) target.title = normalizeSessionTitle(source.title);
   if (!target.sessionKind && source.sessionKind) target.sessionKind = normalizeSessionKind(source.sessionKind);
+  if (!target.parentSessionId && source.parentSessionId) {
+    const parentSessionId = normalizeParentSessionId(source.parentSessionId, target.sessionId);
+    if (parentSessionId) target.parentSessionId = parentSessionId;
+  }
   if (source.usageSource === 'codex-dots-local') {
     target.usageSource = 'codex-dots-local';
     target.usageCoverage = 'observed-only';
@@ -726,6 +738,8 @@ function sessionFromRow(row) {
   session.projectLabel = String(row.projectLabel || row.project_label || '').trim();
   session.title = normalizeSessionTitle(firstString(row, SESSION_TITLE_KEYS));
   session.sessionKind = normalizeSessionKind(row.sessionKind || row.session_kind);
+  const parentSessionId = normalizeParentSessionId(row.parentSessionId ?? row.parent_session_id, id);
+  if (parentSessionId) session.parentSessionId = parentSessionId;
   const model = detectModel(row, client);
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
   if (model && session.costUsd > 0) session.modelCosts[model] = (session.modelCosts[model] || 0) + session.costUsd;
@@ -781,6 +795,8 @@ function normalizeSession(input, fallbackKey) {
   session.projectLabel = String(input.projectLabel || input.project_label || '').trim();
   session.title = normalizeSessionTitle(input.title || input.sessionTitle || input.session_title);
   session.sessionKind = normalizeSessionKind(input.sessionKind || input.session_kind);
+  const parentSessionId = normalizeParentSessionId(input.parentSessionId ?? input.parent_session_id, id);
+  if (parentSessionId) session.parentSessionId = parentSessionId;
   if (client === 'codex' && input.usageSource === 'codex-dots-local') {
     session.usageSource = 'codex-dots-local';
     session.usageCoverage = 'observed-only';

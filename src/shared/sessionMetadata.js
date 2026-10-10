@@ -115,6 +115,11 @@ function applyTokscaleSessionMetadata(json, { resolveProjects = true } = {}) {
       if (lastUsedAt && !row.lastUsedAt) row.lastUsedAt = lastUsedAt;
       const title = String(meta.title || '').trim();
       if (title && !row.sessionTitle) row.sessionTitle = title;
+      // A subagent or background review names the session that started it, in
+      // the same client's id space. Kept as a fact on the row; grouping is the
+      // renderer's decision.
+      const parentSessionId = String(meta.parentSessionId ?? meta.parent_session_id ?? '').trim();
+      if (parentSessionId && parentSessionId !== sessionId && !row.parentSessionId) row.parentSessionId = parentSessionId;
       result.sessions += 1;
     }
     if (!resolveProjects) continue;
