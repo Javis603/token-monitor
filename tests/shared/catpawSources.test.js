@@ -14,7 +14,9 @@ const { deviceRecordFromAnchor } = require('../../src/shared/anchorSeed');
 const { emptyPeriod } = require('../../src/shared/usage');
 
 function fixture(t) {
-  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-catpaw-'));
+  // Windows runners expose an 8.3 tmp path; the ignore matcher canonicalizes
+  // its roots, so an uncanonicalized home would never appear contained.
+  const homeDir = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-catpaw-'));
   const options = { homeDir, platform: 'darwin', env: {} };
   const roots = catpawDataSources(options).roots;
   for (const root of roots) fs.mkdirSync(root, { recursive: true });
