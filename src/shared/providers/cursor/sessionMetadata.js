@@ -203,12 +203,19 @@ function resolveSessionMetadata(sessionIds, { deps = {}, home, now = Date.now(),
   });
   const cache = deps.cursorTitleCache || titleCache;
   const retries = new Map();
+  const unknownTurns = new Set();
   for (const dbPath of candidates) {
     const stamp = databaseStamp(dbPath);
     if (!stamp) continue;
     let cached = cache.get(dbPath);
-    if (cached?.stamp !== stamp) cached = { stamp, titles: new Map(), misses: new Set(), legacyTitles: null,
-      turnEnds: new Map(), turnRetries: new Set() };
+    if (cached?.stamp !== stamp) {
+      // Retain requested scalar boundaries in the existing map. Every retained
+      // entry must be queried again; failures cannot erase a successful read.
+      const turnEnds = cached?.turnEnds || new Map();
+      for (const id of turnEnds.keys()) if (!sessionIds.has(id)) turnEnds.delete(id);
+      cached = { stamp, titles: new Map(), misses: new Set(), legacyTitles: null,
+        turnEnds, turnRetries: new Set(turnEnds.keys()) };
+    }
     // Ask only for ids this fingerprint has not definitively answered. A
     // cached miss is a real answer (no open/query per tick for a header-less
     // session); only ids that failed to read are asked again, so a
@@ -223,6 +230,9 @@ function resolveSessionMetadata(sessionIds, { deps = {}, home, now = Date.now(),
         for (const [id, title] of read.titles) cached.titles.set(id, title);
         for (const [id, title] of read.retries) retries.set(id, title);
         for (const id of read.misses) cached.misses.add(id);
+        if (!read.turnReadFailed) {
+          for (const id of wanted) cached.turnEnds.delete(id);
+        }
         for (const [id, state] of read.turnEnds) cached.turnEnds.set(id, state);
         for (const id of wanted) {
           if (read.turnReadFailed) cached.turnRetries.add(id);
@@ -233,21 +243,17 @@ function resolveSessionMetadata(sessionIds, { deps = {}, home, now = Date.now(),
     cache.set(dbPath, cached);
     for (const sessionId of sessionIds) {
       const title = cached.titles.get(sessionId) || retries.get(sessionId);
-      let state = cached.turnEnds.get(sessionId);
-      // A new title is not evidence of a new turn. Keep the last successful
-      // boundary while a failed state query waits for its next retry.
-      const previous = metadata?.get(`cursor:${sessionId}`);
-      if (cached.turnRetries.has(sessionId) && typeof previous?.turnEnded === 'boolean') {
-        state = { turnEnded: previous.turnEnded,
-          ...(previous.lastUsedAt ? { lastUsedAt: previous.lastUsedAt } : {}) };
-      }
-      if (result.has(sessionId)) continue;
-      if (title) result.set(sessionId, state ? { title, ...state } : { title });
-      else if (state) result.set(sessionId, { ...state });
-      // A definitive unknown answer clears an earlier headerless boundary.
-      // Failed reads have no state entry, so the shared cache stays untouched.
-      else if (state === null && typeof previous?.turnEnded === 'boolean') result.set(sessionId, {});
+      const state = cached.turnEnds.get(sessionId);
+      const existing = result.get(sessionId);
+      // Candidate order selects titles and valid boundaries independently: an
+      // absent conversation in one store cannot hide another store's answer.
+      if (title && !existing?.title) result.set(sessionId, { ...existing, title });
+      if (state && typeof existing?.turnEnded !== 'boolean') result.set(sessionId, { ...result.get(sessionId), ...state });
+      if (state === null) unknownTurns.add(sessionId);
     }
+  }
+  for (const sessionId of unknownTurns) {
+    if (!result.has(sessionId) && typeof metadata?.get(`cursor:${sessionId}`)?.turnEnded === 'boolean') result.set(sessionId, {});
   }
   return result;
 }
