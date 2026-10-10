@@ -430,13 +430,13 @@ test('collectWslUsage scans a Proma-only WSL home through tokscale --home', asyn
   assert.equal(bundle.today.clients.proma, 10);
 });
 
-test('collectWslUsage keeps Qoder CN out of WSL scans', async () => {
+test('collectWslUsage keeps Qoder CN and CatPaw out of WSL scans', async () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const seen = [];
   const { detected } = await collectWslUsage(
     {
-      clients: 'claude,qodercn',
-      trackedClients: 'claude,qodercn',
+      clients: 'claude,catpaw,qodercn',
+      trackedClients: 'claude,catpaw,qodercn',
       allTimeSince: '2025-01-01',
       commandTimeoutMs: 1000,
       runTokscale: async ({ clients }) => {

@@ -56,7 +56,7 @@ function exitChild(code, stderr = '') {
 // The capability probe also runs one empty scan of the fork-only ids, which
 // never appear in --help (see forkOnlyClientsAccepted in collector.js).
 function isForkOnlyProbe(args) {
-  return args.includes('--home') && args[args.indexOf('--client') + 1] === 'proma,qodercn';
+  return args.includes('--home');
 }
 
 function helpChild(possibleValues) {
@@ -330,7 +330,7 @@ test('an old binary that rejects both the join and a client retries once per rej
   }
 });
 
-async function collectWithFallback(clients, acceptsForkOnly) {
+async function collectWithFallback(clients, acceptsForkOnly, rejectedForkClients = ['proma', 'catpaw', 'qodercn']) {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
@@ -339,7 +339,7 @@ async function collectWithFallback(clients, acceptsForkOnly) {
     const requested = args[args.indexOf('--client') + 1].split(',');
     if (!isForkOnlyProbe(args)) calls.push(requested.join(','));
     if (requested.includes('amp')) return exitChild(2, "error: invalid value 'amp' for --client");
-    if (!acceptsForkOnly && requested.some((id) => id === 'proma' || id === 'qodercn')) {
+    if (!acceptsForkOnly && requested.some((id) => rejectedForkClients.includes(id))) {
       return exitChild(2, "error: invalid value 'proma' for --client");
     }
     return jsonChild({ entries: [] });
@@ -364,16 +364,31 @@ async function collectWithFallback(clients, acceptsForkOnly) {
 test('fork-only clients survive a capability fallback on the pinned fork', async () => {
   // They are absent from --help by design, so filtering by --help alone would
   // drop them for the binary's whole lifetime once any other id is rejected.
-  const calls = await collectWithFallback('claude,amp,proma,qodercn', true);
+  const calls = await collectWithFallback('claude,amp,proma,catpaw,qodercn', true);
   assert.deepEqual(calls, [
-    'claude,amp,proma,qodercn',
+    'claude,amp,proma,catpaw,qodercn',
+    'claude,proma,catpaw,qodercn',
+    'claude,proma,catpaw,qodercn',
+    'claude,proma,catpaw,qodercn'
+  ]);
+});
+
+test('an upstream binary that rejects fork-only ids drops them like any unsupported id', async () => {
+  const calls = await collectWithFallback('claude,amp,proma,catpaw,qodercn', false);
+  assert.deepEqual(calls, ['claude,amp,proma,catpaw,qodercn', 'claude', 'claude', 'claude']);
+});
+
+test('an older fork missing CatPaw retains its supported Proma and Qoder CN clients', async () => {
+  const calls = await collectWithFallback('claude,proma,catpaw,qodercn', false, ['catpaw']);
+  assert.deepEqual(calls, [
+    'claude,proma,catpaw,qodercn',
     'claude,proma,qodercn',
     'claude,proma,qodercn',
     'claude,proma,qodercn'
   ]);
 });
 
-test('an upstream binary that rejects fork-only ids drops them like any unsupported id', async () => {
-  const calls = await collectWithFallback('claude,amp,proma,qodercn', false);
+test('CatPaw probing preserves the existing fork-client batch acceptance rule', async () => {
+  const calls = await collectWithFallback('claude,amp,proma,qodercn', false, ['catpaw', 'qodercn']);
   assert.deepEqual(calls, ['claude,amp,proma,qodercn', 'claude', 'claude', 'claude']);
 });

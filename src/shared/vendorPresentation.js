@@ -60,6 +60,7 @@
     { id: 'codebuddy', color: '#6C4DFF', widgetColor: '#8064FF' },
     { id: 'workbuddy', color: '#0DC8A5' },
     { id: 'proma', color: '#000000', widgetInk: true },
+    { id: 'catpaw', color: '#00FFA2', mask: 'catpaw-mask', trayIcon: 'catpaw-mask' },
     { id: 'qodercn', color: '#2ADB5C' },
     { id: 'reasonix', color: '#4d6bfe' },
     { id: 'dsh', color: '#4d6bfe' },
