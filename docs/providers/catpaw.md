@@ -36,7 +36,7 @@ Both editions are scanned together; there is no current-account filter and no re
 
 The watcher keeps each edition root for new-account discovery and accepts only the database/WAL/SHM family; authentication stores, application logs and nested directories are pruned. Because a read-only WAL scan rewrites the wal-index, `catpaw` is in `SELF_WATCHED_SQLITE_SIDECAR_CLIENTS`: `-shm` events are suppressed while database and `-wal` events still trigger collection.
 
-The account-database set is part of the collector's config fingerprint. Adding or removing a database clears the persisted anchor and forces a full re-baseline, because historical usage cannot be recovered from a today-only delta; a set change observed between the serial period scans discards the mixed result and reuses the same bounded single replay as a pricing change.
+The account-database set is part of the collector's config fingerprint. Adding or removing a database clears the persisted anchor and forces a full re-baseline, because historical usage cannot be recovered from a today-only delta; a set change observed between the serial period scans discards the mixed result and reuses the same bounded single replay as a pricing change. Persisted anchors retain the source set used by the scan. Source-set checks apply only when CatPaw is selected; the existing pricing checks and replay limit remain unchanged.
 
 ## Credentials and transport
 
@@ -54,7 +54,7 @@ None. No credential is read, stored or sent, no application code is executed, an
 - Observed real samples (four domestic, three overseas usage rows) satisfied the four-bucket identity with `cacheWrite` always zero. Nonzero cache write, tool/sub-agent rows and legacy runtime formats are covered only synthetically; do not present them as verified.
 - The domestic Windows storage contract was verified statically through installer and `app.asar` inspection; the [issue reporter's real-machine evidence](https://github.com/Javis603/token-monitor/issues/715#issuecomment-6020857899) also confirms its paths, schema and 169 usage rows. The overseas Windows root is inferred from the product contract. Windows file-lock, WAL and SHM behaviour still lacks a real-machine check, as does the overseas Windows installer.
 - Linux and WSL read no CatPaw source. Under a Windows host the root is app-data-relative, so a WSL scan would recount host usage; `catpaw` is in `WSL_EXCLUDED_CLIENTS`.
-- Runtime capability fallback probes fork clients individually after a rejected batch, so a pre-CatPaw fork keeps its supported Proma/Qoder CN clients. The clients gate still requires every registered client, so the vendor pin must carry the fork parser.
+- Runtime capability fallback probes CatPaw separately from the existing fork-client batch after a rejected combined probe, so a pre-CatPaw fork keeps its supported Proma/Qoder CN clients without changing their batch acceptance rule. The clients gate still requires every registered client, so the vendor pin must carry the fork parser.
 
 ## Icons
 

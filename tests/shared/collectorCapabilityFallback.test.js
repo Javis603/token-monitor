@@ -387,3 +387,8 @@ test('an older fork missing CatPaw retains its supported Proma and Qoder CN clie
     'claude,proma,qodercn'
   ]);
 });
+
+test('CatPaw probing preserves the existing fork-client batch acceptance rule', async () => {
+  const calls = await collectWithFallback('claude,amp,proma,qodercn', false, ['catpaw', 'qodercn']);
+  assert.deepEqual(calls, ['claude,amp,proma,qodercn', 'claude', 'claude', 'claude']);
+});

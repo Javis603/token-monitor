@@ -428,7 +428,7 @@ function hermeticEnv(home) {
 }
 
 function spawnFixture(binPath, home, groupBy, client = FIXTURE_CLIENT) {
-  return spawnSync(binPath, ['--home', home, '--json', '--client', client, '--group-by', groupBy, '--no-spinner'], {
+  return spawnSync(binPath, ['--json', '--client', client, '--group-by', groupBy, '--no-spinner'], {
     encoding: 'utf8',
     timeout: 15_000,
     env: hermeticEnv(home)
