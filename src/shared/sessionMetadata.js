@@ -352,7 +352,7 @@ function applySessionMetadata(periods, home, deps = {}) {
         else delete session.title;
       } else if (deps.invalidatedTitleKeys?.has(key) && session.title === deps.t3Titles?.[key]) delete session.title;
       if (!meta) continue;
-      if (meta.t3Title && !Object.prototype.hasOwnProperty.call(meta, 'titleFallback')) {
+      if ((meta.t3Title || meta.catalogTitle) && !Object.prototype.hasOwnProperty.call(meta, 'titleFallback')) {
         meta.titleFallback = session.title;
       }
       if (meta.title) session.title = meta.title;
@@ -373,6 +373,9 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
       if (Object.prototype.hasOwnProperty.call(meta, 'promptCache')) session.promptCache = meta.promptCache;
+      if (session.client === 'codex' && typeof meta.waitingForInput === 'boolean') {
+        session.waitingForInput = meta.waitingForInput;
+      }
       // The three states mean different things and are copied as they are:
       // `true` is a finished turn, `false` is one that is open, and absent is a
       // client that reports no boundary at all. Only the last may leave an

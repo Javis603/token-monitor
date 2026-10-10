@@ -3658,7 +3658,9 @@ html.is-windows .settings-panel select option {
 }
 .home-session-state[data-state="running"] .home-session-spin,
 .home-session-state[data-state="ended"] .home-session-check,
+.home-session-state[data-state="waiting"] .home-session-waiting,
 .home-session-state[data-state="idle"] .home-session-idle { display: block; }
+.home-session-waiting { color: var(--orange); }
 .home-session-spin {
   background: var(--text);
   -webkit-mask: url("icons/actions/spinner.svg") center / contain no-repeat;
@@ -4231,7 +4233,19 @@ html.is-windows .settings-panel select option {
 .row-name { position: relative; }
 .row-live { display: none; }
 /* Absolutely positioned so a running row never shifts against its neighbours. */
- .row-live.is-active { display: block; position: absolute; top: 8px; left: 6px; }
+ .row-live.is-active,
+ .row-live.is-waiting { display: block; position: absolute; top: 8px; left: 6px; }
+.row-live-waiting { display: none; }
+.row-live.is-waiting .row-live-dot { display: none; }
+.row-live.is-waiting .row-live-waiting {
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: -2px;
+  background: var(--orange);
+  -webkit-mask: url("icons/actions/attention.svg") center / contain no-repeat;
+  mask: url("icons/actions/attention.svg") center / contain no-repeat;
+}
 .row-live-dot {
   display: block;
   width: 5px;

@@ -35,6 +35,11 @@ collector.startCollector = (options) => {
   return {
     async tick(reason) {
       ticks += 1;
+      if (reason === 'activity') {
+        await options.onSessionActivity?.({ observations: [{ client: 'codex', sessionId,
+          liveActivity: { state: 'waiting', observedAt: '2026-07-09T08:16:00.000Z' } }], nativeSessions: {} });
+        return true;
+      }
       if (reason === 'crash') {
         setImmediate(() => { throw new Error('scripted crash'); });
         return new Promise(() => {});

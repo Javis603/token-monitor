@@ -143,7 +143,7 @@ test('session detail renders its heading before loading, errors and empty result
   let invalidations = 0;
   let pulls = 0;
   context.allTimeSessions = { invalidate: () => { invalidations += 1; }, ensure: () => { pulls += 1; } };
-  const settingsStart = rendererSource.indexOf('function sessionStatsForDisplay(');
+  const settingsStart = rendererSource.indexOf('let localSessionActivity = null;');
   const settingsEnd = rendererSource.indexOf('\nfunction render()', settingsStart);
   assert.ok(settingsStart >= 0 && settingsEnd > settingsStart, 'renderer title settings helpers should be present');
   vm.runInNewContext(`${rendererSource.slice(settingsStart, settingsEnd)}\nglobalThis.setSettings = setRendererSettings;`, context);

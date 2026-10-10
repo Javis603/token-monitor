@@ -14,11 +14,12 @@
     node ? require('../accountIdentity') : root?.TokenMonitorAccountIdentity,
     node ? require('../../../shared/sessionLive') : root?.TokenMonitorSessionLive,
     node ? require('../usageAttributionRows') : root?.TokenMonitorUsageAttributionRows,
-    node ? require('../limits/resetMotion') : root?.TokenMonitorLimitResetMotion
+    node ? require('../limits/resetMotion') : root?.TokenMonitorLimitResetMotion,
+    node ? require('../../../shared/sessionActivityProviders') : root?.TokenMonitorSessionActivityProviders
   );
   if (node) module.exports = api;
   if (root) root.TokenMonitorEdgeDockPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive, usageAttributionRows, limitResetMotion) {
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive, usageAttributionRows, limitResetMotion, activityProviders) {
   // Every account is listed; the card scrolls when they outgrow the screen.
   const MAX_BUBBLE_ACCOUNTS = 50;
 
@@ -161,20 +162,53 @@
   // aggregate drops all-time session detail (the sessions there are one
   // machine's own view), so a list built from it would silently mean "some"
   // rather than "all".
-  function sessionSourceRows(stats) {
+  const EMPTY_SESSIONS = {};
+  const sourceRowsCache = new WeakMap();
+  function accountingSessionSources(stats) {
+    const month = stats?.periods?.month?.sessions || EMPTY_SESSIONS;
+    const today = stats?.periods?.today?.sessions || EMPTY_SESSIONS;
+    let byToday = sourceRowsCache.get(month);
+    if (!byToday) { byToday = new WeakMap(); sourceRowsCache.set(month, byToday); }
+    let cached = byToday.get(today);
+    if (cached) return cached;
     const byKey = new Map();
     for (const periodKey of ['month', 'today']) {
       for (const [key, session] of Object.entries(stats?.periods?.[periodKey]?.sessions || {})) {
-        if (byKey.has(key)) continue;
+        const previous = byKey.get(key);
+        if (previous && (!sessionLive.isArchivedSession(previous.session) || sessionLive.isArchivedSession(session))) continue;
         if (session?.sessionKind === 'background-review') continue;
         const lastUsedMs = Date.parse(session?.lastUsedAt || session?.startedAt || '');
         if (!Number.isFinite(lastUsedMs)) continue;
-        byKey.set(key, { session, lastUsedMs });
+        byKey.set(key, { key, session, lastUsedMs, periodKey });
       }
     }
-    return [...byKey.entries()]
-      .map(([key, value]) => ({ key, ...value }))
-      .sort((a, b) => b.lastUsedMs - a.lastUsedMs);
+    cached = { byKey, rows: [...byKey.values()].sort((a, b) => b.lastUsedMs - a.lastUsedMs) };
+    byToday.set(today, cached);
+    return cached;
+  }
+  function sessionSourceRows(stats) {
+    const base = accountingSessionSources(stats);
+    const native = new Map();
+    for (const periodKey of ['month', 'today']) for (const [key, session] of Object.entries(stats?.nativeSessions?.[periodKey] || {})) {
+      if (native.has(key) || !activityProviders.isSessionActivityClient(session.client) || session.sessionKind === 'background-review') continue;
+      const accounted = base.byKey.get(key);
+      if (accounted) {
+        if (!sessionLive.isArchivedSession(accounted.session) || !['running', 'waiting'].includes(sessionLive.sessionActivityState(session))) continue;
+      }
+      const lastUsedMs = Date.parse(session.lastUsedAt || session.startedAt || '');
+      if (Number.isFinite(lastUsedMs)) native.set(key, { key, session, lastUsedMs });
+    }
+    const additions = [...native.values()].sort((a, b) => b.lastUsedMs - a.lastUsedMs);
+    const rows = [];
+    let index = 0;
+    for (const entry of base.rows) {
+      if (native.has(entry.key)) continue;
+      while (index < additions.length && additions[index].lastUsedMs > entry.lastUsedMs) rows.push(additions[index++]);
+      rows.push({ key: entry.key, lastUsedMs: entry.lastUsedMs,
+        session: sessionLive.sessionWithActivity(stats?.periods?.[entry.periodKey], entry.key, entry.session) });
+    }
+    rows.push(...additions.slice(index));
+    return rows;
   }
 
   // One row shape for both callers. `client` rides the row because the Sessions
@@ -207,6 +241,8 @@
         // Carried onto the projected row, not just used here: the dock renderer
         // re-derives the state at paint time and needs the boundary to do it.
         turnEnded: session.turnEnded === true,
+        liveActivity: session.liveActivity || null,
+        waitingForInput: session.client === 'codex' && session.waitingForInput === true,
         // The archive flags ride along for the same reason, and their absence was a
         // real bug: `sessionActivityState()` reads them first, so a projection that
         // dropped them let an archived row - idle by definition, whatever its
@@ -240,12 +276,13 @@
   function cappedSessionRows(entries, cap, runningOnly = false, order = 'running-first') {
     const stateByKey = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
     const running = entries.filter(({ key }) => stateByKey.get(key) === 'running');
+    const waiting = runningOnly ? [] : entries.filter(({ key }) => stateByKey.get(key) === 'waiting');
     const quiet = runningOnly
       ? []
       : entries
-        .filter(({ key }) => stateByKey.get(key) !== 'running')
-        .slice(0, Math.max(0, cap - running.length));
-    let ordered = [...running, ...quiet];
+        .filter(({ key }) => !['running', 'waiting'].includes(stateByKey.get(key)))
+        .slice(0, Math.max(0, cap - running.length - waiting.length));
+    let ordered = [...waiting, ...running, ...quiet];
     if (order === 'timeline') {
       // `entries` arrives newest-first (see sessionSourceRows) and a timeline prints in
       // that order. Composing the selection directly would hoist every running row above
@@ -261,7 +298,7 @@
     const entries = sessionSourceRows(stats);
     if (options.includeRunningBeyondCap === true) {
       const states = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
-      const selected = entries.filter((entry, index) => index < cap || states.get(entry.key) === 'running');
+      const selected = entries.filter((entry, index) => index < cap || ['running', 'waiting'].includes(states.get(entry.key)));
       return sessionRowsFor(selected, states);
     }
     const runningOnly = options.runningOnly === true;
@@ -290,13 +327,22 @@
     return { count: running.length, clients, clientCount: clients.length, rows: running };
   }
 
-  // When the earliest still-running row stops reading as running, so the caller
-  // can re-project at that moment instead of leaving a stale count on screen.
-  // 0 when nothing is running: a quiet row never becomes running on its own, so
-  // there is nothing to wait for and a scheduler reading this cannot loop.
+  function waitingSessionSummary(sessions, now = Date.now()) {
+    const rows = (Array.isArray(sessions) ? sessions : [])
+      .filter((row) => sessionLive.sessionActivityState(row, now) === 'waiting');
+    return { count: rows.length, rows };
+  }
+
+  // Re-project when a running window or registry observation expires. Waiting
+  // and explicit idle can fall back to running too, so every lease matters.
   function nextRunningExpiryAt(sessions, now = Date.now()) {
     let soonest = 0;
-    for (const row of runningSessionSummary(sessions, now).rows) {
+    for (const row of sessions || []) {
+      const expiry = sessionLive.liveActivityExpiryAt(row, now);
+      if (expiry && (!soonest || expiry < soonest)) soonest = expiry;
+    }
+    const active = (sessions || []).filter((row) => ['running', 'waiting'].includes(sessionLive.sessionActivityState(row, now)));
+    for (const row of active) {
       const last = Date.parse(String(row?.lastUsedAt || ''));
       if (!Number.isFinite(last)) continue;
       // The first millisecond at which this row is NOT running, not the last one at
@@ -688,6 +734,7 @@
     nextRunningExpiryAt,
     recentSessionRows,
     runningSessionSummary,
+    waitingSessionSummary,
     connectedLimitProviders,
     displayPercent,
     edgeDockCellSignature,

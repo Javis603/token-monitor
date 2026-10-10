@@ -9,6 +9,10 @@
 function createStatsPresentationCache() {
   const cache = new WeakMap();
   return {
+    updateActivity(previous, next, project) {
+      const hit = cache.get(previous);
+      if (hit) cache.set(next, { key: hit.key, result: project(hit.result) });
+    },
     get(stats, key, project) {
       if (!stats || typeof stats !== 'object') return project(stats);
       const hit = cache.get(stats);
@@ -142,6 +146,12 @@ function createRendererSnapshots(options = {}) {
   }
 
   return {
+    updateActivity(previous, next) {
+      const tag = register(previous);
+      tags.set(next, tag);
+      byId.set(tag.id, next);
+      return { ...tag };
+    },
     stamp(stats, copy) {
       if (!stats || typeof stats !== 'object' || !copy || typeof copy !== 'object') return copy;
       return { ...copy, snapshot: { ...register(stats) } };

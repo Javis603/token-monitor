@@ -357,6 +357,12 @@ Response includes:
 
 If multiple devices report the same provider account, the hub keeps the freshest valid limits status for that account. Public Worker stats omit account identifiers.
 
+Session `promptCache` is optional and additive: `{ "observedAt": "<ISO timestamp>", "ttlSeconds": 300 | 1800 | 3600 }`, or `null` to clear a previous observation. It is a transcript-based estimate, not server expiry state. Merge it as one snapshot using the session’s `lastUsedAt`; do not sum it or let an older snapshot replace a newer one. Consumers must suppress it for archived sessions, clock-skewed future observations and elapsed TTLs. Missing fields on older producers are supported.
+
+Session `liveActivity` is optional for clients declared in portable `sessionActivityProviders.js`: `{ "state": "running" | "waiting" | "idle" | "unknown", "observedAt": "<ISO timestamp>" }`. Merge by `observedAt`, independently of token timestamps. Explicit `unknown` clears older evidence; omission supports older producers. Reject future observations and archived sessions; after thirty seconds fall back to transcript activity. Only state and observation time cross the wire. Local-only overlays and zero-token rows are never uploaded, and archives omit transient state. Local refreshes do not advance usage timestamps or enqueue sync uploads; ordinary publications may carry the latest observation.
+
+Codex sessions may carry `waitingForInput: true | false`, derived from outstanding native question calls. Merge this boolean by `lastUsedAt`; on equal timestamps `false` wins, while omission preserves older-producer compatibility. A completed turn or archived session suppresses waiting, and the existing ten-minute activity window bounds it. This is question waiting, not an approval signal. No question content, answers or call ids cross the wire; historical session archives omit this field.
+
 ## `GET /api/stats/stream`
 
 Returns an SSE stream. Every connection begins with a complete `snapshot` event and receives `: hb` comments every 30 seconds. Reconnecting therefore restores a complete state without relying on an earlier event.
@@ -435,9 +441,6 @@ Because `updatedAt` doubles as the concurrency token, it is guaranteed to increa
 Records are re-normalized on ingest exactly as `POST /api/ingest` normalizes device records; unknown fields are dropped and malformed records are discarded rather than stored. `currency` is validated against the display currencies the app carries rates for (`USD`, `TWD`, `HKD`, `CNY`); a record naming anything else responds `400` and stores nothing, because coercing it would report an amount the user never entered. A successful write responds `200` with the stored document in the same shape as `GET`.
 
 An accepted write also broadcasts stats to connected stream clients with `reason: "subscriptions"`, the same way an ingest does. That frame carries the new `subscriptionsUpdatedAt`, which is how the other devices learn their copy has been overtaken.
-
-Session `promptCache` is optional and additive: `{ "observedAt": "<ISO timestamp>", "ttlSeconds": 300 | 1800 | 3600 }`, or `null` to clear a previous observation. It is a transcript-based estimate, not server expiry state. Merge it as one snapshot using the session’s `lastUsedAt`; do not sum it or let an older snapshot replace a newer one. Consumers must suppress it for archived sessions, clock-skewed future observations and elapsed TTLs. Missing fields on older producers are supported.
-
 
 ## `GET /api/sync/content`
 

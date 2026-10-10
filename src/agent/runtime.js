@@ -15,7 +15,9 @@ function createAgentDeviceRuntime(options = {}, deps = {}, overrides = {}) {
   return makeDeviceRuntime({
     envelope: options.envelope,
     limitsOptions: options.limitsOptions,
-    usageOptions: overrides.usageOptions || options.usageOptions,
+    // No local live UI: observe state on normal scans, without a perpetual
+    // activity heartbeat driving archive writes and Hub uploads.
+    usageOptions: { ...(overrides.usageOptions || options.usageOptions), sessionActivityPolling: false },
     transformUsage: options.transformUsage,
     sink,
     onRecord: overrides.onRecord || options.onRecord,

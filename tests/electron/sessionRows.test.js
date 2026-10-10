@@ -17,6 +17,25 @@ const {
   sessionRowsForPeriod
 } = require('../../src/electron/renderer/sessionRows');
 
+test('archived usage joins only matching active native state while retaining its token and cost values', () => {
+  const now = new Date('2026-10-10T00:00:00Z');
+  const key = 'claude:resumed';
+  const accounting = { client: 'claude', sessionId: 'resumed', totalTokens: 100, costUsd: 1,
+    archived: true, turnEnded: true, lastUsedAt: '2026-10-09T00:00:00Z' };
+  const native = { client: 'claude', sessionId: 'resumed', native: true, totalTokens: 0, costUsd: 0,
+    liveActivity: { state: 'waiting', observedAt: now.toISOString() } };
+  for (const [candidate, state] of [[native, 'waiting'], [{ ...native, client: 'codex' }, 'idle'],
+    [{ ...native, sessionId: 'another' }, 'idle'],
+    [{ ...native, liveActivity: { state: 'idle', observedAt: now.toISOString() } }, 'idle']]) {
+    const [row, ...others] = sessionRowsForPeriod({ sessions: { [key]: accounting } }, {
+      now, nativeSessions: { [key]: candidate }
+    });
+    assert.equal(row.activityState, state); assert.equal(others.length, 0);
+    assert.equal(row.value, 100); assert.equal(row.cost, 1);
+    assert.equal(accounting.archived, true); assert.equal(accounting.liveActivity, undefined);
+  }
+});
+
 const clientLabels = { claude: 'Claude Code', codex: 'Codex' };
 const clientColors = { claude: '#cc7c5e', codex: '#49a3b0', default: '#6ab4f0' };
 
@@ -394,6 +413,29 @@ test('background review sessions collapse into one interactive aggregate row wit
   ]);
   assert.equal(Object.hasOwn(collapsed[1], 'sessionGroupExpanded'), false);
   assert.equal(Object.hasOwn(collapsed[1], 'sessionDetailAvailable'), false);
+});
+
+test('pre-token native Codex reviews join the existing background group without hiding ordinary sessions', () => {
+  const now = new Date(2026, 9, 9, 12);
+  const rows = sessionRowsForPeriod({ sessions: {
+    'codex:accounted-review': { client: 'codex', sessionId: 'accounted-review',
+      sessionKind: 'background-review', totalTokens: 15, costUsd: 0.1, lastUsedAt: now.toISOString() }
+  } }, { clientLabels, clientColors, now, nativeSessions: {
+    'codex:native-review': { client: 'codex', sessionId: 'native-review', sessionKind: 'background-review',
+      tokenDataUnavailable: true, totalTokens: 0, lastUsedAt: now.toISOString() },
+    'codex:ordinary': { client: 'codex', sessionId: 'ordinary', model: 'codex-auto-review',
+      tokenDataUnavailable: true, totalTokens: 0, lastUsedAt: now.toISOString() }
+  } });
+  const review = rows.find((row) => row.key === 'session:codex:native-review');
+  assert.equal(review.backgroundReview, true);
+  assert.equal(review.tokenDataUnavailable, true);
+  const collapsed = groupBackgroundReviewRows(rows, { now });
+  assert.deepEqual(collapsed.map((row) => row.key), ['session:codex:ordinary', 'session-group:codex-auto-review']);
+  const group = collapsed[1];
+  assert.deepEqual(group.backgroundReviewRows.map((row) => row.key).sort(),
+    ['session:codex:accounted-review', 'session:codex:native-review']);
+  assert.equal(group.value, 15);
+  assert.equal(group.cost, 0.1);
 });
 
 test('background review run headings show the model independently of session titles and keep the time', () => {

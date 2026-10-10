@@ -1267,11 +1267,10 @@ for (const change of ['stop', 'restart', 'remove', 'disable haptics']) {
 for (const mode of ['always', 'alwaysExceptFullScreen']) {
   for (const outcome of ['success', 'failure', 'throw']) {
     test(`${mode} refresh stays visible after pointer leave until ${outcome}`, async (t) => {
-      t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1 });
-      const advance = (duration) => {
-        // Run recurring polls and animation frames at their scheduled times.
-        // Windows timer delays must not leave the last fade frame pending.
-        for (let elapsed = 0; elapsed < duration; elapsed += 1) t.mock.timers.tick(1);
+      t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+      // Advance through frames so feedback expiry and opacity steps share one clock.
+      const advance = (ms) => {
+        for (let elapsed = 0; elapsed < ms; elapsed += 16) t.mock.timers.tick(Math.min(16, ms - elapsed));
       };
       let finish;
       let fail;

@@ -488,7 +488,8 @@ test('Antigravity summary watches follow homeDir without replacing the process h
       }
       assert.equal(ignored(path.join(dir, 'conversation_summaries.db-shm')), true);
       assert.equal(ignored(path.join(dir, 'unrelated.json')), true);
-      assert.deepEqual(clientsForWatchPath(path.join(dir, 'unrelated.json'), attributed), []);
+      assert.deepEqual(clientsForWatchPath(path.join(dir, 'unrelated.json'), attributed),
+        root === path.join('.gemini', 'antigravity') ? ['antigravity'] : []);
     }
   } finally {
     delete require.cache[collectorPath];
@@ -498,8 +499,9 @@ test('Antigravity summary watches follow homeDir without replacing the process h
   }
 });
 
-for (const source of ['native', 'override', 'configured-home']) {
+for (const source of ['native', 'override', 'configured-home', 'injected-env', 'cli-home']) {
   test(`Antigravity ${source} summary WAL events refresh titles with an exact today delta`, async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
     let sqlite;
     try { sqlite = require('node:sqlite'); } catch (_) { t.skip('node:sqlite unavailable'); return; }
     const sourceRoot = path.join('.gemini', 'antigravity');
@@ -520,7 +522,13 @@ for (const source of ['native', 'override', 'configured-home']) {
       fs.rmSync(tmp, { recursive: true, force: true });
     });
     if (source !== 'configured-home') os.homedir = () => tmp;
-    const dir = source === 'override' ? path.join(tmp, 'catalog') : path.join(tmp, sourceRoot);
+    const cliHome = path.join(tmp, 'relocated-gemini');
+    if (source === 'cli-home') {
+      process.env.GEMINI_CLI_HOME = cliHome;
+      fs.mkdirSync(path.join(cliHome, 'antigravity-cli', 'conversations'), { recursive: true });
+    }
+    const dir = source === 'override' || source === 'injected-env' ? path.join(tmp, 'catalog')
+      : source === 'cli-home' ? path.join(cliHome, 'antigravity-cli') : path.join(tmp, sourceRoot);
     if (source === 'override') process.env.ANTIGRAVITY_HOME = dir;
     const dbPath = path.join(dir, 'conversation_summaries.db');
     db = new sqlite.DatabaseSync(dbPath);
@@ -539,16 +547,18 @@ for (const source of ['native', 'override', 'configured-home']) {
       return watcher;
     };
     const calls = [];
+    let syncs = 0;
     const updates = [];
     const { startCollector } = freshCollector();
     handle = startCollector({
       clients: 'antigravity', allTimeSince: '2024-01-01', commandTimeoutMs: 1000,
       homeDir: source === 'configured-home' ? tmp : undefined,
+      env: source === 'injected-env' ? { ANTIGRAVITY_HOME: dir } : undefined,
       deviceId: 'fixture-device', agentVersion: 'fixture', intervalMs: 60 * 60 * 1000,
       watchEnabled: true, watchUsePolling: false, watchTriggersCollection: true, watchDebounceMs: 10,
       historyEnabled: false, dailyHistoryArchiveEnabled: false, anchorPersistenceEnabled: false,
       codexLocalUsageEnabled: false, wslScanEnabled: false,
-      sessionMetadataDeps: { sqlite, antigravityTitleCache: new Map() }, runAntigravitySync: async () => {},
+      sessionMetadataDeps: { sqlite, antigravityTitleCache: new Map() }, runAntigravitySync: async () => { syncs += 1; },
       runTokscale: async (input) => {
         calls.push(input);
         return { entries: [{ client: 'antigravity', sessionId: 'title-session', model: 'fixture-model', input: 100, output: 30, cost: 0.5 }] };
@@ -558,11 +568,15 @@ for (const source of ['native', 'override', 'configured-home']) {
     await waitForCondition(() => updates.length === 1);
     assert.equal(updates[0].today.sessions['antigravity:title-session'].title, 'Old title');
     assert.equal(calls.length, 3);
+    const initialSyncs = syncs;
+    t.mock.timers.tick(11000);
     db.prepare('UPDATE conversation_summaries SET title = ?').run('Renamed title');
     assert.equal(ignored(`${dbPath}-wal`), false);
     watchHandler('change', `${dbPath}-wal`);
     await waitForCondition(() => updates.length === 2);
     assert.equal(calls.length, 4, 'one today scan replaces the three full-period scans');
+    assert.equal(syncs, initialSyncs, 'a pure summary rename never earns a source self-sync');
+    assert.equal(ignored(path.join(dir, 'runtime.json')), true, 'the watch host receives the same environment as discovery');
     assert.deepEqual(calls[3].flags, ['--today']);
     assert.equal(calls[3].clients, 'antigravity');
     for (const name of ['today', 'month', 'allTime']) {
@@ -575,6 +589,15 @@ for (const source of ['native', 'override', 'configured-home']) {
     watchHandler('change', `${dbPath}-shm`);
     await new Promise((resolve) => setTimeout(resolve, handle.getDiagnostics().watchDebounceMs + 30));
     assert.equal(calls.length, 4, 'reader-created SHM writes never schedule another scan');
+    if (source === 'native' || source === 'configured-home') {
+      t.mock.timers.tick(11000);
+      const usageFile = path.join(dir, 'conversations', 'title-session.pb');
+      assert.equal(ignored(usageFile), false);
+      watchHandler('change', usageFile);
+      await waitForCondition(() => updates.length === 3);
+      assert.equal(calls.length, 5);
+      assert.equal(syncs, initialSyncs + 1, 'genuine conversation writes retain source self-sync');
+    }
   });
 }
 
@@ -3995,8 +4018,10 @@ test('watch roots reach chokidar canonicalised on Windows and untouched elsewher
   const chokidar = require('chokidar');
   const originalWatch = chokidar.watch;
   let watchedDirs = null;
-  chokidar.watch = (dirs) => {
+  let watchOptions = null;
+  chokidar.watch = (dirs, options) => {
     watchedDirs = dirs;
+    watchOptions = options;
     return { on: () => {}, close: () => {} };
   };
 
@@ -4026,11 +4051,13 @@ test('watch roots reach chokidar canonicalised on Windows and untouched elsewher
       // The junction must have been resolved away. Handing libuv a path it will
       // report events under in a different form is what fires the fs-event
       // assert, and that abort is not something the watcher can recover from.
-      assert.deepEqual(watchedDirs, [path.join(real, '.claude', 'projects')]);
+      assert.deepEqual(watchedDirs, [path.join(real, '.claude', 'projects'), path.join(real, '.claude')]);
+      assert.equal(watchOptions.ignored(path.join(real, '.claude', 'sessions', '123.json')), false);
     } else {
       // Off Windows this must be identity: resolving here would make the watch
       // roots disagree with the paths tokscale is pointed at.
-      assert.deepEqual(watchedDirs, [path.join(alias, '.claude', 'projects')]);
+      assert.deepEqual(watchedDirs, [path.join(alias, '.claude', 'projects'), path.join(alias, '.claude')]);
+      assert.equal(watchOptions.ignored(path.join(alias, '.claude', 'sessions', '123.json')), false);
     }
   } finally {
     if (handle) handle.stop();

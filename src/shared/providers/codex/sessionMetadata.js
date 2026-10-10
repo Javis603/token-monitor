@@ -239,6 +239,7 @@ function resolveSessionMetadata(sessionIds, context) {
     // question the window cannot: whether the agent is still generating.
     const turnEnded = deps.readCodexTurnEnded ? readTurnEnded(filePath) : state.turnEnded;
     const decorated = sessionContext ? { ...meta, ...sessionContext } : meta;
+    if (typeof state.waitingForInput === 'boolean') decorated.waitingForInput = state.waitingForInput;
     // Forwarded in all three states, so a \' + BT + 'false\' + BT + ' can clear a \' + BT + 'true\' + BT + ' from an
     // earlier tick and an unknown transcript leaves the reading alone.
     return turnEnded === undefined ? decorated : { ...decorated, turnEnded };

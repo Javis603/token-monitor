@@ -3,7 +3,10 @@
 
 'use strict';
 
+const { isSessionActivityClient } = require('./sessionActivityProviders');
+
 const PERIODS = ['today', 'month', 'allTime'];
+const { normalizeLiveActivity, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
@@ -655,6 +658,22 @@ function mergeSession(target, source) {
     if (sourceLastUsed > targetLastUsed) target.turnEnded = sourceEnded;
     else if (sourceEnded && sourceLastUsed === targetLastUsed) target.turnEnded = true;
   }
+  // Question state follows transcript activity. At equal timestamps a cleared
+  // request wins, preventing an older period from resurrecting an answered call.
+  if (source.client === 'codex' && typeof source.waitingForInput === 'boolean') {
+    if (sourceLastUsed > targetLastUsed || (sourceLastUsed === targetLastUsed
+      && (target.waitingForInput !== false || source.waitingForInput === false))) {
+      target.waitingForInput = source.waitingForInput;
+    }
+  }
+  // Registry observations have their own clock: waiting can change without a
+  // token or transcript write. An explicit unknown reading clears old evidence.
+  if (isSessionActivityClient(source.client)) {
+    const reading = normalizeLiveActivity(source.liveActivity);
+    if (reading && canReplaceLiveActivity(target.liveActivity, reading)) {
+      target.liveActivity = reading;
+    }
+  }
   if (!target.title && source.title) target.title = normalizeSessionTitle(source.title);
   if (!target.sessionKind && source.sessionKind) target.sessionKind = normalizeSessionKind(source.sessionKind);
   if (source.usageSource === 'codex-dots-local') {
@@ -754,6 +773,13 @@ function normalizeSession(input, fallbackKey) {
   // when the same session arrives from a source that had no evidence.
   if (input.turnEnded === true) session.turnEnded = true;
   else if (input.turnEnded === false) session.turnEnded = false;
+  if (client === 'codex' && typeof input.waitingForInput === 'boolean') {
+    session.waitingForInput = input.waitingForInput;
+  }
+  if (isSessionActivityClient(client)) {
+    const activity = normalizeLiveActivity(input.liveActivity);
+    if (activity) session.liveActivity = activity;
+  }
   session.projectId = String(input.projectId || input.project_id || '').trim();
   session.projectLabel = String(input.projectLabel || input.project_label || '').trim();
   session.title = normalizeSessionTitle(input.title || input.sessionTitle || input.session_title);
@@ -996,7 +1022,7 @@ function normalizePeriod(input, options = {}) {
   reconcileCursorAutoGlobalModels(period, input);
   if (input.sessions && typeof input.sessions === 'object') {
     for (const [key, value] of Object.entries(input.sessions)) {
-      const session = normalizeSession(value, key);
+      const session = normalizeSession(sessionWithActivity(input, key, value), key);
       if (!session) continue;
       if (!projectsEnabled) {
         session.projectId = '';

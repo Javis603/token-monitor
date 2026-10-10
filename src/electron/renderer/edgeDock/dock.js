@@ -47,7 +47,8 @@ const overflowText = window.TokenMonitorOverflowText.create({
 const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
   spin: 'edge-dock-session-spin',
   check: 'edge-dock-session-check',
-  idle: 'edge-dock-session-idle'
+  idle: 'edge-dock-session-idle',
+  waiting: 'edge-dock-session-waiting'
 });
 
 const BRAND_VENDOR_COLORS = { ...clientColors };
@@ -59,6 +60,10 @@ const DRAG_THRESHOLD_PX = 4;
 const BREAKDOWN_VISIBLE_ROWS = 6;
 // Keep the phase anchor in sync with edge-dock-running-spin in dock.css.
 const RUNNING_SPIN_MS = 1400;
+// Match the waiting pulse in dock.css. Keep its entry clock across rail
+// rebuilds so usage pushes and live-status renewals preserve the breathing phase.
+const WAITING_PULSE_MS = 2400;
+const waitingRingStarts = new Map();
 
 const root = document.getElementById('edgeDockRoot');
 const query = new URLSearchParams(window.location.search);
@@ -563,7 +568,18 @@ if (surface === 'peek') {
 
 // ---- Rail ----------------------------------------------------------------
 
-function ringNode(remainingPercent, color, mark) {
+function waitingRingStart(cellId, isWaiting) {
+  if (!isWaiting) {
+    waitingRingStarts.delete(cellId);
+    return null;
+  }
+  if (!waitingRingStarts.has(cellId)) {
+    waitingRingStarts.set(cellId, performance.now());
+  }
+  return waitingRingStarts.get(cellId);
+}
+
+function ringNode(remainingPercent, color, mark, waitingStartedAt = null) {
   const ring = el('div', 'edge-dock-ring');
   ring.style.setProperty('--ring-color', color);
   const svg = document.createElementNS(SVG_NS, 'svg');
@@ -589,8 +605,21 @@ function ringNode(remainingPercent, color, mark) {
   fill.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE * (1 - remaining / 100)));
   if (remainingPercent === null) fill.style.opacity = '0';
   svg.append(track, fill);
+  const waiting = document.createElementNS(SVG_NS, 'svg');
+  waiting.setAttribute('class', 'edge-dock-ring-waiting');
+  waiting.setAttribute('viewBox', '0 0 42 42');
+  waiting.setAttribute('aria-hidden', 'true');
+  const waitingCircle = document.createElementNS(SVG_NS, 'circle');
+  waitingCircle.setAttribute('cx', '21');
+  waitingCircle.setAttribute('cy', '21');
+  waitingCircle.setAttribute('r', '14');
+  waiting.append(waitingCircle);
+  if (waitingStartedAt !== null) {
+    const elapsed = Math.max(0, performance.now() - waitingStartedAt);
+    waiting.style.animationDelay = `-${elapsed % WAITING_PULSE_MS}ms`;
+  }
   if (appearance().edgeDockRunningIndicatorEnabled === false) {
-    ring.append(svg, mark);
+    ring.append(svg, mark, waiting);
     return ring;
   }
   // A separate inner arc reports work without moving the quota reading. Rail
@@ -607,7 +636,7 @@ function ringNode(remainingPercent, color, mark) {
   arc.setAttribute('r', '14');
   arc.setAttribute('stroke-dasharray', `${7 * Math.PI} ${21 * Math.PI}`);
   spinner.append(arc);
-  ring.append(svg, spinner, mark);
+  ring.append(svg, spinner, mark, waiting);
   return ring;
 }
 
@@ -620,7 +649,9 @@ function providerCellNode(cell) {
   // endpoint. It also remains visible when the quota is empty or stale. Hiding
   // the card's session list does not hide the running signal.
   const running = runningSessionSummary(cell.sessions).count;
+  const waiting = presentation.waitingSessionSummary(cell.sessions).count;
   if (running > 0) node.dataset.running = 'yes';
+  if (waiting > 0) node.dataset.waiting = 'yes';
   const color = providerColor(cell.provider);
   const shown = presentation.displayPercent(cell.remainingPercent, appearance().showLimitUsed === true);
   const value = el('span', 'edge-dock-value');
@@ -645,11 +676,12 @@ function providerCellNode(cell) {
   // Splitting the two lets a tight secondary window warn without turning the
   // headline into whichever window is lowest this minute.
   value.dataset.severity = displaySeverity(cell.severityPercent ?? cell.remainingPercent);
-  node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider)), value);
+  node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider), waitingRingStart(cell.id, waiting > 0)), value);
   // The spinner is decorative and carries no text, so the state it announces is
   // spoken here instead, from the same reading it is drawn from.
   const spoken = [providerLabel(cell.provider), value.textContent];
   if (running > 0) spoken.push(t('edgeDock.runningCount', { count: running }));
+  if (waiting > 0) spoken.push(t('edgeDock.waitingCount', { count: waiting }));
   node.setAttribute('aria-label', spoken.join(' '));
   return node;
 }
@@ -1079,6 +1111,10 @@ function renderRail(payload) {
     node.classList.toggle('is-focused', payload.focusCellId === cell.id);
     nodes.push(node);
   });
+  const providerIds = new Set((payload.cells || []).filter((cell) => cell.kind !== 'stat').map((cell) => cell.id));
+  for (const id of waitingRingStarts.keys()) {
+    if (!providerIds.has(id)) waitingRingStarts.delete(id);
+  }
   const ringSnapshot = captureRingResetMotion();
   railNode.replaceChildren(...nodes);
   animateRingResets(ringSnapshot);
@@ -1212,6 +1248,7 @@ function stateMark(session, key, state) {
   dot.innerHTML = SESSION_STATE_GLYPHS;
   dot.dataset.state = state;
   if (state === 'running') dot.title = t('session.running');
+  else if (state === 'waiting') dot.title = t('session.waiting');
   else if (state === 'ended') dot.title = t('session.finished');
   const previous = lastActivityBySession.get(key) || 0;
   const next = Date.parse(session.lastUsedAt || '') || 0;
@@ -1288,7 +1325,7 @@ function sessionsContainer(sessions, options = {}) {
     // translated state is rendered as real text for assistive technology. It
     // cannot go on the row itself: a plain `div` has the generic role and
     // Chromium ignores an accessible name set on one.
-    const stateLabel = state === 'running' ? t('session.running')
+    const stateLabel = state === 'waiting' ? t('session.waiting') : state === 'running' ? t('session.running')
       : state === 'ended' ? t('session.finished')
         : t('session.idle');
     nameNode.append(el('span', 'sr-only', ` ${stateLabel}`));

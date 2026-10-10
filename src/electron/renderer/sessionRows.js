@@ -279,7 +279,7 @@
     const { clientLabel, titleParts, modelLabel } = sessionTitleParts(
       { ...session, client },
       labels,
-      'Reasonix',
+      client === 'codex' ? 'Codex' : client === 'claude' ? 'Claude Code' : 'Reasonix',
       session?.model
     );
     // Native Reasonix prompt totals include cache hits; explicit misses win,
@@ -332,6 +332,7 @@
       color: colors[client] || stable(key, palette),
       stale: false,
       client,
+      backgroundReview: isBackgroundReviewSession(session) || undefined,
       sortTime: sessionTimestampValue(session),
       title: `${clientLabel} session ${sessionIdLabel(session?.sessionId || key)}`
     };
@@ -347,6 +348,16 @@
     const now = options.now || new Date();
     const rows = Object.entries(period?.sessions || {})
       .map(([key, session]) => {
+        session = sessionLive.sessionWithActivity(period, key, session);
+        const native = options.nativeSessions?.[key];
+        // A resumed source can be active before accounting replaces its archive.
+        // Join only presentation activity; the retained token/cost values stay put.
+        if (sessionLive.isArchivedSession(session) && native?.client === session.client
+          && native.sessionId === session.sessionId && ['running', 'waiting'].includes(sessionActivityState(native, now))) {
+          session = { ...session, archived: false, deleted: false, sourceDeleted: false,
+            lastUsedAt: native.lastUsedAt, liveActivity: native.liveActivity,
+            turnEnded: native.turnEnded, waitingForInput: native.waitingForInput };
+        }
         if (isReasonixSyntheticSession(session, key)) return null;
         const value = finiteNumber(session?.totalTokens);
         if (value <= 0) return null;
@@ -396,7 +407,9 @@
         };
       })
       .filter(Boolean);
+    const usageKeys = new Set(rows.map((row) => row.key));
     for (const [key, session] of Object.entries(options.nativeSessions || {})) {
+      if (usageKeys.has(`session:${key}`)) continue;
       const row = nativeSessionRow(session, key, options, now);
       if (row) rows.push(row);
     }

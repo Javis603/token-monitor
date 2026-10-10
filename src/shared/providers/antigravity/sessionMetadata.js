@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
 const { antigravityDataRoots } = require('./selfSync');
+const { antigravityCliDataDir } = require('../../clientSources');
 
 // Deferred like cursor: importing this resolver must not emit Node's
 // experimental node:sqlite warning for collectors that never see an Antigravity row.
@@ -54,7 +55,7 @@ function antigravityConversationSummaryCandidates({ home = os.homedir(), env = p
   for (const root of antigravityDataRoots(home)) {
     candidates.push(path.join(root, 'conversation_summaries.db'));
   }
-  candidates.push(path.join(home, '.gemini', 'antigravity-cli', 'conversation_summaries.db'));
+  candidates.push(path.join(path.dirname(antigravityCliDataDir({ homeDir: home, env })), 'conversation_summaries.db'));
   return [...new Set(candidates)];
 }
 
@@ -101,7 +102,7 @@ function readSummaries(dbPath, sqlite, wantedIds) {
     } catch (_) {
       return null;
     }
-    if (!hasTable) return { summaries, misses: new Set(wantedIds) };
+    if (!hasTable) return null;
 
     let stmt = null;
     try {
@@ -137,7 +138,6 @@ function readSummaries(dbPath, sqlite, wantedIds) {
 function resolveSessionMetadata(sessionIds, context = {}) {
   const result = new Map();
   const sqlite = resolveSqlite(context.deps);
-  if (typeof sqlite?.DatabaseSync !== 'function') return result;
 
   const home = context.home || os.homedir();
   const env = context.deps?.scopedHome ? {} : (context.deps?.env || process.env);
@@ -148,14 +148,26 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     const stamp = databaseStamp(dbPath);
     if (!stamp) continue;
     let cached = cache.get(dbPath);
-    if (cached?.stamp !== stamp) cached = { stamp, summaries: new Map(), misses: new Set() };
+    if (cached?.stamp !== stamp) {
+      // Keep the last successful rows while revalidating this fingerprint.
+      // A failed row is retried; it never becomes a definitive hit or miss.
+      cached = { stamp, summaries: cached?.summaries || new Map(), validatedIds: new Set(), misses: new Set() };
+    }
 
-    const wanted = new Set([...sessionIds].filter((id) => !cached.summaries.has(id) && !cached.misses.has(id)));
-    if (wanted.size > 0) {
+    const wanted = new Set([...sessionIds].filter((id) => !cached.validatedIds.has(id) && !cached.misses.has(id)));
+    if (wanted.size > 0 && typeof sqlite?.DatabaseSync === 'function') {
       const read = readSummaries(dbPath, sqlite, wanted);
       if (read) {
-        for (const [id, row] of read.summaries) cached.summaries.set(id, row);
-        for (const id of read.misses) cached.misses.add(id);
+        for (const [id, row] of read.summaries) {
+          cached.summaries.set(id, row);
+          cached.validatedIds.add(id);
+        }
+        for (const id of read.misses) {
+          // Retain a confirmed removal in this same cache, so later read
+          // failures cannot resurrect a title from the full-scan anchor.
+          if (cached.summaries.has(id)) cached.summaries.set(id, null);
+          cached.misses.add(id);
+        }
       }
     }
     cache.set(dbPath, cached);
@@ -163,16 +175,35 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     for (const sessionId of sessionIds) {
       if (result.has(sessionId)) continue;
       const row = cached.summaries.get(sessionId);
-      if (!row) continue;
-      const title = cleanTitle(row.title) || cleanTitle(row.preview);
-      const identity = projectFromWorkspaceUris(row.workspace_uris, context);
-      if (!title && !identity?.projectId) continue;
+      if (!cached.summaries.has(sessionId)) continue;
+      const title = cleanTitle(row?.title) || cleanTitle(row?.preview);
+      const identity = projectFromWorkspaceUris(row?.workspace_uris, context);
       result.set(sessionId, {
         catalogOnly: true,
+        catalogTitle: title || null,
         ...(title ? { title } : {}),
         ...(identity || {})
       });
     }
+  }
+
+  for (const sessionId of sessionIds) {
+    const key = `antigravity:${sessionId}`;
+    const previous = context.metadata?.get(key);
+    const anchored = context.deps?.t3Titles?.[key];
+    if (!result.has(sessionId)) {
+      const retained = previous && Object.prototype.hasOwnProperty.call(previous, 'catalogTitle')
+        ? previous.catalogTitle : anchored;
+      if (typeof retained === 'string' && retained) {
+        result.set(sessionId, { catalogOnly: true, catalogTitle: retained, title: retained });
+      } else if (retained === null) result.set(sessionId, { catalogOnly: true, catalogTitle: null });
+    }
+    const meta = result.get(sessionId);
+    if (meta && previous && Object.prototype.hasOwnProperty.call(previous, 'titleFallback')) meta.titleFallback = previous.titleFallback;
+    if (meta?.catalogTitle !== null) continue;
+    context.deps?.invalidatedTitleKeys?.add(key);
+    const oldTitle = previous?.catalogTitle || anchored;
+    if (oldTitle) meta.invalidatedTitle = oldTitle;
   }
 
   return result;

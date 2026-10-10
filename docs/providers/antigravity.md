@@ -47,7 +47,7 @@ The generated `antigravity-cache` directory is deliberately not watched. Token M
 
 ### Session titles and project resolution
 
-Antigravity session entries are joined against the local `conversation_summaries.db` SQLite database located under the Antigravity configuration roots (`~/.gemini/antigravity`, or paths specified via `ANTIGRAVITY_HOME`/`ANTIGRAVITY_DATA_DIR`).
+Antigravity session entries are joined against the local `conversation_summaries.db` SQLite database located under the Antigravity configuration roots (`~/.gemini/antigravity`, or paths specified via `ANTIGRAVITY_HOME`/`ANTIGRAVITY_DATA_DIR`) and the CLI root beside its `conversations` directory. The CLI root follows the collector's existing `GEMINI_CLI_HOME` path policy; IDE roots remain under the configured home's `.gemini` directory.
 
 For each conversation ID:
 
@@ -55,9 +55,9 @@ For each conversation ID:
 - A missing project association is resolved from `workspace_uris` (file URLs); an existing decoded scan path remains authoritative. WSL workspace URLs are decoded as POSIX paths even though the reader runs on Windows.
 - Summary updates preserve transcript activity timestamps, turn state, context and cache observations. `last_modified_time` is not a generation timestamp: renaming a conversation must not make it appear running.
 
-The reader opens the database read-only, queries only requested session IDs, and caches source rows and misses per database/WAL fingerprint. Project identities are derived on each lookup so changing the Projects setting does not require a database write. WSL lookups ignore host environment overrides.
+The reader opens the database read-only, queries only requested session IDs, and caches source rows and misses per database/WAL fingerprint. A changed fingerprint revalidates each requested row while preserving its last successful value on transient failures; failed rows remain eligible for retry. Successfully clearing both title and preview, or removing a previously read row, removes only that catalog override. Catalog title provenance uses the existing local metadata and anchor ledger, so watch renames and removals survive later read misses and restarts without changing usage baselines. Project identities are derived on each lookup so changing the Projects setting does not require a database write. WSL lookups ignore all host environment overrides, including `GEMINI_CLI_HOME`.
 
-The database and its WAL are watched, including under the environment overrides and the default CLI root. Discovery and watch policies follow the collector's configured home. Summary-only directories admit those exact files and attribute events to them rather than to the whole parent; unrelated runtime files and the reader's SHM writes do not trigger collection. Watch ticks refresh sessions present in today; month/all-time-only titles refresh on the next full scan.
+The database and its WAL are watched, including under the environment overrides and the resolved CLI root. Metadata reads, discovery and watch policies share the collector's environment and configured home. Summary-only directories admit those exact files and attribute events to them rather than to the whole parent; unrelated runtime files and the reader's SHM writes do not trigger collection. Summary changes refresh labels without admitting an accelerated Antigravity RPC self-sync; conversation usage writes retain their source-sync behavior. Watch ticks refresh sessions present in today; month/all-time-only titles refresh on the next full scan.
 
 ### Boundary with quota collection
 

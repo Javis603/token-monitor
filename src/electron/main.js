@@ -105,6 +105,7 @@ const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { actionWindowForEvent, activateWindowAction, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
 const { applyCodexAdditionalLimitsMigration } = require('./codexAdditionalLimitsMigration');
+const { applyActivityPatch, materializeActivity } = require('../shared/sessionActivityProjection');
 const { createDeviceRuntime } = require('../shared/usage/deviceRuntime');
 const { externalAgentActive } = require('../shared/usage/agentPid');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
@@ -336,7 +337,9 @@ const {
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
   composeLocalOnlySummary,
-  composeLocalSyncSummary
+  composeLocalSyncSummary,
+  projectLocalActivity,
+  localActivityPatch
 } = require('./syncDisplayStats');
 const {
   createRendererSnapshots,
@@ -2940,6 +2943,7 @@ let latestHubStatsIdentity = null;
 let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
+let statsPushSource = null;
 let statsPushRevision = 0;
 let macWidgetSnapshotController = null;
 let macWidgetDemand = null;
@@ -2996,7 +3000,7 @@ function rendererAllTimeSessions(stats) {
     const complete = completeLocalSyncStats(stats);
     const hubSnapshot = snapshotLocalDevices.get(stats);
     const sessions = hubSnapshot
-      ? mergedLocalAllTimeSessions(complete.periods, hubSnapshot.localDevice)
+      ? mergedLocalAllTimeSessions(complete.periods, materializeActivity(hubSnapshot.localDevice))
       : complete.periods?.allTime?.sessions || {};
     return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, aliases, { grouping });
   });
@@ -4296,6 +4300,7 @@ async function startIcloudCollector() {
       transformUsage: usageTransform.transform,
       usageOptions,
       sink,
+      onSessionActivity: publishLocalSessionActivity,
       onDiagnosticEvent: recordDiagnosticEvent,
       onError: (error, reason) => console.log(`[icloud-collector] ${reason}: ${error.message}`)
     }, {
@@ -4377,6 +4382,7 @@ function startSyncCollector() {
     transformUsage: usageTransform.transform,
     usageOptions,
     sink,
+    onSessionActivity: publishLocalSessionActivity,
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
   }, {
@@ -4434,6 +4440,7 @@ function startHostCollector() {
     transformUsage: usageTransform.transform,
     usageOptions,
     sink,
+    onSessionActivity: publishLocalSessionActivity,
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
   }, {
@@ -4491,6 +4498,8 @@ function injectLocalDeviceStatus(stats) {
       if (lastCollectedDevice.clientHealth) device.clientHealth = lastCollectedDevice.clientHealth;
       if (lastCollectedDevice.wslStatus) device.wslStatus = lastCollectedDevice.wslStatus;
     }
+    const activity = localActivityPatch(lastCollectedDevice);
+    if (activity) stats = projectLocalActivity(stats, activity);
   }
   if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
   return stats;
@@ -4719,6 +4728,33 @@ function scheduleMacWidgetSnapshot(stats, producerOwner) {
   return ensureMacWidgetSnapshotController()?.enqueue({ stats, producerOwner }) || false;
 }
 
+function publishLocalSessionActivity(patch) {
+  if (!lastCollectedDevice || !ownsUsageRuntime()) return;
+  const previousDevice = lastCollectedDevice;
+  lastCollectedDevice = projectLocalActivity(lastCollectedDevice, patch);
+  if (localDevice) localDevice = localDevice === previousDevice ? lastCollectedDevice : applyActivityPatch(localDevice, patch);
+  if (!latestStats) return;
+  const previous = latestStats;
+  latestStats = projectLocalActivity(previous, patch);
+  const localSnapshot = snapshotLocalDevices.get(previous);
+  if (localSnapshot) snapshotLocalDevices.set(latestStats, {
+    ...localSnapshot, localDevice: applyActivityPatch(localSnapshot.localDevice, patch)
+  });
+  if (localStats === previous) localStats = latestStats;
+  const snapshot = rendererSnapshots.updateActivity(previous, latestStats);
+  edgeDockManualStats = null;
+  // Only activity metadata crosses IPC. Accounting freshness, sync uploads,
+  // exports, History and rate samples remain on the usage publication lane.
+  const displayPatch = localActivityPatch(latestStats);
+  const visiblePatch = settings.sessionTitlesEnabled === false
+    ? { ...displayPatch, nativeSessions: Object.fromEntries(Object.entries(displayPatch.nativeSessions)
+        .map(([name, sessions]) => [name, withoutSessionTitles(sessions)])) }
+    : displayPatch;
+  presentationCache.updateActivity(previous, latestStats, (stats) => applyActivityPatch(stats, visiblePatch));
+  updateEdgeDockCells(electronPresentationStats(latestStats));
+  sendPush({ event: 'session-activity', data: { patch: visiblePatch, snapshot } });
+}
+
 // Two options, both for the cold-start seed and neither for live stats.
 // `skipExport` keeps a republished snapshot from spending the auto-export
 // interval that this run's first real scan needs. `deferToRenderer` waits for
@@ -4730,11 +4766,14 @@ function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   let rendererPayload = payload;
   if (payload?.data?.stats) {
-    injectLocalDeviceStatus(payload.data.stats);
+    payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
     // Client local batches overlay usage on the cached Hub snapshot; they do
     // not supersede an in-flight read of fresh remote stats.
-    if (!(settings?.hubMode === 'client' && payload.data.reason === 'local')) statsPushRevision += 1;
+    if (!(settings?.hubMode === 'client' && payload.data.reason === 'local')) {
+      statsPushRevision += 1;
+      statsPushSource = { generation: hubModeGeneration, identity: currentHubStatsIdentity() };
+    }
     edgeDockManualStats = null;
     getSyncContentRuntime().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
@@ -4975,6 +5014,7 @@ function startLocalCollector() {
     transformUsage: usageTransform.transform,
     usageOptions,
     progressive: true,
+    onSessionActivity: publishLocalSessionActivity,
     onRecord: (summary, meta) => {
       seedInitialLimitProviders(summary);
       const reason = meta.reason;
@@ -7905,7 +7945,17 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('stats:get', async (_event, options) => {
-    const stats = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
+    const revision = statsPushRevision;
+    const fetched = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
+    // A push from the same source/generation supersedes its pending read. A
+    // retried read after a Hub switch must adopt the new source instead.
+    // Compare the source of the revision, not the latest local composition:
+    // a local B publication must not relabel a revision advanced by Hub A.
+    const sameSource = statsPushSource?.generation === hubModeGeneration
+      && statsPushSource.identity === currentHubStatsIdentity();
+    const current = sameSource && statsPushRevision !== revision && latestStats ? latestStats : fetched;
+    if (current !== latestStats) sendPush({ event: 'stats', data: { stats: current, reason: 'read' } }, { skipExport: true });
+    const stats = latestStats || current;
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);

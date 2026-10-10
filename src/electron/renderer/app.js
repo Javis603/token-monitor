@@ -2343,19 +2343,20 @@ function updateRowContext(row, context, promptCache, contextSnapshot) {
 // The old idiom is kept - a green dot means "active right now" - with the dot
 // simply not drawn once the transcript says the turn is over. No spinner, no
 // check, no idle placeholder: a quiet row shows nothing, exactly as before.
-const rowLiveMarkup = '<span class="row-live-dot"></span>';
+const rowLiveMarkup = '<span class="row-live-dot"></span><span class="row-live-waiting"></span>';
 
 function updateRowLive(row, activityState, activityAt) {
   const dot = row.querySelector('.row-live');
   if (!dot) return;
-  // Only one thing is drawn here, and only while the agent is working: the dot
-  // is absent for every other state, which is what a session list full of past
-  // sessions should look like. The turn-end boundary is still read, so the dot
-  // clears the moment the transcript says the answer is finished rather than
-  // holding green until the recency window expires.
+  // Running keeps the green dot; explicit waiting gets a static attention mark.
+  // Finished and historical rows stay quiet.
   const active = activityState === 'running';
   dot.classList.toggle('is-active', active);
-  dot.title = active ? (t('session.running') || 'Running') : '';
+  dot.classList.toggle('is-waiting', activityState === 'waiting');
+  dot.title = activityState === 'waiting' ? t('session.waiting') : active ? (t('session.running') || 'Running') : '';
+  dot.setAttribute('aria-label', dot.title);
+  dot.setAttribute('role', 'img');
+  dot.setAttribute('aria-hidden', dot.title ? 'false' : 'true');
   const previous = Number(row.dataset.activityAt || 0);
   const next = Number(activityAt) || 0;
   if (next > 0) row.dataset.activityAt = String(next);
@@ -5943,7 +5944,11 @@ function stopSessionStatusRepaint() {
 function scheduleSessionStatusRepaint(period, incompleteHint = '') {
   stopSessionStatusRepaint();
   const now = Date.now();
-  const next = window.TokenMonitorSessionLive.nextSessionStatusChangeAt(Object.values(period?.sessions || {}), now);
+  const sessions = [
+    ...Object.entries(period?.sessions || {}).map(([key, session]) => window.TokenMonitorSessionLive.sessionWithActivity(period, key, session)),
+    ...Object.values(state.stats?.nativeSessions?.[state.period] || {})
+  ];
+  const next = window.TokenMonitorSessionLive.nextSessionStatusChangeAt(sessions, now);
   if (!next) return;
   sessionStatusRepaintTimer = setTimeout(() => {
     sessionStatusRepaintTimer = null;
@@ -5980,12 +5985,18 @@ function renderHomeSessionModule() {
     stateMark.className = 'home-session-state';
     stateMark.dataset.state = activityState;
     stateMark.setAttribute('aria-hidden', 'true');
+    if (activityState === 'waiting') {
+      stateMark.setAttribute('aria-hidden', 'false');
+      stateMark.setAttribute('role', 'img');
+      stateMark.setAttribute('aria-label', t('session.waiting'));
+    }
     stateMark.innerHTML = window.TokenMonitorSessionLive.sessionStateMarkup({
       spin: 'home-session-spin',
       check: 'home-session-check',
-      idle: 'home-session-idle'
+      idle: 'home-session-idle',
+      waiting: 'home-session-waiting'
     });
-    stateMark.title = t(activityState === 'running' ? 'session.running'
+    stateMark.title = t(activityState === 'waiting' ? 'session.waiting' : activityState === 'running' ? 'session.running'
       : activityState === 'ended' ? 'session.finished' : 'session.idle');
     const name = document.createElement('span');
     name.className = 'home-list-name';
@@ -6548,9 +6559,18 @@ function renderHome() {
   // ResizeObserver repeats the scroll + hover restoration once layout fully settles.
 }
 
+let localSessionActivity = null;
+function applyLocalSessionActivity(stats) {
+  const incoming = localSessionActivity;
+  if (!stats || !incoming || incoming.snapshot?.id !== stats.snapshot?.id
+    || incoming.snapshot?.source !== stats.snapshot?.source) return stats;
+  return window.TokenMonitorSessionActivityProjection.applyActivityPatch(stats, incoming.patch);
+}
+
 function sessionStatsForDisplay(stats) {
+  const current = applyLocalSessionActivity(stats);
   return state.settings?.sessionTitlesEnabled === false
-    ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitleStats(stats) : stats;
+    ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitleStats(current) : current;
 }
 
 function setRendererSettings(next) {
@@ -13021,7 +13041,7 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
     ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitles(sessions) : sessions,
   projectionKey: () => state.settings?.sessionTitlesEnabled !== false,
   onLoaded: () => {
-    if (state.stats) state.stats = allTimeSessions.attach(state.stats);
+    if (state.stats) state.stats = sessionStatsForDisplay(allTimeSessions.attach(state.stats));
     statsRenderScheduler.request();
   },
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
@@ -13053,6 +13073,12 @@ window.tokenMonitor.onWindowVisibilityPush?.((visible) => {
 
 window.tokenMonitor.onStatsPush?.((payload) => {
   if (!payload) return;
+  if (payload.event === 'session-activity') {
+    localSessionActivity = payload.data;
+    state.stats = applyLocalSessionActivity(state.stats);
+    statsRenderScheduler.request();
+    return;
+  }
   const wasStreamConnected = state.streamConnected;
   if (payload.event === 'status') {
     state.streamConnected = Boolean(payload.data?.connected);
@@ -13060,10 +13086,10 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
     state.streamFailure = state.streamConnected ? null : (payload.data?.reason ? { reason: payload.data.reason, detail: payload.data.detail ?? null } : state.streamFailure);
   } else if (payload.data?.stats) {
-    // Local collector overlays update client-mode data independently of the
+    // Local overlays and adopted reads update data independently of the
     // Hub SSE transport. Preserve its current Offline/error state until a
     // real stream status or remote stats event proves the connection changed.
-    if (payload.data?.reason !== 'local' && payload.data?.reason !== 'presentation') {
+    if (!['local', 'presentation', 'read'].includes(payload.data?.reason)) {
       state.streamConnected = true;
       state.streamFailure = null;
     }

@@ -40,6 +40,7 @@ const STOP_GRACE_MS = 5000;
 const TRANSFORMED = Object.freeze({ transformed: true });
 const CALLER_OPTION_KEYS = Object.freeze([
   'onUpdate',
+  'onSessionActivity',
   'onPreview',
   'onError',
   'onDiagnosticEvent',
@@ -98,6 +99,7 @@ function createUsageHostCoordinator(deps = {}) {
       archiveWritesYieldToAgent,
       liveSubprocesses: createLiveSubprocessTable(),
       callbacks: {
+        ...(typeof options.onSessionActivity === 'function' ? { activity: true } : {}),
         preview: typeof options.onPreview === 'function',
         error: typeof options.onError === 'function',
         logger: typeof options.logger === 'function'
@@ -173,6 +175,10 @@ function createUsageHostCoordinator(deps = {}) {
     function onMessage(message) {
       if (message?.diagnostics !== undefined) diagnostics = message.diagnostics;
       switch (message?.type) {
+        case 'activity':
+          if (stopped) return;
+          notify(options.onSessionActivity, message.patch);
+          return;
         case 'update':
           if (message.archive) archiveState = message.archive;
           notify(options.onUpdate, message.summary, message.reason, TRANSFORMED);

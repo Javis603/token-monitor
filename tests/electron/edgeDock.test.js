@@ -256,13 +256,13 @@ test('the card takes the forecast separator from the page instead of redrawing i
   );
 });
 
-test('the Sessions list uses a plain dot, not the dock card glyph stack', () => {
+test('the Sessions list keeps the running dot and adds a static waiting mark', () => {
   // This row already leads with the client's own icon, so a spinner or check
   // drawn at its corner reads as part of that logo. The card has no such icon,
   // which is why the richer states live there and the old dot idiom stays here.
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  assert.match(app, /rowLiveMarkup = '<span class="row-live-dot"><\/span>'/);
+  assert.match(app, /rowLiveMarkup = '<span class="row-live-dot"><\/span><span class="row-live-waiting"><\/span>'/);
   const sessionList = app.slice(app.indexOf('function updateRowLive('), app.indexOf('function updateRow(', app.indexOf('function updateRowLive(')));
   assert.doesNotMatch(sessionList, /sessionStateMarkup\(\{/);
   assert.doesNotMatch(styles, /row-live-spin|row-live-check|row-live-idle/);
@@ -2493,6 +2493,26 @@ test('the running arc resumes its phase rather than restarting on every repaint'
   const ring = dock.slice(dock.indexOf('function ringNode('), dock.indexOf('function providerCellNode('));
   assert.match(ring, /spinner\.style\.animationDelay/);
   assert.match(ring, /spinner\.setAttribute\('aria-hidden', 'true'\)/);
+});
+
+test('waiting ring keeps its phase across renewals and resets after waiting clears', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const body = dock.slice(dock.indexOf('function waitingRingStart('), dock.indexOf('function ringNode('));
+  const starts = new Map();
+  let clock = 100;
+  const start = Function('waitingRingStarts', 'performance', `return (${body})`)(
+    starts, { now: () => clock }
+  );
+  assert.equal(start('claude', true), 100);
+  clock = 1500;
+  assert.equal(start('claude', true), 100, 'a heartbeat must not replay the entry');
+  assert.equal(start('codex', true), 1500, 'providers enter waiting independently');
+  clock = 5000;
+  assert.equal(start('claude', true), 100, 'a long wait keeps the original phase anchor');
+  assert.equal(start('claude', false), null);
+  assert.equal(starts.has('claude'), false);
+  assert.equal(start('claude', true), 5000, 'a later wait gets its own entry');
+  assert.equal(start('codex', true), 1500, 'another provider remains undisturbed');
 });
 
 // The handle's exit is a move now rather than a blink. The window's fade is the main

@@ -93,6 +93,8 @@ function normalizeSessionUsageArchive(value) {
     for (const periodName of PERIODS) {
       const session = normalizedSessionFrom(rawPeriods?.[periodName], rawKey);
       if (!session || isReasonixSyntheticSession(session, rawKey) || !hasSessionUsage(session)) continue;
+      delete session.liveActivity;
+      delete session.waitingForInput;
       const key = sessionKey(session.client, session.sessionId);
       if (!key) continue;
       entry.client = session.client;
@@ -204,6 +206,8 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
       // only in what the round-trip drops is caught by the second comparison.
       if (sameWindow && sameJson(entry.periods[periodName], session)) continue;
       const nextSession = cloneJson(session);
+      delete nextSession.liveActivity;
+      delete nextSession.waitingForInput;
       if (sameWindow && sameJson(entry.periods[periodName], nextSession)) continue;
       entry.client = session.client;
       entry.sessionId = session.sessionId;

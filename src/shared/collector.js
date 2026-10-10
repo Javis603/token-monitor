@@ -33,6 +33,8 @@ const {
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { createWatcherHost } = require('./watcherHost');
+const { createSessionActivityScheduler } = require('./sessionActivityScheduler');
+const { activityWatchSources, activityClientsForPath, activityWatchIgnored } = require('./sessionActivityWatch');
 const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const {
@@ -52,6 +54,10 @@ const {
   sessionMetadataMap
 } = require('./sessionMetadata');
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
+const { sessionActivityProvidersFor, refreshSessionActivity } = require('./sessionActivityRegistry');
+const { isSessionActivityClient } = require('./sessionActivityProviders');
+const { readT3Activities } = require('./t3SessionActivity');
+const { createProcessStartBatch } = require('./processStarts');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
 const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
 const { createLocalUsageSource } = require('./providers/codex/localUsageSource');
@@ -694,6 +700,9 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       } else {
         delete target.turnEnded;
       }
+      if (session.client === 'codex' && typeof session.waitingForInput === 'boolean') {
+        target.waitingForInput = session.waitingForInput;
+      }
       if (session.startedAt && (!target.startedAt || Date.parse(session.startedAt) < Date.parse(target.startedAt))) {
         target.startedAt = session.startedAt;
       }
@@ -865,6 +874,7 @@ async function collectUsageOnce(options) {
   const normalizedClients = normalizeClientsCsv(clients);
   const localSessionMetadataDeps = {
     ...(options.sessionMetadataDeps || {}),
+    env: options.env || options.sessionMetadataDeps?.env,
     customScanPaths: options.customScanPaths,
     metadataCache: new Map(),
     resolvedSessionKeys: new Set(),
@@ -1205,11 +1215,12 @@ async function collectUsageOnce(options) {
     }
   }
   if (typeof options.onAnchorComputed === 'function') {
-    // Title provenance belongs to the local anchor, never to published rows.
+    // Reuse the existing catalog-title ledger (historically named t3Titles)
+    // for summary overrides too. Provenance never enters published rows.
     const t3Titles = { ...localSessionMetadataDeps.t3Titles };
     for (const key of localSessionMetadataDeps.invalidatedTitleKeys) t3Titles[key] = null;
     for (const [key, meta] of localSessionMetadataDeps.metadataCache) {
-      if (meta.t3Title) t3Titles[key] = meta.t3Title;
+      if (meta.t3Title || meta.catalogTitle) t3Titles[key] = meta.t3Title || meta.catalogTitle;
     }
     options.onAnchorComputed({
       windowsPeriods,
@@ -1260,7 +1271,28 @@ async function collectUsageOnce(options) {
     )
   });
   if (clientHealth) summary.clientHealth = clientHealth;
-  return summary;
+  const activityObservedAt = Date.now();
+  const activityProviders = sessionActivityProvidersFor(trackedClientSet);
+  const activityOptions = activityProviders.length ? activityReadOptions(options, {
+    env: options.env || options.sessionMetadataDeps?.env, homeDir: options.homeDir || os.homedir(),
+    customScanPaths: options.customScanPaths, platform: options.platform, now: activityObservedAt
+  }, activityProviders) : {};
+  const activitySummary = await refreshSessionActivity(summary, activityProviders, options, activityOptions, {
+    isCurrent: () => { throwIfAborted(options.signal); return true; },
+    now: () => activityObservedAt
+  });
+  // Activity is observed after scans; it must not re-date their accounting
+  // snapshot if that read crosses midnight. Observations retain their own clock.
+  const result = require('./sessionActivityProjection').materializeActivity(activitySummary);
+  return result.updatedAt === summary.updatedAt ? result : { ...result, updatedAt: summary.updatedAt };
+}
+
+function activityReadOptions(options, extras, providers) {
+  const base = { ...options.sessionMetadataDeps, ...extras };
+  const readProcessStarts = createProcessStartBatch(base.readProcessStarts);
+  const shared = { ...base, readProcessStarts };
+  const drivers = [...new Set(providers.map((entry) => entry.t3Driver).filter(Boolean))];
+  return { ...shared, ...(drivers.length ? { t3Activity: readT3Activities(shared, drivers) } : {}) };
 }
 
 // Sources that remain part of collection, health, and diagnostics but are too
@@ -1311,7 +1343,7 @@ function selfSyncSourceRootsForClients(clientsCsv, options = {}) {
     if (sourceRoots.length > 0) rootsByClient.cursor = sourceRoots;
   }
   if (enabled.has('antigravity')) {
-    const sourceRoots = [...new Set(antigravityDataRoots().filter(dirExists))];
+    const sourceRoots = [...new Set(antigravityDataRoots(options.homeDir || os.homedir()).filter(dirExists))];
     if (sourceRoots.length > 0) rootsByClient.antigravity = sourceRoots;
   }
   return rootsByClient;
@@ -1348,7 +1380,7 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
   // so it is also safe to watch and shares the umbrella client id. The filter
   // expands that id to antigravity-cli when the targeted scan runs.
   const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
-  const antigravityCliDir = antigravityCliDataDir();
+  const antigravityCliDir = antigravityCliDataDir(options);
   if (enabled.has('antigravity') && dirExists(antigravityCliDir)) {
     rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), antigravityCliDir])];
   }
@@ -1405,7 +1437,7 @@ function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options 
   if (rootsByClient.antigravity) {
     const canonicalRoot = (dir) => path.resolve(canonicalWatchPath(dir));
     const usageRoots = new Set([
-      ...antigravityDataRoots(), antigravityCliDataDir(),
+      ...antigravityDataRoots(options.homeDir || os.homedir()), antigravityCliDataDir(options),
       ...(normalizeCustomScanPaths(options.customScanPaths, options).antigravity || [])
     ].map(canonicalRoot));
     const summaries = antigravitySummaryWatchSources(options);
@@ -1660,7 +1692,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     directChildOnly(isCursorDesktopStateWrite));
 
   const antigravityEnabled = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).includes('antigravity');
-  bound('antigravity', antigravityEnabled ? antigravityDataRoots() : [], (parts) => {
+  bound('antigravity', antigravityEnabled ? antigravityDataRoots(options.homeDir || os.homedir()) : [], (parts) => {
     if (parts.length === 1) {
       return !ANTIGRAVITY_SOURCE_DIRS.has(parts[0]) && !ANTIGRAVITY_SOURCE_FILES.has(parts[0]);
     }
@@ -1765,8 +1797,8 @@ function watchPolicyEntries(clientsCsv, options = {}) {
           && !(claimed.get(client) || EMPTY_SET).has(dir)
         ))
         .map((dir) => ({ root: canonicalRoot(dir), custom: isCustomOnly(client, canonicalRoot(dir)) }))),
-    ...(antigravityEnabled && dirExists(antigravityCliDataDir())
-      ? [{ root: canonicalRoot(antigravityCliDataDir()), custom: false }]
+    ...(antigravityEnabled && dirExists(antigravityCliDataDir(options))
+      ? [{ root: canonicalRoot(antigravityCliDataDir(options)), custom: false }]
       : [])
   ];
   // A directory that is a built-in root for any client keeps everything, even
@@ -2242,11 +2274,12 @@ const WATCH_REFUSAL_CODES = new Set([WATCH_POLLING_LIMIT_CODE, WATCH_POLLING_UNA
 // because the host can switch to polling on its own (a watch process that never
 // confirmed its exit), and a check the host can route around bounds nothing.
 function openWatch(chokidar, config = {}) {
-  const ignored = watchIgnoreMatcher(config.clients, {
+  const ignored = activityWatchIgnored(watchIgnoreMatcher(config.clients, {
     customScanPaths: config.customScanPaths,
     cursorDesktopRoots: config.cursorDesktopRoots,
-    homeDir: config.homeDir
-  });
+    homeDir: config.homeDir,
+    env: config.env
+  }), config.usageDirs || config.dirs || [], config.activitySources || []);
   const limit = Number.isInteger(config.pollingEntryLimit) && config.pollingEntryLimit >= 0
     ? config.pollingEntryLimit
     : WATCH_POLLING_ENTRY_LIMIT;
@@ -2432,6 +2465,10 @@ function startCollector(options) {
   let watchDeadlineAt = 0;
   let intervalTimer = null;
   let stopped = false;
+  let activityScheduler = null;
+  let activityWatchReady = false;
+  let activityUpdate = null;
+  let latestActivitySummary = null;
   let lastTickAttemptAt = 0;
   let lastTickSuccessAt = 0;
   let lastTickFailureAt = 0;
@@ -2848,6 +2885,10 @@ function startCollector(options) {
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'
         ? transformedSummary
         : summary;
+      // Use the actual visible baseline whether archive projection mutated the
+      // input or returned a copy. Retained identities suppress temporary rows.
+      require('./sessionActivityProjection').invalidateActivityIndex(visibleSummary);
+      latestActivitySummary = visibleSummary;
       if (historyEnabled !== false && options.dailyHistoryArchiveEnabled) {
         try {
           const visibleAt = visibleSummary.updatedAt || summary.updatedAt;
@@ -2936,6 +2977,8 @@ function startCollector(options) {
   }
 
   async function runTick(reason, tickOptions = {}) {
+    // Metadata-only publications share the same output lane as token scans.
+    if (activityUpdate) await activityUpdate;
     if (stopped || runtimeSignal.aborted) return false;
     if (startBarrier) {
       const barrier = startBarrier;
@@ -3102,6 +3145,7 @@ function startCollector(options) {
   // is the quit path: descriptors go with the process, so there is nothing to
   // wait for.
   function closeWatchers({ skipClose = false } = {}) {
+    activityWatchReady = false;
     for (const host of watchers) {
       try { host.close({ skipClose }); } catch (_) {}
     }
@@ -3124,6 +3168,8 @@ function startCollector(options) {
   }
 
   function handleWatchError(error) {
+    activityWatchReady = false;
+    activityScheduler?.request();
     log(`chokidar error: ${error.message}`);
     if (stopped) return;
     if (WATCH_REFUSAL_CODES.has(error?.code)) {
@@ -3176,12 +3222,21 @@ function startCollector(options) {
       Object.entries(selfSyncSourceRootsForClients(clients, sourceOptions))
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
     );
-    const dirs = [...new Set(Object.values(rootsByClient).flat())];
-    const directoryKey = dirs.join('\0');
+    const summaryFiles = new Set(antigravitySummaryWatchSources(sourceOptions)
+      .flatMap(({ file }) => [file, `${file}-wal`]));
+    const usageDirs = [...new Set(Object.values(rootsByClient).flat())];
+    const activitySources = options.sessionActivityPolling === false ? [] : activityWatchSources(trackedClients, {
+      ...options.sessionMetadataDeps, ...sourceOptions, homeDir: options.homeDir || os.homedir()
+    }).map((source) => ({ ...source, dir: canonicalWatchPath(source.dir),
+      target: path.resolve(canonicalWatchPath(source.dir), path.relative(source.dir, source.target)),
+      ...(source.runtimeFile ? { runtimeFile: path.resolve(canonicalWatchPath(source.dir), path.relative(source.dir, source.runtimeFile)) } : {}) }));
+    const dirs = [...new Set([...usageDirs, ...activitySources.map((source) => source.dir)])];
+    const directoryKey = JSON.stringify([dirs, activitySources]);
     if (directoryKey === watchedDirectoryKey) return;
     closeWatchers();
     if (dirs.length === 0) {
       watchedDirectoryKey = directoryKey;
+      activityWatchReady = true; // no existing sources; slow discovery is enough
       lastWatchFailureCode = null;
       log('No watchable client data directories found; relying on fallback interval only.');
       return;
@@ -3194,13 +3249,23 @@ function startCollector(options) {
       // the collector cannot re-trigger itself. See
       // SELF_WATCHED_SQLITE_SIDECAR_CLIENTS for the measured per-client evidence.
       if (isSelfWatchSqliteSidecarEvent(filePath, rootsByClient)) return;
+      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient);
+      const activityClients = activityClientsForPath(filePath, activitySources);
+      if (activityClients.length || eventClients.some(isSessionActivityClient)) {
+        activityScheduler?.request();
+      }
+      // The read-only T3 reader can recreate -shm itself. Neither it nor other
+      // activity-only writes are token usage, so they cannot request a scan.
+      if (eventClients.length === 0 && activitySources.some((source) => {
+        const relative = path.relative(source.dir, path.resolve(filePath || '.'));
+        return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+      })) return;
       activityRevision += 1;
       if (tickPending) {
         pendingActivityRevision = pendingActivityRevision === null
           ? activityRevision
           : Math.max(pendingActivityRevision, activityRevision);
       }
-      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient);
       if (
         reasonixNativeSessionCache
         && isReasonixNativeSessionSidecar(filePath)
@@ -3214,6 +3279,8 @@ function startCollector(options) {
         reasonixNativeSessionCache.invalidate(filePath);
       }
       for (const client of clientsForWatchPath(filePath, sourceSyncRootsByClient)) {
+        // Catalog changes refresh labels, not the RPC usage cache.
+        if (client === 'antigravity' && summaryFiles.has(path.resolve(filePath))) continue;
         // Another client's scan root may overlap the desktop store. Its unrelated
         // files can request a local scan, but only database/WAL writes earn a
         // Cursor cloud sync.
@@ -3234,15 +3301,20 @@ function startCollector(options) {
       const host = createWatcherHost(
         {
           dirs,
+          usageDirs,
+          activitySources,
           clients,
           customScanPaths: sourceOptions.customScanPaths,
           cursorDesktopRoots: sourceSyncRootsByClient.cursor || [],
           homeDir: sourceOptions.homeDir,
+          env: sourceOptions.env,
           usePolling,
           pollingEntryLimit: watchPollingEntryLimit
         },
         {
           onHostFallback: (error, fallback = {}) => {
+            activityWatchReady = false;
+            activityScheduler?.request();
             // The host moves to polling by itself when a watch process never
             // confirmed its exit; diagnostics have to say so.
             if (fallback.usePolling === true) watchHostPolling = true;
@@ -3250,6 +3322,7 @@ function startCollector(options) {
             log(`Watch worker unavailable (${error.message}); watching on this thread.`);
           },
           onError: handleWatchError,
+          onReady: () => { activityWatchReady = !usePolling && !watchHostPolling; },
           onEvent: handleWatchEvent
         }
       );
@@ -3309,6 +3382,36 @@ function startCollector(options) {
     });
   }
 
+  function pollSessionActivity() {
+    const providers = sessionActivityProvidersFor(trackedClients);
+    if (stopped || !providers.length) return true;
+    activityUpdate = (async () => {
+      if (tickInFlight || !latestActivitySummary) return false;
+      // Published snapshots are immutable. Replace only the affected maps;
+      // counters, history and the exact scan anchor stay untouched.
+      const previous = latestActivitySummary;
+      const activityOptions = activityReadOptions(options, { ...sourceOptions, homeDir: options.homeDir || os.homedir() }, providers);
+      const next = await refreshSessionActivity(previous, providers, options, activityOptions, {
+        isCurrent: () => !stopped && !tickInFlight && latestActivitySummary === previous
+      });
+      if (!next) return false;
+      if (next === previous) return;
+      // Hosts that understand activity patches bypass accounting transforms,
+      // archive writes and whole-summary IPC. Legacy callers retain onUpdate.
+      if (typeof options.onSessionActivity === 'function') {
+        const { activityPatch } = require('./sessionActivityProjection');
+        await options.onSessionActivity(activityPatch(previous, next));
+      } else await onUpdate?.(require('./sessionActivityProjection').materializeActivity(next), 'session-activity');
+      if (!stopped && latestActivitySummary === previous) latestActivitySummary = next;
+    })().catch((error) => {
+      if (!stopped) log(`Session activity update failed: ${error.message}`);
+      return false;
+    }).finally(() => {
+      activityUpdate = null;
+    });
+    return activityUpdate;
+  }
+
   // Stays synchronous and never returns a promise: startMode() and friends rely
   // on stop() having severed the old collector by the time it returns. Setting
   // `stopped` is what does the severing, so a watcher left alive by
@@ -3320,6 +3423,7 @@ function startCollector(options) {
     codexLocalSource?.stop();
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
+    activityScheduler?.stop();
     clearRolloverHistoryRetry();
     sourceSyncQueue.stop();
     closeWatchers({ skipClose: options.skipCloseWatchers === true });
@@ -3333,7 +3437,7 @@ function startCollector(options) {
     // test pins that startup ordering because reversing it would microtask-spin.
     if (startBarrier) return Promise.resolve(startBarrier).then(() => whenIdle());
     const usageIdle = !tickInFlight ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(resolve));
-    return usageIdle.then(() => stopped ? codexLocalSource?.whenIdle() : undefined);
+    return usageIdle.then(() => activityUpdate).then(() => stopped ? codexLocalSource?.whenIdle() : undefined);
   }
 
   function getDiagnostics() {
@@ -3379,6 +3483,14 @@ function startCollector(options) {
 
   setupWatchers();
   loop();
+  if (options.sessionActivityPolling !== false && sessionActivityProvidersFor(trackedClients).length) {
+    activityScheduler = createSessionActivityScheduler({
+      refresh: pollSessionActivity,
+      nativeEventsReady: () => activityWatchReady || !watchEnabled,
+      needsRenewal: () => require('./sessionActivityProjection').needsActivityRenewal(latestActivitySummary)
+    });
+    activityScheduler.start();
+  }
   if (trackedClients.has('codex') && options.codexLocalUsageEnabled !== false
     && (options.codexDotsEnabled === true || (options.codexDotsEnabled === undefined
       && (options.env || process.env).TOKEN_MONITOR_CODEX_LOCAL_USAGE === '1'))) {

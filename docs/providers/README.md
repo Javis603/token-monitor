@@ -78,6 +78,17 @@ Targeted watch ticks make the client id a correctness surface, because the scan 
 
 The first two are correctness: break either and a watch tick zeroes a client's partition, feeding a negative delta into month/allTime until the next full scan. The third is performance — `synthetic` makes tokscale enable *every* client, so the targeted scan silently degrades into a full one with correct numbers and none of the saving. Don't diagnose one as the other. `tests/shared/clientPartitionInvariants.test.js` enforces all three.
 
+## Adding a live activity adapter
+
+Register only reliable identity/state/resolution evidence; missing evidence clears the prior observation to `unknown` and restores transcript fallback. Do not infer waiting from prompt text or shell arguments.
+
+1. Add the canonical client id, `metadataDepsKey` and optional verified `t3Driver` to portable `sessionActivityProviders.js`; bind an explicit lazy loader in `sessionActivityRegistry.js`. Disabled adapters must not load or probe.
+2. Implement `readActivity(summary, options)` returning `{ readings: Map<sessionId, liveActivity>, sessions: localZeroTokenRows }`, and `projectActivity(summary, activity, now)` returning a new snapshot or `null` when unchanged. Reuse `sessionActivityProjection` for bounded lookups, overlays and clearing; share accounting maps and preserve archive exclusions.
+3. If transcript events are insufficient, expose bounded `activityWatchTargets(options)` declarations: `{ target, floor, kind }` with `pid-registry` or `sqlite`. The shared watcher admits only the ancestor chain and source files, including SQLite WAL and an explicitly declared `runtimeFile`, excluding SHM. New source shapes need a bounded matcher; no adapter owns another watcher or timer.
+4. Test protocol identity, pending/resolved states, stale/future observations, archives, zero-token replacement and collector cancellation. Run `npm run update:hub-build` after portable changes, then `npm run verify`.
+
+Declarations drive common dispatch, rendering, normalization and expiry; native transcript fallbacks remain provider-specific. See [architecture](../architecture.md) for accounting and publication boundaries.
+
 ## Adding a limits provider
 
 Provider identity lives in **one** place: `LIMIT_PROVIDER_CATALOG` in `src/shared/limits/providers.js`. The catalog order is the new-install order; a changed default must not overwrite a saved custom order. A tracked client is something tokscale counts tokens for, a limits provider is an account whose quota we read, and only some ids are both — the two catalogs and checklists are separate. Everything below is either a hand-wired registration point that must agree with that id, or a provider-specific surface to add only where it applies.
