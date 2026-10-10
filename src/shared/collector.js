@@ -942,16 +942,7 @@ async function collectUsageOnce(options) {
   if (anchorUsed) localSessionMetadataDeps.t3Titles = anchor.todayT3Titles || anchor.t3Titles || {};
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
-    try {
-      options.onProgress({
-        ...periods,
-        updatedAt: new Date().toISOString(),
-        // Lets the preview consumer know whether the frozen wslAnchor still
-        // pairs with this scan: a drift-invalidated anchor must not merge its
-        // frozen WSL periods into the preview.
-        wslAnchorUsable: anchorUsable
-      });
-    } catch (_) {}
+    try { options.onProgress({ ...periods, updatedAt: new Date().toISOString() }); } catch (_) {}
   };
   if (normalizedClients) {
     const syncClients = targetRequested ? targetClientsCsv : normalizedClients;
@@ -1107,10 +1098,9 @@ async function collectUsageOnce(options) {
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
+    } else if (options.wslAnchor) {
+      wslBundle = options.wslAnchor;
     } else if (!anchorUsable) {
-      // The Windows anchor is unusable (missing, stale, or drift-invalidated),
-      // so the frozen WSL snapshot from that anchor cannot pair with the fresh
-      // Windows window: rescan WSL as part of the full scan.
       const wslResult = await collectWsl({
         clients: normalizedClients,
         trackedClients: normalizedClients,
@@ -1123,8 +1113,6 @@ async function collectUsageOnce(options) {
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
-    } else if (options.wslAnchor) {
-      wslBundle = options.wslAnchor;
     }
   }
   today = mergePeriods(windowsPeriods.today, wslBundle.today);
@@ -2826,11 +2814,7 @@ function startCollector(options) {
             if (typeof onPreview === 'function') {
               // Frozen WSL snapshot, gated so a cross-day/cross-month full scan
               // doesn't merge a stale period's WSL usage into the preview.
-              // A drift-invalidated Windows anchor invalidates the WSL snapshot
-              // frozen from it as well: nothing from the old window may pair
-              // with this scan's fresh Windows periods.
-              const previewWslAnchor = partial.wslAnchorUsable === false ? null : wslAnchor;
-              const wsl = wslPeriodsForPreview(previewWslAnchor, anchor?.dateKey, todayKey);
+              const wsl = wslPeriodsForPreview(wslAnchor, anchor?.dateKey, todayKey);
               const preview = {
                 deviceId, hostname: os.hostname(),
                 platform: `${process.platform}-${process.arch}`,
@@ -2856,8 +2840,8 @@ function startCollector(options) {
                   : partial.month;
               }
               if (partial.allTime) {
-                preview.allTime = previewWslAnchor
-                  ? mergePeriods(partial.allTime, previewWslAnchor.allTime)
+                preview.allTime = wslAnchor
+                  ? mergePeriods(partial.allTime, wslAnchor.allTime)
                   : partial.allTime;
               }
               // Only derive clientStatus when allTime is available; warm
