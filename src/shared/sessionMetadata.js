@@ -374,7 +374,8 @@ function applySessionMetadata(periods, home, deps = {}) {
           if (sources) delete sources[key];
         } else if (!session.projectId && !meta.catalogProjectResolved && sources?.[key]) {
           session.projectId = sources[key];
-          session.projectLabel = deps.catalogProjectFallbacks?.[periodName]?.sessions?.[key]?.projectLabel;
+          session.projectLabel = deps.catalogProjects?.labels?.[sources[key]]
+            || deps.catalogProjectFallbacks?.[periodName]?.sessions?.[key]?.projectLabel;
           deps.catalogProjectRows?.add(session);
         } else if (sources && !owned) {
           delete sources[key];

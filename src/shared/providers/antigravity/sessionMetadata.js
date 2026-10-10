@@ -170,6 +170,9 @@ function resolveSessionMetadata(sessionIds, context = {}) {
           cached.validatedIds.add(id);
         }
         for (const id of read.misses) {
+          // This store's old row is no longer evidence, even if the file
+          // disappears or a new fingerprint cannot be read on the next tick.
+          if (cached.summaries.has(id)) cached.summaries.set(id, null);
           cached.misses.add(id);
         }
       }
@@ -182,7 +185,7 @@ function resolveSessionMetadata(sessionIds, context = {}) {
 
     for (const sessionId of sessionIds) {
       const row = cached.summaries.get(sessionId);
-      if (stamp && cached.misses.has(sessionId)) continue;
+      if (cached.misses.has(sessionId)) continue;
       if (!row) continue;
       const title = cleanTitle(row?.title) || cleanTitle(row?.preview);
       const priority = (stamp && cached.validatedIds.has(sessionId) ? 2 : 0) + (title ? 4 : 0);

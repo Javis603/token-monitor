@@ -894,7 +894,7 @@ async function collectUsageOnce(options) {
     invalidatedTitleKeys: new Set(),
     t3Titles: {},
     catalogTitleSources: {},
-    catalogProjects: { today: {}, month: {}, allTime: {} },
+    catalogProjects: { today: {}, month: {}, allTime: {}, labels: {} },
     catalogProjectRows: new WeakSet()
     // dshSessionFileCache is deliberately NOT reset here: it's module-level
     // (declared with jsonlTimestampCache above) precisely so it survives
@@ -931,6 +931,7 @@ async function collectUsageOnce(options) {
     for (const period of ['today', 'month', 'allTime']) {
       localSessionMetadataDeps.catalogProjects[period] = { ...anchor.catalogProjects?.[period] };
     }
+    localSessionMetadataDeps.catalogProjects.labels = { ...anchor.catalogProjects?.labels };
     localSessionMetadataDeps.catalogProjectFallbacks = anchor;
   }
   const emitProgress = (periods) => {
@@ -1253,6 +1254,12 @@ async function collectUsageOnce(options) {
       if (meta.catalogTitleSource) catalogTitleSources[key] = meta.catalogTitleSource;
     }
     const catalogProjects = localSessionMetadataDeps.catalogProjects;
+    for (const period of ['today', 'month', 'allTime']) {
+      for (const [key, id] of Object.entries(catalogProjects[period])) {
+        const label = windowsPeriods[period]?.sessions?.[key]?.projectLabel;
+        if (label) catalogProjects.labels[id] = label;
+      }
+    }
     options.onAnchorComputed({
       windowsPeriods,
       todayPartitions,

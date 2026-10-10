@@ -9,6 +9,7 @@ const { pathToFileURL } = require('node:url');
 const { applySessionMetadata, projectIdentity } = require('../../src/shared/sessionMetadata');
 const { collectUsageOnce, localTodayKey, startCollector } = require('../../src/shared/collector');
 const { sessionActivityState } = require('../../src/shared/sessionLive');
+const { projectRollupFromSessions } = require('../../src/shared/usage');
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 const {
   cleanTitle,
@@ -946,4 +947,95 @@ test('Antigravity full-scan deletion stays cleared through a later fingerprint r
     constructor() { throw new Error('SQLITE_BUSY'); }
   } } } });
   for (const period of ['today', 'month', 'allTime']) assert.equal(failed[period].sessions['antigravity:deleted'].title || '', '');
+});
+
+
+for (const secondFailure of ['missing-file', 'changed-fingerprint-busy']) {
+  test(`Antigravity per-store confirmed deletion survives ${secondFailure} without shadowing fallback`, { skip: !sqlite }, async (t) => {
+    const store = summaryStore(t);
+    store.put.run('removed', 'Old primary title', '', null, null);
+    const dir = path.join(store.home, '.gemini', 'antigravity-ide');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'conversation_summaries.db');
+    const other = new sqlite.DatabaseSync(file);
+    try {
+      other.exec('CREATE TABLE conversation_summaries(conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, workspace_uris TEXT)');
+      other.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?)').run('removed', 'Fallback title', '', null);
+      const options = {
+        clients: 'antigravity', homeDir: store.home, projectsEnabled: false, historyEnabled: false,
+        dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false, wslScanEnabled: false,
+        osInfo: {}, allTimeSince: '2024-01-01', sessionMetadataDeps: store.deps,
+        runAntigravitySync: async () => {}, runTokscale: async () => ({ entries: [{ client: 'antigravity', sessionId: 'removed', input: 12, output: 0, cost: 0.5 }] })
+      };
+      const original = await collectUsageOnce(options);
+      assert.equal(original.today.sessions['antigravity:removed'].title, 'Old primary title');
+      store.db.exec('DELETE FROM conversation_summaries');
+      assert.equal((await collectUsageOnce(options)).today.sessions['antigravity:removed'].title, 'Fallback title');
+      if (secondFailure === 'missing-file') {
+        store.close(); other.close();
+        fs.renameSync(store.dbPath, `${store.dbPath}.moved`);
+        fs.renameSync(file, `${file}.moved`);
+      } else {
+        store.db.exec('CREATE TABLE fingerprint_change(value TEXT)');
+        options.sessionMetadataDeps = { ...store.deps, sqlite: { DatabaseSync: class {
+          constructor(target, config) { if (target === store.dbPath) throw new Error('SQLITE_BUSY'); return new sqlite.DatabaseSync(target, config); }
+        } } };
+      }
+      const unavailable = await collectUsageOnce(options);
+      for (const period of ['today', 'month', 'allTime']) {
+        assert.equal(unavailable[period].sessions['antigravity:removed'].title, 'Fallback title');
+        assert.equal(unavailable[period].totalTokens, original[period].totalTokens);
+        assert.equal(unavailable[period].costUsd, original[period].costUsd);
+      }
+    } finally { if (other.isOpen) other.close(); }
+  });
+}
+
+test('Antigravity post-anchor sessions retain project labels and rollups through unavailable-store restart', { skip: !sqlite }, async (t) => {
+  const store = summaryStore(t);
+  const key = 'antigravity:new-session';
+  const project = path.join(store.home, 'new-project');
+  const shared = path.join(store.home, 'shared');
+  const oldShared = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = shared;
+  let handle;
+  let includeNew = false;
+  const updates = [];
+  t.after(() => { handle?.stop(); if (oldShared === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR; else process.env.TOKEN_MONITOR_SHARED_DIR = oldShared; });
+  const options = {
+    clients: 'antigravity', homeDir: store.home, projectsEnabled: true, historyEnabled: false,
+    dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false, wslScanEnabled: false, sessionActivityPolling: false,
+    osInfo: {}, allTimeSince: '2024-01-01', sessionMetadataDeps: store.deps, watchEnabled: false, intervalMs: 3600000,
+    runAntigravitySync: async () => {}, runTokscale: async () => ({ entries: includeNew ? [{ client: 'antigravity', sessionId: 'new-session', input: 12, output: 0, cost: 0.5 }] : [] }),
+    onUpdate: (value) => updates.push(value)
+  };
+  const wait = async (count) => {
+    for (let attempt = 0; attempt < 200 && updates.length < count; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(updates.length, count);
+  };
+  handle = startCollector(options);
+  await wait(1);
+  const file = path.join(shared, 'collector-anchor.json');
+  const original = JSON.parse(fs.readFileSync(file, 'utf8'));
+  includeNew = true;
+  store.put.run('new-session', 'New title', '', JSON.stringify([pathToFileURL(project).href]), null);
+  await handle.refreshClient('antigravity');
+  const learned = updates.at(-1);
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(saved.fullScanAt, original.fullScanAt);
+  assert.equal(saved.today.sessions[key], undefined, 'metadata persistence leaves the usage baseline frozen');
+  assert.equal(saved.catalogProjects.labels[projectIdentity(project).projectId], 'new-project');
+  handle.stop(); handle = null;
+  store.close();
+  fs.renameSync(store.dbPath, `${store.dbPath}.moved`);
+  handle = startCollector({ ...options, sessionMetadataDeps: { ...store.deps, antigravityTitleCache: new Map() } });
+  await wait(3);
+  for (const period of ['today', 'month', 'allTime']) {
+    const session = updates.at(-1)[period].sessions[key];
+    assert.equal(session.projectId, projectIdentity(project).projectId);
+    assert.equal(session.projectLabel, 'new-project');
+    assert.deepEqual(projectRollupFromSessions(updates.at(-1)[period].sessions), projectRollupFromSessions(learned[period].sessions));
+    assert.equal(updates.at(-1)[period].totalTokens, learned[period].totalTokens);
+    assert.equal(updates.at(-1)[period].costUsd, learned[period].costUsd);
+  }
 });
