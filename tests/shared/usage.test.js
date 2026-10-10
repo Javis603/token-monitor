@@ -39,6 +39,28 @@ test('session normalization preserves bounded titles and recognized background-r
   assert.equal(period.sessions['codex:unknown'].sessionKind, '');
 });
 
+test('a parent link is carried only when present, survives Hub ingress and merges first-wins', () => {
+  const period = normalizePeriod({ sessions: {
+    'codex:child': { client: 'codex', sessionId: 'child', totalTokens: 10, parentSessionId: ' parent ' },
+    'codex:self': { client: 'codex', sessionId: 'self', totalTokens: 5, parentSessionId: 'self' },
+    'codex:top': { client: 'codex', sessionId: 'top', totalTokens: 5 }
+  } });
+  assert.equal(period.sessions['codex:child'].parentSessionId, 'parent');
+  assert.equal(Object.hasOwn(period.sessions['codex:self'], 'parentSessionId'), false);
+  assert.equal(Object.hasOwn(period.sessions['codex:top'], 'parentSessionId'), false);
+
+  const stripped = stripSessionTextFromDeviceRecord({ today: period });
+  assert.equal(stripped.today.sessions['codex:child'].parentSessionId, 'parent');
+
+  const merged = mergePeriods(
+    { sessions: { 'codex:child': { client: 'codex', sessionId: 'child', totalTokens: 1 } } },
+    period,
+    { sessions: { 'codex:child': { client: 'codex', sessionId: 'child', totalTokens: 2, parentSessionId: 'other' } } }
+  );
+  assert.equal(merged.sessions['codex:child'].parentSessionId, 'parent');
+  assert.equal(merged.sessions['codex:child'].totalTokens, 13);
+});
+
 test('unpriced attribution maps stay within period and per-client token allowances', () => {
   const total = (map) => Object.values(map || {}).reduce((sum, value) => sum + value, 0);
   const input = {

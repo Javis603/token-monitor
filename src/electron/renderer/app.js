@@ -2856,6 +2856,7 @@ function rawSessionRowsForPeriod(period) {
     stableColor,
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived'),
+    subagentLabel: t('sessions.subagent'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
     sourcePeriods: state.stats?.periods,
     grokBotSessionIds: state.stats?.grokBotSessionIds,
@@ -2868,6 +2869,9 @@ function sessionRowsForPeriod(period) {
   if (rows.length > 0) {
     rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
     return sessionRowsApi.groupSessionRows(rows, {
+      subagents: {
+        countLabel: (count) => t('sessions.subagentCount', { count })
+      },
       backgroundReviews: {
         label: t('sessions.backgroundReviews'),
         countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
@@ -4805,17 +4809,22 @@ function sessionGroupRunNode(row, max, parent) {
   wrap.className = 'detail-exchange session-group-run';
   const interactive = sessionRowsApi.sessionRowDetailAvailable(row);
   const botGroup = parent.summary?.sessionGroup === 'cursor-grok-bot';
+  // Subagent members are distinct conversations, so they read like Sessions
+  // rows (title, activity, id) rather than as runs of one review stream.
+  const subagentGroup = parent.summary?.subagentGroup === true;
+  const namedGroup = botGroup || subagentGroup;
+  const mainSession = subagentGroup && row.key === parent.summary.groupRows?.[0]?.key;
   if (interactive) {
     wrap.setAttribute('role', 'button');
     wrap.setAttribute('tabindex', '0');
   }
   wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">›</span>'
     + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span>'
-    + (botGroup ? '<span class="session-group-id"></span>' : '') + '</div>'
+    + (namedGroup ? '<span class="session-group-id"></span>' : '') + '</div>'
     + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
     + '<div class="bar"><div class="bar-fill"></div></div>';
   const time = sessionRowsApi.compactSessionTime(row.sortTime, new Date());
-  const title = (botGroup ? row.name : [row.modelLabel, time].filter(Boolean).join(' · '))
+  const title = (namedGroup ? row.name : [row.modelLabel, time].filter(Boolean).join(' · '))
     || parent.summary?.name || t('sessions.backgroundReviews');
   const titleEl = wrap.querySelector('.detail-ex-title');
   titleEl.textContent = title;
@@ -4828,10 +4837,11 @@ function sessionGroupRunNode(row, max, parent) {
   }
   if (!interactive) wrap.querySelector('.detail-chev').textContent = '';
   const sub = wrap.querySelector('.detail-ex-sub');
-  sub.textContent = botGroup ? [row.activity ? row.subtitle : '', row.activity || row.subtitle].filter(Boolean).join(' · ') : row.detail || '';
+  sub.textContent = namedGroup ? [mainSession ? t('sessions.mainSession') : '', row.activity ? row.subtitle : '',
+    row.activity || row.subtitle].filter(Boolean).join(' · ') : row.detail || '';
   sub.title = sub.textContent;
   bindHoverMarquee(sub);
-  if (botGroup) {
+  if (namedGroup) {
     const id = wrap.querySelector('.session-group-id');
     id.textContent = row.detail || '';
     id.title = row.detail || '';
@@ -4893,7 +4903,7 @@ function renderSessionGroupDetail(request) {
   const overview = document.createElement('div');
   overview.className = 'session-group-overview';
   overview.innerHTML = '<span class="session-group-count"></span><span class="session-group-totals"></span>';
-  overview.querySelector('.session-group-count').textContent = request.summary.detail;
+  overview.querySelector('.session-group-count').textContent = request.summary.groupDetail || request.summary.detail;
   overview.querySelector('.session-group-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0, request.summary.unpricedTokens)}`;
   container.append(overview);
 

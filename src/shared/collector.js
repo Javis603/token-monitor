@@ -672,6 +672,7 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       if (session.title) target.title = session.title;
       else if (titleMetadata.invalidatedTitleKeys?.has(key) && target.title === titleMetadata.t3Titles?.[key]) delete target.title;
       if (session.sessionKind && !target.sessionKind) target.sessionKind = session.sessionKind;
+      if (session.parentSessionId && !target.parentSessionId) target.parentSessionId = session.parentSessionId;
       // Context occupancy is replaced rather than gap-filled: the derived
       // periods carry the last full scan's reading, which is older than this
       // tick's by construction. The copy is unconditional, including a cleared

@@ -416,6 +416,60 @@ test('background review sessions collapse into one interactive aggregate row wit
   assert.equal(Object.hasOwn(collapsed[1], 'sessionDetailAvailable'), false);
 });
 
+test('subagents fold under their visible parent while reviews keep the global group', () => {
+  const now = new Date(2026, 9, 11, 12, 30);
+  const session = (id, tokens, minute, extra = {}) => ({ client: 'codex', sessionId: id, totalTokens: tokens,
+    costUsd: tokens / 100, models: { 'gpt-5.6-sol': tokens }, lastUsedAt: localIso(2026, 10, 11, 12, minute), ...extra });
+  const rows = sessionRowsForPeriod({ sessions: {
+    'codex:main': session('main', 100, 5, { title: 'Ship the feature' }),
+    'codex:worker': session('worker', 40, 20, { parentSessionId: 'main', title: 'Explore the parser' }),
+    'codex:nested': session('nested', 10, 25, { parentSessionId: 'worker' }),
+    'codex:review': session('review', 30, 28, { parentSessionId: 'main', sessionKind: 'background-review' }),
+    'codex:orphan': session('orphan', 7, 1, { parentSessionId: 'outside-period' }),
+    'codex:other': session('other', 50, 10)
+  } }, { clientLabels, clientColors, now, subagentLabel: 'Subagent' });
+  const grouped = groupSessionRows(rows, {
+    subagents: { countLabel: count => `${count} subagents` },
+    backgroundReviews: { now }
+  });
+
+  assert.deepEqual(grouped.map(row => row.key), [
+    'session-group:codex-auto-review',
+    'session-group:subagents:codex:main',
+    'session:codex:other',
+    'session:codex:orphan'
+  ]);
+  const group = grouped[1];
+  assert.equal(group.kind, 'summary');
+  assert.equal(group.name, 'Ship the feature');
+  assert.equal(group.sessionGroup, 'subagents:codex:main');
+  assert.equal(group.subagentGroup, true);
+  // Members are disjoint sessions: the group is their plain sum, reviews excluded.
+  assert.equal(group.value, 150);
+  assert.ok(Math.abs(group.cost - 1.5) < 1e-9);
+  assert.equal(group.sortTime, Date.parse(localIso(2026, 10, 11, 12, 25)));
+  assert.equal(group.groupDetail, '2 subagents');
+  assert.match(group.subtitle, /^2 subagents · Codex/);
+  assert.equal(group.detail, '');
+  assert.deepEqual(group.groupRows.map(row => row.key),
+    ['session:codex:main', 'session:codex:nested', 'session:codex:worker']);
+  assert.match(group.groupRows[2].activity, /^Subagent/);
+  assert.deepEqual(grouped[0].groupRows.map(row => row.key), ['session:codex:review']);
+  const orphan = grouped[3];
+  assert.equal(orphan.kind, 'session');
+  assert.match(orphan.subtitle, /^Subagent/);
+  const visible = grouped.reduce((sum, row) => sum + row.value, 0);
+  assert.equal(visible, rows.reduce((sum, row) => sum + row.value, 0), 'grouping never changes the list total');
+});
+
+test('a parent cycle leaves both sessions as their own rows', () => {
+  const rows = sessionRowsForPeriod({ sessions: {
+    'codex:a': { client: 'codex', sessionId: 'a', totalTokens: 1, parentSessionId: 'b' },
+    'codex:b': { client: 'codex', sessionId: 'b', totalTokens: 2, parentSessionId: 'a' }
+  } }, { clientLabels, clientColors });
+  assert.deepEqual(groupSessionRows(rows).map(row => row.key).sort(), ['session:codex:a', 'session:codex:b']);
+});
+
 test('pre-token native Codex reviews join the existing background group without hiding ordinary sessions', () => {
   const now = new Date(2026, 9, 9, 12);
   const rows = sessionRowsForPeriod({ sessions: {
