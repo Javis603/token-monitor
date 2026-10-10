@@ -7,6 +7,7 @@
     <script src="floatingBubbleBoot.js"></script>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="edgeDock/composer.css" />
+    <link rel="stylesheet" href="cloudSessions.css" />
   </head>
   <body>
     <main class="shell">
@@ -100,6 +101,12 @@
             </div>
             <div class="settings-subgroup">
               <div class="settings-group-header"><span data-i18n="settings.integrations.title">Integrations</span></div>
+              <label class="checkbox-label settings-item">
+                <span class="settings-item-text"><span id="cloudSessionsSettingTitle" class="settings-item-title">Automatically monitor Codex cloud sessions</span></span>
+                <input id="cloudSessionsEnabled" type="checkbox" aria-describedby="cloudSessionsSettingNote" disabled />
+                <span id="cloudSessionsSettingNote" class="settings-item-desc">Show cloud tasks and subagents in Sessions.</span>
+                <span id="cloudSessionsSettingStatus" class="settings-note" role="status" aria-live="polite"></span>
+              </label>
               <label class="checkbox-label settings-item">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.integrations.discord">Discord Rich Presence</span>
@@ -1568,6 +1575,7 @@
       <section id="fixedPeriodMessage" class="fixed-period-message hidden" role="status" aria-live="polite"></section>
 
       <section id="homePanel" class="home-panel hidden"></section>
+      <p id="cloudSessionsScope" class="cloud-sessions-scope hidden"></p>
       <section id="breakdown" class="breakdown"></section>
       <div id="session-detail-head" class="detail-head hidden"></div>
       <div id="session-detail" class="session-detail hidden"></div>
@@ -1690,6 +1698,7 @@
     <script src="../../shared/sessionLive.js"></script>
     <script src="../../shared/sessionActivityProjection.js"></script>
     <script src="../sessionTitleDisplay.js"></script>
+    <script src="cloudSessionRows.js"></script>
     <script src="sessionRows.js"></script>
     <script src="overflowText.js"></script>
     <script src="breakdownRenderPolicy.js"></script>

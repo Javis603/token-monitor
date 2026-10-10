@@ -9046,6 +9046,10 @@ app.whenReady().then(() => {
     }
     actionWindowForEvent(BrowserWindow, event, mainWindow)?.close();
   });
+  require('./cloudUsageBridge').registerCloudUsageIpc({
+    ipcMain, getWindows: () => [mainWindow, dashboardWindow],
+    rendererDir: path.join(__dirname, 'renderer'), open: () => openViewFromTray('session')
+  });
   ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
   ipcMain.on('dashboard:ready', (event) => {
@@ -9075,9 +9079,11 @@ app.whenReady().then(() => {
   });
   maybeRunBackgroundUpdateCheck();
   startAppUpdateBackgroundChecks();
+  if (process.argv.includes('--cloud-usage') || process.argv.includes('--sessions')) openViewFromTray('session');
 });
 
 app.on('second-instance', focusExistingWindow);
+app.on('second-instance', (_event, argv) => { if (argv.includes('--cloud-usage') || argv.includes('--sessions')) openViewFromTray('session'); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 // Every quit route (Cmd+Q, last window closed, system shutdown) lands here.
 // performQuit is synchronous through to the exit, so there is nothing to wait

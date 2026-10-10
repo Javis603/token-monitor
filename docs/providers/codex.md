@@ -78,3 +78,11 @@ Run the Codex session, limits, login and account-switching tests when changing t
 ```bash
 node --test tests/shared/codex*.test.js tests/shared/limitCollector.codex*.test.js tests/shared/sessionContext.test.js tests/electron/codex*.test.js
 ```
+
+## Automatic hosted-cloud observation
+
+`cloudAutoWatch.js` and `codex-cloud-auto-watch.js` automatically union the live cloud catalogs and attach to running tasks without manual IDs. Per-thread engine counters survive connection retries within the process, but are not summed into local/account totals. A separate user LaunchAgent runs the tested observer with an explicit automatic-attachment flag. Scope, persistence limits, controls and real validation are documented in [automatic cloud monitoring](../codex-cloud-auto-watch.md).
+
+## Cloud sessions in the ordinary list
+
+Hosted Codex tasks and subagents join the existing Sessions view through `renderer/cloudSessionRows.js`; no separate cloud tab or footer button is shipped. Exact canonical Codex identity can annotate a local row instead of duplicating it, without adding an overlapping cumulative snapshot. Cloud-only clicks use the existing detail surface and do not look for local transcripts. The sender-guarded main-process bridge still returns only account-checked, bounded numeric metadata; it also exposes source creation/activity dates for period selection. The service toggle lives in Settings. See [native session integration and verification](../codex-cloud-native-integration.md).
