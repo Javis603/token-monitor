@@ -899,7 +899,7 @@ async function collectUsageOnce(options) {
     // dshSessionFileCache is deliberately NOT reset here: it's module-level
     // (declared with jsonlTimestampCache above) precisely so it survives
     // across collectUsageOnce calls. These caches and sets start fresh each
-    // call; watch ticks recover title provenance from their local anchor below.
+    // call; ticks recover catalog provenance from their local fallback below.
   };
   const decorateLocalPeriods = (periods, { retryMisses = false } = {}) => applySessionMetadata(
     periods,
@@ -925,14 +925,17 @@ async function collectUsageOnce(options) {
     && anchor.dateKey === localTodayKey(collectedAt)
     && canTargetTodayPartitions(anchor, targetClients)
   );
-  if (anchorUsed) {
-    localSessionMetadataDeps.t3Titles = anchor.todayT3Titles || anchor.t3Titles || {};
-    localSessionMetadataDeps.catalogTitleSources = anchor.catalogTitleSources || {};
+  // Catalog state remains useful when a full scan cannot reuse usage totals.
+  // It supplies labels/provenance only; the scan still rebuilds every period.
+  const sessionMetadataFallback = options.sessionMetadataFallback || (anchorUsed ? anchor : null);
+  if (sessionMetadataFallback) {
+    localSessionMetadataDeps.t3Titles = sessionMetadataFallback.todayT3Titles || sessionMetadataFallback.t3Titles || {};
+    localSessionMetadataDeps.catalogTitleSources = sessionMetadataFallback.catalogTitleSources || {};
     for (const period of ['today', 'month', 'allTime']) {
-      localSessionMetadataDeps.catalogProjects[period] = { ...anchor.catalogProjects?.[period] };
+      localSessionMetadataDeps.catalogProjects[period] = { ...sessionMetadataFallback.catalogProjects?.[period] };
     }
-    localSessionMetadataDeps.catalogProjects.labels = { ...anchor.catalogProjects?.labels };
-    localSessionMetadataDeps.catalogProjectFallbacks = anchor;
+    localSessionMetadataDeps.catalogProjects.labels = { ...sessionMetadataFallback.catalogProjects?.labels };
+    localSessionMetadataDeps.catalogProjectFallbacks = sessionMetadataFallback;
   }
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
@@ -2707,6 +2710,7 @@ function startCollector(options) {
     const collectedAt = collectionDate(options.now);
     const todayKey = localTodayKey(collectedAt);
     const tickPricingRevision = pricingFingerprint(options);
+    const sessionMetadataFallback = anchor;
     const pricingChanged = tickPricingRevision !== pricingRevision;
     if (pricingChanged) {
       anchor = null;
@@ -2792,6 +2796,7 @@ function startCollector(options) {
           kind
         ),
         targetClients: anchored && targetAnchorReady ? requestedTargetClients : [],
+        sessionMetadataFallback,
         todayOnlyAnchor: anchored ? anchor : null,
         wslAnchor: anchored ? wslAnchor : null,
         wslStatus: anchored ? wslStatusAnchor : null,
