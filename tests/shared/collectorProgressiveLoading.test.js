@@ -180,7 +180,7 @@ test('session timestamps are backfilled even when project tracking is disabled',
 test('progressive loading skips onProgress on anchored ticks', async () => {
   calls = 0;
   const partials = [];
-  const anchor = { dateKey: require('../../src/shared/collector').localTodayKey(), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() };
+  const anchor = { dateKey: require('../../src/shared/collector').localTodayKey(), utcOffsetMinutes: require('../../src/shared/history').utcOffsetMinutes(), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() };
   await collectUsageOnce({
     clients: 'claude',
     allTimeSince: '2025-01-01',

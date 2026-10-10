@@ -123,7 +123,9 @@ test('a Codex warm watch tick carries question resolution into month and allTime
   for (const name of ['today', 'month', 'allTime']) assert.equal(full[name].sessions[key].waitingForInput, true);
   f.append(answer());
   const warm = await collectUsageOnce({ ...options, todayOnlyAnchor: {
-    dateKey: localDayKey(new Date()), today: full.today, month: full.month,
+    dateKey: localDayKey(new Date()),
+    utcOffsetMinutes: require('../../src/shared/history').utcOffsetMinutes(),
+    today: full.today, month: full.month,
     allTime: full.allTime, todayPartitions: { codex: full.today }
   } });
   for (const name of ['today', 'month', 'allTime']) {

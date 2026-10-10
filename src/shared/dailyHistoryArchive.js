@@ -6,7 +6,7 @@ const { isDeepStrictEqual } = require('node:util');
 const { sharedDataDir, writeJsonAtomic } = require('./config');
 const {
   normalizeTokscaleClientName, normalizeTokscaleModelNameForClient,
-  normalizeTokscaleModelComponentSummary, num, sumOutputTokens, sumTokens
+  normalizeTokscaleModelComponentSummary, num, sumOutputTokens, sumTokens, utcOffsetMinutes
 } = require('./history');
 const {
   CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry
@@ -14,6 +14,31 @@ const {
 
 const ARCHIVE_VERSION = 1;
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// The UTC offset a capture is stamped with. Injectable so tests can replay a
+// timezone round-trip without moving the process clock.
+function captureOffsetMinutes(options = {}) {
+  return Number.isFinite(options.utcOffsetMinutes) ? options.utcOffsetMinutes : utcOffsetMinutes();
+}
+
+// Whether a stored day key may be replaced by a capture from a different UTC
+// offset. A day bucket only means "this calendar day" relative to the midnight
+// its capture was cut from: after a timezone move (or a scan whose window
+// drifted with the OS zone), the same day key holds a different slice of the
+// same absolute sessions, so the monotonic keep-the-maximum rule would lock in
+// a value that mixes two days. The capture under the *current* offset is the
+// day key's authoritative bucketing and wins even when it is smaller.
+//
+// An unstamped day predates offset stamping: what offset its value was cut at
+// cannot be proven, so it keeps the retention-maximum semantics (its maximum
+// survives source transcripts being deleted by design). Corruption already
+// written by an unstamping build therefore needs the one-time archive clear
+// documented in the timezone issue; this rule stops it from being written.
+function offsetChanged(previousDay, incomingOffset) {
+  if (!previousDay) return false;
+  if (!Number.isFinite(previousDay.utcOffsetMinutes)) return false;
+  return previousDay.utcOffsetMinutes !== incomingOffset;
+}
 
 function observationKey(value) {
   return JSON.stringify([
@@ -192,6 +217,11 @@ function normalizeDay(value, fallbackDate = '') {
   return {
     date,
     activeTimeMs: Math.max(0, Math.round(num(value?.activeTimeMs))),
+    // The UTC offset the day's capture was cut from. Provenance for the
+    // cross-offset replacement rule; round-tripped so it survives a reload.
+    ...(Number.isFinite(value?.utcOffsetMinutes)
+      ? { utcOffsetMinutes: num(value.utcOffsetMinutes) }
+      : {}),
     // Provenance travels with the day. An archive written before the split has
     // no marker, which is what makes it recognizable as merged-era; a day this
     // version writes carries the current generation and is taken at face value.
@@ -300,6 +330,7 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
   }
   const todayKey = String(options.todayKey || '').slice(0, 10);
   const hasTodayKey = DAY_KEY_RE.test(todayKey);
+  const incomingOffset = captureOffsetMinutes(options);
   const incomingDays = observationsFromGraphs(graphs, { archive });
   // A failed/empty graph did not confirm any current prices. Keep the old
   // revision so a later successful scan still reconciles retained live costs.
@@ -315,15 +346,29 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
     // post-split day from being absorbed into the merged id when Pi happens to be
     // scanned first.
     const legacy = existing !== null && isPreSplitEntry(existing);
+    // A stored day cut under a different UTC offset holds a different slice of
+    // the same sessions for this day key (a timezone move re-anchors the day
+    // buckets). The current-offset scan is the authoritative bucketing; keep
+    // its rows wholesale rather than max-merging across window origins.
+    const replaceWindow = offsetChanged(existing, incomingOffset);
+    // The offset stamp travels with the observations it describes: a legacy day
+    // that the current scan could not replace stays unstamped, and a stamped
+    // day that max-merged keeps its original stamp.
+    const stampOffset = replaceWindow || !existing
+      ? incomingOffset
+      : (Number.isFinite(existing.utcOffsetMinutes) ? existing.utcOffsetMinutes : undefined);
     const next = {
       date,
-      activeTimeMs: Math.max(previous.activeTimeMs, incoming.activeTimeMs),
+      ...(stampOffset !== undefined ? { utcOffsetMinutes: stampOffset } : {}),
+      activeTimeMs: replaceWindow ? incoming.activeTimeMs : Math.max(previous.activeTimeMs, incoming.activeTimeMs),
       ...(legacy ? {} : { clientIdentityGeneration: CLIENT_IDENTITY_GENERATION }),
-      observations: { ...previous.observations }
+      observations: replaceWindow ? { ...incoming.observations } : { ...previous.observations }
     };
-    for (const [key, observation] of Object.entries(incoming.observations)) {
-      if (shouldReplaceObservation(previous.observations[key], observation)) {
-        next.observations[key] = observation;
+    if (!replaceWindow) {
+      for (const [key, observation] of Object.entries(incoming.observations)) {
+        if (shouldReplaceObservation(previous.observations[key], observation)) {
+          next.observations[key] = observation;
+        }
       }
     }
     const normalized = normalizeDay(next, date);
@@ -562,6 +607,7 @@ function captureLiveDailyHistory(existingArchive, period, options = {}) {
       if (liveDate > date) delete archive.liveDays[liveDate];
     }
   }
+  const incomingOffset = captureOffsetMinutes(options);
   const incoming = periodLiveDay(period, date);
   if (!incoming) return archive;
   if (typeof options.pricingRevision === 'string') {
@@ -570,7 +616,14 @@ function captureLiveDailyHistory(existingArchive, period, options = {}) {
     }
   }
   const previous = archive.liveDays?.[date];
-  const equalUsage = previous && dayTokens(incoming) === dayTokens(previous);
+  // The live overlay re-captured under a different UTC offset replaces the
+  // stored value even when smaller: the stored value was cut from another
+  // window's midnight and max-wins would lock in a two-calendar-day total
+  // (issue: daily usage corrupted after a timezone round-trip). Same-offset
+  // merges keep the monotonic-growth rule, and unstamped legacy values keep
+  // their retention semantics.
+  const replaceWindow = offsetChanged(previous, incomingOffset);
+  const equalUsage = !replaceWindow && previous && dayTokens(incoming) === dayTokens(previous);
   // Revision provenance comes from the retained rows, not a missing model key.
   // Equal totals can also be reattributed by a parser correction independently
   // of pricing. Keep the incoming identities and merge only matching metadata.
@@ -584,7 +637,7 @@ function captureLiveDailyHistory(existingArchive, period, options = {}) {
       observation.tokens !== previous.observations[key]?.tokens
     ))
   );
-  if (!previous || liveDayIsGreater(incoming, previous) || revisionChanged || attributionChanged) {
+  if (!previous || replaceWindow || liveDayIsGreater(incoming, previous) || revisionChanged || attributionChanged) {
     let selected = incoming;
     if (equalUsage && dayComponentQuality(incoming) < dayComponentQuality(previous)) {
       selected = mergeLiveDayMetadata(incoming, previous);
@@ -593,7 +646,7 @@ function captureLiveDailyHistory(existingArchive, period, options = {}) {
         selected.componentSummary = previous.componentSummary;
       }
     }
-    archive.liveDays = { ...(archive.liveDays || {}), [date]: selected };
+    archive.liveDays = { ...(archive.liveDays || {}), [date]: { ...selected, utcOffsetMinutes: incomingOffset } };
   }
   return archive;
 }
@@ -627,10 +680,35 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
     const previous = currentDays.get(date);
     if (!previous) {
       currentDays.set(date, liveDay);
-    } else {
-      const selected = liveDayIsGreater(liveDay, previous) ? mergeLiveDayMetadata(liveDay, previous) : previous;
-      currentDays.set(date, withReconciledGraphCosts(selected, previous, liveDay, options.reprice === true));
+      continue;
     }
+    // For the same day key, when both values carry offset stamps, the one cut
+    // under the current UTC offset is the authoritative bucketing and wins even
+    // when smaller — a drifted window's slice of the day must not bury the
+    // re-bucketed one. An unstamped value has no provable window; keep the
+    // greater-live-value rule so archive-only observations are retained.
+    const liveStamped = Number.isFinite(liveDay.utcOffsetMinutes);
+    const dayStamped = Number.isFinite(previous.utcOffsetMinutes);
+    if (liveStamped && dayStamped && liveDay.utcOffsetMinutes !== previous.utcOffsetMinutes) {
+      const captureOffset = captureOffsetMinutes(options);
+      if (liveDay.utcOffsetMinutes === captureOffset) {
+        currentDays.set(date, liveDay);
+      } else if (previous.utcOffsetMinutes === captureOffset) {
+        currentDays.set(date, previous);
+      } else {
+        // Neither stamp names the current offset (e.g. a stored round-trip
+        // read under a third zone). No stamp can claim the day key, so fall
+        // back to the usual greater-live-value rule instead of letting the
+        // archive bucket bury a larger live value.
+        const selected = liveDayIsGreater(liveDay, previous)
+          ? mergeLiveDayMetadata(liveDay, previous)
+          : previous;
+        currentDays.set(date, withReconciledGraphCosts(selected, previous, liveDay, options.reprice === true));
+      }
+      continue;
+    }
+    const selected = liveDayIsGreater(liveDay, previous) ? mergeLiveDayMetadata(liveDay, previous) : previous;
+    currentDays.set(date, withReconciledGraphCosts(selected, previous, liveDay, options.reprice === true));
   }
 
   const contributions = [...currentDays.values()]
@@ -736,7 +814,17 @@ function mergeLiveDaysIntoArchive(existingArchive, liveDays) {
   const incoming = normalizeDailyHistoryArchive({ liveDays }).liveDays || {};
   for (const [date, liveDay] of Object.entries(incoming)) {
     const previous = archive.liveDays?.[date];
-    if (!previous || liveDayIsGreater(liveDay, previous)) {
+    // Both sides come from the collector's own live captures, so a differing
+    // stamp means the day was cut under a different UTC offset (timezone move);
+    // the newer capture is the authoritative bucketing for the day key.
+    // Both sides come from the collector's own live captures, so a differing
+    // stamp means the day was cut under a different UTC offset (timezone move);
+    // the newer capture is the authoritative bucketing for the day key.
+    const replaceWindow = previous
+      && Number.isFinite(previous.utcOffsetMinutes)
+      && Number.isFinite(liveDay.utcOffsetMinutes)
+      && previous.utcOffsetMinutes !== liveDay.utcOffsetMinutes;
+    if (!previous || replaceWindow || liveDayIsGreater(liveDay, previous)) {
       archive.liveDays = { ...(archive.liveDays || {}), [date]: liveDay };
     }
   }
@@ -797,6 +885,7 @@ module.exports = {
   dailyHistoryArchivePath,
   graphFromDailyHistoryArchive,
   captureLiveDailyHistory,
+  mergeLiveDaysIntoArchive,
   normalizeDailyHistoryArchive,
   observationKey,
   readDailyHistoryArchive,

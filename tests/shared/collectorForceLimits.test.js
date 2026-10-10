@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { extractUsageFromTokscale, mergePeriods } = require('../../src/shared/usage');
+const { utcOffsetMinutes } = require('../../src/shared/history');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
 
 installInProcessWatchHost(test);
@@ -155,6 +156,7 @@ test('anchored Proma refresh derives broader windows from the fresh tokscale tod
   });
   const anchor = {
     dateKey: localTodayKey(),
+    utcOffsetMinutes: utcOffsetMinutes(),
     today: mergePeriods(period('claude', 10), period('proma', 5)),
     month: mergePeriods(period('claude', 100), period('proma', 50)),
     allTime: mergePeriods(period('claude', 1000), period('proma', 500))

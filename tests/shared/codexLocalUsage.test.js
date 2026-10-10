@@ -138,7 +138,7 @@ test('the collector, archive transform, renderer and details consume one canonic
     lookupModelPricing: async () => ({ pricing: { inputCostPerToken: 0.000001, outputCostPerToken: 0.000002, cacheReadInputTokenCost: 0.0000001 } })
   };
   let anchor;
-  const collected = await collectUsageOnce({ ...options, onAnchorComputed: (x) => { anchor = { dateKey: localTodayKey(new Date(AT)), ...x.windowsPeriods, todayPartitions: x.todayPartitions }; } });
+  const collected = await collectUsageOnce({ ...options, onAnchorComputed: (x) => { anchor = { dateKey: localTodayKey(new Date(AT)), utcOffsetMinutes: require('../../src/shared/history').utcOffsetMinutes(new Date(AT)), ...x.windowsPeriods, todayPartitions: x.todayPartitions }; } });
   assert.equal(scans, 3);
   const visible = transform.transform(collected);
   for (const name of ['today', 'month', 'allTime']) {

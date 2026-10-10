@@ -2771,6 +2771,7 @@ test('a targeted tick does not sync an unrelated self-synced client', async () =
       limitsEnabled: false,
       todayOnlyAnchor: {
         dateKey: localTodayKey(),
+        utcOffsetMinutes: require('../../src/shared/history').utcOffsetMinutes(),
         today: emptyPeriod(),
         month: emptyPeriod(),
         allTime: emptyPeriod(),
@@ -3303,6 +3304,7 @@ test('collector does not reuse a persisted anchor after the Qoder CN DB path cha
   oldQoderCnPeriod.clients = { qodercn: 9 };
   fs.writeFileSync(path.join(tmp, 'collector-anchor.json'), JSON.stringify({
     dateKey: initialCollector.localTodayKey(),
+    utcOffsetMinutes: require('../../src/shared/history').utcOffsetMinutes(),
     today: emptyPeriod(),
     month: oldQoderCnPeriod,
     allTime: oldQoderCnPeriod,
