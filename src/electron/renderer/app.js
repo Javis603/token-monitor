@@ -4757,10 +4757,22 @@ function refreshSessionDetailHeading() {
   // stats so the back label, and the group page it returns to, honour title
   // display like every other surface.
   const group = state.openSession.returnTo;
-  if (group?.kind === 'session-group' && group.summary?.key) {
-    const period = state.stats?.periods?.[group.period || state.period];
-    const latest = period ? sessionRowsForPeriod(period).find((row) => row.key === group.summary.key) : null;
-    if (latest) group.summary = latest;
+  const period = group?.kind === 'session-group' && group.summary?.key
+    ? state.stats?.periods?.[group.period || state.period] : null;
+  if (period) {
+    const rows = sessionRowsForPeriod(period);
+    const latest = rows.find((row) => row.key === group.summary.key);
+    if (latest) {
+      group.summary = latest;
+    } else {
+      // The group is gone (its parent left the list, or the session now sits
+      // under another parent). A cached summary would keep quoting titles the
+      // current stats no longer carry, so return to whichever group holds this
+      // session now, or to Sessions when none does.
+      const memberKey = `session:${state.openSession.client}:${state.openSession.sessionId}`;
+      const holder = rows.find((row) => row.groupRows?.some((member) => member.key === memberKey));
+      state.openSession.returnTo = holder ? { kind: 'session-group', period: group.period, summary: holder } : null;
+    }
   }
   const head = els.sessionDetailHead;
   if (state.openSession.headingSignature === sessionDetailHeadingSignature()) return;
