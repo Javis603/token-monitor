@@ -375,6 +375,32 @@ test('desktop WorkBuddy auth reads can be disabled without enabling fallback cre
   assert.equal(limits.workbuddyAccountType, '');
 });
 
+test('an explicitly provided token is allowed while the app credential is unreadable', () => {
+  // An encrypted app session cannot be fixed by signing in again, so the env
+  // token is the only remaining lane for that account.
+  const sealed = limitsConfigFromSettings({}, {
+    env: {
+      TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN: 'rescue-token',
+      TOKEN_MONITOR_WORKBUDDY_USER_ID: 'rescue-user'
+    },
+    workbuddyDesktopSessionOnly: true,
+    workbuddyDesktopSessionEnabled: true,
+    workbuddyLocalSession: { authenticated: false, reason: 'encrypted' }
+  });
+  assert.equal(sealed.workbuddyAccessToken, 'rescue-token');
+  assert.equal(sealed.workbuddyUserId, 'rescue-user');
+
+  // A readable session keeps ignoring the token: the app-owned session wins.
+  const readable = limitsConfigFromSettings({}, {
+    env: { TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN: 'rescue-token' },
+    workbuddyDesktopSessionOnly: true,
+    workbuddyDesktopSessionEnabled: true,
+    workbuddyLocalSession: { userId: 'local-user', accountType: 'personal' }
+  });
+  assert.equal(readable.workbuddyAccessToken, '');
+  assert.equal(readable.workbuddyUserId, 'local-user');
+});
+
 test('desktop WorkBuddy config ignores legacy settings and environment credentials', () => {
   const limits = limitsConfigFromSettings({
     workbuddyAccessToken: 'legacy-settings-token',
