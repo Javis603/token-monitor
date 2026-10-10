@@ -42,6 +42,7 @@ const FADE_OUT_MS = 120;
 const REFRESH_RESULT_HOLD_MS = 900;
 const REFRESH_FADE_OUT_MS = 200;
 const FADE_STEP_MS = 16;
+const WAKE_TOPMOST_RETRY_MS = 500;
 
 function edgeDockSupported(platform = process.platform) {
   return platform === 'darwin' || platform === 'win32';
@@ -65,6 +66,7 @@ function createEdgeDockController(deps) {
   const {
     BrowserWindow,
     ipcMain,
+    powerMonitor,
     screen,
     platform = process.platform,
     rendererDir,
@@ -96,6 +98,7 @@ function createEdgeDockController(deps) {
   const intent = createEdgeDockIntent();
   let running = false;
   let pollTimer = null;
+  let wakeTopmostTimer = null;
   let cells = [];
   let appearance = {};
   let builtGlass = null;
@@ -1214,14 +1217,51 @@ function createEdgeDockController(deps) {
       return;
     }
     running = true;
+    if (platform === 'win32') {
+      powerMonitor?.on('resume', onWake);
+    }
     registerIpc();
     attachDisplayListeners();
     buildWindows();
     schedulePoll();
   }
 
+  // These windows stay shown at opacity zero between reveals. A wake can leave
+  // them behind ordinary windows, so the first-show repair never runs again.
+  // Restore the native level and stacking without changing content or focus.
+  function restoreWindowsTopmost() {
+    if (!running) return;
+    // The refresh button uses peek and must stay above the rail's shoulder.
+    const surfaces = refreshVisible && !peekPaintPending ? ['rail', 'bubble', 'peek'] : SURFACES;
+    for (const surface of surfaces) {
+      const win = windows[surface];
+      if (!alive(win)) continue;
+      try {
+        win.setAlwaysOnTop(true, 'pop-up-menu');
+      } catch (error) {
+        logger(`[edge-dock] ${surface} wake topmost restore failed: ${error.message}`);
+      }
+    }
+  }
+
+  function onWake() {
+    clearTimeout(wakeTopmostTimer);
+    restoreWindowsTopmost();
+    // The shell can finish restoring windows after the power event. One bounded
+    // follow-up also coalesces repeated resume events; no permanent raise loop.
+    wakeTopmostTimer = setTimeout(() => {
+      wakeTopmostTimer = null;
+      restoreWindowsTopmost();
+    }, WAKE_TOPMOST_RETRY_MS);
+  }
+
   function stop() {
     running = false;
+    if (platform === 'win32') {
+      powerMonitor?.removeListener('resume', onWake);
+    }
+    clearTimeout(wakeTopmostTimer);
+    wakeTopmostTimer = null;
     refreshFeedbackUntil = 0;
     refreshFeedbackWindow = null;
     clearTimeout(pollTimer);
