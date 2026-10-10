@@ -233,13 +233,20 @@ function resolveSessionMetadata(sessionIds, { deps = {}, home, now = Date.now(),
     cache.set(dbPath, cached);
     for (const sessionId of sessionIds) {
       const title = cached.titles.get(sessionId) || retries.get(sessionId);
-      const state = cached.turnEnds.get(sessionId);
+      let state = cached.turnEnds.get(sessionId);
+      // A new title is not evidence of a new turn. Keep the last successful
+      // boundary while a failed state query waits for its next retry.
+      const previous = metadata?.get(`cursor:${sessionId}`);
+      if (cached.turnRetries.has(sessionId) && typeof previous?.turnEnded === 'boolean') {
+        state = { turnEnded: previous.turnEnded,
+          ...(previous.lastUsedAt ? { lastUsedAt: previous.lastUsedAt } : {}) };
+      }
       if (result.has(sessionId)) continue;
       if (title) result.set(sessionId, state ? { title, ...state } : { title });
       else if (state) result.set(sessionId, { ...state });
       // A definitive unknown answer clears an earlier headerless boundary.
       // Failed reads have no state entry, so the shared cache stays untouched.
-      else if (state === null && typeof metadata?.get(`cursor:${sessionId}`)?.turnEnded === 'boolean') result.set(sessionId, {});
+      else if (state === null && typeof previous?.turnEnded === 'boolean') result.set(sessionId, {});
     }
   }
   return result;
