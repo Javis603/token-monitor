@@ -1,6 +1,10 @@
 import Foundation
 
 nonisolated enum MetricFormatter {
+    /// Quota cards keep the desktop app's English window vocabulary
+    /// (`100% left`, `Reset 3d 15h`) even when the rest of the UI is localized.
+    static let desktopQuotaLocale = Locale(identifier: "en")
+
     static func tokens(_ value: Double) -> String {
         guard value.isFinite else { return "—" }
         return value.formatted(

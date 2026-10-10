@@ -95,4 +95,14 @@ struct LimitsPresentationTests {
         #expect(MetricFormatter.resetCount(1, locale: en) == "1 reset")
         #expect(MetricFormatter.resetCount(3, locale: Locale(identifier: "zh-Hant")) == "3 次重設")
     }
+
+    @Test func widgetQuotaCopyStaysEnglish() throws {
+        let now = try #require(Date.hubTimestamp(from: "2026-10-08T00:00:00Z"))
+        #expect(WidgetPresentation.remaining(82, locale: WidgetPresentation.desktopQuotaLocale) == "82% left")
+        #expect(WidgetPresentation.updateDescription(for: now, relativeTo: now) == "Updated just now")
+        #expect(WidgetPresentation.updateDescription(for: now.addingTimeInterval(-12 * 60), relativeTo: now) == "Updated 12m ago")
+        #expect(WidgetPresentation.resetDescription(to: now.addingTimeInterval(3 * 86_400 + 15 * 3_600), now: now) == "Reset 3d 15h")
+        #expect(WidgetPresentation.resetDescription(to: now.addingTimeInterval(4 * 3_600 + 11 * 60), now: now) == "Reset 4h 11m")
+        #expect(WidgetPresentation.resetDescription(to: now, now: now) == "Reset Now")
+    }
 }

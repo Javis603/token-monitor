@@ -11,12 +11,15 @@ struct TokenMonitorApp: App {
     private let snapshotStore: SharedSnapshotStore
     private let systemSurfaces: SystemSurfaceCoordinator
     private let usesSampleData: Bool
+    private let usesLimitLayoutFixture: Bool
 
     init() {
         #if DEBUG
         let usesSampleData = ProcessInfo.processInfo.arguments.contains("--sample-data")
+        let usesLimitLayoutFixture = usesSampleData && ProcessInfo.processInfo.arguments.contains("--sample-limit-layout")
         #else
         let usesSampleData = false
+        let usesLimitLayoutFixture = false
         #endif
         let snapshotStore = SharedSnapshotStore()
         let liveActivityController = LiveActivityController()
@@ -27,9 +30,16 @@ struct TokenMonitorApp: App {
         self.snapshotStore = snapshotStore
         self.systemSurfaces = systemSurfaces
         self.usesSampleData = usesSampleData
+        self.usesLimitLayoutFixture = usesLimitLayoutFixture
+        #if DEBUG
+        let sampleStore = usesLimitLayoutFixture
+            ? TokenMonitorStore.previewLimitLayout : TokenMonitorStore.preview
+        #else
+        let sampleStore = TokenMonitorStore.preview
+        #endif
         _store = State(
             initialValue: usesSampleData
-                ? TokenMonitorStore.preview
+                ? sampleStore
                 : TokenMonitorStore(systemSurfaces: systemSurfaces)
         )
         _settings = State(initialValue: ConnectionSettings())
@@ -58,10 +68,16 @@ struct TokenMonitorApp: App {
     }
 
     private func start() async {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--reload-widgets-only") {
+            WidgetCenter.shared.reloadAllTimelines()
+            return
+        }
+        #endif
         if usesSampleData {
             #if DEBUG
             let snapshot = TokenMonitorSharedPayload.Snapshot.make(
-                stats: .sample,
+                stats: usesLimitLayoutFixture ? .sampleLimitLayout : .sample,
                 history: .sample
             )
             var surfacePreferences = preferences.sharedPreferences

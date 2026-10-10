@@ -372,3 +372,79 @@ extension HubStats {
         )
     }
 }
+
+#if DEBUG
+extension HubStats {
+    /// Isolated simulator-only quota fixture; never reads or changes an account.
+    static var sampleLimitLayout: HubStats {
+        let base = sample
+        let now = Date.now.formatted(.iso8601)
+        let reset = Date.now.addingTimeInterval(14_400).formatted(.iso8601)
+
+        func window(
+            _ kind: String,
+            label: String,
+            remainingPercent: Double?,
+            metric: String? = nil,
+            used: Double? = nil,
+            limit: Double? = nil,
+            remaining: Double? = nil,
+            currency: String? = nil,
+            showMeter: Bool = true,
+            resets: Bool = true
+        ) -> LimitWindow {
+            LimitWindow(
+                kind: kind, metric: metric, label: label, used: used, limit: limit,
+                remaining: remaining, usedPercent: remainingPercent.map { 100 - $0 },
+                remainingPercent: remainingPercent, resetsAt: resets ? reset : nil,
+                resetDescription: nil, detail: nil, currency: currency,
+                showMeter: showMeter
+            )
+        }
+
+        func provider(_ id: String, plan: String, windows: [LimitWindow]) -> LimitProvider {
+            LimitProvider(
+                provider: id, accountKey: "fixture-\(id)", accountLabel: plan,
+                planLabel: nil, accountName: nil, accountEmail: nil,
+                workspaceKind: nil, status: "ok", source: "fixture",
+                sourceDetail: nil, updatedAt: now, windows: windows,
+                balanceUsd: nil, balance: nil, sourceDeviceId: "fixture",
+                stale: false
+            )
+        }
+
+        let providers = [
+            provider("antigravity", plan: "Pro", windows: [
+                window("session", label: "Gemini 5-hour", remainingPercent: 100),
+                window("weekly", label: "Gemini weekly", remainingPercent: 83),
+                window("session", label: "Claude/GPT 5-hour", remainingPercent: 68),
+                window("weekly", label: "Claude/GPT weekly", remainingPercent: 41)
+            ]),
+            provider("commandcode", plan: "GOAT", windows: [
+                window("session", label: "", remainingPercent: 92),
+                window("weekly", label: "", remainingPercent: 75),
+                window("billing", label: "Monthly", remainingPercent: 32.16,
+                       metric: "spend", used: 47.49, limit: 70,
+                       remaining: 22.51, currency: "USD")
+            ]),
+            provider("deepseek", plan: "Pay-as-you-go", windows: [
+                window("balance", label: "Balance", remainingPercent: nil,
+                       metric: "credits", remaining: 6.45, currency: "CNY",
+                       showMeter: false, resets: false)
+            ]),
+            provider("zed", plan: "Pro", windows: [
+                window("billing", label: "Monthly", remainingPercent: 72,
+                       metric: "spend", used: 14.20, limit: 50,
+                       remaining: 35.80, currency: "EUR")
+            ])
+        ]
+        return HubStats(
+            updatedAt: base.updatedAt, periods: base.periods, devices: base.devices,
+            limits: LimitsSummary(updatedAt: now, refreshMs: 300_000, providers: providers),
+            historyPreview: base.historyPreview, historyRevision: base.historyRevision,
+            staleAfterMs: base.staleAfterMs,
+            projectsIncomplete: base.projectsIncomplete
+        )
+    }
+}
+#endif

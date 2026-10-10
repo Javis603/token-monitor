@@ -357,4 +357,14 @@ extension TokenMonitorStore {
         store.phase = .live
         return store
     }
+
+    #if DEBUG
+    static var previewLimitLayout: TokenMonitorStore {
+        let store = TokenMonitorStore()
+        store.stats = .sampleLimitLayout
+        store.history = .sample
+        store.phase = .live
+        return store
+    }
+    #endif
 }

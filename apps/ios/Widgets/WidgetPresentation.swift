@@ -181,6 +181,54 @@ nonisolated enum WidgetPresentation {
         return "\(percentage) left"
     }
 
+    /// Quota rows keep the desktop app's English vocabulary even when the
+    /// rest of the widget follows the app language.
+    static let desktopQuotaLocale = Locale(identifier: "en")
+
+    static func updateDescription(for date: Date, relativeTo referenceDate: Date = .now) -> String {
+        let seconds = max(0, referenceDate.timeIntervalSince(date))
+        if seconds < 60 { return "Updated just now" }
+        let value: Int
+        let unit: String
+        if seconds < 3_600 {
+            value = max(1, Int(seconds / 60))
+            unit = "m"
+        } else if seconds < 86_400 {
+            value = max(1, Int(seconds / 3_600))
+            unit = "h"
+        } else {
+            value = max(1, Int(seconds / 86_400))
+            unit = "d"
+        }
+        return "Updated \(value)\(unit) ago"
+    }
+
+    /// Compact header age: `now`, `5m`, `3h`, `2d` — same bucketing as
+    /// `updateDescription` without the sentence.
+    static func compactAge(since date: Date, now: Date = .now) -> String {
+        let seconds = max(0, now.timeIntervalSince(date))
+        if seconds < 60 { return "now" }
+        if seconds < 3_600 { return "\(max(1, Int(seconds / 60)))m" }
+        if seconds < 86_400 { return "\(max(1, Int(seconds / 3_600)))h" }
+        return "\(max(1, Int(seconds / 86_400)))d"
+    }
+
+    static func resetDescription(to date: Date, now: Date = .now) -> String {
+        "Reset \(resetCountdown(to: date, now: now))"
+    }
+
+    static func resetCountdown(to date: Date, now: Date = .now) -> String {
+        let seconds = date.timeIntervalSince(now)
+        guard seconds > 0 else { return "Now" }
+        let totalMinutes = Int((seconds / 60).rounded())
+        let days = totalMinutes / 1_440
+        let hours = (totalMinutes % 1_440) / 60
+        let minutes = totalMinutes % 60
+        if days > 0 { return "\(days)d \(hours)h" }
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        return minutes > 0 ? "\(minutes)m" : "<1m"
+    }
+
     static func heatColor(level: Int) -> Color {
         switch level {
         case 4: Color(red: 180 / 255, green: 230 / 255, blue: 1)

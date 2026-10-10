@@ -30,6 +30,15 @@ final class AppPreferences {
             case .activity: "chart.line.uptrend.xyaxis"
             }
         }
+
+        /// Segmented-control titles for Settings → Widgets.
+        var shortTitle: String {
+            switch self {
+            case .overview: "Usage"
+            case .limits: "Limits"
+            case .activity: "Activity"
+            }
+        }
     }
 
     var appearance: AppAppearance {
@@ -48,6 +57,14 @@ final class AppPreferences {
     }
 
     var showsLiveTokenRate: Bool {
+        didSet { persistLocalPreferences() }
+    }
+
+    var overviewSectionOrder: [String] {
+        didSet { persistLocalPreferences() }
+    }
+
+    var hiddenOverviewSections: Set<String> {
         didSet { persistLocalPreferences() }
     }
 
@@ -135,6 +152,8 @@ final class AppPreferences {
             max(1, defaults.object(forKey: Keys.homeLimitCount) as? Int ?? 3)
         )
         showsLiveTokenRate = defaults.object(forKey: Keys.showsLiveTokenRate) as? Bool ?? true
+        overviewSectionOrder = defaults.stringArray(forKey: Keys.overviewSectionOrder) ?? []
+        hiddenOverviewSections = Set(defaults.stringArray(forKey: Keys.hiddenOverviewSections) ?? [])
         limitProviderOrder = defaults.stringArray(forKey: Keys.limitProviderOrder) ?? []
         hiddenLimitProviders = Set(
             defaults.stringArray(forKey: Keys.hiddenLimitProviders) ?? []
@@ -177,6 +196,8 @@ final class AppPreferences {
         defaults.set(appearance.rawValue, forKey: Keys.appearance)
         defaults.set(homeLimitCount, forKey: Keys.homeLimitCount)
         defaults.set(showsLiveTokenRate, forKey: Keys.showsLiveTokenRate)
+        defaults.set(overviewSectionOrder, forKey: Keys.overviewSectionOrder)
+        defaults.set(hiddenOverviewSections.sorted(), forKey: Keys.hiddenOverviewSections)
         defaults.set(currency.rawValue, forKey: Keys.currency)
         defaults.set(language.rawValue, forKey: Keys.language)
         defaults.set(limitProviderOrder, forKey: Keys.limitProviderOrder)
@@ -193,6 +214,8 @@ final class AppPreferences {
         static let appearance = "appearance"
         static let homeLimitCount = "homeLimitCount"
         static let showsLiveTokenRate = "showsLiveTokenRate"
+        static let overviewSectionOrder = "overviewSectionOrder"
+        static let hiddenOverviewSections = "hiddenOverviewSections"
         static let currency = "currency"
         static let language = "language"
         static let limitProviderOrder = "limitProviderOrder"

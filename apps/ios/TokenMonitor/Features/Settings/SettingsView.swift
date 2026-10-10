@@ -6,7 +6,6 @@ struct SettingsView: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(LiveActivityController.self) private var liveActivity
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         settingsForm
@@ -87,7 +86,7 @@ struct SettingsView: View {
                     "Overview",
                     icon: "house.fill",
                     tint: Color(red: 0.95, green: 0.58, blue: 0.2),
-                    value: Text("\(preferences.homeLimitCount) providers")
+                    value: Text("\(visibleOverviewSectionCount) sections")
                 ) {
                     overviewSection(preferences: preferences)
                 }
@@ -102,13 +101,15 @@ struct SettingsView: View {
                         value: Text("\(visibleLimitProviderCount) visible")
                     )
                 }
-                customizeRow(
-                    "Widgets",
-                    icon: "widget.small.badge.plus",
-                    tint: Color(red: 0.62, green: 0.4, blue: 0.92),
-                    value: Text(LocalizedStringKey(preferences.widgetContent.title))
-                ) {
-                    widgetSection(preferences: preferences)
+                NavigationLink {
+                    WidgetSettingsView()
+                } label: {
+                    settingsLabel(
+                        "Widgets",
+                        icon: "widget.small.badge.plus",
+                        tint: Color(red: 0.62, green: 0.4, blue: 0.92),
+                        value: Text(LocalizedStringKey(preferences.widgetContent.title))
+                    )
                 }
                 NavigationLink {
                     LiveActivityCustomizerView()
@@ -217,6 +218,12 @@ struct SettingsView: View {
             .filter { !preferences.hiddenLimitProviders.contains($0) }.count
     }
 
+    private var visibleOverviewSectionCount: Int {
+        OverviewSection.allCases.filter {
+            !preferences.hiddenOverviewSections.contains($0.id)
+        }.count
+    }
+
     private var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
     }
@@ -257,10 +264,8 @@ struct SettingsView: View {
                         .tag(currency)
                 }
             }
-        } header: {
-            Label("Language & Region", systemImage: "globe")
         } footer: {
-            Text("Hub costs are stored in USD and converted for display using the same rates as Token Monitor Desktop.")
+            Text("Usage costs are converted from USD for display. Provider balances keep their original currency.")
         }
     }
 
@@ -281,62 +286,16 @@ struct SettingsView: View {
                 }
             }
             Toggle("Live speed", isOn: $preferences.showsLiveTokenRate)
-        } header: {
-            Label("Overview", systemImage: "house")
+            NavigationLink {
+                OverviewSectionOrderEditor()
+            } label: {
+                LabeledContent("Sections") {
+                    Text("\(visibleOverviewSectionCount) visible")
+                        .foregroundStyle(.secondary)
+                }
+            }
         } footer: {
             Text("Show new timed output near the top of Overview. The rate returns to a dash when updates stop.")
-        }
-    }
-
-    @ViewBuilder
-    private func widgetSection(preferences: AppPreferences) -> some View {
-        @Bindable var preferences = preferences
-
-        Section {
-            WidgetSurfacePreview(
-                content: preferences.widgetContent,
-                period: preferences.widgetPeriod,
-                providerName: preferences.widgetProviderID.isEmpty
-                    ? Text("Automatic")
-                    : Text(verbatim: ProviderPresentation.displayName(
-                        for: preferences.widgetProviderID
-                    )),
-                showsCost: preferences.widgetShowsCost,
-                showsUpdateTime: preferences.widgetShowsUpdateTime
-            )
-
-            Picker("Default content", selection: $preferences.widgetContent) {
-                ForEach(AppPreferences.WidgetContent.allCases) { content in
-                    Text(LocalizedStringKey(content.title)).tag(content)
-                }
-            }
-
-            Picker("Period", selection: $preferences.widgetPeriod) {
-                ForEach(UsagePeriodKey.allCases) { period in
-                    Text(LocalizedStringKey(period.title)).tag(period)
-                }
-            }
-
-            Picker("Limit provider", selection: $preferences.widgetProviderID) {
-                Text("Automatic").tag("")
-                ForEach(providerIDs, id: \.self) { providerID in
-                    Label {
-                        Text(verbatim: ProviderPresentation.displayName(for: providerID))
-                    } icon: {
-                        Image(uiImage: ProviderMenuArtwork.image(for: providerID, colorScheme: colorScheme))
-                    }
-                    .tag(providerID)
-                }
-            }
-
-            Toggle("Show cost", isOn: $preferences.widgetShowsCost)
-            Toggle("Show update time", isOn: $preferences.widgetShowsUpdateTime)
-        } header: {
-            Label("Widgets", systemImage: "widget.small")
-        } footer: {
-            Text(
-                "These are the defaults for new widgets. Long-press a widget and choose Edit Widget to override its content."
-            )
         }
     }
 
@@ -388,7 +347,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var aboutSection: some View {
-        Section("About") {
+        Section {
             LabeledContent("App", value: "Token Monitor for iOS")
             LabeledContent("Version", value: appVersion)
             LabeledContent("Build", value: appBuild)
@@ -408,15 +367,6 @@ struct SettingsView: View {
             }
         }
     }
-
-    private var providerIDs: [String] {
-        LimitProviderOrder.sortedIDs(
-            (store.stats?.limits?.providers ?? []).map(\.normalizedProviderID)
-                + [preferences.widgetProviderID].filter { !$0.isEmpty },
-            order: preferences.limitProviderOrder
-        )
-    }
-
 }
 
 /// The Hub connection page — URL, secret, Save & Connect, last error.

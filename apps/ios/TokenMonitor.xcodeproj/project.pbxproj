@@ -28,12 +28,14 @@
 		120000000000000000000011 /* WidgetContentOption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000011 /* WidgetContentOption.swift */; };
 		120000000000000000000012 /* WidgetPeriodOption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000012 /* WidgetPeriodOption.swift */; };
 		120000000000000000000013 /* WidgetVisibilityOption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000013 /* WidgetVisibilityOption.swift */; };
+		1200000000000000000000A1 /* WidgetTextContrastOption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000A1 /* WidgetTextContrastOption.swift */; };
 		120000000000000000000014 /* ProviderEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000014 /* ProviderEntity.swift */; };
 		120000000000000000000015 /* TokenMonitorWidgetIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000015 /* TokenMonitorWidgetIntent.swift */; };
 		120000000000000000000016 /* WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000016 /* WidgetPresentation.swift */; };
 		120000000000000000000017 /* TokenMonitorWidgetEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000017 /* TokenMonitorWidgetEntry.swift */; };
 		120000000000000000000018 /* TokenMonitorWidgetProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000018 /* TokenMonitorWidgetProvider.swift */; };
 		120000000000000000000019 /* TokenMonitorWidgetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000019 /* TokenMonitorWidgetView.swift */; };
+		F0A500000000000000000001 /* WidgetHostSurface.mm in Sources */ = {isa = PBXBuildFile; fileRef = F0A500000000000000000002 /* WidgetHostSurface.mm */; };
 		12000000000000000000001A /* TokenMonitorWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001A /* TokenMonitorWidget.swift */; };
 		12000000000000000000001B /* TokenMonitorActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001B /* TokenMonitorActivityWidget.swift */; };
 		12000000000000000000001C /* TokenMonitorWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001C /* TokenMonitorWidgets.swift */; };
@@ -54,11 +56,11 @@
 		120000000000000000000035 /* BreakdownDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000035 /* BreakdownDetailView.swift */; };
 		120000000000000000000036 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000036 /* Localizable.xcstrings */; };
 		120000000000000000000037 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000036 /* Localizable.xcstrings */; };
-		120000000000000000000040 /* WidgetSurfacePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000040 /* WidgetSurfacePreview.swift */; };
 		120000000000000000000042 /* AccountIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000043 /* AccountIdentity.swift */; };
 		120000000000000000000044 /* LimitProviderOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000045 /* LimitProviderOrder.swift */; };
 		120000000000000000000046 /* LimitProviderOrderEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000047 /* LimitProviderOrderEditor.swift */; };
 		120000000000000000000048 /* LimitProviderOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000049 /* LimitProviderOrderTests.swift */; };
+		D0F100000000000000000001 /* OverviewSectionOrderEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F100000000000000000002 /* OverviewSectionOrderEditor.swift */; };
 		13188ADE465A1882B8A28721 /* LimitsSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90A266099249876C9E03A203 /* LimitsSummary.swift */; };
 		16D725EDE9E50EADC84ECB77 /* HubStatsDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63A39C521B2429E690FA44A8 /* HubStatsDecodingTests.swift */; };
 		16DC547A7773B3E4AB91F3F8 /* UsagePeriod.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F1C49F9A70D0608FE003A34 /* UsagePeriod.swift */; };
@@ -142,6 +144,28 @@
 		11ECF1ABF41F36286F771FC7 /* SectionNavigationLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB9764CF2B94387551C10A9F /* SectionNavigationLink.swift */; };
 		CDEB662348E56C4660A79FEB /* SessionStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 678AFAB952EF878C66E3E823 /* SessionStatusView.swift */; };
 		6A7BB656501C6E66014BA6F7 /* BackgroundReviewGroupRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FCD73906B9103A0E6567659 /* BackgroundReviewGroupRow.swift */; };
+		B7E3000000000000000000B1 /* TokenMonitorWidgetEntry+Intent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F1 /* TokenMonitorWidgetEntry+Intent.swift */; };
+		B7E3000000000000000000B2 /* WidgetUsageLayouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F2 /* WidgetUsageLayouts.swift */; };
+		B7E3000000000000000000B3 /* WidgetUsageLayouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F2 /* WidgetUsageLayouts.swift */; };
+		B7E3000000000000000000B4 /* WidgetLimitLayouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F3 /* WidgetLimitLayouts.swift */; };
+		B7E3000000000000000000B5 /* WidgetLimitLayouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F3 /* WidgetLimitLayouts.swift */; };
+		B7E3000000000000000000B6 /* WidgetActivityLayouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F4 /* WidgetActivityLayouts.swift */; };
+		B7E3000000000000000000B7 /* WidgetActivityLayouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F4 /* WidgetActivityLayouts.swift */; };
+		B7E3000000000000000000B8 /* WidgetAccessoryLayouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F5 /* WidgetAccessoryLayouts.swift */; };
+		B7E3000000000000000000B9 /* WidgetAccessoryLayouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F5 /* WidgetAccessoryLayouts.swift */; };
+		B7E3000000000000000000BA /* WidgetComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F6 /* WidgetComponents.swift */; };
+		B7E3000000000000000000BB /* WidgetComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F6 /* WidgetComponents.swift */; };
+		B7E3000000000000000000BC /* WidgetActivityModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F7 /* WidgetActivityModel.swift */; };
+		B7E3000000000000000000BD /* WidgetActivityModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F7 /* WidgetActivityModel.swift */; };
+		B7E3000000000000000000BE /* TokenMonitorSharedPayload+CacheHit.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F8 /* TokenMonitorSharedPayload+CacheHit.swift */; };
+		B7E3000000000000000000BF /* TokenMonitorSharedPayload+CacheHit.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F8 /* TokenMonitorSharedPayload+CacheHit.swift */; };
+		B7E3000000000000000000C0 /* WidgetSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000F9 /* WidgetSettingsView.swift */; };
+		B7E3000000000000000000C1 /* SharedPayloadCacheHitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000FA /* SharedPayloadCacheHitTests.swift */; };
+		B7E3000000000000000000C2 /* WidgetActivityModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000FB /* WidgetActivityModelTests.swift */; };
+		B7E3000000000000000000C3 /* WidgetPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000FC /* WidgetPresentationTests.swift */; };
+		B7E3000000000000000000C4 /* WidgetLayoutRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000FD /* WidgetLayoutRenderTests.swift */; };
+		B7E3000000000000000000C5 /* TokenMonitorWidgetEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000017 /* TokenMonitorWidgetEntry.swift */; };
+		B7E3000000000000000000C6 /* TokenMonitorWidgetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000019 /* TokenMonitorWidgetView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -201,12 +225,14 @@
 		110000000000000000000011 /* WidgetContentOption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetContentOption.swift; sourceTree = "<group>"; };
 		110000000000000000000012 /* WidgetPeriodOption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPeriodOption.swift; sourceTree = "<group>"; };
 		110000000000000000000013 /* WidgetVisibilityOption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetVisibilityOption.swift; sourceTree = "<group>"; };
+		1100000000000000000000A1 /* WidgetTextContrastOption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetTextContrastOption.swift; sourceTree = "<group>"; };
 		110000000000000000000014 /* ProviderEntity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderEntity.swift; sourceTree = "<group>"; };
 		110000000000000000000015 /* TokenMonitorWidgetIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorWidgetIntent.swift; sourceTree = "<group>"; };
 		110000000000000000000016 /* WidgetPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPresentation.swift; sourceTree = "<group>"; };
 		110000000000000000000017 /* TokenMonitorWidgetEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorWidgetEntry.swift; sourceTree = "<group>"; };
 		110000000000000000000018 /* TokenMonitorWidgetProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorWidgetProvider.swift; sourceTree = "<group>"; };
 		110000000000000000000019 /* TokenMonitorWidgetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorWidgetView.swift; sourceTree = "<group>"; };
+		F0A500000000000000000002 /* WidgetHostSurface.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = WidgetHostSurface.mm; sourceTree = "<group>"; };
 		11000000000000000000001A /* TokenMonitorWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorWidget.swift; sourceTree = "<group>"; };
 		11000000000000000000001B /* TokenMonitorActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorActivityWidget.swift; sourceTree = "<group>"; };
 		11000000000000000000001C /* TokenMonitorWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorWidgets.swift; sourceTree = "<group>"; };
@@ -220,7 +246,6 @@
 		110000000000000000000034 /* AppLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLanguage.swift; sourceTree = "<group>"; };
 		110000000000000000000035 /* BreakdownDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreakdownDetailView.swift; sourceTree = "<group>"; };
 		110000000000000000000036 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
-		110000000000000000000040 /* WidgetSurfacePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSurfacePreview.swift; sourceTree = "<group>"; };
 		120000000000000000000043 /* AccountIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountIdentity.swift; sourceTree = "<group>"; };
 		120000000000000000000045 /* LimitProviderOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitProviderOrder.swift; sourceTree = "<group>"; };
 		120000000000000000000047 /* LimitProviderOrderEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitProviderOrderEditor.swift; sourceTree = "<group>"; };
@@ -228,6 +253,7 @@
 		17439276EEA562BC9BF20A4A /* UsagePeriodKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePeriodKey.swift; sourceTree = "<group>"; };
 		17E754338B27452B51451EDD /* TokenMonitorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorApp.swift; sourceTree = "<group>"; };
 		1CFAC75BE4F19FEA45D7EA4E /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
+		D0F100000000000000000002 /* OverviewSectionOrderEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewSectionOrderEditor.swift; sourceTree = "<group>"; };
 		20FA5F2729465E56F3D222A7 /* HubStats+Sample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HubStats+Sample.swift"; sourceTree = "<group>"; };
 		2185651F29A70E12A064FF39 /* ProviderPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderPresentation.swift; sourceTree = "<group>"; };
 		2B4D1FC26409F9A599A44CA8 /* HubStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubStats.swift; sourceTree = "<group>"; };
@@ -309,6 +335,19 @@
 		EB9764CF2B94387551C10A9F /* SectionNavigationLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/DesignSystem/SectionNavigationLink.swift"; sourceTree = SOURCE_ROOT; };
 		678AFAB952EF878C66E3E823 /* SessionStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Sessions/SessionStatusView.swift"; sourceTree = SOURCE_ROOT; };
 		1FCD73906B9103A0E6567659 /* BackgroundReviewGroupRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Sessions/BackgroundReviewGroupRow.swift"; sourceTree = SOURCE_ROOT; };
+		B7E2000000000000000000F1 /* TokenMonitorWidgetEntry+Intent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitorWidgetEntry+Intent.swift"; sourceTree = "<group>"; };
+		B7E2000000000000000000F2 /* WidgetUsageLayouts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WidgetUsageLayouts.swift"; sourceTree = "<group>"; };
+		B7E2000000000000000000F3 /* WidgetLimitLayouts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WidgetLimitLayouts.swift"; sourceTree = "<group>"; };
+		B7E2000000000000000000F4 /* WidgetActivityLayouts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WidgetActivityLayouts.swift"; sourceTree = "<group>"; };
+		B7E2000000000000000000F5 /* WidgetAccessoryLayouts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WidgetAccessoryLayouts.swift"; sourceTree = "<group>"; };
+		B7E2000000000000000000F6 /* WidgetComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WidgetComponents.swift"; sourceTree = "<group>"; };
+		B7E2000000000000000000F7 /* WidgetActivityModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WidgetActivityModel.swift"; sourceTree = "<group>"; };
+		B7E2000000000000000000F8 /* TokenMonitorSharedPayload+CacheHit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitorSharedPayload+CacheHit.swift"; sourceTree = "<group>"; };
+		B7E2000000000000000000F9 /* WidgetSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WidgetSettingsView.swift"; sourceTree = "<group>"; };
+		B7E2000000000000000000FA /* SharedPayloadCacheHitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SharedPayloadCacheHitTests.swift"; sourceTree = "<group>"; };
+		B7E2000000000000000000FB /* WidgetActivityModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WidgetActivityModelTests.swift"; sourceTree = "<group>"; };
+		B7E2000000000000000000FC /* WidgetPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WidgetPresentationTests.swift"; sourceTree = "<group>"; };
+		B7E2000000000000000000FD /* WidgetLayoutRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WidgetLayoutRenderTests.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -370,6 +409,10 @@
 				A336B133A3DC5726C2FC9E26 /* SSEDecoderTests.swift */,
 				120000000000000000000049 /* LimitProviderOrderTests.swift */,
 				110000000000000000000032 /* SharedSnapshotStoreTests.swift */,
+				B7E2000000000000000000FA /* SharedPayloadCacheHitTests.swift */,
+				B7E2000000000000000000FB /* WidgetActivityModelTests.swift */,
+				B7E2000000000000000000FC /* WidgetPresentationTests.swift */,
+				B7E2000000000000000000FD /* WidgetLayoutRenderTests.swift */,
 			);
 			path = TokenMonitorTests;
 			sourceTree = "<group>";
@@ -406,15 +449,25 @@
 				11000000000000000000001B /* TokenMonitorActivityWidget.swift */,
 				11000000000000000000001A /* TokenMonitorWidget.swift */,
 				110000000000000000000017 /* TokenMonitorWidgetEntry.swift */,
+				B7E2000000000000000000F1 /* TokenMonitorWidgetEntry+Intent.swift */,
 				110000000000000000000015 /* TokenMonitorWidgetIntent.swift */,
 				110000000000000000000018 /* TokenMonitorWidgetProvider.swift */,
 				110000000000000000000019 /* TokenMonitorWidgetView.swift */,
+				F0A500000000000000000002 /* WidgetHostSurface.mm */,
 				11000000000000000000001C /* TokenMonitorWidgets.swift */,
+				B7E2000000000000000000F8 /* TokenMonitorSharedPayload+CacheHit.swift */,
+				B7E2000000000000000000F5 /* WidgetAccessoryLayouts.swift */,
+				B7E2000000000000000000F4 /* WidgetActivityLayouts.swift */,
+				B7E2000000000000000000F7 /* WidgetActivityModel.swift */,
+				B7E2000000000000000000F6 /* WidgetComponents.swift */,
 				11000000000000000000001E /* TokenMonitorWidgets.entitlements */,
 				110000000000000000000011 /* WidgetContentOption.swift */,
+				B7E2000000000000000000F3 /* WidgetLimitLayouts.swift */,
 				110000000000000000000012 /* WidgetPeriodOption.swift */,
 				110000000000000000000016 /* WidgetPresentation.swift */,
 				110000000000000000000013 /* WidgetVisibilityOption.swift */,
+				1100000000000000000000A1 /* WidgetTextContrastOption.swift */,
+				B7E2000000000000000000F2 /* WidgetUsageLayouts.swift */,
 			);
 			path = Widgets;
 			sourceTree = "<group>";
@@ -448,6 +501,7 @@
 				0011336A905F5CC4BE2CBEF9 /* LimitPreviewSection.swift */,
 				8B3A1BCEA080127053F8A292 /* OverviewUnavailableView.swift */,
 				1CFAC75BE4F19FEA45D7EA4E /* OverviewView.swift */,
+				D0F100000000000000000002 /* OverviewSectionOrderEditor.swift */,
 			);
 			path = Overview;
 			sourceTree = "<group>";
@@ -489,7 +543,7 @@
 			children = (
 				110000000000000000000043 /* LiveActivityCustomizerView.swift */,
 				3344AB257C48E4C2CB0B0B01 /* SettingsView.swift */,
-				110000000000000000000040 /* WidgetSurfacePreview.swift */,
+				B7E2000000000000000000F9 /* WidgetSettingsView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -748,6 +802,10 @@
 				16D725EDE9E50EADC84ECB77 /* HubStatsDecodingTests.swift in Sources */,
 				A6E9918B2C7373D9325FA53A /* SSEDecoderTests.swift in Sources */,
 				120000000000000000000032 /* SharedSnapshotStoreTests.swift in Sources */,
+				B7E3000000000000000000C1 /* SharedPayloadCacheHitTests.swift in Sources */,
+				B7E3000000000000000000C2 /* WidgetActivityModelTests.swift in Sources */,
+				B7E3000000000000000000C3 /* WidgetPresentationTests.swift in Sources */,
+				B7E3000000000000000000C4 /* WidgetLayoutRenderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -765,12 +823,22 @@
 				120000000000000000000015 /* TokenMonitorWidgetIntent.swift in Sources */,
 				120000000000000000000018 /* TokenMonitorWidgetProvider.swift in Sources */,
 				120000000000000000000019 /* TokenMonitorWidgetView.swift in Sources */,
+				F0A500000000000000000001 /* WidgetHostSurface.mm in Sources */,
 				12000000000000000000001C /* TokenMonitorWidgets.swift in Sources */,
 				12000000000000000000001F /* TokenMonitorSharedPayload.swift in Sources */,
 				120000000000000000000011 /* WidgetContentOption.swift in Sources */,
 				120000000000000000000012 /* WidgetPeriodOption.swift in Sources */,
 				120000000000000000000016 /* WidgetPresentation.swift in Sources */,
 				120000000000000000000013 /* WidgetVisibilityOption.swift in Sources */,
+				1200000000000000000000A1 /* WidgetTextContrastOption.swift in Sources */,
+				B7E3000000000000000000B1 /* TokenMonitorWidgetEntry+Intent.swift in Sources */,
+				B7E3000000000000000000B3 /* WidgetUsageLayouts.swift in Sources */,
+				B7E3000000000000000000B5 /* WidgetLimitLayouts.swift in Sources */,
+				B7E3000000000000000000B7 /* WidgetActivityLayouts.swift in Sources */,
+				B7E3000000000000000000B9 /* WidgetAccessoryLayouts.swift in Sources */,
+				B7E3000000000000000000BB /* WidgetComponents.swift in Sources */,
+				B7E3000000000000000000BD /* WidgetActivityModel.swift in Sources */,
+				B7E3000000000000000000BF /* TokenMonitorSharedPayload+CacheHit.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -852,6 +920,7 @@
 				D1ED3F79D7ECA56A08967C31 /* MetricFormatter.swift in Sources */,
 				5CF413FBB2A0E7698D979A0E /* OverviewUnavailableView.swift in Sources */,
 				29FD242BD5E2C2DA64BBBC9A /* OverviewView.swift in Sources */,
+				D0F100000000000000000001 /* OverviewSectionOrderEditor.swift in Sources */,
 				A6AC339786A0FA6A18ABA432 /* PeriodPicker.swift in Sources */,
 				F5BA8A378D3659C4916B88DD /* ProviderBalance.swift in Sources */,
 				EF929A9613A59121B44719FA /* ProviderLimitCard.swift in Sources */,
@@ -877,7 +946,16 @@
 				16DC547A7773B3E4AB91F3F8 /* UsagePeriod.swift in Sources */,
 				907B1838EA879DB20AD723D0 /* UsagePeriodKey.swift in Sources */,
 				702669D174DD36A2AD2741A5 /* UsageTrendChart.swift in Sources */,
-				120000000000000000000040 /* WidgetSurfacePreview.swift in Sources */,
+				B7E3000000000000000000B2 /* WidgetUsageLayouts.swift in Sources */,
+				B7E3000000000000000000B4 /* WidgetLimitLayouts.swift in Sources */,
+				B7E3000000000000000000B6 /* WidgetActivityLayouts.swift in Sources */,
+				B7E3000000000000000000B8 /* WidgetAccessoryLayouts.swift in Sources */,
+				B7E3000000000000000000BA /* WidgetComponents.swift in Sources */,
+				B7E3000000000000000000BC /* WidgetActivityModel.swift in Sources */,
+				B7E3000000000000000000BE /* TokenMonitorSharedPayload+CacheHit.swift in Sources */,
+				B7E3000000000000000000C0 /* WidgetSettingsView.swift in Sources */,
+				B7E3000000000000000000C5 /* TokenMonitorWidgetEntry.swift in Sources */,
+				B7E3000000000000000000C6 /* TokenMonitorWidgetView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

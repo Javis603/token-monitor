@@ -5,6 +5,7 @@ struct ResetCreditsRow: View {
     @State private var showsDetails = false
 
     let credits: ProviderResetCredits
+    var compact = false
 
     var body: some View {
         if let count = credits.visibleCount {
@@ -13,14 +14,14 @@ struct ResetCreditsRow: View {
                     ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
                     : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
                 layout {
-                    Text(verbatim: MetricFormatter.resetCount(count, locale: Locale(identifier: "en")))
+                    Text(verbatim: MetricFormatter.resetCount(count, locale: MetricFormatter.desktopQuotaLocale))
                         .fixedSize(horizontal: true, vertical: false)
                     if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
                     if hasDetails {
                         expiryDetail(now: context.date)
                     }
                 }
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.vertical, 2)
             }
@@ -34,13 +35,16 @@ struct ResetCreditsRow: View {
     private func expiryDetail(now: Date) -> some View {
         HStack(spacing: 6) {
             if !credits.expirationDates.isEmpty {
+                if compact {
+                    Text(verbatim: "Expires")
+                }
                 Text(verbatim: expirySummary(now: now))
                     .monospacedDigit()
                     .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Image(systemName: "info.circle")
-                .font(.caption2)
+                .font(.caption)
         }
         .accessibilityHidden(true)
         .overlay {
@@ -63,10 +67,11 @@ struct ResetCreditsRow: View {
 
     private func expirySummary(now: Date) -> String {
         let dates = credits.expirationDates
-        var parts = dates.prefix(3).map {
-            MetricFormatter.limitCountdown(to: $0, now: now, locale: Locale(identifier: "en"))
+        let displayedDates = compact ? dates.prefix(1) : dates.prefix(3)
+        var parts = displayedDates.map {
+            MetricFormatter.limitCountdown(to: $0, now: now, locale: MetricFormatter.desktopQuotaLocale)
         }
-        if dates.count > 3 { parts.append("+\(dates.count - 3)") }
+        if !compact && dates.count > 3 { parts.append("+\(dates.count - 3)") }
         return parts.joined(separator: " · ")
     }
 }

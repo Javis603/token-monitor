@@ -22,11 +22,15 @@ struct TokenMonitorWidgetIntent: WidgetConfigurationIntent {
     @Parameter(title: "Update Time", default: .appDefault)
     var updateTimeVisibility: WidgetVisibilityOption
 
+    @Parameter(title: "Text Contrast", default: .recommended)
+    var textContrast: WidgetTextContrastOption
+
     static var parameterSummary: some ParameterSummary {
         Summary("\(\.$content), \(\.$period)") {
             \.$provider
             \.$costVisibility
             \.$updateTimeVisibility
+            \.$textContrast
         }
     }
 }

@@ -77,6 +77,16 @@ struct InsightsView: View {
                         #endif
                     }
                 }
+            } else if case let .failed(message) = store.phase {
+                ContentUnavailableView {
+                    Label("Offline", systemImage: "wifi.slash")
+                } description: {
+                    Text(message)
+                } actions: {
+                    Button("Refresh") { Task { await store.refresh() } }
+                        .modifier(AppActionStyle())
+                }
+                .padding(DesignTokens.screenPadding)
             } else {
                 ContentUnavailableView(
                     "No Insights",

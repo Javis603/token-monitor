@@ -98,6 +98,8 @@ struct AppShellView: View {
                         HubConnectionView()
                     case "live", "customizer":
                         LiveActivityCustomizerView()
+                    case "widgets":
+                        WidgetSettingsView()
                     default:
                         SettingsView()
                     }

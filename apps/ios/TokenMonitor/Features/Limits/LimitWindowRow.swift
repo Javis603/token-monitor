@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct LimitWindowRow: View {
-    @Environment(AppPreferences.self) private var preferences
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let provider: LimitProvider
@@ -38,20 +37,34 @@ struct LimitWindowRow: View {
                 .accessibilityHidden(true)
             }
 
-            if let resetDate = Date.hubTimestamp(from: window.resetsAt) {
-                HStack(spacing: 4) {
-                    Text(verbatim: "Reset")
-                    TimelineView(.periodic(from: .now, by: 60)) { context in
-                        Text(MetricFormatter.limitCountdown(to: resetDate, now: context.date, locale: Locale(identifier: "en")))
+            if Date.hubTimestamp(from: window.resetsAt) != nil
+                || nonEmpty(window.resetDescription) != nil
+                || monetaryDetail != nil {
+                let detailLayout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                    : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+                detailLayout {
+                    if let resetDate = Date.hubTimestamp(from: window.resetsAt) {
+                        HStack(spacing: 4) {
+                            Text(verbatim: "Reset")
+                            TimelineView(.periodic(from: .now, by: 60)) { context in
+                                Text(MetricFormatter.limitCountdown(to: resetDate, now: context.date, locale: MetricFormatter.desktopQuotaLocale))
+                                    .monospacedDigit()
+                            }
+                        }
+                    } else if let description = nonEmpty(window.resetDescription) {
+                        Text(description)
+                    }
+                    if let monetaryDetail {
+                        if !dynamicTypeSize.isAccessibilitySize {
+                            Spacer(minLength: 4)
+                        }
+                        Text(verbatim: monetaryDetail)
                             .monospacedDigit()
                     }
                 }
                 .font(dynamicTypeSize.isAccessibilitySize ? .footnote : .caption2)
                 .foregroundStyle(.secondary)
-            } else if let description = nonEmpty(window.resetDescription) {
-                Text(description)
-                    .font(dynamicTypeSize.isAccessibilitySize ? .footnote : .caption2)
-                    .foregroundStyle(.secondary)
             }
 
             if let detail = nonEmpty(window.detail) {
@@ -72,25 +85,22 @@ struct LimitWindowRow: View {
     }
 
     private var headline: String? {
+        if (provider.normalizedProviderID == "commandcode" || provider.normalizedProviderID == "zed"),
+           window.kind == "billing", window.showMeter != false,
+           let remainingPercent {
+            return MetricFormatter.remaining(remainingPercent, locale: MetricFormatter.desktopQuotaLocale)
+        }
         if window.isCredits {
             guard let amount = window.remaining ?? provider.balance?.amount else {
                 return nil
             }
-            return MetricFormatter.currency(
-                amount,
-                sourceCode: window.currency ?? provider.balance?.currency ?? "USD",
-                displayCurrency: preferences.currency
-            )
+            return MetricFormatter.currency(amount, code: sourceCurrency)
         }
         if window.metric == "spend", let used = window.used {
-            return MetricFormatter.currency(
-                used,
-                sourceCode: window.currency ?? provider.balance?.currency ?? "USD",
-                displayCurrency: preferences.currency
-            )
+            return MetricFormatter.currency(used, code: sourceCurrency)
         }
         if let remainingPercent {
-            return MetricFormatter.remaining(remainingPercent, locale: Locale(identifier: "en"))
+            return MetricFormatter.remaining(remainingPercent, locale: MetricFormatter.desktopQuotaLocale)
         }
         if let remaining = window.remaining {
             return remaining.formatted(.number.precision(.fractionLength(0...2)))
@@ -99,6 +109,26 @@ struct LimitWindowRow: View {
             return used.formatted(.number.precision(.fractionLength(0...2)))
         }
         return nil
+    }
+
+    private var sourceCurrency: String {
+        window.currency ?? provider.balance?.currency ?? "USD"
+    }
+
+    private var monetaryDetail: String? {
+        guard window.kind == "billing", let limit = window.limit, limit > 0 else {
+            return nil
+        }
+        switch provider.normalizedProviderID {
+        case "commandcode":
+            guard let remaining = window.remaining else { return nil }
+            return "\(MetricFormatter.currency(remaining, code: sourceCurrency)) / \(MetricFormatter.currency(limit, code: sourceCurrency))"
+        case "zed":
+            guard window.limitId != "zed.edit-predictions", let used = window.used else { return nil }
+            return "\(MetricFormatter.currency(used, code: sourceCurrency)) / \(MetricFormatter.currency(limit, code: sourceCurrency))"
+        default:
+            return nil
+        }
     }
 
     private var title: some View {
@@ -133,23 +163,27 @@ struct LimitWindowGrid: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             ForEach(LimitWindowSection.make(provider: provider, windows: windows)) { section in
-                if let title = section.title {
-                    Text(title)
-                        .font(.subheadline.weight(.medium))
-                        .accessibilityAddTraits(.isHeader)
-                }
-                ForEach(Array(section.rows.enumerated()), id: \.offset) { _, row in
-                    if dynamicTypeSize.isAccessibilitySize {
-                        VStack(alignment: .leading, spacing: 16) {
-                            ForEach(row) { window in
-                                LimitWindowRow(provider: provider, window: window)
+                VStack(alignment: .leading, spacing: 8) {
+                    if let title = section.title {
+                        Text(title)
+                            .font(.subheadline.weight(.medium))
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(Array(section.rows.enumerated()), id: \.offset) { _, row in
+                            if dynamicTypeSize.isAccessibilitySize {
+                                VStack(alignment: .leading, spacing: 16) {
+                                    ForEach(row) { window in
+                                        LimitWindowRow(provider: provider, window: window)
+                                    }
+                                }
+                            } else {
+                                // Fit the pair together, keeping both meters on one baseline.
+                                ViewThatFits(in: .horizontal) {
+                                    windowPair(row, stacksHeadline: false)
+                                    windowPair(row, stacksHeadline: true)
+                                }
                             }
-                        }
-                    } else {
-                        // Fit the pair together, keeping both meters on one baseline.
-                        ViewThatFits(in: .horizontal) {
-                            windowPair(row, stacksHeadline: false)
-                            windowPair(row, stacksHeadline: true)
                         }
                     }
                 }

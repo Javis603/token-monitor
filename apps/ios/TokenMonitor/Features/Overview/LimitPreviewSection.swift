@@ -15,6 +15,7 @@ struct LimitPreviewSection: View {
                 }
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
+                .contentShape(.rect.inset(by: -10))
             }
 
             SurfaceCard {

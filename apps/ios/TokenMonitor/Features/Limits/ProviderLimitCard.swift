@@ -66,7 +66,7 @@ struct ProviderLimitCard: View {
             }
             windows(for: provider)
             if let credits = provider.resetCredits {
-                ResetCreditsRow(credits: credits)
+                ResetCreditsRow(credits: credits, compact: compact)
             }
         }
     }
@@ -125,7 +125,7 @@ struct ProviderLimitCard: View {
     @ViewBuilder
     private func freshnessLine(_ provider: LimitProvider) -> some View {
         if provider.showsFreshnessLine,
-           let text = provider.freshnessText(locale: Locale(identifier: "en")) {
+           let text = provider.freshnessText(locale: MetricFormatter.desktopQuotaLocale) {
             Text(verbatim: text)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -162,7 +162,7 @@ private struct LimitAccountSection: View {
             VStack(alignment: .leading, spacing: 3) {
                 accountHeading
                 if provider.showsFreshnessLine,
-                   let text = provider.freshnessText(locale: Locale(identifier: "en")) {
+                   let text = provider.freshnessText(locale: MetricFormatter.desktopQuotaLocale) {
                     Text(verbatim: text)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -183,7 +183,7 @@ private struct LimitAccountSection: View {
                 )
             }
             if let credits = provider.resetCredits {
-                ResetCreditsRow(credits: credits)
+                ResetCreditsRow(credits: credits, compact: compact)
             }
         }
     }

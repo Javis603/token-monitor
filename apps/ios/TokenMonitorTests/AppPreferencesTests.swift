@@ -31,6 +31,28 @@ struct AppPreferencesTests {
     }
 
     @Test
+    func overviewLayoutPersistsSectionOrderAndVisibility() {
+        let suiteName = "OverviewLayoutTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName) ?? .standard
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = AppPreferences(
+            defaults: defaults,
+            snapshotStore: SharedSnapshotStore(fileURL: nil)
+        )
+        preferences.overviewSectionOrder = ["models", "summary", "limits", "trend", "tools", "devices"]
+        preferences.hiddenOverviewSections = ["trend", "devices"]
+
+        let reloaded = AppPreferences(
+            defaults: defaults,
+            snapshotStore: SharedSnapshotStore(fileURL: nil)
+        )
+        #expect(OverviewSection.ordered(by: reloaded.overviewSectionOrder).map(\.id) ==
+            ["models", "summary", "limits", "trend", "tools", "devices"])
+        #expect(reloaded.hiddenOverviewSections == ["trend", "devices"])
+    }
+
+    @Test
     func persistsWidgetAndLiveActivityDefaultsToSharedPayload() throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)

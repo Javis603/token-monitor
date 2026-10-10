@@ -23,7 +23,7 @@ struct ResetCreditsDetail: View {
                     Text("Reset details")
                         .font(.subheadline.weight(.semibold))
                     if let count = credits.visibleCount {
-                        Text(verbatim: MetricFormatter.resetCount(count, locale: Locale(identifier: "en")))
+                        Text(verbatim: MetricFormatter.resetCount(count, locale: MetricFormatter.desktopQuotaLocale))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -60,7 +60,7 @@ struct ResetCreditsDetail: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if showsCount, let count = grant.resetsLeft {
-                Text(verbatim: MetricFormatter.resetCount(count, locale: Locale(identifier: "en")))
+                Text(verbatim: MetricFormatter.resetCount(count, locale: MetricFormatter.desktopQuotaLocale))
                     .foregroundStyle(.secondary)
             }
             if let start = Date.hubTimestamp(from: grant.startsAt) {

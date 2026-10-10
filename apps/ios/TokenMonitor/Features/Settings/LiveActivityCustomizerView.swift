@@ -11,8 +11,10 @@ struct LiveActivityCustomizerView: View {
     @Environment(TokenMonitorStore.self) private var store
     @Environment(LiveActivityController.self) private var liveActivity
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let snapshotStore = SharedSnapshotStore()
+    private var stageAnimation: Animation? { reduceMotion ? nil : .snappy }
 
     enum Surface: Int, CaseIterable, Identifiable {
         case compact, minimal, expanded, lockScreen
@@ -170,7 +172,7 @@ struct LiveActivityCustomizerView: View {
     private var stage: some View {
         let context = previewContext
         return VStack(spacing: 14) {
-            TabView(selection: $surface.animation(.snappy)) {
+            TabView(selection: $surface.animation(stageAnimation)) {
                 phone { compactPage(context) }.tag(Surface.compact)
                 phone { minimalPage(context) }.tag(Surface.minimal)
                 phone { expandedPage(context) }.tag(Surface.expanded)
@@ -183,14 +185,14 @@ struct LiveActivityCustomizerView: View {
                     Capsule()
                         .fill(item == surface ? Color.primary : Color.secondary.opacity(0.3))
                         .frame(width: item == surface ? 18 : 6, height: 6)
-                        .onTapGesture { withAnimation(.snappy) { surface = item } }
+                        .onTapGesture { withAnimation(stageAnimation) { surface = item } }
                 }
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text(surface.title))
             .accessibilityAdjustableAction { direction in
                 let next = surface.rawValue + (direction == .increment ? 1 : -1)
-                if let value = Surface(rawValue: next) { withAnimation(.snappy) { surface = value } }
+                if let value = Surface(rawValue: next) { withAnimation(stageAnimation) { surface = value } }
             }
         }
     }
@@ -263,14 +265,14 @@ struct LiveActivityCustomizerView: View {
         .overlay(alignment: slot == .leading ? .leading : .trailing) {
             SlotArc(trailing: slot == .trailing, islandHeight: Device.islandHeight)
         }
-        .animation(.snappy, value: slot)
+        .animation(stageAnimation, value: slot)
     }
 
     /// One side of the island: its reading, or a plus while empty.
     private func slotButton(_ target: Slot, context: ActivityContext) -> some View {
         let item = target == .leading ? context.layout.compactLeading : context.layout.compactTrailing
         return Button {
-            withAnimation(.snappy) { slot = target }
+            withAnimation(stageAnimation) { slot = target }
         } label: {
             Group {
                 if item.style == .none {
@@ -344,7 +346,7 @@ struct LiveActivityCustomizerView: View {
                 Rectangle().fill(.white.opacity(0.35)).frame(width: 1, height: 16)
                     .padding(.horizontal, 14)
                 Button("Delete") {
-                    withAnimation(.snappy) { setSelectedStyle(.none) }
+                    withAnimation(stageAnimation) { setSelectedStyle(.none) }
                 }
             }
         }
@@ -443,7 +445,7 @@ struct LiveActivityCustomizerView: View {
                 }
             }
         }
-        .animation(.snappy, value: surface)
+        .animation(stageAnimation, value: surface)
     }
 
     private var tileColumns: [GridItem] {

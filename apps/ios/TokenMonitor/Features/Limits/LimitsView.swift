@@ -21,10 +21,12 @@ struct LimitsView: View {
 
                             if providers.isEmpty {
                                 ContentUnavailableView(
-                                    "No AI Limits",
+                                    !(stats.limits?.providers ?? []).isEmpty ? "All AI Limits Hidden" : "No AI Limits",
                                     systemImage: "gauge.open.with.lines.needle.33percent",
                                     description: Text(
-                                        "Enable AI Tool Limits on a reporting device. Provider credentials never need to be stored on this iPhone."
+                                        !(stats.limits?.providers ?? []).isEmpty
+                                            ? "Use Customize AI Limits below to show a provider."
+                                            : "Enable AI Tool Limits on a reporting device. Provider credentials never need to be stored on this iPhone."
                                     )
                                 )
                                 .padding(.vertical, 50)
@@ -76,6 +78,16 @@ struct LimitsView: View {
                         #endif
                     }
                 }
+            } else if case let .failed(message) = store.phase {
+                ContentUnavailableView {
+                    Label("Offline", systemImage: "wifi.slash")
+                } description: {
+                    Text(message)
+                } actions: {
+                    Button("Refresh", action: refresh)
+                        .modifier(AppActionStyle())
+                }
+                .padding(DesignTokens.screenPadding)
             } else {
                 ContentUnavailableView(
                     "Connect Your Hub",

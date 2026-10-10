@@ -6,6 +6,7 @@ struct OverviewView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @Binding var selectedTab: AppTab
+    @State private var showsOrderEditor = false
 
     var body: some View {
         @Bindable var store = store
@@ -19,40 +20,73 @@ struct OverviewView: View {
                             spacing: DesignTokens.sectionSpacing
                         ) {
                             ConnectionStatusNotice(phase: store.phase, retry: refresh)
-                            HeroSummaryCard(
-                                period: store.currentPeriod
-                            )
-                            LimitPreviewSection(
-                                groups: Array(limitGroups.prefix(preferences.homeLimitCount)),
-                                showAll: showLimits
-                            )
-                            section("Trend") {
-                                InsightTrendCard(history: store.currentHistory, compact: true)
-                            }
-                            .id("overview-trend")
-                            section("Tools", destination: .tool) {
-                                BreakdownCard(
-                                    kind: .tool,
-                                    entries: store.currentPeriod.clientEntries,
-                                    total: store.currentPeriod.totalTokens ?? 0, limit: 3
-                                )
-                            }
-                            section("Models", destination: .model) {
-                                BreakdownCard(
-                                    kind: .model,
-                                    entries: store.currentPeriod.modelEntries,
-                                    total: store.currentPeriod.totalTokens ?? 0, limit: 3
-                                )
-                            }
-                            VStack(alignment: .leading, spacing: DesignTokens.headerToCardSpacing) {
-                                SectionHeader("Devices") {
-                                    SectionNavigationLink(title: "Devices") { DevicesView() }
+                            ForEach(visibleSections) { section in
+                                switch section {
+                                case .summary:
+                                    HeroSummaryCard(period: store.currentPeriod)
+                                case .limits:
+                                    LimitPreviewSection(
+                                        groups: Array(limitGroups.prefix(preferences.homeLimitCount)),
+                                        showAll: showLimits
+                                    )
+                                case .trend:
+                                    self.section("Trend") {
+                                        InsightTrendCard(history: store.currentHistory, compact: true)
+                                    }
+                                    .id("overview-trend")
+                                case .tools:
+                                    self.section("Tools", destination: .tool) {
+                                        BreakdownCard(
+                                            kind: .tool,
+                                            entries: store.currentPeriod.clientEntries,
+                                            total: store.currentPeriod.totalTokens ?? 0, limit: 3
+                                        )
+                                    }
+                                case .models:
+                                    self.section("Models", destination: .model) {
+                                        BreakdownCard(
+                                            kind: .model,
+                                            entries: store.currentPeriod.modelEntries,
+                                            total: store.currentPeriod.totalTokens ?? 0, limit: 3
+                                        )
+                                    }
+                                case .devices:
+                                    VStack(alignment: .leading, spacing: DesignTokens.headerToCardSpacing) {
+                                        SectionHeader("Devices") {
+                                            SectionNavigationLink(title: "Devices") { DevicesView() }
+                                        }
+                                        SurfaceCard {
+                                            DeviceListCard(devices: stats.usageDevices(for: store.selectedPeriod), period: store.selectedPeriod)
+                                        }
+                                    }
                                 }
-                                SurfaceCard {
-                                    DeviceListCard(devices: stats.usageDevices(for: store.selectedPeriod), period: store.selectedPeriod)
-                                }
                             }
-                            .id("overview-bottom")
+                            if visibleSections.isEmpty {
+                                ContentUnavailableView {
+                                    Label("No Overview sections", systemImage: "square.grid.2x2")
+                                } description: {
+                                    Text("Choose the sections you want to see.")
+                                } actions: {
+                                    Button("Customize Overview") { showsOrderEditor = true }
+                                        .buttonStyle(.borderedProminent)
+                                        .controlSize(.large)
+                                        .frame(minHeight: DesignTokens.controlHeight)
+                                }
+                                .padding(.vertical, 24)
+                            }
+                            if !visibleSections.isEmpty {
+                                Button {
+                                    showsOrderEditor = true
+                                } label: {
+                                    Label("Customize Overview", systemImage: "slider.horizontal.3")
+                                        .frame(minHeight: DesignTokens.controlHeight)
+                                        .contentShape(.rect)
+                                }
+                                .font(.footnote)
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                                .id("overview-bottom")
+                            }
                         }
                         .padding(.horizontal, DesignTokens.screenPadding)
                         .padding(.top, 8)
@@ -119,6 +153,22 @@ struct OverviewView: View {
         .background {
             AppBackground()
         }
+        .sheet(isPresented: $showsOrderEditor) {
+            NavigationStack {
+                OverviewSectionOrderEditor()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Done") { showsOrderEditor = false }
+                                .fontWeight(.semibold)
+                        }
+                    }
+            }
+        }
+    }
+
+    private var visibleSections: [OverviewSection] {
+        OverviewSection.ordered(by: preferences.overviewSectionOrder)
+            .filter { !preferences.hiddenOverviewSections.contains($0.id) }
     }
 
     private var limitGroups: [LimitProviderGroup] {
@@ -179,12 +229,12 @@ private struct LiveSpeedBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "bolt.fill")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.caption.weight(.semibold))
             Text(verbatim: "\(value) tok/s")
                 .monospacedDigit()
                 .contentTransition(.numericText())
         }
-        .font(.system(size: 12, weight: .semibold))
+        .font(.caption.weight(.semibold))
         .foregroundStyle(reading?.isIdle == false ? Color.primary : Color.secondary)
         .lineLimit(1)
         .minimumScaleFactor(0.8)
