@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const { cursorDesktopStateCandidates } = require('./desktopState');
+const { RUNNING_WINDOW_MS } = require('../../sessionLive');
 
 // Deferred like auth.js: importing this resolver must not emit Node's
 // experimental node:sqlite warning for collectors that never see a Cursor row.
@@ -36,6 +37,43 @@ function cleanTitle(value) {
     : '';
 }
 
+function hasRecentUsage(periods, id, now) {
+  if (!periods) return false;
+  return ['today', 'month', 'allTime'].some((name) => {
+    const timestamp = Date.parse(periods?.[name]?.sessions?.[`cursor:${id}`]?.lastUsedAt);
+    return timestamp >= now - RUNNING_WINDOW_MS && timestamp <= now;
+  });
+}
+
+function readTurnEnds(db, wantedIds) {
+  const result = new Map();
+  // Read scalar fields inside SQLite: composerData also contains conversation
+  // text and encrypted checkpoints, which must not enter the metadata cache.
+  const query = db.prepare(`SELECT
+    json_extract(value, '$.composerId') AS composerId,
+    json_extract(value, '$.status') AS status,
+    json_extract(value, '$.unfinishedRunAt') AS unfinishedRunAt,
+    json_extract(value, '$.lastUpdatedAt') AS lastUpdatedAt
+    FROM cursorDiskKV WHERE key = ? AND json_valid(value)`);
+  for (const id of wantedIds) {
+    const row = query.get(`composerData:${id}`);
+    result.set(id, null); // a successful absent/unknown answer is cacheable too
+    if (row?.composerId !== id) continue;
+    // Cursor serializes a local generating run as aborted + unfinishedRunAt.
+    // A completed/cancelled turn drops that marker; aborted alone is terminal.
+    const unfinished = typeof row.unfinishedRunAt === 'number'
+      && row.unfinishedRunAt > 0 && Number.isFinite(new Date(row.unfinishedRunAt).getTime());
+    if (row.status === 'completed' || (row.status === 'aborted' && !unfinished)) result.set(id, { turnEnded: true });
+    else if (row.status === 'generating' || (row.status === 'aborted' && unfinished)) {
+      const activeAt = unfinished ? row.unfinishedRunAt : row.lastUpdatedAt;
+      result.set(id, { turnEnded: false,
+        ...(typeof activeAt === 'number' && activeAt > 0 && Number.isFinite(new Date(activeAt).getTime())
+          ? { lastUsedAt: new Date(activeAt).toISOString() } : {}) });
+    }
+  }
+  return result;
+}
+
 // Older Cursor releases kept the sidebar index in the shared key/value store
 // under 'composer.composerHeaders' (an {allComposers:[...]} list); current
 // releases promote it to a first-class composerHeaders table. The table is the
@@ -64,7 +102,7 @@ function legacyTitlesFor(db, cache) {
   }
 }
 
-function readTitles(dbPath, sqlite, wantedIds, cache) {
+function readTitles(dbPath, sqlite, wantedIds, cache, now = Date.now(), periods) {
   let db;
   try {
     db = new sqlite.DatabaseSync(dbPath, { readOnly: true });
@@ -79,6 +117,7 @@ function readTitles(dbPath, sqlite, wantedIds, cache) {
     const eligible = new Set();
     const failed = new Set();
     const misses = new Set();
+    const turnIds = new Set(wantedIds);
     let hasHeaderTable;
     try {
       hasHeaderTable = Boolean(
@@ -109,6 +148,12 @@ function readTitles(dbPath, sqlite, wantedIds, cache) {
             if (row === undefined) { eligible.add(id); continue; }
             let header;
             try { header = JSON.parse(row.value); } catch (_) { header = null; }
+            // The header is already decoded for its name. Old known headers
+            // cannot light a running indicator, so avoid opening their much
+            // larger composerData values on every unrelated WAL change.
+            if (!hasRecentUsage(periods, id, now) && typeof header?.lastUpdatedAt === 'number'
+              && Number.isFinite(header.lastUpdatedAt) && header.lastUpdatedAt > 0
+              && (header.lastUpdatedAt < now - RUNNING_WINDOW_MS || header.lastUpdatedAt > now)) turnIds.delete(id);
             const title = cleanTitle(header?.name);
             // Only a usable title counts as the table's answer. A malformed or
             // empty-named row stays unanswered so the legacy index — which may
@@ -131,7 +176,14 @@ function readTitles(dbPath, sqlite, wantedIds, cache) {
         if (title) retries.set(id, title);
       }
     }
-    return { titles, retries, misses };
+    let turnEnds = new Map();
+    let turnReadFailed = false;
+    try {
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cursorDiskKV'").get()) {
+        turnEnds = readTurnEnds(db, turnIds);
+      } else turnEnds = new Map([...turnIds].map((id) => [id, null]));
+    } catch (_) { turnReadFailed = true; }
+    return { titles, retries, misses, turnEnds, turnReadFailed };
   } catch (_) {
     return null;
   } finally {
@@ -139,7 +191,7 @@ function readTitles(dbPath, sqlite, wantedIds, cache) {
   }
 }
 
-function resolveSessionMetadata(sessionIds, { deps = {}, home } = {}) {
+function resolveSessionMetadata(sessionIds, { deps = {}, home, now = Date.now(), periods } = {}) {
   const result = new Map();
   const sqlite = resolveSqlite(deps);
   if (typeof sqlite?.DatabaseSync !== 'function') return result;
@@ -154,25 +206,36 @@ function resolveSessionMetadata(sessionIds, { deps = {}, home } = {}) {
     const stamp = databaseStamp(dbPath);
     if (!stamp) continue;
     let cached = cache.get(dbPath);
-    if (cached?.stamp !== stamp) cached = { stamp, titles: new Map(), misses: new Set(), legacyTitles: null };
+    if (cached?.stamp !== stamp) cached = { stamp, titles: new Map(), misses: new Set(), legacyTitles: null,
+      turnEnds: new Map(), turnRetries: new Set() };
     // Ask only for ids this fingerprint has not definitively answered. A
     // cached miss is a real answer (no open/query per tick for a header-less
     // session); only ids that failed to read are asked again, so a
     // late-landing header or transient error still resolves on the next
     // lookup without waiting for the WAL.
-    const wanted = new Set([...sessionIds].filter((id) => !cached.titles.has(id) && !cached.misses.has(id)));
+    const wanted = new Set([...sessionIds].filter((id) => cached.turnRetries.has(id)
+      || (!cached.turnEnds.has(id) && hasRecentUsage(periods, id, now))
+      || (!cached.titles.has(id) && !cached.misses.has(id))));
     if (wanted.size > 0) {
-      const read = readTitles(dbPath, sqlite, wanted, cached);
+      const read = readTitles(dbPath, sqlite, wanted, cached, now, periods);
       if (read) {
         for (const [id, title] of read.titles) cached.titles.set(id, title);
         for (const [id, title] of read.retries) retries.set(id, title);
         for (const id of read.misses) cached.misses.add(id);
+        for (const [id, state] of read.turnEnds) cached.turnEnds.set(id, state);
+        for (const id of wanted) {
+          if (read.turnReadFailed) cached.turnRetries.add(id);
+          else cached.turnRetries.delete(id);
+        }
       }
     }
     cache.set(dbPath, cached);
     for (const sessionId of sessionIds) {
       const title = cached.titles.get(sessionId) || retries.get(sessionId);
-      if (title && !result.has(sessionId)) result.set(sessionId, { title });
+      const state = cached.turnEnds.get(sessionId);
+      if (result.has(sessionId)) continue;
+      if (title) result.set(sessionId, state ? { title, ...state } : { title });
+      else if (state) result.set(sessionId, { ...state });
     }
   }
   return result;

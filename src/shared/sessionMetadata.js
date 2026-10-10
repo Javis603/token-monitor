@@ -300,6 +300,7 @@ function sessionMetadataMap(periods, home = os.homedir(), deps = {}) {
     home,
     metadata,
     now,
+    periods,
     resolveProjects,
     projectIdentity,
     isoFromDate,

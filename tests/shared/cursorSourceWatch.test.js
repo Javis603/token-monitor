@@ -295,6 +295,35 @@ test('Cursor desktop titles refresh while cloud usage sync is throttled', async 
   }
 });
 
+test('Cursor WAL start and finish update session state inside the cloud-sync floor', async (t) => {
+  const f = runtimeFixture(t);
+  await waitFor(() => f.updates.length === 1);
+  const db = new DatabaseSync(path.join(f.roots[0], 'state.vscdb'));
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec('CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB)');
+  const put = db.prepare('INSERT OR REPLACE INTO cursorDiskKV VALUES (?, ?)');
+  const { sessionActivityState } = require('../../src/shared/sessionLive');
+  const before = f.updates[0].summary;
+  try {
+    for (const [index, status] of ['generating', 'completed', 'aborted'].entries()) {
+      f.at(1000 + index * 1000);
+      put.run('composerData:cursor-session', JSON.stringify({ composerId: 'cursor-session', status, lastUpdatedAt: Date.now() }));
+      f.event('change', 'state.vscdb-wal');
+      await waitFor(() => f.updates.length === index + 2);
+      const after = f.updates.at(-1).summary;
+      for (const name of ['today', 'month', 'allTime']) {
+        const row = Object.values(after[name].sessions).find((session) => session.client === 'cursor');
+        assert.equal(row.turnEnded, status !== 'generating', `${name} receives the latest boundary`);
+        assert.equal(sessionActivityState(row) === 'running', status === 'generating', `${name} spinner follows the boundary`);
+        assert.deepEqual(after[name].clients, before[name].clients);
+        assert.equal(after[name].totalTokens, before[name].totalTokens);
+        assert.equal(after[name].costUsd, before[name].costUsd);
+      }
+      assert.equal(f.syncCalls, 1, 'state reads do not force another cloud request');
+    }
+  } finally { db.close(); }
+});
+
 test('a failed Cursor source sync keeps its event on the failure backoff', async (t) => {
   const f = runtimeFixture(t);
   await waitFor(() => f.updates.length === 1);
