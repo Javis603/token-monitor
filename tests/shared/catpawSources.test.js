@@ -221,3 +221,94 @@ test('an account added then removed during serial scans still invalidates the mi
   assert.deepEqual(['today', 'month', 'allTime'].map(period => updates[0][period].totalTokens), [10, 10, 10]);
   assert.ok(previews.every(preview => preview.month?.totalTokens !== 100));
 });
+
+test('CatPaw source checks remain active while a Dots visibility projection is pending', async t => {
+  const f = fixture(t);
+  let calls = 0;
+  const updates = [];
+  const handle = startCollector({
+    ...collectorOptions(f, async () => {
+      calls += 1;
+      if (calls === 4) fs.writeFileSync(f.account('temporary'), '');
+      if (calls === 6) fs.unlinkSync(f.account('temporary'));
+      return { entries: [{ client: 'catpaw', sessionId: 's', model: 'auto', input: calls === 5 ? 100 : 10, output: 0, cost: 0 }] };
+    }, summary => updates.push(summary)),
+    clients: 'catpaw,codex', codexLocalUsageEnabled: false, sessionActivityPolling: false
+  });
+  t.after(() => handle.stop());
+  await handle.whenIdle();
+  fs.writeFileSync(f.account('historical'), '');
+  await handle.setCodexDotsVisible(false);
+  assert.equal(calls, 9, 'the visibility refresh must discard the mixed scan and replay once');
+  assert.equal(updates.length, 2);
+  assert.deepEqual(['today', 'month', 'allTime'].map(period => updates[1][period].totalTokens), [10, 10, 10]);
+});
+
+test('persisted CatPaw anchors retain the source set used by the scan', async t => {
+  const f = fixture(t);
+  const options = {
+    ...collectorOptions(f, async () => ({
+      entries: [{ client: 'catpaw', sessionId: 's', model: 'auto', input: 10, output: 0, cost: 0 }]
+    })),
+    anchorPersistenceEnabled: true
+  };
+  const mkdirSync = fs.mkdirSync;
+  let added = false;
+  const mkdir = t.mock.method(fs, 'mkdirSync', (dir, ...args) => {
+    if (!added && dir === f.options.homeDir) {
+      added = true;
+      fs.writeFileSync(f.account('after-scan'), '');
+    }
+    return mkdirSync(dir, ...args);
+  });
+  let handle = startCollector(options);
+  t.after(() => handle.stop());
+  await handle.whenIdle();
+  mkdir.mock.restore();
+  handle.stop();
+  const saved = JSON.parse(fs.readFileSync(path.join(f.options.homeDir, 'collector-anchor.json'), 'utf8'));
+  assert.equal(added, true);
+  assert.equal(saved.allTime.totalTokens, 10);
+  assert.equal(collectorAnchorTrust(saved, options), null, 'the new account was not part of the persisted baseline');
+  let calls = 0;
+  const updates = [];
+  handle = startCollector({
+    ...options,
+    runTokscale: async ({ flags }) => {
+      calls += 1;
+      const input = flags.includes('--today') ? 20 : flags.includes('--month') ? 100 : 1000;
+      return { entries: [{ client: 'catpaw', sessionId: 's', model: 'auto', input, output: 0, cost: 0 }] };
+    },
+    onUpdate: summary => updates.push(summary)
+  });
+  await handle.whenIdle();
+  assert.equal(calls, 3, 'restart must establish a full baseline for the new source set');
+  assert.deepEqual(['today', 'month', 'allTime'].map(period => updates[0][period].totalTokens), [20, 100, 1000]);
+});
+
+test('CatPaw source checks preserve the existing pricing replay rule for other clients', async t => {
+  const f = fixture(t);
+  const pricingPath = path.join(f.options.homeDir, 'pricing.json');
+  const setPrice = price => fs.writeFileSync(pricingPath, JSON.stringify({ models: { test: { input_cost_per_million_tokens: price } } }));
+  setPrice(1);
+  let calls = 0;
+  const updates = [];
+  const handle = startCollector({
+    ...collectorOptions(f, async () => {
+      calls += 1;
+      if (calls === 1 || calls === 4) setPrice(2);
+      if (calls === 3) setPrice(1);
+      fs.writeFileSync(f.account('unselected'), '');
+      return { entries: [{ client: 'claude', sessionId: 's', model: 'test', input: 10, output: 0, cost: 0 }] };
+    }, (summary, reason) => updates.push({ summary, reason })),
+    clients: 'claude'
+  });
+  t.after(() => handle.stop());
+  await handle.whenIdle();
+  assert.equal(calls, 3, 'a restored pricing revision does not acquire a new replay rule');
+  assert.equal(updates.length, 1);
+  await handle.tick('manual');
+  assert.equal(calls, 9, 'a changed final pricing revision still triggers the existing replay');
+  assert.equal(updates.length, 2);
+  assert.equal(updates[1].reason, 'pricing-change');
+});

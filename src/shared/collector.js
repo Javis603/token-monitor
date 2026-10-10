@@ -409,10 +409,13 @@ async function probeTokscaleCapabilities(command, options = {}) {
   if (await forkOnlyClientsAccepted(command, options)) {
     for (const client of FORK_ONLY_CLIENT_IDS) supported.add(client);
   } else {
-    // An older fork can support existing clients but reject a newly added id.
-    // Only a failed batch needs individual probes; do not drop its siblings.
-    for (const client of FORK_ONLY_CLIENT_IDS) {
-      if (await forkOnlyClientsAccepted(command, options, [client])) supported.add(client);
+    // A pre-CatPaw fork can still accept the existing client batch. Probe
+    // CatPaw separately without changing the other clients' batch rule.
+    const clientGroups = [FORK_ONLY_CLIENT_IDS.filter(client => client !== 'catpaw'), ['catpaw']];
+    for (const clients of clientGroups) {
+      if (await forkOnlyClientsAccepted(command, options, clients)) {
+        for (const client of clients) supported.add(client);
+      }
     }
   }
   return supported;
@@ -2035,7 +2038,7 @@ function pricingFingerprint(options = {}) {
   return hash.digest('hex');
 }
 
-function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, pricingRevision = pricingFingerprint(), sourceOptions = {}) {
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, pricingRevision = pricingFingerprint(), sourceOptions = {}, catpawRevision = catpawSourcesFingerprint(normalizeClientsCsv(clientsCsv), sourceOptions)) {
   // Deterministic string that captures the config inputs anchor correctness
   // depends on. When this changes, the persisted anchor is invalidated.
   const qoderCn = String(qoderCnDbPath || '').trim();
@@ -2048,8 +2051,7 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qod
   // common case.
   const scanKey = customScanPathsFingerprint(customScanPaths);
   const scanPart = scanKey ? `|scan:${scanKey}` : '';
-  const catpawKey = catpawSourcesFingerprint(normalizeClientsCsv(clientsCsv), sourceOptions);
-  const catpawPart = catpawKey ? `|catpaw:${catpawKey}` : '';
+  const catpawPart = catpawRevision ? `|catpaw:${catpawRevision}` : '';
   return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}${catpawPart}|pricing:${pricingRevision}`;
 }
 
@@ -2561,9 +2563,10 @@ function startCollector(options) {
     } catch (_) {}
   }
 
-  function persistAnchor(tickPricingRevision) {
+  function persistAnchor(tickPricingRevision, tickSourceRevision) {
     if (options.anchorPersistenceEnabled === false) return;
     try {
+      // Bind the baseline to the scanned inputs, even if another account appears before the write.
       fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
       fs.writeFileSync(anchorPath, JSON.stringify({
         dateKey: anchor.dateKey,
@@ -2577,7 +2580,7 @@ function startCollector(options) {
         wslStatus: wslStatusAnchor,
         ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
         ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
-        configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, tickPricingRevision, sourceOptions),
+        configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, tickPricingRevision, sourceOptions, tickSourceRevision),
         fullScanAt: new Date(lastFullScanAt).toISOString()
       }));
     } catch (_) {}
@@ -2614,7 +2617,8 @@ function startCollector(options) {
     }, historyRetryMs);
   }
 
-  const scanInputsChangedDuringScan = Symbol('scan inputs changed during scan');
+  const pricingChangedDuringScan = Symbol('pricing changed during scan');
+  const catpawSourcesChangedDuringScan = Symbol('CatPaw sources changed during scan');
 
   async function performTick(reason, tickOptions = {}) {
     const visibilityRevision = codexVisibilityRevision;
@@ -2663,7 +2667,7 @@ function startCollector(options) {
     try {
       let captured = null;
       let tickLocalView = null;
-      let scanInputsChanged = false;
+      let catpawSourceChangeObserved = false;
       const summary = await collectUsageOnce({
         ...options,
         codexDotsVisible,
@@ -2718,12 +2722,12 @@ function startCollector(options) {
         refreshWsl: anchored ? refreshWsl : false,
         onAnchorComputed: (x) => { captured = x; },
         onProgress: (partial) => {
+          if (catpawSourcesFingerprint(normalizedClients, sourceOptions) !== tickSourceRevision) catpawSourceChangeObserved = true;
           if (visibilityRevision !== codexVisibilityRevision) return;
           if (visibilityRevision !== publishedCodexVisibilityRevision) return;
           if (!partial.today) return;
-          if (pricingFingerprint(options) !== tickPricingRevision
-              || catpawSourcesFingerprint(normalizedClients, sourceOptions) !== tickSourceRevision) scanInputsChanged = true;
-          if (pricingChanged || sourcesChanged || scanInputsChanged) return;
+          if (pricingChanged || pricingFingerprint(options) !== tickPricingRevision
+              || sourcesChanged || catpawSourceChangeObserved) return;
           try {
             if (typeof onPreview === 'function') {
               // Frozen WSL snapshot, gated so a cross-day/cross-month full scan
@@ -2790,11 +2794,14 @@ function startCollector(options) {
         // its local revision starts at zero, but DeviceState keeps old history.
         summary.history = historyScanSucceeded ? normalizeHistory([], { todayKey }) : null;
       }
-      // Pricing or the account DB set can change between serial period scans.
-      // Discard that mixed result and replay all windows against one input set.
-      if (scanInputsChanged || pricingFingerprint(options) !== tickPricingRevision
+      if (catpawSourceChangeObserved
           || catpawSourcesFingerprint(normalizedClients, sourceOptions) !== tickSourceRevision) {
-        return scanInputsChangedDuringScan;
+        return catpawSourcesChangedDuringScan;
+      }
+      // A settings save can land between the serial period scans. Discard that
+      // mixed result and replay all windows against one pricing revision.
+      if (pricingFingerprint(options) !== tickPricingRevision) {
+        return pricingChangedDuringScan;
       }
       if (includeHistory) {
         settleRolloverHistoryAttempt(
@@ -2820,7 +2827,7 @@ function startCollector(options) {
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
         lastFullScanAt = Date.now();
-        persistAnchor(tickPricingRevision);
+        persistAnchor(tickPricingRevision, tickSourceRevision);
       } else if (anchored && captured) {
         // Keep the rolling per-client today partitions fresh for targeted
         // watch ticks. WSL stays independently frozen between interval ticks.
@@ -2850,7 +2857,7 @@ function startCollector(options) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
         }
-        if (titlesChanged) persistAnchor(tickPricingRevision);
+        if (titlesChanged) persistAnchor(tickPricingRevision, tickSourceRevision);
       }
       const transformedSummary = await onUpdate?.(summary, reason);
       publishedCodexVisibilityRevision = visibilityRevision;
@@ -2985,12 +2992,12 @@ function startCollector(options) {
     let inputReplayUsed = false;
     const performWithInputReplay = async (tickReason, scanOptions) => {
       const result = await performTick(tickReason, scanOptions);
-      if (result !== scanInputsChangedDuringScan || inputReplayUsed || stopped) return result;
+      if ((result !== pricingChangedDuringScan && result !== catpawSourcesChangedDuringScan) || inputReplayUsed || stopped) return result;
       inputReplayUsed = true;
       // At most one automatic replay belongs to this initiating tick, including
       // its coalesced work. A second mismatch waits for a normal tick; neither
       // mixed result is published. Already acknowledged source sync stays consumed.
-      return performTick('scan-input-change', {
+      return performTick(result === pricingChangedDuringScan ? 'pricing-change' : 'catpaw-source-change', {
         ...scanOptions,
         forceHistory: true,
         todayOnly: false,

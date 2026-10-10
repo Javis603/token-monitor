@@ -331,8 +331,8 @@ test('every source-root id the collector emits is in the allowlist', () => {
   // come from files found on disk, `wsl-home` only appears on Windows with a
   // running distro, and CatPaw is both platform- and discovery-conditional —
   // `catpaw-data` is built only on darwin/win32, and `catpaw-db` only once an
-  // account database is actually found. A CI runner without CatPaw emits
-  // neither, while a machine with it installed emits both.
+  // account database is actually found. On darwin/win32 the data roots are
+  // constructed even when absent; Linux constructs neither CatPaw check id.
   const discoveryDependent = new Set([
     'copilot-otel-exporter', 'hermes-profile', 'wsl-home', 'catpaw-data', 'catpaw-db'
   ]);
