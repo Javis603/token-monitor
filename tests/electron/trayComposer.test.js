@@ -13,12 +13,30 @@ const {
   duplicateTrayLayoutItem,
   floatingBubbleBitmapHeight,
   handlePickerDocumentScroll,
+  liveRateModePatch,
   moveTrayLayoutItemByKey,
   periodItemPatch,
   syncTrayComposerSurfaces,
   usageScopePatch,
   watchDeviceScaleChanges
 } = require('../../src/electron/renderer/trayComposer');
+
+test('switching through task mode restores the live device scope after saving', () => {
+  for (const rateScope of ['all', 'device']) {
+    for (const rateMode of ['speed', 'burn']) {
+      let item = { ...trayLayoutApi.createTrayLayoutItem('liveTokenRate'), rateScope, rateMode };
+      const save = patch => {
+        item = trayLayoutApi.normalizeTrayLayout(JSON.parse(JSON.stringify({ version: 3, items: [{ ...item, ...patch }] }))).items[0];
+      };
+      save(liveRateModePatch(item, 'task'));
+      assert.equal(item.rateScope, 'device');
+      save({ rateClient: 'antigravity' });
+      save(liveRateModePatch(item, rateMode));
+      assert.equal(item.rateScope, rateScope);
+      assert.equal(item.rateClient, undefined);
+    }
+  }
+});
 
 test('floating bubble bitmap height tracks CSS pixels at the current device scale', () => {
   assert.equal(floatingBubbleBitmapHeight(1), 24);

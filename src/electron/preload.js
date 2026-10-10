@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getStats: (options) => ipcRenderer.invoke('stats:get', options),
   deleteDevice: (deviceId) => ipcRenderer.invoke('devices:delete', deviceId),
   getAllTimeSessions: (snapshotId) => ipcRenderer.invoke('stats:allTimeSessions', snapshotId),
+  ...(process.platform === 'linux' ? {
+    getTaskSpeedStats: (args) => ipcRenderer.invoke('taskSpeed:get', args)
+  } : {}),
   getSessionDetail: (args) => ipcRenderer.invoke('session:getDetail', args),
   getStreamStatus: () => ipcRenderer.invoke('stream:status'),
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
@@ -137,6 +140,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   moveFloatingBubble: (delta) => ipcRenderer.invoke('floatingBubble:move', delta),
   signalContentReady: () => ipcRenderer.send('window:contentReady'),
   setViewState: (patch) => ipcRenderer.send('window:viewState', patch),
+  ...(process.platform === 'linux' ? {
+    startWindowResize: (edge) => ipcRenderer.send('window:resizeStart', edge),
+    moveWindowResize: () => ipcRenderer.send('window:resizeMove'),
+    endWindowResize: () => ipcRenderer.send('window:resizeEnd')
+  } : {}),
   peekFloatingBubble: () => ipcRenderer.invoke('floatingBubble:peek'),
   collapseFloatingBubbleIfIdle: () => ipcRenderer.invoke('floatingBubble:collapseIfIdle'),
   setFloatingBubbleCollapsedSize: (size) => ipcRenderer.invoke('floatingBubble:setCollapsedSize', size),

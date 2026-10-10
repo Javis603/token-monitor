@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   defaultViewDisplayPreferences,
@@ -26,18 +27,13 @@ const views = [
   { id: 'limits', label: 'Limits' }
 ];
 
-function extractViewIds(source, constantName) {
-  const mappedMatch = source.match(new RegExp(`const ${constantName} = \\[([^\\]]+)\\]\\.map`));
-  if (mappedMatch) {
-    return [...mappedMatch[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
-  }
-
-  const literalMatch = source.match(new RegExp(`const ${constantName} = \\[([\\s\\S]*?)\\];`));
-  if (literalMatch) {
-    return [...literalMatch[1].matchAll(/id:\s*'([^']+)'/g)].map((match) => match[1]);
-  }
-
-  assert.fail(`Could not find ${constantName}`);
+function extractViewIds(source, constantName, platform = 'linux') {
+  const declaration = source.match(new RegExp(`const ${constantName} = [^]*?;`))?.[0];
+  assert.ok(declaration, constantName);
+  const views = vm.runInNewContext(`${declaration}; ${constantName}`, {
+    isLinux: platform === 'linux', process: { platform }
+  });
+  return Array.from(views, view => view.id);
 }
 
 test('defaultViewDisplayPreferences hides the Status view by default', () => {
@@ -77,7 +73,7 @@ test('main and renderer keep their view display options in sync', () => {
   );
   assert.deepEqual(
     extractViewIds(rendererSource, 'VIEW_DISPLAY_OPTIONS'),
-    ['home', 'limits', 'tool', 'model', 'project', 'session', 'device', 'trends', 'status']
+    ['home', 'limits', 'tool', 'model', 'project', 'session', 'speed', 'device', 'trends', 'status']
   );
 });
 

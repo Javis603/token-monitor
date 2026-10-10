@@ -112,6 +112,11 @@
       : { ...item, usageScope };
   }
 
+  function liveRateModePatch(source, rateMode) {
+    return { rateMode, ...(source.rateMode === 'task' && rateMode !== 'task'
+      ? { rateScope: source.previousRateScope || 'device', rateClient: '' } : {}) };
+  }
+
   function accountModeSourcePatch(source, accounts, accountMode) {
     if (accountMode !== 'specific') {
       return { accountMode, accountKey: '', window: source.window };
@@ -178,6 +183,7 @@
     const {
       root,
       surface,
+      taskSpeedEnabled,
       layoutApi,
       getLayout,
       getStylePreview,
@@ -695,19 +701,23 @@
           l('trayComposer.rateMode', 'Rate'),
           [
             { value: 'speed', label: l('trayComposer.rateMode.speed', 'Generation speed (tok/s)') },
+            ...(taskSpeedEnabled ? [{ value: 'task', label: l('trayComposer.rateMode.task', 'Current task speed (tok/s)') }] : []),
             { value: 'burn', label: l('trayComposer.rateMode.burn', 'Token burn (TPM)') }
           ],
           source.rateMode,
-          (rateMode) => updateItem(item, patch({ rateMode }))
+          (rateMode) => updateItem(item, patch(liveRateModePatch(source, rateMode)))
         ),
         picker(
           l('trayComposer.rateScope', 'Devices'),
           [
-            { value: 'all', label: l('trayComposer.rateScope.all', 'All devices') },
-            { value: 'device', label: l('trayComposer.rateScope.device', 'This device') }
+            ...(source.rateMode !== 'task' ? [{ value: 'all', label: l('trayComposer.rateScope.all', 'All devices') }] : []),
+            { value: 'device', label: l('trayComposer.rateScope.device', 'This device') },
+            ...(source.rateMode === 'task' ? [{ value: 'client:codex', label: 'Codex' }, { value: 'client:antigravity', label: 'Antigravity' }] : [])
           ],
-          source.rateScope,
-          (rateScope) => updateItem(item, patch({ rateScope }))
+          source.rateClient ? `client:${source.rateClient}` : source.rateScope,
+          (value) => updateItem(item, patch(value.startsWith('client:')
+            ? { rateClient: value.slice(7), rateScope: 'device' }
+            : { rateClient: '', rateScope: value }))
         )
       ];
     }
@@ -1422,6 +1432,7 @@
   return {
     accountModeSourcePatch,
     costDisplayPatch,
+    liveRateModePatch,
     createTrayComposer,
     duplicateTrayLayoutItem,
     floatingBubbleBitmapHeight,

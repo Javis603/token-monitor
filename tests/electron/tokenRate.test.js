@@ -665,7 +665,7 @@ test('compact display surfaces can render live rates independently of the footer
   assert.match(trayLayout, /'liveTokenRate'/);
   assert.match(trayLayout, /rateMode: 'speed'/);
   assert.match(trayLayout, /rateScope: 'all'/);
-  assert.match(trayLayout, /options\.liveTokenRates\?\./);
+  assert.match(trayLayout, /mode === 'task' \? options\.taskTokenRates : options\.liveTokenRates/);
   assert.match(trayLayout, /available: Boolean\(sample && sample\.idle !== true\)/);
   assert.match(trayComposer, /styles: \['percent',[\s\S]*'liveTokenRate'/);
   assert.match(trayComposer, /function liveTokenRateEditor\(item, rowIndex = 0\)/);

@@ -166,3 +166,7 @@ For provider changes, cover the affected paths rather than treating one successf
 - platform-specific artifact discovery when changed.
 
 Run focused tests while iterating, then finish with `npm run sync:worker` when shared Worker files changed, `npm run verify`, and `git diff --check`.
+
+### Local task averages
+
+The desktop task-history reader opens local conversation databases read-only. User-input steps define task boundaries; packed generation step indices associate exact output usage with its task. Step and generation timestamps supply execution duration. Unknown schemas or missing timing remain unavailable instead of entering the conversation average. This path is separate from the existing usage and quota probes.

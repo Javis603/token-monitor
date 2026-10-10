@@ -1,5 +1,7 @@
 'use strict';
 
+const isLinux = navigator.userAgent.toLowerCase().includes('linux');
+
 // Client identity — ids, labels and display order — comes from the shared
 // catalog (loaded as a script before this file). Destructured to the bare
 // names the call sites below already use.
@@ -253,12 +255,13 @@ const VIEW_DISPLAY_OPTIONS = [
   { id: 'model', labelKey: 'views.model' },
   { id: 'project', labelKey: 'views.project' },
   { id: 'session', labelKey: 'views.session' },
+  ...(isLinux ? [{ id: 'speed', labelKey: 'views.taskSpeed' }] : []),
   { id: 'device', labelKey: 'views.device' },
   { id: 'trends', labelKey: 'views.trends' },
   { id: 'status', labelKey: 'views.status' }
 ];
 const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', 'allTime']);
-const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
+const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends', ...(isLinux ? ['speed'] : [])]);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
   { id: 'tool', labelKey: 'home.tools', viewId: 'tool' },
@@ -277,6 +280,7 @@ const VIEW_ICON_CLASSES = {
   model: 'view-icon-model',
   project: 'view-icon-project',
   session: 'view-icon-session',
+  speed: 'view-icon-trends',
   limits: 'view-icon-limits',
   trends: 'view-icon-trends'
 };
@@ -552,6 +556,7 @@ Object.assign(els, {
   vendorColorList: document.getElementById('vendorColorList'),
   resetThemeColorsButton: document.getElementById('resetThemeColorsButton'),
   resetVendorColorsButton: document.getElementById('resetVendorColorsButton'),
+  taskSpeedPanel: document.getElementById('taskSpeedPanel'),
   sessionDetail: document.getElementById('session-detail'),
   sessionDetailHead: document.getElementById('session-detail-head')
 });
@@ -1036,7 +1041,7 @@ function resetDisplayLiveTokenRateTracking() {
 }
 
 function observeDisplayLiveTokenRates(stats) {
-  const items = displayLiveTokenRateItems();
+  const items = displayLiveTokenRateItems().filter((item) => item.rateMode !== 'task');
   if (!items.length) {
     resetDisplayLiveTokenRateTracking();
     return false;
@@ -2915,7 +2920,7 @@ function effectiveViewDisplayOrderValue() {
 }
 
 function availableBreakdownIds() {
-  const order = ['home', baseBreakdownOrder[0], 'status', 'trends', ...baseBreakdownOrder.slice(1)];
+  const order = ['home', ...(isLinux ? ['speed'] : []), baseBreakdownOrder[0], 'status', 'trends', ...baseBreakdownOrder.slice(1)];
   let available = state.settings?.historyEnabled === false ? order.filter((id) => id !== 'trends') : order;
   if (state.settings?.projectsEnabled === false) available = available.filter((id) => id !== 'project');
   return limitViewAvailable() ? [...available, 'limits'] : available;
@@ -6586,6 +6591,87 @@ function setRendererSettings(next) {
   if (titlesChanged) refreshSessionDetailHeading();
 }
 
+let taskSpeedPanel;
+let taskSpeedData = null;
+let taskSpeedRequest = null;
+let taskSpeedFetchedAt = 0;
+
+function taskSpeedSessions() {
+  const sessions = new Map();
+  for (const period of ['allTime', 'today']) {
+    for (const session of Object.values(state.stats?.periods?.[period]?.sessions || {})) {
+      const key = `${session.client}:${session.sessionId}`;
+      const previous = sessions.get(key);
+      sessions.set(key, { ...previous, ...session, title: session.title || previous?.title });
+    }
+  }
+  return [...sessions.values()]
+    .filter(session => ['codex', 'antigravity'].includes(session.client) && !/review/i.test(session.sessionKind || ''))
+    .sort((a, b) => {
+      const aTime = Date.parse(a.lastUsedAt || '');
+      const bTime = Date.parse(b.lastUsedAt || '');
+      if (Number.isNaN(aTime)) return Number.isNaN(bTime) ? 0 : 1;
+      if (Number.isNaN(bTime)) return -1;
+      return bTime - aTime;
+    })
+    .map(session => ({ client: session.client, sessionId: session.sessionId, title: session.title
+      || [Object.keys(session.models || {})[0], session.lastUsedAt ? new Date(session.lastUsedAt).toLocaleString() : '', session.sessionId.slice(-6)].filter(Boolean).join(' · ') }));
+}
+
+function fetchTaskSpeedStats(args) {
+  if (taskSpeedRequest) return taskSpeedRequest;
+  if (taskSpeedData && Date.now() - taskSpeedFetchedAt < 5000) return Promise.resolve(taskSpeedData);
+  taskSpeedFetchedAt = Date.now();
+  taskSpeedRequest = window.tokenMonitor.getTaskSpeedStats(args)
+    .then(data => { taskSpeedData = data; return data; })
+    .catch(error => { taskSpeedData = null; throw error; })
+    .finally(() => { taskSpeedRequest = null; });
+  return taskSpeedRequest;
+}
+
+// Select the same latest task used by the task page; speed is already computed
+// by the existing reader. Do not derive another rate from live token samples.
+function taskTokenRateSamples() {
+  const latest = {};
+  for (const session of taskSpeedData?.sessions || []) {
+    for (const task of session.tasks || []) {
+      if (!latest[session.client] || task.startedAt > latest[session.client].startedAt) latest[session.client] = task;
+    }
+  }
+  const sample = task => task?.speed === null || task?.speed === undefined ? null
+    : { speed: task.speed, idle: false, taskId: task.id, startedAt: task.startedAt };
+  const current = Object.values(latest).sort((a, b) => b.startedAt - a.startedAt)[0];
+  const device = sample(current);
+  return { all: device, device, clients: Object.fromEntries(Object.entries(latest).map(([client, task]) => [client, sample(task)])) };
+}
+
+function taskTokenRateDisplaysNeeded() {
+  return isLinux && displayLiveTokenRateItems().some(item => item.rateMode === 'task');
+}
+
+function refreshTaskTokenRateDisplays() {
+  if (!taskTokenRateDisplaysNeeded() || taskSpeedRequest || Date.now() - taskSpeedFetchedAt < 5000) return;
+  allTimeSessions.ensure();
+  const sessions = taskSpeedSessions();
+  if (!sessions.length) return;
+  void fetchTaskSpeedStats({ sessions }).then(() => {
+    void maybeUpdateBarsIcon({ refreshComposers: false });
+    renderFloatingBubbleContent();
+    if (isSettingsSurfaceVisible()) refreshTrayComposers();
+  }).catch(() => { renderFloatingBubbleContent(); });
+}
+
+function renderTaskSpeed() {
+  if (!taskSpeedPanel) taskSpeedPanel = window.TokenMonitorTaskSpeed.createPanel({
+    container: els.taskSpeedPanel, t,
+    fetchStats: fetchTaskSpeedStats,
+    visible: () => visibleStatsSurface() === 'main' && state.breakdown === 'speed',
+    formatTokens: formatCompact,
+    getSessions: taskSpeedSessions
+  });
+  taskSpeedPanel.render();
+}
+
 function render() {
   const surface = visibleStatsSurface();
   if (surface !== 'main') {
@@ -6601,6 +6687,19 @@ function render() {
   renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
   renderViewSwitcher();
+  els.shell.classList.toggle('task-speed-mode', state.breakdown === 'speed');
+  els.taskSpeedPanel.classList.toggle('hidden', state.breakdown !== 'speed');
+  if (state.breakdown === 'speed') {
+    els.shell.classList.toggle('session-mode', false);
+    els.shell.classList.toggle('home-mode', false);
+    els.viewBackRow?.classList.toggle('hidden', !state.homeReturnVisible);
+    hideHomeActivityTooltip();
+    for (const panel of [els.homePanel, els.breakdown, els.serviceStatusPanel, els.trendsPanel,
+      els.limitsPanel, els.sessionDetail, els.sessionDetailHead, els.fixedPeriodMessage, els.sessionPagerHost]) panel?.classList.add('hidden');
+    renderTaskSpeed();
+    signalContentReady();
+    return;
+  }
   const derivedPeriod = fixedPeriodRangesApi.isDerived(state.period);
   if (derivedPeriod) {
     const signature = fixedPeriodHistorySignature();
@@ -7099,6 +7198,7 @@ function applyAppearanceSettings(settings) {
   document.body.classList.remove('is-windows-glass');
   
   document.documentElement.classList.toggle('is-windows', isWindows);
+  document.documentElement.classList.toggle('is-linux', isLinux);
   document.body.classList.toggle('is-windows', isWindows);
   
   document.documentElement.classList.toggle('is-mac-legacy', isMacLegacyRadius);
@@ -7642,6 +7742,7 @@ function renderFloatingBubbleContent() {
       ? trayDataUrlForMode(mode, bitmapHeight, floatingBubbleGeneratedColors(), {
           contentOnly: mode === 'barsAllSessions' || mode === 'limitsAllSessions',
           providerContrastHalo: true,
+          taskSpeedWhite: isLinux,
           showProviderBadge: false,
           layout: mode === 'custom' ? state.settings?.floatingBubbleCustomLayout : undefined
         })
@@ -13031,7 +13132,7 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
 // archived count in Settings, or the TOTAL session and project lists.
 function allTimeSessionsNeeded() {
   if (!allTimeSessions.loaded() || isSettingsPanelOpen()) return true;
-  return state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');
+  return taskTokenRateDisplaysNeeded() || state.breakdown === 'speed' || state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');
 }
 const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   fetchSessions: (snapshotId) => window.tokenMonitor.getAllTimeSessions(snapshotId),
@@ -13163,6 +13264,7 @@ const trayProviderImageOpticalSamples = new WeakMap();
 const trayProviderIconDeliveryGuard = window.TokenMonitorTrayProviderIcons.createTrayProviderIconDeliveryGuard();
 const trayComposers = {};
 let customTrayClockTimer = null;
+let customTrayClockInterval = 0;
 
 function providerImageOpticalSample(image) {
   const cached = trayProviderImageOpticalSamples.get(image);
@@ -13635,6 +13737,11 @@ function drawCustomTrayProviderImage(ctx, img, provider, x, y, size, options = {
   }
 }
 
+function customTrayTextColor(item, textColor, trackColor, options = {}) {
+  if (options.taskSpeedWhite === true && item.metric === 'liveTokenRate' && item.rateMode === 'task') return '#ffffff';
+  return item.available === false ? trackColor : textColor;
+}
+
 function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}) {
   const trackColor = colors.track || 'rgba(0, 0, 0, 0.32)';
   const fillColor = colors.fill || 'rgba(0, 0, 0, 1)';
@@ -13790,7 +13897,7 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
     ctx.textAlign = alignment;
     const textBaselineOffset = Math.max(1, Math.round(h * 0.025));
     rows.forEach((row, index) => {
-      ctx.fillStyle = row.available === false ? trackColor : textColor;
+      ctx.fillStyle = customTrayTextColor(row, textColor, trackColor, options);
       drawTrayText(
         ctx,
         row.text || '--',
@@ -13816,12 +13923,13 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
   const ctx = canvas.getContext('2d');
   ctx.font = font;
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = item.available === false ? trackColor : textColor;
+  ctx.fillStyle = customTrayTextColor(item, textColor, trackColor, options);
   drawTrayText(ctx, text, padX, h / 2 + 1, item, horizontalScale);
   return canvas;
 }
 
 function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options = {}) {
+  refreshTaskTokenRateDisplays();
   const codexProviders = (stats?.limits?.providers || []).filter((provider) => provider?.provider === 'codex');
   const selectedCodexKey = String(state.codexActiveAccount?.accountKey || '').trim();
   const detectedCodexKey = String(localLiveCodexProvider()?.accountKey || '').trim();
@@ -13835,6 +13943,7 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
     activeAccountKeys: activeCodexKey ? { codex: activeCodexKey } : {},
     availableProviderIds: Object.keys(trayProviderImages),
     liveTokenRates: options.liveTokenRates || displayLiveTokenRateSamples(),
+    taskTokenRates: options.taskTokenRates || taskTokenRateSamples(),
     liveTokenRateFormatter: options.liveTokenRateFormatter || ((value) => formatLiveTokenRate(value))
   });
   const items = resolved.items.map((item) => (
@@ -14130,6 +14239,7 @@ function trayComposerPreview(surface) {
         layout: state.settings?.[layoutKey],
         contentOnly: mode === 'barsAllSessions' || mode === 'limitsAllSessions',
         providerContrastHalo: true,
+        taskSpeedWhite: isLinux,
         showProviderBadge: false
       })
     };
@@ -14165,6 +14275,7 @@ function createTrayComposer(surface) {
   return window.TokenMonitorTrayComposer.createTrayComposer({
     root,
     surface,
+    taskSpeedEnabled: isLinux,
     layoutApi: trayLayoutApi,
     getLayout: () => state.settings?.[layoutKey],
     getStylePreview: (style) => renderTrayComposerItem(
@@ -14175,9 +14286,11 @@ function createTrayComposer(surface) {
       }
     ),
     getFontStylePreview: (item, fontStyle) => renderTrayComposerFontPreview(item, fontStyle, {
+      taskSpeedWhite: isLinux && !isTray,
       showProviderBadge: isTray && state.settings?.showTrayProviderBadge === true
     }),
     renderItem: (item) => renderTrayComposerItem(item, {
+      taskSpeedWhite: isLinux && !isTray,
       showProviderBadge: isTray && state.settings?.showTrayProviderBadge === true
     }),
     getPreview: () => trayComposerPreview(surface),
@@ -14201,19 +14314,27 @@ function createTrayComposer(surface) {
 }
 
 function syncCustomTrayClockTimer() {
-  const clockNeeded = (
+  const taskNeeded = taskTokenRateDisplaysNeeded();
+  const interval = taskNeeded ? 5000 : 30000;
+  const clockNeeded = taskNeeded || (
     state.settings?.trayContent === 'custom'
       && trayLayoutApi.trayLayoutNeedsClock(state.settings?.trayCustomLayout)
   ) || (
     state.settings?.floatingBubbleContent === 'custom'
       && trayLayoutApi.trayLayoutNeedsClock(state.settings?.floatingBubbleCustomLayout)
   );
+  if (customTrayClockTimer && (!clockNeeded || customTrayClockInterval !== interval)) {
+    clearInterval(customTrayClockTimer);
+    customTrayClockTimer = null;
+  }
   if (clockNeeded && !customTrayClockTimer) {
+    customTrayClockInterval = interval;
     customTrayClockTimer = setInterval(() => {
+      refreshTaskTokenRateDisplays();
       void maybeUpdateBarsIcon({ refreshComposers: false });
       if (isRendererWindowHidden()) statsRenderScheduler.request();
       else renderFloatingBubbleContent();
-    }, 30 * 1000);
+    }, interval);
   } else if (!clockNeeded && customTrayClockTimer) {
     clearInterval(customTrayClockTimer);
     customTrayClockTimer = null;
@@ -17428,3 +17549,34 @@ setupCursorAccountUI();
 setupCustomPricingUI();
 setupModelAliasesUI();
 init();
+
+// Transparent frameless windows have no reliable native resize border on X11.
+// Keep pointer capture while the window moves; main uses the OS cursor in DIP.
+if (isLinux) {
+  for (const edge of ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']) {
+    const handle = document.createElement('div');
+    handle.className = `window-resize-handle resize-${edge}`;
+    handle.dataset.i18nTitle = 'window.resizeHandle';
+    handle.title = t('window.resizeHandle');
+    handle.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || state.floatingBubble.collapsed || state.settings?.windowBehavior === 'desktop') return;
+      event.preventDefault();
+      event.stopPropagation();
+      handle.setPointerCapture(event.pointerId);
+      window.tokenMonitor.startWindowResize(edge);
+    });
+    handle.addEventListener('pointermove', event => {
+      if (handle.hasPointerCapture(event.pointerId)) window.tokenMonitor.moveWindowResize();
+    });
+    const finish = event => {
+      if (!handle.hasPointerCapture(event.pointerId)) return;
+      handle.releasePointerCapture(event.pointerId);
+      window.tokenMonitor.endWindowResize();
+    };
+    handle.addEventListener('pointerup', finish);
+    handle.addEventListener('pointercancel', finish);
+    handle.addEventListener('lostpointercapture', () => window.tokenMonitor.endWindowResize());
+    document.body.append(handle);
+  }
+  window.addEventListener('blur', () => window.tokenMonitor.endWindowResize());
+}

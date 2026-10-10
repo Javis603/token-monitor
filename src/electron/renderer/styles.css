@@ -3163,6 +3163,12 @@ html.is-windows .settings-panel select option {
   background-color: rgb(var(--panel-rgb));
   color: var(--text);
 }
+/* Linux native popups need opaque colors, including dynamic session pickers. */
+html.is-linux select option,
+html.is-linux select optgroup {
+  background-color: rgb(var(--panel-rgb));
+  color: var(--text);
+}
 .settings-panel input[type="range"] {
   appearance: none;
   -webkit-appearance: none;
@@ -8069,3 +8075,46 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 [hidden] {
   display: none !important;
 }
+
+/* Task speeds reuse the existing detail rows and summary cards. */
+.task-speed-mode .total-panel, .task-speed-mode .tabs, .task-speed-mode .live-token-rate { display: none; }
+.task-speed-panel { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 12px; overflow: hidden; }
+.task-speed-tabs { display: flex; gap: 4px; border-radius: 10px; padding: 3px; background: rgba(128,128,128,.12); }
+.task-speed-tab { flex: 1; border: 0; padding: 9px 3px; border-radius: 8px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.task-speed-tab.is-active { background: rgba(128,128,128,.22); color: var(--text); }
+.task-speed-tab:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.task-speed-select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid rgba(128,128,128,.3); background: var(--bg); color: var(--text); font: inherit; font-size: 12px; }
+.task-speed-headline { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0; }
+.task-speed-headline strong { font-size: 36px; font-weight: 600; letter-spacing: -1px; }
+.task-speed-stats { grid-template-columns: repeat(3,minmax(0,1fr)); }
+.task-speed-stats .trends-stat-v { font-size: 18px; }
+.task-speed-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.task-speed-list { overflow: auto; flex: 1; min-height: 0; scrollbar-width: none; }
+.task-speed-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+.task-speed-row .detail-ex-label { flex: 1; min-width: 0; }
+.task-speed-row .detail-ex-title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; }
+.task-speed-row .detail-ex-sub { margin-top: 5px; white-space: normal; }
+.task-speed-row .detail-ex-value { flex: none; font-size: 16px; }
+.task-speed-row[role=button] { cursor: pointer; }
+
+.shell.task-speed-mode:not(.settings-open) .settings-panel { display: none !important; }
+.shell.task-speed-mode.settings-open .task-speed-panel { display: none; }
+
+/* Resize targets sit inside the transparent window's existing padding. */
+.window-resize-handle { position: fixed; z-index: 10000; -webkit-app-region: no-drag; touch-action: none; }
+.resize-n, .resize-s { left: 16px; right: 16px; height: 7px; cursor: ns-resize; }
+.resize-n { top: 0; }
+.resize-s { bottom: 0; }
+.resize-e, .resize-w { top: 16px; bottom: 16px; width: 7px; cursor: ew-resize; }
+.resize-e { right: 0; }
+.resize-w { left: 0; }
+.resize-ne, .resize-nw, .resize-se, .resize-sw { width: 16px; height: 16px; }
+.resize-ne, .resize-sw { cursor: nesw-resize; }
+.resize-nw, .resize-se { cursor: nwse-resize; }
+.resize-ne { top: 0; right: 0; }
+.resize-nw { top: 0; left: 0; }
+.resize-sw { bottom: 0; left: 0; }
+.resize-se { bottom: 0; right: 0; background: repeating-linear-gradient(135deg, transparent 0 3px, var(--muted) 3px 4px, transparent 4px 6px) bottom right / 10px 10px no-repeat; }
+.shell.desktop-mode ~ .window-resize-handle,
+html.floating-bubble-collapsed-left .window-resize-handle,
+html.floating-bubble-collapsed-right .window-resize-handle { display: none; }
