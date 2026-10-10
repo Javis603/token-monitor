@@ -42,6 +42,7 @@ const transform = createUsageTransform({
   store,
   getSettings: () => config.transformSettings || {},
   isExternalAgentActive,
+  dailyHistoryArchive: true,
   onCaptureFailure: () => post({
     type: 'diagnostic',
     event: { subsystem: 'storage', code: 'storage-archive-update-failed' }

@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  allTimeCumulativeFromArchive,
   captureDailyHistoryArchive,
   captureLiveDailyHistory,
   clearDailyHistoryArchive,
@@ -1174,4 +1175,81 @@ test('a Cursor graph day kept on a tied aggregate cost still fills a price only 
   assert.equal(day.perModel['cursor-grok-4.6-high'].cost, 1);
   assert.equal(day.perModel['gpt-5.5'].cost, 3);
   assert.equal(day.cost, 4);
+});
+
+test('allTimeCumulativeFromArchive folds tokscale ids to partition keys and sums every day', () => {
+  const archive = {
+    days: {
+      '2026-06-01': { date: '2026-06-01', observations: [
+        { client: 'claude-code', modelId: 'claude-opus-4-8', tokens: 100000000, cost: 12.5, messages: 1 }
+      ] },
+      '2026-07-01': { date: '2026-07-01', observations: [
+        { client: 'claude-code', modelId: 'claude-opus-4-8', tokens: 134000000, cost: 20, messages: 1 },
+        { client: 'codex', modelId: 'gpt-5.5', tokens: 5000, cost: 0.1, messages: 1 }
+      ] }
+    }
+  };
+  const cumulative = allTimeCumulativeFromArchive(archive);
+  assert.equal(cumulative.claude.totalTokens, 234000000, 'claude-code folds to claude across both days');
+  assert.equal(cumulative.claude.models['claude-opus-4-8'], 234000000);
+  assert.equal(Math.round(cumulative.claude.costUsd * 100) / 100, 32.5);
+  assert.equal(cumulative.codex.totalTokens, 5000);
+});
+
+test('allTimeCumulativeFromArchive folds Cursor Auto model ids to the period key', () => {
+  const archive = {
+    days: {
+      '2026-08-01': { date: '2026-08-01', observations: [
+        { client: 'cursor', modelId: 'auto', tokens: 300, cost: 0, messages: 1 },
+        { client: 'cursor', modelId: 'default', tokens: 200, cost: 0, messages: 1 }
+      ] }
+    }
+  };
+  const cumulative = allTimeCumulativeFromArchive(archive);
+  assert.equal(cumulative.cursor.totalTokens, 500);
+  assert.equal(cumulative.cursor.models['cursor-auto'], 500, 'auto and default both key to cursor-auto');
+});
+
+test('allTimeCumulativeFromArchive drops reserved key names and never pollutes the prototype', () => {
+  const before = Object.prototype.totalTokens;
+  const archive = {
+    days: {
+      '2026-06-01': { date: '2026-06-01', observations: [
+        { client: '__proto__', modelId: 'x', tokens: 500, cost: 1, messages: 1 },
+        { client: 'constructor', modelId: 'y', tokens: 500, cost: 1, messages: 1 },
+        { client: 'claude-code', modelId: 'claude-opus-4-8', tokens: 100, cost: 2, messages: 1 }
+      ] }
+    }
+  };
+
+  const cumulative = allTimeCumulativeFromArchive(archive);
+
+  assert.deepEqual(Object.keys(cumulative), ['claude'], 'reserved client names are dropped');
+  assert.equal(cumulative.claude.totalTokens, 100);
+  assert.equal(Object.prototype.totalTokens, before, 'Object.prototype is untouched');
+});
+
+test('allTimeCumulativeFromArchive folds liveDays in and takes the larger reading per pair', () => {
+  const archive = {
+    version: 1,
+    days: { '2026-07-01': { date: '2026-07-01', clientIdentityGeneration: 2, observations: [
+      { client: 'codex', modelId: 'gpt', tokens: 100, cost: 2, messages: 1 }
+    ] } },
+    liveDays: {
+      '2026-07-01': { date: '2026-07-01', observations: [
+        { client: 'codex', modelId: 'gpt', tokens: 120, cost: 3, messages: 1 }
+      ] },
+      '2026-07-02': { date: '2026-07-02', observations: [
+        { client: 'codex', modelId: 'gpt', tokens: 50, cost: 1, messages: 1 }
+      ] }
+    }
+  };
+
+  const cumulative = allTimeCumulativeFromArchive(archive);
+
+  // 07-01 is in both stores: the larger live reading wins, not the sum.
+  // 07-02 exists only as a live day and still counts.
+  assert.equal(cumulative.codex.totalTokens, 170, '120 (max on 07-01) + 50 (07-02)');
+  assert.equal(cumulative.codex.models.gpt, 170);
+  assert.equal(cumulative.codex.costUsd, 4);
 });
