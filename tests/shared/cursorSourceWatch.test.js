@@ -150,12 +150,14 @@ test('native Cursor WAL writes arrive while read-only SQLite SHM changes stay ig
   }
 });
 
-for (const scenario of ['completed', 'generating', 'windows-candidates', 'windows-title-only']) {
+for (const scenario of ['completed', 'generating', 'windows-candidates', 'windows-title-only', 'history-completed', 'history-generating']) {
   test('Cursor collector retains and resolves boundaries across collections: ' + scenario, async (t) => {
     const databases = [];
     // Close handles before fixture() removes the temporary Windows stores.
     t.after(() => databases.forEach((db) => db.close()));
     const windows = scenario.startsWith('windows-');
+    const historyOnly = scenario.startsWith('history-');
+    const completed = scenario.endsWith('completed');
     const f = fixture(t, { platform: windows ? 'win32' : 'linux' });
     const auth = require('../../src/shared/providers/cursor/auth');
     t.mock.method(auth, 'runCursorSync', async () => {});
@@ -179,7 +181,7 @@ for (const scenario of ['completed', 'generating', 'windows-candidates', 'window
     const put = active.prepare('INSERT OR REPLACE INTO cursorDiskKV VALUES (?, ?)');
     const putHeader = active.prepare('INSERT OR REPLACE INTO composerHeaders VALUES (?, ?)');
     putHeader.run('s1', JSON.stringify({ name: 'Original title', lastUpdatedAt: now }));
-    put.run('composerData:s1', JSON.stringify({ composerId: 's1', status: scenario === 'completed' ? 'completed' : 'generating', lastUpdatedAt: now }));
+    put.run('composerData:s1', JSON.stringify({ composerId: 's1', status: completed ? 'completed' : 'generating', lastUpdatedAt: now }));
     let fail = false;
     const sqlite = { DatabaseSync: class {
       constructor(...args) { this.db = new DatabaseSync(...args); }
@@ -190,22 +192,25 @@ for (const scenario of ['completed', 'generating', 'windows-candidates', 'window
       }
       close() { this.db.close(); }
     } };
+    let removed = false;
     const options = {
       clients: 'cursor', homeDir: f.homeDir, allTimeSince: '2024-01-01', deviceId: 'fixture', agentVersion: 'test',
       now: new Date(now), limitsEnabled: false, historyEnabled: false, projectsEnabled: false,
       onProgress() {},
       sessionMetadataDeps: { sqlite, platform: f.platform, env: windows ? { APPDATA: path.join(f.homeDir, 'relocated') } : {}, cursorTitleCache: new Map(), now },
-      runTokscale: async () => ({ entries: [{ client: 'cursor', sessionId: 's1', model: 'fixture', input: 123, cost: 0.45, lastUsedAt: scenario === 'completed' ? new Date(now).toISOString() : old }] }),
+      runTokscale: async ({ flags }) => ({ entries: [{ client: 'cursor', sessionId: removed || (historyOnly && flags.includes('--today')) ? 'today-session' : 's1', model: 'fixture', input: 123, cost: 0.45, lastUsedAt: completed ? new Date(now).toISOString() : old }] }),
       collectWslUsage: async () => ({ bundle: { today: {}, month: {}, allTime: {} }, detected: [] })
     };
     const { sessionActivityState } = require('../../src/shared/sessionLive');
-    const expected = scenario === 'completed' ? 'ended' : 'running';
+    const expected = completed ? 'ended' : 'running';
+    const periods = historyOnly ? ['month', 'allTime'] : ['today', 'month', 'allTime'];
     const first = await f.collector.collectUsageOnce(options);
-    for (const period of ['today', 'month', 'allTime']) assert.equal(sessionActivityState(first[period].sessions['cursor:s1'], now), expected);
+    if (historyOnly) assert.equal(first.today.sessions['cursor:s1'], undefined);
+    for (const period of periods) assert.equal(sessionActivityState(first[period].sessions['cursor:s1'], now), expected);
     putHeader.run('s1', JSON.stringify({ name: 'Updated title', lastUpdatedAt: now }));
     fail = true;
     const second = await f.collector.collectUsageOnce(options);
-    for (const period of ['today', 'month', 'allTime']) {
+    for (const period of periods) {
       const row = second[period].sessions['cursor:s1'];
       assert.equal(sessionActivityState(row, now), expected, 'new collection must retain the last successful state');
       assert.equal(row.title, scenario === 'windows-title-only' ? 'Preferred title' : 'Updated title');
@@ -215,9 +220,18 @@ for (const scenario of ['completed', 'generating', 'windows-candidates', 'window
     fail = false;
     put.run('composerData:s1', JSON.stringify({ composerId: 's1', status: 'none' }));
     const third = await f.collector.collectUsageOnce(options);
-    for (const period of ['today', 'month', 'allTime']) {
+    for (const period of periods) {
       assert.equal(third[period].sessions['cursor:s1'].turnEnded, undefined, 'successful unknown state clears retained boundary');
-      assert.equal(sessionActivityState(third[period].sessions['cursor:s1'], now), scenario === 'completed' ? 'running' : 'idle');
+      assert.equal(sessionActivityState(third[period].sessions['cursor:s1'], now), completed ? 'running' : 'idle');
+    }
+    if (historyOnly) {
+      // No further WAL change: a complete scan must still prune an absent id.
+      removed = true;
+      await f.collector.collectUsageOnce(options);
+      for (const cached of options.sessionMetadataDeps.cursorTitleCache.values()) {
+        assert.equal(cached.turnEnds.has('s1'), false);
+        assert.equal(cached.turnRetries.has('s1'), false);
+      }
     }
   });
 }

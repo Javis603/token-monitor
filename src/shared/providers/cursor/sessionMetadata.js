@@ -209,10 +209,9 @@ function resolveSessionMetadata(sessionIds, { deps = {}, home, now = Date.now(),
     if (!stamp) continue;
     let cached = cache.get(dbPath);
     if (cached?.stamp !== stamp) {
-      // Retain requested scalar boundaries in the existing map. Every retained
-      // entry must be queried again; failures cannot erase a successful read.
+      // A partial Today pass cannot discard other periods' successful reads.
+      // Revalidate retained scalar boundaries when their ids are requested.
       const turnEnds = cached?.turnEnds || new Map();
-      for (const id of turnEnds.keys()) if (!sessionIds.has(id)) turnEnds.delete(id);
       cached = { stamp, titles: new Map(), misses: new Set(), legacyTitles: null,
         turnEnds, turnRetries: new Set(turnEnds.keys()) };
     }
@@ -237,6 +236,15 @@ function resolveSessionMetadata(sessionIds, { deps = {}, home, now = Date.now(),
         for (const id of wanted) {
           if (read.turnReadFailed) cached.turnRetries.add(id);
           else cached.turnRetries.delete(id);
+        }
+      }
+    }
+    // Only the complete period set can establish that a session is gone.
+    // Requested ids alone can be narrowed by per-pass metadata resolution.
+    if (periods?.today && periods?.month && periods?.allTime) {
+      for (const entries of [cached.turnEnds, cached.turnRetries]) {
+        for (const id of entries.keys()) {
+          if (!['today', 'month', 'allTime'].some((name) => periods[name].sessions?.[`cursor:${id}`])) entries.delete(id);
         }
       }
     }
