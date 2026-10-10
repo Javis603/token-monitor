@@ -494,6 +494,7 @@ for (const update of ['renamed', 'cleared', 'deleted-while-stopped']) {
     await waitForUpdate(1);
     const file = path.join(shared, 'collector-anchor.json');
     const original = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(original.catalogTitleSources[key], store.dbPath);
     if (update === 'deleted-while-stopped') {
       handle.stop();
       handle = null;
@@ -627,7 +628,7 @@ test('Antigravity summary workspace changes reach all watch periods without chan
   const nativeFirst = await collectUsageOnce({ ...options, todayOnlyAnchor: anchor, targetClients: ['antigravity'] });
   const nativeAnchor = { dateKey: localTodayKey(), today: nativeFirst.today, month: nativeFirst.month, allTime: nativeFirst.allTime,
     todayPartitions: captured.todayPartitions, t3Titles: captured.t3Titles, catalogProjects: captured.catalogProjects };
-  assert.equal(captured.catalogProjects['antigravity:moving'], undefined);
+  assert.equal(captured.catalogProjects.today['antigravity:moving'], undefined);
   store.db.prepare('UPDATE conversation_summaries SET workspace_uris = ?').run(JSON.stringify([pathToFileURL(projectA).href]));
   const nativeNext = await collectUsageOnce({ ...options, todayOnlyAnchor: nativeAnchor, targetClients: ['antigravity'] });
   for (const period of ['today', 'month', 'allTime']) {
@@ -672,7 +673,7 @@ test('Antigravity workspace provenance persists across restart without moving us
   await handle.refreshClient('antigravity');
   const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(saved.fullScanAt, original.fullScanAt);
-  assert.equal(saved.catalogProjects['antigravity:moving'], projectIdentity(projectB).projectId);
+  assert.equal(saved.catalogProjects.today['antigravity:moving'], projectIdentity(projectB).projectId);
   for (const period of ['today', 'month', 'allTime']) {
     const { projectId: _oldId, projectLabel: _oldLabel, ...before } = original[period].sessions['antigravity:moving'];
     const { projectId: _newId, projectLabel: _newLabel, ...after } = saved[period].sessions['antigravity:moving'];
@@ -694,20 +695,21 @@ test('Antigravity confirmed misses do not shadow a later store or a temporarily 
   fs.mkdirSync(otherDir, { recursive: true });
   const otherPath = path.join(otherDir, 'conversation_summaries.db');
   const other = new sqlite.DatabaseSync(otherPath);
-  t.after(() => other.close());
-  other.exec('CREATE TABLE conversation_summaries(conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, workspace_uris TEXT)');
-  other.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?)').run('later', 'Later store title', '', null);
-  const ids = new Set(['later']);
-  const deps = { ...store.deps, t3Titles: { 'antigravity:later': 'Anchor title' }, invalidatedTitleKeys: new Set() };
-  const result = resolveSessionMetadata(ids, { home: store.home, deps });
-  assert.equal(result.get('later').title, 'Later store title');
-  const unavailable = { ...deps, antigravityTitleCache: new Map(), sqlite: { DatabaseSync: class {
-    constructor(file, options) {
-      if (file === otherPath) throw new Error('SQLITE_BUSY');
-      return new sqlite.DatabaseSync(file, options);
-    }
-  } } };
-  assert.equal(resolveSessionMetadata(ids, { home: store.home, deps: unavailable }).get('later').title, 'Anchor title');
+  try {
+    other.exec('CREATE TABLE conversation_summaries(conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, workspace_uris TEXT)');
+    other.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?)').run('later', 'Later store title', '', null);
+    const ids = new Set(['later']);
+    const deps = { ...store.deps, t3Titles: { 'antigravity:later': 'Anchor title' }, invalidatedTitleKeys: new Set() };
+    const result = resolveSessionMetadata(ids, { home: store.home, deps });
+    assert.equal(result.get('later').title, 'Later store title');
+    const unavailable = { ...deps, antigravityTitleCache: new Map(), sqlite: { DatabaseSync: class {
+      constructor(file, options) {
+        if (file === otherPath) throw new Error('SQLITE_BUSY');
+        return new sqlite.DatabaseSync(file, options);
+      }
+    } } };
+    assert.equal(resolveSessionMetadata(ids, { home: store.home, deps: unavailable }).get('later').title, 'Anchor title');
+  } finally { other.close(); }
 });
 
 test('Antigravity revalidates changed fingerprints per row and retains failed rows until retry succeeds', (t) => {
@@ -757,4 +759,191 @@ test('Antigravity CLI summary candidates follow GEMINI_CLI_HOME while scoped hom
   assert.ok(candidates.includes(path.join(relocated, 'antigravity-cli', 'conversation_summaries.db')));
   assert.ok(candidates.includes(path.join(home, '.gemini', 'antigravity', 'conversation_summaries.db')));
   assert.equal(candidates.includes(path.join(home, '.gemini', 'antigravity-cli', 'conversation_summaries.db')), false);
+});
+
+
+for (const failure of ['stat-error', 'missing-file', 'busy']) {
+  test(`Antigravity multiple stores preserve the title on ${failure} and prefer a fresh later row`, { skip: !sqlite }, async (t) => {
+    const store = summaryStore(t);
+    const dir = path.join(store.home, '.gemini', 'antigravity-ide');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'conversation_summaries.db');
+    const other = new sqlite.DatabaseSync(file);
+    other.exec('CREATE TABLE conversation_summaries(conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, workspace_uris TEXT)');
+    other.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?)').run('multi', 'Known later title', '', null);
+    const options = {
+      clients: 'antigravity', homeDir: store.home, projectsEnabled: false,
+      historyEnabled: false, dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false, wslScanEnabled: false,
+      osInfo: {}, allTimeSince: '2024-01-01', sessionMetadataDeps: store.deps,
+      runAntigravitySync: async () => {}, runTokscale: async () => ({ entries: [{ client: 'antigravity', sessionId: 'multi', input: 12, output: 0, cost: 0.5 }] })
+    };
+    const originalStat = fs.statSync;
+    try {
+      const first = await collectUsageOnce(options);
+      assert.equal(first.today.sessions['antigravity:multi'].title, 'Known later title');
+      if (failure === 'missing-file') { other.close(); fs.renameSync(file, `${file}.moved`); }
+      else if (failure === 'stat-error') fs.statSync = function (target, ...args) {
+        if (target === file) throw Object.assign(new Error('permission failure'), { code: 'EACCES' });
+        return originalStat.call(this, target, ...args);
+      };
+      else {
+        other.prepare('UPDATE conversation_summaries SET title = ?').run('Unread revision');
+        options.sessionMetadataDeps = { ...store.deps, sqlite: { DatabaseSync: class {
+          constructor(target, config) { if (target === file) throw new Error('SQLITE_BUSY'); return new sqlite.DatabaseSync(target, config); }
+        } } };
+      }
+      const unavailable = await collectUsageOnce(options);
+      for (const period of ['today', 'month', 'allTime']) assert.equal(unavailable[period].sessions['antigravity:multi'].title, 'Known later title');
+      const cold = await collectUsageOnce({ ...options,
+        sessionMetadataDeps: { ...options.sessionMetadataDeps, antigravityTitleCache: new Map() },
+        todayOnlyAnchor: { dateKey: localTodayKey(), today: first.today, month: first.month, allTime: first.allTime,
+          t3Titles: { 'antigravity:multi': 'Known later title' }, catalogTitleSources: { 'antigravity:multi': file } }
+      });
+      for (const period of ['today', 'month', 'allTime']) assert.equal(cold[period].sessions['antigravity:multi'].title, 'Known later title');
+    } finally {
+      fs.statSync = originalStat;
+      if (other.isOpen) other.close();
+    }
+  });
+}
+
+test('Antigravity cached removals and stale first-store rows cannot shadow a valid later title', { skip: !sqlite }, async (t) => {
+  const store = summaryStore(t);
+  store.put.run('multi', 'First title', '', null, null);
+  const dir = path.join(store.home, '.gemini', 'antigravity-ide');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'conversation_summaries.db');
+  const other = new sqlite.DatabaseSync(file);
+  try {
+    other.exec('CREATE TABLE conversation_summaries(conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, workspace_uris TEXT)');
+    const options = {
+      clients: 'antigravity', homeDir: store.home, projectsEnabled: false, historyEnabled: false,
+      dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false, wslScanEnabled: false,
+      osInfo: {}, allTimeSince: '2024-01-01', sessionMetadataDeps: store.deps,
+      runAntigravitySync: async () => {}, runTokscale: async () => ({ entries: [{ client: 'antigravity', sessionId: 'multi', input: 12, output: 0, cost: 0.5 }] })
+    };
+    assert.equal((await collectUsageOnce(options)).today.sessions['antigravity:multi'].title, 'First title');
+    store.db.exec('DELETE FROM conversation_summaries');
+    await collectUsageOnce(options);
+    other.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?)').run('multi', 'Fresh later title', '', null);
+    store.db.exec('CREATE TABLE fingerprint_change(value TEXT)');
+    options.sessionMetadataDeps = { ...store.deps, sqlite: { DatabaseSync: class {
+      constructor(target, config) { if (target === store.dbPath) throw new Error('SQLITE_BUSY'); return new sqlite.DatabaseSync(target, config); }
+    } } };
+    const later = await collectUsageOnce(options);
+    for (const period of ['today', 'month', 'allTime']) assert.equal(later[period].sessions['antigravity:multi'].title, 'Fresh later title');
+    store.put.run('multi', 'Stale first title', '', null, null);
+    await collectUsageOnce({ ...options, sessionMetadataDeps: store.deps });
+    store.put.run('multi', 'Unvalidated change', '', null, null);
+    assert.equal((await collectUsageOnce(options)).today.sessions['antigravity:multi'].title, 'Fresh later title');
+  } finally { other.close(); }
+});
+
+for (const nativeHistory of [false, true]) {
+  test(`Antigravity workspace removal preserves period sources (native history: ${nativeHistory})`, { skip: !sqlite }, async (t) => {
+    const store = summaryStore(t);
+    const key = 'antigravity:workspace';
+    const projectA = path.join(store.home, 'project-a');
+    const projectB = path.join(store.home, 'project-b');
+    store.put.run('workspace', 'Workspace title', '', JSON.stringify([pathToFileURL(projectA).href]), null);
+    const oldShared = process.env.TOKEN_MONITOR_SHARED_DIR;
+    const shared = path.join(store.home, 'shared');
+    process.env.TOKEN_MONITOR_SHARED_DIR = shared;
+    let handle;
+    t.after(() => { handle?.stop(); if (oldShared === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR; else process.env.TOKEN_MONITOR_SHARED_DIR = oldShared; });
+    const updates = [];
+    const options = {
+      clients: 'antigravity', homeDir: store.home, projectsEnabled: true, historyEnabled: false,
+      dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false, wslScanEnabled: false, sessionActivityPolling: false,
+      osInfo: {}, allTimeSince: '2024-01-01', sessionMetadataDeps: store.deps, watchEnabled: false, intervalMs: 3600000,
+      runAntigravitySync: async () => {}, runTokscale: async ({ flags }) => ({
+        entries: [{ client: 'antigravity', sessionId: 'workspace', input: flags.includes('--today') ? 12 : 120, output: 0, cost: 0.5,
+          ...(nativeHistory && !flags.includes('--today') ? { workspaceKey: 'native' } : {}) }],
+        workspaces: [{ workspaceKey: 'native', path: projectA }]
+      }), onUpdate: (value) => updates.push(value)
+    };
+    handle = startCollector(options);
+    for (let attempt = 0; attempt < 200 && updates.length < 1; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(updates.length, 1);
+    const file = path.join(shared, 'collector-anchor.json');
+    const original = JSON.parse(fs.readFileSync(file, 'utf8'));
+    store.db.prepare('UPDATE conversation_summaries SET title = ?, workspace_uris = ?').run('Renamed', JSON.stringify([pathToFileURL(projectB).href]));
+    await handle.refreshClient('antigravity');
+    for (const period of ['today', 'month', 'allTime']) {
+      const expected = nativeHistory && period !== 'today' ? projectA : projectB;
+      assert.equal(updates.at(-1)[period].sessions[key].projectId, projectIdentity(expected).projectId);
+    }
+    store.db.prepare('UPDATE conversation_summaries SET workspace_uris = ?').run('[]');
+    await handle.refreshClient('antigravity');
+    const check = (value) => {
+      for (const period of ['today', 'month', 'allTime']) {
+        assert.equal(value[period].sessions[key].projectId || '', nativeHistory && period !== 'today' ? projectIdentity(projectA).projectId : '');
+        assert.equal(value[period].sessions[key].title, 'Renamed');
+        assert.equal(value[period].totalTokens, original[period].totalTokens);
+      }
+    };
+    check(updates.at(-1));
+    const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(saved.fullScanAt, original.fullScanAt);
+    for (const period of ['today', 'month', 'allTime']) {
+      assert.equal(saved.catalogProjects[period][key], undefined);
+      assert.equal(saved[period].sessions[key].projectId || '', nativeHistory && period !== 'today' ? projectIdentity(projectA).projectId : '');
+      assert.equal(saved[period].costUsd, original[period].costUsd);
+    }
+    handle.stop(); handle = null;
+    handle = startCollector({ ...options, sessionMetadataDeps: { ...store.deps, sqlite: null, antigravityTitleCache: new Map() } });
+    for (let attempt = 0; attempt < 200 && updates.length < 4; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(updates.length, 4);
+    check(updates.at(-1));
+  });
+}
+
+
+test('Antigravity an empty first-store row cannot clear a title while a later store is unreadable', { skip: !sqlite }, async (t) => {
+  const store = summaryStore(t);
+  store.put.run('multi', '', '', null, null);
+  const dir = path.join(store.home, '.gemini', 'antigravity-ide');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'conversation_summaries.db');
+  const other = new sqlite.DatabaseSync(file);
+  try {
+    other.exec('CREATE TABLE conversation_summaries(conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, workspace_uris TEXT)');
+    other.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?)').run('multi', 'Valid later title', '', null);
+    const options = {
+      clients: 'antigravity', homeDir: store.home, projectsEnabled: false, historyEnabled: false,
+      dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false, wslScanEnabled: false,
+      osInfo: {}, allTimeSince: '2024-01-01', sessionMetadataDeps: store.deps,
+      runAntigravitySync: async () => {}, runTokscale: async () => ({ entries: [{ client: 'antigravity', sessionId: 'multi', input: 12, output: 0, cost: 0.5 }] })
+    };
+    const first = await collectUsageOnce(options);
+    assert.equal(first.today.sessions['antigravity:multi'].title, 'Valid later title');
+    const next = await collectUsageOnce({ ...options,
+      sessionMetadataDeps: { ...store.deps, antigravityTitleCache: new Map(), sqlite: { DatabaseSync: class {
+        constructor(target, config) { if (target === file) throw new Error('SQLITE_BUSY'); return new sqlite.DatabaseSync(target, config); }
+      } } },
+      todayOnlyAnchor: { dateKey: localTodayKey(), today: first.today, month: first.month, allTime: first.allTime,
+        t3Titles: { 'antigravity:multi': 'Valid later title' } }
+    });
+    for (const period of ['today', 'month', 'allTime']) assert.equal(next[period].sessions['antigravity:multi'].title, 'Valid later title');
+  } finally { other.close(); }
+});
+
+
+test('Antigravity full-scan deletion stays cleared through a later fingerprint read failure', { skip: !sqlite }, async (t) => {
+  const store = summaryStore(t);
+  store.put.run('deleted', 'Original title', '', null, null);
+  const options = {
+    clients: 'antigravity', homeDir: store.home, projectsEnabled: false, historyEnabled: false,
+    dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false, wslScanEnabled: false,
+    osInfo: {}, allTimeSince: '2024-01-01', sessionMetadataDeps: store.deps,
+    runAntigravitySync: async () => {}, runTokscale: async () => ({ entries: [{ client: 'antigravity', sessionId: 'deleted', input: 12, output: 0, cost: 0.5 }] })
+  };
+  assert.equal((await collectUsageOnce(options)).today.sessions['antigravity:deleted'].title, 'Original title');
+  store.db.exec('DELETE FROM conversation_summaries');
+  assert.equal((await collectUsageOnce(options)).today.sessions['antigravity:deleted'].title || '', '');
+  store.db.exec('CREATE TABLE fingerprint_change(value TEXT)');
+  const failed = await collectUsageOnce({ ...options, sessionMetadataDeps: { ...store.deps, sqlite: { DatabaseSync: class {
+    constructor() { throw new Error('SQLITE_BUSY'); }
+  } } } });
+  for (const period of ['today', 'month', 'allTime']) assert.equal(failed[period].sessions['antigravity:deleted'].title || '', '');
 });

@@ -24,14 +24,14 @@ function fileStamp(filePath) {
   try {
     const stat = fs.statSync(filePath);
     return `${stat.size}:${stat.mtimeMs}`;
-  } catch (_) {
-    return '';
+  } catch (error) {
+    return error.code === 'ENOENT' ? '' : null;
   }
 }
 
 function databaseStamp(dbPath) {
   const main = fileStamp(dbPath);
-  return main ? `${main}|${fileStamp(`${dbPath}-wal`)}` : '';
+  return main ? `${main}|${fileStamp(`${dbPath}-wal`)}` : main;
 }
 
 const TITLE_MAX_CODE_POINTS = 96;
@@ -144,11 +144,17 @@ function resolveSessionMetadata(sessionIds, context = {}) {
   const candidates = antigravityConversationSummaryCandidates({ home, env });
   const cache = context.deps?.antigravityTitleCache || titleCache;
   const unresolved = new Set();
+  const priorities = new Map();
 
   for (const dbPath of candidates) {
     const stamp = databaseStamp(dbPath);
     let cached = cache.get(dbPath);
-    if (!stamp && !cached) continue;
+    if (!stamp) {
+      for (const id of sessionIds) {
+        if (cached || stamp === null || context.deps?.catalogTitleSources?.[`antigravity:${id}`] === dbPath) unresolved.add(id);
+      }
+      if (!cached) continue;
+    }
     if (stamp && cached?.stamp !== stamp) {
       // Keep the last successful rows while revalidating this fingerprint.
       // A failed row is retried; it never becomes a definitive hit or miss.
@@ -164,9 +170,6 @@ function resolveSessionMetadata(sessionIds, context = {}) {
           cached.validatedIds.add(id);
         }
         for (const id of read.misses) {
-          // Retain a confirmed removal in this same cache, so later read
-          // failures cannot resurrect a title from the full-scan anchor.
-          if (cached.summaries.has(id)) cached.summaries.set(id, null);
           cached.misses.add(id);
         }
       }
@@ -178,15 +181,19 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     }
 
     for (const sessionId of sessionIds) {
-      if (result.has(sessionId)) continue;
       const row = cached.summaries.get(sessionId);
-      if (cached.misses.has(sessionId)) continue;
-      if (!cached.summaries.has(sessionId)) continue;
+      if (stamp && cached.misses.has(sessionId)) continue;
+      if (!row) continue;
       const title = cleanTitle(row?.title) || cleanTitle(row?.preview);
+      const priority = (stamp && cached.validatedIds.has(sessionId) ? 2 : 0) + (title ? 4 : 0);
+      if (priorities.has(sessionId) && priorities.get(sessionId) >= priority) continue;
+      priorities.set(sessionId, priority);
       const identity = projectFromWorkspaceUris(row?.workspace_uris, context);
       result.set(sessionId, {
         catalogOnly: true,
         catalogTitle: title || null,
+        catalogProjectResolved: true,
+        catalogTitleSource: dbPath,
         ...(title ? { title } : {}),
         ...(identity || {})
       });
@@ -197,21 +204,33 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     const key = `antigravity:${sessionId}`;
     const previous = context.metadata?.get(key);
     const anchored = context.deps?.t3Titles?.[key];
+    const retained = previous && Object.prototype.hasOwnProperty.call(previous, 'catalogTitle')
+      ? previous.catalogTitle : anchored;
+    const hasAnchoredProject = Boolean(context.deps?.catalogProjects?.today?.[key]);
+    if (result.get(sessionId)?.catalogTitle === null && unresolved.has(sessionId) && retained) {
+      const meta = result.get(sessionId);
+      meta.catalogTitle = retained;
+      meta.title = retained;
+      delete meta.catalogProjectResolved;
+      delete meta.catalogTitleSource;
+      delete meta.projectId;
+      delete meta.projectLabel;
+    }
     if (!result.has(sessionId)) {
-      const retained = previous && Object.prototype.hasOwnProperty.call(previous, 'catalogTitle')
-        ? previous.catalogTitle : anchored;
       // A successful missing-row query can revoke a persisted override even
       // on a cold cache. Check all candidate stores before deciding absence.
       const confirmedMissing = !unresolved.has(sessionId) && candidates.some((dbPath) => cache.get(dbPath)?.misses.has(sessionId));
-      if (confirmedMissing && retained !== undefined) {
+      const knownSummary = candidates.some((dbPath) => cache.get(dbPath)?.summaries.has(sessionId));
+      if (confirmedMissing && (retained !== undefined || hasAnchoredProject || knownSummary)) {
         for (const dbPath of candidates) {
           const cached = cache.get(dbPath);
           if (cached?.misses.has(sessionId)) cached.summaries.set(sessionId, null);
         }
-        result.set(sessionId, { catalogOnly: true, catalogTitle: null });
+        result.set(sessionId, { catalogOnly: true, catalogTitle: null, catalogProjectResolved: true });
       } else if (typeof retained === 'string' && retained) {
         result.set(sessionId, { catalogOnly: true, catalogTitle: retained, title: retained });
       } else if (retained === null) result.set(sessionId, { catalogOnly: true, catalogTitle: null });
+      else if (hasAnchoredProject) result.set(sessionId, { catalogOnly: true });
     }
     const meta = result.get(sessionId);
     if (meta && previous && Object.prototype.hasOwnProperty.call(previous, 'titleFallback')) meta.titleFallback = previous.titleFallback;

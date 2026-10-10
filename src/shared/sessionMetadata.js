@@ -343,7 +343,7 @@ function sessionMetadataMap(periods, home = os.homedir(), deps = {}) {
 
 function applySessionMetadata(periods, home, deps = {}) {
   const metadata = sessionMetadataMap(periods, home, deps);
-  for (const period of Object.values(periods || {})) {
+  for (const [periodName, period] of Object.entries(periods || {})) {
     for (const [key, session] of Object.entries(period?.sessions || {})) {
       const meta = metadata.get(key);
       // Restore only the catalog title we replaced, leaving newer native labels.
@@ -361,10 +361,23 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (meta.catalogOnly === true) {
         // A summary may supply a missing workspace, but a decoded scan path
         // remains authoritative. Catalog changes never clear turn state.
-        if (meta.projectId && (!session.projectId || session.projectId === meta.catalogProject)) {
+        const sources = deps.catalogProjects?.[periodName];
+        const owned = deps.catalogProjectRows?.has(session);
+        if (meta.projectId && (!session.projectId || owned)) {
           session.projectId = meta.projectId;
           if (meta.projectLabel) session.projectLabel = meta.projectLabel;
-          meta.catalogProject = meta.projectId;
+          deps.catalogProjectRows?.add(session);
+          if (sources) sources[key] = meta.projectId;
+        } else if (owned && meta.catalogProjectResolved) {
+          delete session.projectId;
+          delete session.projectLabel;
+          if (sources) delete sources[key];
+        } else if (!session.projectId && !meta.catalogProjectResolved && sources?.[key]) {
+          session.projectId = sources[key];
+          session.projectLabel = deps.catalogProjectFallbacks?.[periodName]?.sessions?.[key]?.projectLabel;
+          deps.catalogProjectRows?.add(session);
+        } else if (sources && !owned) {
+          delete sources[key];
         }
         continue;
       }

@@ -827,3 +827,17 @@ test('Cursor anchors from before the Auto model rename require a full scan', () 
   assert.equal(collectorAnchorTrust(anchor, options), null);
   assert.equal(collectorAnchorTrust({ ...anchor, cursorAutoModelVersion: 1 }, options).capturedAtMs, now.getTime() - 60_000);
 });
+
+test('flat catalog project provenance requires a full scan instead of guessing period sources', () => {
+  const { collectorAnchorTrust, configFingerprint } = freshCollector();
+  const now = new Date(2026, 7, 8, 10, 0, 0);
+  const options = { clients: 'antigravity', allTimeSince: '2024-01-01', now };
+  const anchor = {
+    dateKey: '2026-08-08', today: {}, month: {}, allTime: {},
+    configFingerprint: configFingerprint('antigravity', '2024-01-01'),
+    fullScanAt: new Date(now.getTime() - 60000).toISOString(),
+    catalogProjects: { 'antigravity:session': 'project-a' }
+  };
+  assert.equal(collectorAnchorTrust(anchor, options), null);
+  assert.ok(collectorAnchorTrust({ ...anchor, catalogProjects: { today: { 'antigravity:session': 'project-a' }, month: {}, allTime: {} } }, options));
+});

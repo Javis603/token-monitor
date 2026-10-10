@@ -658,12 +658,24 @@ function computePeriodWindows(now = new Date()) {
 function propagateTodayProjects(today, periods, titleMetadata = {}) {
   for (const [key, session] of Object.entries(today?.sessions || {})) {
     if (!session) continue;
-    for (const period of periods) {
+    for (const [periodName, period] of Object.entries(periods)) {
       const target = period?.sessions?.[key];
       if (!target) continue;
-      if (session.projectId && (!target.projectId || target.projectId === titleMetadata.catalogProjects?.[key])) {
-        target.projectId = session.projectId;
-        target.projectLabel = session.projectLabel;
+      const sources = titleMetadata.catalogProjects?.[periodName];
+      const owned = Boolean(sources?.[key] && target.projectId === sources[key]);
+      const meta = titleMetadata.metadataCache?.get(key);
+      if (titleMetadata.projectsFromToday || (session.projectId && (!target.projectId || owned)) || (owned && meta?.catalogProjectResolved)) {
+        if (session.projectId) {
+          target.projectId = session.projectId;
+          target.projectLabel = session.projectLabel;
+        } else {
+          delete target.projectId;
+          delete target.projectLabel;
+        }
+        if (sources) {
+          if (titleMetadata.catalogProjects.today?.[key]) sources[key] = session.projectId;
+          else delete sources[key];
+        }
       }
       // The fresh scan's title is authoritative and replaces the anchor's, like
       // the context pair below: a Cursor rename arrives only through this path
@@ -881,7 +893,9 @@ async function collectUsageOnce(options) {
     attemptedSessionKeys: new Set(),
     invalidatedTitleKeys: new Set(),
     t3Titles: {},
-    catalogProjects: {}
+    catalogTitleSources: {},
+    catalogProjects: { today: {}, month: {}, allTime: {} },
+    catalogProjectRows: new WeakSet()
     // dshSessionFileCache is deliberately NOT reset here: it's module-level
     // (declared with jsonlTimestampCache above) precisely so it survives
     // across collectUsageOnce calls. These caches and sets start fresh each
@@ -913,7 +927,11 @@ async function collectUsageOnce(options) {
   );
   if (anchorUsed) {
     localSessionMetadataDeps.t3Titles = anchor.todayT3Titles || anchor.t3Titles || {};
-    localSessionMetadataDeps.catalogProjects = anchor.catalogProjects || {};
+    localSessionMetadataDeps.catalogTitleSources = anchor.catalogTitleSources || {};
+    for (const period of ['today', 'month', 'allTime']) {
+      localSessionMetadataDeps.catalogProjects[period] = { ...anchor.catalogProjects?.[period] };
+    }
+    localSessionMetadataDeps.catalogProjectFallbacks = anchor;
   }
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
@@ -988,6 +1006,13 @@ async function collectUsageOnce(options) {
         ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
         : completeTodayPartitions(freshPartitions, normalizedClients);
       today = mergeTodayPartitions(todayPartitions);
+      if (useTargetedPartitions) {
+        for (const [key, session] of Object.entries(today.sessions || {})) {
+          if (!targetClientSet.has(session.client) && session.projectId === localSessionMetadataDeps.catalogProjects.today[key]) {
+            localSessionMetadataDeps.catalogProjectRows.add(session);
+          }
+        }
+      }
       month = applyPeriodDelta(anchor.month, today, anchor.today);
       allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
     } else if (normalizedClients) {
@@ -1021,18 +1046,14 @@ async function collectUsageOnce(options) {
       // (the perceived UI stutter). Decorate only today, then propagate its freshly
       // resolved identities onto sessions that started today (absent from the anchor).
       decorateLocalPeriods({ today }, { retryMisses: true });
-      propagateTodayProjects(today, [month, allTime], {
-        invalidatedTitleKeys: localSessionMetadataDeps.invalidatedTitleKeys,
-        t3Titles: anchor.t3Titles,
-        catalogProjects: anchor.catalogProjects
-      });
+      propagateTodayProjects(today, { month, allTime }, { ...localSessionMetadataDeps, t3Titles: anchor.t3Titles });
     } else {
       decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
     // period: a later targeted tick re-merges these sessions into `today`.
-    propagateTodayProjects(today, Object.values(todayPartitions), localSessionMetadataDeps);
+    propagateTodayProjects(today, Object.values(todayPartitions), { ...localSessionMetadataDeps, projectsFromToday: true });
   }
 
   // WSL contribution (Windows only; no-op elsewhere). Full tick scans running WSL
@@ -1227,15 +1248,16 @@ async function collectUsageOnce(options) {
     for (const [key, meta] of localSessionMetadataDeps.metadataCache) {
       if (meta.t3Title || meta.catalogTitle) t3Titles[key] = meta.t3Title || meta.catalogTitle;
     }
-    const catalogProjects = { ...localSessionMetadataDeps.catalogProjects };
+    const catalogTitleSources = { ...localSessionMetadataDeps.catalogTitleSources };
     for (const [key, meta] of localSessionMetadataDeps.metadataCache) {
-      if (meta.catalogProject) catalogProjects[key] = meta.catalogProject;
-      else if (meta.catalogOnly && today.sessions?.[key]?.projectId && today.sessions[key].projectId !== catalogProjects[key]) delete catalogProjects[key];
+      if (meta.catalogTitleSource) catalogTitleSources[key] = meta.catalogTitleSource;
     }
+    const catalogProjects = localSessionMetadataDeps.catalogProjects;
     options.onAnchorComputed({
       windowsPeriods,
       todayPartitions,
       t3Titles,
+      catalogTitleSources,
       catalogProjects,
       wslBundle,
       wslStatus,
@@ -2130,6 +2152,8 @@ function collectorAnchorTrust(saved, options = {}) {
   const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
+  // A flat provenance ledger cannot prove each period's project source.
+  if (Object.keys(saved.catalogProjects || {}).length && !saved.catalogProjects.today) return null;
   // Old Cursor anchors preserve `default` in their broad-period model maps;
   // applying a new `cursor-auto` Today delta to them would split one mode.
   if (normalizeClientsCsv(clients).split(',').includes('cursor') && saved.cursorAutoModelVersion !== 1) return null;
@@ -2593,6 +2617,7 @@ function startCollector(options) {
           allTime: saved.allTime,
           t3Titles: saved.t3Titles,
           todayT3Titles: saved.todayT3Titles,
+          catalogTitleSources: saved.catalogTitleSources,
           catalogProjects: saved.catalogProjects,
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
@@ -2624,6 +2649,7 @@ function startCollector(options) {
         allTime: anchor.allTime,
         t3Titles: anchor.t3Titles,
         todayT3Titles: anchor.todayT3Titles,
+        catalogTitleSources: anchor.catalogTitleSources,
         catalogProjects: anchor.catalogProjects,
         wslBundle: wslAnchor,
         wslStatus: wslStatusAnchor,
@@ -2859,6 +2885,7 @@ function startCollector(options) {
           todayPartitions: captured.todayPartitions,
           t3Titles: captured.t3Titles,
           todayT3Titles: captured.t3Titles,
+          catalogTitleSources: captured.catalogTitleSources,
           catalogProjects: captured.catalogProjects,
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {})
@@ -2873,14 +2900,20 @@ function startCollector(options) {
         if (captured.todayPartitions) anchor.todayPartitions = captured.todayPartitions;
         const titlesChanged = JSON.stringify(anchor.todayT3Titles || anchor.t3Titles || {}) !== JSON.stringify(captured.t3Titles);
         const projectsChanged = JSON.stringify(anchor.catalogProjects || {}) !== JSON.stringify(captured.catalogProjects || {});
+        const sourcesChanged = JSON.stringify(anchor.catalogTitleSources || {}) !== JSON.stringify(captured.catalogTitleSources || {});
+        anchor.catalogTitleSources = captured.catalogTitleSources;
         if (projectsChanged) {
           for (const [key, session] of Object.entries(summary.today.sessions || {})) {
-            if (!session.projectId) continue;
             for (const period of ['today', 'month', 'allTime']) {
               const target = anchor[period]?.sessions?.[key];
-              if (target && (!target.projectId || target.projectId === anchor.catalogProjects?.[key])) {
-                target.projectId = session.projectId;
-                target.projectLabel = session.projectLabel;
+              if (target && (!target.projectId || (anchor.catalogProjects?.[period]?.[key] && target.projectId === anchor.catalogProjects[period][key]))) {
+                if (session.projectId) {
+                  target.projectId = summary[period]?.sessions?.[key]?.projectId;
+                  target.projectLabel = summary[period]?.sessions?.[key]?.projectLabel;
+                } else if (!captured.catalogProjects?.[period]?.[key]) {
+                  delete target.projectId;
+                  delete target.projectLabel;
+                }
               }
             }
           }
@@ -2910,7 +2943,7 @@ function startCollector(options) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
         }
-        if (titlesChanged || projectsChanged) persistAnchor(tickPricingRevision);
+        if (titlesChanged || projectsChanged || sourcesChanged) persistAnchor(tickPricingRevision);
       }
       const transformedSummary = await onUpdate?.(summary, reason);
       publishedCodexVisibilityRevision = visibilityRevision;
