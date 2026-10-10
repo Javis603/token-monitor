@@ -262,6 +262,22 @@
     return textValue(session?.sessionKind) === 'background-review';
   }
 
+  // Cursor's sandbox ids identify bot runs independently of the model. A
+  // positive grok-bot model also proves a bot conversation with a regular id;
+  // its other models belong to the same conversation, including Claude.
+  function isGrokBotSession(session, key) {
+    if (session?.client !== 'cursor') return false;
+    if (typeof session.grokBotSession === 'boolean') return session.grokBotSession;
+    const id = textValue(session?.sessionId) || String(key || '').replace(/^cursor:/, '');
+    return /^sand-subagent-.+/.test(id) || Object.entries(session?.models || {})
+      .some(([model, tokens]) => /^grok-bot-.+/.test(model) && finiteNumber(tokens) > 0);
+  }
+
+  function sessionRowDetailAvailable(row) {
+    return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy'].includes(row?.client)
+      || (row?.client === 'reasonix' && row?.sessionDetailAvailable === true);
+  }
+
   function nativeSessionRow(session, key, options, now) {
     const periodTokenDataUnavailable = session?.periodTokenDataUnavailable === true;
     // Native telemetry is cumulative for a resumed Branch, but it remains a
@@ -346,6 +362,14 @@
     const palette = options.fallbackColors || fallbackColors;
     const archivedLabel = options.archivedLabel || 'Archived';
     const now = options.now || new Date();
+    // A day may contain only Claude usage from a bot conversation that used a
+    // grok-bot model earlier. Join evidence by conversation id, never by model.
+    const botIds = new Set();
+    for (const sourcePeriod of Object.values(options.sourcePeriods || {})) {
+      for (const [key, session] of Object.entries(sourcePeriod?.sessions || {})) {
+        if (isGrokBotSession(session, key)) botIds.add(textValue(session.sessionId) || key.replace(/^cursor:/, ''));
+      }
+    }
     const rows = Object.entries(period?.sessions || {})
       .map(([key, session]) => {
         session = sessionLive.sessionWithActivity(period, key, session);
@@ -402,6 +426,8 @@
           promptCache: sessionLive.sessionPromptCacheForRow(session, now),
           client,
           backgroundReview: isBackgroundReviewSession(session) || undefined,
+          grokBot: (isGrokBotSession(session, key) || (client === 'cursor'
+            && botIds.has(textValue(session?.sessionId) || key.replace(/^cursor:/, '')))) || undefined,
           sortTime: sessionTimestampValue(session),
           title: `${clientLabel} session${sessionIdLabel(sessionId) ? ` ${sessionIdLabel(sessionId)}` : ''}`
         };
@@ -423,38 +449,61 @@
       (row?.backgroundReview === true ? reviews : primary).push(row);
     }
     if (reviews.length === 0) return primary;
-    const value = reviews.reduce((sum, row) => sum + finiteNumber(row.value), 0);
-    const cost = reviews.reduce((sum, row) => sum + finiteNumber(row.cost), 0);
-    const sortTime = reviews.reduce((max, row) => Math.max(max, finiteNumber(row.sortTime)), 0);
-    const orderedReviews = [...reviews].sort((a, b) => finiteNumber(b.sortTime) - finiteNumber(a.sortTime));
-    const latest = orderedReviews[0] || null;
+    return [...primary, sessionSummaryRow(reviews, {
+      ...options, id: 'codex-auto-review', client: 'codex',
+      label: options.label || 'Codex Auto Review'
+    })];
+  }
+
+  function sessionSummaryRow(rows, options) {
+    const value = rows.reduce((sum, row) => sum + finiteNumber(row.value), 0);
+    const cost = rows.reduce((sum, row) => sum + finiteNumber(row.cost), 0);
+    const unpricedTokens = rows.reduce((sum, row) => sum + finiteNumber(row.unpricedTokens), 0);
+    const ordered = [...rows].sort((a, b) => finiteNumber(b.sortTime) - finiteNumber(a.sortTime));
+    const latest = ordered[0];
+    const sortTime = finiteNumber(latest?.sortTime);
     const countLabel = typeof options.countLabel === 'function'
-      ? options.countLabel(reviews.length)
-      : `${reviews.length} sessions`;
-    const summary = {
-      key: 'session-group:codex-auto-review',
+      ? options.countLabel(rows.length) : `${rows.length} sessions`;
+    return {
+      key: `session-group:${options.id}`,
       kind: 'summary',
-      name: options.label || 'Codex Auto Review',
+      name: options.label,
       subtitle: typeof options.summaryLabel === 'function'
         ? options.summaryLabel({
-          count: reviews.length,
-          countLabel,
+          count: rows.length, countLabel,
           latestTime: compactSessionTime(sortTime, options.now || new Date()),
           latestValue: finiteNumber(latest?.value)
-        })
-        : '',
+        }) : '',
       detail: countLabel,
       value,
       cost,
+      ...(unpricedTokens > 0 ? { unpricedTokens } : {}),
       barValue: value,
-      color: reviews[0]?.color || fallbackColors[0],
+      color: rows[0]?.color || fallbackColors[0],
       stale: false,
-      client: 'codex',
+      client: options.client,
       sortTime,
-      reviewGroup: true,
-      backgroundReviewRows: orderedReviews
+      sessionGroup: options.id,
+      groupRows: ordered
     };
-    return [...primary, summary];
+  }
+
+  function groupSessionRows(rows, options = {}) {
+    const primary = [];
+    const bots = [];
+    for (const row of Array.isArray(rows) ? rows : []) {
+      (row?.grokBot === true ? bots : primary).push(row);
+    }
+    const grouped = groupBackgroundReviewRows(primary, options.backgroundReviews);
+    if (bots.length > 0) grouped.push(sessionSummaryRow(bots, {
+      // These source ids include internal subagents, not just user chat rooms.
+      countLabel: (count) => `${count} activity records`,
+      ...options.grokBot, id: 'cursor-grok-bot', client: 'cursor',
+      label: options.grokBot?.label || 'Grok Bot'
+    }));
+    return grouped.sort((a, b) => finiteNumber(b.sortTime) - finiteNumber(a.sortTime)
+      || finiteNumber(b.value) - finiteNumber(a.value) || finiteNumber(b.cost) - finiteNumber(a.cost)
+      || a.name.localeCompare(b.name));
   }
 
   function sessionBreakdownIncomplete(stats, periodName) {
@@ -483,6 +532,9 @@
     archivedSessionCount,
     compactSessionTime,
     groupBackgroundReviewRows,
+    groupSessionRows,
+    isGrokBotSession,
+    sessionRowDetailAvailable,
     handleBreakdownRowKeydown,
     sessionBreakdownIncomplete,
     sessionCacheHitPercent,

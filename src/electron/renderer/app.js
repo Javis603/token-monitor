@@ -2368,7 +2368,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2387,17 +2387,15 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
   if (platform !== undefined) row.dataset.platform = platform || '';
   if (client !== undefined) row.dataset.client = client || '';
   if (kind !== undefined) row.dataset.kind = kind || '';
-  if (reviewGroup === true) row.dataset.reviewGroup = 'true';
-  else delete row.dataset.reviewGroup;
+  if (sessionGroup) row.dataset.sessionGroup = sessionGroup;
+  else delete row.dataset.sessionGroup;
   if (kind === 'session' && client === 'reasonix') {
     row.dataset.detailUnavailable = sessionDetailAvailable === true ? 'false' : 'true';
   } else if (row.hasAttribute('data-detail-unavailable')) {
     row.removeAttribute('data-detail-unavailable');
   }
-  const interactive = reviewGroup === true || (
-    kind === 'session'
-    && ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy'].includes(client)
-  ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
+  const interactive = Boolean(sessionGroup) || (kind === 'session'
+    && sessionRowsApi.sessionRowDetailAvailable({ client, sessionDetailAvailable }));
   const mark = row.querySelector('.row-mark');
   const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '', modelSource }, state.breakdown);
   if (iconKind.kind === 'icon') {
@@ -2859,6 +2857,7 @@ function rawSessionRowsForPeriod(period) {
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
+    sourcePeriods: state.stats?.periods,
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
 }
@@ -2867,13 +2866,21 @@ function sessionRowsForPeriod(period) {
   const rows = rawSessionRowsForPeriod(period);
   if (rows.length > 0) {
     rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
-    return sessionRowsApi.groupBackgroundReviewRows(rows, {
-      label: t('sessions.backgroundReviews'),
-      countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
-      summaryLabel: ({ latestTime, latestValue }) => [
-        latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
-        latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
-      ].filter(Boolean).join(' · ')
+    return sessionRowsApi.groupSessionRows(rows, {
+      backgroundReviews: {
+        label: t('sessions.backgroundReviews'),
+        countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
+        summaryLabel: ({ latestTime, latestValue }) => [
+          latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
+          latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
+        ].filter(Boolean).join(' · ')
+      },
+      grokBot: {
+        label: t('sessions.grokBot'),
+        countLabel: (count) => t('sessions.grokBotCount', { count }),
+        summaryLabel: ({ latestTime }) => latestTime
+          ? t('sessions.backgroundReviewLatest', { time: latestTime }) : ''
+      }
     });
   }
   if (Number(period?.totalTokens || 0) === 0) return [];
@@ -4645,7 +4652,7 @@ function applySessionDetailResult(request, options) {
 
 async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null }) {
   const request = { kind: 'session', client, sessionId, sessionCost,
-    title: state.settings?.sessionTitlesEnabled === false && returnTo?.kind !== 'background-review-group' ? '' : title,
+    title: state.settings?.sessionTitlesEnabled === false && returnTo?.kind !== 'session-group' ? '' : title,
     period: state.period, detail: null, returnTo };
   state.openSession = request;
   renderSessionDetail({ loading: true });
@@ -4676,9 +4683,9 @@ function closeSessionDetail() {
 
 function sessionDetailBack() {
   const returnTo = state.openSession?.returnTo;
-  if (returnTo?.kind === 'background-review-group') {
+  if (returnTo?.kind === 'session-group') {
     state.openSession = returnTo;
-    renderBackgroundReviewDetail(returnTo);
+    renderSessionGroupDetail(returnTo);
     return;
   }
   closeSessionDetail();
@@ -4723,9 +4730,9 @@ function renderSessionDetail({ detail, loading, error } = {}) {
 
 function sessionDetailTitle() {
   const request = state.openSession;
-  // Review runs use a model/time heading, which is independent of session
+  // Group runs use a model/time heading, which is independent of session
   // title visibility. Ordinary Details follow the current session metadata.
-  if (request?.returnTo?.kind === 'background-review-group') return request.title;
+  if (request?.returnTo?.kind === 'session-group') return request.title;
   if (state.settings?.sessionTitlesEnabled === false) return '';
   const period = request?.period || state.period;
   const session = request?.client === 'reasonix'
@@ -4746,8 +4753,8 @@ function refreshSessionDetailHeading() {
 function sessionDetailBackButton() {
   const back = document.createElement('button');
   const title = sessionDetailTitle();
-  const backLabel = state.openSession?.returnTo?.kind === 'background-review-group'
-    ? t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
+  const backLabel = state.openSession?.returnTo?.kind === 'session-group'
+    ? state.openSession.returnTo.summary?.name || t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
   back.type = 'button';
   back.className = title ? 'detail-back detail-back-titled' : 'detail-back';
   if (!title) back.textContent = `‹ ${backLabel}`;
@@ -4792,17 +4799,23 @@ function sessionIdLine(idLabel) {
   return line;
 }
 
-function backgroundReviewRunNode(row, max, parent) {
+function sessionGroupRunNode(row, max, parent) {
   const wrap = document.createElement('div');
-  wrap.className = 'detail-exchange background-review-run';
-  wrap.setAttribute('role', 'button');
-  wrap.setAttribute('tabindex', '0');
+  wrap.className = 'detail-exchange session-group-run';
+  const interactive = sessionRowsApi.sessionRowDetailAvailable(row);
+  const botGroup = parent.summary?.sessionGroup === 'cursor-grok-bot';
+  if (interactive) {
+    wrap.setAttribute('role', 'button');
+    wrap.setAttribute('tabindex', '0');
+  }
   wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">›</span>'
-    + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span></div>'
+    + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span>'
+    + (botGroup ? '<span class="session-group-id"></span>' : '') + '</div>'
     + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
     + '<div class="bar"><div class="bar-fill"></div></div>';
   const time = sessionRowsApi.compactSessionTime(row.sortTime, new Date());
-  const title = [row.modelLabel, time].filter(Boolean).join(' · ') || t('sessions.backgroundReviews');
+  const title = (botGroup ? row.name : [row.modelLabel, time].filter(Boolean).join(' · '))
+    || parent.summary?.name || t('sessions.backgroundReviews');
   const titleEl = wrap.querySelector('.detail-ex-title');
   titleEl.textContent = title;
   titleEl.title = title;
@@ -4812,10 +4825,21 @@ function backgroundReviewRunNode(row, max, parent) {
   if (row.modelTooltipEntries?.length > 1) {
     limitWindowsView.setDetailTooltip(titleEl, row.modelTooltipEntries);
   }
-  wrap.querySelector('.detail-ex-sub').textContent = row.detail || '';
+  if (!interactive) wrap.querySelector('.detail-chev').textContent = '';
+  const sub = wrap.querySelector('.detail-ex-sub');
+  sub.textContent = botGroup ? [row.activity ? row.subtitle : '', row.activity || row.subtitle].filter(Boolean).join(' · ') : row.detail || '';
+  sub.title = sub.textContent;
+  bindHoverMarquee(sub);
+  if (botGroup) {
+    const id = wrap.querySelector('.session-group-id');
+    id.textContent = row.detail || '';
+    id.title = row.detail || '';
+    bindHoverMarquee(id);
+  }
   wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
   wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0, row.unpricedTokens);
   applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
+  if (!interactive) return wrap;
   const open = () => openSessionDetail({
     client: row.client,
     sessionId: String(row.key || '').replace(/^session:[^:]+:/, ''),
@@ -4832,7 +4856,7 @@ function backgroundReviewRunNode(row, max, parent) {
   return wrap;
 }
 
-function renderBackgroundReviewDetail(request) {
+function renderSessionGroupDetail(request) {
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
@@ -4841,11 +4865,12 @@ function renderBackgroundReviewDetail(request) {
   head.replaceChildren();
   container.replaceChildren();
 
+  const label = request?.summary?.name || t('sessions.backgroundReviews');
   const back = document.createElement('button');
   back.type = 'button';
   back.className = 'detail-back detail-back-titled';
   back.setAttribute('aria-label', t('sessions.backToWithTitle', {
-    title: t('sessions.backgroundReviews'), destination: t('sessions') || 'Sessions'
+    title: label, destination: t('sessions') || 'Sessions'
   }));
   back.addEventListener('click', closeSessionDetail);
   const arrow = document.createElement('span');
@@ -4854,25 +4879,25 @@ function renderBackgroundReviewDetail(request) {
   arrow.setAttribute('aria-hidden', 'true');
   const heading = document.createElement('span');
   heading.className = 'detail-heading';
-  heading.textContent = t('sessions.backgroundReviews');
+  heading.textContent = label;
   bindHoverMarquee(heading);
   back.append(arrow, heading);
   head.append(back);
 
-  const rows = request?.summary?.backgroundReviewRows || [];
+  const rows = request?.summary?.groupRows || [];
   if (rows.length === 0) {
     container.append(detailNote(t('detailEmpty') || 'No activity in this period.'));
     return;
   }
   const overview = document.createElement('div');
-  overview.className = 'background-review-overview';
-  overview.innerHTML = '<span class="background-review-count"></span><span class="background-review-totals"></span>';
-  overview.querySelector('.background-review-count').textContent = t('sessions.backgroundReviewCount', { count: rows.length });
-  overview.querySelector('.background-review-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0)}`;
+  overview.className = 'session-group-overview';
+  overview.innerHTML = '<span class="session-group-count"></span><span class="session-group-totals"></span>';
+  overview.querySelector('.session-group-count').textContent = request.summary.detail;
+  overview.querySelector('.session-group-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0, request.summary.unpricedTokens)}`;
   container.append(overview);
 
   const max = Math.max(1, ...rows.map((row) => Number(row.value) || 0));
-  for (const row of rows) container.append(backgroundReviewRunNode(row, max, request));
+  for (const row of rows) container.append(sessionGroupRunNode(row, max, request));
 }
 
 function detailNote(text) {
@@ -6712,13 +6737,14 @@ function render() {
     els.trendsPanel.classList.add('hidden');
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
-    if (state.openSession.kind === 'background-review-group') {
-      const latest = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
-      if (latest) state.openSession.summary = latest;
+    if (state.openSession.kind === 'session-group') {
+      const latest = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
+      if (!latest) { closeSessionDetail(); return; }
+      state.openSession.summary = latest;
       // The rebuild replaces every run node, so a hovered run tooltip would die
       // mid-read (and a keyboard focus with it); hold until it closes, as the
       // session and home lists already do.
-      if (!sessionTooltipShouldHoldRender()) renderBackgroundReviewDetail(state.openSession);
+      if (!sessionTooltipShouldHoldRender()) renderSessionGroupDetail(state.openSession);
     }
     refreshSessionDetailHeading();
     if (state.openSession.renderOptions) {
@@ -12028,11 +12054,11 @@ for (const tab of document.querySelectorAll('.tab')) {
     if (!setPeriod(targetPeriod)) return;
     syncPeriodTabs();
     if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session')) {
-      if (state.openSession.kind === 'background-review-group') {
+      if (state.openSession.kind === 'session-group') {
         const period = state.stats?.periods?.[state.period];
-        const summary = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+        const summary = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
         if (summary) {
-          state.openSession = { kind: 'background-review-group', period: state.period, summary };
+          state.openSession = { kind: 'session-group', period: state.period, summary };
         } else {
           state.openSession = null;
         }
@@ -12115,13 +12141,13 @@ els.breakdown.addEventListener('click', (event) => {
   if (state.breakdown !== 'session') return;
   const rowEl = event.target.closest('.row');
   if (!rowEl) return;
-  if (rowEl.dataset.reviewGroup === 'true') {
+  if (rowEl.dataset.sessionGroup) {
     const period = state.stats?.periods?.[state.period];
-    const summary = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+    const summary = sessionRowsForPeriod(period).find((row) => row.key === rowEl.dataset.key);
     if (summary) {
-      const request = { kind: 'background-review-group', period: state.period, summary };
+      const request = { kind: 'session-group', period: state.period, summary };
       state.openSession = request;
-      renderBackgroundReviewDetail(request);
+      renderSessionGroupDetail(request);
     }
     return;
   }

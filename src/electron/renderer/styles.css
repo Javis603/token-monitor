@@ -6362,9 +6362,13 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .detail-role-user { color: #bda5f5; }
 .detail-role-sep { color: var(--muted); }
 .detail-turn-title { color: var(--muted); }
-.background-review-overview { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 4px 0 6px; color: var(--muted); font-size: 0.625rem; }
-.background-review-totals { white-space: nowrap; color: var(--text); }
-.background-review-run:focus-visible,
+.session-group-overview { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 4px 0 6px; color: var(--muted); font-size: 0.625rem; }
+.session-group-totals { white-space: nowrap; color: var(--text); }
+.session-group-run:not([role="button"]) .detail-ex-head { cursor: default; }
+.session-group-run .detail-ex-sub,
+.session-group-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-group-id { color: var(--muted); font-size: 0.625rem; user-select: text; }
+.session-group-run:focus-visible,
 .row[role="button"]:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.35); outline-offset: 2px; }
 .row[role="button"] { cursor: pointer; }
 .detail-session-id { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted, #8a8a90); font-size: 0.625rem; }

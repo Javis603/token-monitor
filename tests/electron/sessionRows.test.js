@@ -9,6 +9,7 @@ const {
   applyBreakdownRowSemantics,
   archivedSessionCount,
   groupBackgroundReviewRows,
+  groupSessionRows,
   handleBreakdownRowKeydown,
   sessionBreakdownIncomplete,
   sessionIdLabel,
@@ -324,7 +325,7 @@ test('a hovered background-review run tooltip holds the session repaint', () => 
 test('the periodic review-detail rebuild defers to the tooltip hold', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const branch = source.slice(
-    source.indexOf("state.openSession.kind === 'background-review-group'"),
+    source.indexOf("state.openSession.kind === 'session-group'"),
     source.indexOf('state.openSession.renderOptions')
   );
   assert.match(branch, /!sessionTooltipShouldHoldRender\(\)/);
@@ -402,12 +403,12 @@ test('background review sessions collapse into one interactive aggregate row wit
   assert.equal(collapsed[1].barValue, 50);
   assert.equal(collapsed[1].subtitle, '12:20 · 20');
   assert.equal(collapsed[1].detail, 'Sessions: 2');
-  assert.equal(collapsed[1].reviewGroup, true);
-  assert.deepEqual(collapsed[1].backgroundReviewRows.map((row) => row.key), [
+  assert.equal(collapsed[1].sessionGroup, 'codex-auto-review');
+  assert.deepEqual(collapsed[1].groupRows.map((row) => row.key), [
     'session:codex:review-a',
     'session:codex:review-b'
   ]);
-  assert.deepEqual(collapsed[1].backgroundReviewRows.map((row) => row.modelLabel), [
+  assert.deepEqual(collapsed[1].groupRows.map((row) => row.modelLabel), [
     'codex-auto-review',
     'gpt-5.6-sol'
   ]);
@@ -432,7 +433,7 @@ test('pre-token native Codex reviews join the existing background group without 
   const collapsed = groupBackgroundReviewRows(rows, { now });
   assert.deepEqual(collapsed.map((row) => row.key), ['session:codex:ordinary', 'session-group:codex-auto-review']);
   const group = collapsed[1];
-  assert.deepEqual(group.backgroundReviewRows.map((row) => row.key).sort(),
+  assert.deepEqual(group.groupRows.map((row) => row.key).sort(),
     ['session:codex:accounted-review', 'session:codex:native-review']);
   assert.equal(group.value, 15);
   assert.equal(group.cost, 0.1);
@@ -440,7 +441,7 @@ test('pre-token native Codex reviews join the existing background group without 
 
 test('background review run headings show the model independently of session titles and keep the time', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-  const body = source.slice(source.indexOf('function backgroundReviewRunNode('), source.indexOf('function renderBackgroundReviewDetail('));
+  const body = source.slice(source.indexOf('function sessionGroupRunNode('), source.indexOf('function renderSessionGroupDetail('));
   const sessionRowsApi = require('../../src/electron/renderer/sessionRows');
   let opened;
   const createNode = () => {
@@ -455,7 +456,7 @@ test('background review run headings show the model independently of session tit
       addEventListener(type, handler) { this.events[type] = handler; }
     };
   };
-  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth', 'openSessionDetail', 'bindHoverMarquee', 'limitWindowsView', `${body}\nreturn backgroundReviewRunNode;`)(
+  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth', 'openSessionDetail', 'bindHoverMarquee', 'limitWindowsView', `${body}\nreturn sessionGroupRunNode;`)(
     { createElement: createNode }, sessionRowsApi, () => 'Codex Auto Review', String, String, () => {}, () => 100,
     (request) => { opened = request; }, () => {}, { setDetailTooltip() {} }
   );
@@ -468,7 +469,7 @@ test('background review run headings show the model independently of session tit
       client: 'codex', sessionId: 'review', title: 'Automatic review', sessionKind: 'background-review',
       totalTokens: 30, models, lastUsedAt: new Date().toISOString()
     } } });
-    const parent = { kind: 'background-review-group' };
+    const parent = { kind: 'session-group' };
     const node = render(row, 30, parent);
     const time = sessionRowsApi.compactSessionTime(row.sortTime);
     const expectedTitle = [expectedModel, time].filter(Boolean).join(' · ');
@@ -967,4 +968,98 @@ test('the shared metrics slot restores its meter and tone after cache or empty s
   assert.equal(gauge.classList.contains('hidden'), true);
   assert.equal(gauge.title, undefined);
   assert.deepEqual(gauge.entries, []);
+});
+
+
+test('Grok Bot groups all bot conversations by latest activity and conserves totals', () => {
+  const now = new Date(2026, 4, 30, 12, 30);
+  const at = localIso(2026, 5, 30, 12, 20);
+  const bot = (id, patch = {}) => ({ client: 'cursor', sessionId: id, totalTokens: 20,
+    costUsd: 0.1, models: { 'grok-bot-automation': 20 }, lastUsedAt: at, ...patch });
+  const sessions = {
+    'cursor:sand-subagent-a': bot('sand-subagent-a', { title: 'Renamed bot', unpricedTokens: 4 }),
+    'cursor:sand-subagent-b': bot('sand-subagent-b', { archived: true, totalTokens: 30,
+      models: { 'grok-bot-automation': 30 }, lastUsedAt: localIso(2026, 5, 30, 12, 10) }),
+    'cursor:default': bot('default', { models: { 'grok-bot-default': 20 } }),
+    'cursor:sand-subagent-knowledge': bot('sand-subagent-knowledge', { models: { 'grok-bot-knowledge-work': 20 } }),
+    'cursor:sand-subagent-cua': bot('sand-subagent-cua', { models: { 'grok-bot-cua': 20 } }),
+    'cursor:mixed': bot('mixed', { models: { 'grok-bot-default': 10, 'claude-opus-5-5-medium': 10 } }),
+    'cursor:sand-subagent-claude': bot('sand-subagent-claude', { models: { 'claude-opus-5-5-medium': 20 } }),
+    'cursor:ordinary-claude': bot('ordinary-claude', { models: { 'claude-opus-5-5-medium': 20 }, lastUsedAt: localIso(2026, 5, 30, 12, 30) }),
+    'cursor:ordinary-grok': bot('ordinary-grok', { models: { 'cursor-grok-4.6-medium': 20 } }),
+    'cursor:empty': bot('empty', { models: { 'grok-bot-default': 0, 'grok-4': 20 } }),
+    'cursor:sand-subagent-': bot('sand-subagent-', { models: {} }),
+    'claude:sand-subagent-other-client': bot('sand-subagent-other-client', { client: 'claude' }),
+    'codex:review': { client: 'codex', sessionId: 'review', totalTokens: 10, costUsd: 0.2,
+      sessionKind: 'background-review', models: { 'gpt-5': 10 }, lastUsedAt: localIso(2026, 5, 30, 12, 5) }
+  };
+  const before = JSON.stringify(sessions);
+  for (const name of ['today', 'month', 'allTime']) {
+    const rows = sessionRowsForPeriod({ sessions }, { now });
+    const grouped = groupSessionRows(rows, { grokBot: { now, label: 'Grok Bot',
+      countLabel: count => `${count} 筆活動記錄`, summaryLabel: ({ latestTime }) => `最近 ${latestTime}` } });
+    const group = grouped.find(row => row.sessionGroup === 'cursor-grok-bot');
+    assert.equal(group.name, 'Grok Bot');
+    assert.equal(group.detail, '7 筆活動記錄');
+    assert.equal(group.subtitle, '最近 12:20');
+    assert.equal(group.value, 150);
+    assert.ok(Math.abs(group.cost - 0.7) < 1e-9);
+    assert.equal(group.unpricedTokens, 4);
+    assert.equal(group.groupRows.length, 7);
+    assert.equal(group.groupRows.at(-1).key, 'session:cursor:sand-subagent-b');
+    assert.equal(group.groupRows.at(-1).archived, true);
+    assert.equal(grouped[0].key, 'session:cursor:ordinary-claude');
+    assert.ok(grouped.indexOf(group) < grouped.findIndex(row => row.sessionGroup === 'codex-auto-review'));
+    assert.deepEqual(grouped.filter(row => !row.sessionGroup), rows.filter(row => !row.backgroundReview && !row.grokBot));
+    assert.ok(grouped.every((row, i) => i === 0 || grouped[i - 1].sortTime >= row.sortTime), name);
+    for (const metric of ['value', 'cost', 'unpricedTokens']) {
+      const sum = list => list.reduce((n, row) => n + (Number(row[metric]) || 0), 0);
+      assert.ok(Math.abs(sum(grouped) - sum(rows)) < 1e-9, `${name}: ${metric} counted once`);
+    }
+  }
+  const rows = sessionRowsForPeriod({ sessions }, { now });
+  const newest = rows.find(row => row.grokBot);
+  const newer = rows.map(row => row === newest ? { ...row, sortTime: now.getTime() + 1000 } : row);
+  assert.equal(groupSessionRows(newer)[0].sessionGroup, 'cursor-grok-bot');
+  assert.equal(JSON.stringify(sessions), before, 'source sessions and identities remain untouched');
+  assert.deepEqual(groupSessionRows([]), []);
+  assert.deepEqual(groupSessionRows(undefined), []);
+});
+
+test('a Claude-only day joins a known bot conversation across period snapshots', () => {
+  const claude = { client: 'cursor', sessionId: 'bot', totalTokens: 10, models: { 'claude-opus-5-5-medium': 10 } };
+  const today = { sessions: { 'cursor:bot': claude, 'cursor:ordinary': { ...claude, sessionId: 'ordinary' } } };
+  const month = { sessions: { 'cursor:bot': { ...claude, totalTokens: 20,
+    models: { 'grok-bot-default': 10, 'claude-opus-5-5-medium': 10 } } } };
+  const rows = groupSessionRows(sessionRowsForPeriod(today, { sourcePeriods: { today, month } }));
+  assert.equal(rows.find(row => row.sessionGroup === 'cursor-grok-bot').value, 10);
+  assert.equal(rows.find(row => row.key === 'session:cursor:ordinary').value, 10);
+  assert.equal(groupSessionRows(sessionRowsForPeriod(today)).length, 2, 'missing evidence never guesses');
+});
+
+test('Grok group run summaries expose usage without an unsupported transcript action', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const body = source.slice(source.indexOf('function sessionGroupRunNode('), source.indexOf('function renderSessionGroupDetail('));
+  const api = require('../../src/electron/renderer/sessionRows');
+  const children = new Map();
+  const node = { attributes: {}, events: {}, setAttribute(key, value) { this.attributes[key] = value; },
+    querySelector(selector) { if (!children.has(selector)) children.set(selector, {}); return children.get(selector); },
+    addEventListener(type, callback) { this.events[type] = callback; } };
+  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth',
+    'openSessionDetail', 'bindHoverMarquee', 'limitWindowsView', `${body}\nreturn sessionGroupRunNode;`)(
+    { createElement: () => node }, api, key => key, String, (cost, unpriced) => `${cost}:${unpriced || 0}`,
+    () => {}, () => 100, () => assert.fail('Cursor has no transcript detail'), () => {}, {});
+  const [row] = sessionRowsForPeriod({ sessions: { 'cursor:sand-subagent-run': {
+    client: 'cursor', sessionId: 'sand-subagent-run', totalTokens: 30, costUsd: 0.5,
+    unpricedTokens: 4, models: { 'grok-bot-automation': 30 }, lastUsedAt: new Date().toISOString()
+  } } });
+  render(row, 30, { kind: 'session-group', summary: { name: 'Grok Bot', sessionGroup: 'cursor-grok-bot' } });
+  assert.equal(node.querySelector('.detail-ex-title').textContent, row.name);
+  assert.equal(node.querySelector('.detail-ex-sub').textContent, row.subtitle);
+  assert.equal(node.querySelector('.session-group-id').textContent, 'sand-subagent-run');
+  assert.equal(node.querySelector('.detail-ex-value').textContent, '30');
+  assert.equal(node.querySelector('.detail-ex-cost').textContent, '0.5:4');
+  assert.equal(node.querySelector('.detail-chev').textContent, '');
+  assert.deepEqual(node.attributes, {});
+  assert.deepEqual(node.events, {});
 });

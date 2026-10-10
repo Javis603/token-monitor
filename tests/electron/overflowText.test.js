@@ -394,7 +394,7 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {},
-    sessionRowsApi: { applyBreakdownRowSemantics(_row, _head, options) { interactive = options.interactive; } },
+    sessionRowsApi: { ...require('../../src/electron/renderer/sessionRows'), applyBreakdownRowSemantics(_row, _head, options) { interactive = options.interactive; } },
     t: key => key
   };
   vm.runInNewContext(`${app.slice(start, end)}\nglobalThis.update = updateRow;`, context);
@@ -436,7 +436,7 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
       : ['Codex · gpt-5', '12:00 · 2 calls', sessionId]);
     assert.equal(interactive, true, 'title mode changes preserve detail navigation');
   }
-  context.update(row, { name: 'Reviews', detail: '3 runs', kind: 'summary', reviewGroup: true, value: 100 });
+  context.update(row, { name: 'Reviews', detail: '3 runs', kind: 'summary', sessionGroup: 'codex-auto-review', value: 100 });
   assert.equal(interactive, true);
   assert.equal(row.querySelector('.row-detail').textContent, '3 runs');
   assert.equal(row.querySelector('.row-detail').classList.contains('hidden'), false);
@@ -461,7 +461,7 @@ test('a token and cost update through updateRow keeps the hovered title moving',
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {},
-    sessionRowsApi: { applyBreakdownRowSemantics() {} }, t: key => key
+    sessionRowsApi: { ...require('../../src/electron/renderer/sessionRows'), applyBreakdownRowSemantics() {} }, t: key => key
   };
   vm.runInNewContext(`${body}\nglobalThis.update = updateRow;`, context);
   const data = { name: h.element.textContent, detail: 'session-id', kind: 'session', client: 'codex', value: 100, cost: 1 };
