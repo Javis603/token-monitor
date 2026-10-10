@@ -41,6 +41,7 @@ class FakeBrowserWindow extends EventEmitter {
   constructor(options) {
     super();
     this.options = options;
+    this.alwaysOnTop = options.alwaysOnTop === true;
     this.webContents = new FakeWebContents();
     this.bounds = { x: 0, y: 0, width: options.width, height: options.height };
     this.opacity = 1;
@@ -73,7 +74,11 @@ class FakeBrowserWindow extends EventEmitter {
     FakeBrowserWindow.zOrder.push(this);
   }
   setBounds(bounds) { this.bounds = { ...bounds }; }
-  setAlwaysOnTop(flag, level) { this.zOrderCalls.push(['setAlwaysOnTop', flag, level]); }
+  setAlwaysOnTop(flag, level) {
+    this.alwaysOnTop = flag;
+    this.zOrderCalls.push(['setAlwaysOnTop', flag, level]);
+    if (flag) this.orderFront();
+  }
   setVisibleOnAllWorkspaces() {}
   setHiddenInMissionControl() {}
   setShape(rects) {
@@ -145,6 +150,7 @@ function createFixture(options = {}) {
   }];
   const screen = new FakeScreen(displays);
   const ipcMain = new FakeIpcMain();
+  const powerMonitor = new EventEmitter();
   const placements = [];
   const maskWindows = [];
   const haptics = [];
@@ -152,6 +158,7 @@ function createFixture(options = {}) {
   const controller = createEdgeDockController({
     BrowserWindow: FakeBrowserWindow,
     ipcMain,
+    powerMonitor,
     screen,
     platform: options.platform || 'win32',
     rendererDir: '/renderer',
@@ -193,7 +200,7 @@ function createFixture(options = {}) {
     const payload = sentPayload(win, 'peek');
     ipcMain.emit('edgeDock:peekPainted', { sender: win.webContents }, { mode: payload.peekMode, shapeKey: payload.shape?.key });
   };
-  return { controller, hapticCalls, haptics, ipcMain, maskWindows, placements, screen, settings, windowFor, paintPeek };
+  return { controller, hapticCalls, haptics, ipcMain, powerMonitor, maskWindows, placements, screen, settings, windowFor, paintPeek };
 }
 
 test('Windows Edge Dock reasserts topmost after each surface is first shown and rebuilt', (t) => {
@@ -221,6 +228,112 @@ test('Windows Edge Dock reasserts topmost after each surface is first shown and 
   for (const surface of surfaces) {
     assert.deepEqual(fixture.windowFor(surface).zOrderCalls, expected, `${surface} reasserts topmost after rebuild`);
   }
+});
+
+for (const mode of ['always', 'autoHide', 'alwaysExceptFullScreen']) {
+  test(`Windows resume restores all Dock surfaces without changing ${mode} visibility`, (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+    const fixture = createFixture({
+      settings: { edgeDockMode: mode, edgeDockRefreshEnabled: false },
+      isFullScreen: () => mode === 'alwaysExceptFullScreen'
+    });
+    t.after(() => fixture.controller.stop());
+    if (mode === 'always') {
+      const rail = fixture.windowFor('rail');
+      const bubble = fixture.windowFor('bubble');
+      fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+      fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 180 });
+      fixture.screen.point = { x: bubble.bounds.x + 30, y: bubble.bounds.y + 30 };
+    } else {
+      fixture.paintPeek();
+      fixture.screen.point = { x: 600, y: 400 };
+    }
+    const surfaces = ['peek', 'rail', 'bubble'].map(fixture.windowFor);
+    const state = () => surfaces.map((win) => ({
+      bounds: win.getBounds(), opacity: win.opacity, ignoreMouse: win.ignoreMouse,
+      messages: win.webContents.messages.length
+    }));
+    const before = state();
+    const counts = surfaces.map((win) => win.zOrderCalls.length);
+    // Simulate the native topmost state being lost after the windows are shown.
+    for (const win of surfaces) win.alwaysOnTop = false;
+    const ordinary = new FakeBrowserWindow({ width: 1200, height: 900 });
+    ordinary.showInactive();
+    fixture.powerMonitor.emit('unlock-screen');
+    assert.deepEqual(surfaces.map((win) => win.zOrderCalls.length), counts, 'Win+L alone does not raise the Dock');
+    fixture.powerMonitor.emit('resume');
+    assert.deepEqual(state(), before, 'an open card stays open and hidden surfaces stay transparent');
+    for (const win of surfaces) {
+      assert.equal(win.alwaysOnTop, true);
+      assert.ok(FakeBrowserWindow.zOrder.indexOf(win) > FakeBrowserWindow.zOrder.indexOf(ordinary));
+    }
+    // A later shell restore can overtake the immediate repair.
+    for (const win of surfaces) win.alwaysOnTop = false;
+    ordinary.moveTop();
+    t.mock.timers.tick(500);
+    for (const win of surfaces) {
+      assert.equal(win.alwaysOnTop, true);
+      assert.ok(FakeBrowserWindow.zOrder.indexOf(win) > FakeBrowserWindow.zOrder.indexOf(ordinary));
+    }
+    assert.deepEqual(surfaces.map((win) => win.zOrderCalls.length), counts.map((count) => count + 2));
+    t.mock.timers.tick(5000);
+    assert.deepEqual(surfaces.map((win) => win.zOrderCalls.length), counts.map((count) => count + 2), 'recovery ends after one follow-up');
+  });
+}
+
+test('Windows resume coalesces follow-ups and cleans up when the Dock stops or restarts', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+  const fixture = createFixture();
+  t.after(() => fixture.controller.stop());
+  fixture.controller.sync();
+  assert.equal(fixture.powerMonitor.listenerCount('resume'), 1);
+  const rail = fixture.windowFor('rail');
+  const count = rail.zOrderCalls.length;
+  fixture.powerMonitor.emit('resume');
+  t.mock.timers.tick(200);
+  fixture.powerMonitor.emit('resume');
+  t.mock.timers.tick(300);
+  assert.equal(rail.zOrderCalls.length, count + 2, 'the old follow-up was cancelled');
+  t.mock.timers.tick(200);
+  assert.equal(rail.zOrderCalls.length, count + 3);
+  fixture.powerMonitor.emit('resume');
+  fixture.settings.edgeDockEnabled = false;
+  fixture.controller.sync();
+  assert.equal(fixture.powerMonitor.listenerCount('resume'), 0);
+  const stoppedCount = rail.zOrderCalls.length;
+  fixture.powerMonitor.emit('resume');
+  fixture.settings.edgeDockEnabled = true;
+  fixture.controller.sync();
+  for (const win of FakeBrowserWindow.instances.filter((win) => !win.destroyed)) win.webContents.emit('did-finish-load');
+  const newRail = fixture.windowFor('rail');
+  const newCount = newRail.zOrderCalls.length;
+  t.mock.timers.tick(1000);
+  assert.equal(rail.zOrderCalls.length, stoppedCount);
+  assert.equal(newRail.zOrderCalls.length, newCount, 'stale callbacks do not raise rebuilt windows');
+  assert.equal(fixture.powerMonitor.listenerCount('resume'), 1);
+  fixture.powerMonitor.emit('resume');
+  assert.equal(newRail.zOrderCalls.length, newCount + 1);
+});
+
+test('Windows resume leaves the painted refresh button above the rail shoulder', (t) => {
+  const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' }, canRefreshLimits: () => true });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+  fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents });
+  fixture.paintPeek();
+  fixture.powerMonitor.emit('resume');
+  assert.equal(FakeBrowserWindow.zOrder.at(-1), peek);
+  assert.equal(FakeBrowserWindow.atPoint({ x: peek.bounds.x + peek.bounds.width / 2, y: peek.bounds.y + peek.bounds.height / 2 }), peek);
+});
+
+test('macOS does not install Windows resume recovery', (t) => {
+  const fixture = createFixture({ platform: 'darwin' });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const count = rail.zOrderCalls.length;
+  fixture.powerMonitor.emit('resume');
+  assert.equal(fixture.powerMonitor.listenerCount('resume'), 0);
+  assert.equal(rail.zOrderCalls.length, count);
 });
 
 test('auto-hide haptics distinguish the handle reveal from the first hovered item', async (t) => {
