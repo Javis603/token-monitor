@@ -322,7 +322,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
 
 test('the closed-Settings guard does not strand main-surface controls', () => {
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
-  const body = app.slice(app.indexOf('function syncSettingsForm()'), app.indexOf('function enabledClientSet()'));
+  const body = app.slice(app.indexOf('function syncSettingsForm('), app.indexOf('function enabledClientSet()'));
   const guard = body.indexOf('if (!isSettingsSurfaceVisible()) return;');
 
   // The pin button lives in the header and is clickable while Settings is closed,
@@ -442,7 +442,7 @@ test('hidden event sources defer DOM work and visible surfaces catch up', () => 
   const statsPush = app.match(/window\.tokenMonitor\.onStatsPush\?\.\(\(payload\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
   const statsRender = app.slice(app.indexOf('function renderStatsUpdate()'), app.indexOf('const statsRenderScheduler ='));
   const bubbleState = app.slice(app.indexOf('function applyFloatingBubbleState('), app.indexOf('const BUBBLE_CONTENT_VALUES'));
-  const settingsSync = app.slice(app.indexOf('function syncSettingsForm()'), app.indexOf('function enabledClientSet()'));
+  const settingsSync = app.slice(app.indexOf('function syncSettingsForm('), app.indexOf('function enabledClientSet()'));
   const visibilityHandler = app.slice(app.indexOf('function handleWindowVisibilityChange()'), app.indexOf("document.addEventListener('visibilitychange'"));
   const hiddenGuard = settingsSync.indexOf('if (isRendererWindowHidden())');
   const hiddenReturn = settingsSync.indexOf('return;', hiddenGuard);
