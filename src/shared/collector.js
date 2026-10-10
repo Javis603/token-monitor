@@ -654,6 +654,10 @@ function computePeriodWindows(now = new Date()) {
 // in the delta-derived periods. Used on watch ticks, where month/allTime are not
 // re-decorated: a session that started today is absent from the anchor, so its
 // project label would otherwise be missing from the broader-period breakdown.
+function sessionHasPeriodUsage(period, client, sessionId) {
+  return Number(period?.sessions?.[`${client}:${sessionId}`]?.totalTokens) > 0;
+}
+
 function propagateTodayProjects(today, periods, titleMetadata = {}) {
   for (const [key, session] of Object.entries(today?.sessions || {})) {
     if (!session) continue;
@@ -672,7 +676,16 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       if (session.title) target.title = session.title;
       else if (titleMetadata.invalidatedTitleKeys?.has(key) && target.title === titleMetadata.t3Titles?.[key]) delete target.title;
       if (session.sessionKind && !target.sessionKind) target.sessionKind = session.sessionKind;
-      if (session.parentSessionId && !target.parentSessionId) target.parentSessionId = session.parentSessionId;
+      // Parent links are resolved per period: a parent's first rollout can fall
+      // outside today's window while the month still holds it, so the fresh
+      // link is not simply copied. A link the derived period can still resolve
+      // stays; one whose parent has no usage left there (its rollout was
+      // deleted, say) yields to the fresh link when that one resolves.
+      if (session.parentSessionId && session.parentSessionId !== target.parentSessionId
+        && (!target.parentSessionId || (!sessionHasPeriodUsage(period, target.client, target.parentSessionId)
+          && sessionHasPeriodUsage(period, target.client, session.parentSessionId)))) {
+        target.parentSessionId = session.parentSessionId;
+      }
       // Context occupancy is replaced rather than gap-filled: the derived
       // periods carry the last full scan's reading, which is older than this
       // tick's by construction. The copy is unconditional, including a cleared
