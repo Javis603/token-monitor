@@ -462,6 +462,30 @@ test('subagents fold under their visible parent while reviews keep the global gr
   assert.equal(visible, rows.reduce((sum, row) => sum + row.value, 0), 'grouping never changes the list total');
 });
 
+test('a subagent group labels and breaks down every member model, not only the parent', () => {
+  const rows = sessionRowsForPeriod({ sessions: {
+    'codex:main': { client: 'codex', sessionId: 'main', totalTokens: 100, title: 'Ship it',
+      models: { 'gpt-5.6-sol': 60, 'gpt-5.6-mini': 40 } },
+    'codex:child': { client: 'codex', sessionId: 'child', totalTokens: 50, parentSessionId: 'main',
+      models: { 'gpt-5.6-sol': 20, 'gpt-5.6-nano': 30 } },
+    'codex:bare': { client: 'codex', sessionId: 'bare', totalTokens: 10, models: { 'gpt-5.6-sol': 10 } },
+    'codex:bare-child': { client: 'codex', sessionId: 'bare-child', totalTokens: 5, parentSessionId: 'bare',
+      models: { 'gpt-5.6-mini': 5 } }
+  } }, { clientLabels, clientColors });
+  const grouped = groupSessionRows(rows, { subagents: { countLabel: count => `${count} subagents`, unattributedLabel: 'Other' } });
+  const titled = grouped.find(row => row.key === 'session-group:subagents:codex:main');
+  assert.equal(titled.value, 150);
+  assert.equal(titled.modelLabel, '3 models');
+  assert.equal(titled.subtitle, '1 subagents · Codex · 3 models');
+  assert.deepEqual(titled.modelTooltipEntries, [
+    ['gpt-5.6-sol', '80', '53%'], ['gpt-5.6-mini', '40', '27%'], ['gpt-5.6-nano', '30', '20%']
+  ]);
+  const untitled = grouped.find(row => row.key === 'session-group:subagents:codex:bare');
+  assert.equal(untitled.name, 'Codex · 2 models', 'an untitled group is named by the group models');
+  assert.deepEqual(untitled.modelTooltipEntries.map(entry => entry[0]), ['gpt-5.6-sol', 'gpt-5.6-mini']);
+  assert.equal(untitled.groupRows[0].modelLabel, 'gpt-5.6-sol', 'members keep their own labels');
+});
+
 test('a parent cycle leaves both sessions as their own rows', () => {
   const rows = sessionRowsForPeriod({ sessions: {
     'codex:a': { client: 'codex', sessionId: 'a', totalTokens: 1, parentSessionId: 'b' },

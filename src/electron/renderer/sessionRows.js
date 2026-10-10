@@ -472,6 +472,11 @@
           contextSnapshot: !archived ? sessionLive.sessionContextRow(session) : undefined,
           promptCache: sessionLive.sessionPromptCacheForRow(session, now),
           client,
+          clientLabel,
+          titled: Boolean(sessionTitle) || undefined,
+          // Raw per-model tokens, so a group row can rebuild its model label and
+          // tooltip from every member rather than from one of them.
+          modelTokens: session?.models,
           backgroundReview: backgroundReview || undefined,
           subagent: subagent || undefined,
           parentKey: parentSessionId ? `session:${client}:${parentSessionId}` : undefined,
@@ -555,16 +560,33 @@
     const countLabel = typeof options.countLabel === 'function'
       ? options.countLabel(members.length) : `${members.length} subagents`;
     const id = `subagents:${String(parent.key).replace(/^session:/, '')}`;
+    // The model label and its tooltip describe the tokens the row shows, which
+    // are the whole group's, so they are rebuilt from every member's models.
+    const models = {};
+    for (const row of groupRows) {
+      for (const [model, tokens] of Object.entries(row.modelTokens || {})) {
+        models[model] = (models[model] || 0) + finiteNumber(tokens);
+      }
+    }
+    const group = { client: parent.client, models, totalTokens: value };
+    const modelLabel = sessionModelLabel(group);
+    const titleParts = [parent.clientLabel || parent.client, modelLabel].filter(Boolean).join(' · ');
     const base = { ...parent };
     delete base.unpricedTokens;
     return {
       ...base,
       key: `session-group:${id}`,
       kind: 'summary',
-      // The count leads the parent's second line, so the row keeps the
-      // parent's height and a narrow window cannot clip it off the end. A
-      // titled row hid its id, as a session row does.
-      subtitle: [countLabel, parent.subtitle].filter(Boolean).join(' · '),
+      // An untitled row is named by client and model, so its name follows the
+      // group's models too.
+      name: parent.titled ? parent.name : titleParts,
+      modelLabel,
+      modelTooltipEntries: sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel }),
+      modelTokens: models,
+      // The count leads the second line, so the row keeps the parent's height
+      // and a narrow window cannot clip it off the end. A titled row hid its
+      // id, as a session row does.
+      subtitle: [countLabel, parent.titled ? titleParts : parent.subtitle].filter(Boolean).join(' · '),
       detail: parent.activity ? '' : parent.detail,
       groupDetail: countLabel,
       value,

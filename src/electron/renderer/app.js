@@ -2870,7 +2870,8 @@ function sessionRowsForPeriod(period) {
     rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
     return sessionRowsApi.groupSessionRows(rows, {
       subagents: {
-        countLabel: (count) => t('sessions.subagentCount', { count })
+        countLabel: (count) => t('sessions.subagentCount', { count }),
+        unattributedLabel: t('dashboard.tooltip.unclassified')
       },
       backgroundReviews: {
         label: t('sessions.backgroundReviews'),
