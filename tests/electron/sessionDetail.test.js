@@ -236,7 +236,8 @@ test('session detail renders its heading before loading, errors and empty result
   const subagentGroup = { kind: 'session-group', period: 'today',
     summary: { key: 'session-group:subagents:codex:parent', name: 'Parent title', subagentGroup: true } };
   context.sessionRowsForPeriod = () => [{ key: subagentGroup.summary.key,
-    name: state.settings?.sessionTitlesEnabled === false ? 'Codex · gpt-5' : 'Parent title' }];
+    name: state.settings?.sessionTitlesEnabled === false ? 'Codex · gpt-5' : 'Parent title',
+    groupRows: [{ key: 'session:codex:parent' }, { key: 'session:codex:child' }] }];
   state.stats = { periods: { today: { sessions: { 'codex:child': { client: 'codex', title: 'Child title', totalTokens: 3 } } } } };
   const childOpening = context.open({ client: 'codex', sessionId: 'child', title: 'Child title',
     returnTo: subagentGroup, titleFollowsSession: true });
@@ -260,11 +261,12 @@ test('session detail renders its heading before loading, errors and empty result
   // the list, or the session is regrouped under another parent. The cached
   // summary must not keep quoting the old parent title once titles hide.
   const titleless = () => state.settings?.sessionTitlesEnabled === false;
-  for (const regrouped of [false, true]) {
+  for (const regrouped of [false, true, 'old group stays']) {
     const staleGroup = { kind: 'session-group', period: 'today',
       summary: { key: 'session-group:subagents:codex:parent', name: 'Parent title', subagentGroup: true,
         groupRows: [{ key: 'session:codex:parent', name: 'Parent title' }, { key: 'session:codex:child', name: 'Child title' }] } };
-    context.sessionRowsForPeriod = () => [{ key: subagentGroup.summary.key, name: titleless() ? 'Codex · gpt-5' : 'Parent title' }];
+    context.sessionRowsForPeriod = () => [{ key: subagentGroup.summary.key, name: titleless() ? 'Codex · gpt-5' : 'Parent title',
+      groupRows: [{ key: 'session:codex:parent' }, { key: 'session:codex:child' }] }];
     state.stats = { periods: { today: { sessions: { 'codex:child': { client: 'codex', title: 'Child title', totalTokens: 3 } } } } };
     const opening = context.open({ client: 'codex', sessionId: 'child', title: 'Child title',
       returnTo: staleGroup, titleFollowsSession: true });
@@ -272,7 +274,12 @@ test('session detail renders its heading before loading, errors and empty result
     const newGroup = { key: 'session-group:subagents:codex:other', subagentGroup: true,
       get name() { return titleless() ? 'Codex · gpt-5.6' : 'Other parent'; },
       groupRows: [{ key: 'session:codex:other' }, { key: 'session:codex:child' }] };
-    context.sessionRowsForPeriod = () => (regrouped ? [newGroup] : [{ key: 'session:codex:child', name: 'Child title' }]);
+    // 'old group stays': the old parent still has another child, so its group
+    // exists under the same key without this session.
+    const oldGroupWithoutChild = { key: staleGroup.summary.key, name: 'Codex · gpt-5', subagentGroup: true,
+      groupRows: [{ key: 'session:codex:parent' }, { key: 'session:codex:sibling' }] };
+    context.sessionRowsForPeriod = () => (regrouped === 'old group stays' ? [oldGroupWithoutChild, newGroup]
+      : regrouped ? [newGroup] : [{ key: 'session:codex:child', name: 'Child title' }]);
     context.setSettings({ sessionTitlesEnabled: false });
     const back = els.sessionDetailHead.children[0];
     assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);

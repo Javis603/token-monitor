@@ -4761,16 +4761,19 @@ function refreshSessionDetailHeading() {
     ? state.stats?.periods?.[group.period || state.period] : null;
   if (period) {
     const rows = sessionRowsForPeriod(period);
-    const latest = rows.find((row) => row.key === group.summary.key);
+    const memberKey = `session:${state.openSession.client}:${state.openSession.sessionId}`;
+    const holds = (row) => row.groupRows?.some((member) => member.key === memberKey);
+    // The same group counts only while it still holds this session: a child
+    // moved to another parent must not return to its old one.
+    const latest = rows.find((row) => row.key === group.summary.key && holds(row));
     if (latest) {
       group.summary = latest;
     } else {
-      // The group is gone (its parent left the list, or the session now sits
-      // under another parent). A cached summary would keep quoting titles the
-      // current stats no longer carry, so return to whichever group holds this
-      // session now, or to Sessions when none does.
-      const memberKey = `session:${state.openSession.client}:${state.openSession.sessionId}`;
-      const holder = rows.find((row) => row.groupRows?.some((member) => member.key === memberKey));
+      // The group is gone or no longer holds this session (its parent left the
+      // list, or the session now sits under another parent). A cached summary
+      // would keep quoting titles the current stats no longer carry, so return
+      // to whichever group holds this session now, or to Sessions when none does.
+      const holder = rows.find(holds);
       state.openSession.returnTo = holder ? { kind: 'session-group', period: group.period, summary: holder } : null;
     }
   }
