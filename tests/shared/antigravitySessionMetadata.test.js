@@ -1039,3 +1039,81 @@ test('Antigravity post-anchor sessions retain project labels and rollups through
     assert.equal(updates.at(-1)[period].costUsd, learned[period].costUsd);
   }
 });
+
+test('Antigravity retains the last selected fallback while both stores are unavailable and restores a revalidated primary', { skip: !sqlite }, async (t) => {
+  const store = summaryStore(t);
+  const key = 'antigravity:source-order';
+  const projectA = path.join(store.home, 'primary-project');
+  const projectB = path.join(store.home, 'fallback-project');
+  store.put.run('source-order', 'Primary title', '', JSON.stringify([pathToFileURL(projectA).href]), null);
+  const dir = path.join(store.home, '.gemini', 'antigravity-ide');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'conversation_summaries.db');
+  const other = new sqlite.DatabaseSync(file);
+  const shared = path.join(store.home, 'shared');
+  const oldShared = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = shared;
+  let handle;
+  t.after(() => { handle?.stop(); if (oldShared === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR; else process.env.TOKEN_MONITOR_SHARED_DIR = oldShared; });
+  const updates = [];
+  const options = {
+    clients: 'antigravity', homeDir: store.home, projectsEnabled: true, historyEnabled: false,
+    dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false, wslScanEnabled: false, sessionActivityPolling: false,
+    osInfo: {}, allTimeSince: '2024-01-01', sessionMetadataDeps: store.deps, watchEnabled: false, intervalMs: 3600000,
+    runAntigravitySync: async () => {}, runTokscale: async () => ({ entries: [{ client: 'antigravity', sessionId: 'source-order', input: 12, output: 0, cost: 0.5 }] }),
+    onUpdate: (value) => updates.push(value)
+  };
+  const wait = async (count) => {
+    for (let attempt = 0; attempt < 200 && updates.length < count; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(updates.length, count);
+  };
+  const check = (title, project, baseline) => {
+    for (const period of ['today', 'month', 'allTime']) {
+      const current = updates.at(-1)[period];
+      assert.equal(current.sessions[key].title, title);
+      assert.equal(current.sessions[key].projectId, projectIdentity(project).projectId);
+      assert.equal(current.sessions[key].projectLabel, path.basename(project));
+      if (baseline) {
+        assert.equal(current.totalTokens, baseline[period].totalTokens);
+        assert.equal(current.costUsd, baseline[period].costUsd);
+      }
+      assert.equal(projectRollupFromSessions(current.sessions)[path.basename(project)].tokens, 12);
+    }
+  };
+  try {
+    other.exec('CREATE TABLE conversation_summaries(conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, workspace_uris TEXT)');
+    other.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?)').run('source-order', 'Fallback title', '', JSON.stringify([pathToFileURL(projectB).href]));
+    handle = startCollector(options);
+    await wait(1);
+    const baseline = updates.at(-1);
+    const anchorFile = path.join(shared, 'collector-anchor.json');
+    const initialAnchor = JSON.parse(fs.readFileSync(anchorFile, 'utf8'));
+    check('Primary title', projectA);
+    store.db.exec('PRAGMA locking_mode = EXCLUSIVE; BEGIN EXCLUSIVE');
+    store.db.prepare('UPDATE conversation_summaries SET title = ?').run('Recovered primary');
+    store.db.exec('COMMIT');
+    await handle.refreshClient('antigravity');
+    check('Fallback title', projectB, baseline);
+    const selected = JSON.parse(fs.readFileSync(anchorFile, 'utf8'));
+    assert.equal(selected.catalogTitleSources[key], file);
+    store.close(); other.close();
+    fs.renameSync(store.dbPath, `${store.dbPath}.moved`);
+    fs.renameSync(file, `${file}.moved`);
+    await handle.refreshClient('antigravity');
+    check('Fallback title', projectB, baseline);
+    const unavailable = JSON.parse(fs.readFileSync(anchorFile, 'utf8'));
+    assert.equal(unavailable.fullScanAt, initialAnchor.fullScanAt);
+    assert.equal(unavailable.catalogTitleSources[key], file);
+    handle.stop(); handle = null;
+    handle = startCollector({ ...options, sessionMetadataDeps: { ...store.deps, antigravityTitleCache: new Map() } });
+    await wait(4);
+    check('Fallback title', projectB, baseline);
+    fs.renameSync(`${store.dbPath}.moved`, store.dbPath);
+    fs.renameSync(`${file}.moved`, file);
+    await handle.refreshClient('antigravity');
+    check('Recovered primary', projectA, baseline);
+  } finally {
+    handle?.stop(); handle = null;
+    if (other.isOpen) other.close();
+  }
+});

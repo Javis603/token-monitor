@@ -188,7 +188,13 @@ function resolveSessionMetadata(sessionIds, context = {}) {
       if (cached.misses.has(sessionId)) continue;
       if (!row) continue;
       const title = cleanTitle(row?.title) || cleanTitle(row?.preview);
-      const priority = (stamp && cached.validatedIds.has(sessionId) ? 2 : 0) + (title ? 4 : 0);
+      const key = `antigravity:${sessionId}`;
+      const selectedSource = context.metadata?.get(key)?.catalogTitleSource || context.deps?.catalogTitleSources?.[key];
+      const validated = stamp && cached.validatedIds.has(sessionId);
+      // Candidate order regains priority only with a validated row. If both
+      // reads are stale, keep the source that last supplied the chosen value.
+      const priority = (validated ? 2 : 0) + (title ? 4 : 0)
+        + (!validated && selectedSource === dbPath ? 1 : 0);
       if (priorities.has(sessionId) && priorities.get(sessionId) >= priority) continue;
       priorities.set(sessionId, priority);
       const identity = projectFromWorkspaceUris(row?.workspace_uris, context);
