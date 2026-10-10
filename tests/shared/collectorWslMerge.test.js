@@ -59,7 +59,7 @@ test('WSL scans receive fork-only Proma like any other tokscale client', async (
 
 test('watch tick reuses wslAnchor and does not rescan WSL', async () => {
   let wslCalls = 0;
-  const anchor = { dateKey: localTodayKey(), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() };
+  const anchor = { dateKey: localTodayKey(), utcOffsetMinutes: require('../../src/shared/history').utcOffsetMinutes(), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() };
   const summary = await collectUsageOnce({
     clients: 'claude,gemini',
     allTimeSince: '2025-01-01',
@@ -78,7 +78,7 @@ test('watch tick reuses wslAnchor and does not rescan WSL', async () => {
 test('interval anchored tick with refreshWsl rescans WSL and updates anchor', async () => {
   let wslCalls = 0;
   let capturedWsl = null;
-  const anchor = { dateKey: localTodayKey(), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() };
+  const anchor = { dateKey: localTodayKey(), utcOffsetMinutes: require('../../src/shared/history').utcOffsetMinutes(), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() };
   const firstBundle = bundleWith(9);
   const secondBundle = bundleWith(15);
   let useSecond = false;

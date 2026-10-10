@@ -22,6 +22,7 @@ const {
 } = require('../../src/shared/collector');
 
 const { emptyPeriod } = require('../../src/shared/usage');
+const { utcOffsetMinutes } = require('../../src/shared/history');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
 
 installInProcessWatchHost(test);
@@ -142,7 +143,7 @@ test('anchored tick with valid anchor runs todayOnly scan and derives month/allT
   anchorAllTime.totalTokens = 5000;
   anchorAllTime.clients = { claude: 5000 };
 
-  const anchor = { dateKey, today: anchorToday, month: anchorMonth, allTime: anchorAllTime };
+  const anchor = { dateKey, utcOffsetMinutes: utcOffsetMinutes(), today: anchorToday, month: anchorMonth, allTime: anchorAllTime };
 
   // Stub tokscale to return a delta: today jumped from 50 to 130
   let tokscaleCalls = 0;
@@ -210,7 +211,7 @@ test('anchored tick replaces a stale anchor title with the freshly resolved rena
     deviceId: 'dev1',
     limitsEnabled: false,
     historyEnabled: false,
-    todayOnlyAnchor: { dateKey, today: anchorToday, month: anchorMonth, allTime: anchorAllTime },
+    todayOnlyAnchor: { dateKey, utcOffsetMinutes: utcOffsetMinutes(), today: anchorToday, month: anchorMonth, allTime: anchorAllTime },
     runTokscale: async () => ({
       entries: [{ client: 'cursor', sessionId: 'conv-1', model: 'cursor-model', input: 55, output: 0, cost: 0 }]
     }),
@@ -421,6 +422,7 @@ test('restart reuse: anchor file on disk enables todayOnly on first interval tic
   fs.mkdirSync(path.join(tmpShared), { recursive: true });
   const anchorData = {
     dateKey,
+    utcOffsetMinutes: utcOffsetMinutes(),
     today: mkPeriod(), month: mkPeriod(), allTime: mkPeriod(),
     wslBundle: null,
     configFingerprint: configFingerprint('claude', '2024-01-01'),
@@ -482,6 +484,7 @@ test('future fullScanAt forces a full scan on first interval tick', async () => 
   fs.mkdirSync(path.join(tmpShared), { recursive: true });
   const anchorData = {
     dateKey,
+    utcOffsetMinutes: utcOffsetMinutes(),
     today: mkPeriod(), month: mkPeriod(), allTime: mkPeriod(),
     wslBundle: null,
     configFingerprint: configFingerprint('claude', '2024-01-01'),
@@ -542,6 +545,7 @@ test('missing fullScanAt forces a full scan on first interval tick', async () =>
   // Valid anchor, but no fullScanAt field (old format or corrupted)
   const anchorData = {
     dateKey,
+    utcOffsetMinutes: utcOffsetMinutes(),
     today: mkPeriod(), month: mkPeriod(), allTime: mkPeriod(),
     wslBundle: null,
     configFingerprint: configFingerprint('claude', '2024-01-01')
@@ -603,6 +607,7 @@ test('unparseable fullScanAt forces a full scan on first interval tick', async (
   // Number.isFinite(NaN) is false, so lastFullScanAt stays 0 -> full scan.
   const anchorData = {
     dateKey,
+    utcOffsetMinutes: utcOffsetMinutes(),
     today: mkPeriod(), month: mkPeriod(), allTime: mkPeriod(),
     wslBundle: null,
     configFingerprint: configFingerprint('claude', '2024-01-01'),
@@ -667,6 +672,7 @@ test('WSL toggle off: persisted wslAnchor is not merged into warm previews', asy
   const wslPeriod = { ...emptyPeriod(), totalTokens: 999, clients: { claude: 999 } };
   const anchorData = {
     dateKey,
+    utcOffsetMinutes: utcOffsetMinutes(),
     today: mkPeriod(), month: mkPeriod(), allTime: mkPeriod(),
     wslBundle: { today: wslPeriod, month: wslPeriod, allTime: wslPeriod },
     configFingerprint: configFingerprint('claude', '2024-01-01')
@@ -782,6 +788,7 @@ test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
   const now = new Date(2026, 7, 8, 10, 0, 0);
   const anchor = (overrides = {}) => ({
     dateKey: '2026-08-08',
+    utcOffsetMinutes: utcOffsetMinutes(now),
     today: {}, month: {}, allTime: {},
     configFingerprint: configFingerprint('claude', '2024-01-01', true),
     fullScanAt: new Date(now.getTime() - 60_000).toISOString(),
@@ -797,6 +804,10 @@ test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
   assert.equal(collectorAnchorTrust(anchor({ allTime: null }), options), null);
   assert.equal(collectorAnchorTrust(anchor(), { ...options, clients: 'claude,codex' }), null);
   assert.equal(collectorAnchorTrust(anchor(), { ...options, projectsEnabled: false }), null);
+  // An anchor written before offset stamping cannot prove which midnight its
+  // windows were cut at; declining costs one full scan and re-stamps it.
+  assert.equal(collectorAnchorTrust(anchor({ utcOffsetMinutes: undefined }), options), null);
+  assert.equal(collectorAnchorTrust(anchor({ utcOffsetMinutes: utcOffsetMinutes(now) + 1 }), options), null);
 
   // A custom scan path added after the anchor was written invalidates it; an
   // anchor whose fingerprint already covers that path stays trusted.
@@ -820,7 +831,7 @@ test('Cursor anchors from before the Auto model rename require a full scan', () 
   const now = new Date(2026, 7, 8, 10, 0, 0);
   const options = { clients: 'cursor', allTimeSince: '2024-01-01', now };
   const anchor = {
-    dateKey: '2026-08-08', today: {}, month: {}, allTime: {},
+    dateKey: '2026-08-08', utcOffsetMinutes: utcOffsetMinutes(now), today: {}, month: {}, allTime: {},
     configFingerprint: configFingerprint('cursor', '2024-01-01'),
     fullScanAt: new Date(now.getTime() - 60_000).toISOString()
   };

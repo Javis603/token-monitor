@@ -35,7 +35,7 @@ const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: pro
 const { createWatcherHost } = require('./watcherHost');
 const { createSessionActivityScheduler } = require('./sessionActivityScheduler');
 const { activityWatchSources, activityClientsForPath, activityWatchIgnored } = require('./sessionActivityWatch');
-const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories } = require('./history');
+const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories, utcOffsetMinutes } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const {
   createSubprocessTermination,
@@ -628,6 +628,24 @@ function lookupModelPricing(modelId, commandTimeoutMs = 15000) {
 // own name: it is exported and reads as the stamping side at its call sites.
 const localTodayKey = localDayKey;
 
+// A "today" period holding sessions whose last activity ended before this
+// device's local midnight cannot have been cut at that midnight. That is the
+// signature of a drifted scan window: the tokscale subprocess resolves the OS
+// timezone fresh at every spawn, while a long-running collector (Electron main
+// on Windows) keeps its startup zone — so after a timezone switch the
+// subprocess keeps counting from the old zone's midnight (UTC-7 00:00 = UTC+8
+// 15:00 the previous day) and "today" spans two of the device's calendar days.
+// Sessions still active across midnight don't qualify: their lastUsedAt is
+// after the midnight by definition. Injectable clock comes in via `now`.
+function todayPeriodHasDriftedWindow(period, midnightMs) {
+  if (!Number.isFinite(midnightMs)) return false;
+  for (const session of Object.values(period?.sessions || {})) {
+    const lastUsedAtMs = Date.parse(session?.lastUsedAt || session?.startedAt || '');
+    if (Number.isFinite(lastUsedAtMs) && lastUsedAtMs < midnightMs) return true;
+  }
+  return false;
+}
+
 function collectionDate(now) {
   const value = typeof now === 'function' ? now() : now;
   return value == null ? new Date() : new Date(value);
@@ -829,6 +847,11 @@ async function collectUsageOnce(options) {
   // straddles local midnight cannot pair a day-N today scan with a day-N+1
   // window (issue #37 follow-up). Injectable for tests.
   const collectedAt = collectionDate(options.now);
+  // One instant for the whole collection: the day key, the UTC offset stamp and
+  // the local midnight all come from the same clock reading (issue #37 follow-up).
+  const localMidnightMs = new Date(
+    collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()
+  ).getTime();
   const reportTerminationUnconfirmed = (operation) => {
     try {
       options.onDiagnosticEvent?.({
@@ -903,11 +926,19 @@ async function collectUsageOnce(options) {
   let dailyHistoryLiveDays = options.dailyHistoryLiveDays;
   let todayPartitions = null;
   const anchor = options.todayOnlyAnchor;
+  // The offset check pairs with the date key: an anchor stamped under a
+  // different UTC offset (timezone or DST moved since the full scan) cut its
+  // baseline at a different local midnight, and the exact-delta identity below
+  // needs both windows to start at the same one.
   const anchorUsed = Boolean(
     anchor
     && anchor.dateKey === localTodayKey(collectedAt)
+    && anchor.utcOffsetMinutes === utcOffsetMinutes(collectedAt)
     && canTargetTodayPartitions(anchor, targetClients)
   );
+  // False when the tick drifted (see the anchored branch below): the delta
+  // identity is dead and the serial full scan takes over, WSL included.
+  let anchorUsable = anchorUsed;
   if (anchorUsed) localSessionMetadataDeps.t3Titles = anchor.todayT3Titles || anchor.t3Titles || {};
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
@@ -935,7 +966,7 @@ async function collectUsageOnce(options) {
     });
     throwIfAborted(options.signal);
     throwIfAborted(options.signal);
-    if (anchorUsed) {
+    if (anchorUsable) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
       // windows exactly via applyPeriodDelta — one spawn instead of three.
@@ -982,9 +1013,20 @@ async function collectUsageOnce(options) {
         ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
         : completeTodayPartitions(freshPartitions, normalizedClients);
       today = mergeTodayPartitions(todayPartitions);
-      month = applyPeriodDelta(anchor.month, today, anchor.today);
-      allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
-    } else if (normalizedClients) {
+      // A fresh scan holding sessions that ended before this device's local
+      // midnight cannot have been cut at that midnight: the subprocess window
+      // moved with the OS timezone while this process kept its startup zone
+      // (Windows keeps the zone cached until restart). The anchor baseline and
+      // fresh scans now start at different midnights, so the exact-delta
+      // identity is dead — fall through to the serial full scan.
+      if (todayPeriodHasDriftedWindow(today, localMidnightMs)) {
+        anchorUsable = false;
+      } else {
+        month = applyPeriodDelta(anchor.month, today, anchor.today);
+        allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
+      }
+    }
+    if (!anchorUsable && normalizedClients) {
       // Serial on purpose: concurrent scans triple the peak CPU/IO load, which
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
       const todayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs, signal: options.signal });
@@ -1007,7 +1049,7 @@ async function collectUsageOnce(options) {
     // Projects opt-out (issue #182). decorateLocalPeriods gates only project identity
     // on projectsEnabled, so opting out still costs the timestamp backfill and nothing
     // more.
-    if (anchorUsed) {
+    if (anchorUsable) {
       // Watch tick: `today` is a fresh scan and must be decorated, but month/
       // allTime are derived from the last full-scan anchor and already carry each
       // session's project label + timestamps through applyPeriodDelta. Decorating
@@ -1058,7 +1100,7 @@ async function collectUsageOnce(options) {
       wslDetected = wslResult.detected;
     } else if (options.wslAnchor) {
       wslBundle = options.wslAnchor;
-    } else if (!anchorUsed) {
+    } else if (!anchorUsable) {
       const wslResult = await collectWsl({
         clients: normalizedClients,
         trackedClients: normalizedClients,
@@ -1078,6 +1120,17 @@ async function collectUsageOnce(options) {
   allTime = mergePeriods(windowsPeriods.allTime, wslBundle.allTime);
   throwIfAborted(options.signal);
 
+  // Authoritative drift verdict on the fully merged today (WSL included). A
+  // drifted window must not enter the durable archives: the day buckets and the
+  // live overlay would otherwise stamp a two-calendar-day total under this
+  // device's day key. The live periods still publish — transiently, and they
+  // self-correct once the zones agree again — but persistence and anchoring
+  // are gated until the next aligned scan.
+  const todayWindowDrifted = todayPeriodHasDriftedWindow(today, localMidnightMs);
+  if (typeof options.onTodayWindowDrift === 'function') {
+    try { options.onTodayWindowDrift(todayWindowDrifted); } catch (_) {}
+  }
+
   // The renderer intentionally uses the live today period while a day is in
   // progress. Callers that do not defer capture persist the largest complete
   // live snapshot here; startCollector defers it until after transformUsage so
@@ -1085,6 +1138,7 @@ async function collectUsageOnce(options) {
   if (
     options.historyEnabled !== false
     && options.dailyHistoryArchiveEnabled
+    && !todayWindowDrifted
     && options.deferLiveHistoryCapture !== true
   ) {
     try {
@@ -1242,7 +1296,11 @@ async function collectUsageOnce(options) {
       todayKey: localTodayKey(collectedAt),
       runGraph: runGraphFn,
       signal: options.signal,
-      dailyHistoryArchiveEnabled: options.dailyHistoryArchiveEnabled,
+      // A drifted window's graph rows re-bucket absolute sessions under day
+      // keys this device's calendar does not own; retain nothing from them.
+      // The scan itself still runs so the chart gets a transient (unpersisted)
+      // view and the status reporting stays truthful.
+      dailyHistoryArchiveEnabled: options.dailyHistoryArchiveEnabled && !todayWindowDrifted,
       dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,
       dailyHistoryArchiveOptions: options.dailyHistoryArchiveOptions,
       dailyHistoryLiveDays,
@@ -2073,6 +2131,12 @@ function qoderCnProjectsDirForClients(clientsCsv, options = {}) {
 function collectorAnchorTrust(saved, options = {}) {
   const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
+  // The anchor's periods were cut at the local midnight of the offset it was
+  // captured under. A timezone or DST move (or an anchor written before offset
+  // stamping, whose offset cannot be proven) makes that midnight different
+  // from the current one, and the exact-delta identity dies with the origin.
+  // Declining here costs one full scan and re-stamps the anchor.
+  if (saved.utcOffsetMinutes !== utcOffsetMinutes(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
   // Old Cursor anchors preserve `default` in their broad-period model maps;
   // applying a new `cursor-auto` Today delta to them would split one mode.
@@ -2432,6 +2496,9 @@ function startCollector(options) {
   let watchFallbackCode = null;
   let lastWatchFailureCode = null;
   let tickHadFailure = false;
+  // Previous tick's drift verdict; gates the diagnostic so a sustained drift
+  // (user stays in the other timezone without restarting) reports once.
+  let lastTickDrifted = false;
   const scheduledWatchClients = new Set();
   let scheduledWatchNeedsFullScan = false;
   // Source events waiting on the shared throttle, and the timer that comes back
@@ -2526,6 +2593,7 @@ function startCollector(options) {
       if (trust) {
         anchor = {
           dateKey: saved.dateKey,
+          utcOffsetMinutes: saved.utcOffsetMinutes,
           today: saved.today,
           month: saved.month,
           allTime: saved.allTime,
@@ -2555,6 +2623,7 @@ function startCollector(options) {
       fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
       fs.writeFileSync(anchorPath, JSON.stringify({
         dateKey: anchor.dateKey,
+        utcOffsetMinutes: anchor.utcOffsetMinutes,
         cursorAutoModelVersion: 1,
         today: anchor.today,
         month: anchor.month,
@@ -2620,6 +2689,26 @@ function startCollector(options) {
       lastHistoryAt = 0;
       pricingRevision = tickPricingRevision;
     }
+    // A timezone or DST move re-anchors every local-midnight window. An anchor
+    // stamped under a different UTC offset pairs its baseline with fresh scans
+    // cut from another midnight, so the exact-delta identity is dead and the
+    // retained live overlay belongs to a window this day key no longer names.
+    // Same treatment as a pricing change: drop everything window-derived and
+    // force a full rescan.
+    const tickUtcOffsetMinutes = utcOffsetMinutes(collectedAt);
+    const timezoneChanged = Boolean(
+      anchor
+      && Number.isFinite(anchor.utcOffsetMinutes)
+      && anchor.utcOffsetMinutes !== tickUtcOffsetMinutes
+    );
+    if (timezoneChanged) {
+      anchor = null;
+      wslAnchor = null;
+      wslStatusAnchor = null;
+      liveDailyHistoryDays = {};
+      lastFullScanAt = 0;
+      lastHistoryAt = 0;
+    }
     // The previous live DAY becomes durable history at local midnight. Finalize
     // it before publishing the new day, even when the normal History interval
     // is not due yet, so fixed ranges never wait for the next scheduled graph.
@@ -2629,7 +2718,7 @@ function startCollector(options) {
       collectedAt.getTime(),
       lastHistoryAt,
       historyIntervalMs,
-      Boolean(tickOptions.forceHistory) || localDayRolledOver || pricingChanged,
+      Boolean(tickOptions.forceHistory) || localDayRolledOver || pricingChanged || timezoneChanged,
       historyEnabled
     );
     if (includeHistory) {
@@ -2648,6 +2737,7 @@ function startCollector(options) {
     try {
       let captured = null;
       let tickLocalView = null;
+      let todayWindowDrifted = false;
       const summary = await collectUsageOnce({
         ...options,
         codexDotsVisible,
@@ -2661,6 +2751,11 @@ function startCollector(options) {
         osInfo: deviceOsInfo,
         now: collectedAt,
         includeHistory,
+        // The fresh scan held sessions that ended before this device's local
+        // midnight: the subprocess window drifted with the OS timezone while
+        // this process kept its startup zone (Windows caches it until restart).
+        // Nothing from this tick may be persisted or anchored.
+        onTodayWindowDrift: (drifted) => { todayWindowDrifted = drifted === true; },
         pricingRevision: tickPricingRevision,
         customPricingActive: Object.keys(readJson(options.pricingPath || customPricingPath({ env: tokscaleEnvWithBlanksDropped(process.env) }), {})?.models || {}).length > 0,
         // Capture after the runtime's transformUsage hook so the archive uses
@@ -2786,9 +2881,31 @@ function startCollector(options) {
       for (const [client, entry] of Object.entries(summary.clientHealth?.clients || {})) {
         if (entry.data?.lastActivityDay) activityDaysAnchor[client] = entry.data.lastActivityDay;
       }
-      if (!anchored && captured) {
+      // The fresh scan's today window does not start at this device's local
+      // midnight (OS timezone moved under a long-running process; Windows keeps
+      // the zone cached until restart). Nothing window-derived survives it: the
+      // drift path in collectUsageOnce already fell back to full scans, so only
+      // the anchors and the retained live overlay need clearing here, and the
+      // drifted periods must not become the next baseline.
+      if (todayWindowDrifted) {
+        anchor = null;
+        wslAnchor = null;
+        wslStatusAnchor = null;
+        liveDailyHistoryDays = {};
+        lastFullScanAt = 0;
+        if (!lastTickDrifted) {
+          emitDiagnosticEvent({
+            subsystem: 'collector',
+            code: 'today-window-timezone-drift',
+            detail: 'today scan window no longer starts at the device local midnight; persistence paused until the zones agree'
+          });
+        }
+      }
+      lastTickDrifted = todayWindowDrifted;
+      if (!anchored && captured && !todayWindowDrifted) {
         anchor = {
           dateKey: todayKey,
+          utcOffsetMinutes: tickUtcOffsetMinutes,
           today: captured.windowsPeriods.today,
           month: captured.windowsPeriods.month,
           allTime: captured.windowsPeriods.allTime,
@@ -2802,7 +2919,7 @@ function startCollector(options) {
         wslStatusAnchor = captured.wslStatus || null;
         lastFullScanAt = Date.now();
         persistAnchor(tickPricingRevision);
-      } else if (anchored && captured) {
+      } else if (anchored && captured && !todayWindowDrifted) {
         // Keep the rolling per-client today partitions fresh for targeted
         // watch ticks. WSL stays independently frozen between interval ticks.
         if (captured.todayPartitions) anchor.todayPartitions = captured.todayPartitions;
@@ -2842,7 +2959,9 @@ function startCollector(options) {
       // input or returned a copy. Retained identities suppress temporary rows.
       require('./sessionActivityProjection').invalidateActivityIndex(visibleSummary);
       latestActivitySummary = visibleSummary;
-      if (historyEnabled !== false && options.dailyHistoryArchiveEnabled) {
+      // A drifted today window is never retained: its "today" total spans two of
+      // this device's calendar days and liveDayIsGreater would lock it in.
+      if (historyEnabled !== false && options.dailyHistoryArchiveEnabled && !todayWindowDrifted) {
         try {
           const visibleAt = visibleSummary.updatedAt || summary.updatedAt;
           const visibleDate = visibleAt ? new Date(visibleAt) : new Date();
@@ -3309,7 +3428,12 @@ function startCollector(options) {
     // does not drift from reality over a long-running session.
     // lastFullScanAt === 0 means no valid timestamp exists (cold start,
     // unparseable, or future timestamp) — force a full scan immediately.
-    const anchorToday = Boolean(!fullScanDue && anchor && anchor.dateKey === localTodayKey());
+    const anchorToday = Boolean(
+      !fullScanDue
+      && anchor
+      && anchor.dateKey === localTodayKey()
+      && anchor.utcOffsetMinutes === utcOffsetMinutes()
+    );
     const sourceSelfSync = activityGated ? sourceSyncQueue.takeDue() : null;
     // Smart mode carries the clients its watch events named since the last tick
     // and unions the self-synced ones on top regardless. Their tokscale cache
@@ -3508,6 +3632,7 @@ module.exports = {
   clientWatchCandidates,
   computePeriodWindows,
   collectorAnchorTrust,
+  todayPeriodHasDriftedWindow,
   pricingFingerprint,
   configFingerprint,
   qoderCnDbPathForClients,

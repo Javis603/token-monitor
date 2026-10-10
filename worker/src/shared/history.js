@@ -309,6 +309,16 @@ function localDayKey(date = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
+// The device's UTC offset in minutes at an instant, using getTimezoneOffset's
+// sign convention (UTC+8 → -480). Day-keyed retention stamps captures with this
+// number so a timezone or DST move — which silently re-anchors "today" and the
+// day buckets at a different local midnight — is visible to the merge logic
+// instead of reading as usage growth. Pure so the Worker closure can carry it.
+function utcOffsetMinutes(at) {
+  const date = at === undefined ? new Date() : new Date(at);
+  return Number.isNaN(date.getTime()) ? -new Date().getTimezoneOffset() : -date.getTimezoneOffset();
+}
+
 // A day is "active" when tokens > 0. currentStreak = consecutive active days ending at
 // todayKey (0 if today is inactive). longestStreak = longest run anywhere.
 function computeStreaks(days, todayKey) {
@@ -622,7 +632,7 @@ function deviceHistoryRevision(devices) {
 module.exports = {
   hasDisjointReasoning, num, normalizeTokscaleClientName, normalizeTokscaleModelNameForClient,
   normalizeTokscaleModelComponentSummary, sumOutputTokens, sumTokens,
-  parseGraphResult, computeIntensities, localDayKey, dayKeyAddDays,
+  parseGraphResult, computeIntensities, localDayKey, dayKeyAddDays, utcOffsetMinutes,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
   coerceHistory, historyPreview, historyRevision, deviceHistoryRevision
 };

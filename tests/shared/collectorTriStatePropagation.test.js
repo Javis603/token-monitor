@@ -54,6 +54,7 @@ function options(home, extra = {}) {
 function anchorFrom(full) {
   return {
     dateKey: localDayKey(new Date()),
+    utcOffsetMinutes: require('../../src/shared/history').utcOffsetMinutes(),
     today: full.today,
     month: full.month,
     allTime: full.allTime,

@@ -10,6 +10,7 @@ const test = require('node:test');
 
 const { deviceRecordFromAnchor } = require('../../src/shared/anchorSeed');
 const { configFingerprint } = require('../../src/shared/collector');
+const { utcOffsetMinutes } = require('../../src/shared/history');
 const { qoderCnDataPaths } = require('../../src/shared/providers/qodercn/paths');
 const { aggregateDevices, emptyPeriod } = require('../../src/shared/usage');
 
@@ -30,6 +31,7 @@ const NOW = new Date(2026, 7, 8, 10, 0, 0); // local 2026-08-08 10:00, UTC 02:00
 function anchorFixture(overrides = {}) {
   return {
     dateKey: '2026-08-08',
+    utcOffsetMinutes: utcOffsetMinutes(NOW),
     today: periodWith(1_000),
     month: periodWith(30_000),
     allTime: periodWith(900_000),

@@ -11,6 +11,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { EventEmitter } = require('node:events');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
+const { utcOffsetMinutes } = require('../../src/shared/history');
 
 installInProcessWatchHost(test);
 
@@ -110,6 +111,7 @@ test('collectUsageOnce with a valid anchor runs a single --today scan and derive
     const { emptyPeriod } = require('../../src/shared/usage');
     const anchor = {
       dateKey: localTodayKey(),
+      utcOffsetMinutes: utcOffsetMinutes(),
       today: { ...emptyPeriod(), totalTokens: 30, clients: { claude: 30 } },
       month: { ...emptyPeriod(), totalTokens: 100, clients: { claude: 100 } },
       allTime: { ...emptyPeriod(), totalTokens: 1000, clients: { claude: 1000 } }
@@ -132,9 +134,15 @@ test('an anchored watch tick does not re-read session files that only appear in 
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
+  // Session timestamps must fall inside the current today window: a today scan
+  // holding sessions that ended before the local midnight reads as a drifted
+  // scan window (see collectorTimezoneDrift.test.js) and falls back to a full
+  // scan, which this test's no-reread contract is not about.
+  const sessionStart = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const sessionEnd = new Date().toISOString();
   childProcess.spawn = recordingSpawn(calls, 50, {
-    startedAt: '2026-07-13T08:00:00.000Z',
-    lastUsedAt: '2026-07-13T08:30:00.000Z'
+    startedAt: sessionStart,
+    lastUsedAt: sessionEnd
   });
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-home-'));
   const realOpen = fs.openSync;
@@ -146,7 +154,6 @@ test('an anchored watch tick does not re-read session files that only appear in 
     const line = (cwd, ts) => `${JSON.stringify({ cwd, timestamp: ts })}\n`;
     fs.writeFileSync(s1File, line('/work/one', '2026-07-13T10:00:00.000Z'));
     fs.writeFileSync(s2File, line('/work/two', '2026-07-13T09:00:00.000Z'));
-
     const { collectUsageOnce, localTodayKey } = freshCollector();
     const { emptyPeriod } = require('../../src/shared/usage');
     // s2 is only in the broader windows, already resolved at the last full scan.
@@ -158,6 +165,7 @@ test('an anchored watch tick does not re-read session files that only appear in 
     });
     const anchor = {
       dateKey: localTodayKey(),
+      utcOffsetMinutes: utcOffsetMinutes(),
       today: { ...emptyPeriod(), totalTokens: 30, clients: { claude: 30 } },
       month: withS2(100),
       allTime: withS2(1000)
@@ -179,8 +187,8 @@ test('an anchored watch tick does not re-read session files that only appear in 
     const todayS1 = summary.today.sessions['claude:s1'];
     assert.ok(todayS1.projectId, "today's new session must be decorated");
     assert.equal(todayS1.projectLabel, 'one');
-    assert.equal(todayS1.startedAt, '2026-07-13T08:00:00.000Z');
-    assert.equal(todayS1.lastUsedAt, '2026-07-13T10:00:00.000Z');
+    assert.equal(todayS1.startedAt, sessionStart);
+    assert.equal(todayS1.lastUsedAt, sessionEnd);
     for (const period of [summary.month, summary.allTime]) {
       const derivedS1 = period.sessions['claude:s1'];
       assert.equal(derivedS1.projectId, todayS1.projectId);
@@ -202,6 +210,7 @@ test('an all-client fallback refreshes fork-only partitions from the same toksca
   const anchorClients = { claude: 10, codex: 20, proma: 5 };
   const anchor = {
     dateKey: localTodayKey(),
+    utcOffsetMinutes: utcOffsetMinutes(),
     today: combinedPeriod(anchorClients),
     month: combinedPeriod(anchorClients),
     allTime: combinedPeriod(anchorClients),
@@ -240,6 +249,7 @@ test('a partial multi-target union falls back instead of trusting a polluted par
   const anchorClients = { claude: 10, codex: 20 };
   const anchor = {
     dateKey: localTodayKey(),
+    utcOffsetMinutes: utcOffsetMinutes(),
     today: combinedPeriod(anchorClients),
     month: combinedPeriod(anchorClients),
     allTime: combinedPeriod(anchorClients),
@@ -277,6 +287,7 @@ test('an empty multi-target union falls back before clearing live partitions', a
   const anchorClients = { claude: 10, codex: 20 };
   const anchor = {
     dateKey: localTodayKey(),
+    utcOffsetMinutes: utcOffsetMinutes(),
     today: combinedPeriod(anchorClients),
     month: combinedPeriod(anchorClients),
     allTime: combinedPeriod(anchorClients),
@@ -313,6 +324,7 @@ test('an empty multi-target union and full snapshot clear genuinely deleted usag
   const anchorClients = { claude: 10, codex: 20 };
   const anchor = {
     dateKey: localTodayKey(),
+    utcOffsetMinutes: utcOffsetMinutes(),
     today: combinedPeriod(anchorClients),
     month: combinedPeriod(anchorClients),
     allTime: combinedPeriod(anchorClients),
@@ -348,6 +360,7 @@ test('an unsafe unattributed union falls back without intermediate scans', async
   const anchorClients = { claude: 10, codex: 20 };
   const anchor = {
     dateKey: localTodayKey(),
+    utcOffsetMinutes: utcOffsetMinutes(),
     today: combinedPeriod(anchorClients),
     month: combinedPeriod(anchorClients),
     allTime: combinedPeriod(anchorClients),
@@ -385,6 +398,7 @@ test('a multi-target full fallback still clears genuinely deleted usage', async 
   const anchorClients = { claude: 10, codex: 20 };
   const anchor = {
     dateKey: localTodayKey(),
+    utcOffsetMinutes: utcOffsetMinutes(),
     today: combinedPeriod(anchorClients),
     month: combinedPeriod(anchorClients),
     allTime: combinedPeriod(anchorClients),
@@ -489,7 +503,7 @@ test('anchored watch updates carry cache observations and cold clears into broad
     'claude:s1': { client: 'claude', sessionId: 's1', totalTokens: 50, lastUsedAt: observedAt, promptCache: warm }
   } });
   for (const promptCache of [{ observedAt, ttlSeconds: 300 }, null, undefined]) {
-    const anchor = { dateKey: localTodayKey(), today: makePeriod(), month: makePeriod(), allTime: makePeriod() };
+    const anchor = { dateKey: localTodayKey(), utcOffsetMinutes: utcOffsetMinutes(), today: makePeriod(), month: makePeriod(), allTime: makePeriod() };
     const summary = await collectUsageOnce({
       ...baseOptions, todayOnlyAnchor: anchor,
       runTokscale: async () => ({ entries: [{ client: 'claude', sessionId: 's1', model: 'claude-opus-4-8', input: 60, output: 0 }] }),

@@ -249,7 +249,8 @@ maybe('watch titles learned or renamed after a full scan survive T3 read misses'
   };
   const initial = await collectUsageOnce(options);
   const anchor = {
-    dateKey: localTodayKey(), today: initial.today, month: initial.month, allTime: initial.allTime,
+    dateKey: localTodayKey(), utcOffsetMinutes: require('../../src/shared/history').utcOffsetMinutes(),
+    today: initial.today, month: initial.month, allTime: initial.allTime,
     todayPartitions: captured.todayPartitions, t3Titles: captured.t3Titles
   };
   const watch = async (sqliteMod = sqlite) => {
@@ -367,7 +368,8 @@ for (const unusable of [
         id === 'native-only' ? 'Native scan label' : 'Old T3 title');
     }
     const anchor = JSON.parse(JSON.stringify({
-      dateKey: localTodayKey(), today: initial.today, month: initial.month, allTime: initial.allTime,
+      dateKey: localTodayKey(), utcOffsetMinutes: require('../../src/shared/history').utcOffsetMinutes(),
+      today: initial.today, month: initial.month, allTime: initial.allTime,
       todayPartitions: captured.todayPartitions, t3Titles: captured.t3Titles
     }));
     const watchOptions = { ...options, todayOnlyAnchor: anchor, targetClients: ['claude'] };
