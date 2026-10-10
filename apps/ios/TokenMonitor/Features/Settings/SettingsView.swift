@@ -4,7 +4,6 @@ struct SettingsView: View {
     @Environment(ConnectionSettings.self) private var settings
     @Environment(TokenMonitorStore.self) private var store
     @Environment(AppPreferences.self) private var preferences
-    @Environment(LiveActivityController.self) private var liveActivity
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -65,6 +64,8 @@ struct SettingsView: View {
                 }
             }
 
+            SystemSurfacesSection()
+
             Section("Customize") {
                 customizeRow(
                     "Appearance",
@@ -99,26 +100,6 @@ struct SettingsView: View {
                         icon: "gauge.with.needle",
                         tint: Color(red: 0.25, green: 0.62, blue: 0.55),
                         value: Text("\(visibleLimitProviderCount) visible")
-                    )
-                }
-                NavigationLink {
-                    WidgetSettingsView()
-                } label: {
-                    settingsLabel(
-                        "Widgets",
-                        icon: "widget.small.badge.plus",
-                        tint: Color(red: 0.62, green: 0.4, blue: 0.92),
-                        value: Text(LocalizedStringKey(preferences.widgetContent.title))
-                    )
-                }
-                NavigationLink {
-                    LiveActivityCustomizerView()
-                } label: {
-                    settingsLabel(
-                        "Live Activity",
-                        icon: "platter.filled.bottom.and.arrow.down.iphone",
-                        tint: Color(red: 0.28, green: 0.7, blue: 0.4),
-                        value: Text(LocalizedStringKey(liveActivity.isActive ? "Active" : preferences.liveActivityEnabled ? "Waiting" : "Off"))
                     )
                 }
             }
@@ -521,7 +502,7 @@ private struct HubDeviceStatusRow: View {
 }
 
 /// iOS-Settings-style colored rounded-square icon.
-private struct SettingsIcon: View {
+struct SettingsIcon: View {
     let systemImage: String
     let tint: Color
 

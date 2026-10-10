@@ -73,6 +73,45 @@ struct SessionUsageTests {
         #expect(SessionListEntry.rows(sessions, query: "Review PR").count == 1)
     }
 
+    @Test func previewRunsFirstThenRecentActivityWithStableOrder() throws {
+        let now = try #require(Date.hubTimestamp(from: "2026-10-09T00:00:00Z"))
+        let sessions = [
+            "run-old": try decode(#"{"client":"codex","totalTokens":10,"lastUsedAt":"2026-10-08T23:50:00Z","turnEnded":false}"#),
+            "done-recent": try decode(#"{"client":"claude","totalTokens":999,"lastUsedAt":"2026-10-08T23:59:30Z","turnEnded":true}"#),
+            "run-new": try decode(#"{"client":"claude","totalTokens":5,"lastUsedAt":"2026-10-08T23:59:50Z","turnEnded":false}"#),
+            "done-stale": try decode(#"{"client":"codex","totalTokens":7,"lastUsedAt":"2026-10-08T20:00:00Z","turnEnded":true}"#),
+        ]
+        #expect(SessionPreviewPresentation.rows(sessions, now: now).map(\.id) == ["run-new", "run-old", "done-recent"])
+        #expect(SessionPreviewPresentation.runningCount(sessions, at: now) == 2)
+    }
+
+    @Test func previewDropsBackgroundReviewsAndKeepsUnknownUsage() throws {
+        let now = try #require(Date.hubTimestamp(from: "2026-10-09T00:00:00Z"))
+        let sessions = [
+            "review": try decode(#"{"client":"codex","totalTokens":500,"sessionKind":"background-review","lastUsedAt":"2026-10-08T23:59:59Z"}"#),
+            "reasonix-stats:1": try decode(#"{"client":"reasonix","totalTokens":10,"lastUsedAt":"2026-10-08T23:59:58Z"}"#),
+            "reasonix-live": try decode(#"{"client":"reasonix","totalTokens":10,"lastUsedAt":"2026-10-08T23:59:57Z"}"#),
+            "zero": try decode(#"{"client":"codex","totalTokens":0,"lastUsedAt":"2026-10-08T23:59:56Z"}"#),
+            "unknown": try decode(#"{"client":"codex","totalTokens":0,"tokenDataUnavailable":true,"lastUsedAt":"2026-10-08T23:59:55Z"}"#),
+        ]
+        #expect(SessionPreviewPresentation.rows(sessions, now: now).map(\.id) == ["reasonix-live", "unknown"])
+        #expect(SessionPreviewPresentation.runningCount(sessions, at: now) == 2)
+    }
+
+    @Test func previewCapsRowsAndTieBreaksByTokensCostThenKey() throws {
+        let now = try #require(Date.hubTimestamp(from: "2026-10-09T00:00:00Z"))
+        let sessions = [
+            "b": try decode(#"{"client":"codex","totalTokens":10,"lastUsedAt":"2026-10-08T20:00:00Z","turnEnded":true}"#),
+            "a": try decode(#"{"client":"claude","totalTokens":10,"lastUsedAt":"2026-10-08T20:00:00Z","turnEnded":true}"#),
+            "costly": try decode(#"{"client":"claude","totalTokens":10,"costUsd":0.1,"lastUsedAt":"2026-10-08T20:00:00Z","turnEnded":true}"#),
+            "big": try decode(#"{"client":"codex","totalTokens":20,"lastUsedAt":"2026-10-08T20:00:00Z","turnEnded":true}"#),
+            "older": try decode(#"{"client":"claude","totalTokens":999,"lastUsedAt":"2026-10-08T19:00:00Z","turnEnded":true}"#),
+        ]
+        #expect(SessionPreviewPresentation.rows(sessions, now: now).map(\.id) == ["big", "costly", "a"])
+        #expect(SessionPreviewPresentation.rows(sessions, now: now, limit: 5).map(\.id) == ["big", "costly", "a", "b", "older"])
+        #expect(SessionPreviewPresentation.runningCount(sessions, at: now) == 0)
+    }
+
     @Test func aliasesRespectGroupingManualPrecedenceAndRetainSourcePrices() throws {
         let ids = ["vendor/gpt-6", "gpt-6", "vendor/standalone"]
         let duplicates = ModelAliasSettings(modelAliasGrouping: "duplicates").resolver(modelIDs: ids)

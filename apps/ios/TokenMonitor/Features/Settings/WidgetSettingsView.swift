@@ -8,6 +8,7 @@ import WidgetKit
 struct WidgetSettingsView: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(TokenMonitorStore.self) private var store
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -80,6 +81,13 @@ struct WidgetSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarVisibility(.visible, for: .navigationBar)
         .tint(DesignTokens.accent)
+        .task { storedSnapshot = Self.loadStoredSnapshot() }
+        .onChange(of: store.phase) { _, _ in
+            storedSnapshot = Self.loadStoredSnapshot()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { storedSnapshot = Self.loadStoredSnapshot() }
+        }
     }
 
     // MARK: - Preview
@@ -105,6 +113,13 @@ struct WidgetSettingsView: View {
         )
     }
 
+    private var hasHubData: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--sample-data") { return false }
+        #endif
+        return storedSnapshot != nil
+    }
+
     private var previewSection: some View {
         Section {
             Picker("Preview size", selection: $previewFamily) {
@@ -116,7 +131,7 @@ struct WidgetSettingsView: View {
 
             VStack(spacing: 10) {
                 previewCard
-                Text(storedSnapshot != nil ? "Latest data from your Hub" : "Sample data")
+                Text(hasHubData ? "Latest data from your Hub" : "Sample data")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)

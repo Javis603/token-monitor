@@ -138,7 +138,7 @@ struct LiveActivityCustomizerView: View {
         return ActivityContext(
             state: state,
             preferences: preferences.sharedPreferences,
-            isStale: store.stats != nil && state.sourceStale == true
+            isStale: state.sourceStale == true
         )
     }
 
@@ -486,7 +486,7 @@ struct LiveActivityCustomizerView: View {
         return VStack(spacing: 22) {
             ForEach(LiveActivityLayout.ExpandedTemplate.allCases, id: \.self) { template in
                 wideTile(template.title, badge: preferences.liveLayout.expanded == template ? "E" : nil) {
-                    FittedPreview(width: 380) {
+                    SystemSurfaceFittedPreview(width: 380) {
                         ActivityExpandedPreview(context: context.with { $0.expanded = template })
                             .foregroundStyle(.white)
                             .background(.black, in: .rect(cornerRadius: 44, style: .continuous))
@@ -504,7 +504,7 @@ struct LiveActivityCustomizerView: View {
         return VStack(spacing: 22) {
             ForEach(LiveActivityLayout.LockScreenTemplate.allCases, id: \.self) { template in
                 wideTile(template.title, badge: preferences.liveLayout.lockScreen == template ? "L" : nil) {
-                    FittedPreview(width: 390) {
+                    SystemSurfaceFittedPreview(width: 390) {
                         ActivityLockScreenView(context: context.with { $0.lockScreen = template })
                             .modifier(LockScreenGlass())
                             .padding(10)
@@ -811,34 +811,6 @@ struct LiveActivityCustomizerView: View {
         } else {
             await refresh()
         }
-    }
-}
-
-/// Lays a surface out at its on-device width, then scales it to the space
-/// available, so a gallery tile keeps the phone's proportions instead of
-/// re-wrapping its text.
-private struct FittedPreview<Content: View>: View {
-    let width: CGFloat
-    @ViewBuilder var content: Content
-    @State private var naturalHeight: CGFloat = 0
-
-    var body: some View {
-        GeometryReader { proxy in
-            let scale = min(1, proxy.size.width / width)
-            content
-                .frame(width: width)
-                .fixedSize(horizontal: false, vertical: true)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { naturalHeight = $0 }
-                .scaleEffect(scale, anchor: .topLeading)
-                .frame(width: proxy.size.width, height: naturalHeight * scale, alignment: .topLeading)
-        }
-        .frame(height: naturalHeight * fittedScale)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
-    }
-
-    @State private var availableWidth: CGFloat = 0
-    private var fittedScale: CGFloat {
-        availableWidth > 0 ? min(1, availableWidth / width) : 1
     }
 }
 

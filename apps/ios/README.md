@@ -15,7 +15,7 @@ The iOS app is a read-only SwiftUI client for an existing Token Monitor Hub. It 
 - `Core/Security`: Keychain-backed Hub secret storage
 - `Core/State`: app-level connection and data state
 - `DesignSystem`: semantic tokens and reusable native surfaces
-- `Features`: Overview, Limits, Insights, Sessions, and Settings
+- `Features`: Overview, Limits, Sessions, Insights, and Settings
 - `Widgets`: configurable Home Screen widgets, Lock Screen accessory, Live Activity, and Dynamic Island
 
 The app reads:
@@ -43,6 +43,8 @@ The Home Screen gallery offers Liquid Glass, Transparent and Solid widgets with 
 
 Widgets read the latest App Group snapshot. The app publishes while connected, and iOS may run a background refresh; WidgetKit and Background Tasks choose their own update budgets. A widget timeline is not a continuous Hub connection. Remote Live Activity updates require APNs configuration on the Hub and a successful push-token registration. A simulator build or local Activity update does not verify remote delivery.
 
+The icon-only native tab bar provides Overview, Limits, Sessions, Insights and Settings with Desktop vector artwork and localized accessibility names. Overview adds up to three recent interactive sessions, prioritizing running sessions, and its Sections editor can reorder or hide that block. Sessions deep links open the root tab. Settings keeps Hub first, followed by compact Live Activity and Widgets rows showing their purpose and status. Full previews and controls live in their customizer pages; Widget counts reflect WidgetKit’s current configurations, with unavailable results kept distinct from zero. A dismissible Overview invitation appears when both surfaces are unused.
+
 The Sessions screen shows bounded today/month summaries from authenticated Hub stats, with tool, model and project search. It does not fetch conversation transcripts. Canonical titles appear only if the sending device and Hub have enabled title sync. Omitted session detail is disclosed while aggregate totals remain complete.
 
 Untitled session rows put the tool and model on the same first line, matching the desktop fallback. The optional live speed beside the Overview brand mark uses differences in each device's timed output and timed duration between Hub frames. It is separate from the period's average speed: without consecutive timed samples it shows a dash, and an idle reading dims before clearing.
@@ -57,7 +59,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
 npm run verify
 ```
 
-Debug builds accept `--sample-data` and `--sample-tab=overview|limits|insights|settings` for reproducible UI inspection without Hub credentials. `--sample-live-activity` also renders a local demonstration Activity. These options are compiled out of release builds.
+Debug builds accept `--sample-data` and `--sample-tab=overview|limits|sessions|insights|settings` for reproducible UI inspection without Hub credentials. `--sample-live-activity` also renders a local demonstration Activity. These options are compiled out of release builds.
 
 
 ## Refresh validation (2026-10-05)

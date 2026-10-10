@@ -4,6 +4,7 @@ enum AppTab: Hashable {
     case overview
     case limits
     case insights
+    case sessions
     case settings
 
     init?(url: URL) {
@@ -12,8 +13,10 @@ enum AppTab: Hashable {
         }
 
         switch url.host?.lowercased() {
-        case "overview", "sessions":
-            self = .overview
+        case "overview":
+            self = url.path.lowercased() == "/sessions" ? .sessions : .overview
+        case "sessions":
+            self = .sessions
         case "limits":
             self = .limits
         case "insights":
@@ -26,8 +29,6 @@ enum AppTab: Hashable {
     }
 
     static func opensSessions(_ url: URL) -> Bool {
-        guard AppTab(url: url) == .overview else { return false }
-        return url.host?.lowercased() == "sessions"
-            || url.path.lowercased() == "/sessions"
+        AppTab(url: url) == .sessions
     }
 }

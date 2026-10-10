@@ -3,6 +3,7 @@ import SwiftUI
 enum OverviewSection: String, CaseIterable, Identifiable {
     case summary
     case limits
+    case sessions
     case trend
     case tools
     case models
@@ -14,6 +15,7 @@ enum OverviewSection: String, CaseIterable, Identifiable {
         switch self {
         case .summary: "Token summary"
         case .limits: "AI Limits"
+        case .sessions: "Sessions"
         case .trend: "Trend"
         case .tools: "Tools"
         case .models: "Models"
@@ -25,6 +27,7 @@ enum OverviewSection: String, CaseIterable, Identifiable {
         switch self {
         case .summary: "sum"
         case .limits: "gauge.with.needle"
+        case .sessions: "bubble.left.and.bubble.right"
         case .trend: "chart.xyaxis.line"
         case .tools: "square.grid.2x2"
         case .models: "cpu"

@@ -8,13 +8,10 @@ struct AppShellView: View {
     @State private var overviewPath = NavigationPath()
     @State private var limitsPath = NavigationPath()
     @State private var insightsPath = NavigationPath()
+    @State private var sessionsPath = NavigationPath()
     @State private var settingsPath = NavigationPath()
     private let sampleDetail: String?
     private let sampleSettingsPage: String?
-
-    private enum OverviewDestination: Hashable {
-        case sessions
-    }
 
     init() {
         #if DEBUG
@@ -25,6 +22,7 @@ struct AppShellView: View {
         let selected: AppTab? = switch selectedName {
         case "limits": .limits
         case "insights": .insights
+        case "sessions": .sessions
         case "settings": .settings
         case "overview": .overview
         default: nil
@@ -62,14 +60,10 @@ struct AppShellView: View {
                         OverviewView(selectedTab: $selectedTab)
                     }
                     }
-                    // Sessions remains an Overview destination, preserving native back navigation.
-                    .navigationDestination(for: OverviewDestination.self) { _ in
-                        SessionsView()
-                    }
                 }
             } label: {
-                Label("Overview", systemImage: "house")
-                    .environment(\.symbolVariants, .none)
+                Label("Overview", image: "DesktopOverview")
+                    .labelStyle(.iconOnly)
             }
 
             Tab(value: .limits) {
@@ -77,8 +71,17 @@ struct AppShellView: View {
                     LimitsView()
                 }
             } label: {
-                Label("Limits", systemImage: "gauge")
-                    .environment(\.symbolVariants, .none)
+                Label("Limits", image: "DesktopLimits")
+                    .labelStyle(.iconOnly)
+            }
+
+            Tab(value: .sessions) {
+                NavigationStack(path: $sessionsPath) {
+                    SessionsView()
+                }
+            } label: {
+                Label("Sessions", image: "DesktopSessions")
+                    .labelStyle(.iconOnly)
             }
 
             Tab(value: .insights) {
@@ -86,8 +89,8 @@ struct AppShellView: View {
                     InsightsView()
                 }
             } label: {
-                Label("Insights", systemImage: "chart.line.uptrend.xyaxis")
-                    .environment(\.symbolVariants, .none)
+                Label("Insights", image: "DesktopInsights")
+                    .labelStyle(.iconOnly)
             }
 
             Tab(value: .settings) {
@@ -108,8 +111,8 @@ struct AppShellView: View {
                     #endif
                 }
             } label: {
-                Label("Settings", systemImage: "gearshape")
-                    .environment(\.symbolVariants, .none)
+                Label("Settings", image: "DesktopSettings")
+                    .labelStyle(.iconOnly)
             }
         }
         .tint(DesignTokens.accent)
@@ -122,11 +125,9 @@ struct AppShellView: View {
             switch tab {
             case .overview:
                 overviewPath = NavigationPath()
-                if AppTab.opensSessions(url) {
-                    overviewPath.append(OverviewDestination.sessions)
-                }
             case .limits: limitsPath = NavigationPath()
             case .insights: insightsPath = NavigationPath()
+            case .sessions: sessionsPath = NavigationPath()
             case .settings: settingsPath = NavigationPath()
             }
         }

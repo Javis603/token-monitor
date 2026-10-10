@@ -7,6 +7,8 @@ struct OverviewView: View {
 
     @Binding var selectedTab: AppTab
     @State private var showsOrderEditor = false
+    @State private var surfaceStatus = SystemSurfaceStatus()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         @Bindable var store = store
@@ -24,10 +26,16 @@ struct OverviewView: View {
                                 switch section {
                                 case .summary:
                                     HeroSummaryCard(period: store.currentPeriod)
+                                    SystemSurfacesHint(widgetCount: surfaceStatus.widgetCount)
                                 case .limits:
                                     LimitPreviewSection(
                                         groups: Array(limitGroups.prefix(preferences.homeLimitCount)),
                                         showAll: showLimits
+                                    )
+                                case .sessions:
+                                    SessionsPreviewSection(
+                                        sessions: sessionPeriod.sessions ?? [:],
+                                        showAll: showSessions
                                     )
                                 case .trend:
                                     self.section("Trend") {
@@ -60,6 +68,9 @@ struct OverviewView: View {
                                         }
                                     }
                                 }
+                            }
+                            if !visibleSections.contains(.summary) {
+                                SystemSurfacesHint(widgetCount: surfaceStatus.widgetCount)
                             }
                             if visibleSections.isEmpty {
                                 ContentUnavailableView {
@@ -153,6 +164,10 @@ struct OverviewView: View {
         .background {
             AppBackground()
         }
+        .task { await surfaceStatus.refresh() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await surfaceStatus.refresh() } }
+        }
         .sheet(isPresented: $showsOrderEditor) {
             NavigationStack {
                 OverviewSectionOrderEditor()
@@ -195,6 +210,12 @@ struct OverviewView: View {
         }
     }
 
+    /// The Sessions tab reads today/month only; Total falls back to today so
+    /// the preview keeps live sessions while retaining the alias projection.
+    private var sessionPeriod: UsagePeriod {
+        store.displayPeriod(store.selectedPeriod == .allTime ? .today : store.selectedPeriod)
+    }
+
     private func refresh() {
         Task {
             await store.refresh()
@@ -203,6 +224,10 @@ struct OverviewView: View {
 
     private func showLimits() {
         selectedTab = .limits
+    }
+
+    private func showSessions() {
+        selectedTab = .sessions
     }
 
     private func showSettings() {

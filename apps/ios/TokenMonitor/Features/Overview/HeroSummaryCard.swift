@@ -15,7 +15,7 @@ struct HeroSummaryCard: View {
         SurfaceCard {
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 8) {
-                    summaryHeader
+                    totalTitle
                     Text(period.totalTokens.map(MetricFormatter.exactTokens) ?? "—")
                         .font(.system(size: headlineSize, weight: .semibold))
                         .monospacedDigit()
@@ -78,35 +78,6 @@ struct HeroSummaryCard: View {
             }
         } else {
             metric("Cache hit rate", value: value)
-        }
-    }
-
-    private var sessionsLink: some View {
-        NavigationLink {
-            SessionsView()
-        } label: {
-            HStack(spacing: 5) {
-                Text("Sessions")
-                    .font(.caption)
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-            .foregroundStyle(.primary)
-            .frame(minWidth: DesignTokens.controlHeight, minHeight: DesignTokens.controlHeight, alignment: .leading)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var summaryHeader: some View {
-        HStack(spacing: 12) {
-            totalTitle
-            Spacer(minLength: 8)
-        }
-        // The expanded hit area must not add space between the label and reading.
-        .overlay(alignment: .trailing) {
-            sessionsLink
         }
     }
 

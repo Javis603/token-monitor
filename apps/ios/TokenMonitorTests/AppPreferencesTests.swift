@@ -48,7 +48,7 @@ struct AppPreferencesTests {
             snapshotStore: SharedSnapshotStore(fileURL: nil)
         )
         #expect(OverviewSection.ordered(by: reloaded.overviewSectionOrder).map(\.id) ==
-            ["models", "summary", "limits", "trend", "tools", "devices"])
+            ["models", "summary", "limits", "trend", "tools", "devices", "sessions"])
         #expect(reloaded.hiddenOverviewSections == ["trend", "devices"])
     }
 
@@ -187,11 +187,34 @@ struct AppPreferencesTests {
     }
 
     @Test
+    func widgetConfigurationStatusKeepsFailureDistinctFromZero() async {
+        var fails = false
+        let status = SystemSurfaceStatus(configurationKinds: {
+            if fails { throw CocoaError(.fileReadUnknown) }
+            return [TokenMonitorWidgetSurface.liquidGlass.kind,
+                    TokenMonitorWidgetSurface.solid.kind, "UnrelatedWidget"]
+        })
+        #expect(status.widgetCount == nil)
+        await status.refresh()
+        #expect(status.widgetCount == 2)
+        fails = true
+        await status.refresh()
+        #expect(status.widgetCount == nil)
+        let empty = SystemSurfaceStatus(configurationKinds: { [] })
+        await empty.refresh()
+        #expect(empty.widgetCount == 0)
+    }
+
+    @Test
     func routesTokenMonitorLinksToNativeTabs() throws {
         #expect(AppTab(url: try #require(URL(string: "tokenmonitor://overview"))) == .overview)
         #expect(AppTab(url: try #require(URL(string: "tokenmonitor://limits"))) == .limits)
         #expect(AppTab(url: try #require(URL(string: "tokenmonitor://insights"))) == .insights)
         #expect(AppTab(url: try #require(URL(string: "tokenmonitor://settings"))) == .settings)
+        #expect(AppTab(url: try #require(URL(string: "tokenmonitor://sessions"))) == .sessions)
+        #expect(AppTab(url: try #require(URL(string: "tokenmonitor://overview/sessions"))) == .sessions)
+        #expect(AppTab.opensSessions(try #require(URL(string: "tokenmonitor://overview/sessions"))))
+        #expect(!AppTab.opensSessions(try #require(URL(string: "https://example.com/sessions"))))
         #expect(AppTab(url: try #require(URL(string: "https://example.com"))) == nil)
         #expect(AppTab(url: try #require(URL(string: "tokenmonitor://unknown"))) == nil)
     }

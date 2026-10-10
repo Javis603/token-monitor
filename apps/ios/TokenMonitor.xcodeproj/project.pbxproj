@@ -166,6 +166,13 @@
 		B7E3000000000000000000C4 /* WidgetLayoutRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E2000000000000000000FD /* WidgetLayoutRenderTests.swift */; };
 		B7E3000000000000000000C5 /* TokenMonitorWidgetEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000017 /* TokenMonitorWidgetEntry.swift */; };
 		B7E3000000000000000000C6 /* TokenMonitorWidgetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000019 /* TokenMonitorWidgetView.swift */; };
+		2F3699A92D8F87D546AC9E30 /* SystemSurfacesHint.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2FB6FA957BF0C10BED4EF91 /* SystemSurfacesHint.swift */; };
+		DCA200000000000000000002 /* DesktopNavigation.LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = DCA200000000000000000001 /* DesktopNavigation.LICENSE.txt */; };
+		330D4472102067CA84EE6C9B /* SessionsPreviewSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7D965AFB5707676A41710F0 /* SessionsPreviewSection.swift */; };
+		B49E3A4542FC38EDB963052F /* SessionPreviewPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61A7EAE336028644B8C8F380 /* SessionPreviewPresentation.swift */; };
+		9ACF7A8DE9C6A25D19C7C3A6 /* SystemSurfacesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F732C52CC7FA2C77E14DEBA /* SystemSurfacesSection.swift */; };
+		6D4406116C74ABF197EA2480 /* SystemSurfaceStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F0307C2F462793909A9EC8E /* SystemSurfaceStatus.swift */; };
+		FA9BD55CAA4232A5C0312D11 /* SystemSurfaceFittedPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6C1B422D40168D8CDB5A641 /* SystemSurfaceFittedPreview.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -348,6 +355,13 @@
 		B7E2000000000000000000FB /* WidgetActivityModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WidgetActivityModelTests.swift"; sourceTree = "<group>"; };
 		B7E2000000000000000000FC /* WidgetPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WidgetPresentationTests.swift"; sourceTree = "<group>"; };
 		B7E2000000000000000000FD /* WidgetLayoutRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WidgetLayoutRenderTests.swift"; sourceTree = "<group>"; };
+		E2FB6FA957BF0C10BED4EF91 /* SystemSurfacesHint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Overview/SystemSurfacesHint.swift"; sourceTree = SOURCE_ROOT; };
+		DCA200000000000000000001 /* DesktopNavigation.LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "TokenMonitor/DesktopNavigation.LICENSE.txt"; sourceTree = SOURCE_ROOT; };
+		C7D965AFB5707676A41710F0 /* SessionsPreviewSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Overview/SessionsPreviewSection.swift"; sourceTree = SOURCE_ROOT; };
+		61A7EAE336028644B8C8F380 /* SessionPreviewPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Overview/SessionPreviewPresentation.swift"; sourceTree = SOURCE_ROOT; };
+		5F732C52CC7FA2C77E14DEBA /* SystemSurfacesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Settings/SystemSurfacesSection.swift"; sourceTree = SOURCE_ROOT; };
+		6F0307C2F462793909A9EC8E /* SystemSurfaceStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Settings/SystemSurfaceStatus.swift"; sourceTree = SOURCE_ROOT; };
+		A6C1B422D40168D8CDB5A641 /* SystemSurfaceFittedPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Settings/SystemSurfaceFittedPreview.swift"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -641,6 +655,13 @@
 		F5BF7D03C052D45A3D1879C1 /* TokenMonitor */ = {
 			isa = PBXGroup;
 			children = (
+				A6C1B422D40168D8CDB5A641 /* SystemSurfaceFittedPreview.swift */,
+				6F0307C2F462793909A9EC8E /* SystemSurfaceStatus.swift */,
+				5F732C52CC7FA2C77E14DEBA /* SystemSurfacesSection.swift */,
+				61A7EAE336028644B8C8F380 /* SessionPreviewPresentation.swift */,
+				C7D965AFB5707676A41710F0 /* SessionsPreviewSection.swift */,
+				DCA200000000000000000001 /* DesktopNavigation.LICENSE.txt */,
+				E2FB6FA957BF0C10BED4EF91 /* SystemSurfacesHint.swift */,
 				1FCD73906B9103A0E6567659 /* BackgroundReviewGroupRow.swift */,
 				678AFAB952EF878C66E3E823 /* SessionStatusView.swift */,
 				EB9764CF2B94387551C10A9F /* SectionNavigationLink.swift */,
@@ -777,6 +798,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C8CFD16EF10BAD97C64842DC /* Assets.xcassets in Resources */,
+				DCA200000000000000000002 /* DesktopNavigation.LICENSE.txt in Resources */,
 				120000000000000000000036 /* Localizable.xcstrings in Resources */,
 				12000000000000000000000D /* SharedAssets.xcassets in Resources */,
 			);
@@ -846,6 +868,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FA9BD55CAA4232A5C0312D11 /* SystemSurfaceFittedPreview.swift in Sources */,
+				6D4406116C74ABF197EA2480 /* SystemSurfaceStatus.swift in Sources */,
+				9ACF7A8DE9C6A25D19C7C3A6 /* SystemSurfacesSection.swift in Sources */,
+				B49E3A4542FC38EDB963052F /* SessionPreviewPresentation.swift in Sources */,
+				330D4472102067CA84EE6C9B /* SessionsPreviewSection.swift in Sources */,
+				2F3699A92D8F87D546AC9E30 /* SystemSurfacesHint.swift in Sources */,
 				6A7BB656501C6E66014BA6F7 /* BackgroundReviewGroupRow.swift in Sources */,
 				CDEB662348E56C4660A79FEB /* SessionStatusView.swift in Sources */,
 				11ECF1ABF41F36286F771FC7 /* SectionNavigationLink.swift in Sources */,

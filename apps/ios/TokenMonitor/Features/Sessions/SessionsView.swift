@@ -5,6 +5,7 @@ struct SessionsView: View {
     @State private var period: UsagePeriodKey = .today
     @State private var query = ""
     @State private var page = 0
+    @State private var initializedPeriod = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var usage: UsagePeriod { store.displayPeriod(period) }
@@ -22,7 +23,6 @@ struct SessionsView: View {
             AppBackground()
             ScrollView {
                 VStack(alignment: .leading, spacing: DesignTokens.sectionSpacing) {
-                    periodPicker
                     if rows.isEmpty {
                         ContentUnavailableView {
                             Label(query.isEmpty ? "No sessions available" : "No matching sessions",
@@ -75,13 +75,15 @@ struct SessionsView: View {
             }
             .refreshable { await store.refresh() }
         }
-        .navigationTitle("Sessions")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarVisibility(.visible, for: .navigationBar)
+        .modifier(RootPageHeader("Sessions") { periodPicker })
         .searchable(text: $query, prompt: "Search sessions")
         .onChange(of: query) { page = 0 }
         .onChange(of: period) { page = 0 }
-        .onAppear { period = store.selectedPeriod == .allTime ? .today : store.selectedPeriod }
+        .onAppear {
+            guard !initializedPeriod else { return }
+            period = store.selectedPeriod == .allTime ? .today : store.selectedPeriod
+            initializedPeriod = true
+        }
     }
 
     private var periodPicker: some View {
@@ -91,9 +93,9 @@ struct SessionsView: View {
         }
         return Group {
             if dynamicTypeSize.isAccessibilitySize {
-                picker.pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
+                picker.pickerStyle(.menu).frame(minHeight: DesignTokens.controlHeight)
             } else {
-                picker.pickerStyle(.segmented)
+                picker.pickerStyle(.segmented).fixedSize(horizontal: true, vertical: false)
             }
         }
         .sensoryFeedback(.selection, trigger: period)

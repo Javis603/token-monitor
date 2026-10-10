@@ -26,7 +26,7 @@ struct SectionHeader<Accessory: View>: View {
     }
 }
 
-/// A shared compact title inside the system navigation bar for the four root tabs.
+/// A shared compact title inside the system navigation bar for the root tabs.
 struct RootPageHeader<Controls: View, BrandAccessory: View>: ViewModifier {
     let title: LocalizedStringKey
     let brandMark: String?
