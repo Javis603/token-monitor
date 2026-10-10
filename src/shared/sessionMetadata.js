@@ -346,11 +346,18 @@ function applySessionMetadata(periods, home, deps = {}) {
   for (const [periodName, period] of Object.entries(periods || {})) {
     for (const [key, session] of Object.entries(period?.sessions || {})) {
       const meta = metadata.get(key);
+      const scanTitleFallbacks = deps.scanTitleFallbacks;
+      if (scanTitleFallbacks && !scanTitleFallbacks.has(session)) scanTitleFallbacks.set(session, session.title);
+      const titleFallback = scanTitleFallbacks ? scanTitleFallbacks.get(session) : meta?.titleFallback;
       // Restore only the catalog title we replaced, leaving newer native labels.
-      if (meta?.invalidatedTitle && session.title === meta.invalidatedTitle) {
-        if (meta.titleFallback) session.title = meta.titleFallback;
+      // A fresh scan's original title is native evidence, regardless of whether
+      // its text equals the invalidated catalog title.
+      if ((scanTitleFallbacks && (meta?.invalidatedTitle || deps.invalidatedTitleKeys?.has(key)))
+        || (meta?.invalidatedTitle && session.title === meta.invalidatedTitle)
+        || (deps.invalidatedTitleKeys?.has(key) && session.title === deps.t3Titles?.[key])) {
+        if (titleFallback) session.title = titleFallback;
         else delete session.title;
-      } else if (deps.invalidatedTitleKeys?.has(key) && session.title === deps.t3Titles?.[key]) delete session.title;
+      }
       if (!meta) continue;
       if ((meta.t3Title || meta.catalogTitle) && !Object.prototype.hasOwnProperty.call(meta, 'titleFallback')) {
         meta.titleFallback = session.title;

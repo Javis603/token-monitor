@@ -925,6 +925,9 @@ async function collectUsageOnce(options) {
     && anchor.dateKey === localTodayKey(collectedAt)
     && canTargetTodayPartitions(anchor, targetClients)
   );
+  // Full-scan rows are native, even when their title matches an old override.
+  // Retain their fallback through the progressive metadata passes this tick.
+  if (!anchorUsed) localSessionMetadataDeps.scanTitleFallbacks = new WeakMap();
   // Catalog state remains useful when a full scan cannot reuse usage totals.
   // It supplies labels/provenance only; the scan still rebuilds every period.
   const sessionMetadataFallback = options.sessionMetadataFallback || (anchorUsed ? anchor : null);

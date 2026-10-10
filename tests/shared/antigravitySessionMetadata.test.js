@@ -1139,3 +1139,57 @@ for (const refreshMode of ['targeted', 'full-warm', 'full-cold']) {
     }
   });
 }
+
+
+for (const removal of ['deletion', 'blanking']) {
+  test(`Antigravity full scans preserve equal native titles after catalog ${removal}`, { skip: !sqlite }, async (t) => {
+    const store = summaryStore(t);
+    const ids = ['equal-native', 'different-native', 'no-native'];
+    for (const id of ids) store.put.run(id, 'Catalog title', '', null, null);
+    const shared = path.join(store.home, 'shared');
+    const oldShared = process.env.TOKEN_MONITOR_SHARED_DIR;
+    process.env.TOKEN_MONITOR_SHARED_DIR = shared;
+    let handle;
+    t.after(() => { handle?.stop(); if (oldShared === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR; else process.env.TOKEN_MONITOR_SHARED_DIR = oldShared; });
+    const updates = [];
+    const scans = [];
+    const options = {
+      clients: 'antigravity', homeDir: store.home, projectsEnabled: false, historyEnabled: false,
+      dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false, wslScanEnabled: false,
+      sessionActivityPolling: false, watchEnabled: false, intervalMs: 3600000, osInfo: {},
+      allTimeSince: '2024-01-01', sessionMetadataDeps: store.deps, runAntigravitySync: async () => {},
+      runTokscale: async ({ flags }) => {
+        scans.push(flags);
+        return {
+          entries: ids.map((sessionId) => ({ client: 'antigravity', sessionId, input: 10, output: 2, cost: 0.5 })),
+          sessions: [{ client: 'antigravity', sessionId: ids[0], title: 'Catalog title' },
+            { client: 'antigravity', sessionId: ids[1], title: 'Other native title' }]
+        };
+      },
+      onUpdate: (value) => updates.push(value)
+    };
+    try {
+      handle = startCollector(options);
+      for (let attempt = 0; attempt < 200 && !updates.length; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(updates.length, 1);
+      const initial = updates[0];
+      if (removal === 'deletion') store.db.exec('DELETE FROM conversation_summaries');
+      else store.db.exec("UPDATE conversation_summaries SET title = '', preview = ''");
+      for (let refresh = 0; refresh < 2; refresh += 1) {
+        scans.length = 0;
+        await handle.tick();
+        assert.deepEqual(scans, [['--today'], ['--month'], ['--since', '2024-01-01']]);
+        for (const period of ['today', 'month', 'allTime']) {
+          const current = updates.at(-1)[period];
+          assert.equal(current.sessions[`antigravity:${ids[0]}`].title, 'Catalog title');
+          assert.equal(current.sessions[`antigravity:${ids[1]}`].title, 'Other native title');
+          assert.equal(current.sessions[`antigravity:${ids[2]}`].title || '', '');
+          assert.equal(current.totalTokens, initial[period].totalTokens);
+          assert.equal(current.costUsd, initial[period].costUsd);
+        }
+        const saved = JSON.parse(fs.readFileSync(path.join(shared, 'collector-anchor.json'), 'utf8'));
+        for (const id of ids) assert.equal(saved.t3Titles[`antigravity:${id}`], null);
+      }
+    } finally { handle?.stop(); handle = null; }
+  });
+}
