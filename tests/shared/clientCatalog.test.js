@@ -21,6 +21,7 @@ const {
   CLIENT_IDS,
   DEFAULT_CLIENT_IDS,
   FORK_ONLY_CLIENT_IDS,
+  LOCALLY_PARSED_CLIENT_IDS,
   CLIENT_LABELS,
   KNOWN_CLIENT_LIST
 } = require('../../src/shared/clientCatalog');
@@ -44,6 +45,7 @@ test('resolved catalog entries expose boolean tracking flags', () => {
   for (const client of CLIENT_CATALOG) {
     assert.equal(typeof client.defaultTracked, 'boolean', `${client.id} defaultTracked`);
     assert.equal(typeof client.forkOnly, 'boolean', `${client.id} forkOnly`);
+    assert.equal(typeof client.locallyParsed, 'boolean', `${client.id} locallyParsed`);
   }
 });
 
@@ -51,7 +53,7 @@ test('derived KNOWN_CLIENTS keeps the established id order', () => {
   assert.equal(KNOWN_CLIENTS, CLIENT_IDS.join(','));
   assert.equal(
     KNOWN_CLIENTS,
-    'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,amp,droid,kimi,qwen,grok,copilot,pi,omp,zed,kilo,commandcode,mimo,muse,zcode,kiro,codebuddy,workbuddy,proma,qodercn,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin,fx,mcode'
+    'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,amp,droid,kimi,qwen,grok,copilot,gcmp,pi,omp,zed,kilo,commandcode,mimo,muse,zcode,kiro,codebuddy,workbuddy,proma,qodercn,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin,fx,mcode'
   );
 });
 
@@ -65,6 +67,10 @@ test('derived DEFAULT_CLIENTS keeps the existing default-tracked CSV', () => {
 
 test('derived FORK_ONLY_CLIENT_IDS lists exactly the clients the tokscale fork owns', () => {
   assert.deepEqual([...FORK_ONLY_CLIENT_IDS], ['proma', 'qodercn']);
+});
+
+test('derived LOCALLY_PARSED_CLIENT_IDS lists exactly the in-process adapters', () => {
+  assert.deepEqual([...LOCALLY_PARSED_CLIENT_IDS], ['gcmp']);
 });
 
 test('default-tracked clients are a subset of the catalog, in catalog order', () => {

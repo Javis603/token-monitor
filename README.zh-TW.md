@@ -26,7 +26,7 @@
 
 ## 什麼是 Token Monitor？
 
-一款桌面小工具，即時顯示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 43+ 種 AI 編程工具的 Token 用量與 AI 工具額度，具備即時多裝置同步與歷史使用趨勢功能，並支援依工具、裝置、模型、session 或專案分項顯示。
+一款桌面小工具，即時顯示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 44+ 種 AI 編程工具的 Token 用量與 AI 工具額度，具備即時多裝置同步與歷史使用趨勢功能，並支援依工具、裝置、模型、session 或專案分項顯示。
 
 ## 支援的工具
 
@@ -48,6 +48,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/`（`sessions/`、`logs/unified.jsonl`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`、`~/.copilot/`（`otel/`、`data.db`、`session-store.db`） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/gcmp.png" width="28" alt="AI Chat Models" /> | AI Chat Models | VS Code `globalStorage/vicanent.gcmp/usages/` 按小時 JSONL（AI Chat Models 擴充功能的 Copilot Chat 用量；可選開啟） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
@@ -94,11 +95,9 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 
 - Custom 會從一個 GET 餘額端點映射數值 JSON 欄位；僅相容 OpenAI 或 Anthropic API 並不足夠。
 
-#### Qoder CN（本機介接）
+- Qoder CN 的 Token 用量來自應用程式本機資料，而非 API —— 在 Settings → tools 中啟用（選用，預設關閉）。目前版本使用 Qoder 設定目錄內的 `projects` JSONL 記錄（通常為 `~/.qoder-cn/projects`），舊版本則使用 SQLite；Token Monitor 內建的 tokscale 會同時讀取兩者。JSONL 路徑依序使用 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`、預設路徑；舊資料庫可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆寫。詳見 [Qoder 資料來源說明](docs/providers/qodercn.md)。這是進階本機整合，但兩種格式都不需要額外執行環境。無法讀取的來源會保留上一次完整讀取的資料。舊資料庫的 session 只記錄專案名稱而非路徑，因此不會顯示所屬專案。只統計有實際 Token 欄位的 JSONL 記錄；目前第一方方案模型可能只有 credits 與 context 使用比例，欠缺可靠的每 session context window，因此不會猜測 Token。Credits 仍會顯示於 AI Tool Limits，含實際 Token 的 BYOK／自訂模型會正常統計。
 
-Qoder CN 的 Token 用量來自應用程式本機資料，而非 API —— 在 Settings → tools 中啟用（選用，預設關閉）。目前版本使用 Qoder 設定目錄內的 `projects` JSONL 記錄（通常為 `~/.qoder-cn/projects`），舊版本則使用 SQLite；Token Monitor 內建的 tokscale 會同時讀取兩者。JSONL 路徑依序使用 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`、預設路徑；舊資料庫可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆寫。詳見 [Qoder 資料來源說明](docs/providers/qodercn.md)。
-
-這是進階本機整合，但兩種格式都不需要額外執行環境。無法讀取的來源會保留上一次完整讀取的資料。舊資料庫的 session 只記錄專案名稱而非路徑，因此不會顯示所屬專案。只統計有實際 Token 欄位的 JSONL 記錄；目前第一方方案模型可能只有 credits 與 context 使用比例，欠缺可靠的每 session context window，因此不會猜測 Token。Credits 仍會顯示於 AI Tool Limits，含實際 Token 的 BYOK／自訂模型會正常統計。
+- AI Chat Models（`vicanent.gcmp`）的 Token 用量來自該擴充功能在 VS Code globalStorage 下按小時寫入的 usage JSONL —— 在 Settings → tools 中啟用（選用，預設關閉）。僅統計最終 `completed` 狀態的記錄，忽略 estimated 佔位行，並直接採用其記錄的快取 token 與成本估算。它記錄的每個請求同樣會出現在 VS Code 自己的 `workspaceStorage/*/chatSessions/` 中（即 GitHub Copilot 一行的資料來源）。兩者請只啟用一個，否則同一批請求會被重複計算。
 </details>
 
 ## 介面展示
@@ -131,7 +130,7 @@ Qoder CN 的 Token 用量來自應用程式本機資料，而非 API —— 在 
 
 ### 用量追蹤
 
-- **即時 Token 追蹤**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 35+ 種 AI 工具，每輪對話後 UI 在數秒內更新（完整清單見上方表格）
+- **即時 Token 追蹤**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 36+ 種 AI 工具，每輪對話後 UI 在數秒內更新（完整清單見上方表格）
 - **即時 Token 速率**：可選顯示的即時讀數，以 `tok/s` 顯示生成速度或以 `tok/min` 顯示總消耗
 - **單一 session 明細**：點進某個 session，可看每則提問的 Token 消耗，並展開查看每次回覆的 Token 拆分與用到的工具（開啟時才即時讀取本機 transcript 或資料庫，絕不同步）
 - **快取命中統計**：點擊任何工具或模型，展開查看輸入 Token（快取命中與未命中）、輸出 Token 的詳細分類及命中率百分比

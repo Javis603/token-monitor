@@ -26,7 +26,7 @@
 
 ## O que é o Token Monitor?
 
-Um widget de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 43+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto.
+Um widget de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 44+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto.
 
 ## Ferramentas suportadas
 
@@ -48,6 +48,7 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 | <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/` (`sessions/`, `logs/unified.jsonl`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`, `~/.copilot/` (`otel/`, `data.db`, `session-store.db`) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/gcmp.png" width="28" alt="AI Chat Models" /> | AI Chat Models | VS Code `globalStorage/vicanent.gcmp/usages/` em JSONL por hora (Copilot Chat pela extensão AI Chat Models; opt-in) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
@@ -94,6 +95,7 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 
 - O mapeamento personalizado associa campos JSON numéricos de um único endpoint GET de saldo; compatibilidade apenas com OpenAI ou Anthropic não é suficiente.
 - O Qoder CN vem desativado por padrão; ative-o em Configurações → ferramentas. As sessões atuais são arquivos JSONL em `~/.qoder-cn/projects` (`TOKEN_MONITOR_QODER_CN_PROJECTS_PATH` e, depois, `QODERCN_CONFIG_DIR/projects`); versões mais antigas usavam um banco SQLite, sobrescrevível com `TOKEN_MONITOR_QODER_CN_DB_PATH`. Uma fonte ilegível mantém a última leitura completa. Sessões do banco legado registram apenas o nome do projeto, então aparecem sem projeto. Linhas JSONL faturadas por plano que informam créditos mas nenhuma contagem de tokens são omitidas dos totais de tokens; esses créditos permanecem nos Limites de Ferramentas de IA, e as linhas BYOK com tokens medidos são contadas. Veja as [notas da origem do Qoder](docs/providers/qodercn.md).
+- O AI Chat Models (`vicanent.gcmp`) lê o uso de tokens do JSONL por hora gravado pela extensão em `globalStorage` do VS Code — ative-o em Configurações → tools (opt-in, desativado por padrão). Apenas registros com status final `completed` são contados; linhas estimadas são ignoradas, e os tokens em cache e as estimativas de custo registrados são usados diretamente. Cada requisição registrada também aparece no `workspaceStorage/*/chatSessions/` do próprio VS Code, que a linha do GitHub Copilot conta. Ative um ou outro, nunca ambos, ou as mesmas requisições serão contadas duas vezes.
 </details>
 
 ## Vitrine
@@ -126,7 +128,7 @@ A maioria dos monitores de uso só é útil na máquina em que roda. O Token Mon
 
 ### Acompanhamento de uso
 
-- **Rastreamento de tokens ao vivo** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode e 35+ ferramentas de IA, com a interface atualizando poucos segundos após cada turno (lista completa na tabela acima)
+- **Rastreamento de tokens ao vivo** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode e 36+ ferramentas de IA, com a interface atualizando poucos segundos após cada turno (lista completa na tabela acima)
 - **Taxa de tokens ao vivo** — uma leitura opcional da velocidade de geração em `tok/s` ou do consumo total em `tok/min`
 - **Detalhes por sessão** — abra uma sessão para ver os tokens por prompt, expansível até a divisão exata de tokens de cada resposta e as ferramentas usadas (lido sob demanda de transcrições ou bancos locais, nunca sincronizado)
 - **Estatísticas de acerto de cache** — clique em qualquer ferramenta ou modelo para expandir um detalhamento completo dos tokens de entrada (acerto no cache vs. fora do cache), tokens de saída e as porcentagens de acerto
