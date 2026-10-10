@@ -4027,7 +4027,7 @@ function limitDetailTooltipShouldHoldRender() {
 }
 
 function sessionTooltipShouldHoldRender() {
-  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
+  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .session-group-run .is-hover-reading, .session-group-run:focus-within, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
 }
 
 function flushPendingLimitDetailTooltipRender() {
@@ -13054,10 +13054,10 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
   render: renderStatsUpdate
 });
 // Pulled once up front, then only while something on screen reads it: the
-// archived count in Settings, or the TOTAL session and project lists.
+// archived count in Settings, bot identity in every Sessions period, or TOTAL projects.
 function allTimeSessionsNeeded() {
   if (!allTimeSessions.loaded() || isSettingsPanelOpen()) return true;
-  return state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');
+  return state.breakdown === 'session' || (state.period === 'allTime' && state.breakdown === 'project');
 }
 const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   fetchSessions: (snapshotId) => window.tokenMonitor.getAllTimeSessions(snapshotId),

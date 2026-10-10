@@ -77,3 +77,56 @@ test('stats repaint refreshes the open group by identity and retires a removed g
   assert.equal(closed, true);
   assert.equal(state.openSession, null);
 });
+
+test('historical bot evidence refreshes in Today and Month without opening TOTAL', async () => {
+  const { createAllTimeSessionsLoader } = require('../../src/electron/renderer/allTimeSessions');
+  const state = { breakdown: 'session', period: 'today', stats: { snapshot: { id: 1, source: 'local' } } };
+  let history = {};
+  const calls = [];
+  let loader;
+  const start = source.indexOf('function allTimeSessionsNeeded()');
+  const end = source.indexOf('const allTimeSessions =', start);
+  const needed = Function('state', 'allTimeSessions', 'isSettingsPanelOpen',
+    `${source.slice(start, end)}; return allTimeSessionsNeeded;`)(state, { loaded: () => loader.loaded() }, () => false);
+  loader = createAllTimeSessionsLoader({ currentSnapshot: () => state.stats.snapshot, needed,
+    fetchSessions: id => { calls.push(id); return history; },
+    onLoaded: () => { state.stats = loader.attach(state.stats); } });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  loader.ensure();
+  await settle();
+  assert.equal(loader.loaded(), true, 'the initial empty history is already loaded');
+  const id = 'uuid-bot';
+  const chat = { client: 'cursor', sessionId: id, totalTokens: 10, costUsd: 1, models: { 'claude-opus-5-5-medium': 10 } };
+  const current = { sessions: { [`cursor:${id}`]: chat } };
+  history = { [`cursor:${id}`]: { ...chat, models: { 'grok-bot-default': 20 } } };
+  for (const selected of ['today', 'month']) {
+    state.period = selected;
+    state.stats = loader.attach({ snapshot: { id: calls.length + 1, source: 'local' },
+      periods: { today: current, month: current, allTime: {} } });
+    loader.invalidate();
+    loader.ensure();
+    await settle();
+    const rows = groupSessionRows(sessionRowsForPeriod(current, { sourcePeriods: state.stats.periods }));
+    assert.equal(rows[0].sessionGroup, 'cursor-grok-bot');
+    assert.equal(rows[0].value, 10);
+    assert.equal(rows[0].cost, 1);
+    assert.equal(state.period, selected, 'no navigation was needed');
+  }
+  assert.deepEqual(calls, [1, 2, 3]);
+  state.breakdown = 'tool';
+  assert.equal(needed(), false, 'unrelated views do not refresh history');
+  state.period = 'allTime';
+  state.breakdown = 'project';
+  assert.equal(needed(), true);
+});
+
+test('group hover reading and keyboard focus hold the refresh for every detail line', () => {
+  const start = source.indexOf('function sessionTooltipShouldHoldRender()');
+  const end = source.indexOf('function flushPendingLimitDetailTooltipRender', start);
+  for (const selector of ['.session-group-run .is-hover-reading', '.session-group-run:focus-within']) {
+    const held = Function('document', `${source.slice(start, end)}; return sessionTooltipShouldHoldRender();`)({
+      querySelector: selectors => selectors.split(', ').includes(selector) ? {} : null
+    });
+    assert.equal(held, true, selector);
+  }
+});
