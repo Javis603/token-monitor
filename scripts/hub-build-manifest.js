@@ -17,6 +17,7 @@ const WORKER_SHARED_MODULES = Object.freeze([
   'limits/core.js',
   'limits/windowLabels.js',
   'liveActivity.js',
+  'sessionLive.js',
   'limits/balanceDisplay.js',
   'compactTokens.js',
   'usage.js',

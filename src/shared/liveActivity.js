@@ -1,22 +1,29 @@
 'use strict';
 
-// Live Activity content state v2: the Hub push builder emits the structured
-// payload the iOS extension decodes into TokenMonitorActivityAttributes
-// .ContentState — no pre-formatted strings cross the wire; the device renders
-// and localises. Keep the field names identical to the Swift struct.
+// Live Activity content state v3: the Hub push builder emits data only — usage,
+// quota and running agents — and the iOS widget extension owns every
+// presentation choice (layout, currency, language), reading it from the app
+// group. Nothing presentational crosses the wire, so a new layout option never
+// needs a Hub change. Keep the field names identical to the Swift
+// TokenMonitorActivityAttributes.ContentState.
 
 const { creditsMeterPercent } = require('./limits/balanceDisplay');
 const { LIMIT_PROVIDER_IDS } = require('./limits/providers');
 const { limitWindowLabel } = require('./limits/windowLabels');
+const { RUNNING_WINDOW_MS, sessionActivityState } = require('./sessionLive');
 
 const DATE_REFERENCE_SECONDS = 978307200;
 const STALE_AGE_SECONDS = 15 * 60;
-const VALID_CURRENCIES = new Set(['USD', 'TWD', 'HKD', 'CNY']);
-const VALID_LANGUAGES = new Set(['auto', 'en', 'zh-TW', 'zh-CN', 'ja', 'ko']);
-const VALID_PERIODS = new Set(['today', 'month', 'allTime']);
-const VALID_COMPACT_LEADING = new Set(['mark', 'ring', 'tokens', 'cost']);
-const VALID_COMPACT_TRAILING = new Set(['percent', 'reset', 'tokens', 'cost', 'ring']);
-const VALID_STYLES = new Set(['quota', 'usage', 'combined']);
+// ActivityKit caps the whole push at 4 KB, so the quota list is bounded and
+// null fields are omitted: three ranked records plus whatever the device's
+// layout names explicitly.
+const RANKED_QUOTAS = 3;
+const MAX_QUOTAS = 8;
+const MAX_WINDOWS = 3;
+const MAX_ACCOUNTS_PER_PROVIDER = 3;
+const MAX_AGENT_CLIENTS = 3;
+const MAX_HIDDEN_PROVIDERS = 64;
+const MAX_REFERENCES = 8;
 
 function asNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -41,20 +48,6 @@ function normalizedProvider(value) {
   return provider || null;
 }
 
-function normalizedOption(value, valid, fallback) {
-  const option = normalizedString(value, 32);
-  return valid.has(option) ? option : fallback;
-}
-
-function languageLocale(languageCode, locale) {
-  if (languageCode === 'en') return 'en';
-  if (languageCode === 'zh-TW') return 'zh-Hant';
-  if (languageCode === 'zh-CN') return 'zh-Hans';
-  if (languageCode === 'ja') return 'ja';
-  if (languageCode === 'ko') return 'ko';
-  return normalizedString(locale, 64) || 'en';
-}
-
 function normalizeLiveActivityRegistration(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('invalid_live_activity_registration');
@@ -68,28 +61,20 @@ function normalizeLiveActivityRegistration(input) {
   const raw = input.preferences && typeof input.preferences === 'object'
     ? input.preferences
     : {};
-  const languageCode = VALID_LANGUAGES.has(raw.languageCode)
-    ? raw.languageCode
-    : 'auto';
-  const currencyCode = VALID_CURRENCIES.has(raw.currencyCode)
-    ? raw.currencyCode
-    : 'USD';
+  const ids = (value, max, normalize) => [...new Set((Array.isArray(value) ? value : [])
+    .filter((id) => typeof id === 'string').map(normalize).filter(Boolean))].slice(0, max);
 
   return {
     activityID,
     token,
-    locale: languageLocale(languageCode, input.locale),
     registeredAt: new Date().toISOString(),
     preferences: {
       liveActivityEnabled: raw.liveActivityEnabled !== false,
-      livePeriod: VALID_PERIODS.has(raw.livePeriod) ? raw.livePeriod : 'today',
-      liveProviderID: normalizedProvider(raw.liveProviderID),
-      liveCompactLeading: normalizedOption(raw.liveCompactLeading, VALID_COMPACT_LEADING, 'mark'),
-      liveCompactTrailing: normalizedOption(raw.liveCompactTrailing, VALID_COMPACT_TRAILING, 'percent'),
-      liveExpandedStyle: normalizedOption(raw.liveExpandedStyle, VALID_STYLES, 'quota'),
-      liveLockScreenStyle: normalizedOption(raw.liveLockScreenStyle, VALID_STYLES, 'combined'),
-      currencyCode,
-      languageCode
+      hiddenLimitProviders: ids(raw.hiddenLimitProviders, MAX_HIDDEN_PROVIDERS, normalizedProvider),
+      // Providers and accounts the device layout names explicitly; the Hub
+      // includes them beside the ranked records so every slot can resolve.
+      providerIDs: ids(raw.providerIDs, MAX_REFERENCES, normalizedProvider),
+      accountKeys: ids(raw.accountKeys, MAX_REFERENCES, (key) => normalizedString(key, 128))
     }
   };
 }
@@ -134,47 +119,52 @@ function catalogIndex(provider) {
   return index === -1 ? LIMIT_PROVIDER_IDS.length : index;
 }
 
-// Identical to the Swift auto pick: healthy (status ok / absent) non-stale
-// providers, the lowest canonical remaining % wins; ties and empty pools fall
-// back to the default catalog order.
-function selectLiveActivityProvider(stats, providerID) {
-  const providers = Array.isArray(stats?.limits?.providers)
-    ? stats.limits.providers
-    : [];
-  if (!providers.length) return null;
-  if (providerID) {
-    const matches = providers.filter((provider) => (
-      normalizedProvider(provider?.provider) === providerID
-    ));
-    if (!matches.length) return null;
-    return matches.reduce((best, provider) => {
-      if (!best) return provider;
-      const left = lowestRemaining(provider);
-      const right = lowestRemaining(best);
-      if (left === null) return best;
-      if (right === null || left < right) return provider;
-      return best;
-    }, null);
+function compareRemaining(left, right) {
+  const leftRemaining = lowestRemaining(left);
+  const rightRemaining = lowestRemaining(right);
+  if (leftRemaining !== null && rightRemaining !== null && leftRemaining !== rightRemaining) {
+    return leftRemaining - rightRemaining;
   }
-  const eligible = providers.filter((provider) => (
-    providerStatus(provider) === 'ok' && provider?.stale !== true
-  ));
-  const pool = eligible.length ? eligible : providers;
-  return pool.reduce((best, provider) => {
-    if (!best) return provider;
-    const left = lowestRemaining(provider);
-    const right = lowestRemaining(best);
-    if (left === null) {
-      // No candidate has a meter yet — catalog order decides.
-      return right === null && catalogIndex(provider) < catalogIndex(best)
-        ? provider
-        : best;
-    }
-    if (right === null || left < right) return provider;
-    return left === right && catalogIndex(provider) < catalogIndex(best)
-      ? provider
-      : best;
-  }, null);
+  if (leftRemaining !== null && rightRemaining === null) return -1;
+  if (leftRemaining === null && rightRemaining !== null) return 1;
+  return catalogIndex(left) - catalogIndex(right);
+}
+
+// Identical to the Swift ranking: healthy (status ok / absent) non-stale
+// providers first, lowest canonical remaining % wins, ties and meterless rows
+// fall back to the default catalog order.
+function rankedProviders(stats, preferences) {
+  const hidden = new Set(preferences?.hiddenLimitProviders || []);
+  const providers = (Array.isArray(stats?.limits?.providers) ? stats.limits.providers : [])
+    .filter((provider) => {
+      const id = normalizedProvider(provider?.provider);
+      return id && !hidden.has(id);
+    });
+  const healthy = (provider) => providerStatus(provider) === 'ok' && provider?.stale !== true;
+  return [
+    ...providers.filter(healthy).sort(compareRemaining),
+    ...providers.filter((provider) => !healthy(provider)).sort(compareRemaining)
+  ];
+}
+
+// The records a push carries: the three most constrained, then each named
+// provider's lowest accounts, named accounts and the recent client's records.
+function liveActivityProviders(stats, preferences, recentClient) {
+  const ranked = rankedProviders(stats, preferences);
+  const selected = ranked.slice(0, RANKED_QUOTAS);
+  const add = (provider) => {
+    if (provider && !selected.includes(provider) && selected.length < MAX_QUOTAS) selected.push(provider);
+  };
+  const named = [...(preferences?.providerIDs || []), recentClient].filter(Boolean);
+  for (const id of named) {
+    ranked.filter((provider) => normalizedProvider(provider.provider) === id)
+      .slice(0, MAX_ACCOUNTS_PER_PROVIDER)
+      .forEach(add);
+  }
+  for (const key of preferences?.accountKeys || []) {
+    add(ranked.find((provider) => normalizedString(provider.accountKey, 128) === key));
+  }
+  return selected;
 }
 
 function sourceTimestamp(value, nowMs) {
@@ -221,6 +211,17 @@ function liveActivityStaleDate(contentState, timestamp) {
   return contentState?.sourceStale === true ? Math.min(deadline, timestamp) : deadline;
 }
 
+function timestampMs(value) {
+  const parsed = Date.parse(typeof value === 'string' ? value : '');
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+// Drops null and empty fields so the push stays well inside 4 KB; the Swift
+// decoder treats a missing optional as nil.
+function compact(object) {
+  return Object.fromEntries(Object.entries(object).filter(([, value]) => value !== null && value !== undefined && value !== ''));
+}
+
 function quotaWindow(provider, providerID, window) {
   const isCredits = window?.metric === 'credits';
   const credits = isCredits
@@ -230,59 +231,131 @@ function quotaWindow(provider, providerID, window) {
     ? normalizedString(window?.currency, 8).toUpperCase()
       || normalizedString(provider?.balance?.currency, 8).toUpperCase() || null
     : null;
-  return {
+  const windowMinutes = asNumber(window?.windowMinutes);
+  return compact({
     label: limitWindowLabel(providerID, window, 'Quota'),
+    // The kind lets a slot ask for "the weekly window" rather than a position.
+    kind: normalizedString(window?.kind, 24).toLowerCase() || null,
     remainingPercent: providerWindowRemaining(provider, window),
     resetsAt: appleSeconds(sourceTimestamp(window?.resetsAt, Number.MAX_SAFE_INTEGER)),
+    windowMinutes: windowMinutes !== null && windowMinutes > 0 ? windowMinutes : null,
     creditsAmount: credits,
     creditsCurrency: currency
-  };
+  });
 }
 
-function liveActivityQuota(stats, preferences, nowMs) {
-  const provider = selectLiveActivityProvider(stats, preferences.liveProviderID);
-  if (!provider) return null;
+function liveActivityQuota(provider, nowMs) {
   const providerID = normalizedProvider(provider.provider);
-  return {
+  return compact({
     providerID,
+    accountKey: normalizedString(provider.accountKey, 128) || null,
     planLabel: normalizedString(provider.planLabel) || normalizedString(provider.accountLabel) || null,
     updatedAt: appleSeconds(sourceTimestamp(provider.updatedAt, nowMs)),
     stale: provider.stale === true || null,
-    windows: canonicalWindows(provider).slice(0, 2)
+    windows: canonicalWindows(provider).slice(0, MAX_WINDOWS)
       .map((window) => quotaWindow(provider, providerID, window))
-  };
+  });
 }
 
-function layoutFor(preferences) {
-  return {
-    compactLeading: normalizedOption(preferences.liveCompactLeading, VALID_COMPACT_LEADING, 'mark'),
-    compactTrailing: normalizedOption(preferences.liveCompactTrailing, VALID_COMPACT_TRAILING, 'percent'),
-    expanded: normalizedOption(preferences.liveExpandedStyle, VALID_STYLES, 'quota'),
-    lockScreen: normalizedOption(preferences.liveLockScreenStyle, VALID_STYLES, 'combined'),
-    currencyCode: VALID_CURRENCIES.has(preferences.currencyCode)
-      ? preferences.currencyCode
-      : 'USD',
-    languageCode: VALID_LANGUAGES.has(preferences.languageCode)
-      ? preferences.languageCode
-      : 'auto'
-  };
+// Mirrors UsagePeriod.averageOutputTokensPerSecond: only output that carries
+// its own duration counts, capped at the period's output.
+function outputTokensPerSecond(period) {
+  if (period?.capabilities?.throughput === false) return null;
+  const timedOutput = asNumber(period?.timedOutputTokens);
+  const durationMs = asNumber(period?.timedDurationMs);
+  if (timedOutput === null || timedOutput <= 0 || durationMs === null || durationMs <= 0) return null;
+  const output = asNumber(period?.outputTokens);
+  const speed = Math.min(timedOutput, output !== null && output >= 0 ? output : timedOutput) / (durationMs / 1000);
+  return Number.isFinite(speed) && speed > 0 ? Math.round(speed * 10) / 10 : null;
+}
+
+function periodUsage(period) {
+  return compact({
+    tokens: asNumber(period?.totalTokens),
+    costUSD: asNumber(period?.costUsd),
+    outputTPS: outputTokensPerSecond(period)
+  });
+}
+
+function sessionEntries(stats) {
+  const seen = new Set();
+  const entries = [];
+  for (const period of ['today', 'month']) {
+    const sessions = stats?.periods?.[period]?.sessions;
+    if (!sessions || typeof sessions !== 'object') continue;
+    for (const [key, session] of Object.entries(sessions)) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entries.push(session);
+    }
+  }
+  return entries;
+}
+
+// The most recently used client — the desktop's "most recently active tool" —
+// with its own share of each period, for slots scoped to that tool.
+function liveRecent(stats) {
+  let client = null;
+  let latest = -Infinity;
+  for (const session of sessionEntries(stats)) {
+    const id = normalizedProvider(session?.client);
+    const at = timestampMs(session?.lastUsedAt);
+    if (id && at !== null && at > latest) {
+      latest = at;
+      client = id;
+    }
+  }
+  if (!client) return null;
+  const share = (period) => compact({
+    tokens: asNumber(stats?.periods?.[period]?.clients?.[client]),
+    costUSD: asNumber(stats?.periods?.[period]?.clientCosts?.[client])
+  });
+  return { client, today: share('today'), month: share('month') };
+}
+
+function runningSessions(stats, nowMs) {
+  return sessionEntries(stats)
+    .filter((session) => sessionActivityState(session, nowMs) === 'running')
+    .map((session) => ({ client: normalizedProvider(session?.client), lastMs: timestampMs(session?.lastUsedAt) }))
+    .sort((left, right) => right.lastMs - left.lastMs);
+}
+
+// Running agents, most recent first. Clients are distinct ids for the marks;
+// `running` counts sessions, so two Claude sessions read as 2.
+function liveAgents(stats, nowMs) {
+  const running = runningSessions(stats, nowMs);
+  const clients = [...new Set(running.map((session) => session.client).filter(Boolean))]
+    .slice(0, MAX_AGENT_CLIENTS);
+  return { running: running.length, clients };
+}
+
+// When the running count next changes on its own. A session that goes quiet
+// writes nothing, so no ingest would trigger the push that clears it.
+function liveActivityRefreshAt(stats, nowMs = Date.now()) {
+  const expiries = runningSessions(stats, nowMs)
+    .map((session) => session.lastMs + RUNNING_WINDOW_MS + 1)
+    .filter((expiry) => expiry > nowMs);
+  return expiries.length ? Math.min(...expiries) : null;
 }
 
 function buildLiveActivityContentState(stats, registration, nowMs = Date.now()) {
   const preferences = registration?.preferences || {};
-  const period = VALID_PERIODS.has(preferences.livePeriod) ? preferences.livePeriod : 'today';
-  const usage = stats?.periods?.[period] || {};
-  return {
+  const recent = liveRecent(stats);
+  return compact({
     ...activitySource(stats, nowMs),
-    period,
-    tokens: asNumber(usage.totalTokens),
-    costUSD: asNumber(usage.costUsd),
-    quota: liveActivityQuota(stats, preferences, nowMs),
-    layout: layoutFor(preferences)
-  };
+    usage: {
+      today: periodUsage(stats?.periods?.today),
+      month: periodUsage(stats?.periods?.month)
+    },
+    recent,
+    quotas: liveActivityProviders(stats, preferences, recent?.client)
+      .map((provider) => liveActivityQuota(provider, nowMs)),
+    agents: liveAgents(stats, nowMs)
+  });
 }
 
 module.exports = {
+  liveActivityRefreshAt,
   liveActivityStaleDate,
   buildLiveActivityContentState,
   normalizeLiveActivityRegistration

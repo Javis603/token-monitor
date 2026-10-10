@@ -31,7 +31,11 @@ const {
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
 
-const { buildLiveActivityContentState, normalizeLiveActivityRegistration } = require('../shared/liveActivity');
+const {
+  buildLiveActivityContentState,
+  liveActivityRefreshAt,
+  normalizeLiveActivityRegistration
+} = require('../shared/liveActivity');
 const { createLiveActivityPushClientFromEnv } = require('./liveActivityPush');
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
@@ -119,6 +123,7 @@ function createHub({
   let broadcastTimer = null;
   let lastSseContentKey = '';
   let liveActivityPushTimer = null;
+  let liveActivityRefreshTimer = null;
   let liveActivityPushPromise = null;
   let liveActivityPushPending = false;
   let lastLiveActivityPushAt = 0;
@@ -196,13 +201,29 @@ function createHub({
       liveActivityPushPending = false;
       lastLiveActivityPushAt = Date.now();
       // Build at dispatch, not ingest time: a coalesced batch must use latest data.
-      liveActivityPushPromise = pushLiveActivityStats(getStats())
+      const stats = getStats();
+      scheduleLiveActivityRefresh(stats);
+      liveActivityPushPromise = pushLiveActivityStats(stats)
         .catch((error) => logger.warn?.(`ActivityKit push update failed: ${error.message}`))
         .finally(() => {
           liveActivityPushPromise = null;
           if (liveActivityPushPending) scheduleLiveActivityPush();
         });
     }, waitMs);
+  }
+
+  // A running session that goes quiet changes the island's agent count without
+  // any ingest to trigger a push, so wake once at the earliest expiry.
+  function scheduleLiveActivityRefresh(stats) {
+    if (liveActivityRefreshTimer) clearTimeout(liveActivityRefreshTimer);
+    liveActivityRefreshTimer = null;
+    const refreshAt = liveActivityRefreshAt(stats);
+    if (refreshAt === null) return;
+    liveActivityRefreshTimer = setTimeout(() => {
+      liveActivityRefreshTimer = null;
+      scheduleLiveActivityPush();
+    }, Math.max(0, refreshAt - Date.now()));
+    liveActivityRefreshTimer.unref?.();
   }
 
   async function pushLiveActivityStats(stats) {
@@ -605,6 +626,8 @@ function createHub({
     liveActivityPushPending = false;
     if (liveActivityPushTimer) clearTimeout(liveActivityPushTimer);
     liveActivityPushTimer = null;
+    if (liveActivityRefreshTimer) clearTimeout(liveActivityRefreshTimer);
+    liveActivityRefreshTimer = null;
     return new Promise((resolve) => {
       if (broadcastTimer) clearTimeout(broadcastTimer);
       broadcastTimer = null;

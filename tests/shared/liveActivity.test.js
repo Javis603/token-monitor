@@ -10,63 +10,40 @@ const {
 
 const basePreferences = {
   liveActivityEnabled: true,
-  livePeriod: 'today',
-  liveProviderID: 'codex',
-  liveCompactLeading: 'mark',
-  liveCompactTrailing: 'percent',
-  liveExpandedStyle: 'quota',
-  liveLockScreenStyle: 'combined',
-  currencyCode: 'USD',
-  languageCode: 'en'
+  hiddenLimitProviders: [],
+  providerIDs: [],
+  accountKeys: []
 };
 
-test('normalizes a Live Activity registration without retaining arbitrary preferences', () => {
+test('normalizes a Live Activity registration without retaining presentation or arbitrary preferences', () => {
   const registration = normalizeLiveActivityRegistration({
     activityID: 'activity-1',
     token: 'A'.repeat(64),
     locale: 'en-US',
     preferences: {
       ...basePreferences,
-      livePrimaryMetric: 'limit',
-      liveIconProviderID: 'codex',
+      hiddenLimitProviders: ['Cursor', 'cursor', '', 42, 'opencode'],
+      providerIDs: ['Claude', 'claude'],
+      accountKeys: [' key-1 ', 7],
+      liveProviderID: 'codex',
+      liveCompactLeading: 'ring',
+      languageCode: 'en',
       unexpected: 'should not persist'
     }
   });
 
   assert.equal(registration.activityID, 'activity-1');
   assert.equal(registration.token, 'a'.repeat(64));
-  assert.equal(registration.locale, 'en');
-  assert.deepEqual(registration.preferences, basePreferences);
-});
-
-test('invalid layout options fall back to the documented defaults', () => {
-  const registration = normalizeLiveActivityRegistration({
-    activityID: 'activity-1',
-    token: 'a'.repeat(64),
-    preferences: {
-      liveCompactLeading: 'bogus',
-      liveCompactTrailing: 'primary',
-      liveExpandedStyle: 'big',
-      liveLockScreenStyle: 'everything',
-      livePeriod: 'week',
-      currencyCode: 'JPY',
-      languageCode: 'fr'
-    }
-  });
+  assert.equal(registration.locale, undefined);
   assert.deepEqual(registration.preferences, {
-    liveActivityEnabled: true,
-    livePeriod: 'today',
-    liveProviderID: null,
-    liveCompactLeading: 'mark',
-    liveCompactTrailing: 'percent',
-    liveExpandedStyle: 'quota',
-    liveLockScreenStyle: 'combined',
-    currencyCode: 'USD',
-    languageCode: 'auto'
+    ...basePreferences,
+    hiddenLimitProviders: ['cursor', 'opencode'],
+    providerIDs: ['claude'],
+    accountKeys: ['key-1']
   });
 });
 
-test('builds a structured ContentState v2 — numbers, not formatted strings', () => {
+test('builds a compact ContentState v4 — data only, null fields omitted', () => {
   const stats = {
     updatedAt: '2026-08-01T00:00:00.000Z',
     periods: {
@@ -78,7 +55,7 @@ test('builds a structured ContentState v2 — numbers, not formatted strings', (
         status: 'ok',
         accountLabel: 'Plus',
         updatedAt: '2026-08-01T00:00:00.000Z',
-        windows: [{ kind: 'weekly', usedPercent: 25, remainingPercent: 75 }]
+        windows: [{ kind: 'weekly', usedPercent: 25, remainingPercent: 75, windowMinutes: 10080 }]
       }]
     }
   };
@@ -88,7 +65,6 @@ test('builds a structured ContentState v2 — numbers, not formatted strings', (
     normalizeLiveActivityRegistration({
       activityID: 'activity-1',
       token: 'a'.repeat(64),
-      locale: 'en-US',
       preferences: basePreferences
     }),
     Date.parse('2026-08-01T00:00:00.000Z')
@@ -97,30 +73,22 @@ test('builds a structured ContentState v2 — numbers, not formatted strings', (
   assert.deepEqual(state, {
     updatedAt: 807235200,
     sourceStale: false,
-    period: 'today',
-    tokens: 62_800_000,
-    costUSD: 2.5,
-    quota: {
+    usage: {
+      today: { tokens: 62_800_000, costUSD: 2.5 },
+      month: {}
+    },
+    quotas: [{
       providerID: 'codex',
       planLabel: 'Plus',
       updatedAt: 807235200,
-      stale: null,
       windows: [{
         label: 'Weekly',
+        kind: 'weekly',
         remainingPercent: 75,
-        resetsAt: null,
-        creditsAmount: null,
-        creditsCurrency: null
+        windowMinutes: 10080
       }]
-    },
-    layout: {
-      compactLeading: 'mark',
-      compactTrailing: 'percent',
-      expanded: 'quota',
-      lockScreen: 'combined',
-      currencyCode: 'USD',
-      languageCode: 'en'
-    }
+    }],
+    agents: { running: 0, clients: [] }
   });
 });
 
@@ -140,7 +108,7 @@ for (const [runtime, api] of [
   const now = Date.parse('2026-10-05T00:00:00Z');
   const appleSeconds = (iso) => Date.parse(iso) / 1000 - 978307200;
   const registration = (preferences = {}) => ({
-    locale: 'en', preferences: { ...basePreferences, liveProviderID: null, ...preferences }
+    preferences: { ...basePreferences, ...preferences }
   });
 
   test(`${runtime} uses the newest valid device source, never the transport timestamp`, () => {
@@ -196,13 +164,13 @@ for (const [runtime, api] of [
     for (const value of [undefined, null, '', ' ', NaN, Infinity, 'invalid']) {
       const stats = { periods: { today: { totalTokens: value, costUsd: value } } };
       const state = api.buildLiveActivityContentState(stats, registration(), now);
-      assert.equal(state.tokens, null);
-      assert.equal(state.costUSD, null);
+      assert.equal(state.usage.today.tokens, undefined);
+      assert.equal(state.usage.today.costUSD, undefined);
     }
     for (const value of [0, '0']) {
       const state = api.buildLiveActivityContentState({ periods: { today: { totalTokens: value, costUsd: value } } }, registration(), now);
-      assert.equal(state.tokens, 0);
-      assert.equal(state.costUSD, 0);
+      assert.equal(state.usage.today.tokens, 0);
+      assert.equal(state.usage.today.costUSD, 0);
     }
   });
 
@@ -218,14 +186,14 @@ for (const [runtime, api] of [
       }] }
     };
     const state = api.buildLiveActivityContentState(stats, registration(), now);
-    assert.equal(state.quota.providerID, 'codex');
-    assert.equal(state.quota.updatedAt, appleSeconds('2026-10-03T00:00:00Z'));
+    assert.equal(state.quotas[0].providerID, 'codex');
+    assert.equal(state.quotas[0].updatedAt, appleSeconds('2026-10-03T00:00:00Z'));
     assert.equal(state.updatedAt, now / 1000 - 978307200);
     stats.limits.providers[0].stale = true;
-    assert.equal(api.buildLiveActivityContentState(stats, registration(), now).quota.stale, true);
+    assert.equal(api.buildLiveActivityContentState(stats, registration(), now).quotas[0].stale, true);
     for (const updatedAt of [undefined, 'invalid', '2099-01-01T00:00:00Z']) {
       stats.limits.providers[0].updatedAt = updatedAt;
-      assert.equal(api.buildLiveActivityContentState(stats, registration(), now).quota.updatedAt, null);
+      assert.equal(api.buildLiveActivityContentState(stats, registration(), now).quotas[0].updatedAt, undefined);
     }
   });
 
@@ -240,7 +208,7 @@ for (const [runtime, api] of [
     };
     const state = api.buildLiveActivityContentState(stats, registration(), now);
     // Cursor (notConfigured) and OpenCode (stale) are skipped despite lower usage.
-    assert.equal(state.quota.providerID, 'codex');
+    assert.equal(state.quotas[0].providerID, 'codex');
   });
 
   test(`${runtime} auto selection ties and empty quota fall back to catalog order`, () => {
@@ -252,32 +220,38 @@ for (const [runtime, api] of [
       ] }
     };
     const state = api.buildLiveActivityContentState(stats, registration(), now);
-    assert.equal(state.quota.providerID, 'claude');
+    assert.equal(state.quotas[0].providerID, 'claude');
     const none = api.buildLiveActivityContentState(
       { limits: { providers: [{ provider: 'cursor', status: 'notConfigured' }] } },
       registration(), now
     );
-    assert.equal(none.quota.providerID, 'cursor');
+    assert.equal(none.quotas[0].providerID, 'cursor');
   });
 
-  test(`${runtime} a specific provider id picks its lowest-remaining account`, () => {
+  test(`${runtime} named providers and accounts ride along with the ranked records`, () => {
     const stats = {
       limits: { providers: [
         { provider: 'codex', accountKey: 'a', windows: [{ remainingPercent: 90 }] },
-        { provider: 'codex', accountKey: 'b', windows: [{ remainingPercent: 30 }] }
+        { provider: 'codex', accountKey: 'b', windows: [{ remainingPercent: 30 }] },
+        { provider: 'claude', windows: [{ remainingPercent: 10 }] },
+        { provider: 'kiro', windows: [{ remainingPercent: 20 }] },
+        { provider: 'cursor', windows: [{ remainingPercent: 95 }] },
+        { provider: 'zai', accountKey: 'z', windows: [{ remainingPercent: 99 }] }
       ] }
     };
-    const state = api.buildLiveActivityContentState(
-      stats, registration({ liveProviderID: 'codex' }), now
+    const ranked = api.buildLiveActivityContentState(stats, registration(), now);
+    assert.deepEqual(ranked.quotas.map((quota) => quota.providerID), ['claude', 'kiro', 'codex']);
+    assert.equal(ranked.quotas[2].accountKey, 'b');
+    const named = api.buildLiveActivityContentState(
+      stats, registration({ providerIDs: ['cursor', 'codex'], accountKeys: ['z'] }), now
     );
-    assert.equal(state.quota.windows[0].remainingPercent, 30);
-    const missing = api.buildLiveActivityContentState(
-      stats, registration({ liveProviderID: 'cursor' }), now
+    assert.deepEqual(
+      named.quotas.map((quota) => `${quota.providerID}:${quota.accountKey || ''}`),
+      ['claude:', 'kiro:', 'codex:b', 'cursor:', 'codex:a', 'zai:z']
     );
-    assert.equal(missing.quota, null);
   });
 
-  test(`${runtime} quota windows are canonical, capped at two and carry structured fields`, () => {
+  test(`${runtime} quota windows are canonical, capped at three and carry structured fields`, () => {
     const stats = {
       limits: { providers: [{
         provider: 'commandcode',
@@ -291,13 +265,12 @@ for (const [runtime, api] of [
         ]
       }] }
     };
-    const state = api.buildLiveActivityContentState(
-      stats, registration({ liveProviderID: 'commandcode' }), now
-    );
-    assert.equal(state.quota.planLabel, 'GOAT');
-    assert.deepEqual(state.quota.windows, [
-      { label: '5-hour', remainingPercent: 70, resetsAt: appleSeconds('2026-10-05T05:00:00Z'), creditsAmount: null, creditsCurrency: null },
-      { label: 'Weekly', remainingPercent: 50, resetsAt: null, creditsAmount: null, creditsCurrency: null }
+    const state = api.buildLiveActivityContentState(stats, registration(), now);
+    assert.equal(state.quotas[0].planLabel, 'GOAT');
+    assert.deepEqual(state.quotas[0].windows, [
+      { label: '5-hour', kind: 'session', remainingPercent: 70, resetsAt: appleSeconds('2026-10-05T05:00:00Z') },
+      { label: 'Weekly', kind: 'weekly', remainingPercent: 50 },
+      { label: 'Daily', kind: 'daily', remainingPercent: 10 }
     ]);
   });
 
@@ -311,19 +284,18 @@ for (const [runtime, api] of [
     };
     const before = structuredClone(stats);
     const state = api.buildLiveActivityContentState(
-      stats, registration({ liveProviderID: 'deepseek', currencyCode: 'HKD' }), now
+      stats, registration(), now
     );
-    assert.equal(state.quota.windows[0].creditsAmount, 30);
-    assert.equal(state.quota.windows[0].creditsCurrency, 'USD');
-    assert.equal(state.quota.windows[0].remainingPercent, 75);
-    assert.equal(state.layout.currencyCode, 'HKD');
+    assert.equal(state.quotas[0].windows[0].creditsAmount, 30);
+    assert.equal(state.quotas[0].windows[0].creditsCurrency, 'USD');
+    assert.equal(state.quotas[0].windows[0].remainingPercent, 75);
     assert.deepEqual(stats, before);
     stats.limits.providers[0].windows[0] = { metric: 'credits', remaining: 0, currency: 'CNY' };
     const zero = api.buildLiveActivityContentState(
-      stats, registration({ liveProviderID: 'deepseek' }), now
+      stats, registration(), now
     );
-    assert.equal(zero.quota.windows[0].creditsAmount, 0);
-    assert.equal(zero.quota.windows[0].creditsCurrency, 'CNY');
+    assert.equal(zero.quotas[0].windows[0].creditsAmount, 0);
+    assert.equal(zero.quotas[0].windows[0].creditsCurrency, 'CNY');
   });
 
   test(`${runtime} all stale devices override a recent source without rewriting its date`, () => {
@@ -334,5 +306,83 @@ for (const [runtime, api] of [
     assert.equal(api.liveActivityStaleDate(state, now / 1000), now / 1000);
     stats.devices.push({ updatedAt: new Date(now).toISOString(), stale: false });
     assert.equal(api.buildLiveActivityContentState(stats, registration(), now).sourceStale, false);
+  });
+
+  test(`${runtime} ranks three quotas with hidden providers out`, () => {
+    const stats = {
+      limits: { providers: [
+        { provider: 'cursor', status: 'ok', windows: [{ remainingPercent: 1 }] },
+        { provider: 'claude', status: 'ok', windows: [{ remainingPercent: 40 }] },
+        { provider: 'codex', status: 'ok', windows: [{ remainingPercent: 10 }] },
+        { provider: 'opencode', status: 'ok', stale: true, windows: [{ remainingPercent: 2 }] },
+        { provider: 'kiro', status: 'ok', windows: [{ remainingPercent: 60 }] }
+      ] }
+    };
+    const auto = api.buildLiveActivityContentState(
+      stats, registration({ hiddenLimitProviders: ['cursor'] }), now
+    );
+    assert.deepEqual(auto.quotas.map((quota) => quota.providerID), ['codex', 'claude', 'kiro']);
+  });
+
+  test(`${runtime} the most recent client carries its own share of usage and its quota`, () => {
+    const at = (minutesAgo) => new Date(now - minutesAgo * 60_000).toISOString();
+    const stats = {
+      periods: {
+        today: {
+          clients: { cursor: 400, claude: 900 },
+          clientCosts: { cursor: 1.25 },
+          sessions: {
+            'claude:a': { client: 'claude', lastUsedAt: at(30) },
+            'cursor:b': { client: 'cursor', lastUsedAt: at(2), turnEnded: true }
+          }
+        },
+        month: { clients: { cursor: 4000 } }
+      },
+      limits: { providers: [
+        { provider: 'claude', windows: [{ remainingPercent: 10 }] },
+        { provider: 'codex', windows: [{ remainingPercent: 20 }] },
+        { provider: 'kiro', windows: [{ remainingPercent: 30 }] },
+        { provider: 'cursor', windows: [{ remainingPercent: 90 }] }
+      ] }
+    };
+    const state = api.buildLiveActivityContentState(stats, registration(), now);
+    assert.deepEqual(state.recent, {
+      client: 'cursor',
+      today: { tokens: 400, costUSD: 1.25 },
+      month: { tokens: 4000 }
+    });
+    assert.deepEqual(state.quotas.map((quota) => quota.providerID), ['claude', 'codex', 'kiro', 'cursor']);
+    assert.equal(api.buildLiveActivityContentState({}, registration(), now).recent, undefined);
+  });
+
+  test(`${runtime} output speed only counts timed output, capped at the period output`, () => {
+    const period = { timedOutputTokens: 1000, timedDurationMs: 20_000, outputTokens: 500 };
+    let state = api.buildLiveActivityContentState({ periods: { today: period } }, registration(), now);
+    assert.equal(state.usage.today.outputTPS, 25);
+    for (const changes of [{ timedDurationMs: 0 }, { timedOutputTokens: 0 }, { capabilities: { throughput: false } }]) {
+      state = api.buildLiveActivityContentState({ periods: { today: { ...period, ...changes } } }, registration(), now);
+      assert.equal(state.usage.today.outputTPS, undefined);
+    }
+  });
+
+  test(`${runtime} counts running sessions once and schedules the refresh at the earliest expiry`, () => {
+    const at = (minutesAgo) => new Date(now - minutesAgo * 60_000).toISOString();
+    const stats = {
+      periods: {
+        today: { sessions: {
+          'claude:a': { client: 'claude', lastUsedAt: at(1) },
+          'codex:b': { client: 'codex', lastUsedAt: at(4) },
+          'claude:c': { client: 'claude', lastUsedAt: at(2) },
+          'claude:done': { client: 'claude', lastUsedAt: at(1), turnEnded: true },
+          'cursor:old': { client: 'cursor', lastUsedAt: at(30) },
+          'codex:gone': { client: 'codex', lastUsedAt: at(1), archived: true }
+        } },
+        month: { sessions: { 'claude:a': { client: 'claude', lastUsedAt: at(1) } } }
+      }
+    };
+    const state = api.buildLiveActivityContentState(stats, registration(), now);
+    assert.deepEqual(state.agents, { running: 3, clients: ['claude', 'codex'] });
+    assert.equal(api.liveActivityRefreshAt(stats, now), now - 4 * 60_000 + 10 * 60_000 + 1);
+    assert.equal(api.liveActivityRefreshAt({ periods: {} }, now), null);
   });
 }

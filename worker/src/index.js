@@ -1,4 +1,8 @@
-import { buildLiveActivityContentState, normalizeLiveActivityRegistration } from './shared/liveActivity.js';
+import {
+  buildLiveActivityContentState,
+  liveActivityRefreshAt,
+  normalizeLiveActivityRegistration
+} from './shared/liveActivity.js';
 import { createLiveActivityPushClient } from './liveActivityPush.js';
 import { publicLimits } from './shared/limits/core.js';
 import subscriptionDisplay from './shared/subscriptionDisplay.js';
@@ -312,7 +316,9 @@ export class HubDO {
     }).then(async () => {
       this.liveActivityPushPending = false;
       this.lastLiveActivityPushAt = Date.now();
-      await this.pushLiveActivityStats(await this.getStats());
+      const stats = await this.getStats();
+      await this.scheduleLiveActivityRefresh(stats);
+      await this.pushLiveActivityStats(stats);
     }).catch((error) => {
       console.warn(`ActivityKit push update failed: ${error.message}`);
     }).finally(() => {
@@ -320,6 +326,21 @@ export class HubDO {
       if (this.liveActivityPushPending) this.scheduleLiveActivityPush();
     });
     this.keepAlive(this.liveActivityPushPromise);
+  }
+
+  // A running session that goes quiet changes the island's agent count without
+  // any ingest to trigger a push; a Durable Object alarm survives eviction.
+  async scheduleLiveActivityRefresh(stats) {
+    const storage = this.state.storage;
+    if (typeof storage?.setAlarm !== 'function') return;
+    const refreshAt = liveActivityRefreshAt(stats);
+    if (refreshAt === null) await storage.deleteAlarm?.();
+    else await storage.setAlarm(refreshAt);
+  }
+
+  async alarm() {
+    this.scheduleLiveActivityPush();
+    await this.liveActivityPushPromise;
   }
 
   async pushLiveActivityStats(stats) {

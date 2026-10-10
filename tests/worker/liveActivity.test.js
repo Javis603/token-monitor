@@ -110,12 +110,12 @@ test('Worker holds coalesced push lifetime, serializes batches and preserves rep
     release({ invalid: true });
     await waitFor(() => pushes.length === 2);
     await Promise.all(kept);
-    assert.equal(pushes[1].state.tokens, 456);
+    assert.equal(pushes[1].state.usage.today.tokens, 456);
     assert.equal(pushes[1].token, 'b'.repeat(64));
     assert.equal(entries.get('activity:activity').token, 'b'.repeat(64));
     await hub.fetch(request('/api/devices/device', 'DELETE'));
     await waitFor(() => pushes.length === 3);
-    assert.equal(pushes[2].state.tokens, 0);
+    assert.equal(pushes[2].state.usage.today.tokens, 0);
   } finally {
     release({ sent: true });
     await Promise.all(kept);
@@ -179,14 +179,14 @@ test('Worker late invalid result preserves a same-token registration made in the
   try {
     await waitFor(() => calls === 1);
     const replacement = await hub.registerLiveActivity({
-      ...registerInput(), preferences: { livePeriod: 'month' }
+      ...registerInput(), preferences: { providerIDs: ['claude'] }
     });
     assert.equal(original.registeredAt, replacement.registeredAt);
     hub.apns.enabled = false;
     release({ invalid: true });
     await dispatch;
     await Promise.all(kept);
-    assert.equal(entries.get('activity:activity')?.preferences.livePeriod, 'month');
+    assert.equal(entries.get('activity:activity')?.preferences.providerIDs[0], 'claude');
   } finally {
     hub.apns.enabled = false;
     release({ sent: true });
@@ -221,7 +221,7 @@ test('Worker cooldown retains delayed delivery, coalesces ingests and skips unre
     t.mock.timers.tick(1);
     await flush();
     assert.equal(pushes.length, 2);
-    assert.equal(pushes[1].state.tokens, 700);
+    assert.equal(pushes[1].state.usage.today.tokens, 700);
     assert.equal(settled, true);
     await hub.fetch(request('/api/ingest', 'POST', { deviceId: 'device' }));
     await hub.fetch(request('/api/live-activities/activity', 'DELETE'));
