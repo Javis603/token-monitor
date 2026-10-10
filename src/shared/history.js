@@ -313,7 +313,10 @@ function localDayKey(date = new Date()) {
 // instead of reading as usage growth. Pure so the Worker closure can carry it.
 function utcOffsetMinutes(at) {
   const date = at === undefined ? new Date() : new Date(at);
-  return Number.isNaN(date.getTime()) ? -new Date().getTimezoneOffset() : -date.getTimezoneOffset();
+  const offset = Number.isNaN(date.getTime()) ? -new Date().getTimezoneOffset() : -date.getTimezoneOffset();
+  // Canonicalize -0 (UTC runners) to 0: the offset round-trips through JSON,
+  // which drops the sign, and strict deep equality treats the two as distinct.
+  return offset === 0 ? 0 : offset;
 }
 
 // A day is "active" when tokens > 0. currentStreak = consecutive active days ending at
