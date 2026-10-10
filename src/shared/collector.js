@@ -2449,7 +2449,7 @@ function startCollector(options) {
   const normalizedClients = normalizeClientsCsv(clients);
   const sourceOptions = {
     customScanPaths: options.customScanPaths,
-    env: options.env,
+    env: options.env || options.sessionMetadataDeps?.env,
     homeDir: options.homeDir,
     platform: options.platform
   };

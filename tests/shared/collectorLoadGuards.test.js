@@ -499,7 +499,7 @@ test('Antigravity summary watches follow homeDir without replacing the process h
   }
 });
 
-for (const source of ['native', 'override', 'configured-home', 'injected-env', 'cli-home']) {
+for (const source of ['native', 'override', 'configured-home', 'injected-env', 'metadata-env', 'env-precedence', 'cli-home']) {
   test(`Antigravity ${source} summary WAL events refresh titles with an exact today delta`, async (t) => {
     t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
     let sqlite;
@@ -527,8 +527,10 @@ for (const source of ['native', 'override', 'configured-home', 'injected-env', '
       process.env.GEMINI_CLI_HOME = cliHome;
       fs.mkdirSync(path.join(cliHome, 'antigravity-cli', 'conversations'), { recursive: true });
     }
-    const dir = source === 'override' || source === 'injected-env' ? path.join(tmp, 'catalog')
+    const dir = ['override', 'injected-env', 'metadata-env', 'env-precedence'].includes(source) ? path.join(tmp, 'catalog')
       : source === 'cli-home' ? path.join(cliHome, 'antigravity-cli') : path.join(tmp, sourceRoot);
+    const depsDir = source === 'env-precedence' ? path.join(tmp, 'deps-catalog') : dir;
+    if (source === 'env-precedence') fs.mkdirSync(depsDir);
     if (source === 'override') process.env.ANTIGRAVITY_HOME = dir;
     const dbPath = path.join(dir, 'conversation_summaries.db');
     db = new sqlite.DatabaseSync(dbPath);
@@ -539,6 +541,7 @@ for (const source of ['native', 'override', 'configured-home', 'injected-env', '
     let ignored;
     chokidar.watch = (dirs, options) => {
       assert.ok(dirs.includes(dir), 'the summary parent is passed to the watch host');
+      if (source === 'env-precedence') assert.equal(dirs.includes(depsDir), false, 'top-level env takes precedence over metadata deps');
       ignored = options.ignored;
       const watcher = {
         on(event, callback) { if (event === 'all') watchHandler = callback; return watcher; },
@@ -553,12 +556,15 @@ for (const source of ['native', 'override', 'configured-home', 'injected-env', '
     handle = startCollector({
       clients: 'antigravity', allTimeSince: '2024-01-01', commandTimeoutMs: 1000,
       homeDir: source === 'configured-home' ? tmp : undefined,
-      env: source === 'injected-env' ? { ANTIGRAVITY_HOME: dir } : undefined,
+      env: source === 'injected-env' || source === 'env-precedence' ? { ANTIGRAVITY_HOME: dir } : undefined,
       deviceId: 'fixture-device', agentVersion: 'fixture', intervalMs: 60 * 60 * 1000,
       watchEnabled: true, watchUsePolling: false, watchTriggersCollection: true, watchDebounceMs: 10,
       historyEnabled: false, dailyHistoryArchiveEnabled: false, anchorPersistenceEnabled: false,
       codexLocalUsageEnabled: false, wslScanEnabled: false,
-      sessionMetadataDeps: { sqlite, antigravityTitleCache: new Map() }, runAntigravitySync: async () => { syncs += 1; },
+      sessionMetadataDeps: {
+        sqlite, antigravityTitleCache: new Map(),
+        ...(['metadata-env', 'env-precedence'].includes(source) ? { env: { ANTIGRAVITY_HOME: depsDir } } : {})
+      }, runAntigravitySync: async () => { syncs += 1; },
       runTokscale: async (input) => {
         calls.push(input);
         return { entries: [{ client: 'antigravity', sessionId: 'title-session', model: 'fixture-model', input: 100, output: 30, cost: 0.5 }] };
