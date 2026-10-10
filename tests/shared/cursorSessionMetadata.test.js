@@ -244,6 +244,89 @@ test('Cursor rejects mismatched, missing and invalid turn identities and unknown
   assert.deepEqual([...read()], [['valid', { turnEnded: true }]], 'cached answers retain only scalars');
 });
 
+test('Cursor future activity timestamps cannot extend the running window', { skip: !sqlite }, (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-future-turn-'));
+  const dbPath = path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new sqlite.DatabaseSync(dbPath);
+  t.after(() => { db.close(); fs.rmSync(home, { recursive: true, force: true }); });
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec('CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB)');
+  const put = db.prepare('INSERT OR REPLACE INTO cursorDiskKV VALUES (?, ?)');
+  const now = Date.now();
+  const future = now + 3600_000;
+  const deps = { platform: 'linux', sqlite, now, cursorTitleCache: new Map(), metadataCache: new Map() };
+  for (const state of [
+    { status: 'aborted', unfinishedRunAt: future },
+    { status: 'generating', lastUpdatedAt: future }
+  ]) {
+    const row = { client: 'cursor', sessionId: 's1', lastUsedAt: new Date(now).toISOString() };
+    const periods = { today: { sessions: { 'cursor:s1': row } } };
+    deps.now = now;
+    put.run('composerData:s1', JSON.stringify({ composerId: 's1', ...state }));
+    applySessionMetadata(periods, home, deps);
+    assert.equal(row.lastUsedAt, new Date(now).toISOString(), 'future editor time does not replace usage time');
+    assert.equal(sessionActivityState(row, now), 'running');
+    deps.now = now + 11 * 60_000;
+    // Even an unrelated WAL invalidation must not renew the same future marker.
+    put.run('composerData:other', JSON.stringify({ composerId: 'other', ...state }));
+    applySessionMetadata(periods, home, deps);
+    assert.equal(sessionActivityState(row, deps.now), 'idle');
+  }
+});
+
+test('Cursor definitive unknown reads clear cached headerless boundaries but failed reads do not', { skip: !sqlite }, (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-clear-boundary-'));
+  const dbPath = path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new sqlite.DatabaseSync(dbPath);
+  t.after(() => { db.close(); fs.rmSync(home, { recursive: true, force: true }); });
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec('CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)');
+  db.exec('CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB)');
+  const put = db.prepare('INSERT OR REPLACE INTO cursorDiskKV VALUES (?, ?)');
+  let fail = false;
+  let opens = 0;
+  const countedSqlite = { DatabaseSync: class {
+    constructor(...args) { opens++; this.db = new sqlite.DatabaseSync(...args); }
+    exec(...args) { return this.db.exec(...args); }
+    prepare(sql) {
+      if (fail && sql.includes('FROM cursorDiskKV')) throw new Error('SQLITE_BUSY');
+      return this.db.prepare(sql);
+    }
+    close() { this.db.close(); }
+  } };
+  const now = Date.now();
+  const row = { client: 'cursor', sessionId: 's1', lastUsedAt: new Date(now).toISOString(), totalTokens: 123, costUsd: 0.45 };
+  const periods = { today: { sessions: { 'cursor:s1': row } } };
+  const deps = { platform: 'linux', sqlite: countedSqlite, now, cursorTitleCache: new Map(), metadataCache: new Map(), retryMisses: true };
+  for (const record of [
+    { composerId: 's1', status: 'future-state' },
+    { composerId: 'other', status: 'completed' },
+    '{broken',
+    null
+  ]) {
+    put.run('composerData:s1', JSON.stringify({ composerId: 's1', status: 'completed' }));
+    applySessionMetadata(periods, home, deps);
+    assert.equal(sessionActivityState(row, now), 'ended');
+    if (record === null) db.prepare('DELETE FROM cursorDiskKV WHERE key = ?').run('composerData:s1');
+    else put.run('composerData:s1', typeof record === 'string' ? record : JSON.stringify(record));
+    fail = true;
+    applySessionMetadata(periods, home, deps);
+    assert.equal(row.turnEnded, true, 'a transient SQL failure preserves the previous boundary');
+    fail = false;
+    applySessionMetadata(periods, home, deps);
+    assert.equal(row.turnEnded, undefined, 'a successful null read clears the previous boundary');
+    assert.equal(deps.metadataCache.get('cursor:s1').turnEnded, undefined);
+    assert.equal(sessionActivityState(row, now), 'running', 'fresh usage falls back normally');
+    assert.equal(row.totalTokens, 123);
+    assert.equal(row.costUsd, 0.45);
+    const previousOpens = opens;
+    applySessionMetadata(periods, home, deps);
+    assert.equal(opens, previousOpens, 'the unchanged definitive answer is cached');
+  }
+});
+
 test('Cursor retries a transient turn read without waiting for another WAL change', { skip: !sqlite }, (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-turn-retry-'));
   const dbPath = path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb');

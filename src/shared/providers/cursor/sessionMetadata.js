@@ -45,7 +45,7 @@ function hasRecentUsage(periods, id, now) {
   });
 }
 
-function readTurnEnds(db, wantedIds) {
+function readTurnEnds(db, wantedIds, now) {
   const result = new Map();
   // Read scalar fields inside SQLite: composerData also contains conversation
   // text and encrypted checkpoints, which must not enter the metadata cache.
@@ -67,7 +67,8 @@ function readTurnEnds(db, wantedIds) {
     else if (row.status === 'generating' || (row.status === 'aborted' && unfinished)) {
       const activeAt = unfinished ? row.unfinishedRunAt : row.lastUpdatedAt;
       result.set(id, { turnEnded: false,
-        ...(typeof activeAt === 'number' && activeAt > 0 && Number.isFinite(new Date(activeAt).getTime())
+        // Ignore a future editor clock instead of renewing it on each WAL read.
+        ...(typeof activeAt === 'number' && activeAt > 0 && activeAt <= now && Number.isFinite(new Date(activeAt).getTime())
           ? { lastUsedAt: new Date(activeAt).toISOString() } : {}) });
     }
   }
@@ -180,7 +181,7 @@ function readTitles(dbPath, sqlite, wantedIds, cache, now = Date.now(), periods)
     let turnReadFailed = false;
     try {
       if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cursorDiskKV'").get()) {
-        turnEnds = readTurnEnds(db, turnIds);
+        turnEnds = readTurnEnds(db, turnIds, now);
       } else turnEnds = new Map([...turnIds].map((id) => [id, null]));
     } catch (_) { turnReadFailed = true; }
     return { titles, retries, misses, turnEnds, turnReadFailed };
@@ -191,7 +192,7 @@ function readTitles(dbPath, sqlite, wantedIds, cache, now = Date.now(), periods)
   }
 }
 
-function resolveSessionMetadata(sessionIds, { deps = {}, home, now = Date.now(), periods } = {}) {
+function resolveSessionMetadata(sessionIds, { deps = {}, home, now = Date.now(), periods, metadata = deps.metadataCache } = {}) {
   const result = new Map();
   const sqlite = resolveSqlite(deps);
   if (typeof sqlite?.DatabaseSync !== 'function') return result;
@@ -236,6 +237,9 @@ function resolveSessionMetadata(sessionIds, { deps = {}, home, now = Date.now(),
       if (result.has(sessionId)) continue;
       if (title) result.set(sessionId, state ? { title, ...state } : { title });
       else if (state) result.set(sessionId, { ...state });
+      // A definitive unknown answer clears an earlier headerless boundary.
+      // Failed reads have no state entry, so the shared cache stays untouched.
+      else if (state === null && typeof metadata?.get(`cursor:${sessionId}`)?.turnEnded === 'boolean') result.set(sessionId, {});
     }
   }
   return result;
