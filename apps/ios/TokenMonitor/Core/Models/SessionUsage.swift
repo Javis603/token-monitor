@@ -27,6 +27,22 @@ nonisolated struct SessionUsage: Decodable, Sendable {
     var sourceDeleted: Bool? = nil
     var sessionKind: String? = nil
     var promptCache: PromptCacheObservation? = nil
+    var grokBotSession: Bool? = nil
+
+    func identityKey(fallback key: String) -> String {
+        let id = sessionId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !id.isEmpty ? id : (key.hasPrefix("cursor:") ? String(key.dropFirst(7)) : key)
+    }
+
+    func isGrokBot(key: String) -> Bool {
+        guard client == "cursor" else { return false }
+        if let grokBotSession { return grokBotSession }
+        let id = identityKey(fallback: key)
+        return (id.hasPrefix("sand-subagent-") && id.count > "sand-subagent-".count)
+            || (models ?? [:]).contains { model, tokens in
+                model.hasPrefix("grok-bot-") && model.count > "grok-bot-".count && tokens.isFinite && tokens > 0
+            }
+    }
 
     var isBackgroundReview: Bool { sessionKind?.trimmingCharacters(in: .whitespacesAndNewlines) == "background-review" }
     func isRunning(at now: Date) -> Bool { isRecent(at: now) && turnEnded != true }

@@ -29,8 +29,11 @@ struct SessionRow: View {
                         }
                         .buttonStyle(.plain)
                         .popover(isPresented: $showsTitle) {
-                            Text(title)
-                                .font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                            VStack(alignment: .leading, spacing: 10) {
+                                PopoverHeader("Session title")
+                                Text(title)
+                                    .font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                            }
                                 .padding(16).frame(idealWidth: 280, maxWidth: 280, alignment: .leading)
                                 .presentationCompactAdaptation(.popover)
                         }
@@ -114,9 +117,10 @@ struct SessionRow: View {
             }
             .buttonStyle(.plain)
             .popover(isPresented: $showsModels) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Models").font(DesignTokens.rowTitle)
+                VStack(alignment: .leading, spacing: 12) {
+                    PopoverHeader("Models")
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
                         ForEach(session.modelEntries) { model in
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(model.id).font(.footnote).fixedSize(horizontal: false, vertical: true)
@@ -128,8 +132,11 @@ struct SessionRow: View {
                                 }.font(.caption).monospacedDigit().foregroundStyle(.secondary)
                             }
                         }
-                    }.padding(16)
+                        }
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
                 }
+                .padding(16)
                 .frame(idealWidth: 280, maxWidth: 280, idealHeight: 240, maxHeight: 320)
                 .presentationCompactAdaptation(.popover)
             }

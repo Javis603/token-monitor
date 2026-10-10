@@ -14,7 +14,7 @@ struct InsightsView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: DesignTokens.sectionSpacing) {
-                            ConnectionStatusNotice(phase: store.phase) {
+                            ConnectionStatusNotice(phase: store.connectionNoticePhase) {
                                 Task { await store.refresh() }
                             }
 

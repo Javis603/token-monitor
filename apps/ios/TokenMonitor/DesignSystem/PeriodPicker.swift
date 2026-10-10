@@ -4,7 +4,8 @@ struct PeriodPicker: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding var selection: UsagePeriodKey
     var compact = false
-    @ScaledMetric(relativeTo: .caption) private var compactWidth = 204
+    var periods: [UsagePeriodKey] = UsagePeriodKey.allCases
+    @ScaledMetric(relativeTo: .caption) private var segmentWidth = 68
 
     var body: some View {
         Group {
@@ -13,7 +14,7 @@ struct PeriodPicker: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else if compact {
                 picker.pickerStyle(.segmented)
-                    .frame(width: compactWidth)
+                    .frame(width: segmentWidth * Double(periods.count))
                     .frame(minHeight: DesignTokens.controlHeight)
             } else {
                 picker.pickerStyle(.segmented)
@@ -24,7 +25,7 @@ struct PeriodPicker: View {
 
     private var picker: some View {
         Picker("Period", selection: $selection) {
-            ForEach(UsagePeriodKey.allCases) { period in
+            ForEach(periods) { period in
                 Text(LocalizedStringKey(period.shortLabel)).tag(period)
             }
         }

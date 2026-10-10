@@ -2,7 +2,6 @@ import SwiftUI
 
 /// A compact explanation attached to the reset indicator, rather than a settings page.
 struct ResetCreditsDetail: View {
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let credits: ProviderResetCredits
 
@@ -18,23 +17,14 @@ struct ResetCreditsDetail: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 8) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Reset details")
-                        .font(.subheadline.weight(.semibold))
-                    if let count = credits.visibleCount {
-                        Text(verbatim: MetricFormatter.resetCount(count, locale: MetricFormatter.desktopQuotaLocale))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+            VStack(alignment: .leading, spacing: 3) {
+                PopoverHeader("Reset details")
+                if let count = credits.visibleCount {
+                    Text(verbatim: MetricFormatter.resetCount(count, locale: MetricFormatter.desktopQuotaLocale))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.trailing, 32)
                 }
-                Spacer(minLength: 0)
-                Button("Done", systemImage: "xmark") { dismiss() }
-                    .labelStyle(.iconOnly)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
             }
 
             Divider()

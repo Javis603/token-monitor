@@ -69,9 +69,12 @@ struct HeroSummaryCard: View {
             .accessibilityValue(value ?? String(localized: "No data"))
             .accessibilityHint("Cache hit rate uses classified data only.")
             .popover(isPresented: $showsCacheDetails) {
-                Text("Cache hit rate uses classified data only.")
-                    .font(.footnote)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 10) {
+                    PopoverHeader("Cache hit rate")
+                    Text("Cache hit rate uses classified data only.")
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                     .padding(16)
                     .frame(idealWidth: 260, maxWidth: 280, alignment: .leading)
                     .presentationCompactAdaptation(.popover)

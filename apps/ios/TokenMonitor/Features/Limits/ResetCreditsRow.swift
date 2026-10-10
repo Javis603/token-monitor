@@ -5,7 +5,6 @@ struct ResetCreditsRow: View {
     @State private var showsDetails = false
 
     let credits: ProviderResetCredits
-    var compact = false
 
     var body: some View {
         if let count = credits.visibleCount {
@@ -35,9 +34,6 @@ struct ResetCreditsRow: View {
     private func expiryDetail(now: Date) -> some View {
         HStack(spacing: 6) {
             if !credits.expirationDates.isEmpty {
-                if compact {
-                    Text(verbatim: "Expires")
-                }
                 Text(verbatim: expirySummary(now: now))
                     .monospacedDigit()
                     .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
@@ -67,11 +63,11 @@ struct ResetCreditsRow: View {
 
     private func expirySummary(now: Date) -> String {
         let dates = credits.expirationDates
-        let displayedDates = compact ? dates.prefix(1) : dates.prefix(3)
+        let displayedDates = dates.prefix(3)
         var parts = displayedDates.map {
             MetricFormatter.limitCountdown(to: $0, now: now, locale: MetricFormatter.desktopQuotaLocale)
         }
-        if !compact && dates.count > 3 { parts.append("+\(dates.count - 3)") }
+        if dates.count > 3 { parts.append("+\(dates.count - 3)") }
         return parts.joined(separator: " · ")
     }
 }

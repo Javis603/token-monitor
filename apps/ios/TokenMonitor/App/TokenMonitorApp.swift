@@ -34,6 +34,19 @@ struct TokenMonitorApp: App {
         #if DEBUG
         let sampleStore = usesLimitLayoutFixture
             ? TokenMonitorStore.previewLimitLayout : TokenMonitorStore.preview
+        if usesSampleData && ProcessInfo.processInfo.arguments.contains("--sample-empty-sessions") {
+            if let stats = sampleStore.stats {
+                let periods = stats.periods?.mapValues { period in
+                    var value = period
+                    value.sessions = [:]
+                    return value
+                }
+                sampleStore.stats = HubStats(updatedAt: stats.updatedAt, periods: periods,
+                    devices: stats.devices, limits: stats.limits, historyPreview: stats.historyPreview,
+                    historyRevision: stats.historyRevision, staleAfterMs: stats.staleAfterMs,
+                    projectsIncomplete: stats.projectsIncomplete)
+            }
+        }
         #else
         let sampleStore = TokenMonitorStore.preview
         #endif

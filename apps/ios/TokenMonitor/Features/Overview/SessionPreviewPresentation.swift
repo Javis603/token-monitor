@@ -29,6 +29,7 @@ nonisolated enum SessionPreviewPresentation {
         sessions.filter { key, value in
             !(value.client == "reasonix" && key.contains("reasonix-stats:"))
                 && !value.isBackgroundReview
+                && !value.isGrokBot(key: key)
                 && value.measuredTokens != 0
         }.map { Row(id: $0.key, session: $0.value) }
     }

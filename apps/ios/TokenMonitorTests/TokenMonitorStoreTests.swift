@@ -54,6 +54,42 @@ private actor ControlledHubClient: HubDataClient {
 
 @MainActor
 struct TokenMonitorStoreTests {
+    @Test func connectionNoticeSuppressesTransientRetriesAndStaysVisibleUntilRecovery() async throws {
+        let store = TokenMonitorStore(systemSurfaces: RecordingSurfaces(), connectionNoticeDelay: .milliseconds(30))
+        store.stats = try stats(10)
+        store.phase = .live
+        store.phase = .failed("offline")
+        store.phase = .connecting
+        #expect(store.connectionNoticePhase == .live)
+        store.phase = .live
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(store.connectionNoticePhase == .live)
+
+        store.phase = .failed("offline")
+        store.phase = .connecting
+        try #require(await coreEventually { store.connectionNoticePhase == .failed("offline") })
+        store.phase = .failed("another retry")
+        #expect(store.connectionNoticePhase == .failed("offline"))
+        store.phase = .connecting
+        #expect(store.connectionNoticePhase == .failed("offline"))
+        #expect(store.currentPeriod.totalTokens == 10)
+        store.phase = .live
+        #expect(store.connectionNoticePhase == .live)
+    }
+
+    @Test func connectionNoticeResetsWhenDestinationChangesAndDoesNotDelayInitialFailure() async throws {
+        let store = TokenMonitorStore(systemSurfaces: RecordingSurfaces(), connectionNoticeDelay: .milliseconds(30))
+        store.phase = .failed("initial failure")
+        #expect(store.phase == .failed("initial failure"))
+        #expect(store.connectionNoticePhase == .live)
+        store.stats = try stats(10)
+        store.phase = .failed("old Hub")
+        store.configure(nil)
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(store.stats == nil)
+        #expect(store.connectionNoticePhase == .live)
+    }
+
     @Test func liveRateUsesPerDeviceDeltasAndExpiresWithoutInventingAnAverage() throws {
         func snapshot(_ aOutput: Int, _ aDuration: Int, _ bOutput: Int, _ bDuration: Int) throws -> HubStats {
             try JSONDecoder().decode(HubStats.self, from: Data("""
@@ -86,6 +122,25 @@ struct TokenMonitorStoreTests {
     private func stats(_ tokens: Int, revision: String = "r1") throws -> HubStats {
         try JSONDecoder().decode(HubStats.self,
             from: Data("{\"historyRevision\":\"\(revision)\",\"periods\":{\"today\":{\"totalTokens\":\(tokens)}}}".utf8))
+    }
+
+    @Test func sourceBotIdentitySurvivesCrossPeriodProjectionAndModelAliases() async throws {
+        let client = ControlledHubClient(holdAliases: true)
+        let store = TokenMonitorStore(client: client, systemSurfaces: RecordingSurfaces())
+        defer { store.configure(nil) }
+        let destination = configuration("bot-alias")
+        let snapshot = try JSONDecoder().decode(HubStats.self, from: Data(#"{"periods":{"today":{"sessions":{"cursor:room":{"client":"cursor","sessionId":"room","totalTokens":5,"models":{"claude":5}}}},"allTime":{"sessions":{"cursor:room":{"client":"cursor","sessionId":"room","totalTokens":99,"models":{"grok-bot-default":99}}}}}}"#.utf8))
+        store.configure(destination)
+        try #require(await coreEventually { await client.requestCount == 1 })
+        await client.complete(0, snapshot)
+        try #require(await coreEventually { await client.aliasCount == 1 })
+        await client.completeAliases(0, ModelAliasDocument(revision: 1,
+            value: ModelAliasSettings(modelAliases: ["grok-bot-default": "Bot alias", "claude": "Chat alias"])))
+        try #require(await coreEventually { store.displayPeriod(.today).sessions?["cursor:room"]?.models?["Chat alias"] == 5 })
+        #expect(SessionListEntry.rows(store.displayPeriod(.today).sessions ?? [:]).first?.group == .grokBot)
+        #expect(SessionListEntry.rows(store.displayPeriod(.allTime).sessions ?? [:]).first?.group == .grokBot)
+        #expect(store.stats?.period(.allTime).sessions?["cursor:room"]?.models?["grok-bot-default"] == 99)
+        #expect(store.displayPeriod(.today).sessions?["cursor:room"]?.measuredTokens == 5)
     }
 
     @Test func aliasRevisionChangesReprojectLatestStatsAndRejectOldDestinations() async throws {

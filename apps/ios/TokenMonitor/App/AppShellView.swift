@@ -117,6 +117,9 @@ struct AppShellView: View {
         }
         .tint(DesignTokens.accent)
         .tabBarMinimizeBehavior(.never)
+        .sensoryFeedback(.selection, trigger: selectedTab) { oldTab, newTab in
+            oldTab != newTab && scenePhase == .active
+        }
         .onOpenURL { url in
             guard let tab = AppTab(url: url) else {
                 return

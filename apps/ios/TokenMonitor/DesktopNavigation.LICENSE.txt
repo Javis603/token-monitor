@@ -14,6 +14,9 @@ Sources:
   - views/home.svg: house
   - iOS DesktopSessions: messages-square
   - iOS DesktopInsights: chart-no-axes-combined
+  - iOS CategoryModels: atom
+  - iOS CategoryTools: bot
+  - iOS CategoryStatus: activity
 - Basil Icons by Craftwork: https://www.figma.com/community/file/931906394678748246
   - actions/zap.svg: lightning-alt-outline
     (modified with a subtle outline for small-size legibility)

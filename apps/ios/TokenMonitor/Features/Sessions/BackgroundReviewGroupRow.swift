@@ -7,7 +7,6 @@ struct BackgroundReviewGroupRow: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var expanded = false
-    @State private var visibleCount = 100
     @ScaledMetric(relativeTo: .subheadline) private var markSize = 18.0
 
     var body: some View {
@@ -18,9 +17,9 @@ struct BackgroundReviewGroupRow: View {
                     : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
                 layout {
                     HStack(alignment: .top, spacing: 8) {
-                        ProviderMark(provider: "codex", size: markSize)
+                        ProviderMark(provider: entry.group?.client ?? "codex", size: markSize)
                         VStack(alignment: .leading, spacing: DesignTokens.rowLineSpacing) {
-                            Text("Codex Auto Review").font(DesignTokens.rowTitle).lineLimit(1)
+                            Text(LocalizedStringKey(entry.group?.title ?? "Codex Auto Review")).font(DesignTokens.rowTitle).lineLimit(1)
                             if let latest = entry.reviews.first {
                                 let time = latest.value.lastActivity.map {
                                     $0.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
@@ -28,7 +27,14 @@ struct BackgroundReviewGroupRow: View {
                                 Text("Recent \(time) · \(MetricFormatter.tokens(latest.value.measuredTokens ?? 0))")
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
-                            Text("\(entry.reviews.count) background runs").font(.caption2).foregroundStyle(.secondary)
+                            Group {
+                                if entry.group == .grokBot {
+                                    Text("\(entry.reviews.count) activity records")
+                                } else {
+                                    Text("\(entry.reviews.count) background runs")
+                                }
+                            }
+                            .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
                     if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
@@ -46,17 +52,17 @@ struct BackgroundReviewGroupRow: View {
                 .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
-            UsageMeter(value: entry.tokens, maximum: maximum, color: ClientPresentation.color(for: "codex"))
+            .accessibilityValue(expanded ? Text("Expanded") : Text("Collapsed"))
+            UsageMeter(value: entry.tokens, maximum: maximum, color: ClientPresentation.color(for: entry.group?.client ?? "codex"))
             if expanded {
                 LazyVStack(alignment: .leading, spacing: DesignTokens.rowDividerSpacing) {
-                    ForEach(Array(entry.reviews.prefix(visibleCount)), id: \.key) { review in
+                    let detailMaximum = UsageRowPresentation.maximum(entry.reviews.map { $0.value.measuredTokens })
+                    ForEach(entry.reviews, id: \.key) { review in
                         Divider()
                         SessionRow(session: review.value, sessionKey: review.key,
-                                   maximum: UsageRowPresentation.maximum(entry.reviews.map { $0.value.measuredTokens }), now: now)
+                                   maximum: detailMaximum, now: now)
                     }
-                    if entry.reviews.count > visibleCount {
-                        Button("Show more") { visibleCount += 100 }.frame(minHeight: DesignTokens.controlHeight)
-                    }
+
                 }
             }
         }

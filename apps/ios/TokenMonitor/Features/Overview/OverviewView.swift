@@ -21,7 +21,7 @@ struct OverviewView: View {
                             alignment: .leading,
                             spacing: DesignTokens.sectionSpacing
                         ) {
-                            ConnectionStatusNotice(phase: store.phase, retry: refresh)
+                            ConnectionStatusNotice(phase: store.connectionNoticePhase, retry: refresh)
                             ForEach(visibleSections) { section in
                                 switch section {
                                 case .summary:
@@ -134,10 +134,8 @@ struct OverviewView: View {
             }
         } controls: {
             ViewThatFits(in: .horizontal) {
-                if !dynamicTypeSize.isAccessibilitySize {
-                    PeriodPicker(selection: $store.selectedPeriod, compact: true)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
+                PeriodPicker(selection: $store.selectedPeriod, compact: true)
+                    .fixedSize(horizontal: true, vertical: false)
                 Menu {
                     Picker("Period", selection: $store.selectedPeriod) {
                         ForEach(UsagePeriodKey.allCases) { period in

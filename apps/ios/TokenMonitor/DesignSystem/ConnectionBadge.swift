@@ -77,14 +77,7 @@ struct ConnectionStatusNotice: View {
                         .modifier(AppActionStyle())
                 }
             }
-        case .connecting:
-            HStack(spacing: 10) {
-                ProgressView()
-                Text("Connecting to Hub")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-        case .idle, .live:
+        case .idle, .connecting, .live:
             EmptyView()
         }
     }

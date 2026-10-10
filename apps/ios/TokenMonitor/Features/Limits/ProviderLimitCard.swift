@@ -30,15 +30,13 @@ struct ProviderLimitCard: View {
     @ScaledMetric(relativeTo: .subheadline) private var markInset = 26.0
 
     let providers: [LimitProvider]
-    var compact = false
 
     init(provider: LimitProvider) {
         providers = [provider]
     }
 
-    init(providers: [LimitProvider], compact: Bool = false) {
+    init(providers: [LimitProvider]) {
         self.providers = providers
-        self.compact = compact
     }
 
     var body: some View {
@@ -66,7 +64,7 @@ struct ProviderLimitCard: View {
             }
             windows(for: provider)
             if let credits = provider.resetCredits {
-                ResetCreditsRow(credits: credits, compact: compact)
+                ResetCreditsRow(credits: credits)
             }
         }
     }
@@ -91,7 +89,7 @@ struct ProviderLimitCard: View {
                 if index > 0 {
                     Divider().padding(.vertical, 4)
                 }
-                LimitAccountSection(provider: provider, compact: compact)
+                LimitAccountSection(provider: provider)
             }
         }
     }
@@ -141,9 +139,7 @@ struct ProviderLimitCard: View {
         } else {
             LimitWindowGrid(
                 provider: provider,
-                windows: compact
-                    ? Array(provider.displayWindows.prefix(2))
-                    : provider.displayWindows
+                windows: provider.displayWindows
             )
         }
     }
@@ -155,7 +151,6 @@ private struct LimitAccountSection: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let provider: LimitProvider
-    let compact: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -177,13 +172,11 @@ private struct LimitAccountSection: View {
             } else {
                 LimitWindowGrid(
                     provider: provider,
-                    windows: compact
-                        ? Array(provider.displayWindows.prefix(2))
-                        : provider.displayWindows
+                    windows: provider.displayWindows
                 )
             }
             if let credits = provider.resetCredits {
-                ResetCreditsRow(credits: credits, compact: compact)
+                ResetCreditsRow(credits: credits)
             }
         }
     }

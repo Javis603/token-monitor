@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DCA300000000000000000002 /* PopoverHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCA300000000000000000001 /* PopoverHeader.swift */; };
 		014B39BA70826BD1E946E54A /* DeviceListCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0202B69BD46AFA44BDFD05B /* DeviceListCard.swift */; };
 		01942276D4783199323D77C2 /* SurfaceCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3178094369BAA5B3858309E4 /* SurfaceCard.swift */; };
 		048DF6E785B24302B735041C /* SSEDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = C86AF8B6020FC392B8CD9AB7 /* SSEDecoder.swift */; };
@@ -207,6 +208,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		DCA300000000000000000001 /* PopoverHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverHeader.swift; sourceTree = "<group>"; };
 		0011336A905F5CC4BE2CBEF9 /* LimitPreviewSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitPreviewSection.swift; sourceTree = "<group>"; };
 		018B7CE8DB6ACDBED2F6C8B8 /* Date+Hub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Date+Hub.swift"; sourceTree = "<group>"; };
 		02A406E897FC40B3FF3918F1 /* ConnectionBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionBadge.swift; sourceTree = "<group>"; };
@@ -646,6 +648,7 @@
 				0C372F3CDA4D1B85A28E4739 /* DesignTokens.swift */,
 				9CCFE7E5AB1522533EC5F8C5 /* PeriodPicker.swift */,
 				EB2E33BFFEA34B817D502FF0 /* ProviderMark.swift */,
+				DCA300000000000000000001 /* PopoverHeader.swift */,
 				CD7D3921C228188DBD97B0F6 /* SectionHeader.swift */,
 				3178094369BAA5B3858309E4 /* SurfaceCard.swift */,
 			);
@@ -956,6 +959,7 @@
 				467B1D6E455937747519FE39 /* ProviderPresentation.swift in Sources */,
 				048DF6E785B24302B735041C /* SSEDecoder.swift in Sources */,
 				120000000000000000000007 /* SharedSnapshotStore.swift in Sources */,
+				DCA300000000000000000002 /* PopoverHeader.swift in Sources */,
 				BB6FC55D3CA70FD85EFFF1D3 /* SectionHeader.swift in Sources */,
 				85395C770639C11C3F0624A2 /* SettingsView.swift in Sources */,
 				01942276D4783199323D77C2 /* SurfaceCard.swift in Sources */,

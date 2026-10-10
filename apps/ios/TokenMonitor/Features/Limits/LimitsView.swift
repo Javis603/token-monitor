@@ -17,7 +17,7 @@ struct LimitsView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: DesignTokens.sectionSpacing) {
-                            ConnectionStatusNotice(phase: store.phase, retry: refresh)
+                            ConnectionStatusNotice(phase: store.connectionNoticePhase, retry: refresh)
 
                             if providers.isEmpty {
                                 ContentUnavailableView(

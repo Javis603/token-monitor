@@ -10,6 +10,7 @@ nonisolated struct HubStats: Decodable, Sendable {
     let staleAfterMs: Double?
     let projectsIncomplete: Bool?
     var syncSettingsRevisions: [String: Int]? = nil
+    var grokBotSessionIds: [String]? = nil
 
     func sourceUpdatedAt(now: Date = .now) -> Date? {
         let sources = devices ?? []

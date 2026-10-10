@@ -59,7 +59,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
 npm run verify
 ```
 
-Debug builds accept `--sample-data` and `--sample-tab=overview|limits|sessions|insights|settings` for reproducible UI inspection without Hub credentials. `--sample-live-activity` also renders a local demonstration Activity. These options are compiled out of release builds.
+Debug builds accept `--sample-data` and `--sample-tab=overview|limits|sessions|insights|settings` for reproducible UI inspection without Hub credentials. `--sample-empty-sessions` gives a connected Hub with empty today/month session lists. `--sample-live-activity` also renders a local demonstration Activity. These options are compiled out of release builds.
 
 
 ## Refresh validation (2026-10-05)
@@ -70,4 +70,4 @@ Simulator screenshots and runtime accessibility snapshots are saved under `/priv
 
 ### Shared model presentation
 
-The app reads authenticated `/api/sync/settings/modelAliases` and refreshes its cached map when `syncSettingsRevisions.modelAliases` changes. It follows desktop manual aliases and `off` / `duplicates` / `prefix` grouping for model and session lists. Grouping folds the Hub's model tokens and model costs together without changing source records or repricing them. Custom pricing stays with the collecting device and Tokscale; iOS displays the resulting Hub USD costs. Session cache estimates use the optional `promptCache` observation, expire locally, and never infer an estimate from cache-hit percentages. Source-tagged background reviews form one expandable group at the end of the list.
+The app reads authenticated `/api/sync/settings/modelAliases` and refreshes its cached map when `syncSettingsRevisions.modelAliases` changes. It follows desktop manual aliases and `off` / `duplicates` / `prefix` grouping for model and session lists. Grouping folds the Hub's model tokens and model costs together without changing source records or repricing them. Custom pricing stays with the collecting device and Tokscale; iOS displays the resulting Hub USD costs. Session cache estimates use the optional `promptCache` observation, expire locally, and never infer an estimate from cache-hit percentages. Source-tagged background reviews and Cursor Grok Bot activity form separate expandable groups ordered with interactive sessions by latest activity. Grok Bot identity survives model display aliases and mixed-model periods. Sessions and expanded groups scroll continuously without manual paging.

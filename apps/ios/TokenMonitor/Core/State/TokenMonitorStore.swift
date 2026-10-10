@@ -6,7 +6,12 @@ import Observation
 final class TokenMonitorStore {
     var stats: HubStats?
     var history: UsageHistory?
-    var phase: ConnectionPhase = .idle
+    var phase: ConnectionPhase = .idle {
+        didSet { updateConnectionNotice() }
+    }
+    private(set) var connectionNoticePhase: ConnectionPhase = .live
+    @ObservationIgnored private var connectionNoticeTask: Task<Void, Never>?
+    @ObservationIgnored private let connectionNoticeDelay: Duration
     var selectedPeriod: UsagePeriodKey = .today
     var isRefreshing = false
     private var displayPeriods: [String: UsagePeriod] = [:]
@@ -40,16 +45,46 @@ final class TokenMonitorStore {
 
     init(
         client: any HubDataClient = HubClient(),
-        systemSurfaces: any SystemSurfacePublishing = SystemSurfaceCoordinator()
+        systemSurfaces: any SystemSurfacePublishing = SystemSurfaceCoordinator(),
+        connectionNoticeDelay: Duration = .seconds(3)
     ) {
+        self.connectionNoticeDelay = connectionNoticeDelay
         self.client = client
         self.systemSurfaces = systemSurfaces
     }
 
     deinit {
+        connectionNoticeTask?.cancel()
         connectionTask?.cancel()
         historyTask?.cancel()
         aliasTask?.cancel()
+    }
+
+    /// Keep transport retries truthful without flashing or resizing reading pages.
+    private func updateConnectionNotice() {
+        switch phase {
+        case .idle, .live:
+            connectionNoticeTask?.cancel()
+            connectionNoticeTask = nil
+            connectionNoticePhase = .live
+        case .connecting:
+            // Retain an already-visible offline notice throughout retry attempts.
+            // Initial loading has its own full-page state when there is no snapshot.
+            break
+        case .failed:
+            guard stats != nil, connectionNoticeTask == nil,
+                  connectionNoticePhase == .live else { return }
+            let delay = connectionNoticeDelay
+            let generation = generation
+            let failure = phase
+            connectionNoticeTask = Task { [weak self] in
+                do { try await Task.sleep(for: delay) } catch { return }
+                guard let self, self.isCurrent(generation), self.stats != nil,
+                      self.phase != .live && self.phase != .idle else { return }
+                self.connectionNoticePhase = failure
+                self.connectionNoticeTask = nil
+            }
+        }
     }
 
     var currentPeriod: UsagePeriod {
@@ -71,16 +106,20 @@ final class TokenMonitorStore {
         let modelIDs = allPeriods.flatMap { period in
             Array((period.models ?? [:]).keys) + (period.sessions ?? [:]).values.flatMap { Array(($0.models ?? [:]).keys) }
         }
+        let botIDs = SessionListEntry.grokBotIDs(stats.periods ?? [:], authoritative: stats.grokBotSessionIds)
         let resolver = modelAliases.resolver(modelIDs: modelIDs)
         displayPeriods = (stats.periods ?? [:]).mapValues { period in
             var result = period
             result.models = ModelAliasSettings.fold(period.models, using: resolver)
             result.modelCosts = ModelAliasSettings.fold(period.modelCosts, using: resolver)
-            result.sessions = period.sessions?.mapValues { session in
+            result.sessions = period.sessions?.map { key, session in
                 var result = session
+                if session.client == "cursor" {
+                    result.grokBotSession = session.isGrokBot(key: key) || botIDs.contains(session.identityKey(fallback: key))
+                }
                 result.models = ModelAliasSettings.fold(session.models, using: resolver)
-                return result
-            }
+                return (key, result)
+            }.reduce(into: [String: SessionUsage]()) { $0[$1.0] = $1.1 }
             return result
         }
     }
@@ -125,6 +164,9 @@ final class TokenMonitorStore {
         historyTask = nil
         historyRequestID = nil
         requestedHistoryRevision = nil
+        connectionNoticeTask?.cancel()
+        connectionNoticeTask = nil
+        connectionNoticePhase = .live
         generation = UUID()
         publication = 0
         refreshID = nil

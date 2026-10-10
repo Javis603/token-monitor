@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Overview preview: the first `homeLimitCount` provider groups in the user's
-/// limits order, compact (at most two windows per account).
+/// limits order, with the same account content as the Limits screen.
 struct LimitPreviewSection: View {
     let groups: [LimitProviderGroup]
     let showAll: () -> Void
@@ -29,7 +29,7 @@ struct LimitPreviewSection: View {
                             if index > 0 {
                                 Divider()
                             }
-                            ProviderLimitCard(providers: group.accounts, compact: true)
+                            ProviderLimitCard(providers: group.accounts)
                         }
                     }
                 }

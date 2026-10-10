@@ -35,6 +35,14 @@ enum OverviewSection: String, CaseIterable, Identifiable {
         }
     }
 
+    var categoryAsset: String? {
+        switch self {
+        case .tools: "CategoryTools"
+        case .models: "CategoryModels"
+        default: nil
+        }
+    }
+
     static func ordered(by savedOrder: [String]) -> [Self] {
         var seen: Set<Self> = []
         return (savedOrder.compactMap(Self.init(rawValue:)) + allCases)
@@ -90,7 +98,16 @@ struct OverviewSectionOrderEditor: View {
     private func row(for section: OverviewSection) -> some View {
         let hidden = preferences.hiddenOverviewSections.contains(section.id)
         return HStack(spacing: 12) {
-            Image(systemName: section.symbol)
+            Group {
+                if let asset = section.categoryAsset {
+                    Image(asset)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 18, height: 18)
+                } else {
+                    Image(systemName: section.symbol)
+                }
+            }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .frame(width: 22)

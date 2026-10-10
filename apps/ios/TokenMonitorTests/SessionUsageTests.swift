@@ -58,7 +58,7 @@ struct SessionUsageTests {
         #expect(try decode(#"{"client":"codex","promptCache":null}"#).cacheMinutesRemaining(at: now) == nil)
     }
 
-    @Test func backgroundReviewsAreGroupedAtTheBottomWithoutGuessingFromTitles() throws {
+    @Test func backgroundReviewGroupsSortByActivityWithoutGuessingFromTitles() throws {
         let sessions = [
             "review-old": try decode(#"{"client":"codex","totalTokens":200,"costUsd":0.2,"sessionKind":"background-review","lastUsedAt":"2026-10-08T23:00:00Z"}"#),
             "review-new": try decode(#"{"client":"codex","totalTokens":100,"costUsd":0.1,"sessionKind":"background-review","lastUsedAt":"2026-10-09T00:00:00Z"}"#),
@@ -66,11 +66,47 @@ struct SessionUsageTests {
             "zero": try decode(#"{"client":"codex","totalTokens":0}"#)
         ]
         let rows = SessionListEntry.rows(sessions)
-        #expect(rows.map(\.id) == ["interactive", "session-group:codex-auto-review"])
-        #expect(rows.last?.tokens == 300)
-        #expect(abs((rows.last?.cost ?? 0) - 0.3) < 1e-12)
-        #expect(rows.last?.reviews.map(\.key) == ["review-new", "review-old"])
+        #expect(rows.map(\.id) == ["session-group:codex-auto-review", "interactive"])
+        #expect(rows.first?.tokens == 300)
+        #expect(abs((rows.first?.cost ?? 0) - 0.3) < 1e-12)
+        #expect(rows.first?.reviews.map(\.key) == ["review-new", "review-old"])
         #expect(SessionListEntry.rows(sessions, query: "Review PR").count == 1)
+    }
+
+    @Test func botGroupingKeepsMixedModelsAndTotalsWithActivityOrderAndSearch() throws {
+        let sessions = [
+            "cursor:sand-subagent-1": try decode(#"{"client":"cursor","totalTokens":10,"costUsd":0.1,"models":{"claude":10},"lastUsedAt":"2026-10-09T00:03:00Z"}"#),
+            "cursor:regular-bot": try decode(#"{"client":"cursor","sessionId":"regular-bot","totalTokens":20,"costUsd":0.2,"models":{"grok-bot-default":10,"claude":10},"lastUsedAt":"2026-10-09T00:01:00Z"}"#),
+            "interactive": try decode(#"{"client":"cursor","totalTokens":5,"costUsd":0.01,"title":"Use Grok Bot","models":{"grok":5},"lastUsedAt":"2026-10-09T00:02:00Z"}"#),
+            "review": try decode(#"{"client":"codex","totalTokens":40,"costUsd":0.3,"sessionKind":"background-review","lastUsedAt":"2026-10-09T00:00:00Z"}"#)
+        ]
+        let rows = SessionListEntry.rows(sessions)
+        #expect(rows.map(\.id) == ["session-group:cursor-grok-bot", "interactive", "session-group:codex-auto-review"])
+        #expect(rows.first?.reviews.count == 2)
+        #expect(rows.first?.tokens == 30)
+        #expect(abs((rows.first?.cost ?? 0) - 0.3) < 1e-12)
+        #expect(rows.reduce(0) { $0 + ($1.tokens ?? 0) } == 75)
+        #expect(SessionListEntry.rows(sessions, query: "claude").first?.reviews.count == 2)
+        #expect(SessionListEntry.rows(sessions, query: "Grok Bot").first?.reviews.count == 2)
+        #expect(try decode(#"{"client":"codex","sessionId":"sand-subagent-x","models":{"grok-bot-default":1}}"#).isGrokBot(key: "") == false)
+        #expect(try decode(#"{"client":"cursor","models":{"grok-bot-default":0}}"#).isGrokBot(key: "") == false)
+        #expect(try decode(#"{"client":"cursor","sessionId":"sand-subagent-x","grokBotSession":false}"#).isGrokBot(key: "") == false)
+    }
+
+    @Test func botIdentityJoinsRawPeriodsBeforeAliasProjectionWithoutChangingPeriodTotals() throws {
+        let today = try JSONDecoder().decode(UsagePeriod.self, from: Data(#"{"sessions":{"cursor:room":{"client":"cursor","sessionId":"room","totalTokens":5,"models":{"claude":5}}}}"#.utf8))
+        let total = try JSONDecoder().decode(UsagePeriod.self, from: Data(#"{"sessions":{"cursor:room":{"client":"cursor","sessionId":"room","totalTokens":99,"models":{"grok-bot-default":99}}}}"#.utf8))
+        let ids = SessionListEntry.grokBotIDs(["today": today, "allTime": total])
+        let rows = SessionListEntry.rows(today.sessions ?? [:], grokBotIDs: ids)
+        #expect(rows.first?.group == .grokBot)
+        #expect(rows.first?.tokens == 5)
+        #expect(SessionListEntry.grokBotIDs(["allTime": total], authoritative: []).isEmpty)
+        var aliased = try #require(total.sessions?["cursor:room"])
+        aliased.grokBotSession = aliased.isGrokBot(key: "cursor:room")
+        aliased.models = ["Custom display name": 99]
+        #expect(SessionListEntry.rows(["cursor:room": aliased]).first?.group == .grokBot)
+        let now = try #require(Date.hubTimestamp(from: "2026-10-09T00:04:00Z"))
+        #expect(SessionPreviewPresentation.rows(["cursor:room": aliased], now: now).isEmpty)
     }
 
     @Test func previewRunsFirstThenRecentActivityWithStableOrder() throws {

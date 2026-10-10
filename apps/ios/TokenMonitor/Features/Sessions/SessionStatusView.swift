@@ -36,8 +36,8 @@ struct SessionStatusView: View {
             .accessibilityValue(used.map { MetricFormatter.percent($0) } ?? minutes.map { "Cache \($0)m" } ?? "")
             .popover(isPresented: $showsDetails) {
                 VStack(alignment: .leading, spacing: 10) {
+                    PopoverHeader(used != nil ? "Context used" : "Prompt cache estimate")
                     if let used {
-                        Text("Context used").font(DesignTokens.rowTitle)
                         Text(MetricFormatter.percent(used)).font(.subheadline.monospacedDigit())
                     }
                     if let tokens = session.contextTokens, let window = session.contextWindow, tokens > 0, window > 0 {
