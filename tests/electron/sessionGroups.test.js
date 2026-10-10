@@ -80,6 +80,8 @@ test('stats repaint refreshes the open group by identity and retires a removed g
 
 test('historical bot evidence refreshes in Today and Month without opening TOTAL', async () => {
   const { createAllTimeSessionsLoader } = require('../../src/electron/renderer/allTimeSessions');
+  const { attachLocalPresentationNativeViews } = require('../../src/electron/syncDisplayStats');
+  const { rendererStats } = require('../../src/electron/statsPublisher');
   const state = { breakdown: 'session', period: 'today', stats: { snapshot: { id: 1, source: 'local' } } };
   let history = {};
   const calls = [];
@@ -98,21 +100,31 @@ test('historical bot evidence refreshes in Today and Month without opening TOTAL
   const id = 'uuid-bot';
   const chat = { client: 'cursor', sessionId: id, totalTokens: 10, costUsd: 1, models: { 'claude-opus-5-5-medium': 10 } };
   const current = { sessions: { [`cursor:${id}`]: chat } };
-  history = { [`cursor:${id}`]: { ...chat, models: { 'grok-bot-default': 20 } } };
-  for (const selected of ['today', 'month']) {
+  const past = { [`cursor:${id}`]: { ...chat, models: { 'grok-bot-default': 20 } } };
+  for (const [index, selected] of ['today', 'month'].entries()) {
     state.period = selected;
-    state.stats = loader.attach({ snapshot: { id: calls.length + 1, source: 'local' },
-      periods: { today: current, month: current, allTime: {} } });
+    const stats = { snapshot: { id: index + 2, source: 'local' },
+      periods: { today: current, month: current, allTime: {} } };
+    attachLocalPresentationNativeViews(stats, { mode: 'local',
+      lastCollectedDevice: { today: current, month: current, allTime: { sessions: past } } });
+    state.stats = loader.attach(rendererStats(stats));
     loader.invalidate();
     loader.ensure();
     await settle();
-    const rows = groupSessionRows(sessionRowsForPeriod(current, { sourcePeriods: state.stats.periods }));
+    const rows = groupSessionRows(sessionRowsForPeriod(current, {
+      sourcePeriods: state.stats.periods, grokBotSessionIds: state.stats.grokBotSessionIds
+    }));
     assert.equal(rows[0].sessionGroup, 'cursor-grok-bot');
     assert.equal(rows[0].value, 10);
     assert.equal(rows[0].cost, 1);
     assert.equal(state.period, selected, 'no navigation was needed');
   }
-  assert.deepEqual(calls, [1, 2, 3]);
+  assert.deepEqual(calls, [1], 'DAY/MONTH stats updates never pull full history again');
+  state.period = 'allTime';
+  history = past;
+  loader.ensure();
+  await settle();
+  assert.deepEqual(calls, [1, 3], 'TOTAL still refreshes its full list on demand');
   state.breakdown = 'tool';
   assert.equal(needed(), false, 'unrelated views do not refresh history');
   state.period = 'allTime';

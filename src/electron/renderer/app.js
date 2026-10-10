@@ -2858,6 +2858,7 @@ function rawSessionRowsForPeriod(period) {
     archivedLabel: t('session.archived'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
     sourcePeriods: state.stats?.periods,
+    grokBotSessionIds: state.stats?.grokBotSessionIds,
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
 }
@@ -13054,10 +13055,11 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
   render: renderStatsUpdate
 });
 // Pulled once up front, then only while something on screen reads it: the
-// archived count in Settings, bot identity in every Sessions period, or TOTAL projects.
+// archived count in Settings, or TOTAL sessions/projects. Bot identity arrives
+// in a compact snapshot projection and does not need a full history pull.
 function allTimeSessionsNeeded() {
   if (!allTimeSessions.loaded() || isSettingsPanelOpen()) return true;
-  return state.breakdown === 'session' || (state.period === 'allTime' && state.breakdown === 'project');
+  return state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');
 }
 const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   fetchSessions: (snapshotId) => window.tokenMonitor.getAllTimeSessions(snapshotId),

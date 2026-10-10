@@ -3,6 +3,7 @@
 const { aggregateDevices, normalizeDeviceRecord, normalizePeriod } = require('../shared/usage');
 const { deviceHistoryRevision } = require('../shared/history');
 const { pickRecentUsageActivity } = require('../shared/trayText');
+const { grokBotSessionIdsForMaps } = require('./renderer/sessionRows');
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
@@ -21,6 +22,12 @@ function attachLocalNativeViews(stats, localDevice) {
   delete stats.nativeSessions;
   delete stats.nativeProjects;
   delete stats.localRecentUsageActivity;
+  // Electron-only identity evidence travels with this snapshot, not with the
+  // device/Hub record. Look up only current DAY/MONTH ids in captured history;
+  // completing the full summary here would defeat lazy all-time composition.
+  stats.grokBotSessionIds = grokBotSessionIdsForMaps([
+    stats.periods?.today?.sessions, stats.periods?.month?.sessions
+  ], [localDevice && rawAllTime(localDevice)?.sessions, stats.periods?.allTime?.sessions]);
   if (hasOwn(localDevice, 'nativeSessions')) stats.nativeSessions = localDevice.nativeSessions;
   if (hasOwn(localDevice, 'nativeProjects')) stats.nativeProjects = localDevice.nativeProjects;
   // The tray's recent provider is a local-only presentation projection. Build

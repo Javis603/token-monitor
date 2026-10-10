@@ -273,6 +273,53 @@
       .some(([model, tokens]) => /^grok-bot-.+/.test(model) && finiteNumber(tokens) > 0);
   }
 
+  const botIdentityCache = new WeakMap();
+  const botIdSets = new WeakMap();
+
+  // Accounting maps use client:sessionId keys. Only inspect the visible
+  // candidates' historical rows: enumerating history would make a DAY repaint
+  // scale with the lifetime session count. Snapshot maps are immutable.
+  function grokBotSessionIdsForMaps(visibleMaps, historyMaps = []) {
+    const maps = visibleMaps.filter(map => map && typeof map === 'object');
+    const history = historyMaps.filter(map => map && typeof map === 'object');
+    if (maps.length === 0) return [];
+    const cached = botIdentityCache.get(maps[0]);
+    const sameMaps = (a, b) => a.length === b.length && a.every((map, index) => map === b[index]);
+    if (cached && sameMaps(cached.maps, maps) && sameMaps(cached.history, history)) return cached.ids;
+    const candidates = new Set();
+    const bots = new Set();
+    for (const map of maps) {
+      for (const [key, session] of Object.entries(map)) {
+        if (session?.client !== 'cursor') continue;
+        const id = textValue(session.sessionId) || key.replace(/^cursor:/, '');
+        candidates.add(id);
+        if (isGrokBotSession(session, key)) bots.add(id);
+      }
+    }
+    for (const id of candidates) {
+      if (bots.has(id)) continue;
+      const key = `cursor:${id}`;
+      if (history.some(map => isGrokBotSession(map[key], key))) bots.add(id);
+    }
+    const ids = [...bots];
+    botIdentityCache.set(maps[0], { maps, history, ids });
+    return ids;
+  }
+
+  function grokBotIdsForPeriod(period, options) {
+    // A pushed compact list is authoritative, including an empty one. Never
+    // revive identity from a stale TOTAL list attached by the renderer loader.
+    const ids = Array.isArray(options.grokBotSessionIds) ? options.grokBotSessionIds
+      : grokBotSessionIdsForMaps([period?.sessions],
+        Object.values(options.sourcePeriods || {}).map(value => value?.sessions));
+    let result = botIdSets.get(ids);
+    if (!result) {
+      result = new Set(ids);
+      botIdSets.set(ids, result);
+    }
+    return result;
+  }
+
   function sessionRowDetailAvailable(row) {
     return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy'].includes(row?.client)
       || (row?.client === 'reasonix' && row?.sessionDetailAvailable === true);
@@ -364,12 +411,7 @@
     const now = options.now || new Date();
     // A day may contain only Claude usage from a bot conversation that used a
     // grok-bot model earlier. Join evidence by conversation id, never by model.
-    const botIds = new Set();
-    for (const sourcePeriod of Object.values(options.sourcePeriods || {})) {
-      for (const [key, session] of Object.entries(sourcePeriod?.sessions || {})) {
-        if (isGrokBotSession(session, key)) botIds.add(textValue(session.sessionId) || key.replace(/^cursor:/, ''));
-      }
-    }
+    const botIds = grokBotIdsForPeriod(period, options);
     const rows = Object.entries(period?.sessions || {})
       .map(([key, session]) => {
         session = sessionLive.sessionWithActivity(period, key, session);
@@ -533,6 +575,7 @@
     compactSessionTime,
     groupBackgroundReviewRows,
     groupSessionRows,
+    grokBotSessionIdsForMaps,
     isGrokBotSession,
     sessionRowDetailAvailable,
     handleBreakdownRowKeydown,
