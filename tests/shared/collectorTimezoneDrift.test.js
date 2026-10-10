@@ -91,6 +91,9 @@ test('an anchor whose offset no longer matches is declined, with unstamped ancho
 test('a drifted anchored tick falls back to the serial full scan and reports the drift', async () => {
   // The subprocess bucketed "today" from a midnight 15 hours behind the device
   // calendar, so the scan carries a session that ended yesterday evening.
+  // The clock is pinned so the session stays "before local midnight" on any
+  // runner date, not just the day this file was written.
+  const now = new Date(2026, 9, 10, 10, 0, 0);
   const flags = [];
   async function stubTokscale({ flags: callFlags }) {
     flags.push(callFlags.join(' '));
@@ -106,7 +109,8 @@ test('a drifted anchored tick falls back to the serial full scan and reports the
 
   const driftReports = [];
   const summary = await collectUsageOnce(baseOptions({
-    todayOnlyAnchor: anchorFixture(),
+    now,
+    todayOnlyAnchor: anchorFixture({ dateKey: localTodayKey(now), utcOffsetMinutes: utcOffsetMinutes(now) }),
     runTokscale: stubTokscale,
     onTodayWindowDrift: (drifted) => driftReports.push(drifted)
   }));
@@ -121,6 +125,7 @@ test('a drifted anchored tick falls back to the serial full scan and reports the
 });
 
 test('a clean anchored tick keeps the single-scan delta path and reports no drift', async () => {
+  const now = new Date(2026, 9, 10, 10, 0, 0);
   const flags = [];
   async function stubTokscale({ flags: callFlags }) {
     flags.push(callFlags.join(' '));
@@ -132,7 +137,8 @@ test('a clean anchored tick keeps the single-scan delta path and reports no drif
 
   const driftReports = [];
   const summary = await collectUsageOnce(baseOptions({
-    todayOnlyAnchor: anchorFixture(),
+    now,
+    todayOnlyAnchor: anchorFixture({ dateKey: localTodayKey(now), utcOffsetMinutes: utcOffsetMinutes(now) }),
     runTokscale: stubTokscale,
     onTodayWindowDrift: (drifted) => driftReports.push(drifted)
   }));

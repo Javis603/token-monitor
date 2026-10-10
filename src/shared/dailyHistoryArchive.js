@@ -670,7 +670,6 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
   const currentDays = observationsFromGraphs(graphs, { archive: normalizedArchive });
   const todayKey = String(options.todayKey || '').slice(0, 10);
   const hasTodayKey = DAY_KEY_RE.test(todayKey);
-  const captureOffset = captureOffsetMinutes(options);
 
   for (const [date, day] of Object.entries(normalizedArchive.days)) {
     if (hasTodayKey && date > todayKey) continue;
@@ -692,7 +691,20 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
     const dayStamped = Number.isFinite(previous.utcOffsetMinutes);
     if (liveStamped && dayStamped && liveDay.utcOffsetMinutes !== previous.utcOffsetMinutes) {
       const captureOffset = captureOffsetMinutes(options);
-      currentDays.set(date, (liveDay.utcOffsetMinutes === captureOffset ? liveDay : previous));
+      if (liveDay.utcOffsetMinutes === captureOffset) {
+        currentDays.set(date, liveDay);
+      } else if (previous.utcOffsetMinutes === captureOffset) {
+        currentDays.set(date, previous);
+      } else {
+        // Neither stamp names the current offset (e.g. a stored round-trip
+        // read under a third zone). No stamp can claim the day key, so fall
+        // back to the usual greater-live-value rule instead of letting the
+        // archive bucket bury a larger live value.
+        const selected = liveDayIsGreater(liveDay, previous)
+          ? mergeLiveDayMetadata(liveDay, previous)
+          : previous;
+        currentDays.set(date, withReconciledGraphCosts(selected, previous, liveDay, options.reprice === true));
+      }
       continue;
     }
     const selected = liveDayIsGreater(liveDay, previous) ? mergeLiveDayMetadata(liveDay, previous) : previous;

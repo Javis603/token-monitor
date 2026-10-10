@@ -2763,6 +2763,15 @@ function startCollector(options) {
         // liveDays overlay is passed into any graph scan that happens first.
         deferLiveHistoryCapture: true,
         dailyHistoryLiveDays: liveDailyHistoryDays,
+        // Stamp the archive with the offset at scan start, not completion: a
+        // timezone move during a long scan would otherwise pair the old
+        // window's graph with the new zone's stamp.
+        dailyHistoryArchiveOptions: {
+          ...(options.dailyHistoryArchiveOptions || {}),
+          utcOffsetMinutes: Number.isFinite(options.dailyHistoryArchiveOptions?.utcOffsetMinutes)
+            ? options.dailyHistoryArchiveOptions.utcOffsetMinutes
+            : tickUtcOffsetMinutes
+        },
         onHistoryStatus: includeHistory ? (status) => {
           lastHistoryAttemptAt = Date.parse(status.attemptedAt) || lastHistoryAttemptAt;
           const successAt = Date.parse(status.successAt);
@@ -2973,6 +2982,9 @@ function startCollector(options) {
             : visibleSummary.today;
           const retainedLive = retainLiveDailyHistory(retainedToday, {
             ...(options.dailyHistoryArchiveOptions || {}),
+            utcOffsetMinutes: Number.isFinite(options.dailyHistoryArchiveOptions?.utcOffsetMinutes)
+              ? options.dailyHistoryArchiveOptions.utcOffsetMinutes
+              : tickUtcOffsetMinutes,
             liveDays: liveDailyHistoryDays,
             todayKey: visibleDateKey,
             pricingRevision: tickPricingRevision,

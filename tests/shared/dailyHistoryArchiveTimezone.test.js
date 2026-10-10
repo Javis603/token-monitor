@@ -202,6 +202,22 @@ test('presentation prefers the same-offset value for a day key, whichever tier i
   );
 });
 
+test('a stale dual-stamp day keeps the greater live value when neither stamp matches the current offset', () => {
+  const date = '2026-10-10';
+  // Read under a third zone (UTC+0): neither stored stamp claims the capture,
+  // so no stamp can assert the day key and the greater-value rule must hold
+  // instead of letting the archive bucket bury the live overlay.
+  const options = { todayKey: date, utcOffsetMinutes: 0 };
+  const result = graphFromDailyHistoryArchive([], {
+    days: { [date]: { date, utcOffsetMinutes: BEIJING, observations: [{ client: 'claude', modelId: 'opus', tokens: 550, cost: 0, messages: 1 }] } },
+    liveDays: { [date]: { date, utcOffsetMinutes: CALIFORNIA, observations: [{ client: 'claude', modelId: 'opus', tokens: 700, cost: 0, messages: 1 }] } }
+  }, options);
+  assert.equal(
+    Object.values(result.contributions.find(row => row.date === date).clients[0].tokens).reduce((a, b) => a + b, 0),
+    700
+  );
+});
+
 test('mergeLiveDaysIntoArchive replaces a cross-offset overlay and keeps same-offset maxima', () => {
   const date = '2026-10-10';
   let archive = {
