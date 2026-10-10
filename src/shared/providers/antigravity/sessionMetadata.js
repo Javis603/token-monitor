@@ -143,19 +143,20 @@ function resolveSessionMetadata(sessionIds, context = {}) {
   const env = context.deps?.scopedHome ? {} : (context.deps?.env || process.env);
   const candidates = antigravityConversationSummaryCandidates({ home, env });
   const cache = context.deps?.antigravityTitleCache || titleCache;
+  const unresolved = new Set();
 
   for (const dbPath of candidates) {
     const stamp = databaseStamp(dbPath);
-    if (!stamp) continue;
     let cached = cache.get(dbPath);
-    if (cached?.stamp !== stamp) {
+    if (!stamp && !cached) continue;
+    if (stamp && cached?.stamp !== stamp) {
       // Keep the last successful rows while revalidating this fingerprint.
       // A failed row is retried; it never becomes a definitive hit or miss.
       cached = { stamp, summaries: cached?.summaries || new Map(), validatedIds: new Set(), misses: new Set() };
     }
 
     const wanted = new Set([...sessionIds].filter((id) => !cached.validatedIds.has(id) && !cached.misses.has(id)));
-    if (wanted.size > 0 && typeof sqlite?.DatabaseSync === 'function') {
+    if (stamp && wanted.size > 0 && typeof sqlite?.DatabaseSync === 'function') {
       const read = readSummaries(dbPath, sqlite, wanted);
       if (read) {
         for (const [id, row] of read.summaries) {
@@ -172,9 +173,14 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     }
     cache.set(dbPath, cached);
 
+    for (const id of wanted) {
+      if (stamp && !cached.validatedIds.has(id) && !cached.misses.has(id)) unresolved.add(id);
+    }
+
     for (const sessionId of sessionIds) {
       if (result.has(sessionId)) continue;
       const row = cached.summaries.get(sessionId);
+      if (cached.misses.has(sessionId)) continue;
       if (!cached.summaries.has(sessionId)) continue;
       const title = cleanTitle(row?.title) || cleanTitle(row?.preview);
       const identity = projectFromWorkspaceUris(row?.workspace_uris, context);
@@ -194,7 +200,16 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     if (!result.has(sessionId)) {
       const retained = previous && Object.prototype.hasOwnProperty.call(previous, 'catalogTitle')
         ? previous.catalogTitle : anchored;
-      if (typeof retained === 'string' && retained) {
+      // A successful missing-row query can revoke a persisted override even
+      // on a cold cache. Check all candidate stores before deciding absence.
+      const confirmedMissing = !unresolved.has(sessionId) && candidates.some((dbPath) => cache.get(dbPath)?.misses.has(sessionId));
+      if (confirmedMissing && retained !== undefined) {
+        for (const dbPath of candidates) {
+          const cached = cache.get(dbPath);
+          if (cached?.misses.has(sessionId)) cached.summaries.set(sessionId, null);
+        }
+        result.set(sessionId, { catalogOnly: true, catalogTitle: null });
+      } else if (typeof retained === 'string' && retained) {
         result.set(sessionId, { catalogOnly: true, catalogTitle: retained, title: retained });
       } else if (retained === null) result.set(sessionId, { catalogOnly: true, catalogTitle: null });
     }

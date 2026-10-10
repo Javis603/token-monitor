@@ -661,7 +661,7 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
     for (const period of periods) {
       const target = period?.sessions?.[key];
       if (!target) continue;
-      if (session.projectId && !target.projectId) {
+      if (session.projectId && (!target.projectId || target.projectId === titleMetadata.catalogProjects?.[key])) {
         target.projectId = session.projectId;
         target.projectLabel = session.projectLabel;
       }
@@ -880,7 +880,8 @@ async function collectUsageOnce(options) {
     resolvedSessionKeys: new Set(),
     attemptedSessionKeys: new Set(),
     invalidatedTitleKeys: new Set(),
-    t3Titles: {}
+    t3Titles: {},
+    catalogProjects: {}
     // dshSessionFileCache is deliberately NOT reset here: it's module-level
     // (declared with jsonlTimestampCache above) precisely so it survives
     // across collectUsageOnce calls. These caches and sets start fresh each
@@ -910,7 +911,10 @@ async function collectUsageOnce(options) {
     && anchor.dateKey === localTodayKey(collectedAt)
     && canTargetTodayPartitions(anchor, targetClients)
   );
-  if (anchorUsed) localSessionMetadataDeps.t3Titles = anchor.todayT3Titles || anchor.t3Titles || {};
+  if (anchorUsed) {
+    localSessionMetadataDeps.t3Titles = anchor.todayT3Titles || anchor.t3Titles || {};
+    localSessionMetadataDeps.catalogProjects = anchor.catalogProjects || {};
+  }
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     try { options.onProgress({ ...periods, updatedAt: new Date().toISOString() }); } catch (_) {}
@@ -1019,7 +1023,8 @@ async function collectUsageOnce(options) {
       decorateLocalPeriods({ today }, { retryMisses: true });
       propagateTodayProjects(today, [month, allTime], {
         invalidatedTitleKeys: localSessionMetadataDeps.invalidatedTitleKeys,
-        t3Titles: anchor.t3Titles
+        t3Titles: anchor.t3Titles,
+        catalogProjects: anchor.catalogProjects
       });
     } else {
       decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
@@ -1222,10 +1227,16 @@ async function collectUsageOnce(options) {
     for (const [key, meta] of localSessionMetadataDeps.metadataCache) {
       if (meta.t3Title || meta.catalogTitle) t3Titles[key] = meta.t3Title || meta.catalogTitle;
     }
+    const catalogProjects = { ...localSessionMetadataDeps.catalogProjects };
+    for (const [key, meta] of localSessionMetadataDeps.metadataCache) {
+      if (meta.catalogProject) catalogProjects[key] = meta.catalogProject;
+      else if (meta.catalogOnly && today.sessions?.[key]?.projectId && today.sessions[key].projectId !== catalogProjects[key]) delete catalogProjects[key];
+    }
     options.onAnchorComputed({
       windowsPeriods,
       todayPartitions,
       t3Titles,
+      catalogProjects,
       wslBundle,
       wslStatus,
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
@@ -2209,6 +2220,7 @@ const WATCH_POLLING_ENTRY_LIMIT = 20000;
 // matcher — and stops as soon as the count passes `limit`, so a million-entry
 // tree costs no more than a small one. opendir rather than readdir, because a
 // single flat directory can itself hold the whole tree.
+// Overlapping roots walk each lexical directory once, just as chokidar does.
 //
 // Symlinked directories are followed, as chokidar follows them by default, and
 // every link is walked on its own: chokidar dedupes by the link's own path, not
@@ -2219,9 +2231,12 @@ const WATCH_POLLING_ENTRY_LIMIT = 20000;
 // the safe answer for a tree chokidar could not finish either.
 function watchEntriesExceed(dirs, ignored, limit) {
   let count = 0;
-  const pending = [...dirs];
+  const pending = dirs.map((dir) => path.resolve(dir));
+  const visited = new Set();
   while (pending.length > 0) {
     const dir = pending.pop();
+    if (visited.has(dir)) continue;
+    visited.add(dir);
     let handle;
     try { handle = fs.opendirSync(dir); } catch (_) { continue; }
     try {
@@ -2578,6 +2593,7 @@ function startCollector(options) {
           allTime: saved.allTime,
           t3Titles: saved.t3Titles,
           todayT3Titles: saved.todayT3Titles,
+          catalogProjects: saved.catalogProjects,
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -2608,6 +2624,7 @@ function startCollector(options) {
         allTime: anchor.allTime,
         t3Titles: anchor.t3Titles,
         todayT3Titles: anchor.todayT3Titles,
+        catalogProjects: anchor.catalogProjects,
         wslBundle: wslAnchor,
         wslStatus: wslStatusAnchor,
         ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
@@ -2842,6 +2859,7 @@ function startCollector(options) {
           todayPartitions: captured.todayPartitions,
           t3Titles: captured.t3Titles,
           todayT3Titles: captured.t3Titles,
+          catalogProjects: captured.catalogProjects,
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {})
         };
@@ -2854,6 +2872,20 @@ function startCollector(options) {
         // watch ticks. WSL stays independently frozen between interval ticks.
         if (captured.todayPartitions) anchor.todayPartitions = captured.todayPartitions;
         const titlesChanged = JSON.stringify(anchor.todayT3Titles || anchor.t3Titles || {}) !== JSON.stringify(captured.t3Titles);
+        const projectsChanged = JSON.stringify(anchor.catalogProjects || {}) !== JSON.stringify(captured.catalogProjects || {});
+        if (projectsChanged) {
+          for (const [key, session] of Object.entries(summary.today.sessions || {})) {
+            if (!session.projectId) continue;
+            for (const period of ['today', 'month', 'allTime']) {
+              const target = anchor[period]?.sessions?.[key];
+              if (target && (!target.projectId || target.projectId === anchor.catalogProjects?.[key])) {
+                target.projectId = session.projectId;
+                target.projectLabel = session.projectLabel;
+              }
+            }
+          }
+          anchor.catalogProjects = captured.catalogProjects;
+        }
         if (titlesChanged) {
           // Only labels move: the exact usage baseline and full-scan time stay
           // frozen. This also keeps cold-start previews at the latest title.
@@ -2878,7 +2910,7 @@ function startCollector(options) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
         }
-        if (titlesChanged) persistAnchor(tickPricingRevision);
+        if (titlesChanged || projectsChanged) persistAnchor(tickPricingRevision);
       }
       const transformedSummary = await onUpdate?.(summary, reason);
       publishedCodexVisibilityRevision = visibilityRevision;

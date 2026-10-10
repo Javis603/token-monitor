@@ -28,8 +28,14 @@ function summaryStore(t) {
   fs.mkdirSync(dir, { recursive: true });
   const dbPath = path.join(dir, 'conversation_summaries.db');
   const db = new sqlite.DatabaseSync(dbPath);
-  t.after(() => {
+  let closed = false;
+  const close = () => {
+    if (closed) return;
     db.close();
+    closed = true;
+  };
+  t.after(() => {
+    close();
     assert.ok(path.resolve(home).startsWith(path.resolve(temp) + path.sep));
     fs.rmSync(home, { recursive: true, force: true });
   });
@@ -39,7 +45,7 @@ function summaryStore(t) {
     workspace_uris TEXT, last_modified_time TEXT
   )`);
   const put = db.prepare('INSERT OR REPLACE INTO conversation_summaries VALUES (?, ?, ?, ?, ?)');
-  return { home, dir, db, dbPath, put, deps: { sqlite, env: {}, antigravityTitleCache: new Map() } };
+  return { home, dir, db, dbPath, put, close, deps: { sqlite, env: {}, antigravityTitleCache: new Map() } };
 }
 
 test('cleanTitle strips whitespace and limits code points', () => {
@@ -446,7 +452,7 @@ test('Antigravity clears only its catalog override and restores a native fallbac
   assert.equal(session.title, 'Newer native title');
 });
 
-for (const update of ['renamed', 'cleared']) {
+for (const update of ['renamed', 'cleared', 'deleted-while-stopped']) {
   test(`Antigravity ${update} titles survive persisted-anchor restart without moving usage baselines`, { skip: !sqlite }, async (t) => {
     const store = summaryStore(t);
     store.put.run('persisted', 'Original title', '', null, null);
@@ -488,6 +494,29 @@ for (const update of ['renamed', 'cleared']) {
     await waitForUpdate(1);
     const file = path.join(shared, 'collector-anchor.json');
     const original = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (update === 'deleted-while-stopped') {
+      handle.stop();
+      handle = null;
+      store.db.exec('DELETE FROM conversation_summaries');
+      const beforeRestart = scans;
+      handle = startCollector({ ...options, sessionMetadataDeps: { ...store.deps, antigravityTitleCache: new Map() } });
+      await waitForUpdate(2);
+      assert.equal(scans - beforeRestart, 1);
+      for (const period of ['today', 'month', 'allTime']) {
+        assert.equal(updates.at(-1)[period].sessions[key].title || '', '');
+        assert.equal(updates.at(-1)[period].totalTokens, original[period].totalTokens);
+        assert.equal(updates.at(-1)[period].costUsd, original[period].costUsd);
+      }
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      assert.equal(saved.t3Titles[key], null);
+      assert.equal(saved.fullScanAt, original.fullScanAt);
+      handle.stop();
+      handle = null;
+      handle = startCollector({ ...options, sessionMetadataDeps: { ...store.deps, sqlite: null, antigravityTitleCache: new Map() } });
+      await waitForUpdate(3);
+      for (const period of ['today', 'month', 'allTime']) assert.equal(updates.at(-1)[period].sessions[key].title || '', '');
+      return;
+    }
     inputToday = 20;
     store.db.prepare('UPDATE conversation_summaries SET title = ?').run(expected);
     await handle.refreshClient('antigravity');
@@ -519,6 +548,167 @@ for (const update of ['renamed', 'cleared']) {
     assert.equal(fs.readFileSync(file, 'utf8'), savedText, 'reader failures do not rewrite unchanged title state');
   });
 }
+
+for (const unavailable of ['renamed-file', 'stat-error']) {
+  test(`Antigravity full scans retain cached titles when the database has a temporary ${unavailable}`, { skip: !sqlite }, async (t) => {
+    const store = summaryStore(t);
+    store.put.run('unavailable', 'Known title', '', null, null);
+    const options = {
+      clients: 'antigravity', homeDir: store.home, projectsEnabled: false,
+      historyEnabled: false, dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false,
+      wslScanEnabled: false, osInfo: {}, allTimeSince: '2024-01-01',
+      deviceId: 'fixture-device', agentVersion: 'fixture', commandTimeoutMs: 1000,
+      sessionMetadataDeps: store.deps, runAntigravitySync: async () => {},
+      runTokscale: async () => ({ entries: [{ client: 'antigravity', sessionId: 'unavailable', model: 'fixture', input: 12, output: 0, cost: 0.5 }] })
+    };
+    const first = await collectUsageOnce(options);
+    let restore;
+    if (unavailable === 'renamed-file') {
+      store.close();
+      fs.renameSync(store.dbPath, `${store.dbPath}.moved`);
+      restore = () => fs.renameSync(`${store.dbPath}.moved`, store.dbPath);
+    } else {
+      const original = fs.statSync;
+      fs.statSync = function (file, ...args) {
+        if (file === store.dbPath) throw Object.assign(new Error('fixture permission failure'), { code: 'EACCES' });
+        return original.call(this, file, ...args);
+      };
+      restore = () => { fs.statSync = original; };
+    }
+    try {
+      const next = await collectUsageOnce(options);
+      for (const period of ['today', 'month', 'allTime']) {
+        assert.equal(next[period].sessions['antigravity:unavailable'].title, 'Known title');
+        assert.equal(next[period].totalTokens, first[period].totalTokens);
+        assert.equal(next[period].costUsd, first[period].costUsd);
+      }
+    } finally { restore(); }
+    const writer = new sqlite.DatabaseSync(store.dbPath);
+    try { writer.prepare('UPDATE conversation_summaries SET title = ?').run('Recovered title'); }
+    finally { writer.close(); }
+    const recovered = await collectUsageOnce(options);
+    assert.equal(recovered.today.sessions['antigravity:unavailable'].title, 'Recovered title');
+  });
+}
+
+test('Antigravity summary workspace changes reach all watch periods without changing accounting', { skip: !sqlite }, async (t) => {
+  const store = summaryStore(t);
+  const projectA = path.join(store.home, 'project-a');
+  const projectB = path.join(store.home, 'project-b');
+  store.put.run('moving', 'Workspace title', '', JSON.stringify([pathToFileURL(projectA).href]), null);
+  let captured;
+  const options = {
+    clients: 'antigravity', homeDir: store.home, projectsEnabled: true,
+    historyEnabled: false, dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false,
+    wslScanEnabled: false, osInfo: {}, allTimeSince: '2024-01-01',
+    deviceId: 'fixture-device', agentVersion: 'fixture', commandTimeoutMs: 1000,
+    sessionMetadataDeps: store.deps, runAntigravitySync: async () => {},
+    runTokscale: async () => ({ entries: [{ client: 'antigravity', sessionId: 'moving', model: 'fixture', input: 12, output: 0, cost: 0.5 }] }),
+    onAnchorComputed: (value) => { captured = value; }
+  };
+  const first = await collectUsageOnce(options);
+  const anchor = {
+    dateKey: localTodayKey(), today: first.today, month: first.month, allTime: first.allTime,
+    todayPartitions: captured.todayPartitions, t3Titles: captured.t3Titles, catalogProjects: captured.catalogProjects
+  };
+  store.db.prepare('UPDATE conversation_summaries SET workspace_uris = ?').run(JSON.stringify([pathToFileURL(projectB).href]));
+  const next = await collectUsageOnce({ ...options, todayOnlyAnchor: anchor, targetClients: ['antigravity'] });
+  for (const period of ['today', 'month', 'allTime']) {
+    assert.equal(next[period].sessions['antigravity:moving'].projectId, projectIdentity(projectB).projectId);
+    assert.equal(next[period].totalTokens, first[period].totalTokens);
+    assert.equal(next[period].costUsd, first[period].costUsd);
+    assert.equal(next[period].sessions['antigravity:moving'].catalogProject, undefined);
+  }
+  // Even a native path equal to the old catalog association stays authoritative.
+  const native = projectB;
+  options.runTokscale = async () => ({ entries: [{ client: 'antigravity', sessionId: 'moving', workspaceKey: 'native', model: 'fixture', input: 12, output: 0, cost: 0.5 }],
+    sessions: [{ client: 'antigravity', sessionId: 'moving', workspaceKey: 'native' }],
+    workspaces: [{ workspaceKey: 'native', path: native }] });
+  const nativeFirst = await collectUsageOnce({ ...options, todayOnlyAnchor: anchor, targetClients: ['antigravity'] });
+  const nativeAnchor = { dateKey: localTodayKey(), today: nativeFirst.today, month: nativeFirst.month, allTime: nativeFirst.allTime,
+    todayPartitions: captured.todayPartitions, t3Titles: captured.t3Titles, catalogProjects: captured.catalogProjects };
+  assert.equal(captured.catalogProjects['antigravity:moving'], undefined);
+  store.db.prepare('UPDATE conversation_summaries SET workspace_uris = ?').run(JSON.stringify([pathToFileURL(projectA).href]));
+  const nativeNext = await collectUsageOnce({ ...options, todayOnlyAnchor: nativeAnchor, targetClients: ['antigravity'] });
+  for (const period of ['today', 'month', 'allTime']) {
+    assert.equal(nativeNext[period].sessions['antigravity:moving'].projectId, projectIdentity(native).projectId);
+  }
+});
+
+test('Antigravity workspace provenance persists across restart without moving usage anchors', { skip: !sqlite }, async (t) => {
+  const store = summaryStore(t);
+  const projectA = path.join(store.home, 'project-a');
+  const projectB = path.join(store.home, 'project-b');
+  store.put.run('moving', 'Stable title', '', JSON.stringify([pathToFileURL(projectA).href]), null);
+  const shared = path.join(store.home, 'shared');
+  const oldShared = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = shared;
+  let handle;
+  t.after(() => {
+    handle?.stop();
+    if (oldShared === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = oldShared;
+  });
+  const updates = [];
+  let scans = 0;
+  const options = {
+    clients: 'antigravity', homeDir: store.home, projectsEnabled: true,
+    historyEnabled: false, dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false,
+    wslScanEnabled: false, sessionActivityPolling: false, watchEnabled: false, intervalMs: 60 * 60 * 1000,
+    osInfo: {}, allTimeSince: '2024-01-01', deviceId: 'fixture-device', agentVersion: 'fixture', commandTimeoutMs: 1000,
+    sessionMetadataDeps: store.deps, runAntigravitySync: async () => {},
+    runTokscale: async () => { scans += 1; return { entries: [{ client: 'antigravity', sessionId: 'moving', model: 'fixture', input: 12, output: 0, cost: 0.5 }] }; },
+    onUpdate: (summary) => updates.push(summary)
+  };
+  const wait = async (count) => {
+    for (let attempt = 0; attempt < 200 && updates.length < count; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(updates.length, count);
+  };
+  handle = startCollector(options);
+  await wait(1);
+  const file = path.join(shared, 'collector-anchor.json');
+  const original = JSON.parse(fs.readFileSync(file, 'utf8'));
+  store.db.prepare('UPDATE conversation_summaries SET workspace_uris = ?').run(JSON.stringify([pathToFileURL(projectB).href]));
+  await handle.refreshClient('antigravity');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(saved.fullScanAt, original.fullScanAt);
+  assert.equal(saved.catalogProjects['antigravity:moving'], projectIdentity(projectB).projectId);
+  for (const period of ['today', 'month', 'allTime']) {
+    const { projectId: _oldId, projectLabel: _oldLabel, ...before } = original[period].sessions['antigravity:moving'];
+    const { projectId: _newId, projectLabel: _newLabel, ...after } = saved[period].sessions['antigravity:moving'];
+    assert.deepEqual(after, before);
+    assert.equal(updates.at(-1)[period].sessions['antigravity:moving'].projectId, projectIdentity(projectB).projectId);
+  }
+  handle.stop();
+  handle = null;
+  const beforeRestart = scans;
+  handle = startCollector({ ...options, sessionMetadataDeps: { ...store.deps, antigravityTitleCache: new Map() } });
+  await wait(3);
+  assert.equal(scans - beforeRestart, 1);
+  for (const period of ['today', 'month', 'allTime']) assert.equal(updates.at(-1)[period].sessions['antigravity:moving'].projectId, projectIdentity(projectB).projectId);
+});
+
+test('Antigravity confirmed misses do not shadow a later store or a temporarily unreadable store', { skip: !sqlite }, (t) => {
+  const store = summaryStore(t);
+  const otherDir = path.join(store.home, '.gemini', 'antigravity-ide');
+  fs.mkdirSync(otherDir, { recursive: true });
+  const otherPath = path.join(otherDir, 'conversation_summaries.db');
+  const other = new sqlite.DatabaseSync(otherPath);
+  t.after(() => other.close());
+  other.exec('CREATE TABLE conversation_summaries(conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, workspace_uris TEXT)');
+  other.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?)').run('later', 'Later store title', '', null);
+  const ids = new Set(['later']);
+  const deps = { ...store.deps, t3Titles: { 'antigravity:later': 'Anchor title' }, invalidatedTitleKeys: new Set() };
+  const result = resolveSessionMetadata(ids, { home: store.home, deps });
+  assert.equal(result.get('later').title, 'Later store title');
+  const unavailable = { ...deps, antigravityTitleCache: new Map(), sqlite: { DatabaseSync: class {
+    constructor(file, options) {
+      if (file === otherPath) throw new Error('SQLITE_BUSY');
+      return new sqlite.DatabaseSync(file, options);
+    }
+  } } };
+  assert.equal(resolveSessionMetadata(ids, { home: store.home, deps: unavailable }).get('later').title, 'Anchor title');
+});
 
 test('Antigravity revalidates changed fingerprints per row and retains failed rows until retry succeeds', (t) => {
   const home = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'antigravity-fingerprint-'));

@@ -5045,6 +5045,27 @@ test('custom roots prune dependency and VCS trees without touching built-in root
   }
 });
 
+test('Antigravity CLI polling counts overlapping summary parents and conversation roots once', () => {
+  const tmp = withTmpHome([path.join('.gemini', 'antigravity-cli', 'conversations')]);
+  try {
+    const { openWatch, watchPathsForClients } = freshCollector();
+    const conversations = path.join(tmp, '.gemini', 'antigravity-cli', 'conversations');
+    for (let index = 0; index < 10001; index += 1) fs.writeFileSync(path.join(conversations, `${index}.db`), '');
+    const options = { homeDir: tmp, env: {} };
+    const dirs = watchPathsForClients('antigravity', options);
+    assert.ok(dirs.includes(conversations));
+    assert.ok(dirs.includes(path.dirname(conversations)));
+    let opened = 0;
+    const chokidar = { watch: () => { opened += 1; return {}; } };
+    assert.doesNotThrow(() => openWatch(chokidar, { ...options, dirs, clients: 'antigravity', usePolling: true }));
+    assert.equal(opened, 1);
+    assert.throws(() => openWatch(chokidar, { ...options, dirs, clients: 'antigravity', usePolling: true, pollingEntryLimit: 10000 }), { code: 'watch-polling-limit' });
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('the polling bound follows symlinked directories the way chokidar does', () => {
   const tmp = withTmpHome([]);
   try {

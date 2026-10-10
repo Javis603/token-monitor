@@ -43,11 +43,11 @@ Claude and Codex derive prompt-cache observations in their existing provider-own
 
 Catalog-only title updates must preserve transcript-derived activity, context, cache and attribution; subsequent transcript reads must resume normal metadata updates. Keep title provenance in local metadata caches and anchors, never in published session rows. Confirmed catalog title removals clear only the matching override and restore any native fallback; missing or unreadable stores preserve the latest known state. The existing anchor title ledger retains its legacy `t3Titles`/`todayT3Titles` field names and also carries provider-keyed Antigravity summary overrides.
 
-Summary catalog metadata may fill a missing decoded workspace, but must not replace a scan's existing project or use a catalog modification time as session activity. The internal `catalogOnly` resolver marker applies this boundary without entering the published row.
+Summary catalog metadata may fill a missing decoded workspace and refresh that catalog-derived association across anchored periods, but must not replace a scan's existing project or use a catalog modification time as session activity. Keep project provenance in the existing local anchor, never in published session rows; metadata changes leave usage baselines and `fullScanAt` unchanged. The internal `catalogOnly` resolver marker applies this boundary without entering the published row.
 
 Codex question waiting shares the context/turn/cache rollout index. Match outstanding `request_user_input` calls to their results by protocol id and clear them at turn boundaries; do not infer waiting from question text, collaboration-mode errors or shell escalation arguments. Only `waitingForInput` is projected, propagated through anchored watch periods and normalized for sync. It follows transcript recency and is omitted from historical session archives; see [Codex](providers/codex.md#session-metadata-and-context) for freshness and approval limits.
 
-Watch title changes and confirmed removals must survive later read misses and restarts without changing token/cost baselines or the full-scan timestamp. Persist anchors only when title state changes. Watch metadata refresh covers sessions present in today, including retained client partitions; month/allTime-only sessions refresh on the next full scan.
+Watch title changes and confirmed removals must survive later read misses and restarts without changing token/cost baselines or the full-scan timestamp. Persist metadata-only anchor updates when catalog title or project provenance changes. Watch metadata refresh covers sessions present in today, including retained client partitions; month/allTime-only sessions refresh on the next full scan.
 
 ### Watching
 

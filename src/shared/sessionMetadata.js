@@ -361,9 +361,10 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (meta.catalogOnly === true) {
         // A summary may supply a missing workspace, but a decoded scan path
         // remains authoritative. Catalog changes never clear turn state.
-        if (!session.projectId && meta.projectId) {
+        if (meta.projectId && (!session.projectId || session.projectId === meta.catalogProject)) {
           session.projectId = meta.projectId;
           if (meta.projectLabel) session.projectLabel = meta.projectLabel;
+          meta.catalogProject = meta.projectId;
         }
         continue;
       }
