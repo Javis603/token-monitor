@@ -34,6 +34,8 @@ Messages are rewritten per conversation, not appended: a read takes a complete s
 
 Both editions are scanned together; there is no current-account filter and no region precedence. `--user-data-dir` aside, the default roots above are the only supported locations. Adding or removing an account database triggers a full re-baseline, because historical usage cannot come from a today-only delta.
 
+Tool details show both edition roots even when they are missing, including before tracking is enabled.
+
 The watcher follows each edition root for new accounts and the database/WAL family. Authentication stores, application logs, nested directories and shared-memory sidecars are ignored.
 
 ## Credentials and transport
@@ -56,7 +58,7 @@ None. No credential is read, stored or sent, no application code is executed, an
 
 ## Icons
 
-`assets/icons/catpaw.svg` is the official brand vector from the app bundle. The mark (`catpaw-mask.svg`) is used for rows and the tray. No website image is needed.
+`assets/icons/catpaw.svg` keeps the original 64×64 paw geometry and foreground colors with a transparent background. The outline becomes transparent separation so the same artwork stays recognizable when lists, the tray and the macOS widget render it in a single color.
 
 ## Verification
 

@@ -362,7 +362,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   if (enabled.has('catpaw')) {
     const catpaw = catpawDataSources({ ...options, platform, env });
     add('catpaw',
-      ...catpaw.roots.map((dir) => ['catpaw-data', dir, null, true]),
+      ...catpaw.roots.map((dir) => ['catpaw-data', dir]),
       ...catpaw.dbPaths.map((file) => ['catpaw-db', path.dirname(file), file])
     );
   }

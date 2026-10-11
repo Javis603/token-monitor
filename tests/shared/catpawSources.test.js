@@ -12,6 +12,9 @@ const {
 } = require('../../src/shared/collector');
 const { deviceRecordFromAnchor } = require('../../src/shared/anchorSeed');
 const { emptyPeriod } = require('../../src/shared/usage');
+const { visibleDiagnosticRoots } = require('../../src/shared/clientSourceObservations');
+const { createClientSourceIpcHandlers } = require('../../src/electron/clientSourceIpc');
+const { clientHealthPlaceholderDetail } = require('../../src/electron/renderer/clientHealthPresentation');
 
 function fixture(t) {
   // Windows runners expose an 8.3 tmp path; the ignore matcher canonicalizes
@@ -30,6 +33,24 @@ function fixture(t) {
   const account = (scope, root = roots[0]) => path.join(root, `catpaw-memory-${scope}.db`);
   return { options, roots, account };
 }
+
+test('untracked CatPaw shows both missing edition paths in tool details', t => {
+  const f = fixture(t);
+  for (const root of f.roots) fs.rmdirSync(root);
+  const handlers = createClientSourceIpcHandlers({
+    knownClients: ['catpaw'],
+    trackedClients: [],
+    visibleDiagnosticRoots: client => visibleDiagnosticRoots(client, f.options)
+  });
+  const result = handlers.clientSources('catpaw');
+  assert.deepEqual(result.sources, f.roots.map(dir => ({ id: 'catpaw-data', dir, exists: false })));
+  const detail = clientHealthPlaceholderDetail({ sources: result.sources });
+  assert.equal(detail.groups[0].state, 'missing');
+  assert.deepEqual(detail.groups[0].checks[0].paths.map(source => source.dir), f.roots);
+  assert.equal(detail.groups[1].state, 'notTracked');
+  fs.mkdirSync(f.roots[0]);
+  assert.equal(clientHealthPlaceholderDetail({ sources: handlers.clientSources('catpaw').sources }).groups[0].state, 'detected');
+});
 
 test('CatPaw discovers both editions and watches only direct account database families', t => {
   const f = fixture(t);
