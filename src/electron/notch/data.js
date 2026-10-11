@@ -114,7 +114,7 @@ function buildNotchData(stats, cells, settings, options = {}) {
     .filter(provider => provider && provider !== 'app').map(provider => limitProviderForClient(provider) || provider))];
   const missingIconProviders = iconProviders.filter(provider => !cells.some(cell => cell.provider === provider));
   const iconCells = missingIconProviders.length ? presentation.buildEdgeDockCells(stats, {
-    ...settings, localDeviceId: settings.deviceId,
+    ...settings, localDeviceId: settings.deviceId, ...(options.cellOptions || {}),
     items: missingIconProviders.map((provider) => ({ type: 'limit', provider }))
   }) : [];
   for (let i = 0; i < resolved.items.length; i += 1) {

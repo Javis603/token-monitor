@@ -5412,9 +5412,12 @@ function notchDataFor(visibleStats, cells) {
       repaintDockSurfaces();
     }, Math.max(1000, nextExpiry - Date.now() + 20));
   }
+  const codexManagedAccounts = codexAccountsForRenderer();
+  const activeCodexAccountId = codexPresentationPendingAccountId || codexPresentationActiveAccountId;
   return buildNotchData(visibleStats, cells, settings, {
     ...compactTokenDisplayOptions(), currency: normalizeCurrency(settings.currency), liveTokenRates,
-    activeAccountKeys: { codex: codexAccountsForRenderer().find((account) => account.id === codexPresentationActiveAccountId)?.accountKey }
+    activeAccountKeys: { codex: codexManagedAccounts.find((account) => account.id === activeCodexAccountId)?.accountKey },
+    cellOptions: { codexManagedAccounts, activeCodexAccountId, localDeviceId: settings.deviceId, syncActive: syncProvenanceActive() }
   });
 }
 

@@ -1847,3 +1847,47 @@ test('summary resize batches fit text before reporting slots and leave the side 
     assert.deepEqual(events, ['text-one', 'text-two', 'report']);
   }
 });
+
+test('summary readings and standalone rings follow the same pending or active Codex account as dock rows', () => {
+  const input = stats();
+  const records = [
+    { provider: 'codex', status: 'ok', accountKey: 'old', sourceDetail: 'live', windows: [{ kind: 'session', remainingPercent: 20 }] },
+    { provider: 'codex', status: 'ok', accountKey: 'next', sourceDetail: 'managed', windows: [{ kind: 'session', remainingPercent: 77 }] }
+  ];
+  input.limits.providers = records;
+  input.devices = [{ deviceId: 'here', limits: { providers: [records[0]] } }];
+  const accounts = [{ id: 'old-login', accountKey: 'old' }, { id: 'next-login', accountKey: 'next' }];
+  const icon = trayLayout.createTrayLayoutItem('providerIcon');
+  icon.source.provider = 'codex';
+  const reading = trayLayout.createTrayLayoutItem('percent');
+  reading.source.provider = 'codex';
+  reading.source.accountMode = 'active';
+  const preferences = { deviceId: 'here', currency: 'USD', notchFollowTray: false,
+    notchCustomLayout: { version: trayLayout.VERSION, items: [icon, reading] } };
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const code = main.slice(main.indexOf('function notchDataFor('), main.indexOf('function toggleDockRateMode('));
+  for (const pending of ['next-login', null]) {
+    const activeId = pending || 'old-login';
+    const projection = { codexManagedAccounts: accounts, activeCodexAccountId: activeId, localDeviceId: 'here', syncActive: true };
+    const expected = buildEdgeDockCells(input, { ...projection, items: [{ type: 'limit', provider: 'codex' }] })[0];
+    const context = {
+      settings: preferences, notchRateTimer: null, notchRateTrackers: new Map(), clearTimeout() {},
+      notchSummaryLayout: summaryLayout, trayLayoutApi: trayLayout, buildNotchData,
+      compactTokenDisplayOptions: () => ({}), normalizeCurrency: value => value,
+      codexAccountsForRenderer: () => accounts, codexPresentationPendingAccountId: pending,
+      codexPresentationActiveAccountId: 'old-login', syncProvenanceActive: () => true
+    };
+    vm.runInNewContext(code, context);
+    for (const cells of [[], [expected]]) {
+      const data = context.notchDataFor(input, cells);
+      const ring = data.summary.items.find(item => item.type === 'icon').providerCell;
+      const value = data.summary.items.find(item => item.type === 'text');
+      assert.equal(ring.remainingPercent, expected.remainingPercent);
+      assert.equal(ring.headlineAccount, expected.headlineAccount);
+      assert.equal(ring.provenanceContext.localDeviceId, 'here');
+      assert.equal(ring.provenanceContext.syncActive, true);
+      assert.equal(value.measure.value, expected.remainingPercent);
+      assert.equal(data.cells, cells, 'standalone ring must not add a quota row');
+    }
+  }
+});
