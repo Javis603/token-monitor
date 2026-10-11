@@ -1021,6 +1021,11 @@ function displayLiveTokenRateItems() {
       enabled: state.settings?.floatingBubbleEnabled === true,
       content: state.settings?.floatingBubbleContent,
       layout: state.settings?.floatingBubbleCustomLayout
+    },
+    {
+      enabled: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchFollowTray === false,
+      content: 'custom',
+      layout: state.settings?.notchCustomLayout
     }
   ]);
 }

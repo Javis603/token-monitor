@@ -23,7 +23,7 @@ function summaryLayout(settings, stats, picks = trayQuotaPicks(stats, settings))
   const mode = settings.trayContent || 'tokens';
   if (mode === 'custom') return trayLayout.normalizeTrayLayout(settings.trayCustomLayout);
   const make = (style, id) => trayLayout.createTrayLayoutItem(style, { idFactory: () => id });
-  const icon = make(mode === 'icon' ? 'appIcon' : 'providerIcon', 'notch-icon');
+  const icon = make(['icon', 'liveTokenRate'].includes(mode) ? 'appIcon' : 'providerIcon', 'notch-icon');
   icon.autoMode = ['tokens', 'tokensAll', 'both', 'bothAll'].includes(mode) ? 'tokens'
     : ['cost', 'costAll'].includes(mode) ? 'cost' : 'lowestLimit';
   icon.period = mode.endsWith('All') ? 'allTime' : 'today';

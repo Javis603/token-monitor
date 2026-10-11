@@ -1945,3 +1945,43 @@ test('a mandatory camera-side readout does not grant menu space to optional over
   assert.equal(reported.left, 50, 'the complete primary readout remains');
   assert.equal(reported.right, 0, 'neither an optional field nor overflow can use the mandatory minimum');
 });
+
+
+test('independent notch rate preview joins shared sampling only on enabled macOS surfaces', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const code = app.slice(app.indexOf('function displayLiveTokenRateItems('), app.indexOf('function effectiveDisplayLiveTokenRateScope('));
+  const rate = trayLayout.createTrayLayoutItem('liveTokenRate');
+  const state = { appInfo: { platform: 'darwin' }, settings: {
+    trayContent: 'tokens', floatingBubbleEnabled: false, notchEnabled: true,
+    notchFollowTray: false, notchCustomLayout: { version: trayLayout.VERSION, items: [rate] }
+  } };
+  const items = vm.runInNewContext(`${code}; displayLiveTokenRateItems`, { state, trayLayoutApi: trayLayout });
+  assert.equal(items().length, 1);
+  assert.equal(items()[0].id, rate.id);
+  state.settings.notchFollowTray = true;
+  assert.equal(items().length, 0);
+  state.settings.notchFollowTray = false;
+  state.settings.notchEnabled = false;
+  assert.equal(items().length, 0);
+  state.settings.notchEnabled = true;
+  for (const platform of ['win32', 'linux']) {
+    state.appInfo.platform = platform;
+    assert.equal(items().length, 0);
+  }
+});
+
+test('following the live rate tray preset preserves its app icon and reading', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const code = app.slice(app.indexOf('function liveTokenRateTrayLayout('), app.indexOf('function trayDataUrlForMode('));
+  const original = vm.runInNewContext(`${code}; liveTokenRateTrayLayout()`, { trayLayoutApi: trayLayout });
+  const followed = summaryLayout({ trayContent: 'liveTokenRate' });
+  const resolve = layout => trayLayout.resolveTrayLayout(layout, stats(), { liveTokenRates: {
+    all: { speed: 200, burn: 12000, idle: false }
+  } }).items;
+  const trayItems = resolve(original), notchItems = resolve(followed);
+  assert.equal(notchItems[0].provider, trayItems[0].provider);
+  assert.equal(notchItems[0].provider, 'app');
+  assert.equal(notchItems[1].text, trayItems[1].text);
+  assert.equal(notchItems[1].text, '200 tok/s');
+  assert.equal(notchItems[1].available, true);
+});
