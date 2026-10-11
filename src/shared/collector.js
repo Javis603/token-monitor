@@ -2746,8 +2746,8 @@ function startCollector(options) {
     const sessionMetadataFallback = anchor;
     const pricingChanged = tickPricingRevision !== pricingRevision;
     const tickSourceRevision = catpawSourcesFingerprint(normalizedClients, sourceOptions);
-    const sourcesChanged = tickSourceRevision !== sourceRevision;
-    if (pricingChanged || sourcesChanged) {
+    const catpawSourcesChanged = tickSourceRevision !== sourceRevision;
+    if (pricingChanged || catpawSourcesChanged) {
       anchor = null;
       wslAnchor = null;
       wslStatusAnchor = null;
@@ -2766,7 +2766,7 @@ function startCollector(options) {
       collectedAt.getTime(),
       lastHistoryAt,
       historyIntervalMs,
-      Boolean(tickOptions.forceHistory) || localDayRolledOver || pricingChanged || sourcesChanged,
+      Boolean(tickOptions.forceHistory) || localDayRolledOver || pricingChanged || catpawSourcesChanged,
       historyEnabled
     );
     if (includeHistory) {
@@ -2846,7 +2846,7 @@ function startCollector(options) {
           if (visibilityRevision !== publishedCodexVisibilityRevision) return;
           if (!partial.today) return;
           if (pricingChanged || pricingFingerprint(options) !== tickPricingRevision
-              || sourcesChanged || catpawSourceChangeObserved) return;
+              || catpawSourcesChanged || catpawSourceChangeObserved) return;
           try {
             if (typeof onPreview === 'function') {
               // Frozen WSL snapshot, gated so a cross-day/cross-month full scan
