@@ -22,7 +22,7 @@ The internal id stays `catpaw` and the display label is `CatPaw`. There is no li
 | Domestic | `<effective home>/Library/Application Support/catpaw-moon/` | native roaming app-data `\catpaw-moon\` |
 | Overseas | `<effective home>/Library/Application Support/catpaw-overseas/` | native roaming app-data `\catpaw-overseas\` |
 
-Windows resolves the roaming root through `FOLDERID_RoamingAppData`, not the `APPDATA` environment variable, matching the fork's `dirs` lookup; an explicit `--home` or a redirected `HOME` resolves `<home>/AppData/Roaming/<edition>` instead through `PathRoot::AppData`. Linux reads no source: no product root has been verified, and reader fixtures are not evidence of one. `--user-data-dir` overrides are not auto-discovered.
+The Windows default is the native roaming app-data folder, not the `APPDATA` environment variable. An explicit `--home` or a redirected `HOME` resolves `<home>/AppData/Roaming/<edition>`. Linux reads no source: no product root has been verified, and reader fixtures are not evidence of one. `--user-data-dir` overrides are not auto-discovered.
 
 Discovery accepts only immediate `catpaw-memory-<scope>.db` files whose scope is non-empty and limited to ASCII letters, digits, `_` and `-`; the exact scope `anon` is excluded. Non-anonymous historical account databases are included: this is the machine's retained history, not the current login's usage, and no login state is read to filter it.
 
@@ -32,11 +32,9 @@ Messages are rewritten per conversation, not appended: a read takes a complete s
 
 ## Source precedence
 
-Both editions are scanned together; there is no current-account filter and no region precedence. `--user-data-dir` aside, the default roots above are the only supported locations.
+Both editions are scanned together; there is no current-account filter and no region precedence. `--user-data-dir` aside, the default roots above are the only supported locations. Adding or removing an account database triggers a full re-baseline, because historical usage cannot come from a today-only delta.
 
-The watcher keeps each edition root for new-account discovery and accepts only the database/WAL/SHM family; authentication stores, application logs and nested directories are pruned. Because a read-only WAL scan rewrites the wal-index, `catpaw` is in `SELF_WATCHED_SQLITE_SIDECAR_CLIENTS`: `-shm` events are suppressed while database and `-wal` events still trigger collection.
-
-The account-database set is part of the collector's config fingerprint. Adding or removing a database clears the persisted anchor and forces a full re-baseline, because historical usage cannot be recovered from a today-only delta; a set change observed between the serial period scans discards the mixed result and reuses the same bounded single replay as a pricing change. Persisted anchors retain the source set used by the scan. Source-set checks apply only when CatPaw is selected; the existing pricing checks and replay limit remain unchanged.
+The watcher follows each edition root for new accounts and the database/WAL family. Authentication stores, application logs, nested directories and shared-memory sidecars are ignored.
 
 ## Credentials and transport
 
@@ -48,17 +46,17 @@ None. No credential is read, stored or sent, no application code is executed, an
 - The session's current selection (`persistedModelId` / `persistedModelMode` / `persistedModelSelection`) takes precedence over the legacy initial fields. A selection is valid only with a Boolean `isAuto`, a safe-integer `modelId` and, when present, a valid safe-integer `lastSelectedModelId`; otherwise the legacy mode routing applies. `lite` / `pro` / `max` remain routing tiers, conflicting current ids and unmapped ids stay unknown, and no lower-priced model is substituted.
 - Auto keeps the label `auto`; routing tiers, unknown and conflicting ids keep an edition-qualified label. All use the `unpriced:catpaw` provider, which blocks automatic catalog pricing. Explicit user custom pricing still applies under the fork's pricing rules. `rateMultiplier` is a credit multiplier, never a token price.
 - Model selection is session state, not per-message identity: changing a session's model relabels its earlier usage. That ceiling is inherent to the stored data.
-- Each source is fingerprinted by database and WAL size/mtime; unchanged sources are not re-read. A changed source is replaced whole or not at all — schema, JSON, identity, counter, budget or I/O failures retain the last complete snapshot and log a warning; a confirmed removal clears its rows; a successful empty read is empty. Budgets: 256 databases per edition, 100,000 usage rows and 50 MiB projected per database.
-- A stable `catpaw.lock` sidecar serializes cache load, scanning and publication across concurrent CLI processes, so an older scan cannot overwrite a newer complete snapshot. Without the lock, sources are still read but no cache is written, and a competing scan waits for the holder.
+- A changed source is replaced whole or not at all: a failed read keeps the last complete snapshot and logs a warning, a confirmed removal clears its rows, and a successful empty read is empty. Reads are bounded; a source over budget keeps its last complete snapshot.
+- Concurrent scans share one lock so an older scan cannot overwrite a newer complete snapshot; without the lock, sources are still read but no cache is written.
 - Changes to older days inside an existing database (deletion or model relabeling) reach history only at the next full reconciliation; today-only watch deltas cannot repair them.
 - Observed real samples (four domestic, three overseas usage rows) satisfied the four-bucket identity with `cacheWrite` always zero. Nonzero cache write, tool/sub-agent rows and legacy runtime formats are covered only synthetically; do not present them as verified.
 - The domestic Windows storage contract was verified statically through installer and `app.asar` inspection; the [issue reporter's real-machine evidence](https://github.com/Javis603/token-monitor/issues/715#issuecomment-6020857899) also confirms its paths, schema and 169 usage rows. The overseas Windows root is inferred from the product contract. Windows file-lock, WAL and SHM behaviour still lacks a real-machine check, as does the overseas Windows installer.
-- Linux and WSL read no CatPaw source. Under a Windows host the root is app-data-relative, so a WSL scan would recount host usage; `catpaw` is in `WSL_EXCLUDED_CLIENTS`.
-- Runtime capability fallback probes CatPaw separately from the existing fork-client batch after a rejected combined probe, so a pre-CatPaw fork keeps its supported Proma/Qoder CN clients without changing their batch acceptance rule. The clients gate still requires every registered client, so the vendor pin must carry the fork parser.
+- Linux and WSL read no CatPaw source. Under a Windows host the root is app-data-relative, so a WSL scan would recount host usage.
+- The vendor pin must carry the fork parser.
 
 ## Icons
 
-`assets/icons/catpaw.svg` preserves the official brand vector extracted from the app bundle, and `catpaw-mask.svg` preserves its white paw-fill paths — the original black outline becomes transparent separation through a luminance mask, so the paws stay recognizable in a single-color mark. Both keep the original 64×64 viewBox, and the presentation entry uses the mask for both row marks and the tray. No website image is needed.
+`assets/icons/catpaw.svg` is the official brand vector from the app bundle. The mark (`catpaw-mask.svg`) is used for rows and the tray. No website image is needed.
 
 ## Verification
 

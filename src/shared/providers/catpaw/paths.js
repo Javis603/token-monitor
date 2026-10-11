@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { tokscaleHomeDir } = require('../../tokscaleConfig');
 
-// These are source paths for watching/health only. The fork owns all usage reads.
+// Token Monitor never reads usage here (the fork does); these paths drive watching, health, and the anchor fingerprint.
 function catpawDatabaseName(name) {
   const scope = /^catpaw-memory-([A-Za-z0-9_-]+)\.db$/.exec(name)?.[1];
   return Boolean(scope && scope !== 'anon');
@@ -14,7 +14,6 @@ function catpawDatabaseName(name) {
 function sameWindowsDirectory(a, b) {
   try { return fs.realpathSync.native(a) === fs.realpathSync.native(b); }
   catch (_) {
-    // Match Rust Path components: keep directory case and unresolved `..`.
     const components = (value) => {
       const root = path.win32.parse(value).root;
       const prefix = root.replaceAll('/', '\\').replace(/^[a-z]:/i, drive => drive.toUpperCase());
@@ -43,10 +42,9 @@ function readWindowsFolders(koffi = require('koffi')) {
           ? koffi.decode(out[0], 'char16_t', -1) : null;
       } finally { if (out[0]) free(out[0]); }
     };
-    // Win32 GUID bytes (the first three fields are little-endian).
     return {
-      profile: folder('8f856c5e220e60479afeea3317b67173'), // FOLDERID_Profile
-      roaming: folder('db85b63ef965f64ca03ae3ef65729f3d') // FOLDERID_RoamingAppData
+      profile: folder('8f856c5e220e60479afeea3317b67173'),
+      roaming: folder('db85b63ef965f64ca03ae3ef65729f3d')
     };
   } finally { if (initialized >= 0) uninitialize(); }
 }
@@ -70,8 +68,7 @@ function catpawDataSources(options = {}) {
   const requestedHome = options.homeDir || profile;
   const home = options.useEnvRoots === false
     ? requestedHome : tokscaleHomeDir({ ...options, homeDir: requestedHome, env, platform });
-  // PathRoot::AppData follows an explicit/redirected home instead of the host
-  // roaming profile. The native known folder is unaffected by env.APPDATA.
+  // Windows default matches the fork's reader: native roaming folder, ignoring APPDATA; an explicit or redirected home wins, so watched paths equal read paths.
   const roaming = options.useEnvRoots !== false && sameWindowsDirectory(home, profile)
     && native.roaming ? native.roaming : path.join(home, 'AppData', 'Roaming');
   const support = platform === 'darwin'
