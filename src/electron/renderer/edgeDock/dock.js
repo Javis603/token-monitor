@@ -1947,6 +1947,21 @@ function notchText(item, row, key, used) {
   return wrapper;
 }
 
+// Sources have already been resolved by the shared tray layout. Only item order
+// and camera clearance affect the split; a stack or embedded mark is one item.
+function allocateNotchSummary(items, cameraGap) {
+  const readings = items.map((item, index) => item.type !== 'icon' && item.type !== 'spacer' ? index : -1).filter(index => index >= 0);
+  const distributed = cameraGap && readings.length > 1;
+  const split = readings.length ? readings[0] + Number(distributed) : items.length;
+  const indices = items.map((_item, index) => index);
+  const left = indices.slice(0, split), right = indices.slice(split);
+  if (cameraGap) {
+    while (left.length && items[left.at(-1)].type === 'spacer') left.pop();
+    while (right.length && items[right[0]].type === 'spacer') right.shift();
+  }
+  return { left, right, primary: distributed ? readings[0] : null, optionalRight: Boolean(distributed) };
+}
+
 function notchSummary(payload) {
   const head = el('div', 'notch-summary');
   const left = el('div', 'notch-slot notch-left');
@@ -1957,17 +1972,12 @@ function notchSummary(payload) {
   const rightContent = el('div', 'notch-slot-content');
   left.append(leftContent); right.append(rightContent);
   const used = new Set();
-  const fields = [];
-  let fieldNodes = [];
+  const parts = [];
   for (const item of payload.summary?.items || []) {
     const iconProvider = item.type === 'icon' ? item.provider : item.iconProvider;
-    if (iconProvider) {
-      const mark = notchIcon({ ...item, provider: iconProvider });
-      mark.title = iconProvider === 'app' ? 'Token Monitor' : providerLabel(iconProvider);
-      leftContent.append(mark);
-      fieldNodes.push(mark);
-    }
-    if (item.type === 'icon') continue;
+    const mark = iconProvider ? notchIcon({ ...item, provider: iconProvider }) : null;
+    if (mark) mark.title = iconProvider === 'app' ? 'Token Monitor' : providerLabel(iconProvider);
+    if (item.type === 'icon') { parts.push(mark); continue; }
     const block = el('span', 'notch-reading');
     block.dataset.notchSpacer = String(item.type === 'spacer');
     const roomyRing = payload.geometry.gapWidth === 0 && payload.geometry.summaryRingSize > 0;
@@ -1992,27 +2002,15 @@ function notchSummary(payload) {
       block.style.alignItems = item.alignment === 'left' ? 'flex-start' : 'flex-end';
       item.rows.forEach((row, i) => block.append(notchText(item, row, `${item.id}:${i}:${JSON.stringify(row.source || row.selection?.source)}`, used)));
     } else block.append(notchText(item, item, `${item.id}:${item.period}:${JSON.stringify(item.source)}`, used));
-    rightContent.append(block);
-    fieldNodes.push(block);
-    if (item.type !== 'spacer') {
-      fields.push(fieldNodes);
-      fieldNodes = [];
-    }
+    const field = mark ? el('span', 'notch-summary-field') : block;
+    if (mark) field.append(mark, block);
+    parts.push(field);
   }
-  // The hardware gap separates fields, never rows within a stack or an icon
-  // from its reading. Camera-free summaries retain their compact arrangement.
-  if (payload.geometry.gapWidth > 0 && fields.length > 1) {
-    fields.at(-1).push(...fieldNodes);
-    leftContent.replaceChildren(); rightContent.replaceChildren();
-    rightContent.dataset.notchOptional = 'true';
-    fields.forEach((nodes, index) => {
-      while (nodes[0]?.dataset.notchSpacer === 'true') nodes.shift();
-      while (nodes.at(-1)?.dataset.notchSpacer === 'true') nodes.pop();
-      const field = el('span', 'notch-summary-field');
-      field.append(...nodes);
-      (index === 0 ? leftContent : rightContent).append(field);
-    });
-  }
+  const allocation = allocateNotchSummary(payload.summary?.items || [], payload.geometry.gapWidth > 0);
+  if (allocation.primary !== null) parts[allocation.primary].dataset.notchPrimary = 'true';
+  rightContent.dataset.notchOptional = String(allocation.optionalRight);
+  leftContent.append(...allocation.left.map(index => parts[index]));
+  rightContent.append(...allocation.right.map(index => parts[index]));
   for (const [key, held] of notchNumbers) {
     if (used.has(key)) continue;
     cancelAnimationFrame(held.handle);
@@ -2111,12 +2109,34 @@ function fitNotchStatReadouts() {
   }
 }
 
-// Measure complete fields before choosing a prefix; hidden fields remain live
+// Measure complete fields before fitting optional items; hidden fields remain live
 // nodes, so fitting never replaces counters or changes their numeric facts.
 function zoomForNotchText(run) {
   const content = run.closest('.notch-slot-content');
   return (Number(getComputedStyle(content).zoom) || 1) * (Number(run.dataset.horizontalScale) || 1);
 }
+// Standalone marks consume their own budget. Only the required reading may
+// exceed clearance; optional items keep their order and stay whole.
+function fitNotchSummaryItems(items, { budget, gap, overflowWidth, primary = -1, optional = false }) {
+  const indices = items.map((_item, index) => index);
+  const first = items.findIndex(item => !item.spacer);
+  const required = primary >= 0 ? [primary] : optional ? [] : indices.slice(0, first < 0 ? items.length : first + 1);
+  const widthFor = visible => visible.reduce((total, index) => total + items[index].width, 0) + Math.max(0, visible.length - 1) * gap;
+  const minimum = required.reduce((total, index) => total + items[index].minimum, 0) + Math.max(0, required.length - 1) * gap;
+  const limit = Number.isFinite(budget) ? Math.max(minimum, budget) : Infinity;
+  const visible = primary >= 0 ? [] : [...required];
+  const candidates = primary >= 0 ? indices.slice(0, primary) : indices.slice(required.length);
+  for (const index of candidates) {
+    if (widthFor([...visible, index, ...(primary >= 0 ? [primary] : [])]) > limit) break;
+    visible.push(index);
+  }
+  if (primary >= 0) visible.push(primary);
+  while (visible.length && items[visible.at(-1)].spacer) visible.pop();
+  const width = widthFor(visible);
+  const overflow = visible.length < items.length && width + (visible.length ? gap : 0) + overflowWidth <= limit;
+  return { visible, minimum, overflow };
+}
+
 function fitNotchSlot(content, budget) {
   let overflow = content.querySelector('.notch-overflow');
   if (!overflow) {
@@ -2140,23 +2160,21 @@ function fitNotchSlot(content, budget) {
   overflow.hidden = true;
   const zoom = Number(getComputedStyle(content).zoom) || 1;
   const gap = (parseFloat(getComputedStyle(content).gap) || 0) * zoom;
-  const widths = blocks.map(node => node.getBoundingClientRect().width);
-  const widthFor = count => widths.slice(0, count).reduce((total, width) => total + width, 0) + Math.max(0, count - 1) * gap;
-  const firstField = blocks.findIndex(node => node.dataset.notchSpacer !== 'true');
-  const mandatory = content.dataset.notchOptional === 'true' ? 0 : firstField < 0 ? blocks.length : firstField + 1;
-  const reading = blocks[firstField]?.classList.contains('notch-summary-field')
-    ? blocks[firstField].querySelector('.notch-reading') : blocks[firstField];
-  const minimum = widthFor(mandatory) - (mandatory && reading?.dataset.notchFlexible === 'true' ? reading.getBoundingClientRect().width : 0);
-  const limit = Number.isFinite(budget) ? Math.max(minimum, budget) : Infinity;
-  let count = mandatory;
-  while (count < blocks.length && widthFor(count + 1) <= limit) count += 1;
-  while (count > mandatory && blocks[count - 1].dataset.notchSpacer === 'true') count -= 1;
-  blocks.forEach((node, index) => { node.hidden = index >= count; });
-  if (count < blocks.length) {
-    overflow.hidden = false;
-    if (widthFor(count) + (count ? gap : 0) + overflow.getBoundingClientRect().width > limit) overflow.hidden = true;
-  }
-  return { width: content.getBoundingClientRect().width, minimum };
+  const items = blocks.map(node => {
+    const width = node.getBoundingClientRect().width;
+    const reading = node.classList.contains('notch-summary-field') ? node.querySelector('.notch-reading') : node;
+    return { width, minimum: width - (reading?.dataset.notchFlexible === 'true' ? reading.getBoundingClientRect().width : 0),
+      spacer: node.dataset.notchSpacer === 'true' };
+  });
+  // Hidden marks have zero width, so they cannot establish overflow clearance.
+  overflow.hidden = false;
+  const overflowWidth = overflow.getBoundingClientRect().width;
+  overflow.hidden = true;
+  const fitted = fitNotchSummaryItems(items, { budget, gap, overflowWidth,
+    primary: blocks.findIndex(node => node.dataset.notchPrimary === 'true'), optional: content.dataset.notchOptional === 'true' });
+  blocks.forEach((node, index) => { node.hidden = !fitted.visible.includes(index); });
+  overflow.hidden = !fitted.overflow;
+  return { width: content.getBoundingClientRect().width, minimum: fitted.minimum };
 }
 function reportNotchSlots(head) {
   // An empty header has no widths to replace the last measured summary with.
@@ -2254,7 +2272,8 @@ function renderNotch(payload) {
   root.classList.toggle('is-notch-attached', payload.geometry.notched === true);
   root.style.setProperty('--notch-zoom', Number(payload.appearance.zoomFactor) || 1);
   const headerActivity = (payload.summary?.items || []).map((item) => item.providerCell ? runningSessionSummary(item.providerCell.sessions).count : 0);
-  const headerKey = JSON.stringify([payload.summary, headerActivity, state.appearanceKey, payload.summary?.needsClock ? notchClock : 0]);
+  // Camera clearance changes grouping even when the readings stay the same.
+  const headerKey = JSON.stringify([payload.summary, headerActivity, payload.geometry.gapWidth > 0, payload.geometry.summaryRingSize > 0, state.appearanceKey, payload.summary?.needsClock ? notchClock : 0]);
   if (headerKey !== notchHeaderKey) {
     notchHeaderKey = headerKey;
     const previousHead = contentLayer.querySelector('.notch-summary');
