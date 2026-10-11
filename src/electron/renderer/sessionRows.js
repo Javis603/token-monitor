@@ -583,10 +583,11 @@
       modelLabel,
       modelTooltipEntries: sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel }),
       modelTokens: models,
-      // The count leads the second line, so the row keeps the parent's height
-      // and a narrow window cannot clip it off the end. A titled row hid its
-      // id, as a session row does.
-      subtitle: [countLabel, parent.titled ? titleParts : parent.subtitle].filter(Boolean).join(' · '),
+      // Keep the tool/model reading order; the renderer reserves space for the
+      // count while the preceding text can shrink in a narrow window.
+      subtitle: [parent.titled ? titleParts : parent.subtitle, countLabel].filter(Boolean).join(' · '),
+      subtitleIdentity: parent.titled ? titleParts : parent.subtitle,
+      subagentCountLabel: countLabel,
       detail: parent.activity ? '' : parent.detail,
       groupDetail: countLabel,
       value,

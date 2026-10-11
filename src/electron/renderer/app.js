@@ -2045,7 +2045,8 @@ document.addEventListener('pointerdown', (event) => {
 let homeSessionRenderPending = false;
 const overflowText = window.TokenMonitorOverflowText.create({
   document, window, prefersReducedMotion,
-  enabled: element => Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint'),
+  enabled: element => !element.classList.contains('has-subagent-count')
+    && Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint'),
   onLeave: () => requestAnimationFrame(() => {
     if (homeSessionRenderPending && state.breakdown === 'home'
       && visibleStatsSurface() === 'main' && state.stats) renderHome();
@@ -2368,7 +2369,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2408,6 +2409,24 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
   const titleEl = row.querySelector('.row-title');
   setHoverMarqueeText(titleEl, name);
   const subtitleEl = row.querySelector('.row-subtitle');
+  let subtitleTextEl = subtitleEl;
+  const splitSubtitle = Boolean(subagentCountLabel);
+  subtitleEl.classList.toggle('has-subagent-count', splitSubtitle);
+  if (splitSubtitle) {
+    subtitleTextEl = subtitleEl.querySelector('.session-subtitle-identity');
+    if (!subtitleTextEl) {
+      subtitleTextEl = document.createElement('span');
+      subtitleTextEl.className = 'session-subtitle-identity';
+      const count = document.createElement('span');
+      count.className = 'session-subagent-count';
+      const content = subtitleEl.querySelector('.overflow-text-content') || subtitleEl;
+      content.replaceChildren(subtitleTextEl, count);
+      bindHoverMarquee(subtitleTextEl);
+    }
+    subtitleEl.querySelector('.session-subagent-count').textContent = `${subtitleIdentity ? ' · ' : ''}${subagentCountLabel}`;
+    overflowText.update(subtitleEl);
+  }
+  const subtitleText = splitSubtitle ? subtitleIdentity || '' : subtitle;
   // A multi-model session abbreviates to "N models"; that label opens the same
   // tooltip the context gauge carries, one row per model with its tokens and
   // share of the session. A titled row prints the label inside the
@@ -2417,18 +2436,18 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
   // chrome, so there is nothing extra on a single-model row.
   const modelEntries = Array.isArray(modelTooltipEntries) && modelTooltipEntries.length > 1
     ? modelTooltipEntries : null;
-  const subtitleShowsModel = Boolean(modelEntries && modelLabel && String(subtitle || '').endsWith(modelLabel));
+  const subtitleShowsModel = Boolean(modelEntries && modelLabel && String(subtitleText || '').endsWith(modelLabel));
   if (subtitleShowsModel) {
     const models = document.createElement('span');
     models.className = 'session-models';
     models.textContent = modelLabel;
     // Inside the marquee's own wrapper, so a long line still scrolls on hover.
-    const subtitleContent = subtitleEl.querySelector('.overflow-text-content') || subtitleEl;
-    subtitleContent.replaceChildren(document.createTextNode(subtitle.slice(0, -modelLabel.length)), models);
-    overflowText.update(subtitleEl);
+    const subtitleContent = subtitleTextEl.querySelector('.overflow-text-content') || subtitleTextEl;
+    subtitleContent.replaceChildren(document.createTextNode(subtitleText.slice(0, -modelLabel.length)), models);
+    overflowText.update(subtitleTextEl);
     limitWindowsView.setDetailTooltip(models, modelEntries);
   } else {
-    setHoverMarqueeText(subtitleEl, subtitle);
+    setHoverMarqueeText(subtitleTextEl, subtitleText);
   }
   if (!subtitleShowsModel && modelEntries && modelLabel && String(name || '').endsWith(modelLabel)) {
     limitWindowsView.setDetailTooltip(titleEl, modelEntries);

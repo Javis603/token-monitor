@@ -449,7 +449,7 @@ test('subagents fold under their visible parent while reviews keep the global gr
   assert.ok(Math.abs(group.cost - 1.5) < 1e-9);
   assert.equal(group.sortTime, Date.parse(localIso(2026, 10, 11, 12, 25)));
   assert.equal(group.groupDetail, '2 subagents');
-  assert.match(group.subtitle, /^2 subagents · Codex/);
+  assert.match(group.subtitle, /^Codex .* · 2 subagents$/);
   assert.equal(group.detail, '');
   assert.deepEqual(group.groupRows.map(row => row.key),
     ['session:codex:main', 'session:codex:nested', 'session:codex:worker']);
@@ -476,7 +476,7 @@ test('a subagent group labels and breaks down every member model, not only the p
   const titled = grouped.find(row => row.key === 'session-group:subagents:codex:main');
   assert.equal(titled.value, 150);
   assert.equal(titled.modelLabel, '3 models');
-  assert.equal(titled.subtitle, '1 subagents · Codex · 3 models');
+  assert.equal(titled.subtitle, 'Codex · 3 models · 1 subagents');
   assert.deepEqual(titled.modelTooltipEntries, [
     ['gpt-5.6-sol', '80', '53%'], ['gpt-5.6-mini', '40', '27%'], ['gpt-5.6-nano', '30', '20%']
   ]);

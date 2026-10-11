@@ -4182,6 +4182,22 @@ html.is-windows .settings-panel select option {
 .row-detail {
   opacity: 0.84;
 }
+.row-subtitle.has-subagent-count > .overflow-text-content {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+.session-subtitle-identity {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-subagent-count {
+  flex: 0 0 auto;
+  white-space: pre;
+}
 .row-metrics { display: grid; flex: 0 0 auto; gap: 2px; min-width: max-content; text-align: right; }
 .row-value { color: var(--text); white-space: nowrap; }
 .row-cost { color: var(--muted); font-size: 0.625rem; white-space: nowrap; }
