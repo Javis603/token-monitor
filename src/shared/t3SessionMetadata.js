@@ -155,32 +155,31 @@ function readT3SessionMeta(sessionIds, deps = {}) {
       db = openDb(dbPath, sqliteMod);
       const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => String(row.name)));
       for (const query of t3TitleQueries(db, tables, providerDriver)) {
-        for (let offset = 0; offset < candidateIds.length; offset += QUERY_CHUNK_SIZE) {
-          const chunk = candidateIds.slice(offset, offset + QUERY_CHUNK_SIZE).filter(
-            (id) => !v2SeenThreadIds.has(id) && (query.authoritative || !legacyTitles.has(id))
-          );
-          if (chunk.length === 0) continue;
-          const placeholders = chunk.map(() => '?').join(',');
-          const sql = `SELECT ${query.threadId} AS cursorThreadId, t.title AS title, ${query.deleted || '0'} AS deleted
-                       ${query.from}
-                       WHERE ${query.where}${query.threadId} IN (${placeholders})${query.order}`;
-          for (const row of db.prepare(sql).all(...query.params, ...chunk)) {
-            const threadId = cleanText(row.cursorThreadId);
-            if (!threadId || v2SeenThreadIds.has(threadId)) continue;
-            if (query.authoritative) {
-              v2SeenThreadIds.add(threadId);
-              if (row.deleted) {
-                v2UnavailableTitleIds.add(threadId);
-                continue;
-              }
-            } else if (legacyTitles.has(threadId)) continue;
-            const title = cleanTitle(row.title);
-            if (!title || T3_DEFAULT_TITLES.has(title.toLowerCase())) {
-              if (query.authoritative) v2UnavailableTitleIds.add(threadId);
+        const wanted = candidateIds.filter(
+          (id) => !v2SeenThreadIds.has(id) && (query.authoritative || !legacyTitles.has(id))
+        );
+        if (wanted.length === 0) continue;
+        // Bind the requested ids as one relation: chunked IN lists re-scan the
+        // store's JSON native identities for every batch of historical sessions.
+        const sql = `SELECT ${query.threadId} AS cursorThreadId, t.title AS title, ${query.deleted || '0'} AS deleted
+                     ${query.from}
+                     WHERE ${query.where}${query.threadId} IN (SELECT value FROM json_each(?))${query.order}`;
+        for (const row of db.prepare(sql).all(...query.params, JSON.stringify(wanted))) {
+          const threadId = cleanText(row.cursorThreadId);
+          if (!threadId || v2SeenThreadIds.has(threadId)) continue;
+          if (query.authoritative) {
+            v2SeenThreadIds.add(threadId);
+            if (row.deleted) {
+              v2UnavailableTitleIds.add(threadId);
               continue;
             }
-            (query.authoritative ? titleByThreadId : legacyTitles).set(threadId, title);
+          } else if (legacyTitles.has(threadId)) continue;
+          const title = cleanTitle(row.title);
+          if (!title || T3_DEFAULT_TITLES.has(title.toLowerCase())) {
+            if (query.authoritative) v2UnavailableTitleIds.add(threadId);
+            continue;
           }
+          (query.authoritative ? titleByThreadId : legacyTitles).set(threadId, title);
         }
       }
     } catch (_) { /* skip missing, locked, or incompatible databases */ } finally {

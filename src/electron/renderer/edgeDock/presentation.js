@@ -279,36 +279,71 @@
   function groupedSessionRows(stats, options = {}) {
     const entries = sessionSourceRows(stats);
     const states = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
-    const projected = sessionRowsFor(entries, states);
-    const byKey = new Map(projected.map(row => [`session:${row.key}`, row]));
     const botIds = new Set(Array.isArray(stats?.grokBotSessionIds) ? stats.grokBotSessionIds
       : sessionRowsApi.grokBotSessionIdsForMaps([Object.fromEntries(entries.map(({ key, session }) => [key, session]))],
         Object.values(stats?.periods || {}).map(period => period?.sessions)));
-    // Grouping needs identities, totals and state. Each surface formats only
-    // the rows it actually displays, not transcript/detail DTOs for history.
-    const rows = projected.map(row => ({
-      key: `session:${row.key}`, kind: 'session', client: row.client,
-      clientLabel: options.clientLabels?.[row.client] || row.client,
-      nativeSessionId: row.nativeSessionId, t3ThreadId: row.t3ThreadId,
-      name: row.title || row.projectLabel || row.sessionId.slice(0, 12) || '—',
-      titled: Boolean(row.title || row.projectLabel),
-      modelTokens: row.models, value: row.totalTokens, cost: row.costUsd,
-      unpricedTokens: row.unpricedTokens, tokenDataUnavailable: row.tokenDataUnavailable,
-      parentKey: row.parentSessionId && (row.parentClient !== row.client || row.parentSessionId !== row.sessionId)
-        ? `session:${row.parentClient}:${row.parentSessionId}` : undefined,
-      grokBot: sessionRowsApi.isGrokBotSession(row, row.key) || (row.client === 'cursor' && botIds.has(row.sessionId)),
-      activityState: sessionActivityState(row), running: row.running,
-      sortTime: Date.parse(row.lastUsedAt || row.startedAt || '') || 0
-    }));
-    return sessionRowsApi.groupSessionRows(rows, { ...options, subagents: { ...options.subagents, includeModelTooltip: false } }).map(summary => {
-      if (!summary.sessionGroup) return byKey.get(summary.key);
-      const members = summary.groupRows.map(row => ({ ...byKey.get(row.key), groupRole: row.groupRole }));
+    // Resolve all group identities and totals before caps, but build display
+    // rows (context, archive flags and member DTOs) only for selected groups.
+    const entriesByKey = new Map();
+    const rows = entries.map(entry => {
+      const { key, session } = entry;
+      const client = normalizedId(session.client);
+      const sessionId = String(session.sessionId || '');
+      const parentClient = normalizedId(session.parentClient || session.client);
+      const parentSessionId = String(session.parentSessionId || '');
+      const models = session.models || (session.model ? { [session.model]: finite(session.totalTokens) || 0 } : {});
+      entriesByKey.set(`session:${key}`, entry);
+      return {
+        key: `session:${key}`, kind: 'session', client,
+        clientLabel: options.clientLabels?.[client] || client,
+        nativeSessionId: normalizedId(session.nativeSessionId), t3ThreadId: String(session.t3ThreadId || ''),
+        name: String(session.title || session.projectLabel || sessionId.slice(0, 12) || '—'),
+        titled: Boolean(session.title || session.projectLabel),
+        modelTokens: models,
+        value: finite(session.totalTokens) || 0, cost: finite(session.costUsd ?? session.reportedCostUsd) || 0,
+        unpricedTokens: session.unpricedTokens > 0 ? finite(session.unpricedTokens) : undefined,
+        tokenDataUnavailable: session.tokenDataUnavailable === true,
+        parentKey: parentSessionId && (parentClient !== client || parentSessionId !== sessionId)
+          ? `session:${parentClient}:${parentSessionId}` : undefined,
+        grokBot: client === 'cursor' && (sessionRowsApi.isGrokBotSession({ client, sessionId, models,
+          grokBotSession: session.grokBotSession }, key) || botIds.has(sessionId)),
+        activityState: client === session.client ? states.get(key) : sessionLive.sessionActivityState({ client, lastUsedAt: session.lastUsedAt, liveActivity: session.liveActivity,
+          turnEnded: session.turnEnded === true, archived: session.archived === true, deleted: session.deleted === true,
+          sourceDeleted: session.sourceDeleted === true, waitingForInput: session.client === 'codex' && session.waitingForInput === true }), running: states.get(key) === 'running',
+        sortTime: entry.lastUsedMs
+      };
+    });
+    const grouped = sessionRowsApi.groupSessionRows(rows, { ...options, subagents: { ...options.subagents, includeModelTooltip: false } });
+    // Grouping can outlast a live lease. Select against the raw members at
+    // the current clock, so either expiry direction uses transcript fallback.
+    const stateFor = (row, now = Date.now()) => {
+      if (row.groupRows) {
+        const memberStates = row.groupRows.map(member => stateFor(member, now));
+        return ['running', 'waiting'].find(state => memberStates.includes(state)) || memberStates[0] || 'idle';
+      }
+      const session = entriesByKey.get(row.key).session;
+      return sessionLive.sessionActivityState(row.client === session.client ? session : {
+        client: row.client, lastUsedAt: session.lastUsedAt, liveActivity: session.liveActivity,
+        turnEnded: session.turnEnded === true, archived: session.archived === true,
+        deleted: session.deleted === true, sourceDeleted: session.sourceDeleted === true,
+        waitingForInput: session.client === 'codex' && session.waitingForInput === true
+      }, now);
+    };
+    const projected = new Map();
+    const projectMember = key => {
+      if (!projected.has(key)) projected.set(key, sessionRowsFor([entriesByKey.get(key)], states)[0]);
+      return projected.get(key);
+    };
+    const project = summary => {
+      if (projected.has(summary.key)) return projected.get(summary.key);
+      if (!summary.sessionGroup) return projectMember(summary.key);
+      const members = summary.groupRows.map(row => ({ ...projectMember(row.key), groupRole: row.groupRole }));
       const parent = members[0];
       const models = {};
       for (const member of members) for (const [model, tokens] of Object.entries(member.models)) {
         models[model] = (models[model] || 0) + (finite(tokens) || 0);
       }
-      return {
+      const result = {
         ...parent, key: summary.key, title: summary.subagentGroup
           ? parent.title || parent.projectLabel || parent.sessionId.slice(0, 12) || '—' : summary.name,
         models,
@@ -323,7 +358,10 @@
         activityState: sessionActivityState({ groupRows: members }),
         groupRows: members
       };
-    });
+      projected.set(summary.key, result);
+      return result;
+    };
+    return { rows: grouped, project, stateFor };
   }
 
   function sessionActivityState(row, now = Date.now()) {
@@ -337,11 +375,12 @@
   }
 
   function recentSessionRows(stats, cap = SESSIONS_RECENT_COUNT, options = {}) {
-    return selectRecentSessionRows(groupedSessionRows(stats, options), cap, options);
+    const grouped = groupedSessionRows(stats, options);
+    return selectRecentSessionRows(grouped.rows, cap, options, grouped.stateFor).map(grouped.project);
   }
 
-  function selectRecentSessionRows(rows, cap, options) {
-    const states = new Map(rows.map(row => [row.key, sessionActivityState(row)]));
+  function selectRecentSessionRows(rows, cap, options, stateFor = sessionActivityState) {
+    const states = new Map(rows.map(row => [row.key, stateFor(row)]));
     if (options.runningOnly === true) return rows.filter(row => states.get(row.key) === 'running');
     if (options.includeRunningBeyondCap === true) {
       return rows.filter((row, index) => index < cap || ['running', 'waiting'].includes(states.get(row.key)));
@@ -419,13 +458,14 @@
     // The canonical `client:sessionId` key identifies a record, not the bare
     // sessionId: two clients can carry the same id, and collapsing them onto one
     // key made their states overwrite each other while the rows stayed distinct.
-    const rows = (groupedSessions || groupedSessionRows(stats))
-      .filter(row => providerForClient(normalizedId(row.client)) === provider);
-    const running = rows.filter(row => sessionActivityState(row) === 'running');
-    const waiting = rows.filter(row => sessionActivityState(row) === 'waiting');
-    const quiet = rows.filter(row => !['running', 'waiting'].includes(sessionActivityState(row)))
+    const grouped = groupedSessions || groupedSessionRows(stats);
+    const rows = grouped.rows.filter(row => providerForClient(normalizedId(row.client)) === provider);
+    const states = new Map(rows.map(row => [row.key, grouped.stateFor(row)]));
+    const running = rows.filter(row => states.get(row.key) === 'running');
+    const waiting = rows.filter(row => states.get(row.key) === 'waiting');
+    const quiet = rows.filter(row => !['running', 'waiting'].includes(states.get(row.key)))
       .slice(0, Math.max(0, RECENT_SESSION_COUNT - running.length - waiting.length));
-    return [...waiting, ...running, ...quiet];
+    return [...waiting, ...running, ...quiet].map(grouped.project);
   }
 
   function providerUsage(stats, provider) {
@@ -617,7 +657,9 @@
     if (metric === dockItems.SESSIONS_METRIC) {
       // Every tracked client, not just the ones with a limits provider: this is
       // the item that answers for the clients no quota card can show.
-      const sessions = selectRecentSessionRows(options.groupedSessions || groupedSessionRows(stats), SESSIONS_RECENT_COUNT, { runningOnly: options.runningOnly === true });
+      const grouped = options.groupedSessions || groupedSessionRows(stats);
+      const sessions = selectRecentSessionRows(grouped.rows, SESSIONS_RECENT_COUNT,
+        { runningOnly: options.runningOnly === true }, grouped.stateFor).map(grouped.project);
       // Only a cell that draws the rate carries one: attaching the sample to every
       // sessions item would put live figures in a projection nothing reads them
       // from, and would make "this cell shows marks" indistinguishable in the cell.
@@ -725,7 +767,7 @@
     // push/expiry; a stats-key cache would freeze time-dependent selection.
     const groupedSessions = items.some(item => item.metric === dockItems.SESSIONS_METRIC
       || (item.type === 'limit' && options.limitsEnabled !== false))
-      ? groupedSessionRows(stats) : [];
+      ? groupedSessionRows(stats) : { rows: [], project: row => row, stateFor: sessionActivityState };
     const cells = [];
     for (const item of items) {
       if (item.type === 'stat') {

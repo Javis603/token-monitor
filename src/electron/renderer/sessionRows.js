@@ -534,6 +534,18 @@
   function groupSubagentRows(rows, options = {}) {
     const list = Array.isArray(rows) ? rows : [];
     const eligible = row => row?.kind === 'session' && row.backgroundReview !== true && row.grokBot !== true;
+    // Independent conversations need neither alias resolution nor parent walks.
+    // Keep the full algorithm for repeated native/app identities and any link,
+    // including missing or cross-client parents.
+    const identities = new Set();
+    let needsGrouping = false;
+    for (const row of list) {
+      if (!eligible(row)) continue;
+      const id = sessionConversationIdentity(row);
+      if (row.parentKey || identities.has(id)) { needsGrouping = true; break; }
+      identities.add(id);
+    }
+    if (!needsGrouping) return list;
     const byKey = new Map(list.filter(eligible).map(row => [row.key, row]));
     // A verified native conversation can have several independent accounting
     // rollouts. Resolve links through any visible alias, without changing those
