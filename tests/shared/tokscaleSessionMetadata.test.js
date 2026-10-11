@@ -92,52 +92,6 @@ test('parent links reach the extracted sessions, survive merges and ignore a sel
   assert.equal(period.sessions['codex:child'].totalTokens, 4);
 });
 
-test('a scan-classified background review stays out of its parent group without the Codex catalog', () => {
-  const { sessionRowsForPeriod, groupSessionRows } = require('../../src/electron/renderer/sessionRows');
-  const parent = 'rollout-2026-10-11T10-00-00-01a0aaaa-0000-7000-8000-000000000001';
-  const review = 'rollout-2026-10-11T10-05-00-01a0bbbb-0000-7000-8000-000000000002';
-  const child = 'rollout-2026-10-11T10-06-00-01a0cccc-0000-7000-8000-000000000003';
-  const scan = (reviewMeta) => ({
-    entries: [
-      { client: 'codex', sessionId: parent, model: 'gpt-5.6-sol', input: 100, output: 10 },
-      { client: 'codex', sessionId: review, model: 'codex-auto-review', input: 30, output: 3 },
-      { client: 'codex', sessionId: child, model: 'gpt-5.6-sol', input: 7, output: 1 }
-    ],
-    sessions: [
-      { client: 'codex', sessionId: parent },
-      { client: 'codex', sessionId: review, parentSessionId: parent, ...reviewMeta },
-      { client: 'codex', sessionId: child, parentSessionId: parent, sessionKind: 'not-a-kind' }
-    ]
-  });
-  const grouped = (reviewMeta, catalog) => {
-    const json = scan(reviewMeta);
-    applyTokscaleSessionMetadata(json);
-    const period = extractUsageFromTokscale(json);
-    // The Codex thread database is the only other classifier; `catalog`
-    // stands for it being readable, and an empty map for it being missing.
-    applySessionMetadata({ today: period }, '/nonexistent', {
-      readCodexMeta: () => new Map(catalog ? [[review, { sessionKind: 'background-review' }]] : []),
-      readT3Meta: () => new Map()
-    });
-    const rows = groupSessionRows(sessionRowsForPeriod(period));
-    return { period, rows: Object.fromEntries(rows.map(row => [row.key, row.value])) };
-  };
-
-  const scanned = grouped({ sessionKind: 'background-review' }, false);
-  assert.equal(scanned.period.sessions[`codex:${review}`].sessionKind, 'background-review');
-  assert.equal(scanned.period.sessions[`codex:${child}`].sessionKind, '', 'an unknown kind is not trusted');
-  assert.deepEqual(scanned.rows, {
-    [`session-group:subagents:codex:${parent}`]: 118,
-    'session-group:codex-auto-review': 33
-  });
-  // Either classifier is enough, and the result does not depend on which.
-  assert.deepEqual(grouped({}, true).rows, scanned.rows);
-  assert.deepEqual(grouped({ sessionKind: 'background-review' }, true).rows, scanned.rows);
-  // Neither: the review still reads as a subagent, which is what the scan's
-  // classification exists to prevent.
-  assert.deepEqual(grouped({}, false).rows, { [`session-group:subagents:codex:${parent}`]: 151 });
-});
-
 test('a zero timestamp reads as unknown rather than as the epoch', () => {
   const json = scan();
   applyTokscaleSessionMetadata(json, { resolveProjects: true });

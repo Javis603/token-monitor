@@ -120,11 +120,6 @@ function applyTokscaleSessionMetadata(json, { resolveProjects = true } = {}) {
       // renderer's decision.
       const parentSessionId = String(meta.parentSessionId ?? meta.parent_session_id ?? '').trim();
       if (parentSessionId && parentSessionId !== sessionId && !row.parentSessionId) row.parentSessionId = parentSessionId;
-      // A background review shares a subagent's parent link, so the scan says
-      // which one it is. Codex's thread database says the same when it can be
-      // read; either answer is enough.
-      const sessionKind = String(meta.sessionKind ?? meta.session_kind ?? '').trim();
-      if (sessionKind === 'background-review' && !row.sessionKind) row.sessionKind = sessionKind;
       result.sessions += 1;
     }
     if (!resolveProjects) continue;
