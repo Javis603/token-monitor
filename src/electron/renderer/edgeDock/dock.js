@@ -1957,12 +1957,15 @@ function notchSummary(payload) {
   const rightContent = el('div', 'notch-slot-content');
   left.append(leftContent); right.append(rightContent);
   const used = new Set();
+  const fields = [];
+  let fieldNodes = [];
   for (const item of payload.summary?.items || []) {
     const iconProvider = item.type === 'icon' ? item.provider : item.iconProvider;
     if (iconProvider) {
       const mark = notchIcon({ ...item, provider: iconProvider });
       mark.title = iconProvider === 'app' ? 'Token Monitor' : providerLabel(iconProvider);
       leftContent.append(mark);
+      fieldNodes.push(mark);
     }
     if (item.type === 'icon') continue;
     const block = el('span', 'notch-reading');
@@ -1990,6 +1993,25 @@ function notchSummary(payload) {
       item.rows.forEach((row, i) => block.append(notchText(item, row, `${item.id}:${i}:${JSON.stringify(row.source || row.selection?.source)}`, used)));
     } else block.append(notchText(item, item, `${item.id}:${item.period}:${JSON.stringify(item.source)}`, used));
     rightContent.append(block);
+    fieldNodes.push(block);
+    if (item.type !== 'spacer') {
+      fields.push(fieldNodes);
+      fieldNodes = [];
+    }
+  }
+  // The hardware gap separates fields, never rows within a stack or an icon
+  // from its reading. Camera-free summaries retain their compact arrangement.
+  if (payload.geometry.gapWidth > 0 && fields.length > 1) {
+    fields.at(-1).push(...fieldNodes);
+    leftContent.replaceChildren(); rightContent.replaceChildren();
+    rightContent.dataset.notchOptional = 'true';
+    fields.forEach((nodes, index) => {
+      while (nodes[0]?.dataset.notchSpacer === 'true') nodes.shift();
+      while (nodes.at(-1)?.dataset.notchSpacer === 'true') nodes.pop();
+      const field = el('span', 'notch-summary-field');
+      field.append(...nodes);
+      (index === 0 ? leftContent : rightContent).append(field);
+    });
   }
   for (const [key, held] of notchNumbers) {
     if (used.has(key)) continue;
@@ -2105,9 +2127,13 @@ function fitNotchSlot(content, budget) {
   const blocks = [...content.children].filter(node => node !== overflow);
   for (const block of blocks) {
     block.hidden = false;
-    for (const run of block.querySelectorAll('.notch-text-run')) {
-      run.style.maxWidth = run.dataset.notchFlexible === 'true' && Number.isFinite(budget)
-        ? `${Math.max(0, budget) / zoomForNotchText(run)}px` : 'none';
+    const runs = block.querySelectorAll('.notch-text-run');
+    for (const run of runs) { run.style.maxWidth = 'none'; fitNotchTypeface(run); }
+    for (const run of runs) {
+      if (run.dataset.notchFlexible !== 'true' || !Number.isFinite(budget)) continue;
+      const reading = run.closest('.notch-reading');
+      const fixed = block.getBoundingClientRect().width - reading.getBoundingClientRect().width;
+      run.style.maxWidth = `${Math.max(0, budget - fixed) / zoomForNotchText(run)}px`;
       fitNotchTypeface(run);
     }
   }
@@ -2117,8 +2143,10 @@ function fitNotchSlot(content, budget) {
   const widths = blocks.map(node => node.getBoundingClientRect().width);
   const widthFor = count => widths.slice(0, count).reduce((total, width) => total + width, 0) + Math.max(0, count - 1) * gap;
   const firstField = blocks.findIndex(node => node.dataset.notchSpacer !== 'true');
-  const mandatory = firstField < 0 ? blocks.length : firstField + 1;
-  const minimum = widthFor(mandatory) - (blocks[firstField]?.dataset.notchFlexible === 'true' ? widths[firstField] : 0);
+  const mandatory = content.dataset.notchOptional === 'true' ? 0 : firstField < 0 ? blocks.length : firstField + 1;
+  const reading = blocks[firstField]?.classList.contains('notch-summary-field')
+    ? blocks[firstField].querySelector('.notch-reading') : blocks[firstField];
+  const minimum = widthFor(mandatory) - (mandatory && reading?.dataset.notchFlexible === 'true' ? reading.getBoundingClientRect().width : 0);
   const limit = Number.isFinite(budget) ? Math.max(minimum, budget) : Infinity;
   let count = mandatory;
   while (count < blocks.length && widthFor(count + 1) <= limit) count += 1;
@@ -2147,7 +2175,9 @@ function reportNotchSlots(head) {
   const left = fitNotchSlot(leftContent, limit === null ? budget : Math.max(0, limit - primaryRight - gap));
   const rightBudget = limit === null ? budget : Math.max(0, limit - left.width - gap);
   const right = fitNotchSlot(rightContent, rightBudget);
-  const firstMark = [...leftContent.children].find(node => !node.hidden)?.querySelector('.edge-dock-mark');
+  const firstBlock = [...leftContent.children].find(node => !node.hidden);
+  const firstIcon = firstBlock?.classList.contains('notch-summary-field') ? firstBlock.firstElementChild : firstBlock;
+  const firstMark = firstIcon?.querySelector('.edge-dock-mark');
   const iconInset = firstMark ? Math.max(0, firstMark.getBoundingClientRect().left - leftContent.getBoundingClientRect().left) : 0;
   head.dataset.notchIconInset = iconInset;
   const slots = { left: Math.ceil(left.width), right: Math.ceil(right.width), minimumLeft: Math.ceil(left.minimum), minimumRight: Math.ceil(right.minimum), iconInset };

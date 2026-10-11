@@ -9,6 +9,7 @@ html.notch-black .edge-dock-shape-line { stroke: transparent; }
 .notch-left { justify-content: flex-start; padding-left: calc(var(--notch-shoulder, 0px) + 8px); box-sizing: border-box; }
 .notch-right { justify-content: flex-end; padding-right: calc(var(--notch-shoulder, 0px) + 8px); box-sizing: border-box; }
 .notch-slot-content { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; width: max-content; zoom: var(--notch-summary-zoom, 1); }
+.notch-summary-field { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .notch-gap { flex: 0 0 auto; }
 .notch-summary .edge-dock-mark { flex-shrink: 0; width: 17px; height: 17px; }
 .notch-app-mark { font-size: 18px; font-weight: 650; line-height: 1; color: var(--text); }

@@ -1488,6 +1488,14 @@ test('camera-free renderer fits the menu budget while reserving a complete prima
   report({ dataset: {}, querySelector: selector => selector.includes('notch-left') ? left : right });
   assert.ok(reported.left + reported.right + 12 <= 76, 'menu budget applies to the complete compact group');
   assert.ok(reported.right >= 40, 'extra icons cannot truncate the primary readout');
+  left.children = [{
+    classList: { contains: () => true },
+    firstElementChild: { querySelector: () => null },
+    querySelector: () => ({ getBoundingClientRect: () => ({ left: 20 }) })
+  }];
+  left.getBoundingClientRect = () => ({ left: 0 });
+  report({ dataset: {}, querySelector: selector => selector.includes('notch-left') ? left : right });
+  assert.equal(reported.iconInset, 0, 'an app mark must not borrow the second provider mark inset');
 });
 
 test('rings preserve summary icon scale and grow only hardware-free entries', (t) => {

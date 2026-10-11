@@ -1919,3 +1919,92 @@ test('Notch stale overview keeps its plan and quota with the shared status label
   assert.equal(cardRows(stale).length, cardRows(fresh).length);
   assert.equal(stale.querySelector('.home-limit-account-head').children.length, fresh.querySelector('.home-limit-account-head').children.length);
 });
+
+
+test('Notch ears distribute complete tray fields while stacks and camera-free summaries stay intact', () => {
+  const trayLayout = require('../../src/shared/trayLayout');
+  const typography = require('../../src/electron/renderer/trayTypography');
+  const { buildNotchData } = require('../../src/electron/notch/data');
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const el = (tag, classes, text = '') => {
+    const node = new FakeElement(tag); node.className = classes; node.textContent = text; return node;
+  };
+  const context = {
+    el, trayTypographyApi: typography, notchNumbers: new Map(), cancelAnimationFrame() {},
+    providerLabel: id => id, positionNotchSummary() {},
+    notchIcon: item => el('span', 'edge-dock-mark', item.provider),
+    notchText: (_item, row) => el('span', 'notch-text-run', row.text)
+  };
+  vm.runInNewContext(source.slice(source.indexOf('function notchSummary('), source.indexOf('function notchStatOverviewCard(')), context);
+  const stats = {
+    limits: { providers: [{ provider: 'codex', status: 'ok', accountKey: 'test', accountEmail: 'test@example.test', windows: [
+      { kind: 'session', remainingPercent: 64, resetsAt: new Date(Date.now() + 3600000).toISOString() },
+      { kind: 'weekly', remainingPercent: 74 }
+    ] }] }, periods: { today: { totalTokens: 9500, costUsd: 0 } }
+  };
+  for (const style of trayLayout.STYLE_IDS) {
+    const item = trayLayout.createTrayLayoutItem(style);
+    const icon = trayLayout.createTrayLayoutItem('providerIcon'); icon.source.provider = 'codex';
+    const cost = trayLayout.createTrayLayoutItem('cost');
+    const separator = trayLayout.createTrayLayoutItem('separatorDot');
+    const readings = !['icon', 'spacer'].includes(item.type);
+    if (readings) {
+      const summary = buildNotchData(stats, [], { notchFollowTray: false,
+        notchCustomLayout: { version: trayLayout.VERSION, items: [icon, item] } }).summary;
+      const single = context.notchSummary({ summary, geometry: { gapWidth: 179 }, appearance: {} });
+      assert.equal(single.find('notch-summary-field'), null, `${style} remains one field even with multiple rows`);
+      assert.equal(single.find('notch-right').querySelectorAll('.notch-reading').length, 1);
+    }
+    for (const gapWidth of [179, 0]) {
+      const summary = buildNotchData(stats, [], { notchFollowTray: false,
+        notchCustomLayout: { version: trayLayout.VERSION, items: [icon, item, separator, cost] }
+      }).summary;
+      const head = context.notchSummary({ summary, geometry: { gapWidth }, appearance: {} });
+      const left = head.find('notch-left').children[0], right = head.find('notch-right').children[0];
+      if (gapWidth && readings) {
+        assert.equal(left.children.length, 1, style);
+        assert.equal(right.children.length, 1, style);
+        assert.equal(right.dataset.notchOptional, 'true');
+        assert.equal(left.find('notch-summary-field').find('edge-dock-mark').textContent, 'codex');
+        assert.equal(right.children[0].children[0].dataset.notchSpacer, 'false', 'no separator starts the right ear');
+        if (item.type === 'stack' || item.type === 'bars') {
+          const block = left.find(item.type === 'stack' ? 'notch-stack' : 'notch-bars');
+          assert.equal(block.children.length, item.rows?.length || item.lines.length, `${style} rows stay together`);
+          if (summary.items[1].iconProvider) assert.equal(left.find('notch-summary-field').children.length, 3, 'embedded mark stays with its field');
+        }
+        assert.match(right.text, /0/, 'zero cost remains a displayed field');
+      } else {
+        assert.equal(head.find('notch-summary-field'), null, `${style} retains its compact or single-field layout`);
+      }
+    }
+  }
+});
+
+test('ear fitting retains the complete first field and hides optional fields atomically', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const el = (tag, classes, text = '') => {
+    const node = new FakeElement(tag); node.className = classes; node.textContent = text;
+    node.getBoundingClientRect = () => ({ width: node.width ?? node.children.filter(child => !child.hidden)
+      .reduce((total, child, index) => total + child.getBoundingClientRect().width + (index ? 6 : 0), 0) });
+    return node;
+  };
+  const context = { el, fitNotchTypeface() {}, getComputedStyle: () => ({ zoom: 1, gap: '6px' }) };
+  vm.runInNewContext(source.slice(source.indexOf('function zoomForNotchText('), source.indexOf('function reportNotchSlots(')), context);
+  const content = el('div', 'notch-slot-content');
+  const field = el('span', 'notch-summary-field');
+  const mark = el('span', 'edge-dock-mark'); mark.width = 17;
+  const reading = el('span', 'notch-reading'); reading.width = 40;
+  field.append(mark, reading); content.append(field);
+  const primary = context.fitNotchSlot(content, 20);
+  assert.equal(primary.minimum, 63, 'the icon and primary number are both reserved');
+  assert.equal(field.hidden, false);
+  const optional = el('div', 'notch-slot-content'); optional.dataset.notchOptional = 'true';
+  optional.append(field);
+  const overflow = el('span', 'notch-reading notch-overflow', '⋯'); overflow.width = 8;
+  optional.append(overflow);
+  const result = context.fitNotchSlot(optional, 20);
+  assert.equal(result.minimum, 0);
+  assert.equal(field.hidden, true, 'the whole group disappears, not just its reading');
+  assert.equal(mark.hidden, undefined);
+  assert.equal(overflow.hidden, false);
+});
