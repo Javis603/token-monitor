@@ -377,6 +377,7 @@
         unattributedLabel: options.unattributedLabel
       }),
       subtitle: subtitleParts.join(' · '),
+      activitySummary: subtitleParts.join(' · '),
       running: running || undefined,
       activityState,
       // Decided by the shared gate, not by `running`: it follows the recency
@@ -395,6 +396,7 @@
       color: colors[client] || stable(key, palette),
       stale: false,
       client,
+      clientLabel,
       backgroundReview: isBackgroundReviewSession(session) || undefined,
       sortTime: sessionTimestampValue(session),
       title: `${clientLabel} session ${sessionIdLabel(session?.sessionId || key)}`
@@ -443,12 +445,13 @@
         const subagent = Boolean(parentSessionId) && !backgroundReview;
         const activityParts = [
           archived ? archivedLabel : '',
-          subagent ? subagentLabel : '',
           sessionActivityLabel(session, now),
           messageLabel(session),
           cacheHitLabel(session),
           tokenRateLabel(session)
         ].filter(Boolean);
+        const activitySummary = activityParts.join(' · ');
+        if (subagent) activityParts.splice(archived ? 1 : 0, 0, subagentLabel);
         return {
           key: `session:${key}`,
           kind: 'session',
@@ -459,6 +462,9 @@
           }),
           subtitle: (sessionTitle ? titleParts : activityParts).join(' · '),
           activity: sessionTitle ? activityParts.join(' · ') : undefined,
+          // Group members show their role beside the tool/model, separately
+          // from the activity line. Keep archive status with the activity.
+          activitySummary,
           detail: sessionIdLabel(sessionId),
           value,
           cost: finiteNumber(session?.costUsd),

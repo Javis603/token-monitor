@@ -4868,7 +4868,7 @@ function sessionGroupRunNode(row, max, parent) {
   const interactive = sessionRowsApi.sessionRowDetailAvailable(row);
   const botGroup = parent.summary?.sessionGroup === 'cursor-grok-bot';
   // Subagent members are distinct conversations, so they read like Sessions
-  // rows (title, activity, id) rather than as runs of one review stream.
+  // rows (title, role/tool/model, activity, id) rather than as runs of one review stream.
   const subagentGroup = parent.summary?.subagentGroup === true;
   const namedGroup = botGroup || subagentGroup;
   const mainSession = subagentGroup && row.key === parent.summary.groupRows?.[0]?.key;
@@ -4878,6 +4878,7 @@ function sessionGroupRunNode(row, max, parent) {
   }
   wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">›</span>'
     + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span>'
+    + (subagentGroup ? '<span class="detail-ex-sub session-group-activity"></span>' : '')
     + (namedGroup ? '<span class="session-group-id"></span>' : '') + '</div>'
     + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
     + '<div class="bar"><div class="bar-fill"></div></div>';
@@ -4895,10 +4896,19 @@ function sessionGroupRunNode(row, max, parent) {
   }
   if (!interactive) wrap.querySelector('.detail-chev').textContent = '';
   const sub = wrap.querySelector('.detail-ex-sub');
-  sub.textContent = namedGroup ? [mainSession ? t('sessions.mainSession') : '', row.activity ? row.subtitle : '',
-    row.activity || row.subtitle].filter(Boolean).join(' · ') : row.detail || '';
+  sub.textContent = subagentGroup
+    ? [t(mainSession ? 'sessions.mainSession' : 'sessions.subagent'), row.clientLabel || row.client, row.modelLabel].filter(Boolean).join(' · ')
+    : namedGroup ? [row.activity ? row.subtitle : '', row.activity || row.subtitle].filter(Boolean).join(' · ')
+      : row.detail || '';
   sub.title = sub.textContent;
   bindHoverMarquee(sub);
+  if (subagentGroup) {
+    const activity = wrap.querySelector('.session-group-activity');
+    activity.textContent = row.activitySummary || '';
+    activity.title = activity.textContent;
+    activity.classList.toggle('hidden', !activity.textContent);
+    bindHoverMarquee(activity);
+  }
   if (namedGroup) {
     const id = wrap.querySelector('.session-group-id');
     id.textContent = row.detail || '';

@@ -454,6 +454,8 @@ test('subagents fold under their visible parent while reviews keep the global gr
   assert.deepEqual(group.groupRows.map(row => row.key),
     ['session:codex:main', 'session:codex:nested', 'session:codex:worker']);
   assert.match(group.groupRows[2].activity, /^Subagent/);
+  assert.equal(group.groupRows[2].activitySummary, '12:20');
+  assert.equal(group.groupRows[1].activitySummary, '12:25');
   assert.deepEqual(grouped[0].groupRows.map(row => row.key), ['session:codex:review']);
   const orphan = grouped[3];
   assert.equal(orphan.kind, 'session');
@@ -558,6 +560,51 @@ test('background review run headings show the model independently of session tit
     assert.equal(opened.title, expectedTitle);
     assert.equal(opened.sessionId, 'review');
     assert.equal(opened.returnTo, parent);
+  }
+});
+
+test('subagent members separate role and model from activity with titles on or off', () => {
+  const api = require('../../src/electron/renderer/sessionRows');
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const body = source.slice(source.indexOf('function sessionGroupRunNode('), source.indexOf('function renderSessionGroupDetail('));
+  let opened;
+  const createNode = () => {
+    const children = new Map();
+    return {
+      events: {}, setAttribute() {},
+      querySelector(selector) {
+        if (!children.has(selector)) children.set(selector, { classList: { toggle() {} } });
+        return children.get(selector);
+      },
+      addEventListener(type, handler) { this.events[type] = handler; }
+    };
+  };
+  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth', 'openSessionDetail', 'bindHoverMarquee', 'limitWindowsView', `${body}\nreturn sessionGroupRunNode;`)(
+    { createElement: createNode }, api, key => key === 'sessions.mainSession' ? '主會話' : '子代理',
+    String, String, () => {}, () => 100, request => { opened = request; }, () => {}, { setDetailTooltip() {} }
+  );
+  const now = new Date(2026, 9, 11, 12, 30);
+  for (const title of ['Session title', '']) {
+    const rows = sessionRowsForPeriod({ sessions: {
+      'codex:main': { client: 'codex', sessionId: 'main', title, totalTokens: 20,
+        models: { 'gpt-6.1-sol': 20 }, lastUsedAt: now.toISOString(), messageCount: 2 },
+      'codex:child': { client: 'codex', sessionId: 'child', title, parentSessionId: 'main', archived: true,
+        totalTokens: 10, models: { 'gpt-6.1-sol': 10 }, lastUsedAt: now.toISOString(), messageCount: 1 }
+    } }, { clientLabels: { codex: 'Codex' }, subagentLabel: '子代理', archivedLabel: '已封存', now });
+    const main = rows.find(row => row.key === 'session:codex:main');
+    const parent = { kind: 'session-group', summary: { subagentGroup: true, groupRows: [main] } };
+    for (const row of rows) {
+      const node = render(row, 20, parent);
+      const isMain = row === main;
+      assert.equal(node.querySelector('.detail-ex-title').textContent, row.name);
+      assert.equal(node.querySelector('.detail-ex-sub').textContent, `${isMain ? '主會話' : '子代理'} · Codex · gpt-6.1-sol`);
+      assert.equal(node.querySelector('.session-group-activity').textContent,
+        isMain ? '12:30 · 2 calls' : '已封存 · 12:30 · 1 call');
+      assert.equal(node.querySelector('.session-group-id').textContent, isMain ? 'main' : 'child');
+      node.events.keydown({ key: 'Enter', preventDefault() {} });
+      assert.equal(opened.sessionId, isMain ? 'main' : 'child');
+      assert.equal(opened.returnTo, parent);
+    }
   }
 });
 
