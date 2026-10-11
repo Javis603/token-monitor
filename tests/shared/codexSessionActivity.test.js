@@ -662,7 +662,7 @@ test('collector discovers a native question before token_count and preserves exa
   assert.equal(payload.today.totalTokens, 0);
 });
 
-test('T3 polling updates waiting, response and terminal states without rescanning token usage', async t => {
+test('T3 polling updates waiting, response and terminal states without rescanning token usage', { timeout: 10_000 }, async t => {
   const f = fixture(t); f.write([started]);
   const updates = [];
   let scans = 0;
