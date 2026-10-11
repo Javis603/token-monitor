@@ -143,13 +143,15 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const minimumRight = activeSlots?.minimumRight ?? activeSlots?.right ?? 0;
     const gap = 12 * zoom();
     const minimum = compact ? minimumLeft + minimumRight + gap : Math.max(minimumLeft, minimumRight);
-    const summaryBudget = activeSlots && summaryNeedsMenuBudget()
-      ? notchSummaryBudget(display, geometry, menuWindows, minimum, Object.values(windowIds)) ?? minimum : null;
+    const summaryOptionalBudget = activeSlots && summaryNeedsMenuBudget()
+      ? notchSummaryBudget(display, geometry, menuWindows, 0, Object.values(windowIds)) ?? 0 : null;
+    // The primary readout can exceed clearance; optional items cannot borrow it.
+    const summaryBudget = summaryOptionalBudget === null ? null : Math.max(minimum, summaryOptionalBudget);
     const left = activeSlots && summaryBudget !== null
       ? Math.min(activeSlots.left, compact ? Math.max(minimumLeft, summaryBudget - minimumRight - gap) : summaryBudget) : activeSlots?.left;
     const boundedSlots = activeSlots && summaryBudget !== null
       ? { left, right: Math.min(activeSlots.right, compact ? Math.max(minimumRight, summaryBudget - left - gap) : summaryBudget) } : activeSlots;
-    return { display, geometry, summaryBudget, summaryIconInset: activeSlots?.iconInset || 0,
+    return { display, geometry, summaryBudget, summaryOptionalBudget, summaryIconInset: activeSlots?.iconInset || 0,
       closed: notchBounds(display, geometry, false, contentHeight, boundedSlots, zoom()),
       open: notchBounds(display, geometry, true, contentHeight, boundedSlots, zoom()) };
   }
@@ -205,7 +207,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       else if (!summaryMeasured && summaryMeasurement?.key !== key) summaryMeasurement = { id: ++summaryGeneration, key, measuring: true };
     }
     const payload = surface === 'notch' ? { ...base, expanded, visible: expanded, quietFullScreen: fullScreen, motion: frame,
-      geometry: { ...current.geometry, summaryBudget: current.summaryBudget, summaryWidthLimit: current.display.bounds.width, headerX: current.closed.x - (viewport || current.open).x, headerWidth: current.closed.width,
+      geometry: { ...current.geometry, summaryBudget: current.summaryBudget, summaryOptionalBudget: current.summaryOptionalBudget, summaryWidthLimit: current.display.bounds.width, headerX: current.closed.x - (viewport || current.open).x, headerWidth: current.closed.width,
         expandedInset: current.open.x - (viewport || current.open).x + (current.geometry.notched ? M.shoulder + 14 : 28) * zoom(),
         gapOffset: current.geometry.centerX - current.geometry.gapWidth / 2 - current.closed.x,
         shoulder: current.geometry.notched && hasSummary ? 4 : 0 },

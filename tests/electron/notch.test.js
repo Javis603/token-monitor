@@ -1110,6 +1110,7 @@ test('menu clearance is sampled only for extra active summary fields and keeps t
   f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 17, right: 600, minimumLeft: 17, minimumRight: 37 } });
   let geometry = last(primary).geometry;
   assert.equal(geometry.summaryBudget, 41);
+  assert.equal(geometry.summaryOptionalBudget, 41);
   assert.equal(geometry.headerWidth, 301, 'raw widths above 220pt are budgeted, not silently mismeasured');
   assert.equal(geometry.gapOffset, (geometry.headerWidth - geometry.gapWidth) / 2);
   f.controller.poll(Date.now() + 1000);
@@ -1119,10 +1120,12 @@ test('menu clearance is sampled only for extra active summary fields and keeps t
   assert.equal(reads, 2);
   geometry = last(primary).geometry;
   assert.equal(geometry.summaryBudget, 37, 'minimum wins over an overlapping menu');
+  assert.equal(geometry.summaryOptionalBudget, 0, 'optional fields cannot borrow the mandatory readout width');
   assert.equal(geometry.headerWidth, 293);
   windows = null;
   f.screen.emit('display-metrics-changed');
   assert.equal(last(primary).geometry.summaryBudget, 37, 'failure retains the complete primary field');
+  assert.equal(last(primary).geometry.summaryOptionalBudget, 0, 'unknown clearance does not admit extra fields');
 });
 
 
@@ -1898,4 +1901,20 @@ test('summary readings and standalone rings follow the same pending or active Co
       assert.equal(data.cells, cells, 'standalone ring must not add a quota row');
     }
   }
+});
+
+
+test('a mandatory camera-side readout does not grant menu space to optional overflow', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const code = source.slice(source.indexOf('function reportNotchSlots('), source.indexOf('const notchProviderObserver'));
+  const left = { minimum: 50, width: 67, children: [] }, right = { minimum: 0, width: 89 };
+  let reported;
+  const report = vm.runInNewContext(`${code}; reportNotchSlots`, {
+    state: { payload: { summary: {}, geometry: { gapWidth: 179, summaryBudget: 50, summaryOptionalBudget: 0 }, appearance: { zoomFactor: 1 } } },
+    fitNotchSlot: (slot, budget) => ({ minimum: slot.minimum, width: Math.max(slot.minimum, Math.min(slot.width, budget)) }),
+    lastNotchSlots: '', bridge: { reportNotchSize: (_height, slots) => { reported = slots; } }
+  });
+  report({ dataset: {}, querySelector: selector => selector.includes('notch-left') ? left : right });
+  assert.equal(reported.left, 50, 'the complete primary readout remains');
+  assert.equal(reported.right, 0, 'neither an optional field nor overflow can use the mandatory minimum');
 });

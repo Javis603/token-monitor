@@ -2182,7 +2182,7 @@ function reportNotchSlots(head) {
   const measurement = state.payload.summaryMeasurement;
   const geometry = state.payload?.geometry;
   const compact = geometry?.gapWidth === 0;
-  const budget = geometry?.summaryBudget ?? null;
+  const budget = geometry?.summaryOptionalBudget ?? geometry?.summaryBudget ?? null;
   const limit = compact && Number.isFinite(geometry.summaryWidthLimit)
     ? Math.max(0, Math.min(geometry.summaryWidthLimit - 2 * (geometry.shoulder + 8), budget ?? Infinity)) : null;
   const leftContent = head.querySelector('.notch-left .notch-slot-content');
