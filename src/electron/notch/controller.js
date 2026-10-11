@@ -121,7 +121,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       || items.filter(item => item.type !== 'icon' && item.type !== 'spacer').length > 1;
   }
   function refreshMenu(now = Date.now()) {
-    if (!running || locked || !summaryVisible() || !summaryNeedsMenuBudget() || !data.sessions.some(session => sessionActivityState(session) === 'running') || now - menuReadAt < 2000) return false;
+    if (!running || locked || !summaryVisible() || !summaryNeedsMenuBudget() || now - menuReadAt < 2000) return false;
     try { menuWindows = readMenuWindows(); } catch { menuWindows = null; }
     menuReadAt = now;
     return true;

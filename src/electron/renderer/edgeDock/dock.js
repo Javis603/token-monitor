@@ -361,92 +361,92 @@ function limitTooltipShouldHoldRender() {
 }
 
 function createCardWindowsView(cell = () => state.payload?.cell, forecast = () => cardForecast) {
-return limitWindowsViewApi.createLimitWindowsView({
-  document,
-  t,
-  settings: appearance,
-  currentLocale: () => state.locale,
-  presentation: limitPresentationApi,
-  // Which device a row's reading came from — "· imac-m1" beside the provider's
-  // own source label. The card has no settings and no device list, so both
-  // facts ride the cell it is rendering, the same way its account set does.
-  provenanceContext: () => cell()?.provenanceContext || {},
-  motion: limitResetMotionApi,
-  tooltip: {
-    hasOpened: () => limitTooltip.opened,
-    markOpened() {
-      limitTooltip.opened = true;
-      limitTooltip.active = true;
+  return limitWindowsViewApi.createLimitWindowsView({
+    document,
+    t,
+    settings: appearance,
+    currentLocale: () => state.locale,
+    presentation: limitPresentationApi,
+    // Which device a row's reading came from — "· imac-m1" beside the provider's
+    // own source label. The card has no settings and no device list, so both
+    // facts ride the cell it is rendering, the same way its account set does.
+    provenanceContext: () => cell()?.provenanceContext || {},
+    motion: limitResetMotionApi,
+    tooltip: {
+      hasOpened: () => limitTooltip.opened,
+      markOpened() {
+        limitTooltip.opened = true;
+        limitTooltip.active = true;
+      },
+      release() {
+        requestAnimationFrame(() => {
+          if (limitTooltipShouldHoldRender()) return;
+          limitTooltip.active = false;
+          if (!limitTooltip.pending) return;
+          limitTooltip.pending = false;
+          if (surface === 'notch' && state.payload) renderNotch(state.payload);
+          else if (state.payload?.cell) renderBubble(state.payload);
+        });
+      }
     },
-    release() {
-      requestAnimationFrame(() => {
-        if (limitTooltipShouldHoldRender()) return;
-        limitTooltip.active = false;
-        if (!limitTooltip.pending) return;
-        limitTooltip.pending = false;
-        if (surface === 'notch' && state.payload) renderNotch(state.payload);
-        else if (state.payload?.cell) renderBubble(state.payload);
-      });
-    }
-  },
-  formatCompact: formatTokens,
-  compactTokenThreshold: () => compactTokenApi.compactTokenUnitThreshold(
-    compactTokenApi.effectiveCompactTokenUnits(appearance().compactTokenUnits, state.locale),
-    state.locale
-  ),
-  formatMoney: balanceDisplay.formatMoney,
-  formatCompactMoney: (value, currency) => balanceDisplay.formatCompactMoney(
-    value, currency, appearance().compactTokenUnits, state.locale
-  ),
-  formatPercent: (value) => (Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'),
-  formatDuration: presentation.formatResetDuration,
-  formatLimitBoundary: limitPresentationApi.limitBoundaryText,
-  limitFillPercent,
-  limitModeSuffix,
-  optionalFiniteNumber,
-  colorWithAlpha,
-  applyBarScale,
-  creditsAmount: balanceDisplay.creditsAmount,
-  creditsCurrency: balanceDisplay.creditsCurrency,
-  creditsMeterPercent: balanceDisplay.creditsMeterPercent,
-  isCreditsWindow: balanceDisplay.isCreditsWindow,
-  spendWindow: balanceDisplay.spendWindow,
-  limitWindowLabel: limitWindowLabels.limitWindowLabel,
-  mimoAccountGroups,
-  mimoProductLabel,
-  limitWindowText: limitWindowTextApi.limitWindowText,
-  accountIdentity: accountIdentityApi,
-  accountControl: codexAccountControl,
-  codexAccounts,
-  // Probed off the stylesheet the dock borrows, so the card can never disagree
-  // with the page about which providers have a mark.
-  hasMark: hasMask,
-  formatAgo: relativeAgo,
-  // The renderer names the intent; the main process owns the URL.
-  openExternal: () => bridge.openResetForecastSource?.(),
-  // The subscription records the widget holds, pushed with the appearance. The
-  // card's plan cell decorates itself from them exactly as the page's does —
-  // same rows, same wording — so a recorded subscription shows the same hover
-  // card here as it does there. What is not pushed is nothing: an empty list
-  // renders a plain plan label on both surfaces.
-  subscriptionApi: subscriptionDisplayApi,
-  subscriptionText: subscriptionTextApi,
-  currencyApi,
-  formatCost,
-  subscriptions: () => appearance().subscriptions,
-  // The row being decorated is one of this card's own accounts, and a record
-  // binds through the same list the page matches against — every account the
-  // provider has, never the rows this card happens to draw, or
-  // matchProviderAccount()'s sole-account fallback would bind a record to
-  // whichever row asked. The composer can hide an account from the card without
-  // it leaving the provider, so the cell carries that list beside its rows.
-  subscriptionAccounts: () => cell()?.subscriptionAccounts || [],
-  // What this month's tokens would have cost, which the subscription card
-  // compares the plan's price against. It rides the cell because it changes with
-  // every stats push, while the appearance is only re-pushed on a settings edit.
-  monthClientCosts: () => cell()?.monthClientCosts,
-  resetForecast: () => ({ busy: false, forecast: forecast() })
-});
+    formatCompact: formatTokens,
+    compactTokenThreshold: () => compactTokenApi.compactTokenUnitThreshold(
+      compactTokenApi.effectiveCompactTokenUnits(appearance().compactTokenUnits, state.locale),
+      state.locale
+    ),
+    formatMoney: balanceDisplay.formatMoney,
+    formatCompactMoney: (value, currency) => balanceDisplay.formatCompactMoney(
+      value, currency, appearance().compactTokenUnits, state.locale
+    ),
+    formatPercent: (value) => (Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'),
+    formatDuration: presentation.formatResetDuration,
+    formatLimitBoundary: limitPresentationApi.limitBoundaryText,
+    limitFillPercent,
+    limitModeSuffix,
+    optionalFiniteNumber,
+    colorWithAlpha,
+    applyBarScale,
+    creditsAmount: balanceDisplay.creditsAmount,
+    creditsCurrency: balanceDisplay.creditsCurrency,
+    creditsMeterPercent: balanceDisplay.creditsMeterPercent,
+    isCreditsWindow: balanceDisplay.isCreditsWindow,
+    spendWindow: balanceDisplay.spendWindow,
+    limitWindowLabel: limitWindowLabels.limitWindowLabel,
+    mimoAccountGroups,
+    mimoProductLabel,
+    limitWindowText: limitWindowTextApi.limitWindowText,
+    accountIdentity: accountIdentityApi,
+    accountControl: codexAccountControl,
+    codexAccounts,
+    // Probed off the stylesheet the dock borrows, so the card can never disagree
+    // with the page about which providers have a mark.
+    hasMark: hasMask,
+    formatAgo: relativeAgo,
+    // The renderer names the intent; the main process owns the URL.
+    openExternal: () => bridge.openResetForecastSource?.(),
+    // The subscription records the widget holds, pushed with the appearance. The
+    // card's plan cell decorates itself from them exactly as the page's does —
+    // same rows, same wording — so a recorded subscription shows the same hover
+    // card here as it does there. What is not pushed is nothing: an empty list
+    // renders a plain plan label on both surfaces.
+    subscriptionApi: subscriptionDisplayApi,
+    subscriptionText: subscriptionTextApi,
+    currencyApi,
+    formatCost,
+    subscriptions: () => appearance().subscriptions,
+    // The row being decorated is one of this card's own accounts, and a record
+    // binds through the same list the page matches against — every account the
+    // provider has, never the rows this card happens to draw, or
+    // matchProviderAccount()'s sole-account fallback would bind a record to
+    // whichever row asked. The composer can hide an account from the card without
+    // it leaving the provider, so the cell carries that list beside its rows.
+    subscriptionAccounts: () => cell()?.subscriptionAccounts || [],
+    // What this month's tokens would have cost, which the subscription card
+    // compares the plan's price against. It rides the cell because it changes with
+    // every stats push, while the appearance is only re-pushed on a settings edit.
+    monthClientCosts: () => cell()?.monthClientCosts,
+    resetForecast: () => ({ busy: false, forecast: forecast() })
+  });
 }
 const limitWindowsView = createCardWindowsView();
 
@@ -1392,11 +1392,8 @@ function providerCard(cell, view = limitWindowsView) {
   return card;
 }
 
-// The top entry is a widget-like quota overview. Window rendering and its
-// selectable usage items remain the existing Limits/EdgeDock implementation.
-// The overview paints on the notch surface, which can be pure black even when
-// the app theme is light. Resolve adaptive ink to a color so the shared builder
-// uses that same color for both the filled bar and its translucent track.
+// A pure-black entry can coexist with a light app theme. Resolve adaptive ink
+// before the shared builder derives the translucent track from the bar color.
 function notchQuotaColor(color) {
   return readableColor(color) === 'var(--text)'
     ? getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || color

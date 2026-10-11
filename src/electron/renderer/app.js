@@ -12690,43 +12690,43 @@ function syncDockControls() {
 function createDockItemsComposer(root, itemsKey) {
   return root && window.TokenMonitorEdgeDockComposer
     ? window.TokenMonitorEdgeDockComposer.createEdgeDockComposer({
-    root, itemsKey,
-    t,
-    itemsApi: window.TokenMonitorEdgeDockItems,
-    presentationApi: window.TokenMonitorEdgeDockPresentation,
-    getSettings: () => state.settings,
-    getStats: () => state.stats,
-    save: (patch) => saveSettings(patch),
-    providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
-    providerColor: (id) => limitProviderColor(id),
-    windowLabel: (record, quotaWindow) => record?.provider === 'codex' && quotaWindow.additional === true
-      ? limitWindowsView.codexAdditionalWindowLabel(
-        quotaWindow,
-        (record.windows || []).filter((entry) => entry?.additional === true)
-      )
-      : limitWindowsView.providerWindowLabel(record, quotaWindow, 'Quota'),
-    hasProviderMark: (id) => limitMarksWithIcon.has(id),
-    // Offer every enabled provider in the user's limits order, including those
-    // without quota data. Keep the ordering rule here rather than in the composer.
-    enabledLimitProviders: () => limitProviderOrderApi
-      .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
-      .filter(({ id }) => enabledLimitProviderSet().has(id))
-      .map(({ id }) => id),
-    isWindowHidden: (providerId, quotaWindow) => limitUsageItemsApi.isLimitWindowHidden(
-      state.settings?.limitProviderHiddenItems, providerId, quotaWindow
-    ),
-    maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
-      ? accountIdentityApi.maskEmailAddress(email)
-      : String(email || '')),
-    mimoProductLabel,
-    createRowDrag: (config) => rowDragControllerApi.createRowDragController({
-      dragSort: verticalDragSortApi,
-      getScrollPanel: () => els.settingsPanel,
-      preserveScroll: preserveSettingsPanelScroll,
-      ...config
+      root, itemsKey,
+      t,
+      itemsApi: window.TokenMonitorEdgeDockItems,
+      presentationApi: window.TokenMonitorEdgeDockPresentation,
+      getSettings: () => state.settings,
+      getStats: () => state.stats,
+      save: (patch) => saveSettings(patch),
+      providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
+      providerColor: (id) => limitProviderColor(id),
+      windowLabel: (record, quotaWindow) => record?.provider === 'codex' && quotaWindow.additional === true
+        ? limitWindowsView.codexAdditionalWindowLabel(
+          quotaWindow,
+          (record.windows || []).filter((entry) => entry?.additional === true)
+        )
+        : limitWindowsView.providerWindowLabel(record, quotaWindow, 'Quota'),
+      hasProviderMark: (id) => limitMarksWithIcon.has(id),
+      // Offer every enabled provider in the user's limits order, including those
+      // without quota data. Keep the ordering rule here rather than in the composer.
+      enabledLimitProviders: () => limitProviderOrderApi
+        .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
+        .filter(({ id }) => enabledLimitProviderSet().has(id))
+        .map(({ id }) => id),
+      isWindowHidden: (providerId, quotaWindow) => limitUsageItemsApi.isLimitWindowHidden(
+        state.settings?.limitProviderHiddenItems, providerId, quotaWindow
+      ),
+      maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
+        ? accountIdentityApi.maskEmailAddress(email)
+        : String(email || '')),
+      mimoProductLabel,
+      createRowDrag: (config) => rowDragControllerApi.createRowDragController({
+        dragSort: verticalDragSortApi,
+        getScrollPanel: () => els.settingsPanel,
+        preserveScroll: preserveSettingsPanelScroll,
+        ...config
+      })
     })
-  })
-  : null;
+    : null;
 }
 const edgeDockComposer = createDockItemsComposer(els.edgeDockComposer, 'edgeDockItems');
 const notchItemsComposer = createDockItemsComposer(els.notchItemsComposer, 'notchItems');

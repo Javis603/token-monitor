@@ -87,7 +87,6 @@ html.notch-black .edge-dock-shape-line { stroke: transparent; }
 .notch-stat-overview .edge-dock-cell-rate { white-space: nowrap; }
 .notch-stat-overview .notch-stat-reading.is-rate { grid-column: 2 / 4; justify-self: end; justify-content: flex-end; width: auto; }
 .notch-stat-reading .edge-dock-cell-rate-unit { flex-shrink: 0; }
-/* Both detail directions keep the shared card padding and point toward the list. */
 .is-notch-detail .edge-dock-card { scrollbar-width: none; }
 
 /* Exact period totals sit on the physical center; fees keep their rail style. */

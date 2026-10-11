@@ -5558,14 +5558,9 @@ function edgeDockLiveRateSample(visibleStats) {
   const context = [mode, hubMode || '', settings?.hubUrl || '', settings?.deviceId || '', scope, selection.source].join('|');
   if (!edgeDockRateTracker) {
     edgeDockRateTracker = tokenRateApi.createLiveTokenRateGroupTracker({
-      // Epoch time, not the module's default monotonic clock. This tracker is the
-      // only one whose expiry is compared against a timer scheduled here
-      // (`expiresAt - Date.now()`), and the two scales are not interchangeable:
-      // `performance.now()` on this process starts near zero, so the difference is a
-      // huge negative number that clamps to the 20ms floor and re-projects the dock
-      // about fifty times a second for as long as a sample is retained. The renderer's
-      // own tracker keeps the default, since it only ever compares its clock with
-      // itself.
+      // Expiry timers subtract Date.now(), so samples must use epoch time too.
+      // The default monotonic clock would produce a negative delay and repeatedly
+      // repaint at the timer floor while a sample is retained.
       now: Date.now,
       activeMs: EDGE_DOCK_RATE_ACTIVE_MS,
       clearMs: EDGE_DOCK_RATE_CLEAR_MS
