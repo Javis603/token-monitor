@@ -3435,7 +3435,7 @@ function startCollector(options) {
       refresh: pollSessionActivity,
       nativeEventsReady: () => activityWatchReady || !watchEnabled,
       needsRenewal: () => require('./sessionActivityProjection').needsActivityRenewal(latestActivitySummary)
-    });
+    }, options.sessionActivityTimers);
     activityScheduler.start();
   }
   if (trackedClients.has('codex') && options.codexLocalUsageEnabled !== false

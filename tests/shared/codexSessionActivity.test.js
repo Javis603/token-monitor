@@ -662,7 +662,7 @@ test('collector discovers a native question before token_count and preserves exa
   assert.equal(payload.today.totalTokens, 0);
 });
 
-test('T3 polling updates waiting, response and terminal states without rescanning token usage', { timeout: 15_000 }, async t => {
+test('T3 polling updates waiting, response and terminal states without rescanning token usage', async t => {
   const f = fixture(t); f.write([started]);
   const updates = [];
   let scans = 0;
@@ -671,6 +671,11 @@ test('T3 polling updates waiting, response and terminal states without rescannin
     clients: 'codex', allTimeSince: '2024-01-01', deviceId: 'poll', agentVersion: 'test',
     historyEnabled: false, projectsEnabled: false, limitsEnabled: false, watchEnabled: false,
     intervalMs: 300_000, codexLocalUsageEnabled: false, anchorPersistenceEnabled: false,
+    // Exercise database polling without waiting for the production cadence.
+    sessionActivityTimers: {
+      setTimeout: (fn, delay) => setTimeout(fn, Math.min(delay, 25)),
+      clearTimeout
+    },
     homeDir: f.home, env: {}, sessionMetadataDeps: { readProcessStarts: f.options.readProcessStarts },
     runTokscale: async () => { scans += 1; return { entries: [{ client: 'codex', sessionId: f.id, model: 'gpt-6-luna', input: 100, output: 0, cost: 0 }] }; },
     onUpdate: (summary, reason) => { updates.push({ summary, reason }); nextUpdate?.(); },
