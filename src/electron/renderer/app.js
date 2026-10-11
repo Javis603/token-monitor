@@ -4889,10 +4889,11 @@ function sessionGroupRunNode(row, max, parent) {
   titleEl.textContent = title;
   titleEl.title = title;
   bindHoverMarquee(titleEl);
-  // A multi-model run reads "N models · time" here — the same label the
-  // Sessions list opens for its per-model shares, so the title opens it too.
-  if (row.modelTooltipEntries?.length > 1) {
-    limitWindowsView.setDetailTooltip(titleEl, row.modelTooltipEntries);
+  const modelEntries = row.modelTooltipEntries?.length > 1 ? row.modelTooltipEntries : null;
+  // Review headings and untitled sessions include the model label; named
+  // conversation titles do not describe the model breakdown.
+  if (modelEntries && (!namedGroup || !row.titled)) {
+    limitWindowsView.setDetailTooltip(titleEl, modelEntries);
   }
   if (!interactive) wrap.querySelector('.detail-chev').textContent = '';
   const sub = wrap.querySelector('.detail-ex-sub');
@@ -4901,7 +4902,22 @@ function sessionGroupRunNode(row, max, parent) {
     : namedGroup ? [row.activity ? row.subtitle : '', row.activity || row.subtitle].filter(Boolean).join(' · ')
       : row.detail || '';
   sub.title = sub.textContent;
+  let modelTrigger;
+  const modelOffset = subagentGroup ? sub.textContent.length - (row.modelLabel || '').length
+    : namedGroup && row.titled ? (row.subtitle || '').length - (row.modelLabel || '').length : -1;
+  if (modelEntries && row.modelLabel && modelOffset >= 0
+    && sub.textContent.slice(modelOffset, modelOffset + row.modelLabel.length) === row.modelLabel) {
+    modelTrigger = document.createElement('span');
+    modelTrigger.className = 'session-models';
+    modelTrigger.textContent = row.modelLabel;
+    sub.replaceChildren(
+      document.createTextNode(sub.textContent.slice(0, modelOffset)),
+      modelTrigger,
+      document.createTextNode(sub.textContent.slice(modelOffset + row.modelLabel.length))
+    );
+  }
   bindHoverMarquee(sub);
+  if (modelTrigger) limitWindowsView.setDetailTooltip(modelTrigger, modelEntries);
   if (subagentGroup) {
     const activity = wrap.querySelector('.session-group-activity');
     activity.textContent = row.activitySummary || '';

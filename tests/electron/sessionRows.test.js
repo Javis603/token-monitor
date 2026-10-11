@@ -608,6 +608,64 @@ test('subagent members separate role and model from activity with titles on or o
   }
 });
 
+test('group model tooltips follow the displayed model label instead of a conversation title', () => {
+  const api = require('../../src/electron/renderer/sessionRows');
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const body = source.slice(source.indexOf('function sessionGroupRunNode('), source.indexOf('function renderSessionGroupDetail('));
+  const makeNode = () => {
+    const selectors = new Map();
+    return {
+      children: [], _text: '', events: {}, classList: { toggle() {} },
+      get textContent() { return this.children.length ? this.children.map(child => child.textContent).join('') : this._text; },
+      set textContent(value) { this.children = []; this._text = value; },
+      replaceChildren(...children) { this.children = children; },
+      setAttribute() {},
+      querySelector(selector) {
+        if (!selectors.has(selector)) selectors.set(selector, makeNode());
+        return selectors.get(selector);
+      },
+      addEventListener(type, handler) { this.events[type] = handler; }
+    };
+  };
+  const tooltips = new Map();
+  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth', 'openSessionDetail', 'bindHoverMarquee', 'limitWindowsView', `${body}\nreturn sessionGroupRunNode;`)(
+    { createElement: makeNode, createTextNode: text => ({ textContent: text }) }, api,
+    key => key === 'sessions.mainSession' ? 'Main session' : 'Subagent', String, String,
+    () => {}, () => 100, () => {}, () => {}, { setDetailTooltip: (node, entries) => tooltips.set(node, entries) }
+  );
+  for (const group of ['subagents', 'cursor-grok-bot', 'reviews']) {
+    for (const titled of [true, false]) {
+      for (const multiple of [true, false]) {
+        tooltips.clear();
+        const modelLabel = multiple ? '2 models' : 'model-a';
+        const modelTooltipEntries = multiple ? [['model-a', '20', '67%'], ['model-b', '10', '33%']] : [];
+        const row = { key: 'session:codex:child', client: 'codex', clientLabel: 'Codex',
+          name: titled ? 'Check the report' : `Codex · ${modelLabel}`, titled,
+          subtitle: titled ? `Codex · ${modelLabel}` : '12:30 · 2 calls',
+          activity: titled ? '12:30 · 2 calls' : undefined, activitySummary: '12:30 · 2 calls',
+          modelLabel, modelTooltipEntries, detail: 'child', value: 30, cost: 0.1 };
+        const parent = { kind: 'session-group', summary: {
+          subagentGroup: group === 'subagents', sessionGroup: group === 'cursor-grok-bot' ? group : '', groupRows: []
+        } };
+        const node = render(row, 30, parent);
+        const title = node.querySelector('.detail-ex-title');
+        const sub = node.querySelector('.detail-ex-sub');
+        const model = sub.children.find(child => child.className === 'session-models');
+        if (!multiple) {
+          assert.equal(tooltips.size, 0);
+        } else if (group === 'reviews') {
+          assert.equal(tooltips.get(title), modelTooltipEntries);
+        } else {
+          assert.equal(tooltips.has(title), !titled, 'only fallback model headings open the breakdown');
+          assert.equal(Boolean(model), group === 'subagents' || titled);
+          if (model) assert.equal(tooltips.get(model), modelTooltipEntries);
+        }
+        if (group === 'subagents') assert.equal(sub.textContent, `Subagent · Codex · ${modelLabel}`);
+      }
+    }
+  }
+});
+
 test('model name alone does not hide an ordinary Codex session in background reviews', () => {
   const rows = sessionRowsForPeriod({ sessions: {
     'codex:user-selected-review-model': {
