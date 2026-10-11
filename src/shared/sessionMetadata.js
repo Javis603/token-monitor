@@ -16,7 +16,7 @@ const dshSessionMetadata = require('./providers/dsh/sessionMetadata');
 const workbuddySession = require('./providers/workbuddy/sessionMetadata');
 const devinSessionMetadata = require('./providers/devin/sessionMetadata');
 const grokSessionMetadata = require('./providers/grok/sessionMetadata');
-const { readT3SessionRelations } = require('./t3SessionMetadata');
+const { readT3SessionRelationResult } = require('./t3SessionMetadata');
 const { supportsT3SessionClient, nativeAccountingId } = require('./t3SessionIdentity');
 
 function isoFromDate(value) {
@@ -364,12 +364,13 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
   }
   const children = targets ? [...targets].filter(supported)
     : Object.values(periods || {}).flatMap(period => [...sessions(period)]).filter(supported);
-  if (!children.length) return;
+  if (!children.length) return true;
   const ids = new Map(children.map(session => [session, candidates(session)]));
   const nativeIds = [...new Set([...ids.values()].flat())];
-  if (!nativeIds.length) return;
-  const relations = readT3SessionRelations(nativeIds, { ...deps, homeDir: home, useEnvRoot: deps.scopedHome !== true });
-  if (!relations.size) return;
+  if (!nativeIds.length) return true;
+  const { facts: relations, status } = readT3SessionRelationResult(nativeIds, { ...deps, homeDir: home, useEnvRoot: deps.scopedHome !== true });
+  if (status === 'retryable') return false;
+  if (!relations.size) return true;
   const links = new Map();
   for (const session of children) {
     const matches = ids.get(session).map(id => relations.get(`${session.client}:${id}`)).filter(Boolean);
@@ -379,7 +380,7 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
     if (!session.parentSessionId && link?.parentThreadId
       && matches.every(fact => fact.parentThreadId === link.parentThreadId)) links.set(session, link);
   }
-  if (!links.size) return;
+  if (!links.size) return true;
   // History is parent evidence, never an additional lookup target on a watch
   // tick. Build only the requested parent indexes, and only when a link needs
   // resolution. Native-only refreshes share accounting maps rather than copy.
@@ -423,6 +424,7 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
       else delete session.parentClient;
     }
   }
+  return true;
 }
 
 // Upgrade only identities in a retained anchor. Historical titles, projects,
@@ -436,7 +438,7 @@ function applySessionIdentities(periods, home, deps = {}) {
     const nativeId = nativeIds.get(session.sessionId);
     if (nativeId) session.nativeSessionId = nativeId;
   }
-  if (!deps.deferT3SessionParents) applyT3SessionParents(periods, home, deps);
+  return deps.deferT3SessionParents || applyT3SessionParents(periods, home, deps);
 }
 
 function applySessionMetadata(periods, home, deps = {}) {
@@ -524,7 +526,7 @@ function applySessionMetadata(periods, home, deps = {}) {
       }
     }
   }
-  if (!deps.deferT3SessionParents) applyT3SessionParents(periods, home, deps);
+  return deps.deferT3SessionParents || applyT3SessionParents(periods, home, deps);
 }
 
 module.exports = {

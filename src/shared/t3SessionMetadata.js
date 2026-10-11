@@ -215,7 +215,7 @@ function readT3SessionMeta(sessionIds, deps = {}) {
 // provider_thread_id: projection_subagents must then prove origin, parent and
 // child_thread_id. Completed nodes may instead name their child provider.
 // Never use the parent's current default provider, human forks or prompt text.
-function readT3SessionRelations(nativeIds, deps = {}) {
+function readT3SessionRelationResult(nativeIds, deps = {}) {
   const ids = [...new Set(Array.from(nativeIds || []).map(String).filter(Boolean))];
   const requested = new Set(ids);
   const uuidIds = [...new Set(ids.filter(id => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)).map(id => id.toLowerCase()))];
@@ -224,7 +224,9 @@ function readT3SessionRelations(nativeIds, deps = {}) {
   const ambiguous = new Set();
   const ambiguousParents = new Set();
   const sqlite = resolveSqlite(deps);
-  if (!ids.length || !sqlite) return out;
+  if (!ids.length) return { facts: out, status: 'complete' };
+  if (!sqlite) return { facts: out, status: 'unavailable' };
+  let status = 'complete';
   const names = {
     t: 'orchestration_v2_projection_threads',
     p: 'orchestration_v2_projection_provider_threads',
@@ -236,14 +238,23 @@ function readT3SessionRelations(nativeIds, deps = {}) {
   const native = (alias, field) => `json_extract(${json(alias)}, '$.nativeThreadRef.${field}')`;
   for (const file of discoverT3DbPaths(deps)) {
     let db;
+    let complete = false;
+    const facts = new Map();
+    const conflicts = new Set();
+    const parentConflicts = new Set();
     try {
       if (!fs.statSync(file).isFile()) continue;
       db = openDb(file, sqlite);
+      // Stage each store: later query failures must not publish partial facts.
       const columns = Object.fromEntries(Object.entries(names).map(([key, name]) =>
         [key, new Set(db.prepare(`PRAGMA table_info(${name})`).all().map(row => row.name))]));
       const has = (key, fields) => fields.every(field => columns[key].has(field));
       if (!has('t', ['thread_id', 'deleted_at', 'payload_json'])
-        || !has('p', ['provider_thread_id', 'thread_id', 'driver', 'payload_json'])) continue;
+        || !has('p', ['provider_thread_id', 'thread_id', 'driver', 'payload_json'])) {
+        const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
+        if (tables.length && status === 'complete') status = 'unavailable';
+        continue;
+      }
       const bindings = readT3IdentityBindings(file);
       const instance = alias => {
         const payloadId = `json_extract(${json(alias)}, '$.providerInstanceId')`;
@@ -252,7 +263,6 @@ function readT3SessionRelations(nativeIds, deps = {}) {
           : payloadId;
       };
       const strong = `${native('p', 'driver')} = p.driver AND ${native('p', 'strength')} = 'strong'`;
-      const facts = new Map();
       const add = row => {
         const client = t3AccountingClient(row.driver, row.instanceId, bindings);
         const id = nativeAccountingId(client, row.nativeId, row.historical);
@@ -260,13 +270,10 @@ function readT3SessionRelations(nativeIds, deps = {}) {
         if (!client || !id || !threadId || (!requested.has(id)
           && !(['codex', 'claude'].includes(client) && requestedUuids.has(id)))) return;
         const key = `${client}:${id}`;
-        if (ambiguous.has(key)) return;
-        if (out.has(key) && out.get(key).threadId !== threadId) {
-          out.delete(key); facts.delete(key); ambiguous.add(key);
-        } else {
-          const fact = out.get(key) || { threadId };
-          out.set(key, fact); facts.set(key, fact);
-        }
+        if (conflicts.has(key)) return;
+        if (facts.has(key) && facts.get(key).threadId !== threadId) {
+          facts.delete(key); conflicts.add(key);
+        } else if (!facts.has(key)) facts.set(key, { threadId });
       };
       // IDs live in unindexed JSON in current T3 schemas. One candidate pass
       // per table avoids rescanning all providers for every 400-ID batch. The
@@ -300,7 +307,10 @@ function readT3SessionRelations(nativeIds, deps = {}) {
             AND t.deleted_at IS NULL AND ${strong}`;
         for (const row of db.prepare(history).all(idJson, uuidJson)) add(row);
       }
-      if (!has('n', ['node_id', 'thread_id', 'root_node_id', 'kind', 'provider_thread_id'])) continue;
+      if (!has('n', ['node_id', 'thread_id', 'root_node_id', 'kind', 'provider_thread_id'])) {
+        complete = true;
+        continue;
+      }
       const threads = [...new Set([...facts.values()].map(fact => fact.threadId))];
       const links = new Map();
       const conflictingThreads = new Set();
@@ -351,14 +361,43 @@ function readT3SessionRelations(nativeIds, deps = {}) {
         if (conflictingThreads.has(fact.threadId) || (link && fact.parentThreadId
           && fact.parentThreadId !== link.parentThreadId)) {
           for (const field of ['parentThreadId', 'parentClient', 'parentNativeId']) delete fact[field];
-          ambiguousParents.add(key);
-        } else if (link && !ambiguousParents.has(key)) Object.assign(fact, link);
+          parentConflicts.add(key);
+        } else if (link) Object.assign(fact, link);
       }
-    } catch (_) { /* missing, locked, malformed, or older stores supply no facts */ } finally {
+      complete = true;
+    } catch (error) {
+      // Extended SQLite error codes retain the base code in the low byte.
+      // Empty/missing stores are valid; corruption and unsupported schemas wait
+      // for the next full scan, while transient contention/resource failures defer migration.
+      const code = Number(error.errcode) & 0xff;
+      if ([5, 6].includes(code) || ['EBUSY', 'EAGAIN', 'EINTR', 'EMFILE', 'ENFILE'].includes(error.code)) status = 'retryable';
+      else if (error.code !== 'ENOENT' && status === 'complete') status = 'unavailable';
+    } finally {
       if (db) { try { db.close(); } catch (_) {} }
+      if (complete) {
+        for (const key of conflicts) { out.delete(key); ambiguous.add(key); }
+        for (const key of parentConflicts) ambiguousParents.add(key);
+        for (const [key, fact] of facts) {
+          if (ambiguous.has(key)) continue;
+          const previous = out.get(key);
+          if (previous && previous.threadId !== fact.threadId) {
+            out.delete(key); ambiguous.add(key);
+            continue;
+          }
+          if (previous?.parentThreadId && fact.parentThreadId && (previous.parentThreadId !== fact.parentThreadId
+            || previous.parentClient !== fact.parentClient || previous.parentNativeId !== fact.parentNativeId)) ambiguousParents.add(key);
+          const merged = { ...previous, ...fact };
+          if (ambiguousParents.has(key)) for (const field of ['parentThreadId', 'parentClient', 'parentNativeId']) delete merged[field];
+          out.set(key, merged);
+        }
+      }
     }
   }
-  return out;
+  return { facts: status === 'retryable' ? new Map() : out, status };
+}
+
+function readT3SessionRelations(nativeIds, deps = {}) {
+  return readT3SessionRelationResult(nativeIds, deps).facts;
 }
 
 function readT3SessionParents(nativeIds, deps = {}) {
@@ -367,4 +406,4 @@ function readT3SessionParents(nativeIds, deps = {}) {
     .map(([key, fact]) => [key, { parentClient: fact.parentClient, parentNativeId: fact.parentNativeId }]));
 }
 
-module.exports = { expandHomePath, t3HomeDir, discoverT3DbPaths, readT3SessionMeta, readT3SessionParents, readT3SessionRelations };
+module.exports = { expandHomePath, t3HomeDir, discoverT3DbPaths, readT3SessionMeta, readT3SessionParents, readT3SessionRelations, readT3SessionRelationResult };

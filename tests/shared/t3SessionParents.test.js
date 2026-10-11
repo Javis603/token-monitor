@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const sqlite = require('node:sqlite');
-const { readT3SessionParents, readT3SessionRelations } = require('../../src/shared/t3SessionMetadata');
+const { readT3SessionParents, readT3SessionRelations, readT3SessionRelationResult } = require('../../src/shared/t3SessionMetadata');
 const { applySessionMetadata, applyT3SessionParents, applySessionIdentities } = require('../../src/shared/sessionMetadata');
 const { normalizePeriod, mergePeriods, extractUsageFromTokscale, stripSessionTextFromPeriod } = require('../../src/shared/usage');
 
@@ -752,4 +752,51 @@ test('a malformed provider payload does not suppress valid relationship evidence
   assert.deepEqual(s.read(['child-native', 'malformed-native']), new Map([['claude:child-native', {
     parentClient: 'codex', parentNativeId: 'parent-native'
   }]]));
+});
+
+
+test('relationship read status distinguishes legal emptiness from retryable and permanent failures', t => {
+  const s = store(t);
+  const read = (extra = {}) => readT3SessionRelationResult(['child-native'], { homeDir: s.home, env: {}, ...extra });
+  assert.deepEqual(read(), { facts: new Map(), status: 'complete' }, 'valid empty T3 schema');
+  assert.deepEqual(read({ t3DbPaths: [path.join(s.home, 'missing.sqlite')] }), { facts: new Map(), status: 'complete' });
+  assert.deepEqual(readT3SessionRelationResult([], { sqlite: null }), { facts: new Map(), status: 'complete' });
+  const emptyPath = path.join(s.home, 'empty.sqlite');
+  const empty = new sqlite.DatabaseSync(emptyPath); empty.close();
+  assert.equal(read({ t3DbPaths: [emptyPath] }).status, 'complete', 'empty SQLite file is legal zero facts');
+  const unsupported = new sqlite.DatabaseSync(emptyPath);
+  unsupported.exec('CREATE TABLE unrelated (id TEXT)'); unsupported.close();
+  assert.equal(read({ t3DbPaths: [emptyPath] }).status, 'unavailable');
+  const corrupt = path.join(s.home, 'corrupt.sqlite');
+  fs.writeFileSync(corrupt, 'not sqlite');
+  assert.equal(read({ t3DbPaths: [corrupt] }).status, 'unavailable');
+  pair(s);
+  s.db.exec('BEGIN EXCLUSIVE');
+  try { assert.deepEqual(read(), { facts: new Map(), status: 'retryable' }); }
+  finally { s.db.exec('ROLLBACK'); }
+  assert.equal(read().facts.get('claude:child-native').parentNativeId, 'parent-native');
+});
+
+test('later store query failures discard partial facts without suppressing completed stores on permanent errors', t => {
+  const s = store(t);
+  pair(s);
+  const copied = path.join(s.home, 'copied.sqlite');
+  fs.copyFileSync(s.file, copied);
+  let errorCode = 5;
+  class DatabaseSync extends sqlite.DatabaseSync {
+    constructor(file, options) { super(file, options); this.failLater = file === copied; }
+    prepare(sql) {
+      if (this.failLater && sql.includes('SELECT cp.thread_id')) throw Object.assign(new Error('injected later query failure'), { errcode: errorCode });
+      return super.prepare(sql);
+    }
+  }
+  const deps = { homeDir: s.home, env: {}, t3DbPaths: [s.file, copied], sqlite: { DatabaseSync } };
+  assert.deepEqual(readT3SessionRelationResult(['child-native'], deps), { facts: new Map(), status: 'retryable' }, 'completed first-store facts are not applied while migration is incomplete');
+  errorCode = 11;
+  assert.equal(readT3SessionRelationResult(['child-native'], { ...deps, t3DbPaths: [copied] }).facts.size, 0, 'partial identity facts are discarded on permanent failure too');
+  const result = readT3SessionRelationResult(['child-native'], deps);
+  assert.equal(result.status, 'unavailable');
+  assert.equal(result.facts.get('claude:child-native').parentNativeId, 'parent-native', 'completed healthy store still supplies facts');
+  errorCode = 6;
+  assert.deepEqual(readT3SessionRelationResult(['child-native'], { ...deps, t3DbPaths: [copied, s.file] }), { facts: new Map(), status: 'retryable' }, 'later success cannot mask LOCKED');
 });

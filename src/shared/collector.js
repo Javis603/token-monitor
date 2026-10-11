@@ -923,6 +923,7 @@ async function collectUsageOnce(options) {
     // across collectUsageOnce calls. These caches and sets start fresh each
     // call; ticks recover catalog provenance from their local fallback below.
   };
+  let sessionIdentitiesComplete = true;
   const decorateLocalPeriods = (periods, { retryMisses = false, deferT3SessionParents = false } = {}) => applySessionMetadata(
     periods,
     options.homeDir || os.homedir(),
@@ -1089,9 +1090,9 @@ async function collectUsageOnce(options) {
       for (const key of Object.keys(today.sessions || {})) {
         for (const period of [today, month, allTime]) if (period.sessions?.[key]) targets.add(period.sessions[key]);
       }
-      applyT3SessionParents({ today, month, allTime }, options.homeDir || os.homedir(), localSessionMetadataDeps, targets);
+      sessionIdentitiesComplete = applyT3SessionParents({ today, month, allTime }, options.homeDir || os.homedir(), localSessionMetadataDeps, targets);
     } else {
-      decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
+      sessionIdentitiesComplete = decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1303,7 +1304,7 @@ async function collectUsageOnce(options) {
       }
     }
     options.onAnchorComputed({
-      sessionIdentityVersion: SESSION_IDENTITY_VERSION,
+      sessionIdentityVersion: sessionIdentitiesComplete ? SESSION_IDENTITY_VERSION : (anchor?.sessionIdentityVersion || 1),
       windowsPeriods,
       todayPartitions,
       t3Titles,

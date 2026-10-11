@@ -842,14 +842,19 @@ test('flat catalog project provenance requires a full scan instead of guessing p
   assert.ok(collectorAnchorTrust({ ...anchor, catalogProjects: { today: { 'antigravity:session': 'project-a' }, month: {}, allTime: {} } }, options));
 });
 
-for (const nativeChild of [false, true]) test(`old persisted anchors retain ${nativeChild ? 'native same-client' : 'T3 cross-client'} parent links through refresh and restart`, async t => {
+for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing', 'empty', 'unsupported', 'corrupt']) test(`old persisted anchors retain identity migration through refresh and restart: ${scenario}`, async t => {
+  const nativeChild = scenario === 'native';
+  const retryable = ['locked', 'partial'].includes(scenario);
+  const unavailable = ['missing', 'empty', 'unsupported', 'corrupt'].includes(scenario);
   const { DatabaseSync } = require('node:sqlite');
   const { normalizePeriod } = require('../../src/shared/usage');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-identity-anchor-'));
   const previousDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = home;
   let handle;
+  let lock;
   t.after(() => {
+    lock?.close();
     handle?.stop();
     if (previousDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = previousDir;
@@ -883,6 +888,16 @@ for (const nativeChild of [false, true]) test(`old persisted anchors retain ${na
   db.prepare('INSERT INTO orchestration_v2_projection_nodes VALUES (?, ?, ?, ?, ?)').run('task', 'app-thread', 'root', 'subagent', 'devin-provider');
   fs.writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ providerInstances: { 'configured-devin': { driver: 'acpRegistry', config: { agentId: 'devin' } } } }));
   db.close();
+  if (scenario === 'locked') { lock = new DatabaseSync(dbPath); lock.exec('BEGIN EXCLUSIVE'); }
+  if (unavailable) {
+    fs.rmSync(dbPath);
+    if (scenario === 'corrupt') fs.writeFileSync(dbPath, 'not sqlite');
+    else if (scenario !== 'missing') {
+      const empty = new DatabaseSync(dbPath);
+      if (scenario === 'unsupported') empty.exec('CREATE TABLE unrelated (id TEXT)');
+      empty.close();
+    }
+  }
   const period = (history = false) => normalizePeriod({ totalTokens: history ? 40 : 10, costUsd: history ? 4 : 1,
     sessions: { 'codex:today': { client: 'codex', sessionId: 'today', totalTokens: 10, costUsd: 1 },
       ...(history ? { 'codex:historical': { client: 'codex', sessionId: 'historical', totalTokens: 10, costUsd: 1 },
@@ -896,8 +911,17 @@ for (const nativeChild of [false, true]) test(`old persisted anchors retain ${na
     configFingerprint: configFingerprint('codex', '2024-01-01', false), fullScanAt: capturedAt, sessionIdentityVersion: 1 }));
   const scans = [], resolved = [], updates = [];
   let relationReads = 0;
+  let failLater = scenario === 'partial';
+  const identityTargets = [];
+  const codexMetadata = require('../../src/shared/providers/codex/sessionMetadata');
+  const originalIdentities = codexMetadata.resolveSessionIdentities;
+  codexMetadata.resolveSessionIdentities = (ids, context) => { identityTargets.push([...ids]); return originalIdentities(ids, context); };
+  t.after(() => { codexMetadata.resolveSessionIdentities = originalIdentities; });
   class ObservedDatabase extends DatabaseSync {
     prepare(sql) {
+      if (failLater && sql.includes('SELECT cp.thread_id')) {
+        throw Object.assign(new Error('database is locked'), { errcode: 5 });
+      }
       if (sql.includes('SELECT p.driver,') && !sql.includes('1 AS historical')) relationReads++;
       return super.prepare(sql);
     }
@@ -931,14 +955,37 @@ for (const nativeChild of [false, true]) test(`old persisted anchors retain ${na
       assert.equal(group.cost, 5);
     }
   };
-  checkFamily(updates[0]);
-  assert.equal(relationReads, 1, 'migration resolves today and retained identities in one relationship read');
-  assert.equal(scans.length, 1, 'migration uses the ordinary today scan, never new historical token scans');
+  if (retryable || unavailable) {
+    assert.equal(updates[0].month.sessions[childKey].parentSessionId, undefined);
+    assert.equal(updates[0].month.sessions[childKey].t3ThreadId, undefined, 'no partial T3 identity is applied');
+    const failed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(failed.sessionIdentityVersion, retryable ? 1 : 2);
+    assert.equal(failed.month.sessions[childKey].parentSessionId, undefined);
+    assert.equal(failed.month.totalTokens, 40);
+    assert.equal(failed.fullScanAt, capturedAt);
+  } else checkFamily(updates[0]);
+  if (retryable) {
+    handle.stop(); handle = null;
+    handle = freshCollector().startCollector(options);
+    await waitForCondition(() => updates.length === 2);
+    await handle.whenIdle();
+    assert.equal(updates[1].month.sessions[childKey].parentSessionId, undefined, 'restart while blocked still publishes no partial link');
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).sessionIdentityVersion, 1, 'restart preserves the pending upgrade');
+  }
+  lock?.exec('ROLLBACK'); lock?.close(); lock = null;
+  failLater = false;
+  const migrationsAfterFirst = identityTargets.length;
+  assert.equal(relationReads, scenario === 'locked' || unavailable ? 0 : scenario === 'partial' ? 2 : 1, 'one migration relationship read');
+  assert.equal(scans.length, retryable ? 2 : 1, 'migration uses the ordinary today scan, never new historical token scans');
   await handle.tick('watch', { todayOnly: true });
   await handle.whenIdle();
-  assert.equal(updates.length, 2);
-  checkFamily(updates[1]);
-  assert.equal(relationReads, 2, 'warm watch does not repeat the metadata relationship lookup');
+  assert.equal(updates.length, retryable ? 3 : 2);
+  if (!unavailable) checkFamily(updates.at(-1));
+  else {
+    assert.equal(updates[1].month.sessions['codex:historical'].nativeSessionId, native);
+    assert.equal(identityTargets.length, migrationsAfterFirst, 'terminal absence does not resolve historical identities again');
+  }
+  assert.equal(relationReads, unavailable ? 0 : scenario === 'locked' ? 1 : scenario === 'partial' ? 3 : 2, 'one lookup per eligible tick');
   assert.equal(resolved.includes('historical'), false, 'migration only reads identity headers, never full historical metadata');
   const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(saved.sessionIdentityVersion, 2);
@@ -946,11 +993,11 @@ for (const nativeChild of [false, true]) test(`old persisted anchors retain ${na
   assert.equal(saved.today.totalTokens, 10, 'frozen delta baseline is retained');
   assert.equal(saved.month.totalTokens, 40);
   assert.equal(saved.month.sessions['codex:historical'].nativeSessionId, native);
-  assert.equal(saved.month.sessions['codex:historical'].t3ThreadId, 'app-thread');
-  assert.equal(saved.month.sessions[childKey].t3ThreadId, 'devin-app', 'version-one anchors receive the child app identity');
+  assert.equal(saved.month.sessions['codex:historical'].t3ThreadId, unavailable ? undefined : 'app-thread');
+  assert.equal(saved.month.sessions[childKey].t3ThreadId, unavailable ? undefined : 'devin-app', 'version-one anchors receive the child app identity');
   for (const period of ['month', 'allTime']) {
-    assert.equal(saved[period].sessions[childKey].parentSessionId, updates[0][period].sessions[childKey].parentSessionId);
-    assert.equal(saved[period].sessions[childKey].parentClient, nativeChild ? undefined : 'codex', 'same-client links remove the redundant old namespace');
+    assert.equal(saved[period].sessions[childKey].parentSessionId, updates.at(-1)[period].sessions[childKey].parentSessionId);
+    assert.equal(saved[period].sessions[childKey].parentClient, nativeChild || unavailable ? undefined : 'codex', 'same-client links remove the redundant old namespace');
   }
   assert.equal(updates[0].month.totalTokens, 50, 'today delta is applied exactly once');
   assert.equal(updates[0].month.costUsd, 5);
@@ -958,13 +1005,14 @@ for (const nativeChild of [false, true]) test(`old persisted anchors retain ${na
   handle = null;
   resolved.length = 0;
   handle = freshCollector().startCollector(options);
-  await waitForCondition(() => updates.length === 3);
+  await waitForCondition(() => updates.length === (retryable ? 4 : 3));
   await handle.whenIdle();
-  checkFamily(updates[2]);
-  assert.equal(relationReads, 3, 'restart preserves the single-read watch path');
-  assert.deepEqual(scans, [['--today'], ['--today'], ['--today']], 'migration, next tick and restart scan only today');
+  if (!unavailable) checkFamily(updates.at(-1));
+  else assert.equal(identityTargets.length, migrationsAfterFirst, 'restart does not repeat terminal historical migration');
+  assert.equal(relationReads, unavailable ? 0 : scenario === 'locked' ? 2 : scenario === 'partial' ? 4 : 3, 'restart preserves the single-read watch path');
+  assert.deepEqual(scans, Array.from({ length: retryable ? 4 : 3 }, () => ['--today']), 'migration, next tick and restart scan only today');
   assert.equal(resolved.includes('historical'), false, 'upgraded anchors do not reread historical transcripts each tick');
-  assert.equal(updates[2].month.totalTokens, 50, 'warm restart never reapplies an already counted delta');
-  assert.equal(updates[2].month.sessions['codex:historical'].t3ThreadId, 'app-thread');
+  assert.equal(updates.at(-1).month.totalTokens, 50, 'warm restart never reapplies an already counted delta');
+  assert.equal(updates.at(-1).month.sessions['codex:historical'].t3ThreadId, unavailable ? undefined : 'app-thread');
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), saved, 'refresh and restart preserve the migrated anchor and frozen baseline');
 });
