@@ -266,6 +266,7 @@
         deleted: session.deleted === true,
         sourceDeleted: session.sourceDeleted === true,
         running: stateByKey.get(key) === 'running',
+        tokenDataUnavailable: session.tokenDataUnavailable === true,
         // The same gate the Sessions list uses, so one surface cannot show a
         // gauge for a session the other has already dropped it from.
         context: sessionLive.sessionContextForRow(session) || null
@@ -280,28 +281,26 @@
     const states = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
     const projected = sessionRowsFor(entries, states);
     const byKey = new Map(projected.map(row => [`session:${row.key}`, row]));
-    const period = { sessions: Object.fromEntries(entries.map(({ key, session }) => [key, session])) };
-    const detailRows = new Map(sessionRowsApi.sessionRowsForPeriod(period, {
-      ...options,
-      nativeSessions: period.sessions,
-      grokBotSessionIds: stats?.grokBotSessionIds,
-      sourcePeriods: stats?.periods
-    }).map(row => [row.key, row]));
+    const botIds = new Set(Array.isArray(stats?.grokBotSessionIds) ? stats.grokBotSessionIds
+      : sessionRowsApi.grokBotSessionIdsForMaps([Object.fromEntries(entries.map(({ key, session }) => [key, session]))],
+        Object.values(stats?.periods || {}).map(period => period?.sessions)));
+    // Grouping needs identities, totals and state. Each surface formats only
+    // the rows it actually displays, not transcript/detail DTOs for history.
     const rows = projected.map(row => ({
-      ...detailRows.get(`session:${row.key}`),
       key: `session:${row.key}`, kind: 'session', client: row.client,
+      clientLabel: options.clientLabels?.[row.client] || row.client,
+      nativeSessionId: row.nativeSessionId, t3ThreadId: row.t3ThreadId,
       name: row.title || row.projectLabel || row.sessionId.slice(0, 12) || '—',
       titled: Boolean(row.title || row.projectLabel),
-      detail: sessionRowsApi.sessionIdLabel(row.sessionId),
       modelTokens: row.models, value: row.totalTokens, cost: row.costUsd,
-      unpricedTokens: row.unpricedTokens,
+      unpricedTokens: row.unpricedTokens, tokenDataUnavailable: row.tokenDataUnavailable,
       parentKey: row.parentSessionId && (row.parentClient !== row.client || row.parentSessionId !== row.sessionId)
         ? `session:${row.parentClient}:${row.parentSessionId}` : undefined,
-      grokBot: detailRows.get(`session:${row.key}`)?.grokBot || sessionRowsApi.isGrokBotSession(row, row.key),
+      grokBot: sessionRowsApi.isGrokBotSession(row, row.key) || (row.client === 'cursor' && botIds.has(row.sessionId)),
       activityState: sessionActivityState(row), running: row.running,
       sortTime: Date.parse(row.lastUsedAt || row.startedAt || '') || 0
     }));
-    return sessionRowsApi.groupSessionRows(rows, options).map(summary => {
+    return sessionRowsApi.groupSessionRows(rows, { ...options, subagents: { ...options.subagents, includeModelTooltip: false } }).map(summary => {
       if (!summary.sessionGroup) return byKey.get(summary.key);
       const members = summary.groupRows.map(row => ({ ...byKey.get(row.key), groupRole: row.groupRole }));
       const parent = members[0];
@@ -315,13 +314,14 @@
         models,
         totalTokens: summary.value, costUsd: summary.cost,
         unpricedTokens: summary.unpricedTokens,
+        tokenDataUnavailable: summary.tokenDataUnavailable === true,
         lastUsedAt: new Date(summary.sortTime).toISOString(),
         // Context and cache are the latest main record’s own snapshots,
         // inherited above; totals and activity cover the whole group.
         sessionGroup: summary.sessionGroup, subagentGroup: summary.subagentGroup, subagentCount: summary.subagentCount,
         running: sessionActivityState({ groupRows: members }) === 'running',
         activityState: sessionActivityState({ groupRows: members }),
-        groupRows: members, summary
+        groupRows: members
       };
     });
   }
@@ -725,11 +725,7 @@
     // push/expiry; a stats-key cache would freeze time-dependent selection.
     const groupedSessions = items.some(item => item.metric === dockItems.SESSIONS_METRIC
       || (item.type === 'limit' && options.limitsEnabled !== false))
-      ? groupedSessionRows(stats).map(row => {
-        const projected = { ...row };
-        delete projected.summary; // Detail rows are only needed by Home.
-        return projected;
-      }) : [];
+      ? groupedSessionRows(stats) : [];
     const cells = [];
     for (const item of items) {
       if (item.type === 'stat') {

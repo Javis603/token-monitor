@@ -4793,9 +4793,7 @@ function refreshSessionDetailHeading() {
   const period = group?.kind === 'session-group' && group.summary?.key
     ? state.stats?.periods?.[group.period || state.period] : null;
   if (period) {
-    const rows = group.recentSessions
-      ? window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, Infinity, sessionPresentationOptions()).map(row => row.summary).filter(Boolean)
-      : sessionRowsForPeriod(period);
+    const rows = sessionRowsForPeriod(period);
     const memberKey = `session:${state.openSession.client}:${state.openSession.sessionId}`;
     const holds = (row) => row.groupRows?.some((member) => member.key === memberKey);
     // The same group counts only while it still holds this session: a child
@@ -4809,7 +4807,7 @@ function refreshSessionDetailHeading() {
       // would keep quoting titles the current stats no longer carry, so return
       // to whichever group holds this session now, or to Sessions when none does.
       const holder = rows.find(holds);
-      state.openSession.returnTo = holder ? { kind: 'session-group', period: group.period, recentSessions: group.recentSessions, summary: holder } : null;
+      state.openSession.returnTo = holder ? { kind: 'session-group', period: group.period, summary: holder } : null;
     }
   }
   const head = els.sessionDetailHead;
@@ -6122,7 +6120,7 @@ function renderHomeSessionModule(rows) {
     const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
     const description = document.createElement('span');
     description.className = 'home-list-sub';
-    const memberLabel = row.summary && (!row.subagentGroup || row.subagentCount > 0)
+    const memberLabel = row.sessionGroup && (!row.subagentGroup || row.subagentCount > 0)
       ? (row.subagentGroup ? t('sessions.subagentCount', { count: row.subagentCount })
         : t('sessions.grokBotCount', { count: row.groupRows.length })) : '';
     // The same "N models" hover the Sessions list draws: the label stays the
@@ -6840,9 +6838,7 @@ function render() {
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
     if (state.openSession.kind === 'session-group') {
-      const latest = (state.openSession.recentSessions
-        ? window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, Infinity, sessionPresentationOptions()).map(row => row.summary).filter(Boolean)
-        : sessionRowsForPeriod(period)).find((row) => row.key === state.openSession.summary.key);
+      const latest = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
       if (!latest) { closeSessionDetail(); return; }
       state.openSession.summary = latest;
       // The rebuild replaces every run node, so a hovered run tooltip would die

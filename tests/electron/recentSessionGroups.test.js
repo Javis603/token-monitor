@@ -98,8 +98,8 @@ test('native zero-token idle parent can anchor a linked active child without ext
   assert.equal(group.key, 'session-group:subagents:codex:parent');
   assert.equal(group.totalTokens, 100);
   assert.equal(group.groupRows.length, 2);
-  assert.equal(group.summary.groupRows[0].key, 'session:codex:parent');
-  assert.equal(group.summary.groupRows[0].value, 0);
+  assert.equal(group.groupRows[0].key, 'codex:parent');
+  assert.equal(group.groupRows[0].totalTokens, 0);
 });
 
 test('global reviews stay excluded and Grok bots keep their global group outside ordinary parent families', () => {
@@ -242,30 +242,37 @@ test('a newer main continuation replaces status snapshots instead of retaining a
   assert.equal(group.totalTokens, 400);
 });
 
-test('recent group detail uses incumbent tool names, colors and localized counts including zero-token parents', () => {
+test('recent groups resolve to Sessions detail with incumbent tool names, colors and localized counts', () => {
   const stats = fixture();
   const opts = incumbentOptions(stats);
   const [family] = presentation.recentSessionRows(stats, Infinity, opts);
-  const child = family.summary.groupRows.find(row => row.client === 'claude');
+  const details = () => {
+    const options = incumbentOptions(stats);
+    return groupSessionRows(sessionRowsForPeriod(stats.periods.month, options), options);
+  };
+  const familyDetail = details().find(row => row.key === family.key);
+  const child = familyDetail.groupRows.find(row => row.client === 'claude');
   assert.equal(child.clientLabel, opts.clientLabels.claude);
   assert.equal(child.color, opts.clientColors.claude);
-  assert.equal(family.summary.groupDetail, opts.subagents.countLabel(2));
+  assert.equal(familyDetail.groupDetail, opts.subagents.countLabel(2));
   const parent = stats.periods.month.sessions['codex:same'];
   parent.tokenDataUnavailable = true;
   parent.totalTokens = 0;
   parent.costUsd = 0;
   parent.models = {};
-  stats.nativeSessions = { today: { 'codex:same': parent } };
+  stats.nativeSessions = { month: { 'codex:same': parent } };
   delete stats.periods.month.sessions['codex:same'];
   const [nativeFamily] = presentation.recentSessionRows(stats, Infinity, incumbentOptions(stats));
-  assert.equal(nativeFamily.summary.groupRows[0].clientLabel, opts.clientLabels.codex);
-  assert.equal(nativeFamily.summary.groupRows[0].color, opts.clientColors.codex);
+  const nativeDetail = details().find(row => row.key === nativeFamily.key);
+  assert.equal(nativeDetail.groupRows[0].clientLabel, opts.clientLabels.codex);
+  assert.equal(nativeDetail.groupRows[0].color, opts.clientColors.codex);
   stats.periods.month.sessions = { ...stats.periods.month.sessions };
   stats.periods.month.sessions['cursor:bot1'] = session('cursor', 'bot1', { models: { 'grok-bot-automation': 100 } });
   stats.periods.month.sessions['cursor:bot2'] = session('cursor', 'bot2', { models: { 'grok-bot-automation': 100 } });
   const bot = presentation.recentSessionRows(stats, Infinity, incumbentOptions(stats)).find(row => row.sessionGroup === 'cursor-grok-bot');
-  assert.equal(bot.summary.detail, opts.grokBot.countLabel(2));
-  assert.notEqual(bot.summary.detail, '2 activity records');
+  const botDetail = details().find(row => row.key === bot.key);
+  assert.equal(botDetail.detail, opts.grokBot.countLabel(2));
+  assert.notEqual(botDetail.detail, '2 activity records');
 });
 
 test('Home keeps family membership below the title and routes mouse and keyboard activation to the Sessions list', () => {
@@ -431,7 +438,10 @@ test('Dock projects once per update for Sessions and multiple provider cards and
     require(id) {
       const api = load(id);
       if (id !== '../sessionRows') return api;
-      return { ...api, sessionRowsForPeriod(...args) { projections += 1; return api.sessionRowsForPeriod(...args); } };
+      return { ...api,
+        sessionRowsForPeriod() { assert.fail('Dock must not build session detail DTOs'); },
+        groupSessionRows(...args) { projections += 1; return api.groupSessionRows(...args); }
+      };
     }
   });
   const stats = fixture();
@@ -440,7 +450,7 @@ test('Dock projects once per update for Sessions and multiple provider cards and
   const cells = module.exports.buildEdgeDockCells(stats, config);
   assert.equal(projections, 1);
   assert.equal(cells[0].sessions[0], cells[1].sessions[0], 'cards share the complete family projection');
-  assert.equal(cells[0].sessions[0].summary, undefined, 'Home-only detail rows do not duplicate the Dock IPC payload');
+  assert.equal(cells[0].sessions[0].summary, undefined, 'detail DTOs stay out of the Dock IPC payload');
   stats.periods = { month: { sessions: Object.fromEntries(Object.entries(stats.periods.month.sessions)
     .map(([key, row]) => [key, { ...row, turnEnded: true }])) } };
   const next = module.exports.buildEdgeDockCells(stats, config);

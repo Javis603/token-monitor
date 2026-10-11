@@ -268,16 +268,17 @@ function readT3SessionRelations(nativeIds, deps = {}) {
           out.set(key, fact); facts.set(key, fact);
         }
       };
-      for (let offset = 0; offset < ids.length; offset += QUERY_CHUNK_SIZE) {
-        const chunk = ids.slice(offset, offset + QUERY_CHUNK_SIZE);
-        const params = chunk.map(() => '?').join(',');
-        const sql = `SELECT p.driver, ${instance('p')} AS instanceId, ${native('p', 'nativeId')} AS nativeId, p.thread_id AS threadId
-          FROM ${names.p} p JOIN ${names.t} t ON t.thread_id = p.thread_id
-          WHERE t.deleted_at IS NULL AND ${strong}
-            AND (${native('p', 'nativeId')} IN (${params})
-              OR lower(${native('p', 'nativeId')}) IN (SELECT value FROM json_each(?)))`;
-        for (const row of db.prepare(sql).all(...chunk, JSON.stringify(chunk.filter(id => requestedUuids.has(id.toLowerCase())).map(id => id.toLowerCase())))) add(row);
-      }
+      // IDs live in unindexed JSON in current T3 schemas. One candidate pass
+      // per table avoids rescanning all providers for every 400-ID batch. The
+      // target filters precede the indexed ownership joins.
+      const idJson = JSON.stringify(ids);
+      const uuidJson = JSON.stringify(uuidIds);
+      const sql = `SELECT p.driver, ${instance('p')} AS instanceId, ${native('p', 'nativeId')} AS nativeId, p.thread_id AS threadId
+        FROM ${names.p} p CROSS JOIN ${names.t} t ON t.thread_id = p.thread_id
+        WHERE (${native('p', 'nativeId')} IN (SELECT value FROM json_each(?))
+          OR lower(${native('p', 'nativeId')}) IN (SELECT value FROM json_each(?)))
+          AND t.deleted_at IS NULL AND ${strong}`;
+      for (const row of db.prepare(sql).all(idJson, uuidJson)) add(row);
       // T3 stamps nativeThreadId after a provider turn starts. It is retained
       // when steering supersedes a started turn or a restart replaces the native
       // reference. Superseded attempts can already have accounted usage.
@@ -285,18 +286,19 @@ function readT3SessionRelations(nativeIds, deps = {}) {
       // Pin join order: SQLite otherwise scans every message/tool node first.
       if (has('a', ['thread_id', 'provider_thread_id', 'root_node_id', 'status', 'payload_json'])
           && has('n', ['node_id', 'thread_id', 'provider_thread_id', 'kind'])) {
-        const history = `SELECT p.driver, 1 AS historical, ${instance('p')} AS instanceId, json_extract(${json('a')}, '$.nativeThreadId') AS nativeId,
-            p.thread_id AS threadId FROM ${names.a} a
-            CROSS JOIN ${names.p} p ON p.provider_thread_id = a.provider_thread_id AND p.thread_id = a.thread_id
-            CROSS JOIN ${names.t} t ON t.thread_id = p.thread_id
-            CROSS JOIN ${names.n} root ON root.node_id = a.root_node_id
-              AND root.thread_id = a.thread_id AND root.provider_thread_id = a.provider_thread_id
-              AND root.kind = 'root_turn'
-            WHERE t.deleted_at IS NULL AND ${strong}
-              AND a.status IN ('running', 'completed', 'failed', 'interrupted', 'cancelled', 'superseded')
-              AND (json_extract(${json('a')}, '$.nativeThreadId') IN (SELECT value FROM json_each(?))
-                OR lower(json_extract(${json('a')}, '$.nativeThreadId')) IN (SELECT value FROM json_each(?)))`;
-        for (const row of db.prepare(history).all(JSON.stringify(ids), JSON.stringify(uuidIds))) add(row);
+        const history = `SELECT p.driver, 1 AS historical, ${instance('p')} AS instanceId,
+            json_extract(${json('a')}, '$.nativeThreadId') AS nativeId, p.thread_id AS threadId
+          FROM ${names.a} a
+          CROSS JOIN ${names.p} p ON p.provider_thread_id = a.provider_thread_id AND p.thread_id = a.thread_id
+          CROSS JOIN ${names.t} t ON t.thread_id = p.thread_id
+          CROSS JOIN ${names.n} root ON root.node_id = a.root_node_id
+            AND root.thread_id = a.thread_id AND root.provider_thread_id = a.provider_thread_id
+            AND root.kind = 'root_turn'
+          WHERE a.status IN ('running', 'completed', 'failed', 'interrupted', 'cancelled', 'superseded')
+            AND (json_extract(${json('a')}, '$.nativeThreadId') IN (SELECT value FROM json_each(?))
+              OR lower(json_extract(${json('a')}, '$.nativeThreadId')) IN (SELECT value FROM json_each(?)))
+            AND t.deleted_at IS NULL AND ${strong}`;
+        for (const row of db.prepare(history).all(idJson, uuidJson)) add(row);
       }
       if (!has('n', ['node_id', 'thread_id', 'root_node_id', 'kind', 'provider_thread_id'])) continue;
       const threads = [...new Set([...facts.values()].map(fact => fact.threadId))];

@@ -436,7 +436,7 @@ function applySessionIdentities(periods, home, deps = {}) {
     const nativeId = nativeIds.get(session.sessionId);
     if (nativeId) session.nativeSessionId = nativeId;
   }
-  applyT3SessionParents(periods, home, deps);
+  if (!deps.deferT3SessionParents) applyT3SessionParents(periods, home, deps);
 }
 
 function applySessionMetadata(periods, home, deps = {}) {
@@ -524,7 +524,7 @@ function applySessionMetadata(periods, home, deps = {}) {
       }
     }
   }
-  applyT3SessionParents(periods, home, deps);
+  if (!deps.deferT3SessionParents) applyT3SessionParents(periods, home, deps);
 }
 
 module.exports = {

@@ -634,7 +634,8 @@
       // group's models too.
       name: display.titled ? display.name : titleParts,
       modelLabel,
-      modelTooltipEntries: sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel }),
+      modelTooltipEntries: options.includeModelTooltip === false ? []
+        : sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel }),
       modelTokens: models,
       // Keep the tool/model reading order; the renderer reserves space for the
       // count while the preceding text can shrink in a narrow window.

@@ -923,13 +923,13 @@ async function collectUsageOnce(options) {
     // across collectUsageOnce calls. These caches and sets start fresh each
     // call; ticks recover catalog provenance from their local fallback below.
   };
-  const decorateLocalPeriods = (periods, { retryMisses = false } = {}) => applySessionMetadata(
+  const decorateLocalPeriods = (periods, { retryMisses = false, deferT3SessionParents = false } = {}) => applySessionMetadata(
     periods,
     options.homeDir || os.homedir(),
     // Still unconditional: only the clients whose parser records a workspace come
     // back from the scan attributed, so the resolvers stay the answer for the rest.
     // applySessionMetadata skips the expensive path read per session, not per tick.
-    { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
+    { ...localSessionMetadataDeps, retryMisses, deferT3SessionParents, resolveProjects: projectsEnabled }
   );
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
@@ -1076,14 +1076,16 @@ async function collectUsageOnce(options) {
       // resolved identities onto sessions that started today (absent from the anchor).
       // Upgrade retained identity metadata once, on the usage worker, without
       // rescanning tokens or moving the frozen delta baseline.
-      decorateLocalPeriods({ today }, { retryMisses: true });
-      if (anchor.sessionIdentityVersion !== SESSION_IDENTITY_VERSION) {
-        applySessionIdentities({ month, allTime }, options.homeDir || os.homedir(), localSessionMetadataDeps);
+      decorateLocalPeriods({ today }, { retryMisses: true, deferT3SessionParents: true });
+      const upgradeIdentities = anchor.sessionIdentityVersion !== SESSION_IDENTITY_VERSION;
+      if (upgradeIdentities) {
+        applySessionIdentities({ month, allTime }, options.homeDir || os.homedir(), { ...localSessionMetadataDeps, deferT3SessionParents: true });
       }
       propagateTodayProjects(today, { month, allTime }, { ...localSessionMetadataDeps, t3Titles: anchor.t3Titles });
       // A delegated child may be new today while its idle parent exists only in
       // the broader anchor. Resolve app links without re-reading transcripts.
-      const targets = new Set();
+      const targets = upgradeIdentities
+        ? new Set([month, allTime].flatMap(period => Object.values(period.sessions || {}))) : new Set();
       for (const key of Object.keys(today.sessions || {})) {
         for (const period of [today, month, allTime]) if (period.sessions?.[key]) targets.add(period.sessions[key]);
       }

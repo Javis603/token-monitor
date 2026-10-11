@@ -429,13 +429,14 @@ test('accepted run identities survive native replacement; pending or wrongly own
   insert.run('main', 'provider', 'root', 'queued', JSON.stringify({ nativeThreadId: 'cccccccc-cccc-cccc-cccc-cccccccccccc' }));
   insert.run('other', 'provider', 'root', 'completed', JSON.stringify({ nativeThreadId: 'dddddddd-dddd-dddd-dddd-dddddddddddd' }));
   const plans = [];
-  let historyQueries = 0;
+  let historyQueries = 0, nativeQueries = 0;
   class DatabaseSync extends sqlite.DatabaseSync {
     prepare(sql) {
       const statement = super.prepare(sql);
-      if (!sql.startsWith('SELECT p.driver, 1 AS historical')) return statement;
+      if (!sql.includes('SELECT p.driver,')) return statement;
       return { all: (...args) => {
-        historyQueries++;
+        if (sql.includes('1 AS historical')) historyQueries++;
+        else nativeQueries++;
         plans.push(...super.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args).map(row => row.detail));
         return statement.all(...args);
       } };
@@ -446,7 +447,10 @@ test('accepted run identities survive native replacement; pending or wrongly own
   const facts = readT3SessionRelations(ids, { homeDir: s.home, env: {}, sqlite: { DatabaseSync } });
   assert.deepEqual([...facts.keys()].sort(), [`codex:${old}`, `codex:${current}`]);
   assert.equal(facts.get(`codex:${old}`).threadId, 'main');
-  assert.equal(historyQueries, 1, 'historical attempts are queried once across native-id chunks');
+  assert.equal(nativeQueries, 1, 'native providers are scanned once even beyond the old batch limit');
+  assert.equal(historyQueries, 1, 'historical attempts are scanned once');
+  assert.equal(plans.filter(detail => /^SCAN p\b/.test(detail)).length, 1, 'ownership joins do not rescan the provider table');
+  assert.ok(plans.some(detail => detail.startsWith('SEARCH p USING INDEX') && detail.includes('(provider_thread_id=?)')));
   assert.equal(plans.some(detail => /^SCAN root\b/.test(detail)), false);
   assert.ok(plans.some(detail => detail.startsWith('SEARCH root USING INDEX') && detail.includes('(node_id=?)')));
 });
@@ -666,7 +670,7 @@ test('targeted relationship lookup queries only targets while historical parent 
   class DatabaseSync extends sqlite.DatabaseSync {
     prepare(sql) {
       const statement = super.prepare(sql);
-      if (!sql.startsWith('SELECT p.driver,')) return statement;
+      if (!sql.includes('SELECT p.driver,') || sql.includes('1 AS historical')) return statement;
       return { all: (...args) => { lookups.push(args); return statement.all(...args); } };
     }
   }
@@ -674,8 +678,10 @@ test('targeted relationship lookup queries only targets while historical parent 
   applyT3SessionParents(periods, s.home, { env: {}, sqlite: { DatabaseSync } }, new Set([child]));
   assert.equal(child.parentSessionId, 'parent-native');
   assert.equal(child.parentClient, 'codex');
-  assert.equal(lookups.flat().includes('unrelated-history'), false);
-  assert.equal(lookups.flat().includes('parent-native'), false, 'historical evidence is not a DB lookup target');
+  const queriedIds = lookups.flatMap(args => args.flatMap(value => JSON.parse(value)));
+  assert.deepEqual(queriedIds, ['child-native'], 'only the target native id is queried');
+  assert.equal(queriedIds.includes('unrelated-history'), false);
+  assert.equal(queriedIds.includes('parent-native'), false, 'historical evidence is not a DB lookup target');
   assert.equal(periods.month.sessions['codex:parent-native'].t3ThreadId, undefined, 'evidence is read-only');
 });
 

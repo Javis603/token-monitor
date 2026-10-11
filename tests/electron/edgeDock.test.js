@@ -427,6 +427,43 @@ test('Home session preview uses the sidebar timeline and keeps running rows with
   );
 });
 
+test('Home and Dock group raw history without building session detail DTOs', () => {
+  const sessionRows = require('../../src/electron/renderer/sessionRows');
+  const original = sessionRows.sessionRowsForPeriod;
+  sessionRows.sessionRowsForPeriod = () => assert.fail('recent cards must not format historical detail DTOs');
+  try {
+    const now = Date.now();
+    const sessions = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`codex:history-${i}`, {
+      client: 'codex', sessionId: `history-${i}`, totalTokens: 10, costUsd: 1,
+      models: { a: 10 }, lastUsedAt: new Date(now - 86400000 - i).toISOString(), turnEnded: true
+    }]));
+    sessions['codex:old-main'] = { client: 'codex', sessionId: 'old-main', t3ThreadId: 'app-main',
+      totalTokens: 500, costUsd: 2, models: { a: 500 }, lastUsedAt: new Date(now - 60000).toISOString(), turnEnded: true };
+    sessions['claude:new-main'] = { client: 'claude', sessionId: 'new-main', t3ThreadId: 'app-main',
+      totalTokens: 0, tokenDataUnavailable: true, lastUsedAt: new Date(now).toISOString(), turnEnded: true };
+    sessions['codex:child'] = { client: 'codex', sessionId: 'child', t3ThreadId: 'app-child',
+      parentSessionId: 'old-main', totalTokens: 100, costUsd: 1, models: { b: 100 }, lastUsedAt: new Date(now).toISOString() };
+    const stats = { periods: { today: { sessions: {} }, month: { sessions } } };
+    const home = edgeDockPresentation.recentSessionRows(stats, 5);
+    const dock = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] })[0].sessions;
+    for (const rows of [home, dock]) {
+      const group = rows.find(row => row.subagentGroup);
+      assert.ok(group);
+      assert.equal(group.groupRows.length, 3);
+      assert.equal(group.subagentCount, 1);
+      assert.equal(group.totalTokens, 600);
+      assert.equal(group.costUsd, 3);
+      assert.equal(group.tokenDataUnavailable, false, 'a new pre-token main does not hide accounted members');
+      assert.deepEqual(group.models, { a: 500, b: 100 });
+      assert.equal(group.running, true);
+      assert.equal(group.summary, undefined, 'full detail presentation stays in Sessions');
+    }
+    assert.equal(home.length, 5);
+  } finally {
+    sessionRows.sessionRowsForPeriod = original;
+  }
+});
+
 test('a startedAt-only session keeps its display age without becoming running', () => {
   const startedAt = new Date(Date.now() - 60_000).toISOString();
   const stats = { periods: { month: { sessions: {

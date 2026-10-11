@@ -895,13 +895,20 @@ for (const nativeChild of [false, true]) test(`old persisted anchors retain ${na
   fs.writeFileSync(file, JSON.stringify({ dateKey: localTodayKey(), ...anchorPeriods,
     configFingerprint: configFingerprint('codex', '2024-01-01', false), fullScanAt: capturedAt, sessionIdentityVersion: 1 }));
   const scans = [], resolved = [], updates = [];
+  let relationReads = 0;
+  class ObservedDatabase extends DatabaseSync {
+    prepare(sql) {
+      if (sql.includes('SELECT p.driver,') && !sql.includes('1 AS historical')) relationReads++;
+      return super.prepare(sql);
+    }
+  }
   const options = { ...baseOptions, clients: 'codex', homeDir: home, projectsEnabled: false,
     intervalMs: 3600000, watchEnabled: false, wslScanEnabled: false, sessionActivityPolling: false,
     runTokscale: async ({ flags }) => {
       scans.push(flags);
       return { entries: [{ client: 'codex', sessionId: 'today', model: 'gpt-test', input: 20, output: 0, cost: 2 }] };
     },
-    sessionMetadataDeps: { env: {}, t3DbPaths: [dbPath], sessionMetadataResolvers: new Map([['codex', ids => {
+    sessionMetadataDeps: { env: {}, sqlite: { DatabaseSync: ObservedDatabase }, t3DbPaths: [dbPath], sessionMetadataResolvers: new Map([['codex', ids => {
       resolved.push(...ids);
       return new Map([...ids].map(id => [id, { nativeSessionId: native }]));
     }]]) },
@@ -925,11 +932,13 @@ for (const nativeChild of [false, true]) test(`old persisted anchors retain ${na
     }
   };
   checkFamily(updates[0]);
+  assert.equal(relationReads, 1, 'migration resolves today and retained identities in one relationship read');
   assert.equal(scans.length, 1, 'migration uses the ordinary today scan, never new historical token scans');
   await handle.tick('watch', { todayOnly: true });
   await handle.whenIdle();
   assert.equal(updates.length, 2);
   checkFamily(updates[1]);
+  assert.equal(relationReads, 2, 'warm watch does not repeat the metadata relationship lookup');
   assert.equal(resolved.includes('historical'), false, 'migration only reads identity headers, never full historical metadata');
   const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(saved.sessionIdentityVersion, 2);
@@ -952,6 +961,7 @@ for (const nativeChild of [false, true]) test(`old persisted anchors retain ${na
   await waitForCondition(() => updates.length === 3);
   await handle.whenIdle();
   checkFamily(updates[2]);
+  assert.equal(relationReads, 3, 'restart preserves the single-read watch path');
   assert.deepEqual(scans, [['--today'], ['--today'], ['--today']], 'migration, next tick and restart scan only today');
   assert.equal(resolved.includes('historical'), false, 'upgraded anchors do not reread historical transcripts each tick');
   assert.equal(updates[2].month.totalTokens, 50, 'warm restart never reapplies an already counted delta');
