@@ -52,7 +52,7 @@ function fixture(t, settings = {}, options = {}) {
   screen.getAllDisplays = () => [display]; screen.getPrimaryDisplay = () => display;
   screen.getCursorScreenPoint = () => screen.point;
   const preferences = { notchEnabled: true, edgeDockEnabled: false, ...settings };
-  const deps = { BrowserWindow: RecordingWindow, ipcMain, screen, rendererDir: '/renderer', preloadPath: '/preload', getSettings: () => preferences, nativeGlass: options.nativeGlass || (() => false), liquidGlass: options.liquidGlass, createGlass: options.createGlass, prefersReducedMotion: () => options.reducedMotion !== false, platform: 'darwin' };
+  const deps = { BrowserWindow: RecordingWindow, ipcMain, screen, rendererDir: '/renderer', preloadPath: '/preload', getSettings: () => preferences, nativeGlass: options.nativeGlass || (() => false), liquidGlass: options.liquidGlass, createGlass: options.createGlass, prefersReducedMotion: () => options.reducedMotion !== false, platform: options.platform || 'darwin' };
   const controller = createNotchController({ ...deps, readScreens: options.readScreens || (() => ({ screens: [native], mainDisplayId: 1 })), onSwitchCodexAccount: (id) => ({ ok: true, id }), onToggleRateMode: options.onToggleRateMode, readMenuWindows: options.readMenuWindows || (() => null), primaryButtonDown: options.primaryButtonDown || (() => false), isFullScreen: options.isFullScreen || (() => false), logger: options.logger, performHaptic: options.performHaptic, canRefreshLimits: options.canRefreshLimits, onRefreshLimits: options.onRefreshLimits });
   t.after(() => controller.dispose());
   const setData = controller.setData;
@@ -1900,6 +1900,33 @@ test('summary readings and standalone rings follow the same pending or active Co
       assert.equal(value.measure.value, expected.remainingPercent);
       assert.equal(data.cells, cells, 'standalone ring must not add a quota row');
     }
+  }
+});
+
+
+test('unsupported platforms keep Notch disabled without reads, windows or polling', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  for (const platform of ['win32', 'linux']) {
+    const f = fixture(t, {}, { platform, readScreens: () => assert.fail('unsupported platform must not read hardware') });
+    f.screen.getCursorScreenPoint = () => assert.fail('unsupported platform must not poll');
+    f.controller.sync(); f.controller.poll(); t.mock.timers.tick(5000);
+    assert.equal(f.controller.isRunning(), false);
+    assert.equal(f.windows.length, 0);
+    assert.equal(f.preferences.notchEnabled, true, 'platform gates do not rewrite persisted preferences');
+  }
+});
+
+test('unsupported Notch selections do not activate shared dock work', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const source = main.slice(main.indexOf('function configuredDockItemLists('), main.indexOf('function edgeDockShowsLiveRate('));
+  const settings = { edgeDockItems: [{ type: 'stat', metric: 'today' }], notchEnabled: true,
+    notchItems: [{ type: 'stat', metric: 'last7days' }, { type: 'stat', metric: 'liveRate' }] };
+  for (const platform of ['darwin', 'win32', 'linux']) {
+    const lists = vm.runInNewContext(`${source}; configuredDockItemLists()`, { settings, process: { platform } });
+    assert.equal(lists[0], settings.edgeDockItems, 'the existing EdgeDock selection stays intact');
+    assert.equal(lists.length, platform === 'darwin' ? 2 : 1);
+    if (platform === 'darwin') assert.equal(lists[1], settings.notchItems);
+    assert.equal(settings.notchEnabled, true);
   }
 });
 

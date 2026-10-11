@@ -5529,7 +5529,7 @@ let edgeDockRateTimer = null;
 
 function configuredDockItemLists() {
   return [...(settings?.edgeDockEnabled !== false ? [settings?.edgeDockItems] : []),
-    ...(settings?.notchEnabled === true ? [settings?.notchItems] : [])];
+    ...(settings?.notchEnabled === true && process.platform === 'darwin' ? [settings?.notchItems] : [])];
 }
 
 function edgeDockShowsLiveRate() {
