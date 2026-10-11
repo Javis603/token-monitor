@@ -368,6 +368,10 @@
     // same reason.
     const activityState = sessionActivityState(session, now);
     const running = activityState === 'running';
+    const parentClient = textValue(session?.parentClient) || client;
+    const parentSessionId = textValue(session?.parentSessionId);
+    const subagent = Boolean(parentSessionId) && (parentClient !== client || parentSessionId !== session.sessionId)
+      && !isBackgroundReviewSession(session);
     return {
       key: `session:${key}`,
       kind: 'session',
@@ -397,6 +401,11 @@
       stale: false,
       client,
       clientLabel,
+      nativeSessionId: textValue(session?.nativeSessionId),
+      t3ThreadId: textValue(session?.t3ThreadId),
+      modelTokens: session?.models || (session?.model ? { [session.model]: value } : {}),
+      parentKey: subagent ? `session:${parentClient}:${parentSessionId}` : undefined,
+      subagent: subagent || undefined,
       backgroundReview: isBackgroundReviewSession(session) || undefined,
       sortTime: sessionTimestampValue(session),
       title: `${clientLabel} session ${sessionIdLabel(session?.sessionId || key)}`
@@ -442,7 +451,8 @@
         const running = activityState === 'running';
         const backgroundReview = isBackgroundReviewSession(session);
         const parentSessionId = textValue(session?.parentSessionId);
-        const subagent = Boolean(parentSessionId) && !backgroundReview;
+        const parentClient = textValue(session?.parentClient) || client;
+        const subagent = Boolean(parentSessionId) && (parentClient !== client || parentSessionId !== sessionId) && !backgroundReview;
         const activityParts = [
           archived ? archivedLabel : '',
           sessionActivityLabel(session, now),
@@ -479,13 +489,15 @@
           promptCache: sessionLive.sessionPromptCacheForRow(session, now),
           client,
           clientLabel,
+          nativeSessionId: textValue(session?.nativeSessionId),
+          t3ThreadId: textValue(session?.t3ThreadId),
           titled: Boolean(sessionTitle) || undefined,
           // Raw per-model tokens, so a group row can rebuild its model label and
           // tooltip from every member rather than from one of them.
           modelTokens: session?.models,
           backgroundReview: backgroundReview || undefined,
           subagent: subagent || undefined,
-          parentKey: parentSessionId ? `session:${client}:${parentSessionId}` : undefined,
+          parentKey: subagent ? `session:${parentClient}:${parentSessionId}` : undefined,
           grokBot: (isGrokBotSession(session, key) || (client === 'cursor'
             && botIds.has(textValue(session?.sessionId) || key.replace(/^cursor:/, '')))) || undefined,
           sortTime: sessionTimestampValue(session),
@@ -523,25 +535,50 @@
     const list = Array.isArray(rows) ? rows : [];
     const eligible = row => row?.kind === 'session' && row.backgroundReview !== true && row.grokBot !== true;
     const byKey = new Map(list.filter(eligible).map(row => [row.key, row]));
-    // A subagent's own subagents join the top-most visible ancestor's group; a
-    // cycle stops at the first repeat rather than looping.
+    // A verified native conversation can have several independent accounting
+    // rollouts. Resolve links through any visible alias, without changing those
+    // keys or pretending a continuation is a delegated child.
+    const identity = sessionConversationIdentity;
+    const aliases = new Map();
+    for (const row of byKey.values()) {
+      const id = identity(row);
+      const previous = aliases.get(id);
+      if (!previous || row.key.localeCompare(previous.key) < 0) aliases.set(id, row);
+    }
+    const parentLinks = new Map();
+    const conflicts = new Set();
+    for (const row of byKey.values()) {
+      if (!row.parentKey) continue;
+      const id = identity(row);
+      const parent = byKey.get(row.parentKey);
+      const link = parent ? identity(parent) : row.parentKey;
+      if (link === id) continue;
+      if (parentLinks.has(id) && parentLinks.get(id).link !== link) conflicts.add(id);
+      else parentLinks.set(id, { link, parentKey: row.parentKey });
+    }
+    // Contradictory relationship facts never justify collapsing identities.
+    const canonical = row => conflicts.has(identity(row)) ? row : aliases.get(identity(row));
     const rootOf = (row) => {
       const seen = new Set();
-      let current = row;
-      while (current.parentKey && !seen.has(current.key)) {
+      let current = canonical(row);
+      while (!seen.has(current.key)) {
+        const parentKey = conflicts.has(identity(current)) ? current.parentKey
+          : parentLinks.get(identity(current))?.parentKey;
+        if (!parentKey) break;
         seen.add(current.key);
-        const parent = byKey.get(current.parentKey);
+        const parent = byKey.get(parentKey);
         if (!parent) break;
-        current = parent;
+        const next = canonical(parent);
+        if (seen.has(next.key)) return canonical(row);
+        current = next;
       }
       return current;
     };
     const children = new Map();
     const grouped = new Set();
     for (const row of byKey.values()) {
-      if (!row.parentKey) continue;
       const root = rootOf(row);
-      if (root === row) continue;
+      if (root.key === row.key) continue;
       if (!children.has(root.key)) children.set(root.key, []);
       children.get(root.key).push(row);
       grouped.add(row.key);
@@ -549,23 +586,32 @@
     if (grouped.size === 0) return list;
     return list
       .filter(row => !grouped.has(row?.key))
-      .map(row => children.has(row?.key) ? subagentGroupRow(row, children.get(row.key), options) : row);
+      .map(row => children.has(row?.key) ? subagentGroupRow(row, children.get(row.key), options, conflicts.has(identity(row))) : row);
   }
 
   // The group row is the parent's own row with the group's totals: members are
   // disjoint sessions, so their sum is the whole group and nothing is counted
   // twice. Its id moves to the group page, where the parent is listed first.
-  function subagentGroupRow(parent, members, options) {
-    const ordered = [...members].sort((a, b) => finiteNumber(b.sortTime) - finiteNumber(a.sortTime));
-    const groupRows = [parent, ...ordered];
+  function sessionConversationIdentity(row) {
+    if (row.t3ThreadId) return `t3:${row.t3ThreadId}`;
+    return row.client === 'codex' && row.nativeSessionId ? `codex:${row.nativeSessionId}` : row.key;
+  }
+
+  function subagentGroupRow(parent, members, options, splitIdentity = false) {
+    const sameConversation = row => sessionConversationIdentity(row) === sessionConversationIdentity(parent);
+    const all = [parent, ...members];
+    const main = all.filter(sameConversation).sort((a, b) => finiteNumber(b.sortTime) - finiteNumber(a.sortTime));
+    const ordered = all.filter(row => !sameConversation(row)).sort((a, b) => finiteNumber(b.sortTime) - finiteNumber(a.sortTime));
+    const groupRows = [...main, ...ordered].map(row => ({ ...row, groupRole: sameConversation(row) ? 'main' : 'subagent' }));
+    const subagentCount = new Set(ordered.map(sessionConversationIdentity)).size;
     const value = groupRows.reduce((sum, row) => sum + finiteNumber(row.value), 0);
     const cost = groupRows.reduce((sum, row) => sum + finiteNumber(row.cost), 0);
     const unpricedTokens = groupRows.reduce((sum, row) => sum + finiteNumber(row.unpricedTokens), 0);
     const activityState = ['running', 'waiting'].find(state => groupRows.some(row => row.activityState === state))
       || parent.activityState;
-    const countLabel = typeof options.countLabel === 'function'
-      ? options.countLabel(members.length) : `${members.length} subagents`;
-    const id = `subagents:${String(parent.key).replace(/^session:/, '')}`;
+    const countLabel = subagentCount === 0 ? '' : (typeof options.countLabel === 'function'
+      ? options.countLabel(subagentCount) : `${subagentCount} subagents`);
+    const id = `subagents:${sessionConversationIdentity(parent).replace(/^session:/, '')}${splitIdentity ? `:root:${encodeURIComponent(parent.key)}` : ''}`;
     // The model label and its tooltip describe the tokens the row shows, which
     // are the whole group's, so they are rebuilt from every member's models.
     const models = {};
@@ -576,8 +622,9 @@
     }
     const group = { client: parent.client, models, totalTokens: value };
     const modelLabel = sessionModelLabel(group);
-    const titleParts = [parent.clientLabel || parent.client, modelLabel].filter(Boolean).join(' · ');
-    const base = { ...parent };
+    const display = main[0];
+    const titleParts = [display.clientLabel || display.client, modelLabel].filter(Boolean).join(' · ');
+    const base = { ...main[0] };
     delete base.unpricedTokens;
     return {
       ...base,
@@ -585,19 +632,22 @@
       kind: 'summary',
       // An untitled row is named by client and model, so its name follows the
       // group's models too.
-      name: parent.titled ? parent.name : titleParts,
+      name: display.titled ? display.name : titleParts,
       modelLabel,
-      modelTooltipEntries: sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel }),
+      modelTooltipEntries: options.includeModelTooltip === false ? []
+        : sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel }),
       modelTokens: models,
       // Keep the tool/model reading order; the renderer reserves space for the
       // count while the preceding text can shrink in a narrow window.
-      subtitle: [parent.titled ? titleParts : parent.subtitle, countLabel].filter(Boolean).join(' · '),
-      subtitleIdentity: parent.titled ? titleParts : parent.subtitle,
+      subtitle: [display.titled ? titleParts : display.subtitle, countLabel].filter(Boolean).join(' · '),
+      subtitleIdentity: display.titled ? titleParts : display.subtitle,
       subagentCountLabel: countLabel,
-      detail: parent.activity ? '' : parent.detail,
+      subagentCount,
+      detail: display.activity ? '' : display.detail,
       groupDetail: countLabel,
       value,
       cost,
+      tokenDataUnavailable: groupRows.every(row => row.tokenDataUnavailable === true),
       ...(unpricedTokens > 0 ? { unpricedTokens } : {}),
       barValue: value,
       running: groupRows.some(row => row.running === true) || undefined,

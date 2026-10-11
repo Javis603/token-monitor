@@ -88,7 +88,19 @@
   }
   function nativeSessionsForPeriod(summary, client, sessions, name) {
     return Object.fromEntries(Object.entries(sessions).filter(([, row]) =>
-      !hasKnownSession(summary, client, row.sessionId, name, false)));
+      !hasKnownSession(summary, client, row.sessionId, name, false)).map(([key, row]) => {
+      // App-owned links are independent of provider activity. Retain them on
+      // the same native identity so adapters compare like-for-like snapshots.
+      const previous = summary.nativeSessions?.[name]?.[key];
+      if (!previous) return [key, row];
+      const linked = { ...row };
+      if (!linked.t3ThreadId && previous.t3ThreadId) linked.t3ThreadId = previous.t3ThreadId;
+      if (!linked.parentSessionId && previous.parentSessionId) {
+        linked.parentSessionId = previous.parentSessionId;
+        if (previous.parentClient) linked.parentClient = previous.parentClient;
+      }
+      return [key, linked];
+    }));
   }
   function activityEntries(summary, client, ids, includeLeased = true) {
     const index = indexFor(summary);

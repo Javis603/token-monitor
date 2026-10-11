@@ -519,70 +519,48 @@ test('pre-token native Codex reviews join the existing background group without 
   assert.equal(group.cost, 0.1);
 });
 
-test('background review run headings show the model independently of session titles and keep the time', () => {
+// Exercise the adapter with the same row contract consumed by the shared
+// template/update renderer (covered by overflowText and the rendered UI proof).
+function groupMemberRenderer(onOpen = () => {}) {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const body = source.slice(source.indexOf('function sessionGroupRunNode('), source.indexOf('function renderSessionGroupDetail('));
-  const sessionRowsApi = require('../../src/electron/renderer/sessionRows');
-  let opened;
-  const createNode = () => {
-    const children = new Map();
-    return {
-      events: {},
-      setAttribute() {},
-      querySelector(selector) {
-        if (!children.has(selector)) children.set(selector, {});
-        return children.get(selector);
-      },
-      addEventListener(type, handler) { this.events[type] = handler; }
-    };
-  };
-  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth', 'openSessionDetail', 'bindHoverMarquee', 'limitWindowsView', `${body}\nreturn sessionGroupRunNode;`)(
-    { createElement: createNode }, sessionRowsApi, () => 'Codex Auto Review', String, String, () => {}, () => 100,
-    (request) => { opened = request; }, () => {}, { setDetailTooltip() {} }
+  const api = require('../../src/electron/renderer/sessionRows');
+  return Function('rowTemplate', 'updateRow', 'sessionRowsApi', 't', 'openSessionDetail',
+    `${body}\nreturn sessionGroupRunNode;`)(
+    data => ({ data, events: {}, classes: new Set(['row']),
+      classList: { add() {} },
+      addEventListener(type, handler) { this.events[type] = handler; },
+      click() { this.events.click?.(); },
+      closest() { return this.interactive ? this : null; }
+    }),
+    (node, data) => { node.data = data; node.interactive = api.sessionRowDetailAvailable(data); },
+    api, key => ({ 'sessions.mainSession': '主會話', 'sessions.subagent': '子代理',
+      'sessions.backgroundReviews': 'Codex Auto Review' })[key] || key, onOpen
   );
-  for (const [models, expectedModel] of [
-    [{ 'gpt-5.6-sol': 30 }, 'gpt-5.6-sol'],
-    [{ 'gpt-5.6-sol': 20, 'gpt-5.6': 10 }, '2 models'],
-    [{}, '']
-  ]) {
+}
+
+test('background review rows retain model/time headings and their return target', () => {
+  let opened;
+  const render = groupMemberRenderer(request => { opened = request; });
+  for (const models of [{ 'gpt-5.6-sol': 30 }, { 'gpt-5.6-sol': 20, 'gpt-5.6': 10 }, {}]) {
     const [row] = sessionRowsForPeriod({ sessions: { 'codex:review': {
       client: 'codex', sessionId: 'review', title: 'Automatic review', sessionKind: 'background-review',
       totalTokens: 30, models, lastUsedAt: new Date().toISOString()
     } } });
     const parent = { kind: 'session-group' };
     const node = render(row, 30, parent);
-    const time = sessionRowsApi.compactSessionTime(row.sortTime);
-    const expectedTitle = [expectedModel, time].filter(Boolean).join(' · ');
-    assert.equal(node.querySelector('.detail-ex-title').textContent, expectedTitle);
-    assert.equal(node.querySelector('.detail-ex-title').title, expectedTitle);
-    assert.equal(node.querySelector('.detail-ex-sub').textContent, 'review');
-    node.events.click();
-    assert.equal(opened.title, expectedTitle);
+    const time = require('../../src/electron/renderer/sessionRows').compactSessionTime(row.sortTime);
+    assert.equal(node.data.name, [row.modelLabel, time].filter(Boolean).join(' · '));
+    node.click();
+    assert.equal(opened.title, node.data.name);
     assert.equal(opened.sessionId, 'review');
     assert.equal(opened.returnTo, parent);
   }
 });
 
-test('subagent members separate role and model from activity with titles on or off', () => {
-  const api = require('../../src/electron/renderer/sessionRows');
-  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-  const body = source.slice(source.indexOf('function sessionGroupRunNode('), source.indexOf('function renderSessionGroupDetail('));
+test('subagent members share Sessions metrics without repeating section roles', () => {
   let opened;
-  const createNode = () => {
-    const children = new Map();
-    return {
-      events: {}, setAttribute() {},
-      querySelector(selector) {
-        if (!children.has(selector)) children.set(selector, { classList: { toggle() {} } });
-        return children.get(selector);
-      },
-      addEventListener(type, handler) { this.events[type] = handler; }
-    };
-  };
-  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth', 'openSessionDetail', 'bindHoverMarquee', 'limitWindowsView', `${body}\nreturn sessionGroupRunNode;`)(
-    { createElement: createNode }, api, key => key === 'sessions.mainSession' ? '主會話' : '子代理',
-    String, String, () => {}, () => 100, request => { opened = request; }, () => {}, { setDetailTooltip() {} }
-  );
+  const render = groupMemberRenderer(request => { opened = request; });
   const now = new Date(2026, 9, 11, 12, 30);
   for (const title of ['Session title', '']) {
     const rows = sessionRowsForPeriod({ sessions: {
@@ -595,75 +573,48 @@ test('subagent members separate role and model from activity with titles on or o
     const parent = { kind: 'session-group', summary: { subagentGroup: true, groupRows: [main] } };
     for (const row of rows) {
       const node = render(row, 20, parent);
-      const isMain = row === main;
-      assert.equal(node.querySelector('.detail-ex-title').textContent, row.name);
-      assert.equal(node.querySelector('.detail-ex-sub').textContent, `${isMain ? '主會話' : '子代理'} · Codex · gpt-6.1-sol`);
-      assert.equal(node.querySelector('.session-group-activity').textContent,
-        isMain ? '12:30 · 2 calls' : '已封存 · 12:30 · 1 call');
-      assert.equal(node.querySelector('.session-group-id').textContent, isMain ? 'main' : 'child');
-      node.events.keydown({ key: 'Enter', preventDefault() {} });
-      assert.equal(opened.sessionId, isMain ? 'main' : 'child');
+      assert.equal(node.data.name, row.name);
+      assert.equal(node.data.subtitle, 'Codex · gpt-6.1-sol');
+      assert.equal(node.data.activity, row.activitySummary);
+      for (const field of ['key', 'detail', 'value', 'cost', 'context', 'promptCache', 'activityState']) {
+        assert.deepEqual(node.data[field], row[field], `preserve member ${field}`);
+      }
+      node.events.keydown({ key: 'Enter', target: node, preventDefault() {} });
+      assert.equal(opened.sessionId, row === main ? 'main' : 'child');
       assert.equal(opened.returnTo, parent);
     }
   }
 });
 
-test('group model tooltips follow the displayed model label instead of a conversation title', () => {
-  const api = require('../../src/electron/renderer/sessionRows');
-  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-  const body = source.slice(source.indexOf('function sessionGroupRunNode('), source.indexOf('function renderSessionGroupDetail('));
-  const makeNode = () => {
-    const selectors = new Map();
-    return {
-      children: [], _text: '', events: {}, classList: { toggle() {} },
-      get textContent() { return this.children.length ? this.children.map(child => child.textContent).join('') : this._text; },
-      set textContent(value) { this.children = []; this._text = value; },
-      replaceChildren(...children) { this.children = children; },
-      setAttribute() {},
-      querySelector(selector) {
-        if (!selectors.has(selector)) selectors.set(selector, makeNode());
-        return selectors.get(selector);
-      },
-      addEventListener(type, handler) { this.events[type] = handler; }
-    };
-  };
-  const tooltips = new Map();
-  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth', 'openSessionDetail', 'bindHoverMarquee', 'limitWindowsView', `${body}\nreturn sessionGroupRunNode;`)(
-    { createElement: makeNode, createTextNode: text => ({ textContent: text }) }, api,
-    key => key === 'sessions.mainSession' ? 'Main session' : 'Subagent', String, String,
-    () => {}, () => 100, () => {}, () => {}, { setDetailTooltip: (node, entries) => tooltips.set(node, entries) }
-  );
+test('all group members pass model tooltips unchanged to the shared row renderer', () => {
+  const render = groupMemberRenderer();
   for (const group of ['subagents', 'cursor-grok-bot', 'reviews']) {
     for (const titled of [true, false]) {
-      for (const multiple of [true, false]) {
-        tooltips.clear();
-        const modelLabel = multiple ? '2 models' : 'model-a';
-        const modelTooltipEntries = multiple ? [['model-a', '20', '67%'], ['model-b', '10', '33%']] : [];
-        const row = { key: 'session:codex:child', client: 'codex', clientLabel: 'Codex',
-          name: titled ? 'Check the report' : `Codex · ${modelLabel}`, titled,
-          subtitle: titled ? `Codex · ${modelLabel}` : '12:30 · 2 calls',
-          activity: titled ? '12:30 · 2 calls' : undefined, activitySummary: '12:30 · 2 calls',
-          modelLabel, modelTooltipEntries, detail: 'child', value: 30, cost: 0.1 };
-        const parent = { kind: 'session-group', summary: {
-          subagentGroup: group === 'subagents', sessionGroup: group === 'cursor-grok-bot' ? group : '', groupRows: []
-        } };
-        const node = render(row, 30, parent);
-        const title = node.querySelector('.detail-ex-title');
-        const sub = node.querySelector('.detail-ex-sub');
-        const model = sub.children.find(child => child.className === 'session-models');
-        if (!multiple) {
-          assert.equal(tooltips.size, 0);
-        } else if (group === 'reviews') {
-          assert.equal(tooltips.get(title), modelTooltipEntries);
-        } else {
-          assert.equal(tooltips.has(title), !titled, 'only fallback model headings open the breakdown');
-          assert.equal(Boolean(model), group === 'subagents' || titled);
-          if (model) assert.equal(tooltips.get(model), modelTooltipEntries);
-        }
-        if (group === 'subagents') assert.equal(sub.textContent, `Subagent · Codex · ${modelLabel}`);
-      }
+      const entries = [['model-a', '20', '67%'], ['model-b', '10', '33%']];
+      const row = { key: 'session:codex:child', client: 'codex', clientLabel: 'Codex',
+        name: titled ? 'Check the report' : 'Codex · 2 models', titled,
+        subtitle: titled ? 'Codex · 2 models' : '12:30 · 2 calls',
+        activity: titled ? '12:30 · 2 calls' : undefined, activitySummary: '12:30 · 2 calls',
+        modelLabel: '2 models', modelTooltipEntries: entries, detail: 'child', value: 30, cost: 0.1 };
+      const parent = { kind: 'session-group', summary: { subagentGroup: group === 'subagents',
+        sessionGroup: group === 'cursor-grok-bot' ? group : '', groupRows: [] } };
+      const node = render(row, 30, parent);
+      assert.equal(node.data.modelLabel, row.modelLabel);
+      assert.equal(node.data.modelTooltipEntries, entries);
+      assert.equal(node.data.max, 30);
+      assert.equal(node.data.barValue, 30);
+      assert.equal(node.data.subtitle, group === 'subagents' ? 'Codex · 2 models' : row.subtitle);
     }
   }
+});
+
+test('Reasonix group members preserve the provider detail identity', () => {
+  let opened;
+  const node = groupMemberRenderer(request => { opened = request; })({
+    key: 'session:reasonix:run-id', client: 'reasonix', sessionDetailAvailable: true, name: 'Run', value: 1
+  }, 1, { summary: { subagentGroup: true } });
+  node.click();
+  assert.equal(opened.sessionId, 'reasonix:run-id');
 });
 
 test('model name alone does not hide an ordinary Codex session in background reviews', () => {
@@ -1220,29 +1171,58 @@ test('a Claude-only day joins a known bot conversation across period snapshots',
   assert.equal(groupSessionRows(sessionRowsForPeriod(today)).length, 2, 'missing evidence never guesses');
 });
 
-test('Grok group run summaries expose usage without an unsupported transcript action', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-  const body = source.slice(source.indexOf('function sessionGroupRunNode('), source.indexOf('function renderSessionGroupDetail('));
-  const api = require('../../src/electron/renderer/sessionRows');
-  const children = new Map();
-  const node = { attributes: {}, events: {}, setAttribute(key, value) { this.attributes[key] = value; },
-    querySelector(selector) { if (!children.has(selector)) children.set(selector, {}); return children.get(selector); },
-    addEventListener(type, callback) { this.events[type] = callback; } };
-  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth',
-    'openSessionDetail', 'bindHoverMarquee', 'limitWindowsView', `${body}\nreturn sessionGroupRunNode;`)(
-    { createElement: () => node }, api, key => key, String, (cost, unpriced) => `${cost}:${unpriced || 0}`,
-    () => {}, () => 100, () => assert.fail('Cursor has no transcript detail'), () => {}, {});
+test('Grok group rows expose usage without an unsupported transcript action', () => {
   const [row] = sessionRowsForPeriod({ sessions: { 'cursor:sand-subagent-run': {
     client: 'cursor', sessionId: 'sand-subagent-run', totalTokens: 30, costUsd: 0.5,
     unpricedTokens: 4, models: { 'grok-bot-automation': 30 }, lastUsedAt: new Date().toISOString()
   } } });
-  render(row, 30, { kind: 'session-group', summary: { name: 'Grok Bot', sessionGroup: 'cursor-grok-bot' } });
-  assert.equal(node.querySelector('.detail-ex-title').textContent, row.name);
-  assert.equal(node.querySelector('.detail-ex-sub').textContent, row.subtitle);
-  assert.equal(node.querySelector('.session-group-id').textContent, 'sand-subagent-run');
-  assert.equal(node.querySelector('.detail-ex-value').textContent, '30');
-  assert.equal(node.querySelector('.detail-ex-cost').textContent, '0.5:4');
-  assert.equal(node.querySelector('.detail-chev').textContent, '');
-  assert.deepEqual(node.attributes, {});
+  const node = groupMemberRenderer(() => assert.fail('Cursor has no transcript detail'))(row, 30,
+    { kind: 'session-group', summary: { name: 'Grok Bot', sessionGroup: 'cursor-grok-bot' } });
+  for (const field of ['name', 'subtitle', 'detail', 'value', 'cost', 'unpricedTokens']) {
+    assert.equal(node.data[field], row[field]);
+  }
+  assert.equal(node.interactive, false);
   assert.deepEqual(node.events, {});
+});
+
+
+test('group sections keep main continuations above children without changing usage or counting runs as agents', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const body = source.slice(source.indexOf('function renderSessionGroupDetail('), source.indexOf('function detailNote('));
+  const node = () => ({ children: [], selectors: new Map(), classList: { add() {}, remove() {} },
+    replaceChildren(...items) { this.children = items; }, append(...items) { this.children.push(...items); },
+    setAttribute() {}, addEventListener() {}, querySelector(selector) {
+      if (!this.selectors.has(selector)) this.selectors.set(selector, {});
+      return this.selectors.get(selector);
+    }
+  });
+  const els = { breakdown: node(), sessionDetail: node(), sessionDetailHead: node() };
+  const render = Function('els', 'document', 't', 'closeSessionDetail', 'bindHoverMarquee',
+    'detailNote', 'formatNumber', 'formatCost', 'sessionGroupRunNode', `${body}\nreturn renderSessionGroupDetail;`)(
+    els, { createElement: node }, key => ({ 'sessions.mainSession': '主會話', 'sessions.subagent': '子代理' })[key] || key,
+    () => {}, () => {}, node, String, String, (row, max) => ({ row, max }));
+  const main = { key: 'main-1', groupRole: 'main', value: 40 };
+  const continuation = { key: 'main-2', groupRole: 'main', value: 30 };
+  const child = { key: 'child-1', groupRole: 'subagent', value: 20 };
+  const childContinuation = { key: 'child-2', groupRole: 'subagent', value: 10 };
+  const rows = [main, child, continuation, childContinuation];
+  const summary = { subagentGroup: true, name: 'Thread', groupRows: rows, subagentCount: 1, value: 100, cost: 2 };
+  render({ summary });
+  let content = els.sessionDetail.children;
+  assert.equal(content[0].querySelector('.session-group-count').textContent, 'dashboard.stat.totalTokens');
+  assert.equal(content[1].textContent, '主會話');
+  assert.equal(content[0].querySelector('.session-group-totals').textContent, '100 · 2');
+  assert.deepEqual(content.filter(item => item.row).map(item => item.row), [main, continuation, child, childContinuation]);
+  assert.equal(content[4].className, 'session-group-section-heading');
+  assert.equal(content[4].textContent, '子代理 · 1', 'count distinct agents, not two child accounting runs');
+  assert.ok(content.filter(item => item.row).every(item => item.max === 40), 'one shared bar scale');
+  assert.equal(content.filter(item => item.row).reduce((sum, item) => sum + item.row.value, 0), 100);
+  assert.deepEqual(summary.groupRows, rows, 'rendering never mutates grouping/order');
+  render({ summary: { ...summary, groupRows: [main, continuation], subagentCount: 0 } });
+  assert.equal(els.sessionDetail.children.filter(item => item.className === 'session-group-section-heading').length, 0);
+  render({ summary: { ...summary, subagentGroup: false, groupDetail: '4 records' } });
+  content = els.sessionDetail.children;
+  assert.equal(content[0].querySelector('.session-group-count').textContent, '4 records');
+  assert.deepEqual(content.filter(item => item.row).map(item => item.row), rows, 'review/bot groups keep their order');
+  assert.equal(content.filter(item => item.className === 'session-group-section-heading').length, 0);
 });

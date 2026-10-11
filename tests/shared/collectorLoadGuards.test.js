@@ -501,7 +501,8 @@ test('Antigravity summary watches follow homeDir without replacing the process h
 
 for (const source of ['native', 'override', 'configured-home', 'injected-env', 'metadata-env', 'env-precedence', 'cli-home']) {
   test(`Antigravity ${source} summary WAL events refresh titles with an exact today delta`, async (t) => {
-    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    // Keep both 11-second advances on one local day, even at midnight.
+    t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 9, 11, 12, 0).getTime() });
     let sqlite;
     try { sqlite = require('node:sqlite'); } catch (_) { t.skip('node:sqlite unavailable'); return; }
     const sourceRoot = path.join('.gemini', 'antigravity');
@@ -1926,13 +1927,16 @@ test('Kimi metadata discovery indexes session directories instead of probing eve
       period.sessions[`kimi:missing-${index}`] = { client: 'kimi', sessionId: `missing-${index}`, totalTokens: 1 };
     }
     let statCalls = 0;
+    let t3StoreProbes = 0;
     fs.statSync = (...args) => {
-      statCalls += 1;
+      if (String(args[0]).endsWith(`${path.sep}statev2.sqlite`) || String(args[0]).endsWith(`${path.sep}state.sqlite`)) t3StoreProbes += 1;
+      else statCalls += 1;
       return originalStatSync(...args);
     };
     const { applySessionTimestamps } = freshCollector();
     applySessionTimestamps({ allTime: period }, tmp, { resolveProjects: true });
     assert.equal(statCalls, 0, 'missing ids should not trigger workspace x session state.json probes');
+    assert.ok(t3StoreProbes <= 6, 'T3 discovery stays bounded independently of session count');
   } finally {
     fs.statSync = originalStatSync;
     os.homedir = originalHomedir;

@@ -102,6 +102,16 @@ The widget runs the collector, the usage transform (`src/shared/usage/usageTrans
 
 `windows[].metric === 'credits'` marks a money quota (`remaining` + `currency`). `src/shared/limits/balanceDisplay.js` is the single display entry point for Home, the tray and the limits page: key off the marker, never a provider whitelist. The top-up meter percentage is a display derivation and stays out of the wire shape.
 
+## Session relationships
+
+Native links take precedence over T3 Code's read-only, app-owned delegation evidence. The [shared reader](../src/shared/t3SessionMetadata.js) verifies provider, thread and execution-root ownership; human forks, weak identities and conflicts supply no parent link. [Accounting bindings](../src/shared/t3SessionIdentity.js) normalize Codex/Claude UUID case and match opaque ACP IDs exactly; unknown/custom executables and incompatible IDs remain unbound. Relationships read no conversation content and do not broaden title collection or sync consent.
+
+`client:sessionId` remains the accounting key. Optional `t3ThreadId` joins verified runs of one App conversation; Codex `nativeSessionId` joins verified continuation headers. `parentSessionId` and optional `parentClient` form one atomic link, with the client defaulting to the child's. Normalization, archives and sync retain these identities and reject conflicting device evidence. A missing parent creates no synthetic usage.
+
+Watch ticks resolve native identities before one T3 relationship lookup for today's members and derived copies; historical maps remain parent evidence. Native refreshes target only local rows and share accounting maps. Anchors persist confirmed identities and atomic parent links before advancing the metadata upgrade version, preserving frozen counters and `fullScanAt`. A transient T3 read failure applies no partial relationship facts and leaves the upgrade pending for the next tick or restart. Empty/missing stores complete normally; corrupt or unsupported stores do not trigger repeated historical upgrades and are reconsidered on full scans.
+
+Sessions, Home and Edge Dock share grouping before recent/running caps; Home/Dock retain raw member data and format only visible rows, without building historical detail DTOs. Sum each accounting member once; count distinct delegated conversations, and derive activity and token availability from all members. Context/cache snapshots remain the latest main member's own readings. Cycles and conflicting parents retain every member with distinct group identities. Sessions keeps Codex Auto Review global; Home/Dock exclude it. Grok Bot remains global. Antigravity relationships and iOS grouping are follow-ups.
+
 ## Session title display
 
 `sessionTitlesEnabled` defaults to `true` and controls Electron presentation only. Hide titles from cached snapshots and all-time pulls through `src/electron/sessionTitleDisplay.js`; ordinary detail headings derive their title from current presentation stats and honor the same preference. Keep collection, metadata caches and local archives unchanged. Titles continue to be collected and saved locally while hidden. Sync consent is separate, defaults off and requires the server/device protocol below.

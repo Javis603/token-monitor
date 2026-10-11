@@ -326,7 +326,7 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   assert.match(sessions, /sessionRowsApi\.sessionModelLabel\(session\)/);
   assert.match(sessions, /if \(context\) meta\.append\(context\)/);
   // Running is a dot beside the name, not a recoloured title.
-  assert.match(sessions, /nameNode\.append\(stateMark\(session, key, state\)\)/);
+  assert.match(sessions, /nameNode\.append\(stateMark\(session, key, activityState\)\)/);
   assert.match(sessions, /el\('span', 'edge-dock-session-title', name\)/);
   assert.match(sessions, /overflowText\.bind\(title\)/);
   assert.match(sessions, /nameNode\.append\(title\)/);
@@ -354,7 +354,7 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   assert.match(readRendererFile(path.join('icons', 'actions', 'spinner.svg')), /<animate attributeName="opacity"/);
   // The slot is reserved on EVERY row and only painted while running, so the
   // titles of running and idle rows start at the same x.
-  assert.match(sessions, /const state = stateByKey\.get\(key\) \|\| 'idle'/);
+  assert.match(sessions, /const activityState = stateByKey\.get\(key\) \|\| 'idle'/);
   // The flare is one-shot, so an idle card animates nothing.
   // The flare rides along with the spin rather than replacing it, and adds no
   // `infinite` of its own: a flare always means a write.
@@ -425,6 +425,43 @@ test('Home session preview uses the sidebar timeline and keeps running rows with
       .map((row) => row.sessionId),
     ['0', '1', '2', '3', '4', '5']
   );
+});
+
+test('Home and Dock group raw history without building session detail DTOs', () => {
+  const sessionRows = require('../../src/electron/renderer/sessionRows');
+  const original = sessionRows.sessionRowsForPeriod;
+  sessionRows.sessionRowsForPeriod = () => assert.fail('recent cards must not format historical detail DTOs');
+  try {
+    const now = Date.now();
+    const sessions = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`codex:history-${i}`, {
+      client: 'codex', sessionId: `history-${i}`, totalTokens: 10, costUsd: 1,
+      models: { a: 10 }, lastUsedAt: new Date(now - 86400000 - i).toISOString(), turnEnded: true
+    }]));
+    sessions['codex:old-main'] = { client: 'codex', sessionId: 'old-main', t3ThreadId: 'app-main',
+      totalTokens: 500, costUsd: 2, models: { a: 500 }, lastUsedAt: new Date(now - 60000).toISOString(), turnEnded: true };
+    sessions['claude:new-main'] = { client: 'claude', sessionId: 'new-main', t3ThreadId: 'app-main',
+      totalTokens: 0, tokenDataUnavailable: true, lastUsedAt: new Date(now).toISOString(), turnEnded: true };
+    sessions['codex:child'] = { client: 'codex', sessionId: 'child', t3ThreadId: 'app-child',
+      parentSessionId: 'old-main', totalTokens: 100, costUsd: 1, models: { b: 100 }, lastUsedAt: new Date(now).toISOString() };
+    const stats = { periods: { today: { sessions: {} }, month: { sessions } } };
+    const home = edgeDockPresentation.recentSessionRows(stats, 5);
+    const dock = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] })[0].sessions;
+    for (const rows of [home, dock]) {
+      const group = rows.find(row => row.subagentGroup);
+      assert.ok(group);
+      assert.equal(group.groupRows.length, 3);
+      assert.equal(group.subagentCount, 1);
+      assert.equal(group.totalTokens, 600);
+      assert.equal(group.costUsd, 3);
+      assert.equal(group.tokenDataUnavailable, false, 'a new pre-token main does not hide accounted members');
+      assert.deepEqual(group.models, { a: 500, b: 100 });
+      assert.equal(group.running, true);
+      assert.equal(group.summary, undefined, 'full detail presentation stays in Sessions');
+    }
+    assert.equal(home.length, 5);
+  } finally {
+    sessionRows.sessionRowsForPeriod = original;
+  }
 });
 
 test('a startedAt-only session keeps its display age without becoming running', () => {
@@ -993,8 +1030,8 @@ test('a repainted card restores the scroll container it actually uses', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const css = readRendererFile(path.join('edgeDock', 'dock.css'));
   const commit = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('function renderBubble('));
-  assert.match(commit, /querySelector\(CARD_SCROLL_SELECTOR\)/);
-  assert.match(commit, /list\.scrollTop = scrollTop;/);
+  assert.match(commit, /querySelectorAll\(CARD_SCROLL_SELECTOR\)/);
+  assert.match(commit, /list\.scrollTop = scrollTops\[index\] \|\| 0;/);
   // Both containers are named, read from the declaration so a third cannot be added to
   // the card without this failing.
   const declaration = dock.match(/const CARD_SCROLL_SELECTOR = '([^']+)';/);
@@ -2661,4 +2698,25 @@ test('a larger dock that would not fit shrinks to the largest size that keeps fu
   assert.equal(edgeDockFittingScale({ workArea, cellKinds: ['provider'], scale: 1.25 }), 1.25, 'a dock that fits keeps its size');
   assert.equal(edgeDockFittingScale({ workArea, cellKinds: kinds, scale: 0.85 }), 0.85, 'a smaller one is left alone');
   assert.equal(edgeDockFittingScale({ workArea: { ...workArea, height: 400 }, cellKinds: kinds, scale: 1.5 }), 1, 'one too long even at 100% keeps today\'s density');
+});
+
+
+test('provider card repaint preserves both account and session scroll and ignores nested families', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const start = dock.indexOf('function commitCard(');
+  const body = dock.slice(start, dock.indexOf('\n}', start) + 2);
+  const list = (scrollTop, nested = false) => ({ scrollTop,
+    closest: () => nested ? {} : null });
+  const previous = { dataset: { cellId: 'codex' },
+    querySelectorAll: () => [list(17), list(140), list(4, true)] };
+  const accounts = list(0), sessions = list(0), nested = list(0, true);
+  const next = { dataset: { cellId: 'codex' }, querySelectorAll: () => [accounts, sessions, nested] };
+  const commit = Function('contentLayer', 'overflowText', 'document', 'cardResetAnimator', 'CARD_SCROLL_SELECTOR',
+    `${body}\nreturn commitCard;`)(
+    { querySelector: () => previous, replaceChildren() {} },
+    { refresh() {}, preserveReading() {} }, {}, { capture() {}, animate() {} }, '.scroll');
+  commit(next, 'codex');
+  assert.deepEqual([accounts.scrollTop, sessions.scrollTop, nested.scrollTop], [17, 140, 0]);
+  commit(next, 'claude');
+  assert.deepEqual([accounts.scrollTop, sessions.scrollTop], [0, 0], 'another card starts at the top');
 });

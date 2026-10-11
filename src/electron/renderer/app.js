@@ -2369,7 +2369,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2433,10 +2433,11 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   // client · model line, so the trigger is just the "N models" span; an
   // untitled row folds it into the title instead, whose whole text then opens
   // the tooltip. The trigger mirrors the row's own wording rather than adding
-  // chrome, so there is nothing extra on a single-model row.
+  // chrome, so there is nothing extra on a single-model row. A review heading
+  // explicitly identifies its model span before the trailing time.
   const modelEntries = Array.isArray(modelTooltipEntries) && modelTooltipEntries.length > 1
     ? modelTooltipEntries : null;
-  const subtitleShowsModel = Boolean(modelEntries && modelLabel && String(subtitleText || '').endsWith(modelLabel));
+  const subtitleShowsModel = Boolean(!titleModelLabel && modelEntries && modelLabel && String(subtitleText || '').endsWith(modelLabel));
   if (subtitleShowsModel) {
     const models = document.createElement('span');
     models.className = 'session-models';
@@ -2449,7 +2450,16 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   } else {
     setHoverMarqueeText(subtitleTextEl, subtitleText);
   }
-  if (!subtitleShowsModel && modelEntries && modelLabel && String(name || '').endsWith(modelLabel)) {
+  if (modelEntries && titleModelLabel && String(name || '').startsWith(titleModelLabel)) {
+    const models = document.createElement('span');
+    models.className = 'session-models';
+    models.textContent = titleModelLabel;
+    const titleContent = titleEl.querySelector('.overflow-text-content') || titleEl;
+    titleContent.replaceChildren(models, document.createTextNode(name.slice(titleModelLabel.length)));
+    overflowText.update(titleEl);
+    limitWindowsView.setDetailTooltip(models, modelEntries);
+  }
+  if (!subtitleShowsModel && !titleModelLabel && modelEntries && modelLabel && String(name || '').endsWith(modelLabel)) {
     limitWindowsView.setDetailTooltip(titleEl, modelEntries);
   } else if (titleEl.classList.contains('limit-detail-tooltip-wrap')) {
     limitWindowsView.setDetailTooltip(titleEl, null);
@@ -2867,8 +2877,8 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
   return toolRowsForPeriod(period);
 }
 
-function rawSessionRowsForPeriod(period) {
-  return sessionRowsApi.sessionRowsForPeriod(period, {
+function sessionPresentationOptions() {
+  return {
     clientLabels,
     clientColors,
     modelColor,
@@ -2879,34 +2889,37 @@ function rawSessionRowsForPeriod(period) {
     unattributedLabel: t('dashboard.tooltip.unclassified'),
     sourcePeriods: state.stats?.periods,
     grokBotSessionIds: state.stats?.grokBotSessionIds,
-    nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
-  });
+    nativeSessions: state.stats?.nativeSessions?.[state.period] || {},
+    subagents: {
+      countLabel: (count) => t('sessions.subagentCount', { count }),
+      unattributedLabel: t('dashboard.tooltip.unclassified')
+    },
+    backgroundReviews: {
+      label: t('sessions.backgroundReviews'),
+      countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
+      summaryLabel: ({ latestTime, latestValue }) => [
+        latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
+        latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
+      ].filter(Boolean).join(' · ')
+    },
+    grokBot: {
+      label: t('sessions.grokBot'),
+      countLabel: (count) => t('sessions.grokBotCount', { count }),
+      summaryLabel: ({ latestTime }) => latestTime
+        ? t('sessions.backgroundReviewLatest', { time: latestTime }) : ''
+    }
+  };
+}
+
+function rawSessionRowsForPeriod(period) {
+  return sessionRowsApi.sessionRowsForPeriod(period, sessionPresentationOptions());
 }
 
 function sessionRowsForPeriod(period) {
   const rows = rawSessionRowsForPeriod(period);
   if (rows.length > 0) {
     rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
-    return sessionRowsApi.groupSessionRows(rows, {
-      subagents: {
-        countLabel: (count) => t('sessions.subagentCount', { count }),
-        unattributedLabel: t('dashboard.tooltip.unclassified')
-      },
-      backgroundReviews: {
-        label: t('sessions.backgroundReviews'),
-        countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
-        summaryLabel: ({ latestTime, latestValue }) => [
-          latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
-          latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
-        ].filter(Boolean).join(' · ')
-      },
-      grokBot: {
-        label: t('sessions.grokBot'),
-        countLabel: (count) => t('sessions.grokBotCount', { count }),
-        summaryLabel: ({ latestTime }) => latestTime
-          ? t('sessions.backgroundReviewLatest', { time: latestTime }) : ''
-      }
-    });
+    return sessionRowsApi.groupSessionRows(rows, sessionPresentationOptions());
   }
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
@@ -4725,6 +4738,7 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   els.sessionDetailHead.classList.remove('hidden');
   const head = els.sessionDetailHead;       // static layer — rows scroll independently below it
   const container = els.sessionDetail;
+  container.classList.remove('session-group-list');
   head.replaceChildren();
   container.replaceChildren();
 
@@ -4863,92 +4877,36 @@ function sessionIdLine(idLabel) {
 }
 
 function sessionGroupRunNode(row, max, parent) {
-  const wrap = document.createElement('div');
-  wrap.className = 'detail-exchange session-group-run';
-  const interactive = sessionRowsApi.sessionRowDetailAvailable(row);
-  const botGroup = parent.summary?.sessionGroup === 'cursor-grok-bot';
-  // Subagent members are distinct conversations, so they read like Sessions
-  // rows (title, role/tool/model, activity, id) rather than as runs of one review stream.
   const subagentGroup = parent.summary?.subagentGroup === true;
-  const namedGroup = botGroup || subagentGroup;
-  const mainSession = subagentGroup && row.key === parent.summary.groupRows?.[0]?.key;
-  if (interactive) {
-    wrap.setAttribute('role', 'button');
-    wrap.setAttribute('tabindex', '0');
-  }
-  wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">›</span>'
-    + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span>'
-    + (subagentGroup ? '<span class="detail-ex-sub session-group-activity"></span>' : '')
-    + (namedGroup ? '<span class="session-group-id"></span>' : '') + '</div>'
-    + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
-    + '<div class="bar"><div class="bar-fill"></div></div>';
-  const time = sessionRowsApi.compactSessionTime(row.sortTime, new Date());
-  const title = (namedGroup ? row.name : [row.modelLabel, time].filter(Boolean).join(' · '))
-    || parent.summary?.name || t('sessions.backgroundReviews');
-  const titleEl = wrap.querySelector('.detail-ex-title');
-  titleEl.textContent = title;
-  titleEl.title = title;
-  bindHoverMarquee(titleEl);
-  const modelEntries = row.modelTooltipEntries?.length > 1 ? row.modelTooltipEntries : null;
-  // Review headings and untitled sessions include the model label; named
-  // conversation titles do not describe the model breakdown.
-  if (modelEntries && (!namedGroup || !row.titled)) {
-    limitWindowsView.setDetailTooltip(titleEl, modelEntries);
-  }
-  if (!interactive) wrap.querySelector('.detail-chev').textContent = '';
-  const sub = wrap.querySelector('.detail-ex-sub');
-  sub.textContent = subagentGroup
-    ? [t(mainSession ? 'sessions.mainSession' : 'sessions.subagent'), row.clientLabel || row.client, row.modelLabel].filter(Boolean).join(' · ')
-    : namedGroup ? [row.activity ? row.subtitle : '', row.activity || row.subtitle].filter(Boolean).join(' · ')
-      : row.detail || '';
-  sub.title = sub.textContent;
-  let modelTrigger;
-  const modelOffset = subagentGroup ? sub.textContent.length - (row.modelLabel || '').length
-    : namedGroup && row.titled ? (row.subtitle || '').length - (row.modelLabel || '').length : -1;
-  if (modelEntries && row.modelLabel && modelOffset >= 0
-    && sub.textContent.slice(modelOffset, modelOffset + row.modelLabel.length) === row.modelLabel) {
-    modelTrigger = document.createElement('span');
-    modelTrigger.className = 'session-models';
-    modelTrigger.textContent = row.modelLabel;
-    sub.replaceChildren(
-      document.createTextNode(sub.textContent.slice(0, modelOffset)),
-      modelTrigger,
-      document.createTextNode(sub.textContent.slice(modelOffset + row.modelLabel.length))
-    );
-  }
-  bindHoverMarquee(sub);
-  if (modelTrigger) limitWindowsView.setDetailTooltip(modelTrigger, modelEntries);
+  const namedGroup = subagentGroup || parent.summary?.sessionGroup === 'cursor-grok-bot';
+  const title = namedGroup ? row.name
+    : [row.modelLabel, sessionRowsApi.compactSessionTime(row.sortTime)].filter(Boolean).join(' · ')
+      || t('sessions.backgroundReviews');
+  // Group members are still session rows. Share the template, metrics, tooltip
+  // and activity rendering; exchange rows belong only to the actual transcript.
+  const member = { ...row, name: title, titleModelLabel: namedGroup ? undefined : row.modelLabel };
   if (subagentGroup) {
-    const activity = wrap.querySelector('.session-group-activity');
-    activity.textContent = row.activitySummary || '';
-    activity.title = activity.textContent;
-    activity.classList.toggle('hidden', !activity.textContent);
-    bindHoverMarquee(activity);
+    member.subtitle = [row.clientLabel, row.modelLabel].filter(Boolean).join(' · ');
+    member.activity = row.activitySummary;
   }
-  if (namedGroup) {
-    const id = wrap.querySelector('.session-group-id');
-    id.textContent = row.detail || '';
-    id.title = row.detail || '';
-    bindHoverMarquee(id);
+  const wrap = rowTemplate(member);
+  updateRow(wrap, { ...member, barValue: member.barValue ?? member.value, max });
+  // Keep the existing repaint guard for model hover and keyboard focus.
+  wrap.classList.add('session-group-run');
+  if (sessionRowsApi.sessionRowDetailAvailable(row)) {
+    wrap.addEventListener('click', () => {
+      const sessionId = String(row.key || '').replace(/^session:[^:]+:/, '');
+      openSessionDetail({
+        client: row.client,
+        sessionId: row.client === 'reasonix' ? `reasonix:${sessionId}` : sessionId,
+        sessionCost: Number(row.cost || 0),
+        title,
+        returnTo: parent,
+        titleFollowsSession: namedGroup
+      });
+    });
+    wrap.addEventListener('keydown', sessionRowsApi.handleBreakdownRowKeydown);
   }
-  wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
-  wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0, row.unpricedTokens);
-  applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
-  if (!interactive) return wrap;
-  const open = () => openSessionDetail({
-    client: row.client,
-    sessionId: String(row.key || '').replace(/^session:[^:]+:/, ''),
-    sessionCost: Number(row.cost || 0),
-    title,
-    returnTo: parent,
-    titleFollowsSession: namedGroup
-  });
-  wrap.addEventListener('click', open);
-  wrap.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    open();
-  });
   return wrap;
 }
 
@@ -4959,6 +4917,7 @@ function renderSessionGroupDetail(request) {
   const head = els.sessionDetailHead;
   const container = els.sessionDetail;
   head.replaceChildren();
+  container.classList.add('session-group-list');
   container.replaceChildren();
 
   const label = request?.summary?.name || t('sessions.backgroundReviews');
@@ -4988,12 +4947,32 @@ function renderSessionGroupDetail(request) {
   const overview = document.createElement('div');
   overview.className = 'session-group-overview';
   overview.innerHTML = '<span class="session-group-count"></span><span class="session-group-totals"></span>';
-  overview.querySelector('.session-group-count').textContent = request.summary.groupDetail || request.summary.detail;
+  overview.querySelector('.session-group-count').textContent = request.summary.subagentGroup
+    ? t('dashboard.stat.totalTokens') : request.summary.groupDetail || request.summary.detail;
   overview.querySelector('.session-group-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0, request.summary.unpricedTokens)}`;
   container.append(overview);
 
   const max = Math.max(1, ...rows.map((row) => Number(row.value) || 0));
-  for (const row of rows) container.append(sessionGroupRunNode(row, max, request));
+  if (request.summary.subagentGroup) {
+    // Roles come from the grouping projection, including every main continuation.
+    // Older member DTOs without a role retain the original first-row main fallback.
+    const isMain = row => row.groupRole === 'main' || (!row.groupRole && row.key === rows[0].key);
+    const mainHeading = document.createElement('h3');
+    mainHeading.className = 'session-group-section-heading is-first';
+    mainHeading.textContent = t('sessions.mainSession');
+    container.append(mainHeading);
+    for (const row of rows.filter(isMain)) container.append(sessionGroupRunNode(row, max, request));
+    const children = rows.filter(row => !isMain(row));
+    if (children.length) {
+      const heading = document.createElement('h3');
+      heading.className = 'session-group-section-heading';
+      heading.textContent = `${t('sessions.subagent')} · ${request.summary.subagentCount}`;
+      container.append(heading);
+      for (const row of children) container.append(sessionGroupRunNode(row, max, request));
+    }
+  } else {
+    for (const row of rows) container.append(sessionGroupRunNode(row, max, request));
+  }
 }
 
 function detailNote(text) {
@@ -6033,14 +6012,14 @@ function stopHomeSessionRepaint() {
   state.homeSessionRepaintTimer = null;
 }
 
-function scheduleHomeSessionRepaint() {
+function scheduleHomeSessionRepaint(rows) {
   stopHomeSessionRepaint();
-  const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
+  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
   if (!rows.length) return;
   const now = Date.now();
   const expiry = window.TokenMonitorEdgeDockPresentation.nextRunningExpiryAt(rows, now);
   // Refresh relative ages once a minute, or sooner when a running session expires.
-  const cacheExpiry = window.TokenMonitorSessionLive?.nextSessionStatusChangeAt(rows, now) || 0;
+  const cacheExpiry = window.TokenMonitorSessionLive?.nextSessionStatusChangeAt(window.TokenMonitorEdgeDockPresentation.sessionMembers(rows), now) || 0;
   const nextExpiry = [expiry, cacheExpiry].filter((at) => at > now).sort((a, b) => a - b)[0];
   const delay = nextExpiry ? Math.min(60_000, Math.max(1_000, nextExpiry - now + 50)) : 60_000;
   state.homeSessionRepaintTimer = setTimeout(() => {
@@ -6049,10 +6028,19 @@ function scheduleHomeSessionRepaint() {
     const current = els.homePanel?.querySelector('.home-module-session');
     if (!current) return;
     const hadFocus = document.activeElement === current;
-    const next = renderHomeSessionModule();
+    const hadHeadFocus = document.activeElement === current.querySelector?.('.home-module-head');
+    const focusedKey = document.activeElement?.closest?.('.home-session-row')?.dataset?.key;
+    const nextRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+    const next = renderHomeSessionModule(nextRows);
     current.replaceWith(next);
     if (hadFocus) next.focus();
-    scheduleHomeSessionRepaint();
+    if (hadHeadFocus) next.querySelector('.home-module-head')?.focus({ preventScroll: true });
+    if (focusedKey) {
+      const row = [...next.querySelectorAll('.home-session-row')]
+        .find(node => node.dataset.key === focusedKey);
+      (row || next).focus({ preventScroll: true });
+    }
+    scheduleHomeSessionRepaint(nextRows);
   }, delay);
 }
 
@@ -6079,14 +6067,14 @@ function scheduleSessionStatusRepaint(period, incompleteHint = '') {
   }, Math.min(60_000, Math.max(1_000, next - now + 50)));
 }
 
-function renderHomeSessionModule() {
+function renderHomeSessionModule(rows) {
   const current = els.homePanel?.querySelector('.home-module-session');
   if (current && sessionTooltipShouldHoldRender()) {
     homeSessionRenderPending = true;
     return current;
   }
-  const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
-  const runningCount = rows.filter((row) => window.TokenMonitorSessionLive.sessionActivityState(row) === 'running').length;
+  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+  const runningCount = window.TokenMonitorEdgeDockPresentation.runningSessionSummary(rows).count;
   const meta = runningCount > 0 ? t('home.runningSessions', { count: runningCount }) : '';
   const { module, body } = homeModuleShell('session', t('home.sessions'), 'session', meta);
   if (rows.length === 0) {
@@ -6097,9 +6085,10 @@ function renderHomeSessionModule() {
     return module;
   }
   for (const row of rows) {
-    const activityState = window.TokenMonitorSessionLive.sessionActivityState(row);
+    const activityState = window.TokenMonitorEdgeDockPresentation.sessionActivityState(row);
     const item = document.createElement('div');
     item.className = 'home-list-row home-session-row';
+    item.dataset.key = row.key;
     const mark = document.createElement('span');
     applyHomeListMark(mark, iconKindFor({ client: row.client }, 'session'), clientColors[row.client] || stableColor(row.key, fallbackModelColors));
     const stateMark = document.createElement('span');
@@ -6131,6 +6120,9 @@ function renderHomeSessionModule() {
     const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
     const description = document.createElement('span');
     description.className = 'home-list-sub';
+    const memberLabel = row.sessionGroup && (!row.subagentGroup || row.subagentCount > 0)
+      ? (row.subagentGroup ? t('sessions.subagentCount', { count: row.subagentCount })
+        : t('sessions.grokBotCount', { count: row.groupRows.length })) : '';
     // The same "N models" hover the Sessions list draws: the label stays the
     // row's own text, and the tooltip lists the models behind the count.
     const modelLabel = sessionRowsApi.sessionModelLabel(row);
@@ -6138,24 +6130,32 @@ function renderHomeSessionModule() {
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatCompact
     });
-    if (modelLabel && modelEntries.length > 1) {
-      const models = document.createElement('span');
-      models.className = 'session-models';
-      models.textContent = modelLabel;
-      limitWindowsView.setDetailTooltip(models, modelEntries);
-      description.append(models);
-      if (age) description.append(document.createTextNode(` · ${age}`));
-    } else {
-      description.textContent = [modelLabel, age].filter(Boolean).join(' · ');
+    if (modelLabel) {
+      if (modelEntries.length > 1) {
+        const models = document.createElement('span');
+        models.className = 'session-models';
+        models.textContent = modelLabel;
+        limitWindowsView.setDetailTooltip(models, modelEntries);
+        description.append(models);
+      } else description.append(document.createTextNode(modelLabel));
     }
+    if (memberLabel) {
+      if (modelLabel) description.append(document.createTextNode(' · '));
+      const count = document.createElement('span');
+      count.className = 'home-session-member-count';
+      count.textContent = memberLabel;
+      description.append(count);
+    }
+    if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
     meta.append(description);
-    const context = window.TokenMonitorSessionLive.sessionActivityState(row) !== 'idle' ? row.context : null;
-    const cache = window.TokenMonitorSessionLive.sessionPromptCacheForRow(row);
+    const statusRow = row.groupRows?.[0] || row;
+    const context = window.TokenMonitorSessionLive.sessionActivityState(statusRow) !== 'idle' ? statusRow.context : null;
+    const cache = window.TokenMonitorSessionLive.sessionPromptCacheForRow(statusRow);
     if (cache && !context) {
       const badge = document.createElement('span');
       badge.className = 'home-session-cache';
       badge.textContent = t('session.cacheEstimate', { minutes: cache.minutes });
-      sessionRowsApi.setSessionTooltip(badge, row, cache, t, limitWindowsView);
+      sessionRowsApi.setSessionTooltip(badge, statusRow, cache, t, limitWindowsView);
       meta.append(badge);
     }
     if (context) meta.append(homeSessionContext(context, cache));
@@ -6657,16 +6657,20 @@ function renderHome() {
     hideHomeActivityTooltip();
     return;
   }
+  let sessionRows;
   const nodes = moduleIds.map((id) => {
     if (id === 'limits') return renderHomeLimitModule();
     if (id === 'tool') return renderHomeToolModule(period);
     if (id === 'device') return renderHomeDeviceModule();
     if (id === 'model') return renderHomeModelModule(period);
-    if (id === 'session') return renderHomeSessionModule();
+    if (id === 'session') {
+      sessionRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+      return renderHomeSessionModule(sessionRows);
+    }
     return renderHomeTrendsModule();
   });
   els.homePanel.replaceChildren(...nodes);
-  if (moduleIds.includes('session')) scheduleHomeSessionRepaint();
+  if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
   // setupHomeActivityScroller first runs while its module is detached, where
   // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
   // attached, before the browser paints or hover restoration measures the new cell.

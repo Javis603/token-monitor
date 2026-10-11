@@ -208,3 +208,12 @@ test('both renderer entry points load portable declarations before activity cons
     assert.ok(declarations < html.indexOf('shared/sessionLive.js'));
   }
 });
+
+
+test('empty and unsupported native refreshes never enumerate historical accounting maps', async () => {
+  const history = new Proxy({}, { ownKeys() { assert.fail('activity refresh enumerated history without a supported target'); } });
+  for (const nativeSessions of [{}, { today: {} }, { today: { x: { client: 'unsupported', sessionId: 'x' } } }]) {
+    const summary = { periods: { today: { sessions: history }, month: { sessions: history }, allTime: { sessions: history } }, nativeSessions };
+    assert.strictEqual(await refreshSessionActivity(summary, [], {}, { homeDir: '/absent', env: {} }), summary);
+  }
+});
