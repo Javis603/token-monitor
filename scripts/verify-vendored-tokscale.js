@@ -66,6 +66,39 @@ const DSH_MODEL_CONTRACT_CASES = Object.freeze([
 // Monitor normalization are both exercised by this release gate.
 const TOKEN_CONTRACT_CASES = Object.freeze([
   {
+    client: 'hermes',
+    // Hermes stores reasoning inside output; Tokscale splits it before JSON.
+    expectedRow: { model: 'claude-sonnet-4-5', input: 1000, output: 250, cacheRead: 200, cacheWrite: 50, reasoning: 150, cost: 1.25 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 1650, clientTokens: 1650, clientOutputTokens: 400 },
+    expectedSession: { id: 'hermes-contract', totalTokens: 1650, outputTokens: 400, reasoningTokens: 150 },
+    writeFixture(home) {
+      const { DatabaseSync } = require('node:sqlite');
+      const dir = path.join(home, '.hermes');
+      fs.mkdirSync(dir, { recursive: true });
+      const db = new DatabaseSync(path.join(dir, 'state.db'));
+      try {
+        db.exec(`CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, model TEXT, billing_provider TEXT, started_at REAL,
+          message_count INTEGER, input_tokens INTEGER, output_tokens INTEGER,
+          cache_read_tokens INTEGER, cache_write_tokens INTEGER, reasoning_tokens INTEGER,
+          actual_cost_usd REAL, estimated_cost_usd REAL
+        );
+        INSERT INTO sessions VALUES
+          ('hermes-contract', 'claude-sonnet-4-5', 'anthropic', 1787196900, 1, 1000, 400, 200, 50, 150, 1.25, 1.25);
+        CREATE TABLE session_model_usage (
+          session_id TEXT, model TEXT, billing_provider TEXT, input_tokens INTEGER,
+          output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER,
+          reasoning_tokens INTEGER, actual_cost_usd REAL, estimated_cost_usd REAL
+        );
+        INSERT INTO session_model_usage VALUES
+          ('hermes-contract', 'claude-sonnet-4-5', 'anthropic', 1000, 400, 200, 50, 150, 1.25, 1.25);`);
+      } finally {
+        db.close();
+      }
+    }
+  },
+  {
     client: 'cherrystudio',
     // Native chat ledger counts include cached input and reasoning output.
     // Agent and legacy aggregate rows overlap other sources and must be skipped.
@@ -437,7 +470,7 @@ function hermeticEnv(home) {
   // overrides would do the same for the fork-only qodercn client, and the
   // MiniMax data-directory overrides for the fork's mcode supplement.
   for (const key of [
-    'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'DSH_HOME',
+    'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'DSH_HOME', 'HERMES_HOME',
     'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
     'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR'
   ]) {

@@ -13,6 +13,7 @@ const {
   rowRenderFingerprint,
   rowWidth,
   shouldAnimateBreakdownRows,
+  visibleBreakdownNumberRows,
   toolIconsEnabled
 } = require('../../src/electron/renderer/breakdownRenderPolicy');
 
@@ -60,6 +61,42 @@ test('small breakdowns keep motion while large breakdowns skip it', () => {
 
 test('reduced motion skips layout capture even for small breakdowns', () => {
   assert.equal(shouldAnimateBreakdownRows(1, { reducedMotion: true }), false);
+});
+
+test('large session lists select visible readings, including a partially clipped number', () => {
+  const rows = Array.from({ length: 100 }, (_, index) => index);
+  const viewport = { top: 100, bottom: 200, left: 0, right: 300 };
+  const selected = visibleBreakdownNumberRows(rows, viewport, index => ({
+    top: index * 20, bottom: index * 20 + 25, left: 250, right: 290
+  }));
+  assert.deepEqual(selected, [4, 5, 6, 7, 8, 9]);
+  assert.deepEqual(visibleBreakdownNumberRows(rows, { ...viewport, bottom: 100 }, () => {
+    assert.fail('a hidden viewport must not measure any rows');
+  }), []);
+});
+
+test('even a tall viewport keeps number animation work bounded', () => {
+  const rows = Array.from({ length: 100 }, (_, index) => index);
+  let measurements = 0;
+  const selected = visibleBreakdownNumberRows(rows, { top: 0, bottom: 10_000, left: 0, right: 300 }, index => {
+    measurements += 1;
+    return { top: index * 20, bottom: index * 20 + 15, left: 250, right: 290 };
+  });
+  assert.equal(selected.length, MAX_ANIMATED_BREAKDOWN_ROWS);
+  assert.equal(measurements, MAX_ANIMATED_BREAKDOWN_ROWS);
+});
+
+test('offscreen and collapsed readings do not consume the animation budget', () => {
+  const viewport = { top: 100, bottom: 200, left: 0, right: 300 };
+  const rects = [
+    { top: 80, bottom: 100, left: 250, right: 290 },
+    { top: 200, bottom: 220, left: 250, right: 290 },
+    { top: 120, bottom: 140, left: 300, right: 320 },
+    { top: 120, bottom: 140, left: -20, right: 0 },
+    { top: 120, bottom: 120, left: 250, right: 290 },
+    { top: 120, bottom: 140, left: 250, right: 290 }
+  ];
+  assert.deepEqual(visibleBreakdownNumberRows(rects, viewport, rect => rect), [rects[5]]);
 });
 
 test('tool icon state uses the same strict normalization as row rendering', () => {

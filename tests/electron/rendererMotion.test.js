@@ -80,10 +80,10 @@ test('period changes preserve row identity, animate rank changes, and count from
   assert.match(app, /animateBarBetween\(fill, previous\.barScale, targetScale, 0, duration\)/);
   assert.match(app, /animateBarBetween\(fill, 0, targetScale, delay, Math\.max\(1, duration - delay\)\)/);
   assert.match(app, /function animateRowNumber\(el, from, to, duration = 420, capturedRoll = null, \{ synchronized = false \} = \{\}\)/);
-  assert.match(app, /animateRowNumber\(row\.querySelector\('\.row-value'\), previous\.value, value, duration, previous\.rollSnapshot,\s*\{ synchronized \}\)/);
+  assert.match(app, /animateRowNumber\(valueEl, previous\?\.value \?\? 0, value,\s*duration, previous\?\.rollSnapshot, \{ synchronized \}\)/);
   assert.match(app, /const delay = synchronized \? 0 : Math\.min\(enteringIndex, 6\) \* 18;/);
-  assert.match(app, /rollSnapshot: tokenNumberAnimationApi\.capture\(row\.querySelector\('\.row-value'\)\)/);
-  assert.match(app, /value: Number\(row\.querySelector\('\.row-value'\)\?\.dataset\.motionValue/);
+  assert.match(app, /rollSnapshot: motionRows\.has\(row\) \? tokenNumberAnimationApi\.capture\(valueEl\) : null/);
+  assert.match(app, /value: Number\(valueEl\?\.dataset\.motionValue/);
 });
 
 test('live row updates count and resize bars together without slowing the headline', () => {
@@ -95,7 +95,7 @@ test('live row updates count and resize bars together without slowing the headli
   assert.match(app, /if \(liveMotionSnapshot\) animateBreakdownFrom\(liveMotionSnapshot, \{ duration: 600 \}\)/);
   assert.match(app, /const animationFrom = numberAnimHandle \? numberAnimValue : state\.currentTotal/);
   assert.match(app, /animateTotalNumber\(els\.totalTokens, animationFrom, nextTotal, state\.periodMotionActive \? 800 : 1000,\s*\{ synchronized: state\.periodMotionActive \}\)/);
-  assert.match(app, /animateRowNumber\(row\.querySelector\('\.row-value'\), 0, value, duration, null, \{ synchronized \}\)/);
+  assert.match(app, /if \(!breakdownNumberMotionVisibleOnly \|\| !previous \|\| previous\.value !== value \|\| rowNumberAnimations\.has\(valueEl\)\)/);
 });
 
 test('unrelated rerenders do not truncate an in-flight headline count', () => {
