@@ -45,6 +45,8 @@
       'settings.workbuddy.loginInProgress': 'A sign-in is already in progress. Complete or cancel it first.',
       'settings.workbuddy.cancelFailed': 'Could not cancel sign-in. Try again.',
       'settings.workbuddy.totalCredits': 'Total credits',
+      'settings.workbuddy.showQuotaTotal': 'Show quota total',
+      'settings.workbuddy.showQuotaTotalDesc': 'Combine quotas only when every account has current, compatible limits. Each account still has its own quota.',
       'settings.workbuddy.perAccountQuotas': 'Quotas are shown per account. A complete compatible total is unavailable.',
 
       'settings.language.title': 'Language',
@@ -1926,6 +1928,8 @@
       'settings.workbuddy.loginInProgress': '已有登入正在進行，請先完成或取消。',
       'settings.workbuddy.cancelFailed': '無法取消登入，請重試。',
       'settings.workbuddy.totalCredits': '點數總額',
+      'settings.workbuddy.showQuotaTotal': '顯示額度合計',
+      'settings.workbuddy.showQuotaTotalDesc': '僅在所有帳號額度正常且相容時合計；各帳號的額度仍分開使用。',
       'settings.workbuddy.perAccountQuotas': '額度按帳戶顯示，目前無法提供完整且相容的總額。',
 
       'settings.language.title': '語言',
@@ -3807,6 +3811,8 @@
       'settings.workbuddy.loginInProgress': '已有登录正在进行，请先完成或取消。',
       'settings.workbuddy.cancelFailed': '无法取消登录，请重试。',
       'settings.workbuddy.totalCredits': '积分总额',
+      'settings.workbuddy.showQuotaTotal': '显示额度合计',
+      'settings.workbuddy.showQuotaTotalDesc': '仅在所有账号额度正常且兼容时合计；各账号的额度仍分开使用。',
       'settings.workbuddy.perAccountQuotas': '额度按账号显示，目前无法提供完整且兼容的总额。',
 
       'settings.language.title': '语言',
@@ -5688,6 +5694,8 @@
       'settings.workbuddy.loginInProgress': '로그인이 진행 중입니다. 먼저 완료하거나 취소하세요.',
       'settings.workbuddy.cancelFailed': '로그인을 취소하지 못했습니다. 다시 시도하세요.',
       'settings.workbuddy.totalCredits': '총 크레딧',
+      'settings.workbuddy.showQuotaTotal': '할당량 합계 표시',
+      'settings.workbuddy.showQuotaTotalDesc': '모든 계정의 할당량이 최신이고 호환될 때만 합산합니다. 각 계정의 할당량은 별도로 사용합니다.',
       'settings.workbuddy.perAccountQuotas': '할당량은 계정별로 표시됩니다. 호환되는 전체 합계를 사용할 수 없습니다.',
 
       'dashboard.empty': '아직 사용 기록이 없습니다',
@@ -7569,6 +7577,8 @@
       'settings.workbuddy.loginInProgress': 'ログインが進行中です。先に完了またはキャンセルしてください。',
       'settings.workbuddy.cancelFailed': 'ログインをキャンセルできませんでした。再試行してください。',
       'settings.workbuddy.totalCredits': 'クレジット合計',
+      'settings.workbuddy.showQuotaTotal': '利用枠の合計を表示',
+      'settings.workbuddy.showQuotaTotalDesc': 'すべてのアカウントの利用枠が最新で互換性がある場合のみ合計します。利用枠はアカウントごとに個別に使われます。',
       'settings.workbuddy.perAccountQuotas': '割り当てはアカウント別に表示します。互換性のある完全な合計は利用できません。',
 
       'dashboard.empty': 'まだ使用履歴がありません',
@@ -9450,6 +9460,8 @@
       'settings.workbuddy.loginInProgress': 'Já existe um login em andamento. Conclua ou cancele primeiro.',
       'settings.workbuddy.cancelFailed': 'Não foi possível cancelar o login. Tente novamente.',
       'settings.workbuddy.totalCredits': 'Total de créditos',
+      'settings.workbuddy.showQuotaTotal': 'Mostrar total de cotas',
+      'settings.workbuddy.showQuotaTotalDesc': 'Some as cotas somente quando todas as contas tiverem limites atuais e compatíveis. Cada conta mantém sua própria cota.',
       'settings.workbuddy.perAccountQuotas': 'As cotas são exibidas por conta. Um total completo e compatível não está disponível.',
 
       'settings.language.title': 'Idioma',

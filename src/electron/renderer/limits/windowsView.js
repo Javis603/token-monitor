@@ -766,6 +766,7 @@
   }
 
   function workbuddyCombinedProvider(providers) {
+    if (settings()?.workbuddyQuotaTotalEnabled !== true) return null;
     const windows = presentationApi.workbuddyCreditTotals(providers);
     if (!windows || windows.length !== 1 || windows[0].currency !== 'CREDITS') return null;
     const first = providers[0];

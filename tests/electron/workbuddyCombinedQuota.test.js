@@ -5,6 +5,7 @@ const test = require('node:test');
 const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
 
 const view = createLimitWindowsView({
+  settings: () => ({ workbuddyQuotaTotalEnabled: true }),
   presentation: require('../../src/electron/renderer/limits/providerPresentation'),
   optionalFiniteNumber: (value) => value === null || value === undefined || value === ''
     ? null : Number.isFinite(Number(value)) ? Number(value) : null
@@ -51,4 +52,21 @@ test('Home total preserves other providers and WorkBuddy position', () => {
   assert.strictEqual(collapsed[0], qoder);
   assert.equal(collapsed[1].balance.amount, 160);
   assert.equal(collapsed[2].provider, 'codex');
+});
+
+
+test('WorkBuddy totals are opt-in and changing the preference preserves account records', () => {
+  const settings = {};
+  const view = createLimitWindowsView({
+    presentation: require('../../src/electron/renderer/limits/providerPresentation'),
+    settings: () => settings
+  });
+  const rows = [account('a'), account('b')];
+  assert.equal(view.workbuddyCombinedProvider(rows), null);
+  assert.strictEqual(view.collapseWorkbuddyAccounts(rows), rows);
+  settings.workbuddyQuotaTotalEnabled = true;
+  assert.equal(view.collapseWorkbuddyAccounts(rows)[0].balance.amount, 160);
+  settings.workbuddyQuotaTotalEnabled = false;
+  assert.strictEqual(view.collapseWorkbuddyAccounts(rows), rows);
+  assert.equal(rows[0].windows[0].remaining, 80);
 });

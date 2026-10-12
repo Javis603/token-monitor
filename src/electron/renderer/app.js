@@ -4481,6 +4481,7 @@ function renderLimits() {
       state.settings?.showToolIcons !== false,
       state.settings?.claudePrepaidBalanceEnabled !== false,
       state.settings?.codexResetForecastEnabled === true,
+      state.settings?.workbuddyQuotaTotalEnabled === true,
       state.settings?.showCodexAdditionalLimits !== false,
       state.settings?.limitProviderHiddenItems || {},
       state.settings?.currency || '',
@@ -11502,6 +11503,12 @@ const LIMIT_PROVIDER_SETTINGS = {
     key: 'codexResetForecastEnabled',
     titleKey: 'settings.limits.codexResetForecast',
     descKey: 'settings.limits.codexResetForecastDesc',
+    defaultValue: false
+  }],
+  workbuddy: [{
+    key: 'workbuddyQuotaTotalEnabled',
+    titleKey: 'settings.workbuddy.showQuotaTotal',
+    descKey: 'settings.workbuddy.showQuotaTotalDesc',
     defaultValue: false
   }],
   opencode: [{

@@ -194,10 +194,15 @@ test('WorkBuddy group draws a healthy total plus independent accounts and omits 
     provider: 'workbuddy', accountKey, accountName: 'Same nickname', region: 'cn', status: 'ok',
     windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, limit: 100, remaining: 80 }]
   }));
-  const healthy = dockView().renderLimitProviderGroup('workbuddy', 'WorkBuddy', rows, '#12B7F5');
+  const healthy = dockView({ workbuddyQuotaTotalEnabled: true }).renderLimitProviderGroup('workbuddy', 'WorkBuddy', rows, '#12B7F5');
   assert.equal(healthy.children[1].className, 'limit-windows');
   assert.equal(healthy.find('limit-account-list').children.length, 2);
-  const partial = dockView().renderLimitProviderGroup('workbuddy', 'WorkBuddy',
+  for (const appearance of [{}, { workbuddyQuotaTotalEnabled: false }]) {
+    const off = dockView(appearance).renderLimitProviderGroup('workbuddy', 'WorkBuddy', rows, '#12B7F5');
+    assert.equal(off.children[1].className, 'limit-account-list');
+    assert.equal(off.children[1].children.length, 2);
+  }
+  const partial = dockView({ workbuddyQuotaTotalEnabled: true }).renderLimitProviderGroup('workbuddy', 'WorkBuddy',
     [rows[0], { ...rows[1], status: 'unavailable' }], '#12B7F5');
   assert.equal(partial.children[1].className, 'limit-account-list');
   assert.equal(partial.children[1].children.length, 2);
@@ -215,7 +220,7 @@ test('Dock projection cannot total only visible WorkBuddy accounts while a known
     });
     const drawn = cell.accounts.map((account) => account.record);
     assert.equal(drawn.length, 2, scenario);
-    const card = dockView({}, { subscriptionAccounts: () => cell.subscriptionAccounts })
+    const card = dockView({ workbuddyQuotaTotalEnabled: true }, { subscriptionAccounts: () => cell.subscriptionAccounts })
       .renderLimitProviderGroup('workbuddy', 'WorkBuddy', drawn, '#12B7F5');
     assert.equal(card.children[1].className, 'limit-account-list', scenario);
   }

@@ -386,7 +386,8 @@ for (const { name, settings, expected } of [
       limitProviderOrderApi,
       homeOverviewApi: { homeLimitAccountsForProviders, homeLimitsAwaitingFirstData },
       limitWindowsView: require('../../src/electron/renderer/limits/windowsView').createLimitWindowsView({
-        presentation: require('../../src/electron/renderer/limits/providerPresentation')
+        presentation: require('../../src/electron/renderer/limits/providerPresentation'),
+        settings: () => settings
       }),
       clientColors: {},
       hiddenHomeLimitProviderSet: () => new Set(),
