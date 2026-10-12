@@ -28,6 +28,7 @@ test('defaultSettings accepts an explicit platform argument and defaults glass o
 
 test('renderer resetDepthButton sets 0 blur on Linux and default blur on non-Linux', () => {
   const resetHandler = sourceBetween(renderer, 'els.resetDepthButton.addEventListener', 'els.resetBackgroundImageOpacityButton');
+  assert.match(resetHandler, /if \(!state\.appInfo\) return;/);
   assert.match(resetHandler, /const defaultBlur = state\.appInfo\?\.platform === 'linux' \? 0 : defaultAppearance\.glassBlur;/);
   assert.match(resetHandler, /els\.blurInput\.value = String\(defaultBlur\);/);
   assert.match(resetHandler, /await saveSettings\(\{\s*glassBlur: defaultBlur\s*\}\);/);
