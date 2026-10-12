@@ -13,6 +13,7 @@ const {
   edgeDockHandleZones,
   edgeDockPeekBounds,
   edgeDockPlacementForDrop,
+  edgeDockPollDelay,
   edgeDockRailBounds,
   edgeDockRefreshBounds,
   edgeDockRefreshCorridor,
@@ -30,9 +31,6 @@ const { shapeRectsFromPolygons } = require('./mask');
 const { bubbleCommands, peekCommands, railCommands, refreshCommands, toPolygons, toSvgPath } = require('../renderer/edgeDock/shapes');
 
 const SURFACES = Object.freeze(['peek', 'rail', 'bubble']);
-const POLL_IDLE_MS = 90;
-const POLL_ACTIVE_MS = 40;
-const POLL_DRAG_MS = 16;
 // How often `alwaysExceptFullScreen` re-checks for a full-screen app. The macOS
 // Space transition itself takes longer than this, so a faster poll would only
 // spend window-list reads without making the dock react sooner.
@@ -938,7 +936,7 @@ function createEdgeDockController(deps) {
     const snapshot = intent.snapshot();
     // The approach zone is on the way to the handle, and only the poll lets the
     // handle take the pointer, so it runs at the active rate from there on.
-    const delay = drag ? POLL_DRAG_MS : (snapshot.revealed || peekNear ? POLL_ACTIVE_MS : POLL_IDLE_MS);
+    const delay = edgeDockPollDelay({ drag, revealed: snapshot.revealed, near: peekNear });
     pollTimer = setTimeout(poll, delay);
   }
 

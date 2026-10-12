@@ -9,7 +9,7 @@ const { readMacMenuWindows } = require('./menuBar');
 const { sessionActivityState } = require('../../shared/sessionLive');
 const { edgeDockBackdropMode, MAC_BACKDROP_LIQUID_GLASS } = require('../macBackdropMode');
 const { nextRunningExpiryAt } = require('../renderer/edgeDock/presentation');
-const { EDGE_DOCK_TIMING, edgeDockCorridorBounds, edgeDockScale, normalizeEdgeDockCustomScale, EDGE_DOCK_METRICS: M } = require('../edgeDock/geometry');
+const { EDGE_DOCK_TIMING, edgeDockCorridorBounds, edgeDockPollDelay, edgeDockScale, normalizeEdgeDockCustomScale, EDGE_DOCK_METRICS: M } = require('../edgeDock/geometry');
 
 function normalizeNotchStyle(value) {
   return ['black', 'inherit', 'default', 'liquid-glass'].includes(value) ? value : 'black';
@@ -461,6 +461,19 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     }
   }
 
+  function schedulePoll() {
+    if (!running || locked || !alive(windows.notch)) return;
+    clearTimeout(pollTimer);
+    const delay = edgeDockPollDelay({ revealed: expanded, near: enterAt !== null });
+    // Manual geometry refreshes do not enqueue another cursor timer.
+    pollTimer = setTimeout(() => {
+      pollTimer = null;
+      try { poll(); }
+      catch (error) { logger(`[top-notch] poll failed: ${error.message}`); }
+      finally { schedulePoll(); }
+    }, delay);
+  }
+
   function scheduleExpiry() {
     clearTimeout(expiryTimer); expiryTimer = null;
     if (!running || locked) return;
@@ -529,12 +542,12 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     windows.bubble.webContents.setZoomFactor?.(zoom());
     updateGlassAppearance();
     refreshGeometry(); visibility(); scheduleExpiry();
-    if (!locked && !pollTimer) pollTimer = setInterval(poll, 50);
+    if (!pollTimer) schedulePoll();
   }
   function stop() {
     menuWindows = null; menuReadAt = -Infinity;
     running = expanded = fullScreen = false; fullScreenCheckedAt = -Infinity; fullScreenDisplayId = null; enterAt = leaveAt = null;
-    clearInterval(pollTimer); clearTimeout(expiryTimer); pollTimer = expiryTimer = null;
+    clearTimeout(pollTimer); clearTimeout(expiryTimer); pollTimer = expiryTimer = null;
     if (screenListeners) { for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.removeListener(event, invalidateGeometry); screenListeners = false; }
     destroyWindows();
   }
@@ -619,10 +632,10 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       locked = value === true;
       if (locked) {
         refreshEpoch++; motion = null; expanded = false; progress = 0; layoutKey = '';
-        clearInterval(pollTimer); clearTimeout(expiryTimer); pollTimer = expiryTimer = null;
+        clearTimeout(pollTimer); clearTimeout(expiryTimer); pollTimer = expiryTimer = null;
       } else if (running) {
         invalidateGeometry(); scheduleExpiry();
-        if (!pollTimer) pollTimer = setInterval(poll, 50);
+        if (!pollTimer) schedulePoll();
       }
       visibility();
     },

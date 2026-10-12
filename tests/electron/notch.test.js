@@ -1712,17 +1712,17 @@ test('idle polling does not repeat unchanged mouse passthrough or renderer updat
 });
 
 test('locking pauses polling and unlock or repeated sync keeps one timer', (t) => {
-  t.mock.timers.enable({ apis: ['setInterval'] });
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
   const f = fixture(t); let cursorReads = 0;
   f.screen.getCursorScreenPoint = () => { cursorReads++; return f.screen.point; };
-  t.mock.timers.tick(200); assert.equal(cursorReads, 4);
+  t.mock.timers.tick(90); t.mock.timers.tick(90); assert.equal(cursorReads, 2);
   f.controller.setLocked(true);
-  t.mock.timers.tick(5000); assert.equal(cursorReads, 4, 'locked entry has no mouse wakeups');
-  f.controller.sync(); t.mock.timers.tick(5000); assert.equal(cursorReads, 4, 'settings sync while locked does not restart polling');
+  t.mock.timers.tick(5000); assert.equal(cursorReads, 2, 'locked entry has no mouse wakeups');
+  f.controller.sync(); t.mock.timers.tick(5000); assert.equal(cursorReads, 2, 'settings sync while locked does not restart polling');
   f.controller.setLocked(false); const resumed = cursorReads;
-  t.mock.timers.tick(200); assert.equal(cursorReads - resumed, 4);
+  t.mock.timers.tick(90); t.mock.timers.tick(90); assert.equal(cursorReads - resumed, 2);
   f.controller.sync(); f.controller.sync(); const synced = cursorReads;
-  t.mock.timers.tick(200); assert.equal(cursorReads - synced, 4, 'sync never duplicates the timer');
+  t.mock.timers.tick(90); t.mock.timers.tick(90); assert.equal(cursorReads - synced, 2, 'sync never duplicates the timer');
   f.controller.stop(); const stopped = cursorReads;
   f.controller.setLocked(false); t.mock.timers.tick(5000);
   assert.equal(cursorReads, stopped, 'unlock never starts a disabled entry');
@@ -1907,7 +1907,7 @@ test('summary readings and standalone rings follow the same pending or active Co
 
 
 test('unsupported platforms keep Notch disabled without reads, windows or polling', (t) => {
-  t.mock.timers.enable({ apis: ['setInterval'] });
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
   for (const platform of ['win32', 'linux']) {
     const f = fixture(t, {}, { platform, readScreens: () => assert.fail('unsupported platform must not read hardware') });
     f.screen.getCursorScreenPoint = () => assert.fail('unsupported platform must not poll');
@@ -2098,4 +2098,26 @@ test('Notch renderer owns its observers and motion hooks while details reuse the
   assert.equal(classes.get('notch-black'), false);
   assert.equal(classes.get('is-notch-detail'), true);
   assert.equal(typeof detail.omitQuotaRows, 'function');
+});
+
+test('Notch shares the dock idle and approach polling cadence', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
+  const f = fixture(t);
+  const reads = [];
+  f.screen.getCursorScreenPoint = () => { reads.push(Date.now()); return f.screen.point; };
+  t.mock.timers.tick(89); assert.equal(reads.length, 0);
+  t.mock.timers.tick(1); assert.deepEqual(reads, [10090]);
+  const top = f.windows[0], payload = last(top);
+  f.screen.point = { x: top.bounds.x + payload.geometry.headerX + 10, y: top.bounds.y + 10 };
+  t.mock.timers.tick(90); assert.equal(reads.at(-1), 10180);
+  t.mock.timers.tick(39); assert.equal(reads.length, 2);
+  t.mock.timers.tick(1); assert.equal(reads.at(-1), 10220);
+  for (let i = 0; i < 3; i++) t.mock.timers.tick(40);
+  assert.equal(last(top).expanded, true);
+  f.screen.point = { x: 20, y: 400 };
+  for (let i = 0; i < 9; i++) t.mock.timers.tick(40);
+  assert.equal(last(top).expanded, false);
+  const idle = reads.length;
+  t.mock.timers.tick(89); assert.equal(reads.length, idle);
+  t.mock.timers.tick(1); assert.equal(reads.length, idle + 1);
 });
