@@ -51,9 +51,20 @@ test('a late TOTAL load reapplies title policy after restoring a previously visi
   const snapshot = { id: 1, source: 'local' };
   const state = { stats: { snapshot, periods: { allTime: {} } }, settings: {} };
   let finish;
+  // The sliced loader region also carries the cloud-scope and cloud-notice
+  // wiring, which binds listeners on the real main-window elements. This test
+  // is about the all-time loader, so give that wiring inert elements.
+  const inertElement = () => ({
+    addEventListener() {}, setAttribute() {}, classList: { add() {}, remove() {}, toggle() {} }, textContent: ''
+  });
   const context = { state, allTimeSessionsApi: require('../../src/electron/renderer/allTimeSessions'),
     allTimeSessionsNeeded: () => true, statsRenderScheduler: { request: () => {} }, console,
+    cloudSessionRowsApi: require('../../src/electron/renderer/cloudSessionRows'),
+    cloudSessionsSource: require('../../src/electron/renderer/cloudSessionRows').createSource({ get: () => null }),
+    currentLocale: () => 'en', rawSessionRowsForPeriod: () => [],
+    document: { getElementById: () => inertElement() },
     window: { TokenMonitorSessionActivityProjection: projection, TokenMonitorSessionTitleDisplay: titles,
+      addEventListener() {},
       tokenMonitor: { getAllTimeSessions: () => new Promise(resolve => { finish = resolve; }) } } };
   vm.runInNewContext(source.slice(displayStart, displayEnd) + '\n' + source.slice(loadStart, loadEnd)
     + '\nglobalThis.loader = allTimeSessions;', context);
