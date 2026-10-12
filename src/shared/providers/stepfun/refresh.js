@@ -67,7 +67,9 @@ async function refreshStepfunToken(token, webid, deps = {}) {
   let body;
   try {
     body = await response.json();
-  } catch {
+  } catch (error) {
+    // Preserve the original body-read rejection on cancellation, matching the fetch catch.
+    if (deps.signal?.aborted) throw error;
     throw errorWithStatus('unavailable', 'Invalid StepFun refresh response');
   }
   const renewed = combineStepfunToken(body?.accessToken?.raw, body?.refreshToken?.raw, token);

@@ -81,3 +81,21 @@ test('refreshStepfunToken propagates cancellation', async () => {
     }
   }), error => error === reason);
 });
+
+test('refreshStepfunToken propagates cancellation raised during the body read', async () => {
+  const controller = new AbortController();
+  const reason = new Error('superseded');
+  // Use a different error from signal.reason to verify the body rejection's identity is preserved.
+  const bodyError = new Error('body read aborted');
+  assert.notEqual(bodyError, reason);
+  await assert.rejects(refreshStepfunToken('a...b', 'device-id', {
+    signal: controller.signal,
+    fetch: async () => ({
+      ok: true,
+      json: async () => {
+        controller.abort(reason);
+        throw bodyError;
+      }
+    })
+  }), error => error === bodyError);
+});
