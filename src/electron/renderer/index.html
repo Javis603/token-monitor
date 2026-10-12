@@ -394,9 +394,7 @@
               <div class="settings-item"><span class="settings-item-text"><span id="windowGlassEffectLabel" class="settings-item-title" data-i18n="settings.appearance.systemGlass">Glass Backdrop</span></span><div class="inline-options" role="radiogroup" aria-labelledby="windowGlassEffectLabel"><label class="inline-option"><input type="radio" name="systemGlassOption" value="system" /><span data-i18n="settings.appearance.glassEffectSystem">System</span></label><label class="inline-option"><input type="radio" name="systemGlassOption" value="off" /><span data-i18n="settings.appearance.glassEffectTransparent">Transparent</span></label></div></div>
               <label id="windowsBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.windowsBackdrop">Windows Glass Style</span></span><select id="windowsBackdropInput"><option value="acrylic" data-i18n="settings.appearance.windowsBackdropAcrylic">Acrylic</option><option value="accent" data-i18n="settings.appearance.windowsBackdropAccent">Accent Blur (experimental)</option></select><span id="windowsBackdropNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.windowsBackdropNote">Keeps the background translucent and blurred, even when the window is not focused.</span></label>
               <label id="macBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.macBackdrop">macOS Glass Style</span></span><select id="macBackdropInput"><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass</option></select></label>
-              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveIndicator">Live Indicator</span></span><input id="liveDotInput" type="checkbox" /></label>
-              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.toolIcons">Tool Icons</span></span><input id="toolIconsInput" type="checkbox" /></label>
-              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.titleIcon">Use Title Icon</span></span><input id="titleIconInput" type="checkbox" /></label>
+              <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.tokenNumberAnimation">Token number animation</span></span><select id="tokenNumberAnimationInput"><option value="roll" data-i18n="settings.appearance.tokenNumberAnimation.roll">Digit roll</option><option value="count" data-i18n="settings.appearance.tokenNumberAnimation.count">Count up</option></select></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTotalTokens">Show compact token total</span></span><input id="showCompactTotalTokensInput" type="checkbox" /></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveTokenRate">Show live token rate</span></span><input id="showLiveTokenRateInput" type="checkbox" aria-describedby="showLiveTokenRateNote" /><span id="showLiveTokenRateNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.liveTokenRateNote">Show the latest generation speed in the footer. Click it to switch between tok/s and TPM.</span></label>
               <label id="liveTokenRateScopeRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveTokenRateScope">Live rate scope</span></span><select id="liveTokenRateScopeInput"><option value="all" data-i18n="settings.appearance.liveTokenRateScopeAll">All devices</option><option value="device" data-i18n="settings.appearance.liveTokenRateScopeDevice">This device</option></select></label>
@@ -500,6 +498,9 @@
                     </div>
                     <p id="fontSettingsNote" class="settings-note" data-i18n="settings.appearance.fontNote">App default uses Token Monitor's built-in typography. System UI uses your operating system's interface font. Choose Custom… to enter a font family.</p>
                   </div>
+                  <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveIndicator">Live Indicator</span></span><input id="liveDotInput" type="checkbox" /></label>
+                  <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.toolIcons">Tool Icons</span></span><input id="toolIconsInput" type="checkbox" /></label>
+                  <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.titleIcon">Use Title Icon</span></span><input id="titleIconInput" type="checkbox" /></label>
                 </div>
               </div>
               <div id="themeVendorGroup" class="settings-group cursor-account-group theme-color-accordion settings-vendor-color-group">
@@ -1694,7 +1695,9 @@
     <script src="rowDragController.js"></script>
     <script src="i18n.js"></script>
     <script src="../../shared/providers/reasonix/sessionGuard.js"></script>
+    <script src="../../shared/sessionActivityProviders.js"></script>
     <script src="../../shared/sessionLive.js"></script>
+    <script src="../../shared/sessionActivityProjection.js"></script>
     <script src="../sessionTitleDisplay.js"></script>
     <script src="cloudSessionRows.js"></script>
     <script src="sessionRows.js"></script>
@@ -1729,6 +1732,7 @@
     <script src="../../shared/trayLayout.js"></script>
     <script src="tokenRatePresentation.js"></script>
     <script src="../motionPreference.js"></script>
+    <script src="../tokenNumberAnimation.js"></script>
     <script src="../windowsBackdropMode.js"></script>
     <script src="windowsGlass.js"></script>
     <script src="../macBackdropMode.js"></script>

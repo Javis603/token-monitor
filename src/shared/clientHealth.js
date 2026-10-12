@@ -177,6 +177,8 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'antigravity-cli-data',
   'antigravity-extension-data',
   'antigravity-ide-source',
+  'catpaw-data',
+  'catpaw-db',
   'cherrystudio-db',
   'cherrystudio-transcripts',
   'claude-projects',

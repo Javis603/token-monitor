@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, screen, session, shell, systemPreferences } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, screen, session, shell, systemPreferences } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
 const {
@@ -23,6 +23,7 @@ const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
+const tokenNumberAnimationApi = require('./tokenNumberAnimation');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
@@ -105,6 +106,7 @@ const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { actionWindowForEvent, activateWindowAction, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
 const { applyCodexAdditionalLimitsMigration } = require('./codexAdditionalLimitsMigration');
+const { applyActivityPatch, materializeActivity } = require('../shared/sessionActivityProjection');
 const { createDeviceRuntime } = require('../shared/usage/deviceRuntime');
 const { externalAgentActive } = require('../shared/usage/agentPid');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
@@ -201,6 +203,7 @@ const {
 } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/providers/cursor/auth');
 const cursorProbe = require('../shared/providers/cursor/probe');
+const { stepfunToken } = require('../shared/providers/stepfun/limits');
 const opencodeWeb = require('../shared/providers/opencode/web');
 const opencodeGoApi = require('../shared/providers/opencode/goApi');
 const opencodeProfiles = require('../shared/providers/opencode/profiles');
@@ -336,7 +339,9 @@ const {
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
   composeLocalOnlySummary,
-  composeLocalSyncSummary
+  composeLocalSyncSummary,
+  projectLocalActivity,
+  localActivityPatch
 } = require('./syncDisplayStats');
 const {
   createRendererSnapshots,
@@ -569,6 +574,7 @@ function defaultSettings() {
     windowsBackdrop: 'acrylic',
     macBackdrop: 'vibrancy',
     reduceMotion: 'system',
+    tokenNumberAnimation: 'roll',
     showLiveDot: true,
     showToolIcons: true,
     titleIconOnly: true,
@@ -858,6 +864,25 @@ function persistClaudeWebCookieRenewal({ previousCookie, cookie } = {}) {
   return true;
 }
 
+// The StepFun Oasis token's access half expires every 30 minutes; the limits
+// fetcher rotates it through the platform's own RefreshToken endpoint. The
+// rotated pair lands here and is stored only while the setting still holds the
+// token that was refreshed, so a fresh paste landing mid-flight always wins.
+// Values are compared in the fetcher's normalized form (a pasted raw cookie
+// header and its bare token compare equal), and the stored value is normalized
+// on the way in.
+function persistStepfunTokenRenewal({ previousToken, token } = {}) {
+  if (!settings?.stepfunToken) return false;
+  const expected = stepfunToken({}, { stepfunToken: previousToken });
+  const renewed = stepfunToken({}, { stepfunToken: token });
+  if (!expected || !renewed) return false;
+  if (stepfunToken({}, { stepfunToken: settings.stepfunToken }) !== expected) return false;
+  if (settings.stepfunToken === renewed) return true;
+  settings.stepfunToken = renewed;
+  saveSettings({ throwOnError: true });
+  return true;
+}
+
 // A save-time probe gets the collector's transports but none of its write-backs:
 // a credential that has not been saved yet must not renew itself into
 // settings, so a rotation is reported into `renewed` and stored with the rest
@@ -870,6 +895,10 @@ function credentialProbeDeps(renewed = {}) {
     claudeWebFetch: electronClaudeWebFetch,
     onClaudeWebCookieRenewed: ({ cookie }) => {
       renewed.claudeWebCookie = cookie;
+      return true;
+    },
+    onStepfunTokenRenewed: ({ token }) => {
+      renewed.stepfunToken = token;
       return true;
     },
     providerRuntimeState: new Map(),
@@ -893,6 +922,7 @@ function electronLimitsDeps() {
     },
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
+    onStepfunTokenRenewed: persistStepfunTokenRenewal,
     onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
     onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
     onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey
@@ -2561,6 +2591,7 @@ function readSettings() {
     merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
     merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
+    merged.tokenNumberAnimation = tokenNumberAnimationApi.normalize(merged.tokenNumberAnimation);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
@@ -2940,6 +2971,7 @@ let latestHubStatsIdentity = null;
 let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
+let statsPushSource = null;
 let statsPushRevision = 0;
 let macWidgetSnapshotController = null;
 let macWidgetDemand = null;
@@ -2996,7 +3028,7 @@ function rendererAllTimeSessions(stats) {
     const complete = completeLocalSyncStats(stats);
     const hubSnapshot = snapshotLocalDevices.get(stats);
     const sessions = hubSnapshot
-      ? mergedLocalAllTimeSessions(complete.periods, hubSnapshot.localDevice)
+      ? mergedLocalAllTimeSessions(complete.periods, materializeActivity(hubSnapshot.localDevice))
       : complete.periods?.allTime?.sessions || {};
     return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, aliases, { grouping });
   });
@@ -4296,6 +4328,7 @@ async function startIcloudCollector() {
       transformUsage: usageTransform.transform,
       usageOptions,
       sink,
+      onSessionActivity: publishLocalSessionActivity,
       onDiagnosticEvent: recordDiagnosticEvent,
       onError: (error, reason) => console.log(`[icloud-collector] ${reason}: ${error.message}`)
     }, {
@@ -4377,6 +4410,7 @@ function startSyncCollector() {
     transformUsage: usageTransform.transform,
     usageOptions,
     sink,
+    onSessionActivity: publishLocalSessionActivity,
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
   }, {
@@ -4434,6 +4468,7 @@ function startHostCollector() {
     transformUsage: usageTransform.transform,
     usageOptions,
     sink,
+    onSessionActivity: publishLocalSessionActivity,
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
   }, {
@@ -4491,6 +4526,8 @@ function injectLocalDeviceStatus(stats) {
       if (lastCollectedDevice.clientHealth) device.clientHealth = lastCollectedDevice.clientHealth;
       if (lastCollectedDevice.wslStatus) device.wslStatus = lastCollectedDevice.wslStatus;
     }
+    const activity = localActivityPatch(lastCollectedDevice);
+    if (activity) stats = projectLocalActivity(stats, activity);
   }
   if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
   return stats;
@@ -4719,6 +4756,33 @@ function scheduleMacWidgetSnapshot(stats, producerOwner) {
   return ensureMacWidgetSnapshotController()?.enqueue({ stats, producerOwner }) || false;
 }
 
+function publishLocalSessionActivity(patch) {
+  if (!lastCollectedDevice || !ownsUsageRuntime()) return;
+  const previousDevice = lastCollectedDevice;
+  lastCollectedDevice = projectLocalActivity(lastCollectedDevice, patch);
+  if (localDevice) localDevice = localDevice === previousDevice ? lastCollectedDevice : applyActivityPatch(localDevice, patch);
+  if (!latestStats) return;
+  const previous = latestStats;
+  latestStats = projectLocalActivity(previous, patch);
+  const localSnapshot = snapshotLocalDevices.get(previous);
+  if (localSnapshot) snapshotLocalDevices.set(latestStats, {
+    ...localSnapshot, localDevice: applyActivityPatch(localSnapshot.localDevice, patch)
+  });
+  if (localStats === previous) localStats = latestStats;
+  const snapshot = rendererSnapshots.updateActivity(previous, latestStats);
+  edgeDockManualStats = null;
+  // Only activity metadata crosses IPC. Accounting freshness, sync uploads,
+  // exports, History and rate samples remain on the usage publication lane.
+  const displayPatch = localActivityPatch(latestStats);
+  const visiblePatch = settings.sessionTitlesEnabled === false
+    ? { ...displayPatch, nativeSessions: Object.fromEntries(Object.entries(displayPatch.nativeSessions)
+        .map(([name, sessions]) => [name, withoutSessionTitles(sessions)])) }
+    : displayPatch;
+  presentationCache.updateActivity(previous, latestStats, (stats) => applyActivityPatch(stats, visiblePatch));
+  updateEdgeDockCells(electronPresentationStats(latestStats));
+  sendPush({ event: 'session-activity', data: { patch: visiblePatch, snapshot } });
+}
+
 // Two options, both for the cold-start seed and neither for live stats.
 // `skipExport` keeps a republished snapshot from spending the auto-export
 // interval that this run's first real scan needs. `deferToRenderer` waits for
@@ -4730,11 +4794,14 @@ function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   let rendererPayload = payload;
   if (payload?.data?.stats) {
-    injectLocalDeviceStatus(payload.data.stats);
+    payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
     // Client local batches overlay usage on the cached Hub snapshot; they do
     // not supersede an in-flight read of fresh remote stats.
-    if (!(settings?.hubMode === 'client' && payload.data.reason === 'local')) statsPushRevision += 1;
+    if (!(settings?.hubMode === 'client' && payload.data.reason === 'local')) {
+      statsPushRevision += 1;
+      statsPushSource = { generation: hubModeGeneration, identity: currentHubStatsIdentity() };
+    }
     edgeDockManualStats = null;
     getSyncContentRuntime().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
@@ -4975,6 +5042,7 @@ function startLocalCollector() {
     transformUsage: usageTransform.transform,
     usageOptions,
     progressive: true,
+    onSessionActivity: publishLocalSessionActivity,
     onRecord: (summary, meta) => {
       seedInitialLimitProviders(summary);
       const reason = meta.reason;
@@ -5648,6 +5716,7 @@ function ensureEdgeDockController() {
   edgeDockController = createEdgeDockController({
     BrowserWindow,
     ipcMain,
+    powerMonitor,
     screen,
     platform: process.platform,
     rendererDir: path.join(__dirname, 'renderer'),
@@ -7518,6 +7587,7 @@ app.whenReady().then(() => {
       windowsBackdrop: normalizeWindowsBackdropMode(patch.windowsBackdrop ?? settings.windowsBackdrop),
       macBackdrop: normalizeMacBackdropMode(patch.macBackdrop ?? settings.macBackdrop),
       reduceMotion: motionPreferenceApi.normalize(patch.reduceMotion ?? settings.reduceMotion),
+      tokenNumberAnimation: tokenNumberAnimationApi.normalize(patch.tokenNumberAnimation ?? settings.tokenNumberAnimation),
       showLiveDot: patch.showLiveDot ?? settings.showLiveDot ?? true,
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
@@ -7905,7 +7975,17 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('stats:get', async (_event, options) => {
-    const stats = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
+    const revision = statsPushRevision;
+    const fetched = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
+    // A push from the same source/generation supersedes its pending read. A
+    // retried read after a Hub switch must adopt the new source instead.
+    // Compare the source of the revision, not the latest local composition:
+    // a local B publication must not relabel a revision advanced by Hub A.
+    const sameSource = statsPushSource?.generation === hubModeGeneration
+      && statsPushSource.identity === currentHubStatsIdentity();
+    const current = sameSource && statsPushRevision !== revision && latestStats ? latestStats : fetched;
+    if (current !== latestStats) sendPush({ event: 'stats', data: { stats: current, reason: 'read' } }, { skipExport: true });
+    const stats = latestStats || current;
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);

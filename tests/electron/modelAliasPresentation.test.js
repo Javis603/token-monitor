@@ -12,6 +12,34 @@ const {
 
 const aliases = { 'anthropic/claude-opus-5': 'claude-opus-5' };
 
+test('bot conversation grouping survives model aliases in stats and pulled session lists', () => {
+  const { groupSessionRows, sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
+  const sessions = {
+    'cursor:bot': { client: 'cursor', sessionId: 'bot', totalTokens: 40, costUsd: 2,
+      models: { 'grok-bot-default': 30, 'claude-opus-5-5-medium': 10 } },
+    'cursor:ordinary': { client: 'cursor', sessionId: 'ordinary', totalTokens: 20,
+      models: { 'claude-opus-5-5-medium': 20 } }
+  };
+  const before = structuredClone(sessions);
+  const aliases = { 'grok-bot-default': 'My Model' };
+  const today = { sessions };
+  const projected = projectModelAliasStats({ periods: { today }, devices: [{ periods: { today } }] }, aliases);
+  for (const list of [projected.periods.today.sessions, projected.devices[0].periods.today.sessions,
+    projectModelAliasSessions({}, sessions, aliases)]) {
+    const grouped = groupSessionRows(sessionRowsForPeriod({ sessions: list }));
+    const bot = grouped.find(row => row.sessionGroup === 'cursor-grok-bot');
+    assert.equal(bot.value, 40);
+    assert.equal(bot.groupRows.length, 1);
+    assert.equal(list['cursor:bot'].grokBotSession, true);
+    assert.deepEqual(list['cursor:bot'].models, { 'My Model': 30, 'claude-opus-5-5-medium': 10 });
+    assert.equal(grouped.find(row => row.key === 'session:cursor:ordinary').value, 20);
+  }
+  const misleadingAlias = projectModelAliasSessions({}, sessions, { 'claude-opus-5-5-medium': 'grok-bot-user-label' });
+  const ordinary = sessionRowsForPeriod({ sessions: misleadingAlias }).find(row => row.key === 'session:cursor:ordinary');
+  assert.equal(ordinary.grokBot, undefined, 'a display alias must not invent bot provenance');
+  assert.deepEqual(sessions, before);
+});
+
 test('model aliases keep unpriced attribution attached to the displayed model', () => {
   const today = {
     totalTokens: 100, costUsd: 0, unpricedTokens: 100,

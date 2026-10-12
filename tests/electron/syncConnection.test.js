@@ -39,9 +39,32 @@ test('no recognizable signal falls back to network with the message as detail', 
   assert.deepEqual(classifyStreamFailure({}), { reason: 'network', detail: null });
 });
 
-test('local and presentation-only stats overlays do not clear a disconnected Hub stream state', () => {
+test('adopted HTTP or iCloud cache reads preserve transport failure and retry frequency', () => {
   const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-  const statsPush = app.match(/window\.tokenMonitor\.onStatsPush\?\.\(\(payload\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
-
-  assert.match(statsPush, /if \(payload\.data\?\.reason !== 'local' && payload\.data\?\.reason !== 'presentation'\) \{\s*state\.streamConnected = true;\s*state\.streamFailure = null;\s*\}/);
+  const handler = app.match(/window\.tokenMonitor\.onStatsPush\?\.\(\(payload\) => \{[\s\S]*?\n\}\);/)[0];
+  const timer = app.slice(app.indexOf('function restartTimer()'), app.indexOf('\nfunction clamp('));
+  for (const mode of ['client', 'icloud']) {
+    let push; let interval;
+    const state = { streamConnected: false, streamFailure: { reason: 'network' }, settings: { hubMode: mode }, period: 'today' };
+    const context = { state, window: { tokenMonitor: { onStatsPush: fn => { push = fn; } } },
+      allTimeSessions: { invalidate() {}, attach: stats => stats }, sessionStatsForDisplay: stats => stats,
+      observeLiveTokenRate() {}, observeDisplayLiveTokenRates() {}, applyCodexActiveAccountFromStats() {},
+      fixedPeriodRangesApi: { isDerived: () => false }, statsRenderScheduler: { request() {} },
+      warmFixedPeriodHistory() {}, maybeUpdateBarsIcon() {}, refreshHubBuildStatus() {}, syncContentForm: null,
+      setInterval: (_fn, ms) => { interval = ms; return 1; }, clearInterval() {}, refreshStats() {}
+    };
+    require('node:vm').runInNewContext(timer + '\n' + handler, context);
+    for (const reason of ['local', 'presentation', 'read']) {
+      const stats = { marker: reason };
+      push({ event: 'stats', data: { reason, stats } });
+      assert.equal(state.stats, stats);
+      assert.equal(state.streamConnected, false, mode + ':' + reason);
+      assert.deepEqual(state.streamFailure, { reason: 'network' });
+      assert.equal(interval, 15000);
+    }
+    push({ event: 'stats', data: { reason: 'update', stats: {} } });
+    assert.equal(state.streamConnected, true);
+    assert.equal(state.streamFailure, null);
+    assert.equal(interval, 300000);
+  }
 });

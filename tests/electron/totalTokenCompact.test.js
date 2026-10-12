@@ -135,7 +135,7 @@ test('compact total stays visible through the count-up, with the font pre-locked
   // does not vanish, clip, or resize mid-animation in either direction.
   assert.match(app, /const animationFrom = numberAnimHandle \? numberAnimValue : state\.currentTotal;/);
   assert.match(app, /const widest = formatNumber\(nextTotal\)\.length >= formatNumber\(animationFrom\)\.length \? nextTotal : animationFrom;/);
-  assert.match(app, /els\.totalTokens\.textContent = formatNumber\(widest\);\s*updateTotalCompact\(nextTotal\);\s*animateTotalNumber\(els\.totalTokens, animationFrom, nextTotal, state\.periodMotionActive \? 800 : 1000\);/s);
+  assert.match(app, /if \(tokenNumberAnimationApi\.normalize\(state\.settings\?\.tokenNumberAnimation\) !== 'roll'\) \{\s*const widest =[^;]+;\s*els\.totalTokens\.textContent = formatNumber\(widest\);\s*updateTotalCompact\(nextTotal\);\s*\}\s*animateTotalNumber\(els\.totalTokens, animationFrom, nextTotal, state\.periodMotionActive \? 800 : 1000,\s*\{ synchronized: state\.periodMotionActive \}\);/s);
   // animateNumber must not reset the font, or the pre-locked size would be lost.
   const animateBody = app.slice(app.indexOf('function animateNumber('), app.indexOf('function rowWidth('));
   assert.doesNotMatch(animateBody, /style\.fontSize/);
@@ -154,6 +154,8 @@ test('unit changes made during the count-up are applied when the animation settl
   const compactRenders = [];
   let unitSystem = 'western';
   const context = {
+    tokenNumberAnimationApi: require('../../src/electron/tokenNumberAnimation'),
+    state: { settings: { tokenNumberAnimation: 'count' } },
     cancelAnimationFrame() {},
     requestAnimationFrame(callback) {
       frames.push(callback);

@@ -61,6 +61,50 @@ function codexHomeDir(home, options = {}) {
   return configured ? path.resolve(configured) : path.join(home, '.codex');
 }
 
+function preferredCodexSessionFile(file) {
+  const plain = String(file).replace(/\.jsonl\.zst$/, '.jsonl');
+  if (!plain.endsWith('.jsonl')) return '';
+  for (const candidate of [plain, `${plain}.zst`]) {
+    try {
+      const stat = candidate.endsWith('.zst') ? fs.lstatSync(candidate) : fs.statSync(candidate);
+      if (stat.isFile()) return candidate;
+    } catch (_) { /* Try the sibling. */ }
+  }
+  return '';
+}
+
+// Both spellings share the accounting key. Plain JSONL wins deterministically
+// across roots; within one spelling, live sessions precede archived sessions.
+function findCodexSessionFiles(codexHome, sessionIds) {
+  const wanted = new Set([...sessionIds].filter(isSafeSessionId));
+  const found = new Map();
+  const ranks = new Map();
+  let entriesLeft = 100_000;
+  function walk(dir, rootRank, depth = 0) {
+    if (depth > 32 || entriesLeft <= 0 || (found.size === wanted.size && [...ranks.values()].every(rank => rank === 0))) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    for (const entry of entries) {
+      if (--entriesLeft < 0) return;
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(file, rootRank, depth + 1);
+      else if (entry.isFile() && /\.jsonl(?:\.zst)?$/.test(entry.name)) {
+        const id = entry.name.replace(/\.jsonl(?:\.zst)?$/, '');
+        const rank = (entry.name.endsWith('.zst') ? 2 : 0) + rootRank;
+        if (wanted.has(id) && (!found.has(id) || rank < ranks.get(id))) {
+          found.set(id, file);
+          ranks.set(id, rank);
+        }
+      }
+    }
+  }
+  if (wanted.size) {
+    walk(path.join(codexHome, 'sessions'), 0);
+    walk(path.join(codexHome, 'archived_sessions'), 1);
+  }
+  return found;
+}
+
 function codexSessionFile(home, sessionId, options = {}) {
   if (!isSafeSessionId(sessionId)) return '';
   const match = String(sessionId).match(/^rollout-(\d{4})-(\d{2})-(\d{2})T/);
@@ -69,7 +113,16 @@ function codexSessionFile(home, sessionId, options = {}) {
   const sessionsRoot = path.join(codexHome, 'sessions');
   const filePath = path.join(sessionsRoot, match[1], match[2], match[3], `${sessionId}.jsonl`);
   if (!isPathInside(sessionsRoot, filePath)) return '';
-  try { return fs.statSync(filePath).isFile() ? filePath : ''; } catch (_) { return ''; }
+  const archivedRoot = path.join(codexHome, 'archived_sessions');
+  const archived = path.join(archivedRoot, match[1], match[2], match[3], `${sessionId}.jsonl`);
+  const flatArchived = path.join(archivedRoot, `${sessionId}.jsonl`);
+  for (const suffix of ['', '.zst']) for (const candidate of [filePath, archived, flatArchived]) {
+    try {
+      const stat = suffix ? fs.lstatSync(candidate + suffix) : fs.statSync(candidate);
+      if (stat.isFile()) return candidate + suffix;
+    } catch (_) { /* Try the next location. */ }
+  }
+  return '';
 }
 
 function resolveSessionFile(client, sessionId, home, options = {}) {
@@ -99,9 +152,9 @@ function resolveSessionFile(client, sessionId, home, options = {}) {
     const codexHome = options.codexHome || codexHomeDir(home, options);
     const direct = codexSessionFile(home, id, { codexHome });
     if (direct) return direct;
-    return findSessionFiles(path.join(codexHome, 'sessions'), [id]).get(id) || '';
+    return findCodexSessionFiles(codexHome, [id]).get(id) || '';
   }
   return '';
 }
 
-module.exports = { findSessionFiles, codexSessionFile, resolveSessionFile, isSafeSessionId };
+module.exports = { findSessionFiles, findCodexSessionFiles, preferredCodexSessionFile, codexSessionFile, resolveSessionFile, isSafeSessionId };

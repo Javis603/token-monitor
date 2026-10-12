@@ -10,6 +10,7 @@ const path = require('node:path');
 
 const {
   CURSOR_EXPLICIT_SYNC_TIMEOUT_MS,
+  CURSOR_BACKGROUND_SYNC_TIMEOUT_MS,
   canonicalCursorUserId,
   listAccounts,
   normalizeCursorSessionToken,
@@ -362,8 +363,33 @@ test('runCursorLogin throws on empty token', async () => {
   } finally { cleanup(); }
 });
 
-test('runCursorSync leaves headroom around Tokscale explicit sync timeout', () => {
-  assert.equal(CURSOR_EXPLICIT_SYNC_TIMEOUT_MS, 150_000);
+test('manual Cursor sync covers the upstream dynamic budget and preserves a custom budget', async () => {
+  const calls = [];
+  const runSubcommand = async (args, options) => {
+    calls.push({ args, timeoutMs: options.timeoutMs });
+    return JSON.stringify({ synced: true, rows: 1 });
+  };
+  await runCursorSync({ runSubcommand });
+  await runCursorSync({ runSubcommand, timeoutMs: 1234 });
+  assert.equal(CURSOR_EXPLICIT_SYNC_TIMEOUT_MS, 1_830_000);
+  assert.deepEqual(calls, [
+    { args: ['sync', '--json'], timeoutMs: 1_830_000 },
+    { args: ['sync', '--json'], timeoutMs: 1234 }
+  ]);
+});
+
+test('Cursor self-sync applies the explicit budget only to forced refresh and preserves overrides', async t => {
+  const auth = require('../../src/shared/providers/cursor/auth');
+  const { createCursorSelfSync } = require('../../src/shared/providers/cursor/selfSync');
+  const { createSelfSyncThrottle } = require('../../src/shared/selfSyncThrottle');
+  const calls = [];
+  t.mock.method(auth, 'runCursorSync', async options => calls.push(options.timeoutMs));
+  for (const options of [{}, { explicit: true }, { timeoutMs: 4321 }, { explicit: true, timeoutMs: 1234 }]) {
+    const sync = createCursorSelfSync({ selfSyncThrottle: createSelfSyncThrottle() });
+    await sync.maybeSyncCursor('cursor', undefined, options);
+  }
+  assert.equal(CURSOR_BACKGROUND_SYNC_TIMEOUT_MS, 150_000);
+  assert.deepEqual(calls, [150_000, 1_830_000, 4321, 1234]);
 });
 
 test('runCursorSync distinguishes no account from transient JSON failures', async () => {

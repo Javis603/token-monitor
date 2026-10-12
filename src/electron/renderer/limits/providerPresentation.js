@@ -268,13 +268,21 @@
       if (!groups.has(entry.groupLabel)) groups.set(entry.groupLabel, []);
       groups.get(entry.groupLabel).push(entry);
     }
+    const tightest = (entries) => entries.slice().sort((a, b) => {
+      const aRemaining = compactWindowRemaining(a.window);
+      const bRemaining = compactWindowRemaining(b.window);
+      if (aRemaining !== bRemaining) return aRemaining - bRemaining;
+      return a.index - b.index;
+    })[0] || null;
+    // Home filters hidden items before this pick. With one visible model
+    // group, its two periods can occupy both compact slots.
+    if (groups.size === 1) {
+      return ['session', 'weekly']
+        .map((kind) => tightest(entries.filter((entry) => normalizeId(entry.window?.kind) === kind)))
+        .filter(Boolean)
+        .map((entry) => entry.window);
+    }
     const selected = [...groups.values()].map((groupEntries, groupIndex) => {
-      const tightest = (entries) => entries.slice().sort((a, b) => {
-        const aRemaining = compactWindowRemaining(a.window);
-        const bRemaining = compactWindowRemaining(b.window);
-        if (aRemaining !== bRemaining) return aRemaining - bRemaining;
-        return a.index - b.index;
-      })[0] || null;
       const session = tightest(groupEntries.filter((entry) => normalizeId(entry.window?.kind) === 'session'));
       const weekly = tightest(groupEntries.filter((entry) => normalizeId(entry.window?.kind) === 'weekly'));
       const sessionRemaining = compactWindowRemaining(session?.window);
@@ -302,17 +310,19 @@
     }
     if (providerId(providerOrId) !== 'antigravity') return '';
     const labels = (visibleWindows || []).map((candidate) => antigravityQuotaWindow(candidate)?.groupLabel || '');
-    const currentLabel = antigravityQuotaWindow(window)?.groupLabel || '';
-    if (labels.length < 2 || !currentLabel || labels.some((label) => !label)) return '';
-    return new Set(labels).size === labels.length ? currentLabel : '';
+    const quota = antigravityQuotaWindow(window);
+    if (!labels.length || !quota || labels.some((label) => !label)) return '';
+    const groups = new Set(labels);
+    if (groups.size === 1 && groups.has(quota.groupLabel)) return `${quota.groupLabel} ${quota.windowLabel}`;
+    return groups.size === labels.length ? quota.groupLabel : '';
   }
 
   function limitProviderCompactWindowPeriodLabel(providerOrId, window, visibleWindows = []) {
-    if (!limitProviderCompactWindowLabel(providerOrId, window, visibleWindows)) return '';
-    const kind = normalizeId(window?.kind);
-    if (kind === 'session') return '5-hour';
-    if (kind === 'weekly') return 'Weekly';
-    return '';
+    const quota = antigravityQuotaWindow(window);
+    // Single-group labels already include the period, even without reset data.
+    return quota && limitProviderCompactWindowLabel(providerOrId, window, visibleWindows) === quota.groupLabel
+      ? quota.windowLabel
+      : '';
   }
 
   function limitResetRemainingMs(value, nowMs = Date.now(), resetNowGraceMs = 60 * 1000) {

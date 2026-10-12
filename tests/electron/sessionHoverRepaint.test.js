@@ -17,6 +17,83 @@ function functionSource(text, name) {
   return text.slice(start, end);
 }
 
+for (const reducedMotion of [false, true]) {
+  test(`group model tooltip holds stats repaint without marquee (reduced motion: ${reducedMotion})`, () => {
+    const app = source('app.js');
+    const run = { classes: new Set(['session-group-run']), parent: null };
+    const subtitle = {
+      classes: new Set(['detail-ex-sub']), parent: run, children: [],
+      clientWidth: reducedMotion ? 50 : 300, scrollLeft: 0,
+      get childNodes() { return this.children; },
+      get textContent() { return 'Subagent · Codex · 2 models'; },
+      append(...children) { this.children = children; },
+      closest: () => run,
+      classList: {
+        add: value => subtitle.classes.add(value), remove: value => subtitle.classes.delete(value),
+        contains: value => subtitle.classes.has(value),
+        toggle: (value, enabled) => enabled ? subtitle.classes.add(value) : subtitle.classes.delete(value)
+      },
+      addEventListener(type, handler) { this[type] = handler; },
+      removeAttribute(name) { delete this[name]; }
+    };
+    const model = { classes: new Set(['session-models', 'limit-detail-tooltip-wrap']),
+      parent: subtitle, hovered: false, focusWithin: false };
+    const elements = [run, subtitle, model];
+    const matchesCompound = (element, selector) => {
+      const [classes, ...pseudos] = selector.split(':');
+      return classes.split('.').filter(Boolean).every(value => element.classes.has(value))
+        && pseudos.every(value => value === 'hover' ? element.hovered : value === 'focus-within' && element.focusWithin);
+    };
+    const matchesSelector = (element, selector) => {
+      const compounds = selector.trim().split(/\s+/);
+      if (!matchesCompound(element, compounds.pop())) return false;
+      let ancestor = element.parent;
+      while (compounds.length) {
+        const compound = compounds.pop();
+        while (ancestor && !matchesCompound(ancestor, compound)) ancestor = ancestor.parent;
+        if (!ancestor) return false;
+        ancestor = ancestor.parent;
+      }
+      return true;
+    };
+    const document = {
+      querySelector: selectors => elements.find(element => selectors.split(',').some(selector => matchesSelector(element, selector))),
+      createElement: () => ({ style: {}, append() {}, getBoundingClientRect: () => ({ width: 200 }) })
+    };
+    const overflow = overflowTextApi.create({ document, prefersReducedMotion: () => reducedMotion,
+      window: { addEventListener() {}, requestAnimationFrame: () => 1 } });
+    overflow.bind(subtitle);
+    subtitle.mouseenter();
+    assert.equal(subtitle.classes.has('is-hover-reading'), false,
+      'a fitting subtitle or reduced motion leaves the tooltip without marquee protection');
+    const hold = Function('document', `${functionSource(app, 'sessionTooltipShouldHoldRender')}; return sessionTooltipShouldHoldRender;`)(document);
+    const start = app.indexOf("    if (state.openSession.kind === 'session-group') {");
+    const end = app.indexOf('    refreshSessionDetailHeading();', start);
+    const state = { openSession: { kind: 'session-group', summary: { key: 'group', value: 1 } } };
+    let painted = state.openSession.summary;
+    const repaint = Function('state', 'period', 'sessionRowsForPeriod', 'closeSessionDetail',
+      'sessionTooltipShouldHoldRender', 'renderSessionGroupDetail', app.slice(start, end));
+    const update = value => repaint(state, value, tokens => [{ key: 'group', value: tokens }],
+      () => assert.fail('the group still exists'), hold, request => { painted = request.summary; });
+    const original = painted;
+    model.hovered = true;
+    update(2);
+    update(3);
+    assert.strictEqual(painted, original, 'hover preserves the current nodes instead of replacing the tooltip');
+    assert.equal(state.openSession.summary.value, 3, 'the latest stats still reach the open group');
+    model.hovered = false;
+    update(4);
+    assert.equal(painted.value, 4, 'the next repaint after pointer leave displays current stats');
+    model.focusWithin = true;
+    update(5);
+    assert.equal(painted.value, 4, 'keyboard reading also holds the tooltip');
+    model.focusWithin = false;
+    update(6);
+    assert.equal(painted.value, 6, 'blur permits normal repaint again');
+    subtitle.mouseleave();
+  });
+}
+
 test('Home holds a real overflowing title and only flushes deferred stats on leave', () => {
   const app = source('app.js');
   const classes = new Set();
@@ -53,14 +130,14 @@ test('Home holds a real overflowing title and only flushes deferred stats on lea
     requestAnimationFrame: callback => frames.push(callback),
     document,
     window: {
-      TokenMonitorOverflowText: overflowTextApi, addEventListener() {},
+      TokenMonitorOverflowText: overflowTextApi, TokenMonitorEdgeDockPresentation: { recentSessionRows: () => [] }, addEventListener() {},
       requestAnimationFrame: callback => frames.push(callback),
       setTimeout: () => 1, clearTimeout() {}
     },
     els: { homePanel: {
       replaceChildren(module) { painted.push(module.revision); }, querySelector: () => null
     } },
-    hideHomeActivityTooltip() {}, homeModuleIds: () => ['session'],
+    hideHomeActivityTooltip() {}, homeModuleIds: () => ['session'], sessionPresentationOptions: () => ({}),
     renderHomeSessionModule: () => ({ revision: state.stats.revision }), scheduleHomeSessionRepaint() {}
   };
   const setup = app.slice(app.indexOf('const overflowText ='), app.indexOf('function bindHoverMarquee('));
