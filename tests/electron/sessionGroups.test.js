@@ -47,6 +47,8 @@ test('period switches keep the same group and return to Sessions when that group
     fixedPeriodRangesApi: { slotForSelection: value => value, normalizeMonthMode: () => 'month', supportsBreakdown: () => true },
     captureBreakdownMotion: noop, setPeriod: value => { state.period = value; return true; }, syncPeriodTabs: noop,
     setPeriodMenuOpen: noop, sessionRowsForPeriod: rowsForPeriod, render: () => { renders += 1; },
+    // The merged branch also refreshes the model-speed window on a period switch.
+    refreshModelSpeedRange: noop,
     periodBreakdownMotionDuration: () => 800, animateBreakdownFrom: noop });
   activate({ stopPropagation: noop });
   assert.equal(state.openSession.summary.key, 'session-group:cursor-grok-bot');

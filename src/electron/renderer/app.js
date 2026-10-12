@@ -4141,12 +4141,13 @@ function limitDetailTooltipShouldHoldRender() {
 }
 
 function sessionTooltipShouldHoldRender() {
-  // A tooltip is held while it is actually open (`:has(:popover-open)`) or still
-  // playing its exit transition (`is-closing`), not merely because the pointer or
-  // focus rests on the title: Escape can close a tooltip without moving either,
-  // and treating that stale engagement as "held" would freeze session updates.
-  // Upstream's session-group run surfaces keep their own hover/focus selectors.
-  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .home-session-meta .limit-detail-tooltip-wrap.is-closing, .row-context.limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .row-context.limit-detail-tooltip-wrap.is-closing, .row-label .limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .row-label .limit-detail-tooltip-wrap.is-closing, .session-group-run .is-hover-reading, .session-group-run:focus-within, .session-group-run .limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .session-group-run .limit-detail-tooltip-wrap.is-closing, .detail-ex-title.limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .detail-ex-title.limit-detail-tooltip-wrap.is-closing'));
+  // A detail tooltip is held while it is actually open (`:has(:popover-open)`) or
+  // still playing its exit transition (`is-closing`), not merely because the
+  // pointer or focus rests on its title: Escape can close a tooltip without
+  // moving either, and treating that stale engagement as "held" would freeze
+  // session updates. The session-group run surfaces keep upstream's own
+  // hover/focus selectors, which cover the run title's marquee reading.
+  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .home-session-meta .limit-detail-tooltip-wrap.is-closing, .row-context.limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .row-context.limit-detail-tooltip-wrap.is-closing, .row-label .limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .row-label .limit-detail-tooltip-wrap.is-closing, .session-group-run .is-hover-reading, .session-group-run:focus-within, .session-group-run .limit-detail-tooltip-wrap:hover, .session-group-run .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .detail-ex-title.limit-detail-tooltip-wrap.is-closing'));
 
 }
 

@@ -215,10 +215,14 @@ function headlineResizeHarness() {
   const calls = { fits: 0, compact: [], bubbleRefreshes: 0 };
   const context = {
     els: { totalTokens: total },
-    state: { currentTotal: 111 },
+    // This harness drives the digit-count path: the roll animation has its own
+    // coverage in tokenNumberAnimation.test.js, and its DOM-based roll needs a
+    // real document these bare nodes do not provide.
+    state: { currentTotal: 111, settings: { tokenNumberAnimation: 'count' } },
     performance: { now: () => 0 },
     prefersReducedMotion: () => false,
     formatNumber: value => String(Math.round(value)),
+    tokenNumberAnimationApi: require('../../src/electron/tokenNumberAnimation'),
     requestAnimationFrame(callback) {
       const id = ++nextFrame;
       frames.set(id, callback);

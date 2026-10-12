@@ -165,11 +165,14 @@ function renderStatusGroup(group, metric = 'used') {
   const shellSource = app.slice(app.indexOf('function homeModuleShell('), app.indexOf('function homeLimitRows('));
   const contextSource = app.slice(app.indexOf('function homeSessionContext('), app.indexOf('function stopHomeSessionRepaint('));
   const homeSource = app.slice(app.indexOf('function renderHomeSessionModule('), app.indexOf('function renderHomeDeviceModule()'));
+  // The merged Home preview sizes itself through the row budget; without the
+  // budget module loaded this is the real implementation's identity fallback.
+  const budgetSource = app.slice(app.indexOf('function homeListLimit('), app.indexOf('// [home-row-budget]'));
   const tooltip = { setDetailTooltip() {} };
   const home = Function('document', 'window', 'state', 'els', 'sessionTooltipShouldHoldRender',
     'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
     'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView',
-    `${shellSource}; ${contextSource}; ${homeSource}; return renderHomeSessionModule;`)(
+    `${shellSource}; ${contextSource}; ${budgetSource}; ${homeSource}; return renderHomeSessionModule;`)(
     document, { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
     state, { homePanel: { querySelector: () => null } }, () => false,
     () => {}, {}, translate, () => {}, () => '', {}, () => '', [], () => {}, String, () => '', rowApi, tooltip
@@ -281,6 +284,9 @@ test('Home keeps family membership below the title and routes mouse and keyboard
   const group = presentation.recentSessionRows(stats, Infinity, opts)[0];
   const shellSource = app.slice(app.indexOf('function homeModuleShell('), app.indexOf('function homeLimitRows('));
   const source = app.slice(app.indexOf('function renderHomeSessionModule('), app.indexOf('function renderHomeDeviceModule()'));
+  // The merged Home preview sizes itself through the row budget; without the
+  // budget module loaded this is the real implementation's identity fallback.
+  const budgetSource = app.slice(app.indexOf('function homeListLimit('), app.indexOf('// [home-row-budget]'));
   for (const keyboard of [false, true]) for (const periodMode of ['month', 'last30']) {
     const state = { stats, period: 'today', breakdown: 'home', openSession: null, settings: { periodMonthMode: periodMode } };
     const routes = [];
@@ -288,7 +294,7 @@ test('Home keeps family membership below the title and routes mouse and keyboard
     const renderHomeSessionModule = Function('document', 'window', 'state', 'els', 'sessionTooltipShouldHoldRender',
       'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
       'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView', 'homeSessionContext',
-      'sessionPresentationOptions', `${shellSource}; ${source}; return renderHomeSessionModule;`)(
+      'sessionPresentationOptions', `${shellSource}; ${budgetSource}; ${source}; return renderHomeSessionModule;`)(
       { createElement: tag => new Node(tag), createTextNode: text => new Node('text', '', text) },
       { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
       state, { homePanel: { querySelector: () => null } }, () => false,
