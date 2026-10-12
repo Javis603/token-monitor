@@ -21,6 +21,7 @@ const balanceDisplay = window.TokenMonitorLimitBalanceDisplay;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const limitPresentationApi = window.TokenMonitorLimitProviderPresentation;
+const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const limitWindowLabels = window.TokenMonitorLimitWindowLabels;
 const { mimoAccountGroups, mimoProductLabel } = limitWindowLabels;
 const limitWindowTextApi = window.TokenMonitorLimitWindowText;
@@ -579,7 +580,7 @@ function waitingRingStart(cellId, isWaiting) {
   return waitingRingStarts.get(cellId);
 }
 
-function ringNode(remainingPercent, color, mark, waitingStartedAt = null) {
+function ringNode(remainingPercent, color, mark, waitingStartedAt = null, options = {}) {
   const ring = el('div', 'edge-dock-ring');
   ring.style.setProperty('--ring-color', color);
   const svg = document.createElementNS(SVG_NS, 'svg');
@@ -618,7 +619,12 @@ function ringNode(remainingPercent, color, mark, waitingStartedAt = null) {
     const elapsed = Math.max(0, performance.now() - waitingStartedAt);
     waiting.style.animationDelay = `-${elapsed % WAITING_PULSE_MS}ms`;
   }
-  if (appearance().edgeDockRunningIndicatorEnabled === false) {
+  // `spinner` overrides the running-indicator preference for a ring that has a
+  // spinner of its own: the update ring's arc means "an upgrade is running", not
+  // "one of your tools is working", so it must not follow a switch about the
+  // second thing.
+  const wantsSpinner = options.spinner ?? appearance().edgeDockRunningIndicatorEnabled !== false;
+  if (!wantsSpinner) {
     ring.append(svg, mark, waiting);
     return ring;
   }
@@ -833,6 +839,107 @@ function statCellNode(cell) {
     : `${statLabel(cell.metric)} ${readout}`.trim();
   node.setAttribute('aria-label', spoken);
   return node;
+}
+
+// ---- App update ring -------------------------------------------------------
+
+const UPDATE_RING_COLOR = 'var(--success)';
+
+function updateCellPhase(cell) {
+  if (cell.downloaded || cell.starting) return 'downloaded';
+  return cell.downloading ? 'downloading' : 'available';
+}
+
+function updateRingPercent(cell) {
+  if (updateCellPhase(cell) === 'downloaded') return 100;
+  if (!cell.downloading) return null;
+  return cell.progress;
+}
+
+function updateMarkNode(cell) {
+  if (updateCellPhase(cell) !== 'downloaded') return markNode('token-monitor');
+  const mark = el('span', 'edge-dock-mark edge-dock-mark-update');
+  mark.setAttribute('aria-hidden', 'true');
+  return mark;
+}
+
+function updateValueText(cell) {
+  if (updateCellPhase(cell) === 'downloading') {
+    const percent = updateRingPercent(cell);
+    return percent === null ? '—' : `${Math.round(percent)}%`;
+  }
+  return cell.version || '--';
+}
+
+// Busy actions are refused by main; do not advertise another press.
+function updateActionHintKey(cell) {
+  if (cell.starting) return 'edgeDock.update.installing';
+  if (cell.downloading) return '';
+  if (cell.action === 'install') return 'edgeDock.update.restart';
+  if (cell.action === 'release') return 'edgeDock.update.release';
+  if (cell.action === 'download') return 'edgeDock.update.download';
+  return '';
+}
+
+function updateCellNode(cell) {
+  const node = el('div', 'edge-dock-cell edge-dock-cell-update');
+  node.dataset.phase = updateCellPhase(cell);
+  node.append(
+    ringNode(updateRingPercent(cell), UPDATE_RING_COLOR, updateMarkNode(cell), null, { spinner: true }),
+    el('span', 'edge-dock-value', updateValueText(cell))
+  );
+  const hint = updateActionHintKey(cell);
+  if (hint) node.title = t(hint);
+  node.setAttribute('aria-busy', String(cell.downloading === true));
+  const spoken = [t('edgeDock.update.title'), cell.version, hint ? t(hint) : ''].filter(Boolean);
+  node.setAttribute('aria-label', spoken.join(' '));
+  return node;
+}
+
+function updateCard(cell) {
+  const card = el('section', 'edge-dock-card edge-dock-card-update');
+  const head = el('header', 'edge-dock-card-head is-inline');
+  head.append(
+    el('span', 'edge-dock-stat-caption', t('edgeDock.update.title')),
+    el('span', 'edge-dock-card-status', cell.version)
+  );
+  card.append(head);
+
+  const groups = appUpdatePresentationApi.releaseNoteGroupsForLocale(cell.releaseNotes, state.locale);
+  if (groups.length) {
+    // Reuse the scroll container so commitCard preserves the reading position.
+    const notes = el('div', 'edge-dock-accounts edge-dock-update-notes');
+    for (const group of groups) {
+      notes.append(el('div', 'edge-dock-section-title', group.title));
+      const list = el('div', 'edge-dock-update-notes-list');
+      for (const item of group.items) list.append(el('div', 'edge-dock-update-note', item));
+      notes.append(list);
+    }
+    card.append(notes);
+  } else {
+    card.append(el('div', 'edge-dock-note', t('edgeDock.update.noNotes')));
+  }
+
+  const lines = [];
+  if (cell.currentVersion) lines.push(t('edgeDock.update.currentVersion', { version: cell.currentVersion }));
+  const hint = updateActionHintKey(cell);
+  if (hint) lines.push(t(hint));
+  const errorKey = cell.installErrorKey || cell.checkErrorKey;
+  if (errorKey) lines.push(t(errorKey));
+  card.append(el('div', 'edge-dock-note edge-dock-update-status', lines.join(' · ')));
+  return card;
+}
+
+function cellNode(cell) {
+  if (cell.kind === 'stat') return statCellNode(cell);
+  if (cell.kind === 'update') return updateCellNode(cell);
+  return providerCellNode(cell);
+}
+
+function cellCard(cell) {
+  if (cell.kind === 'stat') return statCard(cell);
+  if (cell.kind === 'update') return updateCard(cell);
+  return providerCard(cell);
 }
 
 // ---- Reset refill motion --------------------------------------------------
@@ -1100,7 +1207,7 @@ function renderRail(payload) {
   railNode.classList.toggle('is-compact', layout?.compact === true);
   const nodes = [];
   (payload.cells || []).forEach((cell, index) => {
-    const node = cell.kind === 'stat' ? statCellNode(cell) : providerCellNode(cell);
+    const node = cellNode(cell);
     node.dataset.index = String(index);
     // Cells are placed on the main process's layout so hover hit-testing and
     // what is painted can never drift apart.
@@ -1755,7 +1862,7 @@ function renderBubble(payload) {
     stagingLayer.replaceChildren();
     return;
   }
-  const card = cell.kind === 'stat' ? statCard(cell) : providerCard(cell);
+  const card = cellCard(cell);
   card.dataset.cellId = cell.id;
   if (payload.maxCardHeight) card.style.maxHeight = `${payload.maxCardHeight}px`;
   stagingLayer.replaceChildren(card);

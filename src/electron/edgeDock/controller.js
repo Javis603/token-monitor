@@ -82,6 +82,7 @@ function createEdgeDockController(deps) {
     applyShapeMask,
     primaryButtonDown = () => null,
     onToggleRateMode,
+    onUpdateCellAction,
     onSwitchCodexAccount,
     canRefreshLimits = () => false,
     onRefreshLimits,
@@ -1064,7 +1065,8 @@ function createEdgeDockController(deps) {
     // the always-visible mode, and its only trace was an unexplained bar. A
     // click on the peek handle reveals the rail; a click on a cell opens its
     // card at once; a click on the live-rate readout switches tok/s and TPM,
-    // the same toggle the widget's own rate readout offers.
+    // the same toggle the widget's own rate readout offers; and a click on the
+    // update ring starts the update it advertises.
     ipcMain.on('edgeDock:click', (event, payload) => {
       const surface = surfaceFor(event.sender);
       if (surface === 'peek') {
@@ -1079,6 +1081,17 @@ function createEdgeDockController(deps) {
       if (!Number.isInteger(index) || index < 0 || index >= cells.length) return;
       if (cells[index]?.kind === 'stat' && cells[index]?.metric === 'liveRate') {
         try { onToggleRateMode?.(); } catch (error) { logger(`[edge-dock] rate mode toggle failed: ${error.message}`); }
+        return;
+      }
+      // Updates act on click; hovering still opens the release notes.
+      if (cells[index]?.kind === 'update') {
+        try {
+          // Actions can reject asynchronously (including opening the browser).
+          const result = onUpdateCellAction?.(cells[index]);
+          if (result && typeof result.then === 'function') {
+            result.catch((error) => logger(`[edge-dock] update action failed: ${error.message}`));
+          }
+        } catch (error) { logger(`[edge-dock] update action failed: ${error.message}`); }
         return;
       }
       if (bubbleCell !== index) {

@@ -3,6 +3,7 @@ Renderer icon assets include local copies of open-source SVG icons.
 Sources:
 - Lucide Icons: https://github.com/lucide-icons/lucide
   - actions/arrow-left.svg: arrow-left
+  - actions/arrow-up.svg: arrow-up
   - actions/settings.svg: settings
   - actions/pencil-line.svg: pencil-line
   - actions/trash.svg: trash

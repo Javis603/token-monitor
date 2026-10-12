@@ -408,6 +408,7 @@ Object.assign(els, {
   edgeDockHapticInput: document.getElementById('edgeDockHapticInput'),
   edgeDockWarnColorsInput: document.getElementById('edgeDockWarnColorsInput'),
   edgeDockRunningIndicatorInput: document.getElementById('edgeDockRunningIndicatorInput'),
+  edgeDockUpdateRingInput: document.getElementById('edgeDockUpdateRingInput'),
   edgeDockMacBackdropRow: document.getElementById('edgeDockMacBackdropRow'),
   edgeDockMacBackdropInput: document.getElementById('edgeDockMacBackdropInput'),
   edgeDockComposer: document.getElementById('edgeDockComposer'),
@@ -12775,6 +12776,7 @@ function syncEdgeDockControls() {
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
   if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
   if (els.edgeDockRunningIndicatorInput) els.edgeDockRunningIndicatorInput.checked = state.settings?.edgeDockRunningIndicatorEnabled !== false;
+  if (els.edgeDockUpdateRingInput) els.edgeDockUpdateRingInput.checked = state.settings?.edgeDockUpdateRingEnabled !== false;
   if (els.edgeDockMacBackdropInput) {
     els.edgeDockMacBackdropInput.value = macBackdropApi.normalizeEdgeDockBackdropMode(state.settings?.edgeDockMacBackdrop);
   }
@@ -12836,6 +12838,9 @@ els.edgeDockWarnColorsInput?.addEventListener('change', () => {
 });
 els.edgeDockRunningIndicatorInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockRunningIndicatorEnabled: els.edgeDockRunningIndicatorInput.checked });
+});
+els.edgeDockUpdateRingInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockUpdateRingEnabled: els.edgeDockUpdateRingInput.checked });
 });
 els.edgeDockMacBackdropInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockMacBackdrop: macBackdropApi.normalizeEdgeDockBackdropMode(els.edgeDockMacBackdropInput.value) });

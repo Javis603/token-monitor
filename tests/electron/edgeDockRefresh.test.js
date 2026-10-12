@@ -7,6 +7,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 const { runManualDeviceRefresh } = require('../../src/electron/deviceRuntimeCoordinator');
 const { createStatsPublicationBatcher } = require('../../src/electron/statsPublisher');
+const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
 
 const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 const refreshSource = main.slice(main.indexOf('let manualStatsRefreshInFlight ='), main.indexOf('function managedPricingSidecarPath('));
@@ -59,6 +60,7 @@ function fixture() {
     codexPresentationPendingAccountId: '',
     codexPresentationActiveAccountId: '',
     edgeDockLiveRateSample: () => null,
+    deriveAppUpdateState: () => null,
     statsHistoryRevision: (stats) => stats?.historyRevision,
     injectLocalDeviceStatus: (stats) => stats,
     getSyncContentRuntime: () => ({ notifyStats() {} }),
@@ -363,3 +365,79 @@ for (const entry of ['App', 'Edge Dock']) {
     assert.equal(context.dockStats.remote, 'fresh');
   });
 }
+
+function updateDockFixture() {
+  const { context } = fixture();
+  let running = false;
+  let cells = [];
+  const update = {
+    showUpdateNotice: true, hasUpdate: true, installSupported: true,
+    latest: { version: '0.70.0' }, installPhase: 'idle', installProgress: null
+  };
+  const controller = {
+    isRunning: () => running,
+    setAppearance() {},
+    sync() { running = true; },
+    stop() { running = false; }
+  };
+  Object.assign(context, {
+    latestStats: null,
+    settings: { edgeDockEnabled: true, edgeDockItems: [{ type: 'stat', metric: 'today' }] },
+    edgeDockController: controller,
+    ensureEdgeDockController: () => controller,
+    canUseEdgeDock: (settings) => settings.edgeDockEnabled === true,
+    edgeDockAppearance: () => ({}),
+    edgeDockRateTimer: null,
+    scheduleEdgeDockSessionExpiry() {},
+    deriveAppUpdateState: () => update,
+    buildEdgeDockCells,
+    pushEdgeDockCells: (next) => { cells = next; },
+    electronPresentationStats: (stats) => {
+      assert.ok(stats, 'only real snapshots need stats presentation');
+      return stats;
+    }
+  });
+  const sync = main.slice(main.indexOf('function syncEdgeDock('), main.indexOf('function refreshLimitStatsPresentation('));
+  const push = main.slice(main.indexOf('function sendAppUpdatePush()'), main.indexOf('async function runAppUpdateCheck('));
+  vm.runInNewContext(sync + '\n' + push, context);
+  return { context, update, cells: () => cells };
+}
+
+test('update ring starts and follows updater pushes without a stats snapshot or main window', () => {
+  const { context, update, cells } = updateDockFixture();
+  context.syncEdgeDock();
+  assert.deepEqual(cells().map((cell) => cell.id), ['stat:today', 'update:app']);
+  assert.equal(cells()[0].available, false);
+  assert.equal(cells()[0].totalTokens, null, 'missing usage must not be invented as zero');
+  assert.equal(cells()[1].action, 'download');
+
+  Object.assign(update, { installPhase: 'downloading', installProgress: 42 });
+  context.sendAppUpdatePush();
+  assert.equal(cells()[1].progress, 42);
+  assert.equal(cells()[1].downloading, true);
+
+  Object.assign(update, { installPhase: 'downloaded', installProgress: 100, downloaded: true });
+  context.sendAppUpdatePush();
+  assert.equal(cells()[1].action, 'install');
+
+  update.showUpdateNotice = false;
+  context.sendAppUpdatePush();
+  assert.deepEqual(cells().map((cell) => cell.id), ['stat:today']);
+
+  update.showUpdateNotice = true;
+  context.latestStats = { periods: { today: { totalTokens: 123, costUsd: 0.5 } } };
+  context.repaintEdgeDockCells();
+  assert.equal(cells()[0].totalTokens, 123);
+  assert.equal(cells()[1].action, 'install');
+});
+
+test('update ring preference removes and restores the cell without a stats snapshot', () => {
+  const { context, cells } = updateDockFixture();
+  context.syncEdgeDock();
+  context.settings.edgeDockUpdateRingEnabled = false;
+  context.syncEdgeDock();
+  assert.deepEqual(cells().map((cell) => cell.id), ['stat:today']);
+  context.settings.edgeDockUpdateRingEnabled = true;
+  context.syncEdgeDock();
+  assert.equal(cells().at(-1).id, 'update:app');
+});

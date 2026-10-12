@@ -279,6 +279,24 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
 .edge-dock-value[data-severity="critical"] { color: var(--red); }
 .edge-dock-value[data-severity="unknown"] { color: var(--muted); }
 
+/* The update ring. Green throughout, from the first fill to the arrow: it is
+   the one reading on this rail that is not a quota, and a quota-coloured ring
+   beside provider rings would read as one more account to manage. The fill comes
+   from --ring-color (set to --success by the renderer), so the arc, the hover
+   glow and the flare all follow it without a rule each. */
+.edge-dock-cell-update[data-phase="downloading"] .edge-dock-ring-spinner {
+  opacity: 1;
+  animation: edge-dock-running-spin 1400ms linear infinite;
+}
+.edge-dock-cell-update[data-phase="downloading"] .edge-dock-ring-spinner circle { stroke: var(--success); }
+/* The hand-off mark: a mask rather than a character, because the arrow in the
+   font would sit on a different baseline than the app's own mark it replaces. */
+.edge-dock-mark-update {
+  background-color: var(--success);
+  -webkit-mask-image: url("../icons/actions/arrow-up.svg");
+  mask-image: url("../icons/actions/arrow-up.svg");
+}
+
 /* Usage readouts: a caption over the figure, sized to sit inside the rail's
    body rather than spanning it. */
 .edge-dock-cell-stat { gap: 3px; }
@@ -750,6 +768,18 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
 .edge-dock-note { font-size: 11px; color: var(--muted); }
 .edge-dock-note.is-warning { color: var(--orange); }
 
+/* Release notes on the update card: group titles in the section-title voice,
+   bullets at body size. The list is the scroll container's own child, so a long
+   release scrolls inside the card the way a long account list does. */
+.edge-dock-update-notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 1px 0 2px;
+}
+.edge-dock-update-note { color: var(--text); }
+.edge-dock-update-status { margin-top: 2px; }
+
 /* Token usage for the provider: two equal tiles, each a caption, the token
    figure and its cost, left-aligned on a shared baseline grid. */
 .edge-dock-usage {
@@ -909,6 +939,7 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
    changes. */
 .edge-dock-card { font-size: 11px; }
 .edge-dock-note { font-size: 10px; }
+.edge-dock-update-note { font-size: 11px; line-height: 1.35; }
 .edge-dock-section-title { font-size: 10px; }
 .edge-dock-session-name,
 .edge-dock-session-tokens { font-size: 11px; }

@@ -185,12 +185,15 @@ function createFixture(options = {}) {
       settings.edgeDockSide = placement.side;
       settings.edgeDockOffset = placement.offset;
       settings.edgeDockDisplayId = placement.displayId;
-    }
+    },
+    onUpdateCellAction: options.onUpdateCellAction,
+    logger: options.logger
   });
   controller.setCells([
     { id: 'claude', kind: 'provider', label: 'Claude' },
     { id: 'codex', kind: 'provider', label: 'Codex', remainingPercent: 70 },
-    { id: 'cursor', kind: 'provider', label: 'Cursor' }
+    { id: 'cursor', kind: 'provider', label: 'Cursor' },
+    ...(options.cells || [])
   ]);
   controller.sync();
   for (const win of FakeBrowserWindow.instances) win.webContents.emit('did-finish-load');
@@ -324,6 +327,38 @@ test('Windows resume leaves the painted refresh button above the rail shoulder',
   fixture.powerMonitor.emit('resume');
   assert.equal(FakeBrowserWindow.zOrder.at(-1), peek);
   assert.equal(FakeBrowserWindow.atPoint({ x: peek.bounds.x + peek.bounds.width / 2, y: peek.bounds.y + peek.bounds.height / 2 }), peek);
+});
+
+test('a press on the update ring runs the action instead of opening a card, and its failure is not an unhandled rejection', async (t) => {
+  const pressed = [];
+  const logged = [];
+  const fixture = createFixture({
+    settings: { edgeDockMode: 'always' },
+    cells: [{ id: 'update:app', kind: 'update', action: 'install' }],
+    logger: (message) => logged.push(message),
+    onUpdateCellAction: (cell) => {
+      pressed.push(cell.id);
+      // A rejected action is the real shape of every branch here: a download, an
+      // install, a browser that will not start.
+      return Promise.reject(new Error('no browser'));
+    }
+  });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 3 });
+  await Promise.resolve();
+  assert.deepEqual(pressed, ['update:app']);
+  // The bubble window exists from startup, so what matters is what it was told to
+  // draw: nothing, because the ring's press is an action rather than a card.
+  assert.equal(sentPayload(fixture.windowFor('bubble'), 'bubble')?.cell ?? null, null);
+  assert.ok(logged.some((message) => message.includes('no browser')), 'a failed action is reported, not dropped');
+
+  // A provider cell beside it still opens its card, so the new branch is scoped
+  // to the update ring rather than replacing the old behaviour.
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+  const bubble = fixture.windowFor('bubble');
+  assert.ok(bubble);
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 180 });
 });
 
 test('macOS does not install Windows resume recovery', (t) => {

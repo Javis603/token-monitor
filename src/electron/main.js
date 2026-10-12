@@ -603,6 +603,7 @@ function defaultSettings() {
     edgeDockEnabled: false,
     edgeDockRefreshEnabled: false,
     edgeDockRunningIndicatorEnabled: true,
+    edgeDockUpdateRingEnabled: true,
     edgeDockMode: 'autoHide',
     edgeDockHaptic: true,
     edgeDockWarnColors: false,
@@ -2615,6 +2616,7 @@ function readSettings() {
     merged.edgeDockEnabled = parseBoolean(merged.edgeDockEnabled, false);
     merged.edgeDockRefreshEnabled = parseBoolean(merged.edgeDockRefreshEnabled, false);
     merged.edgeDockRunningIndicatorEnabled = parseBoolean(merged.edgeDockRunningIndicatorEnabled, true);
+    merged.edgeDockUpdateRingEnabled = parseBoolean(merged.edgeDockUpdateRingEnabled, true);
     merged.edgeDockSide = normalizeEdgeDockSide(merged.edgeDockSide);
     merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
     merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
@@ -5507,7 +5509,8 @@ function edgeDockStats() {
 
 function repaintEdgeDockCells() {
   const stats = edgeDockStats();
-  if (stats) updateEdgeDockCells(electronPresentationStats(stats));
+  // Update notices do not depend on a successful usage snapshot.
+  updateEdgeDockCells(stats ? electronPresentationStats(stats) : null);
 }
 
 function edgeDockDerivedSelections() {
@@ -5620,12 +5623,16 @@ function edgeDockCellsFor(visibleStats) {
     limitProviders: settings?.limitProviders,
     limitProviderOrder: settings?.limitProviderOrder,
     liveRate: edgeDockLiveRateSample(visibleStats),
-    tokenRateMode: settings?.tokenRateMode
+    tokenRateMode: settings?.tokenRateMode,
+    // Hiding the ring does not disable the updater.
+    appUpdate: settings?.edgeDockUpdateRingEnabled === false
+      ? null
+      : deriveAppUpdateState()
   });
 }
 
 function updateEdgeDockCells(visibleStats) {
-  if (!edgeDockController?.isRunning() || !visibleStats) return;
+  if (!edgeDockController?.isRunning()) return;
   const cells = edgeDockCellsFor(visibleStats);
   pushEdgeDockCells(cells);
 }
@@ -5737,6 +5744,14 @@ function ensureEdgeDockController() {
       saveSettings();
       pushSettingsToRenderer();
     },
+    onUpdateCellAction: (cell) => {
+      if (cell?.action === 'install') return installDownloadedAppUpdate();
+      if (cell?.action === 'download') return downloadAndPrepareAppUpdate();
+      if (cell?.action === 'release' && cell.htmlUrl && isAllowedExternalUrl(cell.htmlUrl)) {
+        return shell.openExternal(cell.htmlUrl);
+      }
+      return null;
+    },
     onPlacementChange: ({ side, offset, displayId }) => {
       settings.edgeDockSide = normalizeEdgeDockSide(side);
       settings.edgeDockOffset = normalizeEdgeDockOffset(offset);
@@ -5765,7 +5780,7 @@ function syncEdgeDock(rendererSettings) {
   // from these cells too: a settings change replaces what is on screen just as a
   // push does, and skipping the reschedule here left the rail on a stale reading.
   const stats = edgeDockStats();
-  if (stats) pushEdgeDockCells(edgeDockCellsFor(electronPresentationStats(stats)));
+  pushEdgeDockCells(edgeDockCellsFor(stats ? electronPresentationStats(stats) : null));
   controller.sync();
   // Now that the controller is running (sync() starts it when enabled), arm the
   // timer against the cells that were just handed over.
@@ -6674,6 +6689,7 @@ function restoreDismissedAppUpdate(version) {
 }
 
 function sendAppUpdatePush() {
+  repaintEdgeDockCells();
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send('appUpdate:push', deriveAppUpdateState());
 }
@@ -6882,6 +6898,8 @@ async function installDownloadedAppUpdate() {
     // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
     // (per-user install needs no elevation); isForceRunAfter relaunches the app.
     autoUpdater.quitAndInstall(true, true);
+    // The dock cannot read this return value; publish the install hand-off.
+    sendAppUpdatePush();
   } catch (error) {
     // The abort above ended the attempt this call had just made, so unlike the
     // updater's own error handler there is nothing else this failure could belong
@@ -7580,6 +7598,7 @@ app.whenReady().then(() => {
       edgeDockEnabled: parseBoolean(patch.edgeDockEnabled ?? settings.edgeDockEnabled, false),
       edgeDockRefreshEnabled: parseBoolean(patch.edgeDockRefreshEnabled ?? settings.edgeDockRefreshEnabled, false),
       edgeDockRunningIndicatorEnabled: parseBoolean(patch.edgeDockRunningIndicatorEnabled ?? settings.edgeDockRunningIndicatorEnabled, true),
+      edgeDockUpdateRingEnabled: parseBoolean(patch.edgeDockUpdateRingEnabled ?? settings.edgeDockUpdateRingEnabled, true),
       edgeDockSide: normalizeEdgeDockSide(patch.edgeDockSide ?? settings.edgeDockSide),
       edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
       edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),
