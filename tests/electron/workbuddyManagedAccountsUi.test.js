@@ -9,6 +9,7 @@ const accountIdentityApi = require('../../src/electron/renderer/accountIdentity'
 const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
 const presentation = require('../../src/electron/renderer/limits/providerPresentation');
 const subscriptionApi = require('../../src/shared/subscriptionDisplay');
+const { createStatsRenderScheduler } = require('../../src/electron/renderer/statsRenderScheduler');
 const { MESSAGES } = require('../../src/electron/renderer/i18n');
 const renderer = path.join(__dirname, '../../src/electron/renderer');
 const app = fs.readFileSync(path.join(renderer, 'app.js'), 'utf8');
@@ -65,6 +66,67 @@ function settingsHarness(api = {}, providers = []) {
 }
 
 const account = { id: 'managed-cn', realm: 'cn', accountKey: 'sha256:primary', accountName: 'Personal', accountEmail: 'member@example.com', enabled: true };
+
+test('widget and Dock load the shared WorkBuddy identity rule before presentation', () => {
+  for (const file of ['index.html', 'edgeDock/index.html']) {
+    const html = fs.readFileSync(path.join(renderer, file), 'utf8');
+    const identity = [...html.matchAll(/<script src="([^"]*providers\/workbuddy\/identity\.js)"><\/script>/g)][0];
+    assert.ok(identity, file);
+    assert.ok(identity.index < html.indexOf('limits/providerPresentation.js'), file);
+    const context = vm.createContext({ window: {} });
+    vm.runInContext(fs.readFileSync(path.resolve(path.dirname(path.join(renderer, file)), identity[1]), 'utf8'), context);
+    for (const key of [
+      'sha256:6ff2121c4f5c0196427ef836a66871994d1208557ff71d282c5ada1964378185',
+      'sha256:89611f6e433217c45827d1bc99bcabe93a3dc58ff826efd996601ca74349348b'
+    ]) {
+      const row = { provider: 'workbuddy', accountKey: key, status: 'notConfigured' };
+      assert.equal(context.window.TokenMonitorWorkbuddyIdentity.isWorkbuddyPlaceholder(row), presentation.isWorkbuddyPlaceholder(row));
+    }
+  }
+});
+
+test('visible Settings follows quota pushes and defers hidden updates without polling', () => {
+  const h = settingsHarness();
+  h.state.settings.workbuddyManagedAccounts = [account];
+  h.state.settings.deviceId = 'local';
+  h.state.stats = { limits: { providers: [] }, devices: [] };
+  for (const name of ['renderConnectionStatus', 'render', 'renderCodexAccounts', 'renderMimoStatus',
+    'renderSettingsSummaries', 'renderLimitProviderCheckboxes', 'renderToolPreferences', 'renderWslPanel',
+    'updateOpenRouterProfilesStatus', 'updateThirdPartyProfilesStatus', 'renderExternalProviderStatus',
+    'renderCopilotStatus', 'signalContentReady']) h.context[name] = () => {};
+  let settingsVisible = true, hidden = false;
+  h.context.visibleStatsSurface = () => hidden ? null : 'main';
+  h.context.isSettingsSurfaceVisible = () => settingsVisible;
+  const localStart = app.indexOf('function localDeviceLimitsProviders()');
+  vm.runInContext(app.slice(localStart, app.indexOf('function workbuddyAccountError(', localStart)), h.context);
+  const statsStart = app.indexOf('function renderStatsUpdate()');
+  vm.runInContext(app.slice(statsStart, app.indexOf('const statsRenderScheduler =', statsStart)), h.context);
+  const scheduler = createStatsRenderScheduler({ isHidden: () => hidden, render: () => h.run('renderStatsUpdate()') });
+  const label = () => h.nodes.workbuddyAccountList.children[0].children[2].children[0].textContent;
+  const push = (status) => {
+    h.state.stats = { devices: [{ deviceId: 'local', limits: { providers: [{
+      provider: 'workbuddy', accountKey: account.accountKey, status, windows: []
+    }] } }] };
+    scheduler.request();
+  };
+  h.run('renderWorkbuddyStatus()');
+  assert.equal(label(), MESSAGES.en['settings.workbuddy.notChecked']);
+  push('ok');
+  assert.equal(label(), 'Live');
+  push('unauthorized');
+  assert.equal(label(), 'Sign in again');
+  settingsVisible = false;
+  push('ok');
+  assert.equal(label(), 'Sign in again', 'closed Settings does not redraw account controls');
+  settingsVisible = true;
+  hidden = true;
+  push('ok');
+  assert.equal(label(), 'Sign in again', 'hidden pushes are coalesced');
+  hidden = false;
+  scheduler.flush();
+  assert.equal(label(), 'Live');
+  assert.deepEqual(h.refreshes, [], 'status rendering requests no extra stats or account polling');
+});
 
 test('WorkBuddy preload exposes dedicated IPC and rejects membership through generic settings', async () => {
   let bridge;

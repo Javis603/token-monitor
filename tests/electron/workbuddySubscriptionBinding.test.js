@@ -12,6 +12,7 @@ const accountIdentityApi = require('../../src/electron/renderer/accountIdentity'
 const subscriptionApi = require('../../src/shared/subscriptionDisplay');
 const limitProviderPresentationApi = require('../../src/electron/renderer/limits/providerPresentation');
 const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
+const { fetchClineLimits, CLINE_API_BASE, USAGE_LIMITS_PATH, USERS_ME_PATH } = require('../../src/shared/providers/cline/limits');
 const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
 
 function functionSource(name) {
@@ -50,6 +51,35 @@ function harness(live, saved, managed = []) {
 }
 
 const saved = { id: 'saved-sub', provider: 'workbuddy', kind: 'subscription', binding: { accountKey: 'missing-key', profileName: 'Saved C' }, planName: 'Old plan', amountMinor: 1000, currency: 'USD', interval: 'month', intervalCount: 1, startDate: '2026-01-01', autoRenew: true };
+
+test('a healthy anonymous Cline reading remains selectable when its profile read fails', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-picker-cline-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(directory, 'settings'));
+  fs.writeFileSync(path.join(directory, 'settings/providers.json'), JSON.stringify({ providers: {
+    cline: { settings: { auth: { accessToken: 'fixture-old-signin' } } }
+  } }));
+  const calls = [];
+  const provider = await fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: directory },
+    fetch: async (url) => {
+      calls.push(url);
+      const usage = url === `${CLINE_API_BASE}${USAGE_LIMITS_PATH}`;
+      return { ok: usage, status: usage ? 200 : 503, headers: { get: () => null },
+        json: async () => usage ? { success: true, data: { limits: [{ type: 'weekly', percentUsed: 20 }] } } : {} };
+    }
+  });
+  assert.deepEqual(calls, [`${CLINE_API_BASE}${USAGE_LIMITS_PATH}`, `${CLINE_API_BASE}${USERS_ME_PATH}`]);
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.accountKey, '');
+  assert.equal(provider.accountEmail, '');
+  const h = harness([provider], []);
+  assert.equal(h.run('subscriptionAccountChoices().length'), 1);
+  assert.equal(h.run('subscriptionAccountChoices()[0].provider.provider'), 'cline');
+  h.els.subscriptionProviderInput.value = 'cline';
+  h.run('renderSubscriptionPickers()');
+  assert.equal(h.els.subscriptionAccountInput.options.length, 1);
+});
 
 test('editing and saving a saved-only binding retains its exact account while siblings are live', async () => {
   const live = ['a', 'b'].map((key) => ({ provider: 'workbuddy', accountKey: 'live-' + key, accountName: 'Same nickname', status: 'ok', windows: [] }));

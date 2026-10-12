@@ -1088,6 +1088,28 @@ test('Muse rows fold Tokscale disjoint reasoning into output and totals', () => 
   assert.equal(session.reasoningTokens, 278);
 });
 
+test('Hermes disjoint reasoning closes the public token buckets without changing cost', () => {
+  const row = {
+    client: 'hermes', sessionId: 'hermes-contract', model: 'claude-sonnet-4-5',
+    input: 1000, output: 250, cacheRead: 200, cacheWrite: 50, reasoning: 150,
+    messageCount: 1, cost: 1.25
+  };
+  for (const entry of [row, { ...row, totalTokens: 1650 }]) {
+    const period = extractUsageFromTokscale({ entries: [entry] });
+    assert.equal(period.totalTokens, 1650);
+    assert.equal(period.clients.hermes, 1650);
+    assert.equal(period.clientOutputs.hermes, 400);
+    assert.equal(period.costUsd, 1.25);
+    const session = period.sessions['hermes:hermes-contract'];
+    assert.equal(session.totalTokens, 1650);
+    assert.equal(session.outputTokens, 400);
+    assert.equal(session.reasoningTokens, 150);
+    assert.equal(session.costUsd, 1.25);
+    assert.equal(session.inputTokens + session.outputTokens + session.cacheReadTokens + session.cacheWriteTokens, session.totalTokens);
+    assert.deepEqual(normalizePeriod(period), period);
+  }
+});
+
 test('fx scan rows and the display name share the tracked client id', () => {
   assert.equal(normalizeClientName('fx'), 'fx');
   assert.equal(normalizeClientName('Fx'), 'fx');

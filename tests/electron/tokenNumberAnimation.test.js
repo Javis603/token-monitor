@@ -254,6 +254,66 @@ test('incoming digits keep a small final movement after becoming legible', () =>
   settle();
 });
 
+test('sparse envelopes stay close to the original spring, crossfade and blur at intermediate times', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/tokenNumberAnimation.js'), 'utf8');
+  const context = { module: { exports: {} } };
+  vm.runInNewContext(source.replace('return { normalize, beginRoll, capture, duration, layoutDuration };',
+    'return { glyphFrames };'), context);
+  const spring = (seconds, damping, period) => {
+    const frequency = 2 * Math.PI / period;
+    if (damping === 1) return 1 - (1 + frequency * seconds) * Math.exp(-frequency * seconds);
+    const damped = frequency * Math.sqrt(1 - damping ** 2);
+    return 1 - Math.exp(-damping * frequency * seconds)
+      * (Math.cos(damped * seconds) + damping * frequency / damped * Math.sin(damped * seconds));
+  };
+  const values = frame => [
+    ...frame.transform.match(/translateY\(([^)]+)em\) scale\(([^)]+)\)/).slice(1).map(Number),
+    frame.opacity,
+    ...['px', 'em'].map(unit => Array.from(frame.filter.matchAll(/blur\(([\d.]+)(px|em)\)/g))
+      .filter(match => match[2] === unit).reduce((sum, match) => sum + Number(match[1]), 0))
+  ];
+  for (const age of [0, 0.05, 0.1, 0.2, 0.4, 0.6, 0.649]) {
+    for (const outgoing of [false, true]) {
+      if (!outgoing && age) continue;
+      const frames = context.module.exports.glyphFrames({ age, outgoing, numeric: true, direction: 1,
+        ink: 0.72, opacity: 0.7, filter: 'blur(2px)' });
+      assert.ok(frames.length < 49);
+      assert.equal(frames[0].offset, 0);
+      assert.equal(frames.at(-1).offset, 1);
+      const body0 = spring(age, 1, 0.278);
+      const position0 = spring(age, 0.55, 0.353);
+      const smear0 = Math.min(0.999999, spring(age, 1, 0.22));
+      // Compare to each knot of the previously shipped 49-point envelope.
+      // Both curves are linear between retained knots, so these include the
+      // maximum differences, including the short departure's first blur knot.
+      for (let index = 0; index <= 48; index++) {
+        const offset = index / 48;
+        const seconds = age + offset * (0.65 - age);
+        const position = index === 48 ? 1 : spring(seconds, 0.55, 0.353);
+        const body = index === 48 ? 1 : spring(seconds, 1, 0.278);
+        const blur = index === 48 ? 1 : Math.min(1, spring(seconds, 0.91, 0.398));
+        const smear = index === 48 ? 1 : spring(seconds, 1, 0.22);
+        const progress = index === 0 ? 0 : Math.max(0, Math.min(1, (smear - smear0) / (1 - smear0)));
+        const expected = outgoing ? [-0.4275 * (position - position0),
+          (1 - 0.6015625 * body) / (1 - 0.6015625 * body0), 0.7 * (1 - body) / (1 - body0),
+          2 * (1 - progress), 0.1152 * progress]
+          : [0.4275 * (1 - position), 0.3984375 + 0.6015625 * body, body, 0, 0.1152 * (1 - blur)];
+        const end = frames.findIndex(frame => frame.offset >= offset);
+        const left = frames[Math.max(0, end - 1)];
+        const right = frames[end];
+        const fraction = left === right ? 0 : (offset - left.offset) / (right.offset - left.offset);
+        const before = values(left);
+        const after = values(right);
+        for (let channel = 0; channel < expected.length; channel++) {
+          const error = Math.abs(before[channel] + fraction * (after[channel] - before[channel]) - expected[channel]);
+          assert.ok(error <= [0.00086, 0.00121, 0.002, 0.00401, 0.000231][channel],
+            `age ${age}, knot ${index}, channel ${channel}: ${error}`);
+        }
+      }
+    }
+  }
+});
+
 test('period bars use the layout duration while count mode retains its existing timing', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const start = source.indexOf('function periodBreakdownMotionDuration(');

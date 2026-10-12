@@ -5,6 +5,7 @@
 
 const { staleAfterMsForSyncUpload } = require('../syncUploadInterval');
 const { LIMIT_PROVIDER_IDS, VALID_LIMIT_WINDOW_METRICS } = require('./providers');
+const { isWorkbuddyPlaceholder } = require('../providers/workbuddy/identity');
 
 const DEFAULT_LIMITS_REFRESH_MS = 5 * 60 * 1000;
 const VALID_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
@@ -614,7 +615,8 @@ function providerAggregateKey(provider) {
 }
 
 function isConfiguredProvider(provider) {
-  return Boolean(provider.accountKey && provider.status !== 'notConfigured' && provider.status !== 'disabled');
+  return Boolean(provider.accountKey && provider.status !== 'notConfigured' && provider.status !== 'disabled'
+    && !isWorkbuddyPlaceholder(provider));
 }
 
 function providerCollapseKey(provider) {
@@ -1005,7 +1007,8 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   // Map.set() would arbitrarily overwrite the fresh one with the stale one.
   const byProvider = new Map();
   for (const candidate of byKey.values()) {
-    const knownWorkbuddyAccount = candidate.provider === 'workbuddy' && candidate.accountKey;
+    const knownWorkbuddyAccount = candidate.provider === 'workbuddy' && candidate.accountKey
+      && !isWorkbuddyPlaceholder(candidate);
     const hasFreshObservation = providersWithFreshObservations.has(candidate.provider);
     // Fresh siblings cannot establish freshness for a different account. The
     // first pass already chooses the best observation of each exact identity.

@@ -7,11 +7,15 @@
   const limitWindowLabelsApi = typeof module === 'object' && module.exports
     ? require('../../../shared/limits/windowLabels')
     : root?.TokenMonitorLimitWindowLabels;
-  const api = factory(accountIdentityApi, limitWindowLabelsApi || {});
+  const workbuddyIdentityApi = typeof module === 'object' && module.exports
+    ? require('../../../shared/providers/workbuddy/identity')
+    : root?.TokenMonitorWorkbuddyIdentity;
+  const api = factory(accountIdentityApi, limitWindowLabelsApi || {}, workbuddyIdentityApi);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorLimitProviderPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi(accountIdentityApi, limitWindowLabelsApi) {
+})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi(accountIdentityApi, limitWindowLabelsApi, workbuddyIdentityApi) {
   const { isMimoMembershipProduct } = limitWindowLabelsApi;
+  const { isWorkbuddyPlaceholder } = workbuddyIdentityApi;
   const SOURCE_LABELS = {
     oauth: 'OAuth',
     cli: 'CLI',
@@ -614,19 +618,6 @@
   // A total describes the entire group, never just the successful subset. Compare
   // every non-measurement field too: currency, pool, period and reset boundaries
   // must describe the same kind of finite entitlement before addition is useful.
-  // Legacy discovery hashes the fixed local-app sentinel when it has neither
-  // a UID nor a token. Keep those wire keys compatible, but do not mistake them
-  // for a verified identity in the subscription picker. Saved bindings and
-  // managed metadata are added independently after this filter.
-  function isWorkbuddyPlaceholder(provider) {
-    if (provider?.provider !== 'workbuddy' || provider.status === 'ok'
-      || provider.accountName || provider.accountEmail || provider.email) return false;
-    return [
-      'sha256:6ff2121c4f5c0196427ef836a66871994d1208557ff71d282c5ada1964378185',
-      'sha256:89611f6e433217c45827d1bc99bcabe93a3dc58ff826efd996601ca74349348b'
-    ].includes(provider.accountKey);
-  }
-
   function workbuddyCreditTotals(providers) {
     if (!Array.isArray(providers) || providers.length < 2) return null;
     const keys = providers.map((provider) => String(provider?.accountKey || '').trim());
