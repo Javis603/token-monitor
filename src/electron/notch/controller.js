@@ -421,7 +421,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     let current = layout();
     if (!current) return;
     if (refreshFullScreen(now, current.display)) {
-      if (fullScreen) { refreshEpoch++; expanded = false; enterAt = leaveAt = null; hideDetail(); }
+      if (fullScreen) { setExpanded(false); enterAt = leaveAt = null; hideDetail(); }
       refreshLayout(); visibility();
       current = layout();
     }

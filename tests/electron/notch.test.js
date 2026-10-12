@@ -1985,3 +1985,41 @@ test('following the live rate tray preset preserves its app icon and reading', (
   assert.equal(notchItems[1].text, '200 tok/s');
   assert.equal(notchItems[1].available, true);
 });
+
+
+test('entering full-screen collapses an open entry even when no summary changes its bounds', (t) => {
+  for (const shape of ['notch', 'pill']) {
+    for (const summaryEnabled of [true, false]) {
+      let fullScreen = false;
+      const f = fixture(t, { notchShape: shape, notchSummaryEnabled: summaryEnabled }, {
+        reducedMotion: false, isFullScreen: () => fullScreen
+      });
+      f.controller.setData(buildNotchData({ periods: { today: { sessions: {} } } }, [], f.preferences));
+      const win = f.windows[0];
+      const now = Date.now() + 1000;
+      const geometry = last(win).geometry;
+      f.screen.point = { x: geometry.centerX, y: geometry.y + 1 };
+      f.controller.poll(now);
+      f.controller.poll(now + EDGE_DOCK_TIMING.revealDelayMs);
+      const opened = win.messages.filter(message => message.channel === 'topNotch:animate').at(-1).payload;
+      ipcFrame(opened);
+      assert.equal(last(win).motion.progress, 1);
+      f.screen.point = { x: 20, y: 500 };
+      fullScreen = true;
+      f.controller.poll(now + 1000);
+      const collapsed = win.messages.filter(message => message.channel === 'topNotch:animate').at(-1).payload;
+      assert.notEqual(collapsed.id, opened.id, 'full-screen transition starts the existing collapse animation');
+      ipcFrame(collapsed);
+      assert.equal(last(win).expanded, false);
+      assert.equal(last(win).motion.progress, 0);
+      assert.equal(last(win).motion.bodyHeight, 0);
+      assert.equal(win.opacity, shape === 'pill' ? 0 : 1);
+      f.controller.poll(now + 1500);
+      assert.equal(last(win).motion.progress, 0);
+      function ipcFrame(animation) {
+        f.ipcMain.emit('topNotch:frame', { sender: win.webContents }, { id: animation.id, elapsed: animation.duration });
+      }
+    }
+  }
+});
+
