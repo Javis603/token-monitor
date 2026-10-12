@@ -13,6 +13,12 @@ const { createEdgeDockController } = require('../../src/electron/edgeDock/contro
 const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
 const { RUNNING_WINDOW_MS } = require('../../src/shared/sessionLive');
 const trayLayout = require('../../src/shared/trayLayout');
+const { parseBoolean } = require('../../src/shared/limits/collector');
+
+const mainSource = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+const configuredDockItemsSource = mainSource.slice(mainSource.indexOf('function configuredDockItemLists('), mainSource.indexOf('function edgeDockShowsLiveRate('));
+const dockForecastSource = configuredDockItemsSource
+  + mainSource.slice(mainSource.indexOf('const EDGE_DOCK_FORECAST_REFRESH_MS'), mainSource.indexOf('function edgeDockCellsFor('));
 
 const display = { id: 1, scaleFactor: 2, bounds: { x: 0, y: 0, width: 1470, height: 956 }, workArea: { x: 0, y: 33, width: 1470, height: 923 } };
 const native = { displayId: 1, frame: { origin: { x: 0, y: 0 }, size: { width: 1470, height: 956 } }, safeTop: 32,
@@ -71,6 +77,19 @@ function fixture(t, settings = {}, options = {}) {
   return { controller, windows, deps, ipcMain, screen, preferences };
 }
 function last(win) { return win.messages.filter((message) => message.channel === 'topNotch:render').at(-1)?.payload; }
+function wiredNotchOptions(overrides = {}) {
+  let options;
+  const source = mainSource.slice(mainSource.indexOf('function ensureNotchController('), mainSource.indexOf('function syncNotch('));
+  const ensure = vm.runInNewContext(`${source}; ensureNotchController`, {
+    notchController: null, settings: {}, BrowserWindow: {}, ipcMain: {}, screen: {},
+    path, __dirname: path.join(__dirname, '../../src/electron'), process: { platform: 'darwin' },
+    toggleDockRateMode() {}, createFullScreenProbe: () => () => false,
+    createNotchController: value => { options = value; return {}; }, ...overrides
+  });
+  ensure();
+  return options;
+}
+
 function stats() {
   return { periods: { today: { totalTokens: 100, costUsd: 1, sessions: {
     a: { client: 'codex', lastUsedAt: new Date().toISOString(), totalTokens: 100 },
@@ -450,6 +469,9 @@ test('reversing the shell starts at the current shape without a jump or window f
 test('header outer margins stay equal through motion at each summary zoom', () => {
   const code = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
   const source = code.slice(code.indexOf('function applyNotchMotion('), code.indexOf('function renderNotch('));
+  const css = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/notch.css'), 'utf8');
+  assert.match(css, /\.notch-left\s*\{[^}]*justify-content:\s*flex-start/);
+  assert.match(css, /\.notch-right\s*\{[^}]*justify-content:\s*flex-end/);
   for (const [appZoom, summaryZoom] of [[1, 1], [1.25, 1.2], [0.8, 0.8]]) {
     const widthLeft = 17 * summaryZoom, widthRight = 37 * summaryZoom;
     const geometry = { ...notchGeometry(display, native), summaryZoom };
@@ -473,14 +495,8 @@ test('header outer margins stay equal through motion at each summary zoom', () =
     });
     // Production CSS anchors outer edges, so the different content widths
     // cannot change their distance to the corresponding silhouette edge.
-    const css = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/notch.css'), 'utf8');
-    const outerAnchored = /\.notch-left\s*\{[^}]*justify-content:\s*flex-start/.test(css)
-      && /\.notch-right\s*\{[^}]*justify-content:\s*flex-end/.test(css);
-    const restingLeft = outerAnchored ? header.headerX + 4 + 8
-      : header.headerX + (header.gapOffset + 4 - widthLeft) / 2;
-    const restingRight = outerAnchored ? header.headerX + closed.width - 4 - 8
-      : header.headerX + header.gapOffset + geometry.gapWidth
-        + (closed.width - header.gapOffset - geometry.gapWidth - 4 + widthRight) / 2;
+    const restingLeft = header.headerX + 4 + 8;
+    const restingRight = header.headerX + closed.width - 4 - 8;
     for (const progress of [0, 0.1, 0.5, 0.9, 1]) {
       apply({ shape: { key: 'test', width: open.width, height: open.height, d: '' }, progress, bodyHeight: 263, headerHeight: 32, summaryEdges: { left: restingLeft + (header.expandedInset - restingLeft) * progress, right: restingRight + (open.width - header.expandedInset - restingRight) * progress } });
       assert.ok(Math.abs(properties['--notch-summary-opacity'] + properties['--notch-content-progress'] - 1) < 1e-9, 'summary and list crossfade without an empty or overlaid full-opacity phase');
@@ -503,13 +519,10 @@ test('header outer margins stay equal through motion at each summary zoom', () =
 
 
 test('forecast opt-in restores the cached value immediately after disabling and re-enabling', async () => {
-  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
-  const source = main.slice(main.indexOf('function configuredDockItemLists('), main.indexOf('function edgeDockShowsLiveRate('))
-    + main.slice(main.indexOf('const EDGE_DOCK_FORECAST_REFRESH_MS'), main.indexOf('function edgeDockCellsFor('));
   const settings = { codexResetForecastEnabled: true, edgeDockItems: [{ type: 'limit', provider: 'codex' }] };
   const forecast = { status: 'scheduled', scheduledFor: '2026-10-08T20:00:00Z' };
   let calls = 0, updates = 0;
-  const refresh = vm.runInNewContext(`${source}; ({ refresh: refreshEdgeDockForecast, value: () => edgeDockForecast })`, {
+  const refresh = vm.runInNewContext(`${dockForecastSource}; ({ refresh: refreshEdgeDockForecast, value: () => edgeDockForecast })`, {
     settings, Date, Promise, console, latestStats: {}, electronPresentationStats: (s) => s,
     repaintDockSurfaces: () => { updates++; },
     codexResetForecastClient: { getForecast: () => { calls++; return Promise.resolve(forecast); } }
@@ -525,13 +538,10 @@ test('forecast opt-in restores the cached value immediately after disabling and 
 });
 
 test('a pending forecast cannot repopulate a disabled projection', async () => {
-  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
-  const source = main.slice(main.indexOf('function configuredDockItemLists('), main.indexOf('function edgeDockShowsLiveRate('))
-    + main.slice(main.indexOf('const EDGE_DOCK_FORECAST_REFRESH_MS'), main.indexOf('function edgeDockCellsFor('));
   const settings = { codexResetForecastEnabled: true };
   let resolve;
   const pending = new Promise((done) => { resolve = done; });
-  const refresh = vm.runInNewContext(`${source}; ({ refresh: refreshEdgeDockForecast, value: () => edgeDockForecast })`, {
+  const refresh = vm.runInNewContext(`${dockForecastSource}; ({ refresh: refreshEdgeDockForecast, value: () => edgeDockForecast })`, {
     settings, Date, Promise, console, latestStats: {}, electronPresentationStats: (s) => s,
     repaintDockSurfaces: () => assert.fail('disabled forecast must not repaint'),
     codexResetForecastClient: { getForecast: () => pending }
@@ -698,7 +708,8 @@ test('top-only independent session item schedules a main-process re-projection a
   let wake, delay;
   const context = { Date, edgeDockSessionExpiryTimer: null, EDGE_DOCK_EXPIRY_FLOOR_MS: 1000, edgeDockLastCells: [], notchLastCells: cells, edgeDockController: null, notchController: { isRunning: () => true }, setTimeout: (callback, ms) => { wake = callback;delay = ms;return 1; }, clearTimeout() {}, latestStats: input, electronPresentationStats: (s) => s, repaintDockSurfaces: () => assert.equal(input.periods.today.totalTokens, 100) };
   vm.runInNewContext(`${source}; scheduleSessionExpiry();`, context);
-  assert.ok(delay > 590000 && delay <= 601000);assert.equal(typeof wake, 'function');wake();
+  assert.ok(delay > 590000 && delay <= 601000);
+  wake();
 });
 
 
@@ -1191,74 +1202,187 @@ test('a single flexible account label uses the menu budget without inheriting it
 
 test('full-screen quiet mode retracts ears, retains configuration and restores it on hover and exit', (t) => {
   let full = false, reads = 0;
-  const f = fixture(t, { notchExpandOnApproach: false }, { isFullScreen: d => { assert.equal(d.id, 1);reads += 1;return full; } });
-  const data = buildNotchData(stats(), [], { trayContent: 'tokens' });f.controller.setData(data);
+  const f = fixture(t, { notchExpandOnApproach: false }, {
+    isFullScreen: d => {
+      assert.equal(d.id, 1);
+      reads += 1;
+      return full;
+    }
+  });
+  const data = buildNotchData(stats(), [], { trayContent: 'tokens' });
+  f.controller.setData(data);
   assert.ok(last(f.windows[0]).summary);
-  const now = Date.now()+1000;full=true;f.controller.poll(now);
-  const primary=f.windows[0];assert.equal(last(primary).quietFullScreen,true);assert.equal(last(primary).summary,null);assert.equal(last(primary).geometry.headerWidth,179);assert.equal(primary.opacity,1);
-  const count=reads;f.controller.poll(now+100);assert.equal(reads,count,'same slow cadence as EdgeDock');
-  f.screen.point={x:native.right.origin.x-90,y:display.bounds.y+native.safeTop+11};
-  f.controller.poll(now+150);f.controller.poll(now+150+EDGE_DOCK_TIMING.revealDelayMs);
-  assert.equal(last(primary).expanded,true);assert.equal(last(primary).summary,data.summary);
-  f.screen.point={x:20,y:500};f.controller.poll(now+500);f.controller.poll(now+500+EDGE_DOCK_TIMING.hideDelayMs);
-  assert.equal(last(primary).expanded,false);assert.equal(last(primary).summary,null);assert.equal(last(primary).geometry.headerWidth,179);
-  full=false;f.controller.poll(now+2000);assert.equal(last(primary).summary,data.summary);assert.ok(last(primary).geometry.headerWidth>179);
+  const now = Date.now() + 1000;
+  full = true;
+  f.controller.poll(now);
+  const primary = f.windows[0];
+  assert.equal(last(primary).quietFullScreen, true);
+  assert.equal(last(primary).summary, null);
+  assert.equal(last(primary).geometry.headerWidth, 179);
+  assert.equal(primary.opacity, 1);
+  const count = reads;
+  f.controller.poll(now + 100);
+  assert.equal(reads, count, 'same slow cadence as EdgeDock');
+  f.screen.point = { x: native.right.origin.x - 90, y: display.bounds.y + native.safeTop + 11 };
+  f.controller.poll(now + 150);
+  f.controller.poll(now + 150 + EDGE_DOCK_TIMING.revealDelayMs);
+  assert.equal(last(primary).expanded, true);
+  assert.equal(last(primary).summary, data.summary);
+  f.screen.point = { x: 20, y: 500 };
+  f.controller.poll(now + 500);
+  f.controller.poll(now + 500 + EDGE_DOCK_TIMING.hideDelayMs);
+  assert.equal(last(primary).expanded, false);
+  assert.equal(last(primary).summary, null);
+  assert.equal(last(primary).geometry.headerWidth, 179);
+  full = false;
+  f.controller.poll(now + 2000);
+  assert.equal(last(primary).summary, data.summary);
+  assert.ok(last(primary).geometry.headerWidth > 179);
 });
 
 test('full-screen ordinary screen is invisible at rest but approach still opens provider content', (t) => {
-  const f=fixture(t, {}, {readScreens:()=>({screens:[],mainDisplayId:1}),isFullScreen:()=>true});
-  const data=buildNotchData(stats(),[{id:'codex',kind:'limit',provider:'codex'}],{trayContent:'tokens'});f.controller.setData(data);
-  const primary=f.windows[0], payload=last(primary);assert.equal(payload.geometry.notched,false);assert.equal(primary.opacity,0);assert.equal(primary.ignoreMouse,true);
-  f.screen.point={x:735,y:payload.geometry.y+payload.geometry.height+11};const now=Date.now()+1000;
-  f.controller.poll(now);f.controller.poll(now+EDGE_DOCK_TIMING.revealDelayMs);assert.equal(last(primary).expanded,true);assert.equal(primary.opacity,1);assert.equal(last(primary).cells[0].id,'codex');
-  f.screen.point={x:20,y:500};f.controller.poll(now+500);f.controller.poll(now+500+EDGE_DOCK_TIMING.hideDelayMs);assert.equal(last(primary).expanded,false);assert.equal(primary.opacity,0);
+  const f = fixture(t, {}, {
+    readScreens: () => ({ screens: [], mainDisplayId: 1 }),
+    isFullScreen: () => true
+  });
+  const data = buildNotchData(stats(), [{ id: 'codex', kind: 'limit', provider: 'codex' }], { trayContent: 'tokens' });
+  f.controller.setData(data);
+  const primary = f.windows[0], payload = last(primary);
+  assert.equal(payload.geometry.notched, false);
+  assert.equal(primary.opacity, 0);
+  assert.equal(primary.ignoreMouse, true);
+  f.screen.point = { x: 735, y: payload.geometry.y + payload.geometry.height + 11 };
+  const now = Date.now() + 1000;
+  f.controller.poll(now);
+  f.controller.poll(now + EDGE_DOCK_TIMING.revealDelayMs);
+  assert.equal(last(primary).expanded, true);
+  assert.equal(primary.opacity, 1);
+  assert.equal(last(primary).cells[0].id, 'codex');
+  f.screen.point = { x: 20, y: 500 };
+  f.controller.poll(now + 500);
+  f.controller.poll(now + 500 + EDGE_DOCK_TIMING.hideDelayMs);
+  assert.equal(last(primary).expanded, false);
+  assert.equal(primary.opacity, 0);
 });
 
 test('quiet mode respects its switch, pointer drag guard, focused own full-screen window and probe failure', (t) => {
-  let full=true, fail=false, held=true;
-  const f=fixture(t, {}, {isFullScreen:()=>{if(fail)throw new Error('probe failed');return full;},primaryButtonDown:()=>held});
-  const data=buildNotchData(stats(),[],{trayContent:'tokens'});f.controller.setData(data);const primary=f.windows[0];
-  f.screen.point={x:735,y:44};const now=Date.now()+1000;f.controller.poll(now);f.controller.poll(now+EDGE_DOCK_TIMING.revealDelayMs);assert.equal(last(primary).expanded,false);
-  f.preferences.notchHideSummaryInFullScreen=false;f.controller.poll(now+1000);assert.equal(last(primary).quietFullScreen,false);assert.ok(last(primary).summary);
-  f.preferences.notchHideSummaryInFullScreen=true;f.deps.BrowserWindow.getFocusedWindow=()=>({isFullScreen:()=>true,getBounds:()=>display.bounds});f.screen.getDisplayMatching=()=>display;
-  f.controller.poll(now+2000);assert.equal(last(primary).quietFullScreen,false,'our own focused full-screen widget is excluded');
-  f.deps.BrowserWindow.getFocusedWindow=()=>null;fail=true;f.controller.poll(now+3000);assert.equal(last(primary).quietFullScreen,false);assert.ok(last(primary).summary,'probe failures retain ordinary behavior');
+  let full = true, fail = false, held = true;
+  const f = fixture(t, {}, {
+    isFullScreen: () => {
+      if (fail) throw new Error('probe failed');
+      return full;
+    },
+    primaryButtonDown: () => held
+  });
+  const data = buildNotchData(stats(), [], { trayContent: 'tokens' });
+  f.controller.setData(data);
+  const primary = f.windows[0];
+  f.screen.point = { x: 735, y: 44 };
+  const now = Date.now() + 1000;
+  f.controller.poll(now);
+  f.controller.poll(now + EDGE_DOCK_TIMING.revealDelayMs);
+  assert.equal(last(primary).expanded, false);
+  f.preferences.notchHideSummaryInFullScreen = false;
+  f.controller.poll(now + 1000);
+  assert.equal(last(primary).quietFullScreen, false);
+  assert.ok(last(primary).summary);
+  f.preferences.notchHideSummaryInFullScreen = true;
+  f.deps.BrowserWindow.getFocusedWindow = () => ({ isFullScreen: () => true, getBounds: () => display.bounds });
+  f.screen.getDisplayMatching = () => display;
+  f.controller.poll(now + 2000);
+  assert.equal(last(primary).quietFullScreen, false, 'our own focused full-screen widget is excluded');
+  f.deps.BrowserWindow.getFocusedWindow = () => null;
+  fail = true;
+  f.controller.poll(now + 3000);
+  assert.equal(last(primary).quietFullScreen, false);
+  assert.ok(last(primary).summary, 'probe failures retain ordinary behavior');
 });
 
-test('full-screen switch uses the shared controls path and defaults on for existing settings', () => {
-  const main=fs.readFileSync(path.join(__dirname,'../../src/electron/main.js'),'utf8');
-  const app=fs.readFileSync(path.join(__dirname,'../../src/electron/renderer/app.js'),'utf8');
-  const html=fs.readFileSync(path.join(__dirname,'../../src/electron/renderer/index.html'),'utf8');
-  assert.match(main,/notchHideSummaryInFullScreen: true/);assert.match(main,/merged\.notchHideSummaryInFullScreen = parseBoolean\(merged\.notchHideSummaryInFullScreen, true\)/);
-  assert.match(app,/saveSettings\(\{ notchHideSummaryInFullScreen: els\.notchHideSummaryInFullScreenInput\.checked \}\)/);
-  assert.match(html,/id="notchHideSummaryInFullScreenInput"/);
+test('Notch full-screen and refresh settings preserve defaults and explicit switches', () => {
+  const start = mainSource.indexOf('    notchEnabled:', mainSource.indexOf('function defaultSettings('));
+  const defaultsSource = mainSource.slice(start, mainSource.indexOf('    edgeDockEnabled:', start));
+  const defaults = vm.runInNewContext(`({${defaultsSource}})`, { createDefaultTrayLayout: trayLayout.createDefaultTrayLayout });
+  assert.equal(defaults.notchHideSummaryInFullScreen, true);
+  assert.equal(defaults.notchRefreshEnabled, false);
+  const loadedSource = mainSource.slice(mainSource.indexOf('    merged.notchHideSummaryInFullScreen ='), mainSource.indexOf('    merged.notchFollowTray ='));
+  const patchStart = mainSource.indexOf('      notchHideSummaryInFullScreen: parseBoolean(');
+  const patchSource = mainSource.slice(patchStart, mainSource.indexOf('      notchFollowTray:', patchStart));
+  for (const [hide, refresh] of [[undefined, undefined], [false, true], [true, false]]) {
+    const merged = { notchHideSummaryInFullScreen: hide, notchRefreshEnabled: refresh };
+    const context = { merged, patch: { ...merged }, settings: defaults, parseBoolean };
+    vm.runInNewContext(loadedSource, context);
+    const patched = vm.runInNewContext(`({${patchSource}})`, context);
+    for (const result of [merged, patched]) {
+      assert.equal(result.notchHideSummaryInFullScreen, hide ?? true);
+      assert.equal(result.notchRefreshEnabled, refresh ?? false);
+    }
+  }
+});
+
+test('the full-screen setting saves both checkbox states through its change event', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const source = app.slice(app.indexOf("els.notchHideSummaryInFullScreenInput?.addEventListener("), app.indexOf("els.notchExpandOnApproachInput?.addEventListener("));
+  let change;
+  const patches = [];
+  const input = { checked: false, addEventListener: (_event, callback) => { change = callback; } };
+  vm.runInNewContext(source, { els: { notchHideSummaryInFullScreenInput: input }, saveSettings: patch => patches.push({ ...patch }) });
+  change();
+  input.checked = true;
+  change();
+  assert.deepEqual(patches, [{ notchHideSummaryInFullScreen: false }, { notchHideSummaryInFullScreen: true }]);
 });
 
 
 test('full-screen visibility follows screen geometry and rechecks immediately when the selected display changes', (t) => {
-  let noNotch=false;const checked=[];
-  const f=fixture(t, {}, {readScreens:()=>({screens:noNotch?[]:[native],mainDisplayId:1}),isFullScreen:d=>{checked.push(d.id);return d.id===1;}});
-  f.controller.setData(buildNotchData(stats(),[],{trayContent:'tokens'}));const primary=f.windows[0];assert.equal(primary.opacity,1);
-  noNotch=true;f.screen.emit('display-metrics-changed');assert.equal(last(primary).geometry.notched,false);assert.equal(primary.opacity,0);
-  noNotch=false;f.screen.emit('display-metrics-changed');assert.equal(last(primary).geometry.notched,true);assert.equal(primary.opacity,1);
-  const external={...display,id:2,bounds:{...display.bounds,x:1470},workArea:{...display.workArea,x:1470}};
-  f.screen.getAllDisplays=()=>[display,external];f.screen.emit('display-added');f.preferences.notchDisplayId=2;
-  f.controller.poll(Date.now()+50);assert.equal(checked.at(-1),2);assert.equal(last(primary).quietFullScreen,false);assert.equal(primary.opacity,1);
+  let noNotch = false;
+  const checked = [];
+  const f = fixture(t, {}, {
+    readScreens: () => ({ screens: noNotch ? [] : [native], mainDisplayId: 1 }),
+    isFullScreen: d => {
+      checked.push(d.id);
+      return d.id === 1;
+    }
+  });
+  f.controller.setData(buildNotchData(stats(), [], { trayContent: 'tokens' }));
+  const primary = f.windows[0];
+  assert.equal(primary.opacity, 1);
+  noNotch = true;
+  f.screen.emit('display-metrics-changed');
+  assert.equal(last(primary).geometry.notched, false);
+  assert.equal(primary.opacity, 0);
+  noNotch = false;
+  f.screen.emit('display-metrics-changed');
+  assert.equal(last(primary).geometry.notched, true);
+  assert.equal(primary.opacity, 1);
+  const external = { ...display, id: 2, bounds: { ...display.bounds, x: 1470 }, workArea: { ...display.workArea, x: 1470 } };
+  f.screen.getAllDisplays = () => [display, external];
+  f.screen.emit('display-added');
+  f.preferences.notchDisplayId = 2;
+  f.controller.poll(Date.now() + 50);
+  assert.equal(checked.at(-1), 2);
+  assert.equal(last(primary).quietFullScreen, false);
+  assert.equal(primary.opacity, 1);
 });
 
 test('revealing a full-screen summary reserves the wider native canvas before animating', (t) => {
-  const f=fixture(t, {}, {isFullScreen:()=>true,reducedMotion:false});const primary=f.windows[0];
-  f.controller.setData(buildNotchData(stats(),[],{trayContent:'tokens'}));
-  f.ipcMain.emit('topNotch:size',{sender:primary.webContents},{slots:{left:17,right:180,minimumLeft:17,minimumRight:180}});
-  f.screen.point={x:735,y:43};const now=Date.now()+1000;f.controller.poll(now);f.controller.poll(now+EDGE_DOCK_TIMING.revealDelayMs);
+  const f = fixture(t, {}, { isFullScreen: () => true, reducedMotion: false });
+  const primary = f.windows[0];
+  f.controller.setData(buildNotchData(stats(), [], { trayContent: 'tokens' }));
+  f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 17, right: 180, minimumLeft: 17, minimumRight: 180 } });
+  f.screen.point = { x: 735, y: 43 };
+  const now = Date.now() + 1000;
+  f.controller.poll(now);
+  f.controller.poll(now + EDGE_DOCK_TIMING.revealDelayMs);
   const measurement = last(primary).summaryMeasurement;
   if (measurement) {
     f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 17, right: 180, minimumLeft: 17, minimumRight: 180 }, summaryMeasurement: { id: measurement.id } });
     f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { summaryMeasurement: { id: measurement.id, ready: true } });
   }
-  assert.equal(last(primary).expanded,true);assert.ok(primary.getBounds().width>=last(primary).geometry.headerWidth,'no header is drawn outside the animation canvas');
-  const config=primary.messages.filter(m=>m.channel==='topNotch:animate').at(-1).payload;
-  f.ipcMain.emit('topNotch:frame',{sender:primary.webContents},{id:config.id,elapsed:config.duration});assert.equal(primary.opacity,1);
+  assert.equal(last(primary).expanded, true);
+  assert.ok(primary.getBounds().width >= last(primary).geometry.headerWidth, 'no header is drawn outside the animation canvas');
+  const config = primary.messages.filter(m => m.channel === 'topNotch:animate').at(-1).payload;
+  f.ipcMain.emit('topNotch:frame', { sender: primary.webContents }, { id: config.id, elapsed: config.duration });
+  assert.equal(primary.opacity, 1);
 });
 
 
@@ -1310,9 +1434,10 @@ test('Notch reuses EdgeDock haptics once per expansion and visible detail visit'
   screen.point = { x: primary.bounds.x + 40, y: 50 };
   controller.poll(1500); controller.poll(1570); measure('codex');
   assert.equal(ticks.length, 4, 'a later expansion and new detail visit each tick once');
-  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
-  const wired = main.slice(main.indexOf('notchController = createNotchController('), main.indexOf('function syncNotch('));
-  assert.match(wired, /performHaptic: \(pattern, performanceTime\) => performMacHaptic\(\{ pattern, performanceTime \}\)/);
+  const nativeCalls = [];
+  const options = wiredNotchOptions({ performMacHaptic: value => nativeCalls.push({ ...value }) });
+  options.performHaptic('generic', 'default');
+  assert.deepEqual(nativeCalls, [{ pattern: 'generic', performanceTime: 'default' }]);
 });
 
 test('a failing native haptic leaves Notch expansion and detail visibility usable', (t) => {
@@ -1370,16 +1495,21 @@ test('Notch refresh validates its own action and shares one request with retry a
 });
 
 test('Notch and the side dock share refresh feedback rendering and retain independent settings', async () => {
-  const root = path.join(__dirname, '../..');
-  const read = file => fs.readFileSync(path.join(root, file), 'utf8');
-  const main = read('src/electron/main.js');
-  assert.match(main, /notchRefreshEnabled: false,/);
-  assert.match(main, /merged\.notchRefreshEnabled = parseBoolean\(merged\.notchRefreshEnabled, false\)/);
-  assert.match(main, /notchRefreshEnabled: parseBoolean\(patch\.notchRefreshEnabled \?\? settings\.notchRefreshEnabled, false\)/);
-  const wire = main.slice(main.indexOf('notchController = createNotchController('), main.indexOf('function syncNotch('));
-  assert.match(wire, /onRefreshLimits: \(\) => refreshStatsFromEdgeDock\(\)/);
-  assert.match(read('src/electron/notch/preload.js'), /invoke\('topNotch:refreshLimits'\)/);
-  const source = read('src/electron/renderer/edgeDock/dock.js');
+  const result = { ok: true };
+  let refreshes = 0;
+  const options = wiredNotchOptions({ refreshStatsFromEdgeDock: () => { refreshes++; return result; } });
+  assert.equal(await options.onRefreshLimits(), result);
+  assert.equal(refreshes, 1);
+  let api;
+  const channels = [];
+  const preload = fs.readFileSync(path.join(__dirname, '../../src/electron/notch/preload.js'), 'utf8');
+  vm.runInNewContext(preload, { require: () => ({
+    contextBridge: { exposeInMainWorld: (_name, value) => { api = value; } },
+    ipcRenderer: { invoke: channel => { channels.push(channel); return Promise.resolve(result); } }
+  }) });
+  assert.equal(await api.refreshLimits(), result);
+  assert.deepEqual(channels, ['topNotch:refreshLimits']);
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
   const part = source.slice(source.indexOf('let refreshButton = null;'), source.indexOf('function renderPeek('));
   let finish, calls = 0;
   const button = { dataset: {}, setAttribute() {}, append() {}, addEventListener() {} };
@@ -1423,11 +1553,12 @@ test('compact entries widen around the same center and reserve the complete list
     }
   }
   const physicalPill = notchGeometry(display, native, 'pill');
-  assert.equal(physicalPill.y, 38); assert.equal(physicalPill.gapWidth, 0);
+  assert.equal(physicalPill.y, 38);
+  assert.equal(physicalPill.gapWidth, 0);
   assert.equal(physicalPill.notched, false);
-  for (const expanded of [false,true]) {
-    const b=notchBounds(display,physicalPill,expanded);
-    assert.equal(b.x+b.width/2,physicalPill.centerX,'capsule matches the same half-point center at both endpoints');
+  for (const expanded of [false, true]) {
+    const b = notchBounds(display, physicalPill, expanded);
+    assert.equal(b.x + b.width / 2, physicalPill.centerX, 'capsule matches the same half-point center at both endpoints');
   }
 });
 
@@ -1735,6 +1866,44 @@ test('locking pauses polling and unlock or repeated sync keeps one timer', (t) =
   assert.equal(cursorReads, stopped, 'unlock never starts a disabled entry');
 });
 
+test('Notch shares the dock idle and approach polling cadence', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
+  const f = fixture(t);
+  const reads = [];
+  f.screen.getCursorScreenPoint = () => { reads.push(Date.now()); return f.screen.point; };
+  t.mock.timers.tick(89); assert.equal(reads.length, 0);
+  t.mock.timers.tick(1); assert.deepEqual(reads, [10090]);
+  const top = f.windows[0], payload = last(top);
+  f.screen.point = { x: top.bounds.x + payload.geometry.headerX + 10, y: top.bounds.y + 10 };
+  t.mock.timers.tick(90); assert.equal(reads.at(-1), 10180);
+  t.mock.timers.tick(39); assert.equal(reads.length, 2);
+  t.mock.timers.tick(1); assert.equal(reads.at(-1), 10220);
+  for (let i = 0; i < 3; i++) t.mock.timers.tick(40);
+  assert.equal(last(top).expanded, true);
+  f.screen.point = { x: 20, y: 400 };
+  for (let i = 0; i < 9; i++) t.mock.timers.tick(40);
+  assert.equal(last(top).expanded, false);
+  const idle = reads.length;
+  t.mock.timers.tick(89); assert.equal(reads.length, idle);
+  t.mock.timers.tick(1); assert.equal(reads.length, idle + 1);
+});
+
+test('disable and re-enable recreates renderer windows and rejects their old senders', (t) => {
+  const f = fixture(t), old = [...f.windows];
+  old[0].webContents.emit('render-process-gone', {}, { reason: 'crashed' });
+  assert.equal(f.windows.length, 2, 'a crash is not automatically recovered');
+  f.preferences.notchEnabled = false; f.controller.sync();
+  assert.ok(old.every(win => win.isDestroyed()));
+  f.preferences.notchEnabled = true; f.controller.sync();
+  const fresh = f.windows.slice(2);
+  assert.equal(fresh.length, 2);
+  for (const win of fresh) f.ipcMain.emit('topNotch:ready', { sender: win.webContents });
+  assert.ok(fresh.every(win => last(win)), 'each fresh renderer receives its initial payload');
+  const messages = fresh[0].messages.length;
+  f.ipcMain.emit('topNotch:size', { sender: old[0].webContents }, { height: 999 });
+  assert.equal(fresh[0].messages.length, messages, 'old renderer cannot mutate the new windows');
+});
+
 
 test('identical data and size reports do not repeat native visibility or detail placement', (t) => {
   const f = fixture(t);
@@ -1926,12 +2095,10 @@ test('unsupported platforms keep Notch disabled without reads, windows or pollin
 });
 
 test('unsupported Notch selections do not activate shared dock work', () => {
-  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
-  const source = main.slice(main.indexOf('function configuredDockItemLists('), main.indexOf('function edgeDockShowsLiveRate('));
   const settings = { edgeDockItems: [{ type: 'stat', metric: 'today' }], notchEnabled: true,
     notchItems: [{ type: 'stat', metric: 'last7days' }, { type: 'stat', metric: 'liveRate' }] };
   for (const platform of ['darwin', 'win32', 'linux']) {
-    const lists = vm.runInNewContext(`${source}; configuredDockItemLists()`, { settings, process: { platform } });
+    const lists = vm.runInNewContext(`${configuredDockItemsSource}; configuredDockItemLists()`, { settings, process: { platform } });
     assert.equal(lists[0], settings.edgeDockItems, 'the existing EdgeDock selection stays intact');
     assert.equal(lists.length, platform === 'darwin' ? 2 : 1);
     if (platform === 'darwin') assert.equal(lists[1], settings.notchItems);
@@ -2107,44 +2274,6 @@ test('Notch renderer owns its observers and motion hooks while details reuse the
   detail.applyAppearance({ style: 'inherit' });
   assert.equal(classes.get('notch-black'), false);
   assert.equal(classes.get('is-notch-detail'), true);
-});
-
-test('Notch shares the dock idle and approach polling cadence', (t) => {
-  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
-  const f = fixture(t);
-  const reads = [];
-  f.screen.getCursorScreenPoint = () => { reads.push(Date.now()); return f.screen.point; };
-  t.mock.timers.tick(89); assert.equal(reads.length, 0);
-  t.mock.timers.tick(1); assert.deepEqual(reads, [10090]);
-  const top = f.windows[0], payload = last(top);
-  f.screen.point = { x: top.bounds.x + payload.geometry.headerX + 10, y: top.bounds.y + 10 };
-  t.mock.timers.tick(90); assert.equal(reads.at(-1), 10180);
-  t.mock.timers.tick(39); assert.equal(reads.length, 2);
-  t.mock.timers.tick(1); assert.equal(reads.at(-1), 10220);
-  for (let i = 0; i < 3; i++) t.mock.timers.tick(40);
-  assert.equal(last(top).expanded, true);
-  f.screen.point = { x: 20, y: 400 };
-  for (let i = 0; i < 9; i++) t.mock.timers.tick(40);
-  assert.equal(last(top).expanded, false);
-  const idle = reads.length;
-  t.mock.timers.tick(89); assert.equal(reads.length, idle);
-  t.mock.timers.tick(1); assert.equal(reads.length, idle + 1);
-});
-
-test('disable and re-enable recreates renderer windows and rejects their old senders', (t) => {
-  const f = fixture(t), old = [...f.windows];
-  old[0].webContents.emit('render-process-gone', {}, { reason: 'crashed' });
-  assert.equal(f.windows.length, 2, 'a crash is not automatically recovered');
-  f.preferences.notchEnabled = false; f.controller.sync();
-  assert.ok(old.every(win => win.isDestroyed()));
-  f.preferences.notchEnabled = true; f.controller.sync();
-  const fresh = f.windows.slice(2);
-  assert.equal(fresh.length, 2);
-  for (const win of fresh) f.ipcMain.emit('topNotch:ready', { sender: win.webContents });
-  assert.ok(fresh.every(win => last(win)), 'each fresh renderer receives its initial payload');
-  const messages = fresh[0].messages.length;
-  f.ipcMain.emit('topNotch:size', { sender: old[0].webContents }, { height: 999 });
-  assert.equal(fresh[0].messages.length, messages, 'old renderer cannot mutate the new windows');
 });
 
 test('hidden Notch details stop their clock while ordinary EdgeDock keeps its cadence', () => {
