@@ -19,13 +19,16 @@ test('OmniRoute token resolves from options and environment variables in order',
   assert.equal(omnirouteToken({}, {}), '');
 });
 
-test('OmniRoute base URL normalizes paths and preserves defaults', () => {
+test('OmniRoute base URL normalizes paths, allows loopback HTTP, and rejects insecure remote HTTP', () => {
   assert.equal(normalizeBaseUrl(''), 'http://localhost:20128');
   assert.equal(normalizeBaseUrl(null), 'http://localhost:20128');
   assert.equal(normalizeBaseUrl('http://localhost:20128/'), 'http://localhost:20128');
   assert.equal(normalizeBaseUrl('http://localhost:20128/v1/'), 'http://localhost:20128');
+  assert.equal(normalizeBaseUrl('http://127.0.0.1:20128/'), 'http://127.0.0.1:20128');
+  assert.equal(normalizeBaseUrl('http://[::1]:20128/'), 'http://[::1]:20128');
   assert.equal(normalizeBaseUrl('https://omni.example.com/v1'), 'https://omni.example.com');
   assert.equal(normalizeBaseUrl('https://omni.example.com/'), 'https://omni.example.com');
+  assert.equal(normalizeBaseUrl('http://remote-insecure.example.com/'), '');
 });
 
 test('parseBudgetWindows handles direct budget and dimensioned quota pools', () => {
@@ -59,6 +62,13 @@ test('parseBudgetWindows handles direct budget and dimensioned quota pools', () 
 
   assert.deepEqual(parseBudgetWindows(null), []);
   assert.deepEqual(parseBudgetWindows({}), []);
+
+  const missingRemaining = parseBudgetWindows({ limit: 10 });
+  assert.equal(missingRemaining.length, 1);
+  assert.equal(missingRemaining[0].used, null);
+  assert.equal(missingRemaining[0].remaining, null);
+  assert.equal(missingRemaining[0].usedPercent, null);
+  assert.equal(Number.isNaN(missingRemaining[0].used), false);
 });
 
 test('fetchOmniRouteLimits returns notConfigured without credentials', async () => {

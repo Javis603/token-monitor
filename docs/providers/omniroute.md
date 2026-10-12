@@ -23,12 +23,12 @@ OmniRoute is an open-source AI gateway that routes, compresses, and tracks LLM u
 
 - `omnirouteToken` is persisted via the secure main-process credential store under `providers.omniroute.token`.
 - `omnirouteBaseUrl` defaults to `http://localhost:20128` and accepts remote gateway endpoints (e.g., `https://omni.example.com`).
-- Environment variable fallbacks: `TOKEN_MONITOR_OMNIROUTE_TOKEN`, `OMNIROUTE_TOKEN`, `OMNIROUTE_API_KEY`, and `TOKEN_MONITOR_OMNIROUTE_BASE_URL`.
+- Environment variable fallbacks: `TOKEN_MONITOR_OMNIROUTE_TOKEN`, `OMNIROUTE_TOKEN`, `OMNIROUTE_API_KEY`, `TOKEN_MONITOR_OMNIROUTE_BASE_URL`, and `OMNIROUTE_BASE_URL`.
 
 ## Verification
 
 Run the provider-specific test suite:
 
 ```bash
-node --test tests/shared/providers/omnirouteLimits.test.js
+node --test tests/shared/omnirouteLimits.test.js
 ```

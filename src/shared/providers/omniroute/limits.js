@@ -24,16 +24,21 @@ function omnirouteToken(env = process.env, options = {}) {
   return '';
 }
 
+function isLoopbackHost(hostname) {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';
+}
+
 function normalizeBaseUrl(url) {
   const raw = String(url || '').trim();
   if (!raw) return DEFAULT_BASE_URL;
   try {
     const parsed = new URL(raw);
-    if (!['http:', 'https:'].includes(parsed.protocol)) return DEFAULT_BASE_URL;
+    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    if (parsed.protocol === 'http:' && !isLoopbackHost(parsed.hostname)) return '';
     parsed.pathname = parsed.pathname.replace(/\/+$/u, '').replace(/\/v1$/iu, '') || '';
     return parsed.toString().replace(/\/$/u, '');
   } catch (_) {
-    return DEFAULT_BASE_URL;
+    return '';
   }
 }
 
@@ -44,8 +49,9 @@ function parseBudgetWindows(payload) {
 
   if (typeof b.limit === 'number' || typeof b.used === 'number' || typeof b.remaining === 'number') {
     const limit = numberOrNull(b.limit);
-    const used = numberOrNull(b.used) ?? (limit !== null && b.remaining !== null ? limit - b.remaining : null);
-    const remaining = numberOrNull(b.remaining) ?? (limit !== null && used !== null ? limit - used : null);
+    const parsedRemaining = numberOrNull(b.remaining);
+    const used = numberOrNull(b.used) ?? (limit !== null && parsedRemaining !== null ? limit - parsedRemaining : null);
+    const remaining = parsedRemaining ?? (limit !== null && used !== null ? limit - used : null);
     const usedPercent = limit && limit > 0 && used !== null
       ? Math.max(0, Math.min(100, (used / limit) * 100))
       : null;
@@ -115,6 +121,16 @@ async function fetchOmniRouteLimits(options = {}, deps = {}) {
   }
 
   const baseUrl = normalizeBaseUrl(options.omnirouteBaseUrl || env.TOKEN_MONITOR_OMNIROUTE_BASE_URL || env.OMNIROUTE_BASE_URL);
+  if (!baseUrl) {
+    return normalizeLimitProvider({
+      provider: 'omniroute',
+      source: 'api',
+      status: 'notConfigured',
+      updatedAt: nowIso(now),
+      windows: []
+    });
+  }
+
   const accountKey = hashKey('omniroute', [baseUrl, token].join('\0'));
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -149,6 +165,8 @@ async function fetchOmniRouteLimits(options = {}, deps = {}) {
             const usedPercent = limit && limit > 0 && used !== null
               ? Math.max(0, Math.min(100, (used / limit) * 100))
               : null;
+            const unit = String(usage.unit || pool.unit || '').trim().toLowerCase();
+            const isUsd = unit === 'usd';
             windows.push({
               kind: 'billing',
               label: pool.name || 'Quota Pool',
@@ -156,8 +174,8 @@ async function fetchOmniRouteLimits(options = {}, deps = {}) {
               limit,
               remaining,
               usedPercent,
-              metric: 'spend',
-              currency: 'USD',
+              metric: isUsd ? 'spend' : 'credits',
+              currency: isUsd ? 'USD' : null,
               showMeter: true
             });
           }
