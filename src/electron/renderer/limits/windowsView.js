@@ -2130,6 +2130,9 @@
     claude: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
     }),
+    workbuddy: (provider, color, { grouped }) => ({
+      options: grouped ? { showIcon: false } : {}
+    }),
     mimo: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
     }),

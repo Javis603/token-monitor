@@ -928,6 +928,7 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
   const view = dockView();
 
   for (const [id, label, color] of [
+    ['workbuddy', 'WorkBuddy', '#10B981'],
     ['claude', 'Claude', '#D97757'],
     ['openrouter', 'OpenRouter', '#6566F1'],
     ['antigravity', 'Antigravity', '#4285F4']
@@ -1752,4 +1753,19 @@ test('WorkBuddy sealed credentials show their cause instead of signed-out instru
   assert.equal(row.find('limit-plan').textContent, 'Encrypted by app');
   assert.equal(view.limitProviderMeta(provider), 'Encrypted by app');
   assert.equal(view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', { ...provider, actionRequired: undefined }, '#10A37F').find('limit-plan').textContent, 'Not signed in');
+});
+
+
+test('WorkBuddy groups count accounts and retain failures without repeating the provider mark', () => {
+  const view = dockView();
+  const accounts = [
+    { provider: 'workbuddy', status: 'ok', accountKey: 'a', accountName: 'Personal', region: 'cn', windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', remaining: 80, limit: 100 }] },
+    { provider: 'workbuddy', status: 'unavailable', accountKey: 'b', accountName: 'Work', region: 'cn', windows: [] }
+  ];
+  const group = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', accounts, '#10B981');
+  assert.equal(group.find('limit-plan').textContent, '2 accounts');
+  assert.equal([...group.walk()].filter((node) => node.classNames.has('limit-icon')).length, 1);
+  const rows = group.find('limit-account-list').children;
+  assert.deepEqual(rows.map((row) => row.find('limit-name-title').textContent), ['Personal', 'Work']);
+  assert.equal(rows[1].find('limit-plan').textContent, 'Unavailable');
 });
