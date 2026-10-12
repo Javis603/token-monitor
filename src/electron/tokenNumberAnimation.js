@@ -40,6 +40,47 @@
     return 1 - Math.exp(-damping * w * seconds)
       * (Math.cos(wd * seconds) + damping * w / wd * Math.sin(wd * seconds));
   }
+  let initialSamples;
+  function sampleIndices(age) {
+    if (age === 0 && initialSamples) return initialSamples;
+    const initialBody = response(age, 1, 0.278);
+    const initialSmear = Math.min(0.999999, response(age, 1, 0.22));
+    const samples = Array.from({ length: 49 }, (_, index) => {
+      const seconds = age + index / 48 * Math.max(0, 0.65 - age);
+      const end = index === 48;
+      return [
+        end ? 1 : response(seconds, 0.55, 0.353),
+        ((end ? 1 : response(seconds, 1, 0.278)) - initialBody) / (1 - initialBody),
+        end ? 1 : Math.min(1, response(seconds, 0.91, 0.398)),
+        index === 0 ? 0 : Math.max(0, Math.min(1, ((end ? 1 : response(seconds, 1, 0.22)) - initialSmear) / (1 - initialSmear)))
+      ];
+    });
+    // Keep the original piecewise-linear envelope within 0.002 per channel,
+    // including its rebound and forced final endpoint. Short interrupted
+    // departures get their own samples; only the common initial curve is cached.
+    const selected = new Set([0, 48]);
+    const intervals = [[0, 48]];
+    while (intervals.length) {
+      const [first, last] = intervals.pop();
+      let error = 0.002;
+      let split = 0;
+      for (let index = first + 1; index < last; index++) {
+        const progress = (index - first) / (last - first);
+        for (let channel = 0; channel < 4; channel++) {
+          const value = samples[first][channel] + (samples[last][channel] - samples[first][channel]) * progress;
+          const distance = Math.abs(samples[index][channel] - value);
+          if (distance > error) { error = distance; split = index; }
+        }
+      }
+      if (split) {
+        selected.add(split);
+        intervals.push([first, split], [split, last]);
+      }
+    }
+    const indices = [...selected].sort((a, b) => a - b);
+    if (age === 0) initialSamples = indices;
+    return indices;
+  }
   function glyphFrames({ outgoing = false, numeric, direction, ink, opacity = 1,
     filter = 'blur(0px)', matching = false, age = 0 }) {
     const initialBlur = Math.sqrt(Array.from(filter.matchAll(/blur\(([\d.]+)px\)/g), (match) => Number(match[1]) ** 2)
@@ -50,7 +91,7 @@
     // channel. Separators blur too: a sharp comma reads as a stray mark.
     const initialBlurProgress = Math.min(0.999999, response(age, 1, 0.22));
     const blurEm = 0.16 * ink;
-    return Array.from({ length: 49 }, (_, index) => {
+    return sampleIndices(age).map((index) => {
       const offset = index / 48;
       const seconds = age + offset * Math.max(0, 0.65 - age);
       const position = index === 48 ? 1 : response(seconds, 0.55, 0.353);
