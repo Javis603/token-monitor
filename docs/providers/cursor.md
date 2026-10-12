@@ -17,6 +17,8 @@ The credential store tracks multiple Cursor accounts and one active account. Des
 
 Login, logout and sync share one lifecycle lane. This prevents an explicit account operation from racing the collector's background sync. Aborted queued work leaves promptly; a failed operation does not poison the lane. Tokscale subprocess timeouts and aborts request termination and wait for the shared close/forced-termination barrier.
 
+Manual explicit sync allows Tokscale's dynamic budget of up to 1800 seconds plus 30 seconds for subprocess shutdown. Background collector self-sync keeps its 150-second budget and existing throttle/cadence; caller-supplied timeout budgets take precedence on both paths.
+
 Only accounts added manually by Token Monitor may be removed from its UI. Desktop discovery remains ambient ownership.
 
 ## Self-sync and sessions

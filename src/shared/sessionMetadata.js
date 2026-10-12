@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const { isCompressedCodexTranscript, readCompressedCodexTranscript } = require('./providers/codex/transcript');
 const os = require('node:os');
 const { hashKey } = require('./hashKey');
 const { normalizeSessionContext } = require('./sessionContext');
@@ -42,6 +43,10 @@ function timestampFromSessionId(id) {
 function readFileTail(filePath, bytes = 64 * 1024) {
   let fd;
   try {
+    if (isCompressedCodexTranscript(filePath)) {
+      const decoded = readCompressedCodexTranscript(filePath);
+      return decoded.subarray(Math.max(0, decoded.length - bytes)).toString('utf8');
+    }
     fd = fs.openSync(filePath, 'r');
     const stat = fs.fstatSync(fd);
     const length = Math.min(bytes, stat.size);
@@ -147,13 +152,17 @@ function projectPathFromJsonl(filePath) {
     cacheKey = `${stat.size}:${stat.mtimeMs}`;
     const cached = projectPathCache.get(filePath);
     if (cached?.key === cacheKey) return cached.value;
-    const fd = fs.openSync(filePath, 'r');
-    try {
-      const size = Math.min(256 * 1024, fs.fstatSync(fd).size);
-      const buffer = Buffer.alloc(size);
-      fs.readSync(fd, buffer, 0, size, 0);
-      text = buffer.toString('utf8');
-    } finally { fs.closeSync(fd); }
+    if (isCompressedCodexTranscript(filePath)) {
+      text = readCompressedCodexTranscript(filePath).subarray(0, 256 * 1024).toString('utf8');
+    } else {
+      const fd = fs.openSync(filePath, 'r');
+      try {
+        const size = Math.min(256 * 1024, fs.fstatSync(fd).size);
+        const buffer = Buffer.alloc(size);
+        fs.readSync(fd, buffer, 0, size, 0);
+        text = buffer.toString('utf8');
+      } finally { fs.closeSync(fd); }
+    }
   } catch (_) { return ''; }
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim()) continue;
@@ -202,6 +211,7 @@ function lastJsonlTimestamp(filePath) {
   const cached = jsonlTimestampCache.get(filePath);
   if (cached?.key === cacheKey) return cached.value;
   const tail = readFileTail(filePath);
+  if (isCompressedCodexTranscript(filePath) && !tail) return '';
   const lines = tail.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   let value = '';
   for (let index = lines.length - 1; index >= 0; index -= 1) {
