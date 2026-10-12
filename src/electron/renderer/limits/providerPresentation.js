@@ -75,7 +75,7 @@
     zai: ['Auto', 'Coding Plan', 'API key'],
     zaiteam: ['Team Plan', 'API key'],
     kiro: ['Auto', 'CLI'],
-    workbuddy: ['Auto', 'Desktop app', 'Manual login'],
+    workbuddy: ['Auto', 'Desktop app', 'Web'],
     qoder: ['Manual login', 'Web'],
     deepseek: ['Pay-as-you-go', 'API key'],
     devin: ['Manual login', 'Web'],

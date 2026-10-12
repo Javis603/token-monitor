@@ -1720,6 +1720,13 @@
     return 'Error';
   }
 
+  function limitProviderFailureLabel(provider) {
+    if (provider?.provider === 'workbuddy' && provider.actionRequired === 'appSessionEncrypted') {
+      return t('settings.limits.status.appSessionEncrypted');
+    }
+    return limitStatusLabel(provider?.status);
+  }
+
   function limitProviderMeta(provider, provenance = null) {
     const sourceDevice = presentationApi.limitProviderMainDeviceLabel(provenance, { showSource: Boolean(settings()?.showLimitSource) });
     // The freshness wording is shared with the edge dock so a row cannot read as
@@ -1739,11 +1746,11 @@
       if (sourceDevice) parts.push(sourceDevice);
       return `${freshness.text}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
     }
-    return limitStatusLabel(provider?.status);
+    return limitProviderFailureLabel(provider);
   }
 
   function limitProviderPlan(provider) {
-    if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status);
+    if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitProviderFailureLabel(provider);
     const mimoProduct = provider?.provider === 'mimo' ? mimoProductLabel(provider) : '';
     if (mimoProduct) {
       const plan = String(provider?.planLabel || '').trim();

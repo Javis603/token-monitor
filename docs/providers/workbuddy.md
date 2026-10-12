@@ -47,7 +47,7 @@ Discovered and managed identities form one set. A managed account takes preceden
 
 ### Managed login and refresh
 
-The main process starts a realm-specific official login, opens the returned official authorization page, and polls the server-issued state. CN uses `https://www.codebuddy.cn/v2/plugin/auth/state?platform=workbuddy`; international uses `https://www.workbuddy.ai/v2/plugin/auth/state?platform=workbuddy-ai`. The accepted authorization URL must match the initiating realm, platform and state. Token polling treats only code `11217` as pending; account polling treats `12151` as pending. Request deadlines, an overall timeout and cancellation bound the flow. This is the official state/polling protocol, not a loopback authorization-code callback.
+The main process starts a realm-specific official login, opens the returned official authorization page, and polls the server-issued state. CN uses `https://www.codebuddy.cn/v2/plugin/auth/state?platform=workbuddy`; international uses `https://www.workbuddy.ai/v2/plugin/auth/state?platform=workbuddy-ai`. The accepted authorization URL must match the initiating realm, platform and state. Token polling treats only code `11217` as pending; account polling treats `12151` as pending. Request deadlines, an overall timeout and cancellation bound the flow. This is the official state/polling protocol, not a loopback authorization-code callback. Settings advertise this login entry point as `Web` alongside automatic desktop discovery; do not label it standard OAuth without a verified protocol contract.
 
 Settings hold bounded identity metadata; access/refresh tokens live under `providers.workbuddy.accounts.<id>.credentials` in the shared credential store. Raw tokens, state, authorization URLs and provider error payloads never enter renderer settings, logs or the device wire record. Token Monitor does not switch the WorkBuddy app account or write any WorkBuddy/CodeBuddy session file.
 
@@ -82,7 +82,7 @@ That distinction is the whole point: an encrypted credential is not a signed-out
 
 | Read reason | Limits outcome | Renderer |
 | --- | --- | --- |
-| `encrypted` | `notConfigured` + `actionRequired: appSessionEncrypted` | "Encrypted by app" |
+| `encrypted` | `notConfigured` + `actionRequired: appSessionEncrypted` | "Encrypted by app" in Settings and the shared Limits/Dock row |
 | `absent`, `incomplete`, `malformed` | `notConfigured` | "Sign in" |
 | `expired` | `unauthorized` | "Sign in again" |
 

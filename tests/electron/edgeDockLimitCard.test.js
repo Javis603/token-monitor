@@ -1743,3 +1743,13 @@ test('with every item unchecked, Home and the picker keep no window the card dre
   }
   assert.deepEqual(problems, []);
 });
+
+
+test('WorkBuddy sealed credentials show their cause instead of signed-out instructions on shared rows', () => {
+  const view = dockView();
+  const provider = { provider: 'workbuddy', status: 'notConfigured', accountKey: 'encrypted-account', actionRequired: 'appSessionEncrypted', windows: [] };
+  const row = view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', provider, '#10A37F');
+  assert.equal(row.find('limit-plan').textContent, 'Encrypted by app');
+  assert.equal(view.limitProviderMeta(provider), 'Encrypted by app');
+  assert.equal(view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', { ...provider, actionRequired: undefined }, '#10A37F').find('limit-plan').textContent, 'Not signed in');
+});
