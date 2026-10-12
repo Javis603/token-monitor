@@ -105,9 +105,9 @@ function accountTokenIdentity(token) {
 
 // Quota request with expiry self-healing: when the access half is rejected
 // (HTTP 401/403 or a body-level login refusal), spend the refresh half on a
-// new token, report the rotation (the runtime persists it; a save-time probe
-// collects it into the draft), and retry once with the renewed token. If that
-// still fails, refreshing cannot help and the original error stands. Returns
+// new token and retry once. Only a successful retry reports the rotation
+// (the runtime persists it; a save-time probe collects it into the draft).
+// A failed retry keeps its own status and does not persist the token. Returns
 // the parsed windows together with the token that actually worked — the plan
 // lookup must use the effective token, or it would just 401 again.
 async function queryRateLimit(request, token, deps = {}) {
@@ -118,6 +118,7 @@ async function queryRateLimit(request, token, deps = {}) {
     if (!isStepfunAuthFailure(error)) throw error;
     const renewed = await refreshStepfunToken(token, deviceId(token), deps);
     if (!renewed) throw error;
+    const windows = await attempt(renewed);
     try {
       await deps.onStepfunTokenRenewed?.({ previousToken: token, token: renewed });
     } catch (persistenceError) {
@@ -125,7 +126,7 @@ async function queryRateLimit(request, token, deps = {}) {
       // next poll; the quota itself is unaffected.
       deps.logger?.(`[limits] StepFun token renewal could not be persisted: ${persistenceError?.message || persistenceError}`);
     }
-    return { windows: await attempt(renewed), token: renewed };
+    return { windows, token: renewed };
   }
 }
 

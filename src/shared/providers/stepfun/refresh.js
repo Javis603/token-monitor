@@ -15,7 +15,7 @@
 //     the renewal callback (the agent) therefore keeps working by refreshing
 //     from the stored value every poll; persisting only saves a round trip.
 
-const { errorWithStatus } = require('../../limits/providerHelpers');
+const { errorWithStatus, statusForHttp } = require('../../limits/providerHelpers');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 
 const ORIGIN = 'https://platform.stepfun.com';
@@ -41,9 +41,9 @@ function combineStepfunToken(accessTokenRaw, refreshTokenRaw, previousToken) {
 }
 
 // Spends the current token (expired access half included) on a fresh one.
-// Returns the combined pair on success; null on a rejection or network
-// failure — the caller keeps its unauthorized verdict, and re-pasting the
-// token in settings remains the only way out once the refresh half expires.
+// Returns the combined pair on success; null only on an authentication
+// rejection. Transient failures keep their retryable status so an outage
+// cannot reject a valid credential or suppress the runtime's retry policy.
 async function refreshStepfunToken(token, webid, deps = {}) {
   const fetchFn = deps.fetch || fetch;
   let response;
@@ -57,16 +57,22 @@ async function refreshStepfunToken(token, webid, deps = {}) {
     });
   } catch (error) {
     if (deps.signal?.aborted) throw error;
-    return null;
+    throw errorWithStatus('unavailable', 'StepFun refresh request failed');
   }
-  if (!response.ok) return null;
+  if (!response.ok) {
+    const status = statusForHttp(response.status);
+    if (status === 'unauthorized') return null;
+    throw errorWithStatus(status, `StepFun refresh returned ${response.status}`);
+  }
   let body;
   try {
     body = await response.json();
   } catch {
     throw errorWithStatus('unavailable', 'Invalid StepFun refresh response');
   }
-  return combineStepfunToken(body?.accessToken?.raw, body?.refreshToken?.raw, token);
+  const renewed = combineStepfunToken(body?.accessToken?.raw, body?.refreshToken?.raw, token);
+  if (!renewed) throw errorWithStatus('unavailable', 'StepFun refresh token missing');
+  return renewed;
 }
 
 module.exports = { REFRESH_URL, combineStepfunToken, isStepfunAuthFailure, refreshStepfunToken };

@@ -104,7 +104,10 @@ test('StepFun rotates an expired Oasis token through the passport refresh endpoi
   const renewals = [];
   const result = await fetchStepfunLimits({ stepfunToken: stale }, {
     env: {},
-    onStepfunTokenRenewed: async (renewal) => { renewals.push(renewal); },
+    onStepfunTokenRenewed: async (renewal) => {
+      assert.equal(requests.length, 3, 'quota retry completes before reporting a renewal');
+      renewals.push(renewal);
+    },
     fetch: async (url, init) => {
       requests.push({ url, init });
       const cookie = init.headers.Cookie;
@@ -147,6 +150,77 @@ test('a rejected refresh keeps the unauthorized verdict and reports nothing', as
   });
   assert.equal(result.status, 'unauthorized');
   assert.deepEqual(renewals, []);
+});
+
+test('transient refresh failures can be saved and schedule a limits retry', async (t) => {
+  const { createCredentialCommands } = require('../../src/electron/limits/credentialCommands');
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  for (const [failure, status] of [['network', 'unavailable'], [503, 'unavailable'], [429, 'sourceRateLimited']]) {
+    const renewals = [];
+    const deps = {
+      env: {},
+      onStepfunTokenRenewed: (renewal) => { renewals.push(renewal); },
+      fetch: async (url) => {
+        if (!url.includes('PassportService/RefreshToken')) return { ok: false, status: 401 };
+        if (failure === 'network') throw new Error('offline');
+        return { ok: false, status: failure };
+      }
+    };
+    const token = 'expired-access...valid-refresh';
+    const row = await fetchStepfunLimits({ stepfunToken: token }, deps);
+    assert.equal(row.status, status, String(failure));
+    assert.deepEqual(renewals, []);
+
+    const patches = [];
+    const commands = createCredentialCommands({
+      getSettings: () => ({}),
+      applySettingsPatch: (patch) => { patches.push(patch); return {}; },
+      probeDeps: () => deps,
+      env: {}
+    });
+    const saved = await commands.saveCredential('stepfun', { stepfunToken: token });
+    assert.equal(saved.saved, true);
+    assert.equal(saved.verdict, 'indeterminate');
+    assert.equal(saved.status, status);
+    assert.equal(patches[0].stepfunToken, token);
+
+    const events = [];
+    const runtime = createLimitsRuntime({ limitProviders: ['stepfun'], stepfunToken: token }, {
+      ...deps, retryBaseMs: 60000, random: () => 0.5,
+      onEvent: (event) => { events.push(event); }
+    });
+    t.after(() => runtime.stop());
+    await runtime.refresh({ provider: 'stepfun' });
+    assert.equal(runtime.getSnapshot().providers[0].status, status);
+    assert.equal(events.find((event) => event.type === 'retry-scheduled')?.reason, status);
+    runtime.stop();
+  }
+});
+
+test('a failed quota retry never reports a renewal or retries again', async () => {
+  for (const [failure, status] of [[401, 'unauthorized'], [503, 'unavailable'], ['network', 'unavailable'], ['invalid', 'unavailable']]) {
+    const renewals = [];
+    const requests = [];
+    const result = await fetchStepfunLimits({ stepfunToken: 'old...refresh' }, {
+      env: {},
+      onStepfunTokenRenewed: (renewal) => { renewals.push(renewal); },
+      fetch: async (url, init) => {
+        requests.push(url);
+        if (url.includes('PassportService/RefreshToken')) {
+          return { ok: true, json: async () => ({ accessToken: { raw: 'new' }, refreshToken: { raw: 'refresh' } }) };
+        }
+        if (init.headers.Cookie.includes('old...refresh')) return { ok: false, status: 401 };
+        if (failure === 'network') throw new Error('offline');
+        if (failure === 'invalid') return { ok: true, json: async () => ({ status: 1 }) };
+        return { ok: false, status: failure };
+      }
+    });
+    assert.equal(result.status, status, String(failure));
+    assert.deepEqual(renewals, []);
+    assert.deepEqual(requests.map((url) => url.split('/').pop()), [
+      'QueryStepPlanRateLimit', 'RefreshToken', 'QueryStepPlanRateLimit'
+    ]);
+  }
 });
 
 test('a failing renewal callback cannot discard a refreshed quota', async () => {
