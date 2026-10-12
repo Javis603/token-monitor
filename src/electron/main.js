@@ -7108,6 +7108,9 @@ function createWindow(boundsOverride, options = {}) {
     }
   });
   win.webContents.on('before-input-event', handleZoomShortcut);
+  win.webContents.on('context-menu', (event) => {
+    event.preventDefault();
+  });
   // The dock's own windows would otherwise keep the process alive after the
   // last real window closes, which window-all-closed relies on for quitting.
   win.on('closed', () => {
@@ -7226,6 +7229,9 @@ function createDashboardWindow() {
   win.webContents.on('will-navigate', (event, url) => {
     event.preventDefault();
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
+  });
+  win.webContents.on('context-menu', (event) => {
+    event.preventDefault();
   });
   // Only dashboard:ready may reveal a healthy window. Slow hub history must not
   // race a wall-clock fallback and expose the unprepared heatmap. Actual load or

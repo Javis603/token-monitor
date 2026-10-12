@@ -584,6 +584,17 @@ const syncModeSelect = window.TokenMonitorSelectControl?.enhance(els.hubModeOpti
   getOptionMeta: option => ({ description: t(SYNC_MODE_DESCRIPTIONS[option.value]), icon: syncModeIcons[option.value] })
 });
 window.addEventListener('unload', () => syncModeSelect?.destroy(), { once: true });
+window.addEventListener('contextmenu', (event) => {
+  const target = event.target;
+  const isEditable = target && (
+    target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.isContentEditable
+  );
+  if (!isEditable) {
+    event.preventDefault();
+  }
+});
 
 function toggleAccordionRow(row) {
   const isExpanded = row.classList.contains('expanded');
