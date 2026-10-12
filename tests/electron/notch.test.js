@@ -2023,3 +2023,41 @@ test('entering full-screen collapses an open entry even when no summary changes 
   }
 });
 
+
+test('restoring a rate summary starts a new baseline instead of reporting usage while it was disabled', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const code = source.slice(source.indexOf('function notchDataFor('), source.indexOf('function toggleDockRateMode('));
+  const tokenRateApi = require('../../src/electron/renderer/tokenRatePresentation');
+  const rate = trayLayout.createTrayLayoutItem('liveTokenRate');
+  const tokens = trayLayout.createTrayLayoutItem('tokens');
+  const preferences = { notchFollowTray: false, deviceId: 'here',
+    notchCustomLayout: { version: trayLayout.VERSION, items: [rate] } };
+  let now = 0;
+  const context = {
+    settings: preferences, mode: 'local', Date: { now: () => now },
+    notchRateTimer: null, notchRateTrackers: new Map(), notchController: { isRunning: () => false },
+    clearTimeout() {}, notchSummaryLayout: summaryLayout, trayLayoutApi: trayLayout, tokenRateApi,
+    buildNotchData, compactTokenDisplayOptions: () => ({}), normalizeCurrency: value => value,
+    codexAccountsForRenderer: () => [], codexPresentationPendingAccountId: null,
+    codexPresentationActiveAccountId: null, syncProvenanceActive: () => false
+  };
+  const project = vm.runInNewContext(`${code}; notchDataFor`, context);
+  const input = (tokens, duration) => ({ periods: { today: {
+    totalTokens: tokens, timedTokens: tokens, timedOutputTokens: tokens, timedDurationMs: duration, sessions: {}
+  } } });
+  project(input(0, 0), []);
+  now = 1000;
+  assert.equal(project(input(50, 1000), []).summary.items[0].measure.value, 50);
+  preferences.notchCustomLayout.items = [tokens];
+  project(input(50, 1000), []);
+  now = 181000;
+  preferences.notchCustomLayout.items = [rate];
+  const restored = project(input(500, 2000), []).summary.items[0];
+  assert.equal(restored.available, false, 'usage accumulated while disabled is not a fresh rate sample');
+  assert.equal(restored.measure, null);
+  now = 182000;
+  assert.equal(project(input(700, 3000), []).summary.items[0].measure.value, 200);
+  preferences.notchCustomLayout.items = [tokens];
+  project(input(700, 3000), []);
+  assert.equal(context.notchRateTrackers.size, 0);
+});

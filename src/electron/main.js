@@ -5393,7 +5393,11 @@ function notchDataFor(visibleStats, cells) {
   const rateItems = trayLayoutApi.liveTokenRateItems(layout);
   const liveTokenRates = {};
   let nextExpiry = 0;
-  for (const scope of new Set(rateItems.map((item) => item.rateScope))) {
+  const scopes = new Set(rateItems.map((item) => item.rateScope));
+  for (const scope of notchRateTrackers.keys()) {
+    if (!scopes.has(scope)) notchRateTrackers.delete(scope);
+  }
+  for (const scope of scopes) {
     const selection = tokenRateApi.selectLiveTokenRatePeriods(visibleStats, settings.deviceId, settings.hubMode, scope);
     const context = [mode, settings.hubMode, settings.hubUrl, settings.deviceId, selection.source].join('|');
     let held = notchRateTrackers.get(scope);
