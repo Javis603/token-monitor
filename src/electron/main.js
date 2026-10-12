@@ -547,9 +547,10 @@ function normalizeHomeLimitAccountCount(value) {
   return Math.max(1, Math.min(HOME_LIMIT_ACCOUNT_COUNT_MAX, count));
 }
 
-function defaultSettings() {
+function defaultSettings(platform = process.platform) {
   const envHubUrl = process.env.TOKEN_MONITOR_HUB_URL || '';
   const windowBehavior = process.env.TOKEN_MONITOR_ALWAYS_ON_TOP === '0' ? 'normal' : 'floating';
+  const isLinux = platform === 'linux';
   return {
     hubMode: envHubUrl ? 'client' : 'local',
     hubUrl: envHubUrl,
@@ -567,9 +568,9 @@ function defaultSettings() {
     keepAboveTaskbar: false,
     refreshMs: Number(process.env.TOKEN_MONITOR_WIDGET_REFRESH_MS || 15000),
     glassOpacity: 68,
-    glassBlur: 32,
+    glassBlur: isLinux ? 0 : 32,
     backgroundImageOpacity: 28,
-    systemGlass: true,
+    systemGlass: !isLinux,
     windowsBackdrop: 'acrylic',
     macBackdrop: 'vibrancy',
     reduceMotion: 'system',

@@ -12622,9 +12622,10 @@ els.resetGlassButton.addEventListener('click', async () => {
   await saveSettings({ glassOpacity: defaultAppearance.glassOpacity });
 });
 els.resetDepthButton.addEventListener('click', async () => {
-  els.blurInput.value = String(defaultAppearance.glassBlur);
+  const defaultBlur = state.appInfo?.platform === 'linux' ? 0 : defaultAppearance.glassBlur;
+  els.blurInput.value = String(defaultBlur);
   applyAppearanceFromControls();
-  await saveSettings({ glassBlur: defaultAppearance.glassBlur });
+  await saveSettings({ glassBlur: defaultBlur });
 });
 els.resetBackgroundImageOpacityButton?.addEventListener('click', async () => {
   els.backgroundImageOpacityInput.value = String(defaultAppearance.backgroundImageOpacity);
