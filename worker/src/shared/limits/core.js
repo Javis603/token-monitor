@@ -1005,8 +1005,13 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   // hashes to different accountKeys (keychain identity vs file path), so byKey
   // keeps them as separate entries; without this pass the renderer's per-provider
   // Map.set() would arbitrarily overwrite the fresh one with the stale one.
+  const hasKnownWorkbuddyAccount = Array.from(byKey.values()).some((candidate) =>
+    candidate.provider === 'workbuddy' && candidate.accountKey && !isWorkbuddyPlaceholder(candidate));
   const byProvider = new Map();
   for (const candidate of byKey.values()) {
+    // A local-app sentinel is an onboarding hint, not an extra account. Real
+    // identities keep their own failure hints even when none has credentials.
+    if (hasKnownWorkbuddyAccount && isWorkbuddyPlaceholder(candidate)) continue;
     const knownWorkbuddyAccount = candidate.provider === 'workbuddy' && candidate.accountKey
       && !isWorkbuddyPlaceholder(candidate);
     const hasFreshObservation = providersWithFreshObservations.has(candidate.provider);

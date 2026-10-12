@@ -5,6 +5,59 @@ const test = require('node:test');
 const { aggregateLimits } = require('../../src/shared/limits/core');
 const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
 const { workbuddyCreditTotals } = require('../../src/electron/renderer/limits/providerPresentation');
+const { aggregateLimits: aggregateWorkerLimits } = require('../../worker/src/shared/limits/core');
+
+for (const [runtime, aggregate] of [['Node', aggregateLimits], ['Worker', aggregateWorkerLimits]]) {
+  test(`${runtime}: unsigned fresh devices do not add accounts when every known credential is missing`, async () => {
+    const now = Date.parse('2026-10-12T00:10:00Z');
+    const at = new Date(now).toISOString();
+    for (const realm of ['cn', 'ai']) {
+      const known = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true, workbuddyLocalSessions: [
+        { realm, userId: 'encrypted-user', reason: 'encrypted' },
+        { realm, userId: 'missing-user', reason: 'incomplete' }
+      ] }, { env: {}, now: () => now });
+      assert.deepEqual(known.map((row) => row.status), ['notConfigured', 'notConfigured']);
+      for (const stale of [false, true]) for (const unsignedRealm of ['cn', 'ai']) {
+        const placeholder = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true,
+          workbuddyRealm: unsignedRealm }, { env: {}, now: () => now });
+        const devices = [
+          { deviceId: 'known', stale, limits: { updatedAt: at, providers: known } },
+          { deviceId: 'unsigned-fresh', limits: { updatedAt: at, providers: [placeholder] } }
+        ];
+        for (const observations of [devices, [...devices].reverse()]) {
+          const summary = aggregate(observations, 60000, now);
+          assert.equal(summary.providers.length, 2, `${realm} / ${unsignedRealm} / stale=${stale}`);
+          for (const expected of known) {
+            const retained = summary.providers.find((row) => row.accountKey === expected.accountKey);
+            assert.ok(retained, 'every genuine identity remains');
+            assert.equal(retained.status, expected.status);
+            assert.equal(retained.actionRequired, expected.actionRequired);
+            assert.equal(retained.stale, stale);
+          }
+          assert.equal(workbuddyCreditTotals(summary.providers), null);
+        }
+      }
+    }
+  });
+
+  test(`${runtime}: placeholder-only devices retain the first-sign-in or encryption hint`, async () => {
+    const now = Date.parse('2026-10-12T00:10:00Z');
+    const at = new Date(now).toISOString();
+    for (const realm of ['cn', 'ai']) for (const reason of ['', 'encrypted']) {
+      const placeholder = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true,
+        workbuddyRealm: realm, workbuddyLocalSessionReason: reason }, { env: {}, now: () => now });
+      const summary = aggregate([
+        { deviceId: 'unsigned-old', stale: true, limits: { updatedAt: at, providers: [placeholder] } },
+        { deviceId: 'unsigned-fresh', limits: { updatedAt: at, providers: [placeholder] } }
+      ], 60000, now);
+      assert.equal(summary.providers.length, 1);
+      assert.equal(summary.providers[0].accountKey, placeholder.accountKey);
+      assert.equal(summary.providers[0].status, 'notConfigured');
+      assert.equal(summary.providers[0].actionRequired, placeholder.actionRequired);
+      assert.equal(summary.providers[0].stale, false);
+    }
+  });
+}
 
 test('an unsigned desktop on another device does not join healthy WorkBuddy accounts', async () => {
   const now = Date.parse('2026-10-12T00:10:00Z');

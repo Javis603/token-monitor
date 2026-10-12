@@ -30,7 +30,8 @@ const { createLimitWindowsView } = require('../../src/electron/renderer/limits/w
 const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
 const { parseStepfunUsage } = require('../../src/shared/providers/stepfun/limits');
 const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../src/shared/providers/factory/limits');
-const { normalizeLimitProvider } = require('../../src/shared/limits/core');
+const { aggregateLimits, normalizeLimitProvider } = require('../../src/shared/limits/core');
+const { fetchWorkbuddyLimits } = require('../../src/shared/providers/workbuddy/limits');
 
 const root = path.join(__dirname, '../..');
 
@@ -188,6 +189,31 @@ function dockView(appearance = {}, overrides = {}) {
     ...overrides
   });
 }
+
+test('Limits group counts only genuine accounts when both credentials are unavailable', async () => {
+  const now = Date.parse('2026-10-12T00:10:00Z');
+  const at = new Date(now).toISOString();
+  const known = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true, workbuddyLocalSessions: [
+    { realm: 'cn', userId: 'encrypted-user', reason: 'encrypted' },
+    { realm: 'cn', userId: 'missing-user', reason: 'incomplete' }
+  ] }, { env: {}, now: () => now });
+  const placeholder = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true }, { env: {}, now: () => now });
+  const summary = aggregateLimits([
+    { deviceId: 'known', limits: { updatedAt: at, providers: known } },
+    { deviceId: 'unsigned', limits: { updatedAt: at, providers: [placeholder] } }
+  ], 0, now);
+  const view = dockView({ workbuddyQuotaTotalEnabled: true });
+  const group = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', summary.providers, '#12B7F5');
+  assert.ok(group.text.includes('2 accounts'), group.text);
+  assert.equal(group.find('limit-account-list').children.length, 2);
+  assert.equal(group.text.includes('Account 3'), false);
+  assert.ok(group.text.includes('Encrypted by app'), group.text);
+  assert.ok(group.text.includes('Not signed in'), group.text);
+  assert.equal(view.workbuddyCombinedProvider(summary.providers), null);
+  const alone = aggregateLimits([{ deviceId: 'unsigned', limits: { updatedAt: at, providers: [placeholder] } }], 0, now);
+  const signIn = view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', alone.providers[0], '#12B7F5');
+  assert.ok(signIn.text.includes('Not signed in'), signIn.text);
+});
 
 test('WorkBuddy group draws a healthy total plus independent accounts and omits partial totals', () => {
   const rows = ['one', 'two'].map((accountKey) => normalizeLimitProvider({
