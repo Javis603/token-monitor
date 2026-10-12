@@ -118,6 +118,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     traeAccessToken: ['providers', 'trae', 'accessToken'],
     traeDeviceId: ['providers', 'trae', 'deviceId'],
     alibabaCookie: ['providers', 'alibaba', 'cookie'],
+    omnirouteToken: ['providers', 'omniroute', 'token'],
     thirdPartyProfiles: ['providers', 'thirdparty', 'profiles']
   });
 });
@@ -171,6 +172,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     ollama: ['ollamaCookie'],
     trae: ['traeAccessToken', 'traeDeviceId'],
     alibaba: ['alibabaCookie', 'alibabaVariant'],
+    omniroute: ['omnirouteBaseUrl', 'omnirouteToken'],
     thirdparty: ['thirdPartyProfiles']
   });
   for (const provider of Object.keys(LIMIT_PROVIDER_SETTING_KEYS)) {
@@ -274,7 +276,8 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
     'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
-    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie'
+    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie',
+    'omnirouteBaseUrl', 'omnirouteToken'
   ].sort());
   for (const key of normalizedKeys) {
     const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test' : ' example ';
@@ -353,6 +356,7 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://dashboard.zed.dev/',
     'https://console.typesafe.ai/settings/billing',
     'https://platform.stepfun.com/plan-usage',
+    'https://omniroute.online/docs',
     'https://ollama.com/settings',
     'https://www.ollama.com/signin',
     'https://kimi.com/code',

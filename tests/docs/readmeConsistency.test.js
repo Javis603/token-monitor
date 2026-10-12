@@ -95,6 +95,7 @@ const supportedToolOrder = [
   'Trae CN',
   'Alibaba Cloud',
   'StepFun',
+  'OmniRoute',
   'Third-party APIs'
 ];
 
@@ -142,6 +143,7 @@ const supportedToolIdOrder = [
   'trae',
   'alibaba',
   'stepfun',
+  'omniroute',
   'thirdparty'
 ];
 

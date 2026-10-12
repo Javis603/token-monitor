@@ -87,6 +87,7 @@
     trae: ['Manual login', 'Web'],
     alibaba: ['Token Plan', 'Web'],
     stepfun: ['Coding/Token Plan', 'Web'],
+    omniroute: ['Relay', 'API key'],
     thirdparty: ['Relay', 'API']
   };
 
