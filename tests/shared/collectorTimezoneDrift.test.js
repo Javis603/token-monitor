@@ -73,7 +73,7 @@ test('todayPeriodHasDriftedWindow flags sessions that ended before the local mid
   assert.equal(todayPeriodHasDriftedWindow({ sessions: { s1: { lastUsedAt: '2026-10-09T20:00:00+08:00' } } }, Number.NaN), false);
 });
 
-test('an anchor whose offset no longer matches is declined, with unstamped anchors joining it', () => {
+test('an anchor whose offset no longer matches is declined, while legacy unstamped anchors stay restorable', () => {
   const now = new Date(2026, 9, 10, 10, 0, 0);
   const options = { clients: 'claude', allTimeSince: '2024-01-01', now };
   const anchor = {
@@ -85,7 +85,10 @@ test('an anchor whose offset no longer matches is declined, with unstamped ancho
   };
   assert.equal(collectorAnchorTrust(anchor, options).capturedAtMs, now.getTime() - 60_000);
   assert.equal(collectorAnchorTrust({ ...anchor, utcOffsetMinutes: utcOffsetMinutes(now) + 1 }, options), null);
-  assert.equal(collectorAnchorTrust({ ...anchor, utcOffsetMinutes: undefined }, options), null);
+  // Pre-stamping anchors cannot prove their zone, but identity migration must
+  // survive restarts: restore accepts them and the drifted-window detector
+  // guards their baseline instead.
+  assert.equal(collectorAnchorTrust({ ...anchor, utcOffsetMinutes: undefined }, options).capturedAtMs, now.getTime() - 60_000);
 });
 
 test('a drifted anchored tick falls back to the serial full scan and reports the drift', async () => {

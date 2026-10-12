@@ -804,9 +804,10 @@ test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
   assert.equal(collectorAnchorTrust(anchor({ allTime: null }), options), null);
   assert.equal(collectorAnchorTrust(anchor(), { ...options, clients: 'claude,codex' }), null);
   assert.equal(collectorAnchorTrust(anchor(), { ...options, projectsEnabled: false }), null);
-  // An anchor written before offset stamping cannot prove which midnight its
-  // windows were cut at; declining costs one full scan and re-stamps it.
-  assert.equal(collectorAnchorTrust(anchor({ utcOffsetMinutes: undefined }), options), null);
+  // A mismatched stamp proves the anchor was cut under another zone's
+  // midnight; declining costs one full scan and re-stamps it. An unstamped
+  // (pre-stamping) anchor stays restorable so identity migration can advance,
+  // with the drifted-window detector guarding a stale baseline instead.
   assert.equal(collectorAnchorTrust(anchor({ utcOffsetMinutes: utcOffsetMinutes(now) + 1 }), options), null);
 
   // A custom scan path added after the anchor was written invalidates it; an

@@ -969,11 +969,14 @@ async function collectUsageOnce(options) {
   // The offset check pairs with the date key: an anchor stamped under a
   // different UTC offset (timezone or DST moved since the full scan) cut its
   // baseline at a different local midnight, and the exact-delta identity below
-  // needs both windows to start at the same one.
+  // needs both windows to start at the same one. A legacy anchor written before
+  // offset stamping (no marker) cannot prove its origin either way; it keeps
+  // the incremental path (upstream contract) and the drifted-window detector
+  // below still catches a baseline that no longer matches the current zone.
   const anchorUsed = Boolean(
     anchor
     && anchor.dateKey === localTodayKey(collectedAt)
-    && anchor.utcOffsetMinutes === utcOffsetMinutes(collectedAt)
+    && (anchor.utcOffsetMinutes === undefined || anchor.utcOffsetMinutes === utcOffsetMinutes(collectedAt))
     && canTargetTodayPartitions(anchor, targetClients)
   );
   // False when the tick drifted (see the anchored branch below): the delta
@@ -2261,11 +2264,14 @@ function collectorAnchorTrust(saved, options = {}) {
   const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
   // The anchor's periods were cut at the local midnight of the offset it was
-  // captured under. A timezone or DST move (or an anchor written before offset
-  // stamping, whose offset cannot be proven) makes that midnight different
-  // from the current one, and the exact-delta identity dies with the origin.
-  // Declining here costs one full scan and re-stamps the anchor.
-  if (saved.utcOffsetMinutes !== utcOffsetMinutes(now)) return null;
+  // captured under. A timezone or DST move makes that midnight different from
+  // the current one, and the exact-delta identity dies with the origin.
+  // Declining here costs one full scan and re-stamps the anchor. An anchor
+  // written before offset stamping (no marker) is still restored: its usage
+  // baseline stays untrusted below (anchorUsed requires a matching stamp), but
+  // the identity/catalog state it carries must survive restarts so identity
+  // migration can advance instead of restarting from zero on every launch.
+  if (saved.utcOffsetMinutes !== undefined && saved.utcOffsetMinutes !== utcOffsetMinutes(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
   // A flat provenance ledger cannot prove each period's project source.
   if (Object.keys(saved.catalogProjects || {}).length && !saved.catalogProjects.today) return null;
@@ -3634,11 +3640,13 @@ function startCollector(options) {
     // does not drift from reality over a long-running session.
     // lastFullScanAt === 0 means no valid timestamp exists (cold start,
     // unparseable, or future timestamp) — force a full scan immediately.
+    // A legacy unstamped anchor keeps the anchored path (upstream contract);
+    // the drifted-window detector still guards its baseline.
     const anchorToday = Boolean(
       !fullScanDue
       && anchor
       && anchor.dateKey === localTodayKey()
-      && anchor.utcOffsetMinutes === utcOffsetMinutes()
+      && (anchor.utcOffsetMinutes === undefined || anchor.utcOffsetMinutes === utcOffsetMinutes())
     );
     const sourceSelfSync = activityGated ? sourceSyncQueue.takeDue() : null;
     // Smart mode carries the clients its watch events named since the last tick
