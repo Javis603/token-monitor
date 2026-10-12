@@ -326,7 +326,7 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   assert.match(sessions, /sessionRowsApi\.sessionModelLabel\(session\)/);
   assert.match(sessions, /if \(context\) meta\.append\(context\)/);
   // Running is a dot beside the name, not a recoloured title.
-  assert.match(sessions, /nameNode\.append\(stateMark\(session, key, state\)\)/);
+  assert.match(sessions, /nameNode\.append\(stateMark\(session, key, activityState\)\)/);
   assert.match(sessions, /el\('span', 'edge-dock-session-title', name\)/);
   assert.match(sessions, /overflowText\.bind\(title\)/);
   assert.match(sessions, /nameNode\.append\(title\)/);
@@ -354,7 +354,7 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   assert.match(readRendererFile(path.join('icons', 'actions', 'spinner.svg')), /<animate attributeName="opacity"/);
   // The slot is reserved on EVERY row and only painted while running, so the
   // titles of running and idle rows start at the same x.
-  assert.match(sessions, /const state = stateByKey\.get\(key\) \|\| 'idle'/);
+  assert.match(sessions, /const activityState = stateByKey\.get\(key\) \|\| 'idle'/);
   // The flare is one-shot, so an idle card animates nothing.
   // The flare rides along with the spin rather than replacing it, and adds no
   // `infinite` of its own: a flare always means a write.
@@ -425,6 +425,43 @@ test('Home session preview uses the sidebar timeline and keeps running rows with
       .map((row) => row.sessionId),
     ['0', '1', '2', '3', '4', '5']
   );
+});
+
+test('Home and Dock group raw history without building session detail DTOs', () => {
+  const sessionRows = require('../../src/electron/renderer/sessionRows');
+  const original = sessionRows.sessionRowsForPeriod;
+  sessionRows.sessionRowsForPeriod = () => assert.fail('recent cards must not format historical detail DTOs');
+  try {
+    const now = Date.now();
+    const sessions = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`codex:history-${i}`, {
+      client: 'codex', sessionId: `history-${i}`, totalTokens: 10, costUsd: 1,
+      models: { a: 10 }, lastUsedAt: new Date(now - 86400000 - i).toISOString(), turnEnded: true
+    }]));
+    sessions['codex:old-main'] = { client: 'codex', sessionId: 'old-main', t3ThreadId: 'app-main',
+      totalTokens: 500, costUsd: 2, models: { a: 500 }, lastUsedAt: new Date(now - 60000).toISOString(), turnEnded: true };
+    sessions['claude:new-main'] = { client: 'claude', sessionId: 'new-main', t3ThreadId: 'app-main',
+      totalTokens: 0, tokenDataUnavailable: true, lastUsedAt: new Date(now).toISOString(), turnEnded: true };
+    sessions['codex:child'] = { client: 'codex', sessionId: 'child', t3ThreadId: 'app-child',
+      parentSessionId: 'old-main', totalTokens: 100, costUsd: 1, models: { b: 100 }, lastUsedAt: new Date(now).toISOString() };
+    const stats = { periods: { today: { sessions: {} }, month: { sessions } } };
+    const home = edgeDockPresentation.recentSessionRows(stats, 5);
+    const dock = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] })[0].sessions;
+    for (const rows of [home, dock]) {
+      const group = rows.find(row => row.subagentGroup);
+      assert.ok(group);
+      assert.equal(group.groupRows.length, 3);
+      assert.equal(group.subagentCount, 1);
+      assert.equal(group.totalTokens, 600);
+      assert.equal(group.costUsd, 3);
+      assert.equal(group.tokenDataUnavailable, false, 'a new pre-token main does not hide accounted members');
+      assert.deepEqual(group.models, { a: 500, b: 100 });
+      assert.equal(group.running, true);
+      assert.equal(group.summary, undefined, 'full detail presentation stays in Sessions');
+    }
+    assert.equal(home.length, 5);
+  } finally {
+    sessionRows.sessionRowsForPeriod = original;
+  }
 });
 
 test('a startedAt-only session keeps its display age without becoming running', () => {
@@ -993,8 +1030,8 @@ test('a repainted card restores the scroll container it actually uses', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const css = readRendererFile(path.join('edgeDock', 'dock.css'));
   const commit = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('function renderBubble('));
-  assert.match(commit, /querySelector\(CARD_SCROLL_SELECTOR\)/);
-  assert.match(commit, /list\.scrollTop = scrollTop;/);
+  assert.match(commit, /querySelectorAll\(CARD_SCROLL_SELECTOR\)/);
+  assert.match(commit, /list\.scrollTop = scrollTops\[index\] \|\| 0;/);
   // Both containers are named, read from the declaration so a third cannot be added to
   // the card without this failing.
   const declaration = dock.match(/const CARD_SCROLL_SELECTOR = '([^']+)';/);
@@ -2661,4 +2698,175 @@ test('a larger dock that would not fit shrinks to the largest size that keeps fu
   assert.equal(edgeDockFittingScale({ workArea, cellKinds: ['provider'], scale: 1.25 }), 1.25, 'a dock that fits keeps its size');
   assert.equal(edgeDockFittingScale({ workArea, cellKinds: kinds, scale: 0.85 }), 0.85, 'a smaller one is left alone');
   assert.equal(edgeDockFittingScale({ workArea: { ...workArea, height: 400 }, cellKinds: kinds, scale: 1.5 }), 1, 'one too long even at 100% keeps today\'s density');
+});
+
+
+test('provider card repaint preserves both account and session scroll and ignores nested families', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const start = dock.indexOf('function commitCard(');
+  const body = dock.slice(start, dock.indexOf('\n}', start) + 2);
+  const list = (scrollTop, nested = false) => ({ scrollTop,
+    closest: () => nested ? {} : null });
+  const previous = { dataset: { cellId: 'codex' },
+    querySelectorAll: () => [list(17), list(140), list(4, true)] };
+  const accounts = list(0), sessions = list(0), nested = list(0, true);
+  const next = { dataset: { cellId: 'codex' }, querySelectorAll: () => [accounts, sessions, nested] };
+  const commit = Function('contentLayer', 'overflowText', 'document', 'cardResetAnimator', 'CARD_SCROLL_SELECTOR',
+    `${body}\nreturn commitCard;`)(
+    { querySelector: () => previous, replaceChildren() {} },
+    { refresh() {}, preserveReading() {} }, {}, { capture() {}, animate() {} }, '.scroll');
+  commit(next, 'codex');
+  assert.deepEqual([accounts.scrollTop, sessions.scrollTop, nested.scrollTop], [17, 140, 0]);
+  commit(next, 'claude');
+  assert.deepEqual([accounts.scrollTop, sessions.scrollTop], [0, 0], 'another card starts at the top');
+});
+
+test('recent cards project only selected display rows while aliases and cross-client children precede caps', (t) => {
+  const now = Date.parse('2026-10-11T12:00:00Z');
+  t.mock.method(Date, 'now', () => now);
+  const live = require('../../src/shared/sessionLive');
+  const context = live.sessionContextForRow;
+  const projectedIds = new Set();
+  t.mock.method(live, 'sessionContextForRow', session => {
+    projectedIds.add(session.sessionId);
+    return context(session);
+  });
+  const sessions = {};
+  const add = (client, id, minutes, extra = {}) => {
+    sessions[`${client}:${id}`] = { client, sessionId: id, title: id, totalTokens: 10, costUsd: 1,
+      models: { a: 10 }, lastUsedAt: new Date(now - minutes * 60_000).toISOString(), turnEnded: true, ...extra };
+  };
+  for (let i = 0; i < 100; i++) add('dsh', `history-${i}`, 60 + i);
+  add('codex', 'main-old', 40, { t3ThreadId: 'app-main' });
+  add('claude', 'main-new', 20, { t3ThreadId: 'app-main', totalTokens: 20, costUsd: 2, models: { b: 20 } });
+  add('codex', 'child', 8, { parentClient: 'claude', parentSessionId: 'main-new', turnEnded: false });
+  add('codex', 'waiting', 9, { turnEnded: false, waitingForInput: true });
+  add('codex', 'running', 7, { turnEnded: false });
+  add('codex', 'quiet', 1);
+  const stats = { periods: { month: { sessions }, today: { sessions: {} } }, grokBotSessionIds: [] };
+  const home = edgeDockPresentation.recentSessionRows(stats, 1, { includeRunningBeyondCap: true });
+  assert.deepEqual(home.map(row => row.sessionId), ['quiet', 'running', 'main-new', 'waiting']);
+  const group = home.find(row => row.subagentGroup);
+  assert.deepEqual(group.groupRows.map(row => row.sessionId), ['main-new', 'main-old', 'child']);
+  assert.equal(group.totalTokens, 40);
+  assert.equal(group.costUsd, 4);
+  assert.deepEqual(group.models, { b: 20, a: 20 });
+  assert.equal(group.subagentCount, 1);
+  assert.ok(![...projectedIds].some(id => id.startsWith('history-')), 'discarded history must not build context/display DTOs');
+  const [dock] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  assert.deepEqual(dock.sessions.map(row => row.sessionId), ['quiet', 'running', 'main-new', 'waiting', 'history-0', 'history-1']);
+  assert.equal(dock.sessions.find(row => row.subagentGroup).totalTokens, 40);
+  assert.ok(![...projectedIds].some(id => /^history-/.test(id) && !['history-0', 'history-1'].includes(id)));
+});
+
+test('an active Grok Bot group survives recent caps and running-only selection after deferred projection', (t) => {
+  const now = Date.parse('2026-10-11T12:00:00Z');
+  t.mock.method(Date, 'now', () => now);
+  const sessions = {
+    'codex:quiet': { client: 'codex', sessionId: 'quiet', totalTokens: 1, turnEnded: true,
+      lastUsedAt: new Date(now - 1000).toISOString() },
+    'cursor:bot-a': { client: 'cursor', sessionId: 'bot-a', grokBotSession: true,
+      totalTokens: 10, costUsd: 1, models: { 'grok-bot-test': 10 },
+      lastUsedAt: new Date(now - 8 * 60_000).toISOString() },
+    'cursor:bot-b': { client: 'cursor', sessionId: 'bot-b', grokBotSession: true, turnEnded: true,
+      totalTokens: 20, costUsd: 2, models: { other: 20 },
+      lastUsedAt: new Date(now - 9 * 60_000).toISOString() }
+  };
+  const stats = { periods: { month: { sessions }, today: { sessions: {} } } };
+  const home = edgeDockPresentation.recentSessionRows(stats, 1, { includeRunningBeyondCap: true });
+  assert.equal(home.length, 2);
+  assert.equal(home[1].totalTokens, 30);
+  assert.equal(home[1].costUsd, 3);
+  assert.equal(home[1].groupRows.length, 2);
+  const [dock] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true }] });
+  assert.equal(dock.sessions.length, 1);
+  assert.equal(dock.sessions[0].sessionGroup, 'cursor-grok-bot');
+  assert.equal(dock.sessions[0].totalTokens, 30);
+});
+
+for (const shape of ['independent', 'aliases', 'cross-client child', 'Grok Bot']) {
+  test(`recent selection rechecks leases after grouping for ${shape} rows`, (t) => {
+    const start = Date.parse('2026-10-11T12:00:00Z');
+    let clock = start;
+    t.mock.method(Date, 'now', () => clock);
+    const rowsApi = require('../../src/electron/renderer/sessionRows');
+    const group = rowsApi.groupSessionRows;
+    t.mock.method(rowsApi, 'groupSessionRows', (...args) => {
+      const result = group(...args);
+      clock += 10;
+      return result;
+    });
+    const sessions = {};
+    const providerId = shape === 'Grok Bot' ? 'cursor' : shape === 'cross-client child' ? 'claude' : 'codex';
+    for (let i = 0; i < 10; i++) sessions[`${providerId}:quiet-${i}`] = {
+      client: providerId, sessionId: `quiet-${i}`, title: `quiet-${i}`, totalTokens: 1,
+      lastUsedAt: new Date(start - 86400000 - i).toISOString()
+    };
+    const client = shape === 'Grok Bot' ? 'cursor' : 'codex';
+    const active = { client, sessionId: 'expired', title: 'expired', totalTokens: 10,
+      lastUsedAt: new Date(start - 2 * 86400000).toISOString(),
+      liveActivity: { state: 'running', observedAt: new Date(start - 30000 + 5).toISOString() } };
+    sessions[`${client}:expired`] = active;
+    if (shape === 'aliases') {
+      active.t3ThreadId = 'app';
+      sessions['claude:alias'] = { ...active, client: 'claude', sessionId: 'alias', totalTokens: 20 };
+    } else if (shape === 'cross-client child') {
+      sessions['claude:parent'] = { client: 'claude', sessionId: 'parent', totalTokens: 20,
+        lastUsedAt: active.lastUsedAt };
+      active.parentClient = 'claude';
+      active.parentSessionId = 'parent';
+    } else if (shape === 'Grok Bot') active.grokBotSession = true;
+    const stats = { periods: { month: { sessions }, today: { sessions: {} } } };
+    for (const activity of ['running', 'waiting']) {
+      active.liveActivity.state = activity;
+      if (shape === 'aliases') sessions['claude:alias'].liveActivity.state = activity;
+      clock = start;
+      assert.deepEqual(edgeDockPresentation.recentSessionRows(stats, 1, { runningOnly: true }), []);
+      clock = start;
+      assert.deepEqual(edgeDockPresentation.recentSessionRows(stats, 1, { includeRunningBeyondCap: true })
+        .map(row => row.sessionId), ['quiet-0']);
+      clock = start;
+      const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true }] });
+      assert.deepEqual(cell.sessions, []);
+      assert.equal(cell.runningExpiresAt, 0);
+      clock = start;
+      const [provider] = buildEdgeDockCells(stats, { items: [{ type: 'limit', provider: providerId }] });
+      assert.ok(!provider.sessions.some(row => row.sessionId === 'expired' || row.groupRows),
+        'expired active groups cannot bypass the provider quiet cap');
+    }
+  });
+}
+
+test('expired idle leases restore transcript running and waiting before Home and provider selection', (t) => {
+  const start = Date.parse('2026-10-11T12:00:00Z');
+  let clock = start;
+  t.mock.method(Date, 'now', () => clock);
+  const rowsApi = require('../../src/electron/renderer/sessionRows');
+  const group = rowsApi.groupSessionRows;
+  t.mock.method(rowsApi, 'groupSessionRows', (...args) => {
+    const result = group(...args);
+    clock += 10;
+    return result;
+  });
+  for (const waitingForInput of [false, true]) {
+    const sessions = {
+      'codex:new': { client: 'codex', sessionId: 'new', totalTokens: 1, turnEnded: true,
+        lastUsedAt: new Date(start - 1000).toISOString() },
+      'codex:old': { client: 'codex', sessionId: 'old', totalTokens: 2, waitingForInput,
+        lastUsedAt: new Date(start - 2000).toISOString(),
+        liveActivity: { state: 'idle', observedAt: new Date(start - 30000 + 5).toISOString() } }
+    };
+    const stats = { periods: { month: { sessions }, today: { sessions: {} } } };
+    clock = start;
+    const home = edgeDockPresentation.recentSessionRows(stats, 1);
+    assert.deepEqual(home.map(row => row.sessionId), ['old']);
+    assert.equal(edgeDockPresentation.sessionActivityState(home[0]), waitingForInput ? 'waiting' : 'running');
+    clock = start;
+    const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true }] });
+    assert.deepEqual(cell.sessions.map(row => row.sessionId), waitingForInput ? [] : ['old']);
+    if (!waitingForInput) assert.ok(cell.runningExpiresAt > clock);
+    clock = start;
+    const [provider] = buildEdgeDockCells(stats, { items: [{ type: 'limit', provider: 'codex' }] });
+    assert.deepEqual(provider.sessions.map(row => row.sessionId), ['old', 'new']);
+  }
 });

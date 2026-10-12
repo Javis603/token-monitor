@@ -207,13 +207,13 @@ for (const phase of ['pending', 'active', 'completed']) {
     // A detached replacement has no text geometry until commitCard mounts it.
     const content = replacement.children[0];
     content.getBoundingClientRect = () => ({ width: replacement.isConnected ? 300 : 0 });
-    const previousList = { scrollTop: 37 };
-    const nextList = { scrollTop: 0 };
+    const previousList = { scrollTop: 37, closest: () => null };
+    const nextList = { scrollTop: 0, closest: () => null };
     function card(title, list) {
       return {
         dataset: { cellId: 'sessions', breakdownMode: 'session' },
         querySelector: () => list,
-        querySelectorAll: selector => selector === '.fade-overflow'
+        querySelectorAll: selector => selector === '.scroll' ? [list] : selector === '.fade-overflow'
           || (selector === '.fade-overflow.is-hover-reading' && title.classList.contains('is-hover-reading'))
           ? [title] : []
       };
@@ -236,6 +236,7 @@ for (const phase of ['pending', 'active', 'completed']) {
     const end = dock.indexOf('\n}', start) + 2;
     assert.ok(start >= 0 && end > start, 'commitCard source boundaries exist');
     const context = {
+      document: h.document,
       contentLayer, overflowText: h.api, CARD_SCROLL_SELECTOR: '.scroll',
       cardResetAnimator: { capture: () => null, animate() {} }
     };
@@ -394,7 +395,7 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {},
-    sessionRowsApi: { applyBreakdownRowSemantics(_row, _head, options) { interactive = options.interactive; } },
+    sessionRowsApi: { ...require('../../src/electron/renderer/sessionRows'), applyBreakdownRowSemantics(_row, _head, options) { interactive = options.interactive; } },
     t: key => key
   };
   vm.runInNewContext(`${app.slice(start, end)}\nglobalThis.update = updateRow;`, context);
@@ -436,7 +437,7 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
       : ['Codex · gpt-5', '12:00 · 2 calls', sessionId]);
     assert.equal(interactive, true, 'title mode changes preserve detail navigation');
   }
-  context.update(row, { name: 'Reviews', detail: '3 runs', kind: 'summary', reviewGroup: true, value: 100 });
+  context.update(row, { name: 'Reviews', detail: '3 runs', kind: 'summary', sessionGroup: 'codex-auto-review', value: 100 });
   assert.equal(interactive, true);
   assert.equal(row.querySelector('.row-detail').textContent, '3 runs');
   assert.equal(row.querySelector('.row-detail').classList.contains('hidden'), false);
@@ -461,7 +462,7 @@ test('a token and cost update through updateRow keeps the hovered title moving',
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {},
-    sessionRowsApi: { applyBreakdownRowSemantics() {} }, t: key => key
+    sessionRowsApi: { ...require('../../src/electron/renderer/sessionRows'), applyBreakdownRowSemantics() {} }, t: key => key
   };
   vm.runInNewContext(`${body}\nglobalThis.update = updateRow;`, context);
   const data = { name: h.element.textContent, detail: 'session-id', kind: 'session', client: 'codex', value: 100, cost: 1 };
@@ -477,4 +478,80 @@ test('a token and cost update through updateRow keeps the hovered title moving',
   assert.equal(content.style.transform, before);
   h.frame(1000);
   assert.notEqual(content.style.transform, before);
+});
+
+
+test('actual shared row rendering keeps group availability and binds Auto Review model labels with trailing time', t => {
+  // Row construction and the adapter's default date formatter share one local day.
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 9, 11, 12, 0).getTime() });
+  const h = harness(0);
+  const rowsApi = require('../../src/electron/renderer/sessionRows');
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const makeNode = () => {
+    const node = h.node();
+    node.querySelector = selector => {
+      const name = selector.slice(1);
+      const find = children => {
+        for (const child of children || []) {
+          if (child.classList?.contains(name) || String(child.className || '').split(' ').includes(name)) return child;
+          const nested = find(child.children); if (nested) return nested;
+        }
+        return null;
+      };
+      return find(node.children);
+    };
+    return node;
+  };
+  const makeRow = () => {
+    const row = makeNode(); const nodes = new Map();
+    row.querySelector = selector => { if (!nodes.has(selector)) nodes.set(selector, makeNode()); return nodes.get(selector); };
+    return row;
+  };
+  const bindings = [];
+  const context = {
+    state: { breakdown: 'session' }, rowWidth: () => 50, iconKindFor: () => ({ kind: 'dot' }),
+    setHoverMarqueeText: h.api.setText, overflowText: h.api, formatNumber: String, formatCost: String,
+    updateRowContext() {}, updateRowLive() {}, applyBarScale() {}, cancelRowNumberAnimation() {},
+    document: { createElement: makeNode, createTextNode: text => ({ textContent: text }) },
+    limitWindowsView: { setDetailTooltip(node, entries) {
+      node.classList.toggle('limit-detail-tooltip-wrap', Boolean(entries));
+      if (entries) bindings.push({ node, entries });
+    } },
+    sessionRowsApi: { ...rowsApi, applyBreakdownRowSemantics() {} }, t: key => key,
+    rowTemplate: makeRow, openSessionDetail() {}
+  };
+  const update = app.slice(app.indexOf('function updateRow('), app.indexOf('function applyHomeListMark('));
+  const member = app.slice(app.indexOf('function sessionGroupRunNode('), app.indexOf('function renderSessionGroupDetail('));
+  vm.runInNewContext(`${update}\n${member}\nglobalThis.update = updateRow; globalThis.member = sessionGroupRunNode;`, context);
+  const now = new Date();
+  const accounting = { client: 'codex', sessionId: 'old', t3ThreadId: 'main', totalTokens: 500, costUsd: 2,
+    models: { a: 500 }, lastUsedAt: new Date(2026, 9, 11, 8, 0).toISOString() };
+  const native = { client: 'claude', sessionId: 'new', t3ThreadId: 'main', tokenDataUnavailable: true,
+    totalTokens: 0, lastUsedAt: now.toISOString(), native: true };
+  const [group] = rowsApi.groupSessionRows(rowsApi.sessionRowsForPeriod({ sessions: { old: accounting } }, {
+    now, nativeSessions: { new: native }, clientLabels: { codex: 'Codex', claude: 'Claude Code' }
+  }));
+  const row = makeRow(); context.update(row, group);
+  assert.equal(group.tokenDataUnavailable, false);
+  assert.equal(row.querySelector('.row-value').textContent, '500');
+  assert.equal(row.querySelector('.row-cost').textContent, '2');
+  assert.equal(row.dataset.tokenDataUnavailable, undefined);
+  const [unavailable] = rowsApi.groupSessionRows(rowsApi.sessionRowsForPeriod({ sessions: {} }, {
+    now, nativeSessions: { new: native, other: { ...native, sessionId: 'other' } }
+  }));
+  context.update(row, unavailable);
+  assert.equal(row.dataset.tokenDataUnavailable, 'true');
+  assert.equal(row.querySelector('.row-cost').textContent, '');
+  for (const titled of [true, false]) {
+    const [review] = rowsApi.sessionRowsForPeriod({ sessions: { review: { ...accounting,
+      sessionId: 'review', sessionKind: 'background-review', title: titled ? 'Review' : '', models: { a: 300, b: 200 }
+    } } }, { now, clientLabels: { codex: 'Codex' } });
+    bindings.length = 0;
+    const rendered = context.member(review, 500, { summary: { sessionGroup: 'codex-auto-review' } });
+    assert.equal(bindings.length, 1, 'adapter plus updateRow binds one tooltip');
+    assert.equal(bindings[0].node.textContent, '2 models');
+    assert.deepEqual(bindings[0].entries, review.modelTooltipEntries);
+    assert.equal(rendered.querySelector('.row-title').textContent, '2 models · 08:00');
+    assert.equal(rendered.classList.contains('session-group-run'), true, 'existing tooltip repaint guard includes the target');
+  }
 });

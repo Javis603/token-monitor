@@ -7,6 +7,7 @@ const { resolveSqlite, openDb } = require('../../sqliteReadOnly');
 const { findSessionFiles, codexSessionFile } = require('../../sessionFiles');
 const t3SessionMetadata = require('../../t3SessionMetadata');
 const { expandHomePath, t3HomeDir, discoverT3DbPaths } = t3SessionMetadata;
+const { nativeIdForFile } = require('./sessionIdentity');
 const { shouldReadSessionContext } = require('../../sessionContext');
 const { readCodexSessionState, readCodexSessionContext, readCodexTurnEnded } = require('./sessionContext');
 
@@ -178,6 +179,28 @@ function readT3SessionMeta(sessionIds, deps = {}) {
   });
 }
 
+function filesForSessionIds(sessionIds, { home, deps }) {
+  const codexHome = codexHomeDir({ homeDir: home, env: deps.env, useEnvRoot: !deps.scopedHome });
+  const files = new Map();
+  const missing = new Set();
+  for (const id of sessionIds) {
+    const file = codexSessionFile(home, id, { codexHome });
+    if (file) files.set(id, file);
+    else missing.add(id);
+  }
+  for (const [id, file] of findSessionFiles(path.join(codexHome, 'sessions'), missing)) files.set(id, file);
+  return files;
+}
+
+function resolveSessionIdentities(sessionIds, context) {
+  const result = new Map();
+  for (const [id, file] of filesForSessionIds(sessionIds, context)) {
+    const nativeId = nativeIdForFile(file);
+    if (nativeId) result.set(id, nativeId);
+  }
+  return result;
+}
+
 function resolveSessionMetadata(sessionIds, context) {
   const { deps, home, metadata } = context;
   const result = new Map();
@@ -218,11 +241,6 @@ function resolveSessionMetadata(sessionIds, context) {
     result.set(sessionId, { ...resolved, title: meta.title });
   }
 
-  const codexHome = codexHomeDir({
-    homeDir: home,
-    env: deps.env,
-    useEnvRoot: !deps.scopedHome
-  });
   const readContext = deps.readCodexSessionContext || readCodexSessionContext;
   const readTurnEnded = deps.readCodexTurnEnded || readCodexTurnEnded;
   // The transcript this pass just stat-ed is also where the context window
@@ -231,6 +249,8 @@ function resolveSessionMetadata(sessionIds, context) {
   // `fileSessionMetadata` has to run first for that reason.
   const decorate = (sessionId, filePath) => {
     const meta = context.fileSessionMetadata(sessionId, filePath, result.get(sessionId));
+    const nativeSessionId = nativeIdForFile(filePath);
+    if (nativeSessionId) meta.nativeSessionId = nativeSessionId;
     if (!shouldReadSessionContext(meta.lastUsedAt, context.now)) return meta;
     const state = readCodexSessionState(filePath, deps.codexDeps);
     if (state.promptCacheState?.observation !== undefined) meta.promptCache = state.promptCacheState.observation;
@@ -244,17 +264,7 @@ function resolveSessionMetadata(sessionIds, context) {
     // earlier tick and an unknown transcript leaves the reading alone.
     return turnEnded === undefined ? decorated : { ...decorated, turnEnded };
   };
-  const missingIds = new Set();
-  for (const sessionId of sessionIds) {
-    const filePath = codexSessionFile(home, sessionId, { codexHome });
-    if (filePath) {
-      result.set(sessionId, decorate(sessionId, filePath));
-    } else {
-      missingIds.add(sessionId);
-    }
-  }
-  const files = findSessionFiles(path.join(codexHome, 'sessions'), missingIds);
-  for (const [sessionId, filePath] of files) {
+  for (const [sessionId, filePath] of filesForSessionIds(sessionIds, context)) {
     result.set(sessionId, decorate(sessionId, filePath));
   }
   return result;
@@ -272,5 +282,6 @@ module.exports = {
   readSessionMeta,
   readT3SessionMeta,
   readSessionMetaForHome,
-  resolveSessionMetadata
+  resolveSessionMetadata,
+  resolveSessionIdentities
 };

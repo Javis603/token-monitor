@@ -306,3 +306,29 @@ test('clock-skewed synced observations cannot poison Hub merge or block a local 
     hub.server.close();
   }
 });
+
+
+test('native refresh retains app relationships only for the same client, session and period without mutating either snapshot', () => {
+  const old = Object.freeze({ client: 'claude', sessionId: 'child', t3ThreadId: 'thread', parentSessionId: 'parent', parentClient: 'codex' });
+  const fresh = Object.freeze({ client: 'claude', sessionId: 'child', liveActivity: observation('running') });
+  const summary = { today: { sessions: {} }, month: { sessions: {} }, nativeSessions: { today: { 'claude:child': old } } };
+  const rows = Object.freeze({ 'claude:child': fresh });
+  const linked = projection.nativeSessionsForPeriod(summary, 'claude', rows, 'today')['claude:child'];
+  assert.deepEqual(linked, { ...fresh, t3ThreadId: 'thread', parentSessionId: 'parent', parentClient: 'codex' });
+  assert.notEqual(linked, fresh);
+  assert.equal(fresh.parentSessionId, undefined);
+  assert.equal(old.liveActivity, undefined);
+  assert.equal(projection.nativeSessionsForPeriod(summary, 'claude', rows, 'month')['claude:child'], fresh);
+  const unrelated = { client: 'codex', sessionId: 'child' };
+  assert.equal(projection.nativeSessionsForPeriod(summary, 'codex', { 'codex:child': unrelated }, 'today')['codex:child'], unrelated);
+});
+
+test('fresh native relationship evidence takes precedence as an atomic parent pair', () => {
+  const summary = { today: { sessions: {} }, nativeSessions: { today: { 'claude:child': {
+    client: 'claude', sessionId: 'child', t3ThreadId: 'old-thread', parentSessionId: 'old-parent', parentClient: 'codex'
+  } } } };
+  const fresh = { client: 'claude', sessionId: 'child', t3ThreadId: 'new-thread', parentSessionId: 'new-parent' };
+  const linked = projection.nativeSessionsForPeriod(summary, 'claude', { 'claude:child': fresh }, 'today')['claude:child'];
+  assert.deepEqual(linked, fresh);
+  assert.equal(linked.parentClient, undefined, 'same-client parent must not inherit the old Codex namespace');
+});

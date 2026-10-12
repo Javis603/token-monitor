@@ -11,7 +11,7 @@ const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const { FORK_ONLY_CLIENT_IDS } = require('./clientCatalog');
-const { antigravityCliDataDir, canonicalWatchPath, cherryStudioTranscriptRoots, clientSourceRoots, copilotExporterWatch } = require('./clientSources');
+const { antigravityCliDataDir, canonicalWatchPath, canonicalWatchFilePath, cherryStudioTranscriptRoots, clientSourceRoots, copilotExporterWatch } = require('./clientSources');
 const { clientDiagnosticRoots, clientSourceChecks, dirExists, visibleDiagnosticRoots } = require('./clientSourceObservations');
 const {
   CLIENT_HEALTH_VERSION,
@@ -42,11 +42,14 @@ const {
   terminationUnconfirmedError
 } = require('./subprocessTermination');
 const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
+const { antigravityConversationSummaryCandidates } = require('./providers/antigravity/sessionMetadata');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
 const { cursorDesktopWatchRoots, isCursorDesktopStateWrite } = require('./providers/cursor/desktopState');
 const {
   applySessionMetadata,
+  applyT3SessionParents,
+  applySessionIdentities,
   applyTokscaleSessionMetadata,
   projectIdentity,
   projectPathFromJsonl,
@@ -672,15 +675,31 @@ function computePeriodWindows(now = new Date()) {
 // in the delta-derived periods. Used on watch ticks, where month/allTime are not
 // re-decorated: a session that started today is absent from the anchor, so its
 // project label would otherwise be missing from the broader-period breakdown.
+function sessionHasPeriodUsage(period, client, sessionId) {
+  return Number(period?.sessions?.[`${client}:${sessionId}`]?.totalTokens) > 0;
+}
+
 function propagateTodayProjects(today, periods, titleMetadata = {}) {
   for (const [key, session] of Object.entries(today?.sessions || {})) {
     if (!session) continue;
-    for (const period of periods) {
+    for (const [periodName, period] of Object.entries(periods)) {
       const target = period?.sessions?.[key];
       if (!target) continue;
-      if (session.projectId && !target.projectId) {
-        target.projectId = session.projectId;
-        target.projectLabel = session.projectLabel;
+      const sources = titleMetadata.catalogProjects?.[periodName];
+      const owned = Boolean(sources?.[key] && target.projectId === sources[key]);
+      const meta = titleMetadata.metadataCache?.get(key);
+      if (titleMetadata.projectsFromToday || (session.projectId && (!target.projectId || owned)) || (owned && meta?.catalogProjectResolved)) {
+        if (session.projectId) {
+          target.projectId = session.projectId;
+          target.projectLabel = session.projectLabel;
+        } else {
+          delete target.projectId;
+          delete target.projectLabel;
+        }
+        if (sources) {
+          if (titleMetadata.catalogProjects.today?.[key]) sources[key] = session.projectId;
+          else delete sources[key];
+        }
       }
       // The fresh scan's title is authoritative and replaces the anchor's, like
       // the context pair below: a Cursor rename arrives only through this path
@@ -690,6 +709,22 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       if (session.title) target.title = session.title;
       else if (titleMetadata.invalidatedTitleKeys?.has(key) && target.title === titleMetadata.t3Titles?.[key]) delete target.title;
       if (session.sessionKind && !target.sessionKind) target.sessionKind = session.sessionKind;
+      // Parent links are resolved per period: a parent's first rollout can fall
+      // outside today's window while the month still holds it, so the fresh
+      // link is not simply copied. A link the derived period can still resolve
+      // stays; one whose parent has no usage left there (its rollout was
+      // deleted, say) yields to the fresh link when that one resolves.
+      if (session.nativeSessionId) target.nativeSessionId = session.nativeSessionId;
+      if (session.t3ThreadId) target.t3ThreadId = session.t3ThreadId;
+      const parentClient = session.parentClient || session.client;
+      const targetParentClient = target.parentClient || target.client;
+      if (session.parentSessionId && (session.parentSessionId !== target.parentSessionId || parentClient !== targetParentClient)
+        && (!target.parentSessionId || (!sessionHasPeriodUsage(period, targetParentClient, target.parentSessionId)
+          && sessionHasPeriodUsage(period, parentClient, session.parentSessionId)))) {
+        target.parentSessionId = session.parentSessionId;
+        if (parentClient !== target.client) target.parentClient = parentClient;
+        else delete target.parentClient;
+      }
       // Context occupancy is replaced rather than gap-filled: the derived
       // periods carry the last full scan's reading, which is older than this
       // tick's by construction. The copy is unconditional, including a cleared
@@ -896,24 +931,29 @@ async function collectUsageOnce(options) {
   const normalizedClients = normalizeClientsCsv(clients);
   const localSessionMetadataDeps = {
     ...(options.sessionMetadataDeps || {}),
+    env: options.env || options.sessionMetadataDeps?.env,
     customScanPaths: options.customScanPaths,
     metadataCache: new Map(),
     resolvedSessionKeys: new Set(),
     attemptedSessionKeys: new Set(),
     invalidatedTitleKeys: new Set(),
-    t3Titles: {}
+    t3Titles: {},
+    catalogTitleSources: {},
+    catalogProjects: { today: {}, month: {}, allTime: {}, labels: {} },
+    catalogProjectRows: new WeakSet()
     // dshSessionFileCache is deliberately NOT reset here: it's module-level
     // (declared with jsonlTimestampCache above) precisely so it survives
     // across collectUsageOnce calls. These caches and sets start fresh each
-    // call; watch ticks recover title provenance from their local anchor below.
+    // call; ticks recover catalog provenance from their local fallback below.
   };
-  const decorateLocalPeriods = (periods, { retryMisses = false } = {}) => applySessionMetadata(
+  let sessionIdentitiesComplete = true;
+  const decorateLocalPeriods = (periods, { retryMisses = false, deferT3SessionParents = false } = {}) => applySessionMetadata(
     periods,
     options.homeDir || os.homedir(),
     // Still unconditional: only the clients whose parser records a workspace come
     // back from the scan attributed, so the resolvers stay the answer for the rest.
     // applySessionMetadata skips the expensive path read per session, not per tick.
-    { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
+    { ...localSessionMetadataDeps, retryMisses, deferT3SessionParents, resolveProjects: projectsEnabled }
   );
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
@@ -939,7 +979,21 @@ async function collectUsageOnce(options) {
   // False when the tick drifted (see the anchored branch below): the delta
   // identity is dead and the serial full scan takes over, WSL included.
   let anchorUsable = anchorUsed;
-  if (anchorUsed) localSessionMetadataDeps.t3Titles = anchor.todayT3Titles || anchor.t3Titles || {};
+  // Full-scan rows are native, even when their title matches an old override.
+  // Retain their fallback through the progressive metadata passes this tick.
+  if (!anchorUsed) localSessionMetadataDeps.scanTitleFallbacks = new WeakMap();
+  // Catalog state remains useful when a full scan cannot reuse usage totals.
+  // It supplies labels/provenance only; the scan still rebuilds every period.
+  const sessionMetadataFallback = options.sessionMetadataFallback || (anchorUsed ? anchor : null);
+  if (sessionMetadataFallback) {
+    localSessionMetadataDeps.t3Titles = sessionMetadataFallback.todayT3Titles || sessionMetadataFallback.t3Titles || {};
+    localSessionMetadataDeps.catalogTitleSources = sessionMetadataFallback.catalogTitleSources || {};
+    for (const period of ['today', 'month', 'allTime']) {
+      localSessionMetadataDeps.catalogProjects[period] = { ...sessionMetadataFallback.catalogProjects?.[period] };
+    }
+    localSessionMetadataDeps.catalogProjects.labels = { ...sessionMetadataFallback.catalogProjects?.labels };
+    localSessionMetadataDeps.catalogProjectFallbacks = sessionMetadataFallback;
+  }
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     try { options.onProgress({ ...periods, updatedAt: new Date().toISOString() }); } catch (_) {}
@@ -1013,6 +1067,13 @@ async function collectUsageOnce(options) {
         ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
         : completeTodayPartitions(freshPartitions, normalizedClients);
       today = mergeTodayPartitions(todayPartitions);
+      if (useTargetedPartitions) {
+        for (const [key, session] of Object.entries(today.sessions || {})) {
+          if (!targetClientSet.has(session.client) && session.projectId === localSessionMetadataDeps.catalogProjects.today[key]) {
+            localSessionMetadataDeps.catalogProjectRows.add(session);
+          }
+        }
+      }
       // A fresh scan holding sessions that ended before this device's local
       // midnight cannot have been cut at that midnight: the subprocess window
       // moved with the OS timezone while this process kept its startup zone
@@ -1056,18 +1117,29 @@ async function collectUsageOnce(options) {
       // them again would re-stat every historical session file every few seconds
       // (the perceived UI stutter). Decorate only today, then propagate its freshly
       // resolved identities onto sessions that started today (absent from the anchor).
-      decorateLocalPeriods({ today }, { retryMisses: true });
-      propagateTodayProjects(today, [month, allTime], {
-        invalidatedTitleKeys: localSessionMetadataDeps.invalidatedTitleKeys,
-        t3Titles: anchor.t3Titles
-      });
+      // Upgrade retained identity metadata once, on the usage worker, without
+      // rescanning tokens or moving the frozen delta baseline.
+      decorateLocalPeriods({ today }, { retryMisses: true, deferT3SessionParents: true });
+      const upgradeIdentities = anchor.sessionIdentityVersion !== SESSION_IDENTITY_VERSION;
+      if (upgradeIdentities) {
+        applySessionIdentities({ month, allTime }, options.homeDir || os.homedir(), { ...localSessionMetadataDeps, deferT3SessionParents: true });
+      }
+      propagateTodayProjects(today, { month, allTime }, { ...localSessionMetadataDeps, t3Titles: anchor.t3Titles });
+      // A delegated child may be new today while its idle parent exists only in
+      // the broader anchor. Resolve app links without re-reading transcripts.
+      const targets = upgradeIdentities
+        ? new Set([month, allTime].flatMap(period => Object.values(period.sessions || {}))) : new Set();
+      for (const key of Object.keys(today.sessions || {})) {
+        for (const period of [today, month, allTime]) if (period.sessions?.[key]) targets.add(period.sessions[key]);
+      }
+      sessionIdentitiesComplete = applyT3SessionParents({ today, month, allTime }, options.homeDir || os.homedir(), localSessionMetadataDeps, targets);
     } else {
-      decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
+      sessionIdentitiesComplete = decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
     // period: a later targeted tick re-merges these sessions into `today`.
-    propagateTodayProjects(today, Object.values(todayPartitions), localSessionMetadataDeps);
+    propagateTodayProjects(today, Object.values(todayPartitions), { ...localSessionMetadataDeps, projectsFromToday: true });
   }
 
   // WSL contribution (Windows only; no-op elsewhere). Full tick scans running WSL
@@ -1267,16 +1339,31 @@ async function collectUsageOnce(options) {
     }
   }
   if (typeof options.onAnchorComputed === 'function') {
-    // Title provenance belongs to the local anchor, never to published rows.
+    // Reuse the existing catalog-title ledger (historically named t3Titles)
+    // for summary overrides too. Provenance never enters published rows.
     const t3Titles = { ...localSessionMetadataDeps.t3Titles };
     for (const key of localSessionMetadataDeps.invalidatedTitleKeys) t3Titles[key] = null;
     for (const [key, meta] of localSessionMetadataDeps.metadataCache) {
-      if (meta.t3Title) t3Titles[key] = meta.t3Title;
+      if (meta.t3Title || meta.catalogTitle) t3Titles[key] = meta.t3Title || meta.catalogTitle;
+    }
+    const catalogTitleSources = { ...localSessionMetadataDeps.catalogTitleSources };
+    for (const [key, meta] of localSessionMetadataDeps.metadataCache) {
+      if (meta.catalogTitleSource) catalogTitleSources[key] = meta.catalogTitleSource;
+    }
+    const catalogProjects = localSessionMetadataDeps.catalogProjects;
+    for (const period of ['today', 'month', 'allTime']) {
+      for (const [key, id] of Object.entries(catalogProjects[period])) {
+        const label = windowsPeriods[period]?.sessions?.[key]?.projectLabel;
+        if (label) catalogProjects.labels[id] = label;
+      }
     }
     options.onAnchorComputed({
+      sessionIdentityVersion: sessionIdentitiesComplete ? SESSION_IDENTITY_VERSION : (anchor?.sessionIdentityVersion || 1),
       windowsPeriods,
       todayPartitions,
       t3Titles,
+      catalogTitleSources,
+      catalogProjects,
       wslBundle,
       wslStatus,
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
@@ -1398,10 +1485,20 @@ function selfSyncSourceRootsForClients(clientsCsv, options = {}) {
     if (sourceRoots.length > 0) rootsByClient.cursor = sourceRoots;
   }
   if (enabled.has('antigravity')) {
-    const sourceRoots = [...new Set(antigravityDataRoots().filter(dirExists))];
+    const sourceRoots = [...new Set(antigravityDataRoots(options.homeDir || os.homedir()).filter(dirExists))];
     if (sourceRoots.length > 0) rootsByClient.antigravity = sourceRoots;
   }
   return rootsByClient;
+}
+
+function antigravitySummaryWatchSources(options = {}) {
+  return antigravityConversationSummaryCandidates({
+    home: options.homeDir || os.homedir(),
+    env: options.env || process.env
+  }).map((candidate) => {
+    const file = canonicalWatchFilePath(candidate);
+    return { file, dir: path.dirname(file) };
+  });
 }
 
 function watchClientRootsForClients(clientsCsv, options = {}) {
@@ -1425,9 +1522,17 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
   // so it is also safe to watch and shares the umbrella client id. The filter
   // expands that id to antigravity-cli when the targeted scan runs.
   const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
-  const antigravityCliDir = antigravityCliDataDir();
+  const antigravityCliDir = antigravityCliDataDir(options);
   if (enabled.has('antigravity') && dirExists(antigravityCliDir)) {
     rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), antigravityCliDir])];
+  }
+  if (enabled.has('antigravity')) {
+    // Watch the parent so a summary DB or WAL created after startup is seen.
+    // Its policy below admits only those exact files, never the surrounding tree.
+    const summaryDirs = antigravitySummaryWatchSources(options).map(({ dir }) => dir).filter(dirExists);
+    if (summaryDirs.length > 0) {
+      rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), ...summaryDirs])];
+    }
   }
   if (enabled.has('reasonix')) {
     const nativeRoots = reasonixNativeSessionWatchRoots();
@@ -1444,8 +1549,8 @@ function watchPathsForClients(clientsCsv, options = {}) {
 }
 
 // The same roots, but as attribution prefixes rather than watch targets. The two
-// differ in exactly one place: a custom Copilot exporter has to be *watched* by
-// its parent directory (the file can appear later), while attributing by that
+// differ for exact-file sources: a custom Copilot exporter or summary database
+// has to be *watched* by its parent (the file can appear later), while attributing by that
 // parent would be wrong — it is an arbitrary user-chosen path, and one pointing
 // at a file in $HOME would make every other client's event also target copilot,
 // turning each targeted scan into a two-client scan. The exact file attributes
@@ -1457,18 +1562,36 @@ function watchPathsForClients(clientsCsv, options = {}) {
 // other — the same "two derivations of one thing" trap the exporter had.
 function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options = {}) {
   const rootsByClient = watchRoots || watchClientRootsForClients(clientsCsv, options);
+  const attributed = { ...rootsByClient };
   const exporter = copilotExporterWatch(os.homedir());
-  if (!exporter || !rootsByClient.copilot) return rootsByClient;
-  const exporterDir = path.resolve(exporter.dir);
-  const ownedByOtherSource = new Set(
-    (clientSourceRoots(clientsCsv, options).copilot || [])
-      .filter((root) => root.id !== 'copilot-otel-exporter')
-      .map((root) => path.resolve(root.dir))
-  );
-  const copilot = rootsByClient.copilot
-    .filter((root) => path.resolve(root) !== exporterDir || ownedByOtherSource.has(exporterDir));
-  copilot.push(exporter.canonicalFile);
-  return { ...rootsByClient, copilot: [...new Set(copilot)] };
+  if (exporter && rootsByClient.copilot) {
+    const exporterDir = path.resolve(exporter.dir);
+    const ownedByOtherSource = new Set(
+      (clientSourceRoots(clientsCsv, options).copilot || [])
+        .filter((root) => root.id !== 'copilot-otel-exporter')
+        .map((root) => path.resolve(root.dir))
+    );
+    const copilot = rootsByClient.copilot
+      .filter((root) => path.resolve(root) !== exporterDir || ownedByOtherSource.has(exporterDir));
+    copilot.push(exporter.canonicalFile);
+    attributed.copilot = [...new Set(copilot)];
+  }
+  if (rootsByClient.antigravity) {
+    const canonicalRoot = (dir) => path.resolve(canonicalWatchPath(dir));
+    const usageRoots = new Set([
+      ...antigravityDataRoots(options.homeDir || os.homedir()), antigravityCliDataDir(options),
+      ...(normalizeCustomScanPaths(options.customScanPaths, options).antigravity || [])
+    ].map(canonicalRoot));
+    const summaries = antigravitySummaryWatchSources(options);
+    const summaryDirs = new Set(summaries.map(({ dir }) => dir));
+    const watched = new Set(rootsByClient.antigravity.map(canonicalRoot));
+    const antigravity = rootsByClient.antigravity.filter((dir) => !summaryDirs.has(canonicalRoot(dir)) || usageRoots.has(canonicalRoot(dir)));
+    for (const { file, dir } of summaries) {
+      if (watched.has(dir)) antigravity.push(file, `${file}-wal`);
+    }
+    attributed.antigravity = [...new Set(antigravity)];
+  }
+  return attributed;
 }
 
 function clientsForWatchPath(filePath, rootsByClient) {
@@ -1711,7 +1834,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     directChildOnly(isCursorDesktopStateWrite));
 
   const antigravityEnabled = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).includes('antigravity');
-  bound('antigravity', antigravityEnabled ? antigravityDataRoots() : [], (parts) => {
+  bound('antigravity', antigravityEnabled ? antigravityDataRoots(options.homeDir || os.homedir()) : [], (parts) => {
     if (parts.length === 1) {
       return !ANTIGRAVITY_SOURCE_DIRS.has(parts[0]) && !ANTIGRAVITY_SOURCE_FILES.has(parts[0]);
     }
@@ -1722,6 +1845,12 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     if (ANTIGRAVITY_SHALLOW_SOURCE_DIRS.has(firstChild)) return parts.length > 2;
     return false;
   });
+  if (antigravityEnabled) {
+    for (const { file, dir } of antigravitySummaryWatchSources(options)) {
+      const name = path.basename(file);
+      bound('antigravity', [dir], directChildOnly((child) => child === name || child === `${name}-wal`));
+    }
+  }
 
   const reasonixEnabled = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).includes('reasonix');
   bound(
@@ -1810,8 +1939,8 @@ function watchPolicyEntries(clientsCsv, options = {}) {
           && !(claimed.get(client) || EMPTY_SET).has(dir)
         ))
         .map((dir) => ({ root: canonicalRoot(dir), custom: isCustomOnly(client, canonicalRoot(dir)) }))),
-    ...(antigravityEnabled && dirExists(antigravityCliDataDir())
-      ? [{ root: canonicalRoot(antigravityCliDataDir()), custom: false }]
+    ...(antigravityEnabled && dirExists(antigravityCliDataDir(options))
+      ? [{ root: canonicalRoot(antigravityCliDataDir(options)), custom: false }]
       : [])
   ];
   // A directory that is a built-in root for any client keeps everything, even
@@ -2138,6 +2267,8 @@ function collectorAnchorTrust(saved, options = {}) {
   // Declining here costs one full scan and re-stamps the anchor.
   if (saved.utcOffsetMinutes !== utcOffsetMinutes(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
+  // A flat provenance ledger cannot prove each period's project source.
+  if (Object.keys(saved.catalogProjects || {}).length && !saved.catalogProjects.today) return null;
   // Old Cursor anchors preserve `default` in their broad-period model maps;
   // applying a new `cursor-auto` Today delta to them would split one mode.
   if (normalizeClientsCsv(clients).split(',').includes('cursor') && saved.cursorAutoModelVersion !== 1) return null;
@@ -2152,6 +2283,7 @@ function collectorAnchorTrust(saved, options = {}) {
 // valid, so a long-running session periodically rescans month/allTime
 // and picks up any changes that the delta-derivation might miss.
 const FULL_SCAN_INTERVAL_MS = 60 * 60 * 1000;
+const SESSION_IDENTITY_VERSION = 2;
 
 // Ceiling on how long an unbroken run of watch events may keep deferring the
 // tick. Every event clears the pending debounce timer and re-arms a fresh one,
@@ -2228,6 +2360,7 @@ const WATCH_POLLING_ENTRY_LIMIT = 20000;
 // matcher — and stops as soon as the count passes `limit`, so a million-entry
 // tree costs no more than a small one. opendir rather than readdir, because a
 // single flat directory can itself hold the whole tree.
+// Overlapping roots walk each lexical directory once, just as chokidar does.
 //
 // Symlinked directories are followed, as chokidar follows them by default, and
 // every link is walked on its own: chokidar dedupes by the link's own path, not
@@ -2238,9 +2371,12 @@ const WATCH_POLLING_ENTRY_LIMIT = 20000;
 // the safe answer for a tree chokidar could not finish either.
 function watchEntriesExceed(dirs, ignored, limit) {
   let count = 0;
-  const pending = [...dirs];
+  const pending = dirs.map((dir) => path.resolve(dir));
+  const visited = new Set();
   while (pending.length > 0) {
     const dir = pending.pop();
+    if (visited.has(dir)) continue;
+    visited.add(dir);
     let handle;
     try { handle = fs.opendirSync(dir); } catch (_) { continue; }
     try {
@@ -2295,7 +2431,9 @@ const WATCH_REFUSAL_CODES = new Set([WATCH_POLLING_LIMIT_CODE, WATCH_POLLING_UNA
 function openWatch(chokidar, config = {}) {
   const ignored = activityWatchIgnored(watchIgnoreMatcher(config.clients, {
     customScanPaths: config.customScanPaths,
-    cursorDesktopRoots: config.cursorDesktopRoots
+    cursorDesktopRoots: config.cursorDesktopRoots,
+    homeDir: config.homeDir,
+    env: config.env
   }), config.usageDirs || config.dirs || [], config.activitySources || []);
   const limit = Number.isInteger(config.pollingEntryLimit) && config.pollingEntryLimit >= 0
     ? config.pollingEntryLimit
@@ -2414,7 +2552,7 @@ function startCollector(options) {
   const normalizedClients = normalizeClientsCsv(clients);
   const sourceOptions = {
     customScanPaths: options.customScanPaths,
-    env: options.env,
+    env: options.env || options.sessionMetadataDeps?.env,
     homeDir: options.homeDir,
     platform: options.platform
   };
@@ -2594,11 +2732,14 @@ function startCollector(options) {
         anchor = {
           dateKey: saved.dateKey,
           utcOffsetMinutes: saved.utcOffsetMinutes,
+          sessionIdentityVersion: saved.sessionIdentityVersion,
           today: saved.today,
           month: saved.month,
           allTime: saved.allTime,
           t3Titles: saved.t3Titles,
           todayT3Titles: saved.todayT3Titles,
+          catalogTitleSources: saved.catalogTitleSources,
+          catalogProjects: saved.catalogProjects,
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -2624,12 +2765,15 @@ function startCollector(options) {
       fs.writeFileSync(anchorPath, JSON.stringify({
         dateKey: anchor.dateKey,
         utcOffsetMinutes: anchor.utcOffsetMinutes,
+        sessionIdentityVersion: anchor.sessionIdentityVersion,
         cursorAutoModelVersion: 1,
         today: anchor.today,
         month: anchor.month,
         allTime: anchor.allTime,
         t3Titles: anchor.t3Titles,
         todayT3Titles: anchor.todayT3Titles,
+        catalogTitleSources: anchor.catalogTitleSources,
+        catalogProjects: anchor.catalogProjects,
         wslBundle: wslAnchor,
         wslStatus: wslStatusAnchor,
         ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
@@ -2679,6 +2823,7 @@ function startCollector(options) {
     const collectedAt = collectionDate(options.now);
     const todayKey = localTodayKey(collectedAt);
     const tickPricingRevision = pricingFingerprint(options);
+    const sessionMetadataFallback = anchor;
     const pricingChanged = tickPricingRevision !== pricingRevision;
     if (pricingChanged) {
       anchor = null;
@@ -2799,6 +2944,7 @@ function startCollector(options) {
           kind
         ),
         targetClients: anchored && targetAnchorReady ? requestedTargetClients : [],
+        sessionMetadataFallback,
         todayOnlyAnchor: anchored ? anchor : null,
         wslAnchor: anchored ? wslAnchor : null,
         wslStatus: anchored ? wslStatusAnchor : null,
@@ -2915,12 +3061,15 @@ function startCollector(options) {
         anchor = {
           dateKey: todayKey,
           utcOffsetMinutes: tickUtcOffsetMinutes,
+          sessionIdentityVersion: captured.sessionIdentityVersion,
           today: captured.windowsPeriods.today,
           month: captured.windowsPeriods.month,
           allTime: captured.windowsPeriods.allTime,
           todayPartitions: captured.todayPartitions,
           t3Titles: captured.t3Titles,
           todayT3Titles: captured.t3Titles,
+          catalogTitleSources: captured.catalogTitleSources,
+          catalogProjects: captured.catalogProjects,
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {})
         };
@@ -2929,10 +3078,49 @@ function startCollector(options) {
         lastFullScanAt = Date.now();
         persistAnchor(tickPricingRevision);
       } else if (anchored && captured && !todayWindowDrifted) {
+        const identitiesUpgraded = anchor.sessionIdentityVersion !== captured.sessionIdentityVersion;
+        if (identitiesUpgraded) {
+          for (const period of ['today', 'month', 'allTime']) {
+            for (const [key, session] of Object.entries(anchor[period]?.sessions || {})) {
+              const resolved = captured.windowsPeriods[period]?.sessions?.[key];
+              for (const field of ['nativeSessionId', 't3ThreadId']) {
+                if (resolved?.[field]) session[field] = resolved[field];
+              }
+              // Commit the confirmed link with its namespace before advancing
+              // the migration version; later watch ticks do not revisit history.
+              if (resolved?.parentSessionId) {
+                session.parentSessionId = resolved.parentSessionId;
+                if (resolved.parentClient && resolved.parentClient !== session.client) session.parentClient = resolved.parentClient;
+                else delete session.parentClient;
+              }
+            }
+          }
+          anchor.sessionIdentityVersion = captured.sessionIdentityVersion;
+        }
         // Keep the rolling per-client today partitions fresh for targeted
         // watch ticks. WSL stays independently frozen between interval ticks.
         if (captured.todayPartitions) anchor.todayPartitions = captured.todayPartitions;
         const titlesChanged = JSON.stringify(anchor.todayT3Titles || anchor.t3Titles || {}) !== JSON.stringify(captured.t3Titles);
+        const projectsChanged = JSON.stringify(anchor.catalogProjects || {}) !== JSON.stringify(captured.catalogProjects || {});
+        const sourcesChanged = JSON.stringify(anchor.catalogTitleSources || {}) !== JSON.stringify(captured.catalogTitleSources || {});
+        anchor.catalogTitleSources = captured.catalogTitleSources;
+        if (projectsChanged) {
+          for (const [key, session] of Object.entries(summary.today.sessions || {})) {
+            for (const period of ['today', 'month', 'allTime']) {
+              const target = anchor[period]?.sessions?.[key];
+              if (target && (!target.projectId || (anchor.catalogProjects?.[period]?.[key] && target.projectId === anchor.catalogProjects[period][key]))) {
+                if (session.projectId) {
+                  target.projectId = summary[period]?.sessions?.[key]?.projectId;
+                  target.projectLabel = summary[period]?.sessions?.[key]?.projectLabel;
+                } else if (!captured.catalogProjects?.[period]?.[key]) {
+                  delete target.projectId;
+                  delete target.projectLabel;
+                }
+              }
+            }
+          }
+          anchor.catalogProjects = captured.catalogProjects;
+        }
         if (titlesChanged) {
           // Only labels move: the exact usage baseline and full-scan time stay
           // frozen. This also keeps cold-start previews at the latest title.
@@ -2957,7 +3145,7 @@ function startCollector(options) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
         }
-        if (titlesChanged) persistAnchor(tickPricingRevision);
+        if (titlesChanged || projectsChanged || sourcesChanged || identitiesUpgraded) persistAnchor(tickPricingRevision);
       }
       const transformedSummary = await onUpdate?.(summary, reason);
       publishedCodexVisibilityRevision = visibilityRevision;
@@ -3306,6 +3494,8 @@ function startCollector(options) {
       Object.entries(selfSyncSourceRootsForClients(clients, sourceOptions))
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
     );
+    const summaryFiles = new Set(antigravitySummaryWatchSources(sourceOptions)
+      .flatMap(({ file }) => [file, `${file}-wal`]));
     const usageDirs = [...new Set(Object.values(rootsByClient).flat())];
     const activitySources = options.sessionActivityPolling === false ? [] : activityWatchSources(trackedClients, {
       ...options.sessionMetadataDeps, ...sourceOptions, homeDir: options.homeDir || os.homedir()
@@ -3361,6 +3551,8 @@ function startCollector(options) {
         reasonixNativeSessionCache.invalidate(filePath);
       }
       for (const client of clientsForWatchPath(filePath, sourceSyncRootsByClient)) {
+        // Catalog changes refresh labels, not the RPC usage cache.
+        if (client === 'antigravity' && summaryFiles.has(path.resolve(filePath))) continue;
         // Another client's scan root may overlap the desktop store. Its unrelated
         // files can request a local scan, but only database/WAL writes earn a
         // Cursor cloud sync.
@@ -3386,6 +3578,8 @@ function startCollector(options) {
           clients,
           customScanPaths: sourceOptions.customScanPaths,
           cursorDesktopRoots: sourceSyncRootsByClient.cursor || [],
+          homeDir: sourceOptions.homeDir,
+          env: sourceOptions.env,
           usePolling,
           pollingEntryLimit: watchPollingEntryLimit
         },
@@ -3571,7 +3765,7 @@ function startCollector(options) {
       refresh: pollSessionActivity,
       nativeEventsReady: () => activityWatchReady || !watchEnabled,
       needsRenewal: () => require('./sessionActivityProjection').needsActivityRenewal(latestActivitySummary)
-    });
+    }, options.sessionActivityTimers);
     activityScheduler.start();
   }
   if (trackedClients.has('codex') && options.codexLocalUsageEnabled !== false

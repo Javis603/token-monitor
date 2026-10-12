@@ -2045,7 +2045,8 @@ document.addEventListener('pointerdown', (event) => {
 let homeSessionRenderPending = false;
 const overflowText = window.TokenMonitorOverflowText.create({
   document, window, prefersReducedMotion,
-  enabled: element => Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint'),
+  enabled: element => !element.classList.contains('has-subagent-count')
+    && Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint'),
   onLeave: () => requestAnimationFrame(() => {
     if (homeSessionRenderPending && state.breakdown === 'home'
       && visibleStatsSurface() === 'main' && state.stats) renderHome();
@@ -2368,7 +2369,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2387,17 +2388,15 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
   if (platform !== undefined) row.dataset.platform = platform || '';
   if (client !== undefined) row.dataset.client = client || '';
   if (kind !== undefined) row.dataset.kind = kind || '';
-  if (reviewGroup === true) row.dataset.reviewGroup = 'true';
-  else delete row.dataset.reviewGroup;
+  if (sessionGroup) row.dataset.sessionGroup = sessionGroup;
+  else delete row.dataset.sessionGroup;
   if (kind === 'session' && client === 'reasonix') {
     row.dataset.detailUnavailable = sessionDetailAvailable === true ? 'false' : 'true';
   } else if (row.hasAttribute('data-detail-unavailable')) {
     row.removeAttribute('data-detail-unavailable');
   }
-  const interactive = reviewGroup === true || (
-    kind === 'session'
-    && ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy'].includes(client)
-  ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
+  const interactive = Boolean(sessionGroup) || (kind === 'session'
+    && sessionRowsApi.sessionRowDetailAvailable({ client, sessionDetailAvailable }));
   const mark = row.querySelector('.row-mark');
   const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '', modelSource }, state.breakdown);
   if (iconKind.kind === 'icon') {
@@ -2410,29 +2409,57 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
   const titleEl = row.querySelector('.row-title');
   setHoverMarqueeText(titleEl, name);
   const subtitleEl = row.querySelector('.row-subtitle');
+  let subtitleTextEl = subtitleEl;
+  const splitSubtitle = Boolean(subagentCountLabel);
+  subtitleEl.classList.toggle('has-subagent-count', splitSubtitle);
+  if (splitSubtitle) {
+    subtitleTextEl = subtitleEl.querySelector('.session-subtitle-identity');
+    if (!subtitleTextEl) {
+      subtitleTextEl = document.createElement('span');
+      subtitleTextEl.className = 'session-subtitle-identity';
+      const count = document.createElement('span');
+      count.className = 'session-subagent-count';
+      const content = subtitleEl.querySelector('.overflow-text-content') || subtitleEl;
+      content.replaceChildren(subtitleTextEl, count);
+      bindHoverMarquee(subtitleTextEl);
+    }
+    subtitleEl.querySelector('.session-subagent-count').textContent = `${subtitleIdentity ? ' · ' : ''}${subagentCountLabel}`;
+    overflowText.update(subtitleEl);
+  }
+  const subtitleText = splitSubtitle ? subtitleIdentity || '' : subtitle;
   // A multi-model session abbreviates to "N models"; that label opens the same
   // tooltip the context gauge carries, one row per model with its tokens and
   // share of the session. A titled row prints the label inside the
   // client · model line, so the trigger is just the "N models" span; an
   // untitled row folds it into the title instead, whose whole text then opens
   // the tooltip. The trigger mirrors the row's own wording rather than adding
-  // chrome, so there is nothing extra on a single-model row.
+  // chrome, so there is nothing extra on a single-model row. A review heading
+  // explicitly identifies its model span before the trailing time.
   const modelEntries = Array.isArray(modelTooltipEntries) && modelTooltipEntries.length > 1
     ? modelTooltipEntries : null;
-  const subtitleShowsModel = Boolean(modelEntries && modelLabel && String(subtitle || '').endsWith(modelLabel));
+  const subtitleShowsModel = Boolean(!titleModelLabel && modelEntries && modelLabel && String(subtitleText || '').endsWith(modelLabel));
   if (subtitleShowsModel) {
     const models = document.createElement('span');
     models.className = 'session-models';
     models.textContent = modelLabel;
     // Inside the marquee's own wrapper, so a long line still scrolls on hover.
-    const subtitleContent = subtitleEl.querySelector('.overflow-text-content') || subtitleEl;
-    subtitleContent.replaceChildren(document.createTextNode(subtitle.slice(0, -modelLabel.length)), models);
-    overflowText.update(subtitleEl);
+    const subtitleContent = subtitleTextEl.querySelector('.overflow-text-content') || subtitleTextEl;
+    subtitleContent.replaceChildren(document.createTextNode(subtitleText.slice(0, -modelLabel.length)), models);
+    overflowText.update(subtitleTextEl);
     limitWindowsView.setDetailTooltip(models, modelEntries);
   } else {
-    setHoverMarqueeText(subtitleEl, subtitle);
+    setHoverMarqueeText(subtitleTextEl, subtitleText);
   }
-  if (!subtitleShowsModel && modelEntries && modelLabel && String(name || '').endsWith(modelLabel)) {
+  if (modelEntries && titleModelLabel && String(name || '').startsWith(titleModelLabel)) {
+    const models = document.createElement('span');
+    models.className = 'session-models';
+    models.textContent = titleModelLabel;
+    const titleContent = titleEl.querySelector('.overflow-text-content') || titleEl;
+    titleContent.replaceChildren(models, document.createTextNode(name.slice(titleModelLabel.length)));
+    overflowText.update(titleEl);
+    limitWindowsView.setDetailTooltip(models, modelEntries);
+  }
+  if (!subtitleShowsModel && !titleModelLabel && modelEntries && modelLabel && String(name || '').endsWith(modelLabel)) {
     limitWindowsView.setDetailTooltip(titleEl, modelEntries);
   } else if (titleEl.classList.contains('limit-detail-tooltip-wrap')) {
     limitWindowsView.setDetailTooltip(titleEl, null);
@@ -2850,31 +2877,49 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
   return toolRowsForPeriod(period);
 }
 
-function rawSessionRowsForPeriod(period) {
-  return sessionRowsApi.sessionRowsForPeriod(period, {
+function sessionPresentationOptions() {
+  return {
     clientLabels,
     clientColors,
     modelColor,
     stableColor,
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived'),
+    subagentLabel: t('sessions.subagent'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
-    nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
-  });
-}
-
-function sessionRowsForPeriod(period) {
-  const rows = rawSessionRowsForPeriod(period);
-  if (rows.length > 0) {
-    rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
-    return sessionRowsApi.groupBackgroundReviewRows(rows, {
+    sourcePeriods: state.stats?.periods,
+    grokBotSessionIds: state.stats?.grokBotSessionIds,
+    nativeSessions: state.stats?.nativeSessions?.[state.period] || {},
+    subagents: {
+      countLabel: (count) => t('sessions.subagentCount', { count }),
+      unattributedLabel: t('dashboard.tooltip.unclassified')
+    },
+    backgroundReviews: {
       label: t('sessions.backgroundReviews'),
       countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
       summaryLabel: ({ latestTime, latestValue }) => [
         latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
         latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
       ].filter(Boolean).join(' · ')
-    });
+    },
+    grokBot: {
+      label: t('sessions.grokBot'),
+      countLabel: (count) => t('sessions.grokBotCount', { count }),
+      summaryLabel: ({ latestTime }) => latestTime
+        ? t('sessions.backgroundReviewLatest', { time: latestTime }) : ''
+    }
+  };
+}
+
+function rawSessionRowsForPeriod(period) {
+  return sessionRowsApi.sessionRowsForPeriod(period, sessionPresentationOptions());
+}
+
+function sessionRowsForPeriod(period) {
+  const rows = rawSessionRowsForPeriod(period);
+  if (rows.length > 0) {
+    rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
+    return sessionRowsApi.groupSessionRows(rows, sessionPresentationOptions());
   }
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
@@ -4020,7 +4065,7 @@ function limitDetailTooltipShouldHoldRender() {
 }
 
 function sessionTooltipShouldHoldRender() {
-  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
+  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .session-group-run .is-hover-reading, .session-group-run:focus-within, .session-group-run .limit-detail-tooltip-wrap:hover, .session-group-run .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
 }
 
 function flushPendingLimitDetailTooltipRender() {
@@ -4643,10 +4688,13 @@ function applySessionDetailResult(request, options) {
   renderSessionDetail(options);
 }
 
-async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null }) {
+async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null, titleFollowsSession = false }) {
+  // A review run is headed by model and time; a named group run (a subagent, a
+  // Grok Bot record) is headed by its session title and follows title display.
+  const fixedGroupHeading = returnTo?.kind === 'session-group' && titleFollowsSession !== true;
   const request = { kind: 'session', client, sessionId, sessionCost,
-    title: state.settings?.sessionTitlesEnabled === false && returnTo?.kind !== 'background-review-group' ? '' : title,
-    period: state.period, detail: null, returnTo };
+    title: state.settings?.sessionTitlesEnabled === false && !fixedGroupHeading ? '' : title,
+    period: state.period, detail: null, returnTo, titleFollowsSession: titleFollowsSession === true };
   state.openSession = request;
   renderSessionDetail({ loading: true });
   try {
@@ -4676,9 +4724,9 @@ function closeSessionDetail() {
 
 function sessionDetailBack() {
   const returnTo = state.openSession?.returnTo;
-  if (returnTo?.kind === 'background-review-group') {
+  if (returnTo?.kind === 'session-group') {
     state.openSession = returnTo;
-    renderBackgroundReviewDetail(returnTo);
+    renderSessionGroupDetail(returnTo);
     return;
   }
   closeSessionDetail();
@@ -4690,6 +4738,7 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   els.sessionDetailHead.classList.remove('hidden');
   const head = els.sessionDetailHead;       // static layer — rows scroll independently below it
   const container = els.sessionDetail;
+  container.classList.remove('session-group-list');
   head.replaceChildren();
   container.replaceChildren();
 
@@ -4723,9 +4772,9 @@ function renderSessionDetail({ detail, loading, error } = {}) {
 
 function sessionDetailTitle() {
   const request = state.openSession;
-  // Review runs use a model/time heading, which is independent of session
+  // Group runs use a model/time heading, which is independent of session
   // title visibility. Ordinary Details follow the current session metadata.
-  if (request?.returnTo?.kind === 'background-review-group') return request.title;
+  if (request?.returnTo?.kind === 'session-group' && request.titleFollowsSession !== true) return request.title;
   if (state.settings?.sessionTitlesEnabled === false) return '';
   const period = request?.period || state.period;
   const session = request?.client === 'reasonix'
@@ -4736,18 +4785,53 @@ function sessionDetailTitle() {
 
 function refreshSessionDetailHeading() {
   if (state.openSession?.kind !== 'session') return;
+  // The group a Details page returns to is labelled by its summary, and a
+  // subagent group's summary quotes the parent's title. Follow the current
+  // stats so the back label, and the group page it returns to, honour title
+  // display like every other surface.
+  const group = state.openSession.returnTo;
+  const period = group?.kind === 'session-group' && group.summary?.key
+    ? state.stats?.periods?.[group.period || state.period] : null;
+  if (period) {
+    const rows = sessionRowsForPeriod(period);
+    const memberKey = `session:${state.openSession.client}:${state.openSession.sessionId}`;
+    const holds = (row) => row.groupRows?.some((member) => member.key === memberKey);
+    // The same group counts only while it still holds this session: a child
+    // moved to another parent must not return to its old one.
+    const latest = rows.find((row) => row.key === group.summary.key && holds(row));
+    if (latest) {
+      group.summary = latest;
+    } else {
+      // The group is gone or no longer holds this session (its parent left the
+      // list, or the session now sits under another parent). A cached summary
+      // would keep quoting titles the current stats no longer carry, so return
+      // to whichever group holds this session now, or to Sessions when none does.
+      const holder = rows.find(holds);
+      state.openSession.returnTo = holder ? { kind: 'session-group', period: group.period, summary: holder } : null;
+    }
+  }
   const head = els.sessionDetailHead;
-  if ((head.querySelector('.detail-heading')?.textContent || '') === sessionDetailTitle()) return;
+  if (state.openSession.headingSignature === sessionDetailHeadingSignature()) return;
   // Retain the body, loading/error state and sort control. Unchanged headings
   // also retain their hover-reading motion through periodic stats updates.
   head.replaceChildren(sessionDetailBackButton(), ...Array.from(head.children).slice(1));
 }
 
+function sessionDetailBackLabel() {
+  return state.openSession?.returnTo?.kind === 'session-group'
+    ? state.openSession.returnTo.summary?.name || t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
+}
+
+function sessionDetailHeadingSignature() {
+  return JSON.stringify([sessionDetailTitle(), sessionDetailBackLabel()]);
+}
+
 function sessionDetailBackButton() {
   const back = document.createElement('button');
   const title = sessionDetailTitle();
-  const backLabel = state.openSession?.returnTo?.kind === 'background-review-group'
-    ? t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
+  const backLabel = sessionDetailBackLabel();
+  // Every heading is built here, so the open request records what it shows.
+  if (state.openSession) state.openSession.headingSignature = JSON.stringify([title, backLabel]);
   back.type = 'button';
   back.className = title ? 'detail-back detail-back-titled' : 'detail-back';
   if (!title) back.textContent = `‹ ${backLabel}`;
@@ -4792,60 +4876,56 @@ function sessionIdLine(idLabel) {
   return line;
 }
 
-function backgroundReviewRunNode(row, max, parent) {
-  const wrap = document.createElement('div');
-  wrap.className = 'detail-exchange background-review-run';
-  wrap.setAttribute('role', 'button');
-  wrap.setAttribute('tabindex', '0');
-  wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">›</span>'
-    + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span></div>'
-    + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
-    + '<div class="bar"><div class="bar-fill"></div></div>';
-  const time = sessionRowsApi.compactSessionTime(row.sortTime, new Date());
-  const title = [row.modelLabel, time].filter(Boolean).join(' · ') || t('sessions.backgroundReviews');
-  const titleEl = wrap.querySelector('.detail-ex-title');
-  titleEl.textContent = title;
-  titleEl.title = title;
-  bindHoverMarquee(titleEl);
-  // A multi-model run reads "N models · time" here — the same label the
-  // Sessions list opens for its per-model shares, so the title opens it too.
-  if (row.modelTooltipEntries?.length > 1) {
-    limitWindowsView.setDetailTooltip(titleEl, row.modelTooltipEntries);
+function sessionGroupRunNode(row, max, parent) {
+  const subagentGroup = parent.summary?.subagentGroup === true;
+  const namedGroup = subagentGroup || parent.summary?.sessionGroup === 'cursor-grok-bot';
+  const title = namedGroup ? row.name
+    : [row.modelLabel, sessionRowsApi.compactSessionTime(row.sortTime)].filter(Boolean).join(' · ')
+      || t('sessions.backgroundReviews');
+  // Group members are still session rows. Share the template, metrics, tooltip
+  // and activity rendering; exchange rows belong only to the actual transcript.
+  const member = { ...row, name: title, titleModelLabel: namedGroup ? undefined : row.modelLabel };
+  if (subagentGroup) {
+    member.subtitle = [row.clientLabel, row.modelLabel].filter(Boolean).join(' · ');
+    member.activity = row.activitySummary;
   }
-  wrap.querySelector('.detail-ex-sub').textContent = row.detail || '';
-  wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
-  wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0, row.unpricedTokens);
-  applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
-  const open = () => openSessionDetail({
-    client: row.client,
-    sessionId: String(row.key || '').replace(/^session:[^:]+:/, ''),
-    sessionCost: Number(row.cost || 0),
-    title,
-    returnTo: parent
-  });
-  wrap.addEventListener('click', open);
-  wrap.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    open();
-  });
+  const wrap = rowTemplate(member);
+  updateRow(wrap, { ...member, barValue: member.barValue ?? member.value, max });
+  // Keep the existing repaint guard for model hover and keyboard focus.
+  wrap.classList.add('session-group-run');
+  if (sessionRowsApi.sessionRowDetailAvailable(row)) {
+    wrap.addEventListener('click', () => {
+      const sessionId = String(row.key || '').replace(/^session:[^:]+:/, '');
+      openSessionDetail({
+        client: row.client,
+        sessionId: row.client === 'reasonix' ? `reasonix:${sessionId}` : sessionId,
+        sessionCost: Number(row.cost || 0),
+        title,
+        returnTo: parent,
+        titleFollowsSession: namedGroup
+      });
+    });
+    wrap.addEventListener('keydown', sessionRowsApi.handleBreakdownRowKeydown);
+  }
   return wrap;
 }
 
-function renderBackgroundReviewDetail(request) {
+function renderSessionGroupDetail(request) {
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
   const head = els.sessionDetailHead;
   const container = els.sessionDetail;
   head.replaceChildren();
+  container.classList.add('session-group-list');
   container.replaceChildren();
 
+  const label = request?.summary?.name || t('sessions.backgroundReviews');
   const back = document.createElement('button');
   back.type = 'button';
   back.className = 'detail-back detail-back-titled';
   back.setAttribute('aria-label', t('sessions.backToWithTitle', {
-    title: t('sessions.backgroundReviews'), destination: t('sessions') || 'Sessions'
+    title: label, destination: t('sessions') || 'Sessions'
   }));
   back.addEventListener('click', closeSessionDetail);
   const arrow = document.createElement('span');
@@ -4854,25 +4934,45 @@ function renderBackgroundReviewDetail(request) {
   arrow.setAttribute('aria-hidden', 'true');
   const heading = document.createElement('span');
   heading.className = 'detail-heading';
-  heading.textContent = t('sessions.backgroundReviews');
+  heading.textContent = label;
   bindHoverMarquee(heading);
   back.append(arrow, heading);
   head.append(back);
 
-  const rows = request?.summary?.backgroundReviewRows || [];
+  const rows = request?.summary?.groupRows || [];
   if (rows.length === 0) {
     container.append(detailNote(t('detailEmpty') || 'No activity in this period.'));
     return;
   }
   const overview = document.createElement('div');
-  overview.className = 'background-review-overview';
-  overview.innerHTML = '<span class="background-review-count"></span><span class="background-review-totals"></span>';
-  overview.querySelector('.background-review-count').textContent = t('sessions.backgroundReviewCount', { count: rows.length });
-  overview.querySelector('.background-review-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0)}`;
+  overview.className = 'session-group-overview';
+  overview.innerHTML = '<span class="session-group-count"></span><span class="session-group-totals"></span>';
+  overview.querySelector('.session-group-count').textContent = request.summary.subagentGroup
+    ? t('dashboard.stat.totalTokens') : request.summary.groupDetail || request.summary.detail;
+  overview.querySelector('.session-group-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0, request.summary.unpricedTokens)}`;
   container.append(overview);
 
   const max = Math.max(1, ...rows.map((row) => Number(row.value) || 0));
-  for (const row of rows) container.append(backgroundReviewRunNode(row, max, request));
+  if (request.summary.subagentGroup) {
+    // Roles come from the grouping projection, including every main continuation.
+    // Older member DTOs without a role retain the original first-row main fallback.
+    const isMain = row => row.groupRole === 'main' || (!row.groupRole && row.key === rows[0].key);
+    const mainHeading = document.createElement('h3');
+    mainHeading.className = 'session-group-section-heading is-first';
+    mainHeading.textContent = t('sessions.mainSession');
+    container.append(mainHeading);
+    for (const row of rows.filter(isMain)) container.append(sessionGroupRunNode(row, max, request));
+    const children = rows.filter(row => !isMain(row));
+    if (children.length) {
+      const heading = document.createElement('h3');
+      heading.className = 'session-group-section-heading';
+      heading.textContent = `${t('sessions.subagent')} · ${request.summary.subagentCount}`;
+      container.append(heading);
+      for (const row of children) container.append(sessionGroupRunNode(row, max, request));
+    }
+  } else {
+    for (const row of rows) container.append(sessionGroupRunNode(row, max, request));
+  }
 }
 
 function detailNote(text) {
@@ -5912,14 +6012,14 @@ function stopHomeSessionRepaint() {
   state.homeSessionRepaintTimer = null;
 }
 
-function scheduleHomeSessionRepaint() {
+function scheduleHomeSessionRepaint(rows) {
   stopHomeSessionRepaint();
-  const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
+  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
   if (!rows.length) return;
   const now = Date.now();
   const expiry = window.TokenMonitorEdgeDockPresentation.nextRunningExpiryAt(rows, now);
   // Refresh relative ages once a minute, or sooner when a running session expires.
-  const cacheExpiry = window.TokenMonitorSessionLive?.nextSessionStatusChangeAt(rows, now) || 0;
+  const cacheExpiry = window.TokenMonitorSessionLive?.nextSessionStatusChangeAt(window.TokenMonitorEdgeDockPresentation.sessionMembers(rows), now) || 0;
   const nextExpiry = [expiry, cacheExpiry].filter((at) => at > now).sort((a, b) => a - b)[0];
   const delay = nextExpiry ? Math.min(60_000, Math.max(1_000, nextExpiry - now + 50)) : 60_000;
   state.homeSessionRepaintTimer = setTimeout(() => {
@@ -5928,10 +6028,19 @@ function scheduleHomeSessionRepaint() {
     const current = els.homePanel?.querySelector('.home-module-session');
     if (!current) return;
     const hadFocus = document.activeElement === current;
-    const next = renderHomeSessionModule();
+    const hadHeadFocus = document.activeElement === current.querySelector?.('.home-module-head');
+    const focusedKey = document.activeElement?.closest?.('.home-session-row')?.dataset?.key;
+    const nextRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+    const next = renderHomeSessionModule(nextRows);
     current.replaceWith(next);
     if (hadFocus) next.focus();
-    scheduleHomeSessionRepaint();
+    if (hadHeadFocus) next.querySelector('.home-module-head')?.focus({ preventScroll: true });
+    if (focusedKey) {
+      const row = [...next.querySelectorAll('.home-session-row')]
+        .find(node => node.dataset.key === focusedKey);
+      (row || next).focus({ preventScroll: true });
+    }
+    scheduleHomeSessionRepaint(nextRows);
   }, delay);
 }
 
@@ -5958,14 +6067,14 @@ function scheduleSessionStatusRepaint(period, incompleteHint = '') {
   }, Math.min(60_000, Math.max(1_000, next - now + 50)));
 }
 
-function renderHomeSessionModule() {
+function renderHomeSessionModule(rows) {
   const current = els.homePanel?.querySelector('.home-module-session');
   if (current && sessionTooltipShouldHoldRender()) {
     homeSessionRenderPending = true;
     return current;
   }
-  const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
-  const runningCount = rows.filter((row) => window.TokenMonitorSessionLive.sessionActivityState(row) === 'running').length;
+  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+  const runningCount = window.TokenMonitorEdgeDockPresentation.runningSessionSummary(rows).count;
   const meta = runningCount > 0 ? t('home.runningSessions', { count: runningCount }) : '';
   const { module, body } = homeModuleShell('session', t('home.sessions'), 'session', meta);
   if (rows.length === 0) {
@@ -5976,9 +6085,10 @@ function renderHomeSessionModule() {
     return module;
   }
   for (const row of rows) {
-    const activityState = window.TokenMonitorSessionLive.sessionActivityState(row);
+    const activityState = window.TokenMonitorEdgeDockPresentation.sessionActivityState(row);
     const item = document.createElement('div');
     item.className = 'home-list-row home-session-row';
+    item.dataset.key = row.key;
     const mark = document.createElement('span');
     applyHomeListMark(mark, iconKindFor({ client: row.client }, 'session'), clientColors[row.client] || stableColor(row.key, fallbackModelColors));
     const stateMark = document.createElement('span');
@@ -6010,6 +6120,9 @@ function renderHomeSessionModule() {
     const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
     const description = document.createElement('span');
     description.className = 'home-list-sub';
+    const memberLabel = row.sessionGroup && (!row.subagentGroup || row.subagentCount > 0)
+      ? (row.subagentGroup ? t('sessions.subagentCount', { count: row.subagentCount })
+        : t('sessions.grokBotCount', { count: row.groupRows.length })) : '';
     // The same "N models" hover the Sessions list draws: the label stays the
     // row's own text, and the tooltip lists the models behind the count.
     const modelLabel = sessionRowsApi.sessionModelLabel(row);
@@ -6017,24 +6130,32 @@ function renderHomeSessionModule() {
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatCompact
     });
-    if (modelLabel && modelEntries.length > 1) {
-      const models = document.createElement('span');
-      models.className = 'session-models';
-      models.textContent = modelLabel;
-      limitWindowsView.setDetailTooltip(models, modelEntries);
-      description.append(models);
-      if (age) description.append(document.createTextNode(` · ${age}`));
-    } else {
-      description.textContent = [modelLabel, age].filter(Boolean).join(' · ');
+    if (modelLabel) {
+      if (modelEntries.length > 1) {
+        const models = document.createElement('span');
+        models.className = 'session-models';
+        models.textContent = modelLabel;
+        limitWindowsView.setDetailTooltip(models, modelEntries);
+        description.append(models);
+      } else description.append(document.createTextNode(modelLabel));
     }
+    if (memberLabel) {
+      if (modelLabel) description.append(document.createTextNode(' · '));
+      const count = document.createElement('span');
+      count.className = 'home-session-member-count';
+      count.textContent = memberLabel;
+      description.append(count);
+    }
+    if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
     meta.append(description);
-    const context = window.TokenMonitorSessionLive.sessionActivityState(row) !== 'idle' ? row.context : null;
-    const cache = window.TokenMonitorSessionLive.sessionPromptCacheForRow(row);
+    const statusRow = row.groupRows?.[0] || row;
+    const context = window.TokenMonitorSessionLive.sessionActivityState(statusRow) !== 'idle' ? statusRow.context : null;
+    const cache = window.TokenMonitorSessionLive.sessionPromptCacheForRow(statusRow);
     if (cache && !context) {
       const badge = document.createElement('span');
       badge.className = 'home-session-cache';
       badge.textContent = t('session.cacheEstimate', { minutes: cache.minutes });
-      sessionRowsApi.setSessionTooltip(badge, row, cache, t, limitWindowsView);
+      sessionRowsApi.setSessionTooltip(badge, statusRow, cache, t, limitWindowsView);
       meta.append(badge);
     }
     if (context) meta.append(homeSessionContext(context, cache));
@@ -6536,16 +6657,20 @@ function renderHome() {
     hideHomeActivityTooltip();
     return;
   }
+  let sessionRows;
   const nodes = moduleIds.map((id) => {
     if (id === 'limits') return renderHomeLimitModule();
     if (id === 'tool') return renderHomeToolModule(period);
     if (id === 'device') return renderHomeDeviceModule();
     if (id === 'model') return renderHomeModelModule(period);
-    if (id === 'session') return renderHomeSessionModule();
+    if (id === 'session') {
+      sessionRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+      return renderHomeSessionModule(sessionRows);
+    }
     return renderHomeTrendsModule();
   });
   els.homePanel.replaceChildren(...nodes);
-  if (moduleIds.includes('session')) scheduleHomeSessionRepaint();
+  if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
   // setupHomeActivityScroller first runs while its module is detached, where
   // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
   // attached, before the browser paints or hover restoration measures the new cell.
@@ -6712,13 +6837,14 @@ function render() {
     els.trendsPanel.classList.add('hidden');
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
-    if (state.openSession.kind === 'background-review-group') {
-      const latest = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
-      if (latest) state.openSession.summary = latest;
+    if (state.openSession.kind === 'session-group') {
+      const latest = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
+      if (!latest) { closeSessionDetail(); return; }
+      state.openSession.summary = latest;
       // The rebuild replaces every run node, so a hovered run tooltip would die
       // mid-read (and a keyboard focus with it); hold until it closes, as the
       // session and home lists already do.
-      if (!sessionTooltipShouldHoldRender()) renderBackgroundReviewDetail(state.openSession);
+      if (!sessionTooltipShouldHoldRender()) renderSessionGroupDetail(state.openSession);
     }
     refreshSessionDetailHeading();
     if (state.openSession.renderOptions) {
@@ -12028,11 +12154,11 @@ for (const tab of document.querySelectorAll('.tab')) {
     if (!setPeriod(targetPeriod)) return;
     syncPeriodTabs();
     if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session')) {
-      if (state.openSession.kind === 'background-review-group') {
+      if (state.openSession.kind === 'session-group') {
         const period = state.stats?.periods?.[state.period];
-        const summary = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+        const summary = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
         if (summary) {
-          state.openSession = { kind: 'background-review-group', period: state.period, summary };
+          state.openSession = { kind: 'session-group', period: state.period, summary };
         } else {
           state.openSession = null;
         }
@@ -12115,13 +12241,13 @@ els.breakdown.addEventListener('click', (event) => {
   if (state.breakdown !== 'session') return;
   const rowEl = event.target.closest('.row');
   if (!rowEl) return;
-  if (rowEl.dataset.reviewGroup === 'true') {
+  if (rowEl.dataset.sessionGroup) {
     const period = state.stats?.periods?.[state.period];
-    const summary = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+    const summary = sessionRowsForPeriod(period).find((row) => row.key === rowEl.dataset.key);
     if (summary) {
-      const request = { kind: 'background-review-group', period: state.period, summary };
+      const request = { kind: 'session-group', period: state.period, summary };
       state.openSession = request;
-      renderBackgroundReviewDetail(request);
+      renderSessionGroupDetail(request);
     }
     return;
   }
@@ -13028,7 +13154,8 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
   render: renderStatsUpdate
 });
 // Pulled once up front, then only while something on screen reads it: the
-// archived count in Settings, or the TOTAL session and project lists.
+// archived count in Settings, or TOTAL sessions/projects. Bot identity arrives
+// in a compact snapshot projection and does not need a full history pull.
 function allTimeSessionsNeeded() {
   if (!allTimeSessions.loaded() || isSettingsPanelOpen()) return true;
   return state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');

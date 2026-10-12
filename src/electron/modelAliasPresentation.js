@@ -7,6 +7,7 @@ const {
   createModelAliasResolver
 } = require('./renderer/modelAliases');
 const { historyRevision, num } = require('../shared/history');
+const { isGrokBotSession } = require('./renderer/sessionRows');
 
 const MODEL_MAP_FIELDS = [
   'models',
@@ -182,6 +183,11 @@ function projectUsage(value, resolve) {
     if (projected === map) continue;
     if (result === value) result = { ...value };
     result[field] = projected;
+  }
+  // Keep source classification when a display alias erases the bot model id.
+  // This flag belongs only to the Electron projection, never the wire record.
+  if (isGrokBotSession(value) !== isGrokBotSession(result)) {
+    result = { ...result, grokBotSession: isGrokBotSession(value) };
   }
   return result;
 }

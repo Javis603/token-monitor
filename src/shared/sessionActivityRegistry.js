@@ -37,6 +37,33 @@ async function refreshSessionActivity(summary, providers, options, shared, {
     if (!isCurrent()) return null;
     next = entry.project(next, activity, now()) || next;
   }
+  if (next?.nativeSessions) {
+    // Pre-token local rows also need delegation links. Clone only the small
+    // native view; accounting members are lookup evidence, never mutated by a
+    // heartbeat and never duplicated into the local-only rows.
+    const targets = new Set();
+    const originals = new Map();
+    const nativeSessions = {};
+    const accounting = next.periods || next;
+    const periods = {};
+    for (const [name, rows] of Object.entries(next.nativeSessions)) {
+      nativeSessions[name] = Object.fromEntries(Object.entries(rows || {}).map(([key, row]) => {
+        const copy = { ...row };
+        targets.add(copy);
+        originals.set(copy, row);
+        return [key, copy];
+      }));
+      periods[name] = { sessions: nativeSessions[name] };
+    }
+    const { applyT3SessionParents } = require('./sessionMetadata');
+    applyT3SessionParents(periods, shared.homeDir, {
+      ...options.sessionMetadataDeps,
+      env: shared.env || options.env || options.sessionMetadataDeps?.env
+    }, targets, accounting);
+    if ([...targets].some((row) => row.parentSessionId !== originals.get(row).parentSessionId
+      || row.parentClient !== originals.get(row).parentClient
+      || row.t3ThreadId !== originals.get(row).t3ThreadId)) next = { ...next, nativeSessions };
+  }
   return next;
 }
 

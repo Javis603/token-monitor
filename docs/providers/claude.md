@@ -21,6 +21,8 @@ For sessions matched to T3 Code, a usable T3 sidebar title takes precedence over
 
 Legacy Claude lookup requires `provider_session_runtime.provider_name = 'claudeAgent'`. Stores without that column keep native titles because the generic `resume` cursor alone cannot establish provider identity. Codex retains its older compatibility path without this column; Claude does not inherit that exception. Malformed legacy cursors are ignored without hiding other valid matches.
 
+T3-owned delegated Claude sessions can carry an independent parent link, including a Codex parent. This uses the shared [relationship reader](../architecture.md#session-relationships); native Claude subagent usage remains accounted for by the parser and is not synthesized into extra session rows.
+
 If the Claude transcript is unavailable, a T3 title updates only the displayed title and preserves the session's existing activity and transcript metadata. When the transcript becomes available again, its turn boundary and other readings apply normally.
 
 Cached overrides record their T3 source explicitly, independently of whether a transcript exists. A confirmed V2 tombstone, empty title or placeholder invalidates that override within the collection. Previously decorated rows recover their prior title, while fresh native labels are preserved. Cached T3 titles are separated from native metadata before a transcript is read, so a transcript with no title cannot inherit a stale override. Missing or unreadable stores do not invalidate overrides and keep cached T3 titles.

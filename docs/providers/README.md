@@ -89,6 +89,10 @@ Register only reliable identity/state/resolution evidence; missing evidence clea
 
 Declarations drive common dispatch, rendering, normalization and expiry; native transcript fallbacks remain provider-specific. See [architecture](../architecture.md) for accounting and publication boundaries.
 
+## T3 Code session relationships
+
+T3 delegation uses one shared relationship reader, independent of the provider. `src/shared/t3SessionIdentity.js` binds its strong native ids to accounting clients. For a new direct driver or ACP Registry agent, verify that T3’s native id is the same id Tokscale emits before adding the binding; otherwise provide a verified conversion separately. ACP instances require the colocated T3 server configuration, not an instance-name convention or model guess. See [the architecture contract](../architecture.md#session-relationships) for ownership, historical-run and missing-parent rules. These bindings do not register a new usage source, title resolver or live-activity adapter.
+
 ## Adding a limits provider
 
 Provider identity lives in **one** place: `LIMIT_PROVIDER_CATALOG` in `src/shared/limits/providers.js`. The catalog order is the new-install order; a changed default must not overwrite a saved custom order. A tracked client is something tokscale counts tokens for, a limits provider is an account whose quota we read, and only some ids are both — the two catalogs and checklists are separate. Everything below is either a hand-wired registration point that must agree with that id, or a provider-specific surface to add only where it applies.
