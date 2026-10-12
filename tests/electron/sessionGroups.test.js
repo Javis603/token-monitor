@@ -46,7 +46,8 @@ test('period switches keep the same group and return to Sessions when that group
   vm.runInNewContext(source.slice(start, end), { state, document: { querySelectorAll: () => [tab] },
     fixedPeriodRangesApi: { slotForSelection: value => value, normalizeMonthMode: () => 'month', supportsBreakdown: () => true },
     captureBreakdownMotion: noop, setPeriod: value => { state.period = value; return true; }, syncPeriodTabs: noop,
-    setPeriodMenuOpen: noop, sessionRowsForPeriod: rowsForPeriod, render: () => { renders += 1; }, animateBreakdownFrom: noop });
+    setPeriodMenuOpen: noop, sessionRowsForPeriod: rowsForPeriod, render: () => { renders += 1; },
+    periodBreakdownMotionDuration: () => 800, animateBreakdownFrom: noop });
   activate({ stopPropagation: noop });
   assert.equal(state.openSession.summary.key, 'session-group:cursor-grok-bot');
   assert.equal(state.openSession.summary.value, 50);
