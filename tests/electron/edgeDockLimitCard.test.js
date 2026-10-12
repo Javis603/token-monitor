@@ -1710,9 +1710,9 @@ test('with every item unchecked, Home and the picker keep no window the card dre
 
 
 function notchAdapter() {
-  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
   const start = source.indexOf('function notchQuotaColor(');
-  const end = source.indexOf('function providerUsageNode(', start);
+  const end = source.indexOf('function fitNotchTooltip(', start);
   const context = {
     el: (_tag, classes, text = '') => { const node = new FakeElement(_tag); node.className = classes; node.textContent = text; return node; },
     limitResetMotionApi,
@@ -1848,8 +1848,9 @@ test('notch overview names each selected provider even when no account reports d
 
 
 test('notch quota ink adapts low-contrast brands without recoloring readable brands', () => {
-  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
-  const colors = source.slice(source.indexOf('function parseColor('), source.indexOf('function limitProviderColor('));
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const colors = dock.slice(dock.indexOf('function parseColor('), dock.indexOf('function limitProviderColor('));
   const helper = source.slice(source.indexOf('function notchQuotaColor('), source.indexOf('function notchOverviewCard('));
   let surface = '0, 0, 0', text = '#ffffff';
   const context = {
@@ -1925,7 +1926,7 @@ test('Notch ears preserve configured tray items and embedded fields across all s
   const trayLayout = require('../../src/shared/trayLayout');
   const typography = require('../../src/electron/renderer/trayTypography');
   const { buildNotchData } = require('../../src/electron/notch/data');
-  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
   const el = (tag, classes, text = '') => {
     const node = new FakeElement(tag); node.className = classes; node.textContent = text; return node;
   };
@@ -1982,7 +1983,7 @@ test('Notch ears preserve configured tray items and embedded fields across all s
 });
 
 test('ear fitting retains the complete first field and hides optional fields atomically', () => {
-  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
   const el = (tag, classes, text = '') => {
     const node = new FakeElement(tag); node.className = classes; node.textContent = text;
     node.getBoundingClientRect = () => ({ width: node.width ?? node.children.filter(child => !child.hidden)
@@ -2012,7 +2013,7 @@ test('ear fitting retains the complete first field and hides optional fields ato
 
 
 test('custom summary order never infers standalone icon ownership or removes same-ear separators', () => {
-  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
   const el = (tag, classes, text = '') => { const node = new FakeElement(tag); node.className = classes; node.textContent = text; return node; };
   const context = { el, trayTypographyApi: require('../../src/electron/renderer/trayTypography'), notchNumbers: new Map(),
     cancelAnimationFrame() {}, providerLabel: id => id, positionNotchSummary() {},
@@ -2040,7 +2041,7 @@ test('custom summary order never infers standalone icon ownership or removes sam
 });
 
 test('primary reading survives extra standalone icons without inflating the minimum budget', () => {
-  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
   const el = (tag, classes, text = '') => {
     const node = new FakeElement(tag); node.className = classes; node.textContent = text;
     node.getBoundingClientRect = () => ({ width: node.width ?? node.children.filter(child => !child.hidden).reduce((sum, child, i) => sum + child.getBoundingClientRect().width + (i ? 6 : 0), 0) });
@@ -2067,14 +2068,14 @@ test('primary reading survives extra standalone icons without inflating the mini
 
 
 test('switching camera clearance rebuilds the same summary without losing configured separators', () => {
-  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
   const el = (tag, classes, text = '') => { const node = new FakeElement(tag); node.className = classes; node.textContent = text; return node; };
   const layer = el('div', 'content');
   layer.prepend = node => { node.parent = layer; layer.children.unshift(node); };
   const context = { el, contentLayer: layer, root: el('div', 'root'), state: { appearanceKey: 'unchanged' },
     notchHeaderKey: '', notchClock: 0, notchNumbers: new Map(), trayTypographyApi: require('../../src/electron/renderer/trayTypography'),
     refreshVisit: 0, refreshFeedbackTimer: null, refreshBusy: false, refreshResult: '',
-    clearTimeout() {}, cancelAnimationFrame() {}, paintRefreshButton() {}, captureRingResetMotion() {}, animateRingResets() {},
+    clearTimeout() {}, cancelAnimationFrame() {}, resetRefreshVisit() {}, paintRefreshButton() {}, captureRingResetMotion() {}, animateRingResets() {},
     notchSummaryObserver: { disconnect() {}, observe() {} }, providerLabel: id => id, positionNotchSummary() {},
     notchIcon: item => el('span', 'edge-dock-mark', item.provider), notchText: (_item, row) => el('span', 'notch-text-run', row.text) };
   const summarySource = source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function notchStatOverviewCard('));
@@ -2100,7 +2101,7 @@ test('switching camera clearance rebuilds the same summary without losing config
 
 
 test('summary allocation and width fitting need only ordered items and measured widths', () => {
-  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
   const context = {};
   vm.runInNewContext(source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function notchSummary(')), context);
   vm.runInNewContext(source.slice(source.indexOf('function fitNotchSummaryItems('), source.indexOf('function fitNotchSlot(')), context);

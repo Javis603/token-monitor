@@ -171,7 +171,7 @@ test('Edge Dock title hover permits pushes and clock repaints while tooltip hold
   let tooltipHovered = false;
   const painted = [];
   const context = {
-    state: { payload: null }, surface: 'bubble', limitTooltip: { active: false, pending: false },
+    state: { payload: null }, surface: 'bubble', notchRenderer: null, limitTooltip: { active: false, pending: false },
     contentLayer: { querySelector: selector => {
       if (selector === '.fade-overflow:hover') return {};
       if (selector === '.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within') {

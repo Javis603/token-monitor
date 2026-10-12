@@ -441,7 +441,7 @@ test('reversing the shell starts at the current shape without a jump or window f
 // Exercise the production renderer's coordinate conversion: CSS zoom also
 // scales translateX, while AppKit/shape coordinates are physical DIPs.
 test('header outer margins stay equal through motion at each summary zoom', () => {
-  const code = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const code = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
   const source = code.slice(code.indexOf('function applyNotchMotion('), code.indexOf('function renderNotch('));
   for (const [appZoom, summaryZoom] of [[1, 1], [1.25, 1.2], [0.8, 0.8]]) {
     const widthLeft = 17 * summaryZoom, widthRight = 37 * summaryZoom;
@@ -536,7 +536,7 @@ test('a pending forecast cannot repopulate a disabled projection', async () => {
 
 
 test('quota/detail partition keeps credit quotas without meters and leaves spending and reset notes in details', () => {
-  const code = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const code = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
   const source = code.slice(code.indexOf('function notchQuotaRows('), code.indexOf('function omitNotchQuotaRows('));
   const rows = [
     { id: 'normal-session', note: false, meter: true },
@@ -553,7 +553,7 @@ test('quota/detail partition keeps credit quotas without meters and leaves spend
 
 
 test('notch tooltip viewport accommodation clamps both axes and leaves ordinary EdgeDock alone', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
   const code = source.slice(source.indexOf('function fitNotchTooltip('), source.indexOf("root.addEventListener('toggle'"));
   const context = { surface: 'bubble', state: { payload: { omitQuotaBars: true } }, innerWidth: 292, innerHeight: 163 };
   const fit = vm.runInNewContext(`${code};fitNotchTooltip`, context);
@@ -696,7 +696,7 @@ test('top-only independent session item schedules a main-process re-projection a
 
 
 test('notch tool marks fit their available width and restore on a wider row', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
   const helper = source.slice(source.indexOf('function fitNotchMarks('), source.indexOf('function fitNotchStatReadouts('));
   const more = { hidden: false, textContent: '+3', getBoundingClientRect() { return { width: this.textContent.length * 6 * row.scale }; } };
   const icons = Array.from({ length: 3 }, () => ({ hidden: false }));
@@ -1153,14 +1153,16 @@ test('summary clock preserves shared percent-reset headlines and updates without
   assert.equal(summary.needsClock, true);
   const row = summary.items[0];
   assert.equal(row.clock.headline, '67%');
-  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
   const code = source.slice(source.indexOf('function notchDisplayRow('), source.indexOf('function fitNotchTypeface('));
   const context = { trayLayoutApi: trayLayout, Date: { now: () => now + 60_000 }, appearance: () => ({ maskLimitAccountEmails: true }), accountIdentityApi: require('../../src/electron/renderer/accountIdentity') };
   const renderRow = vm.runInNewContext(`${code};notchDisplayRow`, context);
   assert.equal(renderRow(row).text, '67% · 53m');
   assert.equal(renderRow({ metric: 'account', text: 'review@example.test' }).text, context.accountIdentityApi.maskEmailAddress('review@example.test'));
-  const cadence = source.slice(source.indexOf('function selfRepaintDelayMs('), source.indexOf('function repaintSelf('));
+  const dock = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const cadence = dock.slice(dock.indexOf('function selfRepaintDelayMs('), dock.indexOf('function repaintSelf('));
   context.surface = 'notch';context.state = { payload: { expanded: false, summary } };context.sessionsExpiryDelayMs = () => 0;context.BUBBLE_REPAINT_MS = 30_000;
+  context.notchRenderer = { needsClock: () => Boolean(context.state.payload.expanded || context.state.payload.summary?.needsClock) };
   const delay = vm.runInNewContext(`${cadence};selfRepaintDelayMs`, context);
   assert.equal(delay(), 30_000);
   context.state.payload.summary = null;assert.equal(delay(), 0);
@@ -1479,7 +1481,7 @@ test('camera-free outlines budget both summary fields against status windows int
 });
 
 test('camera-free renderer fits the menu budget while reserving a complete primary readout before extra icons', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
   const code = source.slice(source.indexOf('function reportNotchSlots('), source.indexOf('const notchProviderObserver'));
   const left = { minimum: 17, width: 300, children: [] }, right = { minimum: 40, width: 500 };
   let reported;
@@ -1839,7 +1841,7 @@ test('disabled summary clears its rate timer and trackers without sampling or fo
 
 
 test('summary resize batches fit text before reporting slots and leave the side rail untouched', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
   const code = source.slice(source.indexOf('const notchSummaryObserver'), source.indexOf('function notchText('));
   for (const surface of ['notch', 'edgeDock']) {
     const events = [];
@@ -1932,7 +1934,7 @@ test('unsupported Notch selections do not activate shared dock work', () => {
 
 
 test('a mandatory camera-side readout does not grant menu space to optional overflow', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
   const code = source.slice(source.indexOf('function reportNotchSlots('), source.indexOf('const notchProviderObserver'));
   const left = { minimum: 50, width: 67, children: [] }, right = { minimum: 0, width: 89 };
   let reported;
@@ -2060,4 +2062,40 @@ test('restoring a rate summary starts a new baseline instead of reporting usage 
   preferences.notchCustomLayout.items = [tokens];
   project(input(700, 3000), []);
   assert.equal(context.notchRateTrackers.size, 0);
+});
+
+
+test('Notch renderer owns its observers and motion hooks while details reuse the shared host', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
+  const observations = [], hooks = [];
+  const context = { module: { exports: {} }, ResizeObserver: class {
+    constructor(callback) { observations.push(callback); }
+    observe() {} disconnect() {}
+  } };
+  vm.runInNewContext(source, context);
+  const cell = { id: 'selected' }, iconCell = { id: 'summary-icon' };
+  const state = { payload: { cells: [cell], summary: { items: [{ providerCell: iconCell }] } } };
+  const classes = new Map();
+  const deps = { state, document: { documentElement: { classList: { toggle: (name, value) => classes.set(name, value) } } },
+    window: { TokenMonitorPressActivation: {}, TokenMonitorEdgeDockPresentation: { runningSessionSummary() {} } }, root: { classList: { toggle: (name, value) => classes.set(name, value) }, addEventListener() {} },
+    bridge: { onAnimate: handler => hooks.push(handler), onMotion: handler => hooks.push(handler) }, shared: {} };
+  const create = context.module.exports.createNotchRenderer;
+  const renderer = create({ ...deps, surface: 'notch' });
+  assert.equal(observations.length, 2);
+  assert.equal(hooks.length, 2);
+  assert.equal(renderer.sessionCells()[0], cell);
+  assert.equal(renderer.sessionCells()[1], iconCell);
+  assert.equal(renderer.needsClock(), false);
+  state.payload.summary.needsClock = true;
+  assert.equal(renderer.needsClock(), true);
+  renderer.applyAppearance({ style: 'black' });
+  assert.equal(classes.get('notch-black'), true);
+  assert.equal(classes.get('is-notch-detail'), false);
+  const detail = create({ ...deps, surface: 'bubble' });
+  assert.equal(observations.length, 2, 'details do not create another summary observer');
+  assert.equal(hooks.length, 2, 'details do not subscribe to shell motion');
+  detail.applyAppearance({ style: 'inherit' });
+  assert.equal(classes.get('notch-black'), false);
+  assert.equal(classes.get('is-notch-detail'), true);
+  assert.equal(typeof detail.omitQuotaRows, 'function');
 });
