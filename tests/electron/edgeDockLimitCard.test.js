@@ -2100,6 +2100,67 @@ test('switching camera clearance rebuilds the same summary without losing config
 });
 
 
+test('menu avoidance clips the primary summary without changing its value or scale', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  for (const zoom of [1, 1.25]) {
+    const el = (tag, classes, text = '') => {
+      const node = new FakeElement(tag);
+      node.className = classes;
+      node.textContent = text;
+      node.getBoundingClientRect = () => {
+        const width = node.width ?? node.children.filter(child => !child.hidden)
+          .reduce((total, child, index) => total + child.getBoundingClientRect().width + (index ? 6 : 0), 0);
+        const maximum = parseFloat(node.style.maxWidth);
+        return { width: Number.isFinite(maximum) ? Math.min(width, maximum * zoom) : width };
+      };
+      return node;
+    };
+    const context = { el, fitNotchTypeface() {}, getComputedStyle: () => ({ zoom, gap: '6px' }) };
+    vm.runInNewContext(source.slice(source.indexOf('function zoomForNotchText('), source.indexOf('function reportNotchSlots(')), context);
+    const content = el('div', 'notch-slot-content');
+    const reading = el('span', 'notch-reading', 'HK$7557194.97');
+    reading.width = 100;
+    content.append(reading);
+    for (const budget of [40, 0]) {
+      const clipped = context.fitNotchSlot(content, budget, true);
+      assert.equal(clipped.width, budget);
+      assert.equal(clipped.minimum, budget);
+      assert.equal(content.style.overflow, 'hidden');
+      assert.equal(reading.hidden, false);
+      assert.equal(reading.textContent, 'HK$7557194.97');
+      assert.equal(reading.getBoundingClientRect().width, 100);
+    }
+    const restored = context.fitNotchSlot(content, null, false);
+    assert.equal(restored.width, 100);
+    assert.equal(restored.minimum, 100);
+    assert.equal(content.style.maxWidth, 'none');
+    assert.equal(content.style.overflow, '');
+  }
+});
+
+test('summary overflow marks omitted content, not removed spacing', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const context = {};
+  vm.runInNewContext(source.slice(source.indexOf('function fitNotchSummaryItems('), source.indexOf('function fitNotchSlot(')), context);
+  const reading = { width: 35, minimum: 35, spacer: false };
+  const spacer = { width: 4, minimum: 4, spacer: true };
+  const cases = [
+    { name: 'trailing decoration', items: [reading, spacer], budget: Infinity, visible: [0], overflow: false },
+    { name: 'spacing only', items: [spacer, spacer], budget: Infinity, visible: [], overflow: false },
+    { name: 'decoration exceeds clearance', items: [reading, spacer], budget: 40, visible: [0], overflow: false },
+    { name: 'optional trailing decoration', items: [reading, spacer], budget: 80, optional: true, visible: [0], overflow: false },
+    { name: 'optional spacing only', items: [spacer], budget: 80, optional: true, visible: [], overflow: false },
+    { name: 'internal separator remains', items: [reading, spacer, reading], budget: 100, visible: [0, 1, 2], overflow: false },
+    { name: 'omitted reading', items: [reading, spacer, reading], budget: 60, visible: [0], overflow: true },
+    { name: 'omitted icon beside primary', items: [{ width: 17, minimum: 17, spacer: false }, reading], budget: 50, primary: 1, visible: [1], overflow: true }
+  ];
+  for (const row of cases) {
+    const fitted = context.fitNotchSummaryItems(row.items, { budget: row.budget, gap: 6, overflowWidth: 8, primary: row.primary ?? -1, optional: row.optional === true });
+    assert.deepEqual(Array.from(fitted.visible), row.visible, row.name);
+    assert.equal(fitted.overflow, row.overflow, row.name);
+  }
+});
+
 test('summary allocation and width fitting need only ordered items and measured widths', () => {
   const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
   const context = {};

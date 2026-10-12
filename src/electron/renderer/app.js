@@ -407,6 +407,7 @@ Object.assign(els, {
   notchRunningIndicatorInput: document.getElementById('notchRunningIndicatorInput'),
   notchHapticInput: document.getElementById('notchHapticInput'),
   notchExpandOnApproachInput: document.getElementById('notchExpandOnApproachInput'),
+  notchAvoidMenuBarInput: document.getElementById('notchAvoidMenuBarInput'),
   notchHideSummaryInFullScreenInput: document.getElementById('notchHideSummaryInFullScreenInput'),
   notchSizeInputs: Array.from(document.querySelectorAll('input[name="notchSize"]')),
   notchCustomScaleInput: document.getElementById('notchCustomScaleInput'),
@@ -12823,6 +12824,7 @@ function syncDockControls() {
   if (els.notchRunningIndicatorInput) els.notchRunningIndicatorInput.checked = state.settings?.notchRunningIndicatorEnabled === true;
   if (els.notchHapticInput) els.notchHapticInput.checked = state.settings?.notchHaptic === true;
   if (els.notchExpandOnApproachInput) els.notchExpandOnApproachInput.checked = state.settings?.notchExpandOnApproach !== false;
+  if (els.notchAvoidMenuBarInput) els.notchAvoidMenuBarInput.checked = state.settings?.notchAvoidMenuBar !== false;
   if (els.notchHideSummaryInFullScreenInput) els.notchHideSummaryInFullScreenInput.checked = state.settings?.notchHideSummaryInFullScreen !== false;
   els.edgeDockComposerRow?.classList.toggle('hidden', !enabled);
   if (enabled) edgeDockComposer?.render();
@@ -12881,6 +12883,9 @@ els.notchHideSummaryInFullScreenInput?.addEventListener('change', () => {
 });
 els.notchExpandOnApproachInput?.addEventListener('change', () => {
   void saveSettings({ notchExpandOnApproach: els.notchExpandOnApproachInput.checked });
+});
+els.notchAvoidMenuBarInput?.addEventListener('change', () => {
+  void saveSettings({ notchAvoidMenuBar: els.notchAvoidMenuBarInput.checked });
 });
 els.notchRunningIndicatorInput?.addEventListener('change', () => {
   void saveSettings({ notchRunningIndicatorEnabled: els.notchRunningIndicatorInput.checked });

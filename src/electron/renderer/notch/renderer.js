@@ -439,11 +439,16 @@
       if (primary >= 0) visible.push(primary);
       while (visible.length && items[visible.at(-1)].spacer) visible.pop();
       const width = widthFor(visible);
-      const overflow = visible.length < items.length && width + (visible.length ? gap : 0) + overflowWidth <= limit;
+      const omittedContent = items.some((item, index) => !item.spacer && !visible.includes(index));
+      const overflow = omittedContent && width + (visible.length ? gap : 0) + overflowWidth <= limit;
       return { visible, minimum, overflow };
     }
 
-    function fitNotchSlot(content, budget) {
+    function fitNotchSlot(content, budget, constrained = false) {
+      const zoom = Number(getComputedStyle(content).zoom) || 1;
+      const clipped = constrained && Number.isFinite(budget);
+      content.style.maxWidth = clipped ? `${Math.max(0, budget) / zoom}px` : 'none';
+      content.style.overflow = clipped ? 'hidden' : '';
       let overflow = content.querySelector('.notch-overflow');
       if (!overflow) {
         overflow = el('span', 'notch-reading notch-overflow', '⋯');
@@ -464,7 +469,6 @@
         }
       }
       overflow.hidden = true;
-      const zoom = Number(getComputedStyle(content).zoom) || 1;
       const gap = (parseFloat(getComputedStyle(content).gap) || 0) * zoom;
       const items = blocks.map(node => {
         const width = node.getBoundingClientRect().width;
@@ -480,7 +484,7 @@
         primary: blocks.findIndex(node => node.dataset.notchPrimary === 'true'), optional: content.dataset.notchOptional === 'true' });
       blocks.forEach((node, index) => { node.hidden = !fitted.visible.includes(index); });
       overflow.hidden = !fitted.overflow;
-      return { width: content.getBoundingClientRect().width, minimum: fitted.minimum };
+      return { width: content.getBoundingClientRect().width, minimum: clipped ? Math.min(fitted.minimum, Math.max(0, budget)) : fitted.minimum };
     }
     // Transform coordinate noise must not become another logical window point.
     function notchLogicalPoint(value) { return Math.round(value * 1000) / 1000; }
@@ -498,9 +502,11 @@
       const gap = 12 * (Number(state.payload.appearance.zoomFactor) || 1);
       // Reserve the existing mandatory primary field before fitting extra icons.
       const primaryRight = limit === null ? 0 : fitNotchSlot(rightContent, 0).minimum;
-      const left = fitNotchSlot(leftContent, limit === null ? budget : Math.max(0, limit - primaryRight - gap));
+      const constrained = geometry.summaryConstrained === true;
+      const reservedRight = constrained && limit !== null ? Math.min(primaryRight, Math.max(0, limit - gap)) : primaryRight;
+      const left = fitNotchSlot(leftContent, limit === null ? budget : Math.max(0, limit - reservedRight - gap), constrained);
       const rightBudget = limit === null ? budget : Math.max(0, limit - left.width - gap);
-      const right = fitNotchSlot(rightContent, rightBudget);
+      const right = fitNotchSlot(rightContent, rightBudget, constrained);
       const firstBlock = [...leftContent.children].find(node => !node.hidden);
       const firstIcon = firstBlock?.classList.contains('notch-summary-field') ? firstBlock.firstElementChild : firstBlock;
       const firstMark = firstIcon?.querySelector('.edge-dock-mark');

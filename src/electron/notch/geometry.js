@@ -73,9 +73,9 @@ function notchBounds(display, geometry, expanded, contentHeight = 180, slots = {
   return { x: Math.round(x), y: Math.round(geometry.y), width, height };
 }
 
-// Constrain extra summary content, never the complete primary readout/icon.
-// This measures status-window clearance on the right; app-menu titles on the
-// left have no verified permission-free geometry contract.
+// Measure right-hand status-window clearance. Callers choose whether primary
+// content may exceed it; left-hand app-menu titles have no verified
+// permission-free geometry contract.
 function notchSummaryBudget(display, geometry, windows, minimum = 0, ownWindowIds = []) {
   if (!Array.isArray(windows)) return null;
   const attached = geometry.gapWidth > 0;

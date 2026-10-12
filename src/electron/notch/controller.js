@@ -115,13 +115,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     return fullScreen !== previous;
   }
 
-  function summaryNeedsMenuBudget() {
-    const items = data.summary?.items || [];
-    return items.some(item => item.limitText === true) || items.filter(item => item.type === 'icon').length > 1
-      || items.filter(item => item.type !== 'icon' && item.type !== 'spacer').length > 1;
-  }
   function refreshMenu(now = Date.now()) {
-    if (!running || locked || !summaryVisible() || !summaryNeedsMenuBudget() || now - menuReadAt < 2000) return false;
+    if (!running || locked || !summaryVisible() || settings().notchAvoidMenuBar === false || now - menuReadAt < 2000) return false;
     try { menuWindows = readMenuWindows(); } catch { menuWindows = null; }
     menuReadAt = now;
     return true;
@@ -143,15 +138,19 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const minimumRight = activeSlots?.minimumRight ?? activeSlots?.right ?? 0;
     const gap = 12 * zoom();
     const minimum = compact ? minimumLeft + minimumRight + gap : Math.max(minimumLeft, minimumRight);
-    const summaryOptionalBudget = activeSlots && summaryNeedsMenuBudget()
-      ? notchSummaryBudget(display, geometry, menuWindows, 0, Object.values(windowIds)) ?? 0 : null;
-    // The primary readout can exceed clearance; optional items cannot borrow it.
-    const summaryBudget = summaryOptionalBudget === null ? null : Math.max(minimum, summaryOptionalBudget);
+    const clearance = activeSlots && settings().notchAvoidMenuBar !== false
+      ? notchSummaryBudget(display, geometry, menuWindows, 0, Object.values(windowIds)) : null;
+    const summaryConstrained = clearance !== null;
+    // Unknown clearance retains the primary readout without admitting extras.
+    const summaryOptionalBudget = activeSlots && settings().notchAvoidMenuBar !== false ? clearance ?? 0 : null;
+    const summaryBudget = summaryOptionalBudget === null ? null : summaryConstrained ? clearance : Math.max(minimum, summaryOptionalBudget);
+    const leftMinimum = summaryConstrained ? 0 : minimumLeft;
+    const rightMinimum = summaryConstrained ? 0 : minimumRight;
     const left = activeSlots && summaryBudget !== null
-      ? Math.min(activeSlots.left, compact ? Math.max(minimumLeft, summaryBudget - minimumRight - gap) : summaryBudget) : activeSlots?.left;
+      ? Math.min(activeSlots.left, compact ? Math.max(leftMinimum, summaryBudget - rightMinimum - gap) : summaryBudget) : activeSlots?.left;
     const boundedSlots = activeSlots && summaryBudget !== null
-      ? { left, right: Math.min(activeSlots.right, compact ? Math.max(minimumRight, summaryBudget - left - gap) : summaryBudget) } : activeSlots;
-    return { display, geometry, summaryBudget, summaryOptionalBudget, summaryIconInset: activeSlots?.iconInset || 0,
+      ? { left, right: Math.min(activeSlots.right, compact ? Math.max(rightMinimum, summaryBudget - left - gap) : summaryBudget) } : activeSlots;
+    return { display, geometry, summaryBudget, summaryOptionalBudget, summaryConstrained, summaryIconInset: activeSlots?.iconInset || 0,
       closed: notchBounds(display, geometry, false, contentHeight, boundedSlots, zoom()),
       open: notchBounds(display, geometry, true, contentHeight, boundedSlots, zoom()) };
   }
@@ -202,12 +201,13 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       appearance: { ...appearance, zoomFactor: zoom(), edgeDockRunningIndicatorEnabled: settings().notchRunningIndicatorEnabled === true }, style: normalizeNotchStyle(settings().notchStyle), glass: nativeMaterial[surface] === true, liquidGlass: Boolean(glass[surface]) };
     const hasSummary = summaryVisible();
     if (surface === 'notch') {
-      const key = hasSummary ? JSON.stringify([data.summary, zoom(), current.display.id, current.geometry, current.summaryBudget]) : null;
+      // Measurement results must not invalidate the request that produced them.
+      const key = hasSummary ? JSON.stringify([data.summary, zoom(), current.display.id, current.geometry, settings().notchAvoidMenuBar !== false, menuWindows]) : null;
       if (!hasSummary) summaryMeasurement = null;
       else if (!summaryMeasured && summaryMeasurement?.key !== key) summaryMeasurement = { id: ++summaryGeneration, key, measuring: true };
     }
     const payload = surface === 'notch' ? { ...base, expanded, visible: expanded, quietFullScreen: fullScreen, motion: frame,
-      geometry: { ...current.geometry, summaryBudget: current.summaryBudget, summaryOptionalBudget: current.summaryOptionalBudget, summaryWidthLimit: current.display.bounds.width, headerX: current.closed.x - (viewport || current.open).x, headerWidth: current.closed.width,
+      geometry: { ...current.geometry, summaryBudget: current.summaryBudget, summaryOptionalBudget: current.summaryOptionalBudget, summaryConstrained: current.summaryConstrained, summaryWidthLimit: current.display.bounds.width, headerX: current.closed.x - (viewport || current.open).x, headerWidth: current.closed.width,
         gapOffset: current.geometry.centerX - current.geometry.gapWidth / 2 - current.closed.x,
         shoulder: current.geometry.notched && hasSummary ? 4 : 0 },
       cells: data.cells, summary: hasSummary ? data.summary : null,

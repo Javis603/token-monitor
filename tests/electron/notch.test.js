@@ -122,7 +122,7 @@ test('first summary is measured and committed before reveal on either screen sha
     assert.equal(win.messages.filter(m => m.channel === 'topNotch:animate').at(-1).payload.duration, 0);
     f.ipcMain.emit('topNotch:size', { sender: win.webContents }, { summaryMeasurement: { id: request.id, ready: true } });
     assert.equal(last(win).summaryMeasurement, null);
-    f.ipcMain.emit('topNotch:size', { sender: win.webContents }, { slots: { ...slots, right: 90 } });
+    f.ipcMain.emit('topNotch:size', { sender: win.webContents }, { slots: { ...slots, right: 90, minimumRight: 90 } });
     if (notched) assert.equal(win.messages.filter(m => m.channel === 'topNotch:animate').at(-1).payload.duration, 360, 'later width changes retain motion');
     else assert.equal(last(win).geometry.headerWidth, notchBounds(display, notchGeometry(display), false, 180, { left: 17, right: 90 }).width, 'resting width follows the compact summary');
   }
@@ -1115,12 +1115,12 @@ test('menu window reader uses status level and numeric metadata and releases cop
 });
 
 
-test('menu clearance is sampled only for extra active summary fields and keeps the camera centered', (t) => {
+test('menu avoidance bounds all active summary fields and keeps the camera centered', (t) => {
   let reads = 0, windows = [{ id: 7, x: 894, y: 0, width: 24, height: 33 }];
   const f = fixture(t, {}, { readMenuWindows: () => { reads += 1; return windows; } });
   const data = buildNotchData(stats(), [], { trayContent: 'tokens' });
   f.controller.setData(data);
-  assert.equal(reads, 0, 'a single readout does not enumerate menu windows');
+  assert.equal(reads, 1, 'even a single primary field respects menu clearance');
   data.summary.items.push({ type: 'text', id: 'extra', text: '$10' });
   f.controller.setData(data);
   assert.equal(reads, 1);
@@ -1137,15 +1137,41 @@ test('menu clearance is sampled only for extra active summary fields and keeps t
   f.screen.emit('display-metrics-changed');
   assert.equal(reads, 2);
   geometry = last(primary).geometry;
-  assert.equal(geometry.summaryBudget, 37, 'minimum wins over an overlapping menu');
+  assert.equal(geometry.summaryBudget, 0, 'known occupied clearance also constrains the primary');
+  assert.equal(geometry.summaryConstrained, true);
   assert.equal(geometry.summaryOptionalBudget, 0, 'optional fields cannot borrow the mandatory readout width');
-  assert.equal(geometry.headerWidth, 293);
+  assert.equal(geometry.headerWidth, 219);
   windows = null;
   f.screen.emit('display-metrics-changed');
   assert.equal(last(primary).geometry.summaryBudget, 37, 'failure retains the complete primary field');
   assert.equal(last(primary).geometry.summaryOptionalBudget, 0, 'unknown clearance does not admit extra fields');
+  assert.equal(last(primary).geometry.summaryConstrained, false);
 });
 
+
+test('disabled menu avoidance retains full summary widths and stops menu sampling', (t) => {
+  let reads = 0;
+  const f = fixture(t, { notchAvoidMenuBar: false }, {
+    readMenuWindows: () => { reads += 1; return [{ id: 7, x: 850, y: 0, width: 24, height: 33 }]; }
+  });
+  f.controller.setData(buildNotchData(stats(), [], { trayContent: 'tokens' }));
+  const primary = f.windows[0];
+  f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 17, right: 300, minimumLeft: 17, minimumRight: 300 } });
+  assert.equal(reads, 0);
+  assert.equal(last(primary).geometry.summaryBudget, null);
+  assert.equal(last(primary).geometry.summaryConstrained, false);
+  assert.equal(last(primary).geometry.headerWidth, 819);
+  f.preferences.notchAvoidMenuBar = true;
+  f.controller.poll(Date.now() + 2500);
+  assert.equal(reads, 1);
+  assert.equal(last(primary).geometry.summaryBudget, 0);
+  assert.equal(last(primary).geometry.summaryConstrained, true);
+  f.preferences.notchAvoidMenuBar = false;
+  f.controller.sync();
+  f.controller.poll(Date.now() + 5000);
+  assert.equal(reads, 1, 'disabled avoidance performs no native menu reads');
+  assert.equal(last(primary).geometry.summaryBudget, null);
+});
 
 test('embedded summary icons use the tray preferred row and retain provider status', () => {
   const input = stats();
@@ -1298,22 +1324,24 @@ test('quiet mode respects its switch, pointer drag guard, focused own full-scree
   assert.ok(last(primary).summary, 'probe failures retain ordinary behavior');
 });
 
-test('Notch full-screen and refresh settings preserve defaults and explicit switches', () => {
+test('Notch visibility and refresh settings preserve defaults and explicit switches', () => {
   const start = mainSource.indexOf('    notchEnabled:', mainSource.indexOf('function defaultSettings('));
   const defaultsSource = mainSource.slice(start, mainSource.indexOf('    edgeDockEnabled:', start));
   const defaults = vm.runInNewContext(`({${defaultsSource}})`, { createDefaultTrayLayout: trayLayout.createDefaultTrayLayout });
   assert.equal(defaults.notchHideSummaryInFullScreen, true);
+  assert.equal(defaults.notchAvoidMenuBar, true);
   assert.equal(defaults.notchRefreshEnabled, false);
-  const loadedSource = mainSource.slice(mainSource.indexOf('    merged.notchHideSummaryInFullScreen ='), mainSource.indexOf('    merged.notchFollowTray ='));
-  const patchStart = mainSource.indexOf('      notchHideSummaryInFullScreen: parseBoolean(');
+  const loadedSource = mainSource.slice(mainSource.indexOf('    merged.notchAvoidMenuBar ='), mainSource.indexOf('    merged.notchFollowTray ='));
+  const patchStart = mainSource.indexOf('      notchAvoidMenuBar: parseBoolean(');
   const patchSource = mainSource.slice(patchStart, mainSource.indexOf('      notchFollowTray:', patchStart));
-  for (const [hide, refresh] of [[undefined, undefined], [false, true], [true, false]]) {
-    const merged = { notchHideSummaryInFullScreen: hide, notchRefreshEnabled: refresh };
+  for (const [hide, refresh, avoid] of [[undefined, undefined, undefined], [false, true, false], [true, false, true]]) {
+    const merged = { notchHideSummaryInFullScreen: hide, notchRefreshEnabled: refresh, notchAvoidMenuBar: avoid };
     const context = { merged, patch: { ...merged }, settings: defaults, parseBoolean };
     vm.runInNewContext(loadedSource, context);
     const patched = vm.runInNewContext(`({${patchSource}})`, context);
     for (const result of [merged, patched]) {
       assert.equal(result.notchHideSummaryInFullScreen, hide ?? true);
+      assert.equal(result.notchAvoidMenuBar, avoid ?? true);
       assert.equal(result.notchRefreshEnabled, refresh ?? false);
     }
   }
@@ -1332,6 +1360,20 @@ test('the full-screen setting saves both checkbox states through its change even
   assert.deepEqual(patches, [{ notchHideSummaryInFullScreen: false }, { notchHideSummaryInFullScreen: true }]);
 });
 
+
+test('menu avoidance saves both states independently of summary visibility', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = app.indexOf("els.notchAvoidMenuBarInput?.addEventListener(");
+  const source = app.slice(start, app.indexOf("els.notchRunningIndicatorInput?.addEventListener(", start));
+  let change;
+  const patches = [];
+  const input = { checked: false, addEventListener: (_event, callback) => { change = callback; } };
+  vm.runInNewContext(source, { els: { notchAvoidMenuBarInput: input }, saveSettings: patch => patches.push({ ...patch }) });
+  change();
+  input.checked = true;
+  change();
+  assert.deepEqual(patches, [{ notchAvoidMenuBar: false }, { notchAvoidMenuBar: true }]);
+});
 
 test('full-screen visibility follows screen geometry and rechecks immediately when the selected display changes', (t) => {
   let noNotch = false;

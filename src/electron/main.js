@@ -614,6 +614,7 @@ function defaultSettings() {
     notchDetailSide: 'right',
     notchRunningIndicatorEnabled: false,
     notchExpandOnApproach: true,
+    notchAvoidMenuBar: true,
     notchHaptic: false,
     notchHideSummaryInFullScreen: true,
     notchRefreshEnabled: false,
@@ -2641,6 +2642,7 @@ function readSettings() {
     merged.notchDetailSide = normalizeNotchDetailSide(merged.notchDetailSide);
     merged.notchRunningIndicatorEnabled = parseBoolean(merged.notchRunningIndicatorEnabled, false);
     merged.notchExpandOnApproach = parseBoolean(merged.notchExpandOnApproach, true);
+    merged.notchAvoidMenuBar = parseBoolean(merged.notchAvoidMenuBar, true);
     merged.notchHaptic = parseBoolean(merged.notchHaptic, false);
     merged.notchHideSummaryInFullScreen = parseBoolean(merged.notchHideSummaryInFullScreen, true);
     merged.notchRefreshEnabled = parseBoolean(merged.notchRefreshEnabled, false);
@@ -7741,6 +7743,7 @@ app.whenReady().then(() => {
       notchDetailSide: normalizeNotchDetailSide(patch.notchDetailSide ?? settings.notchDetailSide),
       notchRunningIndicatorEnabled: parseBoolean(patch.notchRunningIndicatorEnabled ?? settings.notchRunningIndicatorEnabled, false),
       notchExpandOnApproach: parseBoolean(patch.notchExpandOnApproach ?? settings.notchExpandOnApproach, true),
+      notchAvoidMenuBar: parseBoolean(patch.notchAvoidMenuBar ?? settings.notchAvoidMenuBar, true),
       notchHaptic: parseBoolean(patch.notchHaptic ?? settings.notchHaptic, false),
       notchHideSummaryInFullScreen: parseBoolean(patch.notchHideSummaryInFullScreen ?? settings.notchHideSummaryInFullScreen, true),
       notchRefreshEnabled: parseBoolean(patch.notchRefreshEnabled ?? settings.notchRefreshEnabled, false),
