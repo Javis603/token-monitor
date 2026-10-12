@@ -1784,6 +1784,7 @@ function captureBreakdownMotion() {
     const trackWidth = fill?.parentElement?.getBoundingClientRect().width || 0;
     const fillWidth = fill?.getBoundingClientRect().width || 0;
     snapshot.set(row.dataset.key, {
+      layoutCaptured: animateLayout,
       top: rect?.top,
       value: Number(valueEl?.dataset.motionValue || row.dataset.motionValue || 0),
       rollSnapshot: motionRows.has(row) ? tokenNumberAnimationApi.capture(valueEl) : null,
@@ -1907,7 +1908,9 @@ function animateBreakdownFrom(snapshot, { duration = 420, synchronized = false }
           duration, previous?.rollSnapshot, { synchronized });
       }
     };
-    if (!animateLayout) {
+    // Crossing back under the row budget cannot recover the old geometry.
+    // Keep number motion, but do not treat the uncaptured bar scale as zero.
+    if (!animateLayout || previous?.layoutCaptured === false) {
       animateReading();
       continue;
     }

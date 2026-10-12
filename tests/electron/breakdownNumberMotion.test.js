@@ -15,16 +15,25 @@ function harness(count = 100) {
   let captures = 0;
   const motions = new Map();
   const calls = [];
+  const bars = [];
+  const layouts = [];
   const rows = Array.from({ length: count }, (_, index) => {
     const value = { dataset: { motionValue: String(1000 + index) }, textContent: String(1000 + index),
       getBoundingClientRect: () => ({ top: index * 20 - offset, bottom: index * 20 + 15 - offset, left: 250, right: 290 }) };
+    const fill = { scale: index % 2 ? 0.5 : 1,
+      style: { getPropertyValue: () => String(fill.scale) },
+      parentElement: { getBoundingClientRect: () => ({ width: 100 }) },
+      getBoundingClientRect: () => ({ width: 100 * fill.scale }) };
     return { dataset: { key: `session:${index}`, motionValue: String(1000 + index) },
       getBoundingClientRect: value.getBoundingClientRect,
-      animate() { if (count > 40) assert.fail('large lists must not animate row layout'); },
+      animate(frames) {
+        if (rows.length > 40) assert.fail('large lists must not animate row layout');
+        layouts.push(frames);
+      },
       querySelector(selector) {
         if (selector === '.row-value') return value;
         fillReads += 1;
-        return null;
+        return selector === '.bar-fill' ? fill : null;
       }
     };
   });
@@ -43,7 +52,10 @@ function harness(count = 100) {
     },
     cancelRowNumberAnimation(el) { motions.delete(el); delete el.dataset.motionTarget; },
     formatNumber: value => String(value),
-    animateBarBetween() { if (count > 40) assert.fail('large lists must not animate bars'); }
+    animateBarBetween(fill, from, to) {
+      if (rows.length > 40) assert.fail('large lists must not animate bars');
+      bars.push({ fill, from, to });
+    }
   };
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
   vm.runInNewContext([
@@ -52,7 +64,7 @@ function harness(count = 100) {
     section('function animateBreakdownFrom(', 'function periodBreakdownMotionDuration('),
     'this.api = { captureBreakdownMotion, animateBreakdownFrom, settleOffscreenBreakdownNumbers };'
   ].join('\n'), context);
-  return { ...context.api, state: context.state, rows, calls, motions,
+  return { ...context.api, state: context.state, rows, calls, motions, bars, layouts,
     reduce(value) { reduced = value; }, scroll(value) { offset = value; },
     metrics: () => ({ fillReads, captures }) };
 }
@@ -138,4 +150,36 @@ test('compact count lists keep their existing offscreen capture and animation po
   h.animateBreakdownFrom(snapshot);
   assert.equal(h.calls.length, 40);
   assert.equal(h.calls[8].to, 20_008);
+});
+
+for (const mode of ['roll', 'count']) {
+  test(`41-to-40 ${mode} session lists skip uncaptured layout and bars but keep changed number motion`, () => {
+    const h = harness(41);
+    h.state.settings.tokenNumberAnimation = mode;
+    const snapshot = h.captureBreakdownMotion();
+    assert.equal(snapshot.get('session:0').top, undefined);
+    assert.equal(h.metrics().fillReads, 0);
+    h.rows.pop();
+    h.animateBreakdownFrom(snapshot, { synchronized: true });
+    assert.equal(h.bars.length, 0, 'unchanged bars must not restart from an invented zero');
+    assert.equal(h.layouts.length, 0, 'uncaptured positions must not trigger FLIP');
+    h.calls.length = 0;
+    h.motions.clear();
+    h.rows[0].dataset.motionValue = '2000';
+    h.animateBreakdownFrom(snapshot, { synchronized: true });
+    assert.ok(h.calls.some(call => call.from === 1000 && call.to === 2000 && call.options.synchronized));
+    assert.equal(h.bars.length, 0);
+    assert.equal(h.layouts.length, 0);
+  });
+}
+
+test('captured zero-width bars still animate to a nonzero scale in compact lists', () => {
+  const h = harness(40);
+  const fill = h.rows[0].querySelector('.bar-fill');
+  fill.scale = 0;
+  const snapshot = h.captureBreakdownMotion();
+  assert.equal(snapshot.get('session:0').barScale, 0);
+  fill.scale = 0.5;
+  h.animateBreakdownFrom(snapshot);
+  assert.ok(h.bars.some(bar => bar.fill === fill && bar.from === 0 && bar.to === 0.5));
 });
