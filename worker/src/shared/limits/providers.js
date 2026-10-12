@@ -64,6 +64,7 @@
     { id: 'trae', label: 'Trae CN' },
     { id: 'alibaba', label: 'Alibaba Cloud' },
     { id: 'stepfun', label: 'StepFun' },
+    { id: 'omniroute', label: 'OmniRoute' },
     { id: 'thirdparty', label: 'Third-party APIs' }
   ].map((provider) => Object.freeze({ ...provider })));
 
