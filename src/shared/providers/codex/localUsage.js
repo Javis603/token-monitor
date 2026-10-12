@@ -27,6 +27,7 @@ function buildLocalUsageView(rows, options = {}) {
   const nativeIds = new Set();
   for (const session of Object.values(options.nativePeriod?.sessions || {})) {
     if (session.client !== 'codex') continue;
+    if (session.nativeSessionId) nativeIds.add(session.nativeSessionId);
     for (const id of String(session.sessionId || '').match(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/gi) || []) nativeIds.add(id);
   }
   const entries = [];

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { resolveSqlite, openDb } = require('../../sqliteReadOnly');
-const { findSessionFiles, codexSessionFile } = require('../../sessionFiles');
+const { findCodexSessionFiles, codexSessionFile } = require('../../sessionFiles');
 const t3SessionMetadata = require('../../t3SessionMetadata');
 const { expandHomePath, t3HomeDir, discoverT3DbPaths } = t3SessionMetadata;
 const { nativeIdForFile } = require('./sessionIdentity');
@@ -188,7 +188,7 @@ function filesForSessionIds(sessionIds, { home, deps }) {
     if (file) files.set(id, file);
     else missing.add(id);
   }
-  for (const [id, file] of findSessionFiles(path.join(codexHome, 'sessions'), missing)) files.set(id, file);
+  for (const [id, file] of findCodexSessionFiles(codexHome, missing)) files.set(id, file);
   return files;
 }
 

@@ -23,6 +23,7 @@ const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
+const tokenNumberAnimationApi = require('./tokenNumberAnimation');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
@@ -575,6 +576,7 @@ function defaultSettings() {
     windowsBackdrop: 'acrylic',
     macBackdrop: 'vibrancy',
     reduceMotion: 'system',
+    tokenNumberAnimation: 'roll',
     showLiveDot: true,
     showToolIcons: true,
     titleIconOnly: true,
@@ -2640,6 +2642,7 @@ function readSettings() {
     merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
     merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
+    merged.tokenNumberAnimation = tokenNumberAnimationApi.normalize(merged.tokenNumberAnimation);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
@@ -7638,6 +7641,7 @@ app.whenReady().then(() => {
       windowsBackdrop: normalizeWindowsBackdropMode(patch.windowsBackdrop ?? settings.windowsBackdrop),
       macBackdrop: normalizeMacBackdropMode(patch.macBackdrop ?? settings.macBackdrop),
       reduceMotion: motionPreferenceApi.normalize(patch.reduceMotion ?? settings.reduceMotion),
+      tokenNumberAnimation: tokenNumberAnimationApi.normalize(patch.tokenNumberAnimation ?? settings.tokenNumberAnimation),
       showLiveDot: patch.showLiveDot ?? settings.showLiveDot ?? true,
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),

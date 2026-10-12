@@ -394,6 +394,7 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
+    rowNumberAnimations: new Map(), cancelRowNumberAnimation() {},
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {},
     sessionRowsApi: { ...require('../../src/electron/renderer/sessionRows'), applyBreakdownRowSemantics(_row, _head, options) { interactive = options.interactive; } },
     t: key => key
@@ -461,6 +462,7 @@ test('a token and cost update through updateRow keeps the hovered title moving',
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
+    rowNumberAnimations: new Map(), cancelRowNumberAnimation() {},
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {},
     sessionRowsApi: { ...require('../../src/electron/renderer/sessionRows'), applyBreakdownRowSemantics() {} }, t: key => key
   };
@@ -511,6 +513,7 @@ test('actual shared row rendering keeps group availability and binds Auto Review
   const context = {
     state: { breakdown: 'session' }, rowWidth: () => 50, iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, overflowText: h.api, formatNumber: String, formatCost: String,
+    rowNumberAnimations: new Map(),
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {}, cancelRowNumberAnimation() {},
     document: { createElement: makeNode, createTextNode: text => ({ textContent: text }) },
     limitWindowsView: { setDetailTooltip(node, entries) {
