@@ -714,9 +714,6 @@
     }
 
 
-    root.addEventListener('animationend', event => {
-      if (event.animationName === 'notch-shell-in') root.classList.remove('is-revealing');
-    });
     return {
       render: renderNotch,
       applyMotion: applyNotchMotion,

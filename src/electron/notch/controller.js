@@ -208,7 +208,6 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     }
     const payload = surface === 'notch' ? { ...base, expanded, visible: expanded, quietFullScreen: fullScreen, motion: frame,
       geometry: { ...current.geometry, summaryBudget: current.summaryBudget, summaryOptionalBudget: current.summaryOptionalBudget, summaryWidthLimit: current.display.bounds.width, headerX: current.closed.x - (viewport || current.open).x, headerWidth: current.closed.width,
-        expandedInset: current.open.x - (viewport || current.open).x + (current.geometry.notched ? M.shoulder + 14 : 28) * zoom(),
         gapOffset: current.geometry.centerX - current.geometry.gapWidth / 2 - current.closed.x,
         shoulder: current.geometry.notched && hasSummary ? 4 : 0 },
       cells: data.cells, summary: hasSummary ? data.summary : null,
@@ -246,7 +245,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const headerHeight = current.geometry.gapWidth > 0 ? current.geometry.height : current.geometry.height * (1 - value);
     frame = { shape: null, progress, bodyHeight: Math.max(0, height - headerHeight), headerHeight,
       summaryHeight: current.geometry.height, summaryIconInset: current.summaryIconInset,
-      summaryEdges: summaryEdges(current, value), bodyBox: { x: current.open.x - canvas.x, width: current.open.width }, ...extra };
+      summaryEdges: summaryEdges(current), bodyBox: { x: current.open.x - canvas.x, width: current.open.width }, ...extra };
     shape('notch', points, canvas, current.display);
     frame.shape = shapes.notch;
     if (alive(windows.notch) && ready.notch) windows.notch.webContents.send('topNotch:motion', frame);
@@ -382,8 +381,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     motion = { id, current, from: commands || endpoints(current)[0], to: endpoints(current)[expanded ? 1 : 0],
       fromProgress, target, fromHeight: (frame?.bodyHeight || 0) + (frame?.headerHeight ?? current.geometry.height),
       fromSummaryHeight: frame?.summaryHeight ?? current.geometry.height,
-      fromEdges: { ...(frame?.summaryEdges || summaryEdges(current, progress)),
-        left: (frame?.summaryEdges?.left ?? summaryEdges(current).left) + (frame?.summaryIconInset || 0) - current.summaryIconInset }, toEdges: summaryEdges(current, target),
+      fromEdges: { ...(frame?.summaryEdges || summaryEdges(current)),
+        left: (frame?.summaryEdges?.left ?? summaryEdges(current).left) + (frame?.summaryIconInset || 0) - current.summaryIconInset }, toEdges: summaryEdges(current),
       fromBox: frame?.bodyBox || { x: current.open.x - viewport.x, width: current.open.width },
       toBox: { x: current.open.x - viewport.x, width: current.open.width },
       toHeight: expanded ? current.open.height : current.closed.height,
