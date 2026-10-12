@@ -5,6 +5,7 @@ const os = require('node:os');
 const { hashKey } = require('./hashKey');
 const { normalizeSessionContext } = require('./sessionContext');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
+const antigravitySessionMetadata = require('./providers/antigravity/sessionMetadata');
 const codebuddySession = require('./providers/codebuddy/sessionMetadata');
 const codexSession = require('./providers/codex/sessionMetadata');
 const cursorSessionMetadata = require('./providers/cursor/sessionMetadata');
@@ -15,6 +16,8 @@ const dshSessionMetadata = require('./providers/dsh/sessionMetadata');
 const workbuddySession = require('./providers/workbuddy/sessionMetadata');
 const devinSessionMetadata = require('./providers/devin/sessionMetadata');
 const grokSessionMetadata = require('./providers/grok/sessionMetadata');
+const { readT3SessionRelationResult } = require('./t3SessionMetadata');
+const { supportsT3SessionClient, nativeAccountingId } = require('./t3SessionIdentity');
 
 function isoFromDate(value) {
   const date = value instanceof Date ? value : new Date(value || '');
@@ -115,6 +118,11 @@ function applyTokscaleSessionMetadata(json, { resolveProjects = true } = {}) {
       if (lastUsedAt && !row.lastUsedAt) row.lastUsedAt = lastUsedAt;
       const title = String(meta.title || '').trim();
       if (title && !row.sessionTitle) row.sessionTitle = title;
+      // A subagent or background review names the session that started it, in
+      // the same client's id space. Kept as a fact on the row; grouping is the
+      // renderer's decision.
+      const parentSessionId = String(meta.parentSessionId ?? meta.parent_session_id ?? '').trim();
+      if (parentSessionId && parentSessionId !== sessionId && !row.parentSessionId) row.parentSessionId = parentSessionId;
       result.sessions += 1;
     }
     if (!resolveProjects) continue;
@@ -225,6 +233,7 @@ function fileSessionMetadata(sessionId, filePath, context, existing = {}) {
 // after tokscale first exposes a session id. Kimi and unknown clients retain the
 // existing one-shot id-timestamp fallback.
 const SESSION_METADATA_RESOLVERS = new Map([
+  ['antigravity', { resolve: antigravitySessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['claude', { resolve: claudeSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['codebuddy', { resolve: codebuddySession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['codex', { resolve: codexSession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
@@ -300,6 +309,7 @@ function sessionMetadataMap(periods, home = os.homedir(), deps = {}) {
     home,
     metadata,
     now,
+    periods,
     resolveProjects,
     projectIdentity,
     isoFromDate,
@@ -339,29 +349,156 @@ function sessionMetadataMap(periods, home = os.homedir(), deps = {}) {
   return metadata;
 }
 
+function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets, evidencePeriods = periods) {
+  const candidates = (session) => {
+    if (session.client !== 'codex') return [nativeAccountingId(session.client, session.sessionId)].filter(Boolean);
+    if (session.nativeSessionId) return [nativeAccountingId('codex', session.nativeSessionId)].filter(Boolean);
+    // A filename with several UUIDs is ambiguous without a verified header.
+    const ids = String(session.sessionId).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) || [];
+    return new Set(ids.map((id) => id.toLowerCase())).size > 1 ? []
+      : [...new Set(codexSession.threadIdCandidates(session.sessionId).map(id => nativeAccountingId('codex', id)).filter(Boolean))];
+  };
+  const supported = (session) => supportsT3SessionClient(session?.client) && session.sessionId;
+  function* sessions(period) {
+    for (const key in period?.sessions || {}) yield period.sessions[key];
+  }
+  const children = targets ? [...targets].filter(supported)
+    : Object.values(periods || {}).flatMap(period => [...sessions(period)]).filter(supported);
+  if (!children.length) return true;
+  const ids = new Map(children.map(session => [session, candidates(session)]));
+  const nativeIds = [...new Set([...ids.values()].flat())];
+  if (!nativeIds.length) return true;
+  const { facts: relations, status } = readT3SessionRelationResult(nativeIds, { ...deps, homeDir: home, useEnvRoot: deps.scopedHome !== true });
+  if (status === 'retryable') return false;
+  if (!relations.size) return true;
+  const links = new Map();
+  for (const session of children) {
+    const matches = ids.get(session).map(id => relations.get(`${session.client}:${id}`)).filter(Boolean);
+    const link = matches[0];
+    if (link && matches.every(fact => fact.threadId === link.threadId)) session.t3ThreadId = link.threadId;
+    // Native links, including Codex reviews, take precedence over app links.
+    if (!session.parentSessionId && link?.parentThreadId
+      && matches.every(fact => fact.parentThreadId === link.parentThreadId)) links.set(session, link);
+  }
+  if (!links.size) return true;
+  // History is parent evidence, never an additional lookup target on a watch
+  // tick. Build only the requested parent indexes, and only when a link needs
+  // resolution. Native-only refreshes share accounting maps rather than copy.
+  const parentKeys = new Set([...links.values()].map(link => `${link.parentClient}:${link.parentNativeId}`));
+  const parentThreads = new Set([...links.values()].map(link => link.parentThreadId));
+  const parentClients = new Set([...links.values()].map(link => link.parentClient));
+  const index = (sources) => {
+    const native = new Map();
+    const app = new Map();
+    for (const period of new Set(sources)) for (const session of sessions(period)) {
+      if (!supported(session)) continue;
+      if (parentThreads.has(session.t3ThreadId)) app.set(session.t3ThreadId, session);
+      if (!parentClients.has(session.client)) continue;
+      for (const id of candidates(session)) {
+        const key = `${session.client}:${id}`;
+        if (!parentKeys.has(key)) continue;
+        const previous = native.get(key);
+        if (!previous || String(session.startedAt || session.sessionId).localeCompare(String(previous.startedAt || previous.sessionId)) < 0
+          || (String(session.startedAt || session.sessionId) === String(previous.startedAt || previous.sessionId)
+            && session.sessionId.localeCompare(previous.sessionId) < 0)) native.set(key, session);
+      }
+    }
+    return { native, app };
+  };
+  let fallback;
+  for (const [name, period] of Object.entries(periods || {})) {
+    let local;
+    for (const session of sessions(period)) {
+      const link = links.get(session);
+      if (!link) continue;
+      local ||= index([evidencePeriods?.[name], period]);
+      const key = `${link.parentClient}:${link.parentNativeId}`;
+      let parent = local.native.get(key) || local.app.get(link.parentThreadId);
+      if (!parent) {
+        fallback ||= index([...Object.values(evidencePeriods || {}), ...Object.values(periods || {})]);
+        parent = fallback.native.get(key) || fallback.app.get(link.parentThreadId);
+      }
+      if (!parent || (parent.client === session.client && parent.sessionId === session.sessionId)) continue;
+      session.parentSessionId = parent.sessionId;
+      if (parent.client !== session.client) session.parentClient = parent.client;
+      else delete session.parentClient;
+    }
+  }
+  return true;
+}
+
+// Upgrade only identities in a retained anchor. Historical titles, projects,
+// timestamps and live context must not be refreshed by this one-time pass.
+function applySessionIdentities(periods, home, deps = {}) {
+  const sessions = Object.values(periods || {}).flatMap(period => Object.values(period?.sessions || {}));
+  const codexRows = sessions.filter(session => session.client === 'codex' && !session.nativeSessionId);
+  const ids = new Set(codexRows.map(session => session.sessionId));
+  const nativeIds = codexSession.resolveSessionIdentities(ids, { home, deps });
+  for (const session of codexRows) {
+    const nativeId = nativeIds.get(session.sessionId);
+    if (nativeId) session.nativeSessionId = nativeId;
+  }
+  return deps.deferT3SessionParents || applyT3SessionParents(periods, home, deps);
+}
+
 function applySessionMetadata(periods, home, deps = {}) {
   const metadata = sessionMetadataMap(periods, home, deps);
-  for (const period of Object.values(periods || {})) {
+  for (const [periodName, period] of Object.entries(periods || {})) {
     for (const [key, session] of Object.entries(period?.sessions || {})) {
       const meta = metadata.get(key);
+      const scanTitleFallbacks = deps.scanTitleFallbacks;
+      if (scanTitleFallbacks && !scanTitleFallbacks.has(session)) scanTitleFallbacks.set(session, session.title);
+      const titleFallback = scanTitleFallbacks ? scanTitleFallbacks.get(session) : meta?.titleFallback;
       // Restore only the catalog title we replaced, leaving newer native labels.
-      if (meta?.invalidatedTitle && session.title === meta.invalidatedTitle) {
-        if (meta.titleFallback) session.title = meta.titleFallback;
+      // A fresh scan's original title is native evidence, regardless of whether
+      // its text equals the invalidated catalog title.
+      if ((scanTitleFallbacks && (meta?.invalidatedTitle || deps.invalidatedTitleKeys?.has(key)))
+        || (meta?.invalidatedTitle && session.title === meta.invalidatedTitle)
+        || (deps.invalidatedTitleKeys?.has(key) && session.title === deps.t3Titles?.[key])) {
+        if (titleFallback) session.title = titleFallback;
         else delete session.title;
-      } else if (deps.invalidatedTitleKeys?.has(key) && session.title === deps.t3Titles?.[key]) delete session.title;
+      }
       if (!meta) continue;
-      if (meta.t3Title && !Object.prototype.hasOwnProperty.call(meta, 'titleFallback')) {
+      if ((meta.t3Title || meta.catalogTitle) && !Object.prototype.hasOwnProperty.call(meta, 'titleFallback')) {
         meta.titleFallback = session.title;
       }
       if (meta.title) session.title = meta.title;
+      if (session.client === 'codex' && meta.nativeSessionId) session.nativeSessionId = meta.nativeSessionId;
       // A catalog title is not evidence about transcript state or activity.
       if (meta.titleOnly === true) continue;
+      if (meta.catalogOnly === true) {
+        // A summary may supply a missing workspace, but a decoded scan path
+        // remains authoritative. Catalog changes never clear turn state.
+        const sources = deps.catalogProjects?.[periodName];
+        const owned = deps.catalogProjectRows?.has(session);
+        if (meta.projectId && (!session.projectId || owned)) {
+          session.projectId = meta.projectId;
+          if (meta.projectLabel) session.projectLabel = meta.projectLabel;
+          deps.catalogProjectRows?.add(session);
+          if (sources) sources[key] = meta.projectId;
+        } else if (owned && meta.catalogProjectResolved) {
+          delete session.projectId;
+          delete session.projectLabel;
+          if (sources) delete sources[key];
+        } else if (!session.projectId && !meta.catalogProjectResolved && sources?.[key]) {
+          session.projectId = sources[key];
+          session.projectLabel = deps.catalogProjects?.labels?.[sources[key]]
+            || deps.catalogProjectFallbacks?.[periodName]?.sessions?.[key]?.projectLabel;
+          deps.catalogProjectRows?.add(session);
+        } else if (sources && !owned) {
+          delete sources[key];
+        }
+        continue;
+      }
       if (meta.startedAt && (!session.startedAt || Date.parse(meta.startedAt) < Date.parse(session.startedAt))) session.startedAt = meta.startedAt;
       if (meta.lastUsedAt && (!session.lastUsedAt || Date.parse(meta.lastUsedAt) > Date.parse(session.lastUsedAt))) session.lastUsedAt = meta.lastUsedAt;
       if (meta.projectId) session.projectId = meta.projectId;
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
       if (Object.prototype.hasOwnProperty.call(meta, 'promptCache')) session.promptCache = meta.promptCache;
+      if (session.client === 'codex' && typeof meta.waitingForInput === 'boolean') {
+        session.waitingForInput = meta.waitingForInput;
+      }
       // The three states mean different things and are copied as they are:
       // `true` is a finished turn, `false` is one that is open, and absent is a
       // client that reports no boundary at all. Only the last may leave an
@@ -389,10 +526,13 @@ function applySessionMetadata(periods, home, deps = {}) {
       }
     }
   }
+  return deps.deferT3SessionParents || applyT3SessionParents(periods, home, deps);
 }
 
 module.exports = {
   applySessionMetadata,
+  applyT3SessionParents,
+  applySessionIdentities,
   applyTokscaleSessionMetadata,
   // Compatibility aliases for existing callers; metadata now includes titles,
   // projects, and session kind in addition to timestamps.

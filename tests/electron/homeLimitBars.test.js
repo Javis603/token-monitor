@@ -187,7 +187,7 @@ test('Home OpenRouter credits-only success does not repeat grouped profile names
   assert.equal(solo.plan, 'Work');
 });
 
-function renderHomeWindow(window, settings = {}, plan = '') {
+function renderHomeWindows(windows, settings = {}, plan = '', providerId = '', locale = 'en') {
   class Element {
     constructor() {
       this.children = [];
@@ -206,17 +206,16 @@ function renderHomeWindow(window, settings = {}, plan = '') {
   const module = new Element();
   const body = new Element();
   const app = read('src/electron/renderer/app.js');
-  const start = app.indexOf('function renderHomeLimitModule()');
+  const start = app.indexOf('function homeLimitWindowLabel(');
   const end = app.indexOf('function renderHomeModelModule(', start);
   const context = {
     document,
     state: { settings },
     homeModulePreferencesApi: preferences,
     homeModuleShell: () => ({ module, body }),
-    homeLimitRows: () => [{ name: 'Claude', plan, color: '#d97757', windows: [window] }],
+    homeLimitRows: () => [{ name: providerId || 'Claude', providerId, plan, color: '#d97757', windows }],
     applyHomeListMark() {},
     iconKindFor: () => 'claude',
-    homeLimitWindowLabel: () => 'Session',
     formatHomeLimitWindowValue: () => 'value',
     isCreditsWindow: (window) => window.metric === 'credits',
     limitFillPercent,
@@ -226,15 +225,80 @@ function renderHomeWindow(window, settings = {}, plan = '') {
       colorWithAlpha: (color, alpha) => `${color}/${alpha}`,
       applyBarScale: (fill, scale) => fill.style.setProperty('--bar-scale', String(scale))
     }),
-    t: (key) => key,
+    t: (key, params) => require('../../src/electron/renderer/i18n').translate(locale, key, params),
     formatLimitBoundary: () => 'Reset 4h',
-    limitProviderPresentationApi: { limitProviderCompactWindowPeriodLabel: () => '' }
+    limitProviderPresentationApi: require('../../src/electron/renderer/limits/providerPresentation')
   };
   vm.runInNewContext(`${app.slice(start, end)}; renderHomeLimitModule();`, context);
-  const metric = body.children[0].children[1].children[0];
-  metric.accountHead = body.children[0].children[0];
-  return metric;
+  return body.children[0].children[1].children.map((metric) => {
+    metric.accountHead = body.children[0].children[0];
+    return metric;
+  });
 }
+
+function renderHomeWindow(window, settings = {}, plan = '') {
+  return renderHomeWindows([window], settings, plan)[0];
+}
+
+test('Home Antigravity uses both periods after a model group is removed or hidden', () => {
+  const { limitUsageItemId } = require('../../src/shared/limits/usageItems');
+  const windows = [
+    { kind: 'session', label: 'Gemini 5-hour', usedPercent: 25, resetDescription: '4h' },
+    { kind: 'weekly', label: 'Gemini weekly', usedPercent: 90, resetDescription: '6d' },
+    { kind: 'session', label: 'Claude/GPT 5-hour', usedPercent: 40 },
+    { kind: 'weekly', label: 'Claude/GPT weekly', usedPercent: 30 }
+  ];
+  const hiddenGroup = windows.slice(2).map((window) => limitUsageItemId(window, 'antigravity'));
+  for (const homeLimitDisplayMode of ['text', 'bars']) {
+    for (const locale of Object.keys(require('../../src/electron/renderer/i18n').MESSAGES)) {
+      for (const hidden of [false, true]) {
+        const settings = { homeLimitDisplayMode, limitProviderHiddenItems: hidden ? { antigravity: hiddenGroup } : {} };
+        const rows = resolveHomeRows([{ provider: 'antigravity', status: 'ok', windows: hidden ? windows : windows.slice(0, 2) }], settings);
+        assert.deepEqual(rows[0].windows.map((window) => window.label), ['Gemini 5-hour', 'Gemini weekly']);
+        const metrics = renderHomeWindows(rows[0].windows, settings, '', 'antigravity', locale);
+        assert.deepEqual(metrics.map((metric) => metric.children[0].children[0].textContent), ['Gemini 5-hour', 'Gemini Weekly']);
+        const { translate } = require('../../src/electron/renderer/i18n');
+        assert.deepEqual(metrics.map((metric) => metric.children.at(-1).textContent), [
+          translate(locale, 'home.reset', { value: '4h' }),
+          translate(locale, 'home.reset', { value: '6d' })
+        ], 'reset text stays translated without repeating the period');
+      }
+    }
+  }
+  const dualRows = resolveHomeRows([{ provider: 'antigravity', status: 'ok', windows }]);
+  assert.deepEqual(dualRows[0].windows.map((window) => window.label), ['Gemini weekly', 'Claude/GPT 5-hour']);
+  const dualMetrics = renderHomeWindows(dualRows[0].windows, {}, '', 'antigravity');
+  assert.equal(dualMetrics[0].children[0].children[0].textContent, 'Gemini');
+  assert.equal(dualMetrics[0].children.at(-1).textContent, 'Weekly · Reset 6d');
+});
+
+test('Home Antigravity preserves lone-window labels and omits missing or hidden usage', () => {
+  const { limitUsageItemId } = require('../../src/shared/limits/usageItems');
+  const session = { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 75 };
+  const weekly = { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 50 };
+  for (const window of [session, weekly]) {
+    const other = window === session ? weekly : session;
+    const missing = { ...other, remainingPercent: null, usedPercent: null };
+    for (const homeLimitDisplayMode of ['text', 'bars']) {
+      for (const [windows, settings] of [
+        [[window], {}],
+        [[missing, window], {}],
+        [[other, window], { limitProviderHiddenItems: { antigravity: [limitUsageItemId(other, 'antigravity')] } }]
+      ]) {
+        const rows = resolveHomeRows([{ provider: 'antigravity', status: 'ok', windows }], settings);
+        assert.equal(rows[0].windows.length, 1);
+        const metrics = renderHomeWindows(rows[0].windows, { ...settings, homeLimitDisplayMode }, '', 'antigravity');
+        assert.equal(metrics[0].children[0].children[0].textContent, window === session ? 'Gemini 5-hour' : 'Gemini Weekly');
+        assert.equal(metrics[0].children.length, homeLimitDisplayMode === 'bars' ? 2 : 1, 'period does not depend on reset data');
+      }
+    }
+  }
+  for (const windows of [undefined, [], [{ kind: 'session', label: 'Gemini 5-hour' }]]) {
+    assert.deepEqual(resolveHomeRows([{ provider: 'antigravity', status: 'unavailable', windows }]), []);
+  }
+  const settings = { limitProviderHiddenItems: { antigravity: [session, weekly].map((window) => limitUsageItemId(window, 'antigravity')) } };
+  assert.deepEqual(resolveHomeRows([{ provider: 'antigravity', status: 'ok', windows: [session, weekly] }], settings), []);
+});
 
 test('Home shows the plan on the account heading in both modes and omits unknown plans', () => {
   for (const homeLimitDisplayMode of ['text', 'bars']) {

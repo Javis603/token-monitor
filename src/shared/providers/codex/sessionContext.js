@@ -26,6 +26,7 @@ const { createPromptCacheState, applyPromptCacheEntry } = require('../../session
 const TAIL_READ_BUDGETS = [256 * 1024, 1024 * 1024];
 const TURN_READ_MAX_BYTES = 8 * 1024 * 1024;
 const MAX_METADATA_LINE_BYTES = 64 * 1024;
+const MAX_PENDING_INPUT_CALLS = 32;
 const stateCache = new Map();
 
 function contextFromInfo(info) {
@@ -48,8 +49,22 @@ function applyLine(state, line, position, contextStart, cacheStart) {
     const context = contextFromInfo(payload.info);
     if (context) state.context = context;
   }
-  if (payload.type === 'task_complete' || payload.type === 'turn_aborted') state.turnEnded = true;
-  else if (payload.type === 'task_started') state.turnEnded = false;
+  if (payload.type === 'task_complete' || payload.type === 'turn_aborted') {
+    state.turnEnded = true;
+    state.pendingInputCalls.clear();
+  } else if (payload.type === 'task_started') {
+    state.turnEnded = false;
+    state.pendingInputCalls.clear();
+  }
+  // Track protocol identity only. Error results retire a request just like an
+  // answer; neither question text nor collaboration mode determines waiting.
+  const callId = typeof payload.call_id === 'string' && payload.call_id.length <= 256
+    ? payload.call_id : '';
+  if (callId && payload.type === 'function_call' && payload.name === 'request_user_input') {
+    if (state.pendingInputCalls.size < MAX_PENDING_INPUT_CALLS) state.pendingInputCalls.add(callId);
+  } else if (callId && payload.type === 'function_call_output') {
+    state.pendingInputCalls.delete(callId);
+  }
   if (position >= cacheStart) applyPromptCacheEntry(state.promptCacheState, entry, 'codex');
 }
 
@@ -84,8 +99,8 @@ function readCodexSessionState(filePath, deps = {}) {
     const cached = cache.get(filePath);
     if (cached?.identity === identity && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) return cached;
     const appendOnly = cached?.identity === identity && stat.size > cached.size;
-    const state = appendOnly ? { ...cached, promptCacheState: { ...cached.promptCacheState } }
-      : { context: null, turnEnded: undefined, promptCacheState: createPromptCacheState(), trailing: Buffer.alloc(0), droppingLine: false };
+    const state = appendOnly ? { ...cached, pendingInputCalls: new Set(cached.pendingInputCalls), promptCacheState: { ...cached.promptCacheState } }
+      : { context: null, turnEnded: undefined, pendingInputCalls: new Set(), promptCacheState: createPromptCacheState(), trailing: Buffer.alloc(0), droppingLine: false };
     fd = fsApi.openSync(filePath, 'r');
     let start;
     const chunks = [];
@@ -130,7 +145,8 @@ function readCodexSessionState(filePath, deps = {}) {
     // A complete final record without a newline is valid. Keep its bytes so
     // a later append can finish a partial record; accounting dedup is stateful.
     if (!state.droppingLine) applyLine(state, state.trailing, stat.size - state.trailing.length, contextStart, cacheStart);
-    Object.assign(state, { identity, size: stat.size, mtimeMs: stat.mtimeMs });
+    Object.assign(state, { identity, size: stat.size, mtimeMs: stat.mtimeMs,
+      waitingForInput: state.turnEnded !== true && state.pendingInputCalls.size > 0 });
     if (cache.size >= 512 && !cache.has(filePath)) cache.delete(cache.keys().next().value);
     cache.set(filePath, state);
     return state;

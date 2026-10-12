@@ -54,7 +54,7 @@ test('session detail renders its heading before loading, errors and empty result
   const els = { breakdown: element(), sessionDetail: element(), sessionDetailHead: element() };
   const state = { detailSort: 'tokens', openSession: null };
   const start = rendererSource.indexOf('function renderSessionDetail(');
-  const end = rendererSource.indexOf('function backgroundReviewRunNode(', start);
+  const end = rendererSource.indexOf('function sessionGroupRunNode(', start);
   let render;
   const context = {
     els, state, document: { createElement: element, querySelectorAll: () => [els.sessionDetailHead.querySelector('.detail-heading')].filter(Boolean) }, window: { addEventListener() {} }, t: (key, params) => translate('en', key, params),
@@ -143,7 +143,7 @@ test('session detail renders its heading before loading, errors and empty result
   let invalidations = 0;
   let pulls = 0;
   context.allTimeSessions = { invalidate: () => { invalidations += 1; }, ensure: () => { pulls += 1; } };
-  const settingsStart = rendererSource.indexOf('function sessionStatsForDisplay(');
+  const settingsStart = rendererSource.indexOf('let localSessionActivity = null;');
   const settingsEnd = rendererSource.indexOf('\nfunction render()', settingsStart);
   assert.ok(settingsStart >= 0 && settingsEnd > settingsStart, 'renderer title settings helpers should be present');
   vm.runInNewContext(`${rendererSource.slice(settingsStart, settingsEnd)}\nglobalThis.setSettings = setRendererSettings;`, context);
@@ -219,7 +219,7 @@ test('session detail renders its heading before loading, errors and empty result
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'Native session');
   context.setSettings({ sessionTitlesEnabled: false });
   const groupOpening = context.open({ client: 'codex', sessionId: 's', title: 'gpt-5 · 12:00',
-    returnTo: { kind: 'background-review-group' } });
+    returnTo: { kind: 'session-group' } });
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'gpt-5 · 12:00',
     'model/time is not a session title and remains visible while titles are hidden');
   const reviewHeading = els.sessionDetailHead.children[0];
@@ -230,6 +230,72 @@ test('session detail renders its heading before loading, errors and empty result
   await groupOpening;
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'gpt-5 · 12:00');
   context.setSettings({ sessionTitlesEnabled: true });
+
+  // A subagent run is headed by its own session title and returns to a group
+  // named after the parent's title, so both follow title display.
+  const subagentGroup = { kind: 'session-group', period: 'today',
+    summary: { key: 'session-group:subagents:codex:parent', name: 'Parent title', subagentGroup: true } };
+  context.sessionRowsForPeriod = () => [{ key: subagentGroup.summary.key,
+    name: state.settings?.sessionTitlesEnabled === false ? 'Codex · gpt-5' : 'Parent title',
+    groupRows: [{ key: 'session:codex:parent' }, { key: 'session:codex:child' }] }];
+  state.stats = { periods: { today: { sessions: { 'codex:child': { client: 'codex', title: 'Child title', totalTokens: 3 } } } } };
+  const childOpening = context.open({ client: 'codex', sessionId: 'child', title: 'Child title',
+    returnTo: subagentGroup, titleFollowsSession: true });
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'Child title');
+  assert.match(els.sessionDetailHead.children[0].attributes['aria-label'], /Back to Parent title/);
+  context.setSettings({ sessionTitlesEnabled: false });
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null, 'the child title hides with titles');
+  assert.equal(els.sessionDetailHead.children[0].textContent, '‹ Codex · gpt-5');
+  assert.doesNotMatch(JSON.stringify(els.sessionDetailHead.children[0].attributes), /Parent title|Child title/);
+  assert.equal(subagentGroup.summary.name, 'Codex · gpt-5', 'returning to the group shows the titleless parent name');
+  await childOpening;
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null, 'a late detail response keeps it hidden');
+  const opened = context.open({ client: 'codex', sessionId: 'child', title: 'Child title',
+    returnTo: subagentGroup, titleFollowsSession: true });
+  assert.equal(state.openSession.title, '', 'a run opened while hidden stores no title');
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
+  await opened;
+  context.setSettings({ sessionTitlesEnabled: true });
+
+  // The group can vanish while a member's Details stay open: its parent leaves
+  // the list, or the session is regrouped under another parent. The cached
+  // summary must not keep quoting the old parent title once titles hide.
+  const titleless = () => state.settings?.sessionTitlesEnabled === false;
+  for (const regrouped of [false, true, 'old group stays']) {
+    const staleGroup = { kind: 'session-group', period: 'today',
+      summary: { key: 'session-group:subagents:codex:parent', name: 'Parent title', subagentGroup: true,
+        groupRows: [{ key: 'session:codex:parent', name: 'Parent title' }, { key: 'session:codex:child', name: 'Child title' }] } };
+    context.sessionRowsForPeriod = () => [{ key: subagentGroup.summary.key, name: titleless() ? 'Codex · gpt-5' : 'Parent title',
+      groupRows: [{ key: 'session:codex:parent' }, { key: 'session:codex:child' }] }];
+    state.stats = { periods: { today: { sessions: { 'codex:child': { client: 'codex', title: 'Child title', totalTokens: 3 } } } } };
+    const opening = context.open({ client: 'codex', sessionId: 'child', title: 'Child title',
+      returnTo: staleGroup, titleFollowsSession: true });
+    assert.match(els.sessionDetailHead.children[0].attributes['aria-label'], /Back to Parent title/);
+    const newGroup = { key: 'session-group:subagents:codex:other', subagentGroup: true,
+      get name() { return titleless() ? 'Codex · gpt-5.6' : 'Other parent'; },
+      groupRows: [{ key: 'session:codex:other' }, { key: 'session:codex:child' }] };
+    // 'old group stays': the old parent still has another child, so its group
+    // exists under the same key without this session.
+    const oldGroupWithoutChild = { key: staleGroup.summary.key, name: 'Codex · gpt-5', subagentGroup: true,
+      groupRows: [{ key: 'session:codex:parent' }, { key: 'session:codex:sibling' }] };
+    context.sessionRowsForPeriod = () => (regrouped === 'old group stays' ? [oldGroupWithoutChild, newGroup]
+      : regrouped ? [newGroup] : [{ key: 'session:codex:child', name: 'Child title' }]);
+    context.setSettings({ sessionTitlesEnabled: false });
+    const back = els.sessionDetailHead.children[0];
+    assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
+    assert.doesNotMatch(`${back.textContent} ${JSON.stringify(back.attributes)}`, /Parent title|Child title|Other parent/);
+    if (regrouped) {
+      assert.equal(state.openSession.returnTo.summary.key, newGroup.key, 'Back returns to the group that holds the session now');
+      assert.equal(back.textContent, '‹ Codex · gpt-5.6');
+    } else {
+      assert.equal(state.openSession.returnTo, null, 'with no group left, Back returns to Sessions');
+      assert.equal(back.textContent, '‹ sessions');
+    }
+    assert.doesNotMatch(JSON.stringify(state.openSession.returnTo || {}), /Parent title|Child title/,
+      'no cached member keeps the old titles');
+    await opening;
+    context.setSettings({ sessionTitlesEnabled: true });
+  }
 
   // The id the Sessions list no longer prints opens the detail body, copyable,
   // in every state the body can be in.
@@ -271,14 +337,14 @@ test('session detail renders its heading before loading, errors and empty result
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
   assert.equal(els.sessionDetailHead.children[0].textContent, '‹ sessions');
   assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], 'Back to sessions');
-  state.openSession = { title: 'gpt-5.6-sol · 12:34', returnTo: { kind: 'background-review-group' } };
+  state.openSession = { title: 'gpt-5.6-sol · 12:34', returnTo: { kind: 'session-group' } };
   render({ loading: true });
   assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], 'gpt-5.6-sol · 12:34 — Back to Codex Auto Review');
   context.closeSessionDetail = () => { state.backClicked = true; };
-  const groupStart = rendererSource.indexOf('function renderBackgroundReviewDetail(');
+  const groupStart = rendererSource.indexOf('function renderSessionGroupDetail(');
   const groupEnd = rendererSource.indexOf('function detailNote(', groupStart);
-  vm.runInNewContext(`${rendererSource.slice(groupStart, groupEnd)}\nglobalThis.renderGroup = renderBackgroundReviewDetail;`, context);
-  context.renderGroup({ summary: { backgroundReviewRows: [] } });
+  vm.runInNewContext(`${rendererSource.slice(groupStart, groupEnd)}\nglobalThis.renderGroup = renderSessionGroupDetail;`, context);
+  context.renderGroup({ summary: { groupRows: [] } });
   const groupBack = els.sessionDetailHead.children[0];
   assert.equal(groupBack.textContent, '‹Codex Auto Review');
   assert.equal(groupBack.attributes['aria-label'], 'Codex Auto Review — Back to sessions');
@@ -291,7 +357,7 @@ test('session detail renders its heading before loading, errors and empty result
   assert.equal(state.backClicked, true);
   for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) {
     context.t = (key, params) => translate(locale, key, params);
-    for (const returnTo of [null, { kind: 'background-review-group' }]) {
+    for (const returnTo of [null, { kind: 'session-group' }]) {
       const title = 'Review PR 906';
       state.openSession = { title, returnTo };
       render({ loading: true });
@@ -301,10 +367,16 @@ test('session detail renders its heading before loading, errors and empty result
       assert.ok(label.includes(destination), `${locale}: accessible name includes the return destination`);
       assert.ok(!label.includes('{'), `${locale}: translation parameters are resolved`);
     }
-    context.renderGroup({ summary: { backgroundReviewRows: [] } });
-    const label = els.sessionDetailHead.children[0].attributes['aria-label'];
-    assert.ok(label.startsWith(context.t('sessions.backgroundReviews')));
-    assert.ok(label.includes(context.t('sessions')));
+    for (const key of ['sessions.backgroundReviews', 'sessions.grokBot']) {
+      const name = context.t(key);
+      context.renderGroup({ summary: { name, groupRows: [] } });
+      const label = els.sessionDetailHead.children[0].attributes['aria-label'];
+      assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, name);
+      assert.ok(label.startsWith(name));
+      assert.ok(label.includes(context.t('sessions')));
+      assert.ok(!label.includes('{'));
+      assert.ok(!context.t('sessions.grokBotCount', { count: 5 }).includes('{'));
+    }
     state.openSession = {};
     render({ loading: true });
     assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], context.t('sessions.backTo', { destination: context.t('sessions') }));
@@ -314,11 +386,11 @@ test('session detail renders its heading before loading, errors and empty result
 test('the compact detail back control returns to the review group or the session list', () => {
   const start = rendererSource.indexOf('function sessionDetailBack(');
   const end = rendererSource.indexOf('function renderSessionDetail(', start);
-  const group = { kind: 'background-review-group', summary: {} };
+  const group = { kind: 'session-group', summary: {} };
   const state = { openSession: { returnTo: group } };
   let renderedGroup;
   let closed = false;
-  const back = Function('state', 'renderBackgroundReviewDetail', 'closeSessionDetail',
+  const back = Function('state', 'renderSessionGroupDetail', 'closeSessionDetail',
     `${rendererSource.slice(start, end)}\nreturn sessionDetailBack;`
   )(state, request => { renderedGroup = request; }, () => { closed = true; state.openSession = null; });
   back();

@@ -354,27 +354,27 @@ test('live rate selects every active hub device or only this device by scope', (
 
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'client'), {
     entries: [
-      { id: 'device:other', period: other },
-      { id: 'device:this-device', period: local }
+      { id: 'device:other', name: 'other', period: other },
+      { id: 'device:this-device', name: 'this-device', period: local }
     ],
     source: 'devices:all'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'host', 'all'), {
     entries: [
-      { id: 'device:other', period: other },
-      { id: 'device:this-device', period: local }
+      { id: 'device:other', name: 'other', period: other },
+      { id: 'device:this-device', name: 'this-device', period: local }
     ],
     source: 'devices:all'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'icloud', 'all'), {
     entries: [
-      { id: 'device:other', period: other },
-      { id: 'device:this-device', period: local }
+      { id: 'device:other', name: 'other', period: other },
+      { id: 'device:this-device', name: 'this-device', period: local }
     ],
     source: 'devices:all'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'client', 'device'), {
-    entries: [{ id: 'device:this-device', period: local }],
+    entries: [{ id: 'device:this-device', name: 'this-device', period: local }],
     source: 'device:this-device'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'missing', 'client', 'device'), {
@@ -386,22 +386,22 @@ test('live rate selects every active hub device or only this device by scope', (
     source: 'device:missing'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'local'), {
-    entries: [{ id: 'device:this-device', period: local }],
+    entries: [{ id: 'device:this-device', name: 'this-device', period: local }],
     source: 'device:this-device'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'missing', 'local'), {
-    entries: [{ id: 'device:missing', period: aggregate }],
+    entries: [{ id: 'device:missing', name: 'missing', period: aggregate }],
     source: 'device:missing'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods({ periods: { today: aggregate }, devices: [] }, 'this-device', 'local'), {
-    entries: [{ id: 'device:this-device', period: aggregate }],
+    entries: [{ id: 'device:this-device', name: 'this-device', period: aggregate }],
     source: 'device:this-device'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods({
     periods: { today: aggregate },
     devices: [{ deviceId: 'old-device', periods: { today: other } }]
   }, 'this-device', 'local'), {
-    entries: [{ id: 'device:this-device', period: aggregate }],
+    entries: [{ id: 'device:this-device', name: 'this-device', period: aggregate }],
     source: 'device:this-device'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods({
@@ -871,11 +871,32 @@ test('live hover keeps the same model separate by device and simplifies a single
   assert.deepEqual(entries(), []);
 });
 
-test('live rate selection carries device hostnames for hover groups', () => {
+test('live rate groups use configured device names with hostname fallback', () => {
   const period = modelRatePeriod({});
-  const stats = { devices: [{ deviceId: 'a', hostname: 'MacBook', periods: { today: period } }] };
-  assert.equal(tokenRateApi.selectLiveTokenRatePeriods(stats, 'a', 'host', 'all').entries[0].name, 'MacBook');
-  assert.equal(tokenRateApi.selectLiveTokenRatePeriods(stats, 'a', 'local', 'device').entries[0].name, 'MacBook');
+  const devices = [
+    { deviceId: 'imac-m1', hostname: 'Javiss-iMac.local', periods: { today: period } },
+    { deviceId: 'macbook-m5', hostname: 'Javiss-MacBook-Air.local', periods: { today: period } }
+  ];
+  const stats = { devices };
+  for (const mode of ['client', 'host', 'icloud']) {
+    assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'imac-m1', mode, 'all').entries.map(({ name }) => name), ['imac-m1', 'macbook-m5']);
+    assert.equal(tokenRateApi.selectLiveTokenRatePeriods(stats, 'imac-m1', mode, 'device').entries[0].name, 'imac-m1');
+  }
+  assert.equal(tokenRateApi.selectLiveTokenRatePeriods(stats, 'imac-m1', 'local', 'device').entries[0].name, 'imac-m1');
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => 100 });
+  tracker.reset(tokenRateApi.selectLiveTokenRatePeriods(stats, 'imac-m1', 'client', 'all').entries);
+  const fresh = { devices: devices.map((device) => ({
+    ...device,
+    periods: { today: modelRatePeriod({ alpha: { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000 } }) }
+  })) };
+  tracker.observe(tokenRateApi.selectLiveTokenRatePeriods(fresh, 'imac-m1', 'client', 'all').entries);
+  assert.equal(tracker.getSample().speed, 80);
+  assert.deepEqual(tokenRateApi.liveTokenRateTooltipEntries(tracker.getSample(), 'speed', String), [
+    { full: 'imac-m1', separated: false }, ['alpha', '40 tok/s'],
+    { full: 'macbook-m5', separated: true }, ['alpha', '40 tok/s']
+  ]);
+  const legacy = { devices: [{ hostname: 'Legacy.local', periods: { today: period } }] };
+  assert.equal(tokenRateApi.selectLiveTokenRatePeriods(legacy, '', 'client', 'all').entries[0].name, 'Legacy.local');
 });
 
 test('live device names update with the existing tracker and reset with its identity', () => {

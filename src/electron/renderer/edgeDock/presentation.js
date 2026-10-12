@@ -14,11 +14,13 @@
     node ? require('../accountIdentity') : root?.TokenMonitorAccountIdentity,
     node ? require('../../../shared/sessionLive') : root?.TokenMonitorSessionLive,
     node ? require('../usageAttributionRows') : root?.TokenMonitorUsageAttributionRows,
-    node ? require('../limits/resetMotion') : root?.TokenMonitorLimitResetMotion
+    node ? require('../limits/resetMotion') : root?.TokenMonitorLimitResetMotion,
+    node ? require('../../../shared/sessionActivityProviders') : root?.TokenMonitorSessionActivityProviders,
+    node ? require('../sessionRows') : root?.TokenMonitorSessionRows
   );
   if (node) module.exports = api;
   if (root) root.TokenMonitorEdgeDockPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive, usageAttributionRows, limitResetMotion) {
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive, usageAttributionRows, limitResetMotion, activityProviders, sessionRowsApi) {
   // Every account is listed; the card scrolls when they outgrow the screen.
   const MAX_BUBBLE_ACCOUNTS = 50;
 
@@ -161,20 +163,60 @@
   // aggregate drops all-time session detail (the sessions there are one
   // machine's own view), so a list built from it would silently mean "some"
   // rather than "all".
-  function sessionSourceRows(stats) {
+  const EMPTY_SESSIONS = {};
+  const sourceRowsCache = new WeakMap();
+  function accountingSessionSources(stats) {
+    const month = stats?.periods?.month?.sessions || EMPTY_SESSIONS;
+    const today = stats?.periods?.today?.sessions || EMPTY_SESSIONS;
+    let byToday = sourceRowsCache.get(month);
+    if (!byToday) { byToday = new WeakMap(); sourceRowsCache.set(month, byToday); }
+    let cached = byToday.get(today);
+    if (cached) return cached;
     const byKey = new Map();
     for (const periodKey of ['month', 'today']) {
       for (const [key, session] of Object.entries(stats?.periods?.[periodKey]?.sessions || {})) {
-        if (byKey.has(key)) continue;
+        const previous = byKey.get(key);
+        if (previous && (!sessionLive.isArchivedSession(previous.session) || sessionLive.isArchivedSession(session))) continue;
         if (session?.sessionKind === 'background-review') continue;
         const lastUsedMs = Date.parse(session?.lastUsedAt || session?.startedAt || '');
         if (!Number.isFinite(lastUsedMs)) continue;
-        byKey.set(key, { session, lastUsedMs });
+        byKey.set(key, { key, session, lastUsedMs, periodKey });
       }
     }
-    return [...byKey.entries()]
-      .map(([key, value]) => ({ key, ...value }))
-      .sort((a, b) => b.lastUsedMs - a.lastUsedMs);
+    cached = { byKey, rows: [...byKey.values()].sort((a, b) => b.lastUsedMs - a.lastUsedMs) };
+    byToday.set(today, cached);
+    return cached;
+  }
+  function sessionSourceRows(stats) {
+    const base = accountingSessionSources(stats);
+    const native = new Map();
+    for (const periodKey of ['month', 'today']) for (const [key, session] of Object.entries(stats?.nativeSessions?.[periodKey] || {})) {
+      if (native.has(key) || !activityProviders.isSessionActivityClient(session.client) || session.sessionKind === 'background-review') continue;
+      const accounted = base.byKey.get(key);
+      if (accounted) {
+        if (!sessionLive.isArchivedSession(accounted.session) || !['running', 'waiting'].includes(sessionLive.sessionActivityState(session))) continue;
+      }
+      const lastUsedMs = Date.parse(session.lastUsedAt || session.startedAt || '');
+      if (Number.isFinite(lastUsedMs)) native.set(key, { key, session: accounted
+        ? { ...session, totalTokens: accounted.session.totalTokens, costUsd: accounted.session.costUsd,
+          unpricedTokens: accounted.session.unpricedTokens, models: accounted.session.models,
+          nativeSessionId: session.nativeSessionId || accounted.session.nativeSessionId,
+          t3ThreadId: session.t3ThreadId || accounted.session.t3ThreadId,
+          parentSessionId: session.parentSessionId || accounted.session.parentSessionId,
+          parentClient: session.parentSessionId ? session.parentClient : accounted.session.parentClient }
+        : session, lastUsedMs });
+    }
+    const additions = [...native.values()].sort((a, b) => b.lastUsedMs - a.lastUsedMs);
+    const rows = [];
+    let index = 0;
+    for (const entry of base.rows) {
+      if (native.has(entry.key)) continue;
+      while (index < additions.length && additions[index].lastUsedMs > entry.lastUsedMs) rows.push(additions[index++]);
+      rows.push({ key: entry.key, lastUsedMs: entry.lastUsedMs,
+        session: sessionLive.sessionWithActivity(stats?.periods?.[entry.periodKey], entry.key, entry.session) });
+    }
+    rows.push(...additions.slice(index));
+    return rows;
   }
 
   // One row shape for both callers. `client` rides the row because the Sessions
@@ -183,6 +225,9 @@
   function sessionRowsFor(entries, stateByKey) {
     return entries.map(({ key, session }) => {
       return {
+        parentClient: normalizedId(session.parentClient || session.client),
+        parentSessionId: String(session.parentSessionId || ''),
+        grokBotSession: session.grokBotSession,
         title: String(session.title || ''),
         projectLabel: String(session.projectLabel || ''),
         // Carried so the renderer keys its state map and its flare cache on
@@ -190,23 +235,27 @@
         // from sessionId and colliding two clients.
         key,
         sessionId: String(session.sessionId || ''),
+        nativeSessionId: normalizedId(session.nativeSessionId),
+        t3ThreadId: String(session.t3ThreadId || ''),
         client: normalizedId(session.client),
         // The whole model map, not just the top one: the card composes its
         // label with the Sessions list's own sessionModelLabel(), which reads
         // "N models" for a multi-model session — a reading this projection
         // could not reproduce from a flattened winner.
-        models: session.models || {},
+        models: session.models || (session.model ? { [session.model]: finite(session.totalTokens) || 0 } : {}),
         promptCache: session.promptCache || null,
         contextTokens: finite(session.contextTokens),
         contextWindow: finite(session.contextWindow),
         totalTokens: finite(session.totalTokens) || 0,
-        costUsd: finite(session.costUsd) || 0,
+        costUsd: finite(session.costUsd ?? session.reportedCostUsd) || 0,
         ...(session.unpricedTokens > 0 ? { unpricedTokens: finite(session.unpricedTokens) || 0 } : {}),
         lastUsedAt: session.lastUsedAt || null,
         startedAt: session.startedAt || null,
         // Carried onto the projected row, not just used here: the dock renderer
         // re-derives the state at paint time and needs the boundary to do it.
         turnEnded: session.turnEnded === true,
+        liveActivity: session.liveActivity || null,
+        waitingForInput: session.client === 'codex' && session.waitingForInput === true,
         // The archive flags ride along for the same reason, and their absence was a
         // real bug: `sessionActivityState()` reads them first, so a projection that
         // dropped them let an archived row - idle by definition, whatever its
@@ -217,6 +266,7 @@
         deleted: session.deleted === true,
         sourceDeleted: session.sourceDeleted === true,
         running: stateByKey.get(key) === 'running',
+        tokenDataUnavailable: session.tokenDataUnavailable === true,
         // The same gate the Sessions list uses, so one surface cannot show a
         // gauge for a session the other has already dropped it from.
         context: sessionLive.sessionContextForRow(session) || null
@@ -224,48 +274,122 @@
     });
   }
 
-  // Split into the rows a card draws, with running rows kept preferentially:
-  // the cap is a budget for the whole list rather than an allowance stacked on
-  // top of the running ones, and a running row is never dropped (that would
-  // leave the card's "N running" count with no matching row).
-  // The rows a card draws, with running rows kept preferentially: the cap is a budget for
-  // the whole list rather than an allowance stacked on top of the running ones, and a
-  // running row is never dropped (that would leave the card's "N running" count with no
-  // matching row).
-  //
-  // `order` decides how the chosen rows are printed. The default is running-first, which
-  // is the provider card's long-standing behaviour; the standalone Sessions item asks for
-  // `timeline`, printing them newest-first instead. Selection does not change either way,
-  // so the cap protects live work in both.
-  function cappedSessionRows(entries, cap, runningOnly = false, order = 'running-first') {
-    const stateByKey = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
-    const running = entries.filter(({ key }) => stateByKey.get(key) === 'running');
-    const quiet = runningOnly
-      ? []
-      : entries
-        .filter(({ key }) => stateByKey.get(key) !== 'running')
-        .slice(0, Math.max(0, cap - running.length));
-    let ordered = [...running, ...quiet];
-    if (order === 'timeline') {
-      // `entries` arrives newest-first (see sessionSourceRows) and a timeline prints in
-      // that order. Composing the selection directly would hoist every running row above
-      // every quiet one, so a session active nine minutes ago would be listed above one
-      // active a minute ago - an order the layout does not claim.
-      const chosen = new Set(ordered.map((entry) => entry.key));
-      ordered = entries.filter((entry) => chosen.has(entry.key));
-    }
-    return { rows: sessionRowsFor(ordered, stateByKey), running, stateByKey };
+  // Group the complete source list before selecting recent/running rows. Keep
+  // accounting identities on the members; summaries exist only in presentation.
+  function groupedSessionRows(stats, options = {}) {
+    const entries = sessionSourceRows(stats);
+    const states = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
+    const botIds = new Set(Array.isArray(stats?.grokBotSessionIds) ? stats.grokBotSessionIds
+      : sessionRowsApi.grokBotSessionIdsForMaps([Object.fromEntries(entries.map(({ key, session }) => [key, session]))],
+        Object.values(stats?.periods || {}).map(period => period?.sessions)));
+    // Resolve all group identities and totals before caps, but build display
+    // rows (context, archive flags and member DTOs) only for selected groups.
+    const entriesByKey = new Map();
+    const rows = entries.map(entry => {
+      const { key, session } = entry;
+      const client = normalizedId(session.client);
+      const sessionId = String(session.sessionId || '');
+      const parentClient = normalizedId(session.parentClient || session.client);
+      const parentSessionId = String(session.parentSessionId || '');
+      const models = session.models || (session.model ? { [session.model]: finite(session.totalTokens) || 0 } : {});
+      entriesByKey.set(`session:${key}`, entry);
+      return {
+        key: `session:${key}`, kind: 'session', client,
+        clientLabel: options.clientLabels?.[client] || client,
+        nativeSessionId: normalizedId(session.nativeSessionId), t3ThreadId: String(session.t3ThreadId || ''),
+        name: String(session.title || session.projectLabel || sessionId.slice(0, 12) || '—'),
+        titled: Boolean(session.title || session.projectLabel),
+        modelTokens: models,
+        value: finite(session.totalTokens) || 0, cost: finite(session.costUsd ?? session.reportedCostUsd) || 0,
+        unpricedTokens: session.unpricedTokens > 0 ? finite(session.unpricedTokens) : undefined,
+        tokenDataUnavailable: session.tokenDataUnavailable === true,
+        parentKey: parentSessionId && (parentClient !== client || parentSessionId !== sessionId)
+          ? `session:${parentClient}:${parentSessionId}` : undefined,
+        grokBot: client === 'cursor' && (sessionRowsApi.isGrokBotSession({ client, sessionId, models,
+          grokBotSession: session.grokBotSession }, key) || botIds.has(sessionId)),
+        activityState: client === session.client ? states.get(key) : sessionLive.sessionActivityState({ client, lastUsedAt: session.lastUsedAt, liveActivity: session.liveActivity,
+          turnEnded: session.turnEnded === true, archived: session.archived === true, deleted: session.deleted === true,
+          sourceDeleted: session.sourceDeleted === true, waitingForInput: session.client === 'codex' && session.waitingForInput === true }), running: states.get(key) === 'running',
+        sortTime: entry.lastUsedMs
+      };
+    });
+    const grouped = sessionRowsApi.groupSessionRows(rows, { ...options, subagents: { ...options.subagents, includeModelTooltip: false } });
+    // Grouping can outlast a live lease. Select against the raw members at
+    // the current clock, so either expiry direction uses transcript fallback.
+    const stateFor = (row, now = Date.now()) => {
+      if (row.groupRows) {
+        const memberStates = row.groupRows.map(member => stateFor(member, now));
+        return ['running', 'waiting'].find(state => memberStates.includes(state)) || memberStates[0] || 'idle';
+      }
+      const session = entriesByKey.get(row.key).session;
+      return sessionLive.sessionActivityState(row.client === session.client ? session : {
+        client: row.client, lastUsedAt: session.lastUsedAt, liveActivity: session.liveActivity,
+        turnEnded: session.turnEnded === true, archived: session.archived === true,
+        deleted: session.deleted === true, sourceDeleted: session.sourceDeleted === true,
+        waitingForInput: session.client === 'codex' && session.waitingForInput === true
+      }, now);
+    };
+    const projected = new Map();
+    const projectMember = key => {
+      if (!projected.has(key)) projected.set(key, sessionRowsFor([entriesByKey.get(key)], states)[0]);
+      return projected.get(key);
+    };
+    const project = summary => {
+      if (projected.has(summary.key)) return projected.get(summary.key);
+      if (!summary.sessionGroup) return projectMember(summary.key);
+      const members = summary.groupRows.map(row => ({ ...projectMember(row.key), groupRole: row.groupRole }));
+      const parent = members[0];
+      const models = {};
+      for (const member of members) for (const [model, tokens] of Object.entries(member.models)) {
+        models[model] = (models[model] || 0) + (finite(tokens) || 0);
+      }
+      const result = {
+        ...parent, key: summary.key, title: summary.subagentGroup
+          ? parent.title || parent.projectLabel || parent.sessionId.slice(0, 12) || '—' : summary.name,
+        models,
+        totalTokens: summary.value, costUsd: summary.cost,
+        unpricedTokens: summary.unpricedTokens,
+        tokenDataUnavailable: summary.tokenDataUnavailable === true,
+        lastUsedAt: new Date(summary.sortTime).toISOString(),
+        // Context and cache are the latest main record’s own snapshots,
+        // inherited above; totals and activity cover the whole group.
+        sessionGroup: summary.sessionGroup, subagentGroup: summary.subagentGroup, subagentCount: summary.subagentCount,
+        running: sessionActivityState({ groupRows: members }) === 'running',
+        activityState: sessionActivityState({ groupRows: members }),
+        groupRows: members
+      };
+      projected.set(summary.key, result);
+      return result;
+    };
+    return { rows: grouped, project, stateFor };
+  }
+
+  function sessionActivityState(row, now = Date.now()) {
+    if (!row?.groupRows) return sessionLive.sessionActivityState(row, now);
+    const states = row.groupRows.map(member => sessionActivityState(member, now));
+    return ['running', 'waiting'].find(state => states.includes(state)) || states[0] || 'idle';
+  }
+
+  function sessionMembers(rows) {
+    return (rows || []).flatMap(row => row.groupRows ? sessionMembers(row.groupRows) : [row]);
   }
 
   function recentSessionRows(stats, cap = SESSIONS_RECENT_COUNT, options = {}) {
-    const entries = sessionSourceRows(stats);
+    const grouped = groupedSessionRows(stats, options);
+    return selectRecentSessionRows(grouped.rows, cap, options, grouped.stateFor).map(grouped.project);
+  }
+
+  function selectRecentSessionRows(rows, cap, options, stateFor = sessionActivityState) {
+    const states = new Map(rows.map(row => [row.key, stateFor(row)]));
+    if (options.runningOnly === true) return rows.filter(row => states.get(row.key) === 'running');
     if (options.includeRunningBeyondCap === true) {
-      const states = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
-      const selected = entries.filter((entry, index) => index < cap || states.get(entry.key) === 'running');
-      return sessionRowsFor(selected, states);
+      return rows.filter((row, index) => index < cap || ['running', 'waiting'].includes(states.get(row.key)));
     }
-    const runningOnly = options.runningOnly === true;
-    return cappedSessionRows(entries, runningOnly ? entries.length : cap, runningOnly, 'timeline').rows;
+    const active = rows.filter(row => ['running', 'waiting'].includes(states.get(row.key)));
+    const quiet = rows.filter(row => !['running', 'waiting'].includes(states.get(row.key)))
+      .slice(0, Math.max(0, cap - active.length));
+    const selected = new Set([...active, ...quiet]);
+    return rows.filter(row => selected.has(row));
   }
 
   // The running reading, derived from the projected rows at the clock the caller
@@ -279,24 +403,36 @@
   // derivation, shared so the rail, the card and the grouped sections answer
   // identically, and so a caller can ask the same rows at a later clock.
   //
-  // Every running row survives the cap (see cappedSessionRows), so the rows a cell
+  // Every running row survives the cap (see recentSessionRows), so the rows a cell
   // carries are complete for this reading however many sessions are quiet.
   function runningSessionSummary(sessions, now = Date.now()) {
     const rows = Array.isArray(sessions) ? sessions : [];
-    const running = rows.filter((row) => sessionLive.sessionActivityState(row, now) === 'running');
+    const running = rows.filter((row) => sessionActivityState(row, now) === 'running');
     // One entry per tool, in the row order the list already carries (newest
     // first), so the rail's marks match the order the card shows.
-    const clients = [...new Set(running.map((row) => normalizedId(row?.client)).filter(Boolean))];
+    const clients = [...new Set(sessionMembers(running)
+      .filter(row => sessionActivityState(row, now) === 'running')
+      .map(row => normalizedId(row?.client)).filter(Boolean))];
     return { count: running.length, clients, clientCount: clients.length, rows: running };
   }
 
-  // When the earliest still-running row stops reading as running, so the caller
-  // can re-project at that moment instead of leaving a stale count on screen.
-  // 0 when nothing is running: a quiet row never becomes running on its own, so
-  // there is nothing to wait for and a scheduler reading this cannot loop.
+  function waitingSessionSummary(sessions, now = Date.now()) {
+    const rows = (Array.isArray(sessions) ? sessions : [])
+      .filter((row) => sessionActivityState(row, now) === 'waiting');
+    return { count: rows.length, rows };
+  }
+
+  // Re-project when a running window or registry observation expires. Waiting
+  // and explicit idle can fall back to running too, so every lease matters.
   function nextRunningExpiryAt(sessions, now = Date.now()) {
+    sessions = sessionMembers(sessions);
     let soonest = 0;
-    for (const row of runningSessionSummary(sessions, now).rows) {
+    for (const row of sessions || []) {
+      const expiry = sessionLive.liveActivityExpiryAt(row, now);
+      if (expiry && (!soonest || expiry < soonest)) soonest = expiry;
+    }
+    const active = (sessions || []).filter((row) => ['running', 'waiting'].includes(sessionActivityState(row, now)));
+    for (const row of active) {
       const last = Date.parse(String(row?.lastUsedAt || ''));
       if (!Number.isFinite(last)) continue;
       // The first millisecond at which this row is NOT running, not the last one at
@@ -318,15 +454,18 @@
   // rows are one derivation and cannot disagree. `now` is passed in so the
   // caller can pin a clock in tests; the renderer recomputes from the same
   // shared predicate when it repaints between pushes.
-  function recentSessionsFor(stats, provider) {
+  function recentSessionsFor(stats, provider, groupedSessions) {
     // The canonical `client:sessionId` key identifies a record, not the bare
     // sessionId: two clients can carry the same id, and collapsing them onto one
     // key made their states overwrite each other while the rows stayed distinct.
-    const entries = sessionSourceRows(stats)
-      .filter(({ session }) => providerForClient(normalizedId(session?.client)) === provider);
-    // One derivation for the run/quiet split and for the field the rows carry,
-    // from the same shared function the card repaints with.
-    return cappedSessionRows(entries, RECENT_SESSION_COUNT).rows;
+    const grouped = groupedSessions || groupedSessionRows(stats);
+    const rows = grouped.rows.filter(row => providerForClient(normalizedId(row.client)) === provider);
+    const states = new Map(rows.map(row => [row.key, grouped.stateFor(row)]));
+    const running = rows.filter(row => states.get(row.key) === 'running');
+    const waiting = rows.filter(row => states.get(row.key) === 'waiting');
+    const quiet = rows.filter(row => !['running', 'waiting'].includes(states.get(row.key)))
+      .slice(0, Math.max(0, RECENT_SESSION_COUNT - running.length - waiting.length));
+    return [...waiting, ...running, ...quiet].map(grouped.project);
   }
 
   function providerUsage(stats, provider) {
@@ -407,7 +546,7 @@
     // applied here - emptying the rows here turned a switch labelled "Show recent
     // sessions in card" into an off switch for the rail's activity mark, which is a
     // reading the card was never asked about.
-    const sessions = recentSessionsFor(options.stats, id);
+    const sessions = recentSessionsFor(options.stats, id, options.groupedSessions);
     return {
       id,
       kind: 'provider',
@@ -518,7 +657,9 @@
     if (metric === dockItems.SESSIONS_METRIC) {
       // Every tracked client, not just the ones with a limits provider: this is
       // the item that answers for the clients no quota card can show.
-      const sessions = recentSessionRows(stats, SESSIONS_RECENT_COUNT, { runningOnly: options.runningOnly === true });
+      const grouped = options.groupedSessions || groupedSessionRows(stats);
+      const sessions = selectRecentSessionRows(grouped.rows, SESSIONS_RECENT_COUNT,
+        { runningOnly: options.runningOnly === true }, grouped.stateFor).map(grouped.project);
       // Only a cell that draws the rate carries one: attaching the sample to every
       // sessions item would put live figures in a projection nothing reads them
       // from, and would make "this cell shows marks" indistinguishable in the cell.
@@ -625,13 +766,18 @@
     const items = Array.isArray(options.items)
       ? options.items
       : dockItems.defaultEdgeDockItems(connectedLimitProviders(stats, options));
+    // One projection per push, shared by every card. Recompute on the next
+    // push/expiry; a stats-key cache would freeze time-dependent selection.
+    const groupedSessions = items.some(item => item.metric === dockItems.SESSIONS_METRIC
+      || (item.type === 'limit' && options.limitsEnabled !== false))
+      ? groupedSessionRows(stats) : { rows: [], project: row => row, stateFor: sessionActivityState };
     const cells = [];
     for (const item of items) {
       if (item.type === 'stat') {
         // The item's own choices ride along: they are what a stored `sessions`
         // item was configured with, and the projection is the only place that
         // knows how to apply them.
-        cells.push(statCell(stats, item.metric, { ...options, ...item }));
+        cells.push(statCell(stats, item.metric, { ...options, ...item, groupedSessions }));
       } else if (item.type === 'limit' && options.limitsEnabled !== false) {
         // An explicitly chosen provider keeps its slot while it has nothing to
         // report (it renders as `--`), so the user's layout does not reshuffle
@@ -641,6 +787,7 @@
           showCodexAdditionalLimits: options.showCodexAdditionalLimits,
           subscriptionAccounts: allById.get(item.provider) || [],
           stats,
+          groupedSessions,
           localDeviceId: options.localDeviceId,
           syncActive: options.syncActive,
           codexManagedAccounts: options.codexManagedAccounts,
@@ -690,7 +837,10 @@
     buildEdgeDockCells,
     nextRunningExpiryAt,
     recentSessionRows,
+    sessionActivityState,
+    sessionMembers,
     runningSessionSummary,
+    waitingSessionSummary,
     connectedLimitProviders,
     displayPercent,
     edgeDockCellSignature,

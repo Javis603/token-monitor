@@ -9,7 +9,7 @@ const { readT3SessionMeta } = require('../../src/shared/t3SessionMetadata');
 const claude = require('../../src/shared/providers/claude/sessionMetadata');
 const { applySessionMetadata } = require('../../src/shared/sessionMetadata');
 const { sessionActivityState } = require('../../src/shared/sessionLive');
-const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+const { collectUsageOnce, localTodayKey, startCollector } = require('../../src/shared/collector');
 let sqlite;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
 const maybe = sqlite ? test : test.skip;
@@ -437,3 +437,118 @@ for (const unusable of [
     }
   });
 }
+
+
+for (const removal of ['tombstone', 'placeholder']) {
+  maybe(`Claude full scans preserve equal native titles after T3 ${removal}`, async (t) => {
+    const { home, db, v2 } = store(t);
+    const ids = ['equal-native', 'different-native', 'no-native', 'named-transcript'];
+    for (const id of ids) v2(`app-${id}`, id, 'Catalog title');
+    const projects = path.join(home, '.claude', 'projects', 'test-project');
+    fs.mkdirSync(projects, { recursive: true });
+    fs.writeFileSync(path.join(projects, 'named-transcript.jsonl'), JSON.stringify({ type: 'custom-title', customTitle: 'Transcript title' }) + '\n');
+    const shared = path.join(home, 'shared');
+    const oldShared = process.env.TOKEN_MONITOR_SHARED_DIR;
+    process.env.TOKEN_MONITOR_SHARED_DIR = shared;
+    let handle;
+    t.after(() => { handle?.stop(); if (oldShared === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR; else process.env.TOKEN_MONITOR_SHARED_DIR = oldShared; });
+    const updates = [];
+    const scans = [];
+    const options = {
+      clients: 'claude', homeDir: home, projectsEnabled: false, historyEnabled: false,
+      dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false, wslScanEnabled: false,
+      sessionActivityPolling: false, watchEnabled: false, intervalMs: 3600000, osInfo: {},
+      allTimeSince: '2024-01-01',
+      sessionMetadataDeps: { scopedHome: true, env: {}, claudeMetadataDeps: { sqlite, cache: new Map() } },
+      runTokscale: async ({ flags }) => {
+        scans.push(flags);
+        return {
+          entries: ids.map((sessionId) => ({ client: 'claude', sessionId, input: 10, output: 2, cost: 0.5 })),
+          sessions: [{ client: 'claude', sessionId: ids[0], title: 'Catalog title' },
+            { client: 'claude', sessionId: ids[1], title: 'Other native title' }]
+        };
+      },
+      onUpdate: (value) => updates.push(value)
+    };
+    try {
+      handle = startCollector(options);
+      for (let attempt = 0; attempt < 200 && !updates.length; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(updates.length, 1);
+      const initial = updates[0];
+      if (removal === 'tombstone') db.prepare('UPDATE orchestration_v2_projection_threads SET deleted_at = ?').run('2026-10-04');
+      else db.prepare('UPDATE orchestration_v2_projection_threads SET title = ?').run('New thread');
+      for (let refresh = 0; refresh < 2; refresh += 1) {
+        scans.length = 0;
+        await handle.tick();
+        assert.deepEqual(scans, [['--today'], ['--month'], ['--since', '2024-01-01']]);
+        for (const period of ['today', 'month', 'allTime']) {
+          const current = updates.at(-1)[period];
+          assert.equal(current.sessions[`claude:${ids[0]}`].title, 'Catalog title');
+          assert.equal(current.sessions[`claude:${ids[1]}`].title, 'Other native title');
+          assert.equal(current.sessions[`claude:${ids[2]}`].title || '', '');
+          assert.equal(current.sessions[`claude:${ids[3]}`].title, 'Transcript title');
+          assert.equal(current.totalTokens, initial[period].totalTokens);
+          assert.equal(current.costUsd, initial[period].costUsd);
+        }
+        const saved = JSON.parse(fs.readFileSync(path.join(shared, 'collector-anchor.json'), 'utf8'));
+        for (const id of ids) assert.equal(saved.t3Titles[`claude:${id}`], null);
+      }
+    } finally { handle?.stop(); handle = null; }
+  });
+}
+
+maybe('T3 title lookup binds a large requested-id relation once per schema and retains removals', (t) => {
+  const { db, file, v2, legacy } = store(t);
+  db.exec('BEGIN');
+  const ids = Array.from({ length: 1201 }, (_, i) => `native-${i}`);
+  for (const [i, id] of ids.entries()) {
+    v2(`app-${i}`, id, i === 400 ? 'New thread' : `Title ${i}`, 'claudeAgent', i === 800 ? 'deleted' : null);
+    legacy(`old-${i}`, id, `Stale ${i}`);
+  }
+  legacy('legacy-only-app', 'legacy-only', 'Legacy-only title');
+  db.exec('COMMIT');
+  const titleQueries = [];
+  class MeasuredDatabase extends sqlite.DatabaseSync {
+    prepare(sql) {
+      const statement = super.prepare(sql);
+      if (!sql.includes('AS cursorThreadId')) return statement;
+      return { all: (...args) => { titleQueries.push(args); return statement.all(...args); } };
+    }
+  }
+  const invalidatedSessionIds = new Set();
+  const result = readT3SessionMeta([...ids, 'rollout-alias', 'legacy-only', ids[0]], {
+    driver: 'claudeAgent', t3DbPaths: [file], sqlite: { DatabaseSync: MeasuredDatabase }, invalidatedSessionIds,
+    candidatesForId: id => id === 'rollout-alias' ? ['absent', ids[1200]] : [id]
+  });
+  assert.equal(result.size, 1201);
+  assert.equal(result.get(ids[1200]).title, 'Title 1200');
+  assert.equal(result.get('rollout-alias').title, 'Title 1200');
+  assert.equal(result.get('legacy-only').title, 'Legacy-only title');
+  assert.deepEqual(invalidatedSessionIds, new Set([ids[400], ids[800]]));
+  assert.equal(titleQueries.length, 2, 'one title statement per V2/legacy schema, independent of requested-id count');
+  assert.ok(titleQueries.every(args => args.length === 2), 'driver and JSON relation are the only parameters');
+});
+
+maybe('missing T3 stores skip candidate expansion and failed stores do not invalidate titles', (t) => {
+  const { file, v2 } = store(t);
+  v2('app', 'native', 'Confirmed title');
+  const invalidatedSessionIds = new Set();
+  const absent = path.join(path.dirname(file), 'absent.sqlite');
+  assert.equal(readT3SessionMeta(['native'], {
+    driver: 'claudeAgent', t3DbPaths: [absent], sqlite,
+    candidatesForId: () => assert.fail('no store must not expand historical identities')
+  }).size, 0);
+  class FailingDatabase extends sqlite.DatabaseSync {
+    prepare(sql) {
+      if (sql.includes('AS cursorThreadId')) throw new Error('temporary title read failure');
+      return super.prepare(sql);
+    }
+  }
+  assert.equal(readT3SessionMeta(['native'], {
+    driver: 'claudeAgent', t3DbPaths: [file], sqlite: { DatabaseSync: FailingDatabase }, invalidatedSessionIds
+  }).size, 0);
+  assert.equal(invalidatedSessionIds.size, 0, 'read failures are not title removals');
+  assert.equal(readT3SessionMeta(['native'], {
+    driver: 'claudeAgent', t3DbPaths: [absent, file], sqlite, invalidatedSessionIds
+  }).get('native').title, 'Confirmed title');
+});

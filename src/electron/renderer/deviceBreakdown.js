@@ -7,6 +7,14 @@
 })(typeof window !== 'undefined' ? window : null, function createDeviceBreakdownApi() {
   const UNATTRIBUTED_KEY = '__unattributed';
 
+  function deviceLabel(device) {
+    for (const field of ['displayName', 'deviceId', 'hostname']) {
+      const label = String(device?.[field] || '').trim();
+      if (label) return label;
+    }
+    return 'device';
+  }
+
   function positiveEntries(value) {
     return Object.entries(value || {})
       .map(([key, amount]) => [key, Math.max(0, Number(amount || 0))])
@@ -59,5 +67,5 @@
     return [name, version].filter(Boolean).join(' ');
   }
 
-  return { deviceBreakdownForPeriod, devicePlatformLabel };
+  return { deviceBreakdownForPeriod, deviceLabel, devicePlatformLabel };
 });

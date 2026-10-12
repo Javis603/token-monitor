@@ -12,10 +12,12 @@
 // so a session that pauses mid-task keeps its reading) and what a valid pair
 // looks like; this module owns what the UI does with the answer.
 (function exposeSessionLive(root, factory) {
-  const api = factory();
+  const providers = typeof module === 'object' && module.exports
+    ? require('./sessionActivityProviders') : root.TokenMonitorSessionActivityProviders;
+  const api = factory(providers);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorSessionLive = api;
-})(typeof window !== 'undefined' ? window : null, function createSessionLiveApi() {
+})(typeof window !== 'undefined' ? window : null, function createSessionLiveApi(providers) {
   function finiteNumber(value) {
     const number = Number(value);
     return Number.isFinite(number) ? number : 0;
@@ -37,6 +39,42 @@
   // reacts to a transcript write within seconds, so nothing here waits on a
   // poll, and a mid-turn pause does not blink the row out.
   const RUNNING_WINDOW_MS = 10 * 60 * 1000;
+  const LIVE_ACTIVITY_TTL_MS = 30_000;
+
+  function normalizeLiveActivity(value) {
+    if (!value || !['running', 'waiting', 'idle', 'unknown'].includes(value.state)) return null;
+    const observedAt = timestampMs(value.observedAt);
+    return observedAt ? { state: value.state, observedAt: new Date(observedAt).toISOString() } : null;
+  }
+
+  // A future peer clock is not newer evidence. Apply the same ordering at the
+  // aggregate, local overlay and renderer joins so it cannot poison a cache.
+  function canReplaceLiveActivity(previous, next, now = Date.now()) {
+    const incoming = timestampMs(next?.observedAt);
+    const prior = timestampMs(previous?.observedAt);
+    const clock = nowMs(now);
+    return incoming > 0 && incoming <= clock && (prior > clock || incoming >= prior);
+  }
+
+  // Local activity overlays leave the accounting session map untouched. Resolve
+  // one row at the presentation/normalization boundary; wire rows stay ordinary.
+  function sessionWithActivity(period, key, session = period?.sessions?.[key]) {
+    if (!session || isArchivedSession(session)) return session;
+    const observation = normalizeLiveActivity(period?.sessionActivity?.[key]);
+    if (!observation || !providers.isSessionActivityClient(session.client)
+      || !canReplaceLiveActivity(session.liveActivity, observation)) return session;
+    return { ...session, liveActivity: observation };
+  }
+
+  function liveActivityExpiryAt(session, now = Date.now()) {
+    if (!providers.isSessionActivityClient(session?.client) || isArchivedSession(session)) return 0;
+    const reading = normalizeLiveActivity(session.liveActivity);
+    if (!reading || reading.state === 'unknown') return 0;
+    const observedAt = timestampMs(reading.observedAt);
+    const clock = nowMs(now);
+    if (observedAt > clock || observedAt + LIVE_ACTIVITY_TTL_MS <= clock) return 0;
+    return observedAt + LIVE_ACTIVITY_TTL_MS;
+  }
 
   // An archived session is never running whatever its timestamp says: the
   // source it was read from is gone, so nothing can still be appending to it.
@@ -51,7 +89,10 @@
     return sessionActivityState(session, now) === 'running';
   }
 
-  // Three states, not two. A live session's transcript says whether the agent
+  // Transcript activity is running, ended or idle. A validated live provider
+  // observation can override it with explicit running, waiting or idle while
+  // its short lease is current. Unknown and expired observations fall back.
+  // A live session's transcript says whether the agent
   // is still working on a turn, and reading that is strictly better than a
   // timeout for the clients that report it: the run ends when it ends, not up
   // to ten minutes later. `turnEnded` is that report, set by the provider
@@ -67,10 +108,12 @@
   // for the rest of the window.
   function sessionActivityState(session, now = Date.now()) {
     if (isArchivedSession(session)) return 'idle';
+    if (liveActivityExpiryAt(session, now)) return session.liveActivity.state;
     const last = timestampMs(session?.lastUsedAt);
     if (!last) return 'idle';
     const recent = nowMs(now) - last <= RUNNING_WINDOW_MS;
     if (session?.turnEnded === true) return recent ? 'ended' : 'idle';
+    if (recent && session?.client === 'codex' && session.waitingForInput === true) return 'waiting';
     return recent ? 'running' : 'idle';
   }
 
@@ -162,6 +205,8 @@
     let next = nextPromptCacheChangeAt(sessions, clock);
     for (const session of sessions || []) {
       if (isArchivedSession(session)) continue;
+      const activityExpiry = liveActivityExpiryAt(session, clock);
+      if (activityExpiry && (!next || activityExpiry < next)) next = activityExpiry;
       const last = timestampMs(session?.lastUsedAt);
       const expiry = last + RUNNING_WINDOW_MS + 1;
       if (last && expiry > clock && (!next || expiry < next)) next = expiry;
@@ -169,7 +214,7 @@
     return next;
   }
 
-  // The three state glyphs, as markup, so both renderers draw the same shapes
+  // State glyphs, as markup, so both renderers draw the same shapes
   // and only name their CSS classes differently. Six spokes with one leading at
   // full opacity read as rotation even in a still frame, which is why the
   // spinner needs no image asset.
@@ -185,6 +230,7 @@
     const turn = String(classes.spin || 'spin');
     const check = String(classes.check || 'check');
     const idle = String(classes.idle || 'idle');
+    const waiting = String(classes.waiting || 'waiting');
     const tick = CHECK_PATHS.map((d) => `<path d="${d}"/>`).join('');
     // The spinner is an empty hook: its shape comes from the repo's own
     // `icons/actions/spinner.svg` applied as a CSS mask, exactly as the
@@ -192,12 +238,19 @@
     return `<span class="${turn}"></span>`
       + `<svg class="${check}" viewBox="0 0 24 24" fill="none" stroke="currentColor"`
       + ` stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${tick}</svg>`
-      + `<span class="${idle}"></span>`;
+      + `<span class="${idle}"></span>`
+      + `<svg class="${waiting}" viewBox="0 0 24 24" fill="none" stroke="currentColor"`
+      + ' stroke-width="3" stroke-linecap="round"><path d="M8 5v14M16 5v14"/></svg>';
   }
 
   return {
     CONTEXT_TONES,
     RUNNING_WINDOW_MS,
+    LIVE_ACTIVITY_TTL_MS,
+    normalizeLiveActivity,
+    canReplaceLiveActivity,
+    sessionWithActivity,
+    liveActivityExpiryAt,
     contextTone,
     isArchivedSession,
     isRunningSession,

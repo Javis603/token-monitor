@@ -3482,7 +3482,8 @@ html.is-windows .settings-panel select option {
 .home-module:focus-visible {
   opacity: 0.94;
 }
-.home-module:focus-visible {
+.home-module:focus-visible,
+.home-module-head[role="button"]:focus-visible {
   outline: 2px solid rgba(var(--accent-rgb), 0.32);
   outline-offset: 4px;
 }
@@ -3658,7 +3659,9 @@ html.is-windows .settings-panel select option {
 }
 .home-session-state[data-state="running"] .home-session-spin,
 .home-session-state[data-state="ended"] .home-session-check,
+.home-session-state[data-state="waiting"] .home-session-waiting,
 .home-session-state[data-state="idle"] .home-session-idle { display: block; }
+.home-session-waiting { color: var(--orange); }
 .home-session-spin {
   background: var(--text);
   -webkit-mask: url("icons/actions/spinner.svg") center / contain no-repeat;
@@ -4180,6 +4183,22 @@ html.is-windows .settings-panel select option {
 .row-detail {
   opacity: 0.84;
 }
+.row-subtitle.has-subagent-count > .overflow-text-content {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+.session-subtitle-identity {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-subagent-count {
+  flex: 0 0 auto;
+  white-space: pre;
+}
 .row-metrics { display: grid; flex: 0 0 auto; gap: 2px; min-width: max-content; text-align: right; }
 .row-value { color: var(--text); white-space: nowrap; }
 .row-cost { color: var(--muted); font-size: 0.625rem; white-space: nowrap; }
@@ -4231,7 +4250,19 @@ html.is-windows .settings-panel select option {
 .row-name { position: relative; }
 .row-live { display: none; }
 /* Absolutely positioned so a running row never shifts against its neighbours. */
- .row-live.is-active { display: block; position: absolute; top: 8px; left: 6px; }
+ .row-live.is-active,
+ .row-live.is-waiting { display: block; position: absolute; top: 8px; left: 6px; }
+.row-live-waiting { display: none; }
+.row-live.is-waiting .row-live-dot { display: none; }
+.row-live.is-waiting .row-live-waiting {
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: -2px;
+  background: var(--orange);
+  -webkit-mask: url("icons/actions/attention.svg") center / contain no-repeat;
+  mask: url("icons/actions/attention.svg") center / contain no-repeat;
+}
 .row-live-dot {
   display: block;
   width: 5px;
@@ -4301,7 +4332,8 @@ html.is-windows .settings-panel select option {
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .row-context-fill { transition: none; }
 }
-.shell.session-mode .breakdown {
+.shell.session-mode .breakdown,
+.shell.session-mode .session-group-list {
   gap: 7px;
 }
 .shell.session-mode .row {
@@ -4375,7 +4407,8 @@ html.is-windows .settings-panel select option {
    applyBreakdownRowSemantics), so a row with no detail stays inert. The list
    gets a little room (cancelled by its margin) so the wash can reach past the
    text it frames without the scroller clipping the first row's. */
-.shell.session-mode .breakdown {
+.shell.session-mode .breakdown,
+.shell.session-mode .session-group-list {
   margin: -5px -6px 0;
   padding: 5px 8px 0 6px;
 }
@@ -6348,9 +6381,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .detail-role-user { color: #bda5f5; }
 .detail-role-sep { color: var(--muted); }
 .detail-turn-title { color: var(--muted); }
-.background-review-overview { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 4px 0 6px; color: var(--muted); font-size: 0.625rem; }
-.background-review-totals { white-space: nowrap; color: var(--text); }
-.background-review-run:focus-visible,
+.session-group-overview { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 4px 0 6px; color: var(--muted); font-size: 0.625rem; }
+.session-group-section-heading { margin: 8px 0 2px; color: var(--muted); font-size: 0.625rem; font-weight: 400; }
+.session-group-section-heading.is-first { margin-top: 0; }
+.session-group-totals { white-space: nowrap; color: var(--text); }
 .row[role="button"]:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.35); outline-offset: 2px; }
 .row[role="button"] { cursor: pointer; }
 .detail-session-id { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted, #8a8a90); font-size: 0.625rem; }

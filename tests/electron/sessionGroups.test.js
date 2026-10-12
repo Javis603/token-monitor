@@ -1,0 +1,174 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+const { groupSessionRows, sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
+
+const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+function period(tokens) {
+  const sessions = { 'codex:review': { client: 'codex', sessionId: 'review', sessionKind: 'background-review',
+    totalTokens: 10, models: { 'gpt-5': 10 } } };
+  if (tokens) sessions['cursor:sand-subagent-run'] = { client: 'cursor', sessionId: 'sand-subagent-run',
+    totalTokens: tokens, models: { 'grok-bot-automation': tokens } };
+  return { sessions };
+}
+const rowsForPeriod = value => groupSessionRows(sessionRowsForPeriod(value));
+
+test('group activation resolves the clicked group when Codex and Grok coexist', () => {
+  let activate;
+  let rendered;
+  const state = { breakdown: 'session', period: 'today', stats: { periods: { today: period(20) } } };
+  const start = source.indexOf("els.breakdown.addEventListener('click',");
+  const end = source.indexOf('\n});', start) + 4;
+  vm.runInNewContext(source.slice(start, end), { state, els: { breakdown: {
+    addEventListener(_type, handler) { activate = handler; }
+  } }, sessionRowsForPeriod: rowsForPeriod, renderSessionGroupDetail(request) { rendered = request; } });
+  for (const id of ['cursor-grok-bot', 'codex-auto-review']) {
+    const key = `session-group:${id}`;
+    activate({ target: { closest: () => ({ dataset: { key, sessionGroup: id } }) } });
+    assert.equal(state.openSession.summary.key, key);
+    assert.strictEqual(rendered, state.openSession);
+  }
+});
+
+test('period switches keep the same group and return to Sessions when that group is absent', () => {
+  const state = { period: 'today', stats: { periods: { today: period(20), month: period(50), allTime: period(0) } },
+    openSession: { kind: 'session-group', summary: rowsForPeriod(period(20)).find(row => row.sessionGroup === 'cursor-grok-bot') } };
+  let activate;
+  const tab = { dataset: { period: 'month', periodSlot: 'month' }, addEventListener(_type, callback) { activate = callback; } };
+  let renders = 0;
+  const noop = () => {};
+  const start = source.indexOf("for (const tab of document.querySelectorAll('.tab'))");
+  const end = source.indexOf('\nfor (const button of els.monthPeriodMenu', start);
+  vm.runInNewContext(source.slice(start, end), { state, document: { querySelectorAll: () => [tab] },
+    fixedPeriodRangesApi: { slotForSelection: value => value, normalizeMonthMode: () => 'month', supportsBreakdown: () => true },
+    captureBreakdownMotion: noop, setPeriod: value => { state.period = value; return true; }, syncPeriodTabs: noop,
+    setPeriodMenuOpen: noop, sessionRowsForPeriod: rowsForPeriod, render: () => { renders += 1; }, animateBreakdownFrom: noop });
+  activate({ stopPropagation: noop });
+  assert.equal(state.openSession.summary.key, 'session-group:cursor-grok-bot');
+  assert.equal(state.openSession.summary.value, 50);
+  assert.equal(state.openSession.period, 'month');
+  tab.dataset = { period: 'allTime', periodSlot: 'allTime' };
+  activate({ stopPropagation: noop });
+  assert.equal(state.period, 'allTime');
+  assert.equal(state.openSession, null, 'the remaining Codex group does not replace a missing Grok group');
+  assert.equal(renders, 2);
+});
+
+test('stats repaint refreshes the open group by identity and retires a removed group', () => {
+  const key = 'session-group:cursor-grok-bot';
+  const state = { openSession: { kind: 'session-group', summary: rowsForPeriod(period(20)).find(row => row.sessionGroup === 'cursor-grok-bot') } };
+  let rendered;
+  let closed = false;
+  const start = source.indexOf("    if (state.openSession.kind === 'session-group') {");
+  const end = source.indexOf('    refreshSessionDetailHeading();', start);
+  const repaint = Function('state', 'period', 'sessionRowsForPeriod', 'closeSessionDetail',
+    'sessionTooltipShouldHoldRender', 'renderSessionGroupDetail', source.slice(start, end));
+  const close = () => { closed = true; state.openSession = null; };
+  repaint(state, period(80), rowsForPeriod, close, () => false, request => { rendered = request; });
+  assert.equal(rendered.summary.key, key);
+  assert.equal(rendered.summary.value, 80);
+  repaint(state, period(100), rowsForPeriod, close, () => true, () => assert.fail('hover holds repaint'));
+  assert.equal(state.openSession.summary.value, 100);
+  repaint(state, period(0), rowsForPeriod, close, () => false, () => assert.fail('removed group must close'));
+  assert.equal(closed, true);
+  assert.equal(state.openSession, null);
+});
+
+test('historical bot evidence refreshes in Today and Month without opening TOTAL', async () => {
+  const { createAllTimeSessionsLoader } = require('../../src/electron/renderer/allTimeSessions');
+  const { attachLocalPresentationNativeViews } = require('../../src/electron/syncDisplayStats');
+  const { rendererStats } = require('../../src/electron/statsPublisher');
+  const state = { breakdown: 'session', period: 'today', stats: { snapshot: { id: 1, source: 'local' } } };
+  let history = {};
+  const calls = [];
+  let loader;
+  const start = source.indexOf('function allTimeSessionsNeeded()');
+  const end = source.indexOf('const allTimeSessions =', start);
+  const needed = Function('state', 'allTimeSessions', 'isSettingsPanelOpen',
+    `${source.slice(start, end)}; return allTimeSessionsNeeded;`)(state, { loaded: () => loader.loaded() }, () => false);
+  loader = createAllTimeSessionsLoader({ currentSnapshot: () => state.stats.snapshot, needed,
+    fetchSessions: id => { calls.push(id); return history; },
+    onLoaded: () => { state.stats = loader.attach(state.stats); } });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  loader.ensure();
+  await settle();
+  assert.equal(loader.loaded(), true, 'the initial empty history is already loaded');
+  const id = 'uuid-bot';
+  const chat = { client: 'cursor', sessionId: id, totalTokens: 10, costUsd: 1, models: { 'claude-opus-5-5-medium': 10 } };
+  const current = { sessions: { [`cursor:${id}`]: chat } };
+  const past = { [`cursor:${id}`]: { ...chat, models: { 'grok-bot-default': 20 } } };
+  for (const [index, selected] of ['today', 'month'].entries()) {
+    state.period = selected;
+    const stats = { snapshot: { id: index + 2, source: 'local' },
+      periods: { today: current, month: current, allTime: {} } };
+    attachLocalPresentationNativeViews(stats, { mode: 'local',
+      lastCollectedDevice: { today: current, month: current, allTime: { sessions: past } } });
+    state.stats = loader.attach(rendererStats(stats));
+    loader.invalidate();
+    loader.ensure();
+    await settle();
+    const rows = groupSessionRows(sessionRowsForPeriod(current, {
+      sourcePeriods: state.stats.periods, grokBotSessionIds: state.stats.grokBotSessionIds
+    }));
+    assert.equal(rows[0].sessionGroup, 'cursor-grok-bot');
+    assert.equal(rows[0].value, 10);
+    assert.equal(rows[0].cost, 1);
+    assert.equal(state.period, selected, 'no navigation was needed');
+  }
+  assert.deepEqual(calls, [1], 'DAY/MONTH stats updates never pull full history again');
+  state.period = 'allTime';
+  history = past;
+  loader.ensure();
+  await settle();
+  assert.deepEqual(calls, [1, 3], 'TOTAL still refreshes its full list on demand');
+  state.breakdown = 'tool';
+  assert.equal(needed(), false, 'unrelated views do not refresh history');
+  state.period = 'allTime';
+  state.breakdown = 'project';
+  assert.equal(needed(), true);
+});
+
+test('group hover reading and keyboard focus hold the refresh for every detail line', () => {
+  const start = source.indexOf('function sessionTooltipShouldHoldRender()');
+  const end = source.indexOf('function flushPendingLimitDetailTooltipRender', start);
+  for (const selector of ['.session-group-run .is-hover-reading', '.session-group-run:focus-within']) {
+    const held = Function('document', `${source.slice(start, end)}; return sessionTooltipShouldHoldRender();`)({
+      querySelector: selectors => selectors.split(', ').includes(selector) ? {} : null
+    });
+    assert.equal(held, true, selector);
+  }
+});
+
+
+test('conflicting absent parents split a shared native identity into stable independently navigable groups', () => {
+  const nativeSessionId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  const at = new Date().toISOString();
+  const sessions = {
+    'codex:a': { client: 'codex', sessionId: 'a', nativeSessionId, parentSessionId: 'absent-a', totalTokens: 10, lastUsedAt: at },
+    'codex:b': { client: 'codex', sessionId: 'b', nativeSessionId, parentSessionId: 'absent-b', totalTokens: 20, lastUsedAt: at },
+    'codex:ca': { client: 'codex', sessionId: 'ca', parentSessionId: 'a', totalTokens: 30, lastUsedAt: at },
+    'codex:cb': { client: 'codex', sessionId: 'cb', parentSessionId: 'b', totalTokens: 40, lastUsedAt: at }
+  };
+  const rows = rowsForPeriod({ sessions });
+  assert.equal(rows.length, 2);
+  assert.equal(new Set(rows.map(row => row.key)).size, 2, 'DOM and detail lookup keys are distinct');
+  const reversed = rowsForPeriod({ sessions: Object.fromEntries(Object.entries(sessions).reverse()) });
+  assert.deepEqual(rows.map(row => row.key).sort(), reversed.map(row => row.key).sort(), 'input order does not affect identities');
+  let activate;
+  const state = { breakdown: 'session', period: 'month', stats: { periods: { month: { sessions } } } };
+  const start = source.indexOf("els.breakdown.addEventListener('click',");
+  const end = source.indexOf('\n});', start) + 4;
+  vm.runInNewContext(source.slice(start, end), { state, els: { breakdown: { addEventListener(_event, callback) { activate = callback; } } },
+    sessionRowsForPeriod: rowsForPeriod, renderSessionGroupDetail() {} });
+  for (const row of rows) {
+    activate({ target: { closest: () => ({ dataset: { key: row.key, sessionGroup: row.sessionGroup } }) } });
+    assert.deepEqual(state.openSession.summary.groupRows.map(member => member.key), row.groupRows.map(member => member.key));
+  }
+  const dock = require('../../src/electron/renderer/edgeDock/presentation').recentSessionRows({ periods: { month: { sessions } } }, 100);
+  assert.equal(new Set(dock.map(row => row.key)).size, 2, 'Dock expansion keys also remain distinct');
+  assert.equal(dock.reduce((sum, row) => sum + row.totalTokens, 0), 100);
+});

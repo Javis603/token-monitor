@@ -21,6 +21,8 @@ For sessions matched to T3 Code, a usable T3 sidebar title takes precedence over
 
 Legacy Claude lookup requires `provider_session_runtime.provider_name = 'claudeAgent'`. Stores without that column keep native titles because the generic `resume` cursor alone cannot establish provider identity. Codex retains its older compatibility path without this column; Claude does not inherit that exception. Malformed legacy cursors are ignored without hiding other valid matches.
 
+T3-owned delegated Claude sessions can carry an independent parent link, including a Codex parent. This uses the shared [relationship reader](../architecture.md#session-relationships); native Claude subagent usage remains accounted for by the parser and is not synthesized into extra session rows.
+
 If the Claude transcript is unavailable, a T3 title updates only the displayed title and preserves the session's existing activity and transcript metadata. When the transcript becomes available again, its turn boundary and other readings apply normally.
 
 Cached overrides record their T3 source explicitly, independently of whether a transcript exists. A confirmed V2 tombstone, empty title or placeholder invalidates that override within the collection. Previously decorated rows recover their prior title, while fresh native labels are preserved. Cached T3 titles are separated from native metadata before a transcript is read, so a transcript with no title cannot inherit a stale override. Missing or unreadable stores do not invalidate overrides and keep cached T3 titles.
@@ -34,6 +36,14 @@ Claude emits `contextTokens`/`contextWindow` from its transcript for sessions th
 An explicit `[1m]` model marker, supported native Claude 1M model ids and recognized provider Sonnet 5 ids map to 1M. Other nonempty model ids map to Claude Code's 200K default, including third-party bridges as a best-effort estimate; do not present that fallback as an authoritative bridge window. A compact boundary or compact summary clears the pair to `0/0` until the next valid assistant response. Oversized JSONL records use bounded head/tail fragments; accept context only from a complete message-level `usage` object and do not mistake nested `model` or `usage` fields in tool content for the response.
 
 Cache warmth is an optional `promptCache: { observedAt, ttlSeconds }` estimate from the same incremental transcript index used for title, context and turn state, with no extra file read or JSON parse, requiring cache activity and a reported 5-minute or 1-hour write tier in the newest serving response. Mixed tiers use the shorter TTL; unknown tiers and compaction hide the estimate. Duplicate assistant records do not refresh it, and sidechain responses are excluded. The anchor is the first available response observation, not the unrecorded request time, so remaining time may be overstated. No status line, plugin or Claude settings changes are needed. Home, Edge Dock and Sessions share one metrics slot: recent context takes priority, with the context token/window counts and cache countdown available in the shared detail tooltip by hovering its bar or percentage; then a still-valid cache estimate appears after 10 minutes of inactivity, with the last recorded context counts still available on hover. Turn completion alone clears neither reading; the cache countdown ends at the observed TTL.
+
+## Live waiting status
+
+Native Claude Code supplies state through `<configDir>/sessions/<pid>.json`: recognized `waiting`/`busy`/`idle` states or `blocked`/`active`/`idle` tempo values map to activity by `sessionId`. Validate the PID domain and process start identity on each read; dead or recycled PIDs are not evidence. Linux records use `linux:<machine-id>:<pid-namespace>` and compare `procStart` with field 22 from `/proc/<pid>/stat` (start-time ticks), rejecting zombie/dead states. Darwin and Windows retain their existing process-start checks. Desktop-hosted records, scoped WSL homes, unreadable records and unsupported probes retain transcript fallback. No Claude settings changes are required.
+
+T3 V2 pending approvals and questions match the `claudeAgent` driver and `nativeThreadRef.nativeId` to the current run. Validate the server incarnation and request response capability; verified T3 running/waiting takes precedence over the registry. Terminal idle uses the latest run completion or message-question resolution time, expires without renewal and yields to a live native registry. A message-answerable question can remain waiting after model completion until answered or cancelled.
+
+The [shared activity pipeline](../architecture.md) owns refresh, patches and thirty-second expiry. Missing evidence clears the prior observation to `unknown`. Only state and observation time are published; registry prompts, paths and process identity remain local. Pre-token rows use local-only `nativeSessions` and disappear on idle, source loss or replacement by unarchived usage rows. Sessions, Home and Edge Dock share waiting state; waiting rows do not count as running. Without reliable evidence, the existing ten-minute transcript rules apply.
 
 ## Limits source order
 
@@ -72,5 +82,5 @@ Prepaid balance is best effort and cached more slowly than usage. A failed or re
 Run the Claude session, limits and Electron transport tests when changing this note's scope:
 
 ```bash
-node --test tests/shared/claudeSessionMetadata.test.js tests/shared/limitCollector.claude.test.js tests/electron/claudeWebFetch.test.js
+node --test tests/shared/claudeSessionActivity.test.js tests/shared/claudeSessionMetadata.test.js tests/shared/limitCollector.claude.test.js tests/electron/claudeWebFetch.test.js
 ```
