@@ -385,6 +385,9 @@ for (const { name, settings, expected } of [
       DEFAULT_LIMIT_PROVIDER_ORDER: 'claude',
       limitProviderOrderApi,
       homeOverviewApi: { homeLimitAccountsForProviders, homeLimitsAwaitingFirstData },
+      limitWindowsView: require('../../src/electron/renderer/limits/windowsView').createLimitWindowsView({
+        presentation: require('../../src/electron/renderer/limits/providerPresentation')
+      }),
       clientColors: {},
       hiddenHomeLimitProviderSet: () => new Set(),
       homeModuleShell: () => ({ module: {}, body }),

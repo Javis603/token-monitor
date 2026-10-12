@@ -61,6 +61,12 @@ class FakeElement {
       this.children.push(child);
     }
   }
+  insertBefore(child, reference) {
+    const index = this.children.indexOf(reference);
+    if (index < 0) throw new Error('Reference is not a child');
+    child.parent = this;
+    this.children.splice(index, 0, child);
+  }
   remove() {
     if (!this.parent) return;
     this.parent.children = this.parent.children.filter((child) => child !== this);
@@ -182,6 +188,49 @@ function dockView(appearance = {}, overrides = {}) {
     ...overrides
   });
 }
+
+test('WorkBuddy group draws a healthy total plus independent accounts and omits partial totals', () => {
+  const rows = ['one', 'two'].map((accountKey) => normalizeLimitProvider({
+    provider: 'workbuddy', accountKey, accountName: 'Same nickname', region: 'cn', status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, limit: 100, remaining: 80 }]
+  }));
+  const healthy = dockView().renderLimitProviderGroup('workbuddy', 'WorkBuddy', rows, '#12B7F5');
+  assert.equal(healthy.children[1].className, 'limit-windows');
+  assert.equal(healthy.find('limit-account-list').children.length, 2);
+  const partial = dockView().renderLimitProviderGroup('workbuddy', 'WorkBuddy',
+    [rows[0], { ...rows[1], status: 'unavailable' }], '#12B7F5');
+  assert.equal(partial.children[1].className, 'limit-account-list');
+  assert.equal(partial.children[1].children.length, 2);
+});
+
+test('Dock projection cannot total only visible WorkBuddy accounts while a known sibling is omitted', () => {
+  const wb = (accountKey, extra = {}) => normalizeLimitProvider({ provider: 'workbuddy', accountKey, region: 'cn', status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }], ...extra });
+  for (const scenario of ['nonreporting', 'hidden', 'unlimited-hidden', 'healthy-hidden']) {
+    const c = scenario === 'nonreporting' ? wb('c', { status: 'unauthorized', windows: [] })
+      : scenario === 'unlimited-hidden' ? wb('c', { windows: [{ kind: 'billing', metric: 'credits', detail: 'unlimited', used: 20 }] })
+        : wb('c', { status: scenario === 'hidden' ? 'unavailable' : 'ok' });
+    const [cell] = buildEdgeDockCells({ limits: { providers: [wb('a'), wb('b'), c] } }, {
+      items: [{ type: 'limit', provider: 'workbuddy', hiddenAccounts: scenario === 'nonreporting' ? [] : ['c'] }]
+    });
+    const drawn = cell.accounts.map((account) => account.record);
+    assert.equal(drawn.length, 2, scenario);
+    const card = dockView({}, { subscriptionAccounts: () => cell.subscriptionAccounts })
+      .renderLimitProviderGroup('workbuddy', 'WorkBuddy', drawn, '#12B7F5');
+    assert.equal(card.children[1].className, 'limit-account-list', scenario);
+  }
+});
+
+test('saved-only WorkBuddy subscription card does not appear on the sole live sibling', () => {
+  const live = normalizeLimitProvider({ provider: 'workbuddy', accountKey: 'a', status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }] });
+  const saved = { id: 'saved-c', provider: 'workbuddy', kind: 'subscription', binding: { accountKey: 'c', profileName: 'Saved C' },
+    planName: 'C plan', amountMinor: 9900, currency: 'USD', interval: 'month', intervalCount: 1, startDate: '2026-01-01', autoRenew: true };
+  const [cell] = buildEdgeDockCells({ limits: { providers: [live] } }, { items: [{ type: 'limit', provider: 'workbuddy' }] });
+  const card = dockView({ subscriptions: [saved] }, { subscriptionAccounts: () => cell.subscriptionAccounts })
+    .renderLimitProviderSolo('workbuddy', 'WorkBuddy', live, '#12B7F5');
+  assert.equal(card.find('subscription-tooltip'), null);
+});
 
 test('Home text and bars use the plan text rendered by Limits account rows', () => {
   const window = { kind: 'weekly', remainingPercent: 40 };

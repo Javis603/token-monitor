@@ -615,6 +615,9 @@ function isConfiguredProvider(provider) {
 }
 
 function providerCollapseKey(provider) {
+  // Known WorkBuddy identities survive missing credentials and refresh-token
+  // rotation. Keep every account separate even while its login is unavailable.
+  if (provider.provider === 'workbuddy' && provider.accountKey) return providerAggregateKey(provider);
   // Antigravity account keys are portable only when a normalized Google email
   // proves the identity. Anonymous RPC fallback keys are local observations,
   // so keep the device scope established by providerAggregateKey().
@@ -999,12 +1002,15 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   // Map.set() would arbitrarily overwrite the fresh one with the stale one.
   const byProvider = new Map();
   for (const candidate of byKey.values()) {
+    const knownWorkbuddyAccount = candidate.provider === 'workbuddy' && candidate.accountKey;
     const hasFreshObservation = providersWithFreshObservations.has(candidate.provider);
-    if (candidate.stale && hasFreshObservation) continue;
+    // Fresh siblings cannot establish freshness for a different account. The
+    // first pass already chooses the best observation of each exact identity.
+    if (!knownWorkbuddyAccount && candidate.stale && hasFreshObservation) continue;
     const configuredProviders = hasFreshObservation
       ? providersWithFreshConfiguredAccounts
       : providersWithConfiguredAccounts;
-    if (!isConfiguredProvider(candidate) && configuredProviders.has(candidate.provider)) continue;
+    if (!knownWorkbuddyAccount && !isConfiguredProvider(candidate) && configuredProviders.has(candidate.provider)) continue;
     const collapseKey = providerCollapseKey(candidate);
     byProvider.set(collapseKey, pickBetterProvider(byProvider.get(collapseKey), candidate));
   }

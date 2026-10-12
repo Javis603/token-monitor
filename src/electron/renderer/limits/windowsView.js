@@ -765,6 +765,33 @@
     return windows.find((window) => window?.metric === 'credits') || null;
   }
 
+  function workbuddyCombinedProvider(providers) {
+    const windows = presentationApi.workbuddyCreditTotals(providers);
+    if (!windows || windows.length !== 1 || windows[0].currency !== 'CREDITS') return null;
+    const first = providers[0];
+    const remaining = windows[0].remaining;
+    return {
+      ...first, accountKey: '', accountName: '', accountEmail: '', accountLabel: '',
+      accountGroup: true, groupAccounts: providers,
+      updatedAt: providers.map((provider) => provider.updatedAt || '').sort()[0],
+      windows,
+      balance: { amount: remaining, currency: 'CREDITS' }
+    };
+  }
+
+  function collapseWorkbuddyAccounts(providers) {
+    const accounts = providers.filter((provider) => provider.provider === 'workbuddy');
+    const combined = workbuddyCombinedProvider(accounts);
+    if (!combined) return providers;
+    let inserted = false;
+    return providers.flatMap((provider) => {
+      if (provider.provider !== 'workbuddy') return [provider];
+      if (inserted) return [];
+      inserted = true;
+      return [combined];
+    });
+  }
+
   function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
     if (hasPercent) return `${formatPercent(fillPercent)} ${limitModeSuffix(showUsed)}`;
     if (!window) return '--';
@@ -2381,6 +2408,16 @@
     const { row, list: accountList } = renderLimitProviderGroupFrame(
       providerId, label, providers, color, { count: providers.length, markId }
     );
+    if (providerId === 'workbuddy') {
+      // Dock visibility/reporting filters may omit a failed or unlimited
+      // sibling. A total is eligible only when this group covers the complete
+      // known identity pool supplied beside the drawn rows.
+      const known = subscriptionAccounts().filter((account) => account?.provider === 'workbuddy');
+      const drawnKeys = new Set(providers.map((account) => account.accountKey));
+      const complete = known.every((account) => account.accountKey && drawnKeys.has(account.accountKey));
+      const combined = complete ? workbuddyCombinedProvider(providers) : null;
+      if (combined) row.insertBefore(renderProviderWindows(combined, color), accountList);
+    }
     providers.forEach((provider, index) => {
       const account = limitAccountRowPolicy(providerId, provider, color, { grouped: true, sharedFamily });
       // The row's own title is also the name the switch control offers, so the
@@ -2784,6 +2821,8 @@
     renderProviderWindows,
     limitProviderUsageItems,
     thirdPartyQuotaWindow,
+    workbuddyCombinedProvider,
+    collapseWorkbuddyAccounts,
     thirdPartySpendNode,
     windowForKind,
     windowsForKind

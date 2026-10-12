@@ -98,6 +98,7 @@ const LIMIT_PROVIDER_ACCOUNT_NODES = {
   kimi: { group: 'kimiAccountGroup', status: 'kimiAccountStatus' },
   copilot: { group: 'copilotAccountGroup', status: 'copilotApiTokenStatus' },
   mimo: { group: 'mimoAccountGroup', status: 'mimoAccountStatus' },
+  workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus' },
   openrouter: { group: 'openrouterAccountGroup', status: 'openrouterStatus' },
   volcengine: { group: 'volcengineAccountGroup', status: 'volcengineAccountStatus' },
   thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
@@ -306,7 +307,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
@@ -3052,8 +3053,51 @@ function limitProvidersForSubscriptions() {
 // kind says which shape is being recorded, so hiding the accounts only got in
 // the way of reaching them.
 function subscriptionAccountChoices() {
-  const visible = limitProvidersForSubscriptions()
-    .filter((provider) => provider?.provider && provider.status !== 'notConfigured');
+  const observed = limitProvidersForSubscriptions()
+    .filter((provider) => !limitProviderPresentationApi.isWorkbuddyPlaceholder(provider))
+    .map((provider) => ({ ...provider }));
+  const known = [...observed];
+  // Managed identities remain selectable before a first successful quota read.
+  for (const account of state.settings?.workbuddyManagedAccounts || []) {
+    if (!account.accountKey) continue;
+    const existing = known.find((provider) => provider.provider === 'workbuddy' && provider.accountKey === account.accountKey);
+    if (existing) {
+      if (!existing.accountName) existing.accountName = account.accountName;
+      if (!existing.accountEmail) existing.accountEmail = account.accountEmail;
+    } else {
+      known.push({ provider: 'workbuddy', status: 'notConfigured', accountKey: account.accountKey,
+        accountName: account.accountName, accountEmail: account.accountEmail, windows: [] });
+    }
+  }
+  const saved = state.settings?.subscriptions || [];
+  // A stored binding also names an account while a device or credential is gone.
+  for (const subscription of saved) {
+    if (!subscription.provider || !subscription.binding) continue;
+    const binding = subscription.binding;
+    const account = { provider: subscription.provider, status: 'notConfigured', windows: [],
+      accountKey: binding.accountKey || '', accountEmail: binding.accountEmail || '', accountName: binding.profileName || '' };
+    // Token/cookie-based providers heal rotated keys against the observed pool
+    // before a saved-only virtual row can claim the obsolete exact key.
+    const healed = subscription.provider === 'workbuddy' ? null
+      : subscriptionApi.matchProviderAccount(subscription, observed);
+    const existing = healed || known.find((provider) => {
+      if (provider.provider !== account.provider) return false;
+      if (account.accountKey) return accountIdentityApi.accountKeyFamily(provider).has(account.accountKey);
+      if (account.accountEmail) return String(provider.accountEmail || provider.email || '').toLowerCase() === account.accountEmail.toLowerCase();
+      if (account.accountName) return provider.accountName === account.accountName;
+      return !provider.accountKey && !provider.accountEmail && !provider.email && !provider.accountName;
+    });
+    if (existing) {
+      if (!existing.accountName) existing.accountName = account.accountName;
+      if (!existing.accountEmail) existing.accountEmail = account.accountEmail;
+    } else known.push(account);
+  }
+  const visible = known.filter((provider) => {
+    if (!provider?.provider) return false;
+    if (provider.accountKey || provider.accountEmail || provider.email || provider.accountName) return true;
+    return saved.some((subscription) => subscription.provider === provider.provider && subscription.binding
+      && !subscription.binding.accountKey && !subscription.binding.accountEmail && !subscription.binding.profileName);
+  });
   return visible.map((provider, index) => ({
     provider,
     value: subscriptionAccountValue(provider),
@@ -3064,13 +3108,12 @@ function subscriptionAccountChoices() {
   }));
 }
 
-// The picker's value for one choice, which is only ever compared against another
-// choice from the same freshly built list: distinct per account, stable for one
-// record. It carries the address as well, so the two accounts a provider reports
-// by address alone are two choices rather than one — while "is this the same
-// account?" stays with accountIdentity.sameAccount(), where the matcher's rule
-// lives.
+// A known key stays stable through renamed profiles, changed email metadata and
+// failed quota reads. Address-only accounts retain the legacy disambiguation.
 function subscriptionAccountValue(provider) {
+  const id = String(provider?.provider || '').trim().toLowerCase();
+  const key = String(provider?.accountKey || '').trim();
+  if (key) return [id, key].join('\0');
   return [
     String(provider?.provider || '').trim().toLowerCase(),
     String(provider?.accountKey || '').trim(),
@@ -3100,7 +3143,7 @@ function subscriptionSelectedAccount() {
 // replaced the old one.
 function subscriptionForAccount(list, providerId, account, excludeId) {
   if (!account) return null;
-  const accounts = limitProvidersForSubscriptions();
+  const accounts = subscriptionAccountChoices().map((choice) => choice.provider);
   return list.find((entry) => {
     if (entry.id === excludeId || entry.provider !== providerId) return false;
     const bound = subscriptionApi.matchProviderAccount(entry, accounts);
@@ -3250,7 +3293,7 @@ function renderSubscriptionRows() {
     return;
   }
 
-  const providers = limitProvidersForSubscriptions();
+  const providers = subscriptionAccountChoices().map((choice) => choice.provider);
   for (const subscription of list) {
     const account = subscriptionApi.matchProviderAccount(subscription, providers);
     const row = document.createElement('div');
@@ -3896,7 +3939,7 @@ function beginSubscriptionEdit(id) {
   }
   state.subscriptionEditingId = id;
 
-  const account = subscriptionApi.matchProviderAccount(subscription, limitProvidersForSubscriptions());
+  const account = subscriptionApi.matchProviderAccount(subscription, subscriptionAccountChoices().map((choice) => choice.provider));
   if (els.subscriptionProviderInput) els.subscriptionProviderInput.value = subscription.provider;
   renderSubscriptionPickers();
   if (account && els.subscriptionAccountInput) {
@@ -4172,6 +4215,9 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   currencyApi,
   formatCost,
   subscriptions: () => state.settings?.subscriptions,
+  // The quota group uses the complete observed pool, including non-reporting
+  // identities. Saved-only bindings stay in the form choices; the stable-key
+  // matcher refuses to heal their tooltips onto another observed account.
   subscriptionAccounts: () => limitProvidersForSubscriptions(),
   monthClientCosts: () => state.stats?.periods?.month?.clientCosts,
   resetForecast: () => ({ busy: state.codexResetForecastBusy, forecast: state.codexResetForecast })
@@ -5745,7 +5791,7 @@ function homeLimitRows() {
   return homeOverviewApi.homeLimitAccountsForProviders({
     // Hidden rows go before the compact pick, so Antigravity's tightest window
     // per group is chosen among the ones the user still shows.
-    providers: (state.stats?.limits?.providers || []).map((provider) => ({
+    providers: limitWindowsView.collapseWorkbuddyAccounts(state.stats?.limits?.providers || []).map((provider) => ({
       ...provider,
       windows: limitProviderPresentationApi.limitProviderCompactWindows(
         provider,
@@ -8942,6 +8988,7 @@ function syncSettingsForm() {
     if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
   }
   renderAntigravityStatus();
+  renderWorkbuddyStatus();
   renderMimoStatus();
   renderCopilotStatus();
   renderViewPreferences();
@@ -14793,6 +14840,239 @@ function localProviderStatuses(name) {
   return providers.filter((provider) => provider.provider === name);
 }
 
+function workbuddyAccountError(code, fallback = 'loginFailed') {
+  const keys = {
+    TIMEOUT: 'loginTimeout',
+    STATE_MISMATCH: 'loginStateMismatch',
+    INVALID_STATE: 'loginStateMismatch',
+    INVALID_LOGIN_URL: 'loginStateMismatch',
+    CONTEXT_CHANGED: 'loginStateMismatch',
+    credentialStorageUnavailable: 'credentialStorageUnavailable',
+    PERSISTENCE_FAILED: 'credentialStorageUnavailable',
+    ROLLBACK_FAILED: 'credentialStorageUnavailable',
+    loginInProgress: 'loginInProgress'
+  };
+  return t(`settings.workbuddy.${Object.hasOwn(keys, code) ? keys[code] : fallback}`);
+}
+
+function applyWorkbuddyAccounts(accounts) {
+  if (!state.settings || !Array.isArray(accounts)) return;
+  state.workbuddyAccountsRevision = (state.workbuddyAccountsRevision || 0) + 1;
+  state.settings.workbuddyManagedAccounts = accounts;
+  renderWorkbuddyStatus();
+  renderSettingsSummaries();
+  renderSubscriptionSettings();
+}
+
+async function mutateWorkbuddyAccount(id, operation, enabled) {
+  if (state.workbuddyMutationBusy || state.workbuddySignInBusy || state.workbuddyCancelBusy) return;
+  state.workbuddyMutationBusy = true;
+  state.workbuddyAccountError = '';
+  renderWorkbuddyStatus();
+  try {
+    const api = window.tokenMonitor.workbuddy;
+    const result = operation === 'remove'
+      ? await api.removeAccount(id)
+      : await api.setAccountEnabled(id, enabled);
+    if (!result?.ok) {
+      state.workbuddyAccountError = workbuddyAccountError(result?.errorCode,
+        operation === 'remove' ? 'removeFailed' : 'toggleFailed');
+    } else {
+      applyWorkbuddyAccounts(result.accounts);
+      refreshStats({ force: true }).catch(() => {});
+    }
+  } catch (_) {
+    state.workbuddyAccountError = workbuddyAccountError('', operation === 'remove' ? 'removeFailed' : 'toggleFailed');
+  } finally {
+    state.workbuddyMutationBusy = false;
+    renderWorkbuddyStatus();
+  }
+}
+
+function finishWorkbuddyLogin(attempt, result) {
+  if (state.workbuddyLoginAttempt !== attempt) return;
+  if (state.workbuddyCancelBusy) {
+    state.workbuddyPendingLoginResult = { attempt, result };
+    return;
+  }
+  state.workbuddySignInBusy = false;
+  state.workbuddyAccountError = '';
+  if (result?.ok) {
+    applyWorkbuddyAccounts(result.accounts);
+    state.workbuddyLoginStatusKey = '';
+    refreshStats({ force: true }).catch(() => {});
+  } else if (['CANCELED', 'CANCELLED'].includes(result?.errorCode)) {
+    state.workbuddyLoginStatusKey = 'loginCancelled';
+  } else {
+    state.workbuddyLoginStatusKey = '';
+    state.workbuddyAccountError = workbuddyAccountError(result?.errorCode);
+  }
+  renderWorkbuddyStatus();
+}
+
+async function startWorkbuddyLogin(realm) {
+  if (!['cn', 'ai'].includes(realm) || state.workbuddySignInBusy || state.workbuddyCancelBusy || state.workbuddyMutationBusy) return;
+  const attempt = (state.workbuddyLoginAttempt || 0) + 1;
+  state.workbuddyLoginAttempt = attempt;
+  state.workbuddySignInBusy = true;
+  state.workbuddyPendingLoginResult = null;
+  state.workbuddyAccountError = '';
+  state.workbuddyLoginStatusKey = 'loginStatus';
+  renderWorkbuddyStatus();
+  let result;
+  try {
+    result = await window.tokenMonitor.workbuddy.addAccount(realm);
+  } catch (_) {
+    result = { ok: false };
+  }
+  finishWorkbuddyLogin(attempt, result);
+}
+
+async function cancelWorkbuddyLogin() {
+  if (!state.workbuddySignInBusy || state.workbuddyCancelBusy) return;
+  state.workbuddyCancelBusy = true;
+  state.workbuddyAccountError = '';
+  renderWorkbuddyStatus();
+  let cancelled = false;
+  try {
+    const result = await window.tokenMonitor.workbuddy.cancelLogin();
+    cancelled = result === true || result?.ok === true;
+  } catch (_) {}
+  state.workbuddyCancelBusy = false;
+  if (cancelled) {
+    // A cancelled IPC promise may settle later, including after the next login.
+    state.workbuddyLoginAttempt = (state.workbuddyLoginAttempt || 0) + 1;
+    state.workbuddySignInBusy = false;
+    state.workbuddyPendingLoginResult = null;
+    state.workbuddyLoginStatusKey = 'loginCancelled';
+  } else if (state.workbuddyPendingLoginResult) {
+    const pending = state.workbuddyPendingLoginResult;
+    state.workbuddyPendingLoginResult = null;
+    finishWorkbuddyLogin(pending.attempt, pending.result);
+  } else {
+    state.workbuddyAccountError = workbuddyAccountError('', 'cancelFailed');
+  }
+  renderWorkbuddyStatus();
+}
+
+function renderWorkbuddyStatus() {
+  const list = document.getElementById('workbuddyAccountList');
+  if (!list || !state.settings) return;
+  const accounts = Array.isArray(state.settings.workbuddyManagedAccounts) ? state.settings.workbuddyManagedAccounts : [];
+  const busy = Boolean(state.workbuddySignInBusy || state.workbuddyCancelBusy || state.workbuddyMutationBusy);
+  accountShellApi.render({
+    status: document.getElementById('workbuddyAccountStatus'),
+    statusText: accounts.length
+      ? t('settings.workbuddy.connected', { linked: accounts.filter((a) => a.enabled !== false).length, total: accounts.length })
+      : t('settings.workbuddy.notConfigured'),
+    progress: document.getElementById('workbuddyLoginStatus'),
+    progressText: state.workbuddyCancelBusy
+      ? t('settings.workbuddy.cancelling')
+      : state.workbuddyLoginStatusKey ? t(`settings.workbuddy.${state.workbuddyLoginStatusKey}`) : '',
+    error: document.getElementById('workbuddyAccountErrorMessage'),
+    errorText: state.workbuddyAccountError
+  });
+  for (const [id, key] of [['workbuddyAddCnAccountButton', 'addCnAccount'], ['workbuddyAddAiAccountButton', 'addAiAccount']]) {
+    const button = document.getElementById(id);
+    if (!button) continue;
+    button.disabled = busy;
+    button.textContent = t(`settings.workbuddy.${key}`);
+  }
+  const cancel = document.getElementById('workbuddyCancelLoginButton');
+  if (cancel) {
+    cancel.classList.toggle('hidden', !state.workbuddySignInBusy && !state.workbuddyCancelBusy);
+    cancel.disabled = Boolean(state.workbuddyCancelBusy);
+  }
+  list.replaceChildren();
+  if (!accounts.length) {
+    const empty = document.createElement('p');
+    empty.className = 'settings-note';
+    empty.textContent = t('settings.workbuddy.empty');
+    list.append(empty);
+  }
+  const providers = localProviderStatuses('workbuddy');
+  accounts.forEach((account, index) => {
+    const name = accountIdentityApi.accountTitleLabel({ provider: 'workbuddy', ...account }, accounts, {
+      maskEmail: state.settings.maskLimitAccountEmails === true, index
+    }) || t('settings.workbuddy.accountFallback', { number: index + 1 });
+    const row = document.createElement('div');
+    row.className = 'managed-account-row';
+    row.classList.toggle('disabled', account.enabled === false);
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = 'managed-account-checkbox';
+    input.checked = account.enabled !== false;
+    input.disabled = busy;
+    input.setAttribute('aria-label', t('settings.workbuddy.toggleAccount', { account: name }));
+    input.addEventListener('change', () => mutateWorkbuddyAccount(account.id, 'toggle', input.checked));
+    const main = document.createElement('div');
+    main.className = 'managed-account-main';
+    const title = document.createElement('div');
+    title.className = 'managed-account-email';
+    title.textContent = name;
+    title.title = name;
+    const meta = document.createElement('div');
+    meta.className = 'workbuddy-account-meta';
+    meta.textContent = t(account.realm === 'ai' ? 'settings.workbuddy.realmAi' : 'settings.workbuddy.realmCn');
+    main.append(title, meta);
+    const right = document.createElement('span');
+    right.className = 'managed-account-right';
+    const info = document.createElement('span');
+    info.className = 'managed-account-info';
+    // Nicknames, realm labels and email addresses never redirect a quota lookup.
+    const provider = account.accountKey
+      ? providers.find((candidate) => candidate.accountKey === account.accountKey)
+      : null;
+    info.textContent = account.enabled === false ? t('settings.workbuddy.disabled')
+      : provider ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
+        : t('settings.workbuddy.notChecked');
+    info.title = info.textContent;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'managed-account-remove';
+    remove.textContent = '✕';
+    remove.title = t('settings.workbuddy.remove');
+    remove.setAttribute('aria-label', t('settings.workbuddy.removeConfirm', { account: name }));
+    remove.disabled = busy;
+    let armed = false;
+    remove.addEventListener('click', () => {
+      if (busy) return;
+      if (!armed) {
+        armed = true;
+        remove.classList.add('confirming');
+        remove.textContent = '✓';
+        remove.title = t('settings.workbuddy.removeConfirm', { account: name });
+        return;
+      }
+      return mutateWorkbuddyAccount(account.id, 'remove');
+    });
+    right.append(info, remove);
+    row.append(input, main, right);
+    list.append(row);
+  });
+}
+
+function initWorkbuddyAccountSettings() {
+  const api = window.tokenMonitor.workbuddy;
+  const toggle = document.getElementById('workbuddySettingsToggle');
+  if (!api || !toggle) return;
+  toggle.addEventListener('click', () => setAccountGroupExpanded('workbuddy', !state.workbuddyAccountExpanded, 'workbuddyAccountExpanded'));
+  setAccountGroupExpanded('workbuddy', false, 'workbuddyAccountExpanded');
+  renderWorkbuddyStatus();
+  api.onAccounts(applyWorkbuddyAccounts);
+  const revision = state.workbuddyAccountsRevision || 0;
+  api.accounts().then((accounts) => {
+    if ((state.workbuddyAccountsRevision || 0) === revision) applyWorkbuddyAccounts(accounts);
+  }).catch(() => {
+    if ((state.workbuddyAccountsRevision || 0) !== revision) return;
+    state.workbuddyAccountError = workbuddyAccountError('', 'accountsFailed');
+    renderWorkbuddyStatus();
+  });
+  document.getElementById('workbuddyAddCnAccountButton')?.addEventListener('click', () => startWorkbuddyLogin('cn'));
+  document.getElementById('workbuddyAddAiAccountButton')?.addEventListener('click', () => startWorkbuddyLogin('ai'));
+  document.getElementById('workbuddyCancelLoginButton')?.addEventListener('click', cancelWorkbuddyLogin);
+}
+
 function renderAntigravityStatus() {
   if (!isSettingsSurfaceVisible()) return;
   const statusEl = document.getElementById('antigravityAccountStatus');
@@ -17239,6 +17519,8 @@ function setupCursorAccountUI() {
       });
     }
   }
+
+  initWorkbuddyAccountSettings();
 
   const antigravityToggle = document.getElementById('antigravitySettingsToggle');
   if (antigravityToggle && window.tokenMonitor.antigravity) {

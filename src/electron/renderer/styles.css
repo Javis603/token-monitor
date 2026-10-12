@@ -1350,6 +1350,22 @@ span.settings-note.settings-item-desc {
   color: var(--red);
   background: rgba(255, 91, 91, 0.12);
 }
+/* Keep regional sign-in actions and long account identities inside the widget. */
+.workbuddy-login-actions {
+  flex-wrap: wrap;
+}
+.workbuddy-login-actions button {
+  white-space: normal;
+}
+.workbuddy-account-meta {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.5625rem;
+  overflow-wrap: anywhere;
+}
+.workbuddy-credit-summary {
+  margin-block: 8px;
+}
 .codex-login-output {
   max-height: 120px;
   margin: 0;

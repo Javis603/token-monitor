@@ -29,6 +29,8 @@ const { createClaudeWebFetch } = require('./providers/claude/webFetch');
 const { createMimoExchangeFetch } = require('./providers/mimo/exchangeFetch');
 const { runAntigravityOAuthLogin } = require('./providers/antigravity/oauthLogin');
 const antigravityOAuth = require('../shared/providers/antigravity/oauth');
+const workbuddyOAuth = require('../shared/providers/workbuddy/oauth');
+const { createWorkbuddyManagedAccounts } = require('./providers/workbuddy/managedAccounts');
 const {
   createWorkbuddyLocalAuth,
   isSupportedWorkbuddyLocalAppPlatform
@@ -822,6 +824,8 @@ function electronLimitsConfig() {
     workbuddyDesktopSessionSupported,
     workbuddyDesktopSessionEnabled,
     workbuddyLocalSession: workbuddyDesktopSessionEnabled ? electronWorkbuddyLocalAuth.getSessionInfo() : {},
+    workbuddyLocalSessions: workbuddyDesktopSessionEnabled ? electronWorkbuddyLocalAuth.getSessionInfos() : [],
+    workbuddyManagedAccounts: workbuddyAccountsForRenderer(),
     defaultLimitProviders: defaultLimitProviders(),
     codexManagedAccounts: codexManagedAccountsForCollector(),
     antigravityManagedAccounts: antigravityManagedAccountsForCollector(),
@@ -922,6 +926,7 @@ function electronLimitsDeps() {
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
     onStepfunTokenRenewed: persistStepfunTokenRenewal,
     onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
+    resolveWorkbuddyManagedCredential: (account, options) => workbuddyAccountService().resolveCredential(account, options),
     onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
     onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey
   };
@@ -1117,6 +1122,50 @@ function codexManagedAccountsForCollector() {
 
 function normalizeAntigravityManagedAccounts(value) {
   return antigravityOAuth.normalizeManagedAccounts(value);
+}
+
+let workbuddyManagedAccountService = null;
+
+function workbuddyAccountsForRenderer() {
+  return workbuddyOAuth.normalizeManagedAccounts(settings?.workbuddyManagedAccounts);
+}
+
+function workbuddyAccountService() {
+  if (!workbuddyManagedAccountService) {
+    workbuddyManagedAccountService = createWorkbuddyManagedAccounts({
+      getAccounts: () => settings?.workbuddyManagedAccounts,
+      setAccounts: (accounts) => { settings.workbuddyManagedAccounts = accounts; },
+      saveSettings: () => saveSettings({ throwOnError: true }),
+      credentialStore: ensureCredentialStore(),
+      fetch: electronLimitsFetch(),
+      openExternal: (url) => shell.openExternal(url),
+      onChanged: (account, reason, options = {}) => {
+        pushSettingsToRenderer();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          try { mainWindow.webContents.send('workbuddy:accounts', workbuddyAccountsForRenderer()); } catch (_) {}
+        }
+        const scope = { provider: 'workbuddy', accountId: account.id, accountKey: account.accountKey };
+        // Removal can uncover an independent app-owned session for this identity.
+        // Clear only the removed row, then rebuild the complete discovery union.
+        void queueLimitInvalidation(scope, reason === 'account-enabled' ? 'account-state' : reason, options)
+          .then(() => reason === 'account-removed'
+            ? queueLimitInvalidation({ provider: 'workbuddy' }, 'account-state', { refresh: true })
+            : undefined)
+          .catch(() => {});
+      }
+    });
+  }
+  return workbuddyManagedAccountService;
+}
+
+async function workbuddyAccountOperation(operation) {
+  try {
+    return await operation(workbuddyAccountService());
+  } catch (_) {
+    // Storage/transport errors may contain paths or credential material. IPC
+    // returns the bounded setup error and never forwards their raw message.
+    return { ok: false, errorCode: 'credentialStorageUnavailable' };
+  }
 }
 
 function antigravityAccountsForRenderer() {
@@ -2611,6 +2660,7 @@ function readSettings() {
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
     merged.antigravityManagedAccounts = normalizeAntigravityManagedAccounts(merged.antigravityManagedAccounts);
+    merged.workbuddyManagedAccounts = workbuddyOAuth.normalizeManagedAccounts(merged.workbuddyManagedAccounts);
     merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
     if (saved.keepAboveTaskbar !== undefined) {
       merged.keepAboveTaskbar = parseBoolean(saved.keepAboveTaskbar, false);
@@ -5313,6 +5363,7 @@ function settingsForRenderer() {
     ...accountFieldProjection(settings, process.env),
     codexManagedAccounts: codexAccountsForRenderer(),
     antigravityManagedAccounts: antigravityAccountsForRenderer(),
+    workbuddyManagedAccounts: workbuddyAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
     ...accountStatusProjection(settings, process.env),
     limitAccountForms: limitAccountFormsForRenderer(),
@@ -8134,6 +8185,11 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('app:openUserData', () => shell.openPath(app.getPath('userData')));
   ipcMain.handle('antigravity:accounts', () => antigravityAccountsForRenderer());
+  ipcMain.handle('workbuddy:accounts', () => workbuddyAccountsForRenderer());
+  ipcMain.handle('workbuddy:addAccount', (_event, realm) => workbuddyAccountOperation((service) => service.addAccount(realm)));
+  ipcMain.handle('workbuddy:cancelLogin', () => workbuddyManagedAccountService?.cancelLogin() || false);
+  ipcMain.handle('workbuddy:removeAccount', (_event, id) => workbuddyAccountOperation((service) => service.removeAccount(id)));
+  ipcMain.handle('workbuddy:setAccountEnabled', (_event, id, enabled) => workbuddyAccountOperation((service) => service.setAccountEnabled(id, enabled)));
   ipcMain.handle('antigravity:addAccount', () => addAntigravityManagedAccount());
   ipcMain.handle('antigravity:cancelLogin', () => cancelAntigravityManagedAccountLogin());
   ipcMain.handle('antigravity:setAccountEnabled', (_event, id, enabled) => setAntigravityManagedAccountEnabled(id, enabled));
@@ -9112,6 +9168,7 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 app.on('before-quit', () => {
   quitRequested = true;
   antigravityOAuthLoginController?.abort();
+  workbuddyManagedAccountService?.cancelLogin();
   resetMacWidgetReloadThrottle();
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
