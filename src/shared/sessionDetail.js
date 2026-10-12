@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const { isCompressedCodexTranscript, readCompressedCodexTranscript } = require('./providers/codex/transcript');
 const { resolveSessionFile } = require('./sessionFiles');
 const {
   isUserPromptRecord,
@@ -15,13 +16,17 @@ const { readReasonixSessionEvents } = require('./providers/reasonix/sessionDetai
 const { createLocalUsageStore } = require('./providers/codex/localUsageStore');
 
 function* readTranscriptLines(filePath) {
-  const fd = fs.openSync(filePath, 'r');
+  const decoded = isCompressedCodexTranscript(filePath) ? readCompressedCodexTranscript(filePath) : null;
+  const fd = decoded ? undefined : fs.openSync(filePath, 'r');
+  let position = 0;
   let parts = [];
   let lineBytes = 0;
   try {
     for (;;) {
       const buffer = Buffer.allocUnsafe(64 * 1024);
-      const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
+      const bytesRead = decoded ? decoded.copy(buffer, 0, position, position + buffer.length)
+        : fs.readSync(fd, buffer, 0, buffer.length, null);
+      position += bytesRead;
       if (bytesRead === 0) break;
       const chunk = buffer.subarray(0, bytesRead);
       let start = 0;
@@ -43,7 +48,7 @@ function* readTranscriptLines(filePath) {
     }
     if (lineBytes) yield Buffer.concat(parts, lineBytes).toString('utf8');
   } finally {
-    fs.closeSync(fd);
+    if (fd !== undefined) fs.closeSync(fd);
   }
 }
 

@@ -32,6 +32,7 @@ function renderAccountShellError(id) {
 }
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
+const tokenNumberAnimationApi = window.TokenMonitorTokenNumberAnimation;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
 const macBackdropApi = window.TokenMonitorMacBackdropMode;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
@@ -363,7 +364,7 @@ state.projectSettingsExpanded = false;
 state.sessionSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', tokenNumberAnimation: 'roll', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
 let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
 let nativeMaterialRevision = 0;
 let appearancePreview = {};
@@ -508,6 +509,7 @@ Object.assign(els, {
   appUpdateReleaseNotesButton: document.getElementById('appUpdateReleaseNotesButton'),
   appUpdateMessage: document.getElementById('appUpdateMessage'),
   titleIconInput: document.getElementById('titleIconInput'),
+  tokenNumberAnimationInput: document.getElementById('tokenNumberAnimationInput'),
   showCompactTotalTokensInput: document.getElementById('showCompactTotalTokensInput'),
   showLiveTokenRateInput: document.getElementById('showLiveTokenRateInput'),
   liveTokenRateScopeRow: document.getElementById('liveTokenRateScopeRow'),
@@ -1681,7 +1683,10 @@ function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
 let numberAnimHandle = 0;
 let numberAnimTarget = null;
 let numberAnimValue = 0;
+let settleNumberRoll = null;
 function cancelNumberAnimation() {
+  settleNumberRoll?.();
+  settleNumberRoll = null;
   if (numberAnimHandle) cancelAnimationFrame(numberAnimHandle);
   numberAnimHandle = 0;
   numberAnimTarget = null;
@@ -1691,7 +1696,9 @@ function headlineNumberIsAnimatingTo(value) {
   return Boolean(numberAnimHandle) && numberAnimTarget === value;
 }
 
-function animateNumber(el, from, to, duration = 1000, onDone = null) {
+function animateNumber(el, from, to, duration = 1000, onDone = null, { synchronized = false } = {}) {
+  const rolling = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) === 'roll';
+  const rollSnapshot = rolling ? tokenNumberAnimationApi.capture(el) : null;
   cancelNumberAnimation();
   if (prefersReducedMotion()) {
     el.textContent = formatNumber(to);
@@ -1699,17 +1706,28 @@ function animateNumber(el, from, to, duration = 1000, onDone = null) {
     if (typeof onDone === 'function') onDone();
     return;
   }
+  if (rolling) {
+    duration = tokenNumberAnimationApi.duration;
+    settleNumberRoll = tokenNumberAnimationApi.beginRoll(el, formatNumber(from), formatNumber(to), to > from, () => {
+      el.textContent = formatNumber(to);
+      updateTotalCompact(to);
+    }, rollSnapshot, { period: synchronized });
+  }
   const start = performance.now();
   const delta = to - from;
   numberAnimTarget = to;
-  numberAnimValue = from;
+  numberAnimValue = rolling ? to : from;
   function frame(now) {
     const progress = Math.min(1, (now - start) / duration);
-    numberAnimValue = from + delta * easeOutQuart(progress);
-    el.textContent = formatNumber(numberAnimValue);
+    if (!rolling) {
+      numberAnimValue = from + delta * easeOutQuart(progress);
+      el.textContent = formatNumber(numberAnimValue);
+    }
     if (progress < 1) {
       numberAnimHandle = requestAnimationFrame(frame);
     } else {
+      settleNumberRoll?.();
+      settleNumberRoll = null;
       numberAnimHandle = 0;
       numberAnimTarget = null;
       numberAnimValue = to;
@@ -1719,8 +1737,8 @@ function animateNumber(el, from, to, duration = 1000, onDone = null) {
   numberAnimHandle = requestAnimationFrame(frame);
 }
 
-function animateTotalNumber(el, from, to, duration) {
-  animateNumber(el, from, to, duration, () => updateTotalCompact(to));
+function animateTotalNumber(el, from, to, duration, options) {
+  animateNumber(el, from, to, duration, () => updateTotalCompact(to), options);
 }
 
 const rowNumberAnimations = new Map();
@@ -1738,19 +1756,24 @@ function settleMotionAnimations() {
   numberAnimValue = state.currentTotal;
   els.totalTokens.textContent = formatNumber(state.currentTotal);
   updateTotalCompact(state.currentTotal);
+  settleRowNumberAnimations();
+  limitResetAnimator.settle(els.limitsPanel);
+  for (const animation of document.getAnimations?.() || []) {
+    try { animation.finish(); } catch (_) { animation.cancel(); }
+  }
+  rowBarAnimations.clear();
+}
+
+function settleRowNumberAnimations() {
   for (const [el, motion] of rowNumberAnimations) {
     cancelAnimationFrame(motion.handle);
+    motion.settleRoll?.();
     const target = Number(motion.target ?? el.dataset.motionTarget ?? el.dataset.motionValue ?? 0);
     el.textContent = formatNumber(target);
     el.dataset.motionValue = String(target);
     delete el.dataset.motionTarget;
   }
   rowNumberAnimations.clear();
-  limitResetAnimator.settle(els.limitsPanel);
-  for (const animation of document.getAnimations?.() || []) {
-    try { animation.finish(); } catch (_) { animation.cancel(); }
-  }
-  rowBarAnimations.clear();
 }
 
 function applyReduceMotionPreference(value) {
@@ -1772,16 +1795,22 @@ function captureBreakdownMotion() {
     snapshot.set(row.dataset.key, {
       top: rect.top,
       value: Number(row.querySelector('.row-value')?.dataset.motionValue || row.dataset.motionValue || 0),
+      rollSnapshot: tokenNumberAnimationApi.capture(row.querySelector('.row-value')),
       barScale: trackWidth > 0 ? Math.max(0, Math.min(1, fillWidth / trackWidth)) : 0
     });
   }
   return snapshot;
 }
 
-function animateRowNumber(el, from, to, duration = 420) {
+function animateRowNumber(el, from, to, duration = 420, capturedRoll = null, { synchronized = false } = {}) {
   const previous = rowNumberAnimations.get(el);
-  if (previous?.target === to) return;
-  if (previous) cancelAnimationFrame(previous.handle);
+  if (previous?.target === to && !prefersReducedMotion()) return;
+  const rolling = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) === 'roll';
+  const rollSnapshot = rolling ? capturedRoll || tokenNumberAnimationApi.capture(el) : null;
+  if (previous) {
+    cancelAnimationFrame(previous.handle);
+    previous.settleRoll?.();
+  }
   const startValue = Number.isFinite(previous?.value) ? previous.value : from;
   if (!Number.isFinite(startValue) || !Number.isFinite(to) || startValue === to || prefersReducedMotion()) {
     el.textContent = formatNumber(to);
@@ -1793,11 +1822,19 @@ function animateRowNumber(el, from, to, duration = 420) {
   const startedAt = performance.now();
   const delta = to - startValue;
   const motion = { handle: 0, target: to, value: startValue };
-  el.textContent = formatNumber(startValue);
-  el.dataset.motionValue = String(startValue);
+  if (rolling) {
+    duration = tokenNumberAnimationApi.duration;
+    motion.value = to;
+    motion.settleRoll = tokenNumberAnimationApi.beginRoll(el, formatNumber(startValue), formatNumber(to), to > startValue, null, rollSnapshot,
+      { period: synchronized });
+  } else {
+    el.textContent = formatNumber(startValue);
+  }
+  el.dataset.motionValue = String(motion.value);
   el.dataset.motionTarget = String(to);
   function frame(now) {
     if (prefersReducedMotion()) {
+      motion.settleRoll?.();
       el.textContent = formatNumber(to);
       el.dataset.motionValue = String(Number(to) || 0);
       delete el.dataset.motionTarget;
@@ -1805,12 +1842,15 @@ function animateRowNumber(el, from, to, duration = 420) {
       return;
     }
     const progress = Math.min(1, (now - startedAt) / duration);
-    motion.value = startValue + delta * easeOutQuart(progress);
-    el.textContent = formatNumber(motion.value);
-    el.dataset.motionValue = String(motion.value);
+    if (!rolling) {
+      motion.value = startValue + delta * easeOutQuart(progress);
+      el.textContent = formatNumber(motion.value);
+      el.dataset.motionValue = String(motion.value);
+    }
     if (progress < 1) {
       motion.handle = requestAnimationFrame(frame);
     } else {
+      motion.settleRoll?.();
       delete el.dataset.motionTarget;
       if (rowNumberAnimations.get(el) === motion) rowNumberAnimations.delete(el);
     }
@@ -1823,11 +1863,15 @@ function cancelRowNumberAnimation(el) {
   if (!el) return;
   const motion = rowNumberAnimations.get(el);
   if (motion) cancelAnimationFrame(motion.handle);
+  motion?.settleRoll?.();
   rowNumberAnimations.delete(el);
   delete el.dataset.motionTarget;
 }
 
-function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
+// A period switch (synchronized) starts every row on the headline's frame,
+// each sweeping its own reading left to right; live updates keep the gentle
+// entering stagger.
+function animateBreakdownFrom(snapshot, { duration = 420, synchronized = false } = {}) {
   if (!snapshot) return;
   const rows = Array.from(els.breakdown?.querySelectorAll('.row[data-key]') || []);
   if (!shouldAnimateBreakdownRows(rows.length, { reducedMotion: prefersReducedMotion() })) return;
@@ -1853,23 +1897,29 @@ function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
         ], { duration: 280, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
       }
       animateBarBetween(fill, previous.barScale, targetScale, 0, duration);
-      animateRowNumber(row.querySelector('.row-value'), previous.value, value, duration);
+      animateRowNumber(row.querySelector('.row-value'), previous.value, value, duration, previous.rollSnapshot,
+        { synchronized });
       continue;
     }
+    const delay = synchronized ? 0 : Math.min(enteringIndex, 6) * 18;
     row.animate([
       { opacity: 0, transform: 'translate3d(0, 7px, 0)' },
       { opacity: 1, transform: 'translate3d(0, 0, 0)' }
     ], {
       duration: 240,
-      delay: Math.min(enteringIndex, 6) * 18,
+      delay,
       easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
       fill: 'backwards'
     });
-    const delay = Math.min(enteringIndex, 6) * 18;
     animateBarBetween(fill, 0, targetScale, delay, Math.max(1, duration - delay));
-    animateRowNumber(row.querySelector('.row-value'), 0, value, duration);
+    animateRowNumber(row.querySelector('.row-value'), 0, value, duration, null, { synchronized });
     enteringIndex += 1;
   }
+}
+
+function periodBreakdownMotionDuration() {
+  return tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) === 'roll'
+    ? tokenNumberAnimationApi.layoutDuration : 800;
 }
 
 function animateBarBetween(
@@ -2055,7 +2105,8 @@ document.addEventListener('pointerdown', (event) => {
 let homeSessionRenderPending = false;
 const overflowText = window.TokenMonitorOverflowText.create({
   document, window, prefersReducedMotion,
-  enabled: element => Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint'),
+  enabled: element => !element.classList.contains('has-subagent-count')
+    && Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint'),
   onLeave: () => requestAnimationFrame(() => {
     if (homeSessionRenderPending && state.breakdown === 'home'
       && visibleStatsSurface() === 'main' && state.stats) renderHome();
@@ -2353,19 +2404,20 @@ function updateRowContext(row, context, promptCache, contextSnapshot) {
 // The old idiom is kept - a green dot means "active right now" - with the dot
 // simply not drawn once the transcript says the turn is over. No spinner, no
 // check, no idle placeholder: a quiet row shows nothing, exactly as before.
-const rowLiveMarkup = '<span class="row-live-dot"></span>';
+const rowLiveMarkup = '<span class="row-live-dot"></span><span class="row-live-waiting"></span>';
 
 function updateRowLive(row, activityState, activityAt) {
   const dot = row.querySelector('.row-live');
   if (!dot) return;
-  // Only one thing is drawn here, and only while the agent is working: the dot
-  // is absent for every other state, which is what a session list full of past
-  // sessions should look like. The turn-end boundary is still read, so the dot
-  // clears the moment the transcript says the answer is finished rather than
-  // holding green until the recency window expires.
+  // Running keeps the green dot; explicit waiting gets a static attention mark.
+  // Finished and historical rows stay quiet.
   const active = activityState === 'running';
   dot.classList.toggle('is-active', active);
-  dot.title = active ? (t('session.running') || 'Running') : '';
+  dot.classList.toggle('is-waiting', activityState === 'waiting');
+  dot.title = activityState === 'waiting' ? t('session.waiting') : active ? (t('session.running') || 'Running') : '';
+  dot.setAttribute('aria-label', dot.title);
+  dot.setAttribute('role', 'img');
+  dot.setAttribute('aria-hidden', dot.title ? 'false' : 'true');
   const previous = Number(row.dataset.activityAt || 0);
   const next = Number(activityAt) || 0;
   if (next > 0) row.dataset.activityAt = String(next);
@@ -2377,7 +2429,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime, cloudThreadId, cloudOnly, costLabel: metricLabel }) {
+function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime, cloudThreadId, cloudOnly, costLabel: metricLabel }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2400,15 +2452,15 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
   row.dataset.cloudOnly = String(cloudOnly === true);
   if (reviewGroup === true) row.dataset.reviewGroup = 'true';
   else delete row.dataset.reviewGroup;
+  if (sessionGroup) row.dataset.sessionGroup = sessionGroup;
+  else delete row.dataset.sessionGroup;
   if (kind === 'session' && client === 'reasonix') {
     row.dataset.detailUnavailable = sessionDetailAvailable === true ? 'false' : 'true';
   } else if (row.hasAttribute('data-detail-unavailable')) {
     row.removeAttribute('data-detail-unavailable');
   }
-  const interactive = reviewGroup === true || (
-    kind === 'session'
-    && ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy'].includes(client)
-  ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
+  const interactive = Boolean(sessionGroup) || (kind === 'session'
+    && sessionRowsApi.sessionRowDetailAvailable({ client, sessionDetailAvailable }));
   const mark = row.querySelector('.row-mark');
   const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '', modelSource }, state.breakdown);
   if (iconKind.kind === 'icon') {
@@ -2421,29 +2473,57 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
   const titleEl = row.querySelector('.row-title');
   setHoverMarqueeText(titleEl, name);
   const subtitleEl = row.querySelector('.row-subtitle');
+  let subtitleTextEl = subtitleEl;
+  const splitSubtitle = Boolean(subagentCountLabel);
+  subtitleEl.classList.toggle('has-subagent-count', splitSubtitle);
+  if (splitSubtitle) {
+    subtitleTextEl = subtitleEl.querySelector('.session-subtitle-identity');
+    if (!subtitleTextEl) {
+      subtitleTextEl = document.createElement('span');
+      subtitleTextEl.className = 'session-subtitle-identity';
+      const count = document.createElement('span');
+      count.className = 'session-subagent-count';
+      const content = subtitleEl.querySelector('.overflow-text-content') || subtitleEl;
+      content.replaceChildren(subtitleTextEl, count);
+      bindHoverMarquee(subtitleTextEl);
+    }
+    subtitleEl.querySelector('.session-subagent-count').textContent = `${subtitleIdentity ? ' · ' : ''}${subagentCountLabel}`;
+    overflowText.update(subtitleEl);
+  }
+  const subtitleText = splitSubtitle ? subtitleIdentity || '' : subtitle;
   // A multi-model session abbreviates to "N models"; that label opens the same
   // tooltip the context gauge carries, one row per model with its tokens and
   // share of the session. A titled row prints the label inside the
   // client · model line, so the trigger is just the "N models" span; an
   // untitled row folds it into the title instead, whose whole text then opens
   // the tooltip. The trigger mirrors the row's own wording rather than adding
-  // chrome, so there is nothing extra on a single-model row.
+  // chrome, so there is nothing extra on a single-model row. A review heading
+  // explicitly identifies its model span before the trailing time.
   const modelEntries = Array.isArray(modelTooltipEntries) && modelTooltipEntries.length > 1
     ? modelTooltipEntries : null;
-  const subtitleShowsModel = Boolean(modelEntries && modelLabel && String(subtitle || '').endsWith(modelLabel));
+  const subtitleShowsModel = Boolean(!titleModelLabel && modelEntries && modelLabel && String(subtitleText || '').endsWith(modelLabel));
   if (subtitleShowsModel) {
     const models = document.createElement('span');
     models.className = 'session-models';
     models.textContent = modelLabel;
     // Inside the marquee's own wrapper, so a long line still scrolls on hover.
-    const subtitleContent = subtitleEl.querySelector('.overflow-text-content') || subtitleEl;
-    subtitleContent.replaceChildren(document.createTextNode(subtitle.slice(0, -modelLabel.length)), models);
-    overflowText.update(subtitleEl);
+    const subtitleContent = subtitleTextEl.querySelector('.overflow-text-content') || subtitleTextEl;
+    subtitleContent.replaceChildren(document.createTextNode(subtitleText.slice(0, -modelLabel.length)), models);
+    overflowText.update(subtitleTextEl);
     limitWindowsView.setDetailTooltip(models, modelEntries);
   } else {
-    setHoverMarqueeText(subtitleEl, subtitle);
+    setHoverMarqueeText(subtitleTextEl, subtitleText);
   }
-  if (!subtitleShowsModel && modelEntries && modelLabel && String(name || '').endsWith(modelLabel)) {
+  if (modelEntries && titleModelLabel && String(name || '').startsWith(titleModelLabel)) {
+    const models = document.createElement('span');
+    models.className = 'session-models';
+    models.textContent = titleModelLabel;
+    const titleContent = titleEl.querySelector('.overflow-text-content') || titleEl;
+    titleContent.replaceChildren(models, document.createTextNode(name.slice(titleModelLabel.length)));
+    overflowText.update(titleEl);
+    limitWindowsView.setDetailTooltip(models, modelEntries);
+  }
+  if (!subtitleShowsModel && !titleModelLabel && modelEntries && modelLabel && String(name || '').endsWith(modelLabel)) {
     limitWindowsView.setDetailTooltip(titleEl, modelEntries);
   } else if (titleEl.classList.contains('limit-detail-tooltip-wrap')) {
     limitWindowsView.setDetailTooltip(titleEl, null);
@@ -2468,7 +2548,12 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
     valueEl.textContent = t('detailTokenUnavailable') || 'Unavailable';
   } else {
     delete row.dataset.tokenDataUnavailable;
-    valueEl.textContent = formatNumber(value);
+    // Metadata-only updates must not replace the glyphs of a matching roll.
+    // Changed readings are restarted from the captured visual value below.
+    if (rowNumberAnimations.get(valueEl)?.target !== Number(value)) {
+      cancelRowNumberAnimation(valueEl);
+      valueEl.textContent = formatNumber(value);
+    }
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
@@ -2683,6 +2768,10 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     ? captureBreakdownMotion()
     : null;
   if (structureChanged) {
+    const retainedKeys = new Set(visibleRows.map((row) => row.key));
+    for (const [key, row] of existing) {
+      if (!retainedKeys.has(key)) cancelRowNumberAnimation(row.querySelector('.row-value'));
+    }
     const nodes = visibleRows.map((row) => existing.get(row.key) || rowTemplate(row));
     if (incompleteHint) {
       const hint = existingHint || document.createElement('p');
@@ -2861,17 +2950,42 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
   return toolRowsForPeriod(period);
 }
 
-function rawSessionRowsForPeriod(period) {
-  const localRows = sessionRowsApi.sessionRowsForPeriod(period, {
+function sessionPresentationOptions() {
+  return {
     clientLabels,
     clientColors,
     modelColor,
     stableColor,
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived'),
+    subagentLabel: t('sessions.subagent'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
-    nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
-  });
+    sourcePeriods: state.stats?.periods,
+    grokBotSessionIds: state.stats?.grokBotSessionIds,
+    nativeSessions: state.stats?.nativeSessions?.[state.period] || {},
+    subagents: {
+      countLabel: (count) => t('sessions.subagentCount', { count }),
+      unattributedLabel: t('dashboard.tooltip.unclassified')
+    },
+    backgroundReviews: {
+      label: t('sessions.backgroundReviews'),
+      countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
+      summaryLabel: ({ latestTime, latestValue }) => [
+        latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
+        latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
+      ].filter(Boolean).join(' · ')
+    },
+    grokBot: {
+      label: t('sessions.grokBot'),
+      countLabel: (count) => t('sessions.grokBotCount', { count }),
+      summaryLabel: ({ latestTime }) => latestTime
+        ? t('sessions.backgroundReviewLatest', { time: latestTime }) : ''
+    }
+  };
+}
+
+function rawSessionRowsForPeriod(period) {
+  const localRows = sessionRowsApi.sessionRowsForPeriod(period, sessionPresentationOptions());
   return cloudSessionRowsApi.mergeRows(localRows, period, cloudSessionsSource.snapshot(), {
     period: state.period, locale: currentLocale(), color: clientColors.codex
   });
@@ -2881,14 +2995,7 @@ function sessionRowsForPeriod(period) {
   const rows = rawSessionRowsForPeriod(period);
   if (rows.length > 0) {
     rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
-    return sessionRowsApi.groupBackgroundReviewRows(rows, {
-      label: t('sessions.backgroundReviews'),
-      countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
-      summaryLabel: ({ latestTime, latestValue }) => [
-        latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
-        latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
-      ].filter(Boolean).join(' · ')
-    });
+    return sessionRowsApi.groupSessionRows(rows, sessionPresentationOptions());
   }
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
@@ -4034,7 +4141,13 @@ function limitDetailTooltipShouldHoldRender() {
 }
 
 function sessionTooltipShouldHoldRender() {
-  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .home-session-meta .limit-detail-tooltip-wrap.is-closing, .row-context.limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .row-context.limit-detail-tooltip-wrap.is-closing, .row-label .limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .row-label .limit-detail-tooltip-wrap.is-closing, .detail-ex-title.limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .detail-ex-title.limit-detail-tooltip-wrap.is-closing'));
+  // A tooltip is held while it is actually open (`:has(:popover-open)`) or still
+  // playing its exit transition (`is-closing`), not merely because the pointer or
+  // focus rests on the title: Escape can close a tooltip without moving either,
+  // and treating that stale engagement as "held" would freeze session updates.
+  // Upstream's session-group run surfaces keep their own hover/focus selectors.
+  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .home-session-meta .limit-detail-tooltip-wrap.is-closing, .row-context.limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .row-context.limit-detail-tooltip-wrap.is-closing, .row-label .limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .row-label .limit-detail-tooltip-wrap.is-closing, .session-group-run .is-hover-reading, .session-group-run:focus-within, .session-group-run .limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .session-group-run .limit-detail-tooltip-wrap.is-closing, .detail-ex-title.limit-detail-tooltip-wrap:has(.limit-detail-tooltip:popover-open), .detail-ex-title.limit-detail-tooltip-wrap.is-closing'));
+
 }
 
 function flushPendingLimitDetailTooltipRender() {
@@ -4658,10 +4771,14 @@ function applySessionDetailResult(request, options) {
   renderSessionDetail(options);
 }
 
-async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null, cloudThreadId = null, cloudOnly = false }) {
+async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null, titleFollowsSession = false, cloudThreadId = null, cloudOnly = false }) {
+  // A review run is headed by model and time; a named group run (a subagent, a
+  // Grok Bot record) is headed by its session title and follows title display.
+  const fixedGroupHeading = returnTo?.kind === 'session-group' && titleFollowsSession !== true;
   const request = { kind: 'session', client, sessionId, sessionCost,
-    title: state.settings?.sessionTitlesEnabled === false && returnTo?.kind !== 'background-review-group' ? '' : title,
-    period: state.period, detail: null, returnTo, cloudThreadId, cloudOnly };
+    title: state.settings?.sessionTitlesEnabled === false && !fixedGroupHeading ? '' : title,
+    period: state.period, detail: null, returnTo, titleFollowsSession: titleFollowsSession === true,
+    cloudThreadId, cloudOnly };
   state.openSession = request;
   if (cloudOnly) { renderSessionDetail({}); return; }
   renderSessionDetail({ loading: true });
@@ -4711,9 +4828,9 @@ function closeSessionDetail() {
 
 function sessionDetailBack() {
   const returnTo = state.openSession?.returnTo;
-  if (returnTo?.kind === 'background-review-group') {
+  if (returnTo?.kind === 'session-group') {
     state.openSession = returnTo;
-    renderBackgroundReviewDetail(returnTo);
+    renderSessionGroupDetail(returnTo);
     return;
   }
   closeSessionDetail();
@@ -4726,6 +4843,7 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   els.sessionDetailHead.classList.remove('hidden');
   const head = els.sessionDetailHead;       // static layer — rows scroll independently below it
   const container = els.sessionDetail;
+  container.classList.remove('session-group-list');
   head.replaceChildren();
   container.replaceChildren();
 
@@ -4761,9 +4879,9 @@ function renderSessionDetail({ detail, loading, error } = {}) {
 
 function sessionDetailTitle() {
   const request = state.openSession;
-  // Review runs use a model/time heading, which is independent of session
+  // Group runs use a model/time heading, which is independent of session
   // title visibility. Ordinary Details follow the current session metadata.
-  if (request?.returnTo?.kind === 'background-review-group') return request.title;
+  if (request?.returnTo?.kind === 'session-group' && request.titleFollowsSession !== true) return request.title;
   if (state.settings?.sessionTitlesEnabled === false) return '';
   const period = request?.period || state.period;
   const session = request?.client === 'reasonix'
@@ -4774,18 +4892,53 @@ function sessionDetailTitle() {
 
 function refreshSessionDetailHeading() {
   if (state.openSession?.kind !== 'session') return;
+  // The group a Details page returns to is labelled by its summary, and a
+  // subagent group's summary quotes the parent's title. Follow the current
+  // stats so the back label, and the group page it returns to, honour title
+  // display like every other surface.
+  const group = state.openSession.returnTo;
+  const period = group?.kind === 'session-group' && group.summary?.key
+    ? state.stats?.periods?.[group.period || state.period] : null;
+  if (period) {
+    const rows = sessionRowsForPeriod(period);
+    const memberKey = `session:${state.openSession.client}:${state.openSession.sessionId}`;
+    const holds = (row) => row.groupRows?.some((member) => member.key === memberKey);
+    // The same group counts only while it still holds this session: a child
+    // moved to another parent must not return to its old one.
+    const latest = rows.find((row) => row.key === group.summary.key && holds(row));
+    if (latest) {
+      group.summary = latest;
+    } else {
+      // The group is gone or no longer holds this session (its parent left the
+      // list, or the session now sits under another parent). A cached summary
+      // would keep quoting titles the current stats no longer carry, so return
+      // to whichever group holds this session now, or to Sessions when none does.
+      const holder = rows.find(holds);
+      state.openSession.returnTo = holder ? { kind: 'session-group', period: group.period, summary: holder } : null;
+    }
+  }
   const head = els.sessionDetailHead;
-  if ((head.querySelector('.detail-heading')?.textContent || '') === sessionDetailTitle()) return;
+  if (state.openSession.headingSignature === sessionDetailHeadingSignature()) return;
   // Retain the body, loading/error state and sort control. Unchanged headings
   // also retain their hover-reading motion through periodic stats updates.
   head.replaceChildren(sessionDetailBackButton(), ...Array.from(head.children).slice(1));
 }
 
+function sessionDetailBackLabel() {
+  return state.openSession?.returnTo?.kind === 'session-group'
+    ? state.openSession.returnTo.summary?.name || t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
+}
+
+function sessionDetailHeadingSignature() {
+  return JSON.stringify([sessionDetailTitle(), sessionDetailBackLabel()]);
+}
+
 function sessionDetailBackButton() {
   const back = document.createElement('button');
   const title = sessionDetailTitle();
-  const backLabel = state.openSession?.returnTo?.kind === 'background-review-group'
-    ? t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
+  const backLabel = sessionDetailBackLabel();
+  // Every heading is built here, so the open request records what it shows.
+  if (state.openSession) state.openSession.headingSignature = JSON.stringify([title, backLabel]);
   back.type = 'button';
   back.className = title ? 'detail-back detail-back-titled' : 'detail-back';
   if (!title) back.textContent = `‹ ${backLabel}`;
@@ -4830,60 +4983,56 @@ function sessionIdLine(idLabel) {
   return line;
 }
 
-function backgroundReviewRunNode(row, max, parent) {
-  const wrap = document.createElement('div');
-  wrap.className = 'detail-exchange background-review-run';
-  wrap.setAttribute('role', 'button');
-  wrap.setAttribute('tabindex', '0');
-  wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">›</span>'
-    + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span></div>'
-    + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
-    + '<div class="bar"><div class="bar-fill"></div></div>';
-  const time = sessionRowsApi.compactSessionTime(row.sortTime, new Date());
-  const title = [row.modelLabel, time].filter(Boolean).join(' · ') || t('sessions.backgroundReviews');
-  const titleEl = wrap.querySelector('.detail-ex-title');
-  titleEl.textContent = title;
-  titleEl.title = title;
-  bindHoverMarquee(titleEl);
-  // A multi-model run reads "N models · time" here — the same label the
-  // Sessions list opens for its per-model shares, so the title opens it too.
-  if (row.modelTooltipEntries?.length > 1) {
-    limitWindowsView.setDetailTooltip(titleEl, row.modelTooltipEntries);
+function sessionGroupRunNode(row, max, parent) {
+  const subagentGroup = parent.summary?.subagentGroup === true;
+  const namedGroup = subagentGroup || parent.summary?.sessionGroup === 'cursor-grok-bot';
+  const title = namedGroup ? row.name
+    : [row.modelLabel, sessionRowsApi.compactSessionTime(row.sortTime)].filter(Boolean).join(' · ')
+      || t('sessions.backgroundReviews');
+  // Group members are still session rows. Share the template, metrics, tooltip
+  // and activity rendering; exchange rows belong only to the actual transcript.
+  const member = { ...row, name: title, titleModelLabel: namedGroup ? undefined : row.modelLabel };
+  if (subagentGroup) {
+    member.subtitle = [row.clientLabel, row.modelLabel].filter(Boolean).join(' · ');
+    member.activity = row.activitySummary;
   }
-  wrap.querySelector('.detail-ex-sub').textContent = row.detail || '';
-  wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
-  wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0, row.unpricedTokens);
-  applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
-  const open = () => openSessionDetail({
-    client: row.client,
-    sessionId: String(row.key || '').replace(/^session:[^:]+:/, ''),
-    sessionCost: Number(row.cost || 0),
-    title,
-    returnTo: parent
-  });
-  wrap.addEventListener('click', open);
-  wrap.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    open();
-  });
+  const wrap = rowTemplate(member);
+  updateRow(wrap, { ...member, barValue: member.barValue ?? member.value, max });
+  // Keep the existing repaint guard for model hover and keyboard focus.
+  wrap.classList.add('session-group-run');
+  if (sessionRowsApi.sessionRowDetailAvailable(row)) {
+    wrap.addEventListener('click', () => {
+      const sessionId = String(row.key || '').replace(/^session:[^:]+:/, '');
+      openSessionDetail({
+        client: row.client,
+        sessionId: row.client === 'reasonix' ? `reasonix:${sessionId}` : sessionId,
+        sessionCost: Number(row.cost || 0),
+        title,
+        returnTo: parent,
+        titleFollowsSession: namedGroup
+      });
+    });
+    wrap.addEventListener('keydown', sessionRowsApi.handleBreakdownRowKeydown);
+  }
   return wrap;
 }
 
-function renderBackgroundReviewDetail(request) {
+function renderSessionGroupDetail(request) {
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
   const head = els.sessionDetailHead;
   const container = els.sessionDetail;
   head.replaceChildren();
+  container.classList.add('session-group-list');
   container.replaceChildren();
 
+  const label = request?.summary?.name || t('sessions.backgroundReviews');
   const back = document.createElement('button');
   back.type = 'button';
   back.className = 'detail-back detail-back-titled';
   back.setAttribute('aria-label', t('sessions.backToWithTitle', {
-    title: t('sessions.backgroundReviews'), destination: t('sessions') || 'Sessions'
+    title: label, destination: t('sessions') || 'Sessions'
   }));
   back.addEventListener('click', closeSessionDetail);
   const arrow = document.createElement('span');
@@ -4892,25 +5041,45 @@ function renderBackgroundReviewDetail(request) {
   arrow.setAttribute('aria-hidden', 'true');
   const heading = document.createElement('span');
   heading.className = 'detail-heading';
-  heading.textContent = t('sessions.backgroundReviews');
+  heading.textContent = label;
   bindHoverMarquee(heading);
   back.append(arrow, heading);
   head.append(back);
 
-  const rows = request?.summary?.backgroundReviewRows || [];
+  const rows = request?.summary?.groupRows || [];
   if (rows.length === 0) {
     container.append(detailNote(t('detailEmpty') || 'No activity in this period.'));
     return;
   }
   const overview = document.createElement('div');
-  overview.className = 'background-review-overview';
-  overview.innerHTML = '<span class="background-review-count"></span><span class="background-review-totals"></span>';
-  overview.querySelector('.background-review-count').textContent = t('sessions.backgroundReviewCount', { count: rows.length });
-  overview.querySelector('.background-review-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0)}`;
+  overview.className = 'session-group-overview';
+  overview.innerHTML = '<span class="session-group-count"></span><span class="session-group-totals"></span>';
+  overview.querySelector('.session-group-count').textContent = request.summary.subagentGroup
+    ? t('dashboard.stat.totalTokens') : request.summary.groupDetail || request.summary.detail;
+  overview.querySelector('.session-group-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0, request.summary.unpricedTokens)}`;
   container.append(overview);
 
   const max = Math.max(1, ...rows.map((row) => Number(row.value) || 0));
-  for (const row of rows) container.append(backgroundReviewRunNode(row, max, request));
+  if (request.summary.subagentGroup) {
+    // Roles come from the grouping projection, including every main continuation.
+    // Older member DTOs without a role retain the original first-row main fallback.
+    const isMain = row => row.groupRole === 'main' || (!row.groupRole && row.key === rows[0].key);
+    const mainHeading = document.createElement('h3');
+    mainHeading.className = 'session-group-section-heading is-first';
+    mainHeading.textContent = t('sessions.mainSession');
+    container.append(mainHeading);
+    for (const row of rows.filter(isMain)) container.append(sessionGroupRunNode(row, max, request));
+    const children = rows.filter(row => !isMain(row));
+    if (children.length) {
+      const heading = document.createElement('h3');
+      heading.className = 'session-group-section-heading';
+      heading.textContent = `${t('sessions.subagent')} · ${request.summary.subagentCount}`;
+      container.append(heading);
+      for (const row of children) container.append(sessionGroupRunNode(row, max, request));
+    }
+  } else {
+    for (const row of rows) container.append(sessionGroupRunNode(row, max, request));
+  }
 }
 
 function detailNote(text) {
@@ -5967,14 +6136,14 @@ function stopHomeSessionRepaint() {
   state.homeSessionRepaintTimer = null;
 }
 
-function scheduleHomeSessionRepaint() {
+function scheduleHomeSessionRepaint(rows) {
   stopHomeSessionRepaint();
-  const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
+  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
   if (!rows.length) return;
   const now = Date.now();
   const expiry = window.TokenMonitorEdgeDockPresentation.nextRunningExpiryAt(rows, now);
   // Refresh relative ages once a minute, or sooner when a running session expires.
-  const cacheExpiry = window.TokenMonitorSessionLive?.nextSessionStatusChangeAt(rows, now) || 0;
+  const cacheExpiry = window.TokenMonitorSessionLive?.nextSessionStatusChangeAt(window.TokenMonitorEdgeDockPresentation.sessionMembers(rows), now) || 0;
   const nextExpiry = [expiry, cacheExpiry].filter((at) => at > now).sort((a, b) => a - b)[0];
   const delay = nextExpiry ? Math.min(60_000, Math.max(1_000, nextExpiry - now + 50)) : 60_000;
   state.homeSessionRepaintTimer = setTimeout(() => {
@@ -5983,12 +6152,23 @@ function scheduleHomeSessionRepaint() {
     const current = els.homePanel?.querySelector('.home-module-session');
     if (!current) return;
     const hadFocus = document.activeElement === current;
-    const next = renderHomeSessionModule();
+    const hadHeadFocus = document.activeElement === current.querySelector?.('.home-module-head');
+    const focusedKey = document.activeElement?.closest?.('.home-session-row')?.dataset?.key;
+    const nextRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+    const next = renderHomeSessionModule(nextRows);
     current.replaceWith(next);
     if (hadFocus) next.focus();
-    // The fresh module node shows every candidate row again; re-plan it.
+    // The fresh module node shows every candidate row again; re-plan it before
+    // restoring focus, so a restored row is one the budget still shows.
     state.homeRowBudgetRefresh?.();
-    scheduleHomeSessionRepaint();
+    if (hadHeadFocus) next.querySelector('.home-module-head')?.focus({ preventScroll: true });
+    if (focusedKey) {
+      const row = [...next.querySelectorAll('.home-session-row')]
+        .find(node => node.dataset.key === focusedKey);
+      (row || next).focus({ preventScroll: true });
+    }
+    scheduleHomeSessionRepaint(nextRows);
+
   }, delay);
 }
 
@@ -6001,7 +6181,11 @@ function stopSessionStatusRepaint() {
 function scheduleSessionStatusRepaint(period, incompleteHint = '') {
   stopSessionStatusRepaint();
   const now = Date.now();
-  const next = window.TokenMonitorSessionLive.nextSessionStatusChangeAt(Object.values(period?.sessions || {}), now);
+  const sessions = [
+    ...Object.entries(period?.sessions || {}).map(([key, session]) => window.TokenMonitorSessionLive.sessionWithActivity(period, key, session)),
+    ...Object.values(state.stats?.nativeSessions?.[state.period] || {})
+  ];
+  const next = window.TokenMonitorSessionLive.nextSessionStatusChangeAt(sessions, now);
   if (!next) return;
   sessionStatusRepaintTimer = setTimeout(() => {
     sessionStatusRepaintTimer = null;
@@ -6011,17 +6195,21 @@ function scheduleSessionStatusRepaint(period, incompleteHint = '') {
   }, Math.min(60_000, Math.max(1_000, next - now + 50)));
 }
 
-function renderHomeSessionModule() {
+function renderHomeSessionModule(rows) {
   const current = els.homePanel?.querySelector('.home-module-session');
   if (current && sessionTooltipShouldHoldRender()) {
     homeSessionRenderPending = true;
     return current;
   }
+  // The row budget decides how many preview rows fit at this width and height;
+  // the caller may pass rows it already projected (repaint, group navigation),
+  // in which case they are used as-is rather than projected twice.
   const limit = homeListLimit(5, Number.MAX_SAFE_INTEGER);
-  const candidates = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, limit, { includeRunningBeyondCap: true });
-  const runningCount = candidates.filter((row) => window.TokenMonitorSessionLive.sessionActivityState(row) === 'running').length;
+  const candidates = rows || window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, limit, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+  const runningCount = window.TokenMonitorEdgeDockPresentation.runningSessionSummary(candidates).count;
   // Home is a stable preview; the Sessions view keeps the complete running list.
-  const rows = candidates.slice(0, limit);
+  rows = candidates.slice(0, limit);
+
   const meta = runningCount > 0 ? t('home.runningSessions', { count: runningCount }) : '';
   const { module, body } = homeModuleShell('session', t('home.sessions'), 'session', meta);
   if (rows.length === 0) {
@@ -6032,21 +6220,28 @@ function renderHomeSessionModule() {
     return module;
   }
   for (const row of rows) {
-    const activityState = window.TokenMonitorSessionLive.sessionActivityState(row);
+    const activityState = window.TokenMonitorEdgeDockPresentation.sessionActivityState(row);
     const item = document.createElement('div');
     item.className = 'home-list-row home-session-row';
+    item.dataset.key = row.key;
     const mark = document.createElement('span');
     applyHomeListMark(mark, iconKindFor({ client: row.client }, 'session'), clientColors[row.client] || stableColor(row.key, fallbackModelColors));
     const stateMark = document.createElement('span');
     stateMark.className = 'home-session-state';
     stateMark.dataset.state = activityState;
     stateMark.setAttribute('aria-hidden', 'true');
+    if (activityState === 'waiting') {
+      stateMark.setAttribute('aria-hidden', 'false');
+      stateMark.setAttribute('role', 'img');
+      stateMark.setAttribute('aria-label', t('session.waiting'));
+    }
     stateMark.innerHTML = window.TokenMonitorSessionLive.sessionStateMarkup({
       spin: 'home-session-spin',
       check: 'home-session-check',
-      idle: 'home-session-idle'
+      idle: 'home-session-idle',
+      waiting: 'home-session-waiting'
     });
-    stateMark.title = t(activityState === 'running' ? 'session.running'
+    stateMark.title = t(activityState === 'waiting' ? 'session.waiting' : activityState === 'running' ? 'session.running'
       : activityState === 'ended' ? 'session.finished' : 'session.idle');
     const name = document.createElement('span');
     name.className = 'home-list-name';
@@ -6060,6 +6255,9 @@ function renderHomeSessionModule() {
     const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
     const description = document.createElement('span');
     description.className = 'home-list-sub';
+    const memberLabel = row.sessionGroup && (!row.subagentGroup || row.subagentCount > 0)
+      ? (row.subagentGroup ? t('sessions.subagentCount', { count: row.subagentCount })
+        : t('sessions.grokBotCount', { count: row.groupRows.length })) : '';
     // The same "N models" hover the Sessions list draws: the label stays the
     // row's own text, and the tooltip lists the models behind the count.
     const modelLabel = sessionRowsApi.sessionModelLabel(row);
@@ -6068,29 +6266,41 @@ function renderHomeSessionModule() {
       formatTokens: formatCompact
     });
     if (modelLabel) {
-      const models = document.createElement('span');
-      models.className = 'home-session-model';
-      models.textContent = modelLabel;
+      // Upstream keeps the model text inline when there is nothing to hover and
+      // wraps it in the tooltip-bearing span only for a real multi-model list.
       if (modelEntries.length > 1) {
-        models.classList.add('session-models');
+        const models = document.createElement('span');
+        models.className = 'session-models';
+        models.textContent = modelLabel;
         limitWindowsView.setDetailTooltip(models, modelEntries);
-      }
-      description.append(models);
+        description.append(models);
+      } else description.append(document.createTextNode(modelLabel));
+
     }
+    if (memberLabel) {
+      if (modelLabel) description.append(document.createTextNode(' · '));
+      const count = document.createElement('span');
+      count.className = 'home-session-member-count';
+      count.textContent = memberLabel;
+      description.append(count);
+    }
+    // The age keeps its own span: the narrow Home container hides
+    // `.home-session-age` by class, which a bare text node cannot be matched by.
     if (age) {
       const ageText = document.createElement('span');
       ageText.className = 'home-session-age';
-      ageText.textContent = `${modelLabel ? ' · ' : ''}${age}`;
+      ageText.textContent = `${memberLabel || modelLabel ? ' · ' : ''}${age}`;
       description.append(ageText);
     }
     meta.append(description);
-    const context = window.TokenMonitorSessionLive.sessionActivityState(row) !== 'idle' ? row.context : null;
-    const cache = window.TokenMonitorSessionLive.sessionPromptCacheForRow(row);
+    const statusRow = row.groupRows?.[0] || row;
+    const context = window.TokenMonitorSessionLive.sessionActivityState(statusRow) !== 'idle' ? statusRow.context : null;
+    const cache = window.TokenMonitorSessionLive.sessionPromptCacheForRow(statusRow);
     if (cache && !context) {
       const badge = document.createElement('span');
       badge.className = 'home-session-cache';
       badge.textContent = t('session.cacheEstimate', { minutes: cache.minutes });
-      sessionRowsApi.setSessionTooltip(badge, row, cache, t, limitWindowsView);
+      sessionRowsApi.setSessionTooltip(badge, statusRow, cache, t, limitWindowsView);
       meta.append(badge);
     }
     if (context) meta.append(homeSessionContext(context, cache));
@@ -7088,12 +7298,16 @@ function renderHome() {
     hideHomeActivityTooltip();
     return;
   }
+  let sessionRows;
   const nodes = moduleIds.map((id) => {
     if (id === 'limits') return renderHomeLimitModule();
     if (id === 'tool') return renderHomeToolModule(period);
     if (id === 'device') return renderHomeDeviceModule();
     if (id === 'model') return renderHomeModelModule(period);
-    if (id === 'session') return renderHomeSessionModule();
+    if (id === 'session') {
+      sessionRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+      return renderHomeSessionModule(sessionRows);
+    }
     if (id === 'modelspeed') {
       const speedModule = window.TokenMonitorModelSpeedView.renderModule(state.stats?.modelSpeed, {
         ...modelSpeedViewOptions(), onOpen: openModelSpeedDetail, onOpenList: () => openModelSpeedList()
@@ -7108,7 +7322,8 @@ function renderHome() {
   // panel's measured width/height cannot show before the browser paints.
   if (!state.homeRowBudgetObserver) ensureHomeRowBudgetObserver();
   applyHomeRowBudget(els.homePanel);
-  if (moduleIds.includes('session')) scheduleHomeSessionRepaint();
+  if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
+
   // setupHomeActivityScroller first runs while its module is detached, where
   // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
   // attached, before the browser paints or hover restoration measures the new cell.
@@ -7122,14 +7337,32 @@ function renderHome() {
   // ResizeObserver repeats the scroll + hover restoration once layout fully settles.
 }
 
+let localSessionActivity = null;
+function applyLocalSessionActivity(stats) {
+  const incoming = localSessionActivity;
+  if (!stats || !incoming || incoming.snapshot?.id !== stats.snapshot?.id
+    || incoming.snapshot?.source !== stats.snapshot?.source) return stats;
+  return window.TokenMonitorSessionActivityProjection.applyActivityPatch(stats, incoming.patch);
+}
+
 function sessionStatsForDisplay(stats) {
+  const current = applyLocalSessionActivity(stats);
   return state.settings?.sessionTitlesEnabled === false
-    ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitleStats(stats) : stats;
+    ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitleStats(current) : current;
 }
 
 function setRendererSettings(next) {
   const titlesChanged = (state.settings?.sessionTitlesEnabled !== false) !== (next.sessionTitlesEnabled !== false);
+  const animationChanged = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation)
+    !== tokenNumberAnimationApi.normalize(next.tokenNumberAnimation);
   state.settings = next;
+  if (animationChanged) {
+    cancelNumberAnimation();
+    settleRowNumberAnimations();
+    numberAnimValue = state.currentTotal;
+    els.totalTokens.textContent = formatNumber(state.currentTotal);
+    updateTotalCompact(state.currentTotal);
+  }
   if (titlesChanged) {
     if (next.sessionTitlesEnabled === false) state.stats = sessionStatsForDisplay(state.stats);
     // Main may have returned a titleless map while disabled. Pull it again
@@ -7204,15 +7437,17 @@ function render() {
     updateTotalCompact(nextTotal);
     state.suppressInitialNumberAnimation = false;
   } else if (totalChanged) {
-    // Keep the compact chip visible through the count-up and lock the font to the
-    // widest endpoint first (a downward roll starts wider than it settles), so the
-    // number never vanishes, clips, or resizes mid-roll. Re-fit on completion so a
-    // window resize during the animation, or a downward settle, still ends correct.
     const animationFrom = numberAnimHandle ? numberAnimValue : state.currentTotal;
-    const widest = formatNumber(nextTotal).length >= formatNumber(animationFrom).length ? nextTotal : animationFrom;
-    els.totalTokens.textContent = formatNumber(widest);
-    updateTotalCompact(nextTotal);
-    animateTotalNumber(els.totalTokens, animationFrom, nextTotal, state.periodMotionActive ? 800 : 1000);
+    // Count-up keeps a stable font throughout its intermediate values. Digit
+    // roll measures the old layout before fitting its destination, so geometry
+    // and font scaling finish together without a second jump on cleanup.
+    if (tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) !== 'roll') {
+      const widest = formatNumber(nextTotal).length >= formatNumber(animationFrom).length ? nextTotal : animationFrom;
+      els.totalTokens.textContent = formatNumber(widest);
+      updateTotalCompact(nextTotal);
+    }
+    animateTotalNumber(els.totalTokens, animationFrom, nextTotal, state.periodMotionActive ? 800 : 1000,
+      { synchronized: state.periodMotionActive });
     pulseLiveDot();
   } else if (!headlineNumberIsAnimatingTo(nextTotal)) {
     cancelNumberAnimation();
@@ -7298,14 +7533,16 @@ function render() {
     els.trendsPanel.classList.add('hidden');
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
-    if (state.openSession.kind === 'background-review-group') {
-      const latest = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
-      if (latest) state.openSession.summary = latest;
+    if (state.openSession.kind === 'session-group') {
+      const latest = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
+      if (!latest) { closeSessionDetail(); return; }
+      state.openSession.summary = latest;
       // The rebuild replaces every run node, so a hovered run tooltip would die
       // mid-read (and a keyboard focus with it); hold until it closes, as the
       // session and home lists already do.
-      if (!sessionTooltipShouldHoldRender()) renderBackgroundReviewDetail(state.openSession);
-    } else refreshSessionDetailHeading();
+      if (!sessionTooltipShouldHoldRender()) renderSessionGroupDetail(state.openSession);
+    }
+    refreshSessionDetailHeading();
     if (state.openSession.renderOptions) {
       const options = state.openSession.renderOptions;
       state.openSession.renderOptions = null;
@@ -8416,6 +8653,7 @@ function appearancePatchFromControls() {
     windowsBackdrop: windowsGlassApi.normalizeWindowsBackdropMode(els.windowsBackdropInput?.value),
     macBackdrop: macBackdropApi.normalizeMacBackdropMode(els.macBackdropInput?.value),
     reduceMotion: els.reduceMotionInputs?.find((input) => input.checked)?.value || 'system',
+    tokenNumberAnimation: tokenNumberAnimationApi.normalize(els.tokenNumberAnimationInput?.value),
     showLiveDot: Boolean(els.liveDotInput.checked),
     showToolIcons: Boolean(els.toolIconsInput.checked),
     titleIconOnly: Boolean(els.titleIconInput.checked),
@@ -9353,6 +9591,9 @@ function syncSettingsForm() {
   els.liveDotInput.checked = state.settings.showLiveDot !== false;
   els.toolIconsInput.checked = state.settings.showToolIcons !== false;
   els.titleIconInput.checked = state.settings.titleIconOnly === true;
+  if (els.tokenNumberAnimationInput) {
+    els.tokenNumberAnimationInput.value = tokenNumberAnimationApi.normalize(state.settings.tokenNumberAnimation);
+  }
   els.showCompactTotalTokensInput.checked = state.settings.showCompactTotalTokens === true;
   els.showLiveTokenRateInput.checked = state.settings.showLiveTokenRate === true;
   if (els.liveTokenRateScopeInput) {
@@ -12625,11 +12866,11 @@ for (const tab of document.querySelectorAll('.tab')) {
     if (!setPeriod(targetPeriod)) return;
     syncPeriodTabs();
     if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session')) {
-      if (state.openSession.kind === 'background-review-group') {
+      if (state.openSession.kind === 'session-group') {
         const period = state.stats?.periods?.[state.period];
-        const summary = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+        const summary = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
         if (summary) {
-          state.openSession = { kind: 'background-review-group', period: state.period, summary };
+          state.openSession = { kind: 'session-group', period: state.period, summary };
         } else {
           state.openSession = null;
         }
@@ -12644,7 +12885,8 @@ for (const tab of document.querySelectorAll('.tab')) {
     render();
     state.periodMotionActive = false;
     refreshModelSpeedRange();
-    animateBreakdownFrom(snapshot, { duration: 800 });
+    animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
+
   });
 }
 
@@ -12653,6 +12895,7 @@ for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]'
     event.stopPropagation();
     const selection = fixedPeriodRangesApi.normalizeMonthMode(button.dataset.fixedPeriod);
     setPeriodMenuOpen(false, { restoreFocus: true });
+    const snapshot = captureBreakdownMotion();
     const changed = setPeriod(selection);
     state.settings.periodMonthMode = selection;
     syncPeriodTabs();
@@ -12663,6 +12906,8 @@ for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]'
       render();
       state.periodMotionActive = false;
       refreshModelSpeedRange();
+      animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
+
     }
     await saveSettings({ periodMonthMode: selection });
   });
@@ -12722,13 +12967,13 @@ els.breakdown.addEventListener('click', (event) => {
   if (state.breakdown !== 'session') return;
   const rowEl = event.target.closest('.row');
   if (!rowEl) return;
-  if (rowEl.dataset.reviewGroup === 'true') {
+  if (rowEl.dataset.sessionGroup) {
     const period = state.stats?.periods?.[state.period];
-    const summary = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+    const summary = sessionRowsForPeriod(period).find((row) => row.key === rowEl.dataset.key);
     if (summary) {
-      const request = { kind: 'background-review-group', period: state.period, summary };
+      const request = { kind: 'session-group', period: state.period, summary };
       state.openSession = request;
-      renderBackgroundReviewDetail(request);
+      renderSessionGroupDetail(request);
     }
     return;
   }
@@ -13195,6 +13440,7 @@ els.toolIconsInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
+els.tokenNumberAnimationInput?.addEventListener('change', saveAppearanceFromControls);
 els.showCompactTotalTokensInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
@@ -13678,7 +13924,8 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
   render: renderStatsUpdate
 });
 // Pulled once up front, then only while something on screen reads it: the
-// archived count in Settings, or the TOTAL session and project lists.
+// archived count in Settings, or TOTAL sessions/projects. Bot identity arrives
+// in a compact snapshot projection and does not need a full history pull.
 function allTimeSessionsNeeded() {
   if (!allTimeSessions.loaded() || isSettingsPanelOpen()) return true;
   return state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');
@@ -13691,7 +13938,7 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
     ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitles(sessions) : sessions,
   projectionKey: () => state.settings?.sessionTitlesEnabled !== false,
   onLoaded: () => {
-    if (state.stats) state.stats = allTimeSessions.attach(state.stats);
+    if (state.stats) state.stats = sessionStatsForDisplay(allTimeSessions.attach(state.stats));
     statsRenderScheduler.request();
   },
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
@@ -13803,6 +14050,12 @@ window.tokenMonitor.onWindowVisibilityPush?.((visible) => {
 
 window.tokenMonitor.onStatsPush?.((payload) => {
   if (!payload) return;
+  if (payload.event === 'session-activity') {
+    localSessionActivity = payload.data;
+    state.stats = applyLocalSessionActivity(state.stats);
+    statsRenderScheduler.request();
+    return;
+  }
   const wasStreamConnected = state.streamConnected;
   if (payload.event === 'status') {
     state.streamConnected = Boolean(payload.data?.connected);
@@ -13810,10 +14063,10 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
     state.streamFailure = state.streamConnected ? null : (payload.data?.reason ? { reason: payload.data.reason, detail: payload.data.detail ?? null } : state.streamFailure);
   } else if (payload.data?.stats) {
-    // Local collector overlays update client-mode data independently of the
+    // Local overlays and adopted reads update data independently of the
     // Hub SSE transport. Preserve its current Offline/error state until a
     // real stream status or remote stats event proves the connection changed.
-    if (payload.data?.reason !== 'local' && payload.data?.reason !== 'presentation') {
+    if (!['local', 'presentation', 'read'].includes(payload.data?.reason)) {
       state.streamConnected = true;
       state.streamFailure = null;
     }

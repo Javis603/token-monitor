@@ -511,5 +511,5 @@ test('Electron routes cached stats through the presentation projection', () => {
   assert.match(main, /function refreshLimitStatsPresentation\(\)[\s\S]*reason: 'presentation'/);
   assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*return rendererSnapshots\.stamp\(stats, rendererStats\(electronPresentationStats\(stats\)\)\)/);
   assert.doesNotMatch(renderer, /function displayLimitProvider\(/);
-  assert.match(renderer, /reason !== 'local' && payload\.data\?\.reason !== 'presentation'/);
+  assert.match(renderer, /!\['local', 'presentation', 'read'\]\.includes\(payload\.data\?\.reason\)/);
 });

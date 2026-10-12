@@ -5,6 +5,7 @@ const { normalizeLimitProvider } = require('../../limits/core');
 const { errorWithStatus, numberOrNull, providerStatusFromError } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
+const { isStepfunAuthFailure, refreshStepfunToken } = require('./refresh');
 
 const ORIGIN = 'https://platform.stepfun.com';
 const RATE_URL = `${ORIGIN}/api/step.openapi.devcenter.Dashboard/QueryStepPlanRateLimit`;
@@ -92,31 +93,72 @@ function parseStepfunUsage(body) {
   ];
 }
 
+// The account identity hashes the refresh half. The access half rotates every
+// 30 minutes, so keying on the full token would change the account identity on
+// every renewal; the refresh half holds steady for ~30 days and only changes
+// when the user signs in again, which is exactly "one session, one identity".
+// An input without a refresh half falls back to the full token.
+function accountTokenIdentity(token) {
+  const parts = String(token || '').split('...');
+  return parts.length > 1 ? parts.slice(1).join('...') : String(token || '');
+}
+
+// Quota request with expiry self-healing: when the access half is rejected
+// (HTTP 401/403 or a body-level login refusal), spend the refresh half on a
+// new token and retry once. Only a successful retry reports the rotation
+// (the runtime persists it; a save-time probe collects it into the draft).
+// A failed retry keeps its own status and does not persist the token. Returns
+// the parsed windows together with the token that actually worked — the plan
+// lookup must use the effective token, or it would just 401 again.
+async function queryRateLimit(request, token, deps = {}) {
+  const attempt = async (tokenValue) => parseStepfunUsage(await request(tokenValue));
+  try {
+    return { windows: await attempt(token), token };
+  } catch (error) {
+    if (!isStepfunAuthFailure(error)) throw error;
+    const renewed = await refreshStepfunToken(token, deviceId(token), deps);
+    if (!renewed) throw error;
+    const windows = await attempt(renewed);
+    try {
+      await deps.onStepfunTokenRenewed?.({ previousToken: token, token: renewed });
+    } catch (persistenceError) {
+      // A rotation that cannot be stored only costs one extra refresh on the
+      // next poll; the quota itself is unaffected.
+      deps.logger?.(`[limits] StepFun token renewal could not be persisted: ${persistenceError?.message || persistenceError}`);
+    }
+    return { windows, token: renewed };
+  }
+}
+
 async function fetchStepfunLimits(options = {}, deps = {}) {
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
   const base = { provider: 'stepfun', source: 'web', updatedAt };
   const token = stepfunToken(deps.env || process.env, options);
   if (!token) return normalizeLimitProvider({ ...base, status: 'notConfigured', windows: [] });
   try {
-    const webid = deviceId(token);
-    const request = async (url, signal) => {
+    const request = async (url, tokenValue, signal) => {
+      const webid = deviceId(tokenValue);
       const response = await (deps.fetch || fetch)(url, {
         method: 'POST', body: '{}', signal, redirect: 'error', credentials: 'omit',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json',
           'User-Agent': BROWSER_USER_AGENT, 'oasis-appid': '10300', 'oasis-platform': 'web',
-          'oasis-webid': webid, Cookie: `Oasis-Token=${token}; Oasis-Webid=${webid}` }
+          'oasis-webid': webid, Cookie: `Oasis-Token=${tokenValue}; Oasis-Webid=${webid}` }
       });
       if (!response.ok) throw errorWithStatus(response.status === 401 || response.status === 403 ? 'unauthorized' : response.status === 429 ? 'sourceRateLimited' : 'unavailable', `StepFun returned ${response.status}`);
       try { return await response.json(); } catch { throw errorWithStatus('unavailable', 'Invalid StepFun response'); }
     };
-    const windows = await runWithProbeDeadline(
-      async ({ signal }) => parseStepfunUsage(await request(RATE_URL, signal)),
+    const { windows, token: effectiveToken } = await runWithProbeDeadline(
+      ({ signal }) => queryRateLimit(
+        (tokenValue) => request(RATE_URL, tokenValue, signal),
+        token,
+        { fetch: deps.fetch, signal, logger: deps.logger, onStepfunTokenRenewed: deps.onStepfunTokenRenewed }
+      ),
       { signal: deps.signal, deadlineMs: Number(deps.stepfunFetchTimeoutMs || 15000) }
     );
     let accountLabel = '';
     try {
       const plan = await runWithProbeDeadline(
-        ({ signal }) => request(PLAN_URL, signal),
+        ({ signal }) => request(PLAN_URL, effectiveToken, signal),
         { signal: deps.signal, deadlineMs: Number(deps.stepfunPlanFetchTimeoutMs || 1500) }
       );
       if ((plan.status === 1 || plan.status == null) && typeof plan.subscription?.name === 'string') accountLabel = plan.subscription.name;
@@ -124,7 +166,7 @@ async function fetchStepfunLimits(options = {}, deps = {}) {
       if (deps.signal?.aborted) throw error;
       // Plan name is optional; quota remains authoritative.
     }
-    return normalizeLimitProvider({ ...base, status: 'ok', accountKey: hashKey('stepfun', token), accountLabel, windows });
+    return normalizeLimitProvider({ ...base, status: 'ok', accountKey: hashKey('stepfun', accountTokenIdentity(effectiveToken)), accountLabel, windows });
   } catch (error) {
     return normalizeLimitProvider({ ...base, status: providerStatusFromError(error), windows: [] });
   }

@@ -3,6 +3,7 @@
 const { aggregateDevices, normalizeDeviceRecord, normalizePeriod } = require('../shared/usage');
 const { deviceHistoryRevision } = require('../shared/history');
 const { pickRecentUsageActivity } = require('../shared/trayText');
+const { grokBotSessionIdsForMaps } = require('./renderer/sessionRows');
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
@@ -21,6 +22,12 @@ function attachLocalNativeViews(stats, localDevice) {
   delete stats.nativeSessions;
   delete stats.nativeProjects;
   delete stats.localRecentUsageActivity;
+  // Electron-only identity evidence travels with this snapshot, not with the
+  // device/Hub record. Look up only current DAY/MONTH ids in captured history;
+  // completing the full summary here would defeat lazy all-time composition.
+  stats.grokBotSessionIds = grokBotSessionIdsForMaps([
+    stats.periods?.today?.sessions, stats.periods?.month?.sessions
+  ], [localDevice && rawAllTime(localDevice)?.sessions, stats.periods?.allTime?.sessions]);
   if (hasOwn(localDevice, 'nativeSessions')) stats.nativeSessions = localDevice.nativeSessions;
   if (hasOwn(localDevice, 'nativeProjects')) stats.nativeProjects = localDevice.nativeProjects;
   // The tray's recent provider is a local-only presentation projection. Build
@@ -173,6 +180,26 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
 // they ask. The completion is composed from the publish's own inputs and clock,
 // so it agrees with the summary it completes.
 const completions = new WeakMap();
+const { applyActivityPatch, materializeActivity } = require('../shared/sessionActivityProjection');
+const localActivity = new WeakMap();
+
+// Keep lazy all-time completion tied to the same accounting snapshot while
+// refreshing its small local metadata overlay. No aggregation on a heartbeat.
+function projectLocalActivity(stats, patch, now = Date.now()) {
+  if (!stats) return stats;
+  const prior = localActivity.get(stats);
+  const observations = new Map((prior?.patch.observations || []).filter((row) =>
+    now - Date.parse(row.liveActivity.observedAt) < 30_000).map((row) => [`${row.client}:${row.sessionId}`, row]));
+  for (const row of patch.observations) observations.set(`${row.client}:${row.sessionId}`, row);
+  const merged = { ...patch, observations: [...observations.values()] };
+  const next = applyActivityPatch(stats, patch);
+  const base = prior?.base || completions.get(stats);
+  localActivity.set(next, { base, patch: merged });
+  if (base) completions.set(next, { compose: () => applyActivityPatch(base.complete ||= base.compose(), merged), complete: null });
+  return next;
+}
+
+function localActivityPatch(stats) { return localActivity.get(stats)?.patch; }
 
 function composeLocalSyncSummary(hubStats, localDevice, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
@@ -197,8 +224,8 @@ function composeLocalOnlySummary(localDevice, finish, options = {}) {
 // Any other stats object is already complete and comes back as it is.
 function completeLocalSyncStats(stats) {
   const entry = stats && typeof stats === 'object' ? completions.get(stats) : null;
-  if (!entry) return stats;
-  if (!entry.complete) entry.complete = entry.compose();
+  if (!entry) return materializeActivity(stats);
+  if (!entry.complete) entry.complete = materializeActivity(entry.compose());
   return entry.complete;
 }
 
@@ -208,5 +235,7 @@ module.exports = {
   completeLocalSyncStats,
   composeLocalOnlySummary,
   composeLocalSyncStats,
-  composeLocalSyncSummary
+  composeLocalSyncSummary,
+  projectLocalActivity,
+  localActivityPatch
 };

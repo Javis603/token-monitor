@@ -33,6 +33,8 @@ Desktop usage is only as complete as the connected ACP agent. Tokens come from t
 
 Session titles, activity timestamps, and project attribution come from the CLI `sessions` table via `src/shared/providers/devin/sessionMetadata.js`. Devin's opaque session ids (e.g. `lavender-flock`) carry no timestamp of their own, so without the database a session falls back to the scan's own activity bounds.
 
+T3 Code’s ACP Registry driver stores these same opaque ids in strong `nativeThreadRef` records. The shared T3 relationship reader binds a configured registry `agentId: "devin"` to the `devin` accounting client using the `settings.json` beside the T3 database, so provider switches, accepted replacement runs and app-owned delegated children reuse the common grouping path. Neither titles nor the generated session name establish a parent. Local commands and executable overrides cannot prove this binding. Grouping changes no Devin token or cost records and adds no live-activity source.
+
 ## Cost
 
 Usage is priced by Tokscale's model table like any other client. Devin subscription seats and ACU credit accounting are not an API meter, so displayed cost is an estimate, not an invoice.

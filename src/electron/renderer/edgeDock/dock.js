@@ -47,7 +47,8 @@ const overflowText = window.TokenMonitorOverflowText.create({
 const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
   spin: 'edge-dock-session-spin',
   check: 'edge-dock-session-check',
-  idle: 'edge-dock-session-idle'
+  idle: 'edge-dock-session-idle',
+  waiting: 'edge-dock-session-waiting'
 });
 
 const BRAND_VENDOR_COLORS = { ...clientColors };
@@ -59,6 +60,10 @@ const DRAG_THRESHOLD_PX = 4;
 const BREAKDOWN_VISIBLE_ROWS = 6;
 // Keep the phase anchor in sync with edge-dock-running-spin in dock.css.
 const RUNNING_SPIN_MS = 1400;
+// Match the waiting pulse in dock.css. Keep its entry clock across rail
+// rebuilds so usage pushes and live-status renewals preserve the breathing phase.
+const WAITING_PULSE_MS = 2400;
+const waitingRingStarts = new Map();
 
 const root = document.getElementById('edgeDockRoot');
 const query = new URLSearchParams(window.location.search);
@@ -564,7 +569,18 @@ if (surface === 'peek') {
 
 // ---- Rail ----------------------------------------------------------------
 
-function ringNode(remainingPercent, color, mark) {
+function waitingRingStart(cellId, isWaiting) {
+  if (!isWaiting) {
+    waitingRingStarts.delete(cellId);
+    return null;
+  }
+  if (!waitingRingStarts.has(cellId)) {
+    waitingRingStarts.set(cellId, performance.now());
+  }
+  return waitingRingStarts.get(cellId);
+}
+
+function ringNode(remainingPercent, color, mark, waitingStartedAt = null) {
   const ring = el('div', 'edge-dock-ring');
   ring.style.setProperty('--ring-color', color);
   const svg = document.createElementNS(SVG_NS, 'svg');
@@ -590,8 +606,21 @@ function ringNode(remainingPercent, color, mark) {
   fill.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE * (1 - remaining / 100)));
   if (remainingPercent === null) fill.style.opacity = '0';
   svg.append(track, fill);
+  const waiting = document.createElementNS(SVG_NS, 'svg');
+  waiting.setAttribute('class', 'edge-dock-ring-waiting');
+  waiting.setAttribute('viewBox', '0 0 42 42');
+  waiting.setAttribute('aria-hidden', 'true');
+  const waitingCircle = document.createElementNS(SVG_NS, 'circle');
+  waitingCircle.setAttribute('cx', '21');
+  waitingCircle.setAttribute('cy', '21');
+  waitingCircle.setAttribute('r', '14');
+  waiting.append(waitingCircle);
+  if (waitingStartedAt !== null) {
+    const elapsed = Math.max(0, performance.now() - waitingStartedAt);
+    waiting.style.animationDelay = `-${elapsed % WAITING_PULSE_MS}ms`;
+  }
   if (appearance().edgeDockRunningIndicatorEnabled === false) {
-    ring.append(svg, mark);
+    ring.append(svg, mark, waiting);
     return ring;
   }
   // A separate inner arc reports work without moving the quota reading. Rail
@@ -608,7 +637,7 @@ function ringNode(remainingPercent, color, mark) {
   arc.setAttribute('r', '14');
   arc.setAttribute('stroke-dasharray', `${7 * Math.PI} ${21 * Math.PI}`);
   spinner.append(arc);
-  ring.append(svg, spinner, mark);
+  ring.append(svg, spinner, mark, waiting);
   return ring;
 }
 
@@ -621,7 +650,9 @@ function providerCellNode(cell) {
   // endpoint. It also remains visible when the quota is empty or stale. Hiding
   // the card's session list does not hide the running signal.
   const running = runningSessionSummary(cell.sessions).count;
+  const waiting = presentation.waitingSessionSummary(cell.sessions).count;
   if (running > 0) node.dataset.running = 'yes';
+  if (waiting > 0) node.dataset.waiting = 'yes';
   const color = providerColor(cell.provider);
   const shown = presentation.displayPercent(cell.remainingPercent, appearance().showLimitUsed === true);
   const value = el('span', 'edge-dock-value');
@@ -646,11 +677,12 @@ function providerCellNode(cell) {
   // Splitting the two lets a tight secondary window warn without turning the
   // headline into whichever window is lowest this minute.
   value.dataset.severity = displaySeverity(cell.severityPercent ?? cell.remainingPercent);
-  node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider)), value);
+  node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider), waitingRingStart(cell.id, waiting > 0)), value);
   // The spinner is decorative and carries no text, so the state it announces is
   // spoken here instead, from the same reading it is drawn from.
   const spoken = [providerLabel(cell.provider), value.textContent];
   if (running > 0) spoken.push(t('edgeDock.runningCount', { count: running }));
+  if (waiting > 0) spoken.push(t('edgeDock.waitingCount', { count: waiting }));
   node.setAttribute('aria-label', spoken.join(' '));
   return node;
 }
@@ -1080,6 +1112,10 @@ function renderRail(payload) {
     node.classList.toggle('is-focused', payload.focusCellId === cell.id);
     nodes.push(node);
   });
+  const providerIds = new Set((payload.cells || []).filter((cell) => cell.kind !== 'stat').map((cell) => cell.id));
+  for (const id of waitingRingStarts.keys()) {
+    if (!providerIds.has(id)) waitingRingStarts.delete(id);
+  }
   const ringSnapshot = captureRingResetMotion();
   railNode.replaceChildren(...nodes);
   animateRingResets(ringSnapshot);
@@ -1161,6 +1197,7 @@ function relativeAgo(value) {
 // runs out. Absent for a session whose transcript states no window, which is the
 // normal case rather than an error.
 function contextNode(session) {
+  session = session.groupRows?.[0] || session;
   const context = sessionLive.sessionActivityState(session) !== 'idle' ? session?.context : null;
   if (!context) return null;
   const showUsed = appearance().sessionContextMetric !== 'remaining';
@@ -1187,7 +1224,7 @@ const lastActivityBySession = new Map();
 // drops out of the list can never flare again, so holding it would leak one
 // entry per session for the life of the process.
 function pruneActivity(sessions) {
-  const live = new Set(sessions.map(sessionKey));
+  const live = new Set([...sessions, ...presentation.sessionMembers(sessions)].map(sessionKey));
   for (const key of lastActivityBySession.keys()) {
     if (!live.has(key)) lastActivityBySession.delete(key);
   }
@@ -1213,6 +1250,7 @@ function stateMark(session, key, state) {
   dot.innerHTML = SESSION_STATE_GLYPHS;
   dot.dataset.state = state;
   if (state === 'running') dot.title = t('session.running');
+  else if (state === 'waiting') dot.title = t('session.waiting');
   else if (state === 'ended') dot.title = t('session.finished');
   const previous = lastActivityBySession.get(key) || 0;
   const next = Date.parse(session.lastUsedAt || '') || 0;
@@ -1226,13 +1264,29 @@ function stateMark(session, key, state) {
 }
 
 function sessionsNode(sessions) {
-  if (!Array.isArray(sessions) || !sessions.length) return null;
+  sessions = Array.isArray(sessions) ? sessions : [];
   pruneActivity(sessions);
+  pruneSessionGroupExpansion(sessions);
+  if (!sessions.length) return null;
   // A provider card's rows are all one client, so their marks would only repeat
   // the card's own header; the standalone Sessions card lists every client and
   // names each row's tool (see sessionsCard).
   const node = sessionsContainer(sessions, { title: t('edgeDock.sessions'), showClientMark: false });
   return node;
+}
+
+const expandedSessionGroups = new Set();
+
+function sessionGroupExpansionKey(key) {
+  return `${state.payload?.cell?.id || ''}|${key}`;
+}
+
+function pruneSessionGroupExpansion(sessions) {
+  const prefix = sessionGroupExpansionKey('');
+  const live = new Set(sessions.filter(row => row.groupRows).map(row => sessionGroupExpansionKey(sessionKey(row))));
+  for (const key of expandedSessionGroups) {
+    if (key.startsWith(prefix) && !live.has(key)) expandedSessionGroups.delete(key);
+  }
 }
 
 function sessionsContainer(sessions, options = {}) {
@@ -1241,8 +1295,8 @@ function sessionsContainer(sessions, options = {}) {
   // stop reading as running (and must stop being counted).
   // One derivation serves both the count and the marks, from the same shared
   // predicate the Sessions list uses.
-  const stateByKey = new Map(sessions.map((session) => [sessionKey(session), sessionLive.sessionActivityState(session)]));
-  const liveCount = [...stateByKey.values()].filter((state) => state === 'running').length;
+  const stateByKey = new Map(sessions.map((session) => [sessionKey(session), presentation.sessionActivityState(session)]));
+  const liveCount = [...stateByKey.values()].filter((activityState) => activityState === 'running').length;
   const node = el('div', 'edge-dock-sessions');
   // The feathered rule above a section separates it from a quota row. A nested
   // list already sits under its group's own header, so it draws none: one line
@@ -1261,10 +1315,10 @@ function sessionsContainer(sessions, options = {}) {
   if (head.childElementCount) node.append(head);
   const list = el('div', 'edge-dock-session-list');
   for (const session of sessions) {
-    const row = el('div', 'edge-dock-session');
+    const row = el(session.groupRows ? 'summary' : 'div', 'edge-dock-session');
     const key = sessionKey(session);
-    const state = stateByKey.get(key) || 'idle';
-    row.classList.toggle('is-running', state === 'running');
+    const activityState = stateByKey.get(key) || 'idle';
+    row.classList.toggle('is-running', activityState === 'running');
     const name = session.title || session.projectLabel || String(session.sessionId || '').slice(0, 12) || '—';
     const nameNode = el('span', 'edge-dock-session-name');
     // The row's tool, as the same mark the rest of the widget draws for it. A
@@ -1280,7 +1334,7 @@ function sessionsContainer(sessions, options = {}) {
     // The dot sits with the name rather than recolouring it: a green title
     // made the row read as a different kind of row, and the colour carried no
     // more information than the dot does.
-    nameNode.append(stateMark(session, key, state));
+    nameNode.append(stateMark(session, key, activityState));
     const title = el('span', 'edge-dock-session-title', name);
     title.dataset.overflowKey = key;
     overflowText.bind(title);
@@ -1289,13 +1343,16 @@ function sessionsContainer(sessions, options = {}) {
     // translated state is rendered as real text for assistive technology. It
     // cannot go on the row itself: a plain `div` has the generic role and
     // Chromium ignores an accessible name set on one.
-    const stateLabel = state === 'running' ? t('session.running')
-      : state === 'ended' ? t('session.finished')
+    const stateLabel = activityState === 'waiting' ? t('session.waiting') : activityState === 'running' ? t('session.running')
+      : activityState === 'ended' ? t('session.finished')
         : t('session.idle');
     nameNode.append(el('span', 'sr-only', ` ${stateLabel}`));
-    // The meta line carries model, age, and (when the transcript stated one)
-    // the context reading, so nothing the row showed before is displaced.
+    // Membership belongs with model and age, leaving the title its full column.
     const meta = el('span', 'edge-dock-session-meta');
+    const description = el('span', 'edge-dock-session-description');
+    const memberLabel = session.groupRows && (!session.subagentGroup || session.subagentCount > 0)
+      ? (session.subagentGroup ? t('sessions.subagentCount', { count: session.subagentCount })
+        : t('sessions.grokBotCount', { count: session.groupRows.length })) : '';
     // The model label is composed by the Sessions list's own helper, so a
     // multi-model session reads "N models" here exactly as it does there —
     // projecting only the top model showed a different name than the list's
@@ -1307,19 +1364,25 @@ function sessionsContainer(sessions, options = {}) {
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatBreakdownTokens
     });
-    if (modelLabel && modelEntries.length > 1) {
-      const models = el('span', 'session-models', modelLabel);
-      limitWindowsView.setDetailTooltip(models, modelEntries);
-      meta.append(models);
-      if (age) meta.append(document.createTextNode(` · ${age}`));
-    } else {
-      meta.append(document.createTextNode([modelLabel, age].filter(Boolean).join(' · ')));
+    if (modelLabel) {
+      if (modelEntries.length > 1) {
+        const models = el('span', 'session-models', modelLabel);
+        limitWindowsView.setDetailTooltip(models, modelEntries);
+        description.append(models);
+      } else description.append(document.createTextNode(modelLabel));
     }
-    const context = contextNode(session);
-    const cache = context ? null : sessionLive.sessionPromptCacheForRow(session);
+    if (memberLabel) {
+      if (modelLabel) description.append(document.createTextNode(' · '));
+      description.append(el('span', 'edge-dock-session-member-count', memberLabel));
+    }
+    if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
+    meta.append(description);
+    const statusRow = session.groupRows?.[0] || session;
+    const context = contextNode(statusRow);
+    const cache = context ? null : sessionLive.sessionPromptCacheForRow(statusRow);
     if (cache) {
       const badge = el('span', 'edge-dock-session-cache', t('session.cacheEstimate', { minutes: cache.minutes }));
-      sessionRowsApi.setSessionTooltip(badge, session, cache, t, limitWindowsView);
+      sessionRowsApi.setSessionTooltip(badge, statusRow, cache, t, limitWindowsView);
       meta.append(badge);
     }
     if (context) meta.append(context);
@@ -1328,7 +1391,25 @@ function sessionsContainer(sessions, options = {}) {
       el('span', 'edge-dock-session-tokens', formatBreakdownTokens(session.totalTokens)),
       meta
     );
-    list.append(row);
+    if (session.groupRows) {
+      const family = el('details', 'edge-dock-session-family');
+      const expansionKey = sessionGroupExpansionKey(key);
+      family.open = expandedSessionGroups.has(expansionKey);
+      row.dataset.sessionGroupKey = key;
+      row.setAttribute('role', 'button');
+      row.setAttribute('aria-expanded', String(family.open));
+      family.addEventListener('toggle', () => {
+        if (!family.isConnected || family.open === expandedSessionGroups.has(expansionKey)) return;
+        row.setAttribute('aria-expanded', String(family.open));
+        if (family.open) expandedSessionGroups.add(expansionKey);
+        else expandedSessionGroups.delete(expansionKey);
+        // Reuse the existing measured-size handshake so expansion fits the
+        // native bubble window as well as this document.
+        if (state.payload?.cell && surface === 'bubble') renderBubble(state.payload);
+      });
+      family.append(row, sessionsContainer(session.groupRows, { showClientMark: true, showCount: false, separator: false }));
+      list.append(family);
+    } else list.append(row);
   }
   node.append(list);
   return node;
@@ -1559,6 +1640,7 @@ function sessionsCard(cell, card, head) {
   // is merely quiet keeps its flare entry, so a session that starts running again flares
   // on its next write rather than being treated as newly seen.
   pruneActivity(pushed);
+  pruneSessionGroupExpansion(pushed);
   // The count lives in exactly one place per layout. Grouped, each section states
   // its own, and a card total above them printed the very same number whenever one
   // tool happened to be the only one running. Ungrouped there are no section heads,
@@ -1621,12 +1703,19 @@ function commitCard(card, cellId) {
   const previous = contentLayer.querySelector('.edge-dock-card');
   const sameCard = previous?.dataset.cellId === cellId
     && previous?.dataset.breakdownMode === card.dataset.breakdownMode;
-  const scrollTop = sameCard ? previous.querySelector(CARD_SCROLL_SELECTOR)?.scrollTop || 0 : 0;
+  const scrollLists = (node) => [...node.querySelectorAll(CARD_SCROLL_SELECTOR)]
+    .filter(list => !list.closest('.edge-dock-session-family'));
+  const scrollTops = sameCard ? scrollLists(previous).map(list => list.scrollTop) : [];
+  const focusedGroup = sameCard ? document.activeElement?.dataset?.sessionGroupKey : null;
   const resetSnapshot = cardResetAnimator.capture(contentLayer);
   contentLayer.replaceChildren(card);
   overflowText.refresh();
-  const list = card.querySelector(CARD_SCROLL_SELECTOR);
-  if (list) list.scrollTop = scrollTop;
+  if (focusedGroup) {
+    const summary = [...card.querySelectorAll('summary[data-session-group-key]')]
+      .find(node => node.dataset.sessionGroupKey === focusedGroup);
+    summary?.focus({ preventScroll: true });
+  }
+  scrollLists(card).forEach((list, index) => { list.scrollTop = scrollTops[index] || 0; });
   // Measure reading targets only after mounting and restoring their scroll position.
   if (sameCard) overflowText.preserveReading(previous, card);
   cardResetAnimator.animate(card, resetSnapshot);
@@ -1759,7 +1848,7 @@ function sessionsExpiryDelayMs() {
     // surface in turn. Only an expiry still ahead can shorten a wait; a stale one would
     // otherwise pin the delay to the floor and re-arm on every pass.
     const runningExpiry = presentation.nextRunningExpiryAt(cell.sessions, now);
-    const cacheExpiry = sessionLive.nextSessionStatusChangeAt(cell.sessions, now);
+    const cacheExpiry = sessionLive.nextSessionStatusChangeAt(presentation.sessionMembers(cell.sessions), now);
     const expiresAt = [runningExpiry, cacheExpiry].filter((at) => at > now).sort((a, b) => a - b)[0] || 0;
     if (expiresAt > now && (!soonest || expiresAt < soonest)) soonest = expiresAt;
   }
