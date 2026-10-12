@@ -215,7 +215,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       summaryMeasurement: summaryMeasurement && { id: summaryMeasurement.id, measuring: summaryMeasurement.measuring },
       refreshEnabled: settings().notchRefreshEnabled === true,
       refreshable: expanded && settings().notchRefreshEnabled === true && canRefreshLimits() === true }
-      : { ...base, side: settings().notchDetailSide === 'left' ? 'right' : 'left', cell: data.cells.find((c) => c.id === detailId) || null, placed: bubblePlaced,
+      : { ...base, visible: Boolean(detailId) && !locked, side: settings().notchDetailSide === 'left' ? 'right' : 'left', cell: data.cells.find((c) => c.id === detailId) || null, placed: bubblePlaced,
         omitQuotaBars: true, maxCardHeight: notchMaxHeight(current.display, current.geometry, true) / zoom() };
     const key = JSON.stringify(payload);
     if (lastSent[surface] === key) return;
@@ -254,7 +254,10 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
 
   function hideDetail() {
     detailId = hoveredId = null; rowAt = null; bubblePlaced = bubbleBounds = null; detailVisible = false;
-    if (alive(windows.bubble)) { if (windows.bubble.getOpacity() !== 0) windows.bubble.setOpacity(0); ignoreMouse('bubble', true); }
+    if (alive(windows.bubble)) {
+      if (windows.bubble.getOpacity() !== 0) windows.bubble.setOpacity(0);
+      ignoreMouse('bubble', true); send('bubble');
+    }
   }
 
   function placeDetail(current) {
@@ -372,6 +375,9 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
 
   function animateShell(current, resizing = false) {
     const fromProgress = progress, target = expanded ? 1 : 0;
+    // Re-measurement retargets a reveal without restarting its full duration.
+    const remaining = motion && motion.target === target && motion.fromProgress !== target
+      ? Math.max(16, motion.duration - motion.elapsed) : 360;
     const id = ++motionGeneration;
     motion = { id, current, from: commands || endpoints(current)[0], to: endpoints(current)[expanded ? 1 : 0],
       fromProgress, target, fromHeight: (frame?.bodyHeight || 0) + (frame?.headerHeight ?? current.geometry.height),
@@ -381,7 +387,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       fromBox: frame?.bodyBox || { x: current.open.x - viewport.x, width: current.open.width },
       toBox: { x: current.open.x - viewport.x, width: current.open.width },
       toHeight: expanded ? current.open.height : current.closed.height,
-      duration: resizing ? 360 : Math.max(80, (expanded ? 360 : 300) * Math.abs(target - fromProgress)), elapsed: 0 };
+      duration: resizing ? remaining : Math.max(80, (expanded ? 360 : 300) * Math.abs(target - fromProgress)), elapsed: 0 };
     paint(current, motion.from, fromProgress, motion.fromHeight, { summaryHeight: motion.fromSummaryHeight, summaryEdges: motion.fromEdges, bodyBox: motion.fromBox });
     visibility();
     if (prefersReducedMotion()) {

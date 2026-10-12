@@ -140,6 +140,8 @@
     let lastNotchSize = '';
     let notchHeaderKey = '';
     let notchRowsKey = '';
+    const notchRowNodes = new Map();
+    let notchExpanded = false;
     let notchClock = 0;
     let notchRowsPending = false;
     function notchMeasureText(measure, value) {
@@ -378,9 +380,12 @@
       }
       icons.forEach((icon, index) => { icon.hidden = index >= visible; });
     }
-    function fitNotchStatReadouts() {
-      for (const row of contentLayer.querySelectorAll('.notch-stat-overview .edge-dock-cell-marks')) fitNotchMarks(row);
+    function fitNotchStatReadouts(changed = null) {
+      for (const row of contentLayer.querySelectorAll('.notch-stat-overview .edge-dock-cell-marks')) {
+        if (!changed || changed.has(row.closest('.edge-dock-card'))) fitNotchMarks(row);
+      }
       for (const card of contentLayer.querySelectorAll('.notch-stat-overview.is-usage')) {
+        if (changed && !changed.has(card)) continue;
         const cell = card.querySelector('.edge-dock-cell');
         const label = cell.querySelector('.edge-dock-stat-label');
         const cost = cell.querySelector('.edge-dock-stat-cost');
@@ -477,6 +482,8 @@
       overflow.hidden = !fitted.overflow;
       return { width: content.getBoundingClientRect().width, minimum: fitted.minimum };
     }
+    // Transform coordinate noise must not become another logical window point.
+    function notchLogicalPoint(value) { return Math.round(value * 1000) / 1000; }
     function reportNotchSlots(head) {
       // An empty header has no widths to replace the last measured summary with.
       if (!state.payload?.summary) return;
@@ -497,9 +504,9 @@
       const firstBlock = [...leftContent.children].find(node => !node.hidden);
       const firstIcon = firstBlock?.classList.contains('notch-summary-field') ? firstBlock.firstElementChild : firstBlock;
       const firstMark = firstIcon?.querySelector('.edge-dock-mark');
-      const iconInset = firstMark ? Math.max(0, firstMark.getBoundingClientRect().left - leftContent.getBoundingClientRect().left) : 0;
+      const iconInset = firstMark ? notchLogicalPoint(Math.max(0, firstMark.getBoundingClientRect().left - leftContent.getBoundingClientRect().left)) : 0;
       head.dataset.notchIconInset = iconInset;
-      const slots = { left: Math.ceil(left.width), right: Math.ceil(right.width), minimumLeft: Math.ceil(left.minimum), minimumRight: Math.ceil(right.minimum), iconInset };
+      const slots = { left: Math.ceil(notchLogicalPoint(left.width)), right: Math.ceil(notchLogicalPoint(right.width)), minimumLeft: Math.ceil(notchLogicalPoint(left.minimum)), minimumRight: Math.ceil(notchLogicalPoint(right.minimum)), iconInset };
       const key = JSON.stringify([slots, measurement?.measuring ? measurement.id : null]);
       if (key !== lastNotchSlots) {
         lastNotchSlots = key;
@@ -512,11 +519,11 @@
       const list = contentLayer.querySelector('.notch-providers');
       if (!rows || !list) return;
       const zoom = Number(state.payload?.appearance.zoomFactor) || 1;
-      const height = Math.ceil(rows.getBoundingClientRect().height + parseFloat(getComputedStyle(list).paddingBottom) * zoom);
+      const height = Math.ceil(notchLogicalPoint(rows.getBoundingClientRect().height + parseFloat(getComputedStyle(list).paddingBottom) * zoom));
       const origin = root.getBoundingClientRect();
       const rects = [...rows.children].filter((row) => row.dataset.cellId).map((row) => {
         const r = row.getBoundingClientRect();
-        return { id: row.dataset.cellId, x: r.x - origin.x, y: r.y - origin.y, width: r.width, height: r.height };
+        return { id: row.dataset.cellId, x: notchLogicalPoint(r.x - origin.x), y: notchLogicalPoint(r.y - origin.y), width: notchLogicalPoint(r.width), height: notchLogicalPoint(r.height) };
       });
       const key = JSON.stringify([height, rects]);
       if (key !== lastNotchSize) { lastNotchSize = key; bridge.reportNotchSize(height, null, rects); }
@@ -562,7 +569,80 @@
       }
     }
 
+    function notchRowKey(cell) {
+      const data = cell.kind === 'stat' ? cell : { ...cell, usage: null, sessions: null, forecast: null };
+      const sessions = cell.metric === presentation.SESSIONS_METRIC ? runningSessionSummary(cell.sessions) : null;
+      return JSON.stringify([data, state.appearanceKey, cell.kind !== 'stat' ? notchClock : null,
+        sessions && [sessions.count, sessions.clients]]);
+    }
+
+    function renderNotchRows(payload, opening) {
+      // Hidden rows retain their nodes; the next reveal uses the latest payload.
+      // Initial rows are measured once so the first expansion has a natural height.
+      if (!payload.expanded && notchRowNodes.size) return;
+      const cells = payload.cells || [];
+      const keys = cells.map(notchRowKey);
+      const key = JSON.stringify([keys, state.appearanceKey, payload.refreshEnabled]);
+      if (key === notchRowsKey) return;
+      const moving = payload.motion?.progress > 0 && payload.motion.progress < 1;
+      // Fresh reveal content is mounted before it fades in. Later pushes wait
+      // for the current shell motion to settle.
+      if (moving && !opening) { notchRowsPending = true; return; }
+      notchRowsKey = key;
+      let body = contentLayer.querySelector('.notch-body');
+      if (!body) {
+        body = el('div', 'notch-body');
+        const list = el('div', 'notch-providers');
+        const rows = el('div', 'notch-provider-list');
+        list.append(rows); body.append(list); contentLayer.append(body);
+        list.addEventListener('scroll', reportNotchContentSize);
+        notchProviderObserver.observe(rows);
+      }
+      const list = body.querySelector('.notch-providers');
+      const rows = body.querySelector('.notch-provider-list');
+      const scrollTop = list.scrollTop;
+      const focused = document.activeElement?.closest('.edge-dock-card')?.dataset.cellId;
+      const resetSnapshot = cardResetAnimator.capture(contentLayer);
+      const next = [], replaced = [], changed = new Set();
+      for (const [index, cell] of cells.entries()) {
+        let held = notchRowNodes.get(cell.id);
+        if (held?.key !== keys[index]) {
+          const view = createCardWindowsView(() => cell, () => cell.forecast || null);
+          const card = cell.kind === 'stat' ? notchStatOverviewCard(cell) : notchOverviewCard(cell, view);
+          card.dataset.cellId = cell.id; card.tabIndex = 0;
+          changed.add(card);
+          if (held) replaced.push([held.node, card]);
+          held = { key: keys[index], node: card };
+          notchRowNodes.set(cell.id, held);
+        }
+        next.push(held.node);
+      }
+      const ids = new Set(cells.map(cell => cell.id));
+      for (const id of notchRowNodes.keys()) if (!ids.has(id)) notchRowNodes.delete(id);
+      if (!next.length) {
+        const empty = el('section', 'edge-dock-card notch-empty');
+        empty.append(el('div', 'edge-dock-note', t('settings.notch.empty')));
+        next.push(empty);
+      }
+      if (payload.refreshEnabled) {
+        const footer = rows.querySelector('.notch-refresh-footer') || el('div', 'notch-refresh-footer');
+        if (!footer.firstChild) footer.append(ensureRefreshButton());
+        next.push(footer);
+      }
+      next.forEach((node, index) => { if (rows.children[index] !== node) rows.insertBefore(node, rows.children[index] || null); });
+      const keep = new Set(next);
+      for (const node of [...rows.children]) if (!keep.has(node)) node.remove();
+      list.scrollTop = scrollTop;
+      if (focused) next.find(card => card.dataset.cellId === focused)?.focus({ preventScroll: true });
+      fitNotchStatReadouts(changed); overflowText.refresh();
+      for (const [previous, card] of replaced) overflowText.preserveReading(previous, card);
+      cardResetAnimator.animate(list, resetSnapshot);
+    }
+
     function renderNotch(payload) {
+      const opening = payload.expanded === true && !notchExpanded;
+      notchExpanded = payload.expanded === true;
+      if (opening) notchClock++;
       // A hidden/removed action starts a new visit; late replies cannot repaint it.
       if (!payload.expanded || !payload.refreshEnabled) {
         resetRefreshVisit();
@@ -594,47 +674,7 @@
         summary.style.visibility = payload.summaryMeasurement?.measuring ? 'hidden' : '';
         positionNotchSummary(summary, payload); reportNotchSlots(summary);
       }
-      // Hover state is intentionally absent from this key: opening the secondary
-      // window must not change the primary list or its measured height.
-      const cells = (payload.cells || []).map((cell) => cell.kind === 'stat'
-        ? cell : { ...cell, usage: null, sessions: null, forecast: null });
-      const rowsKey = JSON.stringify([cells, state.appearanceKey, notchClock, payload.refreshEnabled]);
-      const moving = payload.motion?.progress > 0 && payload.motion.progress < 1;
-      if (rowsKey !== notchRowsKey && moving) notchRowsPending = true;
-      if (rowsKey !== notchRowsKey && !moving) {
-        notchRowsKey = rowsKey;
-        const previous = contentLayer.querySelector('.notch-body');
-        const scrollTop = previous?.querySelector('.notch-providers')?.scrollTop || 0;
-        const focused = document.activeElement?.closest('.edge-dock-card')?.dataset.cellId;
-        const resetSnapshot = cardResetAnimator.capture(contentLayer);
-        const body = el('div', 'notch-body');
-        const list = el('div', 'notch-providers');
-        const rows = el('div', 'notch-provider-list');
-        list.append(rows); body.append(list);
-        for (const cell of payload.cells || []) {
-          const view = createCardWindowsView(() => cell, () => cell.forecast || null);
-          const card = cell.kind === 'stat' ? notchStatOverviewCard(cell) : notchOverviewCard(cell, view);
-          card.dataset.cellId = cell.id; card.tabIndex = 0;
-          rows.append(card);
-        }
-        if (!rows.children.length) {
-          const empty = el('section', 'edge-dock-card notch-empty');
-          empty.append(el('div', 'edge-dock-note', t('settings.notch.empty')));
-          rows.append(empty);
-        }
-        if (payload.refreshEnabled) {
-          const footer = el('div', 'notch-refresh-footer');
-          footer.append(ensureRefreshButton());
-          rows.append(footer);
-        }
-        if (previous) previous.replaceWith(body); else contentLayer.append(body);
-        list.scrollTop = scrollTop;
-        list.addEventListener('scroll', reportNotchContentSize);
-        if (focused) [...rows.children].find((card) => card.dataset.cellId === focused)?.focus({ preventScroll: true });
-        fitNotchStatReadouts();
-        overflowText.refresh(); cardResetAnimator.animate(list, resetSnapshot);
-        notchProviderObserver.disconnect(); notchProviderObserver.observe(rows);
-      }
+      renderNotchRows(payload, opening);
       applyNotchMotion(payload.motion);
       reportNotchContentSize();
       // The native window can appear only after this measured shape and header
@@ -686,9 +726,12 @@
         root.classList.toggle('is-notch-detail', surface === 'bubble');
       },
       sessionCells() {
-        return [...(state.payload?.cells || []), ...(state.payload?.summary?.items || []).map(item => item.providerCell).filter(Boolean)];
+        return [...(state.payload?.expanded ? state.payload.cells || [] : []), ...(state.payload?.summary?.items || []).map(item => item.providerCell).filter(Boolean)];
       },
-      needsClock() { return Boolean(state.payload?.expanded || state.payload?.summary?.needsClock); },
+      needsClock() {
+        return Boolean(state.payload?.summary?.needsClock
+          || state.payload?.expanded && state.payload.cells?.some(cell => cell.kind !== 'stat'));
+      },
       repaint() { notchClock++; renderNotch(state.payload); }
     };
   }

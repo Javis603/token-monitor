@@ -1803,6 +1803,9 @@ function renderBubble(payload) {
   if (payload.placed?.cellId === cell.id && payload.placed.height === height) {
     commitCard(card, cell.id);
   } else {
+    // The native top-entry detail reveals after this size acknowledgement.
+    // Its retained card must already contain fresh data before that reveal.
+    if (payload.visible === true && notchRenderer) commitCard(card, cell.id);
     bridge.reportBubbleSize(cell.id, height);
   }
 }
@@ -1826,6 +1829,10 @@ function render(payload) {
   state.payload = payload;
   applyAppearance(payload);
   notchRenderer?.applyAppearance(payload);
+  if (surface === 'bubble' && notchRenderer && payload.visible === false) {
+    scheduleSelfRepaint();
+    return;
+  }
   if (surface === 'notch') notchRenderer.applyMotion(payload.motion);
   else updateShape(payload);
   if (surface === 'peek') renderPeek(payload);
@@ -1920,6 +1927,7 @@ function sessionsExpiryDelayMs() {
 // would rebuild its children for nothing. Both are re-armed after every repaint, so a
 // shortened wait does not lower the period that follows it.
 function selfRepaintDelayMs() {
+  if (surface === 'bubble' && notchRenderer && state.payload?.visible === false) return 0;
   const expiry = sessionsExpiryDelayMs();
   const period = surface === 'bubble' || surface === 'notch' && notchRenderer.needsClock() ? BUBBLE_REPAINT_MS : 0;
   const waits = [period, expiry].filter((value) => value > 0);

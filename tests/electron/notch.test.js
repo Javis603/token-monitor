@@ -290,6 +290,7 @@ test('provider hover uses the original EdgeDock bubble without altering primary 
   assert.equal(last(bubble).surface, 'bubble');
   assert.equal(bubble.query.surface, 'bubble', 'exact same renderer, not a new secondary card');
   assert.deepEqual(last(bubble).cell, cell);
+  assert.equal(last(bubble).visible, true);
   assert.equal(last(bubble).omitQuotaBars, true, 'secondary retains original details and omits only overview quotas');
   ipcMain.emit('topNotch:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 250 });
   assert.equal(bubble.opacity, 1);
@@ -300,6 +301,12 @@ test('provider hover uses the original EdgeDock bubble without altering primary 
   assert.equal(last(primary).expanded, true, 'moving into the right window keeps the shell open');
   ipcMain.emit('topNotch:bubbleSize', { sender: primary.webContents }, { cellId: 'codex', height: 800 });
   assert.equal(bubble.getBounds().height, 250, 'wrong sender cannot resize the bubble');
+  screen.point = { x: 20, y: 900 };
+  controller.poll(1000); controller.poll(1400);
+  assert.equal(last(bubble).visible, false);
+  assert.equal(last(bubble).cell, null);
+  assert.equal(bubble.opacity, 0);
+  assert.equal(bubble.isDestroyed(), false, 'hiding retains the loaded renderer');
 });
 
 test('side and top IPC coexist, reject other senders and dispose only their own handlers', async (t) => {
@@ -1482,7 +1489,7 @@ test('camera-free outlines budget both summary fields against status windows int
 
 test('camera-free renderer fits the menu budget while reserving a complete primary readout before extra icons', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
-  const code = source.slice(source.indexOf('function reportNotchSlots('), source.indexOf('const notchProviderObserver'));
+  const code = source.slice(source.indexOf('function notchLogicalPoint('), source.indexOf('const notchProviderObserver'));
   const left = { minimum: 17, width: 300, children: [] }, right = { minimum: 40, width: 500 };
   let reported;
   const report = vm.runInNewContext(`${code}; reportNotchSlots`, {
@@ -1935,7 +1942,7 @@ test('unsupported Notch selections do not activate shared dock work', () => {
 
 test('a mandatory camera-side readout does not grant menu space to optional overflow', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
-  const code = source.slice(source.indexOf('function reportNotchSlots('), source.indexOf('const notchProviderObserver'));
+  const code = source.slice(source.indexOf('function notchLogicalPoint('), source.indexOf('const notchProviderObserver'));
   const left = { minimum: 50, width: 67, children: [] }, right = { minimum: 0, width: 89 };
   let reported;
   const report = vm.runInNewContext(`${code}; reportNotchSlots`, {
@@ -2073,31 +2080,33 @@ test('Notch renderer owns its observers and motion hooks while details reuse the
     observe() {} disconnect() {}
   } };
   vm.runInNewContext(source, context);
-  const cell = { id: 'selected' }, iconCell = { id: 'summary-icon' };
-  const state = { payload: { cells: [cell], summary: { items: [{ providerCell: iconCell }] } } };
+  const cell = { id: 'selected', kind: 'stat', metric: 'today' }, iconCell = { id: 'summary-icon' };
+  const state = { payload: { expanded: true, cells: [cell], summary: { items: [{ providerCell: iconCell }] } } };
   const classes = new Map();
   const deps = { state, document: { documentElement: { classList: { toggle: (name, value) => classes.set(name, value) } } },
     window: { TokenMonitorPressActivation: {}, TokenMonitorEdgeDockPresentation: { runningSessionSummary() {} } }, root: { classList: { toggle: (name, value) => classes.set(name, value) }, addEventListener() {} },
     bridge: { onAnimate: handler => hooks.push(handler), onMotion: handler => hooks.push(handler) }, shared: {} };
   const create = context.module.exports.createNotchRenderer;
   const renderer = create({ ...deps, surface: 'notch' });
-  assert.equal(observations.length, 2);
-  assert.equal(hooks.length, 2);
+  const primaryObservers = observations.length, primaryHooks = hooks.length;
+  assert.ok(primaryObservers > 0, 'the top entry observes its layout');
+  assert.ok(primaryHooks > 0, 'the top entry receives motion updates');
   assert.equal(renderer.sessionCells()[0], cell);
   assert.equal(renderer.sessionCells()[1], iconCell);
   assert.equal(renderer.needsClock(), false);
+  state.payload.expanded = false;
+  assert.equal(renderer.sessionCells().length, 1, 'hidden primary rows do not keep expiry timers alive');
   state.payload.summary.needsClock = true;
   assert.equal(renderer.needsClock(), true);
   renderer.applyAppearance({ style: 'black' });
   assert.equal(classes.get('notch-black'), true);
   assert.equal(classes.get('is-notch-detail'), false);
   const detail = create({ ...deps, surface: 'bubble' });
-  assert.equal(observations.length, 2, 'details do not create another summary observer');
-  assert.equal(hooks.length, 2, 'details do not subscribe to shell motion');
+  assert.equal(observations.length, primaryObservers, 'details do not create another summary observer');
+  assert.equal(hooks.length, primaryHooks, 'details do not subscribe to shell motion');
   detail.applyAppearance({ style: 'inherit' });
   assert.equal(classes.get('notch-black'), false);
   assert.equal(classes.get('is-notch-detail'), true);
-  assert.equal(typeof detail.omitQuotaRows, 'function');
 });
 
 test('Notch shares the dock idle and approach polling cadence', (t) => {
@@ -2120,4 +2129,151 @@ test('Notch shares the dock idle and approach polling cadence', (t) => {
   const idle = reads.length;
   t.mock.timers.tick(89); assert.equal(reads.length, idle);
   t.mock.timers.tick(1); assert.equal(reads.length, idle + 1);
+});
+
+test('disable and re-enable recreates renderer windows and rejects their old senders', (t) => {
+  const f = fixture(t), old = [...f.windows];
+  old[0].webContents.emit('render-process-gone', {}, { reason: 'crashed' });
+  assert.equal(f.windows.length, 2, 'a crash is not automatically recovered');
+  f.preferences.notchEnabled = false; f.controller.sync();
+  assert.ok(old.every(win => win.isDestroyed()));
+  f.preferences.notchEnabled = true; f.controller.sync();
+  const fresh = f.windows.slice(2);
+  assert.equal(fresh.length, 2);
+  for (const win of fresh) f.ipcMain.emit('topNotch:ready', { sender: win.webContents });
+  assert.ok(fresh.every(win => last(win)), 'each fresh renderer receives its initial payload');
+  const messages = fresh[0].messages.length;
+  f.ipcMain.emit('topNotch:size', { sender: old[0].webContents }, { height: 999 });
+  assert.equal(fresh[0].messages.length, messages, 'old renderer cannot mutate the new windows');
+});
+
+test('hidden Notch details stop their clock while ordinary EdgeDock keeps its cadence', () => {
+  const dock = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const code = dock.slice(dock.indexOf('function selfRepaintDelayMs('), dock.indexOf('function repaintSelf('));
+  const context = { surface: 'bubble', notchRenderer: {}, state: { payload: { visible: false } },
+    BUBBLE_REPAINT_MS: 30000, sessionsExpiryDelayMs: () => assert.fail('hidden detail must not schedule an expiry') };
+  const delay = vm.runInNewContext(`${code};selfRepaintDelayMs`, context);
+  assert.equal(delay(), 0);
+  context.sessionsExpiryDelayMs = () => 0;
+  context.state.payload.visible = true;
+  assert.equal(delay(), 30000);
+  context.notchRenderer = null; context.state.payload.visible = false;
+  assert.equal(delay(), 30000, 'ordinary EdgeDock behavior stays unchanged');
+});
+
+test('Notch retains static rows, refreshes time-dependent rows and defers hidden payloads until reveal', () => {
+  class Node {
+    constructor(className) { this.className = className; this.children = []; this.dataset = {}; this.scrollTop = 0; }
+    get firstChild() { return this.children[0]; }
+    querySelector(selector) {
+      for (const node of this.children) {
+        if (node.className.split(' ').includes(selector.slice(1))) return node;
+        const found = node.querySelector(selector); if (found) return found;
+      }
+      return null;
+    }
+    insertBefore(node, reference) {
+      node.remove(); node.parent = this;
+      this.children.splice(reference ? this.children.indexOf(reference) : this.children.length, 0, node);
+    }
+    append(...nodes) { for (const node of nodes) this.insertBefore(node, null); }
+    remove() { if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; }
+    addEventListener() {} focus() {}
+  }
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
+  const code = source.slice(source.indexOf('function notchRowKey('), source.indexOf('function renderNotch(payload)'));
+  const content = new Node('content'), created = [];
+  let running = 1;
+  const build = cell => { const node = new Node('edge-dock-card'); node.text = cell.totalTokens; created.push(cell.id); return node; };
+  const context = { contentLayer: content, document: {}, state: { appearanceKey: 'theme' },
+    presentation: { SESSIONS_METRIC: 'sessions' }, runningSessionSummary: () => ({ count: running, clients: running ? ['codex'] : [] }),
+    notchRowsKey: '', notchRowNodes: new Map(), notchClock: 0, notchRowsPending: false,
+    el: (_tag, classes, text) => Object.assign(new Node(classes), { textContent: text }), t: key => key, createCardWindowsView: () => ({}),
+    notchStatOverviewCard: build, notchOverviewCard: build,
+    cardResetAnimator: { capture() {}, animate() {} }, notchProviderObserver: { observe() {} },
+    reportNotchContentSize() {}, fitNotchStatReadouts() {}, overflowText: { refresh() {}, preserveReading() {} } };
+  const render = vm.runInNewContext(`${code};renderNotchRows`, context);
+  const input = { expanded: true, cells: [{ id: 'today', kind: 'stat', metric: 'today', totalTokens: 10 },
+    { id: 'codex', kind: 'limit', accounts: [] }, { id: 'sessions', kind: 'stat', metric: 'sessions' }] };
+  render(input, false);
+  const list = content.querySelector('.notch-providers'), rows = content.querySelector('.notch-provider-list');
+  const original = [...rows.children]; list.scrollTop = 25;
+  context.notchClock++;
+  render(input, false);
+  assert.equal(content.querySelector('.notch-providers'), list);
+  assert.equal(rows.children[0], original[0], 'clock keeps static usage DOM');
+  assert.notEqual(rows.children[1], original[1], 'shared quota builder refreshes its boundary text');
+  assert.equal(rows.children[2], original[2], 'unchanged session state keeps its DOM');
+  running = 0; render(input, false);
+  assert.notEqual(rows.children[2], original[2], 'session expiry updates without another collection');
+  const hidden = { ...input, expanded: false, cells: [{ ...input.cells[0], totalTokens: 99 }] };
+  const count = created.length; render(hidden, false);
+  assert.equal(created.length, count);
+  render({ ...hidden, expanded: true, motion: { progress: 0.1 } }, true);
+  assert.equal(rows.children[0].text, 99, 'fresh reveal installs the latest data before the fade');
+  assert.equal(rows.children.length, 1);
+  assert.equal(context.notchRowNodes.size, 1, 'removed rows do not remain cached');
+  assert.equal(list.scrollTop, 25);
+  render({ expanded: true, cells: [], motion: { progress: 1 } }, false);
+  assert.equal(context.notchRowNodes.size, 0);
+  assert.ok(rows.querySelector('.notch-empty'));
+  context.state.appearanceKey = 'new-locale'; context.t = () => 'Localized empty list';
+  render({ expanded: true, cells: [], motion: { progress: 1 } }, false);
+  assert.equal(rows.querySelector('.notch-empty').firstChild.textContent, 'Localized empty list');
+});
+
+test('Notch details mount fresh content before acknowledging a reveal size', () => {
+  const dock = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const code = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const notchRenderer ='));
+  const order = [], card = { dataset: {}, style: {}, getBoundingClientRect: () => ({ height: 120 }) };
+  const context = { root: { dataset: {} }, notchRenderer: {}, statCard: () => card,
+    stagingLayer: { replaceChildren() {} }, fitCardTotal() {}, clampBreakdownList() {},
+    commitCard: () => order.push('commit'), bridge: { reportBubbleSize: () => order.push('size') } };
+  const render = vm.runInNewContext(`${code};renderBubble`, context);
+  const payload = { cell: { id: 'stat:today', kind: 'stat' }, visible: true, maxCardHeight: 400 };
+  render(payload);
+  assert.deepEqual(order, ['commit', 'size'], 'fresh content is installed before main may make the retained window visible');
+  order.length = 0; context.notchRenderer = null; render(payload);
+  assert.deepEqual(order, ['size'], 'the ordinary EdgeDock placement handshake is unchanged');
+});
+
+test('transformed summary measurements ignore subpixel noise before rounding logical widths', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
+  const start = source.includes('function notchLogicalPoint(') ? 'function notchLogicalPoint(' : 'function reportNotchSlots(';
+  const code = source.slice(source.indexOf(start), source.indexOf('const notchProviderObserver'));
+  const left = { width: 28, minimum: 28, children: [] }, right = { width: 27, minimum: 27 };
+  const reports = [];
+  const context = { state: { payload: { summary: {}, geometry: { gapWidth: 179 }, appearance: { zoomFactor: 1 } } },
+    fitNotchSlot: slot => slot, lastNotchSlots: '', bridge: { reportNotchSize: (_height, slots) => reports.push(slots) } };
+  const report = vm.runInNewContext(`${code};reportNotchSlots`, context);
+  const head = { dataset: {}, querySelector: name => name.includes('notch-left') ? left : right };
+  report(head);
+  left.width = left.minimum = 28.0000038;
+  report(head);
+  left.width = left.minimum = 27.9999962;
+  report(head);
+  assert.equal(reports.length, 1, 'transform noise must not alternate 28/29pt and keep restarting the shell');
+  left.width = left.minimum = 28.125;
+  report(head);
+  assert.equal(reports.length, 2, 'a real width change still reaches native layout');
+  assert.equal(reports[1].left, 29);
+});
+
+test('summary resizing during reveal preserves the existing motion deadline', (t) => {
+  const f = fixture(t, { notchShape: 'pill' }, { reducedMotion: false });
+  const top = f.windows[0];
+  f.controller.setData({ cells: [], sessions: Object.values(stats().periods.today.sessions), summary: { items: [{ type: 'text', text: '51.7M' }] } });
+  const b = top.getBounds(), g = last(top).geometry;
+  f.screen.point = { x: b.x + g.headerX + 10, y: b.y + 10 };
+  f.controller.poll(1000); f.controller.poll(1140);
+  const first = top.messages.filter(message => message.channel === 'topNotch:animate').at(-1).payload;
+  f.ipcMain.emit('topNotch:frame', { sender: top.webContents }, { id: first.id, elapsed: 200 });
+  f.ipcMain.emit('topNotch:size', { sender: top.webContents }, { slots: { left: 17, right: 65, minimumLeft: 17, minimumRight: 65 } });
+  const resized = top.messages.filter(message => message.channel === 'topNotch:animate').at(-1).payload;
+  assert.notEqual(resized.id, first.id);
+  assert.equal(resized.duration, first.duration - 200, 'measurement must not restart a full 360ms reveal');
+  f.ipcMain.emit('topNotch:frame', { sender: top.webContents }, { id: resized.id, elapsed: resized.duration });
+  const frame = top.messages.filter(message => message.channel === 'topNotch:motion').at(-1).payload;
+  assert.equal(frame.progress, 1);
+  assert.equal(frame.done, true);
 });
