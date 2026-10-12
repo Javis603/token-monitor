@@ -1078,7 +1078,7 @@ test('menu clearance constrains only extra content and ignores off-screen or tal
   }
   assert.equal(notchSummaryBudget(display, geometry, [{ ...icon, x: 850 }, icon], 17, [1]), 617, 'exclude the owned surface without excluding its tray icons by PID');
   assert.equal(notchSummaryBudget(display, geometry, null, 37), null, 'failed sampling is not a measured empty menu');
-  assert.ok(notchSummaryBudget(display, notchGeometry(display, null, 'pill'), [icon], 37) > 37);
+  assert.equal(notchSummaryBudget(display, notchGeometry(display, null, 'pill'), [icon], 37), null);
   const offset = { ...display, bounds: { ...display.bounds, x: -1470, y: -956 } };
   const shifted = { ...geometry, centerX: geometry.centerX - 1470, y: -956 };
   assert.equal(notchSummaryBudget(offset, shifted, [{ ...icon, x: icon.x - 1470, y: -956 }], 37), 41);
@@ -1171,6 +1171,50 @@ test('disabled menu avoidance retains full summary widths and stops menu samplin
   f.controller.poll(Date.now() + 5000);
   assert.equal(reads, 1, 'disabled avoidance performs no native menu reads');
   assert.equal(last(primary).geometry.summaryBudget, null);
+});
+
+test('compact entries keep their complete summary and skip menu reads regardless of avoidance', (t) => {
+  for (const [shape, hardware] of [['pill', true], ['pill', false], ['notch', false], ['auto', false]]) {
+    let reads = 0;
+    const f = fixture(t, { notchShape: shape }, {
+      readScreens: () => ({ screens: hardware ? [native] : [], mainDisplayId: 1 }),
+      readMenuWindows: () => { reads++; return [{ id: 7, x: 750, y: 0, width: 300, height: 32 }]; }
+    });
+    f.controller.setData(buildNotchData(stats(), [], { trayContent: 'tokens' }));
+    const primary = f.windows[0];
+    const slots = { left: 17, right: 300, minimumLeft: 17, minimumRight: 300 };
+    f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots });
+    const width = last(primary).geometry.headerWidth;
+    for (const enabled of [false, true]) {
+      f.preferences.notchAvoidMenuBar = enabled;
+      f.controller.sync();
+      f.controller.poll(Date.now() + 2500);
+      const geometry = last(primary).geometry;
+      assert.equal(geometry.gapWidth, 0);
+      assert.equal(geometry.summaryConstrained, false);
+      assert.equal(geometry.summaryBudget, null);
+      assert.equal(geometry.summaryOptionalBudget, null);
+      assert.equal(geometry.headerWidth, width, `${shape}: avoidance cannot change compact width`);
+    }
+    assert.equal(reads, 0);
+  }
+});
+
+test('switching entry shapes releases a hardware menu constraint and restores it on return', (t) => {
+  let reads = 0;
+  const f = fixture(t, {}, { readMenuWindows: () => { reads++; return [{ id: 7, x: 850, y: 0, width: 300, height: 32 }]; } });
+  f.controller.setData(buildNotchData(stats(), [], { trayContent: 'tokens' }));
+  assert.equal(last(f.windows[0]).geometry.summaryConstrained, true);
+  f.preferences.notchShape = 'pill';
+  f.controller.sync();
+  f.controller.poll(Date.now() + 2500);
+  assert.equal(last(f.windows[0]).geometry.summaryBudget, null);
+  assert.equal(reads, 1);
+  f.preferences.notchShape = 'auto';
+  f.controller.sync();
+  f.controller.poll(Date.now() + 5000);
+  assert.equal(last(f.windows[0]).geometry.summaryConstrained, true);
+  assert.equal(reads, 2);
 });
 
 test('embedded summary icons use the tray preferred row and retain provider status', () => {
@@ -1646,32 +1690,29 @@ test('capsule details meet the visible edge on either side without a phantom hea
   }
 });
 
-test('camera-free outlines budget both summary fields against status windows intersecting their band', () => {
-  for (const shape of ['notch', 'pill']) {
-    const geometry = notchGeometry(display, null, shape);
-    const menu = { id: 91, x: 950, y: 0, width: 300, height: 32 };
-    const budget = notchSummaryBudget(display, geometry, [menu], 69);
-    assert.ok(budget >= 69 && budget < 430, `${shape} must reserve the right-hand menu`);
-    const bounds = notchBounds(display, geometry, false, 180,
-      { left: 17, right: budget - 17 - 12 }, 1);
-    assert.ok(bounds.x + bounds.width <= menu.x, 'shell and complete readout remain before the menu');
-    assert.ok(notchSummaryBudget(display, { ...geometry, y: 38 }, [menu], 69) > budget,
-      'a capsule below the menu does not inherit a false collision');
+test('menu budgets apply only to physical notch ears', () => {
+  const menu = { id: 91, x: 950, y: 0, width: 300, height: 32 };
+  for (const shape of ['auto', 'notch', 'pill']) {
+    const compact = notchGeometry(display, null, shape);
+    assert.equal(notchSummaryBudget(display, compact, [menu], 69), null);
   }
+  assert.equal(notchSummaryBudget(display, notchGeometry(display, native, 'pill'), [menu], 69), null);
+  const hardware = notchGeometry(display, native);
+  assert.ok(notchSummaryBudget(display, hardware, [menu], 0) > 0);
 });
 
-test('camera-free renderer fits the menu budget while reserving a complete primary readout before extra icons', () => {
+test('camera-free renderer fits the display limit while reserving a complete primary readout before extra icons', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
   const code = source.slice(source.indexOf('function notchLogicalPoint('), source.indexOf('const notchProviderObserver'));
   const left = { minimum: 17, width: 300, children: [] }, right = { minimum: 40, width: 500 };
   let reported;
   const report = vm.runInNewContext(`${code}; reportNotchSlots`, {
-    state: { payload: { summary: {}, geometry: { gapWidth: 0, shoulder: 4, summaryWidthLimit: 1470, summaryBudget: 76 }, appearance: { zoomFactor: 1 } } },
+    state: { payload: { summary: {}, geometry: { gapWidth: 0, shoulder: 4, summaryWidthLimit: 100, summaryBudget: null }, appearance: { zoomFactor: 1 } } },
     fitNotchSlot: (slot, budget) => ({ minimum: slot.minimum, width: Math.max(slot.minimum, Math.min(slot.width, budget ?? Infinity)) }),
     lastNotchSlots: '', bridge: { reportNotchSize: (_height, slots) => { reported = slots; } }
   });
   report({ dataset: {}, querySelector: selector => selector.includes('notch-left') ? left : right });
-  assert.ok(reported.left + reported.right + 12 <= 76, 'menu budget applies to the complete compact group');
+  assert.ok(reported.left + reported.right + 12 <= 76, 'display limit applies to the complete compact group');
   assert.ok(reported.right >= 40, 'extra icons cannot truncate the primary readout');
   left.children = [{
     classList: { contains: () => true },

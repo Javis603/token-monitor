@@ -115,8 +115,9 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     return fullScreen !== previous;
   }
 
-  function refreshMenu(now = Date.now()) {
+  function refreshMenu(now = Date.now(), geometry) {
     if (!running || locked || !summaryVisible() || settings().notchAvoidMenuBar === false || now - menuReadAt < 2000) return false;
+    if (!((geometry || layout()?.geometry)?.gapWidth > 0)) return false;
     try { menuWindows = readMenuWindows(); } catch { menuWindows = null; }
     menuReadAt = now;
     return true;
@@ -134,22 +135,16 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (geometry.gapWidth === 0 && geometry.summaryRingSize) geometry.height = Math.ceil(geometry.summaryRingSize * geometry.summaryZoom + 8);
     const activeSlots = summaryVisible() ? slots : null;
     const compact = geometry.gapWidth === 0;
-    const minimumLeft = activeSlots?.minimumLeft ?? activeSlots?.left ?? 0;
-    const minimumRight = activeSlots?.minimumRight ?? activeSlots?.right ?? 0;
-    const gap = 12 * zoom();
-    const minimum = compact ? minimumLeft + minimumRight + gap : Math.max(minimumLeft, minimumRight);
-    const clearance = activeSlots && settings().notchAvoidMenuBar !== false
+    const minimum = Math.max(activeSlots?.minimumLeft ?? activeSlots?.left ?? 0, activeSlots?.minimumRight ?? activeSlots?.right ?? 0);
+    const avoidMenuBar = !compact && settings().notchAvoidMenuBar !== false;
+    const clearance = activeSlots && avoidMenuBar
       ? notchSummaryBudget(display, geometry, menuWindows, 0, Object.values(windowIds)) : null;
     const summaryConstrained = clearance !== null;
     // Unknown clearance retains the primary readout without admitting extras.
-    const summaryOptionalBudget = activeSlots && settings().notchAvoidMenuBar !== false ? clearance ?? 0 : null;
+    const summaryOptionalBudget = activeSlots && avoidMenuBar ? clearance ?? 0 : null;
     const summaryBudget = summaryOptionalBudget === null ? null : summaryConstrained ? clearance : Math.max(minimum, summaryOptionalBudget);
-    const leftMinimum = summaryConstrained ? 0 : minimumLeft;
-    const rightMinimum = summaryConstrained ? 0 : minimumRight;
-    const left = activeSlots && summaryBudget !== null
-      ? Math.min(activeSlots.left, compact ? Math.max(leftMinimum, summaryBudget - rightMinimum - gap) : summaryBudget) : activeSlots?.left;
     const boundedSlots = activeSlots && summaryBudget !== null
-      ? { left, right: Math.min(activeSlots.right, compact ? Math.max(rightMinimum, summaryBudget - left - gap) : summaryBudget) } : activeSlots;
+      ? { left: Math.min(activeSlots.left, summaryBudget), right: Math.min(activeSlots.right, summaryBudget) } : activeSlots;
     return { display, geometry, summaryBudget, summaryOptionalBudget, summaryConstrained, summaryIconInset: activeSlots?.iconInset || 0,
       closed: notchBounds(display, geometry, false, contentHeight, boundedSlots, zoom()),
       open: notchBounds(display, geometry, true, contentHeight, boundedSlots, zoom()) };
@@ -430,7 +425,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       refreshLayout(); visibility();
       current = layout();
     }
-    if (refreshMenu(now)) { refreshLayout(); current = layout(); }
+    if (refreshMenu(now, current.geometry)) { refreshLayout(); current = layout(); }
     const point = screen.getCursorScreenPoint();
     const inDetail = detailId && bubbleBounds && rectContains(bubbleBounds, point);
     // Bubble placement is anchored to the body, excluding concave shoulders.

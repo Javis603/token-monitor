@@ -503,8 +503,7 @@
       // Reserve the existing mandatory primary field before fitting extra icons.
       const primaryRight = limit === null ? 0 : fitNotchSlot(rightContent, 0).minimum;
       const constrained = geometry.summaryConstrained === true;
-      const reservedRight = constrained && limit !== null ? Math.min(primaryRight, Math.max(0, limit - gap)) : primaryRight;
-      const left = fitNotchSlot(leftContent, limit === null ? budget : Math.max(0, limit - reservedRight - gap), constrained);
+      const left = fitNotchSlot(leftContent, limit === null ? budget : Math.max(0, limit - primaryRight - gap), constrained);
       const rightBudget = limit === null ? budget : Math.max(0, limit - left.width - gap);
       const right = fitNotchSlot(rightContent, rightBudget, constrained);
       const firstBlock = [...leftContent.children].find(node => !node.hidden);

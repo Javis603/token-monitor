@@ -77,8 +77,7 @@ function notchBounds(display, geometry, expanded, contentHeight = 180, slots = {
 // content may exceed it; left-hand app-menu titles have no verified
 // permission-free geometry contract.
 function notchSummaryBudget(display, geometry, windows, minimum = 0, ownWindowIds = []) {
-  if (!Array.isArray(windows)) return null;
-  const attached = geometry.gapWidth > 0;
+  if (!(geometry.gapWidth > 0) || !Array.isArray(windows)) return null;
   const gapRight = geometry.centerX + geometry.gapWidth / 2;
   const screenRight = display.bounds.x + display.bounds.width;
   let right = screenRight;
@@ -87,15 +86,11 @@ function notchSummaryBudget(display, geometry, windows, minimum = 0, ownWindowId
       || rect.width <= 0 || rect.height <= 0) continue;
     // Full vertical containment rejects tall status-level panels. Menu height
     // can differ from the safe top by one physical point.
-    const overlapsBand = rect.height <= geometry.height + 1 && rect.y < geometry.y + geometry.height && rect.y + rect.height > geometry.y;
-    if ((attached ? Math.abs(rect.y - geometry.y) > 1 || rect.y + rect.height > geometry.y + geometry.height + 1 : !overlapsBand)
+    if (Math.abs(rect.y - geometry.y) > 1 || rect.y + rect.height > geometry.y + geometry.height + 1
       || rect.x >= screenRight || rect.x + rect.width <= gapRight) continue;
     right = Math.min(right, Math.max(gapRight, rect.x));
   }
-  // Hardware ears use one-side budgets; camera-free groups share one total
-  // budget around the same center, including the gap between icon and readout.
-  const available = attached ? Math.floor(right - gapRight - EDGE_DOCK_METRICS.screenMargin - 20)
-    : Math.floor(2 * (right - gapRight - EDGE_DOCK_METRICS.screenMargin) - 2 * ((geometry.notched ? 4 : 0) + 8));
+  const available = Math.floor(right - gapRight - EDGE_DOCK_METRICS.screenMargin - 20);
   return Math.max(0, minimum, available);
 }
 
