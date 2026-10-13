@@ -856,6 +856,202 @@ test('live model rates use matched model deltas and follow device expiry', () =>
   assert.equal(tracker.getSample(), null);
 });
 
+test('staggered model updates on the same device retain concurrent active models until each expires', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now, activeMs: 8000, clearMs: 180000 });
+  const base = modelRatePeriod({});
+  const codexTick = modelRatePeriod({
+    'gpt-5': { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000 }
+  });
+  const antigravityTick = modelRatePeriod({
+    'gpt-5': { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000 },
+    'gemini-3-flash': { timedTokens: 200, timedOutputTokens: 20, timedDurationMs: 2000 }
+  });
+  tracker.reset([{ id: 'device:local', name: 'Local', period: base }]);
+
+  now = 100;
+  tracker.observe([{ id: 'device:local', name: 'Local', period: codexTick }]);
+  assert.equal(tracker.getSample().speed, 40);
+  assert.equal(tracker.nextExpiryAt(), 8100);
+  assert.deepEqual(tracker.getSample().devices[0].models, [
+    { model: 'gpt-5', speed: 40, burn: 6000 }
+  ]);
+
+  now = 200;
+  tracker.observe([{ id: 'device:local', name: 'Local', period: antigravityTick }]);
+  assert.equal(tracker.getSample().speed, 20);
+  assert.equal(tracker.getSample().burn, 6000);
+  assert.equal(tracker.nextExpiryAt(), 8100);
+  assert.deepEqual(tracker.getSample().devices[0].models, [
+    { model: 'gpt-5', speed: 40, burn: 6000 },
+    { model: 'gemini-3-flash', speed: 10, burn: 6000 }
+  ]);
+  assert.deepEqual(
+    tokenRateApi.liveTokenRateTooltipEntries(tracker.getSample(), 'speed', String),
+    [['gpt-5', '40 tok/s'], ['gemini-3-flash', '10 tok/s']]
+  );
+
+  now = 8100;
+  assert.equal(tracker.getSample().idle, false);
+  assert.equal(tracker.getSample().speed, 10);
+  assert.equal(tracker.nextExpiryAt(), 8200);
+  assert.deepEqual(tracker.getSample().devices[0].models, [
+    { model: 'gemini-3-flash', speed: 10, burn: 6000 }
+  ]);
+
+  now = 8200;
+  assert.equal(tracker.getSample().idle, true);
+  assert.equal(tracker.getSample().speed, 10);
+  assert.equal(tracker.nextExpiryAt(), 180200);
+  assert.deepEqual(tracker.getSample().devices[0].models, [
+    { model: 'gemini-3-flash', speed: 10, burn: 6000 }
+  ]);
+
+  now = 180200;
+  assert.equal(tracker.getSample(), null);
+});
+
+test('alternating model updates replace only their own sample across devices and custom expiry', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now, activeMs: 500 });
+  let local = modelRatePeriod({});
+  let remote = modelRatePeriod({});
+  const entries = () => [{ id: 'local', period: local }, { id: 'remote', period: remote }];
+  tracker.reset(entries());
+  now = 100;
+  local = modelRatePeriod({ alpha: { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000 } });
+  tracker.observe(entries());
+  now = 200;
+  local = modelRatePeriod({
+    alpha: { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000 },
+    beta: { timedTokens: 200, timedOutputTokens: 20, timedDurationMs: 2000 }
+  });
+  tracker.observe(entries());
+  now = 300;
+  local = modelRatePeriod({
+    alpha: { timedTokens: 200, timedOutputTokens: 100, timedDurationMs: 2000 },
+    beta: { timedTokens: 200, timedOutputTokens: 20, timedDurationMs: 2000 }
+  });
+  assert.equal(tracker.observe(entries()).sample.speed, 80 / 3, 'only the latest alpha delta contributes');
+  now = 400;
+  remote = modelRatePeriod({ alpha: { timedTokens: 150, timedOutputTokens: 45, timedDurationMs: 1500 } });
+  const snapshot = JSON.stringify(entries());
+  const combined = tracker.observe(entries()).sample;
+  assert.equal(combined.speed, 80 / 3 + 30, 'device ratios are summed once');
+  assert.equal(combined.deviceCount, 2);
+  assert.deepEqual(combined.devices.map(({ id, models }) => [id, models.map(({ model }) => model)]), [
+    ['local', ['alpha', 'beta']], ['remote', ['alpha']]
+  ]);
+  assert.equal(tracker.nextExpiryAt(), 700);
+  now = 500;
+  assert.equal(tracker.observe(entries()).changed, false);
+  assert.equal(tracker.getSample().revision, combined.revision);
+  assert.equal(tracker.nextExpiryAt(), 700, 'duplicate snapshots do not renew samples');
+  now = 700;
+  assert.equal(tracker.getSample().speed, 90);
+  assert.equal(tracker.nextExpiryAt(), 800);
+  now = 800;
+  assert.equal(tracker.getSample().speed, 30);
+  assert.equal(tracker.getSample().deviceCount, 1);
+  assert.equal(tracker.nextExpiryAt(), 900);
+  now = 900;
+  assert.equal(tracker.getSample().idle, true);
+  assert.equal(JSON.stringify(entries()), snapshot, 'presentation never changes cumulative/history inputs');
+});
+
+test('an unattributed remainder survives a fully attributed model tick until its own expiry', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateTracker({ now: () => now });
+  tracker.reset(modelRatePeriod({}));
+  now = 100;
+  tracker.observe({ ...modelRatePeriod({}), timedTokens: 100, timedOutputTokens: 30, timedDurationMs: 1000 });
+  now = 200;
+  tracker.observe({
+    timedTokens: 200, timedOutputTokens: 40, timedDurationMs: 2000,
+    modelThroughput: { alpha: { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 1000 } }
+  });
+  assert.equal(tracker.getSample(now).speed, 20);
+  assert.equal(tracker.getSample(now).expiresAt, 8100);
+  now = 300;
+  tracker.observe({
+    timedTokens: 300, timedOutputTokens: 60, timedDurationMs: 3000,
+    modelThroughput: { alpha: { timedTokens: 200, timedOutputTokens: 30, timedDurationMs: 2000 } }
+  });
+  assert.equal(tracker.getSample(now).speed, 25, 'replace alpha, retain the distinct remainder');
+  assert.deepEqual(tracker.getSample(now).models, [{ model: 'alpha', speed: 20, burn: 6000 }]);
+  now = 8100;
+  assert.equal(tracker.getSample(now).speed, 20);
+  assert.equal(tracker.getSample(now).expiresAt, 8300);
+  now = 8300;
+  assert.equal(tracker.getSample(now), null);
+});
+
+test('model reattribution without new device usage falls back without renewing the active sample', () => {
+  const { projectModelAliasStats } = require('../../src/electron/modelAliasPresentation');
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now });
+  const original = modelRatePeriod({ alpha: { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000 } });
+  const updated = modelRatePeriod({ alpha: { timedTokens: 200, timedOutputTokens: 80, timedDurationMs: 2000 } });
+  const aliased = (period) => projectModelAliasStats({ periods: { today: period } }, { alpha: 'canonical' }).periods.today;
+  tracker.reset([{ id: 'local', period: original }]);
+  now = 100;
+  tracker.observe([{ id: 'local', period: updated }]);
+  now = 200;
+  const fallback = tracker.observe([{ id: 'local', period: aliased(updated) }]).sample;
+  assert.equal(fallback.speed, 40);
+  assert.equal(fallback.sampledAt, 100);
+  assert.equal(fallback.expiresAt, 8100);
+  assert.deepEqual(fallback.devices, [], 'the old alias must not remain attributed');
+  now = 300;
+  const recovered = tracker.observe([{ id: 'local', period: aliased(modelRatePeriod({
+    alpha: { timedTokens: 300, timedOutputTokens: 90, timedDurationMs: 3000 }
+  })) }]).sample;
+  assert.equal(recovered.speed, 10, 'an ambiguous device fallback must not overlap the recovered model');
+  assert.deepEqual(recovered.devices[0].models, [{ model: 'canonical', speed: 10, burn: 6000 }]);
+});
+
+test('incomplete model timing falls back to the device while missing device timing clears all samples', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateTracker({ now: () => now });
+  tracker.reset(modelRatePeriod({}));
+  now = 100;
+  tracker.observe(modelRatePeriod({ alpha: { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000 } }));
+  now = 200;
+  const fallback = tracker.observe({
+    outputTokens: 100000, timedTokens: 200, timedOutputTokens: 60, timedDurationMs: 2000,
+    modelThroughput: { alpha: { timedTokens: 200, timedOutputTokens: 60 } }
+  });
+  assert.equal(fallback.speed, 20, 'untimed output never enters the measured numerator');
+  assert.deepEqual(fallback.models, []);
+  assert.equal(tracker.observe({ capabilities: { throughput: false }, timedTokens: 0,
+    timedOutputTokens: 0, timedDurationMs: 0 }), null);
+  assert.equal(tracker.getSample(now), null);
+  const complete = modelRatePeriod({ alpha: { timedTokens: 300, timedOutputTokens: 70, timedDurationMs: 3000 } });
+  assert.equal(tracker.observe(complete), null, 'complete timing must establish a fresh baseline');
+  now = 300;
+  const recovered = tracker.observe(modelRatePeriod({ alpha: { timedTokens: 400, timedOutputTokens: 90, timedDurationMs: 4000 } }));
+  assert.equal(recovered.speed, 20);
+  assert.deepEqual(recovered.models, [{ model: 'alpha', speed: 20, burn: 6000 }]);
+});
+
+test('positive model deltas exceeding the device delta fall back even when every model still exists', () => {
+  const tracker = tokenRateApi.createLiveTokenRateTracker({ now: () => 100 });
+  tracker.reset(modelRatePeriod({
+    alpha: { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 1000 },
+    beta: { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 1000 }
+  }));
+  const fallback = tracker.observe({
+    timedTokens: 300, timedOutputTokens: 30, timedDurationMs: 3000,
+    modelThroughput: {
+      alpha: { timedTokens: 200, timedOutputTokens: 20, timedDurationMs: 2000 },
+      beta: { timedTokens: 200, timedOutputTokens: 20, timedDurationMs: 2000 }
+    }
+  });
+  assert.equal(fallback.speed, 10);
+  assert.equal(fallback.timedOutputTokens, 10);
+  assert.deepEqual(fallback.models, []);
+});
+
 test('legacy model attribution establishes a baseline and regressions reset it', () => {
   const tracker = tokenRateApi.createLiveTokenRateTracker({ now: () => 100 });
   tracker.reset({ timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 });
@@ -970,6 +1166,46 @@ test('changing a model alias cannot turn historical counters into a live model d
   assert.equal(first.speed, 20);
   assert.deepEqual(first.models, []);
   assert.deepEqual(tracker.observe(aliased(raw(10200, 4060, 102000))).models, [{ model: 'GPT', speed: 40, burn: 6000 }]);
+
+  // Merging alpha into an existing beta in the same snapshot where gamma adds usage
+  // makes both beta and gamma individually <= stepDelta while their sum exceeds it.
+  const mergedTracker = tokenRateApi.createLiveTokenRateTracker();
+  mergedTracker.reset(modelRatePeriod({
+    alpha: { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 1000 },
+    beta: { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 1000 },
+    gamma: { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 1000 }
+  }));
+  const mergedIntoBeta = (period) => projectModelAliasStats({ periods: { today: period } }, { alpha: 'beta' }).periods.today;
+  const conflict = mergedTracker.observe(mergedIntoBeta(modelRatePeriod({
+    alpha: { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 1000 },
+    beta: { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 1000 },
+    gamma: { timedTokens: 200, timedOutputTokens: 110, timedDurationMs: 2000 }
+  })));
+  assert.equal(conflict.speed, 100);
+  assert.equal(conflict.burn, 6000);
+  assert.deepEqual(conflict.models, []);
+
+  const recovered = mergedTracker.observe(mergedIntoBeta(modelRatePeriod({
+    alpha: { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 1000 },
+    beta: { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 1000 },
+    gamma: { timedTokens: 300, timedOutputTokens: 150, timedDurationMs: 3000 }
+  })));
+  assert.equal(recovered.speed, 40);
+  assert.deepEqual(recovered.models, [{ model: 'gamma', speed: 40, burn: 6000 }]);
+
+  // A partial counter regression on one model while overall device counters still
+  // grow also falls back to the device delta and re-baselines model attribution.
+  const partialRegression = mergedTracker.observe({
+    timedTokens: 600,
+    timedOutputTokens: 210,
+    timedDurationMs: 6000,
+    modelThroughput: {
+      beta: { timedTokens: 150, timedOutputTokens: 15, timedDurationMs: 1500 },
+      gamma: { timedTokens: 450, timedOutputTokens: 195, timedDurationMs: 4500 }
+    }
+  });
+  assert.equal(partialRegression.speed, 40);
+  assert.deepEqual(partialRegression.models, []);
 });
 
 function timedCoveragePeriod({ output = 100, timed = output, duration = 1000, model = 'gpt-6-astra', client = 'codex' } = {}) {
