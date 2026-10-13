@@ -435,6 +435,7 @@ function createTray({
   onSetEdgeDock,
   onSwitchCodexAccount,
   onToggle,
+  getWindowVisible,
   platform = process.platform,
   translateMenu
 }) {
@@ -490,8 +491,22 @@ function createTray({
 
   // On macOS the event position is window-relative, while the screen cursor is
   // in the coordinates popoverBounds uses. Read it while handling the click.
-  tray.on('click', (_event, _bounds, position) => onToggle(tray, pointerPoint(position, electron, platform)));
+  // A menu-bar press can blur and hide the popover before Cocoa emits click.
+  // Remember the state at mouse-down so that same click still closes it.
+  let visibleAtMouseDown = null;
+  if (platform === 'darwin') {
+    tray.on('mouse-down', () => {
+      visibleAtMouseDown = typeof getWindowVisible === 'function' ? getWindowVisible() : null;
+    });
+    tray.on('mouse-leave', () => { visibleAtMouseDown = null; });
+  }
+  tray.on('click', (_event, _bounds, position) => {
+    const wasVisible = visibleAtMouseDown;
+    visibleAtMouseDown = null;
+    onToggle(tray, pointerPoint(position, electron, platform), wasVisible);
+  });
   tray.on('right-click', () => {
+    visibleAtMouseDown = null;
     tray.popUpContextMenu(buildMenu());
   });
 

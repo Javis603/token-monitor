@@ -326,6 +326,7 @@ const {
   macActivationPolicyMode,
   mainWindowCloseAction,
   normalizeTrayModeSettings,
+  popoverToggleAction,
   shouldCreateTray,
   skipTaskbarForSettings,
   trayToggleAction
@@ -5166,9 +5167,9 @@ function hidePopover() {
   if (mainWindow.isVisible()) mainWindow.hide();
 }
 
-function togglePopover(clickPoint = null) {
+function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isVisible() && mainWindow.isFocused()) hidePopover();
+  if (popoverToggleAction(mainWindow.isVisible(), wasVisibleAtMouseDown) === 'hide') hidePopover();
   else showPopover(clickPoint);
 }
 
@@ -5850,9 +5851,9 @@ function handleWindowToggleShortcut() {
   else focusExistingWindow();
 }
 
-function handleTrayToggle(_tray, clickPoint = null) {
+function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null) {
   const action = trayToggleAction(settings);
-  if (action === 'togglePopover') togglePopover(clickPoint);
+  if (action === 'togglePopover') togglePopover(clickPoint, wasVisibleAtMouseDown);
   else if (action === 'focusWindow') focusExistingWindow();
 }
 
@@ -6073,6 +6074,7 @@ function ensureTray() {
       };
     },
     onToggle: handleTrayToggle,
+    getWindowVisible: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()),
     onOpenView: openViewFromTray,
     onRefresh: () => { void refreshFromTray(); },
     onSetTrayContent: setTrayContentFromMenu,

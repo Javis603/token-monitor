@@ -264,6 +264,30 @@ test('macOS tray click passes the screen cursor, not its window-relative event p
   assert.deepEqual(clickPoint, { x: 1200, y: -1060 });
 });
 
+test('macOS tray click keeps the visibility from mouse-down across a window blur', () => {
+  const calls = trayCalls();
+  const electron = fakeTrayElectron(calls);
+  electron.screen = { getCursorScreenPoint: () => ({ x: 100, y: 10 }) };
+  electron.nativeImage.createFromPath = () => ({ resize: () => ({ setTemplateImage() {} }) });
+  let visible = true;
+  const snapshots = [];
+  const tray = createTray({
+    electron,
+    getWindowVisible: () => visible,
+    onToggle: (_tray, _point, wasVisible) => snapshots.push(wasVisible),
+    platform: 'darwin'
+  });
+
+  tray.handlers['mouse-down']();
+  visible = false; // Window blur hides the popover before Tray.click arrives.
+  tray.handlers.click({}, {}, {});
+  assert.deepEqual(snapshots, [true]);
+
+  tray.handlers['mouse-down']();
+  tray.handlers.click({}, {}, {});
+  assert.deepEqual(snapshots, [true, false]);
+});
+
 test('Linux tray exports current menu state and skips unchanged D-Bus rebuilds', () => {
   const calls = trayCalls();
   let state = {

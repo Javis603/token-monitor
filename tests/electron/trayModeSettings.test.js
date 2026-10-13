@@ -7,6 +7,7 @@ const {
   macActivationPolicyMode,
   mainWindowCloseAction,
   normalizeTrayModeSettings,
+  popoverToggleAction,
   shouldCreateTray,
   skipTaskbarForSettings,
   trayToggleAction
@@ -65,6 +66,13 @@ test('uses the tray icon as a window toggle unless tray-only mode is active', ()
   assert.equal(trayToggleAction({ showTrayIcon: true, trayMode: false }), 'focusWindow');
   assert.equal(trayToggleAction({ showTrayIcon: true, trayMode: true }), 'togglePopover');
   assert.equal(trayToggleAction({ showTrayIcon: false, trayMode: true }), 'none');
+});
+
+test('popover click uses the press-time state after a menu-bar blur hides it', () => {
+  assert.equal(popoverToggleAction(false, true), 'hide');
+  assert.equal(popoverToggleAction(true, false), 'show');
+  assert.equal(popoverToggleAction(true), 'hide');
+  assert.equal(popoverToggleAction(false), 'show');
 });
 
 test('uses accessory activation when macOS is running from the menu bar only', () => {

@@ -41,6 +41,10 @@ function trayToggleAction(settings = {}) {
   return normalized.trayMode ? 'togglePopover' : 'focusWindow';
 }
 
+function popoverToggleAction(visible, visibleAtMouseDown = null) {
+  return (visibleAtMouseDown === null ? visible : visibleAtMouseDown) ? 'hide' : 'show';
+}
+
 // macOS has no per-window taskbar entry, so hideAppIcon is expressed as the
 // accessory activation policy (app.dock.hide()) instead of setSkipTaskbar().
 // It has to be tested before the mainWindowVisible branch: focusExistingWindow()
@@ -65,6 +69,7 @@ module.exports = {
   macActivationPolicyMode,
   mainWindowCloseAction,
   normalizeTrayModeSettings,
+  popoverToggleAction,
   shouldCreateTray,
   skipTaskbarForSettings,
   trayToggleAction
