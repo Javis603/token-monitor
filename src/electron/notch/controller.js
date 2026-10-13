@@ -45,6 +45,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   let motionGeneration = 0, refreshInFlight = null, refreshEpoch = 0;
   let fullScreen = false, fullScreenCheckedAt = -Infinity, fullScreenDisplayId = null;
   let progress = 0, commands = null, frame = null, layoutKey = '', viewport = null;
+  let viewportDisplayId = null;
   let summaryMeasured = false, summaryMeasurement = null, summaryGeneration = 0, settleSummary = false;
   const settings = () => getSettings() || {};
   let previewScale = null;
@@ -302,7 +303,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       const previous = viewport;
       const closedShape = notchCommands(current.closed.width, current.closed.height, current.geometry.notched, false, current.geometry.height, zoom());
       const changedShape = commands && (previous?.y !== current.open.y || commands.length !== closedShape.length
-        || commands.some((command, i) => command[0] !== closedShape[i][0] || command.length !== closedShape[i].length));
+        || commands.some((command, i) => command[0] !== closedShape[i][0] || command.length !== closedShape[i].length) || viewportDisplayId !== String(current.display.id));
+      viewportDisplayId = String(current.display.id);
       if (changedShape) {
         // A camera-attached shell and a capsule have different path topology.
         // Crossing displays lands directly; old in-flight frames are discarded.
@@ -484,6 +486,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     motion = null; refreshInFlight = null;
     summaryMeasured = false; summaryMeasurement = null; settleSummary = false;
     hideDetail(); commands = frame = null; progress = 0; layoutKey = ''; viewport = null; rows = [];
+    viewportDisplayId = null;
     for (const s of surfaces) {
       disposeGlass(s);
       const win = windows[s];
@@ -632,6 +635,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       locked = value === true;
       if (locked) {
         refreshEpoch++; motion = null; expanded = false; progress = 0; layoutKey = '';
+        commands = frame = null; viewport = viewportDisplayId = null;
         clearTimeout(pollTimer); clearTimeout(expiryTimer); pollTimer = expiryTimer = null;
       } else if (running) {
         invalidateGeometry(); scheduleExpiry();

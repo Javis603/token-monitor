@@ -1932,6 +1932,58 @@ test('idle polling does not repeat unchanged mouse passthrough or renderer updat
   assert.equal(top.ignoreMouse, true);
 });
 
+test('unlock lands on the closed shell without replaying an expanded path', (t) => {
+  for (const elapsed of [120, 360]) {
+    const f = fixture(t, {}, { reducedMotion: false });
+    const primary = f.windows[0], bounds = primary.getBounds(), header = last(primary).geometry;
+    const frame = () => primary.messages.filter(m => m.channel === 'topNotch:motion').at(-1).payload;
+    f.screen.point = { x: bounds.x + header.headerX + 20, y: bounds.y + 10 };
+    f.controller.poll(100); f.controller.poll(240);
+    const opening = primary.messages.filter(m => m.channel === 'topNotch:animate').at(-1).payload;
+    f.ipcMain.emit('topNotch:frame', { sender: primary.webContents }, { id: opening.id, elapsed });
+    assert.ok(frame().bodyHeight > 0);
+    f.controller.setLocked(true);
+    assert.equal(primary.getOpacity(), 0);
+    f.screen.point = { x: 20, y: 900 };
+    f.controller.setLocked(false);
+    assert.equal(last(primary).expanded, false);
+    assert.equal(frame().progress, 0);
+    assert.equal(frame().bodyHeight, 0, 'the first unlocked frame contains no expanded body');
+    const closed = frame();
+    f.ipcMain.emit('topNotch:frame', { sender: primary.webContents }, { id: opening.id, elapsed: 360 });
+    assert.deepEqual(frame(), closed, 'late pre-lock frames cannot revive the open shell');
+  }
+});
+
+test('same-shape display transfers land on the destination without a spanning canvas', (t) => {
+  for (const expanded of [false, true]) {
+    let activeDisplay = 1;
+    const f = fixture(t, { notchShape: 'pill' }, { reducedMotion: false,
+      readScreens: () => ({ screens: [], mainDisplayId: activeDisplay }) });
+    const primary = f.windows[0];
+    const other = { ...display, id: 2, bounds: { ...display.bounds, x: 1470 }, workArea: { ...display.workArea, x: 1470 } };
+    f.screen.getAllDisplays = () => [display, other];
+    const before = primary.getBounds(), header = last(primary).geometry;
+    if (expanded) {
+      f.screen.point = { x: before.x + header.headerX + 20, y: before.y + 10 };
+      f.controller.poll(100); f.controller.poll(240);
+    }
+    const opening = primary.messages.filter(m => m.channel === 'topNotch:animate').at(-1)?.payload;
+    const frame = () => primary.messages.filter(m => m.channel === 'topNotch:motion').at(-1).payload;
+    for (const target of [other, display]) {
+      activeDisplay = target.id;
+      f.screen.emit('display-metrics-changed');
+      assert.equal(primary.getBounds().width, before.width, 'no canvas joins the old and new screens');
+      assert.equal(primary.getBounds().x, before.x + target.bounds.x);
+      assert.equal(primary.messages.filter(m => m.channel === 'topNotch:animate').at(-1).payload.duration, 0);
+      assert.equal(frame().progress, expanded ? 1 : 0);
+      const placed = frame();
+      if (opening) f.ipcMain.emit('topNotch:frame', { sender: primary.webContents }, { id: opening.id, elapsed: opening.duration });
+      assert.deepEqual(frame(), placed, 'late old-display frames cannot repaint the destination');
+    }
+  }
+});
+
 test('locking pauses polling and unlock or repeated sync keeps one timer', (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
   const f = fixture(t); let cursorReads = 0;
