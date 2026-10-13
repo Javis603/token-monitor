@@ -41,8 +41,12 @@ function trayToggleAction(settings = {}) {
   return normalized.trayMode ? 'togglePopover' : 'focusWindow';
 }
 
-function popoverToggleAction(visible, visibleAtMouseDown = null) {
-  return (visibleAtMouseDown === null ? visible : visibleAtMouseDown) ? 'hide' : 'show';
+function popoverToggleAction({ visible, visibleAtMouseDown = null, clickPoint = null, recentBlur = null, now = 0 }) {
+  const elapsed = now - recentBlur?.at;
+  const dx = clickPoint?.x - recentBlur?.point?.x;
+  const dy = clickPoint?.y - recentBlur?.point?.y;
+  const samePressBlur = elapsed >= 0 && elapsed <= 750 && dx * dx + dy * dy <= 24 * 24;
+  return visible || visibleAtMouseDown === true || samePressBlur ? 'hide' : 'show';
 }
 
 // macOS has no per-window taskbar entry, so hideAppIcon is expressed as the

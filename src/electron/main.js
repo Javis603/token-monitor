@@ -3047,6 +3047,7 @@ function exportIntervalMs() {
   return Number.isFinite(v) && v >= 1000 ? v : DEFAULT_EXPORT_INTERVAL_MS;
 }
 let suppressNextBlurHide = false;
+let recentPopoverBlur = null;
 const providerTrayIcons = {};
 let registeredWindowToggleShortcut = '';
 let windowToggleShortcutRegistered = false;
@@ -5148,6 +5149,7 @@ async function startStatsStream(options = {}) {
 
 function showPopover(clickPoint = null) {
   if (!mainWindow || mainWindow.isDestroyed() || !tray) return;
+  recentPopoverBlur = null;
   applyMacActivationPolicy();
   applyMacSpaceBehavior(true);
   applyWindowSettings();
@@ -5163,13 +5165,22 @@ function showPopover(clickPoint = null) {
 }
 
 function hidePopover() {
+  recentPopoverBlur = null;
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isVisible()) mainWindow.hide();
 }
 
 function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (popoverToggleAction(mainWindow.isVisible(), wasVisibleAtMouseDown) === 'hide') hidePopover();
+  const action = popoverToggleAction({
+    visible: mainWindow.isVisible(),
+    visibleAtMouseDown: wasVisibleAtMouseDown,
+    clickPoint,
+    recentBlur: recentPopoverBlur,
+    now: performance.now()
+  });
+  recentPopoverBlur = null;
+  if (action === 'hide') hidePopover();
   else showPopover(clickPoint);
 }
 
@@ -7092,7 +7103,17 @@ function createWindow(boundsOverride, options = {}) {
   });
   win.on('blur', () => {
     nudgeTaskbarZOrder();
-    if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) hidePopover();
+    if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) {
+      const wasVisible = win.isVisible();
+      const point = wasVisible && process.platform === 'darwin' ? screen.getCursorScreenPoint() : null;
+      if (wasVisible) {
+        hidePopover();
+        // Cocoa can send this blur before Tray.mouse-down for the same click.
+        // The cursor point lets that later click identify its own blur without
+        // mistaking a quick click on another app followed by a tray click.
+        if (point) recentPopoverBlur = { at: performance.now(), point };
+      }
+    }
     else if (!quitRequested) scheduleFloatingBubbleAutoCollapse();
   });
   win.on('resized', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
