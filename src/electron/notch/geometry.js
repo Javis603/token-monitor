@@ -47,7 +47,7 @@ function notchMaxHeight(display, geometry, detail = false) {
     Math.floor(bottom - origin - (detail ? EDGE_DOCK_METRICS.screenMargin : 12))));
 }
 
-function notchBounds(display, geometry, expanded, contentHeight = 180, slots = { left: 17, right: 42 }, zoom = 1) {
+function notchBounds(display, geometry, expanded, contentHeight = 180, slots = { left: 17, right: 42 }, zoom = 1, maxWidth = display.bounds.width) {
   // Equal ears reserve the wider reading on both sides of the camera gap.
   const ear = slots ? Math.ceil(Math.max(0, slots.left, slots.right) + 16) : 0;
   const closedShoulder = geometry.notched && slots ? 4 : 0;
@@ -59,13 +59,15 @@ function notchBounds(display, geometry, expanded, contentHeight = 180, slots = {
   const expandedRequired = geometry.gapWidth > 0 && slots
     ? geometry.gapWidth + 2 * (Math.max(slots.left, slots.right) + 8 + (EDGE_DOCK_METRICS.shoulder + 14) * zoom) : 0;
   const listWidth = Math.max(baseWidth, expandedRequired, closedWidth);
-  let width = (expanded ? Math.ceil : Math.round)(Math.min(display.bounds.width, expanded ? listWidth : closedWidth));
+  // The camera gap is irreducible; other visual minimums yield to clearance.
+  const limit = expanded ? display.bounds.width : Math.max(geometry.gapWidth, Math.min(display.bounds.width, Math.floor(maxWidth)));
+  let width = (expanded ? Math.ceil : Math.round)(Math.min(limit, expanded ? listWidth : closedWidth));
   // Preserve hardware gap parity; camera-free outlines use center parity,
   // including a capsule beneath a half-point physical camera center.
   const parity = geometry.gapWidth > 0 && Number.isInteger(geometry.gapWidth)
     ? geometry.gapWidth % 2 : Math.abs(geometry.centerX * 2) % 2;
-  if (Number.isInteger(geometry.centerX * 2) && width % 2 !== parity) {
-    width += width < display.bounds.width ? 1 : -1;
+  if (width > 0 && Number.isInteger(geometry.centerX * 2) && width % 2 !== parity) {
+    width += width + 1 <= limit ? 1 : -1;
   }
   const maxHeight = notchMaxHeight(display, geometry);
   const height = Math.round(expanded ? Math.min(maxHeight, contentHeight + (geometry.gapWidth > 0 ? geometry.height : 0)) : geometry.height);
@@ -73,10 +75,10 @@ function notchBounds(display, geometry, expanded, contentHeight = 180, slots = {
   return { x: Math.round(x), y: Math.round(geometry.y), width, height };
 }
 
-// Measure physical-notch clearance from right-hand status windows. Left-hand
+// Measure notch clearance from right-hand status windows. Left-hand
 // app-menu titles have no verified permission-free geometry contract.
-function notchSummaryBudget(display, geometry, windows, ownWindowIds = []) {
-  if (!(geometry.gapWidth > 0) || !Array.isArray(windows)) return null;
+function notchSummaryMaxWidth(display, geometry, windows, ownWindowIds = []) {
+  if (!geometry.notched || !Array.isArray(windows)) return null;
   const gapRight = geometry.centerX + geometry.gapWidth / 2;
   const screenRight = display.bounds.x + display.bounds.width;
   let right = screenRight;
@@ -89,8 +91,7 @@ function notchSummaryBudget(display, geometry, windows, ownWindowIds = []) {
       || rect.x >= screenRight || rect.x + rect.width <= gapRight) continue;
     right = Math.min(right, Math.max(gapRight, rect.x));
   }
-  const available = Math.floor(right - gapRight - EDGE_DOCK_METRICS.screenMargin - 20);
-  return Math.max(0, available);
+  return Math.max(0, Math.floor(2 * (right - geometry.centerX - EDGE_DOCK_METRICS.screenMargin)));
 }
 
 function notchCommands(width, height, notched, expanded, notchHeight = 32, zoom = 1) {
@@ -98,8 +99,8 @@ function notchCommands(width, height, notched, expanded, notchHeight = 32, zoom 
   // Keep the same path topology at both endpoints, so every control point can
   // move continuously. AppKit exposes the gap, not the model's corner radii;
   // the shallow resting shoulder is a visual fit to the physical notch.
-  const s = expanded ? EDGE_DOCK_METRICS.shoulder * zoom : 4;
-  const r = Math.min(expanded ? EDGE_DOCK_METRICS.railRadius * zoom : 14, (height - 6) / 2);
+  const s = Math.min(expanded ? EDGE_DOCK_METRICS.shoulder * zoom : 4, width / 2);
+  const r = Math.min(expanded ? EDGE_DOCK_METRICS.railRadius * zoom : 14, (height - 6) / 2, Math.max(0, width / 2 - s));
   const cap = expanded ? Math.min(EDGE_DOCK_METRICS.railWidth * zoom, notchHeight / 0.53) : 6 / 0.53;
   const rail = railCommands({ width: cap, height: width, shoulder: s, radius: expanded ? r : 0 });
   const rotate = ([op, ...points]) => [op, ...points.flatMap((_, i) => i % 2 ? [] : [points[i + 1], cap - points[i]])];
@@ -119,4 +120,4 @@ function translateCommands(commands, x, y = 0) {
 function interpolateCommands(from, to, progress) {
   return to.map(([op, ...points], index) => [op, ...points.map((value, i) => from[index][i + 1] + (value - from[index][i + 1]) * progress)]);
 }
-module.exports = { notchGeometry, notchMaxHeight, notchBounds, notchSummaryBudget, notchCommands, translateCommands, interpolateCommands, rectContains };
+module.exports = { notchGeometry, notchMaxHeight, notchBounds, notchSummaryMaxWidth, notchCommands, translateCommands, interpolateCommands, rectContains };

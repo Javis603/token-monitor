@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createNotchController } = require('../../src/electron/notch/controller');
-const { notchGeometry, notchMaxHeight, notchBounds, notchSummaryBudget, notchCommands, translateCommands, interpolateCommands } = require('../../src/electron/notch/geometry');
+const { notchGeometry, notchMaxHeight, notchBounds, notchSummaryMaxWidth, notchCommands, translateCommands, interpolateCommands } = require('../../src/electron/notch/geometry');
 const { buildNotchData, summaryLayout } = require('../../src/electron/notch/data');
 const { EDGE_DOCK_TIMING, EDGE_DOCK_METRICS } = require('../../src/electron/edgeDock/geometry');
 const { createEdgeDockController } = require('../../src/electron/edgeDock/controller');
@@ -1090,18 +1090,18 @@ test('approach expansion follows EdgeDock drag suppression without changing dire
 test('menu clearance bounds physical ears and ignores off-screen or tall status panels', () => {
   const geometry = notchGeometry(display, native);
   const icon = { id: 1, x: 894, y: 0, width: 24, height: 33 };
-  assert.equal(notchSummaryBudget(display, geometry, [icon]), 41);
-  assert.equal(notchSummaryBudget(display, geometry, [{ ...icon, x: 830 }]), 0, 'the budget cannot exceed measured clearance');
+  assert.equal(notchSummaryMaxWidth(display, geometry, [icon]), 301);
+  assert.equal(notchSummaryMaxWidth(display, geometry, [{ ...icon, x: 830 }]), 173, 'the budget cannot exceed measured clearance');
   for (const ignored of [{ ...icon, x: 780, height: 117 }, { ...icon, y: 32 }, { ...icon, x: 1480 },
     { ...icon, y: -40 }, { ...icon, x: 100 }, { ...icon, width: NaN }]) {
-    assert.equal(notchSummaryBudget(display, geometry, [icon, ignored]), 41);
+    assert.equal(notchSummaryMaxWidth(display, geometry, [icon, ignored]), 301);
   }
-  assert.equal(notchSummaryBudget(display, geometry, [{ ...icon, x: 850 }, icon], [1]), 617, 'exclude the owned surface without excluding its tray icons by PID');
-  assert.equal(notchSummaryBudget(display, geometry, null), null, 'failed sampling is not a measured empty menu');
-  assert.equal(notchSummaryBudget(display, notchGeometry(display, null, 'pill'), [icon]), null);
+  assert.equal(notchSummaryMaxWidth(display, geometry, [{ ...icon, x: 850 }, icon], [1]), 1453, 'exclude the owned surface without excluding its tray icons by PID');
+  assert.equal(notchSummaryMaxWidth(display, geometry, null), null, 'failed sampling is not a measured empty menu');
+  assert.equal(notchSummaryMaxWidth(display, notchGeometry(display, null, 'pill'), [icon]), null);
   const offset = { ...display, bounds: { ...display.bounds, x: -1470, y: -956 } };
   const shifted = { ...geometry, centerX: geometry.centerX - 1470, y: -956 };
-  assert.equal(notchSummaryBudget(offset, shifted, [{ ...icon, x: icon.x - 1470, y: -956 }]), 41);
+  assert.equal(notchSummaryMaxWidth(offset, shifted, [{ ...icon, x: icon.x - 1470, y: -956 }]), 301);
 });
 
 test('menu window reader uses status level and numeric metadata and releases copied lists on success and failure', () => {
@@ -1157,7 +1157,7 @@ test('menu avoidance bounds all active summary fields and keeps the camera cente
   assert.equal(reads, 2);
   geometry = last(primary).geometry;
   assert.equal(geometry.summaryBudget, 0, 'known occupied clearance also constrains the primary');
-  assert.equal(geometry.headerWidth, 219);
+  assert.equal(geometry.headerWidth, 213);
   windows = null;
   f.screen.emit('display-metrics-changed');
   assert.equal(last(primary).geometry.summaryBudget, 625, 'unknown menu clearance falls back to the screen capacity');
@@ -1186,8 +1186,8 @@ test('disabled menu avoidance retains full summary widths and stops menu samplin
   assert.equal(last(primary).geometry.summaryBudget, 625);
 });
 
-test('compact entries keep their complete summary and skip menu reads regardless of avoidance', (t) => {
-  for (const [shape, hardware] of [['pill', true], ['pill', false], ['notch', false], ['auto', false]]) {
+test('capsules keep their complete summary and skip menu reads regardless of avoidance', (t) => {
+  for (const [shape, hardware] of [['pill', true], ['pill', false], ['auto', false]]) {
     let reads = 0;
     const f = fixture(t, { notchShape: shape }, {
       readScreens: () => ({ screens: hardware ? [native] : [], mainDisplayId: 1 }),
@@ -1701,15 +1701,16 @@ test('capsule details meet the visible edge on either side without a phantom hea
   }
 });
 
-test('menu budgets apply only to physical notch ears', () => {
+test('menu budgets apply to notch shapes with or without a physical gap', () => {
   const menu = { id: 91, x: 950, y: 0, width: 300, height: 32 };
-  for (const shape of ['auto', 'notch', 'pill']) {
+  for (const shape of ['auto', 'pill']) {
     const compact = notchGeometry(display, null, shape);
-    assert.equal(notchSummaryBudget(display, compact, [menu]), null);
+    assert.equal(notchSummaryMaxWidth(display, compact, [menu]), null);
   }
-  assert.equal(notchSummaryBudget(display, notchGeometry(display, native, 'pill'), [menu]), null);
+  assert.equal(notchSummaryMaxWidth(display, notchGeometry(display, native, 'pill'), [menu]), null);
   const hardware = notchGeometry(display, native);
-  assert.ok(notchSummaryBudget(display, hardware, [menu]) > 0);
+  assert.ok(notchSummaryMaxWidth(display, hardware, [menu]) > 0);
+  assert.equal(notchSummaryMaxWidth(display, notchGeometry(display, null, 'notch'), [menu]), 414);
 });
 
 test('camera-free renderer fits the display limit while reserving a complete primary readout before extra icons', () => {
@@ -2717,6 +2718,50 @@ test('Notch visibility transitions settle summary motion without rebuilding its 
   context.renderNotch({ ...payload, summaryMeasurement: { id: 1, measuring: true } });
   assert.equal(settles, 2, 'hidden measurement also settles summary effects');
 });
+test('camera-free notch avoidance uses one centered budget and hides an empty resting shell', (t) => {
+  let reads = 0, menuX = 900;
+  const f = fixture(t, { notchShape: 'notch' }, {
+    readScreens: () => ({ screens: [], mainDisplayId: 1 }),
+    readMenuWindows: () => { reads++; return [{ id: 7, x: menuX, y: 0, width: 40, height: 32 }]; }
+  });
+  f.controller.setData(buildNotchData(stats(), [], { trayContent: 'tokens' }));
+  const win = f.windows[0];
+  assert.equal(last(win).geometry.summaryBudget, 290);
+  assert.equal(reads, 1);
+  f.preferences.notchAvoidMenuBar = false;
+  f.controller.sync();
+  assert.ok(last(win).geometry.summaryBudget > 1400);
+  assert.equal(reads, 1, 'turning avoidance off stops native sampling');
+  f.preferences.notchAvoidMenuBar = true;
+  f.controller.sync();
+  menuX = display.bounds.width / 2;
+  f.screen.emit('display-metrics-changed');
+  assert.equal(last(win).geometry.headerWidth, 0);
+  f.ipcMain.emit('topNotch:size', { sender: win.webContents }, { slots: { left: 0, right: 0 } });
+  assert.equal(win.opacity, 0, 'no fitted content leaves no visible empty outline');
+  const g = last(win).geometry;
+  f.screen.point = { x: g.centerX, y: g.y + 1 };
+  const now = Date.now() + 1000;
+  f.controller.poll(now);
+  f.controller.poll(now + EDGE_DOCK_TIMING.revealDelayMs);
+  assert.equal(last(win).expanded, true, 'the original hover target remains usable');
+  assert.equal(win.opacity, 1);
+});
+
+
+test('menu width limits the resting outline before minimum size and parity', () => {
+  for (const center of [735, 735.5]) for (const ringHeight of [32, 50]) {
+    const g = { notched: true, centerX: center, y: 0, gapWidth: 0, height: ringHeight };
+    const limit = 2 * (30 - EDGE_DOCK_METRICS.screenMargin);
+    const b = notchBounds(display, g, false, 180, { left: 0, right: 8 }, 1, limit);
+    assert.ok(b.x + b.width <= center + 30 - EDGE_DOCK_METRICS.screenMargin);
+    assert.ok(b.width <= limit);
+    assert.equal(b.x + b.width / 2, center);
+    assert.ok(notchBounds(display, g, true, 180, { left: 0, right: 8 }, 1, limit).width > limit,
+      'the expanded list has its own width');
+  }
+});
+
 test('Notch option availability follows the current shape without repeated notifications', (t) => {
   const updates = [];
   const f = fixture(t, { notchRunningIndicatorEnabled: true }, { onCapabilitiesChanged: value => updates.push(value) });

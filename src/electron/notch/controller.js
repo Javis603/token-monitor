@@ -2,7 +2,7 @@
 
 const os = require('node:os');
 const path = require('node:path');
-const { notchGeometry, notchMaxHeight, notchBounds, notchSummaryBudget, notchCommands, translateCommands, interpolateCommands, rectContains } = require('./geometry');
+const { notchGeometry, notchMaxHeight, notchBounds, notchSummaryMaxWidth, notchCommands, translateCommands, interpolateCommands, rectContains } = require('./geometry');
 const { toSvgPath, bubbleCommands } = require('../renderer/edgeDock/shapes');
 const { readMacNotchScreens } = require('./screen');
 const { readMacMenuWindows } = require('./menuBar');
@@ -117,7 +117,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
 
   function refreshMenu(now = Date.now(), geometry) {
     if (!running || locked || !summaryVisible() || settings().notchAvoidMenuBar === false || now - menuReadAt < 2000) return false;
-    if (!((geometry || layout()?.geometry)?.gapWidth > 0)) return false;
+    if (!(geometry || layout()?.geometry)?.notched) return false;
     try { menuWindows = readMenuWindows(); } catch { menuWindows = null; }
     menuReadAt = now;
     return true;
@@ -138,15 +138,15 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const compact = geometry.gapWidth === 0;
     const maxWidth = Math.floor(2 * Math.min(geometry.centerX - display.bounds.x,
       display.bounds.x + display.bounds.width - geometry.centerX));
-    const capacity = Math.max(0, Math.floor(compact ? maxWidth - 2 * ((geometry.notched ? 4 : 0) + 8)
-      : (maxWidth - geometry.gapWidth) / 2 - 20));
-    const clearance = activeSlots && !compact && settings().notchAvoidMenuBar !== false
-      ? notchSummaryBudget(display, geometry, menuWindows, Object.values(windowIds)) : null;
-    const summaryBudget = Math.min(capacity, clearance ?? capacity);
+    const menuMaxWidth = activeSlots && geometry.notched && settings().notchAvoidMenuBar !== false
+      ? notchSummaryMaxWidth(display, geometry, menuWindows, Object.values(windowIds)) : null;
+    const closedMaxWidth = Math.min(maxWidth, menuMaxWidth ?? maxWidth);
+    const summaryBudget = Math.max(0, Math.floor(compact ? closedMaxWidth - 2 * ((geometry.notched ? 4 : 0) + 8)
+      : (closedMaxWidth - geometry.gapWidth) / 2 - 20));
     const boundedSlots = activeSlots && !compact
       ? { left: Math.min(activeSlots.left, summaryBudget), right: Math.min(activeSlots.right, summaryBudget) } : activeSlots;
     return { display, geometry, summaryBudget, summaryIconInset: activeSlots?.iconInset || 0,
-      closed: notchBounds(display, geometry, false, contentHeight, boundedSlots, zoom()),
+      closed: notchBounds(display, geometry, false, contentHeight, boundedSlots, zoom(), closedMaxWidth),
       open: notchBounds(display, geometry, true, contentHeight, boundedSlots, zoom()) };
   }
 
@@ -356,7 +356,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (ready.notch && !locked && (!summaryVisible() || summaryMeasured) && !win.isVisible()) win.showInactive();
     // Keep the transparent canvas alive for polling and frame acknowledgements.
     const geometry = layout()?.geometry;
-    const hidden = locked || (!summaryVisible() && !(geometry?.notched && geometry.gapWidth > 0) && !expanded
+    const emptySummary = summaryMeasured && slots.left === 0 && slots.right === 0;
+    const hidden = locked || ((!summaryVisible() || emptySummary) && !(geometry?.notched && geometry.gapWidth > 0) && !expanded
       && !(motion && (motion.fromProgress > 0 || motion.target > 0)));
     const opacity = hidden ? 0 : 1;
     if (win.getOpacity() !== opacity) win.setOpacity(opacity);
@@ -446,8 +447,10 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     // Only extend inward from the top entry; never widen across menu items.
     // Half the side dock's physical wake depth avoids nearby titlebar controls.
     const approach = fullScreen || settings().notchExpandOnApproach !== false;
-    const trigger = { ...current.closed, height: current.closed.height + (approach ? M.wakeDepth / 2 : 0) };
-    const onEntry = rectContains(current.closed, point);
+    // Zero visual clearance leaves the same camera-free hover target alive.
+    const entry = current.closed.width > 0 ? current.closed : notchBounds(current.display, current.geometry, false, contentHeight, null, zoom());
+    const trigger = { ...entry, height: entry.height + (approach ? M.wakeDepth / 2 : 0) };
+    const onEntry = rectContains(entry, point);
     const nearEntry = approach && rectContains(trigger, point) && primaryButtonDown() === false;
     const inside = (expanded ? rectContains(current.open, point) : onEntry || nearEntry) || inDetail || inCorridor;
     // Transparent parts of the stable canvas must not swallow desktop clicks.
