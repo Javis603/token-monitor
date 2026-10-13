@@ -326,6 +326,7 @@ const {
   macActivationPolicyMode,
   mainWindowCloseAction,
   normalizeTrayModeSettings,
+  popoverBlurMatchesPress,
   popoverToggleAction,
   shouldCreateTray,
   skipTaskbarForSettings,
@@ -5170,14 +5171,12 @@ function hidePopover() {
   if (mainWindow.isVisible()) mainWindow.hide();
 }
 
-function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null) {
+function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const action = popoverToggleAction({
     visible: mainWindow.isVisible(),
     visibleAtMouseDown: wasVisibleAtMouseDown,
-    clickPoint,
-    recentBlur: recentPopoverBlur,
-    now: performance.now()
+    blurMatchedAtMouseDown
   });
   recentPopoverBlur = null;
   if (action === 'hide') hidePopover();
@@ -5862,9 +5861,9 @@ function handleWindowToggleShortcut() {
   else focusExistingWindow();
 }
 
-function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null) {
+function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false) {
   const action = trayToggleAction(settings);
-  if (action === 'togglePopover') togglePopover(clickPoint, wasVisibleAtMouseDown);
+  if (action === 'togglePopover') togglePopover(clickPoint, wasVisibleAtMouseDown, blurMatchedAtMouseDown);
   else if (action === 'focusWindow') focusExistingWindow();
 }
 
@@ -6086,6 +6085,12 @@ function ensureTray() {
     },
     onToggle: handleTrayToggle,
     getWindowVisible: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()),
+    onMouseDown: (pressPoint) => {
+      const matched = popoverBlurMatchesPress({ recentBlur: recentPopoverBlur, pressPoint, now: performance.now() });
+      recentPopoverBlur = null;
+      return matched;
+    },
+    onCancelMouseDown: () => { recentPopoverBlur = null; },
     onOpenView: openViewFromTray,
     onRefresh: () => { void refreshFromTray(); },
     onSetTrayContent: setTrayContentFromMenu,
@@ -7111,7 +7116,7 @@ function createWindow(boundsOverride, options = {}) {
         // Cocoa can send this blur before Tray.mouse-down for the same click.
         // The cursor point lets that later click identify its own blur without
         // mistaking a quick click on another app followed by a tray click.
-        if (point) recentPopoverBlur = { at: performance.now(), point };
+        if (point && tray?.isPointerOverIcon?.(point)) recentPopoverBlur = { at: performance.now(), point };
       }
     }
     else if (!quitRequested) scheduleFloatingBubbleAutoCollapse();

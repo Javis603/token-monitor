@@ -7,6 +7,7 @@ const {
   macActivationPolicyMode,
   mainWindowCloseAction,
   normalizeTrayModeSettings,
+  popoverBlurMatchesPress,
   popoverToggleAction,
   shouldCreateTray,
   skipTaskbarForSettings,
@@ -71,23 +72,17 @@ test('uses the tray icon as a window toggle unless tray-only mode is active', ()
 test('popover click uses the press-time state after a menu-bar blur hides it', () => {
   assert.equal(popoverToggleAction({ visible: false, visibleAtMouseDown: true }), 'hide');
   assert.equal(popoverToggleAction({ visible: true, visibleAtMouseDown: false }), 'hide');
+  assert.equal(popoverToggleAction({ visible: false, blurMatchedAtMouseDown: true }), 'hide');
   assert.equal(popoverToggleAction({ visible: true }), 'hide');
   assert.equal(popoverToggleAction({ visible: false }), 'show');
 });
 
-test('popover click recognizes a blur that preceded macOS mouse-down', () => {
+test('popover blur matches only the nearby tray press within the time window', () => {
   const recentBlur = { at: 1000, point: { x: 140, y: 12 } };
-  const clickedTray = { x: 142, y: 13 };
-  assert.equal(popoverToggleAction({
-    visible: false, visibleAtMouseDown: false, recentBlur, clickPoint: clickedTray, now: 1020
-  }), 'hide');
-  assert.equal(popoverToggleAction({
-    visible: false, visibleAtMouseDown: false, recentBlur, clickPoint: clickedTray, now: 1800
-  }), 'show');
-  assert.equal(popoverToggleAction({
-    visible: false, visibleAtMouseDown: false, recentBlur,
-    clickPoint: { x: 500, y: 400 }, now: 1020
-  }), 'show');
+  assert.equal(popoverBlurMatchesPress({ recentBlur, pressPoint: { x: 142, y: 13 }, now: 1020 }), true);
+  assert.equal(popoverBlurMatchesPress({ recentBlur, pressPoint: { x: 142, y: 13 }, now: 1800 }), false);
+  assert.equal(popoverBlurMatchesPress({ recentBlur, pressPoint: { x: 500, y: 400 }, now: 1020 }), false);
+  assert.equal(popoverBlurMatchesPress({ recentBlur: null, pressPoint: { x: 142, y: 13 }, now: 1020 }), false);
 });
 
 test('uses accessory activation when macOS is running from the menu bar only', () => {

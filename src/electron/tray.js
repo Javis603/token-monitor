@@ -436,6 +436,8 @@ function createTray({
   onSwitchCodexAccount,
   onToggle,
   getWindowVisible,
+  onMouseDown,
+  onCancelMouseDown,
   platform = process.platform,
   translateMenu
 }) {
@@ -494,19 +496,36 @@ function createTray({
   // A menu-bar press can blur and hide the popover before Cocoa emits click.
   // Remember the state at mouse-down so that same click still closes it.
   let visibleAtMouseDown = null;
+  let blurMatchedAtMouseDown = false;
   if (platform === 'darwin') {
-    tray.on('mouse-down', () => {
+    let pointerOverIcon = false;
+    // The hover event follows the icon across displays, where getBounds() can
+    // still describe the primary display. Bounds cover a missed hover event.
+    tray.isPointerOverIcon = (point) => pointerOverIcon || pointInside(point, tray.getBounds?.());
+    tray.on('mouse-enter', () => { pointerOverIcon = true; });
+    tray.on('mouse-down', (_event, position) => {
+      pointerOverIcon = true;
       visibleAtMouseDown = typeof getWindowVisible === 'function' ? getWindowVisible() : null;
+      blurMatchedAtMouseDown = onMouseDown?.(pointerPoint(position, electron, platform)) === true;
     });
-    tray.on('mouse-leave', () => { visibleAtMouseDown = null; });
+    tray.on('mouse-leave', () => {
+      pointerOverIcon = false;
+      visibleAtMouseDown = null;
+      blurMatchedAtMouseDown = false;
+      onCancelMouseDown?.();
+    });
   }
   tray.on('click', (_event, _bounds, position) => {
     const wasVisible = visibleAtMouseDown;
+    const matchedBlur = blurMatchedAtMouseDown;
     visibleAtMouseDown = null;
-    onToggle(tray, pointerPoint(position, electron, platform), wasVisible);
+    blurMatchedAtMouseDown = false;
+    onToggle(tray, pointerPoint(position, electron, platform), wasVisible, matchedBlur);
   });
   tray.on('right-click', () => {
     visibleAtMouseDown = null;
+    blurMatchedAtMouseDown = false;
+    onCancelMouseDown?.();
     tray.popUpContextMenu(buildMenu());
   });
 
