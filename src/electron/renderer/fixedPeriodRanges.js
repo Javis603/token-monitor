@@ -94,7 +94,8 @@
   }
 
   function displayLabel(value) {
-    return LABELS[value] || LABELS.today;
+    const period = Object.prototype.hasOwnProperty.call(LABELS, value) ? value : 'today';
+    return LABELS[period];
   }
 
   function rangeForSelection(selection, options = {}) {

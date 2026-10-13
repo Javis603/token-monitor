@@ -365,7 +365,7 @@
       : '';
   }
 
-  function smoothLinePath(points) {
+  function smoothLinePath(points, { bounded = false } = {}) {
     if (!points.length) return '';
     if (points.length < 3) return straightLinePath(points);
     let path = `M${svgRound(points[0].x)},${svgRound(points[0].y)}`;
@@ -374,10 +374,15 @@
       const p1 = points[i];
       const p2 = points[i + 1];
       const p3 = points[Math.min(points.length - 1, i + 2)];
-      const c1x = p1.x + (p2.x - p0.x) / 6;
-      const c1y = p1.y + (p2.y - p0.y) / 6;
-      const c2x = p2.x - (p3.x - p1.x) / 6;
-      const c2y = p2.y - (p3.y - p1.y) / 6;
+      // Timed rate charts opt into segment bounds: smoothing may not invent a
+      // negative rate or bend the time axis backwards across uneven intervals.
+      // The default keeps the established daily-usage curve unchanged.
+      const control = (value, a, b) => bounded
+        ? Math.min(Math.max(a, b), Math.max(Math.min(a, b), value)) : value;
+      const c1x = control(p1.x + (p2.x - p0.x) / 6, p1.x, p2.x);
+      const c1y = control(p1.y + (p2.y - p0.y) / 6, p1.y, p2.y);
+      const c2x = control(p2.x - (p3.x - p1.x) / 6, p1.x, p2.x);
+      const c2y = control(p2.y - (p3.y - p1.y) / 6, p1.y, p2.y);
       path += ` C${svgRound(c1x)},${svgRound(c1y)} ${svgRound(c2x)},${svgRound(c2y)} ${svgRound(p2.x)},${svgRound(p2.y)}`;
     }
     return path;
@@ -679,7 +684,7 @@
 
   return {
     localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
-    areaLineChart, areaLineSvg,
+    areaLineChart, areaLineSvg, smoothLinePath,
     selectPreviewSeries, patchTodayBar, sparklineSvg,
     clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
     barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths

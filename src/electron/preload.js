@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     return () => ipcRenderer.removeListener('appearance:nativeMaterial', listener);
   },
   getStats: (options) => ipcRenderer.invoke('stats:get', options),
+  getModelSpeedModels: (request) => ipcRenderer.invoke('modelSpeed:list', request),
+  getModelSpeedHistory: (request) => ipcRenderer.invoke('modelSpeed:history', request),
   deleteDevice: (deviceId) => ipcRenderer.invoke('devices:delete', deviceId),
   getAllTimeSessions: (snapshotId) => ipcRenderer.invoke('stats:allTimeSessions', snapshotId),
   getSessionDetail: (args) => ipcRenderer.invoke('session:getDetail', args),
@@ -32,6 +34,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
   getCodexResetForecast: (options) => ipcRenderer.invoke('codexResetForecast:get', options),
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),
+  openCloudUsage: () => ipcRenderer.invoke('cloudUsage:open'),
+  cloudUsage: {
+    get: () => ipcRenderer.invoke('cloudUsage:get'),
+    control: (action) => ipcRenderer.invoke('cloudUsage:control', action)
+  },
   getDashboardHistory: (options) => ipcRenderer.invoke('dashboard:getHistory', options),
   onDashboardHistoryChanged: (callback) => {
     const listener = () => { try { callback(); } catch (_) {} };

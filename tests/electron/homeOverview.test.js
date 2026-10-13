@@ -142,6 +142,127 @@ test('Home activity tooltip survives Home rerenders and is dismissed when the vi
   assert.match(render[1], /breakdown !== 'home'[\s\S]*?hideHomeActivityTooltip\(\)/);
 });
 
+test('Home activity preserves a gap spotlight across rebuilds and fades it when the pointer leaves the replaced scroller', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const setup = source.match(/function setupHomeActivityHover\(scroller\) \{[\s\S]*?\n\}/)?.[0];
+  const hide = source.match(/function hideHomeActivityTooltip\(\{ preserveHover = false \} = \{\}\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(setup && hide, 'the actual hover lifecycle is available');
+  const fields = new Map();
+  const tooltip = {
+    dataset: {},
+    setAttribute() {},
+    querySelector(selector) {
+      if (!fields.has(selector)) fields.set(selector, { textContent: '' });
+      return fields.get(selector);
+    }
+  };
+  const frames = new Map();
+  const documentMoves = new Set();
+  let frameId = 0;
+  class HitTarget {
+    closest() { return null; }
+  }
+  const createScroller = () => {
+    const classes = new Set();
+    const handlers = new Map();
+    const attributes = new Map();
+    const gradient = { setAttribute(name, value) { attributes.set(name, value); } };
+    const cell = Object.assign(new HitTarget(), {
+      dataset: { d: '2026-10-07', t: '40' },
+      closest() { return this; },
+      setAttribute(name, value) { this[name] = value; },
+      removeAttribute(name) { delete this[name]; },
+      getBoundingClientRect: () => ({ left: 0, top: 0, right: 9, bottom: 9, width: 9, height: 9 })
+    });
+    const rect = { left: 0, top: 0, right: 100, bottom: 50, width: 100, height: 50 };
+    const svg = Object.assign(new HitTarget(), {
+      viewBox: { baseVal: { x: 0, y: 0, width: 100, height: 50 } },
+      querySelector: () => gradient,
+      getBoundingClientRect: () => rect
+    });
+    const canvas = {
+      querySelector: () => svg,
+      querySelectorAll: () => [cell],
+      contains: (target) => target === cell
+    };
+    const scroller = {
+      classList: {
+        add: (name) => classes.add(name),
+        remove: (name) => classes.delete(name),
+        contains: (name) => classes.has(name)
+      },
+      querySelector: () => canvas,
+      contains: (target) => target === scroller || target === svg || target === cell,
+      getBoundingClientRect: () => rect,
+      addEventListener(name, callback) { handlers.set(name, callback); }
+    };
+    return { scroller, cell, svg, attributes, fire(name, event) { handlers.get(name)?.(event); } };
+  };
+  const state = {};
+  const context = {
+    state,
+    Element: HitTarget,
+    homeActivityProgrammaticScrollers: new WeakSet(),
+    homeActivityTooltipEl: () => tooltip,
+    moveHomeActivityTooltip() {},
+    formatCompact: String,
+    prefersReducedMotion: () => false,
+    requestAnimationFrame(callback) { frames.set(++frameId, callback); return frameId; },
+    cancelAnimationFrame(id) { frames.delete(id); },
+    document: {
+      querySelector: () => tooltip,
+      addEventListener(name, callback) { if (name === 'pointermove') documentMoves.add(callback); },
+      removeEventListener(name, callback) { if (name === 'pointermove') documentMoves.delete(callback); }
+    }
+  };
+  const moveDocument = (target) => {
+    for (const callback of documentMoves) callback({ target });
+  };
+  vm.runInNewContext(setup + '\n' + hide, context);
+  let current = createScroller();
+  context.setupHomeActivityHover(current.scroller);
+  current.fire('pointermove', { clientX: 5, clientY: 5, target: current.cell });
+  assert.equal(tooltip.dataset.visible, 'true');
+  // The real heatmap uses 9px cells with 3px gaps. A hit in the gap targets SVG.
+  current.fire('pointermove', { clientX: 10.5, clientY: 5, target: current.svg });
+  assert.equal(current.scroller.classList.contains('is-spotlight-visible'), true);
+  assert.equal(tooltip.dataset.visible, 'false');
+  assert.equal(state.homeActivityHoverDate, '');
+  for (let refresh = 0; refresh < 2; refresh += 1) {
+    context.hideHomeActivityTooltip({ preserveHover: true });
+    assert.equal(frames.size, 0, 'the replaced SVG retains no queued light movement');
+    assert.equal(documentMoves.size, 0, 'a replaced scroller releases its document listener');
+    current = createScroller();
+    context.setupHomeActivityHover(current.scroller);
+    assert.equal(documentMoves.size, 1, 'refreshes keep one live document listener');
+    state.homeActivityHoverRestore();
+    moveDocument(current.svg);
+    assert.equal(current.scroller.classList.contains('is-spotlight-visible'), true, 'poll restores a stationary gap light');
+    assert.equal(current.attributes.get('cx'), '10.5');
+    assert.equal(current.attributes.get('cy'), '5');
+    assert.equal(tooltip.dataset.visible, 'false', 'a gap never invents a tooltip date');
+    assert.equal(state.homeActivityHoverDate, '');
+    assert.equal(current.cell['data-active'], undefined);
+  }
+  // Chromium can omit pointerleave after replacing a stationary hovered node.
+  // The next move over an unrelated Home module must still dismiss the light.
+  moveDocument(new HitTarget());
+  assert.equal(current.scroller.classList.contains('is-spotlight-visible'), false);
+  assert.equal(current.attributes.get('cx'), '10.5', 'exit retains the last gradient position for the opacity fade');
+  assert.equal(current.attributes.get('cy'), '5');
+  assert.equal(frames.size, 0);
+  assert.equal(state.homeActivitySpotlightPoint, null);
+  context.hideHomeActivityTooltip({ preserveHover: true });
+  assert.equal(documentMoves.size, 0);
+  current = createScroller();
+  context.setupHomeActivityHover(current.scroller);
+  state.homeActivityHoverRestore();
+  assert.equal(current.scroller.classList.contains('is-spotlight-visible'), false, 'leaving the heatmap clears the saved light');
+  assert.equal(tooltip.dataset.visible, 'false');
+  context.hideHomeActivityTooltip();
+  assert.equal(documentMoves.size, 0, 'leaving Home removes the final listener');
+});
+
 test('Home device rows keep only the local badge and mute stale devices without status text', () => {
   const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const match = rendererSource.match(/function renderHomeDeviceModule\(\) \{([\s\S]*?)\n\}\n\nfunction dailyWithHeatIntensity/);
@@ -696,6 +817,255 @@ test('homeActivityScrollRecord captures a user scroll and whether it sits at the
     scrollLeft: 399,
     followEnd: true
   });
+});
+
+test('Home activity ignores browser-driven scroll churn and keeps the newest edge visible', () => {
+  const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = rendererSource.indexOf('const homeActivityProgrammaticScrollers');
+  const end = rendererSource.indexOf('function homeActivityTooltipEl');
+  assert.ok(start !== -1 && end > start, 'the real activity scroller placement code is available');
+  const state = { homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null };
+  let resizeCallback = null;
+  const observed = [];
+  class ResizeObserver {
+    constructor(callback) { resizeCallback = callback; }
+    observe(target) { observed.push(target); }
+    disconnect() {}
+  }
+  const createScroller = () => {
+    const listeners = new Map();
+    const classes = new Set();
+    const canvas = {};
+    const scroller = {
+      scrollLeft: 0,
+      scrollWidth: 0,
+      clientWidth: 0,
+      canvas,
+      classList: {
+        add: (name) => classes.add(name),
+        remove: (name) => classes.delete(name),
+        toggle: (name, force) => { if (force) classes.add(name); else classes.delete(name); },
+        contains: (name) => classes.has(name)
+      },
+      querySelector: (selector) => (selector === '.home-activity-canvas' ? canvas : null),
+      addEventListener(name, callback) { listeners.set(name, callback); },
+      setLayout(scrollWidth, clientWidth) { scroller.scrollWidth = scrollWidth; scroller.clientWidth = clientWidth; },
+      fire(name, event = {}) {
+        event.preventDefault ||= () => { event.defaultPrevented = true; };
+        listeners.get(name)?.(event);
+        return event.defaultPrevented === true;
+      }
+    };
+    return scroller;
+  };
+  const sandbox = {
+    state,
+    ResizeObserver,
+    homeOverviewApi: { homeActivityScrollTarget, homeActivityScrollRecord }
+  };
+  // setupHomeActivityScroller/applyHomeActivityScroll are the real functions; the
+  // script also brings the real placement bookkeeping (WeakSet/WeakMap) with it.
+  vm.runInNewContext(rendererSource.slice(start, end), sandbox);
+  const resize = () => resizeCallback?.();
+
+  const scroller = createScroller();
+  sandbox.setupHomeActivityScroller(scroller);
+  assert.deepEqual(observed, [scroller, scroller.canvas], 'viewport and canvas are observed so size and data changes retain scroll placement');
+
+  // Wide window: every date fits inside the module, nothing overflows.
+  scroller.setLayout(680, 680);
+  resize();
+  assert.equal(scroller.scrollLeft, 0);
+
+  // The window narrows until the dates overflow. Chromium re-clamps the offset (still 0)
+  // and emits a scroll event before the observer callback runs. With no user intent the
+  // newest (right) edge must stay visible instead of the oldest column.
+  scroller.setLayout(610, 333);
+  scroller.fire('scroll');
+  assert.equal(scroller.scrollLeft, 277, 'a layout re-clamp does not strand the heatmap at the oldest edge');
+  assert.equal(state.homeActivityFollowEnd, true);
+  assert.equal(state.homeActivityScrollLeft, null, 'a browser re-clamp is not persisted as a user position');
+
+  // The observer callback and any delayed event from that placement must agree.
+  resize();
+  scroller.fire('scroll');
+  assert.equal(scroller.scrollLeft, 277);
+  assert.equal(state.homeActivityFollowEnd, true);
+
+  // Chromium can lay out a wide canvas and clamp the offset, then return to the
+  // original width before scroll/ResizeObserver delivery. Final geometry is unchanged,
+  // so comparing only its dimensions mistakes the delayed clamp for a user scroll.
+  scroller.setLayout(700, 700);
+  scroller.scrollLeft = 0;
+  scroller.setLayout(610, 333);
+  scroller.fire('scroll');
+  assert.equal(scroller.scrollLeft, 277, 'same-frame width round trips still follow the newest edge');
+  assert.equal(state.homeActivityFollowEnd, true);
+  assert.equal(state.homeActivityScrollLeft, null);
+
+  // A real drag away from the end is the user browsing history: persist that offset.
+  scroller.fire('pointerdown', { button: 0, pointerType: 'mouse', clientX: 300, pointerId: 1, preventDefault() {} });
+  scroller.fire('pointermove', { clientX: 400, pointerId: 1, preventDefault() {} });
+  assert.equal(scroller.scrollLeft, 177);
+  scroller.fire('scroll');
+  assert.equal(state.homeActivityScrollLeft, 177);
+  assert.equal(state.homeActivityFollowEnd, false);
+
+  // Widening clamps 177 -> 110. That is the browser, not the user: the browsing offset
+  // survives the clamp and returns when the window narrows again.
+  scroller.setLayout(610, 500);
+  scroller.scrollLeft = 110;
+  scroller.fire('scroll');
+  assert.equal(state.homeActivityScrollLeft, 177, 'a clamped offset does not overwrite the browsing position');
+  assert.equal(state.homeActivityFollowEnd, false);
+  scroller.setLayout(610, 333);
+  resize();
+  assert.equal(scroller.scrollLeft, 177);
+  scroller.fire('scroll');
+
+  // Dragging back to the right edge resumes following the newest column.
+  scroller.fire('pointerup', { pointerId: 1 });
+  scroller.setLayout(700, 700);
+  scroller.scrollLeft = 0;
+  scroller.setLayout(610, 333);
+  scroller.fire('scroll');
+  assert.equal(scroller.scrollLeft, 177, 'same-frame layout clamps restore the historical browsing position');
+  assert.equal(state.homeActivityScrollLeft, 177);
+  assert.equal(state.homeActivityFollowEnd, false);
+  scroller.fire('pointerdown', { button: 0, pointerType: 'mouse', clientX: 200, pointerId: 2, preventDefault() {} });
+  scroller.fire('pointermove', { clientX: 100, pointerId: 2, preventDefault() {} });
+  assert.equal(scroller.scrollLeft, 277);
+  scroller.fire('scroll');
+  assert.equal(state.homeActivityFollowEnd, true);
+
+  // ...and the next layout change keeps the newest edge visible.
+  scroller.setLayout(610, 223);
+  resize();
+  assert.equal(scroller.scrollLeft, 387);
+  assert.equal(state.homeActivityFollowEnd, true);
+
+  // A stats rebuild creates a fresh scroller; it lands on the newest edge from state.
+  const rebuilt = createScroller();
+  rebuilt.setLayout(610, 333);
+  sandbox.setupHomeActivityScroller(rebuilt);
+  assert.equal(rebuilt.scrollLeft, 277);
+
+  const roundTrip = () => {
+    rebuilt.setLayout(700, 700);
+    rebuilt.scrollLeft = 0;
+    rebuilt.setLayout(610, 333);
+    rebuilt.fire('scroll');
+  };
+  const saved = state.homeActivityScrollLeft;
+  rebuilt.fire('pointerdown', { button: 0, pointerType: 'mouse', clientX: 200, pointerId: 3, preventDefault() {} });
+  rebuilt.fire('pointermove', { clientX: 200, preventDefault() {} });
+  rebuilt.fire('pointerup', { pointerId: 3 });
+  for (const [name, event] of [
+    ['wheel', { deltaX: 0, deltaY: 120 }],
+    ['wheel', { deltaX: 0, deltaY: 0 }],
+    ['keydown', { target: rebuilt, key: 'ArrowDown' }],
+    ['touchstart', { touches: [{ clientX: 100, clientY: 100 }] }],
+    ['touchend', {}]
+  ]) {
+    rebuilt.fire(name, event);
+    roundTrip();
+    assert.equal(rebuilt.scrollLeft, 277, `${name} without horizontal intent preserves the newest edge`);
+    assert.equal(state.homeActivityFollowEnd, true);
+    assert.equal(state.homeActivityScrollLeft, saved);
+  }
+
+  // Outward input at the latest edge has no movement to save. Its delayed
+  // layout event must not authorize a jump to the oldest column.
+  for (const [name, event] of [
+    ['wheel', { deltaX: 50, deltaY: 0 }],
+    ['wheel', { deltaX: 0, deltaY: 50, shiftKey: true }],
+    ['keydown', { target: rebuilt, key: 'ArrowRight' }],
+    ['keydown', { target: rebuilt, key: 'End' }]
+  ]) {
+    assert.equal(rebuilt.fire(name, event), true);
+    roundTrip();
+    assert.equal(rebuilt.scrollLeft, 277, `${name} at the edge preserves the latest column`);
+    assert.equal(state.homeActivityFollowEnd, true);
+    assert.equal(state.homeActivityScrollLeft, saved);
+  }
+
+  for (const [name, event, expected] of [
+    ['wheel', { deltaX: -90, deltaY: 0 }, 187],
+    ['wheel', { deltaX: 0, deltaY: -90, shiftKey: true }, 187],
+    ['wheel', { deltaX: -2, deltaY: 0, deltaMode: 1 }, 245],
+    ['wheel', { deltaX: -1, deltaY: 0, deltaMode: 2 }, 0],
+    ['keydown', { target: rebuilt, key: 'ArrowLeft' }, 237],
+    ['keydown', { target: rebuilt, key: 'Home' }, 0]
+  ]) {
+    state.homeActivityFollowEnd = true;
+    sandbox.applyHomeActivityScroll(rebuilt);
+    assert.equal(rebuilt.fire(name, event), true);
+    assert.equal(rebuilt.scrollLeft, expected, `${name} moves the real scroller during input`);
+    assert.equal(state.homeActivityScrollLeft, expected, `${name} saves browsing before async scroll delivery`);
+    assert.equal(state.homeActivityFollowEnd, false);
+    roundTrip();
+    assert.equal(rebuilt.scrollLeft, expected, `${name} history survives a same-task clamp`);
+  }
+  rebuilt.fire('keydown', { target: rebuilt, key: 'End' });
+  assert.equal(rebuilt.scrollLeft, 277);
+  assert.equal(state.homeActivityFollowEnd, true);
+
+  for (const event of [
+    { deltaX: 10, deltaY: 120 },
+    { deltaX: -90, deltaY: 0, ctrlKey: true },
+    { deltaX: -90, deltaY: 0, metaKey: true },
+    { deltaX: NaN, deltaY: 0 }
+  ]) {
+    assert.equal(rebuilt.fire('wheel', event), false, 'vertical and zoom gestures retain their default action');
+    roundTrip();
+    assert.equal(rebuilt.scrollLeft, 277);
+  }
+
+  // Touch remains native, including inertia after pointer cancellation.
+  rebuilt.fire('touchstart', { touches: [{ clientX: 100, clientY: 100 }] });
+  rebuilt.fire('touchmove', { touches: [{ clientX: 160, clientY: 102 }] });
+  rebuilt.scrollLeft = 140;
+  rebuilt.fire('scroll');
+  assert.equal(state.homeActivityScrollLeft, 140);
+  assert.equal(state.homeActivityFollowEnd, false);
+  rebuilt.fire('pointercancel', { pointerId: 4 });
+  rebuilt.fire('touchend');
+  rebuilt.scrollLeft = 120;
+  rebuilt.fire('scroll');
+  assert.equal(state.homeActivityScrollLeft, 120, 'native touch inertia survives pointer cancellation');
+  rebuilt.fire('scrollend');
+  roundTrip();
+  assert.equal(rebuilt.scrollLeft, 120);
+
+  // Chromium's compositor can move the physical offset before touchmove delivery.
+  // Compare with the last recorded position, including a reversal before the finger
+  // crosses its starting point, rather than treating the already moved offset as zero.
+  state.homeActivityFollowEnd = true;
+  sandbox.applyHomeActivityScroll(rebuilt);
+  rebuilt.fire('touchstart', { touches: [{ clientX: 100, clientY: 100 }] });
+  for (const [x, left] of [[120, 257], [160, 217], [130, 247]]) {
+    rebuilt.scrollLeft = left;
+    if (x === 130) rebuilt.fire('scroll'); // a compositor reversal may arrive before touchmove
+    rebuilt.fire('touchmove', { touches: [{ clientX: x, clientY: 102 }] });
+    rebuilt.fire('scroll');
+    assert.equal(rebuilt.scrollLeft, left, 'successive native touch movement does not snap back');
+    assert.equal(state.homeActivityScrollLeft, left, 'each touch step, including reversal, records its actual position');
+  }
+  rebuilt.fire('touchend');
+  rebuilt.fire('scrollend');
+  roundTrip();
+  assert.equal(rebuilt.scrollLeft, 247);
+
+  // A resize during native touch must not replace the historical position with a clamp.
+  rebuilt.fire('touchstart', { touches: [{ clientX: 100, clientY: 100 }] });
+  rebuilt.fire('touchmove', { touches: [{ clientX: 160, clientY: 102 }] });
+  rebuilt.setLayout(610, 560);
+  rebuilt.scrollLeft = 50;
+  rebuilt.fire('scroll');
+  assert.equal(state.homeActivityScrollLeft, 247);
+  rebuilt.setLayout(610, 333);
+  resize();
+  assert.equal(rebuilt.scrollLeft, 247);
 });
 
 test('pickHomeHistory prefers the full-year homeHistory when it has days', () => {

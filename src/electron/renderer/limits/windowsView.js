@@ -28,8 +28,9 @@
 //   subscriptionApi, subscriptionText  the recorded subscriptions and how they
 //                                      read, for the plan cell's hover card
 //   format*, limitFillPercent, …       the page's own number formatting
-//   tooltip                            { hasOpened(), markOpened(), release() },
-//                                      the host's render-hold bookkeeping
+//   tooltip                            { hasOpened(), markOpened(), release(),
+//                                        prefersReducedMotion?() }, the host's
+//                                      render-hold and live motion bookkeeping
 //
 // The one exception to "everything arrives through deps" is the provider
 // catalog: which client a provider's tokens are recorded under is the same
@@ -447,25 +448,80 @@
     // dialogs, and light-dismiss would close them on the first click anywhere.
     tooltip.setAttribute('popover', 'manual');
 
+    let opened = false;
+    let pointerInside = false;
+    let focusInside = false;
+    let pendingExit = null;
+
+    const cancelExit = () => {
+      const previous = pendingExit;
+      pendingExit = null;
+      wrap.classList.remove('is-closing');
+      // Reopening invalidates the release before cancellation settles its promises.
+      for (const animation of previous?.animations || []) animation.cancel();
+    };
     const open = () => {
-      if (!tooltip.childElementCount) return;
+      if (!tooltip.childElementCount || !wrap.isConnected || opened) return;
+      cancelExit();
       tooltipHost.markOpened();
       wrap.classList.add('has-opened');
-      if (!wrap.isConnected) return;
       tooltip.showPopover?.();
+      opened = true;
       // Measured after opening: a closed popover has no box to measure.
       tooltip.classList.toggle('is-below', wrap.getBoundingClientRect().top < tooltip.offsetHeight + 8);
       positionCenteredDetailTooltip(tooltip);
     };
     const close = () => {
+      if (!opened) return;
+      opened = false;
+      // Keep the trigger, anchor and last geometry through the native discrete
+      // hide transition. Hosts include this marker in their render-hold check.
+      wrap.classList.add('is-closing');
       tooltip.hidePopover?.();
-      tooltipHost.release();
+      const exit = { animations: tooltip.getAnimations?.() || [] };
+      pendingExit = exit;
+      const release = () => {
+        if (pendingExit !== exit || opened) return;
+        pendingExit = null;
+        wrap.classList.remove('is-closing');
+        tooltipHost.release();
+      };
+      const settled = Promise.allSettled(exit.animations.map((animation) => animation.finished));
+      if (tooltipHost.prefersReducedMotion?.()) {
+        // CSS may still have a finishing transition when the preference changes.
+        for (const animation of exit.animations) {
+          try { animation.finish(); } catch (_) { animation.cancel(); }
+        }
+        release();
+      } else if (exit.animations.length === 0) {
+        release();
+      } else {
+        // Both successful completion and cancellation (for example a removed
+        // view) release the hold. A rapid reentry invalidates this exact exit.
+        settled.then(release);
+      }
     };
-    wrap.addEventListener('pointerenter', open);
-    wrap.addEventListener('focusin', open);
-    wrap.addEventListener('pointerleave', close);
-    wrap.addEventListener('focusout', close);
-    wrap.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); });
+    wrap.addEventListener('pointerenter', () => {
+      pointerInside = true;
+      open();
+    });
+    wrap.addEventListener('focusin', () => {
+      focusInside = true;
+      open();
+    });
+    wrap.addEventListener('pointerleave', () => {
+      pointerInside = false;
+      if (!focusInside) close();
+    });
+    wrap.addEventListener('focusout', (event) => {
+      focusInside = Boolean(event.relatedTarget && wrap.contains(event.relatedTarget));
+      if (!pointerInside && !focusInside) close();
+    });
+    wrap.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || (!opened && !pendingExit)) return;
+      event.preventDefault();
+      close();
+    });
   }
 
   // Entries are rows of cells: `[label, value]`, or `[label, middle, value]` when

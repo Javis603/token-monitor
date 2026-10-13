@@ -104,14 +104,16 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
 
   const modernAbort = new AbortController();
   const legacyAbort = new AbortController();
-  const modernResponse = await hub.fetch(new Request('https://hub.example/api/stats/stream', {
+  const modernRequest = new Request('https://hub.example/api/stats/stream', {
     headers: { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' },
     signal: modernAbort.signal
-  }));
-  const legacyResponse = await hub.fetch(new Request('https://hub.example/api/stats/stream', {
+  });
+  const modernResponse = await hub.fetch(modernRequest);
+  const legacyRequest = new Request('https://hub.example/api/stats/stream', {
     headers: { authorization: 'Bearer shh' },
     signal: legacyAbort.signal
-  }));
+  });
+  const legacyResponse = await hub.fetch(legacyRequest);
   const modern = [];
   const legacy = [];
   const modernPump = collectSse(modernResponse, modern);
@@ -161,6 +163,10 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
   } finally {
     modernAbort.abort();
     legacyAbort.abort();
+    // Keep Request's dependent signals alive until their abort listeners run.
+    // Node may otherwise collect them while the test still awaits the SSE pumps.
+    assert.equal(modernRequest.signal.aborted, true);
+    assert.equal(legacyRequest.signal.aborted, true);
     await Promise.all([modernPump, legacyPump]);
   }
 });

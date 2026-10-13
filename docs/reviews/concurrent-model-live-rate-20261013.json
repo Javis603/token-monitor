@@ -1,0 +1,597 @@
+{
+  "date": "2026-10-13",
+  "timezone": "Asia/Shanghai",
+  "baseHead": "7f231ffe651d38ffd97205e8055b3964b1bd57c2",
+  "codeCommit": "30c9ed622bc4b98dc9b417b80cde216fe078e3bb",
+  "adaptedFrom": {
+    "pr": "https://github.com/Javis603/token-monitor/pull/1016",
+    "head": "c9d63d43a98bed7ebb937d58ae92999d1ff71c86",
+    "patchSha256": "ca02b0557bbe6815ece94a5199e0184c96cb4d53d67b2c657e6fb97aa6a26057"
+  },
+  "runtime": {
+    "unitNode": "24.19.0",
+    "initialExistingAndTwoTestReproNode": "25.9.0",
+    "electron": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "versions": {
+        "node": "24.21.0",
+        "acorn": "8.18.0",
+        "ada": "4.0.0",
+        "amaro": "1.1.11",
+        "ares": "1.34.8",
+        "brotli": "1.2.0",
+        "cldr": "48.0",
+        "icu": "78.2",
+        "llhttp": "9.4.3",
+        "merve": "1.2.2",
+        "modules": "148",
+        "napi": "10",
+        "nbytes": "0.1.4",
+        "ncrypto": "0.0.1",
+        "nghttp2": "1.70.0",
+        "nghttp3": "",
+        "ngtcp2": "",
+        "openssl": "0.0.0",
+        "simdjson": "4.6.7",
+        "simdutf": "7.7.0",
+        "sqlite": "3.53.4",
+        "tz": "2026d",
+        "undici": "7.29.1",
+        "unicode": "17.0",
+        "uv": "1.52.1",
+        "uvwasi": "0.0.23",
+        "v8": "15.0.245.31-electron.0",
+        "zlib": "1.3.2.1-motley",
+        "zstd": "1.6.0",
+        "electron": "43.7.9",
+        "chrome": "150.0.7871.250"
+      }
+    }
+  },
+  "sourceHashes": {
+    "src/electron/renderer/tokenRatePresentation.js": "6a31fb4770752fad951fca7a67aa9cfbcfc33e3889304f26e43139d1ed8c58fc",
+    "tests/electron/tokenRate.test.js": "1c6d2c4a70a512aef9f8e37f6042d5f812e0e1eb10aefd35c19918b07b7a02cc",
+    "scripts/verify-live-model-rate.js": "be51880703ca3e2ed5daa2abbfcde6c7f33ad8ab305b12d0f15fb7b2b9bc69cb"
+  },
+  "preservedFiles": {
+    "src/electron/renderer/app.js": "aa113a89cdbb52e708ecbaef039ee09f26eb2481eee86f055a3994b8c64b0511",
+    "src/electron/tokenNumberAnimation.js": "4d90c2fc0126a76c980eaa4a325804b09e256456dd28955997a7ee230d7b025f",
+    "src/electron/renderer/styles.css": "8d7410fcc10d757f150bbf80a2b8d8dc939ca264602219acbb5f9ca65e0b1cab",
+    "src/electron/modelSpeedHistory.js": "8a4c8b1ece711f9167dfdd86992e60df8d533d3cf30946606778a3907ec89c07",
+    "src/electron/modelSpeedRuntime.js": "c4064d21805ca95f83572a37a006d9d19e2b103ec8d14a19b6a80131fcadc86b",
+    "package-lock.json": "ed31da62c99e47020122429fac26219ffa775ad90fb9cff2678fff260d6a4bb4",
+    "package.json": "1c1f55b4b5159bc3e2eb1915915292465924c77071bf19015ea3711c3a573bd0"
+  },
+  "presentationScope": "Only createLiveTokenRateTracker and createLiveTokenRateGroupTracker changed; rate helpers and the remainder of the module are byte-identical to baseHead.",
+  "testRuns": {
+    "baseline-existing.log": {
+      "tests": 66,
+      "pass": 66,
+      "fail": 0,
+      "skipped": 0,
+      "logSha256": "d237cd3db799c305978589c85f1d78e090ff65f5ad6761b9874ef587e6a5db13"
+    },
+    "baseline-repro.log": {
+      "tests": 2,
+      "pass": 0,
+      "fail": 2,
+      "skipped": 0,
+      "logSha256": "8b8ad1e901f1f33f9beba66d76efe7363a3f2ff346aa7bcbf6692fdd528f7b45"
+    },
+    "baseline-combination.log": {
+      "tests": 72,
+      "pass": 66,
+      "fail": 6,
+      "skipped": 0,
+      "logSha256": "b97a13f9b11e29b7550bbdef3482f6ccc54ba740ccd0763cf1c6f7452f06c6c1"
+    },
+    "baseline-combination-corrected.log": {
+      "tests": 72,
+      "pass": 66,
+      "fail": 6,
+      "skipped": 0,
+      "logSha256": "f95cba5bba79ecc0a71e3df3f7934d7ca2e4c81edf5d015bf351d28b19c905ef"
+    },
+    "upstream-combination.log": {
+      "tests": 72,
+      "pass": 70,
+      "fail": 2,
+      "skipped": 0,
+      "logSha256": "d5d150811c8c5ed80dd6e54f9497037cad140710640f994d8e81353dc0475248"
+    },
+    "focused.log": {
+      "tests": 86,
+      "pass": 86,
+      "fail": 0,
+      "skipped": 0,
+      "logSha256": "0031e055c44442b05ec4194e5161cbde0bc7accd79380b7fde2cb82835233d40"
+    },
+    "extended.log": {
+      "tests": 125,
+      "pass": 125,
+      "fail": 0,
+      "skipped": 0,
+      "logSha256": "40a34c302b73292ea8e2da417d6b851e8d06e81cf95814564088a8d9b54479e3"
+    },
+    "full-verify.log": {
+      "tests": 7112,
+      "pass": 7103,
+      "fail": 1,
+      "skipped": 8,
+      "logSha256": "d36c39ff9fe86552f085eae209c11c753c5834d9e7a3bf1a51333ec59d23f49e"
+    },
+    "watcher-isolated.log": {
+      "tests": 26,
+      "pass": 26,
+      "fail": 0,
+      "skipped": 0,
+      "logSha256": "8339aeec897522151e8a43da9e3f85c18e612d17801e93763530c59a3e4e388e"
+    },
+    "full-verify-2.log": {
+      "tests": 7112,
+      "pass": 7104,
+      "fail": 0,
+      "skipped": 8,
+      "logSha256": "3f39661e057c9bab07c45090fba2d745d86026c235410b1bee3b9df32e1062df"
+    }
+  },
+  "initialFixtureError": "baseline-combination.log includes one wrong module path; baseline-combination-corrected.log fixes the fixture and establishes all six semantic failures.",
+  "fullSuiteFirstFailure": {
+    "test": "a real worker delivers events and stops watching the old roots after a reconfigure",
+    "message": "no event from the worker",
+    "isolatedThenFullRerunPassed": true,
+    "productionWatcherChanged": false,
+    "rootCause": "unknown"
+  },
+  "fullSuiteSkips": [
+    "﹣ Windows observer storage fails closed without deleting existing owner evidence (0.761416ms) # SKIP",
+    "﹣ an unavailable OS identity probe fails closed instead of guessing ownership (0.134334ms) # OS identity probe is available here",
+    "﹣ Windows native roots ignore independent APPDATA overrides (0.047167ms) # SKIP",
+    "﹣ Linux live PID registry fixture matches this process on Linux CI (0.075167ms) # SKIP",
+    "﹣ Claude CLI commands execute from a Windows path containing spaces (0.101083ms) # SKIP",
+    "﹣ live Grok billing via env proxy returns Weekly/Monthly window (0.285583ms) # needs HTTPS_PROXY + ~/.grok/auth.json",
+    "﹣ Windows native PID probe matches CIM and reports both measured costs (0.048459ms) # SKIP",
+    "﹣ Windows terminated child with a retained native handle cannot renew activity (0.053709ms) # SKIP"
+  ],
+  "electron": {
+    "newLiveRate": {
+      "synthetic": true,
+      "actualElectron": true,
+      "actualPreload": true,
+      "startedAt": "2026-10-13T11:12:17.824Z",
+      "source": {
+        "head": "7f231ffe651d38ffd97205e8055b3964b1bd57c2",
+        "tokenRate": "6a31fb4770752fad951fca7a67aa9cfbcfc33e3889304f26e43139d1ed8c58fc",
+        "app": "aa113a89cdbb52e708ecbaef039ee09f26eb2481eee86f055a3994b8c64b0511",
+        "animation": "4d90c2fc0126a76c980eaa4a325804b09e256456dd28955997a7ee230d7b025f",
+        "dependencyLock": "ed31da62c99e47020122429fac26219ffa775ad90fb9cff2678fff260d6a4bb4"
+      },
+      "runtime": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "versions": {
+          "node": "24.21.0",
+          "acorn": "8.18.0",
+          "ada": "4.0.0",
+          "amaro": "1.1.11",
+          "ares": "1.34.8",
+          "brotli": "1.2.0",
+          "cldr": "48.0",
+          "icu": "78.2",
+          "llhttp": "9.4.3",
+          "merve": "1.2.2",
+          "modules": "148",
+          "napi": "10",
+          "nbytes": "0.1.4",
+          "ncrypto": "0.0.1",
+          "nghttp2": "1.70.0",
+          "nghttp3": "",
+          "ngtcp2": "",
+          "openssl": "0.0.0",
+          "simdjson": "4.6.7",
+          "simdutf": "7.7.0",
+          "sqlite": "3.53.4",
+          "tz": "2026d",
+          "undici": "7.29.1",
+          "unicode": "17.0",
+          "uv": "1.52.1",
+          "uvwasi": "0.0.23",
+          "v8": "15.0.245.31-electron.0",
+          "zlib": "1.3.2.1-motley",
+          "zstd": "1.6.0",
+          "electron": "43.7.9",
+          "chrome": "150.0.7871.250"
+        }
+      },
+      "stages": [
+        {
+          "name": "alpha",
+          "at": 823,
+          "sample": {
+            "speed": 40,
+            "burn": 6000,
+            "sampledAt": 1791889938633,
+            "devices": [
+              {
+                "id": "device:local",
+                "name": "Local",
+                "models": [
+                  {
+                    "model": "alpha",
+                    "speed": 40,
+                    "burn": 6000
+                  }
+                ]
+              }
+            ],
+            "deviceCount": 1,
+            "revision": 1,
+            "expiresAt": 1791889946633,
+            "idle": false
+          },
+          "text": "40 tok/s",
+          "labels": [
+            "alpha"
+          ],
+          "idle": false,
+          "coverage": "partial"
+        },
+        {
+          "name": "beta retains alpha",
+          "at": 1438,
+          "sample": {
+            "speed": 20,
+            "burn": 6000,
+            "sampledAt": 1791889939248,
+            "devices": [
+              {
+                "id": "device:local",
+                "name": "Local",
+                "models": [
+                  {
+                    "model": "alpha",
+                    "speed": 40,
+                    "burn": 6000
+                  },
+                  {
+                    "model": "beta",
+                    "speed": 10,
+                    "burn": 6000
+                  }
+                ]
+              }
+            ],
+            "deviceCount": 1,
+            "revision": 2,
+            "expiresAt": 1791889946633,
+            "idle": false
+          },
+          "text": "20 tok/s",
+          "labels": [
+            "alpha",
+            "beta"
+          ],
+          "idle": false,
+          "coverage": "partial"
+        },
+        {
+          "name": "alpha replaces alpha",
+          "at": 2059,
+          "sample": {
+            "speed": 26.666666666666668,
+            "burn": 6000,
+            "sampledAt": 1791889939864,
+            "devices": [
+              {
+                "id": "device:local",
+                "name": "Local",
+                "models": [
+                  {
+                    "model": "alpha",
+                    "speed": 60,
+                    "burn": 6000
+                  },
+                  {
+                    "model": "beta",
+                    "speed": 10,
+                    "burn": 6000
+                  }
+                ]
+              }
+            ],
+            "deviceCount": 1,
+            "revision": 3,
+            "expiresAt": 1791889947248,
+            "idle": false
+          },
+          "text": "27 tok/s",
+          "labels": [
+            "alpha",
+            "beta"
+          ],
+          "idle": false,
+          "coverage": "partial"
+        },
+        {
+          "name": "two devices",
+          "at": 2676,
+          "sample": {
+            "speed": 56.66666666666667,
+            "burn": 12000,
+            "sampledAt": 1791889940484,
+            "devices": [
+              {
+                "id": "device:local",
+                "name": "Local",
+                "models": [
+                  {
+                    "model": "alpha",
+                    "speed": 60,
+                    "burn": 6000
+                  },
+                  {
+                    "model": "beta",
+                    "speed": 10,
+                    "burn": 6000
+                  }
+                ]
+              },
+              {
+                "id": "device:remote",
+                "name": "Remote",
+                "models": [
+                  {
+                    "model": "alpha",
+                    "speed": 30,
+                    "burn": 6000
+                  }
+                ]
+              }
+            ],
+            "deviceCount": 2,
+            "revision": 4,
+            "expiresAt": 1791889947248,
+            "idle": false
+          },
+          "text": "57 tok/s",
+          "labels": [
+            "alpha · Local",
+            "alpha · Remote",
+            "beta · Local"
+          ],
+          "idle": false,
+          "coverage": "partial"
+        },
+        {
+          "name": "duplicate",
+          "at": 2792,
+          "sample": {
+            "speed": 56.66666666666667,
+            "burn": 12000,
+            "sampledAt": 1791889940484,
+            "devices": [
+              {
+                "id": "device:local",
+                "name": "Local",
+                "models": [
+                  {
+                    "model": "alpha",
+                    "speed": 60,
+                    "burn": 6000
+                  },
+                  {
+                    "model": "beta",
+                    "speed": 10,
+                    "burn": 6000
+                  }
+                ]
+              },
+              {
+                "id": "device:remote",
+                "name": "Remote",
+                "models": [
+                  {
+                    "model": "alpha",
+                    "speed": 30,
+                    "burn": 6000
+                  }
+                ]
+              }
+            ],
+            "deviceCount": 2,
+            "revision": 4,
+            "expiresAt": 1791889947248,
+            "idle": false
+          },
+          "text": "57 tok/s",
+          "labels": [
+            "alpha · Local",
+            "alpha · Remote",
+            "beta · Local"
+          ],
+          "idle": false,
+          "coverage": "partial"
+        },
+        {
+          "name": "beta expires automatically",
+          "at": 9460,
+          "sample": {
+            "speed": 90,
+            "burn": 12000,
+            "sampledAt": 1791889940484,
+            "devices": [
+              {
+                "id": "device:local",
+                "name": "Local",
+                "models": [
+                  {
+                    "model": "alpha",
+                    "speed": 60,
+                    "burn": 6000
+                  }
+                ]
+              },
+              {
+                "id": "device:remote",
+                "name": "Remote",
+                "models": [
+                  {
+                    "model": "alpha",
+                    "speed": 30,
+                    "burn": 6000
+                  }
+                ]
+              }
+            ],
+            "deviceCount": 2,
+            "revision": 4,
+            "expiresAt": 1791889947864,
+            "idle": false
+          },
+          "text": "90 tok/s",
+          "labels": [
+            "alpha · Local",
+            "alpha · Remote"
+          ],
+          "idle": false,
+          "coverage": "partial"
+        },
+        {
+          "name": "local expires automatically",
+          "at": 10060,
+          "sample": {
+            "speed": 30,
+            "burn": 6000,
+            "sampledAt": 1791889940484,
+            "devices": [
+              {
+                "id": "device:remote",
+                "name": "Remote",
+                "models": [
+                  {
+                    "model": "alpha",
+                    "speed": 30,
+                    "burn": 6000
+                  }
+                ]
+              }
+            ],
+            "deviceCount": 1,
+            "revision": 4,
+            "expiresAt": 1791889948484,
+            "idle": false
+          },
+          "text": "30 tok/s",
+          "labels": [
+            "alpha"
+          ],
+          "idle": false,
+          "coverage": "partial"
+        },
+        {
+          "name": "remote expires to idle",
+          "at": 10686,
+          "sample": {
+            "speed": 30,
+            "burn": 6000,
+            "sampledAt": 1791889940484,
+            "devices": [
+              {
+                "id": "device:remote",
+                "name": "Remote",
+                "models": [
+                  {
+                    "model": "alpha",
+                    "speed": 30,
+                    "burn": 6000
+                  }
+                ]
+              }
+            ],
+            "deviceCount": 1,
+            "revision": 4,
+            "expiresAt": 1791890120484,
+            "idle": true
+          },
+          "text": "30 tok/s",
+          "labels": [
+            "alpha"
+          ],
+          "idle": true,
+          "coverage": "partial"
+        }
+      ],
+      "errors": [],
+      "checks": {
+        "alternatingModels": true,
+        "latestSampleOnly": true,
+        "crossDeviceSum": true,
+        "duplicateStable": true,
+        "realEightSecondExpiryTimers": true,
+        "modelListTotals": true,
+        "deviceTotals": true,
+        "mixedTiming": true,
+        "usageHistoryUnchanged": true,
+        "speedHistoryUnchanged": true
+      },
+      "passed": true
+    },
+    "existing": [
+      {
+        "name": "model-speed-ui",
+        "exitCode": 0,
+        "elapsedSeconds": 22.958,
+        "command": "TM_SPEED_VERIFY_DIR=\"$PWD/tmp/live-rate-20261013/model-speed-ui\" ./node_modules/.bin/electron scripts/verify-model-speed-ui.js",
+        "logSha256": "ad1c98f84792eb7ee38718191fb304a34fda0f64d555013f29a16138ffb91b36",
+        "passed": true
+      },
+      {
+        "name": "model-speed-list",
+        "exitCode": 0,
+        "elapsedSeconds": 5.034,
+        "command": "TM_SPEED_VERIFY_DIR=\"$PWD/tmp/live-rate-20261013/model-speed-list\" ./node_modules/.bin/electron scripts/verify-model-speed-list.js",
+        "logSha256": "f2622cbf931c7f3f588ecb49cae4dec0a6b9f92ae0c9f1de94a0230ba7808f40",
+        "passed": true
+      },
+      {
+        "name": "unified-sessions",
+        "exitCode": 0,
+        "elapsedSeconds": 13.385,
+        "command": "TM_SESSIONS_VERIFY_DIR=\"$PWD/tmp/live-rate-20261013/unified-sessions\" ./node_modules/.bin/electron scripts/verify-unified-sessions.js",
+        "logSha256": "e255eac33811d106682bf776fe7c08c9218d70db377af9c1cb324d5766350fb0",
+        "passed": true
+      },
+      {
+        "name": "period-animation",
+        "exitCode": 0,
+        "elapsedSeconds": 20.633,
+        "command": "TM_ANIMATION_VERIFY_DIR=\"$PWD/tmp/live-rate-20261013/period-animation\" ./node_modules/.bin/electron scripts/verify-period-number-animation.js",
+        "logSha256": "ce1b6f15a6ff2df7bb9c150358407f36703411a2dc029c273f518f62ec6832e8",
+        "passed": true
+      }
+    ],
+    "fixtureBringupFailures": [
+      {
+        "attempt": "electron-live",
+        "passed": false,
+        "issue": "fixture opened Model instead of Home",
+        "resultSha256": "79dc302a5593f3378ad4a7e0aa35bc068970cc1bb840c639406a408cff290307"
+      },
+      {
+        "attempt": "electron-live-2",
+        "passed": false,
+        "issue": "fixture opened Model instead of Home",
+        "resultSha256": "d055db05e63a5a40b3db7bfa99cdc06b635b6f4c0ae963adabef9a0646bd44b7"
+      },
+      {
+        "attempt": "electron-live-3",
+        "passed": false,
+        "issue": "fixture used breakdown selectors for Home overview rows",
+        "resultSha256": "850025f37fc928bf44bba762465bab81af593816253ff00d78e7dfa36276b368"
+      }
+    ]
+  },
+  "evidenceScope": "Controlled synthetic renderer/preload and local source tests; no collector, real-account request, installed-app replacement or native Widget acceptance.",
+  "countsOverlap": true
+}

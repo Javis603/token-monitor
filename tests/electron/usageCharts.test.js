@@ -5,7 +5,7 @@ const test = require('node:test');
 
 const {
   weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, statsCards, sparklinePreview,
-  areaLineChart, areaLineSvg, heatmapSvg, rollingYearHeatmap
+  areaLineChart, areaLineSvg, heatmapSvg, rollingYearHeatmap, smoothLinePath
 } = require('../../src/electron/renderer/usageCharts');
 
 test('computeHeatmapIntensities derives independent metrics from raw values', () => {
@@ -355,6 +355,8 @@ test('areaLineChart can smooth a compact trend path', () => {
 
   assert.match(model.linePath, / C/);
   assert.match(model.areaPath, / C/);
+  assert.equal(model.linePath, 'M6,36.67 C15,31.56 42,7.28 60,6 C78,4.72 105,25.17 114,29', 'the established Home curve is unchanged');
+  assert.equal(smoothLinePath(model.points, { bounded: true }), 'M6,36.67 C15,31.56 42,7.28 60,6 C78,6 105,25.17 114,29', 'rate charts can suppress overshoot without changing the default');
 });
 
 test('rollingYearHeatmap keeps a full 12-month, seven-row grid at normal cell size', () => {

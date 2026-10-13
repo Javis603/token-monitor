@@ -234,7 +234,10 @@ test('Model rows use the selected ranking metric for order and bar scale', () =>
   assert.match(app, /unattributed/);
   assert.match(app, /const width = rowWidth\(barValue, max\)/);
   assert.match(app, /const max = barScaleMax\(rows\)/);
-  assert.match(app, /homeModelRows\(modelRowsForPeriod\(period, 'tokens'\), period\?\.totalTokens, 5\)/);
+  // The row count is the space-aware budget, still bounded by the rows the
+  // period actually carries; the ranking metric is unchanged.
+  assert.match(app, /homeModelRows\(modelRows, period\?\.totalTokens, homeListLimit\(5, modelRows\.length\)\)/);
+  assert.match(app, /const modelRows = modelRowsForPeriod\(period, 'tokens'\)/);
 });
 
 
