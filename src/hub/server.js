@@ -54,6 +54,9 @@ function createHub({
   dataFile = path.join(projectRoot(), 'data', 'devices.json'),
   logger = console
 } = {}) {
+  if (!Number.isFinite(persistIntervalMs) || persistIntervalMs < 0 || persistIntervalMs > 2147483647) {
+    throw new RangeError('persistIntervalMs must be a finite number between 0 and 2147483647 milliseconds');
+  }
   const store = readJson(dataFile, { version: 1, devices: {} }) || { version: 1, devices: {} };
   if (!store.devices || typeof store.devices !== 'object') store.devices = {};
   // Subscriptions are shared by every device on this hub rather than owned by one
@@ -67,6 +70,7 @@ function createHub({
   store.syncSettings = Object.assign(Object.create(null), store.syncSettings || {});
   const bindHost = resolveBindHost(host, secret);
   let persistTimer = null;
+  let persistPending = false;
 
   // Apply the permission at startup, including records from offline devices.
   // Keep disabled policies as tombstones so re-enabling cannot reuse old tokens.
@@ -87,13 +91,20 @@ function createHub({
     writeJsonAtomic(dataFile, store, 0);
     clearTimeout(persistTimer);
     persistTimer = null;
+    persistPending = false;
   }
 
   function queuePersist() {
     if (persistIntervalMs === 0) return persist();
+    persistPending = true;
     // Keep the first deadline: continuous uploads must not postpone saving.
     if (persistTimer) return;
-    persistTimer = setTimeout(persist, persistIntervalMs);
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      try { persist(); } catch (error) {
+        (logger.error || console.error)('Hub failed to save pending device records:', error);
+      }
+    }, persistIntervalMs);
     persistTimer.unref();
   }
 
@@ -405,8 +416,8 @@ function createHub({
           broadcastTimer = null;
         }
       };
-      req.on('close', cleanup);
-      req.on('error', cleanup);
+      res.on('close', cleanup);
+      res.on('error', cleanup);
       return;
     }
 
@@ -487,7 +498,7 @@ function createHub({
       server.close(() => {
         try {
           // Closing first lets in-flight ingests finish before the final save.
-          if (persistTimer) persist();
+          if (persistPending) persist();
           resolve();
         } catch (error) {
           reject(error);

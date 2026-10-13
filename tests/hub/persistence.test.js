@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const http = require('node:http');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { once } = require('node:events');
 const { createHub } = require('../../src/hub/server');
 
@@ -82,6 +82,76 @@ test('default persistence stays synchronous and uses compact JSON', (t) => {
   assert.equal(fs.existsSync(`${dataFile}.tmp`), false);
 });
 
+for (const recovery of ['next upload', 'shutdown']) {
+  test(`a failed timer save keeps pending records for ${recovery}`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const errors = [];
+    const { hub, dataFile } = fixture(t, 300000, {
+      logger: { error: (_message, error) => errors.push(error) }
+    });
+    hub.ingest({ deviceId: 'a', today: { totalTokens: 7 } });
+    const blockedTempFile = `${dataFile}.tmp`;
+    fs.mkdirSync(blockedTempFile);
+    t.mock.timers.tick(300000);
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0] instanceof Error);
+    assert.equal(fs.existsSync(dataFile), false);
+    assert.equal(hub.getStats().periods.today.totalTokens, 7);
+    t.mock.timers.tick(600000);
+    assert.equal(errors.length, 1);
+    fs.rmdirSync(blockedTempFile);
+
+    if (recovery === 'next upload') {
+      hub.ingest({ deviceId: 'b', today: { totalTokens: 3 } });
+      t.mock.timers.tick(299999);
+      assert.equal(fs.existsSync(dataFile), false);
+      t.mock.timers.tick(1);
+      assert.equal(readStore(dataFile).devices.b.periods.today.totalTokens, 3);
+    } else {
+      await hub.stop();
+    }
+    assert.equal(readStore(dataFile).devices.a.periods.today.totalTokens, 7);
+  });
+}
+
+test('createHub rejects intervals that Node would coerce to a one-millisecond timer', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-invalid-interval-'));
+  t.after(() => fs.rmSync(dir, { recursive: true }));
+  const dataFile = path.join(dir, 'devices.json');
+  for (const persistIntervalMs of [NaN, Infinity, -Infinity, -1, 2147483648]) {
+    assert.throws(() => createHub({ dataFile, persistIntervalMs }), {
+      name: 'RangeError', message: /persistIntervalMs.*0.*2147483647/
+    });
+  }
+  assert.equal(fs.existsSync(dataFile), false);
+});
+
+test('the maximum supported interval keeps its full save deadline', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { hub, dataFile } = fixture(t, 2147483647);
+  hub.ingest({ deviceId: 'a', today: { totalTokens: 5 } });
+  t.mock.timers.tick(2147483646);
+  assert.equal(fs.existsSync(dataFile), false);
+  t.mock.timers.tick(1);
+  assert.equal(readStore(dataFile).devices.a.periods.today.totalTokens, 5);
+});
+
+test('invalid CLI and environment intervals fail before the standalone Hub starts', () => {
+  const serverFile = path.resolve(__dirname, '../../src/hub/server.js');
+  for (const { args, value } of [
+    { args: ['--persistIntervalMs=invalid'], value: '3600000' },
+    { args: [], value: '2147483648' }
+  ]) {
+    const result = spawnSync(process.execPath, [serverFile, '--port=0', ...args], {
+      env: { ...process.env, TOKEN_MONITOR_SECRET: 'test-secret', TOKEN_MONITOR_PERSIST_INTERVAL_MS: value },
+      encoding: 'utf8', timeout: 5000
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /persistIntervalMs must be a finite number/);
+    assert.doesNotMatch(result.stdout, /hub listening/);
+  }
+});
+
 test('shared settings and title revocation save immediately during a pending batch', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { hub, dataFile } = fixture(t, 300000, { syncSessionTitles: true });
@@ -152,6 +222,39 @@ test('stop waits for an in-flight upload before saving the final snapshot', asyn
   await stopped;
   assert.equal(readStore(dataFile).devices['in-flight'].periods.today.totalTokens, 17);
 });
+
+for (const consumeRequest of [false, true]) {
+  test(`stop ends an open SSE response and saves pending records (request consumed: ${consumeRequest})`, async (t) => {
+    const { hub, dataFile } = fixture(t);
+    if (consumeRequest) hub.server.on('request', (req) => req.resume());
+    await hub.start();
+    let request;
+    const response = await new Promise((resolve, reject) => {
+      request = http.get(`http://127.0.0.1:${hub.server.address().port}/api/stats/stream`, (res) => {
+        res.once('data', () => resolve(res));
+      });
+      request.on('error', reject);
+    });
+    const streamEnded = once(response, 'end');
+    hub.ingest({ deviceId: 'sse-pending', today: { totalTokens: 19 } });
+    assert.equal(fs.existsSync(dataFile), false);
+    const stopped = hub.stop();
+    let timeout;
+    try {
+      await Promise.race([
+        Promise.all([stopped, streamEnded]),
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('SSE response blocked Hub shutdown')), 2000);
+        })
+      ]);
+      assert.equal(readStore(dataFile).devices['sse-pending'].periods.today.totalTokens, 19);
+    } finally {
+      clearTimeout(timeout);
+      request.destroy();
+      await stopped;
+    }
+  });
+}
 
 test('standalone SIGTERM saves an accepted upload before exiting', { skip: process.platform === 'win32' }, async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-signal-'));
