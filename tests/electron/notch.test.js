@@ -2154,12 +2154,13 @@ test('summary resize batches fit text before reporting slots and leave the side 
       ResizeObserver: class { constructor(fn) { callback = fn; } },
       contentLayer: { querySelector: () => head },
       fitNotchTypeface: target => events.push(target.id),
-      reportNotchSlots: target => { assert.equal(target, head); events.push('report'); }
+      reportNotchSlots: target => { assert.equal(target, head); events.push('report'); },
+      animateNotchNumbers: () => events.push('animate')
     });
     if (surface === 'edgeDock') { assert.equal(callback, undefined); continue; }
     const target = (id, text) => ({ id, classList: { contains: name => text && name === 'notch-text-run' } });
     callback([{ target: target('slot', false) }, { target: target('text-one', true) }, { target: target('text-two', true) }]);
-    assert.deepEqual(events, ['text-one', 'text-two', 'report']);
+    assert.deepEqual(events, ['text-one', 'text-two', 'report', 'animate']);
   }
 });
 
@@ -2413,7 +2414,7 @@ test('Notch renderer owns its observers and motion hooks while details reuse the
   const state = { payload: { expanded: true, cells: [cell], summary: { items: [{ providerCell: iconCell }] } } };
   const classes = new Map();
   const deps = { state, document: { documentElement: { classList: { toggle: (name, value) => classes.set(name, value) } } },
-    window: { TokenMonitorPressActivation: {}, TokenMonitorEdgeDockPresentation: { runningSessionSummary() {} } }, root: { classList: { toggle: (name, value) => classes.set(name, value) }, addEventListener() {} },
+    window: { addEventListener() {}, TokenMonitorPressActivation: {}, TokenMonitorEdgeDockPresentation: { runningSessionSummary() {} } }, root: { classList: { toggle: (name, value) => classes.set(name, value) }, addEventListener() {} },
     bridge: { onAnimate: handler => hooks.push(handler), onMotion: handler => hooks.push(handler) }, shared: {} };
   const create = context.module.exports.createNotchRenderer;
   const renderer = create({ ...deps, surface: 'notch' });
@@ -2480,7 +2481,9 @@ test('Notch retains static rows, refreshes time-dependent rows and defers hidden
     presentation: { SESSIONS_METRIC: 'sessions' }, runningSessionSummary: () => ({ count: running, clients: running ? ['codex'] : [] }),
     notchRowsKey: '', notchRowNodes: new Map(), notchClock: 0, notchRowsPending: false,
     el: (_tag, classes, text) => Object.assign(new Node(classes), { textContent: text }), t: key => key, createCardWindowsView: () => ({}),
-    notchStatOverviewCard: build, notchOverviewCard: build,
+    notchStatOverviewCard: build, notchOverviewCard: build, prefersReducedMotion: () => false, appearance: () => ({}),
+    numberAnimation: { normalize: () => 'roll' }, captureNotchStatNumbers: () => new Map(),
+    settleNotchStatNumbers() {}, animateNotchStatNumbers() {},
     cardResetAnimator: { capture() {}, animate() {} }, notchProviderObserver: { observe() {} },
     reportNotchContentSize() {}, fitNotchStatReadouts() {}, overflowText: { refresh() {}, preserveReading() {} } };
   const render = vm.runInNewContext(`${code};renderNotchRows`, context);
@@ -2567,4 +2570,120 @@ test('summary resizing during reveal preserves the existing motion deadline', (t
   const frame = top.messages.filter(message => message.channel === 'topNotch:motion').at(-1).payload;
   assert.equal(frame.progress, 1);
   assert.equal(frame.done, true);
+});
+
+
+test('Notch summary rolls fitted numbers, retargets glyphs and settles hidden or changed modes', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
+  const code = source.slice(source.indexOf('function stopNotchNumber('), source.indexOf('function notchIcon('));
+  const frames = new Map(), timers = new Map(), calls = [], used = new Set();
+  let id = 0, reduced = false, hidden = false, mode = 'roll';
+  const run = { scrollWidth: 30, clientWidth: 30, style: { maxWidth: 'none' } };
+  const context = {
+    notchNumbers: new Map(), notchStatRolls: new Map(), state: { payload: { expanded: false }, locale: 'en' },
+    appearance: () => ({ tokenNumberAnimation: mode }), prefersReducedMotion: () => reduced,
+    notchMeasureText: (_measure, value) => String(Math.round(value)), performance: { now: () => 0 },
+    el: (_tag, className, textContent) => ({ className, textContent, isConnected: true, closest: selector => selector === '[hidden]' ? hidden ? {} : null : run }),
+    requestAnimationFrame: fn => { frames.set(++id, fn); return id; }, cancelAnimationFrame: key => frames.delete(key),
+    setTimeout: fn => { timers.set(++id, fn); return id; }, clearTimeout: key => timers.delete(key),
+    numberAnimation: { normalize: value => value, duration: 800,
+      capture: node => node.rolling ? ['visible glyphs'] : null,
+      beginRoll(node, from, to, increasing, _prepare, glyphs) {
+        calls.push({ from, to, increasing, glyphs }); node.rolling = true;
+        if (node.dataset) node.dataset.tokenNumberAnimation = 'roll';
+        return () => { node.rolling = false; if (node.dataset) delete node.dataset.tokenNumberAnimation; node.textContent = to; };
+      } }
+  };
+  vm.runInNewContext(code, context);
+  const render = value => context.notchNumber('tokens', { measure: { metric: 'tokens', value } }, used);
+  const node = render(10);
+  assert.equal(calls.length, 0, 'first presentation is immediate');
+  assert.equal(render(20), node, 'summary keeps its numeric node');
+  assert.equal(calls.length, 0, 'glyph measurement waits for layout fitting');
+  context.animateNotchNumbers();
+  assert.deepEqual(calls[0], { from: '10', to: '20', increasing: true, glyphs: null });
+  assert.equal(timers.size, 1);
+  render(30); context.animateNotchNumbers();
+  assert.deepEqual(calls[1].glyphs, ['visible glyphs'], 'a retarget captures the current shared effect before settling');
+  assert.equal(timers.size, 1, 'old completion timer is cancelled');
+  run.clientWidth = 8; run.style.maxWidth = '8px'; context.animateNotchNumbers();
+  assert.equal(node.rolling, false, 'an existing roll stops when a menu update clips it');
+  assert.equal(timers.size, 0);
+  render(40); context.animateNotchNumbers();
+  assert.equal(calls.length, 2, 'a clipped field retains native ellipsis without glyph layers');
+  assert.equal(node.textContent, '40');
+  assert.equal(timers.size, 0);
+  run.clientWidth = 30; run.style.maxWidth = 'none'; mode = 'count'; render(50);
+  assert.equal(node.textContent, '50', 'switching animation style settles immediately');
+  render(60); assert.equal(frames.size, 1);
+  hidden = true; context.animateNotchNumbers();
+  assert.equal(frames.size, 0, 'omitted fields also release count frames');
+  assert.equal(node.textContent, '60');
+  hidden = false; render(65); assert.equal(frames.size, 1);
+  context.state.payload.expanded = true; context.settleNotchNumbers(); render(70);
+  assert.equal(frames.size, 0, 'hidden summary releases its count frame');
+  assert.equal(node.textContent, '70');
+  context.state.payload.expanded = false; mode = 'roll'; render(70); render(80); context.animateNotchNumbers();
+  reduced = true; render(80);
+  assert.equal(timers.size, 0);
+  assert.equal(node.rolling, false, 'reduced motion releases shared effects');
+});
+
+test('Notch stat rolls use matching identities and release replaced readings', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
+  const code = source.slice(source.indexOf('function settleNotchStatNumbers('), source.indexOf('function notchIcon('));
+  const timers = new Map(), calls = [];
+  let id = 0;
+  const reading = (key, text, value) => ({ textContent: text, dataset: { rollKey: key, rollText: text, rollValue: String(value) }, scrollWidth: 30, clientWidth: 30 });
+  const card = (...nodes) => ({ querySelectorAll: () => nodes, contains: node => nodes.includes(node) });
+  const context = { notchStatRolls: new Map(),
+    setTimeout: fn => { timers.set(++id, fn); return id; }, clearTimeout: key => timers.delete(key),
+    numberAnimation: { duration: 800, capture: node => node.rolling ? ['live'] : null,
+      beginRoll(node, from, to, increasing, _prepare, glyphs) {
+        calls.push({ from, to, increasing, glyphs }); node.rolling = true;
+        if (node.dataset) node.dataset.tokenNumberAnimation = 'roll';
+        return () => { node.rolling = false; if (node.dataset) delete node.dataset.tokenNumberAnimation; node.textContent = to; };
+      } }
+  };
+  vm.runInNewContext(code, context);
+  const oldNode = reading('today:value', '100', 100);
+  oldNode.dataset.rollText = '100,000';
+  const old = card(oldNode);
+  const nextNode = reading('today:value', '200', 200), next = card(nextNode);
+  context.animateNotchStatNumbers(next, context.captureNotchStatNumbers(old));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].from, '100', 'static capture uses the fitted reading, not stale full-text metadata');
+  const snapshot = context.captureNotchStatNumbers(next);
+  assert.equal(nextNode.rolling, false);
+  assert.equal(timers.size, 0, 'replacing a card cancels its timer and effect');
+  context.animateNotchStatNumbers(card(reading('today:value', '150', 150)), snapshot);
+  assert.equal(calls[1].increasing, false);
+  assert.deepEqual(calls[1].glyphs, ['live']);
+  context.animateNotchStatNumbers(card(reading('month:value', '150', 150), reading('today:value', '—', 0)), snapshot);
+  assert.equal(calls.length, 2, 'unmatched identities and missing values do not roll');
+  context.settleNotchStatNumbers();
+  assert.equal(timers.size, 0);
+  assert.equal(context.notchStatRolls.size, 0);
+});
+
+
+test('Notch visibility transitions settle summary motion without rebuilding its header', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
+  const code = source.slice(source.indexOf('function renderNotch('), source.indexOf('    let notchAnimation ='));
+  let settles = 0;
+  const payload = { expanded: false, summary: null, cells: [], appearance: {}, geometry: { gapWidth: 179, notched: true } };
+  const context = { state: { appearanceKey: 'same' }, notchExpanded: false, notchClock: 0,
+    notchHeaderKey: '', settleNotchNumbers: () => settles++, settleNotchStatNumbers() {},
+    resetRefreshVisit() {}, paintRefreshButton() {}, root: { classList: { toggle() {} }, style: { setProperty() {} } },
+    runningSessionSummary() {}, contentLayer: { querySelector: () => null, prepend() {} },
+    captureRingResetMotion() {}, notchSummary: () => ({ style: {} }), animateRingResets() {},
+    notchSummaryObserver: { disconnect() {}, observe() {} }, renderNotchRows() {}, applyNotchMotion() {}, reportNotchContentSize() {} };
+  vm.runInNewContext(code, context);
+  context.renderNotch(payload);
+  const key = context.notchHeaderKey;
+  context.renderNotch({ ...payload, expanded: true });
+  assert.equal(context.notchHeaderKey, key, 'unchanged data retains its header');
+  assert.equal(settles, 1, 'expanding settles summary effects independently of header reconstruction');
+  context.renderNotch({ ...payload, summaryMeasurement: { id: 1, measuring: true } });
+  assert.equal(settles, 2, 'hidden measurement also settles summary effects');
 });

@@ -15,6 +15,7 @@
       overflowText, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit
     } = shared;
     const presentation = window.TokenMonitorEdgeDockPresentation;
+    const numberAnimation = window.TokenMonitorTokenNumberAnimation;
     const runningSessionSummary = presentation.runningSessionSummary;
     const trayLayoutApi = window.TokenMonitorTrayLayout;
     const trayTypographyApi = window.TokenMonitorTrayTypography;
@@ -136,6 +137,7 @@
     // ---- Top notch ------------------------------------------------------------
 
     const notchNumbers = new Map();
+    const notchStatRolls = new Map();
     let lastNotchSlots = '';
     let lastNotchSize = '';
     let notchHeaderKey = '';
@@ -154,11 +156,22 @@
       });
     }
 
+    function stopNotchNumber(held) {
+      cancelAnimationFrame(held.handle); clearTimeout(held.timer);
+      held.settleRoll?.();
+      held.handle = held.timer = held.settleRoll = held.pending = null;
+    }
+
+    function settleNotchNumbers() {
+      for (const held of notchNumbers.values()) {
+        stopNotchNumber(held); held.value = held.target; held.node.textContent = held.format(held.target);
+      }
+    }
+
     function notchNumber(key, row, used) {
       const measure = row.measure;
       if (!measure || !Number.isFinite(measure.value)) return el('span', '', row.text || '—');
-      // Unit/source changes establish a new baseline; updates in the same reading
-      // continue from the current tween, just like the home number's 1000ms quart.
+      // Source, units and locale changes establish a new numeric baseline.
       const semantic = JSON.stringify([key, { ...measure, value: null }, appearance().currency, appearance().compactTokenUnits, state.locale]);
       used.add(semantic);
       let held = notchNumbers.get(semantic);
@@ -166,13 +179,20 @@
         held = { node: el('span', 'notch-number'), value: measure.value, target: measure.value, handle: null };
         notchNumbers.set(semantic, held);
       }
-      const format = (value) => notchMeasureText(measure, value);
-      if (held.target !== measure.value || prefersReducedMotion()) {
-        cancelAnimationFrame(held.handle);
+      const format = held.format = (value) => notchMeasureText(measure, value);
+      const mode = numberAnimation.normalize(appearance().tokenNumberAnimation);
+      const changed = held.target !== measure.value;
+      const visible = !state.payload.expanded && !state.payload.summaryMeasurement?.measuring;
+      if (changed || held.mode !== mode || prefersReducedMotion() || !visible) {
+        const glyphs = mode === 'roll' ? numberAnimation.capture(held.node) : null;
+        const from = held.value;
+        stopNotchNumber(held);
         held.target = measure.value;
-        if (prefersReducedMotion()) held.value = held.target;
-        else {
-          const from = held.value;
+        if (!visible || prefersReducedMotion() || !changed || held.mode && held.mode !== mode) held.value = held.target;
+        else if (mode === 'roll') {
+          held.value = held.target;
+          held.pending = { from, to: held.target, fromText: format(from), toText: format(held.target), glyphs };
+        } else {
           const started = performance.now();
           const step = (now) => {
             const t = Math.min(1, (now - started) / 1000);
@@ -184,8 +204,59 @@
           held.handle = requestAnimationFrame(step);
         }
       }
-      held.node.textContent = format(held.value);
+      held.mode = mode;
+      if (!held.settleRoll) held.node.textContent = format(held.value);
       return held.node;
+    }
+
+    // Shared glyph animation measures connected, fitted nodes. A clipped reading
+    // keeps its native ellipsis instead of replacing it with an atomic glyph group.
+    function animateNotchNumbers() {
+      for (const held of notchNumbers.values()) {
+        if (!held.pending && !held.settleRoll && !held.handle) continue;
+        const run = held.node.closest('.notch-text-run');
+        if (!held.node.isConnected || held.node.closest('[hidden]') || run.style.maxWidth !== 'none' && run.scrollWidth > run.clientWidth + 1) {
+          stopNotchNumber(held); held.value = held.target; held.node.textContent = held.format(held.target);
+          continue;
+        }
+        const pending = held.pending;
+        if (!pending) continue;
+        held.pending = null;
+        held.settleRoll = numberAnimation.beginRoll(held.node, pending.fromText, pending.toText, pending.to > pending.from, null, pending.glyphs);
+        held.timer = setTimeout(() => {
+          held.settleRoll?.(); held.settleRoll = held.timer = null;
+        }, numberAnimation.duration);
+      }
+    }
+
+    function settleNotchStatNumbers(card = null) {
+      for (const [node, motion] of notchStatRolls) {
+        if (card && !card.contains(node)) continue;
+        clearTimeout(motion.timer); motion.settle(); notchStatRolls.delete(node);
+      }
+    }
+
+    function captureNotchStatNumbers(card) {
+      const snapshot = new Map();
+      for (const node of card?.querySelectorAll('[data-roll-key]') || []) {
+        snapshot.set(node.dataset.rollKey, { text: node.dataset.tokenNumberAnimation === 'roll' ? node.dataset.rollText : node.textContent, value: Number(node.dataset.rollValue), glyphs: numberAnimation.capture(node) });
+      }
+      settleNotchStatNumbers(card);
+      return snapshot;
+    }
+
+    function animateNotchStatNumbers(card, snapshot) {
+      for (const node of card.querySelectorAll('[data-roll-key]')) {
+        const previous = snapshot.get(node.dataset.rollKey);
+        const text = node.dataset.rollText = node.textContent;
+        if (!previous || previous.text === text || !/[0-9]/.test(previous.text) || !/[0-9]/.test(text)
+          || node.scrollWidth > node.clientWidth + 1) continue;
+        const value = Number(node.dataset.rollValue);
+        const increasing = !(Number.isFinite(value) && Number.isFinite(previous.value)) || value > previous.value;
+        const settle = numberAnimation.beginRoll(node, previous.text, text, increasing, null, previous.glyphs);
+        const timer = setTimeout(() => { settle(); notchStatRolls.delete(node); }, numberAnimation.duration);
+        notchStatRolls.set(node, { settle, timer });
+      }
     }
 
     function notchIcon(item) {
@@ -231,7 +302,7 @@
         if (target.classList.contains('notch-text-run')) fitNotchTypeface(target);
       }
       const head = contentLayer.querySelector('.notch-summary');
-      if (head) reportNotchSlots(head);
+      if (head) { reportNotchSlots(head); animateNotchNumbers(); }
     }) : null;
 
     function notchText(item, row, key, used) {
@@ -314,7 +385,7 @@
       rightContent.append(...allocation.right.map(index => parts[index]));
       for (const [key, held] of notchNumbers) {
         if (used.has(key)) continue;
-        cancelAnimationFrame(held.handle);
+        stopNotchNumber(held);
         notchNumbers.delete(key);
       }
       head.append(left, gap, right);
@@ -336,6 +407,9 @@
         reading.classList.add('edge-dock-total-row');
         const value = reading.firstElementChild;
         const exact = el('strong', 'edge-dock-stat-value', cell.available ? formatCardTokens(cell.totalTokens) : '—');
+        exact.dataset.rollKey = value.dataset.rollKey;
+        exact.dataset.rollValue = value.dataset.rollValue;
+        exact.dataset.rollText = exact.textContent;
         exact.dataset.fullText = exact.textContent;
         exact.dataset.compactText = value.textContent;
         value.replaceWith(exact);
@@ -400,6 +474,7 @@
         const side = Math.min(Math.max(naturalWidth(label), naturalWidth(cost)), Math.max(0, (cell.clientWidth - 2 * gap) / 3));
         cell.style.gridTemplateColumns = `${side}px minmax(0, 1fr) ${side}px`;
         const value = card.querySelector('.edge-dock-stat-value');
+        if (value.dataset.tokenNumberAnimation === 'roll') continue;
         value.style.fontSize = '';
         value.textContent = value.dataset.fullText;
         // Reuse the detail headline's fitting rule; never widen the outer shell.
@@ -614,22 +689,24 @@
       const scrollTop = list.scrollTop;
       const focused = document.activeElement?.closest('.edge-dock-card')?.dataset.cellId;
       const resetSnapshot = cardResetAnimator.capture(contentLayer);
+      const rolling = !opening && !prefersReducedMotion() && numberAnimation.normalize(appearance().tokenNumberAnimation) === 'roll';
       const next = [], replaced = [], changed = new Set();
       for (const [index, cell] of cells.entries()) {
         let held = notchRowNodes.get(cell.id);
         if (held?.key !== keys[index]) {
+          const numbers = cell.kind === 'stat' && held ? captureNotchStatNumbers(held.node) : new Map();
           const view = createCardWindowsView(() => cell, () => cell.forecast || null);
           const card = cell.kind === 'stat' ? notchStatOverviewCard(cell) : notchOverviewCard(cell, view);
           card.dataset.cellId = cell.id; card.tabIndex = 0;
           changed.add(card);
-          if (held) replaced.push([held.node, card]);
+          if (held) replaced.push([held.node, card, numbers]);
           held = { key: keys[index], node: card };
           notchRowNodes.set(cell.id, held);
         }
         next.push(held.node);
       }
       const ids = new Set(cells.map(cell => cell.id));
-      for (const id of notchRowNodes.keys()) if (!ids.has(id)) notchRowNodes.delete(id);
+      for (const [id, held] of notchRowNodes) if (!ids.has(id)) { settleNotchStatNumbers(held.node); notchRowNodes.delete(id); }
       if (!next.length) {
         const empty = el('section', 'edge-dock-card notch-empty');
         empty.append(el('div', 'edge-dock-note', t('settings.notch.empty')));
@@ -648,11 +725,14 @@
       fitNotchStatReadouts(changed); overflowText.refresh();
       for (const [previous, card] of replaced) overflowText.preserveReading(previous, card);
       cardResetAnimator.animate(list, resetSnapshot);
+      if (rolling) for (const [_previous, card, numbers] of replaced) animateNotchStatNumbers(card, numbers);
     }
 
     function renderNotch(payload) {
       const opening = payload.expanded === true && !notchExpanded;
       notchExpanded = payload.expanded === true;
+      if (!payload.expanded) settleNotchStatNumbers();
+      if (payload.expanded || payload.summaryMeasurement?.measuring) settleNotchNumbers();
       if (opening) notchClock++;
       // A hidden/removed action starts a new visit; late replies cannot repaint it.
       if (!payload.expanded || !payload.refreshEnabled) {
@@ -684,6 +764,7 @@
       if (summary) {
         summary.style.visibility = payload.summaryMeasurement?.measuring ? 'hidden' : '';
         positionNotchSummary(summary, payload); reportNotchSlots(summary);
+        animateNotchNumbers();
       }
       renderNotchRows(payload, opening);
       applyNotchMotion(payload.motion);
@@ -724,6 +805,11 @@
       });
     }
 
+
+    window.addEventListener('pagehide', () => {
+      for (const held of notchNumbers.values()) stopNotchNumber(held);
+      settleNotchStatNumbers();
+    }, { once: true });
 
     return {
       render: renderNotch,

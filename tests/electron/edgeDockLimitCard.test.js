@@ -2137,7 +2137,7 @@ test('switching camera clearance rebuilds the same summary without losing config
   const context = { el, contentLayer: layer, root: el('div', 'root'), state: { appearanceKey: 'unchanged' },
     notchHeaderKey: '', notchClock: 0, notchNumbers: new Map(), trayTypographyApi: require('../../src/electron/renderer/trayTypography'),
     refreshVisit: 0, refreshFeedbackTimer: null, refreshBusy: false, refreshResult: '',
-    clearTimeout() {}, cancelAnimationFrame() {}, resetRefreshVisit() {}, paintRefreshButton() {}, captureRingResetMotion() {}, animateRingResets() {},
+    clearTimeout() {}, cancelAnimationFrame() {}, settleNotchNumbers() {}, settleNotchStatNumbers() {}, resetRefreshVisit() {}, paintRefreshButton() {}, captureRingResetMotion() {}, animateRingResets() {},
     notchSummaryObserver: { disconnect() {}, observe() {} }, providerLabel: id => id, positionNotchSummary() {},
     notchIcon: item => el('span', 'edge-dock-mark', item.provider), notchText: (_item, row) => el('span', 'notch-text-run', row.text) };
   const summarySource = source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function notchStatOverviewCard('));
