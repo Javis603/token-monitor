@@ -48,11 +48,11 @@ The agent reads `.env` from the checkout root, wherever it is started from.
 
 ### Title-sync state and migration
 
-Session-title sync is off by default and requires opt-in on both the Hub and agent. The agent uses `TOKEN_MONITOR_SYNC_SESSION_TITLES=1` or `--sync-session-titles`; CLI/env consent is a fresh declaration for the configured destination on every launch, independent of the widget's title-display preference. See the [title-sync API](API.md#put-apisynctitlesdeviceid) for the protocol.
+Title sync is off by default and needs opt-in on both the Hub and agent. For the agent, use `TOKEN_MONITOR_SYNC_SESSION_TITLES=1` or `--sync-session-titles`. The widget's title-display setting is independent. See the [title-sync API](API.md#put-apisynctitlesdeviceid) for protocol and legacy-agent cleanup details.
 
-The agent keeps private revocation state, including the credentials needed to clean up old destinations, in `agent-sync-credentials.json` in its state directory (`TOKEN_MONITOR_SHARED_DIR` overrides the default). Keep that directory across restarts and connection changes; use a separate directory for each independent agent deployment. Offline or unauthorized cleanup stays pending and retries on later uploads. A pending entry for the same Hub URL/device prevents new title admission, but basic usage still uploads without titles. `--dry-run` performs no title negotiation or journal access.
+Before deleting or moving the agent's state directory (`TOKEN_MONITOR_SHARED_DIR`, if set), stop the agent/service and run `npm run agent:once -- --sync-session-titles=false` with the original Hub URL, credentials, Device ID and state directory. Keep the state until revocation is confirmed; pending cleanup or state warnings mean it must be retained. This command still collects and uploads usage without titles after cleanup.
 
-Before deleting or relocating this state, stop the resident agent, then run `npm run agent:once -- --sync-session-titles=false` with its old Hub URL, credentials, Device ID and state directory. Let cleanup finish; pending-cleanup or journal warnings mean the state must be kept for retry. Alternatively, delete the old device on its Hub. An upgrade from an agent that predates this journal cannot discover historical destinations: remove those old devices manually. Revocation removes active stored titles, not exported copies or backups.
+To avoid another usage upload, delete the old device on the old Hub instead. Keep the original agent stopped so it cannot recreate the device. Revocation does not remove exported copies or backups.
 
 ## Verify
 

@@ -48,11 +48,11 @@ TOKEN_MONITOR_DEVICE_ID=build-server
 
 ### 標題同步狀態與遷移
 
-工作階段標題同步預設關閉，需要分別在 Hub 和 agent 上開啟。agent 使用 `TOKEN_MONITOR_SYNC_SESSION_TITLES=1` 或 `--sync-session-titles`；每次啟動時，CLI/環境變數都會對目前目標重新聲明同意，與小工具的標題顯示偏好獨立。協定見[標題同步 API](API.md#put-apisynctitlesdeviceid)。
+標題同步預設關閉，需分別在 Hub 和 agent 上開啟。agent 使用 `TOKEN_MONITOR_SYNC_SESSION_TITLES=1` 或 `--sync-session-titles`，與小工具的標題顯示設定獨立。協定及舊版 agent 的清理說明見[標題同步 API](API.md#put-apisynctitlesdeviceid)。
 
-agent 將私有撤銷狀態保存在狀態目錄中的 `agent-sync-credentials.json`，其中包含清理舊目標所需的憑證（`TOKEN_MONITOR_SHARED_DIR` 可覆蓋預設目錄）。重新啟動或變更連線時應保留這個目錄；每個獨立部署的 agent 應使用各自的目錄。舊 Hub 離線或拒絕驗證時，清理會維持待處理，並在後續上傳時重試。同一 Hub URL/裝置仍有待處理項目時，不會重新啟用標題傳送，但基本用量仍會不帶標題上傳。`--dry-run` 不協商標題權限，也不存取該狀態檔。
+刪除或遷移 agent 的狀態目錄（若設定了 `TOKEN_MONITOR_SHARED_DIR`，則為該目錄）前，先停止 agent 或其服務，再使用原來的 Hub URL、憑證、裝置 ID 和狀態目錄執行 `npm run agent:once -- --sync-session-titles=false`。確認撤銷成功前不要刪除狀態；仍有清理待處理或狀態警告時，應保留它。這個命令在清理後仍會正常採集並上傳不含標題的用量。
 
-刪除或遷移這個狀態前，先停止常駐 agent，再使用原來的 Hub URL、憑證、裝置 ID 和狀態目錄執行 `npm run agent:once -- --sync-session-titles=false`，等待清理完成。如果仍有清理待處理或狀態檔警告，就應保留狀態以便重試。也可以直接在舊 Hub 上刪除舊裝置。從尚未使用此狀態檔的舊版 agent 升級時，程式無法找回歷史目標，需要手動刪除那些舊裝置。撤銷只會移除伺服器目前儲存的標題，無法刪除已匯出的副本或備份。
+若不想再次上傳用量，可改為在舊 Hub 上刪除舊裝置，並保持原 agent 停止，避免它重新建立裝置。撤銷無法刪除已匯出的副本或備份。
 
 ## 驗證
 
