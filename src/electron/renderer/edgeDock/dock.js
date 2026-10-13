@@ -69,6 +69,10 @@ const root = document.getElementById('edgeDockRoot');
 const query = new URLSearchParams(window.location.search);
 const surface = query.get('surface') || 'rail';
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+const tokenNumberAnimationApi = window.TokenMonitorTokenNumberAnimation;
+const railNumberRollApi = window.TokenMonitorEdgeDockRailNumberRoll;
+const railNumberRoll = railNumberRollApi.create({ animation: tokenNumberAnimationApi });
+const markRoll = railNumberRollApi.mark;
 
 const state = {
   payload: null,
@@ -662,6 +666,7 @@ function providerCellNode(cell) {
   } else {
     value.textContent = shown === null ? '--' : `${Math.round(shown)}%`;
   }
+  markRoll(value, `${cell.id}:value`, cell.credits ? Number(cell.credits.amount) : shown);
   // What a refill motion compares against to recognise a real reset on this
   // cell: the headline's account and window identities ride the key, so a
   // headline that swapped to another account or pool is never animated as one.
@@ -738,7 +743,7 @@ function cellRateNode(cell) {
   // item's readout, which really does toggle rate mode on click while this cell
   // opens its card. A tooltip nobody can read is not worth five translations.
   node.append(
-    el('span', 'edge-dock-cell-rate-value', missing ? '—' : formatRate(cell.rate)),
+    markRoll(el('span', 'edge-dock-cell-rate-value', missing ? '—' : formatRate(cell.rate)), `${cell.id}:rate`, cell.rate),
     el('span', 'edge-dock-cell-rate-unit', t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit'))
   );
   return node;
@@ -782,7 +787,8 @@ function statCellNode(cell) {
   if (cell.metric === 'liveRate') {
     node.classList.toggle('is-idle', cell.idle === true);
     node.title = t('edgeDock.rate.switch');
-    node.append(el('span', 'edge-dock-stat-value', cell.rate === null || cell.rate === undefined ? '—' : formatRate(cell.rate)));
+    node.append(markRoll(el('span', 'edge-dock-stat-value', cell.rate === null || cell.rate === undefined ? '—' : formatRate(cell.rate)),
+      `${cell.id}:value`, cell.rate));
   } else if (cell.metric === presentation.SESSIONS_METRIC) {
     // Nothing running is a real reading, not a missing one, so the zero is
     // shown - muted, exactly as the live-rate cell mutes its own idle state.
@@ -790,7 +796,7 @@ function statCellNode(cell) {
     // running session the moment that session crosses the ten-minute window.
     const running = runningSessionSummary(cell.sessions).count;
     node.classList.toggle('is-idle', running === 0);
-    node.append(el('span', 'edge-dock-stat-value', String(running)));
+    node.append(markRoll(el('span', 'edge-dock-stat-value', String(running)), `${cell.id}:value`, running));
     // The third line is the item's own choice: the tools with work in flight, or
     // the live token rate. Rate mode keeps its line even with nothing running, so
     // the cell does not change height as work starts and stops.
@@ -805,8 +811,8 @@ function statCellNode(cell) {
     node.append(el('span', 'edge-dock-stat-value', '—'));
   } else {
     node.append(
-      el('span', 'edge-dock-stat-value', formatTokens(cell.totalTokens)),
-      el('span', 'edge-dock-stat-cost', formatRailCost(cell.costUsd, cell.unpricedTokens))
+      markRoll(el('span', 'edge-dock-stat-value', formatTokens(cell.totalTokens)), `${cell.id}:value`, cell.totalTokens),
+      markRoll(el('span', 'edge-dock-stat-cost', formatRailCost(cell.costUsd, cell.unpricedTokens)), `${cell.id}:cost`, cell.costUsd)
     );
   }
   // The tool marks are decorative: the count beside them already says how many
@@ -1043,6 +1049,7 @@ function settleDockMotions() {
     el.textContent = `${Math.round(entry.target)}%`;
   }
   ringNumberAnimations.clear();
+  railNumberRoll.settle();
   cardResetAnimator.settle(contentLayer);
 }
 
@@ -1089,7 +1096,8 @@ function renderRail(payload) {
   // slide belongs to the reveal rather than to every payload that follows it: the
   // count moves only on a real reveal, and this plays when it has moved on.
   const reveal = payload.reveal;
-  if (railReveal !== null && reveal !== railReveal) playRailReveal();
+  const revealing = railReveal !== null && reveal !== railReveal;
+  if (revealing) playRailReveal();
   railReveal = reveal;
   if (!railNode) {
     railNode = el('div', 'edge-dock-rail');
@@ -1116,8 +1124,16 @@ function renderRail(payload) {
     if (!providerIds.has(id)) waitingRingStarts.delete(id);
   }
   const ringSnapshot = captureRingResetMotion();
+  const rollSnapshot = railNumberRoll.capture(railNode);
   railNode.replaceChildren(...nodes);
   animateRingResets(ringSnapshot);
+  // A retracted rail is not repainted, so a reveal shows the latest readings at
+  // once rather than rolling from ones left on screen minutes ago. A refill's
+  // count-up owns its figure.
+  if (!revealing && !prefersReducedMotion()
+    && tokenNumberAnimationApi.normalize(appearance().tokenNumberAnimation) === 'roll') {
+    railNumberRoll.play(railNode, rollSnapshot, { skip: (node) => ringNumberAnimations.has(node) });
+  }
 }
 
 let gesture = null;

@@ -315,6 +315,11 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   text-overflow: clip;
 }
 .edge-dock-cell-stat.is-idle .edge-dock-stat-value { color: var(--muted); }
+/* A rolling readout's glyphs leave its line box and fade out through the mask
+   (see .token-number-glyphs); clipping would cut them with a straight edge. */
+.edge-dock-stat-value[data-token-number-animation="roll"],
+.edge-dock-stat-cost[data-token-number-animation="roll"],
+.edge-dock-cell-rate:has([data-token-number-animation="roll"]) { overflow: visible; }
 /* The tools with work in flight, drawn with their own marks. The cell is 56px
    of a 64px rail, so the row is capped in the projection (runningClients) and
    the remainder is stated as a count rather than shrunk below legibility. */

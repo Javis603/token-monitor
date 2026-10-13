@@ -5427,6 +5427,7 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     glassBlur: source.glassBlur,
     systemGlass: source.systemGlass,
     reduceMotion: source.reduceMotion,
+    tokenNumberAnimation: source.tokenNumberAnimation,
     interfaceFontFamily: source.interfaceFontFamily,
     displayFontFamily: source.displayFontFamily,
     showLimitUsed: source.showLimitUsed,
