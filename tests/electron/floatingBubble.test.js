@@ -431,7 +431,7 @@ test('glass surfaces keep the shared tint and blur without decorative chrome', (
   assert.match(boot, /floatingBubbleSide/);
   assert.match(boot, /suppressInitialNumberAnimation/);
   assert.match(boot, /__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__/);
-  assert.match(boot, /\['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'\]\.includes\(breakdown\)/);
+  assert.match(boot, /\['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends', \.\.\.\(window\.navigator\?\.userAgent\.toLowerCase\(\)\.includes\('linux'\) \? \['speed'\] : \[\]\)\]\.includes\(breakdown\)/);
   assert.match(boot, /document\.documentElement\.classList\.add/);
   assert.match(css, /html\.floating-bubble-collapsed-left,\s*body\.floating-bubble-collapsed-left/);
   assert.match(css, /html\.floating-bubble-collapsed-right,\s*body\.floating-bubble-collapsed-right/);

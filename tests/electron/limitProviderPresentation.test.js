@@ -989,6 +989,9 @@ test('hidden Settings keeps the custom tray clock running without refreshing com
   let scheduledRenders = 0;
   const context = {
     customTrayClockTimer: null,
+    customTrayClockInterval: 0,
+    taskTokenRateDisplaysNeeded: () => false,
+    refreshTaskTokenRateDisplays: () => {},
     isRendererWindowHidden: () => true,
     isSettingsSurfaceVisible: () => false,
     refreshTrayComposers: () => { throw new Error('hidden Settings refreshed composer DOM'); },

@@ -652,6 +652,7 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
 }
 
 module.exports = {
+  codexResponseItemPrompt,
   parseClaudeTranscript,
   parseCodebuddyTranscript,
   parseCodexTranscript,
