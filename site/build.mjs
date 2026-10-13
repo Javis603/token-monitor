@@ -7,11 +7,13 @@ const outputRoot = new URL("../_site/", import.meta.url);
 
 const cssFiles = ["styles/tokens.css", "styles/base.css", "styles/components.css", "styles/edgedock.css", "styles/sections.css"];
 const jsFiles = ["scripts/i18n.js", "scripts/main.js"];
-const assetVersion = "20260929-v063";
-// Icons are the site's own brand-colored copies under site/assets/icons/ (the app's
-// assets/icons/ stay mask-only currentColor and must not be mutated to serve the web).
+const assetVersion = "20261013-v070";
+// Icons are the site's own copies under site/assets/icons/ (the app's assets/icons/ stay
+// mask-only currentColor and must not be mutated to serve the web). Marks the app only
+// draws as ink — the brands whose art renders black — are copied verbatim and flattened
+// to white by the marquee rule in styles/components.css; the rest are brand-colored.
 // tray-claude / tray-codex are the real tray glyphs, masked to monochrome in the surfaces section.
-const iconNames = ["claude", "codex", "cursor", "antigravity", "hermes-agent", "opencode", "openclaw", "codebuddy", "workbuddy", "reasonix", "dsh", "openrouter", "newapi", "volcengine", "os-apple", "os-windows", "os-linux", "tray-claude", "tray-codex", "gemini", "xai", "deepseek", "qwen", "kimi", "mistral", "meta", "zai", "minimax", "cline", "copilot", "pi", "zed", "kilo", "kiro", "mimo", "devin", "amp", "droid", "omp", "commandcode", "qoder", "trae", "cherrystudio", "lmstudio", "unsloth", "alibaba", "typesafe", "ollama", "proma", "spinner", "token-monitor"];
+const iconNames = ["claude", "codex", "cursor", "antigravity", "hermes-agent", "opencode", "openclaw", "codebuddy", "workbuddy", "reasonix", "dsh", "openrouter", "newapi", "volcengine", "os-apple", "os-windows", "os-linux", "tray-claude", "tray-codex", "gemini", "xai", "deepseek", "qwen", "kimi", "mistral", "meta", "zai", "minimax", "cline", "copilot", "pi", "zed", "kilo", "kiro", "mimo", "devin", "amp", "droid", "omp", "commandcode", "qoder", "trae", "cherrystudio", "lmstudio", "unsloth", "alibaba", "typesafe", "ollama", "proma", "catpaw", "fx", "stepfun", "spinner", "token-monitor"];
 const viewIconNames = ["home", "limits", "tool", "model", "device", "session", "project", "trends", "status"];
 const assets = [
   ["assets/app.png", "assets/app.png"], // full app icon used by the Discord mockup
@@ -43,6 +45,11 @@ await mkdir(new URL("assets/icons/views/", outputRoot), { recursive: true });
 const bundledCss = (await concat(cssFiles)).replace(/url\(([\"']?)\.\.\/assets\//g, "url($1assets/");
 await writeFile(new URL("styles.css", outputRoot), bundledCss);
 await writeFile(new URL("app.js", outputRoot), await concat(jsFiles));
+// islands.jsx imports src/electron/tokenNumberAnimation.js so the site's token
+// readings roll with the widget's own animation instead of a second copy. The
+// module is bundled here, so it is not fetched from the site root: keep its
+// exported names (normalize, beginRoll, capture, duration, layoutDuration) as
+// the contract this build depends on.
 await bundle({
   entryPoints: [fileURLToPath(new URL("scripts/islands.jsx", siteRoot))],
   outfile: fileURLToPath(new URL("islands.js", outputRoot)),
