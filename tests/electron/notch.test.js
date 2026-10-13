@@ -59,7 +59,7 @@ function fixture(t, settings = {}, options = {}) {
   screen.getCursorScreenPoint = () => screen.point;
   const preferences = { notchEnabled: true, edgeDockEnabled: false, ...settings };
   const deps = { BrowserWindow: RecordingWindow, ipcMain, screen, rendererDir: '/renderer', preloadPath: '/preload', getSettings: () => preferences, nativeGlass: options.nativeGlass || (() => false), liquidGlass: options.liquidGlass, createGlass: options.createGlass, prefersReducedMotion: () => options.reducedMotion !== false, platform: options.platform || 'darwin' };
-  const controller = createNotchController({ ...deps, readScreens: options.readScreens || (() => ({ screens: [native], mainDisplayId: 1 })), onSwitchCodexAccount: (id) => ({ ok: true, id }), onToggleRateMode: options.onToggleRateMode, readMenuWindows: options.readMenuWindows || (() => null), primaryButtonDown: options.primaryButtonDown || (() => false), isFullScreen: options.isFullScreen || (() => false), logger: options.logger, performHaptic: options.performHaptic, canRefreshLimits: options.canRefreshLimits, onRefreshLimits: options.onRefreshLimits });
+  const controller = createNotchController({ ...deps, readScreens: options.readScreens || (() => ({ screens: [native], mainDisplayId: 1 })), onSwitchCodexAccount: (id) => ({ ok: true, id }), onToggleRateMode: options.onToggleRateMode, onCapabilitiesChanged: options.onCapabilitiesChanged, readMenuWindows: options.readMenuWindows || (() => null), primaryButtonDown: options.primaryButtonDown || (() => false), isFullScreen: options.isFullScreen || (() => false), logger: options.logger, performHaptic: options.performHaptic, canRefreshLimits: options.canRefreshLimits, onRefreshLimits: options.onRefreshLimits });
   t.after(() => controller.dispose());
   const setData = controller.setData;
   controller.setData = (value) => {
@@ -248,23 +248,46 @@ test('top-only real provider projection updates while the side controller is abs
   assert.equal(last(windows[0]).summary.items[1].measure.value, 100);
 });
 
-test('activity keeps summary until all tasks end and expires without another stats push', async (t) => {
-  const { controller, windows } = fixture(t);
+test('collapsed summary stays visible without running tasks and never opens by activity', (t) => {
+  for (const shape of ['auto', 'pill', 'notch']) {
+    const f = fixture(t, { notchShape: shape }, {
+      readScreens: () => ({ screens: shape === 'notch' ? [] : [native], mainDisplayId: 1 })
+    });
+    const input = stats();
+    const project = () => buildNotchData(input, [], { trayContent: 'tokens' });
+    for (const session of Object.values(input.periods.today.sessions)) session.turnEnded = true;
+    f.controller.setData(project());
+    const win = f.windows[0];
+    assert.ok(last(win).summary, 'idle data still shows the configured summary');
+    assert.equal(win.opacity, 1);
+    assert.equal(last(win).expanded, false);
+    input.periods.today.sessions.a.turnEnded = false;
+    f.controller.setData(project());
+    assert.equal(last(win).expanded, false, 'starting Codex does not open the quota list');
+    input.periods.today.sessions.a.lastUsedAt = new Date(Date.now() - RUNNING_WINDOW_MS - 100).toISOString();
+    f.controller.setData(project());
+    assert.ok(last(win).summary, 'expired activity does not hide the summary');
+    assert.equal(win.opacity, 1);
+    assert.equal(last(win).expanded, false);
+  }
+});
+
+test('fixed provider custom fields remain visible after every task ends', (t) => {
   const input = stats();
-  const project = () => buildNotchData(input, [], { trayContent: 'tokens' });
-  input.periods.today.sessions.a.turnEnded = true;
-  controller.setData(project());
-  assert.ok(last(windows[0]).summary, 'task b is still running');
-  input.periods.today.sessions.b.turnEnded = true;
-  controller.setData(project());
-  assert.equal(last(windows[0]).summary, null);
-  assert.equal(windows[0].opacity, 1, 'idle entry remains available');
-  input.periods.today.sessions.b.turnEnded = false;
-  input.periods.today.sessions.b.lastUsedAt = new Date(Date.now() - RUNNING_WINDOW_MS + 100).toISOString();
-  controller.setData(project());
-  assert.ok(last(windows[0]).summary);
-  await new Promise((resolve) => setTimeout(resolve, 1150));
-  assert.equal(last(windows[0]).summary, null, 'time alone clears the stale activity');
+  for (const session of Object.values(input.periods.today.sessions)) session.turnEnded = true;
+  const icon = trayLayout.createTrayLayoutItem('providerIcon');
+  const percent = trayLayout.createTrayLayoutItem('percent');
+  icon.source.provider = percent.source.provider = 'codex';
+  const settings = { notchFollowTray: false, notchCustomLayout: { version: trayLayout.VERSION, items: [icon, percent] } };
+  const data = buildNotchData(input, [], settings);
+  assert.equal(data.summary.items[0].provider, 'codex');
+  assert.equal(data.summary.items[0].providerCell.remainingPercent, 67);
+  assert.equal(data.summary.items[1].available, true);
+  assert.equal(data.summary.items[1].measure.value, 67);
+  const f = fixture(t, settings);
+  f.controller.setData(data);
+  assert.equal(last(f.windows[0]).summary.items[1].measure.value, 67);
+  assert.equal(last(f.windows[0]).expanded, false);
 });
 
 test('hover morph retains one opaque primary and unchanged canvas; lock hides all surfaces', (t) => {
@@ -356,7 +379,6 @@ test('empty custom summary hides both ears while retaining provider data and hov
     const data = buildNotchData(input, cells, settings);
     assert.equal(data.summary, null);
     assert.equal(data.cells, cells);
-    assert.equal(data.sessions.length, 2, 'collection activity is independent of summary contents');
     const f = fixture(t, settings);
     f.controller.setData(data);
     const top = f.windows[0];
@@ -387,7 +409,6 @@ test('notch summary switch preserves custom configuration, provider data and tra
     const hidden = buildNotchData(input, cells, { ...settings, notchSummaryEnabled: false });
     assert.equal(hidden.summary, null);
     assert.equal(hidden.cells, cells);
-    assert.equal(hidden.sessions.length, 2);
     assert.equal(JSON.stringify(settings), before, 'display configuration remains intact');
     assert.ok(buildNotchData(input, cells, { ...settings, notchSummaryEnabled: true }).summary);
   }
@@ -601,7 +622,6 @@ test('notch preserves every composed EdgeDock item and each session preference',
   assert.equal(sessions.cellDetail, 'rate');
   assert.equal(sessions.rate, 900);
   assert.equal(data.cells.find((cell) => cell.metric === 'liveRate').rate, 900);
-  assert.equal(data.sessions.length, 2, 'summary activity is independent of item visibility');
 });
 
 test('top rate toggle accepts only its own surfaces and removes its listener on disposal', (t) => {
@@ -1730,7 +1750,14 @@ test('rings preserve summary icon scale and grow only hardware-free entries', (t
   const g = last(f.windows[0]).geometry;
   assert.equal(g.height, native.safeTop);
   assert.equal(g.summaryZoom, 1.2);
-  assert.ok(Math.abs(g.summaryRingSize * g.summaryZoom - 28) < 1e-8);
+  assert.equal(g.summaryRingSize, 0, 'the camera band never squeezes the mark into a ring');
+  f.preferences.notchShape = 'pill';
+  f.controller.sync();
+  assert.equal(last(f.windows[0]).geometry.summaryRingSize, 42);
+  f.preferences.notchShape = 'auto';
+  f.controller.sync();
+  assert.equal(last(f.windows[0]).geometry.summaryRingSize, 0);
+  assert.equal(f.preferences.notchRunningIndicatorEnabled, true, 'shape changes retain the ring preference');
 });
 
 test('summary ring resize interpolates height and preserves the existing icon center', (t) => {
@@ -1756,8 +1783,12 @@ test('camera-free quiet entries hide the empty shell and remain hoverable', (t) 
   for (const shape of ['notch', 'pill']) for (const active of [false, true]) {
     const f = fixture(t, { notchShape: shape }, { readScreens: () => ({ screens: [], mainDisplayId: 1 }) });
     const primary = f.windows[0];
-    f.controller.setData({ cells: [{ id: 'codex', provider: 'codex', accounts: [] }], sessions: active ? Object.values(stats().periods.today.sessions) : [], summary: active ? null : { items: [] } });
-    assert.equal(primary.opacity, 0, 'task ended or summary off leaves no empty shell');
+    const input = stats();
+    if (!active) for (const session of Object.values(input.periods.today.sessions)) session.turnEnded = true;
+    f.controller.setData(buildNotchData(input, [{ id: 'codex', provider: 'codex', accounts: [] }], {
+      notchSummaryEnabled: !active, notchFollowTray: false, notchCustomLayout: { version: 3, items: [] }
+    }));
+    assert.equal(primary.opacity, 0, 'empty custom content or summary off leaves no empty shell');
     const g = last(primary).geometry;
     f.screen.point = { x: g.centerX, y: g.y + 16 };
     f.controller.poll(10000); f.controller.poll(10200);
@@ -2087,7 +2118,7 @@ test('summary icons reuse configured provider projections and only build missing
 });
 
 
-test('data and settings pushes while locked keep the latest facts without waking native layout or expiry', (t) => {
+test('data and settings pushes while locked keep the latest facts without waking native layout or polling', (t) => {
   const timeout = global.setTimeout;
   let timeouts = 0;
   global.setTimeout = (...args) => { timeouts++; return timeout(...args); };
@@ -2100,14 +2131,14 @@ test('data and settings pushes while locked keep the latest facts without waking
   const before = timeouts;
   f.controller.setData(input);
   f.controller.sync();
-  assert.equal(timeouts, before, 'locked pushes never rearm an expiry timer');
+  assert.equal(timeouts, before, 'locked pushes never rearm the cursor timer');
   assert.equal(primary.messages.length, sent, 'locked data stays in memory instead of repainting');
   f.controller.setLocked(false);
   assert.equal(last(primary).cells[0].id, 'new', 'unlock presents the newest facts');
-  assert.ok(timeouts > before, 'expiry resumes after unlock');
+  assert.ok(timeouts > before, 'cursor polling resumes after unlock');
 });
 
-test('disabled summary skips layout resolution while retaining provider data and activity', () => {
+test('disabled summary skips layout resolution while retaining provider data', () => {
   const cells = [{ id: 'codex', provider: 'codex' }];
   const stats = { periods: { today: { sessions: {
     live: { sessionId: 'live', client: 'codex', lastUsedAt: new Date().toISOString(), totalTokens: 50 }
@@ -2117,7 +2148,6 @@ test('disabled summary skips layout resolution while retaining provider data and
   const data = buildNotchData(stats, cells, settings);
   assert.equal(data.summary, null);
   assert.equal(data.cells, cells);
-  assert.equal(data.sessions.length, 1);
 });
 
 test('disabled summary clears its rate timer and trackers without sampling or formatting', () => {
@@ -2686,4 +2716,17 @@ test('Notch visibility transitions settle summary motion without rebuilding its 
   assert.equal(settles, 1, 'expanding settles summary effects independently of header reconstruction');
   context.renderNotch({ ...payload, summaryMeasurement: { id: 1, measuring: true } });
   assert.equal(settles, 2, 'hidden measurement also settles summary effects');
+});
+test('Notch option availability follows the current shape without repeated notifications', (t) => {
+  const updates = [];
+  const f = fixture(t, { notchRunningIndicatorEnabled: true }, { onCapabilitiesChanged: value => updates.push(value) });
+  assert.deepEqual(f.controller.getCapabilities(), { rings: false, menuAvoidance: true });
+  f.controller.sync();
+  f.controller.poll(Date.now() + 1000);
+  assert.equal(updates.length, 1, 'unchanged geometry does not repeat the settings notification');
+  f.preferences.notchShape = 'pill';
+  f.controller.sync();
+  assert.deepEqual(f.controller.getCapabilities(), { rings: true, menuAvoidance: false });
+  assert.equal(updates.length, 2);
+  assert.equal(f.preferences.notchRunningIndicatorEnabled, true);
 });

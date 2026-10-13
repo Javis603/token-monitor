@@ -407,6 +407,7 @@ Object.assign(els, {
   notchItemsComposer: document.getElementById('notchItemsComposer'),
   notchDetailSideInput: document.getElementById('notchDetailSideInput'),
   notchRunningIndicatorInput: document.getElementById('notchRunningIndicatorInput'),
+  notchRunningIndicatorRow: document.getElementById('notchRunningIndicatorRow'),
   notchHapticInput: document.getElementById('notchHapticInput'),
   notchExpandOnApproachInput: document.getElementById('notchExpandOnApproachInput'),
   notchAvoidMenuBarInput: document.getElementById('notchAvoidMenuBarInput'),
@@ -12238,8 +12239,16 @@ async function init() {
     void maybeUpdateBarsIcon();
     void deliverTrayProviderIcons();
   };
+  let notchCapabilitiesSeeded = false;
+  window.tokenMonitor.onNotchCapabilitiesPush?.((value) => {
+    notchCapabilitiesSeeded = true;
+    state.notchCapabilities = value;
+    syncNotchCapabilities();
+  });
   window.tokenMonitor.onSystemUiThemePush?.((payload) => applySystemUiTheme(payload?.dark === true));
   try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
+  if (!notchCapabilitiesSeeded) state.notchCapabilities = state.appInfo?.notchCapabilities || null;
+  syncNotchCapabilities();
   // Seeding assigns directly: the rest of init delivers both icon sets anyway,
   // and settings have not loaded yet, so repainting from here would only churn.
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
@@ -12915,6 +12924,11 @@ function syncDockSizeControls(surface) {
   }
 }
 
+function syncNotchCapabilities() {
+  els.notchRunningIndicatorRow?.classList.toggle('hidden', state.notchCapabilities?.rings === false);
+  if (els.notchAvoidMenuBarInput) els.notchAvoidMenuBarInput.disabled = state.notchCapabilities?.menuAvoidance === false;
+}
+
 function syncDockControls() {
   if (!els.edgeDockInput) return;
   const available = edgeDockAvailable();
@@ -12946,6 +12960,7 @@ function syncDockControls() {
   if (els.notchSummaryInput) els.notchSummaryInput.checked = state.settings?.notchSummaryEnabled !== false;
   if (els.notchDetailSideInput) els.notchDetailSideInput.value = state.settings?.notchDetailSide || 'right';
   if (els.notchRunningIndicatorInput) els.notchRunningIndicatorInput.checked = state.settings?.notchRunningIndicatorEnabled === true;
+  syncNotchCapabilities();
   if (els.notchHapticInput) els.notchHapticInput.checked = state.settings?.notchHaptic === true;
   if (els.notchExpandOnApproachInput) els.notchExpandOnApproachInput.checked = state.settings?.notchExpandOnApproach !== false;
   if (els.notchAvoidMenuBarInput) els.notchAvoidMenuBarInput.checked = state.settings?.notchAvoidMenuBar !== false;

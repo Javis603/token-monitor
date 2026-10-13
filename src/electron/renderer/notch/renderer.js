@@ -261,7 +261,7 @@
     }
 
     function notchIcon(item) {
-      if (item.providerCell && appearance().edgeDockRunningIndicatorEnabled === true) {
+      if (item.providerCell && state.payload.geometry.summaryRingSize > 0) {
         const node = providerCellNode(item.providerCell);
         node.classList.add('notch-provider-icon');
         node.querySelector('.edge-dock-value').remove();

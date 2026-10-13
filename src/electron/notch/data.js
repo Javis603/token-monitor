@@ -94,9 +94,7 @@ function attachSummaryClock(row, metric, nowMs) {
 }
 
 function buildNotchData(stats, cells, settings, options = {}) {
-  // Activity does not depend on the selected items or the side rail.
-  const sessions = presentation.recentSessionRows(stats, 0, { runningOnly: true });
-  if (settings.notchSummaryEnabled === false) return { sessions, cells, summary: null };
+  if (settings.notchSummaryEnabled === false) return { cells, summary: null };
   const picks = trayQuotaPicks(stats, settings);
   const layout = summaryLayout(settings, stats, picks);
   // Preserve the selected record even for legacy accounts without accountKey:
@@ -140,7 +138,6 @@ function buildNotchData(stats, cells, settings, options = {}) {
     }
   }
   return {
-    sessions,
     cells,
     // An explicitly empty custom layout reuses the idle shell and hover target.
     summary: resolved.items.length ? resolved : null

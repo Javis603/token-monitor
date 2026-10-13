@@ -6,9 +6,7 @@ const { notchGeometry, notchMaxHeight, notchBounds, notchSummaryBudget, notchCom
 const { toSvgPath, bubbleCommands } = require('../renderer/edgeDock/shapes');
 const { readMacNotchScreens } = require('./screen');
 const { readMacMenuWindows } = require('./menuBar');
-const { sessionActivityState } = require('../../shared/sessionLive');
 const { edgeDockBackdropMode, MAC_BACKDROP_LIQUID_GLASS } = require('../macBackdropMode');
-const { nextRunningExpiryAt } = require('../renderer/edgeDock/presentation');
 const { EDGE_DOCK_TIMING, edgeDockCorridorBounds, edgeDockPollDelay, edgeDockScale, normalizeEdgeDockCustomScale, EDGE_DOCK_METRICS: M } = require('../edgeDock/geometry');
 
 function normalizeNotchStyle(value) {
@@ -28,12 +26,13 @@ function normalizeNotchDetailSide(value) {
 function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   rendererDir, preloadPath, platform = process.platform, readScreens = readMacNotchScreens, readMenuWindows = readMacMenuWindows,
   nativeGlass = () => false, liquidGlass = () => null, createGlass, applyShapeMask,
-  onSwitchCodexAccount, onOpenResetForecastSource, onToggleRateMode, primaryButtonDown = () => null, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
+  onSwitchCodexAccount, onOpenResetForecastSource, onToggleRateMode, onCapabilitiesChanged = () => {}, primaryButtonDown = () => null, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
   logger = () => {} }) {
   const surfaces = ['notch', 'bubble'];
   const windows = {}, windowIds = {}, ready = {}, shapes = {}, glass = {}, nativeMaterial = {}, lastSent = {};
   let materialKey = '', running = false, expanded = false, locked = false;
-  let appearance = {}, data = { cells: [], sessions: [], summary: null };
+  let capabilities = null;
+  let appearance = {}, data = { cells: [], summary: null };
   let nativeScreens = { screens: [], mainDisplayId: null }, geometryReadAt = -Infinity, geometryDirty = true;
   let geometryConfigs = new Map(), displays = [], primaryDisplay = null;
   const ignoredMouse = {};
@@ -41,7 +40,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   let contentHeight = 180, slots = { left: 17, right: 42 }, rows = [];
   let enterAt = null, leaveAt = null, rowAt = null, hoveredId = null, detailId = null;
   let bubbleHeight = 180, bubblePlaced = null, bubbleBounds = null, detailVisible = false;
-  let pollTimer = null, expiryTimer = null, motion = null, screenListeners = false;
+  let pollTimer = null, motion = null, screenListeners = false;
   let motionGeneration = 0, refreshInFlight = null, refreshEpoch = 0;
   let fullScreen = false, fullScreenCheckedAt = -Infinity, fullScreenDisplayId = null;
   let progress = 0, commands = null, frame = null, layoutKey = '', viewport = null;
@@ -92,7 +91,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   }
 
   function summaryVisible() {
-    return Boolean(data.summary && (!fullScreen || expanded) && data.sessions.some(session => sessionActivityState(session) === 'running'));
+    return Boolean(data.summary && (!fullScreen || expanded));
   }
 
   // Reuse EdgeDock's 500ms full-screen cadence on this entry's selected display.
@@ -129,10 +128,11 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const display = displays.find((d) => String(d.id) === String(id)) || primaryDisplay;
     if (!display) return null;
     const geometry = notchGeometry(display, nativeScreens.screens.find((s) => String(s.displayId) === String(display.id)), normalizeNotchShape(settings().notchShape));
-    // Keep the original mark/text scale; only the surrounding ring needs room.
+    // The fixed camera band cannot hold an outer ring without shrinking the
+    // mark. Only camera-free entries grow around it.
     geometry.summaryZoom = Math.min(zoom(), (geometry.height - 8) / 20);
-    geometry.summaryRingSize = summaryVisible() && settings().notchRunningIndicatorEnabled === true
-      && data.summary.items.some(item => item.providerCell) ? (geometry.gapWidth > 0 ? Math.min(42, (geometry.height - 4) / geometry.summaryZoom) : 42) : 0;
+    geometry.summaryRingSize = summaryVisible() && geometry.gapWidth === 0 && settings().notchRunningIndicatorEnabled === true
+      && data.summary.items.some(item => item.providerCell) ? 42 : 0;
     if (geometry.gapWidth === 0 && geometry.summaryRingSize) geometry.height = Math.ceil(geometry.summaryRingSize * geometry.summaryZoom + 8);
     const activeSlots = summaryVisible() ? slots : null;
     const compact = geometry.gapWidth === 0;
@@ -148,6 +148,14 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     return { display, geometry, summaryBudget, summaryIconInset: activeSlots?.iconInset || 0,
       closed: notchBounds(display, geometry, false, contentHeight, boundedSlots, zoom()),
       open: notchBounds(display, geometry, true, contentHeight, boundedSlots, zoom()) };
+  }
+
+  function publishCapabilities(current) {
+    const rings = current.geometry.gapWidth === 0;
+    const menuAvoidance = current.geometry.notched;
+    if (capabilities?.rings === rings && capabilities.menuAvoidance === menuAvoidance) return;
+    capabilities = { rings, menuAvoidance };
+    onCapabilitiesChanged(capabilities);
   }
 
   function disposeGlass(surface) {
@@ -291,6 +299,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (locked) return;
     const current = layout();
     if (!current || !alive(windows.notch)) return;
+    publishCapabilities(current);
     // The first header is measured on the live DOM while hidden. Keep the
     // existing quiet shell until its actual widths return, on either shape.
     if (ready.notch && summaryVisible() && !summaryMeasured && summaryMeasurement?.measuring !== false) {
@@ -421,6 +430,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     }
     let current = layout();
     if (!current) return;
+    publishCapabilities(current);
     if (refreshFullScreen(now, current.display)) {
       if (fullScreen) { setExpanded(false); enterAt = leaveAt = null; hideDetail(); }
       refreshLayout(); visibility();
@@ -475,12 +485,6 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     }, delay);
   }
 
-  function scheduleExpiry() {
-    clearTimeout(expiryTimer); expiryTimer = null;
-    if (!running || locked) return;
-    const expiry = nextRunningExpiryAt(data.sessions);
-    if (expiry) expiryTimer = setTimeout(() => { refreshLayout(); scheduleExpiry(); }, Math.max(1000, expiry - Date.now() + 50));
-  }
   function destroyWindows() {
     motion = null; refreshInFlight = null;
     summaryMeasured = false; summaryMeasurement = null; settleSummary = false;
@@ -543,13 +547,13 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (!screenListeners) { for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, invalidateGeometry); screenListeners = true; }
     windows.bubble.webContents.setZoomFactor?.(zoom());
     updateGlassAppearance();
-    refreshGeometry(); visibility(); scheduleExpiry();
+    refreshGeometry(); visibility();
     if (!pollTimer) schedulePoll();
   }
   function stop() {
     menuWindows = null; menuReadAt = -Infinity;
     running = expanded = fullScreen = false; fullScreenCheckedAt = -Infinity; fullScreenDisplayId = null; enterAt = leaveAt = null;
-    clearTimeout(pollTimer); clearTimeout(expiryTimer); pollTimer = expiryTimer = null;
+    clearTimeout(pollTimer); pollTimer = null;
     if (screenListeners) { for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.removeListener(event, invalidateGeometry); screenListeners = false; }
     destroyWindows();
   }
@@ -619,7 +623,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (!ownedSender(event.sender)) return { ok: false, error: 'Unknown surface' };
     return onSwitchCodexAccount?.(String(payload?.accountId || '')) || { ok: false, error: 'Unavailable' };
   });
-  return { sync, stop, poll, isRunning: () => running,
+  return { sync, stop, poll, isRunning: () => running, getCapabilities: () => capabilities,
     owns: (win) => surfaces.some((s) => win === windows[s] && alive(win)),
     previewScale(value) { previewScale = normalizeEdgeDockCustomScale(value); windows.bubble?.webContents.setZoomFactor?.(zoom()); refreshLayout(); },
     setAppearance(value) {
@@ -627,15 +631,15 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       updateGlassAppearance();
       windows.bubble?.webContents.setZoomFactor?.(zoom()); refreshLayout();
     },
-    setData(value) { data = value; if (detailId && !data.cells.some((c) => c.id === detailId)) hideDetail(); refreshMenu(); refreshLayout(); scheduleExpiry(); },
+    setData(value) { data = value; if (detailId && !data.cells.some((c) => c.id === detailId)) hideDetail(); refreshMenu(); refreshLayout(); },
     setLocked(value) {
       locked = value === true;
       if (locked) {
         refreshEpoch++; motion = null; expanded = false; progress = 0; layoutKey = '';
         commands = frame = null; viewport = viewportDisplayId = null;
-        clearTimeout(pollTimer); clearTimeout(expiryTimer); pollTimer = expiryTimer = null;
+        clearTimeout(pollTimer); pollTimer = null;
       } else if (running) {
-        invalidateGeometry(); scheduleExpiry();
+        invalidateGeometry();
         if (!pollTimer) schedulePoll();
       }
       visibility();

@@ -5508,6 +5508,7 @@ function ensureNotchController() {
     rendererDir: path.join(__dirname, 'renderer'),
     preloadPath: path.join(__dirname, 'notch', 'preload.js'),
     getSettings: () => settings,
+    onCapabilitiesChanged: (value) => sendMainWindowEvent('topNotch:capabilities', value, () => notchController?.getCapabilities() === value),
     nativeGlass: () => nativeBlurEnabled(),
     liquidGlass: () => {
       const options = nativeMaterialOptions();
@@ -8225,6 +8226,7 @@ app.whenReady().then(() => {
     return getNativeMaterialState(win);
   });
   ipcMain.handle('app:getInfo', () => ({
+    notchCapabilities: notchController?.getCapabilities() || null,
     version: app.getVersion(),
     platform: process.platform,
     arch: process.arch,
