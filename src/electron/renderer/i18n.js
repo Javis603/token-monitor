@@ -6481,7 +6481,7 @@
       'limits.codexResetForecast.lastReset': '최근 리셋',
       'limits.codexResetForecast.lastAttempt': '마지막 시도',
       'limits.codexResetForecast.disclaimer': 'codex-resets.com의 정보이며 OpenAI 공식 정보가 아닙니다.',
-      'settings.minimax.apiKeyPlaceholder': 'sk-cp-...',
+      'settings.minimax.apiKeyPlaceholder': 'sk-cp-... / sk-api-...',
       'settings.minimax.apiRegion': 'API 리전',
       'settings.minimax.regionAuto': '자동',
       'settings.minimax.regionCn': '중국 (api.minimaxi.com)',

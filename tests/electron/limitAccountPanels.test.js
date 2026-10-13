@@ -353,6 +353,14 @@ test('every shared account message exists in each locale with its placeholders',
   }
 });
 
+test('MiniMax key hints cover both billing types in every locale', () => {
+  for (const locale of Object.keys(i18n.MESSAGES)) {
+    const hint = i18n.translate(locale, 'settings.minimax.apiKeyPlaceholder');
+    assert.match(hint, /sk-cp-/, locale);
+    assert.match(hint, /sk-api-/, locale);
+  }
+});
+
 test('MiniMax explicit regions drive Open before a probe and override stale status', async () => {
   const { resolveOpenUrl, syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
