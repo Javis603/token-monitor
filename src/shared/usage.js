@@ -635,7 +635,7 @@ function emptySession(client, id) {
 
 const sessionsWithLiveSource = new WeakSet();
 
-function mergeSession(target, source, nowMs) {
+function mergeSession(target, source) {
   const sourceTokens = Math.max(0, Math.round(asNumber(source.totalTokens)));
   target.totalTokens += sourceTokens;
   target.costUsd += asNumber(source.costUsd);
@@ -711,7 +711,7 @@ function mergeSession(target, source, nowMs) {
   // token or transcript write. An explicit unknown reading clears old evidence.
   if (isSessionActivityClient(source.client)) {
     const reading = normalizeLiveActivity(source.liveActivity);
-    if (reading && canReplaceLiveActivity(target.liveActivity, reading, nowMs)) {
+    if (reading && canReplaceLiveActivity(target.liveActivity, reading)) {
       target.liveActivity = reading;
     }
   }
@@ -748,12 +748,12 @@ function mergeSession(target, source, nowMs) {
   return target;
 }
 
-function addSession(period, session, nowMs) {
+function addSession(period, session) {
   if (!session?.client || !session?.sessionId || isReasonixSyntheticSession(session)) return;
   const key = sessionKey(session.client, session.sessionId);
   if (isReasonixSyntheticSession(session, key)) return;
   if (!period.sessions[key]) period.sessions[key] = emptySession(session.client, session.sessionId);
-  mergeSession(period.sessions[key], session, nowMs);
+  mergeSession(period.sessions[key], session);
 }
 
 function sessionFromRow(row) {
@@ -1072,13 +1072,13 @@ function normalizePeriod(input, options = {}) {
   reconcileCursorAutoGlobalModels(period, input);
   if (input.sessions && typeof input.sessions === 'object') {
     for (const [key, value] of Object.entries(input.sessions)) {
-      const session = normalizeSession(sessionWithActivity(input, key, value, options.nowMs), key);
+      const session = normalizeSession(sessionWithActivity(input, key, value), key);
       if (!session) continue;
       if (!projectsEnabled) {
         session.projectId = '';
         session.projectLabel = '';
       }
-      addSession(period, session, options.nowMs);
+      addSession(period, session);
     }
   }
   period.projects = projectsEnabled
@@ -1286,8 +1286,8 @@ function normalizeRecordHistoryFields(record, nowIso = new Date().toISOString())
   return fields;
 }
 
-function normalizeDeviceRecord(record, options = {}) {
-  const nowIso = new Date(options.nowMs ?? Date.now()).toISOString();
+function normalizeDeviceRecord(record) {
+  const nowIso = new Date().toISOString();
   const historyFields = normalizeRecordHistoryFields(record, nowIso);
   const normalized = {
     deviceId: String(record.deviceId || record.id || 'unknown'),
@@ -1329,7 +1329,7 @@ function normalizeDeviceRecord(record, options = {}) {
   if (hasOwn(historyFields, 'periodWindows')) normalized.periodWindows = historyFields.periodWindows;
   for (const periodName of PERIODS) {
     normalized.periods[periodName] = normalizePeriod(record[periodName] || record.periods?.[periodName], {
-      projectsEnabled: normalized.projectsEnabled !== false, nowMs: options.nowMs
+      projectsEnabled: normalized.projectsEnabled !== false
     });
   }
   return normalized;
@@ -1707,7 +1707,7 @@ function aggregateHistory(devices, options = {}) {
 // Adds every numeric field and nested map of `source` into `target` (an
 // emptyPeriod()-shaped object). Shared by device aggregation and the WSL merge so
 // the two never diverge on which period fields exist.
-function addPeriodInto(target, source, nowMs) {
+function addPeriodInto(target, source) {
   target.capabilities.tokenComponents = target.capabilities.tokenComponents === true
     && source.capabilities?.tokenComponents === true;
   target.capabilities.throughput = target.capabilities.throughput === true
@@ -1761,7 +1761,7 @@ function addPeriodInto(target, source, nowMs) {
     }
   }
   for (const [key, project] of Object.entries(source.projects || {})) addProjectInto(target.projects, key, project);
-  for (const session of Object.values(source.sessions)) addSession(target, session, nowMs);
+  for (const session of Object.values(source.sessions)) addSession(target, session);
   return target;
 }
 
@@ -1805,7 +1805,7 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
   for (const periodName of PERIODS) aggregate.periods[periodName] = emptyPeriod();
   const now = nowMs;
   for (const record of devices) {
-    const normalized = normalizeRecord(record, { nowMs });
+    const normalized = normalizeRecord(record);
     const ageMs = now - Date.parse(normalized.receivedAt || normalized.updatedAt || 0);
     const deviceStaleAfterMs = staleAfterMsForSyncUpload(normalized.syncUploadIntervalMs, staleAfterMs);
     const stale = Number.isFinite(ageMs) && deviceStaleAfterMs > 0 ? ageMs > deviceStaleAfterMs : false;
@@ -1857,7 +1857,7 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
     // pass here only re-walked every session again.
     for (const periodName of PERIODS) {
       if (isPeriodExpired(normalized, periodName, now)) continue;
-      addPeriodInto(aggregate.periods[periodName], normalized.periods[periodName], nowMs);
+      addPeriodInto(aggregate.periods[periodName], normalized.periods[periodName]);
     }
   }
   aggregate.limits = aggregateLimits(aggregate.devices, staleAfterMs, now);

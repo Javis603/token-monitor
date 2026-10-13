@@ -209,7 +209,7 @@ test('the pulled list completes its snapshot with the local record that snapshot
   assert.doesNotMatch(pull[1], /lastCollectedDevice/);
   assert.match(pull[1], /snapshotLocalDevices\.get\(stats\)/);
   const inject = main.match(/function injectLocalDeviceStatus\(stats\) \{([\s\S]*?)\n\}\n/);
-  assert.match(inject[1], /if \(mode !== 'local'\) snapshotLocalDevices\.set\(stats, \{ localDevice: lastCollectedDevice, nowMs: Date\.now\(\) \}\);\s*return stats;\s*$/);
+  assert.match(inject[1], /if \(mode !== 'local'\) snapshotLocalDevices\.set\(stats, \{ localDevice: lastCollectedDevice \}\);\s*return stats;\s*$/);
 });
 
 test('a snapshot stays addressable after newer ones are published', () => {
@@ -242,22 +242,4 @@ test('a snapshot stays addressable after newer ones are published', () => {
   assert.deepEqual(snapshots.stamp(first, {}).snapshot, { id: 1, source: 3 });
   assert.equal(snapshots.get(1), first);
   assert.equal(snapshots.get(2), null, 'the re-stamped snapshot counts as recent');
-});
-
-
-test('bounded TOTAL projections retain recently read snapshots and rebuild evicted settings projections', () => {
-  const cache = createStatsPresentationCache({ limit: 2 });
-  const snapshots = [{ id: 1 }, { id: 2 }, { id: 3 }];
-  let calls = 0;
-  const project = stats => ({ id: stats.id, call: ++calls });
-  const first = cache.get(snapshots[0], 'titles', project);
-  const second = cache.get(snapshots[1], 'titles', project);
-  assert.equal(cache.get(snapshots[0], 'titles', project), first);
-  cache.get(snapshots[2], 'titles', project);
-  assert.equal(cache.get(snapshots[0], 'titles', project), first, 'reads refresh recency');
-  assert.notEqual(cache.get(snapshots[1], 'titles', project), second);
-  const hidden = cache.get(snapshots[1], 'hidden', project);
-  assert.equal(cache.get(snapshots[1], 'hidden', project), hidden);
-  cache.clear();
-  assert.notEqual(cache.get(snapshots[1], 'hidden', project), hidden);
 });

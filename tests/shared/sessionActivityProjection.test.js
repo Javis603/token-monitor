@@ -332,37 +332,3 @@ test('fresh native relationship evidence takes precedence as an atomic parent pa
   assert.deepEqual(linked, fresh);
   assert.equal(linked.parentClient, undefined, 'same-client parent must not inherit the old Codex namespace');
 });
-
-
-test('evicted TOTAL activity completions rebuild their own observations across midnight', t => {
-  t.mock.timers.enable({ apis: ['Date'], now });
-  const summary = composeLocalOnlySummary(fixture(10), stats => stats);
-  const patch = state => ({ observations: [{ client: 'claude', sessionId: 'id-4', liveActivity: observation(state) }], nativeSessions: {} });
-  const waiting = projectLocalActivity(summary, patch('waiting'), now);
-  const waitingFull = completeLocalSyncStats(waiting);
-  t.mock.timers.tick(3000);
-  const running = projectLocalActivity(waiting, { observations: [{ client: 'claude', sessionId: 'id-4', liveActivity: observation('running', now + 3000) }] }, now + 3000);
-  const runningFull = completeLocalSyncStats(running);
-  for (let i = 0; i < 4; i++) completeLocalSyncStats(composeLocalOnlySummary(fixture(5), stats => stats));
-  t.mock.timers.tick(86400000);
-  assert.deepEqual(completeLocalSyncStats(waiting), waitingFull);
-  assert.deepEqual(completeLocalSyncStats(running), runningFull);
-  assert.equal(completeLocalSyncStats(summary).periods.allTime.sessions['claude:id-4'].liveActivity, undefined);
-});
-
-
-for (const offset of [0, 5000]) test(`evicted activity recipe uses its original acceptance clock (offset ${offset})`, t => {
-  t.mock.timers.enable({ apis: ['Date'], now });
-  const { clearLocalStatsCaches } = require('../../src/electron/syncDisplayStats');
-  clearLocalStatsCaches();
-  const summary = composeLocalOnlySummary(fixture(1), stats => stats);
-  const projected = projectLocalActivity(summary, { observations: [{ client: 'claude', sessionId: 'id-0',
-    liveActivity: observation('waiting', now + offset) }] }, now);
-  const first = completeLocalSyncStats(projected);
-  assert.equal(first.periods.allTime.sessions['claude:id-0'].liveActivity?.state, offset ? undefined : 'waiting');
-  for (let i = 0; i < 3; i++) completeLocalSyncStats(composeLocalOnlySummary(fixture(1), stats => stats));
-  t.mock.timers.tick(6000);
-  const rebuilt = completeLocalSyncStats(projected);
-  assert.notEqual(rebuilt, first);
-  assert.deepEqual(rebuilt, first);
-});

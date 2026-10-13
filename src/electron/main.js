@@ -338,7 +338,6 @@ const {
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
-  clearLocalStatsCaches,
   composeLocalOnlySummary,
   composeLocalSyncSummary,
   projectLocalActivity,
@@ -3009,7 +3008,7 @@ function electronPresentationStats(stats) {
   ));
 }
 
-const allTimeSessionsCache = createStatsPresentationCache({ limit: 2 });
+const allTimeSessionsCache = createStatsPresentationCache();
 const rendererSnapshots = createRendererSnapshots({ source: () => hubModeGeneration });
 // The local record each Hub snapshot was shown with, captured where the
 // snapshot was built. The collector replaces the live one between publishes.
@@ -3029,7 +3028,7 @@ function rendererAllTimeSessions(stats) {
     const complete = completeLocalSyncStats(stats);
     const hubSnapshot = snapshotLocalDevices.get(stats);
     const sessions = hubSnapshot
-      ? mergedLocalAllTimeSessions(complete.periods, materializeActivity(hubSnapshot.localDevice, hubSnapshot.nowMs))
+      ? mergedLocalAllTimeSessions(complete.periods, materializeActivity(hubSnapshot.localDevice))
       : complete.periods?.allTime?.sessions || {};
     return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, aliases, { grouping });
   });
@@ -4530,7 +4529,7 @@ function injectLocalDeviceStatus(stats) {
     const activity = localActivityPatch(lastCollectedDevice);
     if (activity) stats = projectLocalActivity(stats, activity);
   }
-  if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice, nowMs: Date.now() });
+  if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
   return stats;
 }
 
@@ -4767,7 +4766,7 @@ function publishLocalSessionActivity(patch) {
   latestStats = projectLocalActivity(previous, patch);
   const localSnapshot = snapshotLocalDevices.get(previous);
   if (localSnapshot) snapshotLocalDevices.set(latestStats, {
-    ...localSnapshot, nowMs: Date.now(), localDevice: applyActivityPatch(localSnapshot.localDevice, patch)
+    ...localSnapshot, localDevice: applyActivityPatch(localSnapshot.localDevice, patch)
   });
   if (localStats === previous) localStats = latestStats;
   const snapshot = rendererSnapshots.updateActivity(previous, latestStats);
@@ -5050,11 +5049,9 @@ function startLocalCollector() {
       const visibleSummary = summary;
       localDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       lastCollectedDevice = localDevice;
-      const snapshotDevice = localDevice;
-      const snapshotHistory = withHistoryPreview({}, [snapshotDevice]);
-      localStats = composeLocalOnlySummary(snapshotDevice, (stats) => {
-        Object.assign(stats, snapshotHistory);
-        attachLocalNativeViews(stats, snapshotDevice);
+      localStats = composeLocalOnlySummary(localDevice, (stats) => {
+        withHistoryPreview(stats, [localDevice]);
+        attachLocalNativeViews(stats, localDevice);
         return stats;
       });
       updateDiscordRpcDisplay(localStats);
@@ -6141,8 +6138,6 @@ function startMode() {
   hubModeGeneration += 1;
   advanceMacWidgetProducerAndSourceEpoch();
   clearLatestHubStatsCache();
-  clearLocalStatsCaches();
-  allTimeSessionsCache.clear();
   edgeDockManualStats = null;
   const icloudStop = stopIcloudRuntime();
   // Tear down collectors synchronously so they can't double-run while the

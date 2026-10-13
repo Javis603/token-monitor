@@ -4,7 +4,6 @@ const { aggregateDevices, normalizeDeviceRecord, normalizePeriod } = require('..
 const { deviceHistoryRevision } = require('../shared/history');
 const { pickRecentUsageActivity } = require('../shared/trayText');
 const { grokBotSessionIdsForMaps } = require('./renderer/sessionRows');
-const { createBoundedCache } = require('./boundedCache');
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
@@ -62,7 +61,7 @@ function attachLocalPresentationNativeViews(stats, options = {}) {
 // full normalization then adds just the all-time period to the summary's, so a
 // view that completes every summary does not normalize today and month twice.
 const normalizedLocalSummaries = new WeakMap();
-const normalizedLocalRecords = createBoundedCache(2);
+const normalizedLocalRecords = new WeakMap();
 
 // A local record carries its periods at the top level, a wire record under
 // `periods`; normalizeDeviceRecord() reads either, preferring the top level.
@@ -79,26 +78,24 @@ function withoutRawAllTimeSessions(record) {
   return stripped;
 }
 
-// Activity acceptance depends on the snapshot clock as well as the record.
-// A later snapshot may accept an observation that an older recipe must reject.
-function normalizedLocalSummary(localDevice, { nowMs = Date.now() } = {}) {
-  let cached = normalizedLocalSummaries.get(localDevice);
-  if (!cached || cached.nowMs !== nowMs) {
-    cached = { nowMs, value: normalizeDeviceRecord(withoutRawAllTimeSessions(localDevice), { nowMs }) };
-    normalizedLocalSummaries.set(localDevice, cached);
+function normalizedLocalSummary(localDevice) {
+  let normalized = normalizedLocalSummaries.get(localDevice);
+  if (!normalized) {
+    normalized = normalizeDeviceRecord(withoutRawAllTimeSessions(localDevice));
+    normalizedLocalSummaries.set(localDevice, normalized);
   }
-  return cached.value;
+  return normalized;
 }
 
-function normalizedLocalRecord(localDevice, { nowMs = Date.now() } = {}) {
-  let cached = normalizedLocalRecords.get(localDevice);
-  if (!cached || cached.nowMs !== nowMs) {
-    const summary = normalizedLocalSummary(localDevice, { nowMs });
-    const allTime = normalizePeriod(rawAllTime(localDevice), { projectsEnabled: summary.projectsEnabled !== false, nowMs });
-    cached = { nowMs, value: { ...summary, periods: { ...summary.periods, allTime } } };
-    normalizedLocalRecords.set(localDevice, cached);
+function normalizedLocalRecord(localDevice) {
+  let normalized = normalizedLocalRecords.get(localDevice);
+  if (!normalized) {
+    const summary = normalizedLocalSummary(localDevice);
+    const allTime = normalizePeriod(rawAllTime(localDevice), { projectsEnabled: summary.projectsEnabled !== false });
+    normalized = { ...summary, periods: { ...summary.periods, allTime } };
+    normalizedLocalRecords.set(localDevice, normalized);
   }
-  return cached.value;
+  return normalized;
 }
 
 const summaryRecords = new WeakMap();
@@ -126,13 +123,11 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     .concat(localDevice);
   const hubStaleAfterMs = nonNegativeNumber(hubStats?.staleAfterMs);
   const hasHubStaleAfterMs = hubStaleAfterMs !== null;
-  const nowMs = options.nowMs ?? Date.now();
-  const clock = { nowMs };
-  const normalize = (record) => (record === localDevice ? normalizedLocalRecord(localDevice, clock) : normalizeDeviceRecord(record, clock));
+  const normalize = (record) => (record === localDevice ? normalizedLocalRecord(localDevice) : normalizeDeviceRecord(record));
   const summarize = (record) => (record === localDevice
-    ? normalizedLocalSummary(localDevice, clock)
-    : withoutAllTimeSessions(normalizeDeviceRecord(record, clock)));
-  const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, nowMs, {
+    ? normalizedLocalSummary(localDevice)
+    : withoutAllTimeSessions(normalizeDeviceRecord(record)));
+  const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs, {
     normalizeRecord: options.allTimeSessions === false ? summarize : normalize
   });
 
@@ -185,25 +180,8 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
 // they ask. The completion is composed from the publish's own inputs and clock,
 // so it agrees with the summary it completes.
 const completions = new WeakMap();
-const completedStats = createBoundedCache(2);
 const { applyActivityPatch, materializeActivity } = require('../shared/sessionActivityProjection');
 const localActivity = new WeakMap();
-
-// Snapshot IDs retain recipes, not every full TOTAL graph. Two hot results
-// also let successive activity patches reuse their accounting baseline.
-function completeEntry(entry) {
-  let result = completedStats.get(entry);
-  if (!result) {
-    result = materializeActivity(entry.compose(), entry.nowMs);
-    completedStats.set(entry, result);
-  }
-  return result;
-}
-
-function clearLocalStatsCaches() {
-  normalizedLocalRecords.clear();
-  completedStats.clear();
-}
 
 // Keep lazy all-time completion tied to the same accounting snapshot while
 // refreshing its small local metadata overlay. No aggregation on a heartbeat.
@@ -214,10 +192,10 @@ function projectLocalActivity(stats, patch, now = Date.now()) {
     now - Date.parse(row.liveActivity.observedAt) < 30_000).map((row) => [`${row.client}:${row.sessionId}`, row]));
   for (const row of patch.observations) observations.set(`${row.client}:${row.sessionId}`, row);
   const merged = { ...patch, observations: [...observations.values()] };
-  const next = applyActivityPatch(stats, patch, now);
+  const next = applyActivityPatch(stats, patch);
   const base = prior?.base || completions.get(stats);
   localActivity.set(next, { base, patch: merged });
-  if (base) completions.set(next, { nowMs: now, compose: () => applyActivityPatch(completeEntry(base), merged, now) });
+  if (base) completions.set(next, { compose: () => applyActivityPatch(base.complete ||= base.compose(), merged), complete: null });
   return next;
 }
 
@@ -227,8 +205,7 @@ function composeLocalSyncSummary(hubStats, localDevice, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
   const summary = composeLocalSyncStats(hubStats, localDevice, { nowMs, allTimeSessions: false });
   if (summary && summary !== hubStats) {
-    const updatedAt = summary.updatedAt;
-    completions.set(summary, { nowMs, compose: () => ({ ...composeLocalSyncStats(hubStats, localDevice, { nowMs }), updatedAt }) });
+    completions.set(summary, { compose: () => composeLocalSyncStats(hubStats, localDevice, { nowMs }), complete: null });
   }
   return summary;
 }
@@ -240,8 +217,7 @@ function composeLocalOnlySummary(localDevice, finish, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
   const compose = (normalizeRecord) => finish(aggregateDevices([localDevice], 0, nowMs, { normalizeRecord }));
   const summary = compose(normalizedLocalSummary);
-  const updatedAt = summary.updatedAt;
-  completions.set(summary, { nowMs, compose: () => ({ ...compose(normalizedLocalRecord), updatedAt }) });
+  completions.set(summary, { compose: () => compose(normalizedLocalRecord), complete: null });
   return summary;
 }
 
@@ -249,14 +225,14 @@ function composeLocalOnlySummary(localDevice, finish, options = {}) {
 function completeLocalSyncStats(stats) {
   const entry = stats && typeof stats === 'object' ? completions.get(stats) : null;
   if (!entry) return materializeActivity(stats);
-  return completeEntry(entry);
+  if (!entry.complete) entry.complete = materializeActivity(entry.compose());
+  return entry.complete;
 }
 
 module.exports = {
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
-  clearLocalStatsCaches,
   composeLocalOnlySummary,
   composeLocalSyncStats,
   composeLocalSyncSummary,
