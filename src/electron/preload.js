@@ -32,6 +32,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
   getCodexResetForecast: (options) => ipcRenderer.invoke('codexResetForecast:get', options),
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),
+  openCloudUsage: () => ipcRenderer.invoke('cloudUsage:open'),
+  cloudUsage: {
+    get: () => ipcRenderer.invoke('cloudUsage:get'),
+    control: (action) => ipcRenderer.invoke('cloudUsage:control', action)
+  },
   getDashboardHistory: (options) => ipcRenderer.invoke('dashboard:getHistory', options),
   onDashboardHistoryChanged: (callback) => {
     const listener = () => { try { callback(); } catch (_) {} };
