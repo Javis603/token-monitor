@@ -4,6 +4,7 @@ const { aggregateDevices, normalizeDeviceRecord, normalizePeriod } = require('..
 const { deviceHistoryRevision } = require('../shared/history');
 const { pickRecentUsageActivity } = require('../shared/trayText');
 const { grokBotSessionIdsForMaps } = require('./renderer/sessionRows');
+const { createBoundedCache } = require('./boundedCache');
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
@@ -61,7 +62,7 @@ function attachLocalPresentationNativeViews(stats, options = {}) {
 // full normalization then adds just the all-time period to the summary's, so a
 // view that completes every summary does not normalize today and month twice.
 const normalizedLocalSummaries = new WeakMap();
-const normalizedLocalRecords = new WeakMap();
+const normalizedLocalRecords = createBoundedCache(2);
 
 // A local record carries its periods at the top level, a wire record under
 // `periods`; normalizeDeviceRecord() reads either, preferring the top level.
@@ -180,8 +181,25 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
 // they ask. The completion is composed from the publish's own inputs and clock,
 // so it agrees with the summary it completes.
 const completions = new WeakMap();
+const completedStats = createBoundedCache(2);
 const { applyActivityPatch, materializeActivity } = require('../shared/sessionActivityProjection');
 const localActivity = new WeakMap();
+
+// Snapshot IDs retain recipes, not every full TOTAL graph. Two hot results
+// also let successive activity patches reuse their accounting baseline.
+function completeEntry(entry) {
+  let result = completedStats.get(entry);
+  if (!result) {
+    result = materializeActivity(entry.compose());
+    completedStats.set(entry, result);
+  }
+  return result;
+}
+
+function clearLocalStatsCaches() {
+  normalizedLocalRecords.clear();
+  completedStats.clear();
+}
 
 // Keep lazy all-time completion tied to the same accounting snapshot while
 // refreshing its small local metadata overlay. No aggregation on a heartbeat.
@@ -195,7 +213,7 @@ function projectLocalActivity(stats, patch, now = Date.now()) {
   const next = applyActivityPatch(stats, patch);
   const base = prior?.base || completions.get(stats);
   localActivity.set(next, { base, patch: merged });
-  if (base) completions.set(next, { compose: () => applyActivityPatch(base.complete ||= base.compose(), merged), complete: null });
+  if (base) completions.set(next, { compose: () => applyActivityPatch(completeEntry(base), merged) });
   return next;
 }
 
@@ -205,7 +223,8 @@ function composeLocalSyncSummary(hubStats, localDevice, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
   const summary = composeLocalSyncStats(hubStats, localDevice, { nowMs, allTimeSessions: false });
   if (summary && summary !== hubStats) {
-    completions.set(summary, { compose: () => composeLocalSyncStats(hubStats, localDevice, { nowMs }), complete: null });
+    const updatedAt = summary.updatedAt;
+    completions.set(summary, { compose: () => ({ ...composeLocalSyncStats(hubStats, localDevice, { nowMs }), updatedAt }) });
   }
   return summary;
 }
@@ -217,7 +236,8 @@ function composeLocalOnlySummary(localDevice, finish, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
   const compose = (normalizeRecord) => finish(aggregateDevices([localDevice], 0, nowMs, { normalizeRecord }));
   const summary = compose(normalizedLocalSummary);
-  completions.set(summary, { compose: () => compose(normalizedLocalRecord), complete: null });
+  const updatedAt = summary.updatedAt;
+  completions.set(summary, { compose: () => ({ ...compose(normalizedLocalRecord), updatedAt }) });
   return summary;
 }
 
@@ -225,14 +245,14 @@ function composeLocalOnlySummary(localDevice, finish, options = {}) {
 function completeLocalSyncStats(stats) {
   const entry = stats && typeof stats === 'object' ? completions.get(stats) : null;
   if (!entry) return materializeActivity(stats);
-  if (!entry.complete) entry.complete = materializeActivity(entry.compose());
-  return entry.complete;
+  return completeEntry(entry);
 }
 
 module.exports = {
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
+  clearLocalStatsCaches,
   composeLocalOnlySummary,
   composeLocalSyncStats,
   composeLocalSyncSummary,

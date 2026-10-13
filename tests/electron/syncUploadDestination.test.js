@@ -238,6 +238,7 @@ for (const failure of ['cleanup', 'preferences', 'bind']) test(`host ${failure} 
     getHubInfo: () => ({ error: sandbox.embeddedHubError, listening: Boolean(sandbox.embeddedHub), secret: sandbox.settings.hubHostSecret }),
     sendHubPush: payload => events.push(payload),
     advanceMacWidgetProducerAndSourceEpoch: () => {}, clearLatestHubStatsCache: () => {},
+    clearLocalStatsCaches: () => {}, allTimeSessionsCache: { clear: () => {} },
     stopIcloudRuntime: async () => {}, stopLocalCollector: () => events.push('stopLocal'),
     stopStatsStream: () => {}, stopHostStats: () => {}, stopSyncCollector: () => {},
     syncStatsPublication: { cancel: () => {} },

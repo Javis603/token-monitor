@@ -1,14 +1,21 @@
 'use strict';
 
+const { createBoundedCache } = require('./boundedCache');
+
 // A published stats snapshot is read by every surface the main process feeds —
 // renderer, tray, edge dock, Widget — and each of them asks for the presentation
 // projection of the same object. The projection walks every session, so it runs
 // once per snapshot and settings key rather than once per reader. Keyed by the
 // snapshot object itself: a snapshot is never mutated after it is published, and
-// a WeakMap lets superseded snapshots go with their projections.
-function createStatsPresentationCache() {
-  const cache = new WeakMap();
+// a WeakMap lets superseded snapshots go with their projections. Expensive
+// on-demand TOTAL lists opt into a bounded cache even while IDs stay alive.
+function createStatsPresentationCache(options = {}) {
+  let cache = options.limit === undefined ? new WeakMap() : createBoundedCache(options.limit);
   return {
+    clear() {
+      if (options.limit === undefined) cache = new WeakMap();
+      else cache.clear();
+    },
     updateActivity(previous, next, project) {
       const hit = cache.get(previous);
       if (hit) cache.set(next, { key: hit.key, result: project(hit.result) });

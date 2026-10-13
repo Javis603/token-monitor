@@ -338,6 +338,7 @@ const {
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
+  clearLocalStatsCaches,
   composeLocalOnlySummary,
   composeLocalSyncSummary,
   projectLocalActivity,
@@ -3008,7 +3009,7 @@ function electronPresentationStats(stats) {
   ));
 }
 
-const allTimeSessionsCache = createStatsPresentationCache();
+const allTimeSessionsCache = createStatsPresentationCache({ limit: 2 });
 const rendererSnapshots = createRendererSnapshots({ source: () => hubModeGeneration });
 // The local record each Hub snapshot was shown with, captured where the
 // snapshot was built. The collector replaces the live one between publishes.
@@ -5049,9 +5050,11 @@ function startLocalCollector() {
       const visibleSummary = summary;
       localDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       lastCollectedDevice = localDevice;
-      localStats = composeLocalOnlySummary(localDevice, (stats) => {
-        withHistoryPreview(stats, [localDevice]);
-        attachLocalNativeViews(stats, localDevice);
+      const snapshotDevice = localDevice;
+      const snapshotHistory = withHistoryPreview({}, [snapshotDevice]);
+      localStats = composeLocalOnlySummary(snapshotDevice, (stats) => {
+        Object.assign(stats, snapshotHistory);
+        attachLocalNativeViews(stats, snapshotDevice);
         return stats;
       });
       updateDiscordRpcDisplay(localStats);
@@ -6138,6 +6141,8 @@ function startMode() {
   hubModeGeneration += 1;
   advanceMacWidgetProducerAndSourceEpoch();
   clearLatestHubStatsCache();
+  clearLocalStatsCaches();
+  allTimeSessionsCache.clear();
   edgeDockManualStats = null;
   const icloudStop = stopIcloudRuntime();
   // Tear down collectors synchronously so they can't double-run while the

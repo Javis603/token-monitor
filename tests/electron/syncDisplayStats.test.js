@@ -10,10 +10,12 @@ const { pickRecentUsageProviderId } = require('../../src/shared/trayText');
 const {
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
+  clearLocalStatsCaches,
   composeLocalOnlySummary,
   composeLocalSyncStats,
   composeLocalSyncSummary
 } = require('../../src/electron/syncDisplayStats');
+const { createRendererSnapshots } = require('../../src/electron/statsPublisher');
 
 function device(deviceId, totalTokens, extra = {}) {
   return {
@@ -503,4 +505,78 @@ test('main publishes summaries and exports their completions', () => {
   assert.match(main, /writeExportTo\(settings\.exportDir, completeLocalSyncStats\(payload\.data\.stats\)\.periods/);
   assert.match(main, /writeExportTo\(result\.filePaths\[0\], completeLocalSyncStats\(stats\)\.periods\)/);
   assert.equal((main.match(/writeExportTo\(/g) || []).length, 3, 'the definition and the two exports above');
+});
+
+
+for (const mode of ['local', 'sync']) test(`${mode} TOTAL eviction preserves all eight snapshot recipes and their clocks`, t => {
+  clearLocalStatsCaches();
+  const clock = Date.parse('2026-07-16T23:59:50Z');
+  t.mock.timers.enable({ apis: ['Date'], now: clock });
+  const snapshots = createRendererSnapshots({ source: () => 42 });
+  const expected = new Map();
+  const originals = new Map();
+  for (let i = 0; i < 8; i += 1) {
+    t.mock.timers.tick(1000);
+    const local = device('local', i + 1, { allTime: usagePeriod('codex', new Date(clock).toISOString(), i + 1) });
+    const summary = mode === 'local'
+      ? composeLocalOnlySummary(local, stats => ({ ...stats, marker: i }))
+      : composeLocalSyncSummary(aggregateDevices([device('remote', 2)], 60000, Date.now()), local);
+    const id = snapshots.stamp(summary, {}).snapshot.id;
+    const full = completeLocalSyncStats(summary);
+    assert.equal(full.updatedAt, summary.updatedAt);
+    originals.set(id, full);
+    expected.set(id, structuredClone(full));
+  }
+  t.mock.timers.tick(86400000);
+  for (const [id, full] of expected) {
+    const summary = snapshots.get(id);
+    assert.ok(summary, 'evicting derived results must not evict snapshot IDs');
+    const rebuilt = completeLocalSyncStats(summary);
+    assert.notEqual(rebuilt, originals.get(id), 'old completions are evicted');
+    assert.deepEqual(structuredClone(rebuilt), full, 'rebuild keeps original totals, rows, age, limits and clock');
+    assert.equal(snapshots.stamp(summary, {}).snapshot.source, 42);
+  }
+  const hot = snapshots.get(8);
+  const before = completeLocalSyncStats(hot);
+  clearLocalStatsCaches();
+  const after = completeLocalSyncStats(hot);
+  assert.notEqual(after, before);
+  assert.deepEqual(after, before, 'clearing mode caches keeps immutable recipes usable');
+});
+
+test('local collector completion retains published native and History metadata across eviction and setting changes', t => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-07-16T12:00:00Z') });
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = source.indexOf('      seedInitialLimitProviders(summary);', source.indexOf('function startLocalCollector('));
+  const end = source.indexOf('\n    },\n    onDiagnosticEvent:', start);
+  assert.ok(start > 0 && end > start);
+  const historyStart = source.indexOf('function withHistoryPreview(stats, devices) {');
+  const historyEnd = source.indexOf('\n}', historyStart) + 2;
+  const { aggregateHistory } = require('../../src/shared/usage');
+  const { historyPreview, historyRevision, deviceHistoryRevision } = require('../../src/shared/history');
+  const context = vm.createContext({
+    Date, settings: { historyEnabled: true }, aggregateHistory, historyPreview, historyRevision, deviceHistoryRevision,
+    composeLocalOnlySummary, attachLocalNativeViews: require('../../src/electron/syncDisplayStats').attachLocalNativeViews,
+    seedInitialLimitProviders() {}, updateDiscordRpcDisplay() {}, sendPush() {}, sendStatus() {},
+    widgetProducerOwner: {}, localDevice: null, localStats: null, lastCollectedDevice: null
+  });
+  vm.runInContext(`${source.slice(historyStart, historyEnd)}\nfunction onRecord(summary, meta) {${source.slice(start, end)}\n}`, context);
+  context.onRecord(device('local', 1, { hostname: 'old', nativeProjects: { old: true }, history: {
+    daily: ['2026-07-15', '2026-07-16'].map(date => ({ date, tokens: 10, cost: 1 })), monthly: [], summary: {}
+  } }), { reason: 'test' });
+  const old = context.localStats;
+  const expected = completeLocalSyncStats(old);
+  assert.equal(expected.historyPreview.summary.currentStreak, 2);
+  for (let i = 0; i < 4; i++) {
+    context.onRecord(device('local', i + 2, { hostname: 'new', nativeProjects: { newer: true } }), { reason: 'test' });
+    completeLocalSyncStats(context.localStats);
+  }
+  t.mock.timers.tick(2 * 86400000);
+  const rebuilt = completeLocalSyncStats(old);
+  assert.deepEqual(rebuilt, expected);
+  assert.deepEqual(rebuilt.nativeProjects, { old: true });
+  context.settings.historyEnabled = false;
+  clearLocalStatsCaches();
+  assert.deepEqual(completeLocalSyncStats(old), expected);
 });
