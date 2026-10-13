@@ -598,7 +598,7 @@ function readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, h
 function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, env, useEnvRoots, deps = {} }) {
   if (client === 'opencode') return readOpenCodeSessionDetail({ sessionId, period, deps });
   if (client === 'reasonix') return readReasonixSessionDetail({ sessionId, period, home, deps });
-  const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots });
+  const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots, fs: deps.fs });
   if (!filePath && client === 'codebuddy') {
     return readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, home, env, deps });
   }

@@ -195,3 +195,92 @@ test('reports a missing transcript instead of throwing', () => {
   assert.equal(detail.found, false);
   assert.deepEqual(detail.exchanges, []);
 });
+
+// tokscale reports every sub-agent transcript as its own codebuddy session,
+// keyed on the top-level sessionId its records state — which appears nowhere
+// in the file name, so the name-based lookup alone reads the session as
+// missing. The `baggage` on those records carries the parent session id.
+const withSessionId = (line, sessionId) => JSON.stringify({ ...JSON.parse(line), sessionId });
+
+test('resolves a sub-agent transcript reported as its own session', () => {
+  const home = tmpDir('codebuddy-subagent-detail-');
+  const parentId = '01a13463-cb53-72a7-afee-0164d5bdde33';
+  const subId = '01a13466-8201-7275-95ad-04d2f3520e7e';
+  const dir = path.join(home, '.codebuddy', 'projects', 'd-some-project');
+  fs.mkdirSync(path.join(dir, parentId, 'subagents'), { recursive: true });
+  fs.writeFileSync(path.join(dir, `${parentId}.jsonl`), [
+    user('run the market scan'),
+    call('m1', 'Agent', usageOf({ prompt: 1000, completion: 100, hit: 400 }))
+  ].join('\n') + '\n');
+  fs.writeFileSync(path.join(dir, parentId, 'subagents', 'agent-9077a5ed-6f2d-4464-8416-d182d9fd84d5.jsonl'), [
+    withSessionId(user('collect competitor pricing'), subId),
+    withSessionId(call('s1', 'WebSearch', usageOf({ prompt: 1000, completion: 100, hit: 400 })), subId),
+    withSessionId(reply('s2', 'done', usageOf({ prompt: 2000, completion: 100 })), subId)
+  ].join('\n') + '\n');
+
+  const detail = readSessionDetail({
+    client: 'codebuddy',
+    sessionId: subId,
+    period: 'total',
+    sessionCost: 0.4,
+    home
+  });
+
+  assert.equal(detail.found, true);
+  assert.deepEqual(detail.exchanges.map((ex) => ex.promptPreview), ['collect competitor pricing']);
+  assert.deepEqual(detail.exchanges[0].tools, ['WebSearch']);
+  assert.equal(detail.totals.turnCount, 2);
+  assert.equal(detail.totals.costUsd, 0.4);
+  // 1000 prompt − 400 cached + 100 output + 400 cache read, then 2000 + 100.
+  assert.equal(detail.exchanges[0].tokens.total, 3200);
+});
+
+test('resolves a parent session to its own transcript, not a sub-agent file', () => {
+  const home = tmpDir('codebuddy-subagent-parent-');
+  const parentId = '01a13463-cb53-72a7-afee-0164d5bdde33';
+  const subId = '01a13466-8201-7275-95ad-04d2f3520e7e';
+  const dir = path.join(home, '.codebuddy', 'projects', 'd-some-project');
+  fs.mkdirSync(path.join(dir, parentId, 'subagents'), { recursive: true });
+  fs.writeFileSync(path.join(dir, `${parentId}.jsonl`), [
+    user('run the market scan'),
+    call('m1', 'Agent', usageOf({ prompt: 1000, completion: 100, hit: 400 }))
+  ].join('\n') + '\n');
+  fs.writeFileSync(path.join(dir, parentId, 'subagents', 'agent-9077a5ed-6f2d-4464-8416-d182d9fd84d5.jsonl'), [
+    withSessionId(user('collect competitor pricing'), subId),
+    withSessionId(call('s1', 'WebSearch', usageOf({ prompt: 1000, completion: 100, hit: 400 })), subId)
+  ].join('\n') + '\n');
+
+  const detail = readSessionDetail({
+    client: 'codebuddy',
+    sessionId: parentId,
+    period: 'total',
+    sessionCost: 0.4,
+    home
+  });
+
+  assert.equal(detail.found, true);
+  assert.deepEqual(detail.exchanges.map((ex) => ex.promptPreview), ['run the market scan']);
+  // The sub-agent turns stay the scan's own session; the parent keeps only its
+  // own turn, so the two do not double-count.
+  assert.equal(detail.totals.turnCount, 1);
+  assert.equal(detail.totals.totalTokens, 1100);
+});
+
+test('reports an unknown session id as missing even when sub-agents exist', () => {
+  const home = tmpDir('codebuddy-subagent-missing-');
+  const parentId = '01a13463-cb53-72a7-afee-0164d5bdde33';
+  const dir = path.join(home, '.codebuddy', 'projects', 'd-some-project');
+  fs.mkdirSync(path.join(dir, parentId, 'subagents'), { recursive: true });
+  fs.writeFileSync(path.join(dir, parentId, 'subagents', 'agent-9077a5ed-6f2d-4464-8416-d182d9fd84d5.jsonl'),
+    withSessionId(user('collect competitor pricing'), '01a13466-8201-7275-95ad-04d2f3520e7e'));
+
+  const detail = readSessionDetail({
+    client: 'codebuddy',
+    sessionId: '01a0c29e-0000-0000-0000-000000000000',
+    period: 'total',
+    home
+  });
+
+  assert.equal(detail.found, false);
+  assert.deepEqual(detail.exchanges, []);
+});

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { claudeSessionRoots } = require('./providers/claude/paths');
 const { codebuddyProjectsRoot } = require('./providers/codebuddy/paths');
+const { findSubagentSessionFile } = require('./providers/codebuddy/subagents');
 
 // 5.5 moved the WorkBuddy home to ~/.workbuddy-ai and tokscale still scans
 // both, so a session reported from either root resolves from either.
@@ -139,7 +140,17 @@ function resolveSessionFile(client, sessionId, home, options = {}) {
     return findSessionFiles(transcripts, [id]).get(id) || '';
   }
   if (client === 'codebuddy') {
-    return findSessionFiles(codebuddyProjectsRoot({ homeDir: home }), [id]).get(id) || '';
+    const projectsRoot = codebuddyProjectsRoot({ homeDir: home });
+    // A sub-agent conversation is the scan's own reported session, but its file
+    // is named after the agent id, so the name-based lookup cannot find it. The
+    // fallback reads the first record of each sub-agent transcript and runs only
+    // when the session's own file is absent — a parent session always resolves
+    // to its own transcript, and the collector's per-tick path, which calls
+    // findSessionFiles directly, is untouched. Sub-agent usage stays the scan's
+    // separate sessions; nothing here merges it into the parent.
+    return findSessionFiles(projectsRoot, [id]).get(id)
+      || findSubagentSessionFile(projectsRoot, id, { fs: options.fs })
+      || '';
   }
   if (client === 'workbuddy') {
     for (const root of workbuddyProjectsRoots(home)) {
