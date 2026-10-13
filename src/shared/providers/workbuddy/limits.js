@@ -6,6 +6,9 @@ const { cleanSecret, numberOrNull } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 
 const WORKBUDDY_FETCH_TIMEOUT_MS = 12_000;
+const WORKBUDDY_ACCOUNT_CONCURRENCY = 4;
+// Match the limits collector's physical bound; its cleanup grace is not work time.
+const WORKBUDDY_PROBE_BUDGET_MS = 120_000;
 const WORKBUDDY_DEFAULT_ENDPOINT = 'https://copilot.tencent.com';
 const WORKBUDDY_AI_ENDPOINT = 'https://www.workbuddy.ai';
 const WORKBUDDY_PERSONAL_PATH = '/v2/billing/meter/get-user-resource';
@@ -414,6 +417,7 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
     windows: []
   };
   const row = (status, extra = {}) => normalizeLimitProvider({ ...source, status, ...extra });
+  if (deps.signal?.aborted) return row('unavailable');
   if (localAppUnsupported) return row('unavailable');
   if (!managed && !explicitToken && options.workbuddyDesktopSessionEnabled === true
     && sessionReason === WORKBUDDY_SESSION_REASON_ENCRYPTED) {
@@ -424,65 +428,93 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
     authenticated: true, userId, enterpriseId, departmentInfo, domain, accountType, realm,
     ...(account?.accountKey ? { accountKey: account.accountKey } : {})
   } : null;
-  const requestDeps = useLocalApp ? {
-    ...deps, fetch: (url, init) => deps.workbuddyFetch(url, init, expectedSession)
-  } : deps;
   const deadlineMs = Number(deps.workbuddyFetchTimeoutMs || deps.fetchTimeoutMs || WORKBUDDY_FETCH_TIMEOUT_MS);
   try {
-    if (!['cn', 'ai'].includes(realm) || !workbuddyDomainMatchesRealm(domain, realm)) {
-      throw Object.assign(new Error('WorkBuddy credential realm mismatch'), { status: 'unavailable' });
-    }
-    const resolveCredential = async (forceRefresh) => {
-      if (typeof deps.resolveWorkbuddyManagedCredential !== 'function') {
-        throw Object.assign(new Error('WorkBuddy managed credential is missing'), { status: 'notConfigured' });
-      }
-      return runWithProbeDeadline(({ signal }) => deps.resolveWorkbuddyManagedCredential(account, { signal, forceRefresh }),
-        { signal: deps.signal, deadlineMs });
-    };
-    let credential = managed ? await resolveCredential(false) : { accessToken: explicitToken, domain };
-    const requestQuota = async () => {
-      const token = cleanSecret(credential?.accessToken);
-      const credentialDomain = cleanSecret(credential?.domain) || domain;
-      if (managed && !token) throw Object.assign(new Error('WorkBuddy managed credential is missing'), { status: 'notConfigured' });
-      if (!workbuddyDomainMatchesRealm(credentialDomain, realm)) {
+    return await runWithProbeDeadline(async ({ signal }) => {
+      const requestDeps = { ...deps, signal,
+        ...(useLocalApp ? { fetch: (url, init) => deps.workbuddyFetch(url, init, expectedSession) } : {}) };
+      if (!['cn', 'ai'].includes(realm) || !workbuddyDomainMatchesRealm(domain, realm)) {
         throw Object.assign(new Error('WorkBuddy credential realm mismatch'), { status: 'unavailable' });
       }
-      const headers = useLocalApp ? requestHeaders('', '', '', '', '', '')
-        : requestHeaders(token, userId, enterpriseId, workbuddyLocale(env, options), credentialDomain, departmentInfo);
-      const init = {
-        method: 'POST', redirect: 'error', credentials: 'omit', headers,
-        body: enterpriseId ? '{}' : JSON.stringify({
-          PageNumber: 1, PageSize: 100, ProductCode: WORKBUDDY_PRODUCT_CODE, Status: [0, 3],
-          PackageEndTimeRangeBegin: formatWorkbuddyDateTime(now),
-          PackageEndTimeRangeEnd: formatWorkbuddyDateTime(now + WORKBUDDY_PERSONAL_RANGE_MS)
-        })
-      };
-      const endpoint = realm === 'ai' ? WORKBUDDY_AI_ENDPOINT : WORKBUDDY_DEFAULT_ENDPOINT;
-      const paths = workbuddyBillingPaths(realm, Boolean(enterpriseId));
-      for (let index = 0; index < paths.length; index += 1) {
-        try { return await fetchJson(`${endpoint}${paths[index]}`, init, requestDeps); }
-        catch (error) {
-          if (error.httpStatus !== 404 || index === paths.length - 1) throw error;
+      const resolveCredential = async (forceRefresh) => {
+        if (typeof deps.resolveWorkbuddyManagedCredential !== 'function') {
+          throw Object.assign(new Error('WorkBuddy managed credential is missing'), { status: 'notConfigured' });
         }
+        return runWithProbeDeadline(({ signal }) => deps.resolveWorkbuddyManagedCredential(account, { signal, forceRefresh }),
+          { signal, deadlineMs });
+      };
+      let credential = managed ? await resolveCredential(false) : { accessToken: explicitToken, domain };
+      const requestQuota = async () => {
+        const token = cleanSecret(credential?.accessToken);
+        const credentialDomain = cleanSecret(credential?.domain) || domain;
+        if (managed && !token) throw Object.assign(new Error('WorkBuddy managed credential is missing'), { status: 'notConfigured' });
+        if (!workbuddyDomainMatchesRealm(credentialDomain, realm)) {
+          throw Object.assign(new Error('WorkBuddy credential realm mismatch'), { status: 'unavailable' });
+        }
+        const headers = useLocalApp ? requestHeaders('', '', '', '', '', '')
+          : requestHeaders(token, userId, enterpriseId, workbuddyLocale(env, options), credentialDomain, departmentInfo);
+        const init = {
+          method: 'POST', redirect: 'error', credentials: 'omit', headers,
+          body: enterpriseId ? '{}' : JSON.stringify({
+            PageNumber: 1, PageSize: 100, ProductCode: WORKBUDDY_PRODUCT_CODE, Status: [0, 3],
+            PackageEndTimeRangeBegin: formatWorkbuddyDateTime(now),
+            PackageEndTimeRangeEnd: formatWorkbuddyDateTime(now + WORKBUDDY_PERSONAL_RANGE_MS)
+          })
+        };
+        const endpoint = realm === 'ai' ? WORKBUDDY_AI_ENDPOINT : WORKBUDDY_DEFAULT_ENDPOINT;
+        const paths = workbuddyBillingPaths(realm, Boolean(enterpriseId));
+        for (let index = 0; index < paths.length; index += 1) {
+          try { return await fetchJson(`${endpoint}${paths[index]}`, init, requestDeps); }
+          catch (error) {
+            if (error.httpStatus !== 404 || index === paths.length - 1) throw error;
+          }
+        }
+      };
+      let body;
+      try { body = await requestQuota(); }
+      catch (error) {
+        // The resolver owns serialization and durable rotation. Await its
+        // completion before retrying billing, and renew at most once per row.
+        const expiredToken = error.httpStatus === 401 || error.applicationCode === 401;
+        if (!managed || !expiredToken) throw error;
+        credential = await resolveCredential(true);
+        body = await requestQuota();
       }
-    };
-    let body;
-    try { body = await requestQuota(); }
-    catch (error) {
-      // The resolver owns serialization and durable rotation. Await its
-      // completion before retrying billing, and renew at most once per row.
-      const expiredToken = error.httpStatus === 401 || error.applicationCode === 401;
-      if (!managed || !expiredToken) throw error;
-      credential = await resolveCredential(true);
-      body = await requestQuota();
-    }
-    const usage = enterpriseId ? parseEnterpriseUsage(body) : parsePersonalUsage(body);
-    return row('ok', {
-      accountKey: managed || userId ? accountKey : workbuddyAccountKey(explicitToken, userId, enterpriseId, usage.accountId, realm),
-      windows: usage.window ? [usage.window] : [],
-      ...(usage.window ? { balance: { amount: usage.remaining, currency: 'CREDITS' } } : {})
-    });
+      const usage = enterpriseId ? parseEnterpriseUsage(body) : parsePersonalUsage(body);
+      return row('ok', {
+        accountKey: managed || userId ? accountKey : workbuddyAccountKey(explicitToken, userId, enterpriseId, usage.accountId, realm),
+        windows: usage.window ? [usage.window] : [],
+        ...(usage.window ? { balance: { amount: usage.remaining, currency: 'CREDITS' } } : {})
+      });
+    }, { signal: deps.signal, deadlineMs: deps.workbuddyAccountTimeoutMs || WORKBUDDY_PROBE_BUDGET_MS });
   } catch (error) { return row(workbuddyStatus(error)); }
+}
+
+async function runWorkbuddyAccounts(jobs, deps) {
+  const configured = Number(deps.providerPhysicalBounds?.workbuddy);
+  const budgetMs = Number.isFinite(configured) && configured > 0 ? configured : WORKBUDDY_PROBE_BUDGET_MS;
+  const startedAt = performance.now();
+  const controller = new AbortController();
+  const signal = deps.signal ? AbortSignal.any([deps.signal, controller.signal]) : controller.signal;
+  const concurrency = Math.min(WORKBUDDY_ACCOUNT_CONCURRENCY, jobs.length);
+  const rows = new Array(jobs.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < jobs.length) {
+      const index = next++;
+      const remainingMs = budgetMs - (performance.now() - startedAt);
+      if (remainingMs <= 0) controller.abort();
+      // Bound the entire resolve/refresh/billing sequence, reserving time for
+      // later waves. Quick accounts leave their unused time for queued ones.
+      const waves = Math.ceil((jobs.length - index) / concurrency);
+      rows[index] = await jobs[index]({ ...deps, signal,
+        workbuddyAccountTimeoutMs: Math.max(1, Math.floor(remainingMs / waves)) });
+      // With an aborted signal, remaining jobs produce identity-only unavailable
+      // rows without resolving credentials or dispatching requests.
+    }
+  };
+  await Promise.all(Array.from({ length: concurrency }, worker));
+  return rows;
 }
 
 // Removal uses only the runtime's accepted snapshot. Probe-local caches can
@@ -544,13 +576,13 @@ async function fetchWorkbuddyLimits(options = {}, deps = {}) {
     const key = workbuddyRowKey(account);
     if (seen.has(key)) continue;
     seen.add(key);
-    if (account.enabled !== false && matches(account, key)) jobs.push(() => fetchWorkbuddyAccount(options, deps, account, true));
+    if (account.enabled !== false && matches(account, key)) jobs.push((jobDeps) => fetchWorkbuddyAccount(options, jobDeps, account, true));
   }
   for (const account of locals) {
     const key = workbuddyAccountKey(account);
     if ((cleanSecret(account.userId) && managedIdentities.has(key)) || seen.has(key)) continue;
     seen.add(key);
-    if (matches(account, key)) jobs.push(() => fetchWorkbuddyAccount(options, deps, account));
+    if (matches(account, key)) jobs.push((jobDeps) => fetchWorkbuddyAccount(options, jobDeps, account));
   }
   if (!locals.length) {
     const identity = {
@@ -562,10 +594,10 @@ async function fetchWorkbuddyLimits(options = {}, deps = {}) {
     const legacyLocal = options.workbuddyDesktopSessionEnabled === true;
     if ((!managed.length || token || (legacyLocal && identity.userId))
       && !managedIdentities.has(key) && matches(null, key)) {
-      jobs.push(() => fetchWorkbuddyAccount(options, deps));
+      jobs.push((jobDeps) => fetchWorkbuddyAccount(options, jobDeps));
     }
   }
-  const currentRows = await Promise.all(jobs.map((job) => job()));
+  const currentRows = await runWorkbuddyAccounts(jobs, deps);
   const rows = appendWorkbuddyRemovals(currentRows, options, deps, targeted || namesOnly);
   // Keep the legacy single-object return when there is no managed account
   // configuration and at most one local discovery row.
