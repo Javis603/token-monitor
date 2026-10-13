@@ -74,6 +74,7 @@ class FakeBrowserWindow extends EventEmitter {
     FakeBrowserWindow.zOrder.push(this);
   }
   setBounds(bounds) { this.bounds = { ...bounds }; }
+  setSkipTaskbar(flag) { this.zOrderCalls.push(['setSkipTaskbar', flag]); }
   setAlwaysOnTop(flag, level) {
     this.alwaysOnTop = flag;
     this.zOrderCalls.push(['setAlwaysOnTop', flag, level]);
@@ -203,16 +204,19 @@ function createFixture(options = {}) {
   return { controller, hapticCalls, haptics, ipcMain, powerMonitor, maskWindows, placements, screen, settings, windowFor, paintPeek };
 }
 
-test('Windows Edge Dock reasserts topmost after each surface is first shown and rebuilt', (t) => {
+test('Windows Edge Dock creates toolbar windows and reasserts taskbar exclusion and topmost after showing', (t) => {
   const fixture = createFixture();
   t.after(() => fixture.controller.stop());
   const surfaces = ['peek', 'rail', 'bubble'];
-  const expected = ['showInactive', ['setAlwaysOnTop', true, 'pop-up-menu']];
+  const expected = ['showInactive', ['setSkipTaskbar', true], ['setAlwaysOnTop', true, 'pop-up-menu']];
 
   for (const surface of surfaces) {
     const win = fixture.windowFor(surface);
+    assert.equal(win.options.type, 'toolbar');
+    assert.equal(win.options.skipTaskbar, true);
+    assert.equal(win.options.thickFrame, false);
     assert.equal(win.options.alwaysOnTop, true);
-    assert.deepEqual(win.zOrderCalls, expected, `${surface} reasserts topmost after showing`);
+    assert.deepEqual(win.zOrderCalls, expected, `${surface} reasserts taskbar exclusion and topmost after showing`);
   }
 
   fixture.controller.sync();
@@ -226,7 +230,9 @@ test('Windows Edge Dock reasserts topmost after each surface is first shown and 
     win.webContents.emit('did-finish-load');
   }
   for (const surface of surfaces) {
-    assert.deepEqual(fixture.windowFor(surface).zOrderCalls, expected, `${surface} reasserts topmost after rebuild`);
+    const win = fixture.windowFor(surface);
+    assert.equal(win.options.type, 'toolbar');
+    assert.deepEqual(win.zOrderCalls, expected, `${surface} reasserts taskbar exclusion and topmost after rebuild`);
   }
 });
 

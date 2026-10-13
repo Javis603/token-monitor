@@ -20,6 +20,7 @@
  */
 
 const fs = require('node:fs');
+const { isCompressedCodexTranscript, readCompressedCodexTranscript } = require('./transcript');
 const { normalizeSessionContext } = require('../../sessionContext');
 const { createPromptCacheState, applyPromptCacheEntry } = require('../../sessionPromptCache');
 
@@ -98,9 +99,25 @@ function readCodexSessionState(filePath, deps = {}) {
     const identity = `${stat.dev}:${stat.ino}`;
     const cached = cache.get(filePath);
     if (cached?.identity === identity && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) return cached;
-    const appendOnly = cached?.identity === identity && stat.size > cached.size;
+    const compressed = isCompressedCodexTranscript(filePath);
+    const appendOnly = !compressed && cached?.identity === identity && stat.size > cached.size;
     const state = appendOnly ? { ...cached, pendingInputCalls: new Set(cached.pendingInputCalls), promptCacheState: { ...cached.promptCacheState } }
       : { context: null, turnEnded: undefined, pendingInputCalls: new Set(), promptCacheState: createPromptCacheState(), trailing: Buffer.alloc(0), droppingLine: false };
+    if (compressed) {
+      const bytes = readCompressedCodexTranscript(filePath, deps);
+      const start = Math.max(0, bytes.length - TURN_READ_MAX_BYTES);
+      const contextStart = Math.max(0, bytes.length - TAIL_READ_BUDGETS[1]);
+      state.droppingLine = start > 0;
+      for (let position = start; position < bytes.length; position += TAIL_READ_BUDGETS[0]) {
+        consumeBytes(state, bytes.subarray(position, position + TAIL_READ_BUDGETS[0]), position, contextStart, contextStart);
+      }
+      if (!state.droppingLine) applyLine(state, state.trailing, bytes.length - state.trailing.length, contextStart, contextStart);
+      Object.assign(state, { identity, size: stat.size, mtimeMs: stat.mtimeMs,
+        waitingForInput: state.turnEnded !== true && state.pendingInputCalls.size > 0 });
+      if (cache.size >= 512 && !cache.has(filePath)) cache.delete(cache.keys().next().value);
+      cache.set(filePath, state);
+      return state;
+    }
     fd = fsApi.openSync(filePath, 'r');
     let start;
     const chunks = [];

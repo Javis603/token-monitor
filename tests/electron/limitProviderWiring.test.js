@@ -163,7 +163,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     typesafe: ['typesafeCookie'],
     stepfun: ['stepfunToken'],
     openrouter: ['openrouterProfiles'],
-    minimax: ['minimaxApiKey', 'minimaxApiRegion'],
+    minimax: ['minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode'],
     volcengine: [
       'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
       'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'
@@ -267,7 +267,7 @@ test('settings:update normalizes provider fields and strips separately managed a
   const fields = LIMIT_PROVIDER_REGISTRY.flatMap(({ fields }) => fields);
   const normalizedKeys = fields.filter(({ normalize, persist }) => normalize && persist !== 'never').map(({ key }) => key);
   assert.deepEqual(normalizedKeys.sort(), [
-    'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'minimaxApiKey', 'minimaxApiRegion', 'copilotApiToken', 'copilotEnterpriseHost',
+    'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode', 'copilotApiToken', 'copilotEnterpriseHost',
     'factoryApiKey', 'clineApiKey', 'zaiApiKey', 'zaiApiRegion', 'zaiTeamApiKey',
     'zaiTeamOrganizationId', 'zaiTeamProjectId', 'volcengineAccessKeyId',
     'volcengineSecretAccessKey', 'volcengineRegion', 'volcengineAgentAccessKeyId',
@@ -538,6 +538,26 @@ test('MiniMax implicit region remains env-driven after unrelated saves and reloa
   const previous = { ...saved, minimaxApiKey: 'test-key', limitProviders: 'minimax' };
   const next = { ...previous, ...finalAccountSettings({ minimaxApiRegion: 'cn' }, previous) };
   assert.equal(next.minimaxApiKey, 'test-key');
+  const change = classifySettingsChange(previous, next);
+  assert.deepEqual(change.limitScopes, [{ provider: 'minimax' }]);
+  assert.equal(change.usageStructural, false);
+  const { settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
+  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax' }, reason: 'settings-change', options: { clear: true } }]);
+});
+
+test('MiniMax billing choice survives reload and clears only its provider quota', () => {
+  const { initialAccountSettings } = require('../../src/electron/limits/accountSettings');
+  assert.equal(initialAccountSettings({}).minimaxBillingMode, 'token-plan');
+  assert.equal(limitsConfigFromSettings({}, { env: {} }).minimaxBillingMode, 'token-plan');
+  assert.equal(accountFieldProjection({}).minimaxBillingMode, 'token-plan');
+  assert.equal(finalAccountSettings({}, {}).minimaxBillingMode, 'token-plan');
+  assert.equal(normalizeAccountField('minimaxBillingMode', ' API '), 'api');
+  assert.equal(normalizeAccountField('minimaxBillingMode', 'unknown'), 'token-plan');
+  const previous = { ...finalAccountSettings({}, {}), minimaxApiKey: 'existing-key', minimaxBillingMode: 'token-plan', limitProviders: 'minimax' };
+  const next = JSON.parse(JSON.stringify({ ...previous, ...finalAccountSettings({ minimaxBillingMode: 'api' }, previous) }));
+  assert.equal(next.minimaxApiKey, previous.minimaxApiKey);
+  assert.equal(limitsConfigFromSettings(next, { env: {} }).minimaxBillingMode, 'api');
+  assert.equal(accountFieldProjection(next).minimaxBillingMode, 'api');
   const change = classifySettingsChange(previous, next);
   assert.deepEqual(change.limitScopes, [{ provider: 'minimax' }]);
   assert.equal(change.usageStructural, false);

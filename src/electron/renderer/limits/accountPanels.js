@@ -32,12 +32,12 @@ function byFieldValue(document, spec) {
 function resolveOpenUrl(form, { document, provider }) {
   const { openUrl } = form;
   if (openUrl.url) return openUrl.url;
+  let url;
   if (openUrl.byField) {
     const selected = openUrl.urls[fieldValue(document, openUrl.byField)];
-    if (selected) return selected;
-    return openUrl.statusUrls?.[provider?.[openUrl.byStatus]] || openUrl.default;
-  }
-  return openUrl.urls[provider?.[openUrl.byStatus]] || openUrl.default;
+    url = selected || openUrl.statusUrls?.[provider?.[openUrl.byStatus]] || openUrl.default;
+  } else url = openUrl.urls[provider?.[openUrl.byStatus]] || openUrl.default;
+  return openUrl.pathByField ? new URL(byFieldValue(document, openUrl.pathByField), url).href : url;
 }
 
 // Selects and plain-text settings mirror what is stored; secrets never do.

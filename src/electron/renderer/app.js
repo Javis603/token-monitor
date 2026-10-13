@@ -32,6 +32,7 @@ function renderAccountShellError(id) {
 }
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
+const tokenNumberAnimationApi = window.TokenMonitorTokenNumberAnimation;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
 const macBackdropApi = window.TokenMonitorMacBackdropMode;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
@@ -188,6 +189,7 @@ const {
   rowRenderFingerprint,
   rowWidth,
   shouldAnimateBreakdownRows,
+  visibleBreakdownNumberRows,
   toolIconsEnabled
 } = breakdownRenderPolicyApi;
 const deviceBreakdownApi = window.TokenMonitorDeviceBreakdown;
@@ -357,7 +359,7 @@ state.projectSettingsExpanded = false;
 state.sessionSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', tokenNumberAnimation: 'roll', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
 let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
 let nativeMaterialRevision = 0;
 let appearancePreview = {};
@@ -524,6 +526,7 @@ Object.assign(els, {
   appUpdateReleaseNotesButton: document.getElementById('appUpdateReleaseNotesButton'),
   appUpdateMessage: document.getElementById('appUpdateMessage'),
   titleIconInput: document.getElementById('titleIconInput'),
+  tokenNumberAnimationInput: document.getElementById('tokenNumberAnimationInput'),
   showCompactTotalTokensInput: document.getElementById('showCompactTotalTokensInput'),
   showLiveTokenRateInput: document.getElementById('showLiveTokenRateInput'),
   liveTokenRateScopeRow: document.getElementById('liveTokenRateScopeRow'),
@@ -1690,7 +1693,10 @@ function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
 let numberAnimHandle = 0;
 let numberAnimTarget = null;
 let numberAnimValue = 0;
+let settleNumberRoll = null;
 function cancelNumberAnimation() {
+  settleNumberRoll?.();
+  settleNumberRoll = null;
   if (numberAnimHandle) cancelAnimationFrame(numberAnimHandle);
   numberAnimHandle = 0;
   numberAnimTarget = null;
@@ -1700,7 +1706,9 @@ function headlineNumberIsAnimatingTo(value) {
   return Boolean(numberAnimHandle) && numberAnimTarget === value;
 }
 
-function animateNumber(el, from, to, duration = 1000, onDone = null) {
+function animateNumber(el, from, to, duration = 1000, onDone = null, { synchronized = false } = {}) {
+  const rolling = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) === 'roll';
+  const rollSnapshot = rolling ? tokenNumberAnimationApi.capture(el) : null;
   cancelNumberAnimation();
   if (prefersReducedMotion()) {
     el.textContent = formatNumber(to);
@@ -1708,17 +1716,28 @@ function animateNumber(el, from, to, duration = 1000, onDone = null) {
     if (typeof onDone === 'function') onDone();
     return;
   }
+  if (rolling) {
+    duration = tokenNumberAnimationApi.duration;
+    settleNumberRoll = tokenNumberAnimationApi.beginRoll(el, formatNumber(from), formatNumber(to), to > from, () => {
+      el.textContent = formatNumber(to);
+      updateTotalCompact(to);
+    }, rollSnapshot, { period: synchronized });
+  }
   const start = performance.now();
   const delta = to - from;
   numberAnimTarget = to;
-  numberAnimValue = from;
+  numberAnimValue = rolling ? to : from;
   function frame(now) {
     const progress = Math.min(1, (now - start) / duration);
-    numberAnimValue = from + delta * easeOutQuart(progress);
-    el.textContent = formatNumber(numberAnimValue);
+    if (!rolling) {
+      numberAnimValue = from + delta * easeOutQuart(progress);
+      el.textContent = formatNumber(numberAnimValue);
+    }
     if (progress < 1) {
       numberAnimHandle = requestAnimationFrame(frame);
     } else {
+      settleNumberRoll?.();
+      settleNumberRoll = null;
       numberAnimHandle = 0;
       numberAnimTarget = null;
       numberAnimValue = to;
@@ -1728,12 +1747,13 @@ function animateNumber(el, from, to, duration = 1000, onDone = null) {
   numberAnimHandle = requestAnimationFrame(frame);
 }
 
-function animateTotalNumber(el, from, to, duration) {
-  animateNumber(el, from, to, duration, () => updateTotalCompact(to));
+function animateTotalNumber(el, from, to, duration, options) {
+  animateNumber(el, from, to, duration, () => updateTotalCompact(to), options);
 }
 
 const rowNumberAnimations = new Map();
 const rowBarAnimations = new Map();
+let breakdownNumberMotionVisibleOnly = false;
 const rowRenderFingerprints = new WeakMap();
 const toolDetailData = new WeakMap();
 
@@ -1747,19 +1767,24 @@ function settleMotionAnimations() {
   numberAnimValue = state.currentTotal;
   els.totalTokens.textContent = formatNumber(state.currentTotal);
   updateTotalCompact(state.currentTotal);
+  settleRowNumberAnimations();
+  limitResetAnimator.settle(els.limitsPanel);
+  for (const animation of document.getAnimations?.() || []) {
+    try { animation.finish(); } catch (_) { animation.cancel(); }
+  }
+  rowBarAnimations.clear();
+}
+
+function settleRowNumberAnimations() {
   for (const [el, motion] of rowNumberAnimations) {
     cancelAnimationFrame(motion.handle);
+    motion.settleRoll?.();
     const target = Number(motion.target ?? el.dataset.motionTarget ?? el.dataset.motionValue ?? 0);
     el.textContent = formatNumber(target);
     el.dataset.motionValue = String(target);
     delete el.dataset.motionTarget;
   }
   rowNumberAnimations.clear();
-  limitResetAnimator.settle(els.limitsPanel);
-  for (const animation of document.getAnimations?.() || []) {
-    try { animation.finish(); } catch (_) { animation.cancel(); }
-  }
-  rowBarAnimations.clear();
 }
 
 function applyReduceMotionPreference(value) {
@@ -1771,26 +1796,41 @@ function applyReduceMotionPreference(value) {
 
 function captureBreakdownMotion() {
   const rows = Array.from(els.breakdown?.querySelectorAll('.row[data-key]') || []);
-  if (!shouldAnimateBreakdownRows(rows.length, { reducedMotion: prefersReducedMotion() })) return null;
+  if (prefersReducedMotion()) return null;
+  const animateLayout = shouldAnimateBreakdownRows(rows.length, { reducedMotion: prefersReducedMotion() });
+  if (!animateLayout && state.breakdown !== 'session') return null;
+  const visibleNumbersOnly = !animateLayout || tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) === 'roll';
+  const motionRows = new Set(!visibleNumbersOnly ? rows : visibleBreakdownNumberRows(rows,
+    els.breakdown.getBoundingClientRect(), row => row.querySelector('.row-value')?.getBoundingClientRect()));
   const snapshot = new Map();
   for (const row of rows) {
-    const rect = row.getBoundingClientRect();
-    const fill = row.querySelector('.bar-fill');
+    // Keep cheap old values for every key: a reordered row may become visible
+    // after the update. Only visible readings need a glyph/layout snapshot.
+    const valueEl = row.querySelector('.row-value');
+    const rect = animateLayout ? row.getBoundingClientRect() : null;
+    const fill = animateLayout ? row.querySelector('.bar-fill') : null;
     const trackWidth = fill?.parentElement?.getBoundingClientRect().width || 0;
     const fillWidth = fill?.getBoundingClientRect().width || 0;
     snapshot.set(row.dataset.key, {
-      top: rect.top,
-      value: Number(row.querySelector('.row-value')?.dataset.motionValue || row.dataset.motionValue || 0),
+      layoutCaptured: animateLayout,
+      top: rect?.top,
+      value: Number(valueEl?.dataset.motionValue || row.dataset.motionValue || 0),
+      rollSnapshot: motionRows.has(row) ? tokenNumberAnimationApi.capture(valueEl) : null,
       barScale: trackWidth > 0 ? Math.max(0, Math.min(1, fillWidth / trackWidth)) : 0
     });
   }
   return snapshot;
 }
 
-function animateRowNumber(el, from, to, duration = 420) {
+function animateRowNumber(el, from, to, duration = 420, capturedRoll = null, { synchronized = false } = {}) {
   const previous = rowNumberAnimations.get(el);
-  if (previous?.target === to) return;
-  if (previous) cancelAnimationFrame(previous.handle);
+  if (previous?.target === to && !prefersReducedMotion()) return;
+  const rolling = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) === 'roll';
+  const rollSnapshot = rolling ? capturedRoll || tokenNumberAnimationApi.capture(el) : null;
+  if (previous) {
+    cancelAnimationFrame(previous.handle);
+    previous.settleRoll?.();
+  }
   const startValue = Number.isFinite(previous?.value) ? previous.value : from;
   if (!Number.isFinite(startValue) || !Number.isFinite(to) || startValue === to || prefersReducedMotion()) {
     el.textContent = formatNumber(to);
@@ -1802,11 +1842,19 @@ function animateRowNumber(el, from, to, duration = 420) {
   const startedAt = performance.now();
   const delta = to - startValue;
   const motion = { handle: 0, target: to, value: startValue };
-  el.textContent = formatNumber(startValue);
-  el.dataset.motionValue = String(startValue);
+  if (rolling) {
+    duration = tokenNumberAnimationApi.duration;
+    motion.value = to;
+    motion.settleRoll = tokenNumberAnimationApi.beginRoll(el, formatNumber(startValue), formatNumber(to), to > startValue, null, rollSnapshot,
+      { period: synchronized, whole: synchronized });
+  } else {
+    el.textContent = formatNumber(startValue);
+  }
+  el.dataset.motionValue = String(motion.value);
   el.dataset.motionTarget = String(to);
   function frame(now) {
     if (prefersReducedMotion()) {
+      motion.settleRoll?.();
       el.textContent = formatNumber(to);
       el.dataset.motionValue = String(Number(to) || 0);
       delete el.dataset.motionTarget;
@@ -1814,12 +1862,15 @@ function animateRowNumber(el, from, to, duration = 420) {
       return;
     }
     const progress = Math.min(1, (now - startedAt) / duration);
-    motion.value = startValue + delta * easeOutQuart(progress);
-    el.textContent = formatNumber(motion.value);
-    el.dataset.motionValue = String(motion.value);
+    if (!rolling) {
+      motion.value = startValue + delta * easeOutQuart(progress);
+      el.textContent = formatNumber(motion.value);
+      el.dataset.motionValue = String(motion.value);
+    }
     if (progress < 1) {
       motion.handle = requestAnimationFrame(frame);
     } else {
+      motion.settleRoll?.();
       delete el.dataset.motionTarget;
       if (rowNumberAnimations.get(el) === motion) rowNumberAnimations.delete(el);
     }
@@ -1832,16 +1883,43 @@ function cancelRowNumberAnimation(el) {
   if (!el) return;
   const motion = rowNumberAnimations.get(el);
   if (motion) cancelAnimationFrame(motion.handle);
+  motion?.settleRoll?.();
   rowNumberAnimations.delete(el);
   delete el.dataset.motionTarget;
 }
 
-function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
-  if (!snapshot) return;
+function settleOffscreenBreakdownNumbers() {
+  if (!breakdownNumberMotionVisibleOnly || rowNumberAnimations.size === 0) return;
+  const visible = new Set(visibleBreakdownNumberRows([...rowNumberAnimations.keys()],
+    els.breakdown.getBoundingClientRect(), el => el.getBoundingClientRect()));
+  for (const [el, motion] of rowNumberAnimations) {
+    if (visible.has(el)) continue;
+    cancelRowNumberAnimation(el);
+    el.textContent = formatNumber(motion.target);
+    el.dataset.motionValue = String(motion.target);
+  }
+}
+
+// A period switch (synchronized) starts every row on the headline's frame,
+// each sweeping its own reading left to right; live updates keep the gentle
+// entering stagger.
+function animateBreakdownFrom(snapshot, { duration = 420, synchronized = false } = {}) {
+  if (!snapshot || prefersReducedMotion()) return;
   const rows = Array.from(els.breakdown?.querySelectorAll('.row[data-key]') || []);
-  if (!shouldAnimateBreakdownRows(rows.length, { reducedMotion: prefersReducedMotion() })) return;
+  const animateLayout = shouldAnimateBreakdownRows(rows.length, { reducedMotion: prefersReducedMotion() });
+  if (!animateLayout && state.breakdown !== 'session') return;
+  breakdownNumberMotionVisibleOnly = !animateLayout || tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) === 'roll';
+  const motionRows = !breakdownNumberMotionVisibleOnly ? rows : visibleBreakdownNumberRows(rows,
+    els.breakdown.getBoundingClientRect(), row => row.querySelector('.row-value')?.getBoundingClientRect());
+  const animatedValues = new Set(motionRows.map(row => row.querySelector('.row-value')));
+  for (const [el, motion] of rowNumberAnimations) {
+    if (animatedValues.has(el)) continue;
+    cancelRowNumberAnimation(el);
+    el.textContent = formatNumber(motion.target);
+    el.dataset.motionValue = String(motion.target);
+  }
   let enteringIndex = 0;
-  for (const row of rows) {
+  for (const row of motionRows) {
     // An unavailable native session value must stay a semantic label. The
     // ordinary row-number tween formats its zero placeholder as "0", which
     // would turn unknown data into a false numeric reading after every render.
@@ -1851,6 +1929,19 @@ function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
     }
     const previous = snapshot.get(row.dataset.key);
     const value = Number(row.dataset.motionValue || 0);
+    const valueEl = row.querySelector('.row-value');
+    const animateReading = () => {
+      if (!breakdownNumberMotionVisibleOnly || !previous || previous.value !== value || rowNumberAnimations.has(valueEl)) {
+        animateRowNumber(valueEl, previous?.value ?? 0, value,
+          duration, previous?.rollSnapshot, { synchronized });
+      }
+    };
+    // Crossing back under the row budget cannot recover the old geometry.
+    // Keep number motion, but do not treat the uncaptured bar scale as zero.
+    if (!animateLayout || previous?.layoutCaptured === false) {
+      animateReading();
+      continue;
+    }
     const fill = row.querySelector('.bar-fill');
     const targetScale = Math.max(0, Math.min(1, Number(fill?.style.getPropertyValue('--bar-scale')) || 0));
     if (previous) {
@@ -1862,23 +1953,28 @@ function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
         ], { duration: 280, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
       }
       animateBarBetween(fill, previous.barScale, targetScale, 0, duration);
-      animateRowNumber(row.querySelector('.row-value'), previous.value, value, duration);
+      animateReading();
       continue;
     }
+    const delay = synchronized ? 0 : Math.min(enteringIndex, 6) * 18;
     row.animate([
       { opacity: 0, transform: 'translate3d(0, 7px, 0)' },
       { opacity: 1, transform: 'translate3d(0, 0, 0)' }
     ], {
       duration: 240,
-      delay: Math.min(enteringIndex, 6) * 18,
+      delay,
       easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
       fill: 'backwards'
     });
-    const delay = Math.min(enteringIndex, 6) * 18;
     animateBarBetween(fill, 0, targetScale, delay, Math.max(1, duration - delay));
-    animateRowNumber(row.querySelector('.row-value'), 0, value, duration);
+    animateReading();
     enteringIndex += 1;
   }
+}
+
+function periodBreakdownMotionDuration() {
+  return tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) === 'roll'
+    ? tokenNumberAnimationApi.layoutDuration : 800;
 }
 
 function animateBarBetween(
@@ -2512,7 +2608,12 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
     valueEl.textContent = t('detailTokenUnavailable') || 'Unavailable';
   } else {
     delete row.dataset.tokenDataUnavailable;
-    valueEl.textContent = formatNumber(value);
+    // Metadata-only updates must not replace the glyphs of a matching roll.
+    // Changed readings are restarted from the captured visual value below.
+    if (rowNumberAnimations.get(valueEl)?.target !== Number(value)) {
+      cancelRowNumberAnimation(valueEl);
+      valueEl.textContent = formatNumber(value);
+    }
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
@@ -2727,6 +2828,10 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     ? captureBreakdownMotion()
     : null;
   if (structureChanged) {
+    const retainedKeys = new Set(visibleRows.map((row) => row.key));
+    for (const [key, row] of existing) {
+      if (!retainedKeys.has(key)) cancelRowNumberAnimation(row.querySelector('.row-value'));
+    }
     const nodes = visibleRows.map((row) => existing.get(row.key) || rowTemplate(row));
     if (incompleteHint) {
       const hint = existingHint || document.createElement('p');
@@ -6728,7 +6833,16 @@ function sessionStatsForDisplay(stats) {
 
 function setRendererSettings(next) {
   const titlesChanged = (state.settings?.sessionTitlesEnabled !== false) !== (next.sessionTitlesEnabled !== false);
+  const animationChanged = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation)
+    !== tokenNumberAnimationApi.normalize(next.tokenNumberAnimation);
   state.settings = next;
+  if (animationChanged) {
+    cancelNumberAnimation();
+    settleRowNumberAnimations();
+    numberAnimValue = state.currentTotal;
+    els.totalTokens.textContent = formatNumber(state.currentTotal);
+    updateTotalCompact(state.currentTotal);
+  }
   if (titlesChanged) {
     if (next.sessionTitlesEnabled === false) state.stats = sessionStatsForDisplay(state.stats);
     // Main may have returned a titleless map while disabled. Pull it again
@@ -6800,15 +6914,17 @@ function render() {
     updateTotalCompact(nextTotal);
     state.suppressInitialNumberAnimation = false;
   } else if (totalChanged) {
-    // Keep the compact chip visible through the count-up and lock the font to the
-    // widest endpoint first (a downward roll starts wider than it settles), so the
-    // number never vanishes, clips, or resizes mid-roll. Re-fit on completion so a
-    // window resize during the animation, or a downward settle, still ends correct.
     const animationFrom = numberAnimHandle ? numberAnimValue : state.currentTotal;
-    const widest = formatNumber(nextTotal).length >= formatNumber(animationFrom).length ? nextTotal : animationFrom;
-    els.totalTokens.textContent = formatNumber(widest);
-    updateTotalCompact(nextTotal);
-    animateTotalNumber(els.totalTokens, animationFrom, nextTotal, state.periodMotionActive ? 800 : 1000);
+    // Count-up keeps a stable font throughout its intermediate values. Digit
+    // roll measures the old layout before fitting its destination, so geometry
+    // and font scaling finish together without a second jump on cleanup.
+    if (tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) !== 'roll') {
+      const widest = formatNumber(nextTotal).length >= formatNumber(animationFrom).length ? nextTotal : animationFrom;
+      els.totalTokens.textContent = formatNumber(widest);
+      updateTotalCompact(nextTotal);
+    }
+    animateTotalNumber(els.totalTokens, animationFrom, nextTotal, state.periodMotionActive ? 800 : 1000,
+      { synchronized: state.periodMotionActive });
     pulseLiveDot();
   } else if (!headlineNumberIsAnimatingTo(nextTotal)) {
     cancelNumberAnimation();
@@ -7983,6 +8099,7 @@ function appearancePatchFromControls() {
     windowsBackdrop: windowsGlassApi.normalizeWindowsBackdropMode(els.windowsBackdropInput?.value),
     macBackdrop: macBackdropApi.normalizeMacBackdropMode(els.macBackdropInput?.value),
     reduceMotion: els.reduceMotionInputs?.find((input) => input.checked)?.value || 'system',
+    tokenNumberAnimation: tokenNumberAnimationApi.normalize(els.tokenNumberAnimationInput?.value),
     showLiveDot: Boolean(els.liveDotInput.checked),
     showToolIcons: Boolean(els.toolIconsInput.checked),
     titleIconOnly: Boolean(els.titleIconInput.checked),
@@ -8911,6 +9028,9 @@ function syncSettingsForm() {
   els.liveDotInput.checked = state.settings.showLiveDot !== false;
   els.toolIconsInput.checked = state.settings.showToolIcons !== false;
   els.titleIconInput.checked = state.settings.titleIconOnly === true;
+  if (els.tokenNumberAnimationInput) {
+    els.tokenNumberAnimationInput.value = tokenNumberAnimationApi.normalize(state.settings.tokenNumberAnimation);
+  }
   els.showCompactTotalTokensInput.checked = state.settings.showCompactTotalTokens === true;
   els.showLiveTokenRateInput.checked = state.settings.showLiveTokenRate === true;
   if (els.liveTokenRateScopeInput) {
@@ -12200,7 +12320,7 @@ for (const tab of document.querySelectorAll('.tab')) {
     state.periodMotionActive = true;
     render();
     state.periodMotionActive = false;
-    animateBreakdownFrom(snapshot, { duration: 800 });
+    animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
   });
 }
 
@@ -12209,6 +12329,7 @@ for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]'
     event.stopPropagation();
     const selection = fixedPeriodRangesApi.normalizeMonthMode(button.dataset.fixedPeriod);
     setPeriodMenuOpen(false, { restoreFocus: true });
+    const snapshot = captureBreakdownMotion();
     const changed = setPeriod(selection);
     state.settings.periodMonthMode = selection;
     syncPeriodTabs();
@@ -12218,6 +12339,7 @@ for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]'
       state.periodMotionActive = true;
       render();
       state.periodMotionActive = false;
+      animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
     }
     await saveSettings({ periodMonthMode: selection });
   });
@@ -12265,6 +12387,7 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+els.breakdown.addEventListener('scroll', settleOffscreenBreakdownNumbers, { passive: true });
 els.breakdown.addEventListener('click', (event) => {
   if (state.breakdown !== 'session') return;
   const rowEl = event.target.closest('.row');
@@ -12731,6 +12854,7 @@ els.toolIconsInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
+els.tokenNumberAnimationInput?.addEventListener('change', saveAppearanceFromControls);
 els.showCompactTotalTokensInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });

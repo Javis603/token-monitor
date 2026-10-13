@@ -3328,6 +3328,12 @@ html.is-windows .settings-panel select option {
   text-wrap: balance;
 }
 .total-panel {
+  /* The gaps double as the room a rolling number may fade into (below). */
+  --total-number-gap: 8px;
+  --total-cost-gap: 6px;
+  --token-number-fade-top: var(--total-number-gap);
+  /* + the cost line's own leading above its ink. */
+  --token-number-fade-bottom: calc(var(--total-cost-gap) + 1px);
   position: relative;
   z-index: 1;
   padding: 2px 2px 12px;
@@ -3347,7 +3353,7 @@ html.is-windows .settings-panel select option {
 .total-number {
   flex: 0 1 auto;
   min-width: 0;
-  margin-top: 8px;
+  margin-top: var(--total-number-gap);
   color: var(--number);
   font-family: var(--display-font, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif);
   font-weight: 500;
@@ -3360,6 +3366,59 @@ html.is-windows .settings-panel select option {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Ellipsis reserves another glyph beside the outgoing places on a long
+   downward roll, even when the pre-fitted digits themselves fit. */
+[data-token-number-animation="roll"] {
+  position: relative;
+  text-overflow: clip;
+}
+.total-number[data-token-number-animation="roll"] { overflow: visible; }
+.token-number-reading {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.token-number-glyphs {
+  --token-number-fade-top-room: var(--token-number-fade-top, 0.12em);
+  --token-number-fade-bottom-room: var(--token-number-fade-bottom, 0.12em);
+  /* Sideways the mask stays opaque: room for blur, plus the outgoing
+     reading's overhang, which beginRoll measures. */
+  --token-number-left-room: calc(0.25em + var(--token-number-overhang-left, 0px));
+  --token-number-right-room: calc(0.25em + var(--token-number-overhang-right, 0px));
+  display: inline-flex;
+  position: relative;
+  vertical-align: bottom;
+  /* Rolling glyphs leave the line box, as native numericText's do. Fade them
+     out across the room before the neighbouring text instead of cutting them
+     with a straight edge. A mask only paints inside its box (Chromium ignores
+     mask-clip: no-clip), so padding cancelled by margin gives it that room
+     without moving layout; NumberFlow uses the same technique. */
+  margin: calc(-1 * var(--token-number-fade-top-room)) calc(-1 * var(--token-number-right-room))
+    calc(-1 * var(--token-number-fade-bottom-room)) calc(-1 * var(--token-number-left-room));
+  padding: var(--token-number-fade-top-room) var(--token-number-right-room)
+    var(--token-number-fade-bottom-room) var(--token-number-left-room);
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--token-number-fade-top-room),
+    #000 calc(100% - var(--token-number-fade-bottom-room)), transparent);
+}
+.token-number-place {
+  display: inline-grid;
+  position: relative;
+  flex: 0 0 auto;
+  overflow: visible;
+  transform-origin: top left;
+}
+.token-number-glyph {
+  grid-area: 1 / 1;
+}
+.token-number-glyph {
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+.token-number-previous { position: absolute; }
 .total-compact {
   flex: 0 0 auto;
   color: var(--muted);
@@ -3367,7 +3426,7 @@ html.is-windows .settings-panel select option {
   font-weight: 500;
   white-space: nowrap;
 }
-.cost { margin-top: 6px; color: var(--readable-muted); font-size: 0.75rem; }
+.cost { margin-top: var(--total-cost-gap); color: var(--readable-muted); font-size: 0.75rem; }
 .cost { display: flex; align-items: center; gap: 3px; }
 .usage-cost-value { white-space: nowrap; }
 .usage-cost-info.limit-detail-tooltip-wrap {
@@ -3437,6 +3496,10 @@ html.is-windows .settings-panel select option {
   flex-direction: column;
   gap: 10px;
   overflow: hidden auto;
+  /* Room (cancelled by the margin) so the scroller does not cut the first
+     row's rolling value with a straight edge. */
+  margin-top: -5px;
+  padding-top: 5px;
   padding-right: 2px;
   scrollbar-width: none;
 }
@@ -4199,7 +4262,17 @@ html.is-windows .settings-panel select option {
   flex: 0 0 auto;
   white-space: pre;
 }
-.row-metrics { display: grid; flex: 0 0 auto; gap: 2px; min-width: max-content; text-align: right; }
+.row-metrics {
+  /* Fade a rolling value out before the cost line's ink: the 2px gap plus
+     that line's leading. The list keeps the room above the first row. */
+  --token-number-fade-top: 5px;
+  --token-number-fade-bottom: 3px;
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+  min-width: max-content;
+  text-align: right;
+}
 .row-value { color: var(--text); white-space: nowrap; }
 .row-cost { color: var(--muted); font-size: 0.625rem; white-space: nowrap; }
 .bar { width: 100%; height: 6px; overflow: hidden; border-radius: 3px; background: rgba(var(--sunken-rgb), 0.46); box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.04); }
@@ -6252,11 +6325,11 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 @media (max-height: 200px) {
   .shell { gap: 8px; padding: 12px 14px; }
   .titlebar { min-height: clamp(28px, 8vh, 38px); }
-  .total-panel { padding: 2px 2px; }
+  .total-panel { --total-number-gap: clamp(2px, 1.2vh, 8px); --total-cost-gap: clamp(2px, 1vh, 6px); padding: 2px 2px; }
   .label-row { font-size: calc(clamp(11px, 2.6vw, 16px) * var(--ui-text-scale)); }
-  .total-number { margin-top: clamp(2px, 1.2vh, 8px); font-size: clamp(22px, 13vw, 60px); }
+  .total-number { font-size: clamp(22px, 13vw, 60px); }
   .total-compact { font-size: calc(clamp(11px, 3vw, 16px) * var(--ui-text-scale)); }
-  .cost { margin-top: clamp(2px, 1vh, 6px); font-size: calc(clamp(12px, 2.8vw, 18px) * var(--ui-text-scale)); }
+  .cost { font-size: calc(clamp(12px, 2.8vw, 18px) * var(--ui-text-scale)); }
   .breakdown,
   .home-panel,
   .service-status-panel { display: none; }

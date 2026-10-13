@@ -1594,12 +1594,26 @@
     } else {
       // Default: render only the windows the provider actually has. Providers
       // that only expose a single window shouldn't leave a half-empty bar next to
-      // the real one. (Grok is handled above; this branch covers minimax's
-      // session + weekly pair and any future session/weekly provider.)
+      // the real one. Credits windows carry money rather than quota percentages;
+      // their display meter is derived without changing the provider reading.
       const session = windowForKind(provider, 'session');
       const weekly = windowForKind(provider, 'weekly');
       if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
       if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
+      for (const creditsWindow of (provider.windows || []).filter(isCreditsWindow)) {
+        const amount = creditsAmount(provider, creditsWindow);
+        if (amount === null) continue;
+        const balanceNode = limitWindowNode(
+          providerWindowLabel(provider, creditsWindow, 'Balance'),
+          { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow) },
+          color,
+          0.95,
+          formatMoney(amount, creditsCurrency(provider, creditsWindow))
+        );
+        balanceNode.classList.add('limit-window-wide');
+        if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) balanceNode.classList.add('limit-window-no-reset');
+        windows.append(balanceNode);
+      }
     }
     if (!options.showAllUsageItems) {
       hideUsageItems(windows, usageItems.hiddenUsageItemSet(settings()?.limitProviderHiddenItems, provider?.provider));
