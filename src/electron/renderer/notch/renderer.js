@@ -754,7 +754,10 @@
       root.classList.toggle('is-notch-open', payload.expanded === true);
       root.classList.toggle('is-notch-attached', payload.geometry.notched === true);
       root.style.setProperty('--notch-zoom', Number(payload.appearance.zoomFactor) || 1);
-      const headerActivity = (payload.summary?.items || []).map((item) => item.providerCell ? runningSessionSummary(item.providerCell.sessions).count : 0);
+      const headerActivity = (payload.summary?.items || []).map((item) => item.providerCell ? [
+        runningSessionSummary(item.providerCell.sessions).count,
+        presentation.waitingSessionSummary(item.providerCell.sessions).count
+      ] : 0);
       // Camera clearance changes grouping even when the readings stay the same.
       const headerKey = JSON.stringify([payload.summary, headerActivity, payload.geometry.gapWidth > 0, payload.geometry.summaryRingSize > 0, state.appearanceKey, payload.summary?.needsClock ? notchClock : 0]);
       if (headerKey !== notchHeaderKey) {

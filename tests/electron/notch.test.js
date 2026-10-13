@@ -2718,6 +2718,51 @@ test('Notch visibility transitions settle summary motion without rebuilding its 
   context.renderNotch({ ...payload, summaryMeasurement: { id: 1, measuring: true } });
   assert.equal(settles, 2, 'hidden measurement also settles summary effects');
 });
+
+
+test('Notch refreshes an expired waiting indicator without rebuilding an unchanged summary', () => {
+  const presentation = require('../../src/electron/renderer/edgeDock/presentation');
+  const { LIVE_ACTIVITY_TTL_MS } = require('../../src/shared/sessionLive');
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
+  const code = source.slice(source.indexOf('function renderNotch('), source.indexOf('    let notchAnimation ='));
+  let now = Date.parse('2026-10-13T00:00:00Z'), head = null;
+  const sessions = [{ client: 'codex', turnEnded: true,
+    lastUsedAt: new Date(now - RUNNING_WINDOW_MS - 1000).toISOString(),
+    liveActivity: { state: 'waiting', observedAt: new Date(now).toISOString() } }];
+  const waiting = () => presentation.waitingSessionSummary(sessions, now).count;
+  const payload = { expanded: false, summary: { needsClock: false,
+    items: [{ type: 'icon', providerCell: { sessions } }, { type: 'text', text: '51.7M' }] },
+  cells: [], appearance: {}, geometry: { gapWidth: 0, summaryRingSize: 42, notched: false } };
+  const context = { state: { appearanceKey: 'same' }, notchExpanded: false, notchClock: 0, notchHeaderKey: '',
+    runningSessionSummary: rows => presentation.runningSessionSummary(rows, now),
+    presentation: { waitingSessionSummary: rows => presentation.waitingSessionSummary(rows, now) },
+    settleNotchNumbers() {}, settleNotchStatNumbers() {}, resetRefreshVisit() {}, paintRefreshButton() {},
+    root: { classList: { toggle() {} }, style: { setProperty() {} } },
+    contentLayer: { querySelector: () => head, prepend: node => { head = node; } },
+    captureRingResetMotion() {}, animateRingResets() {},
+    notchSummary: () => ({ style: {}, waiting: waiting(), text: payload.summary.items[1].text,
+      remove() {}, querySelectorAll: () => [] }),
+    notchSummaryObserver: { disconnect() {}, observe() {} }, positionNotchSummary() {}, reportNotchSlots() {},
+    animateNotchNumbers() {}, renderNotchRows() {}, applyNotchMotion() {}, reportNotchContentSize() {} };
+  const render = vm.runInNewContext(`${code};renderNotch`, context);
+  render(payload);
+  const original = head;
+  assert.equal(original.waiting, 1);
+  now += LIVE_ACTIVITY_TTL_MS - 1;
+  render(payload);
+  assert.equal(head, original, 'unchanged activity keeps the summary node');
+  now++;
+  assert.equal(presentation.runningSessionSummary(sessions, now).count, 0);
+  assert.equal(waiting(), 0);
+  render(payload);
+  assert.notEqual(head, original, 'waiting expiry refreshes the indicator without a new payload');
+  assert.equal(head.waiting, 0);
+  assert.equal(head.text, '51.7M');
+  const expired = head;
+  render(payload);
+  assert.equal(head, expired, 'quiet activity resumes node reuse');
+});
+
 test('camera-free notch avoidance uses one centered budget and hides an empty resting shell', (t) => {
   let reads = 0, menuX = 900;
   const f = fixture(t, { notchShape: 'notch' }, {
