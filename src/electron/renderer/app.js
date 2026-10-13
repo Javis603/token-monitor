@@ -1837,7 +1837,7 @@ function animateRowNumber(el, from, to, duration = 420, capturedRoll = null, { s
     duration = tokenNumberAnimationApi.duration;
     motion.value = to;
     motion.settleRoll = tokenNumberAnimationApi.beginRoll(el, formatNumber(startValue), formatNumber(to), to > startValue, null, rollSnapshot,
-      { period: synchronized });
+      { period: synchronized, whole: synchronized });
   } else {
     el.textContent = formatNumber(startValue);
   }

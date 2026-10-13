@@ -21,6 +21,10 @@
   const periodPace = 32;
   const periodWave = 250;
   const duration = periodWave + glyphDuration;
+  // A period retarget carries at most this many glyphs per place, and drops
+  // all but the strongest once they are three-quarters faded.
+  const retargetLayers = 2;
+  const retargetFloor = 0.25;
   function inkRatio(document, el) {
     const style = document.defaultView.getComputedStyle(el);
     const context = document.createElement('canvas').getContext?.('2d');
@@ -152,18 +156,32 @@
   // its identity and follows the layout (alignment, font fit). Retargets keep
   // every visible layer in place with its own clock.
   function beginRoll(el, fromText, toText, increasing, prepare = null, snapshot = null,
-    { period = false } = {}) {
+    { period = false, whole = false } = {}) {
+    // A whole reading rolls as one unit: two layers instead of one per glyph
+    // and place. Breakdown rows take it on a period switch, where every glyph
+    // changes at once and per-glyph layers made the switch heavy.
+    const split = whole ? (text) => [{ char: text, numeric: false, key: 'reading:0' }] : parts;
     const document = el.ownerDocument;
     const view = document.defaultView;
     let previous = snapshot || capture(el);
     const interrupted = Boolean(previous);
+    // Rapid period retargets would stack every earlier reading's leaving
+    // glyphs, each its own layer. Keep the strongest few per place and drop
+    // the ones already nearly gone.
+    if (period && previous?.length) {
+      const byPlace = new Map();
+      for (const glyph of previous) byPlace.set(glyph.key, [...(byPlace.get(glyph.key) || []), glyph]);
+      const kept = [...byPlace.values()].flatMap((glyphs) => glyphs.sort((a, b) => b.opacity - a.opacity)
+        .slice(0, retargetLayers).filter((glyph, index) => index === 0 || glyph.opacity >= retargetFloor));
+      previous = kept;
+    }
     const fontSize = parseFloat(view.getComputedStyle(el).fontSize);
     const companion = prepare ? el.nextElementSibling : null;
     const companionLeft = companion?.getBoundingClientRect().left;
     if (!previous) {
       const old = document.createElement('span');
       old.className = 'token-number-glyphs';
-      const oldParts = parts(fromText);
+      const oldParts = split(fromText);
       for (const part of oldParts) {
         const glyph = document.createElement('span');
         glyph.textContent = part.char;
@@ -178,8 +196,8 @@
     const wrapper = document.createElement('span');
     wrapper.className = 'token-number-glyphs';
     wrapper.setAttribute('aria-hidden', 'true');
-    const before = parts(fromText);
-    const after = parts(toText);
+    const before = split(fromText);
+    const after = split(toText);
     let unchangedPrefix = 0;
     while (unchangedPrefix < Math.min(before.length, after.length)
       && before[unchangedPrefix].char === after[unchangedPrefix].char) unchangedPrefix++;
@@ -231,6 +249,7 @@
     // swapping the whole reading on one frame reads as a block, not a change
     // from first digit to last. Interrupted live ticks stay immediate.
     const delayAt = (rect) => {
+      if (whole) return 0;
       const distance = Math.max(0, center(rect) - waveStart);
       if (period) return Math.min(periodWave, periodPace * distance / (destinationFontSize || fontSize || 16));
       return interrupted || !(waveSpan > 0) ? 0 : wave * Math.min(1, distance / waveSpan);
