@@ -809,6 +809,64 @@ test('the count preference retains numeric tweening for every breakdown row', ()
   assert.equal(api.rowMotion(row), undefined);
 });
 
+test('period retargets cap each place and retain its strongest layer even below the fade floor', () => {
+  for (const opacities of [[0.1, 0.7, 0.9, 0.5], [0.02, 0.1, 0.05], [0.9, 0.25, 0.24]]) {
+    const el = element();
+    animationApi.beginRoll(el, '1', '2', true);
+    const glyph = animationApi.capture(el)[0];
+    const snapshot = opacities.map((opacity, index) => ({ ...glyph, char: String(index + 3), opacity }));
+    const settle = animationApi.beginRoll(el, '2', '9', true, null, snapshot, { period: true });
+    const outgoing = el.children[1].children.filter(child => child.className.includes('previous'));
+    const retained = [...opacities].sort((a, b) => b - a).slice(0, 2)
+      .filter((opacity, index) => index === 0 || opacity >= 0.25);
+    assert.deepEqual(outgoing.map(child => child.animations[0].frames[0].opacity), retained);
+    settle();
+    assert.equal(el.textContent, '9');
+  }
+});
+
+test('rapid shared-period retargets stay bounded and a following live tick restores row glyph rolls', () => {
+  const { api, tick } = harness();
+  const headline = element(), row = element();
+  let from = 533940381;
+  for (let index = 0; index < 20; index++) {
+    const to = index % 2 ? 533940381 : 5791220226;
+    api.animateTotalNumber(headline, from, to, 800, { synchronized: true });
+    api.animateRowNumber(row, from, to, 250, null, { synchronized: true });
+    const captured = animationApi.capture(headline);
+    const byPlace = new Map();
+    for (const glyph of captured) byPlace.set(glyph.key, (byPlace.get(glyph.key) || 0) + 1);
+    assert.ok([...byPlace.values()].every(count => count <= 3), 'two retained glyphs plus one arrival per place');
+    assert.ok(animationApi.capture(row).length <= 3, 'whole-reading layers do not accumulate');
+    assert.equal(row.children[0].textContent, to.toLocaleString('en-US'));
+    from = to;
+  }
+  api.animateRowNumber(row, from, from + 1);
+  assert.equal(row.children[1].children.filter(child => child.className === 'token-number-place').length,
+    (from + 1).toLocaleString('en-US').length, 'live ticks return to per-glyph animation');
+  tick(animationApi.duration);
+  assert.equal(headline.textContent, from.toLocaleString('en-US'));
+  assert.equal(row.textContent, (from + 1).toLocaleString('en-US'));
+  assert.equal(api.rowMotion(row), undefined);
+});
+
+test('reduced motion during a shared-period roll settles the latest values without stale callbacks', () => {
+  const { api, context, tick } = harness();
+  const headline = element(), row = element();
+  api.animateTotalNumber(headline, 999, 1000, 800, { synchronized: true });
+  api.animateRowNumber(row, 999, 1000, 250, null, { synchronized: true });
+  tick(150);
+  context.prefersReducedMotion = () => true;
+  api.animateTotalNumber(headline, 1000, 500, 800, { synchronized: true });
+  api.animateRowNumber(row, 1000, 500, 250, null, { synchronized: true });
+  tick(2000);
+  for (const el of [headline, row]) {
+    assert.equal(el.textContent, '500');
+    assert.equal(el.children.length, 0);
+    assert.equal(animationApi.capture(el), null);
+  }
+});
+
 test('every bundled locale labels both token number animation options', () => {
   for (const [locale, messages] of Object.entries(MESSAGES)) {
     for (const suffix of ['', '.count', '.roll']) {

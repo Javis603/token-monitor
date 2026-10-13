@@ -1892,7 +1892,7 @@ function settleOffscreenBreakdownNumbers() {
 }
 
 // A period switch (synchronized) starts every row on the headline's frame,
-// each sweeping its own reading left to right; live updates keep the gentle
+// the headline sweeps and rows roll whole readings; live updates keep the gentle
 // entering stagger.
 function animateBreakdownFrom(snapshot, { duration = 420, synchronized = false } = {}) {
   if (!snapshot || prefersReducedMotion()) return;
