@@ -659,18 +659,20 @@ function providerCellNode(cell) {
   const color = providerColor(cell.provider);
   const shown = presentation.displayPercent(cell.remainingPercent, appearance().showLimitUsed === true);
   const value = el('span', 'edge-dock-value');
-  if (cell.credits && cell.credits.amount !== null && cell.credits.amount !== undefined) {
+  const hasCreditsAmount = Boolean(cell.credits) && cell.credits.amount !== null && cell.credits.amount !== undefined;
+  if (hasCreditsAmount) {
     value.textContent = balanceDisplay.formatCompactMoney(
       cell.credits.amount, cell.credits.currency, appearance().compactTokenUnits, state.locale
     );
   } else {
     value.textContent = shown === null ? '--' : `${Math.round(shown)}%`;
   }
-  markRoll(value, `${cell.id}:value`, cell.credits ? Number(cell.credits.amount) : shown);
   // What a refill motion compares against to recognise a real reset on this
   // cell: the headline's account and window identities ride the key, so a
   // headline that swapped to another account or pool is never animated as one.
+  // The figure's roll keys on the same identity for the same reason.
   node.dataset.ringMotionKey = `${cell.id}\0${cell.headlineAccount || ''}\0${cell.headlineWindowKey || ''}`;
+  markRoll(value, `${node.dataset.ringMotionKey}:value`, hasCreditsAmount ? Number(cell.credits.amount) : shown);
   node.dataset.ringRemaining = cell.remainingPercent === null || cell.remainingPercent === undefined
     ? ''
     : String(cell.remainingPercent);
@@ -952,8 +954,11 @@ function animateRingCompletion(ring, duration, startedAt = null) {
   animation.oncancel = remove;
 }
 
+// Returns the figures a refill counts up, including ones whose count-up starts
+// on the next frame, so nothing else animates them in the meantime.
 function animateRingResets(snapshot) {
-  if (!snapshot?.size || prefersReducedMotion()) return;
+  const owned = new Set();
+  if (!snapshot?.size || prefersReducedMotion()) return owned;
   const motions = [];
   for (const cell of railNode?.querySelectorAll('.edge-dock-cell[data-ring-motion-key]') || []) {
     const key = cell.dataset.ringMotionKey;
@@ -1007,7 +1012,7 @@ function animateRingResets(snapshot) {
       }
     });
   }
-  if (!motions.length) return;
+  if (!motions.length) return owned;
   // The same batch rule the meters follow: refills land on full together,
   // paced by the longest member.
   const duration = limitResetMotionApi.groupDurationMs(
@@ -1035,6 +1040,10 @@ function animateRingResets(snapshot) {
   if (pending.length) requestAnimationFrame((now) => {
     for (const entry of pending) startMotion(entry, now);
   });
+  for (const { cell, motion } of motions) {
+    if (motion.display) owned.add(cell.querySelector('.edge-dock-value'));
+  }
+  return owned;
 }
 
 // Snapping running effects to their end state when reduced motion turns on —
@@ -1126,13 +1135,13 @@ function renderRail(payload) {
   const ringSnapshot = captureRingResetMotion();
   const rollSnapshot = railNumberRoll.capture(railNode);
   railNode.replaceChildren(...nodes);
-  animateRingResets(ringSnapshot);
+  const refilling = animateRingResets(ringSnapshot);
   // A retracted rail is not repainted, so a reveal shows the latest readings at
   // once rather than rolling from ones left on screen minutes ago. A refill's
   // count-up owns its figure.
   if (!revealing && !prefersReducedMotion()
     && tokenNumberAnimationApi.normalize(appearance().tokenNumberAnimation) === 'roll') {
-    railNumberRoll.play(railNode, rollSnapshot, { skip: (node) => ringNumberAnimations.has(node) });
+    railNumberRoll.play(railNode, rollSnapshot, { skip: (node) => refilling.has(node) });
   }
 }
 
