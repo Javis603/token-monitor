@@ -28,5 +28,9 @@
     const ratios = item.variant === 'dot' ? { narrow: 0.18, regular: 0.24, wide: 0.34 } : { narrow: 0.07, regular: 0.14, wide: 0.27 };
     return Math.max(2, Math.round(height * (ratios[item.size] || ratios.regular)));
   }
-  return { font, horizontalScale, spaceScale, spacerWidth };
+  function iconGap(height) {
+    return Math.max(2, Math.round(height * 0.08));
+  }
+
+  return { font, horizontalScale, spaceScale, spacerWidth, iconGap };
 });

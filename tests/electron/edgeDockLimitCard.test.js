@@ -1993,7 +1993,7 @@ test('Notch ears preserve configured tray items and embedded fields across all s
     const node = new FakeElement(tag); node.className = classes; node.textContent = text; return node;
   };
   const context = {
-    el, trayTypographyApi: typography, notchNumbers: new Map(), cancelAnimationFrame() {},
+    el, trayTypographyApi: typography, trayBarsApi: require('../../src/electron/renderer/trayBars'), notchNumbers: new Map(), cancelAnimationFrame() {},
     providerLabel: id => id, positionNotchSummary() {},
     notchIcon: item => el('span', 'edge-dock-mark', item.provider),
     notchText: (_item, row) => el('span', 'notch-text-run', row.text)
@@ -2034,7 +2034,18 @@ test('Notch ears preserve configured tray items and embedded fields across all s
         if (item.type === 'stack' || item.type === 'bars') {
           const block = left.find(item.type === 'stack' ? 'notch-stack' : 'notch-bars');
           assert.equal(block.children.length, item.rows?.length || item.lines.length, `${style} rows stay together`);
-          if (summary.items[1].iconProvider) assert.equal(left.find('notch-summary-field').children.length, 2, 'only the embedded mark stays with its field');
+          if (item.type === 'bars') {
+            assert.equal(block.style.gap, '3px');
+            for (const track of block.children) {
+              assert.equal(track.style.width, '18px', 'bars retain the compact tray width');
+              assert.equal(track.style.height, '5px');
+            }
+          }
+          if (summary.items[1].iconProvider) {
+            const field = left.find('notch-summary-field');
+            assert.equal(field.children.length, 2, 'only the embedded mark stays with its field');
+            assert.equal(field.style.gap, item.type === 'bars' ? '3px' : '2px');
+          }
         }
         assert.match(right.text, /0/, 'zero cost remains a displayed field');
       } else {

@@ -19,6 +19,7 @@
     const runningSessionSummary = presentation.runningSessionSummary;
     const trayLayoutApi = window.TokenMonitorTrayLayout;
     const trayTypographyApi = window.TokenMonitorTrayTypography;
+    const trayBarsApi = window.TokenMonitorTrayBars;
     const compactMoneyApi = window.TokenMonitorCompactMoney;
     const balanceDisplay = window.TokenMonitorLimitBalanceDisplay;
     const accountIdentityApi = window.TokenMonitorAccountIdentity;
@@ -352,6 +353,7 @@
         if (mark) mark.title = iconProvider === 'app' ? 'Token Monitor' : providerLabel(iconProvider);
         if (item.type === 'icon') { parts.push(mark); continue; }
         const block = el('span', 'notch-reading');
+        let iconGap;
         block.dataset.notchSpacer = String(item.type === 'spacer');
         const roomyRing = payload.geometry.gapWidth === 0 && payload.geometry.summaryRingSize > 0;
         const fontSize = item.type === 'stack' ? (roomyRing ? 10 : 9) : Math.max(9, Math.min(16, (roomyRing ? 14 : 12) * (Number(item.scale) || 1)));
@@ -361,21 +363,31 @@
           block.textContent = item.variant === 'dot' ? '·' : ' ';
           block.style.width = `${trayTypographyApi.spacerWidth(item, 20)}px`;
         } else if (item.type === 'bars') {
+          const layout = trayBarsApi.trayBarsLayout(20);
+          iconGap = layout.barsX - layout.iconSize;
           block.classList.add('notch-bars');
+          block.style.gap = `${layout.barGap}px`;
           for (const row of item.rows) {
             const track = el('span', 'notch-bar');
+            track.style.width = `${layout.barsWidth}px`;
+            track.style.height = `${layout.barHeight}px`;
+            track.style.borderRadius = `${layout.radius}px`;
             track.title = row.selection ? providerLabel(row.selection.provider) : '—';
             const fill = el('span', 'notch-bar-fill');
             fill.style.width = `${Math.max(0, Math.min(100, row.percent || 0))}%`;
             track.append(fill); block.append(track);
           }
         } else if (item.type === 'stack') {
+          iconGap = trayTypographyApi.iconGap(20);
           block.classList.add('notch-stack');
           block.style.alignItems = item.alignment === 'left' ? 'flex-start' : 'flex-end';
           item.rows.forEach((row, i) => block.append(notchText(item, row, `${item.id}:${i}:${JSON.stringify(row.source || row.selection?.source)}`, used)));
         } else block.append(notchText(item, item, `${item.id}:${item.period}:${JSON.stringify(item.source)}`, used));
         const field = mark ? el('span', 'notch-summary-field') : block;
-        if (mark) field.append(mark, block);
+        if (mark) {
+          if (iconGap !== undefined) field.style.gap = `${iconGap}px`;
+          field.append(mark, block);
+        }
         parts.push(field);
       }
       const allocation = allocateNotchSummary(payload.summary?.items || [], payload.geometry.gapWidth > 0);

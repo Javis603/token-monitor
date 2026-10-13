@@ -14091,7 +14091,7 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
       ? 'app'
       : trayLayoutApi.preferredRowProvider(rows, preferredIndex);
     const iconSize = h;
-    const iconGap = Math.max(2, Math.round(h * 0.08));
+    const iconGap = window.TokenMonitorTrayTypography.iconGap(h);
     const fontSize = Math.max(8, Math.round(h * 0.43));
     const font = trayTextCanvasFont(item, fontSize, 600);
     const horizontalScale = trayTextHorizontalScale(item);

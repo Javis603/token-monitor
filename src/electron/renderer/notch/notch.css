@@ -18,8 +18,8 @@ html.notch-black .edge-dock-shape-line { stroke: transparent; }
 .notch-text-layout { display: inline-block; flex: 0 0 auto; }
 .notch-text-run { display: inline-block; width: max-content; white-space: nowrap; vertical-align: bottom; transform-origin: left center; overflow: hidden; text-overflow: ellipsis; }
 .notch-text-run.is-unavailable { color: rgba(var(--overlay-rgb), .32); }
-.notch-bars { flex-direction: column; gap: 3px; }
-.notch-bar { width: 42px; height: 4px; background: rgba(var(--overlay-rgb), .18); border-radius: 2px; overflow: hidden; }
+.notch-bars { flex-direction: column; }
+.notch-bar { background: rgba(var(--overlay-rgb), .18); overflow: hidden; }
 .notch-bar-fill { display: block; height: 100%; background: var(--text); border-radius: inherit; transition: width 420ms cubic-bezier(.2,.8,.2,1); }
 .notch-body { position: absolute; top: var(--notch-header-height, 32px); left: 0; width: 100%; height: var(--notch-body-height, 0px); overflow: hidden; opacity: var(--notch-content-progress, 0); }
 .notch-providers { height: 100%; zoom: var(--notch-zoom, 1); min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 28px; box-sizing: border-box; scrollbar-width: none; }
