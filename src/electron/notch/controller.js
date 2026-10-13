@@ -9,6 +9,8 @@ const { readMacMenuWindows } = require('./menuBar');
 const { edgeDockBackdropMode, MAC_BACKDROP_LIQUID_GLASS } = require('../macBackdropMode');
 const { EDGE_DOCK_TIMING, edgeDockCorridorBounds, edgeDockPollDelay, edgeDockScale, normalizeEdgeDockCustomScale, EDGE_DOCK_METRICS: M } = require('../edgeDock/geometry');
 
+const FULL_SCREEN_POLL_MS = 500;
+
 function normalizeNotchStyle(value) {
   return ['black', 'inherit', 'default', 'liquid-glass'].includes(value) ? value : 'black';
 }
@@ -100,7 +102,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const previous = fullScreen;
     if (settings().notchHideSummaryInFullScreen === false) {
       fullScreen = false; fullScreenCheckedAt = -Infinity;
-    } else if (String(display.id) !== fullScreenDisplayId || now - fullScreenCheckedAt >= 500) {
+    } else if (String(display.id) !== fullScreenDisplayId || now - fullScreenCheckedAt >= FULL_SCREEN_POLL_MS) {
       fullScreenDisplayId = String(display.id); fullScreenCheckedAt = now;
       try {
         const focused = BrowserWindow.getFocusedWindow?.();
@@ -488,11 +490,15 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     }, delay);
   }
 
+  function resetShellMotion() {
+    motion = commands = frame = null; progress = 0; layoutKey = '';
+    viewport = viewportDisplayId = null;
+  }
+
   function destroyWindows() {
-    motion = null; refreshInFlight = null;
+    resetShellMotion(); refreshInFlight = null;
     summaryMeasured = false; summaryMeasurement = null; settleSummary = false;
-    hideDetail(); commands = frame = null; progress = 0; layoutKey = ''; viewport = null; rows = [];
-    viewportDisplayId = null;
+    hideDetail(); rows = [];
     for (const s of surfaces) {
       disposeGlass(s);
       const win = windows[s];
@@ -638,8 +644,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     setLocked(value) {
       locked = value === true;
       if (locked) {
-        refreshEpoch++; motion = null; expanded = false; progress = 0; layoutKey = '';
-        commands = frame = null; viewport = viewportDisplayId = null;
+        refreshEpoch++; expanded = false;
+        resetShellMotion();
         clearTimeout(pollTimer); pollTimer = null;
       } else if (running) {
         invalidateGeometry();

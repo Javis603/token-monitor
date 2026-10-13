@@ -1591,6 +1591,32 @@ test('Notch refresh validates its own action and shares one request with retry a
   controller.dispose(); assert.equal(ipcMain.handlers.has('topNotch:refreshLimits'), false);
 });
 
+test('Notch subscriptions isolate channels, unsubscribe and preserve callback errors', () => {
+  let api;
+  const ipcRenderer = new EventEmitter();
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/notch/preload.js'), 'utf8');
+  vm.runInNewContext(source, { require: () => ({ ipcRenderer,
+    contextBridge: { exposeInMainWorld: (_name, value) => { api = value; } }
+  }) });
+  for (const [method, channel] of [['onAnimate', 'animate'], ['onMotion', 'motion'], ['onRender', 'render']]) {
+    const received = [], payload = { id: 1 };
+    const name = `topNotch:${channel}`;
+    const unsubscribe = api[method](value => received.push(value));
+    ipcRenderer.emit('edgeDock:render', {}, payload);
+    assert.equal(received.length, 0);
+    ipcRenderer.emit(name, {}, payload);
+    assert.equal(received[0], payload);
+    unsubscribe();
+    assert.equal(ipcRenderer.listenerCount(name), 0);
+    ipcRenderer.emit(name, {}, payload);
+    assert.equal(received.length, 1);
+    const error = new Error('Callback failed');
+    const stop = api[method](() => { throw error; });
+    assert.throws(() => ipcRenderer.emit(name, {}, payload), value => value === error);
+    stop();
+  }
+});
+
 test('Notch and the side dock share refresh feedback rendering and retain independent settings', async () => {
   const result = { ok: true };
   let refreshes = 0;
