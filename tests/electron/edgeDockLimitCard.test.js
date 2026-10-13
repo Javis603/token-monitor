@@ -31,7 +31,7 @@ const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/pre
 const { parseStepfunUsage } = require('../../src/shared/providers/stepfun/limits');
 const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../src/shared/providers/factory/limits');
 const { aggregateLimits, normalizeLimitProvider } = require('../../src/shared/limits/core');
-const { fetchWorkbuddyLimits } = require('../../src/shared/providers/workbuddy/limits');
+const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
 
 const root = path.join(__dirname, '../..');
 
@@ -189,6 +189,91 @@ function dockView(appearance = {}, overrides = {}) {
     ...overrides
   });
 }
+
+function limitsSubscriptionPool(localProviders, aggregateProviders) {
+  const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+  const state = { mode: 'sync', settings: { deviceId: 'local' }, stats: {
+    devices: [{ deviceId: 'local', limits: { providers: localProviders } }],
+    limits: { providers: aggregateProviders }
+  } };
+  const context = vm.createContext({ state, accountIdentityApi });
+  for (const name of ['localDeviceLimitsProviders', 'limitProvidersForSubscriptions']) {
+    vm.runInContext(balancedCall(app, `function ${name}() {`), context);
+  }
+  return vm.runInContext('limitProvidersForSubscriptions()', context);
+}
+
+for (const realm of ['cn', 'ai']) for (const reason of ['', 'encrypted']) {
+  test(`WorkBuddy ${realm} totals ignore ${reason || 'unsigned'} local placeholders without removing local hints`, async () => {
+    const now = Date.parse('2026-10-12T00:10:00Z');
+    const at = new Date(now).toISOString();
+    const healthy = ['remote-a', 'remote-b'].map((user) => normalizeLimitProvider({
+      provider: 'workbuddy', accountKey: workbuddyAccountKey('', user, '', '', realm),
+      status: 'ok', region: realm, updatedAt: at,
+      windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }]
+    }));
+    for (const localRealm of ['cn', 'ai']) {
+      const placeholder = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true,
+        workbuddyRealm: localRealm, workbuddyLocalSessionReason: reason }, { env: {}, now: () => now });
+      const summary = aggregateLimits([
+        { deviceId: 'remote', limits: { updatedAt: at, providers: healthy } },
+        { deviceId: 'local', limits: { updatedAt: at, providers: [placeholder] } }
+      ], 0, now);
+      assert.equal(summary.providers.length, 2);
+      const pool = limitsSubscriptionPool([placeholder], summary.providers);
+      assert.equal(pool.length, 3, 'the global pool still includes local discovery');
+      const view = dockView({ workbuddyQuotaTotalEnabled: true }, { subscriptionAccounts: () => pool });
+      assert.equal(view.workbuddyCombinedProvider(summary.providers).windows[0].remaining, 160);
+      const group = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', summary.providers, '#12B7F5');
+      assert.equal(group.children[1].className, 'limit-windows', localRealm);
+      assert.match(group.children[1].text, /160/);
+      assert.equal(group.find('limit-account-list').children.length, 2);
+      assert.equal(pool.length, 3, 'rendering does not mutate the observed pool');
+      const off = dockView({ workbuddyQuotaTotalEnabled: false }, { subscriptionAccounts: () => pool })
+        .renderLimitProviderGroup('workbuddy', 'WorkBuddy', summary.providers, '#12B7F5');
+      assert.equal(off.children[1].className, 'limit-account-list');
+      const hint = view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', placeholder, '#12B7F5');
+      assert.ok(hint.text.includes(reason ? 'Encrypted by app' : 'Not signed in'), hint.text);
+    }
+  });
+}
+
+test('WorkBuddy total completeness retains real failed, incomplete and hidden accounts beside a placeholder', async () => {
+  const healthy = ['a', 'b'].map((accountKey) => normalizeLimitProvider({
+    provider: 'workbuddy', accountKey, status: 'ok', region: 'cn',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }]
+  }));
+  const placeholder = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true }, { env: {} });
+  const failed = (extra = {}) => normalizeLimitProvider({
+    provider: 'workbuddy', accountKey: 'c', status: 'notConfigured', region: 'cn', windows: [], ...extra
+  });
+  const siblings = [
+    ['missing credentials', failed()],
+    ['unauthorized', failed({ status: 'unauthorized' })],
+    ['unavailable', failed({ status: 'unavailable' })],
+    ['known encrypted identity', failed({ actionRequired: 'appSessionEncrypted' })],
+    ['missing key', failed({ accountKey: '' })],
+    ['missing quota', failed({ status: 'ok' })],
+    ['stale', { ...healthy[0], accountKey: 'c', stale: true }],
+    ['unlimited', { ...healthy[0], accountKey: 'c', windows: [
+      { kind: 'billing', metric: 'credits', currency: 'CREDITS', detail: 'unlimited', used: 20 }
+    ] }],
+    ['healthy hidden', { ...healthy[0], accountKey: 'c' }]
+  ];
+  for (const [name, sibling] of siblings) {
+    assert.equal(limitPresentationApi.isWorkbuddyPlaceholder(sibling), false, name);
+    const pool = limitsSubscriptionPool([placeholder, sibling], healthy);
+    assert.equal(pool.length, 4, name);
+    const view = dockView({ workbuddyQuotaTotalEnabled: true }, { subscriptionAccounts: () => pool });
+    const hidden = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', healthy, '#12B7F5');
+    assert.equal(hidden.children[1].className, 'limit-account-list', name);
+    if (name !== 'healthy hidden') {
+      const drawn = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', [...healthy, sibling], '#12B7F5');
+      assert.equal(drawn.children[1].className, 'limit-account-list', `${name} drawn`);
+    }
+    assert.equal(pool.length, 4, 'real identities and local hints remain in the global pool');
+  }
+});
 
 test('Limits group counts only genuine accounts when both credentials are unavailable', async () => {
   const now = Date.parse('2026-10-12T00:10:00Z');

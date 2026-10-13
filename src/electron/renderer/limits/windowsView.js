@@ -2423,7 +2423,8 @@
       // Dock visibility/reporting filters may omit a failed or unlimited
       // sibling. A total is eligible only when this group covers the complete
       // known identity pool supplied beside the drawn rows.
-      const known = subscriptionAccounts().filter((account) => account?.provider === 'workbuddy');
+      const known = subscriptionAccounts().filter((account) => account?.provider === 'workbuddy'
+        && !presentationApi.isWorkbuddyPlaceholder(account));
       const drawnKeys = new Set(providers.map((account) => account.accountKey));
       const complete = known.every((account) => account.accountKey && drawnKeys.has(account.accountKey));
       const combined = complete ? workbuddyCombinedProvider(providers) : null;
