@@ -152,6 +152,8 @@ Renderer reads and full pushes adopt the same stamped snapshot used by subsequen
 
 ## Data flow contract
 
+The Node Hub can batch device persistence with `persistIntervalMs` / `TOKEN_MONITOR_PERSIST_INTERVAL_MS`. The default `0` preserves synchronous upload saves; a positive interval saves the latest records at a fixed deadline after the first pending upload, without delaying API/SSE updates. Saves use compact JSON and atomic replacement of the existing file. Device deletion, subscriptions, shared settings and title policies persist immediately and consume pending uploads; their existing rollback behavior is preserved. Startup title-permission cleanup also persists immediately. `stop()` drains HTTP requests and saves pending records; the standalone process calls it on SIGINT/SIGTERM. Abrupt termination can lose updates since the last save, and file readers lag live API data by at most the save interval.
+
 The Hub stores normalized device records (`normalizeDeviceRecord`) and aggregates on read (`aggregateDevices`). `DeviceState` composes the wire record from usage, the runtime envelope and limits: limits-only updates keep the usage `updatedAt`, and cold-start previews wait for a complete usage baseline. `collectUsageOnce()` owns the usage portion; `docs/API.md` documents the full contract, which the Worker shares exactly. Neither Hub needs provider credentials.
 
 Settings keys, env vars, CLI flags, Hub endpoints and this wire shape have external users: treat changes as breaking and plan the migration.
