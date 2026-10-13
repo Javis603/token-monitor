@@ -46,6 +46,14 @@ TOKEN_MONITOR_DEVICE_ID=build-server
 
 The agent reads `.env` from the checkout root, wherever it is started from.
 
+### Title-sync state and migration
+
+Session-title sync is off by default and requires opt-in on both the Hub and agent. The agent uses `TOKEN_MONITOR_SYNC_SESSION_TITLES=1` or `--sync-session-titles`; CLI/env consent is a fresh declaration for the configured destination on every launch, independent of the widget's title-display preference. See the [title-sync API](API.md#put-apisynctitlesdeviceid) for the protocol.
+
+The agent keeps private revocation state, including the credentials needed to clean up old destinations, in `agent-sync-credentials.json` in its state directory (`TOKEN_MONITOR_SHARED_DIR` overrides the default). Keep that directory across restarts and connection changes; use a separate directory for each independent agent deployment. Offline or unauthorized cleanup stays pending and retries on later uploads. A pending entry for the same Hub URL/device prevents new title admission, but basic usage still uploads without titles. `--dry-run` performs no title negotiation or journal access.
+
+Before deleting or relocating this state, stop the resident agent, then run `npm run agent:once -- --sync-session-titles=false` with its old Hub URL, credentials, Device ID and state directory. Let cleanup finish; pending-cleanup or journal warnings mean the state must be kept for retry. Alternatively, delete the old device on its Hub. An upgrade from an agent that predates this journal cannot discover historical destinations: remove those old devices manually. Revocation removes active stored titles, not exported copies or backups.
+
 ## Verify
 
 Print the summary the agent would send, without posting it to the hub:
@@ -91,6 +99,8 @@ npm ci
 Then start it again. The next start fetches the pinned tokscale build if it changed.
 
 ## Uninstall
+
+Before removing the state directory, complete [title-sync cleanup](#title-sync-state-and-migration) if this agent has ever shared titles. Deleting the local journal alone does not revoke titles on old Hubs.
 
 Stop and remove the service, delete the checkout, and delete the agent's state directory: `~/.config/Token Monitor/` on Linux, `~/Library/Application Support/Token Monitor/` on macOS, `%APPDATA%\Token Monitor\` on Windows (or `TOKEN_MONITOR_SHARED_DIR` if you set it). On a machine that also has the widget installed, this is the widget's data directory too. tokscale keeps its settings and pricing cache in `%APPDATA%\tokscale\` on Windows and `~/.config/tokscale/` elsewhere; delete it too unless you also use the tokscale CLI. To remove the device from the dashboard, delete it from a connected widget's device list.
 

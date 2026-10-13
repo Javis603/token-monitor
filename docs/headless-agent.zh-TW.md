@@ -46,6 +46,14 @@ TOKEN_MONITOR_DEVICE_ID=build-server
 
 無論從哪個目錄啟動，agent 都會讀取 checkout 根目錄下的 `.env`。
 
+### 標題同步狀態與遷移
+
+工作階段標題同步預設關閉，需要分別在 Hub 和 agent 上開啟。agent 使用 `TOKEN_MONITOR_SYNC_SESSION_TITLES=1` 或 `--sync-session-titles`；每次啟動時，CLI/環境變數都會對目前目標重新聲明同意，與小工具的標題顯示偏好獨立。協定見[標題同步 API](API.md#put-apisynctitlesdeviceid)。
+
+agent 將私有撤銷狀態保存在狀態目錄中的 `agent-sync-credentials.json`，其中包含清理舊目標所需的憑證（`TOKEN_MONITOR_SHARED_DIR` 可覆蓋預設目錄）。重新啟動或變更連線時應保留這個目錄；每個獨立部署的 agent 應使用各自的目錄。舊 Hub 離線或拒絕驗證時，清理會維持待處理，並在後續上傳時重試。同一 Hub URL/裝置仍有待處理項目時，不會重新啟用標題傳送，但基本用量仍會不帶標題上傳。`--dry-run` 不協商標題權限，也不存取該狀態檔。
+
+刪除或遷移這個狀態前，先停止常駐 agent，再使用原來的 Hub URL、憑證、裝置 ID 和狀態目錄執行 `npm run agent:once -- --sync-session-titles=false`，等待清理完成。如果仍有清理待處理或狀態檔警告，就應保留狀態以便重試。也可以直接在舊 Hub 上刪除舊裝置。從尚未使用此狀態檔的舊版 agent 升級時，程式無法找回歷史目標，需要手動刪除那些舊裝置。撤銷只會移除伺服器目前儲存的標題，無法刪除已匯出的副本或備份。
+
 ## 驗證
 
 印出 agent 將要傳送的摘要，但不傳送到 hub：
@@ -91,6 +99,8 @@ npm ci
 然後重新啟動。如果固定的 tokscale 版本有變動，下次啟動時會自動取得。
 
 ## 解除安裝
+
+如果這個 agent 曾經同步過標題，刪除狀態目錄前必須完成[標題同步清理](#標題同步狀態與遷移)。只刪除本機狀態檔，不會撤銷舊 Hub 上的標題。
 
 停止並移除服務，刪除 checkout，再刪除 agent 的狀態目錄：Linux 為 `~/.config/Token Monitor/`，macOS 為 `~/Library/Application Support/Token Monitor/`，Windows 為 `%APPDATA%\Token Monitor\`（若設定了 `TOKEN_MONITOR_SHARED_DIR` 則為該目錄）。如果這台機器也裝了小工具，這同時也是小工具的資料目錄。tokscale 的設定與價格快取位於 `%APPDATA%\tokscale\`（Windows）或 `~/.config/tokscale/`（其他系統）；除非你也在使用 tokscale CLI，否則一併刪除。要把裝置從面板中移除，請在已連線小工具的裝置清單中刪除它。
 
