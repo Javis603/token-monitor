@@ -18,7 +18,7 @@ function notchGeometry(display, native, shape = 'auto') {
     && Math.abs(rect.size.height - height) <= 1;
   const notched = Boolean(validRect(frame) && Math.abs(frame.size.width - bounds.width) <= 1 && Math.abs(frame.size.height - bounds.height) <= 1
     && topBand(left) && topBand(right) && height > 0 && height < bounds.height / 4
-    && left?.size?.width > 0 && right?.size?.width > 0 && width > 0
+    && width > 0
     && gapLeft >= frame.origin.x && gapRight <= frame.origin.x + frame.size.width);
   const geometry = {
     notched,

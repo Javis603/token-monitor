@@ -36,8 +36,7 @@
     const refreshItem = { type: 'action', action: 'refresh' };
     const idFor = (item) => item.type === 'action' ? 'action:refresh' : itemsApi.itemId(item);
     const refreshKey = itemsKey === 'notchItems' ? 'notchRefreshEnabled' : 'edgeDockRefreshEnabled';
-    const allowsRefresh = itemsKey === 'edgeDockItems' || itemsKey === 'notchItems';
-    const refreshEnabled = () => allowsRefresh && getSettings()?.[refreshKey] === true;
+    const refreshEnabled = () => getSettings()?.[refreshKey] === true;
     let drag = null;
     let renderedSignature = '';
 
@@ -188,7 +187,7 @@
       section('settings.edgeDock.addSessions', present.has(itemsApi.itemId({ type: 'stat', metric: itemsApi.SESSIONS_METRIC }))
         ? []
         : [{ type: 'stat', metric: itemsApi.SESSIONS_METRIC, runningOnly: false, groupBy: 'none' }]);
-      if (allowsRefresh) section('settings.edgeDock.addActions', refreshEnabled() ? [] : [refreshItem]);
+      section('settings.edgeDock.addActions', refreshEnabled() ? [] : [refreshItem]);
       if (!menu.childElementCount) menu.append(el('div', 'edge-dock-composer-empty', t('settings.edgeDock.nothingToAdd')));
       return menu;
     }
@@ -429,7 +428,7 @@
         reset.addEventListener('click', () => {
           ui.selected = '';
           ui.menuOpen = false;
-          void save({ [itemsKey]: null, ...(allowsRefresh ? { [refreshKey]: false } : {}) });
+          void save({ [itemsKey]: null, [refreshKey]: false });
         });
         actions.append(reset);
       }

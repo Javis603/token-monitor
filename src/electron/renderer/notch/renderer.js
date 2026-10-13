@@ -207,7 +207,7 @@
       const offset = payload.geometry.notched ? payload.geometry.gapOffset : (width - payload.geometry.gapWidth) / 2;
       head.style.gridTemplateColumns = `${offset}px ${payload.geometry.gapWidth}px ${width - offset - payload.geometry.gapWidth}px`;
       head.style.setProperty('--notch-shoulder', `${payload.geometry.shoulder}px`);
-      head.style.setProperty('--notch-summary-zoom', payload.geometry.summaryZoom ?? Math.min(Number(payload.appearance.zoomFactor) || 1, (payload.geometry.height - 8) / 20));
+      head.style.setProperty('--notch-summary-zoom', payload.geometry.summaryZoom);
       head.style.setProperty('--notch-ring-size', `${payload.geometry.summaryRingSize || 28}px`);
       head.querySelector('.notch-gap').style.width = `${payload.geometry.gapWidth}px`;
     }
@@ -567,7 +567,7 @@
         const restingRight = geometry.headerX + geometry.headerWidth - geometry.shoulder - 8;
         // The same value positions the summary; reading computed style after the
         // shape writes would force a style update on every animation frame.
-        const summaryZoom = Number(geometry.summaryZoom) || Math.min(Number(state.payload.appearance?.zoomFactor) || 1, (geometry.height - 8) / 20);
+        const summaryZoom = geometry.summaryZoom;
         // Anchor the outer content edges to equal insets. Different glyph widths
         // cannot alter the mirrored margins, including interrupted motion.
         left.style.transform = `translateX(${((frame.summaryEdges?.left ?? restingLeft) - restingLeft + (frame.summaryIconInset || 0) - (Number(header.dataset.notchIconInset) || 0)) / summaryZoom}px)`;
