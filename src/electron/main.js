@@ -3029,7 +3029,7 @@ function rendererAllTimeSessions(stats) {
     const complete = completeLocalSyncStats(stats);
     const hubSnapshot = snapshotLocalDevices.get(stats);
     const sessions = hubSnapshot
-      ? mergedLocalAllTimeSessions(complete.periods, materializeActivity(hubSnapshot.localDevice))
+      ? mergedLocalAllTimeSessions(complete.periods, materializeActivity(hubSnapshot.localDevice, hubSnapshot.nowMs))
       : complete.periods?.allTime?.sessions || {};
     return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, aliases, { grouping });
   });
@@ -4530,7 +4530,7 @@ function injectLocalDeviceStatus(stats) {
     const activity = localActivityPatch(lastCollectedDevice);
     if (activity) stats = projectLocalActivity(stats, activity);
   }
-  if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
+  if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice, nowMs: Date.now() });
   return stats;
 }
 
@@ -4767,7 +4767,7 @@ function publishLocalSessionActivity(patch) {
   latestStats = projectLocalActivity(previous, patch);
   const localSnapshot = snapshotLocalDevices.get(previous);
   if (localSnapshot) snapshotLocalDevices.set(latestStats, {
-    ...localSnapshot, localDevice: applyActivityPatch(localSnapshot.localDevice, patch)
+    ...localSnapshot, nowMs: Date.now(), localDevice: applyActivityPatch(localSnapshot.localDevice, patch)
   });
   if (localStats === previous) localStats = latestStats;
   const snapshot = rendererSnapshots.updateActivity(previous, latestStats);

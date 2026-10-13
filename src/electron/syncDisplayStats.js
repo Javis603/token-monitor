@@ -79,24 +79,26 @@ function withoutRawAllTimeSessions(record) {
   return stripped;
 }
 
-function normalizedLocalSummary(localDevice) {
-  let normalized = normalizedLocalSummaries.get(localDevice);
-  if (!normalized) {
-    normalized = normalizeDeviceRecord(withoutRawAllTimeSessions(localDevice));
-    normalizedLocalSummaries.set(localDevice, normalized);
+// Activity acceptance depends on the snapshot clock as well as the record.
+// A later snapshot may accept an observation that an older recipe must reject.
+function normalizedLocalSummary(localDevice, { nowMs = Date.now() } = {}) {
+  let cached = normalizedLocalSummaries.get(localDevice);
+  if (!cached || cached.nowMs !== nowMs) {
+    cached = { nowMs, value: normalizeDeviceRecord(withoutRawAllTimeSessions(localDevice), { nowMs }) };
+    normalizedLocalSummaries.set(localDevice, cached);
   }
-  return normalized;
+  return cached.value;
 }
 
-function normalizedLocalRecord(localDevice) {
-  let normalized = normalizedLocalRecords.get(localDevice);
-  if (!normalized) {
-    const summary = normalizedLocalSummary(localDevice);
-    const allTime = normalizePeriod(rawAllTime(localDevice), { projectsEnabled: summary.projectsEnabled !== false });
-    normalized = { ...summary, periods: { ...summary.periods, allTime } };
-    normalizedLocalRecords.set(localDevice, normalized);
+function normalizedLocalRecord(localDevice, { nowMs = Date.now() } = {}) {
+  let cached = normalizedLocalRecords.get(localDevice);
+  if (!cached || cached.nowMs !== nowMs) {
+    const summary = normalizedLocalSummary(localDevice, { nowMs });
+    const allTime = normalizePeriod(rawAllTime(localDevice), { projectsEnabled: summary.projectsEnabled !== false, nowMs });
+    cached = { nowMs, value: { ...summary, periods: { ...summary.periods, allTime } } };
+    normalizedLocalRecords.set(localDevice, cached);
   }
-  return normalized;
+  return cached.value;
 }
 
 const summaryRecords = new WeakMap();
@@ -124,11 +126,13 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     .concat(localDevice);
   const hubStaleAfterMs = nonNegativeNumber(hubStats?.staleAfterMs);
   const hasHubStaleAfterMs = hubStaleAfterMs !== null;
-  const normalize = (record) => (record === localDevice ? normalizedLocalRecord(localDevice) : normalizeDeviceRecord(record));
+  const nowMs = options.nowMs ?? Date.now();
+  const clock = { nowMs };
+  const normalize = (record) => (record === localDevice ? normalizedLocalRecord(localDevice, clock) : normalizeDeviceRecord(record, clock));
   const summarize = (record) => (record === localDevice
-    ? normalizedLocalSummary(localDevice)
-    : withoutAllTimeSessions(normalizeDeviceRecord(record)));
-  const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs, {
+    ? normalizedLocalSummary(localDevice, clock)
+    : withoutAllTimeSessions(normalizeDeviceRecord(record, clock)));
+  const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, nowMs, {
     normalizeRecord: options.allTimeSessions === false ? summarize : normalize
   });
 
@@ -190,7 +194,7 @@ const localActivity = new WeakMap();
 function completeEntry(entry) {
   let result = completedStats.get(entry);
   if (!result) {
-    result = materializeActivity(entry.compose());
+    result = materializeActivity(entry.compose(), entry.nowMs);
     completedStats.set(entry, result);
   }
   return result;
@@ -210,10 +214,10 @@ function projectLocalActivity(stats, patch, now = Date.now()) {
     now - Date.parse(row.liveActivity.observedAt) < 30_000).map((row) => [`${row.client}:${row.sessionId}`, row]));
   for (const row of patch.observations) observations.set(`${row.client}:${row.sessionId}`, row);
   const merged = { ...patch, observations: [...observations.values()] };
-  const next = applyActivityPatch(stats, patch);
+  const next = applyActivityPatch(stats, patch, now);
   const base = prior?.base || completions.get(stats);
   localActivity.set(next, { base, patch: merged });
-  if (base) completions.set(next, { compose: () => applyActivityPatch(completeEntry(base), merged) });
+  if (base) completions.set(next, { nowMs: now, compose: () => applyActivityPatch(completeEntry(base), merged, now) });
   return next;
 }
 
@@ -224,7 +228,7 @@ function composeLocalSyncSummary(hubStats, localDevice, options = {}) {
   const summary = composeLocalSyncStats(hubStats, localDevice, { nowMs, allTimeSessions: false });
   if (summary && summary !== hubStats) {
     const updatedAt = summary.updatedAt;
-    completions.set(summary, { compose: () => ({ ...composeLocalSyncStats(hubStats, localDevice, { nowMs }), updatedAt }) });
+    completions.set(summary, { nowMs, compose: () => ({ ...composeLocalSyncStats(hubStats, localDevice, { nowMs }), updatedAt }) });
   }
   return summary;
 }
@@ -237,7 +241,7 @@ function composeLocalOnlySummary(localDevice, finish, options = {}) {
   const compose = (normalizeRecord) => finish(aggregateDevices([localDevice], 0, nowMs, { normalizeRecord }));
   const summary = compose(normalizedLocalSummary);
   const updatedAt = summary.updatedAt;
-  completions.set(summary, { compose: () => ({ ...compose(normalizedLocalRecord), updatedAt }) });
+  completions.set(summary, { nowMs, compose: () => ({ ...compose(normalizedLocalRecord), updatedAt }) });
   return summary;
 }
 

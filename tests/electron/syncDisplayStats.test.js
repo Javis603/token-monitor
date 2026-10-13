@@ -545,7 +545,7 @@ for (const mode of ['local', 'sync']) test(`${mode} TOTAL eviction preserves all
 });
 
 test('local collector completion retains published native and History metadata across eviction and setting changes', t => {
-  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-07-16T12:00:00Z') });
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 6, 16, 12) });
   const vm = require('node:vm');
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const start = source.indexOf('      seedInitialLimitProviders(summary);', source.indexOf('function startLocalCollector('));
@@ -580,3 +580,50 @@ test('local collector completion retains published native and History metadata a
   clearLocalStatsCaches();
   assert.deepEqual(completeLocalSyncStats(old), expected);
 });
+
+for (const mode of ['local', 'sync']) for (const form of ['embedded', 'overlay']) {
+  test(`${mode} ${form} future activity stays rejected when a TOTAL snapshot is rebuilt`, t => {
+    clearLocalStatsCaches();
+    const clock = Date.parse('2026-07-16T12:00:00Z');
+    t.mock.timers.enable({ apis: ['Date'], now: clock + 5000 });
+    const reading = { state: 'running', observedAt: new Date().toISOString() };
+    const session = { client: 'claude', sessionId: 'future-peer', totalTokens: 10,
+      lastUsedAt: new Date(clock - 3600000).toISOString(), ...(form === 'embedded' ? { liveActivity: reading } : {}) };
+    const period = { totalTokens: 10, sessions: { 'claude:future-peer': session },
+      ...(form === 'overlay' ? { sessionActivity: { 'claude:future-peer': reading } } : {}) };
+    const raw = device('remote', 10, { today: period, month: period, allTime: period });
+    // Produce the remote payload through the real Hub path on its faster clock.
+    const hub = aggregateDevices([raw], 0, Date.now());
+    assert.equal(hub.periods.allTime.sessions['claude:future-peer'].liveActivity.state, 'running');
+    t.mock.timers.setTime(clock);
+    const local = mode === 'local' ? { ...raw, deviceId: 'local' } : device('local', 1);
+    const summary = mode === 'local' ? composeLocalOnlySummary(local, x => x) : composeLocalSyncSummary(hub, local);
+    const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+    const start = source.indexOf('function rendererAllTimeSessions(');
+    const end = source.indexOf('\nlet codexPresentationPendingSince', start);
+    const context = { settings: {}, completeLocalSyncStats,
+      allTimeSessionsCache: require('../../src/electron/statsPublisher').createStatsPresentationCache({ limit: 2 }),
+      snapshotLocalDevices: new WeakMap(), projectModelAliasSessions: (_stats, sessions) => sessions,
+      mergedLocalAllTimeSessions: require('../../src/shared/localSessions').mergedLocalAllTimeSessions,
+      materializeActivity: require('../../src/shared/sessionActivityProjection').materializeActivity };
+    if (mode === 'sync') context.snapshotLocalDevices.set(summary, { localDevice: local, nowMs: clock });
+    require('node:vm').runInNewContext(source.slice(start, end), context);
+    const { sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
+    const first = context.rendererAllTimeSessions(summary);
+    const rows = sessions => sessionRowsForPeriod({ ...summary.periods.allTime, sessions }, { now: new Date() });
+    assert.equal(rows(first).find(row => row.key === 'session:claude:future-peer').activityState, 'idle');
+    for (let i = 0; i < 3; i++) context.rendererAllTimeSessions(composeLocalOnlySummary(device(`other-${i}`, i + 1), x => x));
+    t.mock.timers.tick(6000);
+    const rebuilt = context.rendererAllTimeSessions(summary);
+    assert.notEqual(rebuilt, first, 'the old derived cache really was evicted');
+    assert.deepEqual(rebuilt, first, 'rebuild must not admit an observation rejected by the original clock');
+    assert.equal(rows(rebuilt).find(row => row.key === 'session:claude:future-peer').activityState, 'idle');
+    const fresh = mode === 'local' ? composeLocalOnlySummary(local, x => x) : composeLocalSyncSummary(hub, local);
+    const freshRows = context.rendererAllTimeSessions(fresh);
+    assert.equal(rows(freshRows).find(row => row.key === 'session:claude:future-peer').activityState, 'running',
+      'a new snapshot evaluates the same input using its own later clock');
+    clearLocalStatsCaches();
+    context.allTimeSessionsCache.clear();
+    assert.deepEqual(context.rendererAllTimeSessions(summary), first, 'new evaluations must not poison an older recipe');
+  });
+}

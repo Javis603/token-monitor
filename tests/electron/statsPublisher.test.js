@@ -209,7 +209,7 @@ test('the pulled list completes its snapshot with the local record that snapshot
   assert.doesNotMatch(pull[1], /lastCollectedDevice/);
   assert.match(pull[1], /snapshotLocalDevices\.get\(stats\)/);
   const inject = main.match(/function injectLocalDeviceStatus\(stats\) \{([\s\S]*?)\n\}\n/);
-  assert.match(inject[1], /if \(mode !== 'local'\) snapshotLocalDevices\.set\(stats, \{ localDevice: lastCollectedDevice \}\);\s*return stats;\s*$/);
+  assert.match(inject[1], /if \(mode !== 'local'\) snapshotLocalDevices\.set\(stats, \{ localDevice: lastCollectedDevice, nowMs: Date\.now\(\) \}\);\s*return stats;\s*$/);
 });
 
 test('a snapshot stays addressable after newer ones are published', () => {

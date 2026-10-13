@@ -102,13 +102,13 @@
       return [key, linked];
     }));
   }
-  function activityEntries(summary, client, ids, includeLeased = true) {
+  function activityEntries(summary, client, ids, includeLeased = true, now = Date.now()) {
     const index = indexFor(summary);
     const selected = new Set(ids);
     if (includeLeased) for (const id of index.leased.get(client) || []) selected.add(id);
     const result = [];
     for (const id of selected) for (const location of locationsFor(summary, client, id)) {
-      const session = live.sessionWithActivity(periods(summary)[location.name], location.key);
+      const session = live.sessionWithActivity(periods(summary)[location.name], location.key, undefined, now);
       if (session && !live.isArchivedSession(session)) result.push({ ...location, session });
     }
     return result;
@@ -199,7 +199,7 @@
       .filter(([, row]) => isSessionActivityClient(row.client)));
     return { observations: [...observations.values()], nativeSessions };
   }
-  function applyActivityPatch(summary, patch) {
+  function applyActivityPatch(summary, patch, now = Date.now()) {
     if (!summary || !patch) return summary;
     const source = periods(summary);
     let result = summary;
@@ -209,8 +209,8 @@
       if (!isSessionActivityClient(row.client)) continue;
       const observation = live.normalizeLiveActivity(row.liveActivity);
       if (!observation) continue;
-      for (const { name, key, session } of activityEntries(summary, row.client, [row.sessionId], false)) {
-        if (!live.canReplaceLiveActivity(session.liveActivity, observation)) continue;
+      for (const { name, key, session } of activityEntries(summary, row.client, [row.sessionId], false, now)) {
+        if (!live.canReplaceLiveActivity(session.liveActivity, observation, now)) continue;
         if (session.liveActivity?.state === observation.state && session.liveActivity?.observedAt === observation.observedAt) continue;
         if (!maps.has(name)) maps.set(name, compactActivity(source[name], Date.parse(observation.observedAt)));
         maps.get(name)[key] = observation;
@@ -248,7 +248,7 @@
     return Object.values(summary.nativeSessions?.today || {}).some((row) =>
       isSessionActivityClient(row.client) && ['running', 'waiting'].includes(live.sessionActivityState(row)));
   }
-  function materializeActivity(summary) {
+  function materializeActivity(summary, now = Date.now()) {
     if (!summary) return summary;
     const source = periods(summary);
     let result = summary;
@@ -256,7 +256,7 @@
       const period = source[name];
       if (!period?.sessionActivity) continue;
       const sessions = { ...period.sessions };
-      for (const key of Object.keys(period.sessionActivity)) if (sessions[key]) sessions[key] = live.sessionWithActivity(period, key, sessions[key]);
+      for (const key of Object.keys(period.sessionActivity)) if (sessions[key]) sessions[key] = live.sessionWithActivity(period, key, sessions[key], now);
       const next = { ...period, sessions };
       delete next.sessionActivity;
       if (result === summary) result = summary.periods ? { ...summary, periods: { ...source } } : { ...summary };
