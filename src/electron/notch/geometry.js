@@ -73,10 +73,9 @@ function notchBounds(display, geometry, expanded, contentHeight = 180, slots = {
   return { x: Math.round(x), y: Math.round(geometry.y), width, height };
 }
 
-// Measure right-hand status-window clearance. Callers choose whether primary
-// content may exceed it; left-hand app-menu titles have no verified
-// permission-free geometry contract.
-function notchSummaryBudget(display, geometry, windows, minimum = 0, ownWindowIds = []) {
+// Measure physical-notch clearance from right-hand status windows. Left-hand
+// app-menu titles have no verified permission-free geometry contract.
+function notchSummaryBudget(display, geometry, windows, ownWindowIds = []) {
   if (!(geometry.gapWidth > 0) || !Array.isArray(windows)) return null;
   const gapRight = geometry.centerX + geometry.gapWidth / 2;
   const screenRight = display.bounds.x + display.bounds.width;
@@ -91,7 +90,7 @@ function notchSummaryBudget(display, geometry, windows, minimum = 0, ownWindowId
     right = Math.min(right, Math.max(gapRight, rect.x));
   }
   const available = Math.floor(right - gapRight - EDGE_DOCK_METRICS.screenMargin - 20);
-  return Math.max(0, minimum, available);
+  return Math.max(0, available);
 }
 
 function notchCommands(width, height, notched, expanded, notchHeight = 32, zoom = 1) {

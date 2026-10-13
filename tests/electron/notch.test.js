@@ -1067,21 +1067,21 @@ test('approach expansion follows EdgeDock drag suppression without changing dire
 });
 
 
-test('menu clearance constrains only extra content and ignores off-screen or tall status panels', () => {
+test('menu clearance bounds physical ears and ignores off-screen or tall status panels', () => {
   const geometry = notchGeometry(display, native);
   const icon = { id: 1, x: 894, y: 0, width: 24, height: 33 };
-  assert.equal(notchSummaryBudget(display, geometry, [icon], 37), 41);
-  assert.equal(notchSummaryBudget(display, geometry, [{ ...icon, x: 830 }], 37), 37, 'primary content takes precedence when clearance is insufficient');
+  assert.equal(notchSummaryBudget(display, geometry, [icon]), 41);
+  assert.equal(notchSummaryBudget(display, geometry, [{ ...icon, x: 830 }]), 0, 'the budget cannot exceed measured clearance');
   for (const ignored of [{ ...icon, x: 780, height: 117 }, { ...icon, y: 32 }, { ...icon, x: 1480 },
     { ...icon, y: -40 }, { ...icon, x: 100 }, { ...icon, width: NaN }]) {
-    assert.equal(notchSummaryBudget(display, geometry, [icon, ignored], 37), 41);
+    assert.equal(notchSummaryBudget(display, geometry, [icon, ignored]), 41);
   }
-  assert.equal(notchSummaryBudget(display, geometry, [{ ...icon, x: 850 }, icon], 17, [1]), 617, 'exclude the owned surface without excluding its tray icons by PID');
-  assert.equal(notchSummaryBudget(display, geometry, null, 37), null, 'failed sampling is not a measured empty menu');
-  assert.equal(notchSummaryBudget(display, notchGeometry(display, null, 'pill'), [icon], 37), null);
+  assert.equal(notchSummaryBudget(display, geometry, [{ ...icon, x: 850 }, icon], [1]), 617, 'exclude the owned surface without excluding its tray icons by PID');
+  assert.equal(notchSummaryBudget(display, geometry, null), null, 'failed sampling is not a measured empty menu');
+  assert.equal(notchSummaryBudget(display, notchGeometry(display, null, 'pill'), [icon]), null);
   const offset = { ...display, bounds: { ...display.bounds, x: -1470, y: -956 } };
   const shifted = { ...geometry, centerX: geometry.centerX - 1470, y: -956 };
-  assert.equal(notchSummaryBudget(offset, shifted, [{ ...icon, x: icon.x - 1470, y: -956 }], 37), 41);
+  assert.equal(notchSummaryBudget(offset, shifted, [{ ...icon, x: icon.x - 1470, y: -956 }]), 41);
 });
 
 test('menu window reader uses status level and numeric metadata and releases copied lists on success and failure', () => {
@@ -1128,7 +1128,6 @@ test('menu avoidance bounds all active summary fields and keeps the camera cente
   f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 17, right: 600, minimumLeft: 17, minimumRight: 37 } });
   let geometry = last(primary).geometry;
   assert.equal(geometry.summaryBudget, 41);
-  assert.equal(geometry.summaryOptionalBudget, 41);
   assert.equal(geometry.headerWidth, 301, 'raw widths above 220pt are budgeted, not silently mismeasured');
   assert.equal(geometry.gapOffset, (geometry.headerWidth - geometry.gapWidth) / 2);
   f.controller.poll(Date.now() + 1000);
@@ -1138,14 +1137,10 @@ test('menu avoidance bounds all active summary fields and keeps the camera cente
   assert.equal(reads, 2);
   geometry = last(primary).geometry;
   assert.equal(geometry.summaryBudget, 0, 'known occupied clearance also constrains the primary');
-  assert.equal(geometry.summaryConstrained, true);
-  assert.equal(geometry.summaryOptionalBudget, 0, 'optional fields cannot borrow the mandatory readout width');
   assert.equal(geometry.headerWidth, 219);
   windows = null;
   f.screen.emit('display-metrics-changed');
-  assert.equal(last(primary).geometry.summaryBudget, 37, 'failure retains the complete primary field');
-  assert.equal(last(primary).geometry.summaryOptionalBudget, 0, 'unknown clearance does not admit extra fields');
-  assert.equal(last(primary).geometry.summaryConstrained, false);
+  assert.equal(last(primary).geometry.summaryBudget, 625, 'unknown menu clearance falls back to the screen capacity');
 });
 
 
@@ -1158,19 +1153,17 @@ test('disabled menu avoidance retains full summary widths and stops menu samplin
   const primary = f.windows[0];
   f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 17, right: 300, minimumLeft: 17, minimumRight: 300 } });
   assert.equal(reads, 0);
-  assert.equal(last(primary).geometry.summaryBudget, null);
-  assert.equal(last(primary).geometry.summaryConstrained, false);
+  assert.equal(last(primary).geometry.summaryBudget, 625);
   assert.equal(last(primary).geometry.headerWidth, 819);
   f.preferences.notchAvoidMenuBar = true;
   f.controller.poll(Date.now() + 2500);
   assert.equal(reads, 1);
   assert.equal(last(primary).geometry.summaryBudget, 0);
-  assert.equal(last(primary).geometry.summaryConstrained, true);
   f.preferences.notchAvoidMenuBar = false;
   f.controller.sync();
   f.controller.poll(Date.now() + 5000);
   assert.equal(reads, 1, 'disabled avoidance performs no native menu reads');
-  assert.equal(last(primary).geometry.summaryBudget, null);
+  assert.equal(last(primary).geometry.summaryBudget, 625);
 });
 
 test('compact entries keep their complete summary and skip menu reads regardless of avoidance', (t) => {
@@ -1191,9 +1184,7 @@ test('compact entries keep their complete summary and skip menu reads regardless
       f.controller.poll(Date.now() + 2500);
       const geometry = last(primary).geometry;
       assert.equal(geometry.gapWidth, 0);
-      assert.equal(geometry.summaryConstrained, false);
-      assert.equal(geometry.summaryBudget, null);
-      assert.equal(geometry.summaryOptionalBudget, null);
+      assert.ok(geometry.summaryBudget > 1400, 'compact entries use the screen capacity');
       assert.equal(geometry.headerWidth, width, `${shape}: avoidance cannot change compact width`);
     }
     assert.equal(reads, 0);
@@ -1204,16 +1195,16 @@ test('switching entry shapes releases a hardware menu constraint and restores it
   let reads = 0;
   const f = fixture(t, {}, { readMenuWindows: () => { reads++; return [{ id: 7, x: 850, y: 0, width: 300, height: 32 }]; } });
   f.controller.setData(buildNotchData(stats(), [], { trayContent: 'tokens' }));
-  assert.equal(last(f.windows[0]).geometry.summaryConstrained, true);
+  assert.equal(last(f.windows[0]).geometry.summaryBudget, 0);
   f.preferences.notchShape = 'pill';
   f.controller.sync();
   f.controller.poll(Date.now() + 2500);
-  assert.equal(last(f.windows[0]).geometry.summaryBudget, null);
+  assert.ok(last(f.windows[0]).geometry.summaryBudget > 1400);
   assert.equal(reads, 1);
   f.preferences.notchShape = 'auto';
   f.controller.sync();
   f.controller.poll(Date.now() + 5000);
-  assert.equal(last(f.windows[0]).geometry.summaryConstrained, true);
+  assert.equal(last(f.windows[0]).geometry.summaryBudget, 0);
   assert.equal(reads, 2);
 });
 
@@ -1256,12 +1247,12 @@ test('summary clock preserves shared percent-reset headlines and updates without
   context.state.payload.summary = null;assert.equal(delay(), 0);
 });
 
-test('a single flexible account label uses the menu budget without inheriting its full width as a minimum', (t) => {
+test('a single custom label preserves shared formatting and uses the menu budget', (t) => {
   let reads = 0;
   const f = fixture(t, {}, { readMenuWindows: () => { reads += 1; return [{ id: 7, x: 894, y: 0, width: 24, height: 33 }]; } });
   const item = trayLayout.createTrayLayoutItem('customText');item.text = 'Long label '.repeat(4);
   const data = buildNotchData(stats(), [], { notchFollowTray: false, notchCustomLayout: { version: trayLayout.VERSION, items: [item] } });
-  assert.equal(data.summary.items[0].limitText, true);
+  assert.equal(data.summary.items[0].text, trayLayout.resolveTrayLayout(summaryLayout({ notchFollowTray: false, notchCustomLayout: { version: trayLayout.VERSION, items: [item] } }), stats()).items[0].text);
   f.controller.setData(data);assert.equal(reads, 1);
   const primary = f.windows[0];
   f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 0, right: 41, minimumLeft: 0, minimumRight: 0 } });
@@ -1694,11 +1685,11 @@ test('menu budgets apply only to physical notch ears', () => {
   const menu = { id: 91, x: 950, y: 0, width: 300, height: 32 };
   for (const shape of ['auto', 'notch', 'pill']) {
     const compact = notchGeometry(display, null, shape);
-    assert.equal(notchSummaryBudget(display, compact, [menu], 69), null);
+    assert.equal(notchSummaryBudget(display, compact, [menu]), null);
   }
-  assert.equal(notchSummaryBudget(display, notchGeometry(display, native, 'pill'), [menu], 69), null);
+  assert.equal(notchSummaryBudget(display, notchGeometry(display, native, 'pill'), [menu]), null);
   const hardware = notchGeometry(display, native);
-  assert.ok(notchSummaryBudget(display, hardware, [menu], 0) > 0);
+  assert.ok(notchSummaryBudget(display, hardware, [menu]) > 0);
 });
 
 test('camera-free renderer fits the display limit while reserving a complete primary readout before extra icons', () => {
@@ -1707,7 +1698,7 @@ test('camera-free renderer fits the display limit while reserving a complete pri
   const left = { minimum: 17, width: 300, children: [] }, right = { minimum: 40, width: 500 };
   let reported;
   const report = vm.runInNewContext(`${code}; reportNotchSlots`, {
-    state: { payload: { summary: {}, geometry: { gapWidth: 0, shoulder: 4, summaryWidthLimit: 100, summaryBudget: null }, appearance: { zoomFactor: 1 } } },
+    state: { payload: { summary: {}, geometry: { gapWidth: 0, shoulder: 4, summaryBudget: 76 }, appearance: { zoomFactor: 1 } } },
     fitNotchSlot: (slot, budget) => ({ minimum: slot.minimum, width: Math.max(slot.minimum, Math.min(slot.width, budget ?? Infinity)) }),
     lastNotchSlots: '', bridge: { reportNotchSize: (_height, slots) => { reported = slots; } }
   });
@@ -2242,19 +2233,55 @@ test('unsupported Notch selections do not activate shared dock work', () => {
 });
 
 
-test('a mandatory camera-side readout does not grant menu space to optional overflow', () => {
+test('summary fitting uses a hard budget, whole graphics and one ellipsis source', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
+  const code = source.slice(source.indexOf('function fitNotchSummaryItems('), source.indexOf('function fitNotchSlot('));
+  const fit = vm.runInNewContext(`${code}; fitNotchSummaryItems`);
+  const items = [{ width: 17, minimum: 17 }, { width: 98, minimum: 12 }, { width: 30, minimum: 12 }];
+  for (const budget of [0, 11, 12, 30, 65, 150, 200]) {
+    const result = fit(items, { budget, gap: 6, overflowWidth: 12, primary: 1 });
+    const width = result.visible.reduce((sum, i) => sum + result.widths[i], 0)
+      + Math.max(0, result.visible.length - 1) * 6 + (result.overflow ? 12 + (result.visible.length ? 6 : 0) : 0);
+    assert.ok(width <= budget);
+    assert.deepEqual(Array.from(result.visible), Array.from(result.visible).sort((a, b) => a - b));
+    if (result.visible.includes(0)) assert.equal(result.widths[0], 17, 'icons remain whole');
+    if (result.widths[1] < 98 && result.visible.includes(1)) assert.equal(result.overflow, false, 'text ellipsis replaces the group marker');
+  }
+  const narrow = fit(items, { budget: 65, gap: 6, overflowWidth: 12, primary: 1 });
+  assert.deepEqual(Array.from(narrow.visible), [1]);
+  assert.equal(narrow.widths[1], 65);
+  const roomy = fit(items, { budget: 150, gap: 6, overflowWidth: 12, primary: 1 });
+  assert.deepEqual(Array.from(roomy.visible), [0, 1]);
+  assert.equal(roomy.overflow, true);
+  const spacers = fit([{ width: 8, minimum: 8, spacer: true }], { budget: 20, gap: 6, overflowWidth: 12 });
+  assert.deepEqual(Array.from(spacers.visible), []);
+  assert.equal(spacers.overflow, false);
+});
+
+test('disabling menu avoidance still bounds both ears to the screen capacity', (t) => {
+  const f = fixture(t, { notchAvoidMenuBar: false });
+  f.controller.setData(buildNotchData(stats(), [], { trayContent: 'tokens' }));
+  const primary = f.windows[0];
+  f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 1000, right: 2000 } });
+  const geometry = last(primary).geometry;
+  assert.equal(geometry.summaryBudget, 625);
+  assert.equal(geometry.headerWidth, 1469);
+  assert.equal((geometry.headerWidth - geometry.gapWidth) / 2 - 20, geometry.summaryBudget);
+});
+
+test('both physical ears use the same finite budget', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
   const code = source.slice(source.indexOf('function notchLogicalPoint('), source.indexOf('const notchProviderObserver'));
   const left = { minimum: 50, width: 67, children: [] }, right = { minimum: 0, width: 89 };
   let reported;
   const report = vm.runInNewContext(`${code}; reportNotchSlots`, {
-    state: { payload: { summary: {}, geometry: { gapWidth: 179, summaryBudget: 50, summaryOptionalBudget: 0 }, appearance: { zoomFactor: 1 } } },
+    state: { payload: { summary: {}, geometry: { gapWidth: 179, summaryBudget: 50 }, appearance: { zoomFactor: 1 } } },
     fitNotchSlot: (slot, budget) => ({ minimum: slot.minimum, width: Math.max(slot.minimum, Math.min(slot.width, budget)) }),
     lastNotchSlots: '', bridge: { reportNotchSize: (_height, slots) => { reported = slots; } }
   });
   report({ dataset: {}, querySelector: selector => selector.includes('notch-left') ? left : right });
-  assert.equal(reported.left, 50, 'the complete primary readout remains');
-  assert.equal(reported.right, 0, 'neither an optional field nor overflow can use the mandatory minimum');
+  assert.equal(reported.left, 50);
+  assert.equal(reported.right, 50);
 });
 
 

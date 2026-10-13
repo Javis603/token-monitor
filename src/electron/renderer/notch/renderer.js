@@ -240,12 +240,11 @@
       const run = el('span', 'notch-text-run');
       const scale = trayTypographyApi.horizontalScale(item);
       run.dataset.horizontalScale = String(scale);
-      run.dataset.notchFlexible = String(['custom', 'account'].includes(row.metric || item.metric));
       run.style.transform = `scaleX(${scale})`;
       if (trayTypographyApi.spaceScale(item) !== 1) run.style.wordSpacing = '-.45ch';
       run.classList.toggle('is-unavailable', row.available === false);
       run.append(notchNumber(key, row, used));
-      if (run.dataset.notchFlexible === 'true') run.title = row.text || '';
+      if (['custom', 'account'].includes(row.metric || item.metric)) run.title = row.text || '';
       wrapper.append(run);
       return wrapper;
     }
@@ -287,7 +286,6 @@
         const fontSize = item.type === 'stack' ? (roomyRing ? 10 : 9) : Math.max(9, Math.min(16, (roomyRing ? 14 : 12) * (Number(item.scale) || 1)));
         block.style.font = trayTypographyApi.font(item, fontSize, item.type === 'stack' ? 600 : 500);
         block.style.fontVariantNumeric = 'tabular-nums';
-        block.dataset.notchFlexible = String(item.limitText === true && (item.type !== 'stack' || item.rows.every(row => ['custom', 'account'].includes(row.metric || item.metric))));
         if (item.type === 'spacer') {
           block.textContent = item.variant === 'dot' ? '·' : ' ';
           block.style.width = `${trayTypographyApi.spacerWidth(item, 20)}px`;
@@ -421,34 +419,36 @@
       const content = run.closest('.notch-slot-content');
       return (Number(getComputedStyle(content).zoom) || 1) * (Number(run.dataset.horizontalScale) || 1);
     }
-    // Standalone marks consume their own budget. Only the required reading may
-    // exceed clearance; optional items keep their order and stay whole.
+    // The primary field has priority; all other fields keep their configured order.
+    // Text may shrink to its ellipsis. Marks and bars retain their full width.
     function fitNotchSummaryItems(items, { budget, gap, overflowWidth, primary = -1, optional = false }) {
-      const indices = items.map((_item, index) => index);
       const first = items.findIndex(item => !item.spacer);
-      const required = primary >= 0 ? [primary] : optional ? [] : indices.slice(0, first < 0 ? items.length : first + 1);
-      const widthFor = visible => visible.reduce((total, index) => total + items[index].width, 0) + Math.max(0, visible.length - 1) * gap;
-      const minimum = required.reduce((total, index) => total + items[index].minimum, 0) + Math.max(0, required.length - 1) * gap;
-      const limit = Number.isFinite(budget) ? Math.max(minimum, budget) : Infinity;
-      const visible = primary >= 0 ? [] : [...required];
-      const candidates = primary >= 0 ? indices.slice(0, primary) : indices.slice(required.length);
-      for (const index of candidates) {
-        if (widthFor([...visible, index, ...(primary >= 0 ? [primary] : [])]) > limit) break;
-        visible.push(index);
+      const required = primary >= 0 ? primary : optional ? -1 : first;
+      const limit = Math.max(0, budget);
+      const widths = items.map(item => item.width);
+      const visible = [];
+      const widthFor = indices => indices.reduce((total, index) => total + widths[index], 0) + Math.max(0, indices.length - 1) * gap;
+      if (required >= 0 && items[required].minimum <= limit) {
+        widths[required] = Math.min(widths[required], limit);
+        visible.push(required);
       }
-      if (primary >= 0) visible.push(primary);
+      for (let index = 0; index < items.length; index++) {
+        if (index === required) continue;
+        const next = [...visible, index].sort((a, b) => a - b);
+        if (widthFor(next) > limit) break;
+        visible.splice(0, visible.length, ...next);
+      }
       while (visible.length && items[visible.at(-1)].spacer) visible.pop();
-      const width = widthFor(visible);
-      const omittedContent = items.some((item, index) => !item.spacer && !visible.includes(index));
-      const overflow = omittedContent && width + (visible.length ? gap : 0) + overflowWidth <= limit;
-      return { visible, minimum, overflow };
+      const textEllipsis = visible.some(index => widths[index] < items[index].width);
+      const omitted = items.some((item, index) => !item.spacer && !visible.includes(index));
+      const overflow = omitted && !textEllipsis && widthFor(visible) + (visible.length ? gap : 0) + overflowWidth <= limit;
+      return { visible, widths, minimum: required >= 0 ? items[required].width : 0, overflow };
     }
 
-    function fitNotchSlot(content, budget, constrained = false) {
+    function fitNotchSlot(content, budget) {
       const zoom = Number(getComputedStyle(content).zoom) || 1;
-      const clipped = constrained && Number.isFinite(budget);
-      content.style.maxWidth = clipped ? `${Math.max(0, budget) / zoom}px` : 'none';
-      content.style.overflow = clipped ? 'hidden' : '';
+      content.style.maxWidth = Number.isFinite(budget) ? `${Math.max(0, budget) / zoom}px` : 'none';
+      content.style.overflow = 'hidden';
       let overflow = content.querySelector('.notch-overflow');
       if (!overflow) {
         overflow = el('span', 'notch-reading notch-overflow', '⋯');
@@ -458,33 +458,44 @@
       const blocks = [...content.children].filter(node => node !== overflow);
       for (const block of blocks) {
         block.hidden = false;
-        const runs = block.querySelectorAll('.notch-text-run');
-        for (const run of runs) { run.style.maxWidth = 'none'; fitNotchTypeface(run); }
-        for (const run of runs) {
-          if (run.dataset.notchFlexible !== 'true' || !Number.isFinite(budget)) continue;
-          const reading = run.closest('.notch-reading');
-          const fixed = block.getBoundingClientRect().width - reading.getBoundingClientRect().width;
-          run.style.maxWidth = `${Math.max(0, budget - fixed) / zoomForNotchText(run)}px`;
-          fitNotchTypeface(run);
-        }
+        for (const run of block.querySelectorAll('.notch-text-run')) { run.style.maxWidth = 'none'; fitNotchTypeface(run); }
       }
-      overflow.hidden = true;
-      const gap = (parseFloat(getComputedStyle(content).gap) || 0) * zoom;
-      const items = blocks.map(node => {
-        const width = node.getBoundingClientRect().width;
-        const reading = node.classList.contains('notch-summary-field') ? node.querySelector('.notch-reading') : node;
-        return { width, minimum: width - (reading?.dataset.notchFlexible === 'true' ? reading.getBoundingClientRect().width : 0),
-          spacer: node.dataset.notchSpacer === 'true' };
-      });
-      // Hidden marks have zero width, so they cannot establish overflow clearance.
       overflow.hidden = false;
       const overflowWidth = overflow.getBoundingClientRect().width;
       overflow.hidden = true;
+      const gap = (parseFloat(getComputedStyle(content).gap) || 0) * zoom;
+      const markerStyle = overflow.style.cssText;
+      const items = blocks.map(node => {
+        const width = node.getBoundingClientRect().width;
+        const reading = node.classList.contains('notch-summary-field') ? node.querySelector('.notch-reading') : node;
+        const run = node.querySelector('.notch-text-run');
+        let minimum = width;
+        if (run) {
+          const font = getComputedStyle(run);
+          overflow.style.font = `${font.fontStyle} ${font.fontWeight} ${font.fontSize} ${font.fontFamily}`;
+          overflow.textContent = '…';
+          overflow.hidden = false;
+          const ellipsis = overflow.getBoundingClientRect().width * zoomForNotchText(run) / zoom;
+          minimum = Math.min(width, width - reading.getBoundingClientRect().width + ellipsis);
+        }
+        return { width, minimum, spacer: node.dataset.notchSpacer === 'true' };
+      });
+      overflow.style.cssText = markerStyle;
+      overflow.textContent = '⋯'; overflow.hidden = true;
       const fitted = fitNotchSummaryItems(items, { budget, gap, overflowWidth,
         primary: blocks.findIndex(node => node.dataset.notchPrimary === 'true'), optional: content.dataset.notchOptional === 'true' });
-      blocks.forEach((node, index) => { node.hidden = !fitted.visible.includes(index); });
+      blocks.forEach((node, index) => {
+        node.hidden = !fitted.visible.includes(index);
+        if (node.hidden || fitted.widths[index] >= items[index].width) return;
+        const reading = node.classList.contains('notch-summary-field') ? node.querySelector('.notch-reading') : node;
+        const fixed = items[index].width - reading.getBoundingClientRect().width;
+        for (const run of node.querySelectorAll('.notch-text-run')) {
+          run.style.maxWidth = `${Math.max(0, fitted.widths[index] - fixed) / zoomForNotchText(run)}px`;
+          fitNotchTypeface(run);
+        }
+      });
       overflow.hidden = !fitted.overflow;
-      return { width: content.getBoundingClientRect().width, minimum: clipped ? Math.min(fitted.minimum, Math.max(0, budget)) : fitted.minimum };
+      return { width: content.getBoundingClientRect().width, minimum: fitted.minimum };
     }
     // Transform coordinate noise must not become another logical window point.
     function notchLogicalPoint(value) { return Math.round(value * 1000) / 1000; }
@@ -494,24 +505,19 @@
       const measurement = state.payload.summaryMeasurement;
       const geometry = state.payload?.geometry;
       const compact = geometry?.gapWidth === 0;
-      const budget = geometry?.summaryOptionalBudget ?? geometry?.summaryBudget ?? null;
-      const limit = compact && Number.isFinite(geometry.summaryWidthLimit)
-        ? Math.max(0, Math.min(geometry.summaryWidthLimit - 2 * (geometry.shoulder + 8), budget ?? Infinity)) : null;
+      const budget = geometry.summaryBudget;
       const leftContent = head.querySelector('.notch-left .notch-slot-content');
       const rightContent = head.querySelector('.notch-right .notch-slot-content');
       const gap = 12 * (Number(state.payload.appearance.zoomFactor) || 1);
-      // Reserve the existing mandatory primary field before fitting extra icons.
-      const primaryRight = limit === null ? 0 : fitNotchSlot(rightContent, 0).minimum;
-      const constrained = geometry.summaryConstrained === true;
-      const left = fitNotchSlot(leftContent, limit === null ? budget : Math.max(0, limit - primaryRight - gap), constrained);
-      const rightBudget = limit === null ? budget : Math.max(0, limit - left.width - gap);
-      const right = fitNotchSlot(rightContent, rightBudget, constrained);
+      const primaryRight = compact ? Math.min(budget, fitNotchSlot(rightContent, Infinity).minimum) : 0;
+      const left = fitNotchSlot(leftContent, compact ? Math.max(0, budget - primaryRight - gap) : budget);
+      const right = fitNotchSlot(rightContent, compact ? Math.max(0, budget - left.width - gap) : budget);
       const firstBlock = [...leftContent.children].find(node => !node.hidden);
       const firstIcon = firstBlock?.classList.contains('notch-summary-field') ? firstBlock.firstElementChild : firstBlock;
       const firstMark = firstIcon?.querySelector('.edge-dock-mark');
       const iconInset = firstMark ? notchLogicalPoint(Math.max(0, firstMark.getBoundingClientRect().left - leftContent.getBoundingClientRect().left)) : 0;
       head.dataset.notchIconInset = iconInset;
-      const slots = { left: Math.ceil(notchLogicalPoint(left.width)), right: Math.ceil(notchLogicalPoint(right.width)), minimumLeft: Math.ceil(notchLogicalPoint(left.minimum)), minimumRight: Math.ceil(notchLogicalPoint(right.minimum)), iconInset };
+      const slots = { left: Math.ceil(notchLogicalPoint(left.width)), right: Math.ceil(notchLogicalPoint(right.width)), iconInset };
       const key = JSON.stringify([slots, measurement?.measuring ? measurement.id : null]);
       if (key !== lastNotchSlots) {
         lastNotchSlots = key;

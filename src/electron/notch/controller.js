@@ -136,17 +136,16 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (geometry.gapWidth === 0 && geometry.summaryRingSize) geometry.height = Math.ceil(geometry.summaryRingSize * geometry.summaryZoom + 8);
     const activeSlots = summaryVisible() ? slots : null;
     const compact = geometry.gapWidth === 0;
-    const minimum = Math.max(activeSlots?.minimumLeft ?? activeSlots?.left ?? 0, activeSlots?.minimumRight ?? activeSlots?.right ?? 0);
-    const avoidMenuBar = !compact && settings().notchAvoidMenuBar !== false;
-    const clearance = activeSlots && avoidMenuBar
-      ? notchSummaryBudget(display, geometry, menuWindows, 0, Object.values(windowIds)) : null;
-    const summaryConstrained = clearance !== null;
-    // Unknown clearance retains the primary readout without admitting extras.
-    const summaryOptionalBudget = activeSlots && avoidMenuBar ? clearance ?? 0 : null;
-    const summaryBudget = summaryOptionalBudget === null ? null : summaryConstrained ? clearance : Math.max(minimum, summaryOptionalBudget);
-    const boundedSlots = activeSlots && summaryBudget !== null
+    const maxWidth = Math.floor(2 * Math.min(geometry.centerX - display.bounds.x,
+      display.bounds.x + display.bounds.width - geometry.centerX));
+    const capacity = Math.max(0, Math.floor(compact ? maxWidth - 2 * ((geometry.notched ? 4 : 0) + 8)
+      : (maxWidth - geometry.gapWidth) / 2 - 20));
+    const clearance = activeSlots && !compact && settings().notchAvoidMenuBar !== false
+      ? notchSummaryBudget(display, geometry, menuWindows, Object.values(windowIds)) : null;
+    const summaryBudget = Math.min(capacity, clearance ?? capacity);
+    const boundedSlots = activeSlots && !compact
       ? { left: Math.min(activeSlots.left, summaryBudget), right: Math.min(activeSlots.right, summaryBudget) } : activeSlots;
-    return { display, geometry, summaryBudget, summaryOptionalBudget, summaryConstrained, summaryIconInset: activeSlots?.iconInset || 0,
+    return { display, geometry, summaryBudget, summaryIconInset: activeSlots?.iconInset || 0,
       closed: notchBounds(display, geometry, false, contentHeight, boundedSlots, zoom()),
       open: notchBounds(display, geometry, true, contentHeight, boundedSlots, zoom()) };
   }
@@ -203,7 +202,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       else if (!summaryMeasured && summaryMeasurement?.key !== key) summaryMeasurement = { id: ++summaryGeneration, key, measuring: true };
     }
     const payload = surface === 'notch' ? { ...base, expanded, visible: expanded, quietFullScreen: fullScreen, motion: frame,
-      geometry: { ...current.geometry, summaryBudget: current.summaryBudget, summaryOptionalBudget: current.summaryOptionalBudget, summaryConstrained: current.summaryConstrained, summaryWidthLimit: current.display.bounds.width, headerX: current.closed.x - (viewport || current.open).x, headerWidth: current.closed.width,
+      geometry: { ...current.geometry, summaryBudget: current.summaryBudget, headerX: current.closed.x - (viewport || current.open).x, headerWidth: current.closed.width,
         gapOffset: current.geometry.centerX - current.geometry.gapWidth / 2 - current.closed.x,
         shoulder: current.geometry.notched && hasSummary ? 4 : 0 },
       cells: data.cells, summary: hasSummary ? data.summary : null,
@@ -572,15 +571,13 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
           if (expanded && progress < 1) animateShell(layout());
           send('notch'); visibility(); return;
         }
-        if (!payload.slots || !['left', 'right', 'minimumLeft', 'minimumRight'].every(key => Number.isFinite(payload.slots[key]) && payload.slots[key] >= 0)) return;
+        if (!payload.slots || !['left', 'right'].every(key => Number.isFinite(payload.slots[key]) && payload.slots[key] >= 0)) return;
         summaryMeasurement.measuring = false; settleSummary = true; layoutKey = '';
       }
       if (Number.isFinite(payload?.height) && payload.height > 0) contentHeight = Math.max(40, Math.min(4000, payload.height));
       if (payload?.slots) {
         const width = name => Math.max(0, Math.min(10000, Number(payload.slots[name]) || 0));
-        slots = { left: width('left'), right: width('right'), iconInset: width('iconInset'),
-          minimumLeft: width(payload.slots.minimumLeft === undefined ? 'left' : 'minimumLeft'),
-          minimumRight: width(payload.slots.minimumRight === undefined ? 'right' : 'minimumRight') };
+        slots = { left: width('left'), right: width('right'), iconInset: width('iconInset') };
       }
       if (Array.isArray(payload?.rows)) rows = payload.rows.filter((r) => data.cells.some((c) => c.id === r.id) && ['x', 'y', 'width', 'height'].every((key) => Number.isFinite(r[key]) && Math.abs(r[key]) < 10000));
       refreshLayout();

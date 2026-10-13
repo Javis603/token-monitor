@@ -108,7 +108,6 @@ function buildNotchData(stats, cells, settings, options = {}) {
     if (['bars', 'stack'].includes(output.type) && output.icon !== 'none') {
       output.iconProvider = output.icon === 'app' ? 'app' : trayLayout.preferredRowProvider(output.rows, output.icon === 'second' ? 1 : 0) || '?';
     }
-    output.limitText = ['custom', 'account'].includes(output.metric);
   }
   const iconProviders = [...new Set(resolved.items.map(item => item.type === 'icon' ? item.provider : item.iconProvider)
     .filter(provider => provider && provider !== 'app').map(provider => limitProviderForClient(provider) || provider))];
@@ -137,7 +136,6 @@ function buildNotchData(stats, cells, settings, options = {}) {
         output.rows[j].metric = metric;
         output.rows[j].measure = numericMeasure({ ...source, metric }, output.rows[j], stats);
         attachSummaryClock(output.rows[j], metric, options.nowMs);
-        output.limitText ||= ['custom', 'account'].includes(metric);
       }
     }
   }

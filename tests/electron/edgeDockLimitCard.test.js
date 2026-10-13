@@ -1982,7 +1982,7 @@ test('Notch ears preserve configured tray items and embedded fields across all s
   }
 });
 
-test('ear fitting retains the complete first field and hides optional fields atomically', () => {
+test('ear fitting keeps graphics whole within the hard budget', () => {
   const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
   const el = (tag, classes, text = '') => {
     const node = new FakeElement(tag); node.className = classes; node.textContent = text;
@@ -1999,7 +1999,7 @@ test('ear fitting retains the complete first field and hides optional fields ato
   field.append(mark, reading); content.append(field);
   const primary = context.fitNotchSlot(content, 20);
   assert.equal(primary.minimum, 63, 'the icon and primary number are both reserved');
-  assert.equal(field.hidden, false);
+  assert.equal(field.hidden, true, 'an indivisible group cannot exceed the budget');
   const optional = el('div', 'notch-slot-content'); optional.dataset.notchOptional = 'true';
   optional.append(field);
   const overflow = el('span', 'notch-reading notch-overflow', '⋯'); overflow.width = 8;
@@ -2100,41 +2100,41 @@ test('switching camera clearance rebuilds the same summary without losing config
 });
 
 
-test('menu avoidance clips the primary summary without changing its value or scale', () => {
+test('summary text ellipsis preserves the full value and restores within a larger budget', () => {
   const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
   for (const zoom of [1, 1.25]) {
     const el = (tag, classes, text = '') => {
-      const node = new FakeElement(tag);
-      node.className = classes;
-      node.textContent = text;
+      const node = new FakeElement(tag); node.className = classes; node.textContent = text;
       node.getBoundingClientRect = () => {
-        const width = node.width ?? node.children.filter(child => !child.hidden)
-          .reduce((total, child, index) => total + child.getBoundingClientRect().width + (index ? 6 : 0), 0);
+        const width = node.width ?? (node.classList.contains('notch-overflow') ? (node.textContent === '…' && /12px/.test(node.style.font || '') ? 12 : 8) : node.children.filter(child => !child.hidden)
+          .reduce((total, child, index) => total + child.getBoundingClientRect().width + (index ? 6 : 0), 0));
         const maximum = parseFloat(node.style.maxWidth);
         return { width: Number.isFinite(maximum) ? Math.min(width, maximum * zoom) : width };
       };
       return node;
     };
-    const context = { el, fitNotchTypeface() {}, getComputedStyle: () => ({ zoom, gap: '6px' }) };
+    const context = { el, fitNotchTypeface() {}, getComputedStyle: () => ({ zoom, gap: '6px', font: '', fontStyle: 'normal', fontWeight: '500', fontSize: '12px', fontFamily: 'sans-serif' }) };
     vm.runInNewContext(source.slice(source.indexOf('function zoomForNotchText('), source.indexOf('function reportNotchSlots(')), context);
     const content = el('div', 'notch-slot-content');
-    const reading = el('span', 'notch-reading', 'HK$7557194.97');
-    reading.width = 100;
-    content.append(reading);
-    for (const budget of [40, 0]) {
-      const clipped = context.fitNotchSlot(content, budget, true);
-      assert.equal(clipped.width, budget);
-      assert.equal(clipped.minimum, budget);
-      assert.equal(content.style.overflow, 'hidden');
-      assert.equal(reading.hidden, false);
-      assert.equal(reading.textContent, 'HK$7557194.97');
-      assert.equal(reading.getBoundingClientRect().width, 100);
-    }
-    const restored = context.fitNotchSlot(content, null, false);
+    const reading = el('span', 'notch-reading');
+    const run = el('span', 'notch-text-run', 'HK$7557194.97'); run.width = 100;
+    run.dataset.horizontalScale = '1'; run.closest = () => content;
+    reading.append(run); content.append(reading);
+    const fitted = context.fitNotchSlot(content, 40);
+    assert.equal(fitted.width, 40);
+    assert.equal(run.style.maxWidth, `${40 / zoom}px`);
+    assert.equal(run.textContent, 'HK$7557194.97');
+    assert.equal(content.querySelector('.notch-overflow').hidden, true, 'native text ellipsis needs no second marker');
+    context.fitNotchSlot(content, 8);
+    assert.equal(reading.hidden, true, 'too little space for the text ellipsis cannot leave a partial glyph');
+    assert.equal(content.querySelector('.notch-overflow').hidden, false);
+    context.fitNotchSlot(content, 0);
+    assert.equal(reading.hidden, true);
+    const restored = context.fitNotchSlot(content, 200);
     assert.equal(restored.width, 100);
-    assert.equal(restored.minimum, 100);
-    assert.equal(content.style.maxWidth, 'none');
-    assert.equal(content.style.overflow, '');
+    assert.equal(run.style.maxWidth, 'none');
+    assert.equal(reading.hidden, false);
+    assert.equal(run.textContent, 'HK$7557194.97');
   }
 });
 
@@ -2185,7 +2185,7 @@ test('summary allocation and width fitting need only ordered items and measured 
   assert.equal(fitted.overflow, false);
   const embedded = context.fitNotchSummaryItems([{ width: 63, minimum: 63, spacer: false }],
     { budget: 40, gap: 6, overflowWidth: 8, primary: 0 });
-  assert.deepEqual(Array.from(embedded.visible), [0], 'an embedded mark and reading remain one measured item');
+  assert.deepEqual(Array.from(embedded.visible), [], 'an indivisible item cannot exceed the budget');
   assert.equal(embedded.minimum, 63);
   const hidden = context.fitNotchSummaryItems(widths, { budget: 0, gap: 6, overflowWidth: 8, optional: true });
   assert.deepEqual(Array.from(hidden.visible), []);
