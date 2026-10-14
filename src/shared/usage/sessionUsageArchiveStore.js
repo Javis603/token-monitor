@@ -36,6 +36,15 @@ function parseArchiveRow(row) {
   }
 }
 
+function archiveFileExists(filePath, options) {
+  if (options.existsSync) return options.existsSync(filePath);
+  if (!options.strict) return fs.existsSync(filePath);
+  try { fs.statSync(filePath); return true; } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 // Release the SQLite read cursor even when next() throws. for-of alone only
 // closes an iterator when its body exits early, not when stepping it fails.
 function* iterateSessionRows(statement, ...parameters) {
@@ -50,7 +59,7 @@ function* iterateSessionRows(statement, ...parameters) {
 function readMigratedArchiveSnapshot(options = {}) {
   const databasePath = sessionUsageArchiveDatabasePath(options);
   const Database = options.DatabaseSync || DatabaseSync;
-  const existsSync = options.existsSync || fs.existsSync;
+  const existsSync = (filePath) => archiveFileExists(filePath, options);
   if (!existsSync(databasePath)) return null;
 
   let database = null;
@@ -62,6 +71,10 @@ function readMigratedArchiveSnapshot(options = {}) {
       WHERE key IN ('schema-version', 'legacy-migrated', 'pruned-day', 'pruned-month')
     `).all();
     const metadata = new Map(rows.map((row) => [row.key, row.value]));
+    if (options.strict && metadata.has('schema-version')
+      && Number(metadata.get('schema-version')) !== SESSION_ARCHIVE_DATABASE_VERSION) {
+      throw new Error('unsupported session archive database version');
+    }
     if (Number(metadata.get('schema-version')) !== SESSION_ARCHIVE_DATABASE_VERSION
       || metadata.get('legacy-migrated') !== '1') return null;
 
@@ -73,7 +86,8 @@ function readMigratedArchiveSnapshot(options = {}) {
       if (entry) archive.sessions[row.session_key] = entry;
     }
     return archive;
-  } catch (_) {
+  } catch (error) {
+    if (options.strict) throw error;
     return null;
   } finally {
     try { database?.close(); } catch (_) {}
@@ -85,12 +99,30 @@ function readSessionUsageArchiveSnapshot(options = {}) {
   if (migrated) return migrated;
 
   const legacyPath = sessionUsageArchivePath(options);
-  const existsSync = options.existsSync || fs.existsSync;
+  const existsSync = (filePath) => archiveFileExists(filePath, options);
   if (!existsSync(legacyPath)) {
-    return readMigratedArchiveSnapshot(options) || normalizeSessionUsageArchive({});
+    const snapshot = readMigratedArchiveSnapshot(options);
+    if (snapshot) return snapshot;
+    if (options.strict && existsSync(sessionUsageArchiveDatabasePath(options))) {
+      throw new Error('session archive database is not ready');
+    }
+    return normalizeSessionUsageArchive({});
   }
 
-  const legacy = readSessionUsageArchive({ ...options, path: legacyPath });
+  // The default snapshot remains best-effort for existing readers. Usage
+  // publication must distinguish a missing archive from failed/corrupt reads.
+  const legacyValue = options.strict
+    ? JSON.parse((options.readFileSync || fs.readFileSync)(legacyPath, 'utf8'))
+    : null;
+  if (options.strict && (!legacyValue || typeof legacyValue !== 'object' || Array.isArray(legacyValue)
+    || (legacyValue.version !== undefined && legacyValue.version !== SESSION_ARCHIVE_DATABASE_VERSION)
+    || (Object.hasOwn(legacyValue, 'sessions') && (!legacyValue.sessions
+      || typeof legacyValue.sessions !== 'object' || Array.isArray(legacyValue.sessions))))) {
+    throw new Error('invalid session archive snapshot');
+  }
+  const legacy = options.strict
+    ? normalizeSessionUsageArchive(legacyValue)
+    : readSessionUsageArchive({ ...options, path: legacyPath });
   return readMigratedArchiveSnapshot(options) || legacy;
 }
 
@@ -283,12 +315,12 @@ function createSessionUsageArchiveStore(options = {}) {
     }
   }
 
-  function refresh() {
+  function refresh(_now, readOptions = {}) {
     // A widget that yielded ownership to the headless agent must not race that
     // agent's one-time migration. Until the writer commits the migration marker,
     // the legacy JSON remains an atomic, read-only fallback.
     if (!database && (!existsSync(databasePath) || !databaseIsMigrated())) {
-      const snapshot = readSessionUsageArchiveSnapshot({ ...options, databasePath, path: legacyPath });
+      const snapshot = readSessionUsageArchiveSnapshot({ ...options, ...readOptions, databasePath, path: legacyPath });
       if (!existsSync(databasePath) || !databaseIsMigrated()) {
         archive = snapshot;
         archiveSource = 'legacy';
@@ -401,10 +433,25 @@ function createSessionUsageArchiveStore(options = {}) {
     database = null;
   }
 
+  // Relinquish this reader's materialized rows without touching persistence.
+  // Reset the revision/source together: fallback must reload a complete archive
+  // before replaying any writes the worker committed while it owned the store.
+  function release() {
+    try {
+      close();
+    } finally {
+      archive = null;
+      archiveSource = null;
+      revision = 0;
+      reloadRequired = false;
+    }
+  }
+
   return {
     capture,
     clear,
     close,
+    release,
     read: loadAll,
     refresh,
     databasePath,
