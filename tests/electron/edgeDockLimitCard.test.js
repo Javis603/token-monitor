@@ -1775,6 +1775,7 @@ function notchAdapter() {
   const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
   const start = source.indexOf('function notchQuotaColor(');
   const end = source.indexOf('function fitNotchTooltip(', start);
+  assert.ok(start >= 0 && end > start, 'notch adapter source boundaries should exist');
   const context = {
     el: (_tag, classes, text = '') => { const node = new FakeElement(_tag); node.className = classes; node.textContent = text; return node; },
     limitResetMotionApi,

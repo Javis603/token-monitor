@@ -158,7 +158,7 @@ test('title resolution matches between the limits panel and Home', () => {
   // is left to disagree with another.
   assert.match(view, /limitAccountTitle\(providerId, provider, index, providers\)/);
   assert.match(app, /limitAccountTitle\(id, provider, index, providerEntries\)/);
-  const detail = dock.slice(dock.indexOf('function providerCard('), dock.indexOf('function providerUsageNode('));
+  const detail = balancedBlock(dock, 'function providerCard(');
   assert.equal(detail.match(/limitAccountTitle/g), null, 'the detail card titles accounts through the view');
   assert.match(readRendererFile('notch/renderer.js'), /view\.limitAccountTitle\(cell\.provider, record, accountIndex, accountPeers\)/, 'the quota overview delegates its compact account title to the same view');
   for (const name of ['codexAccountTitle', 'opencodeAccountTitle', 'namedApiAccountTitle', 'volcenginePlanAccountTitle']) {
