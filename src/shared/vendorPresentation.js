@@ -39,6 +39,7 @@
     { id: 'opencode', color: '#000000', widgetInk: true },
     { id: 'hermes', color: '#d4af37', icon: 'hermes-agent' },
     { id: 'openclaw', color: '#ff4d4d' },
+    { id: 'goose', color: '#FFFFFF' },
     { id: 'cursor', color: '#000000', widgetInk: true },
     { id: 'antigravity', color: '#4285f4' },
     { id: 'cline', color: '#9D4EDD', widgetColor: '#53616D' },

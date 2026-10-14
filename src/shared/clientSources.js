@@ -194,6 +194,21 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // `detected` next to usage collected from another directory.
   const tokscaleHome = tokscaleHomeDir({ env, platform, homeDir: home });
   const xdgHome = xdgDataHome(tokscaleHome, env);
+  // fa5f0c13 opens the first existing Goose file in this order, even when it
+  // is empty. Keep every candidate watchable so creation of an earlier file
+  // triggers a rescan. Relative GOOSE_PATH_ROOT is accepted by this scanner
+  // (although Goose itself ignores it); the scanner trims that override.
+  const gooseRoot = typeof env.GOOSE_PATH_ROOT === 'string' ? env.GOOSE_PATH_ROOT.trim() : '';
+  // tokscaleCommand drops blank XDG values before spawning; use the same
+  // blank-as-unset fallback as the other XDG sources for health and watching.
+  const gooseFiles = [
+    ...(gooseRoot ? [path.resolve(gooseRoot, 'data', 'sessions', 'sessions.db')] : []),
+    path.resolve(xdgHome, 'goose', 'sessions', 'sessions.db'),
+    path.join(tokscaleHome, 'Library', 'Application Support', 'goose', 'sessions', 'sessions.db'),
+    path.join(tokscaleHome, 'Library', 'Application Support', 'Block', 'goose', 'sessions', 'sessions.db'),
+    path.join(tokscaleHome, '.local', 'share', 'Block', 'goose', 'sessions', 'sessions.db')
+  ];
+  add('goose', ...[...new Set(gooseFiles)].map((file) => ['goose-db', path.dirname(file), file]));
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
   // Amp (Sourcegraph / AmpCode): tokscale reads the XDG-data root on every

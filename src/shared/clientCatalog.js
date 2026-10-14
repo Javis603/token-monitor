@@ -53,6 +53,7 @@
     { id: 'opencode', label: 'OpenCode' },
     { id: 'hermes', label: 'Hermes Agent' },
     { id: 'openclaw', label: 'OpenClaw' },
+    { id: 'goose', label: 'Goose' },
     { id: 'cursor', label: 'Cursor' },
     { id: 'antigravity', label: 'Antigravity' },
     { id: 'cline', label: 'Cline' },

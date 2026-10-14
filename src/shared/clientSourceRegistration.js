@@ -15,6 +15,8 @@ const SOURCE_MARKERS = [
   { marker: '.clawdbot/agents', client: 'openclaw' },
   { marker: '.moltbot/agents', client: 'openclaw' },
   { marker: '.moldbot/agents', client: 'openclaw' },
+  { marker: '.local/share/goose/sessions/sessions.db', client: 'goose' },
+  { marker: '.local/share/Block/goose/sessions/sessions.db', client: 'goose' },
   { marker: '.hermes', client: 'hermes' },
   { marker: '.kimi/sessions', client: 'kimi' },
   { marker: '.kimi-code/sessions', client: 'kimi' },
