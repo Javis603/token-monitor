@@ -1809,7 +1809,7 @@ const networkProxyDrafts = {
 // The last refused save, kept until that field is edited again so the next
 // settings push does not wipe the reason off screen.
 let networkProxyError = null;
-const PROXY_SETTING_ERROR_CODES = ['proxy_invalid_url', 'proxy_unsupported_scheme', 'proxy_credentials_unsupported', 'proxy_bypass_unsupported'];
+const PROXY_SETTING_ERROR_CODES = ['proxy_invalid_url', 'proxy_unsupported_scheme', 'proxy_credentials_unsupported', 'proxy_bypass_unsupported', 'proxy_bypass_too_long'];
 
 function networkProxyInput(field) {
   return field === 'proxyUrl' ? els.proxyUrlInput : els.noProxyInput;

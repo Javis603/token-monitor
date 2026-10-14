@@ -46,6 +46,27 @@ test('the bypass list accepts commas, spaces and new lines', () => {
   assert.equal(normalizeNoProxy(undefined), '');
 });
 
+test('bypass length is checked after normalization without truncating hosts', () => {
+  const prefix = Array.from({ length: 198 }, (_, i) => `a${String(i).padStart(3, '0')}.test`).join(',');
+  for (const length of [1999, 2000, 2001]) {
+    const input = `${prefix},${'x'.repeat(length - prefix.length - 1)}`;
+    assert.equal(input.length, length);
+    if (length <= 2000) {
+      assert.equal(noProxyError(input), '');
+      assert.equal(normalizeNoProxy(input), input);
+    } else {
+      assert.equal(noProxyError(input), 'proxy_bypass_too_long');
+      assert.throws(() => normalizeNoProxy(input), /proxy_bypass_too_long/);
+    }
+  }
+  const input = `${prefix},pad.test,example.com.evil`;
+  assert.equal(input.length, 2005);
+  assert.equal(noProxyError(input), 'proxy_bypass_too_long');
+  assert.throws(() => normalizeNoProxy(input), /proxy_bypass_too_long/);
+  assert.equal(noProxyError(`${prefix}, ${prefix}`), '', 'duplicates and whitespace count only after normalization');
+  assert.equal(normalizeNoProxy(`${prefix}, ${prefix}`), prefix);
+});
+
 // Only forms undici and Chromium read the same way are kept, in the canonical
 // spelling undici matches: a leading `.`/`*.` means the domain and its
 // subdomains in both, IPv6 is bracketed, and `*` must be the whole value.

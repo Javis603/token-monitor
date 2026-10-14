@@ -109,11 +109,11 @@ test('the transport re-reads its route on every request', async () => {
 test('every widget provider probe takes the runtime transport', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
 
-  assert.match(main, /function electronLimitsFetch\(\) \{\s*return createElectronLimitsFetch\(\{ net, getRoute: networkProxyRoute \}\);/);
+  assert.match(main, /function electronLimitsFetch\(\) \{\s*return createElectronLimitsFetch\(\{\s*net: \{ fetch: createProxyReadyFetch\(net\.fetch\.bind\(net\), \(\) => sessionProxy\.ensureReady\(\)\) \},\s*getRoute: networkProxyRoute/);
   assert.match(main, /function networkProxyRoute\(\) \{\s*return outboundRouteForSettings\(settings \|\| \{\}, process\.env\);/);
   // MiMo's exchange and the Chromium session follow the same setting, and
   // every settings save re-applies the session so a failed apply is retried.
-  assert.match(main, /createMimoExchangeFetch\(\{ session: session\.defaultSession, getRoute: networkProxyRoute \}\)/);
+  assert.match(main, /createMimoExchangeFetch\(\{\s*session: \{ resolveProxy: createProxyReadyFetch\([^;]+sessionProxy\.ensureReady\(\)\) \},\s*getRoute: networkProxyRoute/);
   assert.match(main, /getConfig: \(\) => sessionProxyConfig\(settings \|\| \{\}\)/);
   // An unsupported bypass entry is refused at save time, like an unusable URL.
   assert.match(main, /const bypassError = noProxyError\(patch\.noProxy\);\s*if \(bypassError\) throw new Error\(bypassError\);/);

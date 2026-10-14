@@ -199,12 +199,18 @@ function parsedNoProxyEntries(value) {
 }
 
 function noProxyError(value) {
-  return parsedNoProxyEntries(value).invalid ? 'proxy_bypass_unsupported' : '';
+  const parsed = parsedNoProxyEntries(value);
+  if (parsed.invalid) return 'proxy_bypass_unsupported';
+  return parsed.entries.map((entry) => entry.key).join(',').length > MAX_NO_PROXY_LENGTH
+    ? 'proxy_bypass_too_long' : '';
 }
 
 /** The supported entries in their canonical form; anything else is dropped. */
 function normalizeNoProxy(value) {
-  return parsedNoProxyEntries(value).entries.map((entry) => entry.key).join(',').slice(0, MAX_NO_PROXY_LENGTH);
+  const normalized = parsedNoProxyEntries(value).entries.map((entry) => entry.key).join(',');
+  // Cutting a hostname can turn an unrelated suffix into a direct-route rule.
+  if (normalized.length > MAX_NO_PROXY_LENGTH) throw new Error('proxy_bypass_too_long');
+  return normalized;
 }
 
 function parseProxyUrl(value) {
@@ -358,11 +364,47 @@ function createSessionProxyApplier({ getSession, getConfig, log = () => {} }) {
     queue = run;
     return run;
   }
-  return { apply };
+  async function ensureReady() {
+    await apply();
+    const config = getConfig();
+    const key = config ? JSON.stringify(config) : '';
+    // `apply()` reports whether anything changed, not whether the desired route
+    // is ready. A failed apply/cleanup or a newer setting must block requests.
+    if (key !== appliedKey || closePending) throw new Error('proxy_session_not_ready');
+  }
+  return { apply, ensureReady };
+}
+
+// Gate only protected Chromium transports. Local collection and Node routes
+// can start independently; a failed session apply stays retryable on the next
+// request/save. Aborting the wait must not send a request when it later clears.
+function createProxyReadyFetch(fetchImpl, ensureReady) {
+  return async function proxyReadyFetch(input, init = {}) {
+    const signal = init.signal;
+    signal?.throwIfAborted();
+    let abort;
+    try {
+      const ready = ensureReady();
+      if (signal) {
+        await Promise.race([ready, new Promise((resolve, reject) => {
+          abort = () => reject(signal.reason);
+          signal.addEventListener('abort', abort, { once: true });
+          if (signal.aborted) abort();
+        })]);
+      } else {
+        await ready;
+      }
+      signal?.throwIfAborted();
+      return fetchImpl(input, init);
+    } finally {
+      if (abort) signal.removeEventListener('abort', abort);
+    }
+  };
 }
 
 module.exports = {
   AppProxyAgent,
+  createProxyReadyFetch,
   createSessionProxyApplier,
   effectiveAppProxy,
   isImplicitBypassHost,
