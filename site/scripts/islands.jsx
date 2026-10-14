@@ -4,11 +4,14 @@
  * MIT + Commons Clause License Condition v1.0.
  * Full notice: THIRD_PARTY_NOTICES.md
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createPortal } from "react-dom";
 import { Mesh, Program, Renderer, Triangle } from "ogl";
 import DarkVeil from "./darkVeil.jsx";
+// The widget's own token number animation, so the site's readings move the way
+// the app's do rather than counting from zero.
+import TokenNumber from "../../src/electron/tokenNumberAnimation.js";
 
 const VERTEX_SHADER = `
 attribute vec2 position;
@@ -340,6 +343,56 @@ function AnimatedNumber({ value, currency = false, format }) {
   return Math.round(displayValue).toLocaleString("en-US");
 }
 
+/* A token reading that rolls digits the way the widget does: outgoing glyphs
+   fall away while the incoming ones rise, and the reading settles when the last
+   glyph lands. `periodKey` marks a period switch, where the whole reading is
+   replaced at once and the roll sweeps from its first changed digit to its last
+   instead of ticking with a live update. */
+function RollingNumber({ value, format, periodKey = "" }) {
+  var elRef = useRef(null);
+  var settleRef = useRef(null);
+  var timerRef = useRef(0);
+  var previousRef = useRef(null);
+  var reading = format ? String(format(value)) : Math.round(value).toLocaleString("en-US");
+
+  // Layout effect: the roll measures glyph boxes, and the very first reading
+  // has to be in the DOM before the browser paints the empty element.
+  useLayoutEffect(function rollToReading() {
+    var el = elRef.current;
+    if (!el) return;
+    var previous = previousRef.current;
+    previousRef.current = { value: value, reading: reading, periodKey: periodKey };
+    window.clearTimeout(timerRef.current);
+    timerRef.current = 0;
+    if (!previous || previous.reading === reading || prefersReducedMotion()) {
+      if (settleRef.current) settleRef.current();
+      settleRef.current = null;
+      el.textContent = reading;
+      return;
+    }
+    var settle = TokenNumber.beginRoll(el, previous.reading, reading, value > previous.value,
+      null, null, { period: previous.periodKey !== periodKey });
+    settleRef.current = settle;
+    // beginRoll only animates: the caller owns settling, and until it runs the
+    // filled animations outlive the visual motion.
+    timerRef.current = window.setTimeout(function settleRoll() {
+      timerRef.current = 0;
+      settleRef.current = null;
+      settle();
+    }, TokenNumber.duration);
+  }, [periodKey, reading, value]);
+
+  useEffect(function settleOnUnmount() {
+    return function cleanup() {
+      window.clearTimeout(timerRef.current);
+      if (settleRef.current) settleRef.current();
+      settleRef.current = null;
+    };
+  }, []);
+
+  return <strong ref={elRef}></strong>;
+}
+
 function ViewIcon({ id, className = "" }) {
   return <span className={`app-view-icon view-icon-${id} ${className}`.trim()} aria-hidden="true"></span>;
 }
@@ -578,7 +631,7 @@ function HeroDashboard() {
 
       <section className="hero-dashboard-total" aria-live="polite">
         <span>TOTAL TOKENS</span>
-        <strong><AnimatedNumber value={liveTotal} /></strong>
+        <RollingNumber value={liveTotal} periodKey={period} />
         <small><AnimatedNumber value={liveCost} currency /></small>
       </section>
 
@@ -627,7 +680,11 @@ function HeroDashboard() {
                 <span>{device.name}</span>
                 {device.you ? <em>YOU</em> : null}
               </span>
-              <strong><AnimatedNumber value={device.value + liveTick * HERO_LIVE_STEP * device.share} format={formatHeroCompact} /></strong>
+              <RollingNumber
+                value={device.value + liveTick * HERO_LIVE_STEP * device.share}
+                format={formatHeroCompact}
+                periodKey={period}
+              />
             </div>
           );
         })}
@@ -645,7 +702,11 @@ function HeroDashboard() {
             <div className="hero-dashboard-model-row" key={`${model.name}-${index}`}>
               <img src={`assets/icons/${model.id}.svg`} alt="" />
               <span>{model.name}</span>
-              <strong><AnimatedNumber value={model.value + liveTick * HERO_LIVE_STEP * model.share} format={formatHeroCompact} /></strong>
+              <RollingNumber
+                value={model.value + liveTick * HERO_LIVE_STEP * model.share}
+                format={formatHeroCompact}
+                periodKey={period}
+              />
               <em>{model.shareLabel}</em>
             </div>
           );

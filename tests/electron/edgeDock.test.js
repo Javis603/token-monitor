@@ -2494,7 +2494,7 @@ test('the rail entrance moves the whole surface and stops under reduced motion',
   // payload, so a page keying on the state would never see the rail leave and would
   // read the next reveal as no change at all - one entrance per page load.
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  assert.match(dock, /if \(railReveal !== null && reveal !== railReveal\) playRailReveal\(\);/);
+  assert.match(dock, /const revealing = railReveal !== null && reveal !== railReveal;\s*if \(revealing\) playRailReveal\(\);/);
 });
 
 // The work indicator must fit between the provider mark and the quota reading,

@@ -127,10 +127,16 @@
   // contains an equal digit. Skipping separators would carry equal digits
   // sideways across a regrouping (1,234 → 12,340).
   // Keep digits and separators separate so neither can roll into the other.
-  // Input is the renderer's exact, grouped integer format.
+  // A trailing unit (191.8M, 43%) is keyed from the end instead, so it stays
+  // sharp and follows the layout when the digits before it change.
   function parts(text) {
-    return Array.from(text, (char, index) => {
+    const chars = Array.from(text);
+    let unit = chars.length;
+    while (unit > 0 && !/[0-9]/.test(chars[unit - 1])) unit--;
+    if (unit === 0) unit = chars.length;
+    return chars.map((char, index) => {
       const numeric = /[0-9]/.test(char);
+      if (index >= unit) return { char, numeric, key: `unit:${chars.length - index}:${char}` };
       return { char, numeric, key: numeric ? `digit:${index}` : `symbol:${index}:${char}` };
     });
   }
@@ -235,13 +241,14 @@
     const direction = increasing ? 1 : -1;
     const ink = inkRatio(document, el);
     const indexOf = (glyph) => Number(glyph.key.split(':')[1]);
+    const isUnit = (key) => key.startsWith('unit:');
     const center = (rect) => rect.left + rect.width / 2;
     const changing = (index) => index >= unchangedPrefix;
     // The wave is spatial, so an outgoing glyph and the incoming glyph drawn
     // over it change together even when grouping moved their indices apart.
     const centers = [
-      ...previous.filter((glyph) => changing(indexOf(glyph))).map((glyph) => center(glyph.rect)),
-      ...rects.filter((_, index) => changing(index)).map(center)
+      ...previous.filter((glyph) => !isUnit(glyph.key) && changing(indexOf(glyph))).map((glyph) => center(glyph.rect)),
+      ...rects.filter((_, index) => !isUnit(transitions[index].key) && changing(index)).map(center)
     ];
     const waveStart = Math.min(...centers);
     const waveSpan = Math.max(...centers) - waveStart;
@@ -285,7 +292,7 @@
     transitions.forEach(({ key, char, numeric, place, next }, index) => {
       const rect = rects[index];
       const candidates = previous.filter((glyph) => glyph.key === key);
-      const matching = index < unchangedPrefix
+      const matching = index < unchangedPrefix || isUnit(key)
         ? candidates.filter((glyph) => glyph.char === char).sort((a, b) => b.opacity - a.opacity)[0] : null;
       if (matching) {
         // A kept glyph follows the layout transaction; font fitting scales it

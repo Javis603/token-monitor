@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { claudeSessionRoots } = require('./providers/claude/paths');
 const { codebuddyProjectsRoot } = require('./providers/codebuddy/paths');
+const { resolvePiSessionsDir } = require('./providers/pi/paths');
 
 // 5.5 moved the WorkBuddy home to ~/.workbuddy-ai and tokscale still scans
 // both, so a session reported from either root resolves from either.
@@ -47,6 +48,41 @@ function findSessionFiles(root, sessionIds) {
         walk(nextPath);
       } else if (entry.isFile() && wanted.has(entry.name)) {
         found.set(entry.name.slice(0, -'.jsonl'.length), nextPath);
+      }
+    }
+  }
+
+  walk(root);
+  return found;
+}
+
+// Pi names each transcript `<ISO-timestamp>_<sessionId>.jsonl`, so the session
+// id is a suffix of the filename rather than the whole basename (which is what
+// `findSessionFiles` matches on for every other client here).
+function findPiSessionFiles(root, sessionIds) {
+  const wanted = new Map();
+  for (const sessionId of sessionIds) {
+    if (isSafeSessionId(sessionId)) wanted.set(`${sessionId}.jsonl`, sessionId);
+  }
+  const found = new Map();
+  if (wanted.size === 0) return found;
+
+  function walk(dir) {
+    if (found.size >= wanted.size) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    for (const entry of entries) {
+      if (found.size >= wanted.size) return;
+      const nextPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(nextPath);
+      } else if (entry.isFile()) {
+        for (const [filename, sessionId] of wanted) {
+          if (entry.name === filename || entry.name.endsWith(`_${filename}`)) {
+            found.set(sessionId, nextPath);
+            break;
+          }
+        }
       }
     }
   }
@@ -154,7 +190,11 @@ function resolveSessionFile(client, sessionId, home, options = {}) {
     if (direct) return direct;
     return findCodexSessionFiles(codexHome, [id]).get(id) || '';
   }
+  if (client === 'pi') {
+    const sessionsDir = resolvePiSessionsDir({ homeDir: home });
+    return findPiSessionFiles(sessionsDir, [id]).get(id) || '';
+  }
   return '';
 }
 
-module.exports = { findSessionFiles, findCodexSessionFiles, preferredCodexSessionFile, codexSessionFile, resolveSessionFile, isSafeSessionId };
+module.exports = { findSessionFiles, findPiSessionFiles, findCodexSessionFiles, preferredCodexSessionFile, codexSessionFile, resolveSessionFile, isSafeSessionId };

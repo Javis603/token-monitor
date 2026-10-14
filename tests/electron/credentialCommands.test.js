@@ -397,3 +397,23 @@ test('MiniMax credential save keeps an implicit region and probes the effective 
   assert.deepEqual(urls, ['https://api.minimaxi.com/v1/token_plan/remains']);
   assert.equal(Object.hasOwn(patches[0], 'minimaxApiRegion'), false);
 });
+
+test('MiniMax saves a pay-as-you-go key against balance instead of Token Plan quota', async () => {
+  const urls = [];
+  const { api, patches } = commands({
+    settings: { minimaxApiRegion: 'cn', minimaxBillingMode: 'api', limitProviders: 'minimax' },
+    answer: (url, init) => {
+      urls.push(url);
+      assert.equal(init.headers.Authorization, 'Bearer sk-api-test');
+      return url === 'https://api.minimaxi.com/account/query_balance'
+        ? response(200, { available_amount: '0.00', base_resp: { status_code: 0 } })
+        : response(401);
+    }
+  });
+  const result = await api.saveCredential('minimax', { minimaxApiKey: 'sk-api-test', minimaxBillingMode: 'token-plan' });
+  assert.equal(result.saved, true);
+  assert.equal(result.verdict, 'valid');
+  assert.deepEqual(urls, ['https://api.minimaxi.com/account/query_balance']);
+  assert.equal(patches[0].minimaxApiKey, 'sk-api-test');
+  assert.equal(Object.hasOwn(patches[0], 'minimaxBillingMode'), false);
+});

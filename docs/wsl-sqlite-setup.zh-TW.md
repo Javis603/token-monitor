@@ -8,7 +8,7 @@
 
 Windows 版 Token Monitor 預設會透過 `\\wsl$` 掃描所有正在執行的 WSL 發行版，並約每五分鐘合併一次用量。Codex JSONL session 這類檔案型資料通常可以直接讀取。
 
-OpenCode、Hermes 和 ZCode 等工具的目前用量儲存在 SQLite 資料庫中。Windows 程序可以透過 `\\wsl$` 找到資料庫，但 SQLite 無法可靠地跨 WSL 9P 邊界協調檔案鎖和正在使用的 WAL。因此，Token Monitor 可能會在 **設定 → 採集 → WSL 偵測** 裡顯示已找到工具，卻沒有用量。
+OpenCode、Hermes、ZCode 和 Antigravity 等工具的目前用量儲存在 SQLite 資料庫中。Windows 程序可以透過 `\\wsl$` 找到資料庫，但 SQLite 無法可靠地跨 WSL 9P 邊界協調檔案鎖和正在使用的 WAL。因此，Token Monitor 可能會在 **設定 → 採集 → WSL 偵測** 裡顯示已找到工具，卻沒有用量。
 
 不要把複製正在使用的 `.db` 檔案當作解決方法。最新交易可能還在 `-wal` 中，而分別複製資料庫與 sidecar 檔案也無法保證得到一致的快照。
 
@@ -44,7 +44,7 @@ npm ci
 TOKEN_MONITOR_HUB_URL=http://WINDOWS_HOST_IP:17321
 TOKEN_MONITOR_SECRET=你的共享密鑰
 TOKEN_MONITOR_DEVICE_ID=wsl-agent
-TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode
+TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode,antigravity
 ```
 
 `TOKEN_MONITOR_DEVICE_ID` 必須與 Windows 小工具的裝置 ID 不同。Hub 會把相同 ID 當作同一台裝置，後傳送的紀錄會覆蓋前一筆。
@@ -53,7 +53,7 @@ TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode
 
 Hub 會直接相加不同裝置的總量，不會跨裝置去除重複的 session。請選擇一種設定：
 
-- 建議：保留 Windows 的 WSL 掃描，只讓 WSL agent 採集 Windows 無法可靠讀取的 SQLite 工具，例如 `TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode`。
+- 建議：保留 Windows 的 WSL 掃描，只讓 WSL agent 採集 Windows 無法可靠讀取的 SQLite 工具，例如 `TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode,antigravity`。
 - 另一種方式：讓 WSL agent 採集全部 WSL 工具，然後在 Windows 小工具的 **設定 → 採集** 中關閉 **掃描 WSL 裡的工具**。
 
 不要讓兩個採集器同時回報相同的 Codex、Claude Code 或其他檔案型 session。

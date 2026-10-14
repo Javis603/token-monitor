@@ -752,7 +752,7 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   const forms = limitAccountFormsForRenderer();
   const expectedFields = {
     deepseek: [['deepseekApiKey', 'password']],
-    minimax: [['minimaxApiRegion', 'select'], ['minimaxApiKey', 'password']]
+    minimax: [['minimaxBillingMode', 'select'], ['minimaxApiRegion', 'select'], ['minimaxApiKey', 'password']]
   };
   for (const id of ['deepseek', 'minimax']) {
     assert.doesNotMatch(html, new RegExp(`id="${id}(AccountGroup|ManualPanel|ApiKeyInput)"`), id);
@@ -791,7 +791,11 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
       cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
       en: 'https://platform.minimax.io/user-center/payment/token-plan'
     },
-    default: 'https://platform.minimaxi.com/user-center/payment/token-plan'
+    default: 'https://platform.minimaxi.com/user-center/payment/token-plan',
+    pathByField: {
+      byField: 'minimaxBillingMode',
+      values: { 'token-plan': '/user-center/payment/token-plan', api: '/user-center/payment/balance' }
+    }
   });
 
   // The region is a plain setting beside the credential, so Clear leaves it
@@ -804,7 +808,7 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   for (const { labelKey } of region.options) {
     assert.match(labelKey, /^settings\.minimax\./, labelKey);
   }
-  assert.deepEqual(minimax.top, [{ field: 'minimaxApiRegion' }]);
+  assert.deepEqual(minimax.top, [{ field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' }]);
 
   // The region never becomes a credential: no store path, so it stays in
   // settings.json only after a selection; an implicit default stays empty.
