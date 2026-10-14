@@ -100,6 +100,8 @@ Metadata upgrades preserve counters and `fullScanAt`, persisting identities and 
 
 Sessions, Home and Edge Dock group the complete member set before applying display caps. Count each accounting member once and distinct delegated conversations separately; derive activity/token availability from all members but context/cache from the latest main member's own readings. Recheck activity at the current clock, including expired-lease transcript fallback; never cache groups across pushes or expiry. Cycles/conflicting parents retain all members with distinct group identities. Provider-specific grouping and visibility rules stay in their notes and renderer tests.
 
+The Sessions family activity line uses the same members as its token/cost total: sum calls, divide summed cache reads by summed input (including cache reads/writes), and divide summed timed output by summed message durations. Cap timed output against each member's output and exclude its numerator when it has no duration before merging; never average percentages/rates or let untimed output borrow another member's clock. The time label follows the latest member. Expanded members retain their own metrics; context and prompt-cache estimates remain the latest main member's snapshots.
+
 ## Session title display
 
 `sessionTitlesEnabled` defaults on and affects Electron presentation only. `src/electron/sessionTitleDisplay.js` hides titles from snapshots, all-time pulls and detail headings without changing collection, metadata caches or local archives. Sync consent is independent, defaults off, and requires the [shared sync protocol](#shared-sync-content).

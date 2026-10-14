@@ -488,6 +488,77 @@ test('a subagent group labels and breaks down every member model, not only the p
   assert.equal(untitled.groupRows[0].modelLabel, 'gpt-5.6-sol', 'members keep their own labels');
 });
 
+test('family activity sums calls and weights cache and speed across continuations and nested cross-client children', () => {
+  const now = new Date(2026, 9, 11, 12, 30);
+  for (const title of ['Ship it', '']) {
+    const session = (client, id, minute, extra) => ({ client, sessionId: id, totalTokens: 2_000,
+      models: { model: 2_000 }, lastUsedAt: localIso(2026, 10, 11, 12, minute), ...extra });
+    const period = { sessions: {
+      'codex:main': session('codex', 'main', 5, { title, t3ThreadId: 'main-thread',
+        messageCount: 10, inputTokens: 100, cacheReadTokens: 900,
+        outputTokens: 100, timedOutputTokens: 100, timedDurationMs: 1_000 }),
+      'codex:continuation': session('codex', 'continuation', 10, { title, t3ThreadId: 'main-thread',
+        messageCount: 2, inputTokens: 100, cacheReadTokens: 100,
+        outputTokens: 100, timedOutputTokens: 100, timedDurationMs: 0 }),
+      'claude:worker': session('claude', 'worker', 20, { parentClient: 'codex', parentSessionId: 'main',
+        messageCount: 3, inputTokens: 100, cacheWriteTokens: 100,
+        outputTokens: 300, timedOutputTokens: 999, timedDurationMs: 9_000 }),
+      'codex:nested': session('codex', 'nested', 25, { parentClient: 'claude', parentSessionId: 'worker',
+        messageCount: 4, inputTokens: 600, outputTokens: 900, timedOutputTokens: 900 }),
+      'codex:review': session('codex', 'review', 28, { parentSessionId: 'main', sessionKind: 'background-review',
+        messageCount: 100, inputTokens: 10_000, outputTokens: 10_000, timedOutputTokens: 10_000, timedDurationMs: 1 })
+    } };
+    const before = JSON.stringify(period);
+    const rows = sessionRowsForPeriod(period, { clientLabels, now });
+    // Repeated presentation input must not count the same accounting key twice.
+    const grouped = groupSessionRows([...rows, rows.find(row => row.key === 'session:claude:worker')]);
+    const group = grouped.find(row => row.subagentGroup);
+    assert.equal(group.value, 8_000);
+    assert.equal(group.subagentCount, 2);
+    assert.equal(group.groupRows.length, 4);
+    assert.equal(group.activitySummary, '12:25 · 19 calls · 50% · 40 tok/s');
+    if (title) assert.equal(group.activity, group.activitySummary);
+    else assert.equal(group.subtitle, `${group.activitySummary} · 2 subagents`);
+    assert.equal(group.groupRows.find(row => row.key === 'session:codex:main').activitySummary,
+      '12:05 · 10 calls · 90% · 100 tok/s');
+    assert.equal(JSON.stringify(period), before);
+  }
+});
+
+test('continuation summaries omit unreported cache and speed rather than inheriting main metrics', () => {
+  const now = new Date(2026, 9, 11, 12, 30);
+  const rows = sessionRowsForPeriod({ sessions: {
+    'codex:one': { client: 'codex', sessionId: 'one', t3ThreadId: 'same', title: 'Run',
+      totalTokens: 100, messageCount: 1, lastUsedAt: localIso(2026, 10, 11, 12, 5) },
+    'codex:two': { client: 'codex', sessionId: 'two', t3ThreadId: 'same', title: 'Run',
+      totalTokens: 100, messageCount: 2, lastUsedAt: localIso(2026, 10, 11, 12, 10),
+      outputTokens: 100, timedOutputTokens: 100, timedDurationMs: 0 }
+  } }, { now });
+  const [group] = groupSessionRows(rows);
+  assert.equal(group.subagentCount, 0);
+  assert.equal(group.activity, '12:10 · 3 calls');
+});
+
+test('native children contribute their own cache schema and keep unavailable token counters out of family rates', () => {
+  const now = new Date(2026, 9, 11, 12, 30);
+  const rows = sessionRowsForPeriod({ sessions: {
+    'codex:main': { client: 'codex', sessionId: 'main', title: 'Run', totalTokens: 100,
+      messageCount: 2, inputTokens: 100, outputTokens: 20, timedOutputTokens: 20, timedDurationMs: 1_000,
+      lastUsedAt: localIso(2026, 10, 11, 12, 5) }
+  } }, { now, nativeSessions: {
+    'reasonix:child': { client: 'reasonix', sessionId: 'child', parentClient: 'codex', parentSessionId: 'main',
+      totalTokens: 200, messageCount: 3, promptTokens: 100, cacheHitTokens: 0, cacheMissTokens: 100,
+      outputTokens: 30, timedOutputTokens: 30, timedDurationMs: 1_000,
+      lastUsedAt: localIso(2026, 10, 11, 12, 10) },
+    'codex:pending': { client: 'codex', sessionId: 'pending', parentSessionId: 'main',
+      tokenDataUnavailable: true, messageCount: 1, outputTokens: 999, timedOutputTokens: 999, timedDurationMs: 1,
+      lastUsedAt: localIso(2026, 10, 11, 12, 15) }
+  } });
+  const [group] = groupSessionRows(rows);
+  assert.equal(group.value, 300);
+  assert.equal(group.activity, '12:15 · 6 calls · 0% · 25 tok/s');
+});
+
 test('a parent cycle leaves both sessions as their own rows', () => {
   const rows = sessionRowsForPeriod({ sessions: {
     'codex:a': { client: 'codex', sessionId: 'a', totalTokens: 1, parentSessionId: 'b' },
