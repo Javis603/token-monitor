@@ -328,6 +328,8 @@ const {
   macActivationPolicyMode,
   mainWindowCloseAction,
   normalizeTrayModeSettings,
+  popoverBlurMatchesPress,
+  popoverToggleAction,
   shouldCreateTray,
   skipTaskbarForSettings,
   trayToggleAction
@@ -3098,6 +3100,7 @@ function exportIntervalMs() {
   return Number.isFinite(v) && v >= 1000 ? v : DEFAULT_EXPORT_INTERVAL_MS;
 }
 let suppressNextBlurHide = false;
+let recentPopoverBlur = null;
 const providerTrayIcons = {};
 let registeredWindowToggleShortcut = '';
 let windowToggleShortcutRegistered = false;
@@ -5199,6 +5202,7 @@ async function startStatsStream(options = {}) {
 
 function showPopover(clickPoint = null) {
   if (!mainWindow || mainWindow.isDestroyed() || !tray) return;
+  recentPopoverBlur = null;
   applyMacActivationPolicy();
   applyMacSpaceBehavior(true);
   applyWindowSettings();
@@ -5214,13 +5218,21 @@ function showPopover(clickPoint = null) {
 }
 
 function hidePopover() {
+  recentPopoverBlur = null;
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isVisible()) mainWindow.hide();
 }
 
-function togglePopover(clickPoint = null) {
+function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isVisible() && mainWindow.isFocused()) hidePopover();
+  const action = popoverToggleAction({
+    visible: mainWindow.isVisible(),
+    focused: mainWindow.isFocused(),
+    visibleAtMouseDown: wasVisibleAtMouseDown,
+    blurMatchedAtMouseDown
+  });
+  recentPopoverBlur = null;
+  if (action === 'hide') hidePopover();
   else showPopover(clickPoint);
 }
 
@@ -5480,6 +5492,7 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     glassBlur: source.glassBlur,
     systemGlass: source.systemGlass,
     reduceMotion: source.reduceMotion,
+    tokenNumberAnimation: source.tokenNumberAnimation,
     interfaceFontFamily: source.interfaceFontFamily,
     displayFontFamily: source.displayFontFamily,
     showLimitUsed: source.showLimitUsed,
@@ -5903,9 +5916,9 @@ function handleWindowToggleShortcut() {
   else focusExistingWindow();
 }
 
-function handleTrayToggle(_tray, clickPoint = null) {
+function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false) {
   const action = trayToggleAction(settings);
-  if (action === 'togglePopover') togglePopover(clickPoint);
+  if (action === 'togglePopover') togglePopover(clickPoint, wasVisibleAtMouseDown, blurMatchedAtMouseDown);
   else if (action === 'focusWindow') focusExistingWindow();
 }
 
@@ -6126,6 +6139,13 @@ function ensureTray() {
       };
     },
     onToggle: handleTrayToggle,
+    getWindowVisible: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()),
+    onMouseDown: (pressPoint) => {
+      const matched = popoverBlurMatchesPress({ recentBlur: recentPopoverBlur, pressPoint, now: performance.now() });
+      recentPopoverBlur = null;
+      return matched;
+    },
+    onCancelMouseDown: () => { recentPopoverBlur = null; },
     onOpenView: openViewFromTray,
     onRefresh: () => { void refreshFromTray(); },
     onSetTrayContent: setTrayContentFromMenu,
@@ -7143,7 +7163,17 @@ function createWindow(boundsOverride, options = {}) {
   });
   win.on('blur', () => {
     nudgeTaskbarZOrder();
-    if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) hidePopover();
+    if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) {
+      const wasVisible = win.isVisible();
+      const point = wasVisible && process.platform === 'darwin' ? screen.getCursorScreenPoint() : null;
+      if (wasVisible) {
+        hidePopover();
+        // Cocoa can send this blur before Tray.mouse-down for the same click.
+        // The cursor point lets that later click identify its own blur without
+        // mistaking a quick click on another app followed by a tray click.
+        if (point && tray?.isPointerOverIcon?.(point)) recentPopoverBlur = { at: performance.now(), point };
+      }
+    }
     else if (!quitRequested) scheduleFloatingBubbleAutoCollapse();
   });
   win.on('resized', () => { persistBoundsSoon(); syncTaskbarZOrder(); });

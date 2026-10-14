@@ -36,6 +36,17 @@ function parseArchiveRow(row) {
   }
 }
 
+// Release the SQLite read cursor even when next() throws. for-of alone only
+// closes an iterator when its body exits early, not when stepping it fails.
+function* iterateSessionRows(statement, ...parameters) {
+  const rows = statement.iterate(...parameters);
+  try {
+    for (const row of rows) yield row;
+  } finally {
+    rows.return();
+  }
+}
+
 function readMigratedArchiveSnapshot(options = {}) {
   const databasePath = sessionUsageArchiveDatabasePath(options);
   const Database = options.DatabaseSync || DatabaseSync;
@@ -57,7 +68,7 @@ function readMigratedArchiveSnapshot(options = {}) {
     const archive = normalizeSessionUsageArchive({});
     if (metadata.get('pruned-day')) archive.prunedDay = metadata.get('pruned-day');
     if (metadata.get('pruned-month')) archive.prunedMonth = metadata.get('pruned-month');
-    for (const row of database.prepare('SELECT session_key, entry_json FROM sessions').all()) {
+    for (const row of iterateSessionRows(database.prepare('SELECT session_key, entry_json FROM sessions'))) {
       const entry = parseArchiveRow(row);
       if (entry) archive.sessions[row.session_key] = entry;
     }
@@ -108,15 +119,20 @@ function createSessionUsageArchiveStore(options = {}) {
   }
 
   function loadRevisedRows(sinceRevision) {
-    for (const row of database.prepare(`
+    // Stage parsed entries, never raw JSON rows. An interrupted cursor must not
+    // expose a partial catch-up through the archive held by existing callers.
+    const changes = new Map();
+    for (const row of iterateSessionRows(database.prepare(`
       SELECT session_key, entry_json
       FROM sessions
       WHERE revision > ?
       ORDER BY revision, session_key
-    `).all(sinceRevision)) {
-      const entry = parseRow(row);
-      if (entry) archive.sessions[row.session_key] = entry;
-      else delete archive.sessions[row.session_key];
+    `), sinceRevision)) {
+      changes.set(row.session_key, parseRow(row));
+    }
+    for (const [key, entry] of changes) {
+      if (entry) archive.sessions[key] = entry;
+      else delete archive.sessions[key];
     }
   }
 
@@ -228,13 +244,14 @@ function createSessionUsageArchiveStore(options = {}) {
       const loadedRevision = Number(metadataValue('revision') || 0);
       const prunedDay = metadataValue('pruned-day');
       const prunedMonth = metadataValue('pruned-month');
-      archive = normalizeSessionUsageArchive({});
-      for (const row of database.prepare('SELECT session_key, entry_json FROM sessions').all()) {
+      const loadedArchive = normalizeSessionUsageArchive({});
+      for (const row of iterateSessionRows(database.prepare('SELECT session_key, entry_json FROM sessions'))) {
         const entry = parseRow(row);
-        if (entry) archive.sessions[row.session_key] = entry;
+        if (entry) loadedArchive.sessions[row.session_key] = entry;
       }
-      if (prunedDay) archive.prunedDay = prunedDay;
-      if (prunedMonth) archive.prunedMonth = prunedMonth;
+      if (prunedDay) loadedArchive.prunedDay = prunedDay;
+      if (prunedMonth) loadedArchive.prunedMonth = prunedMonth;
+      archive = loadedArchive;
       revision = loadedRevision;
       archiveSource = 'database';
       reloadRequired = false;
@@ -282,16 +299,7 @@ function createSessionUsageArchiveStore(options = {}) {
     loadRows();
     const storedRevision = Number(metadataValue('revision') || 0);
     if (storedRevision > revision) {
-      for (const row of database.prepare(`
-        SELECT session_key, entry_json, revision
-        FROM sessions
-        WHERE revision > ?
-        ORDER BY revision, session_key
-      `).all(revision)) {
-        const entry = parseRow(row);
-        if (entry) archive.sessions[row.session_key] = entry;
-        else delete archive.sessions[row.session_key];
-        }
+      loadRevisedRows(revision);
       revision = storedRevision;
     }
     return archive;

@@ -46,6 +46,14 @@ TOKEN_MONITOR_DEVICE_ID=build-server
 
 The agent reads `.env` from the checkout root, wherever it is started from.
 
+### Title-sync state and migration
+
+Title sync is off by default and needs opt-in on both the Hub and agent. For the agent, use `TOKEN_MONITOR_SYNC_SESSION_TITLES=1` or `--sync-session-titles`. The widget's title-display setting is independent. See the [title-sync API](API.md#put-apisynctitlesdeviceid) for protocol and legacy-agent cleanup details.
+
+Before deleting or moving the agent's state directory (`TOKEN_MONITOR_SHARED_DIR`, if set), stop the agent/service and run `npm run agent:once -- --sync-session-titles=false` with the original Hub URL, credentials, Device ID and state directory. Keep the state until revocation is confirmed; pending cleanup or state warnings mean it must be retained. This command still collects and uploads usage without titles after cleanup.
+
+To avoid another usage upload, delete the old device on the old Hub instead. Keep the original agent stopped so it cannot recreate the device. Revocation does not remove exported copies or backups.
+
 ## Verify
 
 Print the summary the agent would send, without posting it to the hub:
@@ -91,6 +99,8 @@ npm ci
 Then start it again. The next start fetches the pinned tokscale build if it changed.
 
 ## Uninstall
+
+Before removing the state directory, complete [title-sync cleanup](#title-sync-state-and-migration) if this agent has ever shared titles. Deleting the local journal alone does not revoke titles on old Hubs.
 
 Stop and remove the service, delete the checkout, and delete the agent's state directory: `~/.config/Token Monitor/` on Linux, `~/Library/Application Support/Token Monitor/` on macOS, `%APPDATA%\Token Monitor\` on Windows (or `TOKEN_MONITOR_SHARED_DIR` if you set it). On a machine that also has the widget installed, this is the widget's data directory too. tokscale keeps its settings and pricing cache in `%APPDATA%\tokscale\` on Windows and `~/.config/tokscale/` elsewhere; delete it too unless you also use the tokscale CLI. To remove the device from the dashboard, delete it from a connected widget's device list.
 

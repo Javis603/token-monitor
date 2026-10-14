@@ -25,6 +25,102 @@ const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
 
 const CN_REMAINS_URLS = new Set([MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
 
+const BALANCE_URL_CN = 'https://api.minimaxi.com/account/query_balance';
+const BALANCE_URL_EN = 'https://api.minimax.io/account/query_balance';
+
+test('MiniMax API billing uses one balance endpoint in the selected region', async () => {
+  for (const [region, url, currency] of [['cn', BALANCE_URL_CN, 'CNY'], ['intl', BALANCE_URL_EN, 'USD']]) {
+    for (const amount of ['98.25', '0.00', '-1.50']) {
+      const calls = [];
+      const result = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-test', minimaxBillingMode: 'api', minimaxApiRegion: region }, {
+        env: {},
+        fetchJson: async (target, headers) => {
+          calls.push(target);
+          assert.equal(headers.Authorization, 'Bearer sk-api-test');
+          return { available_amount: amount, cash_balance: '100.00', base_resp: { status_code: 0 } };
+        }
+      });
+      assert.deepEqual(calls, [url]);
+      assert.equal(result.status, 'ok');
+      assert.equal(result.accountLabel, 'Pay-as-you-go');
+      assert.equal(result.windows.length, 1);
+      assert.equal(result.windows[0].metric, 'credits');
+      assert.equal(result.windows[0].currency, currency);
+      assert.equal(result.windows[0].remaining, Number(amount));
+      assert.equal(result.windows[0].usedPercent, null);
+      assert.equal(result.windows[0].resetsAt, null);
+      assert.equal(JSON.stringify(result).includes('sk-api-test'), false);
+    }
+  }
+});
+
+test('MiniMax API billing rejects missing or malformed balances without inventing a quota', async () => {
+  for (const available_amount of [undefined, null, '', ' ', 'invalid', false, Infinity]) {
+    const calls = [];
+    const result = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-test', minimaxBillingMode: 'api' }, {
+      env: {},
+      fetchJson: async (url) => {
+        calls.push(url);
+        return { available_amount, base_resp: { status_code: 0 } };
+      }
+    });
+    assert.equal(result.status, 'unavailable');
+    assert.deepEqual(result.windows, []);
+    assert.deepEqual(calls, [BALANCE_URL_EN]);
+  }
+});
+
+test('MiniMax API billing reuses Auto region fallback and remembers a valid zero balance', async () => {
+  const calls = [];
+  const providerRuntimeState = new Map();
+  const deps = {
+    env: {}, providerRuntimeState,
+    fetchJson: async (url) => {
+      calls.push(url);
+      if (url === BALANCE_URL_EN) throw Object.assign(new Error('wrong region'), { status: 'unauthorized', statusCode: 401 });
+      return { available_amount: '0.00', base_resp: { status_code: 0 } };
+    }
+  };
+  const options = { minimaxApiKey: 'sk-api-test', minimaxBillingMode: 'api' };
+  assert.equal((await fetchMinimaxLimits(options, deps)).status, 'ok');
+  assert.deepEqual(calls, [BALANCE_URL_EN, BALANCE_URL_CN]);
+  assert.equal(providerRuntimeState.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
+  calls.length = 0;
+  assert.equal((await fetchMinimaxLimits(options, deps)).status, 'ok');
+  assert.deepEqual(calls, [BALANCE_URL_CN]);
+});
+
+test('MiniMax API billing preserves auth, rate-limit and transport verdicts', async () => {
+  for (const [error, expected, urls] of [
+    [{ status: 'unauthorized', statusCode: 401 }, 'unauthorized', [BALANCE_URL_EN, BALANCE_URL_CN]],
+    [{ status: 'sourceRateLimited', statusCode: 429 }, 'sourceRateLimited', [BALANCE_URL_EN]],
+    [{ status: 'unavailable', statusCode: 500 }, 'unavailable', [BALANCE_URL_EN]],
+    [{}, 'unavailable', [BALANCE_URL_EN, BALANCE_URL_CN]]
+  ]) {
+    const calls = [];
+    const result = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-test', minimaxBillingMode: 'api' }, {
+      env: {},
+      fetchJson: async (url) => {
+        calls.push(url);
+        throw Object.assign(new Error('probe failed'), error);
+      }
+    });
+    assert.equal(result.status, expected);
+    assert.deepEqual(calls, urls);
+  }
+  const calls = [];
+  const result = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-test', minimaxBillingMode: 'api' }, {
+    env: {},
+    fetchJson: async (url) => {
+      calls.push(url);
+      if (url === BALANCE_URL_EN) throw new Error('network down');
+      return { base_resp: { status_code: 1004, status_msg: 'invalid api key' } };
+    }
+  });
+  assert.equal(result.status, 'unavailable');
+  assert.deepEqual(calls, [BALANCE_URL_EN, BALANCE_URL_CN]);
+});
+
 test('the copied environment example leaves the legacy MiniMax host pin effective', () => {
   const example = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
   const env = dotenv.parse(`${example}\nMINIMAX_API_HOST=api.minimaxi.com\n`);

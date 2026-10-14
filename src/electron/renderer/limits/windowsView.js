@@ -1592,6 +1592,17 @@
       // compact line; the ⓘ tooltip carries each grant's label and coverage.
       const resetNode = claudeResetCreditsNode(provider.resetCredits);
       if (resetNode) windows.append(resetNode);
+    } else if (provider.provider === 'notion') {
+      // Both included allowances are percentage quotas. Monthly is a billing
+      // window, which the default session/weekly branch would omit.
+      const quotaNodes = (provider.windows || [])
+        .filter((window) => window.kind === 'session' || window.kind === 'billing')
+        .map((window) => limitWindowNode(
+          providerWindowLabel(provider, window), window, color,
+          window.kind === 'session' ? 0.95 : 0.68
+        ));
+      if (quotaNodes.length === 1) quotaNodes[0].classList.add('limit-window-wide');
+      windows.append(...quotaNodes);
     } else if (provider.provider === 'cline') {
       // ClinePass measures three quota windows, and the account's credit arrives as
       // a fourth "billing" window — told apart by its metric rather than by its
@@ -1622,12 +1633,26 @@
     } else {
       // Default: render only the windows the provider actually has. Providers
       // that only expose a single window shouldn't leave a half-empty bar next to
-      // the real one. (Grok is handled above; this branch covers minimax's
-      // session + weekly pair and any future session/weekly provider.)
+      // the real one. Credits windows carry money rather than quota percentages;
+      // their display meter is derived without changing the provider reading.
       const session = windowForKind(provider, 'session');
       const weekly = windowForKind(provider, 'weekly');
       if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
       if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
+      for (const creditsWindow of (provider.windows || []).filter(isCreditsWindow)) {
+        const amount = creditsAmount(provider, creditsWindow);
+        if (amount === null) continue;
+        const balanceNode = limitWindowNode(
+          providerWindowLabel(provider, creditsWindow, 'Balance'),
+          { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow) },
+          color,
+          0.95,
+          formatMoney(amount, creditsCurrency(provider, creditsWindow))
+        );
+        balanceNode.classList.add('limit-window-wide');
+        if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) balanceNode.classList.add('limit-window-no-reset');
+        windows.append(balanceNode);
+      }
     }
     if (!options.showAllUsageItems) {
       hideUsageItems(windows, usageItems.hiddenUsageItemSet(settings()?.limitProviderHiddenItems, provider?.provider));

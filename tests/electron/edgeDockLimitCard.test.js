@@ -32,6 +32,7 @@ const { parseStepfunUsage } = require('../../src/shared/providers/stepfun/limits
 const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../src/shared/providers/factory/limits');
 const { aggregateLimits, normalizeLimitProvider } = require('../../src/shared/limits/core');
 const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
+const { fetchMinimaxLimits } = require('../../src/shared/providers/minimax/limits');
 
 const root = path.join(__dirname, '../..');
 
@@ -346,6 +347,98 @@ test('saved-only WorkBuddy subscription card does not appear on the sole live si
   const card = dockView({ subscriptions: [saved] }, { subscriptionAccounts: () => cell.subscriptionAccounts })
     .renderLimitProviderSolo('workbuddy', 'WorkBuddy', live, '#12B7F5');
   assert.equal(card.find('subscription-tooltip'), null);
+});
+
+test('Notion rolling and monthly allowances render in both display modes and hide independently', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'notion', status: 'ok', source: 'web',
+    windows: [
+      { kind: 'session', label: 'Rolling', used: 21, limit: 50, usedPercent: 42, resetsAt: '2026-11-01T00:00:00Z' },
+      { kind: 'billing', label: 'Monthly', used: 18, limit: 100, usedPercent: 18, resetsAt: '2026-12-01T00:00:00Z' }
+    ]
+  });
+  const before = JSON.stringify(provider);
+  for (const showLimitUsed of [false, true]) {
+    const view = dockView({ showLimitUsed });
+    const card = view.renderProviderWindows(provider, '#888888');
+    assert.equal(card.children.length, 2);
+    assert.deepEqual(card.children.map((row) => row.children[0].children[0].textContent), ['Rolling', 'Monthly']);
+    assert.match(card.text, showLimitUsed ? /42% used/ : /58% left/);
+    assert.match(card.text, showLimitUsed ? /18% used/ : /82% left/);
+    assert.equal(card.text.includes('$'), false, 'included allowance units are not spendable money');
+    assert.ok(card.children.every((row) => row.find('limit-reset').text));
+    const items = view.limitProviderUsageItems([provider]);
+    assert.equal(items.length, 2);
+    for (const item of items) {
+      const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { notion: [item.id] } });
+      assert.equal(hidden.renderProviderWindows(provider, '#888888').children.length, 1);
+      assert.deepEqual(hidden.limitProviderUsageItems([provider]), items);
+    }
+  }
+  const monthlyOnly = { ...provider, windows: [provider.windows[1]] };
+  assert.ok(dockView().renderProviderWindows(monthlyOnly, '#888888').children[0].classNames.has('limit-window-wide'));
+  assert.equal(JSON.stringify(provider), before);
+});
+
+test('MiniMax API balances reach the shared Limits and dock renderer in both currencies', async () => {
+  for (const [region, currency, symbol] of [['cn', 'CNY', '¥'], ['intl', 'USD', '$']]) {
+    for (const amount of [98.25, 0, -1.5]) {
+      const provider = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-fixture', minimaxBillingMode: 'api', minimaxApiRegion: region }, {
+        env: {}, fetchJson: async () => ({ available_amount: String(amount), base_resp: { status_code: 0 } })
+      });
+      assert.equal(provider.status, 'ok');
+      assert.equal(provider.windows[0].currency, currency);
+      assert.equal(provider.balance, null, 'the collector only supplies a credits window');
+      const before = JSON.stringify(provider);
+      for (const showLimitUsed of [false, true]) {
+        const card = dockView({ showLimitUsed }).renderProviderWindows(provider, '#888888');
+        assert.equal(card.children.length, 1);
+        const row = card.children[0];
+        assert.equal(row.children[0].children[0].textContent, 'Balance');
+        assert.equal(row.children[0].children[1].textContent, `${symbol}${amount.toFixed(2)}`);
+        assert.equal(row.dataset.usageItem, 'credits');
+        assert.ok(row.classNames.has('limit-window-wide'));
+        assert.ok(row.classNames.has('limit-window-no-reset'));
+        assert.equal(row.find('limit-meter-fill').style['--bar-scale'], amount > 0 ? '1' : '0');
+        assert.equal(row.find('limit-reset').text, '');
+      }
+      assert.equal(JSON.stringify(provider), before, 'display percentages never mutate the wire reading');
+    }
+  }
+});
+
+test('MiniMax Balance is listed and can be hidden without disappearing from its checklist', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'minimax', status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 0, currency: 'CNY' }]
+  });
+  const view = dockView({ limitProviderHiddenItems: { minimax: ['credits'] } });
+  assert.deepEqual(view.limitProviderUsageItems([provider]), [{ id: 'credits', label: 'Balance' }]);
+  assert.equal(view.renderProviderWindows(provider, '#888888').children.length, 0);
+  assert.equal(view.renderProviderWindows(provider, '#888888', { showAllUsageItems: true }).children.length, 1);
+  assert.equal(dockView().renderProviderWindows(provider, '#888888').children.length, 1);
+});
+
+test('MiniMax Token Plan retains its quota pair and missing API balances do not invent a row', async () => {
+  const plan = await fetchMinimaxLimits({ minimaxApiKey: 'sk-cp-fixture', minimaxApiRegion: 'cn' }, {
+    env: {}, fetchJson: async () => ({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 75, current_weekly_remaining_percent: 50 }] } })
+  });
+  const card = dockView().renderProviderWindows(plan, '#888888');
+  assert.equal(plan.status, 'ok');
+  assert.deepEqual(card.children.map((row) => row.children[0].children[0].textContent), ['5h', 'Weekly']);
+  assert.equal(card.text.includes('Balance'), false);
+  for (const available_amount of [undefined, 'invalid']) {
+    const provider = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-fixture', minimaxBillingMode: 'api', minimaxApiRegion: 'cn' }, {
+      env: {}, fetchJson: async () => ({ available_amount, base_resp: { status_code: 0 } })
+    });
+    assert.equal(provider.status, 'unavailable');
+    assert.equal(dockView().renderProviderWindows(provider, '#888888').children.length, 0);
+  }
+});
+
+test('default provider balance rendering follows the credits marker without a provider whitelist', () => {
+  const provider = { provider: 'future-provider', windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 5, currency: 'USD' }] };
+  assert.match(dockView().renderProviderWindows(provider, '#888888').text, /\$5\.00/);
 });
 
 test('Home text and bars use the plan text rendered by Limits account rows', () => {

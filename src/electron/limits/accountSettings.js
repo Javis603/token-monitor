@@ -279,7 +279,10 @@ function accountForm(entry) {
 
 function formUrls(openUrl) {
   if (openUrl?.url) return [openUrl.url];
-  return [...Object.values(openUrl?.urls || {}), ...Object.values(openUrl?.statusUrls || {}), ...(openUrl?.default ? [openUrl.default] : [])];
+  const urls = [...Object.values(openUrl?.urls || {}), ...Object.values(openUrl?.statusUrls || {}), ...(openUrl?.default ? [openUrl.default] : [])];
+  return openUrl?.pathByField
+    ? [...urls, ...urls.flatMap((url) => Object.values(openUrl.pathByField.values).map((path) => new URL(path, url).href))]
+    : urls;
 }
 
 function assertAccountForm(entry, form) {

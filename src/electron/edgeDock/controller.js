@@ -345,9 +345,14 @@ function createEdgeDockController(deps) {
     if (!win.isVisible()) {
       win.setOpacity(0);
       win.showInactive();
-      // Reassert native topmost after showInactive. The floating level can be
-      // demoted when Electron moves the HWND behind a non-topmost taskbar.
-      if (platform === 'win32') win.setAlwaysOnTop(true, 'pop-up-menu');
+      // Reassert native topmost and taskbar exclusion after showInactive. The
+      // floating level can be demoted when Electron moves the HWND behind a
+      // non-topmost taskbar, and the constructor's skipTaskbar call ran while
+      // the HWND was still hidden.
+      if (platform === 'win32') {
+        win.setSkipTaskbar?.(true);
+        win.setAlwaysOnTop(true, 'pop-up-menu');
+      }
     }
     // The nested refresh circle overlaps the rail's transparent shoulder, but
     // macOS still hit-tests that rail rectangle. Keep the action above it,
@@ -532,7 +537,11 @@ function createEdgeDockController(deps) {
       // even after Electron applies a shaped region. Windows therefore keeps
       // the transparent renderer-backed surface used by the no-glass mode.
       transparent: true,
-      ...(win32 ? { thickFrame: false } : {}),
+      // `type: 'toolbar'` sets WS_EX_TOOLWINDOW on the native HWND. Without it,
+      // the three always-shown surfaces are unowned top-level windows that
+      // Windows Shell can re-add to the taskbar and DWM thumbnail previews
+      // when showInactive() or setIgnoreMouseEvents() updates the window.
+      ...(win32 ? { type: 'toolbar', thickFrame: false } : {}),
       ...(mac ? { type: 'panel', acceptFirstMouse: true, roundedCorners: false } : {}),
       // The macOS material stays attached for the window's lifetime rather than
       // being detached while hidden: re-attaching builds a new effect view,

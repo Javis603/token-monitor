@@ -170,6 +170,25 @@ test('equal digits after the first changed character roll as part of the changed
   settle();
 });
 
+test('a trailing unit stays sharp and follows the layout while the digits before it roll', () => {
+  for (const [from, to] of [['191.8M', '223.4M'], ['99%', '100%']]) {
+    const el = element();
+    const settle = animationApi.beginRoll(el, from, to, true);
+    const wrapper = el.children[1];
+    const places = wrapper.children.filter((child) => child.className === 'token-number-place');
+    const unitPlace = places.at(-1);
+    assert.equal(unitPlace.children[0].animations.length, 0, `${from} → ${to}: the unit does not roll`);
+    assert.ok(!wrapper.children.some((child) => child.className.includes('previous') && child.textContent === to.at(-1)),
+      `${from} → ${to}: no outgoing copy of the unit`);
+    const shift = (to.length - from.length) * 10;
+    if (shift) assert.equal(unitPlace.animations[0].frames[0].transform, `translate(${-shift}px, 0px) scale(1)`);
+    else assert.equal(unitPlace.animations.length, 0);
+    assert.ok(places.slice(0, -1).some((place) => place.children[0].animations.length), 'the digits still roll');
+    settle();
+    assert.equal(el.textContent, to);
+  }
+});
+
 test('shrinking places have their final layout before cleanup instead of leaving a leading gap', () => {
   for (const rightAligned of [false, true]) {
     const el = element();
@@ -508,21 +527,28 @@ test('a period switch interrupting a live wave keeps departing clocks and reswee
   assert.equal(el.textContent, '5,791');
 });
 
-test('period switches start headline and breakdown together, each sweeping at one pace', () => {
+test('period switches start headline and breakdown together; rows roll as whole readings', () => {
   const { api, tick } = harness();
   const headline = element();
   const row = element();
   api.animateTotalNumber(headline, 533940381, 5791220226, 800, { synchronized: true });
   api.animateRowNumber(row, 533940381, 5791220226, 250, null, { synchronized: true });
-  const sweeps = [headline, row].map((el) => {
-    const places = el.children[1].children.filter((place) => place.className === 'token-number-place');
-    assert.ok(places.every((place) => place.animations.length === 0));
-    const timed = spatialTimings(el);
-    assert.equal(timed[0].delay, 0, 'both start on the same frame');
-    return timed.map((timing) => timing.delay);
-  });
-  assert.deepEqual(sweeps[0], sweeps[1], 'headline and breakdown share one sweep');
+  const places = headline.children[1].children.filter((place) => place.className === 'token-number-place');
+  assert.ok(places.every((place) => place.animations.length === 0));
+  const timed = spatialTimings(headline);
+  assert.equal(timed[0].delay, 0);
+  assert.ok(timed.at(-1).delay > 0, 'the headline sweeps glyph by glyph');
+  // Every row changes every glyph on a period switch; per-glyph layers there
+  // made the switch heavy, so a row moves as two layers on the headline's frame.
+  const [incoming, outgoing] = row.children[1].children;
+  assert.equal(row.children[1].children.length, 2);
+  assert.equal(incoming.children[0].textContent, '5,791,220,226');
+  assert.equal(outgoing.textContent, '533,940,381');
+  assert.equal(incoming.children[0].animations[0].options.delay, 0, 'rows start with the headline');
+  assert.equal(outgoing.animations[0].options.delay, 0);
+  assert.equal(incoming.children[0].animations[0].frames[0].transform, 'translate(0px, 0px) translateY(0.4275em) scale(1)');
   tick(animationApi.duration);
+  assert.equal(row.textContent, '5,791,220,226');
   api.animateTotalNumber(headline, 5791220226, 5791221000);
   api.animateRowNumber(row, 5791220226, 5791221000, 250);
   for (const el of [headline, row]) {
