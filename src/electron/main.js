@@ -42,8 +42,9 @@ const {
   createSessionProxyApplier,
   networkProxySource,
   normalizeNoProxy,
+  noProxyError,
   normalizeProxyUrl,
-  proxyEnvForSettings,
+  outboundRouteForSettings,
   proxyUrlError,
   sessionProxyConfig
 } = require('./networkProxy');
@@ -76,13 +77,13 @@ const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
 // exchange on the mimoExchangeFetch below, which keeps undici for the per-hop
 // request it needs but still asks Chromium which proxy to use.
 function electronLimitsFetch() {
-  return createElectronLimitsFetch({ net, getEnv: networkProxyEnv });
+  return createElectronLimitsFetch({ net, getRoute: networkProxyRoute });
 }
 
 // Read per request: the app proxy setting can change after a caller captured
 // its fetch, and `settings` is still null while this module loads.
-function networkProxyEnv() {
-  return proxyEnvForSettings(settings || {}, process.env);
+function networkProxyRoute() {
+  return outboundRouteForSettings(settings || {}, process.env);
 }
 
 // The Chromium half of the app proxy setting, so net.fetch/net.request callers
@@ -91,7 +92,7 @@ function networkProxyEnv() {
 // Electron's own default; clearing it restores that default.
 const sessionProxy = createSessionProxyApplier({
   getSession: () => session.defaultSession,
-  getConfig: () => sessionProxyConfig(settings || {}, process.env),
+  getConfig: () => sessionProxyConfig(settings || {}),
   log: (message) => console.log(message)
 });
 
@@ -99,7 +100,7 @@ const sessionProxy = createSessionProxyApplier({
 // process-wide because the transport caches one proxy agent per proxy URL.
 let mimoExchangeFetch = null;
 function ensureMimoExchangeFetch() {
-  if (!mimoExchangeFetch) mimoExchangeFetch = createMimoExchangeFetch({ session: session.defaultSession, getEnv: networkProxyEnv });
+  if (!mimoExchangeFetch) mimoExchangeFetch = createMimoExchangeFetch({ session: session.defaultSession, getRoute: networkProxyRoute });
   return mimoExchangeFetch;
 }
 
@@ -8147,6 +8148,10 @@ app.whenReady().then(() => {
       const proxyError = proxyUrlError(patch.proxyUrl);
       if (proxyError) throw new Error(proxyError);
     }
+    if (patch.noProxy !== undefined) {
+      const bypassError = noProxyError(patch.noProxy);
+      if (bypassError) throw new Error(bypassError);
+    }
     if (patch.vendorColors !== undefined) normalizedPatch.vendorColors = migrateVendorColors(patch.vendorColors);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
@@ -8327,7 +8332,7 @@ app.whenReady().then(() => {
       // A hand-edited settings.json value the form would refuse is kept as-is
       // so the transport fails closed on it rather than silently going direct.
       proxyUrl: patch.proxyUrl !== undefined ? normalizeProxyUrl(patch.proxyUrl) : String(settings.proxyUrl || ''),
-      noProxy: normalizeNoProxy(patch.noProxy ?? settings.noProxy),
+      noProxy: patch.noProxy !== undefined ? normalizeNoProxy(patch.noProxy) : String(settings.noProxy || ''),
       ...finalAccountSettings(patch, settings),
       customModelPricing: patch.customModelPricing !== undefined
         ? normalizeCustomPricingSetting(patch.customModelPricing)

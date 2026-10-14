@@ -89,16 +89,16 @@ test('an explicitly configured proxy env stays ahead of the system proxy', async
 
 // Long-lived callers capture their fetch once (some at module load), so a proxy
 // setting saved later has to reach them through the per-request env lookup.
-test('the transport re-reads its env on every request', async () => {
+test('the transport re-reads its route on every request', async () => {
   resetOutboundFetchCache();
   const { calls, net } = recordingNet();
-  let env = {};
-  const fetchFn = createElectronLimitsFetch({ net, getEnv: () => env });
+  let route = { env: {}, deps: {} };
+  const fetchFn = createElectronLimitsFetch({ net, getRoute: () => route });
 
   assert.equal(await fetchFn('https://example.com/usage'), 'net-fetch-result');
-  env = { https_proxy: 'http://127.0.0.1:1' };
+  route = { env: { https_proxy: 'http://127.0.0.1:1' }, deps: {} };
   await assert.rejects(() => fetchFn('http://example.invalid/usage'));
-  env = {};
+  route = { env: {}, deps: {} };
   assert.equal(await fetchFn('https://example.com/usage'), 'net-fetch-result');
   assert.equal(calls.length, 2);
 });
@@ -109,12 +109,14 @@ test('the transport re-reads its env on every request', async () => {
 test('every widget provider probe takes the runtime transport', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
 
-  assert.match(main, /function electronLimitsFetch\(\) \{\s*return createElectronLimitsFetch\(\{ net, getEnv: networkProxyEnv \}\);/);
-  assert.match(main, /function networkProxyEnv\(\) \{\s*return proxyEnvForSettings\(settings \|\| \{\}, process\.env\);/);
+  assert.match(main, /function electronLimitsFetch\(\) \{\s*return createElectronLimitsFetch\(\{ net, getRoute: networkProxyRoute \}\);/);
+  assert.match(main, /function networkProxyRoute\(\) \{\s*return outboundRouteForSettings\(settings \|\| \{\}, process\.env\);/);
   // MiMo's exchange and the Chromium session follow the same setting, and
   // every settings save re-applies the session so a failed apply is retried.
-  assert.match(main, /createMimoExchangeFetch\(\{ session: session\.defaultSession, getEnv: networkProxyEnv \}\)/);
-  assert.match(main, /getConfig: \(\) => sessionProxyConfig\(settings \|\| \{\}, process\.env\)/);
+  assert.match(main, /createMimoExchangeFetch\(\{ session: session\.defaultSession, getRoute: networkProxyRoute \}\)/);
+  assert.match(main, /getConfig: \(\) => sessionProxyConfig\(settings \|\| \{\}\)/);
+  // An unsupported bypass entry is refused at save time, like an unusable URL.
+  assert.match(main, /const bypassError = noProxyError\(patch\.noProxy\);\s*if \(bypassError\) throw new Error\(bypassError\);/);
   assert.match(main, /const proxySettingChanged = [^;]+;\s*void sessionProxy\.apply\(\)/);
   assert.match(main, /fetch: electronLimitsFetch\(\)/);
   assert.match(main, /opencodeGoApi\.fetchGoApi\(apiKey, \{\s*fetch: electronLimitsFetch\(\)/);

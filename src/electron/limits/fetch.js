@@ -36,25 +36,26 @@ function createElectronNetFetch(net) {
  * Transport policy belongs to the runtime, not to a provider: one branch is
  * chosen for every call that resolves through `deps.fetch`, instead of each
  * provider deciding for itself. An explicitly configured proxy env wins over
- * the OS setting (and the app proxy setting, expressed as that same env, wins
- * over both), which keeps the documented env behavior working — lowercase
- * precedence, ALL_PROXY, NO_PROXY, failing closed on an invalid proxy, and
- * credentials embedded in the proxy URL, which Chromium's proxy rules do not
- * accept.
+ * the OS setting (and the app proxy setting, which replaces the env proxy
+ * variables while set, wins over both), which keeps the documented env
+ * behavior working — lowercase precedence, ALL_PROXY, NO_PROXY, failing closed
+ * on an invalid proxy, and credentials embedded in the proxy URL, which
+ * Chromium's proxy rules do not accept.
  *
- * The branch is chosen per request from `getEnv()`, because the app-scoped
+ * The branch is chosen per request from `getRoute()`, because the app-scoped
  * proxy setting (networkProxy.js) can change while long-lived callers still
- * hold the fetch they were constructed with.
+ * hold the fetch they were constructed with. A route is the env to read plus
+ * the outboundFetch deps for it (the app proxy's dispatcher; none for env).
  *
- * @param {{ net: { fetch: typeof fetch }, env?: NodeJS.ProcessEnv, getEnv?: () => NodeJS.ProcessEnv }} options
+ * @param {{ net: { fetch: typeof fetch }, env?: NodeJS.ProcessEnv, getRoute?: () => { env: NodeJS.ProcessEnv, deps?: object } }} options
  * @returns {typeof fetch}
  */
-function createElectronLimitsFetch({ net, env = process.env, getEnv = () => env } = {}) {
+function createElectronLimitsFetch({ net, env = process.env, getRoute = () => ({ env, deps: {} }) } = {}) {
   const netFetch = createElectronNetFetch(net);
   return async function electronLimitsFetch(input, init) {
-    const currentEnv = getEnv();
-    const proxy = resolveProxyConfig(currentEnv);
-    const transport = proxy.httpProxy || proxy.httpsProxy ? createOutboundFetch(currentEnv) : netFetch;
+    const route = getRoute();
+    const proxy = resolveProxyConfig(route.env);
+    const transport = proxy.httpProxy || proxy.httpsProxy ? createOutboundFetch(route.env, route.deps || {}) : netFetch;
     return transport(input, init);
   };
 }

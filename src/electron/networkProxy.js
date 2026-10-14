@@ -1,5 +1,7 @@
 'use strict';
 
+const { BlockList, isIP } = require('node:net');
+const { Agent, Dispatcher, EnvHttpProxyAgent } = require('undici');
 const { cleanProxyUrl, resolveProxyConfig } = require('../shared/outboundFetch');
 
 /**
@@ -11,11 +13,21 @@ const { cleanProxyUrl, resolveProxyConfig } = require('../shared/outboundFetch')
  * (VS Code's `http.proxy`): the setting wins, then the standard env vars, then
  * the OS proxy Chromium already follows. An empty setting is today's behavior.
  *
- * One effective rule (`effectiveAppProxy`) feeds both network stacks: the
- * Node-side transport reads it as the env shape outboundFetch.js already
- * understands, and the default Chromium session gets the same proxy and bypass
- * list rendered in Chromium's rule syntax, so `net.fetch`/`net.request`
- * callers and MiMo's `resolveProxy` route exactly like undici does.
+ * The setting is a complete override, not a layer over the env: while it is
+ * set, the env proxy variables, NO_PROXY included, are ignored, and only the
+ * bypass entries saved with it plus the platform's local-host rules apply. One
+ * effective rule (`effectiveAppProxy`) feeds both network stacks: the Node-side
+ * transport gets it through `AppProxyAgent`, and the default Chromium session
+ * gets the same proxy and bypass list in Chromium's rule syntax, so
+ * `net.fetch`/`net.request` callers and MiMo's `resolveProxy` route exactly
+ * like undici does.
+ *
+ * Local hosts stay direct the way Chromium keeps them direct (its implicit
+ * bypass rules, which exist because proxying a secure `localhost` origin hands
+ * the proxy extra power). Chromium applies them natively; `AppProxyAgent`
+ * applies the same classification on every dispatch, redirect hops included.
+ * Classification is by literal host only: no DNS lookup, and private ranges
+ * beyond loopback and link-local are not included.
  *
  * Credentials embedded in the URL are refused: Chromium's proxy rules cannot
  * carry them, and the value is a plain renderer-visible setting rather than a
@@ -28,17 +40,172 @@ const PROXY_ENV_KEYS = [
   'all_proxy', 'ALL_PROXY',
   'no_proxy', 'NO_PROXY'
 ];
-// The loopback hosts a local Hub or self-hosted endpoint is reached by. undici
-// matches NO_PROXY by host name and suffix only (no CIDR), so this is the whole
-// loopback set the Node side can express: `localhost` also covers
-// `*.localhost`, and IPv6 must be bracketed to match undici's host form.
-// Chromium is told to drop its own wider implicit set (`<-loopback>`, e.g.
-// 127.0.0.2) and use this one, so both stacks bypass the same hosts.
-const LOOPBACK_BYPASS = ['localhost', '127.0.0.1', '[::1]'];
 // RFC 6761 guarantees `.invalid` never resolves. An unusable proxy setting is
 // routed here so both stacks refuse the request instead of going direct.
 const BLOCKING_PROXY_URL = 'http://proxy.invalid:1';
 const MAX_NO_PROXY_LENGTH = 2000;
+
+// Chromium's implicit bypass rules (net/docs/proxy.md): loopback and
+// link-local literals. BlockList also matches IPv4-mapped IPv6 against the
+// IPv4 ranges, which is how Chromium treats `[::ffff:127.0.0.1]`.
+const IMPLICIT_BYPASS_ADDRESSES = new BlockList();
+IMPLICIT_BYPASS_ADDRESSES.addSubnet('127.0.0.0', 8, 'ipv4');
+IMPLICIT_BYPASS_ADDRESSES.addSubnet('169.254.0.0', 16, 'ipv4');
+IMPLICIT_BYPASS_ADDRESSES.addSubnet('::1', 128, 'ipv6');
+IMPLICIT_BYPASS_ADDRESSES.addSubnet('fe80::', 10, 'ipv6');
+
+/**
+ * Whether Chromium would send a request for this URL host direct regardless of
+ * the proxy rules: `localhost` and `*.localhost` (a trailing dot included),
+ * loopback and link-local IP literals, and `loopback` on Windows.
+ */
+function isImplicitBypassHost(hostname, platform = process.platform) {
+  let host = String(hostname || '').toLowerCase().replace(/\.$/, '');
+  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (platform === 'win32' && host === 'loopback') return true;
+  const family = isIP(host);
+  return family !== 0 && IMPLICIT_BYPASS_ADDRESSES.check(host, family === 6 ? 'ipv6' : 'ipv4');
+}
+
+function isImplicitBypassOrigin(origin, platform) {
+  try {
+    return isImplicitBypassHost(new URL(String(origin)).hostname, platform);
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * undici dispatcher for the app proxy: local hosts go to a direct Agent, the
+ * rest to an EnvHttpProxyAgent built from explicit values only. Every proxy
+ * field is passed, `noProxy` even when empty, because EnvHttpProxyAgent reads
+ * process.env for any field left undefined and a shell's NO_PROXY or
+ * HTTP(S)_PROXY must not leak back into the override. undici's fetch
+ * dispatches each redirect hop separately, so the choice is remade per hop.
+ */
+class AppProxyAgent extends Dispatcher {
+  constructor({ httpProxy, httpsProxy, noProxy, platform = process.platform } = {}) {
+    super();
+    if (!httpProxy || !httpsProxy) throw new TypeError('AppProxyAgent needs explicit proxy URLs');
+    this.platform = platform;
+    this.proxied = new EnvHttpProxyAgent({ httpProxy, httpsProxy, noProxy: String(noProxy ?? '') });
+    this.direct = new Agent();
+  }
+
+  dispatch(options, handler) {
+    const agent = isImplicitBypassOrigin(options.origin, this.platform) ? this.direct : this.proxied;
+    return agent.dispatch(options, handler);
+  }
+
+  close(callback) {
+    return settleBoth([this.proxied.close(), this.direct.close()], callback);
+  }
+
+  destroy(error, callback) {
+    if (typeof error === 'function') {
+      callback = error;
+      error = null;
+    }
+    return settleBoth([this.proxied.destroy(error), this.direct.destroy(error)], callback);
+  }
+}
+
+function settleBoth(promises, callback) {
+  const settled = Promise.all(promises).then(() => {});
+  if (typeof callback !== 'function') return settled;
+  settled.then(() => callback(null), callback);
+  return undefined;
+}
+
+// The bypass entries both stacks read the same way: `*`, or a host name or
+// domain (an optional leading `.`/`*.` is the same as none: the domain and its
+// subdomains), an IPv4 literal, or an IPv6 literal, each with an optional
+// `:port`. CIDR ranges, schemes, `<local>`/`<-loopback>` and inner wildcards
+// only mean something to Chromium, so they are refused rather than left to
+// diverge between the stacks.
+const HOST_NAME = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*$/;
+
+// The bracketed form a URL hostname takes, which is what undici compares
+// against and what Chromium normalizes to (`[2001:0db8::0:1]` →
+// `[2001:db8::1]`, `[::ffff:10.0.0.1]` → `[::ffff:a00:1]`). A zone ID passes
+// isIP but cannot appear in a URL, so it can never match and is refused.
+function canonicalIpv6(address) {
+  if (isIP(address) !== 6) return '';
+  try {
+    return new URL(`http://[${address}]/`).hostname;
+  } catch (_) {
+    return '';
+  }
+}
+
+function urlHostIsIp(name) {
+  try {
+    return isIP(new URL(`http://${name}/`).hostname) !== 0;
+  } catch (_) {
+    return true;
+  }
+}
+
+function parseNoProxyEntry(raw) {
+  const value = String(raw || '').trim().toLowerCase();
+  if (!value) return null;
+  if (value === '*') return { host: '*', port: '', ip: false };
+  if (isIP(value) === 6) {
+    const host = canonicalIpv6(value);
+    return host ? { host, port: '', ip: true } : { error: true };
+  }
+  let rest = value;
+  let port = '';
+  const bracketed = /^\[([^\]]+)\](?::(\d+))?$/.exec(rest);
+  if (bracketed) {
+    rest = canonicalIpv6(bracketed[1]);
+    if (!rest) return { error: true };
+    port = bracketed[2] || '';
+  } else {
+    const withPort = /^(.+):(\d+)$/.exec(rest);
+    if (withPort) {
+      rest = withPort[1];
+      port = withPort[2];
+    }
+    rest = rest.replace(/^\*?\./, '');
+    const ipv4 = isIP(rest) === 4;
+    // A name the URL parser turns into an IP (`10.0.0`, `0xc0000201`,
+    // `0xC0.0.2.1`) would match by name in undici but by address in Chromium.
+    if (!ipv4 && (!HOST_NAME.test(rest) || urlHostIsIp(rest))) return { error: true };
+  }
+  if (port && (Number(port) < 1 || Number(port) > 65535)) return { error: true };
+  return { host: rest, port, ip: rest.startsWith('[') || isIP(rest) === 4 };
+}
+
+function parsedNoProxyEntries(value) {
+  const seen = new Set();
+  const entries = [];
+  let invalid = false;
+  for (const part of String(value || '').split(/[\s,;]+/)) {
+    const entry = parseNoProxyEntry(part);
+    if (!entry) continue;
+    if (entry.error) {
+      invalid = true;
+      continue;
+    }
+    const key = `${entry.host}${entry.port ? `:${entry.port}` : ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push({ ...entry, key });
+  }
+  // undici honors `*` only as the entire value.
+  return { entries: entries.some((entry) => entry.host === '*') ? [{ host: '*', port: '', ip: false, key: '*' }] : entries, invalid };
+}
+
+function noProxyError(value) {
+  return parsedNoProxyEntries(value).invalid ? 'proxy_bypass_unsupported' : '';
+}
+
+/** The supported entries in their canonical form; anything else is dropped. */
+function normalizeNoProxy(value) {
+  return parsedNoProxyEntries(value).entries.map((entry) => entry.key).join(',').slice(0, MAX_NO_PROXY_LENGTH);
+}
 
 function parseProxyUrl(value) {
   const raw = cleanProxyUrl(value);
@@ -71,47 +238,21 @@ function normalizeProxyUrl(value) {
   return error ? '' : url;
 }
 
-// A bare IPv6 literal (`::1`) would be read by undici as host `:` port `1`.
-function bracketIpv6(entry) {
-  return !entry.startsWith('[') && (entry.match(/:/g) || []).length > 1 ? `[${entry}]` : entry;
-}
-
-// undici honors `*` only as the entire value, so a list containing it is
-// collapsed to it; otherwise the wildcard would silently stop bypassing.
-function noProxyEntries(value) {
-  const seen = new Set();
-  const entries = [];
-  for (const part of String(value || '').split(/[\s,;]+/)) {
-    const entry = bracketIpv6(part.trim());
-    if (!entry || seen.has(entry.toLowerCase())) continue;
-    seen.add(entry.toLowerCase());
-    entries.push(entry);
-  }
-  return entries.includes('*') ? ['*'] : entries;
-}
-
-function normalizeNoProxy(value) {
-  return noProxyEntries(value).join(',').slice(0, MAX_NO_PROXY_LENGTH);
-}
-
 /**
  * The single effective app proxy, or `null` when the setting is empty and the
- * env/OS route applies unchanged. The bypass list merges the setting with the
- * env NO_PROXY and the loopback hosts; an unusable setting resolves to the
- * blocking proxy rather than to a direct connection.
+ * env/OS route applies unchanged. The bypass list is the setting's own
+ * supported entries; a hand-edited unsupported entry is ignored by both stacks,
+ * which errs toward the proxy. An unusable proxy URL resolves to the blocking
+ * proxy rather than to a direct connection.
  */
-function effectiveAppProxy(settings = {}, env = process.env) {
+function effectiveAppProxy(settings = {}) {
   const raw = cleanProxyUrl(settings.proxyUrl);
   if (!raw) return null;
   const { url, error } = parseProxyUrl(raw);
   return {
     url: error ? BLOCKING_PROXY_URL : url,
     invalid: Boolean(error),
-    bypass: noProxyEntries([
-      ...LOOPBACK_BYPASS,
-      settings.noProxy,
-      resolveProxyConfig(env).noProxy
-    ].join(','))
+    bypass: parsedNoProxyEntries(settings.noProxy).entries
   };
 }
 
@@ -121,40 +262,41 @@ function effectiveAppProxy(settings = {}, env = process.env) {
  * requests are blocked while it stays.
  */
 function networkProxySource(settings = {}, env = process.env) {
-  const proxy = effectiveAppProxy(settings, env);
+  const proxy = effectiveAppProxy(settings);
   if (proxy) return proxy.invalid ? 'invalid' : 'setting';
   const fromEnv = resolveProxyConfig(env);
   return fromEnv.httpProxy || fromEnv.httpsProxy ? 'environment' : 'system';
 }
 
 /**
- * The env the Node-side transport should read. Without a proxy setting this is
- * the process env untouched; with one, every proxy variable is replaced so a
- * stale shell value cannot win over the setting.
+ * What the Node-side transport should use: without a proxy setting the process
+ * env untouched and no extra deps, which keeps the env-only behavior exactly;
+ * with one, an env carrying only the setting (every inherited proxy variable
+ * removed, `no_proxy` set even when empty) and the dispatcher that adds the
+ * local-host rules.
  */
-function proxyEnvForSettings(settings = {}, env = process.env) {
-  const proxy = effectiveAppProxy(settings, env);
-  if (!proxy) return env;
+function outboundRouteForSettings(settings = {}, env = process.env) {
+  const proxy = effectiveAppProxy(settings);
+  if (!proxy) return { env, deps: {} };
   const next = { ...env };
   for (const key of PROXY_ENV_KEYS) delete next[key];
   next.http_proxy = proxy.url;
   next.https_proxy = proxy.url;
-  next.no_proxy = proxy.bypass.join(',');
-  return next;
+  next.no_proxy = proxy.bypass.map((entry) => entry.key).join(',');
+  return { env: next, deps: { EnvHttpProxyAgent: AppProxyAgent } };
 }
 
-// undici matches an entry against the host and every subdomain, ignoring a
-// leading `.` or `*.`; Chromium matches `host` exactly and `*.host` as
-// subdomains only, so a name needs both. An optional `:port` carries over.
+// undici matches a name against the host and every subdomain; Chromium matches
+// `host` exactly and `*.host` as subdomains only, so a name needs both. An
+// optional `:port` carries over. Chromium's implicit local-host rules are left
+// in place (no `<-loopback>`).
 function chromiumBypassRules(entries) {
-  if (entries.includes('*')) return '*';
-  const rules = ['<-loopback>'];
+  if (entries.some((entry) => entry.host === '*')) return '*';
+  const rules = [];
   for (const entry of entries) {
-    const parsed = entry.match(/^(.+):(\d+)$/);
-    const host = (parsed ? parsed[1] : entry).replace(/^\*?\./, '');
-    const port = parsed ? `:${parsed[2]}` : '';
-    rules.push(`${host}${port}`);
-    if (!host.startsWith('[') && !/^\d{1,3}(?:\.\d{1,3}){3}(?:\/\d+)?$/.test(host)) rules.push(`*.${host}${port}`);
+    const port = entry.port ? `:${entry.port}` : '';
+    rules.push(`${entry.host}${port}`);
+    if (!entry.ip) rules.push(`*.${entry.host}${port}`);
   }
   return rules.join(',');
 }
@@ -164,8 +306,8 @@ function chromiumBypassRules(entries) {
  * session should follow the OS. `{ mode: 'system' }` is what restores
  * Electron's own default once a configured proxy is cleared.
  */
-function sessionProxyConfig(settings = {}, env = process.env) {
-  const proxy = effectiveAppProxy(settings, env);
+function sessionProxyConfig(settings = {}) {
+  const proxy = effectiveAppProxy(settings);
   if (!proxy) return null;
   return {
     mode: 'fixed_servers',
@@ -220,12 +362,15 @@ function createSessionProxyApplier({ getSession, getConfig, log = () => {} }) {
 }
 
 module.exports = {
+  AppProxyAgent,
   createSessionProxyApplier,
   effectiveAppProxy,
+  isImplicitBypassHost,
   networkProxySource,
+  noProxyError,
   normalizeNoProxy,
   normalizeProxyUrl,
-  proxyEnvForSettings,
+  outboundRouteForSettings,
   proxyUrlError,
   sessionProxyConfig
 };

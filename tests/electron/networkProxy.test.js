@@ -1,19 +1,20 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const http = require('node:http');
 const test = require('node:test');
 
 const {
+  AppProxyAgent,
   createSessionProxyApplier,
   networkProxySource,
+  noProxyError,
   normalizeNoProxy,
   normalizeProxyUrl,
-  proxyEnvForSettings,
+  outboundRouteForSettings,
   proxyUrlError,
   sessionProxyConfig
 } = require('../../src/electron/networkProxy');
-const { createOutboundFetch, resetOutboundFetchCache, resolveProxyConfig } = require('../../src/shared/outboundFetch');
+const { resolveProxyConfig } = require('../../src/shared/outboundFetch');
 
 test('proxy URLs normalize to scheme://host[:port]', () => {
   assert.equal(normalizeProxyUrl('http://127.0.0.1:7897'), 'http://127.0.0.1:7897');
@@ -41,42 +42,109 @@ test('proxy URLs the transport cannot honor are refused with a reason', () => {
 });
 
 test('the bypass list accepts commas, spaces and new lines', () => {
-  assert.equal(normalizeNoProxy(' example.com, .internal.net\nfoo.local  example.com '), 'example.com,.internal.net,foo.local');
+  assert.equal(normalizeNoProxy(' example.com, internal.net\nfoo.local  example.com '), 'example.com,internal.net,foo.local');
   assert.equal(normalizeNoProxy(undefined), '');
 });
 
-// undici honors `*` only as the whole NO_PROXY value and reads a bare `::1` as
-// host `:` port `1`, so the stored list has to be in the form it can match.
-test('the bypass list keeps a wildcard standalone and brackets IPv6 literals', () => {
-  assert.equal(normalizeNoProxy('example.com, *'), '*');
-  assert.equal(normalizeNoProxy('::1, fd00::1:8080, [::1]'), '[::1],[fd00::1:8080]');
+// Only forms undici and Chromium read the same way are kept, in the canonical
+// spelling undici matches: a leading `.`/`*.` means the domain and its
+// subdomains in both, IPv6 is bracketed, and `*` must be the whole value.
+test('the bypass list keeps only the forms both stacks support', () => {
+  const accepted = {
+    'Example.COM': 'example.com',
+    '.example.com': 'example.com',
+    '*.example.com:8443': 'example.com:8443',
+    '10.0.0.1': '10.0.0.1',
+    '10.0.0.1:8080': '10.0.0.1:8080',
+    '::1': '[::1]',
+    'fd00::1': '[fd00::1]',
+    '[fd00::1]:8080': '[fd00::1]:8080',
+    'my_host-1.internal': 'my_host-1.internal',
+    '*': '*',
+    'example.com, *': '*'
+  };
+  for (const [input, expected] of Object.entries(accepted)) {
+    assert.equal(noProxyError(input), '', input);
+    assert.equal(normalizeNoProxy(input), expected, input);
+  }
+  for (const input of [
+    '10.0.0.0/8', 'fd00::/8', 'http://example.com', 'http://example.com:8080', 'https://[::1]:8443',
+    '<local>', '<-loopback>', 'foo*.com', '*example.com', 'example.*', '10.0.0', '[10.0.0.1]',
+    'example.com:0', 'example.com:70000', 'exämple.com', 'example.com, 10.0.0.0/8',
+    // Non-standard IPv4 spellings the URL parser turns into 192.0.2.1.
+    '0xc0000201', '0xC0.0.2.1:8080'
+  ]) {
+    assert.equal(noProxyError(input), 'proxy_bypass_unsupported', input);
+  }
+  // Settings saved before this check are read with the unsupported part dropped.
+  assert.equal(normalizeNoProxy('example.com, 10.0.0.0/8, <local>'), 'example.com');
 });
 
-test('without a proxy setting the process env passes through untouched', () => {
-  const env = { HTTPS_PROXY: 'http://env-proxy:1', PATH: '/bin' };
-  assert.equal(proxyEnvForSettings({}, env), env);
-  assert.equal(proxyEnvForSettings({ proxyUrl: '  ' }, env), env);
+// undici compares the URL's compressed host and Chromium normalizes literals
+// before matching, so an IPv6 entry is only equivalent on both stacks once it
+// is stored in that same compressed form.
+test('IPv6 bypass entries are stored in the compressed form both stacks match', () => {
+  const equivalents = {
+    '[2001:0db8:0:0:0:0:0:1]': '[2001:db8::1]',
+    '2001:DB8::0:1': '[2001:db8::1]',
+    '[fd00:0000::1]:8080': '[fd00::1]:8080',
+    '[::ffff:10.0.0.1]': '[::ffff:a00:1]',
+    '::FFFF:10.0.0.1': '[::ffff:a00:1]',
+    '[0:0::1]': '[::1]'
+  };
+  for (const [input, expected] of Object.entries(equivalents)) {
+    assert.equal(noProxyError(input), '', input);
+    assert.equal(normalizeNoProxy(input), expected, input);
+    assert.equal(new URL(`http://${expected.replace(/:\d+$/, '')}/`).hostname, expected.replace(/:\d+$/, ''), input);
+  }
+  assert.equal(normalizeNoProxy('[2001:db8::1] [2001:0db8:0:0:0:0:0:1]'), '[2001:db8::1]', 'equivalents dedupe');
+  // A zone ID passes isIP but no URL can carry it.
+  for (const input of ['fe80::1%en0', '[fe80::1%en0]', '[fe80::1%25en0]:8080']) {
+    assert.equal(noProxyError(input), 'proxy_bypass_unsupported', input);
+  }
+  assert.equal(sessionProxyConfig({ proxyUrl: '127.0.0.1:7897', noProxy: '[fd00:0000::1]:8080' }).proxyBypassRules, '[fd00::1]:8080');
 });
 
-test('the proxy setting replaces every proxy env var and keeps loopback direct', () => {
+test('without a proxy setting the env-only route is left exactly as it was', () => {
+  const env = { HTTPS_PROXY: 'http://env-proxy:1', NO_PROXY: 'corp.example', PATH: '/bin' };
+  for (const settings of [{}, { proxyUrl: '  ' }, { noProxy: 'example.com' }]) {
+    const route = outboundRouteForSettings(settings, env);
+    assert.equal(route.env, env);
+    assert.deepEqual(route.deps, {});
+  }
+});
+
+// The setting is a complete override: no proxy variable from the shell may
+// leak back in, in either case spelling, and NO_PROXY is not inherited.
+test('the proxy setting replaces every proxy env var and inherits no NO_PROXY', () => {
   const env = {
     HTTP_PROXY: 'http://stale:1',
     https_proxy: 'http://stale:2',
     ALL_PROXY: 'http://stale:3',
+    all_proxy: 'http://stale:4',
     NO_PROXY: 'corp.example',
+    no_proxy: '*',
     PATH: '/bin'
   };
-  const next = proxyEnvForSettings({ proxyUrl: '127.0.0.1:7897', noProxy: 'example.com' }, env);
-  assert.equal(next.PATH, '/bin');
-  assert.equal(next.HTTP_PROXY, undefined);
-  assert.equal(next.ALL_PROXY, undefined);
-  assert.deepEqual(resolveProxyConfig(next), {
+  const route = outboundRouteForSettings({ proxyUrl: '127.0.0.1:7897', noProxy: 'example.com' }, env);
+  assert.equal(route.deps.EnvHttpProxyAgent, AppProxyAgent);
+  assert.equal(route.env.PATH, '/bin');
+  for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'all_proxy', 'NO_PROXY']) {
+    assert.equal(route.env[key], undefined, key);
+  }
+  assert.deepEqual(resolveProxyConfig(route.env), {
     httpProxy: 'http://127.0.0.1:7897',
     httpsProxy: 'http://127.0.0.1:7897',
-    noProxy: 'localhost,127.0.0.1,[::1],example.com,corp.example'
+    noProxy: 'example.com'
   });
   // The caller's env is never mutated.
   assert.equal(env.HTTP_PROXY, 'http://stale:1');
+
+  // An empty bypass list is still an explicit value, never an absent one.
+  const empty = outboundRouteForSettings({ proxyUrl: '127.0.0.1:7897' }, env);
+  assert.equal(Object.hasOwn(empty.env, 'no_proxy'), true);
+  assert.equal(empty.env.no_proxy, '');
+  assert.equal(resolveProxyConfig(empty.env).noProxy, '');
 });
 
 // A hand-edited settings.json value the form would refuse must not quietly turn
@@ -84,10 +152,11 @@ test('the proxy setting replaces every proxy env var and keeps loopback direct',
 // on either stack, which is what the settings form reports.
 test('an invalid proxy setting blocks both stacks instead of going direct', () => {
   for (const proxyUrl of ['socks5://127.0.0.1:7897', 'http://user:pass@127.0.0.1:7897']) {
-    const next = proxyEnvForSettings({ proxyUrl }, { HTTPS_PROXY: 'http://env:1' });
-    assert.equal(resolveProxyConfig(next).httpsProxy, 'http://proxy.invalid:1');
+    const route = outboundRouteForSettings({ proxyUrl }, { HTTPS_PROXY: 'http://env:1' });
+    assert.equal(resolveProxyConfig(route.env).httpsProxy, 'http://proxy.invalid:1');
+    assert.equal(route.deps.EnvHttpProxyAgent, AppProxyAgent);
     assert.equal(networkProxySource({ proxyUrl }, {}), 'invalid');
-    const session = sessionProxyConfig({ proxyUrl }, {});
+    const session = sessionProxyConfig({ proxyUrl });
     assert.equal(session.mode, 'fixed_servers');
     assert.equal(session.proxyRules, 'http://proxy.invalid:1');
   }
@@ -101,31 +170,34 @@ test('the reported source follows setting > env > system', () => {
 });
 
 test('the Chromium session follows the setting and is left alone without one', () => {
-  assert.equal(sessionProxyConfig({}, {}), null);
-  assert.equal(sessionProxyConfig({}, { HTTPS_PROXY: 'http://env:1' }), null);
-  assert.deepEqual(sessionProxyConfig({ proxyUrl: '127.0.0.1:7897', noProxy: 'example.com .internal.net' }, {}), {
+  assert.equal(sessionProxyConfig({}), null);
+  assert.deepEqual(sessionProxyConfig({ proxyUrl: '127.0.0.1:7897', noProxy: 'example.com internal.net' }), {
     mode: 'fixed_servers',
     proxyRules: 'http://127.0.0.1:7897',
-    // Chromium's implicit loopback set is wider than what undici can express,
-    // so it is replaced by the same explicit hosts. A name covers its
-    // subdomains in undici, which Chromium spells as a second `*.` rule.
-    proxyBypassRules: '<-loopback>,localhost,*.localhost,127.0.0.1,[::1],'
-      + 'example.com,*.example.com,internal.net,*.internal.net'
+    // A name covers its subdomains in undici, which Chromium spells as a
+    // second `*.` rule.
+    proxyBypassRules: 'example.com,*.example.com,internal.net,*.internal.net'
   });
 });
 
-// One effective bypass list feeds both stacks, so the env NO_PROXY the Node
-// side honors has to reach Chromium too.
-test('the Chromium bypass rules come from the same effective list as the Node side', () => {
-  const settings = { proxyUrl: '127.0.0.1:7897', noProxy: 'example.com:8443' };
-  const env = { NO_PROXY: 'corp.example,10.0.0.1' };
-  assert.equal(resolveProxyConfig(proxyEnvForSettings(settings, env)).noProxy,
-    'localhost,127.0.0.1,[::1],example.com:8443,corp.example,10.0.0.1');
-  assert.equal(sessionProxyConfig(settings, env).proxyBypassRules,
-    '<-loopback>,localhost,*.localhost,127.0.0.1,[::1],example.com:8443,*.example.com:8443,'
-    + 'corp.example,*.corp.example,10.0.0.1');
-  assert.equal(sessionProxyConfig(settings, { NO_PROXY: '*' }).proxyBypassRules, '*');
-  assert.equal(resolveProxyConfig(proxyEnvForSettings(settings, { NO_PROXY: '*' })).noProxy, '*');
+// Chromium keeps local hosts direct for security reasons (net/docs/proxy.md,
+// "Implicit bypass rules"); `<-loopback>` would subtract that, so it must never
+// be generated, whatever the bypass list holds.
+test('the Chromium rules keep the implicit local-host bypass', () => {
+  for (const noProxy of ['', 'example.com', 'localhost 127.0.0.1 ::1', '*', '<-loopback>', 'example.com <-loopback>']) {
+    const rules = sessionProxyConfig({ proxyUrl: '127.0.0.1:7897', noProxy }).proxyBypassRules;
+    assert.doesNotMatch(rules, /loopback/, JSON.stringify(noProxy));
+  }
+  assert.equal(sessionProxyConfig({ proxyUrl: '127.0.0.1:7897' }).proxyBypassRules, '');
+});
+
+test('the Chromium rules come from the same supported entries as the Node side', () => {
+  const settings = { proxyUrl: '127.0.0.1:7897', noProxy: '.example.com:8443 10.0.0.1 fd00::1 10.0.0.0/8 <local>' };
+  assert.equal(resolveProxyConfig(outboundRouteForSettings(settings, { NO_PROXY: 'corp.example' }).env).noProxy,
+    'example.com:8443,10.0.0.1,[fd00::1]');
+  assert.equal(sessionProxyConfig(settings).proxyBypassRules,
+    'example.com:8443,*.example.com:8443,10.0.0.1,[fd00::1]');
+  assert.equal(sessionProxyConfig({ ...settings, noProxy: 'example.com, *' }).proxyBypassRules, '*');
 });
 
 function fakeSession({ failures = 0, closeFailures = 0 } = {}) {
@@ -182,50 +254,4 @@ test('an install without a proxy setting never touches the session', async () =>
   const applier = createSessionProxyApplier({ getSession: () => session, getConfig: () => null });
   assert.equal(await applier.apply(), false);
   assert.deepEqual(session.calls, []);
-});
-
-function listen(server, host) {
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, host, () => resolve(server.address().port));
-  });
-}
-
-// Behavioral check against undici itself: the proxy below records every
-// CONNECT and refuses it, the origin answers directly.
-async function routeThroughSetting(t, settings, url, originHost) {
-  const tunnels = [];
-  const proxy = http.createServer();
-  proxy.on('connect', (req, socket) => { tunnels.push(req.url); socket.end('HTTP/1.1 502 Refused\r\n\r\n'); });
-  const origin = http.createServer((req, res) => res.end('direct'));
-  const proxyPort = await listen(proxy, '127.0.0.1');
-  let originPort;
-  try {
-    originPort = await listen(origin, originHost);
-  } catch (error) {
-    proxy.close();
-    t.skip(`cannot listen on ${originHost}: ${error.code}`);
-    return null;
-  }
-  t.after(() => { proxy.close(); origin.close(); resetOutboundFetchCache(); });
-  const env = proxyEnvForSettings({ ...settings, proxyUrl: `127.0.0.1:${proxyPort}` }, {});
-  const target = url.replace('PORT', originPort);
-  try {
-    return { body: await (await createOutboundFetch(env)(target, { signal: AbortSignal.timeout(3000) })).text(), tunnels };
-  } catch (error) {
-    return { error, tunnels };
-  }
-}
-
-test('IPv6 loopback stays direct under the proxy setting', async (t) => {
-  const result = await routeThroughSetting(t, {}, 'http://[::1]:PORT/', '::1');
-  if (!result) return;
-  assert.deepEqual(result.tunnels, []);
-  assert.equal(result.body, 'direct');
-});
-
-test('a wildcard in the bypass list sends nothing through the proxy', async (t) => {
-  const result = await routeThroughSetting(t, { noProxy: 'example.com, *' }, 'http://bypassed.invalid/', '127.0.0.1');
-  if (!result) return;
-  assert.deepEqual(result.tunnels, []);
 });

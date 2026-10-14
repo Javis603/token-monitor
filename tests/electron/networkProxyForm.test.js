@@ -91,3 +91,14 @@ test('a stored value replaces the field once its save lands', async () => {
   context.syncNetworkProxyControls();
   assert.equal(els.proxyUrlInput.value, 'http://127.0.0.1:7897');
 });
+
+test('an unsupported bypass entry is refused with its own reason', async () => {
+  const { els, pending, type, commit } = harness();
+  type(els.noProxyInput, '10.0.0.0/8');
+  const saving = commit(els.noProxyInput);
+  pending[0].reject('proxy_bypass_unsupported');
+  await saving;
+  assert.equal(els.noProxyInput.value, '10.0.0.0/8');
+  assert.equal(els.proxyUrlError.hidden, false);
+  assert.equal(els.proxyUrlError.textContent, i18n.translate('en', 'settings.proxy.error.proxy_bypass_unsupported'));
+});
