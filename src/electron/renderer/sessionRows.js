@@ -531,6 +531,7 @@
           modelTokens: session?.models,
           backgroundReview: backgroundReview || undefined,
           subagent: subagent || undefined,
+          subagentLabel: subagent ? subagentLabel : undefined,
           parentKey: subagent ? `session:${parentClient}:${parentSessionId}` : undefined,
           grokBot: (isGrokBotSession(session, key) || (client === 'cursor'
             && botIds.has(textValue(session?.sessionId) || key.replace(/^cursor:/, '')))) || undefined,
@@ -681,13 +682,19 @@
     }
     const latest = groupRows.reduce((a, b) => finiteNumber(b.sortTime) > finiteNumber(a.sortTime) ? b : a);
     const activityTime = latest.activityTime || '';
-    const activitySummary = [
-      groupRows.every(row => row.archived === true) ? display.archivedLabel : '',
+    const archivedLabel = groupRows.every(row => row.archived === true) ? display.archivedLabel : '';
+    const activityParts = [
+      archivedLabel,
       activityTime,
       messageLabel(usageMetrics),
       cacheHitLabel(usageMetrics),
       tokenRateLabel(usageMetrics)
-    ].filter(Boolean).join(' · ');
+    ].filter(Boolean);
+    const activitySummary = activityParts.join(' · ');
+    // A visible family root can still be a delegated child of an absent ancestor.
+    // Keep its existing role in the row, separately from expanded-member metrics.
+    if (display.subagentLabel) activityParts.splice(archivedLabel ? 1 : 0, 0, display.subagentLabel);
+    const activity = activityParts.join(' · ');
     const base = { ...main[0] };
     delete base.unpricedTokens;
     return {
@@ -703,9 +710,9 @@
       modelTokens: models,
       // Keep the tool/model reading order; the renderer reserves space for the
       // count while the preceding text can shrink in a narrow window.
-      subtitle: [display.titled ? titleParts : activitySummary, countLabel].filter(Boolean).join(' · '),
-      subtitleIdentity: display.titled ? titleParts : activitySummary,
-      activity: display.titled ? activitySummary : undefined,
+      subtitle: [display.titled ? titleParts : activity, countLabel].filter(Boolean).join(' · '),
+      subtitleIdentity: display.titled ? titleParts : activity,
+      activity: display.titled ? activity : undefined,
       activitySummary,
       activityTime,
       usageMetrics,

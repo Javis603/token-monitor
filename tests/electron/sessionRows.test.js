@@ -559,6 +559,37 @@ test('native children contribute their own cache schema and keep unavailable tok
   assert.equal(group.activity, '12:15 · 6 calls · 0% · 25 tok/s');
 });
 
+for (const titled of [true, false]) {
+  for (const missingParent of [true, false]) {
+    test(`${titled ? 'titled' : 'untitled'} family ${missingParent ? 'retains its root subagent role when the ancestor is outside the period' : 'does not label an ordinary root as a subagent'}`, () => {
+      const now = new Date(2026, 9, 11, 12, 30);
+      const rows = sessionRowsForPeriod({ sessions: {
+        'codex:b': { client: 'codex', sessionId: 'b', title: titled ? 'Family root' : '',
+          totalTokens: 20, messageCount: 2, models: { 'gpt-6.1-sol': 20 },
+          parentSessionId: missingParent ? 'a' : '', lastUsedAt: localIso(2026, 10, 11, 12, 10) },
+        'codex:c': { client: 'codex', sessionId: 'c', parentSessionId: 'b',
+          totalTokens: 30, messageCount: 3, models: { 'gpt-6.1-sol': 30 },
+          lastUsedAt: localIso(2026, 10, 11, 12, 20) },
+        'codex:review': { client: 'codex', sessionId: 'review', sessionKind: 'background-review', totalTokens: 20 },
+        'cursor:bot': { client: 'cursor', sessionId: 'sand-subagent-bot', totalTokens: 20 }
+      } }, { clientLabels, now, subagentLabel: '子代理' });
+      const root = rows.find(row => row.key === 'session:codex:b');
+      const grouped = groupSessionRows(rows, { subagents: { countLabel: count => `${count} 個子代理` } });
+      const group = grouped.find(row => row.subagentGroup);
+      const activity = `${missingParent ? '子代理 · ' : ''}12:20 · 5 calls`;
+      assert.equal(titled ? group.activity : group.subtitleIdentity, activity);
+      if (!titled) assert.equal(group.subtitle, `${activity} · 1 個子代理`);
+      assert.equal(group.activitySummary, '12:20 · 5 calls', 'expanded members receive metrics without duplicate role labels');
+      assert.equal(group.subagent, root.subagent);
+      assert.equal(group.parentKey, root.parentKey);
+      assert.equal(group.value, 50);
+      assert.equal(group.groupRows.length, 2);
+      assert.equal(titled ? root.activity : root.subtitle, `${missingParent ? '子代理 · ' : ''}12:10 · 2 calls`);
+      assert.equal(grouped.reduce((sum, row) => sum + row.value, 0), 90, 'review and Grok Bot usage stays visible');
+    });
+  }
+}
+
 test('a parent cycle leaves both sessions as their own rows', () => {
   const rows = sessionRowsForPeriod({ sessions: {
     'codex:a': { client: 'codex', sessionId: 'a', totalTokens: 1, parentSessionId: 'b' },
