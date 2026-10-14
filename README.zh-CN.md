@@ -43,7 +43,6 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/`（`opencode*.db`、`storage/message/`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `~/.hermes/state.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `$XDG_DATA_HOME/goose/sessions/sessions.db` (`~/.local/share/goose/sessions/sessions.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor IDE / Cursor CLI / Grok Bot | `~/.config/tokscale/cursor-cache/`（账号层级用量导出） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.gemini/`（`antigravity/`、`antigravity-ide/`、`antigravity-backup/`、`antigravity-cli/conversations/`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks（`.../saoudrizwan.claude-dev/tasks/`）、`~/.cline/data/sessions/` | ✅ | ✅ | — |
@@ -55,6 +54,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`、`~/.copilot/`（`otel/`、`data.db`、`session-store.db`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `$XDG_DATA_HOME/goose/sessions/sessions.db` (`~/.local/share/goose/sessions/sessions.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`；VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`）—— 扩展记录仅限 Linux 与远程/WSL | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
@@ -85,14 +85,13 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Notion AI 滚动／每月额度，仅限 Business/Enterprise；手动 token_v2 Cookie + 明确的工作区 ID | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="第三方 API" /> | 第三方 API | New API / Sub2API 兼容账号预设方案（包括兼容的 One API 分支）、New API 密钥预设方案与自定义余额端点 | — | ✅ | — |
 
-Goose 支持 macOS/Linux 本机累计 input + output（Desktop 与 CLI 共用数据库），整个 session 归入 `created_at`；跨日续用不会归入后一天。Pinned scanner 未读取 Windows 原生默认 `%APPDATA%\Block\goose\data\sessions\sessions.db` 或远程 goosed，也不支持自定义扫描路径。详见 [Goose 来源优先级与上游限制](docs/providers/goose.md)。
-
 <details>
 <summary><strong>注意事项、Custom 余额端点，以及用环境变量覆盖的数据路径</strong></summary>
 
 <br>
 
 - 上表为默认路径。Token Monitor 与 Tokscale 遵循相同的环境变量覆盖：`~/.local/share/` 下的路径跟随 `$XDG_DATA_HOME`，各工具另有 `$CODEX_HOME`、`$GROK_HOME`、`$HERMES_HOME`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME` 以及 `$CLINE_*` 系列。
+- Goose 跟踪 macOS/Linux 本机累计 input + output，Desktop 与 CLI 共用数据库。同一 session 的所有用量均计入创建日，包括跨日续用的用量。目前不支持 Windows 原生默认路径、远程 goosed 及自定义扫描路径。详见 [Goose 数据来源说明](docs/providers/goose.md)。
 - CatPaw 默认关闭，可在 Settings → tools 中启用；读取 macOS 和 Windows 上国内版与外区版助手的数据库。路径与验证边界见 [CatPaw 数据来源说明](docs/providers/catpaw.md)。
 - LM Studio 追踪目前仅涵盖服务器日志中记录的 OpenAI 兼容 `/v1/chat/completions` 和 `/v1/responses` 请求。通过 LM Studio 内置 Chat 界面发起的对话，以及原生 `/api/v1/chat` 请求均不包括在内。
 - Unsloth Studio 从 `studio.db` 追踪 Studio 对话与本地 API 的推理用量。本地推理的 API 费用为零；可识别的按量计费供应商使用 Tokscale 的价格估算。不包括训练 Token。详见 [Unsloth 数据来源说明](docs/providers/unsloth.md)。

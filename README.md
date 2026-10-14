@@ -43,7 +43,6 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/` (`opencode*.db`, `storage/message/`) | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `~/.hermes/state.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `$XDG_DATA_HOME/goose/sessions/sessions.db` (`~/.local/share/goose/sessions/sessions.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor IDE / Cursor CLI / Grok Bot | `~/.config/tokscale/cursor-cache/` (account-level usage export) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.gemini/` (`antigravity/`, `antigravity-ide/`, `antigravity-backup/`, `antigravity-cli/conversations/`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks (`.../saoudrizwan.claude-dev/tasks/`), `~/.cline/data/sessions/` | ✅ | ✅ | — |
@@ -55,6 +54,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`, `~/.copilot/` (`otel/`, `data.db`, `session-store.db`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `$XDG_DATA_HOME/goose/sessions/sessions.db` (`~/.local/share/goose/sessions/sessions.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`; VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — extension logs on Linux & remote/WSL only | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
@@ -85,14 +85,13 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Notion AI rolling/monthly allowance for Business/Enterprise; manual token_v2 cookie + explicit workspace ID | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="Third-party APIs" /> | Third-party APIs | New API / Sub2API-compatible account presets (including compatible One API forks), a New API API-key preset, and a Custom balance endpoint | — | ✅ | — |
 
-Goose counts local cumulative input + output on macOS/Linux (Desktop and CLI share the database), with the entire session assigned to `created_at`; continuing it on another day does not move usage to that day. The pinned scanner does not read the native Windows default `%APPDATA%\Block\goose\data\sessions\sessions.db` or remote goosed stores. Custom scan paths are unsupported. See [Goose source precedence and upstream limitations](docs/providers/goose.md).
-
 <details>
 <summary><strong>Notes, Custom balance endpoints, and data paths overridden by environment variables</strong></summary>
 
 <br>
 
 - Paths above are the defaults. Token Monitor follows the same environment overrides Tokscale does — `$XDG_DATA_HOME` for the `~/.local/share/` roots, and per-tool variables such as `$CODEX_HOME`, `$GROK_HOME`, `$HERMES_HOME`, `$KIMI_CODE_HOME`, `$UNSLOTH_STUDIO_HOME`, `$LM_STUDIO_HOME`, `$DSH_HOME`, `$REASONIX_STATE_HOME`, `$REASONIX_HOME` and the `$CLINE_*` family.
+- Goose tracks local cumulative input + output on macOS/Linux; Desktop and CLI share the database. All usage in a session is counted on its creation day, including usage on later days. Native Windows default paths, remote goosed servers and custom scan paths are currently unsupported. See [Goose source notes](docs/providers/goose.md).
 - CatPaw is off by default; enable it in Settings → tools. It reads domestic and overseas assistant databases on macOS and Windows. See [CatPaw source notes](docs/providers/catpaw.md) for paths and verification boundaries.
 - LM Studio tracking currently covers OpenAI-compatible `/v1/chat/completions` and `/v1/responses` requests recorded in server logs. Conversations started from LM Studio's built-in Chat UI and native `/api/v1/chat` requests are not included.
 - Unsloth Studio tracks inference usage from `studio.db`: Studio chats and its local API. Local inference has zero API cost; recognized metered providers use Tokscale's price estimates. Training tokens are not included. See [Unsloth source notes](docs/providers/unsloth.md).

@@ -53,7 +53,6 @@
     { id: 'opencode', label: 'OpenCode' },
     { id: 'hermes', label: 'Hermes Agent' },
     { id: 'openclaw', label: 'OpenClaw' },
-    { id: 'goose', label: 'Goose' },
     { id: 'cursor', label: 'Cursor' },
     { id: 'antigravity', label: 'Antigravity' },
     { id: 'cline', label: 'Cline' },
@@ -69,6 +68,7 @@
     // .omp/agent/sessions root as its own `omp` client, so the row is a real
     // client, not a sub-source of Pi.
     { id: 'omp', label: 'Oh My Pi' },
+    { id: 'goose', label: 'Goose' },
     { id: 'zed', label: 'Zed' },
     { id: 'kilo', label: 'Kilo' },
     { id: 'commandcode', label: 'Command Code' },

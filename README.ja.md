@@ -43,7 +43,6 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/`（`opencode*.db`、`storage/message/`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `~/.hermes/state.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `$XDG_DATA_HOME/goose/sessions/sessions.db` (`~/.local/share/goose/sessions/sessions.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor IDE / Cursor CLI / Grok Bot | `~/.config/tokscale/cursor-cache/`（アカウント単位の使用量エクスポート） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.gemini/`（`antigravity/`、`antigravity-ide/`、`antigravity-backup/`、`antigravity-cli/conversations/`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks (`.../saoudrizwan.claude-dev/tasks/`)、`~/.cline/data/sessions/` | ✅ | ✅ | — |
@@ -55,6 +54,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`、`~/.copilot/`（`otel/`、`data.db`、`session-store.db`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `$XDG_DATA_HOME/goose/sessions/sessions.db` (`~/.local/share/goose/sessions/sessions.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`、VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — 拡張機能のログは Linux およびリモート/WSL のみ | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
@@ -85,14 +85,13 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Business/Enterprise 向けの Notion AI ローリング／月間使用枠；手動 token_v2 Cookie + 明示的なワークスペース ID | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="サードパーティAPI" /> | サードパーティAPI | New API / Sub2API互換アカウントプリセット（互換性のあるOne APIフォークを含む）、New APIキープリセット、カスタム残高エンドポイント | — | ✅ | — |
 
-Goose は macOS/Linux のローカル累積 input + output を集計します（Desktop と CLI は同じデータベースを使用）。セッション全体は `created_at` の日に計上され、翌日以降の継続利用も作成日に残ります。固定版 scanner は Windows 標準の `%APPDATA%\Block\goose\data\sessions\sessions.db`、リモート goosed、カスタムスキャンパスに対応しません。[Goose の優先順位と上流の制限](docs/providers/goose.md)を参照してください。
-
 <details>
 <summary><strong>注意事項、Custom 残高エンドポイント、環境変数で変更したデータパス</strong></summary>
 
 <br>
 
 - 上記はデフォルトのパスです。Token Monitor は Tokscale と同じ環境変数の上書きに従います。`~/.local/share/` 配下は `$XDG_DATA_HOME`、ツール個別では `$CODEX_HOME`、`$GROK_HOME`、`$HERMES_HOME`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME`、`$CLINE_*` などです。
+- Goose は macOS/Linux のローカル累積 input + output を集計し、Desktop と CLI は同じデータベースを使用します。セッションの使用量は、翌日以降の分も含めてすべて作成日に計上されます。Windows 標準の保存先、リモート goosed サーバー、カスタムスキャンパスは現在対象外です。[Goose のデータソース](docs/providers/goose.md)を参照してください。
 - CatPaw は既定で無効です。Settings → tools で有効にすると、macOS と Windows の中国版・海外版アシスタントのデータベースを読み取ります。パスと検証範囲は [CatPaw のデータソース](docs/providers/catpaw.md)を参照してください。
 - LM Studio の追跡対象は現在、サーバーログに記録される OpenAI 互換の `/v1/chat/completions` および `/v1/responses` リクエストのみです。LM Studio 内蔵 Chat UI から開始した会話と、ネイティブの `/api/v1/chat` リクエストは含まれません。
 - Unsloth Studio は `studio.db` から Studio のチャットとローカル API の推論使用量を追跡します。ローカル推論の API コストはゼロで、識別可能な従量課金プロバイダーには Tokscale の推定価格を使用します。学習トークンは含まれません。[Unsloth のデータソース](docs/providers/unsloth.md)も参照してください。
