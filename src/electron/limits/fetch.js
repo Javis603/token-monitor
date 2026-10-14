@@ -36,18 +36,27 @@ function createElectronNetFetch(net) {
  * Transport policy belongs to the runtime, not to a provider: one branch is
  * chosen for every call that resolves through `deps.fetch`, instead of each
  * provider deciding for itself. An explicitly configured proxy env wins over
- * the OS setting, which keeps the documented env behavior working — lowercase
+ * the OS setting (and the app proxy setting, expressed as that same env, wins
+ * over both), which keeps the documented env behavior working — lowercase
  * precedence, ALL_PROXY, NO_PROXY, failing closed on an invalid proxy, and
  * credentials embedded in the proxy URL, which Chromium's proxy rules do not
  * accept.
  *
- * @param {{ net: { fetch: typeof fetch }, env?: NodeJS.ProcessEnv }} options
+ * The branch is chosen per request from `getEnv()`, because the app-scoped
+ * proxy setting (networkProxy.js) can change while long-lived callers still
+ * hold the fetch they were constructed with.
+ *
+ * @param {{ net: { fetch: typeof fetch }, env?: NodeJS.ProcessEnv, getEnv?: () => NodeJS.ProcessEnv }} options
  * @returns {typeof fetch}
  */
-function createElectronLimitsFetch({ net, env = process.env } = {}) {
-  const proxy = resolveProxyConfig(env);
-  if (proxy.httpProxy || proxy.httpsProxy) return createOutboundFetch(env);
-  return createElectronNetFetch(net);
+function createElectronLimitsFetch({ net, env = process.env, getEnv = () => env } = {}) {
+  const netFetch = createElectronNetFetch(net);
+  return async function electronLimitsFetch(input, init) {
+    const currentEnv = getEnv();
+    const proxy = resolveProxyConfig(currentEnv);
+    const transport = proxy.httpProxy || proxy.httpsProxy ? createOutboundFetch(currentEnv) : netFetch;
+    return transport(input, init);
+  };
 }
 
 module.exports = { createElectronLimitsFetch, createElectronNetFetch };

@@ -87,13 +87,30 @@ test('an explicitly configured proxy env stays ahead of the system proxy', async
   }
 });
 
+// Long-lived callers capture their fetch once (some at module load), so a proxy
+// setting saved later has to reach them through the per-request env lookup.
+test('the transport re-reads its env on every request', async () => {
+  resetOutboundFetchCache();
+  const { calls, net } = recordingNet();
+  let env = {};
+  const fetchFn = createElectronLimitsFetch({ net, getEnv: () => env });
+
+  assert.equal(await fetchFn('https://example.com/usage'), 'net-fetch-result');
+  env = { https_proxy: 'http://127.0.0.1:1' };
+  await assert.rejects(() => fetchFn('http://example.invalid/usage'));
+  env = {};
+  assert.equal(await fetchFn('https://example.com/usage'), 'net-fetch-result');
+  assert.equal(calls.length, 2);
+});
+
 // The account-settings probes decide whether a credential can be saved at all,
 // so a probe left on the global fetch refuses to save an account on exactly the
 // machines this transport exists for.
 test('every widget provider probe takes the runtime transport', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
 
-  assert.match(main, /function electronLimitsFetch\(\) \{\s*return createElectronLimitsFetch\(\{ net, env: process\.env \}\);/);
+  assert.match(main, /function electronLimitsFetch\(\) \{\s*return createElectronLimitsFetch\(\{ net, getEnv: networkProxyEnv \}\);/);
+  assert.match(main, /function networkProxyEnv\(\) \{\s*return proxyEnvForSettings\(settings \|\| \{\}, process\.env\);/);
   assert.match(main, /fetch: electronLimitsFetch\(\)/);
   assert.match(main, /opencodeGoApi\.fetchGoApi\(apiKey, \{\s*fetch: electronLimitsFetch\(\)/);
   // Every settings-side validation that can refuse to save a credential.

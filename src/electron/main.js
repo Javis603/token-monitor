@@ -39,6 +39,14 @@ const {
 } = require('./providers/workbuddy/localAuth');
 const { createElectronLimitsFetch } = require('./limits/fetch');
 const {
+  networkProxySource,
+  normalizeNoProxy,
+  normalizeProxyUrl,
+  proxyEnvForSettings,
+  proxyUrlError,
+  sessionProxyConfig
+} = require('./networkProxy');
+const {
   expandedBoundsForCollapse,
   normalWindowBounds,
   persistWindowState,
@@ -67,7 +75,31 @@ const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
 // exchange on the mimoExchangeFetch below, which keeps undici for the per-hop
 // request it needs but still asks Chromium which proxy to use.
 function electronLimitsFetch() {
-  return createElectronLimitsFetch({ net, env: process.env });
+  return createElectronLimitsFetch({ net, getEnv: networkProxyEnv });
+}
+
+// Read per request: the app proxy setting can change after a caller captured
+// its fetch, and `settings` is still null while this module loads.
+function networkProxyEnv() {
+  return proxyEnvForSettings(settings || {}, process.env);
+}
+
+// The Chromium half of the app proxy setting, so net.fetch/net.request callers,
+// MiMo's resolveProxy and login windows route the same way as the Node-side
+// transport. Untouched until a proxy is configured, so an install without one
+// keeps Electron's own default; clearing it restores that default.
+let appliedSessionProxyKey = '';
+async function applySessionProxy() {
+  const config = sessionProxyConfig(settings || {});
+  const key = config ? JSON.stringify(config) : '';
+  if (key === appliedSessionProxyKey) return;
+  appliedSessionProxyKey = key;
+  try {
+    await session.defaultSession.setProxy(config || { mode: 'system' });
+    await session.defaultSession.closeAllConnections();
+  } catch (error) {
+    console.log(`[proxy] applying the session proxy failed: ${error.message}`);
+  }
 }
 
 // Lazy because `session.defaultSession` only exists once the app is ready, and
@@ -765,6 +797,8 @@ function defaultSettings() {
     currencyRates: {},
     startAtLogin: false,
     automaticAppUpdates: false,
+    proxyUrl: '',
+    noProxy: '',
     language: 'auto',
     ...initialAccountSettings(process.env),
     appUpdate: {
@@ -5570,7 +5604,8 @@ function settingsForRenderer() {
     limitAccountForms: limitAccountFormsForRenderer(),
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
-    windowToggleShortcutStatus: currentWindowToggleShortcutStatus()
+    windowToggleShortcutStatus: currentWindowToggleShortcutStatus(),
+    networkProxySource: networkProxySource(settings, process.env)
   };
 }
 
@@ -7849,6 +7884,7 @@ app.whenReady().then(() => {
   ensureSettingsLoaded();
   powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
   powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
+  void applySessionProxy();
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
   // it — nothing else in the app would notice the change.
@@ -8076,6 +8112,7 @@ app.whenReady().then(() => {
     const previousStartAtLogin = settings.startAtLogin;
     const previousAutomaticAppUpdates = settings.automaticAppUpdates;
     const previousCustomModelPricing = JSON.stringify(settings.customModelPricing || []);
+    const previousProxyKey = JSON.stringify([settings.proxyUrl || '', settings.noProxy || '']);
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
     delete normalizedPatch.windowMaximized;
@@ -8112,6 +8149,10 @@ app.whenReady().then(() => {
       const limitError = customScanPathLimitError(patch.customScanPaths);
       if (limitError) throw new Error(limitError);
       normalizedPatch.customScanPaths = normalizeCustomScanPaths(patch.customScanPaths);
+    }
+    if (patch.proxyUrl !== undefined) {
+      const proxyError = proxyUrlError(patch.proxyUrl);
+      if (proxyError) throw new Error(proxyError);
     }
     if (patch.vendorColors !== undefined) normalizedPatch.vendorColors = migrateVendorColors(patch.vendorColors);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
@@ -8290,6 +8331,10 @@ app.whenReady().then(() => {
       language: patch.language !== undefined ? normalizeLanguageSetting(patch.language, settings.language) : normalizeLanguageSetting(settings.language),
       startAtLogin: loginItemEnabledHere() ? parseBoolean(patch.startAtLogin ?? settings.startAtLogin, false) : false,
       automaticAppUpdates: parseBoolean(patch.automaticAppUpdates ?? settings.automaticAppUpdates, false),
+      // A hand-edited settings.json value the form would refuse is kept as-is
+      // so the transport fails closed on it rather than silently going direct.
+      proxyUrl: patch.proxyUrl !== undefined ? normalizeProxyUrl(patch.proxyUrl) : String(settings.proxyUrl || ''),
+      noProxy: normalizeNoProxy(patch.noProxy ?? settings.noProxy),
       ...finalAccountSettings(patch, settings),
       customModelPricing: patch.customModelPricing !== undefined
         ? normalizeCustomPricingSetting(patch.customModelPricing)
@@ -8330,6 +8375,12 @@ app.whenReady().then(() => {
     if (settings.startAtLogin !== previousStartAtLogin) {
       settings.startAtLogin = applyLoginItem(settings.startAtLogin);
       saveSettings({ throwOnError: true });
+    }
+    if (JSON.stringify([settings.proxyUrl || '', settings.noProxy || '']) !== previousProxyKey) {
+      // Every provider answer so far came over the previous route; ask again
+      // over the new one instead of waiting out each provider's interval.
+      void applySessionProxy().then(() => queueLimitInvalidation({ all: true }, 'settings-change'))
+        .catch((error) => console.log(`[limits-runtime] proxy refresh failed: ${error.message}`));
     }
     if (settings.automaticAppUpdates && !previousAutomaticAppUpdates) {
       runAppUpdateCheck({ bypassCooldown: true }).catch(() => {});
