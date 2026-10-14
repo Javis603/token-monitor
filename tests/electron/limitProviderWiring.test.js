@@ -100,6 +100,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     zedCookie: ['providers', 'zed', 'cookie'],
     typesafeCookie: ['providers', 'typesafe', 'cookie'],
     stepfunToken: ['providers', 'stepfun', 'token'],
+    notionCookie: ['providers', 'notion', 'cookie'],
     commandcodeCookie: ['providers', 'commandcode', 'cookie'],
     zaiApiKey: ['providers', 'zai', 'apiKey'],
     zaiTeamApiKey: ['providers', 'zaiTeam', 'apiKey'],
@@ -162,6 +163,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     devin: ['devinBearerToken', 'devinOrganization'],
     typesafe: ['typesafeCookie'],
     stepfun: ['stepfunToken'],
+    notion: ['notionCookie', 'notionWorkspaceId'],
     openrouter: ['openrouterProfiles'],
     minimax: ['minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode'],
     volcengine: [
@@ -274,10 +276,11 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
     'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
-    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie'
+    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId'
   ].sort());
   for (const key of normalizedKeys) {
-    const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test' : ' example ';
+    const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test'
+      : key === 'notionWorkspaceId' ? ' 11111111222233334444555555555555 ' : ' example ';
     const patch = { [key]: value };
     const normalized = { ...patch };
     normalizeAccountPatch(patch, normalized);
@@ -507,12 +510,12 @@ test('static account statuses refresh in both paths while descriptor panels use 
 test('every provider with an account panel has its group and status markup in index.html', () => {
   const nodes = evalTopLevel(appSource, 'const LIMIT_PROVIDER_ACCOUNT_NODES = {', '\nconst LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS');
   const groupIds = Object.fromEntries(Object.entries(nodes).map(([provider, node]) => [provider, node.group]));
-  // Not every catalog provider has a hand-written panel: grok, kiro and workbuddy
+  // Not every catalog provider has a hand-written panel: grok and kiro
   // take their credentials from the tool itself, and the account-form providers
   // get theirs generated. The map is the list of those whose markup is static.
   assert.deepEqual(
     LIMIT_PROVIDER_IDS.filter((provider) => !groupIds[provider]).sort(),
-    ['grok', 'kiro', 'workbuddy', ...limitAccountFormsForRenderer().map(({ id }) => id)].sort()
+    ['grok', 'kiro', ...limitAccountFormsForRenderer().map(({ id }) => id)].sort()
   );
   for (const [provider, id] of Object.entries(groupIds)) {
     assert.ok(LIMIT_PROVIDER_IDS.includes(provider), `${provider} is a catalog id`);

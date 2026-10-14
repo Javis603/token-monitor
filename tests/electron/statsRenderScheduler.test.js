@@ -284,6 +284,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
   const settingsRenderers = [
     'renderCodexAccounts',
     'renderMimoStatus',
+    'renderWorkbuddyStatus',
     'renderSettingsSummaries',
     'renderLimitProviderCheckboxes',
     'renderToolPreferences',

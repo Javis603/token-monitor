@@ -1065,6 +1065,25 @@
                 <div id="mimoAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
+            <div id="workbuddyAccountGroup" class="settings-group cursor-account-group">
+              <button id="workbuddySettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="workbuddySettingsDetails">
+                <span data-i18n="settings.workbuddy.title">WorkBuddy Accounts</span>
+                <span class="cursor-settings-summary">
+                  <span id="workbuddyAccountStatus" class="cursor-status-pill"></span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="workbuddySettingsDetails" class="cursor-settings-details hidden">
+                <div id="workbuddyAccountList" class="managed-account-list"></div>
+                <div class="settings-actions workbuddy-login-actions">
+                  <button id="workbuddyAddCnAccountButton" type="button" data-i18n="settings.workbuddy.addCnAccount">Add China account</button>
+                  <button id="workbuddyAddAiAccountButton" type="button" data-i18n="settings.workbuddy.addAiAccount">Add international account</button>
+                  <button id="workbuddyCancelLoginButton" type="button" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
+                </div>
+                <div id="workbuddyLoginStatus" class="settings-note hidden" role="status" aria-live="polite"></div>
+                <div id="workbuddyAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
+              </div>
+            </div>
             <div id="openrouterAccountGroup" class="settings-group cursor-account-group">
               <button id="openrouterSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="openrouterSettingsDetails">
                 <span data-i18n="settings.openrouter.title">OpenRouter Accounts</span>
@@ -1666,6 +1685,7 @@
     <script src="limits/accountShell.js"></script>
     <script src="accountIdentity.js"></script>
     <script src="appUpdatePresentation.js"></script>
+    <script src="../../shared/providers/workbuddy/identity.js"></script>
     <script src="limits/providerPresentation.js"></script>
     <script src="../providers/codex/accountControl.js"></script>
     <script src="limits/displayMode.js"></script>

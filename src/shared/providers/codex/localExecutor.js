@@ -8,9 +8,15 @@ const { createSubprocessTermination } = require('../../subprocessTermination');
 // can be identical on several computers. Never retain or log the command line.
 function executorIdsFromProcesses(text) {
   const ids = new Set();
+  // Desktop versions can put global config overrides before the subcommand.
+  // Admit only assignment-valued -c/--config options, not arbitrary argv which
+  // could contain an exec-server command as another subcommand's argument.
+  const assignment = `(?:[A-Za-z0-9_.-]+=(?:[^\\s"']|"[^"]*"|'[^']*')+|"[A-Za-z0-9_.-]+=[^"]*"|'[A-Za-z0-9_.-]+=[^']*')`;
+  const executor = new RegExp(`^\\s*(?:"(?:[^"]*[\\\\/])?codex(?:\\.exe)?"|(?:[^\\s"]*[\\\\/])?codex(?:\\.exe)?)(?:\\s+(?:-c|--config)\\s+${assignment})*\\s+exec-server\\s`);
   for (const line of String(text || '').split(/\r?\n/)) {
-    if (!/^\s*(?:"(?:[^"]*[\\/])?codex(?:\.exe)?"|(?:[^\s"]*[\\/])?codex(?:\.exe)?)\s+exec-server\s/.test(line)) continue;
-    const id = line.match(/--environment-id\s+"?([A-Za-z0-9_-]+)(?:"|\s|$)/)?.[1];
+    const command = line.match(executor);
+    if (!command) continue;
+    const id = line.slice(command[0].length).match(/(?:^|\s)--environment-id\s+"?([A-Za-z0-9_-]+)(?:"|\s|$)/)?.[1];
     if (id) ids.add(id);
   }
   return ids;

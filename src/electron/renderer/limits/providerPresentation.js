@@ -7,11 +7,15 @@
   const limitWindowLabelsApi = typeof module === 'object' && module.exports
     ? require('../../../shared/limits/windowLabels')
     : root?.TokenMonitorLimitWindowLabels;
-  const api = factory(accountIdentityApi, limitWindowLabelsApi || {});
+  const workbuddyIdentityApi = typeof module === 'object' && module.exports
+    ? require('../../../shared/providers/workbuddy/identity')
+    : root?.TokenMonitorWorkbuddyIdentity;
+  const api = factory(accountIdentityApi, limitWindowLabelsApi || {}, workbuddyIdentityApi);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorLimitProviderPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi(accountIdentityApi, limitWindowLabelsApi) {
+})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi(accountIdentityApi, limitWindowLabelsApi, workbuddyIdentityApi) {
   const { isMimoMembershipProduct } = limitWindowLabelsApi;
+  const { isWorkbuddyPlaceholder } = workbuddyIdentityApi;
   const SOURCE_LABELS = {
     oauth: 'OAuth',
     cli: 'CLI',
@@ -37,7 +41,7 @@
     zai: { api: 'API' },
     zaiteam: { api: 'API' },
     kiro: { cli: 'CLI' },
-    workbuddy: { local: 'Local', api: 'API' },
+    workbuddy: { local: 'Local', api: 'API', oauth: 'OAuth' },
     qoder: { web: 'Web' },
     deepseek: { api: 'API' },
     devin: { web: 'Web' },
@@ -75,7 +79,7 @@
     zai: ['Auto', 'Coding Plan', 'API key'],
     zaiteam: ['Team Plan', 'API key'],
     kiro: ['Auto', 'CLI'],
-    workbuddy: ['Auto', 'Desktop app'],
+    workbuddy: ['Auto', 'Desktop app', 'Web'],
     qoder: ['Manual login', 'Web'],
     deepseek: ['Pay-as-you-go', 'API key'],
     devin: ['Manual login', 'Web'],
@@ -87,6 +91,7 @@
     trae: ['Manual login', 'Web'],
     alibaba: ['Token Plan', 'Web'],
     stepfun: ['Coding/Token Plan', 'Web'],
+    notion: ['Web', 'Manual'],
     thirdparty: ['Relay', 'API']
   };
 
@@ -611,6 +616,46 @@
     return tags;
   }
 
+  // A total describes the entire group, never just the successful subset. Compare
+  // every non-measurement field too: currency, pool, period and reset boundaries
+  // must describe the same kind of finite entitlement before addition is useful.
+  function workbuddyCreditTotals(providers) {
+    if (!Array.isArray(providers) || providers.length < 2) return null;
+    const keys = providers.map((provider) => String(provider?.accountKey || '').trim());
+    if (keys.some((key) => !key) || new Set(keys).size !== providers.length) return null;
+    const measurementFields = new Set(['used', 'remaining', 'limit', 'usedPercent', 'remainingPercent']);
+    const signature = (window) => JSON.stringify(Object.keys(window).sort()
+      .filter((key) => !measurementFields.has(key)).map((key) => [key, window[key]]));
+    const readings = providers.map((provider) => {
+      if (provider?.provider !== 'workbuddy' || provider.status !== 'ok' || provider.stale || provider.actionRequired) return null;
+      if (!Array.isArray(provider.windows) || !provider.windows.length) return null;
+      const windows = new Map();
+      for (const window of provider.windows) {
+        if (!window || window.metric !== 'credits' || !window.currency || window.detail === 'unlimited'
+          || !Number.isFinite(window.limit) || window.limit <= 0
+          || !Number.isFinite(window.used) || window.used < 0 || window.used > window.limit
+          || !Number.isFinite(window.remaining) || window.remaining < 0 || window.remaining > window.limit) return null;
+        const key = signature(window);
+        if (windows.has(key)) return null;
+        windows.set(key, window);
+      }
+      return windows;
+    });
+    if (readings.some((reading) => !reading)) return null;
+    if (providers.some((provider) => provider.realm !== providers[0].realm || provider.region !== providers[0].region)) return null;
+    const first = readings[0];
+    if (readings.some((reading) => reading.size !== first.size || [...first.keys()].some((key) => !reading.has(key)))) return null;
+    const totals = [...first].map(([key, window]) => {
+      const sum = (field) => readings.reduce((total, reading) => total + reading.get(key)[field], 0);
+      const used = sum('used');
+      const remaining = sum('remaining');
+      const limit = sum('limit');
+      return { ...window, used, remaining, limit, usedPercent: used / limit * 100, remainingPercent: remaining / limit * 100 };
+    });
+    return totals.every((window) => [window.used, window.remaining, window.limit, window.usedPercent, window.remainingPercent].every(Number.isFinite))
+      ? totals : null;
+  }
+
   function limitProviderSettingsRecord(providers, id) {
     const rows = (providers || []).filter((row) => row.provider === id);
     if (id !== 'mimo') return rows.at(-1);
@@ -646,6 +691,8 @@
     thirdPartyAdapterFamily,
     thirdPartyAdapterVisual,
     thirdPartyGroupPlanText,
-    thirdPartySharedAdapterFamily
+    thirdPartySharedAdapterFamily,
+    workbuddyCreditTotals,
+    isWorkbuddyPlaceholder
   };
 });

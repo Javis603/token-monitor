@@ -18,9 +18,9 @@ Every note declares the catalog ids it covers in its front matter, so routing ne
 grep -lE '^ids:.*[[, ]<id>[],]' docs/providers/*.md
 ```
 
-A product family shares one note when splitting it would hide a coupled contract — `droid.md` covers both the `droid` tracked client and the `factory` limits provider. If no note claims an id, this README and the code/tests are authoritative; do not create an empty placeholder. `tests/docs/providerGuidance.test.js` fails when a note claims an id that is in neither catalog (so a rename cannot leave a note pointing at nothing), when two notes claim the same id, or when a filename is not one of its own ids.
+A product family shares one note when splitting it would hide a coupled contract — `droid.md` covers both the `droid` tracked client and the `factory` limits provider. If no note claims an id, use the relevant shared contracts and the code/tests; do not create an empty placeholder. `tests/docs/providerGuidance.test.js` fails when a note claims an id that is in neither catalog (so a rename cannot leave a note pointing at nothing), when two notes claim the same id, or when a filename is not one of its own ids.
 
-Read the matching note before changing that provider, and update it in the same change when its documented contract moves.
+Use the matching note's `read_when` to select relevant guidance, and update it in the same change when its documented contract moves. Consult the [tracked-client checklist](#adding-a-tracked-client) or [limits-provider checklist](#adding-a-limits-provider) only when changing that catalog or wiring; read both only when the change spans both.
 
 ## Writing a note
 

@@ -138,6 +138,8 @@ Settings keys, env vars, CLI flags, endpoints and wire fields have external user
 
 ## Shared subscriptions
 
+The account picker retains healthy readings even when a provider cannot supply a stable account key or display identity. Missing identity alone does not imply an unconfigured placeholder; known failed identities and saved bindings remain available independently.
+
 Subscriptions are one list per selected backend, not deduplicated per-device copies: account keys differ across platforms and would double totals. `src/shared/subscriptionDisplay.js` owns presentation; Hub endpoints and iCloud snapshots own persistence.
 
 - Hub writes use the `baseUpdatedAt` the editor opened with, returning `409` on mismatch. A queued write cannot retarget a refreshed base. Client/host local copies are caches; refuse offline writes rather than fork the list.
