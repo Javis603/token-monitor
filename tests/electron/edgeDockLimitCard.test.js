@@ -184,6 +184,37 @@ function dockView(appearance = {}, overrides = {}) {
   });
 }
 
+test('Notion rolling and monthly allowances render in both display modes and hide independently', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'notion', status: 'ok', source: 'web',
+    windows: [
+      { kind: 'session', label: 'Rolling', used: 21, limit: 50, usedPercent: 42, resetsAt: '2026-11-01T00:00:00Z' },
+      { kind: 'billing', label: 'Monthly', used: 18, limit: 100, usedPercent: 18, resetsAt: '2026-12-01T00:00:00Z' }
+    ]
+  });
+  const before = JSON.stringify(provider);
+  for (const showLimitUsed of [false, true]) {
+    const view = dockView({ showLimitUsed });
+    const card = view.renderProviderWindows(provider, '#888888');
+    assert.equal(card.children.length, 2);
+    assert.deepEqual(card.children.map((row) => row.children[0].children[0].textContent), ['Rolling', 'Monthly']);
+    assert.match(card.text, showLimitUsed ? /42% used/ : /58% left/);
+    assert.match(card.text, showLimitUsed ? /18% used/ : /82% left/);
+    assert.equal(card.text.includes('$'), false, 'included allowance units are not spendable money');
+    assert.ok(card.children.every((row) => row.find('limit-reset').text));
+    const items = view.limitProviderUsageItems([provider]);
+    assert.equal(items.length, 2);
+    for (const item of items) {
+      const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { notion: [item.id] } });
+      assert.equal(hidden.renderProviderWindows(provider, '#888888').children.length, 1);
+      assert.deepEqual(hidden.limitProviderUsageItems([provider]), items);
+    }
+  }
+  const monthlyOnly = { ...provider, windows: [provider.windows[1]] };
+  assert.ok(dockView().renderProviderWindows(monthlyOnly, '#888888').children[0].classNames.has('limit-window-wide'));
+  assert.equal(JSON.stringify(provider), before);
+});
+
 test('MiniMax API balances reach the shared Limits and dock renderer in both currencies', async () => {
   for (const [region, currency, symbol] of [['cn', 'CNY', '¥'], ['intl', 'USD', '$']]) {
     for (const amount of [98.25, 0, -1.5]) {

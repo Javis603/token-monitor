@@ -1564,6 +1564,17 @@
       // compact line; the ⓘ tooltip carries each grant's label and coverage.
       const resetNode = claudeResetCreditsNode(provider.resetCredits);
       if (resetNode) windows.append(resetNode);
+    } else if (provider.provider === 'notion') {
+      // Both included allowances are percentage quotas. Monthly is a billing
+      // window, which the default session/weekly branch would omit.
+      const quotaNodes = (provider.windows || [])
+        .filter((window) => window.kind === 'session' || window.kind === 'billing')
+        .map((window) => limitWindowNode(
+          providerWindowLabel(provider, window), window, color,
+          window.kind === 'session' ? 0.95 : 0.68
+        ));
+      if (quotaNodes.length === 1) quotaNodes[0].classList.add('limit-window-wide');
+      windows.append(...quotaNodes);
     } else if (provider.provider === 'cline') {
       // ClinePass measures three quota windows, and the account's credit arrives as
       // a fourth "billing" window — told apart by its metric rather than by its

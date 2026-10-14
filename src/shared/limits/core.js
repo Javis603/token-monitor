@@ -627,6 +627,9 @@ function providerCollapseKey(provider) {
       || provider.provider === 'thirdparty'
       || provider.provider === 'mimo'
       || provider.provider === 'cursor'
+      // Notion allowances are per user AND workspace. Its verified composite
+      // key is portable; neither a provider-only nor an email collapse is safe.
+      || provider.provider === 'notion'
       // Volcengine's accountKey comes from the AK/SK and region, so it is the
       // same on every platform. Two keys mean the Coding/Agent plan split, not
       // one account hashed twice.

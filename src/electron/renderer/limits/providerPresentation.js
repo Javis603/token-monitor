@@ -87,6 +87,7 @@
     trae: ['Manual login', 'Web'],
     alibaba: ['Token Plan', 'Web'],
     stepfun: ['Coding/Token Plan', 'Web'],
+    notion: ['Web', 'Manual'],
     thirdparty: ['Relay', 'API']
   };
 

@@ -100,6 +100,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     zedCookie: ['providers', 'zed', 'cookie'],
     typesafeCookie: ['providers', 'typesafe', 'cookie'],
     stepfunToken: ['providers', 'stepfun', 'token'],
+    notionCookie: ['providers', 'notion', 'cookie'],
     commandcodeCookie: ['providers', 'commandcode', 'cookie'],
     zaiApiKey: ['providers', 'zai', 'apiKey'],
     zaiTeamApiKey: ['providers', 'zaiTeam', 'apiKey'],
@@ -162,6 +163,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     devin: ['devinBearerToken', 'devinOrganization'],
     typesafe: ['typesafeCookie'],
     stepfun: ['stepfunToken'],
+    notion: ['notionCookie', 'notionWorkspaceId'],
     openrouter: ['openrouterProfiles'],
     minimax: ['minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode'],
     volcengine: [
@@ -274,10 +276,11 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
     'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
-    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie'
+    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId'
   ].sort());
   for (const key of normalizedKeys) {
-    const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test' : ' example ';
+    const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test'
+      : key === 'notionWorkspaceId' ? ' 11111111222233334444555555555555 ' : ' example ';
     const patch = { [key]: value };
     const normalized = { ...patch };
     normalizeAccountPatch(patch, normalized);

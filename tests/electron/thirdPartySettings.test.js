@@ -317,6 +317,7 @@ test('third-party fallback stays last after named providers across product surfa
   assert.ok(html.indexOf('id="thirdpartyAccountGroup"') > html.indexOf('id="copilotAccountGroup"'));
 
   const providerOrder = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
+  assert.equal(providerOrder.at(-1), 'thirdparty');
   assert.ok(providerOrder.indexOf('thirdparty') > providerOrder.indexOf('ollama'));
   // clientsWithIcon is VENDOR_ORDER now, so this covers the icon set too.
   assert.equal(VENDOR_ORDER.at(-1), 'thirdparty');
@@ -334,8 +335,8 @@ test('third-party fallback stays last after named providers across product surfa
 
   const api = read('docs/API.md');
   const providerContract = api.split('\n').find((line) => line.startsWith('`limits.providers[].provider`'));
-  assert.ok(providerContract, 'docs/API.md must document the limits provider enum');
-  assert.ok(providerContract.lastIndexOf('`thirdparty`') > providerContract.lastIndexOf('`ollama`'));
+  assert.ok(providerContract, 'docs/API.md must document the limits provider contract');
+  assert.match(providerContract, /`LIMIT_PROVIDER_CATALOG` in `src\/shared\/limits\/providers\.js`/);
 
   for (const file of ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md']) {
     const content = read(file);
