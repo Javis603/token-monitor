@@ -113,6 +113,110 @@ test('sync endpoint reuses hover reading and preserves its wrapper across settin
   assert.equal(endpoint.title, 'Saved Hub URL');
 });
 
+for (const className of ['detail-ex-title', 'detail-heading']) {
+  for (const [midFlight, finalUpdate, earlyLeave] of [[false, false, false], [true, false, false], [true, true, false], [true, true, true]]) {
+    test(`${className} reading catches the final detail update on leave (${midFlight ? `read in flight${finalUpdate ? ', final stats update' : ''}${earlyLeave ? ', early leave' : ''}` : 'read not started'})`, async () => {
+      const h = harness(400);
+      h.element.classList.add(className);
+      h.element.closest = () => ({});
+      const endpoint = h.node();
+      endpoint.id = 'syncConnectionEndpoint';
+      endpoint.closest = () => null;
+      const document = {
+        createElement: h.node,
+        querySelectorAll: () => [h.element, endpoint],
+        // This harness has one reading target and no tooltip or ancestor holds.
+        // Evaluate the production selector against its actual event-driven classes.
+        querySelector: selectors => selectors.split(',').some(selector => {
+          const rule = selector.trim();
+          return !/[ :]/.test(rule) && rule.startsWith('.')
+            && rule.slice(1).split('.').every(name => h.element.classList.contains(name));
+        }) ? h.element : null
+      };
+      const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+      const setup = app.slice(app.indexOf('const overflowText ='), app.indexOf('// Two clicks to remove from sync settings'));
+      const hold = app.slice(app.indexOf('function sessionTooltipShouldHoldRender()'), app.indexOf('function flushPendingLimitDetailTooltipRender()'));
+      const detail = app.slice(app.indexOf('function applySessionDetailResult('), app.indexOf('\nfunction toggleDetailSort'));
+      const renders = [];
+      let reads = 0;
+      let finishRead;
+      let defer = false;
+      const state = { period: 'today', breakdown: 'session', stats: { periods: { today: {
+        sessions: { 'claude:s': { totalTokens: 100, costUsd: 1 } }
+      } } } };
+      const context = vm.createContext({
+        document, state, els: { syncConnectionEndpoint: endpoint },
+        window: { ...h.window, TokenMonitorOverflowText: { create }, tokenMonitor: { getSessionDetail: async () => {
+          reads += 1;
+          if (defer) return new Promise(resolve => { finishRead = resolve; });
+          return { found: true, marker: reads };
+        } } },
+        requestAnimationFrame: h.window.requestAnimationFrame,
+        prefersReducedMotion: () => false, homeSessionRenderPending: false,
+        visibleStatsSurface: () => 'main', isRendererWindowHidden: () => false,
+        statsRenderScheduler: { request() {} }, renderSessionDetail: options => renders.push(options)
+      });
+      vm.runInContext(`${setup}\n${hold}\n${detail}`, context);
+      context.bindHoverMarquee(h.element);
+      await context.openSessionDetail({ client: 'claude', sessionId: 's', sessionCost: 1 });
+      h.frame(0);
+      state.stats.periods.today.sessions['claude:s'] = { totalTokens: 200, costUsd: 2 };
+      let reading;
+      if (midFlight) {
+        defer = true;
+        reading = context.refreshOpenSessionDetail();
+      }
+      h.hover();
+      assert.equal(h.element.classList.contains('is-hover-reading'), true);
+      assert.equal(context.sessionTooltipShouldHoldRender(), true, 'the real marquee class triggers the real hold selector');
+      if (midFlight) {
+        if (finalUpdate) {
+          state.stats.periods.today.sessions['claude:s'] = { totalTokens: 300, costUsd: 3 };
+          await context.refreshOpenSessionDetail();
+          assert.equal(reads, 2, 'a final push during the held read must not start another read');
+        }
+        if (earlyLeave) {
+          h.element.mouseleave();
+          h.frame(100);
+          await new Promise(resolve => setImmediate(resolve));
+          assert.equal(reads, 2, 'leave while busy must not start a concurrent read');
+          assert.equal(state.openSession.detailLiveBusy, true);
+          assert.equal(renders.at(-1).detail.marker, 1);
+          defer = false;
+        }
+        finishRead({ found: true, marker: 2 });
+        await reading;
+        if (!earlyLeave) {
+          assert.equal(state.openSession.detailRenderPending, true);
+          assert.equal(state.openSession.liveSignature, JSON.stringify([200, 2, 0]));
+        }
+      } else {
+        await context.refreshOpenSessionDetail();
+        assert.equal(reads, 1, 'the held update has not started a read');
+      }
+      if (!earlyLeave) {
+        assert.equal(renders.at(-1).detail.marker, 1);
+        defer = false;
+        h.element.mouseleave();
+        h.frame(100);
+      }
+      await new Promise(resolve => setImmediate(resolve));
+      const finalReads = finalUpdate ? 3 : 2;
+      assert.equal(reads, finalReads, 'leave performs exactly the missing read, if any');
+      assert.equal(renders.at(-1).detail.marker, finalReads, 'the final update paints without another stats push');
+      assert.equal(state.openSession.liveSignature, JSON.stringify(finalUpdate ? [300, 3, 0] : [200, 2, 0]));
+      assert.equal(state.openSession.sessionCost, finalUpdate ? 3 : 2);
+      assert.deepEqual(renders.filter(render => render.detail).map(render => render.detail.marker), finalUpdate ? [1, 2, 3] : [1, 2]);
+      assert.equal(renders.at(-1).preserveScroll, true);
+      assert.equal(Boolean(state.openSession.detailRenderPending), false);
+      h.element.mouseleave();
+      h.frame(101);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(reads, finalReads, 'idle leave does not read again');
+    });
+  }
+}
+
 test('small overflow moves smoothly in fractional pixels and finishes promptly', () => {
   const h = harness();
   h.hover();

@@ -526,6 +526,9 @@ html[data-platform="linux"] [data-platform-option="linux"] { display: none; }
   box-shadow: none;
 }
 .hero-dashboard-total {
+  /* The gaps double as the room a rolling number may fade into (below). */
+  --token-number-fade-top: 8px;
+  --token-number-fade-bottom: 6px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -722,6 +725,58 @@ html[data-platform="linux"] [data-platform-option="linux"] { display: none; }
 }
 .hero-dashboard-model-row > em {
   color: rgba(212, 225, 239, 0.52);
+}
+
+/* Rolling token readings. The widget's digit roll leaves the line box, so the
+   reading fades into the room beside it instead of being cut by a straight edge:
+   a mask only paints inside its box (Chromium ignores mask-clip: no-clip), so
+   padding cancelled by an equal negative margin gives the mask that room
+   without moving layout. Ported from the app's .token-number-glyphs. */
+[data-token-number-animation="roll"] {
+  position: relative;
+}
+.token-number-reading {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.token-number-glyphs {
+  --token-number-fade-top-room: var(--token-number-fade-top, 0.12em);
+  --token-number-fade-bottom-room: var(--token-number-fade-bottom, 0.12em);
+  /* Sideways the mask stays opaque: room for blur, plus the outgoing reading's
+     overhang, which beginRoll measures. */
+  --token-number-left-room: calc(0.25em + var(--token-number-overhang-left, 0px));
+  --token-number-right-room: calc(0.25em + var(--token-number-overhang-right, 0px));
+  display: inline-flex;
+  position: relative;
+  vertical-align: bottom;
+  margin: calc(-1 * var(--token-number-fade-top-room)) calc(-1 * var(--token-number-right-room)) calc(-1 * var(--token-number-fade-bottom-room)) calc(-1 * var(--token-number-left-room));
+  padding: var(--token-number-fade-top-room) var(--token-number-right-room) var(--token-number-fade-bottom-room) var(--token-number-left-room);
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--token-number-fade-top-room), #000 calc(100% - var(--token-number-fade-bottom-room)), transparent);
+}
+.token-number-place {
+  display: inline-grid;
+  position: relative;
+  flex: 0 0 auto;
+  overflow: visible;
+  transform-origin: top left;
+}
+.token-number-glyph {
+  grid-area: 1 / 1;
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+.token-number-previous {
+  position: absolute;
+}
+.hero-dashboard-device-row > strong,
+.hero-dashboard-model-row > strong {
+  --token-number-fade-top: 5px;
+  --token-number-fade-bottom: 3px;
 }
 .hero-dashboard-activity-scroll {
   display: flex;
@@ -929,15 +984,15 @@ html[data-platform="linux"] [data-platform-option="linux"] { display: none; }
   display: block;
   width: 7px;
   height: 7px;
-  margin-top: -3px;
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
-  transform: rotate(45deg);
-  transition: transform 180ms cubic-bezier(.16, 1, .3, 1), margin 180ms cubic-bezier(.16, 1, .3, 1);
+  /* The flip's optical nudge rides in translateY rather than margin-top, so the
+     transition animates transform alone. */
+  transform: translateY(-1.5px) rotate(45deg);
+  transition: transform 180ms cubic-bezier(.16, 1, .3, 1);
 }
 .hero-dashboard-view-control.is-open .hero-dashboard-chevron {
-  margin-top: 3px;
-  transform: rotate(225deg);
+  transform: translateY(1.5px) rotate(225deg);
 }
 .hero-dashboard-view-control .app-view-icon {
   width: 14px;
