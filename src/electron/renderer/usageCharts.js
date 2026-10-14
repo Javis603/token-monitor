@@ -457,6 +457,7 @@
     if (/hy\d|hunyuan/.test(name)) return 'hunyuan';
     if (/^swe[-_]|devin|cognition/.test(name)) return 'devin';
     if (/^big-pickle$/.test(name)) return 'opencode'; // OpenCode Zen stealth model — no vendor hint in the name
+    if (/omniroute/.test(name)) return 'omniroute';
     return null;
   }
 

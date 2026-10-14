@@ -667,6 +667,7 @@ enum WidgetVendorIdentity {
         if matches("hy\\d|hunyuan") { return "hunyuan" }
         if matches("^swe[-_]|devin|cognition") { return "devin" }
         if matches("^big-pickle$") { return "opencode" }
+        if matches("omniroute") { return "omniroute" }
         return "default"
     }
 }
