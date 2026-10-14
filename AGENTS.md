@@ -81,8 +81,8 @@ Never add an AI `Co-Authored-By` trailer. **Do** keep the genuine human `Co-auth
 ### Pull requests
 
 - PR titles follow the commit-message convention above — they become the squash-merge subject.
-- In the description: summarize the behaviour change, record checks and results (`npm run verify` at minimum), and link the related issue. For bug fixes, include a regression check that fails before and passes after the fix, or explain why that proof is unavailable.
-- Match further validation to the changed behaviour: include reproducible before/after evidence (screenshots/GIFs for UI changes), and state untested platforms and outstanding manual acceptance checks. Documentation-only edits need relevant guidance/link checks, not unrelated runtime exercises.
+- In the description: summarize the change and why it is needed, link any related issue, and record checks and results, including `npm run verify` or why it could not be completed. For bug fixes, include a regression check that fails before and passes after the fix, or explain why that proof is unavailable.
+- Match further validation to the changed behaviour: include reproducible before/after evidence where applicable (screenshots/GIFs for UI changes), and state relevant untested platforms and outstanding manual acceptance checks. Documentation-only edits need relevant guidance/link checks; unrelated manual runtime checks are not required.
 
 ### Authoring GitHub content via `gh`
 
