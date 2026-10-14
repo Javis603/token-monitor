@@ -49,8 +49,12 @@ function popoverBlurMatchesPress({ recentBlur, pressPoint, now }) {
   return elapsed >= 0 && elapsed <= 750 && dx * dx + dy * dy <= 24 * 24;
 }
 
-function popoverToggleAction({ visible, visibleAtMouseDown = null, blurMatchedAtMouseDown = false }) {
-  return visible || visibleAtMouseDown === true || blurMatchedAtMouseDown ? 'hide' : 'show';
+function popoverToggleAction({ visible, focused, visibleAtMouseDown = null, blurMatchedAtMouseDown = false }) {
+  if (typeof visibleAtMouseDown === 'boolean' || blurMatchedAtMouseDown) {
+    return visible || visibleAtMouseDown === true || blurMatchedAtMouseDown ? 'hide' : 'show';
+  }
+  // Shortcuts and accessibility activations retain the original focus behavior.
+  return visible && focused ? 'hide' : 'show';
 }
 
 // macOS has no per-window taskbar entry, so hideAppIcon is expressed as the

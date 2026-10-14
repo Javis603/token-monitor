@@ -280,10 +280,12 @@ test('macOS tray click keeps the visibility from mouse-down across a window blur
 
   tray.handlers['mouse-down']();
   visible = false; // Window blur hides the popover before Tray.click arrives.
+  tray.handlers['mouse-up']();
   tray.handlers.click({}, {}, {});
   assert.deepEqual(snapshots, [true]);
 
   tray.handlers['mouse-down']();
+  tray.handlers['mouse-up']();
   tray.handlers.click({}, {}, {});
   assert.deepEqual(snapshots, [true, false]);
 });
@@ -328,6 +330,7 @@ test('a canceled macOS tray press cannot reuse its blur for the next click', () 
   tray.handlers['mouse-leave']();
   tray.handlers['mouse-enter']();
   tray.handlers['mouse-down']();
+  tray.handlers['mouse-up']();
   tray.handlers.click({}, {}, {});
   assert.deepEqual(toggles, [false]);
 });

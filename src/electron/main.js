@@ -5175,6 +5175,7 @@ function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null, blurMatc
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const action = popoverToggleAction({
     visible: mainWindow.isVisible(),
+    focused: mainWindow.isFocused(),
     visibleAtMouseDown: wasVisibleAtMouseDown,
     blurMatchedAtMouseDown
   });

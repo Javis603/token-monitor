@@ -73,8 +73,17 @@ test('popover click uses the press-time state after a menu-bar blur hides it', (
   assert.equal(popoverToggleAction({ visible: false, visibleAtMouseDown: true }), 'hide');
   assert.equal(popoverToggleAction({ visible: true, visibleAtMouseDown: false }), 'hide');
   assert.equal(popoverToggleAction({ visible: false, blurMatchedAtMouseDown: true }), 'hide');
-  assert.equal(popoverToggleAction({ visible: true }), 'hide');
+  assert.equal(popoverToggleAction({ visible: true, focused: true }), 'hide');
   assert.equal(popoverToggleAction({ visible: false }), 'show');
+});
+
+test('popover activations without a completed press refocus an unfocused window', () => {
+  assert.equal(popoverToggleAction({ visible: true, focused: false }), 'show');
+  assert.equal(popoverToggleAction({ visible: true, focused: true }), 'hide');
+  assert.equal(popoverToggleAction({ visible: false, focused: false }), 'show');
+  assert.equal(popoverToggleAction({ visible: true, focused: false, visibleAtMouseDown: true }), 'hide');
+  assert.equal(popoverToggleAction({ visible: true, focused: false, visibleAtMouseDown: false }), 'hide');
+  assert.equal(popoverToggleAction({ visible: false, focused: false, blurMatchedAtMouseDown: true }), 'hide');
 });
 
 test('popover blur matches only the nearby tray press within the time window', () => {
