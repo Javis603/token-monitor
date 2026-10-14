@@ -1799,41 +1799,63 @@ function renderSettingsAppUpdateRow() {
   }
 }
 
-// Set by a refused proxy save and kept until the field is edited, so the next
+// Per-field edit state. `dirty` keeps a settings push from overwriting text
+// that has not been stored (an edit in progress or a refused value), and the
+// revision lets a save that finishes after a newer edit leave that edit alone.
+const networkProxyDrafts = {
+  proxyUrl: { revision: 0, dirty: false },
+  noProxy: { revision: 0, dirty: false }
+};
+// The last refused save, kept until that field is edited again so the next
 // settings push does not wipe the reason off screen.
-let proxySettingErrorCode = '';
+let networkProxyError = null;
 const PROXY_SETTING_ERROR_CODES = ['proxy_invalid_url', 'proxy_unsupported_scheme', 'proxy_credentials_unsupported'];
+
+function networkProxyInput(field) {
+  return field === 'proxyUrl' ? els.proxyUrlInput : els.noProxyInput;
+}
 
 function syncNetworkProxyControls() {
   if (!els.proxyUrlInput) return;
-  // Don't clobber a field while the user is typing in it.
-  if (document.activeElement !== els.proxyUrlInput && !proxySettingErrorCode) {
-    els.proxyUrlInput.value = state.settings?.proxyUrl || '';
-  }
-  if (els.noProxyInput && document.activeElement !== els.noProxyInput) {
-    els.noProxyInput.value = state.settings?.noProxy || '';
+  for (const field of Object.keys(networkProxyDrafts)) {
+    const input = networkProxyInput(field);
+    if (input && document.activeElement !== input && !networkProxyDrafts[field].dirty) {
+      input.value = state.settings?.[field] || '';
+    }
   }
   if (els.networkProxySource) {
     const source = state.settings?.networkProxySource || 'system';
     els.networkProxySource.textContent = t(`settings.proxy.source.${source}`);
   }
   if (els.proxyUrlError) {
-    els.proxyUrlError.hidden = !proxySettingErrorCode;
-    els.proxyUrlError.textContent = proxySettingErrorCode ? t(`settings.proxy.error.${proxySettingErrorCode}`) : '';
+    els.proxyUrlError.hidden = !networkProxyError;
+    els.proxyUrlError.textContent = networkProxyError ? t(`settings.proxy.error.${networkProxyError.code}`) : '';
   }
 }
 
-async function saveNetworkProxySetting(patch) {
+function markNetworkProxyDraft(field) {
+  networkProxyDrafts[field].revision += 1;
+  networkProxyDrafts[field].dirty = true;
+  if (networkProxyError?.field !== field) return;
+  networkProxyError = null;
+  syncNetworkProxyControls();
+}
+
+async function saveNetworkProxySetting(field) {
+  const draft = networkProxyDrafts[field];
+  const revision = draft.revision;
+  let code = '';
   try {
-    await saveSettings(patch);
-    proxySettingErrorCode = '';
+    await saveSettings({ [field]: networkProxyInput(field).value });
   } catch (error) {
     const message = String(error?.message || '');
-    proxySettingErrorCode = PROXY_SETTING_ERROR_CODES.find((code) => message.includes(code)) || 'save_failed';
-    // The failed save already re-synced the form from the stored value; put the
-    // refused text back so it can be corrected rather than retyped.
-    if (patch.proxyUrl !== undefined) els.proxyUrlInput.value = patch.proxyUrl;
+    code = PROXY_SETTING_ERROR_CODES.find((candidate) => message.includes(candidate)) || 'save_failed';
   }
+  // A newer edit owns the field now; this outcome no longer describes it.
+  if (draft.revision !== revision) return;
+  // A refused value stays dirty, so it is left in place to be corrected.
+  draft.dirty = Boolean(code);
+  networkProxyError = code ? { field, code } : (networkProxyError?.field === field ? null : networkProxyError);
   preserveSettingsPanelScroll(syncNetworkProxyControls);
 }
 
@@ -14238,13 +14260,10 @@ els.windowToggleShortcutValue?.addEventListener('click', startWindowShortcutReco
 els.windowToggleShortcutClearButton?.addEventListener('click', () => setWindowToggleShortcut('').catch(() => {}));
 els.startAtLoginInput?.addEventListener('change', () => saveSettings({ startAtLogin: els.startAtLoginInput.checked }));
 els.automaticAppUpdatesInput?.addEventListener('change', () => saveSettings({ automaticAppUpdates: els.automaticAppUpdatesInput.checked }));
-els.proxyUrlInput?.addEventListener('input', () => {
-  if (!proxySettingErrorCode) return;
-  proxySettingErrorCode = '';
-  syncNetworkProxyControls();
-});
-els.proxyUrlInput?.addEventListener('change', () => saveNetworkProxySetting({ proxyUrl: els.proxyUrlInput.value }));
-els.noProxyInput?.addEventListener('change', () => saveNetworkProxySetting({ noProxy: els.noProxyInput.value }));
+els.proxyUrlInput?.addEventListener('input', () => markNetworkProxyDraft('proxyUrl'));
+els.proxyUrlInput?.addEventListener('change', () => saveNetworkProxySetting('proxyUrl'));
+els.noProxyInput?.addEventListener('input', () => markNetworkProxyDraft('noProxy'));
+els.noProxyInput?.addEventListener('change', () => saveNetworkProxySetting('noProxy'));
 els.glassInput.addEventListener('change', saveAppearanceFromControls);
 els.blurInput.addEventListener('change', saveAppearanceFromControls);
 els.backgroundImageOpacityInput?.addEventListener('change', saveAppearanceFromControls);

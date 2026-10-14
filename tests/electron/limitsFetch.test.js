@@ -111,6 +111,11 @@ test('every widget provider probe takes the runtime transport', () => {
 
   assert.match(main, /function electronLimitsFetch\(\) \{\s*return createElectronLimitsFetch\(\{ net, getEnv: networkProxyEnv \}\);/);
   assert.match(main, /function networkProxyEnv\(\) \{\s*return proxyEnvForSettings\(settings \|\| \{\}, process\.env\);/);
+  // MiMo's exchange and the Chromium session follow the same setting, and
+  // every settings save re-applies the session so a failed apply is retried.
+  assert.match(main, /createMimoExchangeFetch\(\{ session: session\.defaultSession, getEnv: networkProxyEnv \}\)/);
+  assert.match(main, /getConfig: \(\) => sessionProxyConfig\(settings \|\| \{\}, process\.env\)/);
+  assert.match(main, /const proxySettingChanged = [^;]+;\s*void sessionProxy\.apply\(\)/);
   assert.match(main, /fetch: electronLimitsFetch\(\)/);
   assert.match(main, /opencodeGoApi\.fetchGoApi\(apiKey, \{\s*fetch: electronLimitsFetch\(\)/);
   // Every settings-side validation that can refuse to save a credential.

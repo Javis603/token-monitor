@@ -52,6 +52,25 @@ test('an explicit proxy environment wins before Chromium proxy resolution', asyn
   assert.equal(seen[0].init.redirect, 'manual');
 });
 
+// The transport lives for the whole process, so the app proxy setting saved
+// after it was built has to take effect on the next hop, both ways.
+test('the proxy env is re-read on every hop', async () => {
+  let resolutions = 0;
+  const viaEnv = [];
+  let env = { HTTPS_PROXY: 'http://app-a.example:8080' };
+  const fetch = createMimoExchangeFetch({
+    session: { resolveProxy: async () => { resolutions += 1; return 'DIRECT'; } },
+    getEnv: () => env,
+    envFetch: async (url) => { viaEnv.push(url); return { status: 200 }; },
+    fetch: async () => ({ status: 200 })
+  });
+  await fetch('https://platform.xiaomimimo.com/api/v1/balance');
+  assert.deepEqual([viaEnv.length, resolutions], [1, 0]);
+  env = {};
+  await fetch('https://platform.xiaomimimo.com/api/v1/balance');
+  assert.deepEqual([viaEnv.length, resolutions], [1, 1]);
+});
+
 test('a resolved proxy becomes a dispatcher on the request', async () => {
   const seen = [];
   const fetch = createMimoExchangeFetch({

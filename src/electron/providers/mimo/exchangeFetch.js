@@ -27,22 +27,26 @@ function parseProxyResolveResults(value) {
 // exchange keeps its own jar and uses this transport to inspect each hop.
 // Explicit proxy environment settings win; otherwise each hop follows the
 // system/PAC route Chromium resolves. The shared walker enforces HTTPS.
+// `getEnv()` is read per hop because the app proxy setting (networkProxy.js)
+// can change while this process-wide transport lives.
 function createMimoExchangeFetch({
   session,
   fetch: fetchImpl = undiciFetch,
   env = process.env,
+  getEnv = () => env,
   envFetch
 } = {}) {
-  const configured = resolveProxyConfig(env);
-  if (configured.httpProxy || configured.httpsProxy) {
-    return envFetch || createOutboundFetch(env);
-  }
   const agents = new Map();
   const agentFor = (proxyUrl) => {
     if (!agents.has(proxyUrl)) agents.set(proxyUrl, new ProxyAgent(proxyUrl));
     return agents.get(proxyUrl);
   };
   return async function mimoExchangeFetch(url, init = {}) {
+    const currentEnv = getEnv();
+    const configured = resolveProxyConfig(currentEnv);
+    if (configured.httpProxy || configured.httpsProxy) {
+      return (envFetch || createOutboundFetch(currentEnv))(url, init);
+    }
     const routes = parseProxyResolveResults(await session.resolveProxy(String(url)));
     let lastError = null;
     // One resolution per hop, deliberately: the proxy can differ per host under

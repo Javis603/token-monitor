@@ -131,7 +131,7 @@
                     <div class="settings-group-header maintenance-header"><span data-i18n="settings.proxy.title">Network proxy</span><span id="networkProxySource"></span></div>
                     <label><span data-i18n="settings.proxy.url">Proxy URL</span><input id="proxyUrlInput" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7890" aria-describedby="networkProxyNote" /></label>
                     <label><span data-i18n="settings.proxy.noProxy">Bypass proxy for</span><input id="noProxyInput" type="text" spellcheck="false" autocomplete="off" placeholder="example.com, .internal.net" data-i18n-placeholder="settings.proxy.noProxyPlaceholder" /></label>
-                    <p id="networkProxyNote" class="settings-note" data-i18n="settings.proxy.note">Only Token Monitor's limit requests and sign-in windows use this proxy. Leave empty to use HTTP(S)_PROXY or the system proxy.</p>
+                    <p id="networkProxyNote" class="settings-note" data-i18n="settings.proxy.note">Used only for Token Monitor's own limit and account requests; sign-ins in your browser or a CLI are not affected. Leave empty to use HTTP(S)_PROXY or the system proxy.</p>
                     <div id="proxyUrlError" class="hub-status error" role="alert" hidden></div>
                   </div>
                   <div class="settings-group advanced-settings-block advanced-config-row">
