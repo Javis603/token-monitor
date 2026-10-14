@@ -15,9 +15,9 @@ const opencodeSession = require('./providers/opencode/session');
 const { readReasonixSessionEvents } = require('./providers/reasonix/sessionDetail');
 const { createLocalUsageStore } = require('./providers/codex/localUsageStore');
 
-function* readTranscriptLines(filePath) {
-  const decoded = isCompressedCodexTranscript(filePath) ? readCompressedCodexTranscript(filePath) : null;
-  const fd = decoded ? undefined : fs.openSync(filePath, 'r');
+function* readTranscriptLines(filePath, transcriptFs = fs) {
+  const decoded = isCompressedCodexTranscript(filePath) ? readCompressedCodexTranscript(filePath, { fs: transcriptFs }) : null;
+  const fd = decoded ? undefined : transcriptFs.openSync(filePath, 'r');
   let position = 0;
   let parts = [];
   let lineBytes = 0;
@@ -25,7 +25,7 @@ function* readTranscriptLines(filePath) {
     for (;;) {
       const buffer = Buffer.allocUnsafe(64 * 1024);
       const bytesRead = decoded ? decoded.copy(buffer, 0, position, position + buffer.length)
-        : fs.readSync(fd, buffer, 0, buffer.length, null);
+        : transcriptFs.readSync(fd, buffer, 0, buffer.length, null);
       position += bytesRead;
       if (bytesRead === 0) break;
       const chunk = buffer.subarray(0, bytesRead);
@@ -48,7 +48,7 @@ function* readTranscriptLines(filePath) {
     }
     if (lineBytes) yield Buffer.concat(parts, lineBytes).toString('utf8');
   } finally {
-    if (fd !== undefined) fs.closeSync(fd);
+    if (fd !== undefined) transcriptFs.closeSync(fd);
   }
 }
 
@@ -703,7 +703,7 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
   let parsed;
   let events;
   try {
-    const lines = readTranscriptLines(filePath);
+    const lines = readTranscriptLines(filePath, deps.fs || fs);
     // The filename is a lookup key, not necessarily Codex's conversation identity.
     parsed = client === 'codex' ? parseCodexTranscriptData(lines) : null;
     // WorkBuddy writes the same transcript family as CodeBuddy Code.
