@@ -138,6 +138,7 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
       canonical: !dryRun
     });
   }
+  delete visibleSummary.sessionUsageArchiveFullScan;
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
 }
 

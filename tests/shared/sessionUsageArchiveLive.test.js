@@ -5,8 +5,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 const { normalizePeriod } = require('../../src/shared/usage');
-const { applySessionUsageArchive, captureSessionUsageArchive } = require('../../src/shared/usage/sessionUsageArchive');
+const {
+  applySessionUsageArchive, captureSessionUsageArchive, sessionUsageArchiveDate, updateSessionUsageArchive
+} = require('../../src/shared/usage/sessionUsageArchive');
 const { createSessionUsageArchiveStore } = require('../../src/shared/usage/sessionUsageArchiveStore');
 const { createUsageTransform } = require('../../src/shared/usage/usageTransform');
 
@@ -84,6 +87,32 @@ test('a preview is read-only until the full collection succeeds', () => {
   assert.equal(archive.sessions['claude:one'].periods.allTime.totalTokens, 100);
 });
 
+test('a preview reads its own store and leaves the committed observation unchanged', t => {
+  const { transform, store } = setup(t);
+  transform.transform(summary(100));
+  const current = summary(20, LATER, 'codex');
+  assert.equal(transform.transform(current, 'progress', { preview: true }).allTime.totalTokens, 120);
+  const archive = store.read(LATER);
+  assert.equal(archive.sessions['claude:one'].periods.allTime.totalTokens, 100);
+  assert.equal(archive.sessions['codex:one'], undefined, 'preview must not capture a new identity');
+});
+
+test('a cold preview reads legacy JSON without migrating it or creating SQLite', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-preview-'));
+  const options = { databasePath: path.join(dir, 'archive.sqlite'), path: path.join(dir, 'legacy.json') };
+  const store = createSessionUsageArchiveStore(options);
+  const transform = createUsageTransform({ store, getSettings: () => ({ projectsEnabled: false }) });
+  t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const current = summary(20, LATER, 'codex');
+  assert.equal(transform.transform(current, 'progress', { preview: true }).allTime.totalTokens, 20);
+  assert.equal(fs.existsSync(options.databasePath), false);
+  const legacy = JSON.stringify(captureSessionUsageArchive({}, summary(100), AT));
+  fs.writeFileSync(options.path, legacy);
+  assert.equal(transform.transform(current, 'progress', { preview: true }).allTime.totalTokens, 120);
+  assert.equal(fs.readFileSync(options.path, 'utf8'), legacy);
+  assert.equal(fs.existsSync(options.databasePath), false, 'preview must not open the archive writer');
+});
+
 test('released micode archive keys do not duplicate a current mimo session or its retained peer', () => {
   const archive = captureSessionUsageArchive({}, summary(100, AT, 'mimo'), AT);
   archive.sessions['micode:one'] = structuredClone(archive.sessions['mimo:one']);
@@ -107,6 +136,31 @@ test('alias observations choose the newest whole period, including zero, in eith
         assert.equal(visible.allTime.totalTokens, zero ? 0 : 20);
         assert.equal(visible.allTime.costUsd, zero ? 0 : 0.2);
       }
+    }
+  }
+});
+
+test('headless projection consumes the full-scan hint without publishing it', t => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../../src/agent/agent.js'), 'utf8');
+  const start = source.indexOf('function summaryWithSessionUsageArchive(');
+  const body = source.slice(start, source.indexOf('\n}\n', start) + 3);
+  const { serializeSyncPayload } = require('../../src/shared/syncPayload');
+  for (const sessionUsageArchiveEnabled of [false, true]) {
+    for (const dryRun of [false, true]) {
+      const { store } = setup(t);
+      const archive = captureSessionUsageArchive({}, summary(100), AT);
+      store.capture(summary(100), AT);
+      const context = { sessionUsageArchiveEnabled, dryRun, projectsEnabled: false,
+        sessionUsageArchive: archive, sessionUsageArchiveStore: store, cursorUsageEvents: undefined,
+        sessionUsageArchiveDate, updateSessionUsageArchive, applySessionUsageArchive,
+        readSessionUsageArchiveSnapshot: () => archive };
+      vm.runInNewContext(body, context);
+      const current = { ...summary(20, LATER), today: period(null), sessionUsageArchiveFullScan: true };
+      const visible = context.summaryWithSessionUsageArchive(current, LATER);
+      assert.equal(visible.today.totalTokens, 0);
+      assert.equal(visible.allTime.totalTokens, 20);
+      assert.equal(Object.hasOwn(visible, 'sessionUsageArchiveFullScan'), false);
+      assert.equal(Object.hasOwn(serializeSyncPayload(visible).payload, 'sessionUsageArchiveFullScan'), false);
     }
   }
 });

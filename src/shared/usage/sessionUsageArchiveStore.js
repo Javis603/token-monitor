@@ -337,6 +337,13 @@ function createSessionUsageArchiveStore(options = {}) {
     return archive;
   }
 
+  function snapshot(readOptions = {}) {
+    // Reuse an open reader's revision checks, but never initialize the writer,
+    // migrate legacy JSON or prune periods just to project a preview.
+    if (database) return refresh(undefined, readOptions);
+    return readSessionUsageArchiveSnapshot({ ...options, ...readOptions, databasePath, path: legacyPath });
+  }
+
   function mutateArchive(mutate) {
     database.exec('BEGIN IMMEDIATE');
     try {
@@ -454,6 +461,7 @@ function createSessionUsageArchiveStore(options = {}) {
     release,
     read: loadAll,
     refresh,
+    snapshot,
     databasePath,
     legacyPath
   };

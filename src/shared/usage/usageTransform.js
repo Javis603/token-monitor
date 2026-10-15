@@ -34,7 +34,7 @@ function createUsageTransform(options = {}) {
   const store = options.store;
   const getSettings = options.getSettings || (() => ({}));
   const isExternalAgentActive = options.isExternalAgentActive || (() => false);
-  const readSnapshot = options.readSnapshot || readSessionUsageArchiveSnapshot;
+  const readSnapshot = options.readSnapshot || store?.snapshot || readSessionUsageArchiveSnapshot;
   const onCaptureFailure = options.onCaptureFailure || (() => {});
   const log = options.log || ((message) => console.log(message));
   let sessionArchive = null;
