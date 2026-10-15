@@ -68,11 +68,9 @@ function isUnifiedPlan(usage) {
 
 function cursorIncludedWindow(usage, billingResetsAt) {
   if (finiteNumber(usage.planPercent) === null) return null;
-  // Without plan info, only the sand status identified the plan; unified pools
-  // reset weekly, so keep the window weekly and leave its reset unknown.
-  const weekly = usage.planInfo
-    ? usage.planInfo.includedUsagePeriod === 'weekly'
-    : usage.grokBot?.isUnified === true;
+  // Unified pools default to weekly; only an explicit monthly period may use
+  // the billing reset. Missing weekly reset dates stay unknown.
+  const weekly = usage.planInfo?.includedUsagePeriod !== 'monthly';
   return {
     kind: weekly ? 'weekly' : 'billing',
     label: 'Included usage',
@@ -242,7 +240,7 @@ async function fetchCursorAccountLimits(account, deps = {}) {
   const prepaidWindow = unified ? cursorPrepaidWindow(usage) : null;
   if (prepaidWindow) windows.push(prepaidWindow);
 
-  const onDemandWindow = cursorOnDemandWindow(usage, resetsAt);
+  const onDemandWindow = unified ? null : cursorOnDemandWindow(usage, resetsAt);
   if (onDemandWindow) windows.push(onDemandWindow);
 
   return {

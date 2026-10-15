@@ -346,6 +346,45 @@ test('fetchCursorLimits keeps a monthly unified pool on the billing cycle', asyn
   assert.equal(result.windows[0].windowMinutes, null);
 });
 
+test('fetchCursorLimits keeps unified pools weekly when the period is missing or unknown', async () => {
+  for (const period of [{}, { includedUsagePeriod: null }, { includedUsagePeriod: 'unknown' }]) {
+    const result = await fetchCursorLimits({}, {
+      readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+      probe: unifiedProbe({ planInfo: {
+        isMerged: true,
+        billingCycleEnd: '2026-11-01T00:00:00.000Z',
+        ...period
+      } })
+    });
+    const included = result.windows[0];
+    assert.equal(included.kind, 'weekly');
+    assert.equal(included.windowMinutes, 10080);
+    assert.equal(included.resetsAt, null, 'a billing reset cannot stand in for the unknown weekly reset');
+  }
+});
+
+test('fetchCursorLimits hides legacy on-demand data only for unified plans', async () => {
+  for (const onDemand of [
+    { onDemandUsedUsd: 2, onDemandLimitUsd: 50 },
+    { onDemandUsedUsd: 0, onDemandLimitUsd: 50 },
+    { onDemandUsedUsd: 2 },
+    { teamOnDemandUsedUsd: 2, teamOnDemandLimitUsd: 50 }
+  ]) {
+    for (const planInfo of [{ isMerged: true, includedUsagePeriod: 'weekly' }, null]) {
+      const result = await fetchCursorLimits({}, {
+        readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+        probe: unifiedProbe({ planInfo, ...onDemand })
+      });
+      assert.deepEqual(result.windows.map((window) => window.label), ['Included usage', 'Prepaid balance']);
+    }
+    const legacy = await fetchCursorLimits({}, {
+      readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+      probe: unifiedProbe({ planInfo: { isMerged: false }, ...onDemand })
+    });
+    assert.equal(legacy.windows.at(-1).label, 'On-demand spend');
+  }
+});
+
 test('fetchCursorLimits keeps the legacy layout when plan info says the plan is not unified', async () => {
   const result = await fetchCursorLimits({}, {
     readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
