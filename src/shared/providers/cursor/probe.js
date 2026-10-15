@@ -317,7 +317,7 @@ async function probe(sessionToken, opts = {}) {
   // Only unified (The X Subscription) plans carry a prepaid balance, so legacy
   // plans never pay for this request.
   let prepaid = null;
-  if (planInfo?.isMerged === true || grokBot?.isUnified === true) {
+  if (planInfo ? planInfo.isMerged : grokBot?.isUnified === true) {
     const prepaidResult = await dashboardRpc(PREPAID_BILLING_URL, sessionToken, opts, configuredTimeoutMs);
     if (prepaidResult.ok) prepaid = parsePrepaidBilling(prepaidResult.json);
   }

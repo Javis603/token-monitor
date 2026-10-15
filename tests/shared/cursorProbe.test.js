@@ -300,10 +300,11 @@ function dashboardFakeHttps(payloads, calls = []) {
     request(opts, cb) {
       calls.push(opts.path);
       const res = new EventEmitter();
-      res.statusCode = 200;
+      // A null payload stands for an unavailable endpoint.
+      res.statusCode = payloads[opts.path] === null ? 500 : 200;
       setImmediate(() => {
         cb(res);
-        setImmediate(() => {
+        if (res.statusCode === 200) setImmediate(() => {
           res.emit('data', Buffer.from(JSON.stringify(payloads[opts.path] || {})));
           res.emit('end');
         });
@@ -346,4 +347,15 @@ test('probe treats the sand unified flag as a unified plan when plan info is una
   assert.equal(result.usage.grokBot.isUnified, true);
   assert.ok(calls.includes('/api/dashboard/get-user-prepaid-billing'));
   assert.deepEqual(result.usage.prepaid, { availableUsd: 0 });
+});
+
+test('probe skips the prepaid request when plan info denies a sand unified flag', async () => {
+  const calls = [];
+  const result = await probe('tok', { httpsLib: dashboardFakeHttps({
+    '/api/usage-summary': { individualUsage: { plan: { autoPercentUsed: 1, apiPercentUsed: 2 } } },
+    '/api/dashboard/get-sand-usage-status': { usagePercent: 5, isUnified: true },
+    '/api/dashboard/get-plan-info': { planInfo: { planName: 'Pro' } }
+  }, calls) });
+  assert.equal(result.usage.prepaid, null);
+  assert.ok(!calls.includes('/api/dashboard/get-user-prepaid-billing'));
 });

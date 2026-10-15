@@ -58,8 +58,12 @@ function cursorBillingWindow(label, fields = {}) {
 // The X Subscription (Plus, Premium, Super, unified Ultra) replaces the two model
 // pools with one included pool shared with Grok and Grok Bot, so the separate
 // Grok Bot allowance would count the same pool twice.
+// Plan info is authoritative, as in Cursor's own settings; the sand status's
+// unified flag only stands in when plan info is unavailable.
 function isUnifiedPlan(usage) {
-  return usage.planInfo?.isMerged === true || usage.grokBot?.isUnified === true;
+  return usage.planInfo
+    ? usage.planInfo.isMerged === true
+    : usage.grokBot?.isUnified === true;
 }
 
 function cursorIncludedWindow(usage, billingResetsAt) {

@@ -369,3 +369,16 @@ test('fetchCursorLimits keeps a sand-only unified pool weekly with an unknown re
   assert.equal(result.windows[0].resetsAt, null);
   assert.equal(result.windows[0].windowMinutes, 10080);
 });
+
+test('fetchCursorLimits lets plan info override the sand unified flag', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: unifiedProbe({
+      membershipType: 'pro',
+      planInfo: { isMerged: false, planName: 'Pro', includedUsagePeriod: null },
+      prepaid: null
+    })
+  });
+  assert.equal(result.windows.find((window) => window.label === 'Grok Bot')?.kind, 'weekly');
+  assert.deepEqual(result.windows.map((window) => window.label), ['Cursor Models', 'Other Models', 'Grok Bot']);
+});
