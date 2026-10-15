@@ -104,7 +104,7 @@
       return { ...row, reportedCredits };
     });
     for (const [key, reportedCredits] of credits) {
-      result.push({ key, name: key, value: 0, cost: 0, barValue: 0, reportedCredits });
+      result.push({ key, name: key, value: 0, cost: 0, barValue: 0, tokenDataUnavailable: true, reportedCredits });
     }
     return result;
   }

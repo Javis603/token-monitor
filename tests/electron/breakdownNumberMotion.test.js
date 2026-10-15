@@ -183,15 +183,3 @@ test('captured zero-width bars still animate to a nonzero scale in compact lists
   h.animateBreakdownFrom(snapshot);
   assert.ok(h.bars.some(bar => bar.fill === fill && bar.from === 0 && bar.to === 0.5));
 });
-
-test('credit-only model labels survive existing period and live-update number animations', () => {
-  const h = harness(2);
-  const row = h.rows[0];
-  row.dataset.creditOnly = 'true';
-  row.querySelector('.row-value').textContent = '0.25 credits';
-  const snapshot = h.captureBreakdownMotion();
-  h.rows[1].dataset.motionValue = '2000';
-  h.animateBreakdownFrom(snapshot, { synchronized: true });
-  assert.equal(h.calls.length, 1);
-  assert.equal(row.querySelector('.row-value').textContent, '0.25 credits');
-});

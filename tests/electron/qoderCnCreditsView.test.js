@@ -131,17 +131,17 @@ test('the shared row renderer displays credit-only and combined readings without
   });
   vm.runInContext(app.slice(app.indexOf('function updateRow(row,'), app.indexOf('function applyHomeListMark(')), h);
   const reading = { name: 'qfmodel', subtitle: 'Qoder CN CLI · 1 request', value: 0, cost: 0,
-    reportedCredits: { credits: 0.25, requests: 1 } };
+    tokenDataUnavailable: true, reportedCredits: { credits: 0.25, requests: 1 } };
   h.updateRow(row, reading);
-  assert.equal(row.querySelector('.row-value').textContent, '0.25 credits');
-  assert.equal(row.querySelector('.row-cost').textContent, '');
-  assert.equal(row.dataset.creditOnly, 'true');
+  assert.equal(row.querySelector('.row-value').textContent, 'Unavailable');
+  assert.equal(row.querySelector('.row-cost').textContent, '0.25 credits');
+  assert.equal(row.dataset.tokenDataUnavailable, 'true');
   assert.match(semantics.ariaLabel, /0.25 credits/);
-  h.updateRow(row, { ...reading, value: 120, cost: 0.1 });
+  h.updateRow(row, { ...reading, tokenDataUnavailable: false, value: 120, cost: 0.1 });
   assert.equal(row.querySelector('.row-value').textContent, '120');
   assert.equal(row.querySelector('.row-cost').textContent, '$0.10 · 0.25 credits');
-  assert.equal(row.dataset.creditOnly, undefined);
-  h.updateRow(row, { ...reading, reportedCredits: undefined, value: 240, cost: 0.2 });
+  assert.equal(row.dataset.tokenDataUnavailable, undefined);
+  h.updateRow(row, { ...reading, tokenDataUnavailable: false, reportedCredits: undefined, value: 240, cost: 0.2 });
   assert.equal(row.querySelector('.row-value').textContent, '240');
   assert.equal(row.querySelector('.row-cost').textContent, '$0.20');
   assert.equal(row.title, '');

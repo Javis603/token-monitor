@@ -8178,5 +8178,3 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 [hidden] {
   display: none !important;
 }
-
-.row.credit-only .row-body { display: none; }

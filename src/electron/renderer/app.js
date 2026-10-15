@@ -1894,9 +1894,9 @@ function animateBreakdownFrom(snapshot, { duration = 420, synchronized = false }
   }
   let enteringIndex = 0;
   for (const row of motionRows) {
-    // Unknown token readings and explicit credit units are semantic labels,
-    // not token counts for the ordinary row-number tween.
-    if (row.dataset.tokenDataUnavailable === 'true' || row.dataset.creditOnly === 'true') {
+    // Unknown token readings are semantic labels, not token counts for the
+    // ordinary row-number tween.
+    if (row.dataset.tokenDataUnavailable === 'true') {
       cancelRowNumberAnimation(row.querySelector('.row-value'));
       continue;
     }
@@ -2578,14 +2578,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   setHoverMarqueeText(detailEl, shownDetail);
   detailEl.classList.toggle('hidden', !shownDetail);
   const valueEl = row.querySelector('.row-value');
-  const creditOnly = reportedCredits != null && !(value > 0 || cost > 0 || unpricedTokens > 0);
-  row.classList.toggle('credit-only', creditOnly);
-  if (creditOnly) {
-    row.dataset.creditOnly = 'true';
-    delete row.dataset.tokenDataUnavailable;
-    cancelRowNumberAnimation(valueEl);
-    valueEl.textContent = formatCredits(reportedCredits.credits);
-  } else if (tokenDataUnavailable === true) {
+  if (tokenDataUnavailable === true) {
     row.dataset.tokenDataUnavailable = 'true';
     cancelRowNumberAnimation(valueEl);
     valueEl.textContent = t('detailTokenUnavailable') || 'Unavailable';
@@ -2600,14 +2593,14 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
-  if (!creditOnly) delete row.dataset.creditOnly;
   const costEl = row.querySelector('.row-cost');
   const costLabelText = formatCost(cost || 0, unpricedTokens);
   costEl.textContent = tokenDataUnavailable === true ? ''
     : unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText;
   costEl.title = tokenDataUnavailable === true ? '' : costLabelText;
   if (reportedCredits) {
-    costEl.textContent = creditOnly ? '' : `${costEl.textContent} · ${formatCredits(reportedCredits.credits)}`;
+    costEl.textContent = tokenDataUnavailable === true ? formatCredits(reportedCredits.credits)
+      : `${costEl.textContent} · ${formatCredits(reportedCredits.credits)}`;
     costEl.title = t('qoderCnCredits.source');
     row.title = t('qoderCnCredits.source');
   }
