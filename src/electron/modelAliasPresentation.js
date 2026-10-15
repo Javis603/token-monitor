@@ -103,7 +103,6 @@ function collectStatsModelIds(stats) {
   for (const period of Object.values(stats.periods || {})) collectUsageModelIds(period, modelIds);
   for (const field of ['today', 'month', 'allTime']) collectUsageModelIds(stats[field], modelIds);
   for (const device of Array.isArray(stats.devices) ? stats.devices : []) {
-    for (const models of Object.values(device?.qoderCnCredits?.days || {})) addModelMapIds(modelIds, models);
     for (const period of Object.values(device?.periods || {})) collectUsageModelIds(period, modelIds);
     for (const field of ['today', 'month', 'allTime']) collectUsageModelIds(device?.[field], modelIds);
     collectHistoryModelIds(device?.history, modelIds);
@@ -147,23 +146,6 @@ function foldModelThroughput(value, resolve) {
     result.set(key, target);
   }
   return Object.fromEntries(result);
-}
-
-function projectModelCredits(value, resolve) {
-  if (!value?.days) return value;
-  const days = mapValues(value.days, (models) => {
-    if (!Object.keys(models).some((model) => resolve(model) !== model)) return models;
-    const grouped = new Map();
-    for (const [model, usage] of Object.entries(models)) {
-      const key = resolve(model);
-      const target = grouped.get(key) || { credits: 0, requests: 0 };
-      target.credits += usage.credits;
-      target.requests += usage.requests;
-      grouped.set(key, target);
-    }
-    return Object.fromEntries(grouped);
-  });
-  return days === value.days ? value : { ...value, days };
 }
 
 function projectNestedUsage(map, resolve) {
@@ -394,7 +376,6 @@ function projectModelAliasStats(stats, aliases, options = {}) {
       result[field] = projected;
     };
     if (record.periods) set('periods', mapValues(record.periods, (period) => projectUsage(period, plan.resolve)));
-    if (record.qoderCnCredits) set('qoderCnCredits', projectModelCredits(record.qoderCnCredits, plan.resolve));
     for (const field of ['today', 'month', 'allTime']) {
       if (record[field]) set(field, projectUsage(record[field], plan.resolve));
     }
@@ -413,9 +394,6 @@ function projectModelAliasStats(stats, aliases, options = {}) {
   for (const period of ['today', 'month', 'allTime']) {
     addModelMapIds(pricingSourceIds, stats.periods?.[period]?.models);
     addModelMapIds(pricingSourceIds, stats[period]?.models);
-  }
-  for (const device of stats.devices || []) {
-    for (const models of Object.values(device.qoderCnCredits?.days || {})) addModelMapIds(pricingSourceIds, models);
   }
   result.modelAliasSourceIds = [...pricingSourceIds].sort();
 

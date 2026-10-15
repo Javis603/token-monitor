@@ -244,30 +244,6 @@ Current agents and widgets include `osName` and, when known, `osVersion` so devi
 
 `periodWindows` is optional. Agents and widgets stamp each snapshot with the UTC instant its `today`/`month` windows end, computed in the device's own local time (`endsAt` = next local midnight / next local month start; `key` is the device-local day/month for reference). New producers also include their IANA `timeZone`, which lets retained daily History keep using that device's calendar after it goes offline. The hub uses `endsAt` to expire a device's `today`/`month` from the native aggregate once `now >= endsAt`, so an offline device does not keep contributing a stale day/month snapshot (`allTime` never expires). Payloads without `periodWindows` fall back to a UTC day/month comparison against `updatedAt`; fixed History ranges fail closed after an unzoned producer window expires.
 
-### Qoder CN CLI reported credits
-
-An optional device-level `qoderCnCredits` field carries local CLI reported credits independently of `periods` token/cost accounting and `limits` account quota:
-
-```json
-{
-  "qoderCnCredits": {
-    "days": {
-      "2026-10-15": {
-        "qfmodel": { "credits": 1.25, "requests": 3 }
-      }
-    }
-  }
-}
-```
-
-Day keys use the producing device's local calendar. Each model row contains a finite nonnegative numeric `credits` sum and a positive integer `requests` count. Values include `billable: false` requests, represent the log's `usage.credits`, and have no currency conversion or token equivalent. The local collector deduplicates request IDs before rolling up; no request IDs, transcript contents, session titles or source paths enter this field. Multi-device presentation adds distinct device contributions, as with other locally collected usage; copied source logs on different devices are separate producer contributions.
-
-Normalization accepts up to 3,660 valid calendar days and 64 distinct model IDs (128 characters each); each row is bounded to `credits <= 1e12` and `requests <= 1e9`. Unknown fields are stripped; malformed/over-budget data normalizes to `null`, never a partial sum. A producer publishes `null` when collection is disabled; an absent field from an older producer means unknown coverage, while `{ "days": {} }` means a supported scan found no credits. Limits-only and partial runtime updates carry the previous field when omitted; complete updates replace it. It is returned under `devices[]` on authenticated stats, not duplicated into top-level aggregates or public stats. On a read/persistence failure, `error: "collection-failed"` accompanies the last-good `days` when available; an error-only object means no baseline is available, so consumers show an unknown value rather than zero. Errors remain independent of successful token collection and clear on recovery. Older Hubs omit the new field; update the Hub for remote credits presentation.
-
-Credit-only collection sets the optional `clientHealth.clients.qodercn.data.creditRequests` positive integer and reports `healthy` when the source is detected. This health evidence supports the collection status; it does not add any token counts. A credits read failure sets `collection.state: "read-failed"`, yielding `overall: "attention"` while preserving token accounting.
-
-### Client health
-
 `clientHealth` is optional per-client diagnostics: why a tracked tool shows the number it shows. It sits alongside the older `clientStatus` map (`active` / `waiting` / `missing` per client), which agents continue to send unchanged.
 
 ```json
@@ -312,7 +288,7 @@ Credit-only collection sets the optional `clientHealth.clients.qodercn.data.cred
 
 Every tracked client sends the same fixed core — `source.state`, `source.detectedCount`, `source.checkedCount`, `collection.state`, `data.liveTokens`, and `overall` — because the hub recomputes `overall` from those inputs rather than storing what the producer claimed. Detail beyond the core is sparse: `source.checks` and `diagnostics` are sent only for a client that is not `healthy`, and a client with nothing to report sends neither.
 
-`overall` is `healthy` (usage was observed), `waiting` (sources present, nothing counted yet), `attention` (something we do on the user's behalf is failing), `unavailable` (no source found at all), or `unknown`. `source.state` is `detected`, `missing`, or `unknown`, and is **derived from the counts** on ingest rather than read from the payload, so a state that contradicts them cannot be stored; `detectedCount` is clamped to `checkedCount` first, and a client with nothing probed is `unknown` rather than `missing`. `collection.state` is `direct` for the clients whose files are parsed in place — the common case, with no fetch step to succeed or fail — `read-failed` when a provider-owned local credits reader failed, and `idle` / `pending` / `ok` / `failed` for the self-synced clients (Cursor, Antigravity) whose usage is refreshed by a subprocess. A value the reader does not recognize becomes `unknown`, never `direct`: `direct` is the positive claim that there is no fetch step to fail, so collapsing a future state onto it would report a broken client as working.
+`overall` is `healthy` (usage was observed), `waiting` (sources present, nothing counted yet), `attention` (something we do on the user's behalf is failing), `unavailable` (no source found at all), or `unknown`. `source.state` is `detected`, `missing`, or `unknown`, and is **derived from the counts** on ingest rather than read from the payload, so a state that contradicts them cannot be stored; `detectedCount` is clamped to `checkedCount` first, and a client with nothing probed is `unknown` rather than `missing`. `collection.state` is `direct` for the clients whose files are parsed in place — the common case, with no fetch step to succeed or fail — and `idle` / `pending` / `ok` / `failed` for the self-synced clients (Cursor, Antigravity) whose usage is refreshed by a subprocess. A value the reader does not recognize becomes `unknown`, never `direct`: `direct` is the positive claim that there is no fetch step to fail, so collapsing a future state onto it would report a broken client as working.
 
 A client installed only inside a running WSL distro has no host directory, and its usage is merged into the same periods before either derivation runs. Its WSL marker is therefore a source that exists, reported as the `wsl-home` check — without it the same snapshot would count the client's tokens and call its source missing.
 

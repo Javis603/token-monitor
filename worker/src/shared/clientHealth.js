@@ -56,8 +56,7 @@ const CLIENT_SOURCE_STATES = Object.freeze(['detected', 'missing', 'unknown']);
 // `direct`, tell an older hub there is no fetch step to fail, and a client with
 // tokens from an earlier scan would come back out as `healthy`.
 const CLIENT_COLLECTION_STATES = Object.freeze([
-  // A provider-owned local reader can fail independently of token collection.
-  'direct', 'idle', 'pending', 'ok', 'failed', 'read-failed', 'unknown'
+  'direct', 'idle', 'pending', 'ok', 'failed', 'unknown'
 ]);
 
 // Additional evidence for a failed self-sync. These values describe the stage
@@ -331,9 +330,9 @@ function deriveClientOverall(health) {
   // so it stops here rather than resolving to a state that reads as fine.
   if (!SOURCE_STATE_SET.has(sourceState) || sourceState === 'unknown') return 'unknown';
   if (!COLLECTION_STATE_SET.has(collectionState) || collectionState === 'unknown') return 'unknown';
-  if (collectionState === 'failed' || collectionState === 'read-failed') return 'attention';
+  if (collectionState === 'failed') return 'attention';
   if (sourceState === 'missing') return 'unavailable';
-  if (boundedTokens(health?.data?.liveTokens) > 0 || health?.data?.creditRequests > 0) return 'healthy';
+  if (boundedTokens(health?.data?.liveTokens) > 0) return 'healthy';
   return 'waiting';
 }
 
@@ -343,7 +342,7 @@ function deriveClientOverall(health) {
 // other direction: a client whose sync is failing but whose earlier tokens still
 // count reads `attention` here and `active` there, and both are correct.
 function deriveLegacyClientStatus(health) {
-  if (boundedTokens(health?.data?.liveTokens) > 0 || health?.data?.creditRequests > 0) return 'active';
+  if (boundedTokens(health?.data?.liveTokens) > 0) return 'active';
   return health?.source?.state === 'detected' ? 'waiting' : 'missing';
 }
 
@@ -371,7 +370,7 @@ function diagnosticAgreesWithEntry(code, entry) {
   if (code === 'source-missing') return entry.source.state === 'missing';
   // Both halves: "we can read this client and found nothing" is a different
   // statement from "there is nothing to read", and only the first is this code.
-  if (code === 'no-usage-observed') return entry.source.state === 'detected' && entry.data.liveTokens === 0 && !entry.data.creditRequests && entry.collection.state !== 'read-failed';
+  if (code === 'no-usage-observed') return entry.source.state === 'detected' && entry.data.liveTokens === 0;
   return true;
 }
 
@@ -414,8 +413,6 @@ function normalizeClientHealthEntry(value) {
       liveTokens: boundedTokens(value?.data?.liveTokens)
     }
   };
-  const creditRequests = value?.data?.creditRequests;
-  if (Number.isSafeInteger(creditRequests) && creditRequests > 0) entry.data.creditRequests = creditRequests;
   // The counts are the core the hub recomputes `overall` from, so `checks` has to
   // agree with them or go. Dropping the evidence is the safe direction: a
   // renderer with no checks shows a ratio, while one holding checks that

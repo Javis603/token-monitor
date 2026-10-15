@@ -6,7 +6,6 @@ const PERIODS = ['today', 'month', 'allTime'];
 const { normalizeLiveActivity, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
-const { normalizeQoderCnCredits } = require('./providers/qodercn/creditUsage');
 const {
   coerceHistory, dayKeyAddDays, hasDisjointReasoning, localDayKey, mergeHistories,
   normalizeTokscaleClientName, normalizeTokscaleModelNameForClient
@@ -1306,7 +1305,6 @@ function normalizeDeviceRecord(record) {
   if (hasOwn(record, 'osVersion')) normalized.osVersion = normalizeDeviceOsVersion(record.osVersion);
   if (hasOwn(record, 'trackedClients')) normalized.trackedClients = normalizeTrackedClients(record.trackedClients);
   if (hasOwn(record, 'clientStatus')) normalized.clientStatus = normalizeClientStatus(record.clientStatus);
-  if (hasOwn(record, 'qoderCnCredits')) normalized.qoderCnCredits = normalizeQoderCnCredits(record.qoderCnCredits);
   if (hasOwn(record, 'clientHealth')) {
     // Validated, capped, and with `overall` recomputed from the core rather than
     // trusted — see clientHealth.js. Left off the record entirely when the field
@@ -1539,7 +1537,6 @@ function mergeDeviceRecord(existing, incoming) {
     // stale diagnosis on a device that changed hands.
     if (hasOwn(normalizedExisting, 'clientStatus') && !hasOwn(normalizedIncoming, 'clientStatus')) normalizedIncoming.clientStatus = normalizedExisting.clientStatus;
     if (hasOwn(normalizedExisting, 'clientHealth') && !hasOwn(normalizedIncoming, 'clientHealth')) normalizedIncoming.clientHealth = normalizedExisting.clientHealth;
-    if (hasOwn(normalizedExisting, 'qoderCnCredits') && !hasOwn(normalizedIncoming, 'qoderCnCredits')) normalizedIncoming.qoderCnCredits = normalizedExisting.qoderCnCredits;
     if (hasOwn(normalizedExisting, 'wslStatus') && !hasOwn(normalizedIncoming, 'wslStatus')) normalizedIncoming.wslStatus = normalizedExisting.wslStatus;
     if (hasOwn(normalizedExisting, 'periodWindows')) normalizedIncoming.periodWindows = normalizedExisting.periodWindows;
     if (hasOwn(normalizedExisting, 'projectsEnabled')) normalizedIncoming.projectsEnabled = normalizedExisting.projectsEnabled;
@@ -1832,7 +1829,6 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
       // of getStats(), so a top-level summary is the one shape that would put
       // diagnostics on the unauthenticated surface.
       ...(hasOwn(normalized, 'clientHealth') ? { clientHealth: normalized.clientHealth } : {}),
-      ...(hasOwn(normalized, 'qoderCnCredits') ? { qoderCnCredits: normalized.qoderCnCredits } : {}),
       ...(hasOwn(normalized, 'wslStatus') ? { wslStatus: normalized.wslStatus } : {}),
       ...(hasOwn(normalized, 'projectsEnabled') ? { projectsEnabled: normalized.projectsEnabled } : {}),
       ...(hasOwn(normalized, 'allTimeProjectsOmitted') ? { allTimeProjectsOmitted: normalized.allTimeProjectsOmitted } : {}),

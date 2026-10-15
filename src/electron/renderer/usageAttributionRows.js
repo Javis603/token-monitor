@@ -93,22 +93,6 @@
     return Math.max(0, finiteNumber(total) - attributed);
   }
 
-  // Reported credits have no token/USD conversion. Join them by model identity
-  // after ranking, keeping the existing token/cost bars and order intact.
-  function withModelCredits(rows, models) {
-    const credits = new Map((models || []).map(({ model, ...usage }) => [model, usage]));
-    const result = rows.map((row) => {
-      const reportedCredits = credits.get(row.key);
-      if (!reportedCredits) return row;
-      credits.delete(row.key);
-      return { ...row, reportedCredits };
-    });
-    for (const [key, reportedCredits] of credits) {
-      result.push({ key, name: key, value: 0, cost: 0, barValue: 0, tokenDataUnavailable: true, reportedCredits });
-    }
-    return result;
-  }
-
   function normalizeRankingMetric(value) {
     return value === 'cost' ? 'cost' : 'tokens';
   }
@@ -155,7 +139,6 @@
     attributionRows,
     visibleAttributionRows,
     attributionValue,
-    withModelCredits,
     normalizeRankingMetric,
     rankingValue,
     rankRowsWithValues,

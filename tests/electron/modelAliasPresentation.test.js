@@ -272,23 +272,3 @@ test('an alias that matches nothing in the payload copies no part of the stats t
   assert.deepEqual(projected.modelAliasSourceIds, ['gpt-5.5-pro']);
   assert.ok(projected.historyRevision.startsWith('raw:aliases:'));
 });
-
-test('credit models use existing aliases without changing token/cost periods or persisted metadata', () => {
-  const stats = { periods: { today: { totalTokens: 120, costUsd: 0.1, models: { qwen: 120 } } }, devices: [{
-    deviceId: 'local', qoderCnCredits: { days: { '2026-10-15': {
-      qfmodel: { credits: 0.25, requests: 1 }, qwen: { credits: 0.5, requests: 2 }
-    } } }
-  }] };
-  const before = structuredClone(stats);
-  const projected = projectModelAliasStats(stats, { qfmodel: 'qwen' });
-  assert.deepEqual(projected.devices[0].qoderCnCredits.days['2026-10-15'], { qwen: { credits: 0.75, requests: 3 } });
-  assert.strictEqual(projected.periods, stats.periods);
-  assert.ok(projected.modelAliasSourceIds.includes('qfmodel'));
-  assert.deepEqual(stats, before);
-  const noMatch = projectModelAliasStats(stats, { absent: 'other' });
-  assert.strictEqual(noMatch.devices, stats.devices);
-  const grouped = projectModelAliasStats({ devices: [{ qoderCnCredits: { days: { '2026-10-15': {
-    'provider/qwen': { credits: 1, requests: 1 }, qwen: { credits: 2, requests: 2 }
-  } } } }] }, {}, { grouping: 'duplicates' });
-  assert.deepEqual(grouped.devices[0].qoderCnCredits.days['2026-10-15'], { qwen: { credits: 3, requests: 3 } });
-});
