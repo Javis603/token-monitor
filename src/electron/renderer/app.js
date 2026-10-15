@@ -13458,10 +13458,16 @@ els.appUpdatePillAction.addEventListener('focus', () => {
 });
 els.appUpdatePillAction.addEventListener('keydown', (event) => {
   if (event.key !== 'Tab' || event.shiftKey || !els.appUpdatePopover.matches(':popover-open')) return;
-  const first = els.appUpdatePopover.querySelector('button:not(:disabled):not(.hidden)');
-  if (!first) return;
+  // Dismiss while it is offered; otherwise the notes body, which is a focusable
+  // scroller. A generic button search lands on a release link deep in the notes,
+  // or finds nothing at all once Dismiss is hidden during an install.
+  const dismiss = els.appUpdatePopoverDismiss.classList.contains('hidden') || els.appUpdatePopoverDismiss.disabled
+    ? null
+    : els.appUpdatePopoverDismiss;
+  const target = dismiss || (els.appUpdatePopoverBody.classList.contains('hidden') ? null : els.appUpdatePopoverBody);
+  if (!target) return;
   event.preventDefault();
-  first.focus();
+  target.focus();
 });
 for (const target of [els.appUpdatePillAction, els.appUpdatePopover]) {
   target.addEventListener('focusout', (event) => {

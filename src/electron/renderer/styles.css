@@ -6434,6 +6434,11 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   outline: 1px solid rgba(var(--blue-rgb), 0.72);
   outline-offset: 2px;
 }
+/* Inset so the card's own overflow does not clip the ring. */
+.app-update-popover-body:focus-visible {
+  outline: 1px solid rgba(var(--blue-rgb), 0.72);
+  outline-offset: -2px;
+}
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .update-pill,
   :root:not([data-reduce-motion="off"]) .app-update-popover { transition-duration: 0.01ms; }

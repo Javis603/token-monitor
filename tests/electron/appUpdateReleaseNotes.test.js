@@ -144,6 +144,25 @@ test('footer update button runs the update action and opens the card on hover or
   assert.match(handlers, /appUpdatePopoverDismiss\.addEventListener[\s\S]*dismissAppUpdate\(version\)/);
 });
 
+test('Tab into the card prefers dismiss, then the focusable notes scroller', () => {
+  const html = read('index.html');
+  assert.match(html, /id="appUpdatePopoverBody"[^>]*tabindex="0"/);
+  const app = read('app.js');
+  const handlerStart = app.indexOf("els.appUpdatePillAction.addEventListener('keydown'");
+  const handler = app.slice(
+    handlerStart,
+    // The same for-target loop shape also binds pointerenter earlier, so the end
+    // marker is searched after the handler itself.
+    app.indexOf("for (const target of [els.appUpdatePillAction, els.appUpdatePopover])", handlerStart)
+  );
+  assert.match(handler, /event\.key !== 'Tab' \|\| event\.shiftKey \|\| !els\.appUpdatePopover\.matches\(':popover-open'\)/);
+  // Dismiss hides while an install runs; the notes body is the fallback target
+  // and stays scrollable from the keyboard.
+  assert.match(handler, /appUpdatePopoverDismiss\.classList\.contains\('hidden'\) \|\| els\.appUpdatePopoverDismiss\.disabled/);
+  assert.match(handler, /appUpdatePopoverBody\.classList\.contains\('hidden'\) \? null : els\.appUpdatePopoverBody/);
+  assert.doesNotMatch(handler, /querySelector\('button:not\(:disabled\):not\(\.hidden\)'\)/);
+});
+
 test('a card closed by the pointer leaving does not pull focus to the button', () => {
   const app = read('app.js');
   const hide = app.slice(app.indexOf('function hideAppUpdatePopover'), app.indexOf('function scheduleAppUpdatePopoverOpen'));
