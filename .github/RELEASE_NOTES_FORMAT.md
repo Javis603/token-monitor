@@ -29,8 +29,16 @@ This file documents the stable Markdown shape of that release body.
 - Put Traditional Chinese, Korean, and Japanese in three separate nested
   collapsed `<details>` blocks. Each block has its own language heading and
   translated update heading.
-- Keep the locale marker content inside the matching language block. The app
-  updater reads these five marker pairs: `en`, `zh`, `zh-TW`, `ko`, and `ja`.
+- The packaged app's updater reads release notes from the GitHub releases
+  Atom feed, where HTML comments are stripped, so it finds each language by
+  its heading — h1 `English` and `中文`; h2 `繁體中文`, `한국어`, and
+  `日本語` inside the additional-language blocks — and takes the section
+  between that language's first two `##` headings (its update heading and
+  its download heading). Keep those headings and their order. Leave notes
+  out of `latest*.yml`: embedded notes suppress electron-updater's
+  `fullChangelog`. The five marker pairs — `en`, `zh`, `zh-TW`, `ko`, and
+  `ja` — are still read from the release body by the fallback release check,
+  so keep them inside the matching language block.
 - Keep each language's download content with its corresponding release-note
   section. The English and Simplified Chinese sections may retain their
   existing first-launch and other-notes details; keep translated downloads for
