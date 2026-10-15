@@ -3081,7 +3081,7 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
   assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Auto', 'API key', 'CLI']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ['Manual login', 'Web']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Auto', 'Desktop app']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Auto', 'Desktop app', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'Web']);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'factory', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zai', source: 'api' }), 'API');
@@ -3570,7 +3570,7 @@ test('switching to another edit preserves its form values during a canceled clos
       matchProviderAccount: () => account,
       amountUnits: (subscription) => subscription.amountMinor / 100
     },
-    limitProvidersForSubscriptions: () => [],
+    subscriptionAccountChoices: () => [],
     subscriptionAccountValue: () => 'acct-b',
     renderSubscriptionPickers() {},
     setSubscriptionFormMode: () => {},
@@ -4242,7 +4242,7 @@ test('one account holds one subscription record', () => {
     {
       subscriptionApi,
       accountIdentityApi: require('../../src/electron/renderer/accountIdentity'),
-      limitProvidersForSubscriptions: () => accounts,
+      subscriptionAccountChoices: () => accounts.map((provider) => ({ provider })),
       list: existing,
       target,
       excludeId

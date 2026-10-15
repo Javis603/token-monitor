@@ -41,6 +41,22 @@ function trayToggleAction(settings = {}) {
   return normalized.trayMode ? 'togglePopover' : 'focusWindow';
 }
 
+function popoverBlurMatchesPress({ recentBlur, pressPoint, now }) {
+  if (!recentBlur || !pressPoint) return false;
+  const elapsed = now - recentBlur.at;
+  const dx = pressPoint.x - recentBlur.point.x;
+  const dy = pressPoint.y - recentBlur.point.y;
+  return elapsed >= 0 && elapsed <= 750 && dx * dx + dy * dy <= 24 * 24;
+}
+
+function popoverToggleAction({ visible, focused, visibleAtMouseDown = null, blurMatchedAtMouseDown = false }) {
+  if (typeof visibleAtMouseDown === 'boolean' || blurMatchedAtMouseDown) {
+    return visible || visibleAtMouseDown === true || blurMatchedAtMouseDown ? 'hide' : 'show';
+  }
+  // Shortcuts and accessibility activations retain the original focus behavior.
+  return visible && focused ? 'hide' : 'show';
+}
+
 // macOS has no per-window taskbar entry, so hideAppIcon is expressed as the
 // accessory activation policy (app.dock.hide()) instead of setSkipTaskbar().
 // It has to be tested before the mainWindowVisible branch: focusExistingWindow()
@@ -65,6 +81,8 @@ module.exports = {
   macActivationPolicyMode,
   mainWindowCloseAction,
   normalizeTrayModeSettings,
+  popoverBlurMatchesPress,
+  popoverToggleAction,
   shouldCreateTray,
   skipTaskbarForSettings,
   trayToggleAction

@@ -66,6 +66,19 @@ const DSH_MODEL_CONTRACT_CASES = Object.freeze([
 // Monitor normalization are both exercised by this release gate.
 const TOKEN_CONTRACT_CASES = Object.freeze([
   {
+    client: 'goose',
+    // The total gap is inferred reasoning, not measured additive output.
+    // Preserve input + output; do not inflate usage with that heuristic.
+    expectedRow: { model: 'claude-sonnet-4', input: 1200, output: 340, cacheRead: 0, cacheWrite: 0, reasoning: 60 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 1540, clientTokens: 1540, clientOutputTokens: 340 },
+    expectedSession: { id: 'goose-contract', totalTokens: 1540, outputTokens: 340, reasoningTokens: 60 },
+    writeFixture(home) {
+      const { writeGooseDatabase } = require('../tests/fixtures/goose');
+      writeGooseDatabase(path.join(home, '.local', 'share', 'goose', 'sessions', 'sessions.db'));
+    }
+  },
+  {
     client: 'hermes',
     // Hermes stores reasoning inside output; Tokscale splits it before JSON.
     expectedRow: { model: 'claude-sonnet-4-5', input: 1000, output: 250, cacheRead: 200, cacheWrite: 50, reasoning: 150, cost: 1.25 },
@@ -470,7 +483,7 @@ function hermeticEnv(home) {
   // overrides would do the same for the fork-only qodercn client, and the
   // MiniMax data-directory overrides for the fork's mcode supplement.
   for (const key of [
-    'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'DSH_HOME', 'HERMES_HOME',
+    'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'DSH_HOME', 'HERMES_HOME', 'GOOSE_PATH_ROOT',
     'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
     'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR'
   ]) {
@@ -578,6 +591,95 @@ function assertGroupByRejected(result) {
   }
 }
 
+function verifyGooseScannerContract(binPath) {
+  const assert = require('node:assert/strict');
+  const { writeGooseDatabase, insertGooseRow } = require('../tests/fixtures/goose');
+  const home = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tm-goose-contract-'));
+  const env = hermeticEnv(home);
+  // Pin local date boundaries as well as the fixture clock.
+  env.TZ = 'UTC';
+  const run = (overrides = {}, args = []) => {
+    const result = spawnSync(binPath, ['--json', '--client', 'goose', '--group-by', 'client,session,model', '--no-spinner', ...args], {
+      encoding: 'utf8', timeout: 15_000, env: { ...env, ...overrides }
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  const counters = (parsed) => Object.fromEntries(parsed.entries.map((row) => [row.sessionId,
+    [row.input, row.output, row.reasoning]]));
+  const xdg = path.join(home, '.local', 'share', 'goose', 'sessions', 'sessions.db');
+  let writer;
+  try {
+    writeGooseDatabase(xdg, [
+      {},
+      { id: 'fallback', accumulatedTotal: null, accumulatedInput: null, accumulatedOutput: null },
+      { id: 'mixed', accumulatedTotal: null, accumulatedInput: null, accumulatedOutput: 20 },
+      { id: 'zero', accumulatedInput: 0, accumulatedOutput: 0, accumulatedTotal: 0 },
+      { id: 'no-model', model: ' ' }
+    ]);
+    const parsed = run();
+    assert.deepEqual(counters(parsed), {
+      'goose-contract': [1200, 340, 60], fallback: [70, 30, 0], mixed: [70, 20, 10]
+    });
+    const usage = extractUsageFromTokscale(parsed);
+    assert.equal(usage.totalTokens, 1730);
+    assert.equal(usage.clientOutputs.goose, 390);
+    const graphResult = spawnSync(binPath, ['graph', '--client', 'goose', '--no-spinner'], {
+      encoding: 'utf8', timeout: 15_000, env
+    });
+    assert.equal(graphResult.status, 0, graphResult.stderr);
+    const { parseGraphResult, normalizeHistory } = require('../src/shared/history');
+    const history = normalizeHistory(parseGraphResult(JSON.parse(graphResult.stdout)), { todayKey: '2026-08-21' });
+    assert.equal(history.summary.totalTokens, 1730);
+    assert.equal(history.daily.length, 1);
+    assert.equal(history.daily[0].date, '2026-08-20');
+    assert.equal(history.daily[0].perClient.goose.tokens, 1730);
+    assert.equal(history.daily[0].outputTokens, 390);
+    assert.equal(extractUsageFromTokscale(run({}, ['--since', '2026-08-20', '--until', '2026-08-20'])).totalTokens, 1730);
+    assert.equal(run({}, ['--since', '2026-08-21', '--until', '2026-08-21']).entries.length, 0);
+    fs.rmSync(xdg);
+
+    // First-existing selection: all five contain distinct counters, never a union.
+    const customRoot = path.join(home, 'custom');
+    const candidates = [
+      path.join(customRoot, 'data', 'sessions', 'sessions.db'), xdg,
+      path.join(home, 'Library', 'Application Support', 'goose', 'sessions', 'sessions.db'),
+      path.join(home, 'Library', 'Application Support', 'Block', 'goose', 'sessions', 'sessions.db'),
+      path.join(home, '.local', 'share', 'Block', 'goose', 'sessions', 'sessions.db')
+    ];
+    candidates.forEach((file, i) => writeGooseDatabase(file, [{ id: `priority-${i}`, accumulatedInput: (i + 1) * 100 }]));
+    const relativeRoot = path.relative(process.cwd(), customRoot);
+    assert.deepEqual(Object.keys(counters(run({ GOOSE_PATH_ROOT: ` ${relativeRoot} ` }))), ['priority-0']);
+    for (let i = 0; i < candidates.length; i += 1) {
+      assert.deepEqual(Object.keys(counters(run({ GOOSE_PATH_ROOT: ` ${customRoot} ` }))), [`priority-${i}`]);
+      // An empty earlier DB still shadows later non-empty candidates.
+      if (i === 0) {
+        fs.rmSync(candidates[i]);
+        writeGooseDatabase(candidates[i], []);
+        assert.equal(run({ GOOSE_PATH_ROOT: customRoot }).entries.length, 0);
+      }
+      fs.rmSync(candidates[i]);
+    }
+    const extra = path.join(home, 'extra');
+    writeGooseDatabase(path.join(extra, 'sessions.db'));
+    assert.equal(run({ TOKSCALE_EXTRA_DIRS: `goose:${extra}` }).entries.length, 0);
+    writeGooseDatabase(path.join(home, 'AppData', 'Roaming', 'Block', 'goose', 'data', 'sessions', 'sessions.db'));
+    writeGooseDatabase(path.join(home, 'Library', 'Application Support', 'Block', 'goose', 'data', 'sessions', 'sessions.db'));
+    assert.equal(run().entries.length, 0);
+
+    writer = writeGooseDatabase(xdg, [{}], { wal: true });
+    assert.ok(fs.statSync(`${xdg}-wal`).size > 0);
+    assert.equal(extractUsageFromTokscale(run()).totalTokens, 1540);
+    insertGooseRow(writer, { id: 'wal-next', accumulatedInput: 200, accumulatedOutput: 50, accumulatedTotal: 250 });
+    assert.equal(extractUsageFromTokscale(run()).totalTokens, 1790);
+    // Even a later WAL write remains on created_at, not the update/read date.
+    assert.equal(run({}, ['--since', '2026-08-21']).entries.length, 0);
+  } finally {
+    writer?.close();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
 function main() {
   const manifest = loadManifest();
   const isUpstream = manifestMode(manifest) === 'upstream';
@@ -590,6 +692,8 @@ function main() {
         : `No binary at ${binPath} for ${key} — run ensure-vendored-tokscale.js first`
     );
   }
+
+  verifyGooseScannerContract(binPath);
 
   const home = writeFixtureHome();
   try {
@@ -618,7 +722,7 @@ function main() {
   }
 
   console.log(
-    `Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): DSH and ${applicableTokenContracts().length} tracked-client token contract fixture(s) applicable to ${process.platform} parse correctly, and ${isUpstream ? `'${SESSION_GROUP_BY}' is rejected as the collector's fallback expects` : 'the joined grouping reports session and workspace metadata'}.`
+    `Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): Goose cumulative/date/path/WAL contracts, DSH and ${applicableTokenContracts().length} tracked-client token contract fixture(s) applicable to ${process.platform} parse correctly, and ${isUpstream ? `'${SESSION_GROUP_BY}' is rejected as the collector's fallback expects` : 'the joined grouping reports session and workspace metadata'}.`
   );
 }
 
@@ -631,4 +735,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, TOKEN_CONTRACT_CASES, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected };
+module.exports = { main, TOKEN_CONTRACT_CASES, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected, verifyGooseScannerContract };

@@ -3384,7 +3384,7 @@ test('a SQLite client whose scan does not recreate its sidecar still watches db-
 // was actually about. A suppressed shm event must not spawn a scan, while a real
 // -wal change from the same directory still must — otherwise the fix would have
 // traded a runaway loop for silent staleness.
-for (const client of ['zcode', 'cherrystudio']) {
+for (const client of ['zcode', 'cherrystudio', 'goose']) {
   test(`a ${client} shm event does not spawn a scan while WAL and database changes still do`, async () => {
     const tmp = withTmpHome([]);
     const originalHomedir = os.homedir;
@@ -3392,10 +3392,10 @@ for (const client of ['zcode', 'cherrystudio']) {
     os.homedir = () => tmp;
     process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
     const { clientSourceRoots } = freshCollector();
-    const dbDir = clientSourceRoots(client)[client].find((root) => root.id === (client === 'zcode' ? 'zcode-db' : 'cherrystudio-db'))?.dir
+    const dbDir = clientSourceRoots(client)[client].find((root) => root.id === `${client}-db`)?.dir
       || path.join(tmp, '.zcode', 'cli', 'db');
     fs.mkdirSync(dbDir, { recursive: true });
-    const dbName = client === 'zcode' ? 'db.sqlite' : 'cherrystudio.sqlite';
+    const dbName = { zcode: 'db.sqlite', cherrystudio: 'cherrystudio.sqlite', goose: 'sessions.db' }[client];
 
     const chokidar = require('chokidar');
     const originalWatch = chokidar.watch;

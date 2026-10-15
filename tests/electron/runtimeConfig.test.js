@@ -557,3 +557,42 @@ test('an unset Alibaba variant leaves the env var reachable by the collector', (
   // With neither, the provider falls back to mainland Team.
   assert.equal(alibabaVariant(limitsConfigFromSettings({}, { env: {} }), {}), 'cn');
 });
+
+test('WorkBuddy managed metadata overrides settings while desktop sessions ignore blank/legacy env credentials', () => {
+  const managed = [{ id: 'managed', realm: 'cn', userId: 'user', accountKey: 'stable-key' }];
+  const sessions = [{ realm: 'ai', authenticated: true, userId: 'ai-user', domain: 'www.workbuddy.ai' }];
+  const config = limitsConfigFromSettings({ workbuddyManagedAccounts: [{ id: 'stale' }], workbuddyAccessToken: 'legacy' }, {
+    env: { WORKBUDDY_ACCESS_TOKEN: 'env-token', WORKBUDDY_USER_ID: '' },
+    workbuddyDesktopSessionOnly: true, workbuddyDesktopSessionEnabled: true,
+    workbuddyManagedAccounts: managed, workbuddyLocalSessions: sessions, workbuddyLocalSession: sessions[0]
+  });
+  assert.deepEqual(config.workbuddyManagedAccounts, managed);
+  assert.deepEqual(config.workbuddyLocalSessions, sessions);
+  assert.equal(config.workbuddyAccessToken, '');
+  assert.equal(config.workbuddyUserId, 'ai-user');
+  assert.equal(config.workbuddyRealm, 'ai');
+  assert.deepEqual(limitsConfigFromSettings({}, { env: {}, workbuddyManagedAccounts: [] }).workbuddyManagedAccounts, []);
+  const headless = limitsConfigFromSettings({}, { env: { WORKBUDDY_ACCESS_TOKEN: 'headless-token' },
+    workbuddyLocalSessions: sessions });
+  assert.equal(headless.workbuddyAccessToken, 'headless-token');
+  assert.equal(headless.workbuddyRealm, 'cn');
+  assert.equal(headless.workbuddyLocalSessions, undefined);
+});
+
+test('WorkBuddy managed field is private and owned by the managed service', () => {
+  const { normalizeAccountPatch, initialAccountSettings, rendererOmittedAccountKeys } = require('../../src/electron/limits/accountSettings');
+  const { limitAccountField } = require('../../src/shared/limits/accounts');
+  const field = limitAccountField('workbuddy', 'workbuddyManagedAccounts');
+  assert.equal(field.kind, 'managed');
+  assert.equal(field.contextOverride, true);
+  assert.equal(field.persist, 'never');
+  assert.equal(field.watch, false);
+  assert.equal(field.rendererOmit, true);
+  assert.deepEqual(initialAccountSettings({}).workbuddyManagedAccounts, []);
+  const patch = { workbuddyManagedAccounts: [{ accessToken: 'untrusted' }] };
+  const normalized = { ...patch };
+  normalizeAccountPatch(patch, normalized);
+  assert.equal(Object.hasOwn(normalized, 'workbuddyManagedAccounts'), false);
+  assert.ok(rendererOmittedAccountKeys().includes('workbuddyManagedAccounts'));
+  assert.equal(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.workbuddy.includes('workbuddyManagedAccounts'), false);
+});

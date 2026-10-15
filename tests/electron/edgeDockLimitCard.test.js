@@ -30,7 +30,8 @@ const { createLimitWindowsView } = require('../../src/electron/renderer/limits/w
 const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
 const { parseStepfunUsage } = require('../../src/shared/providers/stepfun/limits');
 const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../src/shared/providers/factory/limits');
-const { normalizeLimitProvider } = require('../../src/shared/limits/core');
+const { aggregateLimits, normalizeLimitProvider } = require('../../src/shared/limits/core');
+const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
 const { fetchMinimaxLimits } = require('../../src/shared/providers/minimax/limits');
 
 const root = path.join(__dirname, '../..');
@@ -61,6 +62,12 @@ class FakeElement {
       if (child instanceof FakeElement) child.parent = this;
       this.children.push(child);
     }
+  }
+  insertBefore(child, reference) {
+    const index = this.children.indexOf(reference);
+    if (index < 0) throw new Error('Reference is not a child');
+    child.parent = this;
+    this.children.splice(index, 0, child);
   }
   remove() {
     if (!this.parent) return;
@@ -196,6 +203,195 @@ function dockView(appearance = {}, overrides = {}) {
     ...overrides
   });
 }
+
+function limitsSubscriptionPool(localProviders, aggregateProviders) {
+  const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+  const state = { mode: 'sync', settings: { deviceId: 'local' }, stats: {
+    devices: [{ deviceId: 'local', limits: { providers: localProviders } }],
+    limits: { providers: aggregateProviders }
+  } };
+  const context = vm.createContext({ state, accountIdentityApi });
+  for (const name of ['localDeviceLimitsProviders', 'limitProvidersForSubscriptions']) {
+    vm.runInContext(balancedCall(app, `function ${name}() {`), context);
+  }
+  return vm.runInContext('limitProvidersForSubscriptions()', context);
+}
+
+for (const realm of ['cn', 'ai']) for (const reason of ['', 'encrypted']) {
+  test(`WorkBuddy ${realm} totals ignore ${reason || 'unsigned'} local placeholders without removing local hints`, async () => {
+    const now = Date.parse('2026-10-12T00:10:00Z');
+    const at = new Date(now).toISOString();
+    const healthy = ['remote-a', 'remote-b'].map((user) => normalizeLimitProvider({
+      provider: 'workbuddy', accountKey: workbuddyAccountKey('', user, '', '', realm),
+      status: 'ok', region: realm, updatedAt: at,
+      windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }]
+    }));
+    for (const localRealm of ['cn', 'ai']) {
+      const placeholder = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true,
+        workbuddyRealm: localRealm, workbuddyLocalSessionReason: reason }, { env: {}, now: () => now });
+      const summary = aggregateLimits([
+        { deviceId: 'remote', limits: { updatedAt: at, providers: healthy } },
+        { deviceId: 'local', limits: { updatedAt: at, providers: [placeholder] } }
+      ], 0, now);
+      assert.equal(summary.providers.length, 2);
+      const pool = limitsSubscriptionPool([placeholder], summary.providers);
+      assert.equal(pool.length, 3, 'the global pool still includes local discovery');
+      const view = dockView({ workbuddyQuotaTotalEnabled: true }, { subscriptionAccounts: () => pool });
+      assert.equal(view.workbuddyCombinedProvider(summary.providers).windows[0].remaining, 160);
+      const group = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', summary.providers, '#12B7F5');
+      assert.equal(group.children[1].className, 'limit-windows', localRealm);
+      assert.match(group.children[1].text, /160/);
+      assert.equal(group.find('limit-account-list').children.length, 2);
+      assert.equal(pool.length, 3, 'rendering does not mutate the observed pool');
+      const off = dockView({ workbuddyQuotaTotalEnabled: false }, { subscriptionAccounts: () => pool })
+        .renderLimitProviderGroup('workbuddy', 'WorkBuddy', summary.providers, '#12B7F5');
+      assert.equal(off.children[1].className, 'limit-account-list');
+      const hint = view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', placeholder, '#12B7F5');
+      assert.ok(hint.text.includes(reason ? 'Encrypted by app' : 'Not signed in'), hint.text);
+    }
+  });
+}
+
+test('WorkBuddy total completeness retains real failed, incomplete and hidden accounts beside a placeholder', async () => {
+  const healthy = ['a', 'b'].map((accountKey) => normalizeLimitProvider({
+    provider: 'workbuddy', accountKey, status: 'ok', region: 'cn',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }]
+  }));
+  const placeholder = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true }, { env: {} });
+  const failed = (extra = {}) => normalizeLimitProvider({
+    provider: 'workbuddy', accountKey: 'c', status: 'notConfigured', region: 'cn', windows: [], ...extra
+  });
+  const siblings = [
+    ['missing credentials', failed()],
+    ['unauthorized', failed({ status: 'unauthorized' })],
+    ['unavailable', failed({ status: 'unavailable' })],
+    ['known encrypted identity', failed({ actionRequired: 'appSessionEncrypted' })],
+    ['missing key', failed({ accountKey: '' })],
+    ['missing quota', failed({ status: 'ok' })],
+    ['stale', { ...healthy[0], accountKey: 'c', stale: true }],
+    ['unlimited', { ...healthy[0], accountKey: 'c', windows: [
+      { kind: 'billing', metric: 'credits', currency: 'CREDITS', detail: 'unlimited', used: 20 }
+    ] }],
+    ['healthy hidden', { ...healthy[0], accountKey: 'c' }]
+  ];
+  for (const [name, sibling] of siblings) {
+    assert.equal(limitPresentationApi.isWorkbuddyPlaceholder(sibling), false, name);
+    const pool = limitsSubscriptionPool([placeholder, sibling], healthy);
+    assert.equal(pool.length, 4, name);
+    const view = dockView({ workbuddyQuotaTotalEnabled: true }, { subscriptionAccounts: () => pool });
+    const hidden = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', healthy, '#12B7F5');
+    assert.equal(hidden.children[1].className, 'limit-account-list', name);
+    if (name !== 'healthy hidden') {
+      const drawn = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', [...healthy, sibling], '#12B7F5');
+      assert.equal(drawn.children[1].className, 'limit-account-list', `${name} drawn`);
+    }
+    assert.equal(pool.length, 4, 'real identities and local hints remain in the global pool');
+  }
+});
+
+test('Limits group counts only genuine accounts when both credentials are unavailable', async () => {
+  const now = Date.parse('2026-10-12T00:10:00Z');
+  const at = new Date(now).toISOString();
+  const known = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true, workbuddyLocalSessions: [
+    { realm: 'cn', userId: 'encrypted-user', reason: 'encrypted' },
+    { realm: 'cn', userId: 'missing-user', reason: 'incomplete' }
+  ] }, { env: {}, now: () => now });
+  const placeholder = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true }, { env: {}, now: () => now });
+  const summary = aggregateLimits([
+    { deviceId: 'known', limits: { updatedAt: at, providers: known } },
+    { deviceId: 'unsigned', limits: { updatedAt: at, providers: [placeholder] } }
+  ], 0, now);
+  const view = dockView({ workbuddyQuotaTotalEnabled: true });
+  const group = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', summary.providers, '#12B7F5');
+  assert.ok(group.text.includes('2 accounts'), group.text);
+  assert.equal(group.find('limit-account-list').children.length, 2);
+  assert.equal(group.text.includes('Account 3'), false);
+  assert.ok(group.text.includes('Encrypted by app'), group.text);
+  assert.ok(group.text.includes('Not signed in'), group.text);
+  assert.equal(view.workbuddyCombinedProvider(summary.providers), null);
+  const alone = aggregateLimits([{ deviceId: 'unsigned', limits: { updatedAt: at, providers: [placeholder] } }], 0, now);
+  const signIn = view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', alone.providers[0], '#12B7F5');
+  assert.ok(signIn.text.includes('Not signed in'), signIn.text);
+});
+
+test('WorkBuddy group draws a healthy total plus independent accounts and omits partial totals', () => {
+  const rows = ['one', 'two'].map((accountKey) => normalizeLimitProvider({
+    provider: 'workbuddy', accountKey, accountName: 'Same nickname', region: 'cn', status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, limit: 100, remaining: 80 }]
+  }));
+  const healthy = dockView({ workbuddyQuotaTotalEnabled: true }).renderLimitProviderGroup('workbuddy', 'WorkBuddy', rows, '#12B7F5');
+  assert.equal(healthy.children[1].className, 'limit-windows');
+  assert.equal(healthy.find('limit-account-list').children.length, 2);
+  for (const appearance of [{}, { workbuddyQuotaTotalEnabled: false }]) {
+    const off = dockView(appearance).renderLimitProviderGroup('workbuddy', 'WorkBuddy', rows, '#12B7F5');
+    assert.equal(off.children[1].className, 'limit-account-list');
+    assert.equal(off.children[1].children.length, 2);
+  }
+  const partial = dockView({ workbuddyQuotaTotalEnabled: true }).renderLimitProviderGroup('workbuddy', 'WorkBuddy',
+    [rows[0], { ...rows[1], status: 'unavailable' }], '#12B7F5');
+  assert.equal(partial.children[1].className, 'limit-account-list');
+  assert.equal(partial.children[1].children.length, 2);
+});
+
+test('Dock projection cannot total only visible WorkBuddy accounts while a known sibling is omitted', () => {
+  const wb = (accountKey, extra = {}) => normalizeLimitProvider({ provider: 'workbuddy', accountKey, region: 'cn', status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }], ...extra });
+  for (const scenario of ['nonreporting', 'hidden', 'unlimited-hidden', 'healthy-hidden']) {
+    const c = scenario === 'nonreporting' ? wb('c', { status: 'unauthorized', windows: [] })
+      : scenario === 'unlimited-hidden' ? wb('c', { windows: [{ kind: 'billing', metric: 'credits', detail: 'unlimited', used: 20 }] })
+        : wb('c', { status: scenario === 'hidden' ? 'unavailable' : 'ok' });
+    const [cell] = buildEdgeDockCells({ limits: { providers: [wb('a'), wb('b'), c] } }, {
+      items: [{ type: 'limit', provider: 'workbuddy', hiddenAccounts: scenario === 'nonreporting' ? [] : ['c'] }]
+    });
+    const drawn = cell.accounts.map((account) => account.record);
+    assert.equal(drawn.length, 2, scenario);
+    const card = dockView({ workbuddyQuotaTotalEnabled: true }, { subscriptionAccounts: () => cell.subscriptionAccounts })
+      .renderLimitProviderGroup('workbuddy', 'WorkBuddy', drawn, '#12B7F5');
+    assert.equal(card.children[1].className, 'limit-account-list', scenario);
+  }
+});
+
+test('saved-only WorkBuddy subscription card does not appear on the sole live sibling', () => {
+  const live = normalizeLimitProvider({ provider: 'workbuddy', accountKey: 'a', status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }] });
+  const saved = { id: 'saved-c', provider: 'workbuddy', kind: 'subscription', binding: { accountKey: 'c', profileName: 'Saved C' },
+    planName: 'C plan', amountMinor: 9900, currency: 'USD', interval: 'month', intervalCount: 1, startDate: '2026-01-01', autoRenew: true };
+  const [cell] = buildEdgeDockCells({ limits: { providers: [live] } }, { items: [{ type: 'limit', provider: 'workbuddy' }] });
+  const card = dockView({ subscriptions: [saved] }, { subscriptionAccounts: () => cell.subscriptionAccounts })
+    .renderLimitProviderSolo('workbuddy', 'WorkBuddy', live, '#12B7F5');
+  assert.equal(card.find('subscription-tooltip'), null);
+});
+
+test('Notion rolling and monthly allowances render in both display modes and hide independently', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'notion', status: 'ok', source: 'web',
+    windows: [
+      { kind: 'session', label: 'Rolling', used: 21, limit: 50, usedPercent: 42, resetsAt: '2026-11-01T00:00:00Z' },
+      { kind: 'billing', label: 'Monthly', used: 18, limit: 100, usedPercent: 18, resetsAt: '2026-12-01T00:00:00Z' }
+    ]
+  });
+  const before = JSON.stringify(provider);
+  for (const showLimitUsed of [false, true]) {
+    const view = dockView({ showLimitUsed });
+    const card = view.renderProviderWindows(provider, '#888888');
+    assert.equal(card.children.length, 2);
+    assert.deepEqual(card.children.map((row) => row.children[0].children[0].textContent), ['Rolling', 'Monthly']);
+    assert.match(card.text, showLimitUsed ? /42% used/ : /58% left/);
+    assert.match(card.text, showLimitUsed ? /18% used/ : /82% left/);
+    assert.equal(card.text.includes('$'), false, 'included allowance units are not spendable money');
+    assert.ok(card.children.every((row) => row.find('limit-reset').text));
+    const items = view.limitProviderUsageItems([provider]);
+    assert.equal(items.length, 2);
+    for (const item of items) {
+      const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { notion: [item.id] } });
+      assert.equal(hidden.renderProviderWindows(provider, '#888888').children.length, 1);
+      assert.deepEqual(hidden.limitProviderUsageItems([provider]), items);
+    }
+  }
+  const monthlyOnly = { ...provider, windows: [provider.windows[1]] };
+  assert.ok(dockView().renderProviderWindows(monthlyOnly, '#888888').children[0].classNames.has('limit-window-wide'));
+  assert.equal(JSON.stringify(provider), before);
+});
 
 test('MiniMax API balances reach the shared Limits and dock renderer in both currencies', async () => {
   for (const [region, currency, symbol] of [['cn', 'CNY', '¥'], ['intl', 'USD', '$']]) {
@@ -954,6 +1150,7 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
   const view = dockView();
 
   for (const [id, label, color] of [
+    ['workbuddy', 'WorkBuddy', '#10B981'],
     ['claude', 'Claude', '#D97757'],
     ['openrouter', 'OpenRouter', '#6566F1'],
     ['antigravity', 'Antigravity', '#4285F4']
@@ -1768,6 +1965,31 @@ test('with every item unchecked, Home and the picker keep no window the card dre
     }
   }
   assert.deepEqual(problems, []);
+});
+
+
+test('WorkBuddy sealed credentials show their cause instead of signed-out instructions on shared rows', () => {
+  const view = dockView();
+  const provider = { provider: 'workbuddy', status: 'notConfigured', accountKey: 'encrypted-account', actionRequired: 'appSessionEncrypted', windows: [] };
+  const row = view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', provider, '#10A37F');
+  assert.equal(row.find('limit-plan').textContent, 'Encrypted by app');
+  assert.equal(view.limitProviderMeta(provider), 'Encrypted by app');
+  assert.equal(view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', { ...provider, actionRequired: undefined }, '#10A37F').find('limit-plan').textContent, 'Not signed in');
+});
+
+
+test('WorkBuddy groups count accounts and retain failures without repeating the provider mark', () => {
+  const view = dockView();
+  const accounts = [
+    { provider: 'workbuddy', status: 'ok', accountKey: 'a', accountName: 'Personal', region: 'cn', windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', remaining: 80, limit: 100 }] },
+    { provider: 'workbuddy', status: 'unavailable', accountKey: 'b', accountName: 'Work', region: 'cn', windows: [] }
+  ];
+  const group = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', accounts, '#10B981');
+  assert.equal(group.find('limit-plan').textContent, '2 accounts');
+  assert.equal([...group.walk()].filter((node) => node.classNames.has('limit-icon')).length, 1);
+  const rows = group.find('limit-account-list').children;
+  assert.deepEqual(rows.map((row) => row.find('limit-name-title').textContent), ['Personal', 'Work']);
+  assert.equal(rows[1].find('limit-plan').textContent, 'Unavailable');
 });
 
 

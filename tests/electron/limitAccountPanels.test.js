@@ -145,7 +145,8 @@ for (const form of limitAccountFormsForRenderer()) {
     await submit.click();
     // Clearing the draft empties secrets and leaves settings beside them.
     for (const field of form.fields) {
-      assert.equal(group.byId(`${field.key}Input`).value, field.secret ? '' : field.options[0].value, field.key);
+      assert.equal(group.byId(`${field.key}Input`).value,
+        field.secret ? '' : field.input === 'select' ? field.options[0].value : `${field.key}-draft`, field.key);
     }
   });
 }

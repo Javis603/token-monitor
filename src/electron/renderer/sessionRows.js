@@ -219,6 +219,25 @@
     return `${formatNumber(count)} ${count === 1 ? 'call' : 'calls'}`;
   }
 
+  // Preserve raw counters on presentation rows so a family divides only after
+  // summing its disjoint accounting members. Clamp timed output per member:
+  // untimed or malformed output must not borrow another member's duration.
+  function sessionUsageMetrics(session) {
+    const positive = field => Math.max(0, finiteNumber(session?.[field]));
+    const timedDurationMs = positive('timedDurationMs');
+    return {
+      messageCount: positive('messageCount'),
+      inputTokens: positive('inputTokens'),
+      cacheReadTokens: positive('cacheReadTokens'),
+      cacheWriteTokens: positive('cacheWriteTokens'),
+      outputTokens: positive('outputTokens'),
+      timedOutputTokens: timedDurationMs > 0
+        ? Math.min(positive('outputTokens'), positive('timedOutputTokens')) : 0,
+      timedDurationMs,
+      cacheReported: session?.cacheReported === true
+    };
+  }
+
   // The session's own generation speed: the footer's tok/s ratio over just
   // this session's timed entries. A client that reports no durations leaves
   // both counters at 0 and the row without a reading.
@@ -244,9 +263,9 @@
   function sessionCacheHitPercent(session) {
     const cacheRead = Math.max(0, finiteNumber(session?.cacheReadTokens));
     const cacheWrite = Math.max(0, finiteNumber(session?.cacheWriteTokens));
-    if (cacheRead <= 0 && cacheWrite <= 0) return null;
+    if (cacheRead <= 0 && cacheWrite <= 0 && session?.cacheReported !== true) return null;
     const input = Math.max(0, finiteNumber(session?.inputTokens)) + cacheRead + cacheWrite;
-    return cacheRead / input * 100;
+    return input > 0 ? cacheRead / input * 100 : null;
   }
 
   // A bare percentage: the line has no room for a label in a narrow window, and
@@ -321,7 +340,7 @@
   }
 
   function sessionRowDetailAvailable(row) {
-    return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy'].includes(row?.client)
+    return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy', 'pi'].includes(row?.client)
       || (row?.client === 'reasonix' && row?.sessionDetailAvailable === true);
   }
 
@@ -356,8 +375,17 @@
       cacheReadTokens: cacheRead,
       cacheWriteTokens: session?.cacheWriteTokens
     }) || (finiteNumber(session?.cacheMissTokens) > 0 ? '0%' : '');
+    const usageMetrics = sessionUsageMetrics({
+      ...session,
+      ...(tokenDataUnavailable ? { inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+        outputTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 } : client === 'reasonix' ? {
+        inputTokens: cacheInput, cacheReadTokens: cacheRead,
+        cacheReported: finiteNumber(session?.cacheMissTokens) > 0
+      } : {})
+    });
+    const activityTime = sessionActivityLabel(session, now);
     const subtitleParts = [
-      sessionActivityLabel(session, now),
+      activityTime,
       messageLabel(session),
       tokenDataUnavailable ? '' : cacheLabel,
       tokenRateLabel(session)
@@ -382,6 +410,8 @@
       }),
       subtitle: subtitleParts.join(' · '),
       activitySummary: subtitleParts.join(' · '),
+      activityTime,
+      usageMetrics,
       running: running || undefined,
       activityState,
       // Decided by the shared gate, not by `running`: it follows the recency
@@ -406,6 +436,7 @@
       modelTokens: session?.models || (session?.model ? { [session.model]: value } : {}),
       parentKey: subagent ? `session:${parentClient}:${parentSessionId}` : undefined,
       subagent: subagent || undefined,
+      subagentLabel: subagent ? options.subagentLabel || 'Subagent' : undefined,
       backgroundReview: isBackgroundReviewSession(session) || undefined,
       sortTime: sessionTimestampValue(session),
       title: `${clientLabel} session ${sessionIdLabel(session?.sessionId || key)}`
@@ -453,9 +484,10 @@
         const parentSessionId = textValue(session?.parentSessionId);
         const parentClient = textValue(session?.parentClient) || client;
         const subagent = Boolean(parentSessionId) && (parentClient !== client || parentSessionId !== sessionId) && !backgroundReview;
+        const activityTime = sessionActivityLabel(session, now);
         const activityParts = [
           archived ? archivedLabel : '',
-          sessionActivityLabel(session, now),
+          activityTime,
           messageLabel(session),
           cacheHitLabel(session),
           tokenRateLabel(session)
@@ -475,6 +507,9 @@
           // Group members show their role beside the tool/model, separately
           // from the activity line. Keep archive status with the activity.
           activitySummary,
+          activityTime,
+          archivedLabel: archived ? archivedLabel : '',
+          usageMetrics: sessionUsageMetrics(session),
           detail: sessionIdLabel(sessionId),
           value,
           cost: finiteNumber(session?.costUsd),
@@ -497,6 +532,7 @@
           modelTokens: session?.models,
           backgroundReview: backgroundReview || undefined,
           subagent: subagent || undefined,
+          subagentLabel: subagent ? subagentLabel : undefined,
           parentKey: subagent ? `session:${parentClient}:${parentSessionId}` : undefined,
           grokBot: (isGrokBotSession(session, key) || (client === 'cursor'
             && botIds.has(textValue(session?.sessionId) || key.replace(/^cursor:/, '')))) || undefined,
@@ -566,7 +602,7 @@
       const link = parent ? identity(parent) : row.parentKey;
       if (link === id) continue;
       if (parentLinks.has(id) && parentLinks.get(id).link !== link) conflicts.add(id);
-      else parentLinks.set(id, { link, parentKey: row.parentKey });
+      else parentLinks.set(id, { link, parentKey: row.parentKey, subagentLabel: row.subagentLabel });
     }
     // Contradictory relationship facts never justify collapsing identities.
     const canonical = row => conflicts.has(identity(row)) ? row : aliases.get(identity(row));
@@ -598,7 +634,8 @@
     if (grouped.size === 0) return list;
     return list
       .filter(row => !grouped.has(row?.key))
-      .map(row => children.has(row?.key) ? subagentGroupRow(row, children.get(row.key), options, conflicts.has(identity(row))) : row);
+      .map(row => children.has(row?.key) ? subagentGroupRow(row, children.get(row.key), options,
+        conflicts.has(identity(row)), conflicts.has(identity(row)) ? undefined : parentLinks.get(identity(row))?.subagentLabel) : row);
   }
 
   // The group row is the parent's own row with the group's totals: members are
@@ -609,7 +646,7 @@
     return row.client === 'codex' && row.nativeSessionId ? `codex:${row.nativeSessionId}` : row.key;
   }
 
-  function subagentGroupRow(parent, members, options, splitIdentity = false) {
+  function subagentGroupRow(parent, members, options, splitIdentity = false, rootSubagentLabel) {
     const sameConversation = row => sessionConversationIdentity(row) === sessionConversationIdentity(parent);
     const all = [parent, ...members];
     const main = all.filter(sameConversation).sort((a, b) => finiteNumber(b.sortTime) - finiteNumber(a.sortTime));
@@ -636,6 +673,30 @@
     const modelLabel = sessionModelLabel(group);
     const display = main[0];
     const titleParts = [display.clientLabel || display.client, modelLabel].filter(Boolean).join(' · ');
+    const usageMetrics = sessionUsageMetrics();
+    for (const row of groupRows) {
+      const metrics = row.usageMetrics;
+      if (!metrics) continue;
+      for (const field of Object.keys(usageMetrics)) {
+        if (field === 'cacheReported') usageMetrics.cacheReported ||= metrics.cacheReported === true;
+        else usageMetrics[field] += finiteNumber(metrics[field]);
+      }
+    }
+    const latest = groupRows.reduce((a, b) => finiteNumber(b.sortTime) > finiteNumber(a.sortTime) ? b : a);
+    const activityTime = latest.activityTime || '';
+    const archivedLabel = groupRows.every(row => row.archived === true) ? display.archivedLabel : '';
+    const activityParts = [
+      archivedLabel,
+      activityTime,
+      messageLabel(usageMetrics),
+      cacheHitLabel(usageMetrics),
+      tokenRateLabel(usageMetrics)
+    ].filter(Boolean);
+    const activitySummary = activityParts.join(' · ');
+    // Role follows the root conversation's non-conflicting external link, even
+    // when its display/canonical continuation has no parent of its own.
+    if (rootSubagentLabel) activityParts.splice(archivedLabel ? 1 : 0, 0, rootSubagentLabel);
+    const activity = activityParts.join(' · ');
     const base = { ...main[0] };
     delete base.unpricedTokens;
     return {
@@ -651,8 +712,13 @@
       modelTokens: models,
       // Keep the tool/model reading order; the renderer reserves space for the
       // count while the preceding text can shrink in a narrow window.
-      subtitle: [display.titled ? titleParts : display.subtitle, countLabel].filter(Boolean).join(' · '),
-      subtitleIdentity: display.titled ? titleParts : display.subtitle,
+      subtitle: [display.titled ? titleParts : activity, countLabel].filter(Boolean).join(' · '),
+      subtitleIdentity: display.titled ? titleParts : activity,
+      activity: display.titled ? activity : undefined,
+      subagentLabel: rootSubagentLabel || undefined,
+      activitySummary,
+      activityTime,
+      usageMetrics,
       subagentCountLabel: countLabel,
       subagentCount,
       detail: display.activity ? '' : display.detail,

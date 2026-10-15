@@ -68,6 +68,7 @@
     // .omp/agent/sessions root as its own `omp` client, so the row is a real
     // client, not a sub-source of Pi.
     { id: 'omp', label: 'Oh My Pi' },
+    { id: 'goose', label: 'Goose' },
     { id: 'zed', label: 'Zed' },
     { id: 'kilo', label: 'Kilo' },
     { id: 'commandcode', label: 'Command Code' },

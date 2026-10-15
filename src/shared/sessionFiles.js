@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { claudeSessionRoots } = require('./providers/claude/paths');
 const { codebuddyProjectsRoot } = require('./providers/codebuddy/paths');
+const { findSubagentSessionFile } = require('./providers/codebuddy/subagents');
+const { resolvePiSessionsDir } = require('./providers/pi/paths');
 
 // 5.5 moved the WorkBuddy home to ~/.workbuddy-ai and tokscale still scans
 // both, so a session reported from either root resolves from either.
@@ -47,6 +49,41 @@ function findSessionFiles(root, sessionIds) {
         walk(nextPath);
       } else if (entry.isFile() && wanted.has(entry.name)) {
         found.set(entry.name.slice(0, -'.jsonl'.length), nextPath);
+      }
+    }
+  }
+
+  walk(root);
+  return found;
+}
+
+// Pi names each transcript `<ISO-timestamp>_<sessionId>.jsonl`, so the session
+// id is a suffix of the filename rather than the whole basename (which is what
+// `findSessionFiles` matches on for every other client here).
+function findPiSessionFiles(root, sessionIds) {
+  const wanted = new Map();
+  for (const sessionId of sessionIds) {
+    if (isSafeSessionId(sessionId)) wanted.set(`${sessionId}.jsonl`, sessionId);
+  }
+  const found = new Map();
+  if (wanted.size === 0) return found;
+
+  function walk(dir) {
+    if (found.size >= wanted.size) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    for (const entry of entries) {
+      if (found.size >= wanted.size) return;
+      const nextPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(nextPath);
+      } else if (entry.isFile()) {
+        for (const [filename, sessionId] of wanted) {
+          if (entry.name === filename || entry.name.endsWith(`_${filename}`)) {
+            found.set(sessionId, nextPath);
+            break;
+          }
+        }
       }
     }
   }
@@ -139,7 +176,17 @@ function resolveSessionFile(client, sessionId, home, options = {}) {
     return findSessionFiles(transcripts, [id]).get(id) || '';
   }
   if (client === 'codebuddy') {
-    return findSessionFiles(codebuddyProjectsRoot({ homeDir: home }), [id]).get(id) || '';
+    const projectsRoot = codebuddyProjectsRoot({ homeDir: home });
+    // A sub-agent conversation is the scan's own reported session, but its file
+    // is named after the agent id, so the name-based lookup cannot find it. The
+    // fallback reads the first record of each sub-agent transcript and runs only
+    // when the session's own file is absent — a parent session always resolves
+    // to its own transcript, and the collector's per-tick path, which calls
+    // findSessionFiles directly, is untouched. Sub-agent usage stays the scan's
+    // separate sessions; nothing here merges it into the parent.
+    return findSessionFiles(projectsRoot, [id]).get(id)
+      || findSubagentSessionFile(projectsRoot, id, { fs: options.fs })
+      || '';
   }
   if (client === 'workbuddy') {
     for (const root of workbuddyProjectsRoots(home)) {
@@ -154,7 +201,11 @@ function resolveSessionFile(client, sessionId, home, options = {}) {
     if (direct) return direct;
     return findCodexSessionFiles(codexHome, [id]).get(id) || '';
   }
+  if (client === 'pi') {
+    const sessionsDir = resolvePiSessionsDir({ homeDir: home });
+    return findPiSessionFiles(sessionsDir, [id]).get(id) || '';
+  }
   return '';
 }
 
-module.exports = { findSessionFiles, findCodexSessionFiles, preferredCodexSessionFile, codexSessionFile, resolveSessionFile, isSafeSessionId };
+module.exports = { findSessionFiles, findPiSessionFiles, findCodexSessionFiles, preferredCodexSessionFile, codexSessionFile, resolveSessionFile, isSafeSessionId };

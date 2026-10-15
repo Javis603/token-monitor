@@ -45,6 +45,12 @@ test('WSL SQLite recovery guidance is localized without English fallback', () =>
   }
 });
 
+test('WSL SQLite recovery guidance names Antigravity in every locale', () => {
+  for (const locale of LANGUAGE_OPTIONS.map((option) => option.value).filter((value) => value !== 'auto')) {
+    assert.match(MESSAGES[locale]['settings.collection.wslPanel.sqliteHelp'], /Antigravity/, locale);
+  }
+});
+
 test('Unlimited remains a provider quota value token in every locale', () => {
   for (const locale of LANGUAGE_OPTIONS.map((option) => option.value).filter((value) => value !== 'auto')) {
     assert.equal(MESSAGES[locale]['settings.thirdparty.unlimited'], 'Unlimited', locale);

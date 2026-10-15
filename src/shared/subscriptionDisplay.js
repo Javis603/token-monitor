@@ -534,6 +534,10 @@
     if (binding.accountKey) {
       const byKey = accounts.find((account) => accountIdentityKeys(account).has(binding.accountKey));
       if (byKey) return byKey;
+      // WorkBuddy's realm/user/enterprise key is a stable context identity.
+      // Missing credentials cannot rotate it into a sibling's identity, so a
+      // saved key never heals through email/name or sole-account fallback.
+      if (subscription?.provider === 'workbuddy') return null;
     }
     if (binding.accountEmail) {
       const byEmail = accounts.find(

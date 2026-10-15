@@ -545,3 +545,321 @@ test('the sealed-credential hint stays inside the desktop provider lane', async 
   assert.equal(provider.status, 'notConfigured');
   assert.equal(Object.hasOwn(provider, 'actionRequired'), false);
 });
+
+function managedAccount(id, realm = 'cn', extra = {}) {
+  const account = { id, realm, userId: id, enterpriseId: '', accountName: 'Same name',
+    domain: realm === 'ai' ? 'www.workbuddy.ai' : 'www.codebuddy.cn', enabled: true, ...extra };
+  account.accountKey = workbuddyAccountKey(account);
+  return account;
+}
+
+function quotaResponse() {
+  return response({ code: 0, data: { Accounts: [{ Status: 0,
+    CycleCapacitySizePrecise: 100, CycleCapacityRemainPrecise: 70 }] } });
+}
+
+test('managed WorkBuddy identities match OAuth keys and preserve existing CN hashes', () => {
+  const oauth = require('../../src/shared/providers/workbuddy/oauth');
+  for (const realm of ['cn', 'ai']) {
+    for (const enterpriseId of ['', 'enterprise']) {
+      const account = managedAccount('user', realm, { enterpriseId });
+      assert.equal(workbuddyAccountKey(account), oauth.workbuddyAccountKey(account));
+      if (realm === 'cn') assert.equal(account.accountKey, workbuddyAccountKey('token', 'user', enterpriseId));
+    }
+  }
+  assert.notEqual(workbuddyAccountKey(managedAccount('user', 'ai')), workbuddyAccountKey(managedAccount('user')));
+});
+
+test('managed WorkBuddy accounts collect independently on Linux and preserve failure identities', async () => {
+  const accounts = ['ok', 'missing', 'invalid', 'offline', 'limited', 'timeout'].map((id) => managedAccount(id));
+  const calls = [];
+  const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: accounts,
+    workbuddyDesktopSessionSupported: false }, { env: {}, workbuddyFetchTimeoutMs: 20,
+    resolveWorkbuddyManagedCredential: async (account, { signal, forceRefresh }) => {
+      calls.push(account.id);
+      assert.equal(forceRefresh, false);
+      assert.ok(signal instanceof AbortSignal);
+      if (account.id === 'timeout') return new Promise(() => {});
+      const status = { missing: 'notConfigured', invalid: 'unauthorized', offline: 'unavailable', limited: 'sourceRateLimited' }[account.id];
+      if (status) throw Object.assign(new Error('secret fixture'), { status });
+      return { accessToken: 'private-token', refreshToken: 'private-refresh' };
+    }, fetch: async () => quotaResponse() });
+  assert.deepEqual(calls, accounts.map((account) => account.id));
+  assert.deepEqual(rows.map((row) => row.status), ['ok', 'notConfigured', 'unauthorized', 'unavailable', 'sourceRateLimited', 'unavailable']);
+  assert.deepEqual(rows.map((row) => row.accountKey), accounts.map((account) => account.accountKey));
+  assert.ok(rows.every((row) => row.sourceDetail === 'managed'));
+  assert.doesNotMatch(JSON.stringify(rows), /private-token|private-refresh|secret fixture/);
+});
+
+test('WorkBuddy target refresh uses exact accountId/accountKey despite identical names', async () => {
+  const accounts = [managedAccount('a'), managedAccount('b')];
+  const calls = [];
+  const deps = { env: {}, resolveWorkbuddyManagedCredential: async (account) => {
+    calls.push(account.id); return { accessToken: 'token' };
+  }, fetch: async () => quotaResponse() };
+  for (const selector of [{ accountId: 'b' }, { accountKey: accounts[1].accountKey },
+    { accountId: 'b', accountKey: accounts[1].accountKey }]) {
+    calls.length = 0;
+    const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: accounts,
+      limitRefreshScope: { provider: 'workbuddy', ...selector } }, deps);
+    assert.deepEqual(calls, ['b']);
+    assert.equal(rows.length, 1);
+  }
+  for (const selector of [{ accountName: 'Same name' }, { id: 'b' }, { managedAccountId: 'b' }, { accountId: 'Same name' },
+    { accountId: 'a', accountKey: accounts[1].accountKey }]) {
+    calls.length = 0;
+    assert.deepEqual(await fetchWorkbuddyLimits({ workbuddyManagedAccounts: accounts,
+      limitRefreshScope: { provider: 'workbuddy', ...selector } }, deps), []);
+    assert.deepEqual(calls, []);
+  }
+  calls.length = 0;
+  await fetchWorkbuddyLimits({ workbuddyManagedAccounts: accounts,
+    limitRefreshScope: { provider: 'workbuddy' } }, deps);
+  assert.deepEqual(calls, ['a', 'b']);
+});
+
+test('WorkBuddy managed accounts suppress duplicate local sessions even when disabled or missing credentials', async () => {
+  const account = managedAccount('user');
+  const local = { ...account, authenticated: true, accountType: 'personal' };
+  let localCalls = 0;
+  const deps = { env: {}, workbuddyFetch: async () => { localCalls += 1; return quotaResponse(); } };
+  const config = { workbuddyDesktopSessionEnabled: true, workbuddyLocalSessions: [local],
+    workbuddyManagedAccounts: [account] };
+  const missing = await fetchWorkbuddyLimits(config, deps);
+  assert.equal(missing.length, 1);
+  assert.equal(missing[0].status, 'notConfigured');
+  assert.equal(missing[0].accountKey, account.accountKey);
+  assert.equal(localCalls, 0);
+  const disabled = await fetchWorkbuddyLimits({ ...config,
+    workbuddyManagedAccounts: [{ ...account, enabled: false }] }, deps);
+  assert.deepEqual(disabled, []);
+  assert.equal(localCalls, 0);
+  const legacy = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true,
+    workbuddyUserId: account.userId, workbuddyManagedAccounts: [{ ...account, enabled: false }] }, deps);
+  assert.deepEqual(legacy, []);
+  assert.deepEqual(await fetchWorkbuddyLimits({ workbuddyManagedAccounts: [{ ...account, enabled: false }] }, deps), []);
+});
+
+test('WorkBuddy combines distinct local/managed realms and retains encrypted local row', async () => {
+  const managed = managedAccount('user');
+  const localAi = { ...managedAccount('user', 'ai'), authenticated: true, accountType: 'personal' };
+  const localCn = { ...managedAccount('encrypted'), authenticated: false, reason: 'encrypted' };
+  const requests = [];
+  const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: [managed], workbuddyDesktopSessionEnabled: true,
+    workbuddyLocalSessions: [localAi, localCn] }, { env: {},
+    resolveWorkbuddyManagedCredential: async () => ({ accessToken: 'managed-token' }),
+    fetch: async (url, init) => { requests.push({ url, init }); return quotaResponse(); },
+    workbuddyFetch: async (url, init, expected) => {
+      assert.equal(expected.realm, 'ai');
+      assert.equal(expected.accountKey, localAi.accountKey);
+      assert.equal(init.headers.Authorization, undefined);
+      requests.push({ url, init }); return quotaResponse();
+    } });
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map((row) => row.status), ['ok', 'ok', 'notConfigured']);
+  assert.equal(rows[2].actionRequired, 'appSessionEncrypted');
+  assert.equal(rows[2].accountKey, localCn.accountKey);
+  assert.deepEqual(requests.map((request) => request.url).sort(), [
+    'https://copilot.tencent.com/v2/billing/meter/get-user-resource',
+    'https://www.workbuddy.ai/billing/meter/get-user-resource'
+  ]);
+});
+
+test('WorkBuddy managed 401 refresh awaits persisted rotation and retries with the current token once', async () => {
+  const account = managedAccount('user');
+  for (const application401 of [false, true]) {
+    const events = [];
+    let persisted = false;
+    const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: [account] }, { env: {},
+      resolveWorkbuddyManagedCredential: async (_, { forceRefresh }) => {
+        events.push(forceRefresh ? 'refresh' : 'resolve');
+        if (forceRefresh) { await Promise.resolve(); persisted = true; events.push('persist'); }
+        return { accessToken: forceRefresh ? 'rotated-token' : 'old-token', refreshToken: 'rotated-refresh' };
+      }, fetch: async (_, init) => {
+        events.push(init.headers.Authorization);
+        if (init.headers.Authorization === 'Bearer old-token') {
+          return application401 ? response({ code: 401 }) : response({}, 401);
+        }
+        assert.equal(persisted, true);
+        return quotaResponse();
+      } });
+    assert.equal(rows[0].status, 'ok');
+    assert.deepEqual(events, ['resolve', 'Bearer old-token', 'refresh', 'persist', 'Bearer rotated-token']);
+    assert.equal(rows[0].accountKey, account.accountKey);
+  }
+});
+
+test('WorkBuddy stops after one managed refresh and never treats transient billing failures as credential errors', async () => {
+  const account = managedAccount('user');
+  for (const status of [401, 403, 429, 503]) {
+    let renewals = 0;
+    let requests = 0;
+    const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: [account] }, { env: {},
+      resolveWorkbuddyManagedCredential: async (_, { forceRefresh }) => {
+        if (forceRefresh) renewals += 1;
+        return { accessToken: 'token' };
+      }, fetch: async () => { requests += 1; return response({}, status); } });
+    assert.equal(renewals, status === 401 ? 1 : 0);
+    assert.equal(requests, status === 401 ? 2 : 1);
+    assert.equal(rows[0].status, status === 429 ? 'sourceRateLimited' : status === 503 ? 'unavailable' : 'unauthorized');
+  }
+  let requests = 0;
+  const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: [account] }, { env: {},
+    resolveWorkbuddyManagedCredential: async (_, { forceRefresh }) => {
+      if (forceRefresh) throw Object.assign(new Error('persist failed'), { status: 'unavailable' });
+      return { accessToken: 'token' };
+    }, fetch: async () => { requests += 1; return response({}, 401); } });
+  assert.equal(rows[0].status, 'unavailable');
+  assert.equal(requests, 1);
+});
+
+test('WorkBuddy AI billing falls back only on HTTP 404 and never crosses realms', async () => {
+  const account = managedAccount('user', 'ai');
+  for (const status of [404, 401, 403, 429, 503]) {
+    const requests = [];
+    const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: [account] }, { env: {},
+      resolveWorkbuddyManagedCredential: async () => ({ accessToken: 'ai-token', domain: account.domain }),
+      fetch: async (url, init) => {
+        requests.push(url);
+        assert.equal(init.credentials, 'omit');
+        assert.equal(init.redirect, 'error');
+        assert.equal(init.headers.Authorization, 'Bearer ai-token');
+        assert.equal(init.headers.Host, undefined);
+        assert.equal(init.headers.Referer, undefined);
+        return requests.length === 1 ? response({}, status) : quotaResponse();
+      } });
+    assert.ok(requests.every((url) => url.startsWith('https://www.workbuddy.ai/')));
+    if (status === 404) {
+      assert.deepEqual(requests, ['https://www.workbuddy.ai/billing/meter/get-user-resource',
+        'https://www.workbuddy.ai/v2/billing/meter/get-user-resource']);
+      assert.equal(rows[0].status, 'ok');
+    } else assert.ok(requests.every((url) => url === 'https://www.workbuddy.ai/billing/meter/get-user-resource'));
+  }
+  for (const [realm, domain] of [['cn', 'www.workbuddy.ai'], ['ai', 'www.codebuddy.cn'], ['ai', 'attacker.example']]) {
+    const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: [managedAccount('user', realm)] }, {
+      env: {}, resolveWorkbuddyManagedCredential: async () => ({ accessToken: 'token', domain }),
+      fetch: async () => { throw new Error('realm mismatch must not dispatch'); }
+    });
+    assert.equal(rows[0].status, 'unavailable');
+  }
+});
+
+test('managed WorkBuddy requests observe cancellation and bounded billing deadlines', async () => {
+  let billingSignal;
+  const account = managedAccount('user');
+  const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: [account] }, { env: {}, workbuddyFetchTimeoutMs: 10,
+    resolveWorkbuddyManagedCredential: async () => ({ accessToken: 'token' }),
+    fetch: async (_, init) => { billingSignal = init.signal; return new Promise(() => {}); } });
+  assert.equal(rows[0].status, 'unavailable');
+  assert.equal(billingSignal.aborted, true);
+  const controller = new AbortController();
+  controller.abort();
+  const canceled = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: [account] }, { env: {}, signal: controller.signal,
+    resolveWorkbuddyManagedCredential: async () => { throw new Error('must not resolve'); } });
+  assert.equal(canceled[0].status, 'unavailable');
+});
+
+test('all WorkBuddy stable rows carry their billing realm as region', async () => {
+  for (const realm of ['cn', 'ai']) {
+    for (const status of ['ok', 'notConfigured', 'unauthorized', 'unavailable', 'sourceRateLimited']) {
+      const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: [managedAccount('user', realm)] }, { env: {},
+        resolveWorkbuddyManagedCredential: async () => {
+          if (status !== 'ok') throw Object.assign(new Error('fixture'), { status });
+          return { accessToken: 'token' };
+        }, fetch: async () => quotaResponse() });
+      assert.equal(rows[0].status, status);
+      assert.equal(rows[0].region, realm);
+    }
+    const encrypted = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true,
+      workbuddyRealm: realm, workbuddyLocalSessionReason: 'encrypted' }, { env: {} });
+    assert.equal(encrypted.region, realm);
+  }
+  assert.equal((await fetchWorkbuddyLimits({}, { env: {} })).region, 'cn');
+  assert.equal((await fetchWorkbuddyLimits({ workbuddyDesktopSessionSupported: false }, { env: {} })).region, 'cn');
+});
+
+test('WorkBuddy full discovery emits explicit removals and partial/scoped discovery keeps known identities', async () => {
+  const a = managedAccount('a');
+  const b = managedAccount('b', 'ai');
+  const prior = [
+    { provider: 'workbuddy', sourceDetail: 'managed', accountKey: a.accountKey, region: 'cn' },
+    { provider: 'workbuddy', sourceDetail: 'app', accountKey: b.accountKey, region: 'ai' }
+  ];
+  const base = { previousLimits: { providers: prior }, workbuddyManagedAccounts: [], workbuddyDesktopSessionEnabled: true,
+    workbuddyLocalSessions: [{ realm: 'cn', authenticated: false, reason: 'absent' },
+      { realm: 'ai', authenticated: false, reason: 'absent' }] };
+  const deps = { env: {}, workbuddyFetch: async () => { throw Object.assign(new Error('absent'), { status: 'notConfigured' }); } };
+  const full = await fetchWorkbuddyLimits(base, deps);
+  assert.deepEqual(full.filter((row) => row.removed).map((row) => row.accountKey), [a.accountKey, b.accountKey]);
+  for (const config of [
+    { ...base, limitRefreshScope: { provider: 'workbuddy', accountKey: a.accountKey } },
+    { ...base, workbuddyManagedAccounts: undefined, workbuddyLocalSessionsComplete: false },
+    { ...base, workbuddyManagedAccounts: undefined,
+      workbuddyLocalSessions: [{ realm: 'ai', authenticated: false, reason: 'malformed' }] },
+    { ...base, workbuddyManagedAccounts: undefined,
+      workbuddyLocalSessions: [{ realm: 'ai', authenticated: false, reason: 'encrypted' }] }
+  ]) {
+    const rows = await fetchWorkbuddyLimits(config, deps);
+    assert.equal((Array.isArray(rows) ? rows : [rows]).some((row) => row.removed), false);
+  }
+  const failed = await fetchWorkbuddyLimits({ ...base, workbuddyManagedAccounts: [a],
+    workbuddyLocalSessions: [{ ...b, authenticated: true, accountType: 'personal' }] }, {
+    env: {}, resolveWorkbuddyManagedCredential: async () => { throw Object.assign(new Error('missing'), { status: 'notConfigured' }); },
+    workbuddyFetch: async () => { throw Object.assign(new Error('offline'), { status: 'unavailable' }); }
+  });
+  assert.equal(failed.some((row) => row.removed), false);
+  assert.deepEqual(failed.map((row) => row.accountKey), [a.accountKey, b.accountKey]);
+  const disabled = await fetchWorkbuddyLimits({ ...base, workbuddyManagedAccounts: [{ ...a, enabled: false }],
+    workbuddyLocalSessions: [{ ...a, authenticated: true }] }, deps);
+  assert.ok(disabled.some((row) => row.removed && row.accountKey === a.accountKey));
+});
+
+test('WorkBuddy runtime retires removed rows only after complete discovery and one-shot drops markers', async () => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  const account = managedAccount('runtime-local');
+  let sessions = [{ ...account, authenticated: true, accountType: 'personal' }];
+  const runtime = createLimitsRuntime({ limitProviders: ['workbuddy'] }, {
+    autoStart: false, env: {}, providerPhysicalBoundMs: () => 1000,
+    resolveConfigSnapshot: () => ({ workbuddyManagedAccounts: [], workbuddyDesktopSessionEnabled: true,
+      workbuddyLocalSessions: sessions }),
+    workbuddyFetch: async (_, __, expected) => {
+      if (!expected.userId) throw Object.assign(new Error('unreadable'), { status: 'notConfigured' });
+      return quotaResponse();
+    }
+  });
+  try {
+    await runtime.refresh({ provider: 'workbuddy' }, 'manual');
+    assert.ok(runtime.getSnapshot().providers.some((row) => row.accountKey === account.accountKey));
+    sessions = [{ realm: 'cn', authenticated: false, reason: 'malformed' }];
+    await runtime.refresh({ provider: 'workbuddy' }, 'manual');
+    assert.ok(runtime.getSnapshot().providers.some((row) => row.accountKey === account.accountKey));
+    sessions = [{ realm: 'cn', authenticated: false, reason: 'absent' }];
+    await runtime.refresh({ provider: 'workbuddy' }, 'manual');
+    assert.equal(runtime.getSnapshot().providers.some((row) => row.accountKey === account.accountKey), false);
+    assert.equal(runtime.getSnapshot().providers.some((row) => row.removed), false);
+    const oneShot = await collectLimitsOnce({ limitsEnabled: true, limitProviders: ['workbuddy'], workbuddyManagedAccounts: [],
+      previousLimits: { providers: [{ provider: 'workbuddy', accountKey: account.accountKey, sourceDetail: 'managed' }] } }, { env: {} });
+    assert.equal(oneShot.providers.some((row) => row.removed), false);
+    assert.equal(oneShot.providers.some((row) => row.accountKey === account.accountKey), false);
+  } finally { runtime.stop(); }
+});
+
+test('managed enterprise billing with a Chinese department dispatches Fetch-compatible bound identity headers', async () => {
+  const identity = { id: 'enterprise', realm: 'cn', userId: 'user', enterpriseId: 'enterprise',
+    departmentInfo: '研发部', domain: 'www.codebuddy.cn', enabled: true };
+  let dispatched = 0;
+  const result = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: [identity] }, {
+    env: {}, resolveWorkbuddyManagedCredential: async () => ({ accessToken: 'fixture-token', domain: identity.domain }),
+    fetch: async (url, init) => {
+      const request = new Request(url, init);
+      assert.equal(request.headers.get('X-User-Id'), identity.userId);
+      assert.equal(request.headers.get('X-Enterprise-Id'), identity.enterpriseId);
+      assert.equal(request.headers.get('X-Department-Info'), null);
+      dispatched++;
+      return response({ data: { limitNum: 100, credit: 20 } });
+    }
+  });
+  assert.equal(dispatched, 1);
+  assert.equal(result[0].accountKey, workbuddyAccountKey(identity));
+  assert.equal(result[0].status, 'ok');
+});

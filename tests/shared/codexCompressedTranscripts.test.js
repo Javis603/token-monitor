@@ -74,6 +74,54 @@ test('compressed Codex live and archived rollouts preserve identity, metadata an
   }
 });
 
+test('compressed Session Detail decodes through the injected filesystem and closes its handle', t => {
+  const f = fixture(t);
+  const injected = zlib.zstdCompressSync(Buffer.from([
+    header, started,
+    entry('event_msg', { type: 'token_count', info: {
+      last_token_usage: { input_tokens: 200, cached_input_tokens: 0, output_tokens: 50, total_tokens: 250 },
+      total_token_usage: { input_tokens: 200, cached_input_tokens: 0, output_tokens: 50, total_tokens: 250 }
+    } })
+  ].join('\n')));
+  let opened = 0;
+  let closed = 0;
+  let active = false;
+  const fd = 123;
+  const injectedFs = {
+    openSync(file) {
+      assert.equal(file, f.compressed);
+      assert.equal(active, false);
+      active = true;
+      opened += 1;
+      return fd;
+    },
+    fstatSync(handle) {
+      assert.equal(handle, fd);
+      assert.equal(active, true);
+      return { isFile: () => true, size: injected.length };
+    },
+    readSync(handle, buffer, offset, length, position) {
+      assert.equal(handle, fd);
+      assert.equal(active, true);
+      return injected.copy(buffer, offset, position, position + length);
+    },
+    closeSync(handle) {
+      assert.equal(handle, fd);
+      assert.equal(active, true);
+      active = false;
+      closed += 1;
+    }
+  };
+
+  const detail = readSessionDetail({ client: 'codex', sessionId: ID, home: f.home, env: {}, deps: { fs: injectedFs } });
+  assert.equal(detail.found, true);
+  assert.equal(detail.canonicalSessionId, NATIVE_ID);
+  assert.equal(detail.totals.totalTokens, 250, 'use injected bytes rather than the on-disk 140-token transcript');
+  assert.equal(opened, 1);
+  assert.equal(closed, 1);
+  assert.equal(active, false);
+});
+
 test('Codex discovery prefers plain files deterministically and supports legacy compressed archive keys', t => {
   const f = fixture(t);
   fs.writeFileSync(f.plain, text);
