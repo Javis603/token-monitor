@@ -18,3 +18,12 @@ TOKEN_MONITOR_SYNC_SESSION_TITLES = "false"
 # Set the shared secret with:
 #   wrangler secret put TOKEN_MONITOR_SECRET
 # Required for all private data routes.
+
+TOKEN_MONITOR_APNS_BUNDLE_ID = "com.javis.tokenmonitor.ios"
+TOKEN_MONITOR_APNS_ENVIRONMENT = "production"
+TOKEN_MONITOR_APNS_MIN_INTERVAL_MS = "15000"
+
+# ActivityKit remote updates are optional. Configure the APNs key with:
+#   wrangler secret put TOKEN_MONITOR_APNS_KEY_ID
+#   wrangler secret put TOKEN_MONITOR_APNS_TEAM_ID
+#   wrangler secret put TOKEN_MONITOR_APNS_PRIVATE_KEY

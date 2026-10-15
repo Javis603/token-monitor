@@ -1,0 +1,26 @@
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+
+# Build products
+build/
+DerivedData/
+.build/
+.swiftpm/
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# Signing material
+*.mobileprovision
+*.provisionprofile
+*.p8
+*.p12
+*.cer
+
+# Local design-tool sidecar. The committed spec is DESIGN.md.
+.impeccable/
