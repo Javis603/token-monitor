@@ -6290,6 +6290,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .app-update-popover {
   inset: auto;
   margin: 0;
+  /* Keep the layout through the discrete display/overlay exit transition. */
+  flex-direction: column;
   max-height: min(440px, calc(100vh - 64px));
   padding: 0;
   /* When the window is too short for even the header, the whole card scrolls
@@ -6308,7 +6310,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 }
 /* Only while open: a display on the base rule would override the UA rule that
    hides a closed popover. */
-.app-update-popover:popover-open { display: flex; flex-direction: column; opacity: 1; transform: none; }
+.app-update-popover:popover-open { display: flex; opacity: 1; transform: none; }
 @starting-style {
   .app-update-popover:popover-open { opacity: 0; transform: translateY(5px) scale(0.985); }
 }
@@ -6425,11 +6427,15 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   outline: 1px solid rgba(var(--blue-rgb), 0.72);
   outline-offset: 2px;
 }
-.app-update-release-older,
-.app-update-release-full {
+/* Full width, so the rule above it matches the ones between releases; the
+   label stays at the start. */
+.app-update-release-older {
+  justify-self: stretch;
   padding-top: 10px;
   border-top: 1px solid rgba(var(--line-rgb), 0.14);
 }
+/* Part of the release above it, so no separating rule. */
+.app-update-release-full { padding-top: 4px; }
 .app-update-popover button:focus-visible {
   outline: 1px solid rgba(var(--blue-rgb), 0.72);
   outline-offset: 2px;
