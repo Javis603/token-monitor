@@ -146,10 +146,13 @@ test('ledger retains only request metadata, not prompt, response or project cont
   } })]);
   f.create().scan();
   const db = new DatabaseSync(f.databasePath, { readOnly: true });
-  t.after(() => db.close());
-  const row = db.prepare('SELECT * FROM requests').get();
-  assert.deepEqual(Object.keys(row), ['source_root', 'request_key', 'timestamp', 'model', 'credits']);
-  assert.doesNotMatch(JSON.stringify(row), /PRIVATE_RESPONSE|private\/project/);
+  try {
+    const row = db.prepare('SELECT * FROM requests').get();
+    assert.deepEqual(Object.keys(row), ['source_root', 'request_key', 'timestamp', 'model', 'credits']);
+    assert.doesNotMatch(JSON.stringify(row), /PRIVATE_RESPONSE|private\/project/);
+  } finally {
+    db.close();
+  }
 });
 
 test('failed reads and conflicting records roll back the entire scan and retry without losing offsets', (t) => {
@@ -329,6 +332,31 @@ test('the running collector owns the persistent ledger and targeted refresh publ
   } finally {
     collector.stop();
     await collector.whenIdle();
+  }
+});
+
+test('stopping a running collector leaves caller-owned credits collectors open', async (t) => {
+  const f = fixture(t);
+  f.write('a.jsonl', [entry('a')]);
+  for (const stopOptions of [undefined, { skipCloseWatchers: true }]) {
+    const credits = f.create();
+    let closes = 0;
+    const close = credits.close;
+    credits.close = () => { closes += 1; close(); };
+    const collector = startCollector({
+      clients: 'qodercn', deviceId: 'test', homeDir: f.home, env: {}, allTimeSince: '2024-01-01',
+      historyEnabled: false, projectsEnabled: false, watchEnabled: false, sessionActivityPolling: false,
+      anchorPersistenceEnabled: false, intervalMs: 60000, qoderCnCreditsCollector: credits,
+      runTokscale: async () => ({ entries: [] })
+    });
+    try {
+      await collector.whenIdle();
+    } finally {
+      collector.stop(stopOptions);
+      await collector.whenIdle();
+    }
+    assert.equal(closes, 0, 'the caller retains ownership after stop');
+    assert.equal(totals(credits.scan()).credits, 0.25);
   }
 });
 

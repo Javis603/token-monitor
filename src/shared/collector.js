@@ -2543,6 +2543,7 @@ function startCollector(options) {
   });
   const qoderCnDbPath = qoderCnSources.dbPath;
   const qoderCnProjectsDir = qoderCnSources.projectsDir;
+  const ownsQoderCnCreditsCollector = !options.qoderCnCreditsCollector;
   const qoderCnCreditsCollector = trackedClients.has('qodercn')
     ? options.qoderCnCreditsCollector || createQoderCnCreditsCollector({
       ...sourceOptions, databasePath: options.qoderCnCreditsDatabasePath
@@ -3626,7 +3627,7 @@ function startCollector(options) {
     stopped = true;
     runtimeAbortController.abort(new Error('collector stopped'));
     codexLocalSource?.stop();
-    if (!options.qoderCnCreditsCollector) qoderCnCreditsCollector?.close();
+    if (ownsQoderCnCreditsCollector) qoderCnCreditsCollector?.close();
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
     activityScheduler?.stop();
