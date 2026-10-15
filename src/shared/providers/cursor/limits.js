@@ -26,6 +26,7 @@ function formatCursorMembership(type) {
   const raw = type.trim().toLowerCase();
   if (!raw) return '';
   if (raw === 'pro+' || raw === 'pro_plus') return 'Pro+';
+  if (raw === 'unified_ultra') return 'Ultra';
   return displayPlanText(cleanPlanText(raw, []), Infinity);
 }
 
@@ -52,6 +53,41 @@ function cursorBillingWindow(label, fields = {}) {
     label,
     ...fields
   };
+}
+
+// The X Subscription (Plus, Premium, Super, unified Ultra) replaces the two model
+// pools with one included pool shared with Grok and Grok Bot, so the separate
+// Grok Bot allowance would count the same pool twice.
+function isUnifiedPlan(usage) {
+  return usage.planInfo?.isMerged === true || usage.grokBot?.isUnified === true;
+}
+
+function cursorIncludedWindow(usage, billingResetsAt) {
+  if (finiteNumber(usage.planPercent) === null) return null;
+  const weekly = usage.planInfo?.includedUsagePeriod === 'weekly';
+  return {
+    kind: weekly ? 'weekly' : 'billing',
+    label: 'Included usage',
+    usedPercent: usage.planPercent,
+    resetsAt: weekly ? usage.planInfo.includedUsageResetsAt || null : billingResetsAt,
+    windowMinutes: weekly ? 7 * 24 * 60 : null,
+    resetDescription: '',
+    showMeter: true
+  };
+}
+
+function cursorPrepaidWindow(usage) {
+  const available = finiteNumber(usage.prepaid?.availableUsd);
+  if (available === null || available <= 0) return null;
+  return cursorBillingWindow('Prepaid balance', {
+    metric: 'credits',
+    currency: 'USD',
+    remaining: available,
+    resetsAt: null,
+    windowMinutes: null,
+    resetDescription: '',
+    showMeter: false
+  });
 }
 
 function cursorOnDemandWindow(usage, resetsAt) {
@@ -125,13 +161,17 @@ async function fetchCursorAccountLimits(account, deps = {}) {
   }
 
   const { usage } = result;
-  const resetsAt = cursorResetIso(usage);
+  const resetsAt = cursorResetIso(usage) || usage.planInfo?.billingCycleEnd || null;
+  const unified = isUnifiedPlan(usage);
   const hasRequestUsage = finiteNumber(usage.requestsUsed) !== null
     && finiteNumber(usage.requestsLimit) !== null
     && usage.requestsLimit > 0;
   const windows = [];
 
-  if (hasRequestUsage) {
+  if (unified) {
+    const includedWindow = cursorIncludedWindow(usage, resetsAt);
+    if (includedWindow) windows.push(includedWindow);
+  } else if (hasRequestUsage) {
     windows.push(cursorBillingWindow('Requests', {
       usedPercent: percentFromUsedLimit(usage.requestsUsed, usage.requestsLimit),
       used: usage.requestsUsed,
@@ -163,7 +203,7 @@ async function fetchCursorAccountLimits(account, deps = {}) {
     }));
   }
 
-  if (usage.grokBot?.hasNonZeroIncludedLimit === true && finiteNumber(usage.grokBot.usedPercent) !== null) {
+  if (!unified && usage.grokBot?.hasNonZeroIncludedLimit === true && finiteNumber(usage.grokBot.usedPercent) !== null) {
     windows.push({
       kind: 'weekly',
       label: 'Grok Bot',
@@ -191,6 +231,9 @@ async function fetchCursorAccountLimits(account, deps = {}) {
     }));
   }
 
+  const prepaidWindow = unified ? cursorPrepaidWindow(usage) : null;
+  if (prepaidWindow) windows.push(prepaidWindow);
+
   const onDemandWindow = cursorOnDemandWindow(usage, resetsAt);
   if (onDemandWindow) windows.push(onDemandWindow);
 
@@ -199,7 +242,7 @@ async function fetchCursorAccountLimits(account, deps = {}) {
     accountKey: hashCursorAccountKey(account, result.user?.sub),
     accountLabel: result.user?.email || account.label || formatCursorMembership(usage.membershipType) || '',
     accountEmail: result.user?.email || '',
-    planLabel: formatCursorMembership(usage.membershipType),
+    planLabel: formatCursorMembership(usage.membershipType) || (unified ? usage.planInfo?.planName || '' : ''),
     status: 'ok',
     source: 'web',
     updatedAt,

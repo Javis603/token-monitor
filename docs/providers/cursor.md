@@ -4,7 +4,7 @@ ids: [cursor]
 read_when:
   - Changing Cursor account discovery, login/logout/sync or local credential storage
   - Changing Cursor tokscale self-sync, cache events or legacy-session replacement
-  - Changing Cursor usage-summary, Grok Bot, team pool or on-demand limits mapping
+  - Changing Cursor usage-summary, Grok Bot, team pool, on-demand or unified-plan limits mapping
 ---
 
 # Cursor
@@ -42,6 +42,8 @@ For known usage conversations, the same read joins `cursorDiskKV`'s `composerDat
 Every enabled saved account is probed independently. Stable identity prefers the canonical API subject; opaque local fallback ids remain distinct rather than merging unrelated accounts. API email is presentation metadata, not the only identity key.
 
 The dashboard mapping preserves separate official model pools, legacy request plans, enterprise/team pooled usage, optional Grok Bot allowance and on-demand spend. Never synthesize an overall total by summing model pools. Grok Bot is best effort and must not fail the main account row. A zero uncapped spend is hidden; positive uncapped spend remains visible.
+
+Unified plans (The X Subscription: Plus, Premium, Super and unified Ultra) are detected by `get-plan-info`'s `isMerged`, or by the sand status's `isUnified` when plan info is unavailable. They show one `Included usage` row from `totalPercentUsed`; it is weekly with `includedUsageResetsAt` when `includedUsagePeriod` is weekly, otherwise it follows the billing cycle. The pool is shared with Grok and Grok Bot, so the separate Grok Bot row and the two model pools are suppressed. `get-user-prepaid-billing` is requested only for unified plans; a positive `availableCents` becomes a `Prepaid balance` credits row. These dashboard RPCs answer in proto3 JSON: int64 values are decimal strings, enums are full names, and zero values are omitted, so an absent `isMerged` means legacy and an absent balance means zero. The field contract comes from the Cursor client's dashboard schema and was verified live only on a legacy account.
 
 Account-scoped enable/disable affects limits collection only. The active tokscale account and self-synced history are managed by the explicit Cursor lifecycle operations.
 

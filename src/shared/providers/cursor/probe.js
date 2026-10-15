@@ -8,6 +8,8 @@ const USAGE_SUMMARY_URL = 'https://cursor.com/api/usage-summary';
 const AUTH_ME_URL = 'https://cursor.com/api/auth/me';
 const REQUEST_USAGE_URL = 'https://cursor.com/api/usage';
 const SAND_USAGE_URL = 'https://cursor.com/api/dashboard/get-sand-usage-status';
+const PLAN_INFO_URL = 'https://cursor.com/api/dashboard/get-plan-info';
+const PREPAID_BILLING_URL = 'https://cursor.com/api/dashboard/get-user-prepaid-billing';
 const SAND_TIMEOUT_MS = 5000;
 
 const DEFAULT_HEADERS = {
@@ -76,7 +78,45 @@ function parseGrokBotUsage(input) {
     resetsAt,
     windowMinutes,
     hasAvailableUsage: typeof usage.hasAvailableUsage === 'boolean' ? usage.hasAvailableUsage : null,
-    hasNonZeroIncludedLimit: usage.hasNonZeroIncludedLimit === true
+    hasNonZeroIncludedLimit: usage.hasNonZeroIncludedLimit === true,
+    isUnified: usage.isUnified === true
+  };
+}
+
+// Dashboard RPCs answer in proto3 JSON: int64 values arrive as decimal strings,
+// enums as their full names, and zero values (false, 0, unspecified) are omitted.
+function int64OrNull(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string' || !/^-?\d+$/.test(value.trim())) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function epochMsToIso(value) {
+  const ms = int64OrNull(value);
+  return ms === null || ms <= 0 ? null : new Date(ms).toISOString();
+}
+
+function parsePlanInfo(input) {
+  const response = input && typeof input === 'object' ? input : {};
+  const info = response.planInfo && typeof response.planInfo === 'object' ? response.planInfo : {};
+  const period = info.includedUsagePeriod;
+  return {
+    isMerged: response.isMerged === true,
+    planName: typeof info.planName === 'string' ? info.planName : null,
+    includedUsagePeriod: period === 'INCLUDED_USAGE_PERIOD_WEEKLY'
+      ? 'weekly'
+      : period === 'INCLUDED_USAGE_PERIOD_MONTHLY' ? 'monthly' : null,
+    includedUsageResetsAt: epochMsToIso(info.includedUsageResetsAt),
+    billingCycleEnd: epochMsToIso(info.billingCycleEnd)
+  };
+}
+
+function parsePrepaidBilling(input) {
+  const response = input && typeof input === 'object' ? input : {};
+  const availableCents = response.availableCents === undefined ? 0 : int64OrNull(response.availableCents);
+  return {
+    availableUsd: availableCents === null ? null : Math.max(0, availableCents) / 100
   };
 }
 
@@ -171,6 +211,20 @@ function parseUserInfo(input) {
   };
 }
 
+function dashboardRpc(url, sessionToken, opts, configuredTimeoutMs) {
+  return requestJson(url, sessionToken, {
+    ...opts,
+    timeoutMs: Math.min(configuredTimeoutMs, SAND_TIMEOUT_MS),
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Origin': 'https://cursor.com'
+    },
+    body: '{}'
+  });
+}
+
 function requestJson(url, sessionToken, {
   timeoutMs = 15000,
   httpsLib = https,
@@ -242,17 +296,9 @@ function requestJson(url, sessionToken, {
 async function probe(sessionToken, opts = {}) {
   if (!sessionToken) return { ok: false, error: { kind: 'unauthorized', message: 'no session token' } };
   const configuredTimeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 15000;
-  const grokBotResultPromise = requestJson(SAND_USAGE_URL, sessionToken, {
-    ...opts,
-    timeoutMs: Math.min(configuredTimeoutMs, SAND_TIMEOUT_MS),
-    method: 'POST',
-    headers: {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      'Origin': 'https://cursor.com'
-    },
-    body: '{}'
-  });
+  // Grok Bot and plan info are best effort: neither may fail the account row.
+  const grokBotResultPromise = dashboardRpc(SAND_USAGE_URL, sessionToken, opts, configuredTimeoutMs);
+  const planInfoResultPromise = dashboardRpc(PLAN_INFO_URL, sessionToken, opts, configuredTimeoutMs);
   const [usageResult, userResult] = await Promise.all([
     requestJson(USAGE_SUMMARY_URL, sessionToken, opts),
     requestJson(AUTH_ME_URL, sessionToken, opts)
@@ -265,9 +311,17 @@ async function probe(sessionToken, opts = {}) {
     const requestUsageResult = await requestJson(url, sessionToken, opts);
     if (requestUsageResult.ok) requestUsage = requestUsageResult.json;
   }
-  const grokBotResult = await grokBotResultPromise;
+  const [grokBotResult, planInfoResult] = await Promise.all([grokBotResultPromise, planInfoResultPromise]);
   const grokBot = grokBotResult.ok ? parseGrokBotUsage(grokBotResult.json) : null;
-  const usage = { ...parseUsageSummary(usageResult.json, { requestUsage }), grokBot };
+  const planInfo = planInfoResult.ok ? parsePlanInfo(planInfoResult.json) : null;
+  // Only unified (The X Subscription) plans carry a prepaid balance, so legacy
+  // plans never pay for this request.
+  let prepaid = null;
+  if (planInfo?.isMerged === true || grokBot?.isUnified === true) {
+    const prepaidResult = await dashboardRpc(PREPAID_BILLING_URL, sessionToken, opts, configuredTimeoutMs);
+    if (prepaidResult.ok) prepaid = parsePrepaidBilling(prepaidResult.json);
+  }
+  const usage = { ...parseUsageSummary(usageResult.json, { requestUsage }), grokBot, planInfo, prepaid };
   return { ok: true, usage, user };
 }
 
@@ -275,6 +329,8 @@ module.exports = {
   parseUsageSummary,
   parseRequestUsage,
   parseGrokBotUsage,
+  parsePlanInfo,
+  parsePrepaidBilling,
   parseUserInfo,
   probe,
   requestJson,
@@ -282,5 +338,7 @@ module.exports = {
   AUTH_ME_URL,
   REQUEST_USAGE_URL,
   SAND_USAGE_URL,
+  PLAN_INFO_URL,
+  PREPAID_BILLING_URL,
   SAND_TIMEOUT_MS
 };

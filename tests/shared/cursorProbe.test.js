@@ -4,7 +4,14 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
 
-const { parseGrokBotUsage, parseUsageSummary, parseUserInfo, probe } = require('../../src/shared/providers/cursor/probe');
+const {
+  parseGrokBotUsage,
+  parsePlanInfo,
+  parsePrepaidBilling,
+  parseUsageSummary,
+  parseUserInfo,
+  probe
+} = require('../../src/shared/providers/cursor/probe');
 
 test('parseUsageSummary maps cents to USD and reads billing cycle end', () => {
   const input = {
@@ -60,7 +67,8 @@ test('parseGrokBotUsage keeps an exhausted included allowance visible', () => {
     resetsAt: '2026-06-01T00:00:00.000Z',
     windowMinutes: 7 * 24 * 60,
     hasAvailableUsage: false,
-    hasNonZeroIncludedLimit: true
+    hasNonZeroIncludedLimit: true,
+    isUnified: false
   });
 });
 
@@ -187,7 +195,7 @@ test('probe includes legacy request usage when auth returns a user id', async ()
   assert.equal(result.usage.grokBot.hasAvailableUsage, false);
   assert.deepEqual(
     calls.map((call) => call.path).sort(),
-    ['/api/auth/me', '/api/dashboard/get-sand-usage-status', '/api/usage-summary', '/api/usage?user=user_1'].sort()
+    ['/api/auth/me', '/api/dashboard/get-plan-info', '/api/dashboard/get-sand-usage-status', '/api/usage-summary', '/api/usage?user=user_1'].sort()
   );
   assert.deepEqual(new Set(calls.map((call) => call.headers.Referer)), new Set(['https://cursor.com/dashboard']));
   const sand = calls.find((call) => call.path === '/api/dashboard/get-sand-usage-status');
@@ -245,6 +253,97 @@ test('probe destroys in-flight HTTPS requests when the parent signal aborts', as
   const result = await pending;
   assert.equal(result.ok, false);
   assert.equal(result.error.kind, 'network');
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, 4);
   assert.ok(requests.every((request) => request.destroyed));
+});
+
+// Shapes below follow the proto3 JSON the dashboard returned to a live legacy
+// account: int64 as strings, full enum names, zero values omitted.
+test('parsePlanInfo reads a unified weekly plan from proto3 JSON', () => {
+  assert.deepEqual(parsePlanInfo({
+    isMerged: true,
+    planInfo: {
+      planName: 'Premium',
+      includedAmountCents: 6000,
+      billingCycleEnd: '1793179761487',
+      includedUsagePeriod: 'INCLUDED_USAGE_PERIOD_WEEKLY',
+      includedUsageResetsAt: '1792800000000'
+    }
+  }), {
+    isMerged: true,
+    planName: 'Premium',
+    includedUsagePeriod: 'weekly',
+    includedUsageResetsAt: new Date(1792800000000).toISOString(),
+    billingCycleEnd: new Date(1793179761487).toISOString()
+  });
+});
+
+test('parsePlanInfo treats omitted proto3 fields as a legacy plan', () => {
+  assert.deepEqual(parsePlanInfo({ planInfo: { planName: 'Free', price: 'Free', billingCycleEnd: '1793179761487' } }), {
+    isMerged: false,
+    planName: 'Free',
+    includedUsagePeriod: null,
+    includedUsageResetsAt: null,
+    billingCycleEnd: new Date(1793179761487).toISOString()
+  });
+  assert.equal(parsePlanInfo(null).isMerged, false);
+});
+
+test('parsePrepaidBilling reads int64 cents and an omitted balance as zero', () => {
+  assert.deepEqual(parsePrepaidBilling({ billingMode: 'PREPAID_BILLING_MODE_PREPAID', availableCents: '1446' }), { availableUsd: 14.46 });
+  assert.deepEqual(parsePrepaidBilling({}), { availableUsd: 0 });
+  assert.deepEqual(parsePrepaidBilling({ availableCents: 'abc' }), { availableUsd: null });
+});
+
+function dashboardFakeHttps(payloads, calls = []) {
+  return {
+    request(opts, cb) {
+      calls.push(opts.path);
+      const res = new EventEmitter();
+      res.statusCode = 200;
+      setImmediate(() => {
+        cb(res);
+        setImmediate(() => {
+          res.emit('data', Buffer.from(JSON.stringify(payloads[opts.path] || {})));
+          res.emit('end');
+        });
+      });
+      return { on() {}, end() {}, write() {}, setTimeout() {} };
+    }
+  };
+}
+
+test('probe fetches the prepaid balance only for unified plans', async () => {
+  const legacyCalls = [];
+  const legacy = await probe('tok', { httpsLib: dashboardFakeHttps({
+    '/api/usage-summary': { individualUsage: { plan: { autoPercentUsed: 1, apiPercentUsed: 2 } } },
+    '/api/dashboard/get-plan-info': { planInfo: { planName: 'Pro' } }
+  }, legacyCalls) });
+  assert.equal(legacy.usage.planInfo.isMerged, false);
+  assert.equal(legacy.usage.prepaid, null);
+  assert.ok(!legacyCalls.includes('/api/dashboard/get-user-prepaid-billing'));
+
+  const unified = await probe('tok', { httpsLib: dashboardFakeHttps({
+    '/api/usage-summary': { individualUsage: { plan: { totalPercentUsed: 30 } } },
+    '/api/dashboard/get-plan-info': {
+      isMerged: true,
+      planInfo: { planName: 'Plus', includedUsagePeriod: 'INCLUDED_USAGE_PERIOD_WEEKLY', includedUsageResetsAt: '1792800000000' }
+    },
+    '/api/dashboard/get-user-prepaid-billing': { availableCents: '2500' }
+  }) });
+  assert.equal(unified.usage.planPercent, 30);
+  assert.equal(unified.usage.planInfo.includedUsagePeriod, 'weekly');
+  assert.deepEqual(unified.usage.prepaid, { availableUsd: 25 });
+});
+
+test('probe treats the sand unified flag as a unified plan when plan info is unavailable', async () => {
+  const calls = [];
+  const result = await probe('tok', { httpsLib: dashboardFakeHttps({
+    '/api/usage-summary': { individualUsage: { plan: { totalPercentUsed: 5 } } },
+    '/api/dashboard/get-sand-usage-status': { usagePercent: 5, isUnified: true },
+    '/api/dashboard/get-plan-info': null
+  }, calls) });
+  assert.equal(result.usage.grokBot.isUnified, true);
+  assert.ok(calls.includes('/api/dashboard/get-user-prepaid-billing'));
+  assert.deepEqual(result.usage.prepaid, { availableUsd: 0 });
 });
