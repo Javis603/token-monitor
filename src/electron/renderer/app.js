@@ -159,7 +159,6 @@ const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
 const clientHealthPresentationApi = window.TokenMonitorClientHealthPresentation;
 const qoderCnCreditsApi = window.TokenMonitorQoderCnCredits;
-const qoderCnCreditsViewApi = window.TokenMonitorQoderCnCreditsView;
 const clientSourceCacheApi = window.TokenMonitorClientSourceCache;
 const clientRescanStateApi = window.TokenMonitorClientRescanState;
 const serviceStatusPresentationApi = window.TokenMonitorServiceStatusPresentation;
@@ -266,7 +265,6 @@ const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', '
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
-  { id: 'credits', labelKey: 'qoderCnCredits.title', viewId: 'tool' },
   { id: 'tool', labelKey: 'home.tools', viewId: 'tool' },
   { id: 'model', labelKey: 'home.models', viewId: 'model' },
   { id: 'session', labelKey: 'home.sessions', viewId: 'session' },
@@ -1896,10 +1894,9 @@ function animateBreakdownFrom(snapshot, { duration = 420, synchronized = false }
   }
   let enteringIndex = 0;
   for (const row of motionRows) {
-    // An unavailable native session value must stay a semantic label. The
-    // ordinary row-number tween formats its zero placeholder as "0", which
-    // would turn unknown data into a false numeric reading after every render.
-    if (row.dataset.tokenDataUnavailable === 'true') {
+    // Unknown token readings and explicit credit units are semantic labels,
+    // not token counts for the ordinary row-number tween.
+    if (row.dataset.tokenDataUnavailable === 'true' || row.dataset.creditOnly === 'true') {
       cancelRowNumberAnimation(row.querySelector('.row-value'));
       continue;
     }
@@ -2472,7 +2469,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, tokenDataUnavailable, reportedCredits, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2581,7 +2578,14 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   setHoverMarqueeText(detailEl, shownDetail);
   detailEl.classList.toggle('hidden', !shownDetail);
   const valueEl = row.querySelector('.row-value');
-  if (tokenDataUnavailable === true) {
+  const creditOnly = reportedCredits != null && !(value > 0 || cost > 0 || unpricedTokens > 0);
+  row.classList.toggle('credit-only', creditOnly);
+  if (creditOnly) {
+    row.dataset.creditOnly = 'true';
+    delete row.dataset.tokenDataUnavailable;
+    cancelRowNumberAnimation(valueEl);
+    valueEl.textContent = formatCredits(reportedCredits.credits);
+  } else if (tokenDataUnavailable === true) {
     row.dataset.tokenDataUnavailable = 'true';
     cancelRowNumberAnimation(valueEl);
     valueEl.textContent = t('detailTokenUnavailable') || 'Unavailable';
@@ -2596,11 +2600,17 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
+  if (!creditOnly) delete row.dataset.creditOnly;
   const costEl = row.querySelector('.row-cost');
   const costLabelText = formatCost(cost || 0, unpricedTokens);
   costEl.textContent = tokenDataUnavailable === true ? ''
     : unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText;
   costEl.title = tokenDataUnavailable === true ? '' : costLabelText;
+  if (reportedCredits) {
+    costEl.textContent = creditOnly ? '' : `${costEl.textContent} · ${formatCredits(reportedCredits.credits)}`;
+    costEl.title = t('qoderCnCredits.source');
+    row.title = t('qoderCnCredits.source');
+  }
   // The row builder already applied the shared gate (recent enough to have a
   // reading), so this draws whatever arrived rather than re-deciding from
   // `running` - that second gate is exactly what made the dock card and this
@@ -2676,13 +2686,14 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
     ? (t('detailTokenUnavailable') || 'Unavailable')
     : formatNumber(value);
   const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0, unpricedTokens)}`;
+  const ariaLabel = hasAccordion
+    ? `${name}, ${t('dashboard.stat.totalTokens')}: ${tokenLabel}${costLabel}`
+    : name;
   sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
     interactive,
     hasAccordion,
     expanded: row.classList.contains('expanded'),
-    ariaLabel: hasAccordion
-      ? `${name}, ${t('dashboard.stat.totalTokens')}: ${tokenLabel}${costLabel}`
-      : name
+    ariaLabel: reportedCredits ? `${ariaLabel}, ${formatCredits(reportedCredits.credits)}, ${subtitle}` : ariaLabel
   });
 }
 
@@ -3049,9 +3060,9 @@ function projectRowsForPeriod(period) {
   });
 }
 
-function rowsForPeriod(period) {
+function rowsForPeriod(period, credits) {
   if (state.breakdown === 'device') return deviceRowsForPeriod();
-  if (state.breakdown === 'model') return modelRowsForPeriod(period);
+  if (state.breakdown === 'model') return modelRowsWithCredits(period, credits);
   if (state.breakdown === 'session') return sessionRowsForPeriod(period);
   if (state.breakdown === 'project') return projectRowsForPeriod(period);
   return toolRowsForPeriod(period);
@@ -6196,15 +6207,24 @@ function renderHomeLimitModule() {
   return module;
 }
 
-function renderHomeCreditsModule() {
+function modelCreditsSummary() {
   const today = fixedPeriodRangesApi.localDayKey();
   const range = fixedPeriodRangesApi.rangeForSelection(state.period, { todayKey: today, locale: currentCalendarLocale() })
     || { start: state.period === 'today' ? today : state.period === 'month' ? `${today.slice(0, 7)}-01` : '', end: today };
-  const summary = qoderCnCreditsApi.summarizeQoderCnCredits(state.stats?.devices, range);
-  return qoderCnCreditsViewApi.renderQoderCnCredits(summary, {
-    document, t, formatNumber,
-    formatCredits: (value) => new Intl.NumberFormat(currentLocale(), { maximumFractionDigits: 6 }).format(value)
-  });
+  return qoderCnCreditsApi.summarizeQoderCnCredits(state.stats?.devices, range);
+}
+
+function modelRowsWithCredits(period, credits = modelCreditsSummary()) {
+  return usageAttributionRowsApi.withModelCredits(modelRowsForPeriod(period), credits.models)
+    .map((row) => row.reportedCredits ? {
+      ...row,
+      color: row.color || modelColor(row.key),
+      subtitle: `Qoder CN CLI · ${t('qoderCnCredits.requests', { n: formatNumber(row.reportedCredits.requests) })}`
+    } : row);
+}
+
+function formatCredits(value) {
+  return `${new Intl.NumberFormat(currentLocale(), { maximumFractionDigits: 6 }).format(value)} credits`;
 }
 
 function renderHomeModelModule(period) {
@@ -6934,7 +6954,7 @@ function renderHome() {
   state.homeActivityResizeObserver?.disconnect();
   state.homeActivityResizeObserver = null;
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
-  const moduleIds = homeModuleIds().filter((id) => id !== 'credits' || state.stats?.devices?.some((device) => device.qoderCnCredits));
+  const moduleIds = homeModuleIds();
   if (moduleIds.includes('trends')) void loadHomeHistory();
   if (moduleIds.length === 0) {
     const empty = document.createElement('div');
@@ -6958,7 +6978,6 @@ function renderHome() {
   let sessionRows;
   const nodes = moduleIds.map((id) => {
     if (id === 'limits') return renderHomeLimitModule();
-    if (id === 'credits') return renderHomeCreditsModule();
     if (id === 'tool') return renderHomeToolModule(period);
     if (id === 'device') return renderHomeDeviceModule();
     if (id === 'model') return renderHomeModelModule(period);
@@ -7169,13 +7188,15 @@ function render() {
     els.serviceStatusPanel?.classList.add('hidden');
     els.trendsPanel.classList.add('hidden');
     els.breakdown.classList.remove('hidden');
-    const rows = rowsForPeriod(period);
+    const credits = state.breakdown === 'model' ? modelCreditsSummary() : null;
+    const rows = rowsForPeriod(period, credits);
     let incompleteHint = '';
     if (state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)) {
       incompleteHint = 'projects.incomplete';
     } else if (state.breakdown === 'session' && sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)) {
       incompleteHint = 'sessions.incomplete';
     }
+    if (credits?.failed) incompleteHint = 'qoderCnCredits.failed';
     renderRows(rows, { incompleteHint });
     if (state.breakdown === 'session') scheduleSessionStatusRepaint(period, incompleteHint);
   }
