@@ -64,12 +64,16 @@ function isUnifiedPlan(usage) {
 
 function cursorIncludedWindow(usage, billingResetsAt) {
   if (finiteNumber(usage.planPercent) === null) return null;
-  const weekly = usage.planInfo?.includedUsagePeriod === 'weekly';
+  // Without plan info, only the sand status identified the plan; unified pools
+  // reset weekly, so keep the window weekly and leave its reset unknown.
+  const weekly = usage.planInfo
+    ? usage.planInfo.includedUsagePeriod === 'weekly'
+    : usage.grokBot?.isUnified === true;
   return {
     kind: weekly ? 'weekly' : 'billing',
     label: 'Included usage',
     usedPercent: usage.planPercent,
-    resetsAt: weekly ? usage.planInfo.includedUsageResetsAt || null : billingResetsAt,
+    resetsAt: weekly ? usage.planInfo?.includedUsageResetsAt || null : billingResetsAt,
     windowMinutes: weekly ? 7 * 24 * 60 : null,
     resetDescription: '',
     showMeter: true

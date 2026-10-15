@@ -358,3 +358,14 @@ test('fetchCursorLimits keeps the legacy layout when plan info says the plan is 
   });
   assert.deepEqual(result.windows.map((window) => window.label), ['Cursor Models', 'Other Models', 'Grok Bot']);
 });
+
+test('fetchCursorLimits keeps a sand-only unified pool weekly with an unknown reset', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: unifiedProbe({ planInfo: null, prepaid: null })
+  });
+  assert.deepEqual(result.windows.map((window) => window.label), ['Included usage']);
+  assert.equal(result.windows[0].kind, 'weekly');
+  assert.equal(result.windows[0].resetsAt, null);
+  assert.equal(result.windows[0].windowMinutes, 10080);
+});
