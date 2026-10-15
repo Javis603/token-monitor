@@ -39,6 +39,39 @@ test('session normalization preserves bounded titles and recognized background-r
   assert.equal(period.sessions['codex:unknown'].sessionKind, '');
 });
 
+test('Tokscale session titles strip private-use glyphs and treat empty results as missing', () => {
+  const period = extractUsageFromTokscale([
+    {
+      client: 'omp',
+      sessionId: 'title-cleanup',
+      totalTokens: 1,
+      sessionTitle: '\uE000 \u{F066E}\n OMP:\t Plan \u{FFFFD}\u{100000}  carefully\u{10FFFD} '
+    },
+    {
+      client: 'omp',
+      sessionId: 'empty-title',
+      totalTokens: 1,
+      sessionTitle: '\uE000\u{F066E}\u{100000}'
+    },
+    {
+      client: 'omp',
+      sessionId: 'fallback-title',
+      totalTokens: 1,
+      sessionTitle: '\u{F066E}'
+    },
+    {
+      client: 'omp',
+      sessionId: 'fallback-title',
+      totalTokens: 1,
+      sessionTitle: 'Recovered title'
+    }
+  ]);
+
+  assert.equal(period.sessions['omp:title-cleanup'].title, 'OMP: Plan carefully');
+  assert.equal(period.sessions['omp:empty-title'].title, '');
+  assert.equal(period.sessions['omp:fallback-title'].title, 'Recovered title');
+});
+
 test('a parent link is carried only when present, survives Hub ingress and merges first-wins', () => {
   const period = normalizePeriod({ sessions: {
     'codex:child': { client: 'codex', sessionId: 'child', totalTokens: 10, parentSessionId: ' parent ' },
