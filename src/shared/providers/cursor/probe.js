@@ -94,7 +94,7 @@ function int64OrNull(value) {
 
 function epochMsToIso(value) {
   const ms = int64OrNull(value);
-  return ms === null || ms <= 0 ? null : new Date(ms).toISOString();
+  return ms === null || ms <= 0 ? null : isoTimestampOrNull(ms);
 }
 
 function parsePlanInfo(input) {
@@ -146,12 +146,12 @@ function parseUsageSummary(input, { requestUsage = null } = {}) {
   const teamPooledLimit = numberOrNull(teamPooled.limit);
   const teamPooledRemaining = numberOrNull(teamPooled.remaining);
 
+  // Missing totals and counters stay unknown; model-pool percentages are separate.
   let planPercent = clampPercent(numberOrNull(plan.totalPercentUsed));
   if (planPercent === null) {
-    if (planLimit > 0) planPercent = percentFromUsedLimit(planUsed, planLimit);
+    if (planLimit > 0) planPercent = percentFromUsedLimit(numberOrNull(plan.used), planLimit);
     else if (overallLimit !== null && overallLimit > 0) planPercent = percentFromUsedLimit(overallUsed, overallLimit);
     else if (teamPooledLimit !== null && teamPooledLimit > 0) planPercent = percentFromUsedLimit(teamPooledUsed, teamPooledLimit);
-    else planPercent = 0;
   }
 
   let resolvedPlanUsed = planUsed;

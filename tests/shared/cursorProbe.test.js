@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
+const { fetchCursorLimits } = require('../../src/shared/providers/cursor/limits');
 
 const {
   parseGrokBotUsage,
@@ -42,6 +43,24 @@ test('parseUsageSummary falls back to (used / limit) when totalPercentUsed missi
   };
   const result = parseUsageSummary(input);
   assert.equal(result.planPercent, 25);
+});
+
+test('parseUsageSummary keeps missing total usage unknown instead of synthesizing zero', () => {
+  for (const input of [
+    {},
+    { individualUsage: { plan: {} } },
+    { individualUsage: { plan: { autoPercentUsed: 10, apiPercentUsed: 50 } } },
+    { individualUsage: { plan: { limit: 2000 } } },
+    { individualUsage: { plan: { used: null, limit: 2000 } } },
+    { individualUsage: { plan: { used: 500 } } },
+    { individualUsage: { overall: { limit: 2000 } } },
+    { teamUsage: { pooled: { limit: 2000 } } }
+  ]) {
+    assert.equal(parseUsageSummary(input).planPercent, null, JSON.stringify(input));
+  }
+  for (const plan of [{ totalPercentUsed: 0 }, { used: 0, limit: 2000 }]) {
+    assert.equal(parseUsageSummary({ individualUsage: { plan } }).planPercent, 0);
+  }
 });
 
 test('parseUsageSummary never synthesizes a total from the separate model pools', () => {
@@ -117,7 +136,7 @@ test('parseUsageSummary falls back to enterprise pooled usage when individual da
 
 test('parseUsageSummary tolerates missing fields', () => {
   const result = parseUsageSummary({});
-  assert.equal(result.planPercent, 0);
+  assert.equal(result.planPercent, null);
   assert.equal(result.planUsedUsd, 0);
   assert.equal(result.billingCycleEnd, null);
   assert.equal(result.membershipType, null);
@@ -289,6 +308,29 @@ test('parsePlanInfo treats omitted proto3 fields as a legacy plan', () => {
   assert.equal(parsePlanInfo(null).isMerged, false);
 });
 
+test('parsePlanInfo keeps out-of-range dates unknown without losing valid fields', () => {
+  for (const invalid of [8640000000000001, '8640000000000001', Number.MAX_SAFE_INTEGER, String(Number.MAX_SAFE_INTEGER)]) {
+    for (const field of ['includedUsageResetsAt', 'billingCycleEnd']) {
+      const info = parsePlanInfo({ isMerged: true, planInfo: {
+        planName: 'Premium',
+        includedUsagePeriod: 'INCLUDED_USAGE_PERIOD_WEEKLY',
+        includedUsageResetsAt: '1792800000000',
+        billingCycleEnd: '1793179761487',
+        [field]: invalid
+      } });
+      assert.equal(info[field], null);
+      assert.equal(info.isMerged, true);
+      assert.equal(info.planName, 'Premium');
+      const other = field === 'billingCycleEnd' ? 'includedUsageResetsAt' : 'billingCycleEnd';
+      assert.notEqual(info[other], null);
+    }
+  }
+  for (const boundary of [8640000000000000, '8640000000000000']) {
+    assert.equal(parsePlanInfo({ planInfo: { includedUsageResetsAt: boundary } }).includedUsageResetsAt,
+      '+275760-09-13T00:00:00.000Z');
+  }
+});
+
 test('parsePrepaidBilling reads int64 cents and an omitted balance as zero', () => {
   assert.deepEqual(parsePrepaidBilling({ billingMode: 'PREPAID_BILLING_MODE_PREPAID', availableCents: '1446' }), { availableUsd: 14.46 });
   assert.deepEqual(parsePrepaidBilling({}), { availableUsd: 0 });
@@ -313,6 +355,57 @@ function dashboardFakeHttps(payloads, calls = []) {
     }
   };
 }
+
+test('unified limits through the real probe distinguish missing usage from a true zero', async () => {
+  for (const [summary, expected] of [
+    [{}, null],
+    [{ individualUsage: { plan: {} } }, null],
+    [{ individualUsage: { plan: { autoPercentUsed: 10, apiPercentUsed: 50 } } }, null],
+    [{ individualUsage: { plan: { limit: 2000 } } }, null],
+    [{ individualUsage: { plan: { totalPercentUsed: 0 } } }, 0],
+    [{ individualUsage: { plan: { used: 0, limit: 2000 } } }, 0],
+    [{ individualUsage: { plan: { used: 500, limit: 2000 } } }, 25]
+  ]) {
+    for (const planInfo of [{ isMerged: true }, null]) {
+      const result = await fetchCursorLimits({}, {
+        readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't' }),
+        httpsLib: dashboardFakeHttps({
+          '/api/usage-summary': summary,
+          '/api/dashboard/get-plan-info': planInfo,
+          '/api/dashboard/get-sand-usage-status': { isUnified: true },
+          '/api/dashboard/get-user-prepaid-billing': { availableCents: '1446' }
+        })
+      });
+      const included = result.windows.find((window) => window.label === 'Included usage');
+      assert.equal(result.status, 'ok');
+      if (expected === null) assert.equal(included, undefined, JSON.stringify(summary));
+      else assert.equal(included?.usedPercent, expected);
+      assert.equal(result.windows.find((window) => window.label === 'Prepaid balance')?.remaining, 14.46);
+      assert.ok(!result.windows.some((window) => ['Cursor Models', 'Other Models'].includes(window.label)));
+    }
+  }
+});
+
+test('probe keeps a unified account available when plan timestamps exceed the Date range', async () => {
+  const result = await probe('tok', { httpsLib: dashboardFakeHttps({
+    '/api/usage-summary': { individualUsage: { plan: { totalPercentUsed: 30 } } },
+    '/api/dashboard/get-plan-info': {
+      isMerged: true,
+      planInfo: {
+        includedUsagePeriod: 'INCLUDED_USAGE_PERIOD_WEEKLY',
+        includedUsageResetsAt: '8640000000000001',
+        billingCycleEnd: '8640000000000001'
+      }
+    },
+    '/api/dashboard/get-user-prepaid-billing': { availableCents: '1446' }
+  }) });
+  assert.equal(result.ok, true);
+  assert.equal(result.usage.planPercent, 30);
+  assert.equal(result.usage.planInfo.isMerged, true);
+  assert.equal(result.usage.planInfo.includedUsageResetsAt, null);
+  assert.equal(result.usage.planInfo.billingCycleEnd, null);
+  assert.equal(result.usage.prepaid.availableUsd, 14.46);
+});
 
 test('probe fetches the prepaid balance only for unified plans', async () => {
   const legacyCalls = [];
