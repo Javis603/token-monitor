@@ -173,6 +173,7 @@ function createFixture(options = {}) {
     prefersReducedMotion: options.prefersReducedMotion || (() => true),
     isFullScreen: options.isFullScreen,
     primaryButtonDown: options.primaryButtonDown,
+    installNonActivatingInput: options.installNonActivatingInput,
     applyShapeMask: (win) => {
       maskWindows.push(win);
       return options.maskAvailable !== false;
@@ -203,6 +204,29 @@ function createFixture(options = {}) {
   };
   return { controller, hapticCalls, haptics, ipcMain, powerMonitor, maskWindows, placements, screen, settings, windowFor, paintPeek };
 }
+
+test('Windows Edge Dock installs non-activating input on every surface, including rebuilt windows', (t) => {
+  const installed = [];
+  const fixture = createFixture({ installNonActivatingInput: (win) => installed.push(win) });
+  t.after(() => fixture.controller.stop());
+  assert.deepEqual(installed, FakeBrowserWindow.instances);
+  assert.ok(installed.every((win) => win.options.focusable === false));
+  fixture.controller.sync();
+  assert.equal(installed.length, 3, 'ordinary sync does not reinstall native callbacks');
+  fixture.settings.edgeDockEnabled = false;
+  fixture.controller.sync();
+  fixture.settings.edgeDockEnabled = true;
+  fixture.controller.sync();
+  assert.deepEqual(installed, FakeBrowserWindow.instances);
+  assert.equal(installed.filter((win) => !win.destroyed).length, 3);
+});
+
+test('macOS Edge Dock keeps its native panel input without installing Windows subclasses', (t) => {
+  const installed = [];
+  const fixture = createFixture({ platform: 'darwin', installNonActivatingInput: (win) => installed.push(win) });
+  t.after(() => fixture.controller.stop());
+  assert.deepEqual(installed, []);
+});
 
 test('Windows Edge Dock creates toolbar windows and reasserts taskbar exclusion and topmost after showing', (t) => {
   const fixture = createFixture();

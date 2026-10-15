@@ -80,6 +80,7 @@ function createEdgeDockController(deps) {
     prefersReducedMotion = () => false,
     onPlacementChange,
     applyShapeMask,
+    installNonActivatingInput = () => {},
     primaryButtonDown = () => null,
     onToggleRateMode,
     onSwitchCodexAccount,
@@ -558,6 +559,7 @@ function createEdgeDockController(deps) {
         zoomFactor: dockScale()
       }
     });
+    if (win32) installNonActivatingInput(win);
     if (mac) {
       win.setAlwaysOnTop(true, 'floating');
       win.setVisibleOnAllWorkspaces?.(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
