@@ -171,8 +171,30 @@ function contribution(value) {
     || !identifier(value.modelId) || typeof value.providerId !== 'string' || !value.tokens
     || TOKEN_FIELDS.some(field => !Number.isSafeInteger(value.tokens[field]) || value.tokens[field] < 0)
     || !Number.isFinite(value.cost) || value.cost < 0 || !Number.isSafeInteger(value.messages) || value.messages < 0) return null;
+  const optional = {};
+  if (value.unpricedTokens !== undefined) {
+    if (!Number.isSafeInteger(value.unpricedTokens) || value.unpricedTokens < 0) return null;
+    optional.unpricedTokens = value.unpricedTokens;
+  }
+  if (value.pricing !== undefined) {
+    const fields = ['unpricedTokens', 'unpricedMessages'];
+    if (!value.pricing || fields.some(field => !Number.isSafeInteger(value.pricing[field]) || value.pricing[field] < 0)) return null;
+    optional.pricing = Object.fromEntries(fields.map(field => [field, value.pricing[field]]));
+  }
+  if (value.performance !== undefined) {
+    const fields = ['timedTokens', 'timedOutputTokens', 'totalDurationMs'];
+    if (!value.performance || fields.some(field => !Number.isSafeInteger(value.performance[field]) || value.performance[field] < 0)) return null;
+    optional.performance = Object.fromEntries(fields.map(field => [field, value.performance[field]]));
+    if (value.performance.sampleCount !== undefined) {
+      if (!Number.isSafeInteger(value.performance.sampleCount) || value.performance.sampleCount < 0) return null;
+      optional.performance.sampleCount = value.performance.sampleCount;
+    }
+  }
   return { timestamp: value.timestamp, modelId: value.modelId, providerId: value.providerId,
-    tokens: Object.fromEntries(TOKEN_FIELDS.map(field => [field, value.tokens[field]])), cost: value.cost, messages: value.messages };
+    tokens: Object.fromEntries(TOKEN_FIELDS.map(field => [field, value.tokens[field]])), cost: value.cost, messages: value.messages, ...optional };
+}
+function observationKind(value) {
+  return ['native', 'mirror'].includes(value) ? { observationKind: value } : {};
 }
 function markCanonical(ledger) {
   canonicalLedgers.add(ledger);
@@ -224,7 +246,14 @@ function normalizeSourceLedger(value) {
       if (!identifier(uid) || !next.sessions[event?.ownerKey] || !rows || rows.some(row => !row)) {
         throw new Error('Invalid source ledger claim; retained accounting cannot be discarded');
       }
-      next.events[uid] = { ownerKey: event.ownerKey, contributions: rows };
+      // Proof observation time follows the event, not a later scope inventory
+      // check. Legacy present inventory can certify its original capture only.
+      const owner = next.sessions[event.ownerKey];
+      const capturedAt = timestamp(event.capturedAt) ? event.capturedAt
+        : owner.sourceState === 'present' && owner.sourceObservedAt === scope.acceptedAt ? scope.acceptedAt : null;
+      next.events[uid] = { ownerKey: event.ownerKey, contributions: rows, ...observationKind(event.observationKind),
+        ...(timestamp(capturedAt) && Date.parse(capturedAt) <= Date.parse(scope.acceptedAt)
+          ? { capturedAt: new Date(capturedAt).toISOString() } : {}) };
     }
     ledger.scopes[id] = next;
   }
@@ -262,7 +291,8 @@ function scansFromGraphs(graphs) {
         for (const event of row.events) {
           const rows = Array.isArray(event?.contributions) ? event.contributions.map(contribution) : null;
           if (!identifier(event?.id) || !rows || rows.some(row => !row) || events[event.id]) { reason = 'identity-gap'; continue; }
-          events[event.id] = { ownerKey: key, contributions: rows };
+          events[event.id] = { ownerKey: key, contributions: rows, ...observationKind(event.observationKind),
+            capturedAt: new Date(source.capturedAt).toISOString() };
         }
       }
       if (clients.some(client => Number(source.rowsWithoutIdentity?.[client] || 0) !== 0)) reason = 'identity-gap';
@@ -300,7 +330,10 @@ function scopeDays(scope, timeZone) {
       let day = days.get(date);
       if (!day) { day = { date, clients: [] }; days.set(date, day); }
       day.clients.push({ client: row.client, modelId: value.modelId, providerId: value.providerId,
-        tokens: value.tokens, cost: value.cost, messages: value.messages });
+        tokens: value.tokens, cost: value.cost, messages: value.messages,
+        ...(value.pricing ? { pricing: value.pricing, unpricedTokens: value.pricing.unpricedTokens } : {}),
+        ...(value.unpricedTokens !== undefined ? { unpricedTokens: value.unpricedTokens } : {}),
+        ...(value.performance ? { performance: value.performance } : {}) });
     }
   }
   return owners;
@@ -496,4 +529,10 @@ function rebucketSourceUsage(projection, timeZone) {
   return ledger ? projectSourceLedger(ledger, { timeZone }) : projection;
 }
 
-module.exports = { legacyCostsEqual, legacyDaysMatch, legacyAllocationMatches, legacySessionAccounting, selectLegacyDay, largerLegacyPeriod, rebucketSourceUsage, captureSourceLedger, normalizeSourceLedger, projectSourceLedger, sourceSnapshotsFromGraphs };
+// Only an in-process projection can expose its accepted ledger. Deserializing
+// an aggregate projection never reconstructs event identity or read authority.
+function getSourceLedger(projection) {
+  return projectionLedgers.get(projection) || null;
+}
+
+module.exports = { getSourceLedger, legacyCostsEqual, legacyDaysMatch, legacyAllocationMatches, legacySessionAccounting, selectLegacyDay, largerLegacyPeriod, rebucketSourceUsage, captureSourceLedger, normalizeSourceLedger, projectSourceLedger, sourceSnapshotsFromGraphs };

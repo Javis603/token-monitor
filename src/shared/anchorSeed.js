@@ -2,6 +2,7 @@
 
 const { collectorAnchorTrust, computePeriodWindows, qoderCnSourcesForClients } = require('./collector');
 const { mergePeriods } = require('./usage');
+const { usageIdentityFromState } = require('./usage/sourceIdentity');
 const { filterReasonixSyntheticSessions } = require('./providers/reasonix/sessionGuard');
 
 // The collector persists every full scan to collector-anchor.json so it can
@@ -68,7 +69,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
       ? { state: 'disabled', detected: [], withData: [] }
       : (saved.wslStatus || null);
   const at = new Date(trust.capturedAtMs).toISOString();
-  return {
+  const record = {
     ...envelope,
     hostname,
     platform,
@@ -92,6 +93,14 @@ function deviceRecordFromAnchor(saved, options = {}) {
     ...(Object.prototype.hasOwnProperty.call(saved, 'nativeSessions') ? { nativeSessions: saved.nativeSessions } : {}),
     ...(Object.prototype.hasOwnProperty.call(saved, 'nativeProjects') ? { nativeProjects: saved.nativeProjects } : {})
   };
+  // The persisted full-period baseline and its accepted claims are one capture.
+  // todayIdentityState is a later watch observation; pairing it with the older
+  // saved counters could falsely attribute a corrected or deleted event.
+  try {
+    const identity = usageIdentityFromState(saved.nativeIdentityState, record);
+    if (identity) record.usageIdentity = identity;
+  } catch (_) { /* old or malformed anchors grant no identity proof */ }
+  return record;
 }
 
 module.exports = {

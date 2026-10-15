@@ -59,8 +59,10 @@ test('WSL scans receive fork-only Proma like any other tokscale client', async (
 
 test('watch tick reuses wslAnchor and does not rescan WSL', async () => {
   let wslCalls = 0;
-  const anchor = { dateKey: localTodayKey(), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() };
+  const anchor = { dateKey: localTodayKey(), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod(),
+    scanRoots: {}, wslDiscovery: { homes: [], clientsByHome: {}, claudeRoots: [], diagnostics: [], state: 'ok' } };
   const summary = await collectUsageOnce({
+    platform: 'win32',
     clients: 'claude,gemini',
     allTimeSince: '2025-01-01',
     commandTimeoutMs: 1000,
@@ -68,6 +70,7 @@ test('watch tick reuses wslAnchor and does not rescan WSL', async () => {
     limitsEnabled: false,
     runTokscale: windowsTokscale,
     todayOnlyAnchor: anchor,
+    discoverWslUsage: () => { throw new Error('warm tick must not discover WSL'); },
     wslAnchor: bundleWith(9),
     collectWslUsage: async () => { wslCalls += 1; return { bundle: bundleWith(0), detected: [] }; }
   });
@@ -78,12 +81,14 @@ test('watch tick reuses wslAnchor and does not rescan WSL', async () => {
 test('interval anchored tick with refreshWsl rescans WSL and updates anchor', async () => {
   let wslCalls = 0;
   let capturedWsl = null;
-  const anchor = { dateKey: localTodayKey(), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() };
+  const anchor = { dateKey: localTodayKey(), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod(),
+    scanRoots: {}, wslDiscovery: { homes: [], clientsByHome: {}, claudeRoots: [], diagnostics: [], state: 'ok' } };
   const firstBundle = bundleWith(9);
   const secondBundle = bundleWith(15);
   let useSecond = false;
 
   const summary = await collectUsageOnce({
+    platform: 'win32',
     clients: 'claude,gemini',
     allTimeSince: '2025-01-01',
     commandTimeoutMs: 1000,
@@ -92,6 +97,7 @@ test('interval anchored tick with refreshWsl rescans WSL and updates anchor', as
     runTokscale: windowsTokscale,
     todayOnlyAnchor: anchor,
     wslAnchor: bundleWith(3),     // frozen snapshot that would be used by a watch tick
+    discoverWslUsage: () => anchor.wslDiscovery,
     refreshWsl: true,             // interval tick: refresh WSL independently
     collectWslUsage: async () => {
       wslCalls += 1;
@@ -114,6 +120,7 @@ test('interval anchored tick with refreshWsl rescans WSL and updates anchor', as
   // Second call: verify refreshWsl=false (watch mode) reuses wslAnchor instead
   wslCalls = 0;
   await collectUsageOnce({
+    platform: 'win32',
     clients: 'claude,gemini',
     allTimeSince: '2025-01-01',
     commandTimeoutMs: 1000,
@@ -121,6 +128,7 @@ test('interval anchored tick with refreshWsl rescans WSL and updates anchor', as
     limitsEnabled: false,
     runTokscale: windowsTokscale,
     todayOnlyAnchor: anchor,
+    discoverWslUsage: () => { throw new Error('warm tick must not discover WSL'); },
     wslAnchor: capturedWsl,        // updated anchor from the interval refresh
     collectWslUsage: async () => { wslCalls += 1; return { bundle: bundleWith(0), detected: [] }; }
   });

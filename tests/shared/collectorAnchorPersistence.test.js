@@ -14,7 +14,7 @@ function freshCollector() {
 }
 
 const {
-  configFingerprint,
+  configFingerprint: collectorConfigFingerprint,
   collectUsageOnce,
   localTodayKey,
   qoderCnSourcesForClients,
@@ -26,7 +26,14 @@ const { installInProcessWatchHost } = require('../helpers/watchHost');
 
 installInProcessWatchHost(test);
 
+// These anchors model host-only scans; WSL inventory is tested separately.
+function configFingerprint(...args) {
+  args[7] = { platform: 'darwin', ...args[7] };
+  return collectorConfigFingerprint(...args);
+}
+
 const baseOptions = {
+  platform: 'darwin',
   clients: 'claude',
   allTimeSince: '2024-01-01',
   commandTimeoutMs: 1000,
@@ -160,6 +167,7 @@ test('anchored tick with valid anchor runs todayOnly scan and derives month/allT
     historyEnabled: false,
     todayOnlyAnchor: anchor,
     wslAnchor: emptyWslBundle(),
+    wslScanEnabled: false, // This synthetic anchor has no WSL inventory.
     runTokscale: stubTokscale,
     collectWslUsage: async () => ({ bundle: emptyWslBundle(), detected: [] })
   });
@@ -339,7 +347,8 @@ for (const update of ['deleted', 'renamed']) {
       }
       assert.equal(saved.fullScanAt, original.fullScanAt);
       const seed = require('../../src/shared/anchorSeed').deviceRecordFromAnchor(saved, {
-        clients: 'claude', allTimeSince: baseOptions.allTimeSince, projectsEnabled: false, homeDir: tmpShared
+        clients: 'claude', allTimeSince: baseOptions.allTimeSince, projectsEnabled: false, homeDir: tmpShared,
+        platform: baseOptions.platform, wslScanEnabled: false
       });
       for (const period of ['today', 'month', 'allTime']) assert.equal(seed[period].sessions['claude:native'].title || '', expected);
       state = 'failure';

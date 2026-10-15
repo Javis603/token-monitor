@@ -119,6 +119,47 @@ function wslUsageHomes(deps = {}) {
   return homes;
 }
 
+// One immutable inventory per full tick. Keep original Claude config roots even
+// when their marker cannot be read: the native exporter reports that read's
+// health instead of turning a permission failure into proved absence.
+function discoverWslUsage(deps = {}) {
+  const exec = deps.exec || defaultExec;
+  const readdirSync = deps.readdirSync || fs.readdirSync;
+  const existsSync = deps.existsSync || fs.existsSync;
+  const result = { homes: [], clientsByHome: {}, claudeRoots: [], state: 'not-installed', diagnostics: [] };
+  if (!isWslInstalled(deps)) return result;
+  let distros;
+  try {
+    distros = String(exec('wsl.exe', ['--list', '--quiet', '--running']))
+      .split(/\r?\n/).map(line => line.replace(/\u0000/g, '').trim()).filter(Boolean);
+  } catch (error) {
+    result.state = 'not-running';
+    result.diagnostics.push({ code: 'wsl-discovery-failed', detailCode: error.code || 'unknown' });
+    return result;
+  }
+  result.state = distros.length ? 'ok' : 'not-running';
+  for (const distro of distros) {
+    const homeRoot = `\\\\wsl$\\${distro}\\home`;
+    const candidates = [];
+    try {
+      for (const user of readdirSync(homeRoot)) candidates.push(`${homeRoot}\\${user}`);
+    } catch (error) {
+      result.diagnostics.push({ code: 'wsl-home-read-failed', detailCode: error.code || 'unknown' });
+    }
+    // Root may be the distro's default user. Do not start a distro to find it.
+    candidates.push(`\\\\wsl$\\${distro}\\root`);
+    for (const home of candidates) {
+      const clients = homeHasData(home, existsSync, readdirSync);
+      result.homes.push(home);
+      result.clientsByHome[home] = clients;
+      result.claudeRoots.push(wslHomePath(home, '.claude'));
+    }
+  }
+  result.homes = [...new Set(result.homes)];
+  result.claudeRoots = [...new Set(result.claudeRoots)].sort();
+  return result;
+}
+
 // Cheap WSL readiness probe (no tokscale). Returns 'not-installed' (no Lxss),
 // 'not-running' (installed but no running distro), or 'ok'.
 function probeWslState(deps = {}) {
@@ -145,12 +186,12 @@ async function collectWslUsage(options = {}, deps = {}) {
   // APPDATA rather than from --home, so a WSL scan would recount host usage.
   const tracked = new Set(String(trackedClients).split(',').map((c) => c.trim()).filter(Boolean));
   const clientsCsv = String(clients || '').split(',').map((c) => c.trim()).filter(Boolean)
-    .filter((client) => !WSL_EXCLUDED_CLIENTS.has(client))
+    .filter((client) => !WSL_EXCLUDED_CLIENTS.has(client) && !(client === 'claude' && options.claudeIncludedInNative === true))
     .join(',');
-  for (const home of wslUsageHomes(deps)) {
+  for (const home of options.discovery?.homes || wslUsageHomes(deps)) {
     throwIfAborted(options.signal, 'WSL usage scan aborted');
     // Attribution is marker-based, independent of whether a parser returns data.
-    const homeDataClients = homeHasData(home, existsSync, readdirSync);
+    const homeDataClients = options.discovery?.clientsByHome?.[home] || homeHasData(home, existsSync, readdirSync);
     for (const id of homeDataClients) {
       if (tracked.has(id)) detected.add(id);
     }
@@ -160,16 +201,21 @@ async function collectWslUsage(options = {}, deps = {}) {
     if (clientsCsv.length === 0 || typeof runTokscale !== 'function') continue;
     try {
       // Serial on purpose (issue #15): never run these concurrently.
-      const todayJson = await runTokscale({ clients: clientsCsv, flags: ['--today', '--home', home], commandTimeoutMs, signal: options.signal });
+      const scanPeriod = (name, flags) => {
+        const filter = clientsCsv.split(',').filter(client => client !== 'claude' || !options.claudeIncludedInNativePeriods?.[name]).join(',');
+        return filter ? runTokscale({ clients: filter, flags: [...flags, '--home', home], commandTimeoutMs, signal: options.signal })
+          : Promise.resolve({ entries: [] });
+      };
+      const todayJson = await scanPeriod('today', ['--today']);
       throwIfAborted(options.signal, 'WSL usage scan aborted');
-      const monthJson = await runTokscale({ clients: clientsCsv, flags: ['--month', '--home', home], commandTimeoutMs, signal: options.signal });
+      const monthJson = await scanPeriod('month', ['--month']);
       throwIfAborted(options.signal, 'WSL usage scan aborted');
-      const allTimeJson = await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs, signal: options.signal });
+      const allTimeJson = await scanPeriod('allTime', ['--since', allTimeSince]);
       throwIfAborted(options.signal, 'WSL usage scan aborted');
       const periods = {
-        today: extractUsageFromTokscale(todayJson),
-        month: extractUsageFromTokscale(monthJson),
-        allTime: extractUsageFromTokscale(allTimeJson)
+        today: extractUsageFromTokscale(Object.fromEntries(Object.entries(todayJson).filter(([key]) => key !== 'sourceUsage'))),
+        month: extractUsageFromTokscale(Object.fromEntries(Object.entries(monthJson).filter(([key]) => key !== 'sourceUsage'))),
+        allTime: extractUsageFromTokscale(Object.fromEntries(Object.entries(allTimeJson).filter(([key]) => key !== 'sourceUsage')))
       };
       if (typeof decoratePeriods === 'function') decoratePeriods(periods, home);
       bundle.today = mergePeriods(bundle.today, periods.today);
@@ -187,6 +233,7 @@ module.exports = {
   WSL_DATA_MARKERS,
   MARKER_CLIENTS,
   collectWslUsage,
+  discoverWslUsage,
   emptyWslBundle,
   homeHasData,
   isWslInstalled,

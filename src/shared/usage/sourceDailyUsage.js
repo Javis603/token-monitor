@@ -55,7 +55,10 @@ function snapshotPeriod(sourceUsage, snapshot, name, today, since, pastOnly = fa
       .flatMap(day => (day.clients || []).map(row => ({ client: snapshot.client, sessionId: snapshot.sessionId,
         model: row.modelId, provider: row.providerId, input: row.tokens?.input, output: row.tokens?.output,
         cacheRead: row.tokens?.cacheRead, cacheWrite: row.tokens?.cacheWrite, reasoning: row.tokens?.reasoning,
-        cost: row.cost, messages: row.messages })));
+        cost: row.cost, messages: row.messages,
+        ...(row.pricing ? { pricing: row.pricing } : {}),
+        ...(row.unpricedTokens !== undefined ? { unpricedTokens: row.unpricedTokens } : {}),
+        ...(row.performance ? { performance: row.performance } : {}) })));
     rowCache.set(key, extractUsageFromTokscale({ entries }));
   }
   return structuredClone(rowCache.get(key));
@@ -65,7 +68,8 @@ function legacyDayPeriod(day) {
   const entries = observations.map(row => ({ client: row.client, model: row.modelId,
       provider: row.providerId, totalTokens: row.tokens,
       output: row.outputTokens || 0, cacheRead: row.cacheReadTokens || 0, cacheWrite: row.cacheWriteTokens || 0,
-      cost: row.cost, messages: row.messages }));
+      cost: row.cost, messages: row.messages,
+      ...(row.unpricedTokens > 0 ? { unpricedTokens: row.unpricedTokens } : {}) }));
   let period = extractUsageFromTokscale({ entries });
   for (const row of observations) {
     const remaining = Math.max(0, row.tokens - (row.outputTokens || 0) - (row.cacheReadTokens || 0) - (row.cacheWriteTokens || 0));

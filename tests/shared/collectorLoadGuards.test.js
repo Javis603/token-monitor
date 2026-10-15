@@ -4578,7 +4578,7 @@ test('hourly smart reconciliation starts watching a client directory created aft
   }
 });
 
-test('smart collection lets a successful manual refresh acknowledge existing activity', async () => {
+test('smart collection lets a successful manual refresh acknowledge existing activity', async (t) => {
   const tmp = withTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
@@ -4602,6 +4602,9 @@ test('smart collection lets a successful manual refresh acknowledge existing act
   try {
     const { startCollector } = freshCollector();
     const updates = [];
+    // The interval follows the completed refresh in this scenario. A real 60ms
+    // timer can expire during a slower full scan and correctly queue a replay.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
     handle = startCollector({
       clients: 'claude',
       allTimeSince: '2024-01-01',
@@ -4609,6 +4612,7 @@ test('smart collection lets a successful manual refresh acknowledge existing act
       deviceId: 'test-device',
       agentVersion: 'test',
       intervalMs: 60,
+      wslScanEnabled: false,
       watchEnabled: true,
       watchUsePolling: false,
       watchTriggersCollection: false,
@@ -4618,13 +4622,16 @@ test('smart collection lets a successful manual refresh acknowledge existing act
       onUpdate: (_summary, reason) => updates.push(reason)
     });
 
-    await waitForCondition(() => updates.length === 1);
+    await handle.whenIdle();
+    assert.deepEqual(updates, ['interval']);
     watchHandler('change', '/fake/before-manual.jsonl');
     await handle.tick('manual');
     assert.deepEqual(updates, ['interval', 'manual']);
     assert.equal(calls.length, 6, 'startup and manual refresh are full scans');
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    t.mock.timers.tick(120);
+    await new Promise((resolve) => setImmediate(resolve));
+    await handle.whenIdle();
     assert.deepEqual(updates, ['interval', 'manual'], 'the next smart interval does not repeat covered activity');
     assert.equal(calls.length, 6, 'the covered activity does not cause another scan');
   } finally {

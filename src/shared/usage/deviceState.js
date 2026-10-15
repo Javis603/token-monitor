@@ -69,10 +69,23 @@ function mergeUsagePart(previous, incoming) {
 
   if (!hasOwn(next, 'history') && hasOwn(previous, 'history')) {
     next.history = previous.history;
+    if (previous.usageIdentity?.history) {
+      next.usageIdentity = { version: 1, eventIdentityVersion: 2, ...next.usageIdentity,
+        periods: next.usageIdentity?.periods || {}, history: previous.usageIdentity.history };
+    }
   }
 
   const partial = !hasOwn(next, 'month') || !hasOwn(next, 'allTime');
   if (partial) {
+    // Carry only evidence for the broader periods being carried. Fresh Today
+    // without identity is an explicit legacy observation, never old proof.
+    if (previous.usageIdentity) {
+      const periods = { ...next.usageIdentity?.periods };
+      for (const name of ['month', 'allTime']) {
+        if (!hasOwn(next, name) && previous.usageIdentity.periods?.[name]) periods[name] = previous.usageIdentity.periods[name];
+      }
+      if (Object.keys(periods).length) next.usageIdentity = { version: 1, eventIdentityVersion: 2, ...next.usageIdentity, periods };
+    }
     for (const field of PARTIAL_USAGE_CARRY_FIELDS) {
       if (!hasOwn(next, field) && hasOwn(previous, field)) {
         next[field] = previous[field];

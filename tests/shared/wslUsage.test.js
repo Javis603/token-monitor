@@ -485,3 +485,35 @@ test('collectWslUsage logs and skips a home that throws, keeps others', async ()
   assert.equal(logs.length, 1);
   assert.match(logs[0], /Debian/);
 });
+
+test('full WSL inventory adds original Claude config roots even when markers are missing', () => {
+  const { discoverWslUsage } = require('../../src/shared/wslUsage');
+  const calls = [];
+  const result = discoverWslUsage({ platform: 'win32', exec: (cmd, args) => { calls.push([cmd, args]); return cmd === 'reg' ? 'installed' : 'Ubuntu,Dev\n'; },
+    readdirSync: dir => dir === '\\\\wsl$\\Ubuntu,Dev\\home' ? ['alice,bob'] : [], existsSync: () => false });
+  assert.equal(calls.filter(([cmd]) => cmd === 'wsl.exe').length, 1);
+  assert.deepEqual(result.claudeRoots.sort(), ['\\\\wsl$\\Ubuntu,Dev\\home\\alice,bob\\.claude', '\\\\wsl$\\Ubuntu,Dev\\root\\.claude']);
+  assert.equal(result.homes.length, 2);
+});
+
+test('WSL discovery failure remains diagnostic instead of silently proving no original', () => {
+  const { discoverWslUsage } = require('../../src/shared/wslUsage');
+  const result = discoverWslUsage({ platform: 'win32', exec: cmd => {
+    if (cmd === 'reg') return 'installed';
+    throw Object.assign(new Error('read denied'), { code: 'EACCES' });
+  } });
+  assert.deepEqual(result.diagnostics, [{ code: 'wsl-discovery-failed', detailCode: 'EACCES' }]);
+  const unreachable = discoverWslUsage({ platform: 'win32', exec: cmd => cmd === 'reg' ? 'installed' : 'Ubuntu\n',
+    readdirSync: () => { throw Object.assign(new Error('home share unavailable'), { code: 'ENOENT' }); }, existsSync: () => false });
+  assert.deepEqual(unreachable.diagnostics, [{ code: 'wsl-home-read-failed', detailCode: 'ENOENT' }]);
+  assert.deepEqual(unreachable.claudeRoots, ['\\\\wsl$\\Ubuntu\\root\\.claude']);
+});
+
+test('acknowledged Claude originals skip isolated home scans while keeping detected status', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\alice';
+  const result = await collectWslUsage({ clients: 'claude', trackedClients: 'claude', claudeIncludedInNative: true,
+    discovery: { homes: [home], clientsByHome: { [home]: ['claude'] } },
+    runTokscale: () => { throw new Error('isolated Claude must be skipped only after inclusion'); } });
+  assert.deepEqual(result.detected, ['claude']);
+  assert.equal(result.bundle.allTime.totalTokens, 0);
+});

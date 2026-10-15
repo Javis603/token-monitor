@@ -2,6 +2,7 @@ import { publicLimits } from './shared/limits/core.js';
 import subscriptionDisplay from './shared/subscriptionDisplay.js';
 import currency from './shared/currency.js';
 import syncContent from './shared/syncContent.js';
+import usageIdentity from './shared/usageIdentity.js';
 import {
   aggregateDevices,
   mergeSyncDeviceRecord,
@@ -80,6 +81,30 @@ const SUBSCRIPTIONS_KEY = 'subscriptions';
 const SETTINGS_PREFIX = 'sync-settings:';
 const TITLE_POLICY_PREFIX = 'title-policy:';
 
+async function putDeviceRecord(storage, key, record) {
+  const stored = { ...record };
+  if (record.usageIdentity) {
+    // Ingress expands claims for validation/merge. Title-only rewrites already
+    // hold compact evidence; never expand it again just to persist the record.
+    const proof = record.usageIdentity.encoding === 'event-rows-v1'
+      ? record.usageIdentity
+      : usageIdentity.packUsageIdentity(record.usageIdentity);
+    if (proof) stored.usageIdentity = proof;
+    else delete stored.usageIdentity;
+  }
+  try {
+    await storage.put(key, stored);
+  } catch (error) {
+    // SQLite DO limits apply to V8 bytes, not JSON/upload bytes. workerd's
+    // SqliteKvRegulator exposes SQLITE_TOOBIG as this Error; quota/I/O errors
+    // must still fail. Retry once with all usage intact and no optional proof.
+    if (!stored.usageIdentity || error?.message !== 'string or blob too big: SQLITE_TOOBIG') throw error;
+    delete stored.usageIdentity;
+    await storage.put(key, stored);
+  }
+  return stored;
+}
+
 function sseFormat(event, data) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
@@ -152,7 +177,7 @@ export class HubDO {
         const safe = stripSessionTextFromDeviceRecord(record, {
           preserveSessionTitles: enabled && syncContent.normalizeTitlePolicy(policy).enabled
         });
-        if (JSON.stringify(safe) !== JSON.stringify(record)) await storage.put(key, safe);
+        if (JSON.stringify(safe) !== JSON.stringify(record)) await putDeviceRecord(storage, key, safe);
       }
     });
     this.titlePrivacyServerEnabled = enabled;
@@ -204,7 +229,7 @@ export class HubDO {
       await storage.put(key, next);
       if (!enabled) {
         const record = await storage.get(`dev:${deviceId}`);
-        if (record) await storage.put(`dev:${deviceId}`, stripSessionTextFromDeviceRecord(record));
+        if (record) await putDeviceRecord(storage, `dev:${deviceId}`, stripSessionTextFromDeviceRecord(record));
       }
       return next;
     }));
@@ -459,8 +484,7 @@ export class HubDO {
         const next = mergeSyncDeviceRecord(existing, { ...payload, receivedAt: new Date().toISOString() }, {
           preserveSessionTitles: syncContent.acceptsSessionTitles(this.syncSessionTitles, policy, payload.sessionTitleSyncGeneration)
         });
-        await this.state.storage.put(`dev:${next.deviceId}`, next);
-        return next;
+        return putDeviceRecord(this.state.storage, `dev:${next.deviceId}`, next);
       });
       this.queueBroadcast();
       const response = { ok: true, deviceId: record.deviceId };

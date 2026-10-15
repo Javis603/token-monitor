@@ -10,11 +10,19 @@ const test = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 
 const { deviceRecordFromAnchor } = require('../../src/shared/anchorSeed');
-const { configFingerprint } = require('../../src/shared/collector');
+const { configFingerprint: collectorConfigFingerprint } = require('../../src/shared/collector');
+
+// Match the simulated device OS instead of the CI runner OS.
+function configFingerprint(...args) {
+  args[7] = { platform: 'darwin', ...args[7] };
+  return collectorConfigFingerprint(...args);
+}
 const { qoderCnDataPaths } = require('../../src/shared/providers/qodercn/paths');
-const { aggregateDevices, emptyPeriod } = require('../../src/shared/usage');
+const { aggregateDevices, emptyPeriod, extractUsageFromTokscale } = require('../../src/shared/usage');
+const { periodIdentityStateFromSource } = require('../../src/shared/usage/sourceIdentity');
 
 const CLIENTS = 'claude,codex';
 const ALL_TIME_SINCE = '2024-01-01';
@@ -87,7 +95,8 @@ test('a Windows cold-start seed reads APPDATA settings without changing its reco
   const options = seedOptions({ homeDir, env, now: new Date('2026-10-12T04:00Z'),
     dailyHistoryArchiveEnabled: true, pricingRevision: 'fixed' });
   const saved = anchorFixture({ dateKey: '2026-10-11', timeZone: 'America/Los_Angeles',
-    fullScanAt: '2026-10-12T03:00Z', configFingerprint: configFingerprint(CLIENTS, ALL_TIME_SINCE, true, '', '', null, 'fixed') });
+    fullScanAt: '2026-10-12T03:00Z', configFingerprint: configFingerprint(CLIENTS, ALL_TIME_SINCE, true, '', '', null, 'fixed',
+      { platform: 'win32', wslScanEnabled: true }) });
   assert.ok(deviceRecordFromAnchor(saved, { ...options, platform: 'win32' }));
   for (const platform of ['win32-x64', 'win32-arm64']) {
     const record = deviceRecordFromAnchor(saved, { ...options, platform });
@@ -103,22 +112,24 @@ test('a Windows cold-start seed reads APPDATA settings without changing its reco
 
 test('WSL status follows the platform and the toggle, the way a collected record does', () => {
   const wslStatus = { state: 'active', detected: ['claude'], withData: ['claude'] };
+  const windowsFingerprint = enabled => configFingerprint(CLIENTS, ALL_TIME_SINCE, true, '', '', null, undefined,
+    { platform: 'win32', wslScanEnabled: enabled });
 
   const restored = deviceRecordFromAnchor(
-    anchorFixture({ wslStatus }),
+    anchorFixture({ wslStatus, configFingerprint: windowsFingerprint(true) }),
     seedOptions({ wslSupported: true, platform: 'win32-x64' })
   );
   assert.deepEqual(restored.wslStatus, wslStatus);
 
   // Disabled is a state the panel renders, not the same as not knowing yet.
   const off = deviceRecordFromAnchor(
-    anchorFixture({ wslStatus }),
+    anchorFixture({ wslStatus, configFingerprint: windowsFingerprint(false) }),
     seedOptions({ wslSupported: true, wslScanEnabled: false, platform: 'win32-x64' })
   );
   assert.deepEqual(off.wslStatus, { state: 'disabled', detected: [], withData: [] });
 
   const noSnapshot = deviceRecordFromAnchor(
-    anchorFixture(),
+    anchorFixture({ configFingerprint: windowsFingerprint(true) }),
     seedOptions({ wslSupported: true, platform: 'win32-x64' })
   );
   assert.equal(Object.prototype.hasOwnProperty.call(noSnapshot, 'wslStatus'), false);
@@ -139,7 +150,8 @@ test('the cold-start seed accepts an anchor configured for Qoder CN', () => {
     const env = {};
     const cnPaths = qoderCnDataPaths({ homeDir, env, platform: sourcePlatform });
     const anchor = anchorFixture({
-      configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, cnPaths.dbPaths[0], cnPaths.projectsDir)
+      configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, cnPaths.dbPaths[0], cnPaths.projectsDir, null, undefined,
+        { platform: sourcePlatform, wslScanEnabled: true })
     });
     const record = deviceRecordFromAnchor(anchor, seedOptions({ clients, homeDir, env, sourcePlatform }));
     assert.ok(record, sourcePlatform);
@@ -147,6 +159,42 @@ test('the cold-start seed accepts an anchor configured for Qoder CN', () => {
     assert.deepEqual(record.trackedClients, ['claude', 'qodercn']);
     assert.equal(record.platform, 'darwin-arm64');
   }
+});
+
+test('legacy Windows anchors without WSL source configuration cannot seed old mirror accounting', () => {
+  const legacy = anchorFixture();
+  // Derive the exact old format while keeping pricing and timezone unchanged.
+  legacy.configFingerprint = configFingerprint(CLIENTS, ALL_TIME_SINCE, true, '', '', null, undefined,
+    { platform: 'win32', wslScanEnabled: true }).replace(/\|wslClaude:on\|wslRoots:\[\]/, '');
+  assert.equal(deviceRecordFromAnchor(legacy, seedOptions({ platform: 'win32-x64', wslSupported: true })), null);
+});
+
+test('cold seed carries matching accepted full-period claims and deduplicates against another source', () => {
+  const eventId = `sha256:${createHash('sha256').update('same Claude event').digest('hex')}`;
+  const period = extractUsageFromTokscale({ entries: [{ client: 'claude', sessionId: 's', model: 'claude-opus-4-8', provider: 'anthropic', input: 5, cost: 0.05, messages: 1 }] });
+  const source = { version: 2, eventIdentityVersion: 2, capturedAt: FULL_SCAN_AT,
+    scopes: [{ id: 'scope', clients: ['claude'], readStatus: 'complete', identityStatus: 'exact' }],
+    sessions: [{ client: 'claude', sessionId: 's', scopeId: 'scope', events: [{ id: eventId, observationKind: 'native',
+      contributions: [{ timestamp: Date.parse(FULL_SCAN_AT), modelId: 'claude-opus-4-8', providerId: 'anthropic',
+        tokens: { input: 5, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0.05, messages: 1 }] }] }] };
+  const state = periodIdentityStateFromSource(source, period, { timeZone: 'Asia/Shanghai' });
+  const saved = anchorFixture({ today: period, month: period, allTime: period,
+    nativeIdentityState: { today: state, month: state, allTime: state },
+    todayIdentityState: { ...state, events: [] } });
+  const record = deviceRecordFromAnchor(saved, seedOptions());
+  assert.equal(record.usageIdentity.periods.today.events[0].id, eventId, 'seed uses the saved full capture, not later watch claims');
+  const mirror = structuredClone(record);
+  mirror.deviceId = 'device-b';
+  for (const proof of Object.values(mirror.usageIdentity.periods)) proof.events[0].observationKind = 'mirror';
+  const aggregate = aggregateDevices([record, mirror], 0, NOW.getTime());
+  assert.equal(aggregate.periods.today.totalTokens, 5);
+  assert.equal(aggregate.periods.month.totalTokens, 5);
+  assert.equal(aggregate.periods.allTime.totalTokens, 5);
+  const oversized = structuredClone(saved);
+  oversized.today = emptyPeriod();
+  assert.equal(deviceRecordFromAnchor(oversized, seedOptions()).usageIdentity.periods.today, undefined);
+  const malformed = anchorFixture({ nativeIdentityState: { today: { events: null } } });
+  assert.equal(deviceRecordFromAnchor(malformed, seedOptions()).usageIdentity, undefined);
 });
 
 test('the seed refuses a Qoder CN anchor that predates the JSONL source', () => {

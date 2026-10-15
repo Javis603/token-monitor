@@ -10,7 +10,7 @@ const {
   normalizeDailyHistoryArchive, sourceSnapshotsFromGraphs, retainDailyHistory,
   retainLiveDailyHistory, readDailyHistoryArchive, writeDailyHistoryArchive
 } = require('../../src/shared/dailyHistoryArchive');
-const { projectSourceLedger } = require('../../src/shared/usage/sourceLedger');
+const { getSourceLedger, projectSourceLedger } = require('../../src/shared/usage/sourceLedger');
 const { parseGraphResult, normalizeHistory } = require('../../src/shared/history');
 const { applySourceDailyUsage } = require('../../src/shared/usage/sourceDailyUsage');
 const { captureSessionUsageArchive, applySessionUsageArchive, updateSessionUsageArchive } = require('../../src/shared/usage/sessionUsageArchive');
@@ -68,6 +68,34 @@ function assertPeriods(summary, expected) {
     assert.equal(Object.values(summary[name].sessions).reduce((sum, row) => sum + row.totalTokens, 0), expected, name);
   }
 }
+
+test('accepted event kind, unpriced counters and timed samples survive archive restart and partial reads', () => {
+  const row = session('ssh-session', 100, `sha256:${'a'.repeat(64)}`);
+  row.events[0].observationKind = 'mirror';
+  Object.assign(row.events[0].contributions[0], {
+    cost: 0, pricing: { unpricedTokens: 100, unpricedMessages: 1 },
+    performance: { totalDurationMs: 200, timedTokens: 100, timedOutputTokens: 0, sampleCount: 1 }
+  });
+  const archive = roundTrip(capture({}, graph([row])));
+  const projection = graphFromDailyHistoryArchive([], archive, options).sourceUsage;
+  const accepted = getSourceLedger(projection);
+  assert.equal(accepted.scopes['scanner-domain'].events[row.events[0].id].observationKind, 'mirror');
+  assert.deepEqual(accepted.scopes['scanner-domain'].events[row.events[0].id].contributions[0].pricing,
+    { unpricedTokens: 100, unpricedMessages: 1 });
+  assert.equal(accepted.scopes['scanner-domain'].events[row.events[0].id].contributions[0].performance.totalDurationMs, 200);
+  assert.equal(getSourceLedger(JSON.parse(JSON.stringify(projection))), null);
+  const visibleUsage = visible(archive);
+  for (const name of ['today', 'month', 'allTime']) assert.equal(visibleUsage[name].unpricedTokens, 100);
+  const history = normalizeHistory(parseGraphResult(graphFromDailyHistoryArchive([], archive, options)), options);
+  assert.equal(history.summary.unpricedTokens, 100);
+  assert.equal(history.daily[0].perClient.claude.unpricedTokens, 100);
+  assert.equal(history.monthly[0].perModel.model.unpricedTokens, 100);
+  const failed = graph([], '2026-10-11T13:00:00Z', { scopes: [{ id: 'scanner-domain', clients: ['claude'], readStatus: 'partial', identityStatus: 'exact' }] });
+  const retained = roundTrip(capture(archive, failed));
+  assert.equal(total(retained), 100);
+  assert.equal(getSourceLedger(graphFromDailyHistoryArchive([], retained, options).sourceUsage)
+    .scopes['scanner-domain'].events[row.events[0].id].observationKind, 'mirror');
+});
 
 test('ledger projection preserves main session identities and a cross-client parent through retention', () => {
   const sessionId = '11111111-1111-4111-8111-111111111111';

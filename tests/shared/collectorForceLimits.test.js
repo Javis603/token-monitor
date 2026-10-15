@@ -161,6 +161,7 @@ test('anchored Proma refresh derives broader windows from the fresh tokscale tod
   };
 
   const summary = await collectUsageOnce({
+    wslScanEnabled: false, // Host-only synthetic anchor.
     clients: 'claude,proma',
     allTimeSince: '2026-01-01',
     commandTimeoutMs: 1000,

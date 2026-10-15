@@ -1,6 +1,7 @@
 'use strict';
 
 const { isSessionActivityClient } = require('./sessionActivityProviders');
+const { normalizeUsageIdentity, reconcilePeriodIdentities, reconcileHistoryIdentities } = require('./usageIdentity');
 
 const PERIODS = ['today', 'month', 'allTime'];
 const { normalizeLiveActivity, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
@@ -578,7 +579,10 @@ function collectUsageRows(node, rows) {
     rows.push(node);
     return;
   }
-  for (const value of Object.values(node)) {
+  for (const [key, value] of Object.entries(node)) {
+    // Opt-in source evidence is an alternate description of these same rows,
+    // not another accounting input (including local-only root diagnostics).
+    if (key === 'sourceUsage' || key === 'usageIdentity') continue;
     if (value && (Array.isArray(value) || typeof value === 'object')) collectUsageRows(value, rows);
   }
 }
@@ -1162,7 +1166,10 @@ function normalizeModelThroughput(value, period) {
 function entryThroughput(row, output) {
   const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
   const timedDurationMs = Math.max(0, Math.round(firstNumber(performance, TIMED_DURATION_KEYS)));
-  return { timedOutputTokens: timedDurationMs > 0 ? output : 0, timedDurationMs };
+  const exactOutput = performance?.timedOutputTokens;
+  return { timedOutputTokens: timedDurationMs > 0
+    ? (Number.isSafeInteger(exactOutput) && exactOutput >= 0 ? Math.min(output, exactOutput) : output) : 0,
+  timedDurationMs };
 }
 
 function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
@@ -1360,6 +1367,8 @@ function normalizeDeviceRecord(record) {
       projectsEnabled: normalized.projectsEnabled !== false
     });
   }
+  const identity = normalizeUsageIdentity(record.usageIdentity, normalized);
+  if (identity) normalized.usageIdentity = identity;
   return normalized;
 }
 
@@ -1557,6 +1566,8 @@ function mergeDeviceRecord(existing, incoming) {
   const normalizedExisting = normalizeDeviceRecord(existing);
   if (incoming?.limitsOnly === true) {
     normalizedIncoming.periods = normalizedExisting.periods;
+    if (normalizedExisting.usageIdentity) normalizedIncoming.usageIdentity = normalizedExisting.usageIdentity;
+    else delete normalizedIncoming.usageIdentity;
     // The three attribution fields describe the usage this branch is carrying
     // forward, so they have to travel with it. Scoped to `limitsOnly` on
     // purpose: a full update from an agent too old to send them is stating that
@@ -1590,6 +1601,15 @@ function mergeDeviceRecord(existing, incoming) {
   if (hasIncomingTrackedClients) {
     preserveUntrackedClientUsage(normalizedExisting, normalizedIncoming, normalizedIncoming.trackedClients || []);
   }
+  // History has its own capture cadence; its evidence travels with the retained
+  // History, while a full legacy usage update clears period claims.
+  if (!hasIncomingHistory && normalizedExisting.usageIdentity?.history) {
+    normalizedIncoming.usageIdentity ||= { version: 1, eventIdentityVersion: 2, periods: {} };
+    normalizedIncoming.usageIdentity.history = normalizedExisting.usageIdentity.history;
+  }
+  const identity = normalizeUsageIdentity(normalizedIncoming.usageIdentity, normalizedIncoming);
+  if (identity) normalizedIncoming.usageIdentity = identity;
+  else delete normalizedIncoming.usageIdentity;
   return normalizedIncoming;
 }
 
@@ -1623,7 +1643,12 @@ function carryDeviceHistory(previous, incoming) {
   if (!incoming || typeof incoming !== 'object') return incoming;
   if (hasOwn(incoming, 'history')) return incoming;
   if (previous && typeof previous === 'object' && hasOwn(previous, 'history')) {
-    return { ...incoming, history: previous.history };
+    const next = { ...incoming, history: previous.history };
+    if (previous.usageIdentity?.history) {
+      next.usageIdentity = { version: 1, eventIdentityVersion: 2, ...incoming.usageIdentity,
+        periods: incoming.usageIdentity?.periods || {}, history: previous.usageIdentity.history };
+    }
+    return next;
   }
   return incoming;
 }
@@ -1715,10 +1740,17 @@ function aggregateHistory(devices, options = {}) {
   const clockToday = localDayKey(now);
   const histories = [];
   let reportedToday = '';
-  for (const record of devices) {
-    const normalized = normalizeRecordHistoryFields(record);
+  const records = devices.map(record => {
+    const normalized = { ...normalizeRecordHistoryFields(record), deviceId: record.deviceId };
+    const identity = normalizeUsageIdentity(record.usageIdentity, normalized);
+    if (identity) normalized.usageIdentity = identity;
+    return normalized;
+  });
+  const reconciled = reconcileHistoryIdentities(records);
+  for (let index = 0; index < records.length; index += 1) {
+    const normalized = records[index];
     if (!hasOwn(normalized, 'history') || normalized.history === null) continue;
-    histories.push(normalized.history);
+    histories.push(reconciled[index]);
     if (!normalized.history.daily.length) continue;
     const reported = calendarDayKey(normalized.periodWindows?.today?.key);
     if (!reported) continue;
@@ -1832,8 +1864,11 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
   const periodProjectsOmitted = {};
   for (const periodName of PERIODS) aggregate.periods[periodName] = emptyPeriod();
   const now = nowMs;
-  for (const record of devices) {
-    const normalized = normalizeRecord(record);
+  const records = devices.map(normalizeRecord);
+  const reconciled = Object.fromEntries(PERIODS.map(name => [name,
+    reconcilePeriodIdentities(records, name, record => !isPeriodExpired(record, name, now))]));
+  for (let index = 0; index < records.length; index += 1) {
+    const normalized = records[index];
     const ageMs = now - Date.parse(normalized.receivedAt || normalized.updatedAt || 0);
     const deviceStaleAfterMs = staleAfterMsForSyncUpload(normalized.syncUploadIntervalMs, staleAfterMs);
     const stale = Number.isFinite(ageMs) && deviceStaleAfterMs > 0 ? ageMs > deviceStaleAfterMs : false;
@@ -1885,7 +1920,7 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
     // pass here only re-walked every session again.
     for (const periodName of PERIODS) {
       if (isPeriodExpired(normalized, periodName, now)) continue;
-      addPeriodInto(aggregate.periods[periodName], normalized.periods[periodName]);
+      addPeriodInto(aggregate.periods[periodName], reconciled[periodName][index]);
     }
   }
   aggregate.limits = aggregateLimits(aggregate.devices, staleAfterMs, now);

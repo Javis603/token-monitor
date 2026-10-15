@@ -46,6 +46,7 @@ function normalizeObservation(value, sourceIdentity = false) {
   const tokens = Math.max(0, Math.round(num(value.tokens)));
   const cost = Math.max(0, num(value.cost));
   const messages = Math.max(0, Math.round(num(value.messages)));
+  const unpricedTokens = Math.min(tokens, Math.max(0, Math.round(num(value.unpricedTokens ?? value.pricing?.unpricedTokens))));
   const reasoningTokens = Math.max(0, Math.round(num(value.reasoningTokens ?? value.reasoning_tokens)));
   const rawCacheReadTokens = Math.max(0, Math.round(num(value.cacheReadTokens ?? value.cache_read_tokens)));
   const rawCacheWriteTokens = Math.max(0, Math.round(num(value.cacheWriteTokens ?? value.cache_write_tokens)));
@@ -80,6 +81,7 @@ function normalizeObservation(value, sourceIdentity = false) {
     tokens,
     cost,
     messages,
+    ...(unpricedTokens > 0 ? { unpricedTokens } : {}),
     ...(typeof value.pricingRevision === 'string' ? { pricingRevision: value.pricingRevision } : {}),
     ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {}),
     ...(tokenComponentsAvailable ? { tokenComponentsAvailable: true } : {}),
@@ -98,6 +100,7 @@ function addObservation(previous, candidate) {
     tokens: previous.tokens + candidate.tokens,
     cost: previous.cost + candidate.cost,
     messages: previous.messages + candidate.messages,
+    unpricedTokens: num(previous.unpricedTokens) + num(candidate.unpricedTokens),
     reasoningTokens: num(previous.reasoningTokens) + num(candidate.reasoningTokens),
     tokenComponentsAvailable: previous.tokenComponentsAvailable === true
       && candidate.tokenComponentsAvailable === true,
@@ -896,7 +899,8 @@ function dayContribution(day) {
       },
       tokenComponentsAvailable: observation.tokenComponentsAvailable === true,
       ...(num(observation.unclassifiedTokens) > 0 ? { unclassifiedTokens: num(observation.unclassifiedTokens) } : {}),
-      cost: observation.cost, messages: observation.messages
+      cost: observation.cost, messages: observation.messages,
+      ...(observation.unpricedTokens > 0 ? { unpricedTokens: observation.unpricedTokens } : {})
     }))
   };
 }

@@ -1,8 +1,10 @@
 'use strict';
 
+const { normalizeUsageIdentity, packUsageIdentity } = require('./usageIdentity');
+
 const { MAX_JSON_BODY_BYTES } = require('./http');
 const { syncLimits } = require('./limits/core');
-const { stripSessionTextFromDeviceRecord } = require('./usage');
+const { normalizeDeviceRecord, stripSessionTextFromDeviceRecord } = require('./usage');
 const { isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
@@ -180,6 +182,7 @@ function buildSyncPayload(summary, {
   omitAllTimeProjects = false,
   omitHistoryTokenComponents = false,
   omitModelThroughput = false,
+  omitUsageIdentity = false,
   syncSessionTitles = false,
   sessionTitleSyncGeneration
 } = {}) {
@@ -192,6 +195,7 @@ function buildSyncPayload(summary, {
       .map((key) => [key, period[key]]));
   };
   const source = { ...summary, limits: syncLimits(summary.limits) };
+  delete source.usageIdentity;
   // Collector provenance is local even when archive capture is disabled.
   delete source.sessionArchiveSource;
   if (hasOwn(source, 'allTime')) source.allTime = withoutAllTimeSessions(source.allTime);
@@ -247,6 +251,17 @@ function buildSyncPayload(summary, {
       if (payload[period]) delete payload[period].modelThroughput;
     }
   }
+  // Validate after optional detail was removed. Opaque event evidence never
+  // transports source paths, prompts or private session metadata.
+  const identity = omitUsageIdentity ? null : normalizeUsageIdentity(summary.usageIdentity, normalizeDeviceRecord(payload));
+  if (identity) {
+    for (const event of identity.periods.allTime?.events || []) {
+      delete event.sessionId;
+      delete event.usage.sessions;
+    }
+    payload.usageIdentity = packUsageIdentity(identity);
+    if (!payload.usageIdentity) delete payload.usageIdentity;
+  } else delete payload.usageIdentity;
   return payload;
 }
 
@@ -263,6 +278,13 @@ function serializeSyncPayload(summary, options = {}) {
     return { payload, body, bytes: body ? Buffer.byteLength(body, 'utf8') : 0 };
   }
   let body = JSON.stringify(payload);
+  if (Buffer.byteLength(body, 'utf8') > maxBytes && payload.usageIdentity) {
+    // Evidence is optional; dropping it preserves accepted counters and the
+    // legacy additive behavior. Never retain a truncated proof.
+    buildOptions.omitUsageIdentity = true;
+    payload = buildSyncPayload(summary, buildOptions);
+    body = JSON.stringify(payload);
+  }
   if (Buffer.byteLength(body, 'utf8') > maxBytes
     && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput)) {
     // Optional live attribution must never evict aggregate usage or session detail.
