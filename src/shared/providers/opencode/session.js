@@ -47,11 +47,10 @@ function openDb(dbPath, sqliteMod) {
 // `session_message`, where a message row carries its own content items. 1.x wrote
 // the parallel `session`/`message`/`part` triple instead and 2.x stopped updating
 // it, so that triple is frozen at the upgrade while `session_message` keeps
-// growing. The current pair is the superset — every legacy message id still
-// exists in `session_message` — so it is read first and the legacy triple is only
-// the fallback for a database written before the current tables (or a session the
-// upgrade did not carry over). Reading `message`/`part` alone is what reported
-// "transcript not found" for every session created after the upgrade.
+// growing. Prefer current messages, but the v1 migration replaces a compaction
+// prompt and its paid summary with one compaction row that omits usage, and drops
+// task assistants. Restore only verified omitted usage; the two histories cannot
+// simply be added together. Unmigrated sessions still use the legacy triple.
 function tableColumns(db, table) {
   try {
     return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((column) => String(column.name)));
@@ -100,67 +99,56 @@ function createdMsExpr(columns) {
 // ---------------------------------------------------------------------------
 function readMessageActivity(db, shape, ids, placeholders) {
   const lastMessageBySession = new Map();
-  // The newest assistant row's `finish` is OpenCode's turn-end signal, the
-  // same fact Claude states as `stop_reason`: `stop` means the model
-  // finished its answer, `tool-calls` means it paused to run tools and is
-  // still mid-turn. Read beside the last-message timestamp so one query
-  // answers both, and only `stop` counts as finished.
-  // Tri-state per session: true = the newest word was a completed answer,
-  // false = a prompt is waiting on one, absent = no evidence. A boolean
-  // pair could not express the third case, and collapsing it into "omit"
-  // is what let a stale completion survive.
   const turnEndedBySession = new Map();
   const columns = tableColumns(db, shape.messageTable);
   if (!columns.has('session_id') || !columns.has('data')) return { lastMessageBySession, turnEndedBySession };
 
   const createdMs = createdMsExpr(columns);
+  // Settings selections are persisted messages in v2, but do not represent new
+  // work and must not renew the running window of an otherwise idle session.
+  const activityFilter = shape.contentInRow
+    ? "AND type NOT IN ('model-switched', 'agent-switched', 'location-switched')" : '';
   const messageSql = `SELECT session_id AS sessionId,
                              MAX(${createdMs}) AS lastMessageMs
                       FROM ${shape.messageTable}
                       WHERE session_id IN (${placeholders})
+                        ${activityFilter}
                       GROUP BY session_id`;
   for (const row of db.prepare(messageSql).all(...ids)) {
     lastMessageBySession.set(String(row.sessionId), row.lastMessageMs);
   }
 
-  // One row per session: the newest message. Windowed rather than grouped,
-  // because the role/finish values belong to that single row and SQLite's
-  // bare-column grouping would pick an arbitrary one. (A correlated subquery is
-  // the obvious alternative, but `inner` is a reserved word and the resulting
-  // syntax error is swallowed by the caller's catch, which reads as "this
-  // session has no metadata".)
-  // The boundary belongs to the newest message, not to the newest assistant
-  // message: a prompt accepted after a completion has already started the next
-  // turn, so that completion no longer describes the current one. Taking the
-  // newest assistant row unconditionally latched the previous `stop` and marked a
-  // freshly prompted session finished.
-  // Order by the same effective timestamp the query above used rather than an
-  // unconditional `time_created, id`: the guard only requires a session id plus
-  // the message payload, so a schema without `id` (or without `time_created`)
-  // would make SQLite reject this query, and the caller's catch would read that
-  // as "this session has no metadata" and blank its title and timestamps.
+  // v2's durable seq, not the clock or message id, defines conversation order.
+  // Non-boundary messages leave the last real boundary intact. An unfinished
+  // assistant or running manual compaction clears a prior idle without a prompt.
   const orderId = columns.has('id') ? 'id' : 'rowid';
+  const order = shape.contentInRow && columns.has('seq') ? 'seq DESC' : `${createdMs} DESC, ${orderId} DESC`;
+  const boundaryFilter = shape.contentInRow
+    ? "AND (type IN ('user', 'assistant', 'idle') OR (type = 'compaction' AND json_extract(data,'$.status') = 'running'))" : '';
   const finishSql = `SELECT sessionId, role, finish FROM (
                        SELECT session_id AS sessionId,
                               ${shape.role} AS role,
                               json_extract(data,'$.finish') AS finish,
                               ROW_NUMBER() OVER (
                                 PARTITION BY session_id
-                                ORDER BY ${createdMs} DESC,
-                                         ${orderId} DESC
+                                ORDER BY ${order}
                               ) AS rank
                        FROM ${shape.messageTable}
                        WHERE session_id IN (${placeholders})
                          AND json_valid(data)
+                         ${boundaryFilter}
                      ) WHERE rank = 1`;
   for (const row of db.prepare(finishSql).all(...ids)) {
     const sessionId = String(row.sessionId);
     const role = String(row.role || '');
     const finish = String(row.finish || '');
     if (role === 'assistant') {
-      // A row with no `finish` is the pre-v2 shape, which recorded no
-      // boundary at all and therefore is not evidence of one.
-      if (!finish) continue;
+      // Missing finish is an active v2 assistant; older stores may never have
+      // recorded this field, so preserve their unknown state.
+      if (!finish) {
+        if (shape.contentInRow) turnEndedBySession.set(sessionId, false);
+        continue;
+      }
       // Only a pause to run tools leaves the turn open. Every other
       // reason OpenCode can record is terminal — it stops the loop and
       // waits for the next prompt — including `length` (the output
@@ -168,22 +156,14 @@ function readMessageActivity(db, shape, ids, placeholders) {
       // "still generating" held the running mark for the whole recency
       // window after the model had already stopped.
       turnEndedBySession.set(sessionId, finish !== 'tool-calls');
-    } else if (role === 'user') {
-      // The newest message is the user's, so a prompt is waiting on an
-      // answer and the previous completion no longer describes this turn.
+    } else if (role === 'user' || (shape.contentInRow && role === 'compaction')) {
+      // A prompt or explicitly running compaction starts work. Completed/failed
+      // compactions are excluded above; they are not conversation terminals.
       turnEndedBySession.set(sessionId, false);
     } else if (role === 'idle') {
-      // The current shape writes an `idle` row when the session's turn loop
-      // stops, carrying the outcome (`succeeded`/`interrupted`). It is the
-      // explicit completion the legacy shape stated as an assistant `finish`,
-      // and it lands after that assistant row — so a turn that paused on
-      // `tool-calls` is over once this row is the newest one. Without it the
-      // busiest OpenCode sessions (21 of 45 in one real database) would fall
-      // back to a time window instead of being known to have stopped.
+      // The turn loop has stopped, including after a tool-calls pause.
       turnEndedBySession.set(sessionId, true);
     }
-    // Any other kind (system, synthetic, compaction, model-switched…) is not a
-    // turn boundary, so it leaves the session without evidence either way.
   }
   return { lastMessageBySession, turnEndedBySession };
 }
@@ -277,16 +257,19 @@ function resolveSessionMetadata(sessionIds, context) {
 // ---------------------------------------------------------------------------
 // Session detail events (neutral shape consumed by sessionDetail.js)
 // ---------------------------------------------------------------------------
-const MESSAGES_SQL =
-  `SELECT id,
-          CAST(COALESCE(json_extract(data,'$.time.created'), time_created) AS INTEGER) AS createdMs,
-          json_extract(data,'$.role')             AS role,
-          json_extract(data,'$.cost')             AS cost,
+const USAGE_COLUMNS_SQL =
+  `json_extract(data,'$.cost')             AS cost,
           json_extract(data,'$.tokens.input')     AS tInput,
           json_extract(data,'$.tokens.output')    AS tOutput,
           json_extract(data,'$.tokens.reasoning') AS tReasoning,
           json_extract(data,'$.tokens.cache.read')  AS tCacheRead,
-          json_extract(data,'$.tokens.cache.write') AS tCacheWrite
+          json_extract(data,'$.tokens.cache.write') AS tCacheWrite`;
+
+const MESSAGES_SQL =
+  `SELECT id,
+          CAST(COALESCE(json_extract(data,'$.time.created'), time_created) AS INTEGER) AS createdMs,
+          json_extract(data,'$.role') AS role,
+          ${USAGE_COLUMNS_SQL}
    FROM message
    WHERE session_id = ? AND json_valid(data)
    ORDER BY createdMs ASC, id ASC`;
@@ -300,16 +283,25 @@ const PARTS_SQL =
    WHERE session_id = ? AND json_valid(data)
    ORDER BY time_created ASC, id ASC`;
 
-// The current shape stores the payload of a message in its own row, so the whole
-// transcript arrives in one query and the content items are unpacked below.
+// Project before crossing into JS: tool output, reasoning and answer text are
+// unused by Session Detail and can dwarf the usage and tool names it needs.
 const CURRENT_MESSAGES_SQL =
   `SELECT id,
           CAST(COALESCE(json_extract(data,'$.time.created'), time_created) AS INTEGER) AS createdMs,
           type AS role,
-          data
+          json_type(data) AS payloadType,
+          CASE WHEN type = 'user' THEN json_extract(data,'$.text') END AS text,
+          ${USAGE_COLUMNS_SQL},
+          (json_extract(data,'$.tokens') IS NOT NULL OR json_extract(data,'$.cost') IS NOT NULL) AS hasUsage,
+          CASE WHEN type = 'assistant' THEN (
+            SELECT json_group_array(json_extract(item.value,'$.name'))
+            FROM json_each(CASE WHEN json_type(session_message.data,'$.content') = 'array'
+              THEN json_extract(session_message.data,'$.content') ELSE '[]' END) AS item
+            WHERE CASE WHEN item.type = 'object' THEN json_extract(item.value,'$.type') = 'tool' ELSE 0 END
+          ) ELSE '[]' END AS toolsJson
    FROM session_message
    WHERE session_id = ? AND json_valid(data)
-   ORDER BY createdMs ASC, id ASC`;
+   ORDER BY seq ASC`;
 
 function mapTokens(r) {
   const input = num(r.tInput);
@@ -324,57 +316,95 @@ function mapTokens(r) {
   return { input, output, cacheRead, cacheWrite, reasoning, total };
 }
 
-// Content items carry the same text/tool facts the legacy `part` rows did, under
-// the names the current shape uses (`name` rather than `tool`).
-function collectContentParts(parts, messageId, content) {
-  if (!Array.isArray(content)) return;
-  for (const item of content) {
-    if (!item || typeof item !== 'object') continue;
-    if (item.type === 'text' && item.text) parts.push({ messageId, type: 'text', text: item.text });
-    else if (item.type === 'tool' && item.name) parts.push({ messageId, type: 'tool', tool: item.name });
+function readMigratedUsage(db, sessionId) {
+  const supplements = new Map();
+  const columns = tableColumns(db, 'message');
+  if (!['id', 'session_id', 'data', 'time_created'].every((column) => columns.has(column))) return supplements;
+  const partColumns = tableColumns(db, 'part');
+  const currentId = `(SELECT current.id FROM session_message AS current
+                     WHERE current.session_id = message.session_id AND current.id = message.id)`;
+  const compactionId = `(SELECT current.id FROM session_message AS current
+                        WHERE current.session_id = message.session_id AND current.type = 'compaction'
+                          AND current.id = json_extract(message.data,'$.parentID'))`;
+  const hasParts = ['message_id', 'session_id', 'data'].every((column) => partColumns.has(column));
+  const parentHasPart = (type) => hasParts
+    ? `EXISTS (SELECT 1 FROM message AS parent JOIN part ON part.message_id = parent.id AND part.session_id = parent.session_id
+                  WHERE parent.session_id = message.session_id AND parent.id = json_extract(message.data,'$.parentID')
+                    AND json_valid(parent.data) AND json_extract(parent.data,'$.role') = 'user'
+                    AND json_valid(part.data) AND json_extract(part.data,'$.type') = '${type}')` : '0';
+  const isSummary = `(json_extract(data,'$.summary') = 1 AND (${compactionId} IS NOT NULL OR ${parentHasPart('compaction')}))`;
+  const isSubtask = hasParts
+    ? `(${parentHasPart('subtask')} AND EXISTS (SELECT 1 FROM part AS owned
+         WHERE owned.session_id = message.session_id AND owned.message_id = message.id AND json_valid(owned.data)
+           AND json_extract(owned.data,'$.type') = 'tool' AND json_extract(owned.data,'$.tool') = 'task'))` : '0';
+  const tools = hasParts
+    ? `(SELECT json_group_array(json_extract(owned.data,'$.tool')) FROM part AS owned
+        WHERE owned.session_id = message.session_id AND owned.message_id = message.id AND json_valid(owned.data)
+          AND json_extract(owned.data,'$.type') = 'tool')` : "'[]'";
+  const rows = db.prepare(`SELECT id, time_created AS orderMs, json_extract(data,'$.parentID') AS parentId,
+                                 ${currentId} AS currentId, ${compactionId} AS compactionId,
+                                 CASE WHEN ${isSummary} THEN 'compaction-summary' END AS type,
+                                 CASE WHEN ${currentId} IS NULL THEN ${tools} ELSE '[]' END AS toolsJson,
+                                 ${createdMsExpr(columns)} AS createdMs, ${USAGE_COLUMNS_SQL}
+                          FROM message
+                          WHERE session_id = ? AND json_valid(data)
+                            AND (${currentId} IS NOT NULL OR (
+                              json_extract(data,'$.role') = 'assistant' AND (${isSummary} OR ${isSubtask})))`).iterate(sessionId);
+  const entries = [];
+  try {
+    for (const row of rows) entries.push(row);
+  } finally {
+    rows.return();
   }
+  // Match upstream transformSession's stored-time/id order, including its JS
+  // localeCompare tie-break. Failed/incomplete compactions and task assistants
+  // have no new row: place their usage after the last surviving legacy id, without
+  // reordering v2 seq or fabricating seq from clocks. A legacy-only prefix stays
+  // ahead of messages appended after migration, even when no old id survived.
+  entries.sort((a, b) => a.orderMs - b.orderMs || a.id.localeCompare(b.id));
+  let anchor = null;
+  for (const row of entries) {
+    if (row.currentId) { anchor = row.currentId; continue; }
+    const position = (row.type === 'compaction-summary' && row.compactionId) || anchor;
+    if (!supplements.has(position)) supplements.set(position, []);
+    supplements.get(position).push({ ...row, role: 'assistant' });
+  }
+  return supplements;
 }
 
-// Only the current shape needs this: it reads one table and parses JSON in JS,
-// because the payload (role, tokens, cost, content) lives inside the row.
-// Returns null when the session has no message row at all, which is the signal
-// that this database does not hold its transcript.
 function readSessionEventsCurrent(db, sessionId) {
-  const rows = db.prepare(CURRENT_MESSAGES_SQL).all(sessionId);
-  if (rows.length === 0) return null;
-  const messages = [];
+  const supplements = readMigratedUsage(db, sessionId);
+  const rows = db.prepare(CURRENT_MESSAGES_SQL).iterate(sessionId);
+  let found = false;
+  const messages = [...(supplements.get(null) || [])];
   const parts = [];
-  for (const row of rows) {
-    let data;
-    try { data = JSON.parse(row.data); } catch (_) { continue; }
-    if (!data || typeof data !== 'object') continue;
-    const role = String(row.role || data.role || '');
-    if (role === 'user') {
-      // A prompt is the row's own `text`; it has no content items.
-      if (typeof data.text === 'string' && data.text) parts.push({ messageId: row.id, type: 'text', text: data.text });
-      messages.push({ id: row.id, role, createdMs: row.createdMs });
-    } else if (role === 'assistant') {
-      collectContentParts(parts, row.id, data.content);
-      // An aborted or in-flight turn can omit tokens and cost; num() reads both
-      // as zero rather than dropping the turn's row.
-      const tokens = data.tokens && typeof data.tokens === 'object' ? data.tokens : {};
-      const cache = tokens.cache && typeof tokens.cache === 'object' ? tokens.cache : {};
-      messages.push({
-        id: row.id,
-        role,
-        createdMs: row.createdMs,
-        cost: data.cost,
-        tInput: tokens.input,
-        tOutput: tokens.output,
-        tReasoning: tokens.reasoning,
-        tCacheRead: cache.read,
-        tCacheWrite: cache.write
-      });
+  try {
+    for (const row of rows) {
+      found = true;
+      if (!['object', 'array'].includes(row.payloadType)) continue;
+      if (row.role === 'user') {
+        if (typeof row.text === 'string' && row.text) parts.push({ messageId: row.id, type: 'text', text: row.text });
+        messages.push(row);
+      } else if (row.role === 'assistant') {
+        messages.push(row);
+      } else if (row.role === 'compaction') {
+        // Native compactions may already carry the omitted summary's usage.
+        if (row.hasUsage) messages.push({ ...row, role: 'assistant', type: 'compaction-summary' });
+      }
+      for (const supplement of supplements.get(row.id) || []) {
+        if (row.role === 'compaction' && row.hasUsage && supplement.type === 'compaction-summary' && supplement.parentId === row.id) continue;
+        messages.push(supplement);
+      }
     }
-    // system, synthetic, idle and the other non-exchange kinds are not prompts
-    // or turns; they are skipped exactly as a non user/assistant role always was.
+  } finally {
+    rows.return();
   }
-  return { messages, parts };
+  for (const message of messages) {
+    for (const tool of JSON.parse(message.toolsJson || '[]')) {
+      if (tool) parts.push({ messageId: message.id, type: 'tool', tool });
+    }
+  }
+  return found ? { messages, parts } : null;
 }
 
 // The legacy shape keeps the role and token counts in the message payload and the
@@ -410,7 +440,7 @@ function buildEvents(messages, parts) {
       const cost = num(m.cost);
       sessionCost += cost;
       const tools = Array.from(new Set(toolsByMessage.get(m.id) || []));
-      events.push({ kind: 'turn', timestamp, tokens: mapTokens(m), tools, cost });
+      events.push({ kind: 'turn', ...(m.type ? { type: m.type } : {}), timestamp, tokens: mapTokens(m), tools, cost });
     }
   }
   return { events, sessionCost };
@@ -427,6 +457,9 @@ function readSessionEvents(sessionId, deps = {}) {
     let db;
     try {
       db = openDb(dbPath, sqliteMod);
+      // Reconcile both shapes from one read snapshot while OpenCode appends.
+      // Closing this read-only connection also ends the transaction.
+      db.exec('BEGIN');
       for (const shape of openCodeShapes(db)) {
         if (!shape.readsMessages) continue;
         const transcript = shape.contentInRow

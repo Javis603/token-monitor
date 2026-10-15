@@ -11,6 +11,7 @@ try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
 
 const ocs = require('../../src/shared/providers/opencode/session');
 const { pickRecentUsageActivity } = require('../../src/shared/trayText');
+const { sessionActivityState } = require('../../src/shared/sessionLive');
 
 // The whole suite needs node:sqlite (Node >= 22.5 / Electron 42). Skip cleanly when absent.
 const maybe = sqlite ? test : test.skip;
@@ -472,4 +473,118 @@ maybe('an interrupted assistant turn keeps its row with zeroed usage', () => {
   assert.strictEqual(out.events[0].cost, 0);
   assert.deepStrictEqual(out.events[0].tools, []);
   assert.strictEqual(out.sessionCost, 0);
+});
+
+maybe('current messages and their turn boundary follow seq rather than time or id', () => {
+  for (const times of [[T1, T1, T1], [T3, T2, T1]]) {
+    const file = makeCurrentDb({
+      session: { id: 's1', created: T0, updated: T4 },
+      messages: [
+        { id: 'msg_z', role: 'user', createdMs: times[0], text: 'Keep this prompt' },
+        { id: 'msg_a', role: 'assistant', createdMs: times[1], finish: 'tool-calls', tokens: { input: 10 }, cost: 1 }
+      ],
+      extraRows: [{ id: 'msg_b', type: 'idle', createdMs: times[2], data: JSON.stringify({ time: { created: times[2] }, outcome: 'succeeded' }) }]
+    });
+    const deps = { dbPaths: [file], sqlite };
+    assert.deepEqual(ocs.readSessionEvents('s1', deps).events.map((event) => event.kind), ['prompt', 'turn']);
+    assert.equal(ocs.readSessionMeta(['s1'], deps).get('s1').turnEnded, true);
+  }
+});
+
+maybe('current settings rows preserve the last boundary and do not renew activity', () => {
+  for (const type of ['model-switched', 'agent-switched', 'location-switched']) {
+    const file = makeCurrentDb({
+      session: { id: 's1', created: T0, updated: T4 },
+      messages: [{ id: 'a', role: 'assistant', createdMs: T1, finish: 'stop' }],
+      extraRows: [
+        { id: 'idle', type: 'idle', createdMs: T2, data: JSON.stringify({ time: { created: T2 }, outcome: 'succeeded' }) },
+        { id: 'setting', type, createdMs: T3, data: JSON.stringify({ time: { created: T3 } }) }
+      ]
+    });
+    const deps = { dbPaths: [file], sqlite };
+    const meta = () => ocs.readSessionMeta(['s1'], deps).get('s1');
+    const ended = meta();
+    assert.equal(ended.turnEnded, true, type);
+    assert.equal(ended.lastUsedAt, new Date(T2).toISOString(), type);
+    assert.equal(sessionActivityState({ client: 'opencode', ...ended }, T4), 'ended');
+    assert.equal(sessionActivityState({ client: 'opencode', ...ended }, T2 + 600_001), 'idle');
+
+    const db = new sqlite.DatabaseSync(file);
+    const insert = db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)');
+    insert.run('prompt', 's1', 'user', 3, T4, T4, JSON.stringify({ time: { created: T4 }, text: 'Next' }));
+    assert.equal(meta().turnEnded, false, 'a new prompt clears the old boundary');
+    insert.run('idle2', 's1', 'idle', 4, T4 + 1, T4 + 1, JSON.stringify({ time: { created: T4 + 1 } }));
+    insert.run('unfinished', 's1', 'assistant', 5, T4 + 2, T4 + 2, JSON.stringify({ time: { created: T4 + 2 }, content: [] }));
+    assert.equal(meta().turnEnded, false, 'an in-flight assistant must not reuse the previous idle');
+    db.close();
+  }
+});
+
+maybe('current detail reads keep unused tool output, reasoning and answer text inside SQLite', () => {
+  const unused = 'UNUSED_TRANSCRIPT_PAYLOAD_'.repeat(8192);
+  const file = makeCurrentDb({
+    session: { id: 's1', created: T0, updated: T4 },
+    messages: [
+      { id: 'user', role: 'user', createdMs: T0, text: 'Run checks' },
+      ...Array.from({ length: 8 }, (_, index) => ({
+        id: `assistant-${index}`, role: 'assistant', createdMs: T1 + index,
+        tokens: { input: 10 }, cost: 0.25,
+        content: [
+          null, 'not a content object',
+          { type: 'text', text: unused },
+          { type: 'reasoning', text: unused },
+          { type: 'tool', name: 'shell', state: { status: 'completed', content: [{ type: 'text', text: unused }] } }
+        ]
+      }))
+    ]
+  });
+  let transferredBytes = 0;
+  class ObservedDatabase {
+    constructor(...args) { this.db = new sqlite.DatabaseSync(...args); }
+    exec(sql) { return this.db.exec(sql); }
+    close() { this.db.close(); }
+    prepare(sql) {
+      const statement = this.db.prepare(sql);
+      const observe = (row) => { transferredBytes += Buffer.byteLength(JSON.stringify(row)); return row; };
+      return {
+        all(...args) { return statement.all(...args).map(observe); },
+        *iterate(...args) { for (const row of statement.iterate(...args)) yield observe(row); }
+      };
+    }
+  }
+  const result = ocs.readSessionEvents('s1', { dbPaths: [file], sqlite: { DatabaseSync: ObservedDatabase } });
+  assert.equal(result.found, true);
+  assert.equal(result.events[0].text, 'Run checks');
+  assert.equal(result.events.length, 9);
+  assert.equal(result.events.slice(1).reduce((sum, event) => sum + event.tokens.total, 0), 80);
+  assert.equal(result.sessionCost, 2);
+  assert.deepEqual(result.events[1].tools, ['shell']);
+  assert.ok(transferredBytes < 32 * 1024, `unused payload crossed the SQLite boundary: ${transferredBytes} bytes`);
+});
+
+maybe('a running manual compaction clears idle without treating other compactions as terminal', () => {
+  for (const status of ['running', 'completed', 'failed']) {
+    for (const ended of [false, true]) {
+      const file = makeCurrentDb({
+        session: { id: 's1', created: T0, updated: T4 },
+        messages: [{ id: 'answer', role: 'assistant', createdMs: T1, finish: ended ? 'stop' : 'tool-calls' }],
+        extraRows: [
+          ...(ended ? [{ id: 'idle', type: 'idle', createdMs: T2, data: JSON.stringify({ time: { created: T2 }, outcome: 'succeeded' }) }] : []),
+          // Manual /compact starts with no new user; even a reversed clock
+          // cannot leave the previous idle latched when its status is running.
+          { id: 'compact', type: 'compaction', createdMs: T0, data: JSON.stringify({ time: { created: T0 }, status, reason: 'manual', summary: '', recent: '' }) }
+        ]
+      });
+      const deps = { dbPaths: [file], sqlite };
+      const meta = () => ocs.readSessionMeta(['s1'], deps).get('s1');
+      assert.equal(meta().turnEnded, status === 'running' ? false : ended, `${status}, previous ended=${ended}`);
+      assert.equal(sessionActivityState({ client: 'opencode', ...meta() }, T4), status === 'running' || !ended ? 'running' : 'ended');
+      if (status === 'running') {
+        const db = new sqlite.DatabaseSync(file);
+        db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)').run('idle-after-compact', 's1', 'idle', ended ? 3 : 2, T3, T3, JSON.stringify({ time: { created: T3 }, outcome: 'succeeded' }));
+        db.close();
+        assert.equal(meta().turnEnded, true, 'a subsequent actual idle still ends the run');
+      }
+    }
+  }
 });
