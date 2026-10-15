@@ -102,12 +102,14 @@ function createUsageTransform(options = {}) {
           canonicalSummary: true,
           mutate: true
         });
+    delete visibleSummary.sessionUsageArchiveFullScan;
     return settings.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
   }
 
-  function transform(summary) {
+  function transform(summary, _reason, meta = {}) {
     const now = sessionUsageArchiveDate(summary);
     if (getSettings()?.sessionUsageArchiveEnabled === false) return project(summary, null, now);
+    if (meta.preview === true) return project(summary, readSnapshot({ strict: true }), now);
     if (isExternalAgentActive()) {
       try {
         sessionArchive = store.refresh(now, { strict: true });
