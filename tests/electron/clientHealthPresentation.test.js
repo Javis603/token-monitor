@@ -211,3 +211,89 @@ test('every overall state has a tone', () => {
     assert.ok(clientHealthDetail(health({ codex: entry({ overall }) }), 'codex').tone, overall);
   }
 });
+
+const qoderSources = (projects, db = false) => ({
+  state: projects || db ? 'detected' : 'missing',
+  detectedCount: Number(projects) + Number(db),
+  checkedCount: 2,
+  checks: [
+    { id: 'qodercn-db', exists: db },
+    { id: 'qodercn-projects', exists: projects }
+  ]
+});
+const qoderAvailabilityNote = { code: 'qodercn-token-availability', group: 'data', tone: 'neutral' };
+
+test('Qoder CN transcripts explain unavailable first-party tokens instead of generic no usage', () => {
+  const detail = clientHealthDetail(health({ qodercn: entry({
+    source: qoderSources(true),
+    diagnostics: [{ code: 'no-usage-observed' }]
+  }) }), 'QODERCN', { usage: {
+    today: { tokens: 0 }, month: { tokens: 0 }, allTime: { tokens: 0 }
+  } });
+  assert.deepEqual(detail.notes, [qoderAvailabilityNote]);
+  assert.equal(detail.overall, 'waiting');
+  assert.deepEqual(detail.groups[2].periods.map(({ tokens }) => tokens), [0, 0, 0]);
+});
+
+test('Qoder CN guidance also explains partial coverage without changing measured BYOK usage', () => {
+  const detail = clientHealthDetail(health({ qodercn: entry({
+    source: qoderSources(true, true),
+    data: { liveTokens: 200, lastActivityDay: '2026-10-15' },
+    overall: 'healthy'
+  }) }), 'qodercn', { usage: {
+    today: { tokens: 50, cost: 0.1 }, month: { tokens: 100, cost: 0.2 }, allTime: { tokens: 200, cost: 0.4 }
+  } });
+  assert.deepEqual(detail.notes, [qoderAvailabilityNote]);
+  assert.equal(detail.overall, 'healthy');
+  assert.equal(detail.groups[2].tokens, 200);
+  assert.equal(detail.groups[2].lastActivityDay, '2026-10-15');
+  assert.deepEqual(detail.groups[2].periods.map(({ tokens, cost }) => [tokens, cost]), [[50, 0.1], [100, 0.2], [200, 0.4]]);
+});
+
+test('Qoder CN legacy-only and missing sources retain their existing diagnostics', () => {
+  const legacy = clientHealthDetail(health({ qodercn: entry({
+    source: qoderSources(false, true), diagnostics: [{ code: 'no-usage-observed' }]
+  }) }), 'qodercn');
+  assert.deepEqual(legacy.notes, [{ code: 'no-usage-observed', group: 'data', tone: 'muted' }]);
+  const missing = clientHealthDetail(health({ qodercn: entry({
+    source: qoderSources(false), overall: 'unavailable', diagnostics: [{ code: 'source-missing' }]
+  }) }), 'qodercn');
+  assert.deepEqual(missing.notes, []);
+});
+
+test('Qoder CN guidance uses canonical checks before potentially stale local paths', () => {
+  const detail = clientHealthDetail(health({ qodercn: entry({
+    source: qoderSources(false, true)
+  }) }), 'qodercn', { sources: [{ id: 'qodercn-projects', exists: true, dir: '/old/projects' }] });
+  assert.deepEqual(detail.notes, []);
+});
+
+test('older Qoder CN health records can use the existing local source probe for guidance', () => {
+  const detail = clientHealthDetail(health({ qodercn: entry() }), 'qodercn', {
+    sources: [{ id: 'qodercn-projects', exists: true, dir: '/configured/projects' }]
+  });
+  assert.deepEqual(detail.notes, [qoderAvailabilityNote]);
+});
+
+test('Qoder CN guidance does not change other clients or hide collection failures', () => {
+  const diagnostics = [{ code: 'sync-failed' }, { code: 'no-usage-observed' }];
+  const detail = clientHealthDetail(health({ qodercn: entry({
+    source: qoderSources(true), collection: { state: 'failed' }, overall: 'attention', diagnostics
+  }) }), 'qodercn');
+  assert.deepEqual(detail.notes, [{ code: 'sync-failed', group: 'collection', tone: 'warn' }, qoderAvailabilityNote]);
+  const other = clientHealthDetail(health({ claude: entry({ diagnostics }) }), 'claude');
+  assert.deepEqual(other.notes, [
+    { code: 'sync-failed', group: 'collection', tone: 'warn' },
+    { code: 'no-usage-observed', group: 'data', tone: 'muted' }
+  ]);
+});
+
+test('Qoder CN token guidance is translated in every supported locale', () => {
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const [locale, messages] of Object.entries(MESSAGES)) {
+    const text = messages['settings.tools.health.code.qodercn-token-availability'];
+    assert.ok(text, locale);
+    assert.match(text, /BYOK/);
+    assert.match(text, /Qoder/);
+  }
+});

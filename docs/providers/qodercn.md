@@ -32,6 +32,8 @@ Token Monitor's tokscale fork parses Qoder CN (`crates/tokscale-core/src/token_m
 
 Only rows with reported token counts enter usage. Current first-party, plan-billed rows can contain `credits` and `context_usage_ratio` while every token field is zero. The active context-window denominator is not reliably present in the observed session data and can vary per session, so a model-wide window must not be used to reconstruct tokens. Those rows remain absent from token totals; their credits belong to AI Tool Limits. BYOK/custom-model rows that contain measured token fields are counted normally.
 
+When the collection health panel detects the JSONL source, it explains this first-party token gap and points to **AI Tool Limits → Qoder** for credit quota. The same guidance remains visible alongside measured BYOK usage, since those totals can omit first-party requests. It replaces the generic no-usage note without changing collection state or counters. The hint uses existing source checks and describes possible coverage, since directory detection alone cannot identify credits-only transcripts.
+
 ## Source precedence
 
 The JSONL projects directory resolves in this order:

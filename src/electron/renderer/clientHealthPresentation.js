@@ -189,7 +189,16 @@
   }
 
   function clientHealthDetail(health, clientId, options = {}) {
-    return clientHealthDetailFromEntry(healthFor(health, clientId), options);
+    const detail = clientHealthDetailFromEntry(healthFor(health, clientId), options);
+    // Source presence does not prove credits-only records exist. Explain the
+    // source's coverage without a second transcript scan or invented counters.
+    if (normalizeId(clientId) === 'qodercn'
+      && detail?.groups[0].state === 'detected'
+      && detail.groups[0].checks.some((check) => check.id === 'qodercn-projects' && check.exists)) {
+      detail.notes = detail.notes.filter((note) => note.code !== 'no-usage-observed');
+      detail.notes.push({ code: 'qodercn-token-availability', group: 'data', tone: 'neutral' });
+    }
+    return detail;
   }
 
   // Tools without a health entry have no collector snapshot yet. They can
