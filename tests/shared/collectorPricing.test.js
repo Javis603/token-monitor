@@ -221,3 +221,11 @@ test('Qoder CN credits use effective CNY FX and invalidate anchors when that rat
   process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = '0.02';
   assert.equal(Number(tokscaleCommand().env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.02);
 });
+
+
+test('worker scalar FX reaches native command and pricing identity without shared module state', () => {
+  const { tokscaleCommand } = require('../../src/shared/collector');
+  const options = { qoderCnUsdPerCredit: 0.007, binaryRevision: 'test-build' };
+  assert.equal(Number(tokscaleCommand(structuredClone(options)).env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.007);
+  assert.notEqual(pricingFingerprint(options), pricingFingerprint({ ...options, qoderCnUsdPerCredit: 0.008 }));
+});

@@ -596,3 +596,11 @@ test('WorkBuddy managed field is private and owned by the managed service', () =
   assert.ok(rendererOmittedAccountKeys().includes('workbuddyManagedAccounts'));
   assert.equal(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.workbuddy.includes('workbuddyManagedAccounts'), false);
 });
+
+
+test('effective credit FX is serializable and participates in worker runtime replacement', () => {
+  const first = usageConfigFromSettings({ clients: 'qodercn' }, { qoderCnUsdPerCredit: 0.006 });
+  const second = usageConfigFromSettings({ clients: 'qodercn' }, { qoderCnUsdPerCredit: 0.007 });
+  assert.equal(JSON.parse(JSON.stringify(first)).qoderCnUsdPerCredit, 0.006);
+  assert.notEqual(usageConfigFingerprint(first), usageConfigFingerprint(second));
+});

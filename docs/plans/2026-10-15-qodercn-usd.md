@@ -27,3 +27,9 @@ Collect real CLI tokens where exposed, value reported CN credits in USD, and use
 - Compared Claude, Codex, Qwen, Kiro and Qoder CN native paths.
 - Real native token exposure proved; correct model catalog and CN pricing verified.
 - Native parser tests pass; package and upstream integration checks in progress.
+
+### Worker FX and local acceptance
+
+The desktop usage collector normally runs in a worker thread, not the main process's currency-module instance. Pass one effective USD-per-credit scalar through the existing serializable runtime configuration; include it in runtime/pricing fingerprints and reconcile the usage runtime when effective CNY FX changes. Scan and graph use the same scalar. Lint plus 93 affected runtime/worker/pricing/anchor tests pass.
+
+The native source build passed real-source credit reconciliation and a four-client fixture comparison: unrelated client token/cost rows are unchanged, measured Qoder counts remain actual tokens, and copied credit requests count once. The signed packaged binary passed direct native execution and dependency loading. Local-only package provenance records both source commits; signing changes executable signature bytes, so the signed artifact integrity is recorded separately from the pre-sign vendor/download digest. No official vendor artifacts have been published.
