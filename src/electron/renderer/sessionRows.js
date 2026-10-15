@@ -436,6 +436,7 @@
       modelTokens: session?.models || (session?.model ? { [session.model]: value } : {}),
       parentKey: subagent ? `session:${parentClient}:${parentSessionId}` : undefined,
       subagent: subagent || undefined,
+      subagentLabel: subagent ? options.subagentLabel || 'Subagent' : undefined,
       backgroundReview: isBackgroundReviewSession(session) || undefined,
       sortTime: sessionTimestampValue(session),
       title: `${clientLabel} session ${sessionIdLabel(session?.sessionId || key)}`
@@ -601,7 +602,7 @@
       const link = parent ? identity(parent) : row.parentKey;
       if (link === id) continue;
       if (parentLinks.has(id) && parentLinks.get(id).link !== link) conflicts.add(id);
-      else parentLinks.set(id, { link, parentKey: row.parentKey });
+      else parentLinks.set(id, { link, parentKey: row.parentKey, subagentLabel: row.subagentLabel });
     }
     // Contradictory relationship facts never justify collapsing identities.
     const canonical = row => conflicts.has(identity(row)) ? row : aliases.get(identity(row));
@@ -633,7 +634,8 @@
     if (grouped.size === 0) return list;
     return list
       .filter(row => !grouped.has(row?.key))
-      .map(row => children.has(row?.key) ? subagentGroupRow(row, children.get(row.key), options, conflicts.has(identity(row))) : row);
+      .map(row => children.has(row?.key) ? subagentGroupRow(row, children.get(row.key), options,
+        conflicts.has(identity(row)), conflicts.has(identity(row)) ? undefined : parentLinks.get(identity(row))?.subagentLabel) : row);
   }
 
   // The group row is the parent's own row with the group's totals: members are
@@ -644,7 +646,7 @@
     return row.client === 'codex' && row.nativeSessionId ? `codex:${row.nativeSessionId}` : row.key;
   }
 
-  function subagentGroupRow(parent, members, options, splitIdentity = false) {
+  function subagentGroupRow(parent, members, options, splitIdentity = false, rootSubagentLabel) {
     const sameConversation = row => sessionConversationIdentity(row) === sessionConversationIdentity(parent);
     const all = [parent, ...members];
     const main = all.filter(sameConversation).sort((a, b) => finiteNumber(b.sortTime) - finiteNumber(a.sortTime));
@@ -691,9 +693,9 @@
       tokenRateLabel(usageMetrics)
     ].filter(Boolean);
     const activitySummary = activityParts.join(' · ');
-    // A visible family root can still be a delegated child of an absent ancestor.
-    // Keep its existing role in the row, separately from expanded-member metrics.
-    if (display.subagentLabel) activityParts.splice(archivedLabel ? 1 : 0, 0, display.subagentLabel);
+    // Role follows the root conversation's non-conflicting external link, even
+    // when its display/canonical continuation has no parent of its own.
+    if (rootSubagentLabel) activityParts.splice(archivedLabel ? 1 : 0, 0, rootSubagentLabel);
     const activity = activityParts.join(' · ');
     const base = { ...main[0] };
     delete base.unpricedTokens;
@@ -713,6 +715,7 @@
       subtitle: [display.titled ? titleParts : activity, countLabel].filter(Boolean).join(' · '),
       subtitleIdentity: display.titled ? titleParts : activity,
       activity: display.titled ? activity : undefined,
+      subagentLabel: rootSubagentLabel || undefined,
       activitySummary,
       activityTime,
       usageMetrics,

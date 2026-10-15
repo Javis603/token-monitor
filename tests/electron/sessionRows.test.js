@@ -590,6 +590,65 @@ for (const titled of [true, false]) {
   }
 }
 
+function delegatedRootFixture({ titled, native, canonicalWithoutParent, relation = 'external', label = '子代理' }) {
+  const now = new Date(2026, 9, 11, 12, 30);
+  const rootId = canonicalWithoutParent ? 'zzz' : 'b';
+  const continuationId = canonicalWithoutParent ? 'aaa' : 'b2';
+  const session = (id, minute, tokens, calls, extra = {}) => ({ client: 'codex', sessionId: id,
+    title: titled ? 'Root conversation' : '', totalTokens: tokens, costUsd: tokens / 100,
+    reportedCostUsd: tokens / 100, messageCount: calls, models: { 'gpt-6.1-sol': tokens },
+    lastUsedAt: localIso(2026, 10, 11, 12, minute), ...extra });
+  const family = {
+    [`codex:${rootId}`]: session(rootId, 10, 20, 2, { t3ThreadId: 'conversation-b',
+      parentSessionId: ['ordinary', 'internal'].includes(relation) ? '' : 'a' }),
+    [`codex:${continuationId}`]: session(continuationId, 15, 30, 3, { t3ThreadId: 'conversation-b',
+      parentSessionId: relation === 'conflicting' ? 'different-ancestor' : relation === 'internal' ? rootId : '' }),
+    'codex:c': session('c', 20, 40, 4, { parentSessionId: rootId })
+  };
+  const period = { sessions: {
+    ...(!native ? family : {}),
+    'codex:review': session('review', 25, 20, 1, { sessionKind: 'background-review' }),
+    'cursor:bot': { client: 'cursor', sessionId: 'sand-subagent-bot', totalTokens: 20 }
+  } };
+  const rows = sessionRowsForPeriod(period, { clientLabels, now, subagentLabel: label,
+    nativeSessions: native ? family : {} });
+  return { rows, rootId, grouped: groupSessionRows(rows) };
+}
+
+for (const native of [false, true]) {
+  for (const titled of [true, false]) {
+    for (const canonicalWithoutParent of [false, true]) {
+      test(`${native ? 'native' : 'accounting'} ${titled ? 'titled' : 'untitled'} delegated root keeps its localized role across ${canonicalWithoutParent ? 'aaa/zzz canonical aliases' : 'a newer unlinked continuation'}`, () => {
+        const { rows, rootId, grouped } = delegatedRootFixture({ native, titled, canonicalWithoutParent,
+          label: 'Delegierter Agent' });
+        const group = grouped.find(row => row.subagentGroup);
+        assert.equal(rows.find(row => row.key === `session:codex:${rootId}`).subagentLabel, 'Delegierter Agent');
+        assert.equal(group.activity || group.subtitleIdentity, 'Delegierter Agent · 12:20 · 9 calls');
+        assert.equal(group.activitySummary, '12:20 · 9 calls');
+        assert.equal(group.value, 90);
+        assert.equal(group.cost, 0.9);
+        assert.equal(group.subagentCount, 1);
+        assert.equal(group.groupRows.length, 3);
+        assert.equal(group.groupRows[0].activitySummary, '12:15 · 3 calls');
+        assert.equal(grouped.reduce((sum, row) => sum + row.value, 0), 130);
+        assert.deepEqual(grouped.filter(row => !row.subagentGroup).map(row => row.sessionGroup).sort(),
+          ['codex-auto-review', 'cursor-grok-bot']);
+      });
+    }
+    for (const relation of ['ordinary', 'internal', 'conflicting']) {
+      test(`${native ? 'native' : 'accounting'} ${titled ? 'titled' : 'untitled'} ${relation} root relationship does not invent a family role`, () => {
+        const { grouped } = delegatedRootFixture({ native, titled, relation, canonicalWithoutParent: true });
+        const group = grouped.find(row => row.subagentGroup);
+        const calls = relation === 'conflicting' ? 6 : 9;
+        assert.equal(group.activity || group.subtitleIdentity, `12:20 · ${calls} calls`);
+        assert.equal(group.subagentLabel, undefined);
+        assert.equal(group.value, relation === 'conflicting' ? 60 : 90);
+        assert.equal(grouped.reduce((sum, row) => sum + row.value, 0), 130);
+      });
+    }
+  }
+}
+
 test('a parent cycle leaves both sessions as their own rows', () => {
   const rows = sessionRowsForPeriod({ sessions: {
     'codex:a': { client: 'codex', sessionId: 'a', totalTokens: 1, parentSessionId: 'b' },
