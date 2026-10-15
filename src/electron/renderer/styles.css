@@ -3635,6 +3635,12 @@ html.is-windows .settings-panel select option {
   min-width: 0;
   gap: 6px;
 }
+.home-module-credits { cursor: default; }
+.home-module-credits .home-module-label { margin: 0; }
+.qodercn-credits-total { font-size: 1.25rem; font-variant-numeric: tabular-nums; margin-top: 6px; }
+.home-list-row.qodercn-credit-model { grid-template-columns: minmax(0, 1fr) auto; }
+.qodercn-credits-note { margin: 7px 0 0; color: var(--muted); font-size: 0.625rem; line-height: 1.4; }
+.qodercn-credits-note.is-error { color: var(--orange); }
 .home-module-limits .home-module-body {
   gap: 12px;
 }

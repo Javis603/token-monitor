@@ -62,6 +62,8 @@ const { readT3Activities } = require('./t3SessionActivity');
 const { createProcessStartBatch } = require('./processStarts');
 const { catpawDatabaseName, catpawSourcesFingerprint } = require('./providers/catpaw/paths');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
+const { createQoderCnCreditsCollector } = require('./providers/qodercn/credits');
+const { summarizeQoderCnCredits } = require('./providers/qodercn/creditUsage');
 const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
 const { createLocalUsageSource } = require('./providers/codex/localUsageSource');
 const {
@@ -1274,6 +1276,28 @@ async function collectUsageOnce(options) {
     month,
     allTime
   };
+  // The CLI credits ledger owns retention and deduplication independently of
+  // native token periods, their watch deltas and generic token archives.
+  summary.qoderCnCredits = null;
+  if (trackedClientSet.has('qodercn')) {
+    throwIfAborted(options.signal);
+    const credits = options.qoderCnCreditsCollector || createQoderCnCreditsCollector({
+      homeDir: options.homeDir, env: options.env, platform: platformValue,
+      databasePath: options.qoderCnCreditsDatabasePath
+    });
+    try {
+      summary.qoderCnCredits = credits.scan({ allTimeSince });
+    } catch (error) {
+      if (options.signal?.aborted) throw abortReason(options.signal);
+      summary.qoderCnCredits = { ...credits.getSnapshot({ allTimeSince }), error: 'collection-failed' };
+      options.logger?.(`Qoder CN CLI credits collection failed: ${error.message}`);
+      try { options.onDiagnosticEvent?.({ subsystem: 'collector', code: 'qodercn-credits-read-failed' }); } catch (_) {}
+    } finally {
+      if (!options.qoderCnCreditsCollector) credits.close();
+    }
+  }
+  const qoderCnCreditRequests = summarizeQoderCnCredits([summary]).requests;
+  if (qoderCnCreditRequests > 0) summary.clientStatus.qodercn = 'active';
   // The request ledger is this source's archive. A second per-session archive
   // would resurrect its contribution after a native rollout takes precedence.
   if (codexLocalView) summary.codexLocalSessionKeys = codexLocalView.sessionKeys;
@@ -1356,6 +1380,8 @@ async function collectUsageOnce(options) {
   // After history, so `lastActivityDay` can come from the daily buckets this
   // scan already produced rather than from a second source of truth.
   const clientHealth = deriveClientHealth(normalizedClients, allTime, {
+    qoderCnCreditRequests,
+    qoderCnCreditsError: summary.qoderCnCredits?.error,
     sourceChecks,
     wslStatus,
     observedAt: collectedAt,
@@ -2051,6 +2077,8 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
       collection: { state: sync ? sync.state : 'direct' },
       data: { liveTokens: liveTokens > 0 ? liveTokens : 0 }
     };
+    if (client === 'qodercn' && options.qoderCnCreditRequests > 0) entry.data.creditRequests = options.qoderCnCreditRequests;
+    if (client === 'qodercn' && options.qoderCnCreditsError) entry.collection.state = 'read-failed';
     // Kept even for a healthy self-synced client: "last synced two minutes ago"
     // is the answer to "why is today still 0", not a fault report.
     if (sync?.lastAttemptAt) entry.collection.lastAttemptAt = new Date(sync.lastAttemptAt).toISOString();
@@ -2076,7 +2104,7 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
       if (checks.length > 0 && detected.length === 0) codes.push('source-missing');
       if (sync?.detailCode === 'sync-lock-present') codes.push('sync-lock-present');
       else if (sync?.failureCode) codes.push(sync.failureCode);
-      if (detected.length > 0 && liveTokens <= 0) codes.push('no-usage-observed');
+      if (detected.length > 0 && liveTokens <= 0 && !entry.data.creditRequests && entry.collection.state !== 'read-failed') codes.push('no-usage-observed');
       // States a fact, not a cause: a marker without usage can equally mean the
       // tool is installed in that distro and simply unused.
       if (wslDetected.has(client) && !wslWithData.has(client)) codes.push('wsl-detected-no-data');
@@ -2515,6 +2543,11 @@ function startCollector(options) {
   });
   const qoderCnDbPath = qoderCnSources.dbPath;
   const qoderCnProjectsDir = qoderCnSources.projectsDir;
+  const qoderCnCreditsCollector = trackedClients.has('qodercn')
+    ? options.qoderCnCreditsCollector || createQoderCnCreditsCollector({
+      ...sourceOptions, databasePath: options.qoderCnCreditsDatabasePath
+    })
+    : null;
   let tickInFlight = false;
   let idleWaiters = [];
   let tickPending = false;
@@ -2819,6 +2852,7 @@ function startCollector(options) {
       let catpawSourceChangeObserved = false;
       const summary = await collectUsageOnce({
         ...options,
+        qoderCnCreditsCollector,
         codexDotsVisible,
         signal: runtimeSignal,
         clients,
@@ -3592,6 +3626,7 @@ function startCollector(options) {
     stopped = true;
     runtimeAbortController.abort(new Error('collector stopped'));
     codexLocalSource?.stop();
+    if (!options.qoderCnCreditsCollector) qoderCnCreditsCollector?.close();
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
     activityScheduler?.stop();

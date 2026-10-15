@@ -9,6 +9,7 @@ const PARTIAL_USAGE_CARRY_FIELDS = Object.freeze([
   'allTime',
   'clientStatus',
   'clientHealth',
+  'qoderCnCredits',
   'wslStatus',
   'periodWindows',
   'historyAvailable',

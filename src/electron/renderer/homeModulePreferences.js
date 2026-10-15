@@ -5,7 +5,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorHomeModulePreferences = api;
 })(typeof window !== 'undefined' ? window : null, function createHomeModulePreferencesApi() {
-  const DEFAULT_HOME_MODULE_ORDER = 'limits,tool,model,session,device,trends';
+  const DEFAULT_HOME_MODULE_ORDER = 'limits,credits,tool,model,session,device,trends';
 
   function normalizeHomeLimitDisplayMode(value) {
     return value === 'bars' ? 'bars' : 'text';
@@ -18,7 +18,8 @@
   function normalizeHomeModuleOrder(value, options) {
     const known = optionIds(options);
     const knownSet = new Set(known);
-    const raw = Array.isArray(value) ? value : String(value || DEFAULT_HOME_MODULE_ORDER).split(',');
+    const saved = value === 'limits,tool,model,session,device,trends' ? DEFAULT_HOME_MODULE_ORDER : value;
+    const raw = Array.isArray(saved) ? saved : String(saved || DEFAULT_HOME_MODULE_ORDER).split(',');
     const seen = new Set();
     const order = [];
     for (const item of raw) {

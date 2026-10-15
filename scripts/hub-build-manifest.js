@@ -16,6 +16,7 @@ const WORKER_SHARED_MODULES = Object.freeze([
   'limits/providers.js',
   'limits/core.js',
   'providers/workbuddy/identity.js',
+  'providers/qodercn/creditUsage.js',
   'usage.js',
   'sessionLive.js',
   'sessionActivityProviders.js',

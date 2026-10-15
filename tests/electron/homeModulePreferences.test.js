@@ -25,9 +25,9 @@ const modules = [
 ];
 
 test('defaultHomeModulePreferences includes Sessions and shows it by default', () => {
-  assert.equal(DEFAULT_HOME_MODULE_ORDER, 'limits,tool,model,session,device,trends');
+  assert.equal(DEFAULT_HOME_MODULE_ORDER, 'limits,credits,tool,model,session,device,trends');
   assert.deepEqual(defaultHomeModulePreferences(), {
-    homeModuleOrder: 'limits,tool,model,session,device,trends',
+    homeModuleOrder: 'limits,credits,tool,model,session,device,trends',
     hiddenHomeModules: 'tool,device'
   });
 });

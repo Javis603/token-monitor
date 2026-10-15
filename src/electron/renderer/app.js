@@ -158,6 +158,8 @@ const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
 const clientHealthPresentationApi = window.TokenMonitorClientHealthPresentation;
+const qoderCnCreditsApi = window.TokenMonitorQoderCnCredits;
+const qoderCnCreditsViewApi = window.TokenMonitorQoderCnCreditsView;
 const clientSourceCacheApi = window.TokenMonitorClientSourceCache;
 const clientRescanStateApi = window.TokenMonitorClientRescanState;
 const serviceStatusPresentationApi = window.TokenMonitorServiceStatusPresentation;
@@ -264,6 +266,7 @@ const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', '
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
+  { id: 'credits', labelKey: 'qoderCnCredits.title', viewId: 'tool' },
   { id: 'tool', labelKey: 'home.tools', viewId: 'tool' },
   { id: 'model', labelKey: 'home.models', viewId: 'model' },
   { id: 'session', labelKey: 'home.sessions', viewId: 'session' },
@@ -6193,6 +6196,17 @@ function renderHomeLimitModule() {
   return module;
 }
 
+function renderHomeCreditsModule() {
+  const today = fixedPeriodRangesApi.localDayKey();
+  const range = fixedPeriodRangesApi.rangeForSelection(state.period, { todayKey: today, locale: currentCalendarLocale() })
+    || { start: state.period === 'today' ? today : state.period === 'month' ? `${today.slice(0, 7)}-01` : '', end: today };
+  const summary = qoderCnCreditsApi.summarizeQoderCnCredits(state.stats?.devices, range);
+  return qoderCnCreditsViewApi.renderQoderCnCredits(summary, {
+    document, t, formatNumber,
+    formatCredits: (value) => new Intl.NumberFormat(currentLocale(), { maximumFractionDigits: 6 }).format(value)
+  });
+}
+
 function renderHomeModelModule(period) {
   const { module, body } = homeModuleShell('model', t('home.models'), 'model');
   const rows = homeOverviewApi.homeModelRows(modelRowsForPeriod(period, 'tokens'), period?.totalTokens, 5);
@@ -6920,7 +6934,7 @@ function renderHome() {
   state.homeActivityResizeObserver?.disconnect();
   state.homeActivityResizeObserver = null;
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
-  const moduleIds = homeModuleIds();
+  const moduleIds = homeModuleIds().filter((id) => id !== 'credits' || state.stats?.devices?.some((device) => device.qoderCnCredits));
   if (moduleIds.includes('trends')) void loadHomeHistory();
   if (moduleIds.length === 0) {
     const empty = document.createElement('div');
@@ -6944,6 +6958,7 @@ function renderHome() {
   let sessionRows;
   const nodes = moduleIds.map((id) => {
     if (id === 'limits') return renderHomeLimitModule();
+    if (id === 'credits') return renderHomeCreditsModule();
     if (id === 'tool') return renderHomeToolModule(period);
     if (id === 'device') return renderHomeDeviceModule();
     if (id === 'model') return renderHomeModelModule(period);

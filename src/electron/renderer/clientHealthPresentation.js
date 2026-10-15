@@ -189,7 +189,16 @@
   }
 
   function clientHealthDetail(health, clientId, options = {}) {
-    return clientHealthDetailFromEntry(healthFor(health, clientId), options);
+    const entry = healthFor(health, clientId);
+    const detail = clientHealthDetailFromEntry(entry, options);
+    if (normalizeId(clientId) === 'qodercn' && entry?.collection?.state === 'read-failed') {
+      detail.notes = detail.notes.filter((note) => note.code !== 'no-usage-observed');
+      detail.notes.push({ code: 'qodercn-credits-failed', group: 'collection', tone: 'warn' });
+    } else if (normalizeId(clientId) === 'qodercn' && entry?.data?.creditRequests > 0) {
+      detail.notes = detail.notes.filter((note) => note.code !== 'no-usage-observed');
+      detail.notes.push({ code: 'qodercn-credits-collected', group: 'data', tone: 'neutral' });
+    }
+    return detail;
   }
 
   // Tools without a health entry have no collector snapshot yet. They can
