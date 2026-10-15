@@ -31,6 +31,8 @@ Do not label a merged row `Web` when any local-only window remains in it. Source
 
 Session metadata and detail read OpenCode's local storage on demand. Keep profile/limits identity out of session attribution: local token sessions are not proof of the billing account selected by a credential profile.
 
+OpenCode 2.x moved the session row to `session_v2` and every message to `session_message`, where a message row carries its own content items; the 1.x `session`/`message`/`part` triple stops receiving writes at that upgrade. Read both shapes, current first: the current tables are the superset (every legacy message id survives in `session_message`), and a reader that only knows the legacy triple answers "not found" for every session created after the upgrade.
+
 ## Transport
 
 Every Web probe must receive the runtime-injected transport. Do not bypass proxy and Electron behavior by constructing provider-local fetch implicitly.

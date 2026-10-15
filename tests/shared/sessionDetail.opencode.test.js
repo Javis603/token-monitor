@@ -103,3 +103,50 @@ maybe('readSessionDetail(opencode) returns not-found for an unknown session', ()
   assert.strictEqual(detail.found, false);
   assert.deepStrictEqual(detail.exchanges, []);
 });
+
+// The same conversation in the shape OpenCode 2.x writes. Without the current
+// tables every session created after that upgrade reached this path as
+// found:false, which the renderer shows as "Transcript not found on this machine".
+function makeCurrentFixture() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ocdetail-v2-'));
+  tmpDirs.push(tmp);
+  const file = path.join(tmp, 'opencode.db');
+  const db = new sqlite.DatabaseSync(file);
+  db.exec('CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER)');
+  db.exec('CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, time_created INTEGER, time_updated INTEGER, data TEXT)');
+  db.prepare('INSERT INTO session_v2 VALUES (?,?,?,?,?)').run('s1', 'Greeting', 'D:/repo', T0, T4);
+  const ins = db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)');
+  const asst = (cost, tokens, createdMs, content) => JSON.stringify({
+    time: { created: createdMs }, agent: 'build', model: { id: 'big-pickle', providerID: 'opencode' }, content, cost, tokens, finish: 'stop'
+  });
+  const user = (createdMs, text) => JSON.stringify({ time: { created: createdMs }, text });
+  ins.run('m0', 's1', 'user', 0, T0, T0, user(T0, 'Hello there'));
+  ins.run('m1', 's1', 'assistant', 1, T1, T1, asst(0.5, { input: 9416, output: 9, reasoning: 16, cache: { read: 0, write: 0 } }, T1, [{ type: 'text', text: 'Hi, reply text' }]));
+  ins.run('m2', 's1', 'user', 2, T2, T2, user(T2, 'Do a search'));
+  ins.run('m3', 's1', 'assistant', 3, T3, T3, asst(0.25, { input: 50, output: 30, reasoning: 5, cache: { read: 15, write: 0 } }, T3, [{ type: 'tool', name: 'websearch' }]));
+  ins.run('m4', 's1', 'assistant', 4, T4, T4, asst(0.1, { input: 120, output: 40, reasoning: 0, cache: { read: 40, write: 0 } }, T4, []));
+  db.close();
+  return file;
+}
+
+maybe('readSessionDetail(opencode) reads the current shape OpenCode 2.x writes', () => {
+  const file = makeCurrentFixture();
+  const detail = readSessionDetail({
+    client: 'opencode', sessionId: 's1', period: 'total',
+    deps: { dbPaths: [file], sqlite, now: () => T4 + 1000 }
+  });
+  assert.strictEqual(detail.found, true);
+  assert.strictEqual(detail.exchanges.length, 2);
+
+  const [ex1, ex2] = detail.exchanges;
+  assert.strictEqual(ex1.promptPreview, 'Hello there');
+  assert.strictEqual(ex1.turnCount, 1);
+  assert.strictEqual(ex1.tokens.total, 9425);
+  assert.strictEqual(ex1.costEstimate, 0.5);
+
+  assert.strictEqual(ex2.promptPreview, 'Do a search');
+  assert.strictEqual(ex2.turnCount, 2);
+  assert.strictEqual(detail.totals.totalTokens, 9720);
+  assert.strictEqual(detail.totals.turnCount, 3);
+  assert.ok(Math.abs(detail.totals.costUsd - 0.85) < 1e-9);
+});
