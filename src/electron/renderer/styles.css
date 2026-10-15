@@ -6292,7 +6292,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   margin: 0;
   max-height: min(440px, calc(100vh - 64px));
   padding: 0;
-  overflow: hidden;
+  /* When the window is too short for even the header, the whole card scrolls
+     rather than clipping the title and the dismiss control off the top. */
+  overflow: auto;
   /* The shared popup surface, denser: this one is paragraphs of release notes
      over the dashboard, not a short list of labels. */
   background:
@@ -6423,7 +6425,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   outline: 1px solid rgba(var(--blue-rgb), 0.72);
   outline-offset: 2px;
 }
-.app-update-release-older {
+.app-update-release-older,
+.app-update-release-full {
   padding-top: 10px;
   border-top: 1px solid rgba(var(--line-rgb), 0.14);
 }

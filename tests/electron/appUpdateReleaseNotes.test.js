@@ -87,6 +87,39 @@ test('release notes show every item of every release in the history', () => {
   assert.match(renderer, /settings\.appUpdate\.olderReleases/);
 });
 
+test('a single-release card links to the full release', () => {
+  const app = read('app.js');
+  const renderer = app.slice(
+    app.indexOf('function buildAppUpdateReleaseHistoryNodes'),
+    app.indexOf('function appUpdateNotesContentKey')
+  );
+  // The link is built from the unfiltered history, so it also appears when the
+  // single release has no groups for the current locale — then it is the body's
+  // only node and keeps the body visible.
+  assert.match(renderer, /const history = releaseNoteHistoryForCurrentLocale\(s\?\.latest\)/);
+  assert.match(renderer, /history\.length === 1 && history\[0\]\?\.htmlUrl/);
+  assert.match(renderer, /nodes\.push\(buildAppUpdateReleaseLink\('app-update-release-full', t\('settings\.appUpdate\.viewFullRelease'\), history\[0\]\.htmlUrl\)\)/);
+  // After the note sections, before the unchanged "older releases" link — and a
+  // lone link still counts, so the body is not hidden.
+  assert.match(renderer, /buildAppUpdateReleaseNodes\(entries\)[\s\S]*app-update-release-full[\s\S]*app-update-release-older/);
+  const popover = app.slice(app.indexOf('function renderAppUpdatePopover'), app.indexOf('function positionAppUpdatePopover'));
+  assert.match(popover, /appUpdatePopoverBody\.classList\.toggle\('hidden', nodes\.length === 0\)/);
+});
+
+test('multi-release cards link each release by its version heading instead', () => {
+  const app = read('app.js');
+  const history = app.slice(
+    app.indexOf('function buildAppUpdateReleaseHistoryNodes'),
+    app.indexOf('function appUpdateNotesContentKey')
+  );
+  assert.match(history, /history\.length === 1 && history\[0\]\?\.htmlUrl[\s\S]*app-update-release-full/);
+  const versions = app.slice(
+    app.indexOf('function buildAppUpdateReleaseNodes'),
+    app.indexOf('function buildAppUpdateReleaseHistoryNodes')
+  );
+  assert.match(versions, /entries\.length > 1[\s\S]*buildAppUpdateReleaseLink\('app-update-release-version', label, entry\.htmlUrl\)/);
+});
+
 test('download progress pushes do not rebuild the notes being read', () => {
   const app = read('app.js');
   const popover = app.slice(app.indexOf('function renderAppUpdatePopover'), app.indexOf('function positionAppUpdatePopover'));

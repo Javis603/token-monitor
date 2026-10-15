@@ -1522,9 +1522,16 @@ function buildAppUpdateReleaseNodes(entries) {
   });
 }
 function buildAppUpdateReleaseHistoryNodes(s) {
-  const entries = releaseNoteHistoryForCurrentLocale(s?.latest)
+  const history = releaseNoteHistoryForCurrentLocale(s?.latest);
+  const entries = history
     .filter((entry, _index, all) => all.length > 1 || entry.groups.length > 0);
   const nodes = buildAppUpdateReleaseNodes(entries);
+  // A single release has no version heading to open its page, so it gets an
+  // explicit link after its notes — even when the locale carries no groups and
+  // the link is the body's only node.
+  if (history.length === 1 && history[0]?.htmlUrl) {
+    nodes.push(buildAppUpdateReleaseLink('app-update-release-full', t('settings.appUpdate.viewFullRelease'), history[0].htmlUrl));
+  }
   if (nodes.length > 0 && s?.latest?.releaseHistoryTruncated && s.releasesUrl) {
     nodes.push(buildAppUpdateReleaseLink('app-update-release-older', t('settings.appUpdate.olderReleases'), s.releasesUrl));
   }
@@ -1574,7 +1581,7 @@ function positionAppUpdatePopover() {
   els.appUpdatePopover.style.width = `${width}px`;
   els.appUpdatePopover.style.left = `${left}px`;
   els.appUpdatePopover.style.bottom = `${bottom}px`;
-  els.appUpdatePopover.style.maxHeight = `${Math.max(160, Math.min(440, window.innerHeight - bottom - 12))}px`;
+  els.appUpdatePopover.style.maxHeight = `${appUpdatePresentationApi.appUpdatePopoverMaxHeight({ viewportHeight: window.innerHeight, bottom })}px`;
 }
 function clearAppUpdateCardTimers() {
   clearTimeout(appUpdateCardOpenTimer);

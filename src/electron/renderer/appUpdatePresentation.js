@@ -143,10 +143,19 @@
     };
   }
 
+  // The card anchors to the footer button from below, so its cap is the space
+  // left above the button minus a small top margin. No floor: at the window's
+  // 140px minimum height a floor would push the header off the top edge — the
+  // card scrolls itself instead.
+  function appUpdatePopoverMaxHeight({ viewportHeight, bottom }) {
+    return Math.max(0, Math.min(440, viewportHeight - bottom - 12));
+  }
+
   return {
     appUpdateActionMode,
     appUpdateErrorMessageKey,
     appUpdateInstallErrorMessageKey,
+    appUpdatePopoverMaxHeight,
     appUpdateStatusPresentation,
     automaticAppUpdateControlState,
     releaseNoteGroupsForLocale,
