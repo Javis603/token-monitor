@@ -588,3 +588,50 @@ maybe('a running manual compaction clears idle without treating other compaction
     }
   }
 });
+
+for (const missing of ['seq', 'time_created']) {
+  maybe(`current detail falls back to legacy without ${missing} while metadata remains readable`, () => {
+    const file = currentFixture();
+    const db = new sqlite.DatabaseSync(file);
+    db.exec(`ALTER TABLE session_message DROP COLUMN ${missing};
+      CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT, time_created INTEGER);
+      CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+      CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);`);
+    db.prepare('INSERT INTO session VALUES (?,?,?)').run('s1', 'Legacy title', T0);
+    db.prepare('INSERT INTO message VALUES (?,?,?,?)').run('legacy-answer', 's1', T1, JSON.stringify({
+      role: 'assistant', time: { created: T1 }, tokens: { input: 10 }, cost: 1, finish: 'stop'
+    }));
+    db.close();
+
+    const deps = { dbPaths: [file], sqlite };
+    const detail = ocs.readSessionEvents('s1', deps);
+    assert.equal(detail.found, true);
+    assert.equal(detail.sessionCost, 1);
+    assert.equal(detail.events.length, 1);
+    assert.equal(detail.events[0].tokens.total, 10);
+    assert.equal(detail.events[0].timestamp, new Date(T1).toISOString());
+    // Detail's stricter schema gate must not disable metadata's dynamic
+    // timestamp/order fallback or replace current metadata with legacy values.
+    assert.deepEqual(ocs.readSessionMeta(['s1'], deps).get('s1'), {
+      startedAt: new Date(T0).toISOString(),
+      lastUsedAt: new Date(T4).toISOString(),
+      title: 'Greeting',
+      projectPath: 'D:/repo',
+      turnEnded: true
+    });
+  });
+}
+
+maybe('current metadata preserves session fields when message type is absent', () => {
+  const file = currentFixture();
+  const db = new sqlite.DatabaseSync(file);
+  db.exec('ALTER TABLE session_message DROP COLUMN type');
+  db.close();
+
+  assert.deepEqual(ocs.readSessionMeta(['s1'], { dbPaths: [file], sqlite }).get('s1'), {
+    startedAt: new Date(T0).toISOString(),
+    lastUsedAt: new Date(T0).toISOString(),
+    title: 'Greeting',
+    projectPath: 'D:/repo'
+  });
+});

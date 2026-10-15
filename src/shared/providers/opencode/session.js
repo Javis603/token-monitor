@@ -71,6 +71,7 @@ function openCodeShapes(db) {
       // wrote a message table still answers when the session appeared.
       readsMessages: sessionMessage.has('id') && sessionMessage.has('session_id')
         && sessionMessage.has('data') && sessionMessage.has('type')
+        && sessionMessage.has('seq') && sessionMessage.has('time_created')
     });
   }
   const session = tableColumns(db, 'session');
@@ -101,7 +102,9 @@ function readMessageActivity(db, shape, ids, placeholders) {
   const lastMessageBySession = new Map();
   const turnEndedBySession = new Map();
   const columns = tableColumns(db, shape.messageTable);
-  if (!columns.has('session_id') || !columns.has('data')) return { lastMessageBySession, turnEndedBySession };
+  if (!columns.has('session_id') || !columns.has('data') || (shape.contentInRow && !columns.has('type'))) {
+    return { lastMessageBySession, turnEndedBySession };
+  }
 
   const createdMs = createdMsExpr(columns);
   // Settings selections are persisted messages in v2, but do not represent new
