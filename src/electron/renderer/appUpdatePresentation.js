@@ -59,6 +59,34 @@
     return [];
   }
 
+  // One entry per release the user is about to receive, newest first. Older
+  // remembered state and the unpackaged check carry only the latest release's
+  // notes, which become a one-entry history.
+  function releaseNoteHistoryForLocale(latest, locale) {
+    const history = Array.isArray(latest?.releaseNoteHistory) && latest.releaseNoteHistory.length > 0
+      ? latest.releaseNoteHistory
+      : latest?.version
+        ? [{ version: latest.version, htmlUrl: latest.htmlUrl, releaseNotes: latest.releaseNotes }]
+        : [];
+    return history
+      .filter((entry) => typeof entry?.version === 'string' && entry.version)
+      .map((entry) => ({
+        version: entry.version,
+        htmlUrl: typeof entry.htmlUrl === 'string' ? entry.htmlUrl : '',
+        groups: releaseNoteGroupsForLocale(entry.releaseNotes, locale)
+      }));
+  }
+
+  // Release notes lead each item with a bold topic ("**Goose usage:** Supports…").
+  // The parser keeps plain text, so the topic is recovered from its colon to
+  // restore that emphasis. A colon deep in a sentence is not a topic.
+  const RELEASE_NOTE_LEAD_RE = /^([^。．.!?！？:：]{1,40}?[:：])\s*(\S[\s\S]*)$/;
+  function splitReleaseNoteLead(item) {
+    const text = String(item || '');
+    const match = RELEASE_NOTE_LEAD_RE.exec(text);
+    return match ? { lead: match[1], body: match[2] } : { lead: '', body: text };
+  }
+
   function appUpdateErrorMessageKey(kind) {
     const keys = {
       githubUnavailable: 'settings.appUpdate.githubUnavailable',
@@ -121,6 +149,8 @@
     appUpdateInstallErrorMessageKey,
     appUpdateStatusPresentation,
     automaticAppUpdateControlState,
-    releaseNoteGroupsForLocale
+    releaseNoteGroupsForLocale,
+    releaseNoteHistoryForLocale,
+    splitReleaseNoteLead
   };
 });

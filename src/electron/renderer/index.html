@@ -1605,15 +1605,14 @@
           <span class="live-token-rate-icon" aria-hidden="true"></span>
           <span id="liveTokenRateValue" class="live-token-rate-value">— tok/s</span>
         </button>
-        <div id="appUpdatePill" class="update-pill hidden" title="">
-          <button id="appUpdatePillAction" type="button" class="update-pill-action">
-            <span id="appUpdatePillLabel" class="update-pill-label"></span>
+        <div id="appUpdatePill" class="update-pill hidden">
+          <button id="appUpdatePillAction" type="button" class="update-pill-action" data-status="available">
+            <svg class="update-pill-progress" viewBox="0 0 34 30" aria-hidden="true">
+              <path id="appUpdatePillProgress" class="update-pill-progress-bar" pathLength="100" d="M17 .5H27A6.5 6.5 0 0 1 33.5 7V23A6.5 6.5 0 0 1 27 29.5H7A6.5 6.5 0 0 1 .5 23V7A6.5 6.5 0 0 1 7 .5Z" />
+            </svg>
+            <span class="update-pill-icon" aria-hidden="true"></span>
+            <span class="update-pill-badge" aria-hidden="true"></span>
           </button>
-          <button id="appUpdatePillRestart" type="button" class="update-pill-restart hidden">
-            <span aria-hidden="true">↻</span>
-            <span id="appUpdatePillRestartLabel" class="update-pill-restart-label"></span>
-          </button>
-          <button id="appUpdatePillDismiss" type="button" class="update-pill-dismiss" data-i18n-title="settings.appUpdate.dismiss" data-i18n-aria-label="settings.appUpdate.dismiss" title="Dismiss this version" aria-label="Dismiss this version">×</button>
         </div>
         <span id="footerActionSlot">
           <span id="utilityActions" class="utility-actions">
@@ -1622,16 +1621,13 @@
           </span>
         </span>
       </footer>
-      <div id="appUpdatePopover" class="app-update-popover" popover="auto" role="dialog" aria-labelledby="appUpdatePopoverTitle">
+      <div id="appUpdatePopover" class="app-update-popover" popover="manual" role="dialog" aria-labelledby="appUpdatePopoverTitle">
         <div class="app-update-popover-header">
           <strong id="appUpdatePopoverTitle"></strong>
-          <button id="appUpdatePopoverClose" type="button" class="app-update-popover-close" data-i18n-title="settings.appUpdate.close" data-i18n-aria-label="settings.appUpdate.close" title="Close" aria-label="Close">×</button>
+          <span id="appUpdatePopoverSubtitle" class="app-update-popover-subtitle"></span>
+          <button id="appUpdatePopoverDismiss" type="button" class="app-update-popover-dismiss" data-i18n="settings.appUpdate.dismiss">Dismiss this version</button>
         </div>
-        <div id="appUpdatePopoverBody" class="app-update-notes-body"></div>
-        <div class="app-update-popover-actions">
-          <button id="appUpdatePopoverAction" type="button" class="app-update-popover-primary"></button>
-          <button id="appUpdatePopoverRelease" type="button" class="inline-link" data-i18n="settings.appUpdate.viewFullRelease">View full release</button>
-        </div>
+        <div id="appUpdatePopoverBody" class="app-update-popover-body"></div>
       </div>
     </main>
     <div id="syncContentTitleHelpPopover" class="settings-help-popover" popover="auto" role="tooltip">
