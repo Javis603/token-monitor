@@ -1625,22 +1625,22 @@ function scheduleAppUpdatePopoverClose() {
 }
 function renderAppUpdateNotes(s) {
   const version = s?.latest?.version || '';
-  const { entries, nodes } = version ? buildAppUpdateReleaseHistoryNodes(s) : { entries: [], nodes: [] };
-  const visible = Boolean(version && nodes.length > 0);
-  els.appUpdateNotes.classList.toggle('hidden', !visible);
-  if (!visible) {
-    setSettingsAccordionExpanded(els.appUpdateNotes, els.appUpdateNotesToggle, els.appUpdateNotesDetails, false);
-    els.appUpdateNotesTitle.textContent = '';
-    els.appUpdateNotesBody.replaceChildren();
-    delete els.appUpdateNotesBody.dataset.contentKey;
-    return;
-  }
-
-  els.appUpdateNotesTitle.textContent = entries.length > 1
-    ? t('settings.appUpdate.changesSince', { version: s.currentVersion })
-    : t('settings.appUpdate.whatsNew', { version });
   const contentKey = appUpdateNotesContentKey(s);
   if (els.appUpdateNotesBody.dataset.contentKey !== contentKey) {
+    const { entries, nodes } = version ? buildAppUpdateReleaseHistoryNodes(s) : { entries: [], nodes: [] };
+    const visible = Boolean(version && nodes.length > 0);
+    els.appUpdateNotes.classList.toggle('hidden', !visible);
+    if (!visible) {
+      setSettingsAccordionExpanded(els.appUpdateNotes, els.appUpdateNotesToggle, els.appUpdateNotesDetails, false);
+      els.appUpdateNotesTitle.textContent = '';
+      els.appUpdateNotesBody.replaceChildren();
+      delete els.appUpdateNotesBody.dataset.contentKey;
+      return;
+    }
+
+    els.appUpdateNotesTitle.textContent = entries.length > 1
+      ? t('settings.appUpdate.changesSince', { version: s.currentVersion })
+      : t('settings.appUpdate.whatsNew', { version });
     els.appUpdateNotesBody.replaceChildren(...nodes);
     els.appUpdateNotesBody.dataset.contentKey = contentKey;
   }
