@@ -585,11 +585,17 @@ test('openSessionDetail ignores a stale period result that completes last', asyn
 });
 
 test('Reasonix rows enter the shared detail navigation path instead of a native accordion', () => {
-  assert.match(rendererSource, /client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix'/);
+  const rowSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/sessionRows.js'), 'utf8');
+  // Reasonix is detail-bearing through the same predicate every other row uses,
+  // not through a list-local allowlist, and the shared open path is what the
+  // click handlers call.
+  assert.match(rowSource, /row\?\.client === 'reasonix' && row\?\.sessionDetailAvailable === true/);
+  assert.match(rendererSource, /function sessionRowOpensDetail\(row\) \{[\s\S]*?sessionRowsApi\.sessionRowDetailAvailable\(row\)/);
+  assert.match(rendererSource, /const row = findSessionListRow\(rowEl\.dataset\.key\);[\s\S]*?openSessionRow\(row\);/);
+  // Its id keeps the native prefix and its cost is the reported one, both from
+  // the helpers the live detail refresh already uses.
   assert.match(rendererSource, /const sessionId = client === 'reasonix' \? `reasonix:\$\{match\[2\]\}` : match\[2\];/);
-  assert.match(rendererSource, /state\.stats\?\.nativeSessions\?\.\[state\.period\]\?\.\[sessionId\]/);
-  assert.match(rendererSource, /client === 'reasonix' && rowEl\.dataset\.detailUnavailable === 'true'/);
-  assert.match(rendererSource, /sessionCost: client === 'reasonix' \? Number\(session\?\.reportedCostUsd \|\| 0\)/);
+  assert.match(rendererSource, /state\.stats\?\.nativeSessions\?\.\[periodKey\]\?\.\[request\.sessionId\][\s\S]*?return client === 'reasonix' \? Number\(entry\?\.reportedCostUsd \|\| 0\)/);
   assert.doesNotMatch(rendererSource, /nativeSessionBreakdown/);
 });
 

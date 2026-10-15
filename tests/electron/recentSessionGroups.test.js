@@ -169,10 +169,12 @@ function renderStatusGroup(group, metric = 'used') {
   const home = Function('document', 'window', 'state', 'els', 'sessionTooltipShouldHoldRender',
     'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
     'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView',
+    'findSessionListRow', 'sessionRowOpensDetail', 'openHomeSessionRow',
     `${shellSource}; ${contextSource}; ${homeSource}; return renderHomeSessionModule;`)(
     document, { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
     state, { homePanel: { querySelector: () => null } }, () => false,
-    () => {}, {}, translate, () => {}, () => '', {}, () => '', [], () => {}, String, () => '', rowApi, tooltip
+    () => {}, {}, translate, () => {}, () => '', {}, () => '', [], () => {}, String, () => '', rowApi, tooltip,
+    () => null, () => false, () => {}
   )([group]);
   const dockContext = dock.slice(dock.indexOf('function contextNode('), dock.indexOf('// Last activity seen'));
   const dockSource = dock.slice(dock.indexOf('const expandedSessionGroups ='), dock.indexOf('function providerCard('));
@@ -285,16 +287,19 @@ test('Home keeps family membership below the title and routes mouse and keyboard
     const state = { stats, period: 'today', breakdown: 'home', openSession: null, settings: { periodMonthMode: periodMode } };
     const routes = [];
     const readingTargets = [];
+    const opened = [];
     const renderHomeSessionModule = Function('document', 'window', 'state', 'els', 'sessionTooltipShouldHoldRender',
       'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
       'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView', 'homeSessionContext',
-      'sessionPresentationOptions', `${shellSource}; ${source}; return renderHomeSessionModule;`)(
+      'sessionPresentationOptions', 'findSessionListRow', 'sessionRowOpensDetail', 'openHomeSessionRow',
+      `${shellSource}; ${source}; return renderHomeSessionModule;`)(
       { createElement: tag => new Node(tag), createTextNode: text => new Node('text', '', text) },
       { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
       state, { homePanel: { querySelector: () => null } }, () => false,
       (view, options) => { routes.push([view, options]); state.breakdown = view; }, {}, translate,
       () => {}, () => '', {}, () => '', [], node => readingTargets.push(node), String, () => 'just now',
-      rowApi, { setDetailTooltip() {} }, () => assert.fail('group context must be absent'), () => opts
+      rowApi, { setDetailTooltip() {} }, () => assert.fail('group context must be absent'), () => opts,
+      (key) => ({ key, name: 'resolved' }), () => true, (row) => opened.push(row.key)
     );
     const module = renderHomeSessionModule();
     const row = module.children[1].children[0];
@@ -310,8 +315,15 @@ test('Home keeps family membership below the title and routes mouse and keyboard
     assert.equal(description.children[countIndex].textContent, '2 subagents');
     assert.equal(description.children.at(-1).textContent, ' · just now');
     assert.equal(row.attributes.role, undefined, 'rows do not create nested navigation buttons');
-    assert.equal(row.handlers.click, undefined);
     assert.equal(row.dataset.key, group.key);
+    // A row that the Sessions list can open takes the click itself, without the
+    // module's own navigation also running and showing the list underneath.
+    let propagated = false;
+    row.handlers.click({ stopPropagation() { propagated = true; } });
+    assert.equal(typeof row.handlers.click, 'function', 'an openable row activates itself');
+    assert.equal(propagated, true);
+    assert.deepEqual(opened, [group.key]);
+    assert.deepEqual(routes, [], 'the row does not detour through the list');
     let prevented = false;
     module.handlers[keyboard ? 'keydown' : 'click']({
       target: keyboard ? module : { closest: () => null }, key: 'Enter',
@@ -321,8 +333,76 @@ test('Home keeps family membership below the title and routes mouse and keyboard
     assert.deepEqual(routes, [['session', { fromHome: true }]]);
     assert.equal(state.breakdown, 'session');
     assert.equal(state.period, 'today', 'Home navigation preserves the selected period');
-    assert.equal(state.openSession, null, 'activation opens the list rather than a group detail');
+    assert.equal(state.openSession, null, 'the module still opens the list rather than a group detail');
   }
+});
+
+// A Home row activation harness with the real open path lifted from app.js —
+// findSessionListRow/openSessionRow/openHomeSessionRow plus the live-cost
+// helpers they use — and the surfaces they drive recorded instead of drawn.
+function homeActivationHarness(stats, { period = 'month', opts = incumbentOptions(stats) } = {}) {
+  const state = { stats, period, breakdown: 'home', openSession: null, settings: {} };
+  const routes = [];
+  const opened = [];
+  const groups = [];
+  const renders = [];
+  const shellSource = app.slice(app.indexOf('function homeModuleShell('), app.indexOf('function homeLimitRows('));
+  const homeSource = app.slice(app.indexOf('function renderHomeSessionModule('), app.indexOf('function renderHomeDeviceModule()'));
+  const openSource = app.slice(app.indexOf('function sessionRowOpensDetail('), app.indexOf('function renderSessionGroupDetail('));
+  const liveSource = app.slice(app.indexOf('function sessionLiveStatsEntry('), app.indexOf('function sessionDetailLiveSignature('));
+  const build = Function('document', 'window', 'state', 'els', 'sessionTooltipShouldHoldRender',
+    'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
+    'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView', 'homeSessionContext',
+    'sessionPresentationOptions', 'sessionRowsForPeriod', 'setBreakdown', 'render', 'openSessionDetail', 'renderSessionGroupDetail',
+    `${liveSource}; ${shellSource}; ${homeSource}; ${openSource}; return renderHomeSessionModule;`)(
+    { createElement: tag => new Node(tag), createTextNode: text => new Node('text', '', text) },
+    { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
+    state, { homePanel: { querySelector: () => null } }, () => false,
+    (view, options) => { routes.push([view, options]); state.breakdown = view; }, {}, translate,
+    () => {}, () => '', {}, () => '', [], () => {}, String, () => 'just now', rowApi, { setDetailTooltip() {} },
+    () => null, () => opts,
+    // The app's sessionRowsForPeriod: the period's rows grouped the way the
+    // Sessions list groups them, so a Home key resolves exactly as it does there.
+    (targetPeriod) => groupSessionRows(sessionRowsForPeriod(targetPeriod, opts), opts),
+    (view, options) => { routes.push([view, options]); state.breakdown = view; },
+    () => renders.push(true),
+    (request) => opened.push(request),
+    (request) => groups.push(request)
+  );
+  const module = build();
+  return { state, routes, opened, groups, renders, module, row: key => module.children[1].children.find(node => node.dataset.key === key) };
+}
+
+test('a Home session row opens its transcript where the Sessions list would, without the extra click', () => {
+  const stats = fixture();
+  stats.periods.month.sessions['opencode:solo'] = session('opencode', 'solo', { title: 'Backend credit/admin facts' });
+  const opts = incumbentOptions(stats);
+  const rows = presentation.recentSessionRows(stats, Infinity, opts);
+  // Home spells a plain session's key without the list's "session:" prefix; the
+  // row activation resolves through the list's own spelling.
+  const solo = rows.find(row => row.key === 'opencode:solo');
+  const family = rows.find(row => row.subagentGroup);
+  assert.ok(solo && family, 'fixture lists one plain session and one family');
+
+  const harness = homeActivationHarness(stats, { opts });
+  let propagated = false;
+  harness.row(solo.key).handlers.click({ stopPropagation() { propagated = true; } });
+  assert.equal(propagated, true, 'the module click must not also open the list under the transcript');
+  assert.deepEqual(harness.routes, [['session', { fromHome: true }]],
+    'the session view is current before the transcript opens, and keeps Back to Home');
+  assert.deepEqual(harness.opened, [{
+    client: 'opencode', sessionId: 'solo', sessionCost: 1, title: 'Backend credit/admin facts'
+  }]);
+  assert.equal(harness.groups.length, 0);
+  assert.equal(harness.renders.length, 1, 'one paint hides Home behind the opened transcript');
+
+  // A grouped row opens the member list it groups, exactly as in Sessions.
+  harness.row(family.key).handlers.click({ stopPropagation() {} });
+  assert.equal(harness.groups.length, 1);
+  assert.equal(harness.groups[0].kind, 'session-group');
+  assert.equal(harness.groups[0].summary.key, family.key);
+  assert.equal(harness.state.openSession.kind, 'session-group');
+  assert.equal(harness.opened.length, 1, 'a family opens no single transcript');
 });
 
 test('Dock family expansion keeps real member rows and requests the existing native bubble size handshake', () => {
@@ -408,7 +488,7 @@ test('resumed archived child preserves its accounting parent unless native metad
   assert.equal(rows.find(row => row.client === 'claude').parentSessionId, 'new-parent');
 });
 
-test('Home session navigation uses the incumbent module action without a second heading or row action', () => {
+test('Home session navigation keeps one module action and no second heading', () => {
   const source = app.slice(app.indexOf('function homeModuleShell('), app.indexOf('function homeLimitRows('));
   const routes = [];
   const shell = Function('document', 'renderBreakdownChange', 'VIEW_ICON_CLASSES', `${source}; return homeModuleShell;`)(

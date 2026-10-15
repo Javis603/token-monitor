@@ -5314,6 +5314,52 @@ function sessionGroupRunNode(row, max, parent) {
   return wrap;
 }
 
+// Every listed session row opens the same thing wherever it is listed: a grouped
+// row opens the member list it groups, a plain row opens its transcript. A row
+// without such a surface stays inert and leaves its list's own click in charge.
+function sessionRowOpensDetail(row) {
+  return Boolean(row?.sessionGroup) || sessionRowsApi.sessionRowDetailAvailable(row);
+}
+
+// Home's projected rows spell a plain session "client:id" while the Sessions
+// list words it "session:client:id" — the same row under two keys — so resolve
+// through either spelling. The list's own click passes its own and matches exactly.
+function findSessionListRow(key) {
+  if (!key) return null;
+  const rows = sessionRowsForPeriod(state.stats?.periods?.[state.period]);
+  return rows.find((row) => row.key === key || row.key === `session:${key}`) || null;
+}
+
+function openSessionRow(row) {
+  if (row.sessionGroup) {
+    const request = { kind: 'session-group', period: state.period, summary: row };
+    state.openSession = request;
+    renderSessionGroupDetail(request);
+    return;
+  }
+  const match = String(row.key || '').match(/^session:([^:]+):(.+)$/);    // "session:<client>:<sessionId>"
+  if (!match || !sessionRowsApi.sessionRowDetailAvailable(row)) return;
+  const client = String(row.client || match[1]);
+  const sessionId = client === 'reasonix' ? `reasonix:${match[2]}` : match[2];
+  openSessionDetail({
+    client,
+    sessionId,
+    sessionCost: sessionLiveCost(sessionLiveStatsEntry({ client, sessionId, period: state.period }), client),
+    // The list row's own name, so the heading matches the row the reader clicked.
+    title: row.name || ''
+  });
+}
+
+// A row on Home is a Sessions row, so activating it lands on the surface that
+// same row opens there instead of stopping at the list. The session view has to
+// be current first — render() drops an open session while another breakdown is
+// showing — and the paint after the open is what hides Home behind it.
+function openHomeSessionRow(row) {
+  setBreakdown('session', { fromHome: true });
+  openSessionRow(row);
+  render();
+}
+
 function renderSessionGroupDetail(request) {
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
@@ -6572,6 +6618,15 @@ function renderHomeSessionModule(rows) {
     }
     if (context) meta.append(homeSessionContext(context, cache));
     item.append(mark, stateMark, name, value, meta);
+    // Home lists the Sessions rows, so a row that has a detail surface opens it
+    // directly; only the rest of the card still routes through the module click.
+    const target = findSessionListRow(row.key);
+    if (target && sessionRowOpensDetail(target)) {
+      item.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openHomeSessionRow(target);
+      });
+    }
     body.append(item);
   }
   return module;
@@ -12679,33 +12734,9 @@ els.breakdown.addEventListener('click', (event) => {
   if (state.breakdown !== 'session') return;
   const rowEl = event.target.closest('.row');
   if (!rowEl) return;
-  if (rowEl.dataset.sessionGroup) {
-    const period = state.stats?.periods?.[state.period];
-    const summary = sessionRowsForPeriod(period).find((row) => row.key === rowEl.dataset.key);
-    if (summary) {
-      const request = { kind: 'session-group', period: state.period, summary };
-      state.openSession = request;
-      renderSessionGroupDetail(request);
-    }
-    return;
-  }
-  const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
-  const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp') return;
-  if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
-  const match = key.match(/^session:([^:]+):(.+)$/);
-  if (!match) return;
-  const sessionId = client === 'reasonix' ? `reasonix:${match[2]}` : match[2];
-  const period = state.stats?.periods?.[state.period];
-  const session = client === 'reasonix'
-    ? state.stats?.nativeSessions?.[state.period]?.[sessionId]
-    : period?.sessions?.[`${client}:${sessionId}`];
-  openSessionDetail({
-    client,
-    sessionId,
-    sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
-    title: rowEl.querySelector('.row-title')?.textContent || ''
-  });
+  const row = findSessionListRow(rowEl.dataset.key);
+  if (!row || !sessionRowOpensDetail(row)) return;
+  openSessionRow(row);
 });
 
 els.breakdown.addEventListener('keydown', (event) => {
