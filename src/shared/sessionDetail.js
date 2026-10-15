@@ -14,6 +14,7 @@ const codebuddyExtension = require('./providers/codebuddy/extension');
 const opencodeSession = require('./providers/opencode/session');
 const { readReasonixSessionEvents } = require('./providers/reasonix/sessionDetail');
 const { createLocalUsageStore } = require('./providers/codex/localUsageStore');
+const PI_FORMAT_CLIENTS = new Set(['pi', 'omp']);
 
 function* readTranscriptLines(filePath, transcriptFs = fs) {
   const decoded = isCompressedCodexTranscript(filePath) ? readCompressedCodexTranscript(filePath, { fs: transcriptFs }) : null;
@@ -385,11 +386,12 @@ function parseCodebuddyTranscriptLines(lines) {
   return events;
 }
 
-// Pi (pi.dev) writes conversation and billed operations as separate entries.
-// Only user messages create prompt boundaries; summary, tool and standalone
-// usage contributes to totals without counting as assistant replies. Pi
-// follows OpenAI's convention: `totalTokens` is input + output + cacheRead +
-// cacheWrite, and `reasoning` is an informational subset of output.
+// Pi (pi.dev) and OMP write the same conversation format, with billed
+// operations as separate entries. OMP's title slot is naturally ignored
+// because only user messages create prompt boundaries; summary, tool and
+// standalone usage contributes to totals without counting as assistant replies.
+// Both follow OpenAI's convention: totalTokens is input + output + cacheRead +
+// cacheWrite, and reasoning is an informational subset of output.
 function piPromptText(content) {
   if (typeof content === 'string') return cleanPromptText(content) || null;
   if (!Array.isArray(content)) return null;
@@ -443,9 +445,9 @@ function parsePiTranscriptLines(lines) {
           output: u.output,
           cacheRead: u.cacheRead,
           cacheWrite: u.cacheWrite,
-          reasoning: u.reasoning
+          reasoning: u.reasoning ?? u.reasoningTokens
         }),
-        // Pi prices each operation itself; `readSessionDetail` prefers this over the
+        // Pi and OMP report each operation's cost; prefer it over the
         // proportional split of the session subtotal.
         cost: num(u.cost && u.cost.total),
         tools: uniqueTools(tools)
@@ -710,9 +712,9 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
     events = parsed ? parsed.events
       : (client === 'codebuddy' || client === 'workbuddy')
         ? parseCodebuddyTranscriptLines(lines)
-        : client === 'pi'
-          ? parsePiTranscriptLines(lines)
-          : parseClaudeTranscriptLines(lines);
+      : PI_FORMAT_CLIENTS.has(client)
+        ? parsePiTranscriptLines(lines)
+        : parseClaudeTranscriptLines(lines);
   } catch (error) {
     if (error.code === 'ENOENT') return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
     return {
@@ -722,10 +724,10 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
   }
   const now = new Date((deps.now || Date.now)());
   const grouped = filterExchangesByPeriod(groupEvents(events), period, now);
-  // Pi prices every reply in `usage.cost.total`, so use the reported per-turn
-  // cost instead of splitting the session subtotal the way Claude/Codex do. A
-  // provider that reports no price (all zeros) falls back to that split.
-  const reportedCost = client === 'pi'
+  // Pi and OMP price replies with `usage.cost.total`, so use the reported
+  // per-turn costs instead of splitting the session subtotal. A provider that
+  // reports no price (all zeros) falls back to that split.
+  const reportedCost = PI_FORMAT_CLIENTS.has(client)
     ? grouped.reduce((sum, ex) => sum + ex.turns.reduce((turnSum, t) => turnSum + num(t.costEstimate), 0), 0)
     : 0;
   let costUsd = num(sessionCost);
