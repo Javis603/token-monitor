@@ -120,7 +120,7 @@ function parsePrepaidBilling(input) {
   };
 }
 
-function parseUsageSummary(input, { requestUsage = null } = {}) {
+function parseUsageSummary(input, { requestUsage = null, unifiedPlan = false } = {}) {
   const summary = input && typeof input === 'object' ? input : {};
   const individual = summary.individualUsage && typeof summary.individualUsage === 'object' ? summary.individualUsage : {};
   const plan = individual.plan && typeof individual.plan === 'object' ? individual.plan : {};
@@ -150,8 +150,9 @@ function parseUsageSummary(input, { requestUsage = null } = {}) {
   let planPercent = clampPercent(numberOrNull(plan.totalPercentUsed));
   if (planPercent === null) {
     if (planLimit > 0) planPercent = percentFromUsedLimit(numberOrNull(plan.used), planLimit);
-    else if (overallLimit !== null && overallLimit > 0) planPercent = percentFromUsedLimit(overallUsed, overallLimit);
-    else if (teamPooledLimit !== null && teamPooledLimit > 0) planPercent = percentFromUsedLimit(teamPooledUsed, teamPooledLimit);
+    // Legacy aggregate pools do not establish a unified seat's included usage.
+    else if (!unifiedPlan && overallLimit !== null && overallLimit > 0) planPercent = percentFromUsedLimit(overallUsed, overallLimit);
+    else if (!unifiedPlan && teamPooledLimit !== null && teamPooledLimit > 0) planPercent = percentFromUsedLimit(teamPooledUsed, teamPooledLimit);
   }
 
   let resolvedPlanUsed = planUsed;
@@ -314,14 +315,15 @@ async function probe(sessionToken, opts = {}) {
   const [grokBotResult, planInfoResult] = await Promise.all([grokBotResultPromise, planInfoResultPromise]);
   const grokBot = grokBotResult.ok ? parseGrokBotUsage(grokBotResult.json) : null;
   const planInfo = planInfoResult.ok ? parsePlanInfo(planInfoResult.json) : null;
+  const unifiedPlan = planInfo ? planInfo.isMerged : grokBot?.isUnified === true;
   // Only unified (The X Subscription) plans carry a prepaid balance, so legacy
   // plans never pay for this request.
   let prepaid = null;
-  if (planInfo ? planInfo.isMerged : grokBot?.isUnified === true) {
+  if (unifiedPlan) {
     const prepaidResult = await dashboardRpc(PREPAID_BILLING_URL, sessionToken, opts, configuredTimeoutMs);
     if (prepaidResult.ok) prepaid = parsePrepaidBilling(prepaidResult.json);
   }
-  const usage = { ...parseUsageSummary(usageResult.json, { requestUsage }), grokBot, planInfo, prepaid };
+  const usage = { ...parseUsageSummary(usageResult.json, { requestUsage, unifiedPlan }), grokBot, planInfo, prepaid };
   return { ok: true, usage, user };
 }
 

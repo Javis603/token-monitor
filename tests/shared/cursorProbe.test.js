@@ -72,6 +72,25 @@ test('parseUsageSummary never synthesizes a total from the separate model pools'
   assert.equal(result.planPercent, 25);
 });
 
+test('parseUsageSummary limits unified percentages to individual plan data', () => {
+  for (const individual of [{}, { overall: { used: 1000, limit: 2000 } }]) {
+    for (const [plan, expected] of [
+      [{}, null],
+      [{ autoPercentUsed: 10, apiPercentUsed: 50 }, null],
+      [{ totalPercentUsed: 0 }, 0],
+      [{ used: 0, limit: 2000 }, 0],
+      [{ used: 500, limit: 2000 }, 25]
+    ]) {
+      const summary = {
+        individualUsage: { ...individual, plan },
+        teamUsage: { pooled: { used: 7500, limit: 10000 } }
+      };
+      assert.equal(parseUsageSummary(summary, { unifiedPlan: true }).planPercent, expected);
+      assert.equal(parseUsageSummary(summary).planPercent, expected ?? (individual.overall ? 50 : 75));
+    }
+  }
+});
+
 test('parseGrokBotUsage keeps an exhausted included allowance visible', () => {
   const result = parseGrokBotUsage({
     usagePercent: 100,
@@ -382,6 +401,49 @@ test('unified limits through the real probe distinguish missing usage from a tru
       else assert.equal(included?.usedPercent, expected);
       assert.equal(result.windows.find((window) => window.label === 'Prepaid balance')?.remaining, 14.46);
       assert.ok(!result.windows.some((window) => ['Cursor Models', 'Other Models'].includes(window.label)));
+    }
+  }
+});
+
+test('unified limits never reuse legacy overall or team usage as the included pool', async () => {
+  for (const planInfo of [
+    { isMerged: true, planInfo: { includedUsagePeriod: 'INCLUDED_USAGE_PERIOD_WEEKLY' } },
+    { isMerged: true, planInfo: { includedUsagePeriod: 'INCLUDED_USAGE_PERIOD_MONTHLY' } },
+    null,
+    { isMerged: false }
+  ]) {
+    const unified = planInfo?.isMerged !== false;
+    for (const overall of [undefined, { used: 1000, limit: 2000 }]) {
+      for (const [plan, expected] of [[{}, null], [{ totalPercentUsed: 0 }, 0], [{ used: 500, limit: 2000 }, 25]]) {
+        const result = await fetchCursorLimits({}, {
+          readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't' }),
+          httpsLib: dashboardFakeHttps({
+            '/api/usage-summary': {
+              individualUsage: { plan, overall },
+              teamUsage: { pooled: { used: 7500, limit: 10000 } },
+              billingCycleEnd: '2026-11-01T00:00:00Z'
+            },
+            '/api/dashboard/get-plan-info': planInfo,
+            '/api/dashboard/get-sand-usage-status': { isUnified: true },
+            '/api/dashboard/get-user-prepaid-billing': { availableCents: '1446' }
+          })
+        });
+        assert.equal(result.status, 'ok');
+        const included = result.windows.find((window) => window.label === 'Included usage');
+        if (!unified || expected === null) assert.equal(included, undefined);
+        else assert.equal(included?.usedPercent, expected);
+        const team = result.windows.find((window) => window.label === 'Team pool');
+        assert.equal(team?.usedPercent, 75);
+        assert.equal(team?.kind, 'billing');
+        assert.equal(team?.used, 75);
+        assert.equal(team?.limit, 100);
+        const prepaid = result.windows.find((window) => window.label === 'Prepaid balance');
+        if (unified) assert.equal(prepaid?.remaining, 14.46);
+        else assert.equal(prepaid, undefined);
+        if (!unified && overall) {
+          assert.equal(result.windows.find((window) => window.label === 'Overall')?.usedPercent, expected ?? 50);
+        }
+      }
     }
   }
 });
