@@ -20,8 +20,8 @@ function createWindowsNonActivatingInput(koffi) {
   const proc = koffi.proto(
     'intptr_t __stdcall TokenMonitorNonActivatingSubclassProc(uintptr_t hwnd, uint32 msg, uintptr_t wParam, intptr_t lParam, uintptr_t id, uintptr_t data)'
   );
-  const setSubclass = lib.func('bool __stdcall SetWindowSubclass(uintptr_t hwnd, void *proc, uintptr_t id, uintptr_t data)');
-  const removeSubclass = lib.func('bool __stdcall RemoveWindowSubclass(uintptr_t hwnd, void *proc, uintptr_t id)');
+  const setSubclass = lib.func('int32_t __stdcall SetWindowSubclass(uintptr_t hwnd, void *proc, uintptr_t id, uintptr_t data)');
+  const removeSubclass = lib.func('int32_t __stdcall RemoveWindowSubclass(uintptr_t hwnd, void *proc, uintptr_t id)');
   const next = lib.func('intptr_t __stdcall DefSubclassProc(uintptr_t hwnd, uint32 msg, uintptr_t wParam, intptr_t lParam)');
   const installed = new WeakSet();
 
@@ -51,7 +51,7 @@ function createWindowsNonActivatingInput(koffi) {
       return next(target, message, wParam, lParam);
     }, koffi.pointer(proc));
     try {
-      if (!setSubclass(hwnd, callback, SUBCLASS_ID, 0)) throw new Error('SetWindowSubclass returned FALSE');
+      if (setSubclass(hwnd, callback, SUBCLASS_ID, 0) === 0) throw new Error('SetWindowSubclass returned FALSE');
     } catch (error) {
       koffi.unregister(callback);
       throw error;

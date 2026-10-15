@@ -5,7 +5,7 @@ const { EventEmitter } = require('node:events');
 const test = require('node:test');
 const { createWindowsNonActivatingInput, installWindowsNonActivatingInput } = require('../../src/electron/windowsNonActivatingInput');
 
-function fixture({ installResult = true, installError = null } = {}) {
+function fixture({ installResult = 1, installError = null } = {}) {
   const calls = [];
   const callbacks = [];
   const koffi = {
@@ -13,15 +13,21 @@ function fixture({ installResult = true, installError = null } = {}) {
       assert.equal(name, 'comctl32.dll');
       return {
         func(signature) {
-          if (signature.includes('SetWindowSubclass')) return (...args) => {
-            calls.push(['install', ...args]);
-            if (installError) throw installError;
-            return installResult;
-          };
-          if (signature.includes('RemoveWindowSubclass')) return (...args) => {
-            calls.push(['remove', ...args]);
-            return true;
-          };
+          if (signature.includes('SetWindowSubclass')) {
+            assert.match(signature, /^int32_t __stdcall SetWindowSubclass\(/, 'Win32 BOOL is a 32-bit signed integer');
+            return (...args) => {
+              calls.push(['install', ...args]);
+              if (installError) throw installError;
+              return installResult;
+            };
+          }
+          if (signature.includes('RemoveWindowSubclass')) {
+            assert.match(signature, /^int32_t __stdcall RemoveWindowSubclass\(/, 'Win32 BOOL is a 32-bit signed integer');
+            return (...args) => {
+              calls.push(['remove', ...args]);
+              return 1;
+            };
+          }
           if (signature.includes('DefSubclassProc')) return (...args) => {
             calls.push(['next', ...args]);
             // The real Chromium handler returns 4 for WM_MOUSEACTIVATE on
@@ -66,6 +72,15 @@ test('all other messages and their signed result stay on the native subclass cha
   assert.equal(f.callbacks.length, 1, 'repeated installation does not stack callbacks');
 });
 
+test('nonzero Win32 BOOL results are successful even when the low byte is zero', () => {
+  for (const installResult of [0x100, -1]) {
+    const f = fixture({ installResult });
+    assert.equal(f.install(f.win), true);
+    assert.equal(f.win.listenerCount('closed'), 1);
+    assert.equal(f.calls.some(([name]) => name === 'unregister'), false);
+  }
+});
+
 test('native destruction removes the subclass before chaining and releases the callback after returning', async () => {
   const f = fixture();
   f.install(f.win);
@@ -88,7 +103,7 @@ test('a closed window also releases the callback when no native destruction noti
   assert.equal(f.calls.filter(([name]) => name === 'unregister').length, 1);
 });
 
-for (const options of [{ installResult: false }, { installError: new Error('native install failed') }]) {
+for (const options of [{ installResult: 0 }, { installError: new Error('native install failed') }]) {
   test(`failed subclass installation releases its registered callback (${options.installError ? 'throw' : 'FALSE'})`, () => {
     const f = fixture(options);
     assert.throws(() => f.install(f.win), /SetWindowSubclass returned FALSE|native install failed/);
