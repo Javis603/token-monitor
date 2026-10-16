@@ -648,8 +648,11 @@ function verifyGooseScannerContract(binPath) {
       path.join(home, '.local', 'share', 'Block', 'goose', 'sessions', 'sessions.db')
     ];
     candidates.forEach((file, i) => writeGooseDatabase(file, [{ id: `priority-${i}`, accumulatedInput: (i + 1) * 100 }]));
-    const relativeRoot = path.relative(process.cwd(), customRoot);
-    assert.deepEqual(Object.keys(counters(run({ GOOSE_PATH_ROOT: relativeRoot }))), ['priority-1']);
+    // Windows checkout and TEMP can be on different drives; relative(cwd, root)
+    // then returns an absolute path and accidentally tests a valid override.
+    const relativeRoot = path.relative(home, customRoot);
+    assert.equal(path.isAbsolute(relativeRoot), false, 'fixture override must be relative');
+    assert.deepEqual(Object.keys(counters(run({ GOOSE_PATH_ROOT: relativeRoot }))), ['priority-1'], 'relative override is ignored');
     assert.deepEqual(Object.keys(counters(run({ GOOSE_PATH_ROOT: ` ${customRoot} ` }))), ['priority-1']);
     assert.deepEqual(Object.keys(counters(run({ GOOSE_PATH_ROOT: customRoot }))), ['priority-0']);
     fs.rmSync(candidates[0]);
