@@ -6,11 +6,12 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { DatabaseSync } = require('node:sqlite');
 const { normalizePeriod } = require('../../src/shared/usage');
 const {
   applySessionUsageArchive, captureSessionUsageArchive, sessionUsageArchiveDate, updateSessionUsageArchive
 } = require('../../src/shared/usage/sessionUsageArchive');
-const { createSessionUsageArchiveStore } = require('../../src/shared/usage/sessionUsageArchiveStore');
+const { createSessionUsageArchiveStore, readSessionUsageArchiveSnapshot } = require('../../src/shared/usage/sessionUsageArchiveStore');
 const { createUsageTransform } = require('../../src/shared/usage/usageTransform');
 
 const AT = new Date('2026-07-09T12:00:00Z');
@@ -24,9 +25,9 @@ function period(tokens, client = 'claude') {
 function summary(tokens, at = AT, client = 'claude') {
   return { updatedAt: at.toISOString(), today: period(tokens, client), month: period(tokens, client), allTime: period(tokens, client) };
 }
-function setup(t) {
+function setup(t, storeOptions = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-live-'));
-  const options = { databasePath: path.join(dir, 'archive.sqlite'), path: path.join(dir, 'legacy.json') };
+  const options = { databasePath: path.join(dir, 'archive.sqlite'), path: path.join(dir, 'legacy.json'), ...storeOptions };
   let store = createSessionUsageArchiveStore(options);
   const transform = createUsageTransform({ store, getSettings: () => ({ projectsEnabled: false }), log: () => {} });
   t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
@@ -163,6 +164,60 @@ test('headless projection consumes the full-scan hint without publishing it', t 
       assert.equal(Object.hasOwn(serializeSyncPayload(visible).payload, 'sessionUsageArchiveFullScan'), false);
     }
   }
+});
+
+test('headless capture failure preserves committed usage and publication until recovery', async t => {
+  let failCommit = false;
+  class FailingDatabase extends DatabaseSync {
+    exec(sql) {
+      if (failCommit && sql === 'COMMIT') throw new Error('synthetic archive commit failure');
+      return super.exec(sql);
+    }
+  }
+  const { store } = setup(t, { DatabaseSync: FailingDatabase });
+  const source = fs.readFileSync(path.resolve(__dirname, '../../src/agent/agent.js'), 'utf8');
+  const start = source.indexOf('function summaryWithSessionUsageArchive(');
+  const body = source.slice(start, source.indexOf('\n}\n', start) + 3);
+  const context = { sessionUsageArchiveEnabled: true, dryRun: false, projectsEnabled: false,
+    sessionUsageArchiveStore: store, sessionUsageArchiveDate, applySessionUsageArchive,
+    console: { error() {} } };
+  vm.runInNewContext(body, context);
+  const { runAgent } = require('../../src/agent/runtime');
+  let delivery, limits;
+  const records = [], posted = [];
+  const runtime = runAgent({
+    transformUsage: context.summaryWithSessionUsageArchive,
+    onRecord: record => records.push(record), deliver: async record => posted.push(record)
+  }, { deviceRuntimeDeps: {
+    createUsageRuntime(options) { delivery = options; return { stop() {} }; },
+    createLimitsRuntime(_options, deps) { limits = deps; return { stop() {} }; }
+  } });
+  t.after(() => runtime.stop());
+  delivery.onUpdate(summary(100), 'startup');
+  await runtime.flush();
+  assert.equal(records.length, 1);
+  assert.equal(posted[0].allTime.totalTokens, 100);
+  failCommit = true;
+  let captureError;
+  try { delivery.onUpdate(summary(20, LATER), 'manual'); } catch (error) { captureError = error; }
+  await runtime.flush();
+  const snapshot = () => readSessionUsageArchiveSnapshot({
+    databasePath: store.databasePath, path: store.legacyPath, strict: true
+  });
+  assert.equal(snapshot().sessions['claude:one'].periods.allTime.totalTokens, 100);
+  assert.equal(posted.length, 1, `disk retained100 but failed capture published${posted.at(-1).allTime.totalTokens}`);
+  assert.equal(records.length, 1);
+  assert.match(captureError?.message || '', /synthetic archive commit failure/);
+  assert.equal(runtime.getSnapshot().allTime.totalTokens, 100);
+  limits.onUpdate({ providers: [], updatedAt: LATER.toISOString() });
+  await runtime.flush();
+  assert.equal(posted.at(-1).allTime.totalTokens, 100, 'limits-only delivery retains committed usage');
+  failCommit = false;
+  delivery.onUpdate(summary(20, new Date(AT.getTime() + 2000)), 'manual');
+  await runtime.flush();
+  assert.equal(runtime.getSnapshot().allTime.totalTokens, 20);
+  assert.equal(posted.at(-1).allTime.totalTokens, 20);
+  assert.equal(snapshot().sessions['claude:one'].periods.allTime.totalTokens, 20);
 });
 
 test('an incomplete full-scan hint cannot turn an unscanned period into zero', () => {
