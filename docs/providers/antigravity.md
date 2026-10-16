@@ -78,7 +78,7 @@ Local RPC probes prefer process kinds in this order:
 2. CLI
 3. IDE
 
-When managed OAuth accounts exist, Token Monitor fetches enabled OAuth accounts and the local RPC snapshot concurrently. If local RPC returns a trusted email matching an OAuth account, the live local result replaces the remote result for that account, unless the local snapshot is empty or unavailable (`status !== 'ok'`), or a legacy 3-pool RPC fallback (`windowMinutes: null`) would overwrite richer grouped OAuth quota (`windowMinutes: 300` or `10080`).
+When managed OAuth accounts exist, Token Monitor fetches enabled OAuth accounts and the local RPC snapshot concurrently. If local RPC returns a trusted email matching an OAuth account, the live local result replaces the remote result for that account, unless the local snapshot is empty or unavailable (`status !== 'ok'`), or a legacy 3-pool RPC fallback (`windowMinutes: null`) would overwrite richer grouped OAuth quota (`windowMinutes: 300` or `10080`). When both sources return grouped windows for the same account, any grouped model family present only in OAuth (such as `Gemini 4 Argon` when the local language server predates Hub 2.16.0) is retained alongside the live local groups.
 
 An account-scoped manual refresh fetches only the requested OAuth account. With no managed accounts, normal collection remains local-RPC-only.
 
@@ -113,10 +113,11 @@ Grouped quota responses map into the normalized limits windows used by every pro
 
 - Gemini windows;
 - Claude/GPT shared windows;
+- Gemini 4 Argon windows;
 - five-hour windows;
 - weekly windows.
 
-Older model-config responses are pooled into compatible fallback windows. UI labels and grouping should describe the upstream pool rather than inventing per-model precision the response does not contain.
+Older model-config responses are pooled into compatible fallback windows (`Gemini Pro`, `Gemini Flash`, `Claude`, and `Gemini 4 Argon`). UI labels and grouping should describe the upstream pool rather than inventing per-model precision the response does not contain.
 
 ### Identity and aggregation
 

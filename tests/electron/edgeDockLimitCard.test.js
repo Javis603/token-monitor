@@ -1845,6 +1845,40 @@ test('an Antigravity group whose rows are all unchecked goes with them', () => {
   assert.doesNotMatch(card.text, /Claude/);
 });
 
+test('Antigravity renders Gemini 4 Argon as its own group with a single Weekly row', () => {
+  const record = {
+    provider: 'antigravity',
+    windows: [
+      { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 98 },
+      { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 99 },
+      { kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: null, showMeter: false },
+      { kind: 'weekly', label: 'Claude/GPT weekly', remainingPercent: 0 },
+      { kind: 'weekly', label: 'Gemini 4 Argon weekly', remainingPercent: 37 }
+    ]
+  };
+  const card = dockView().renderProviderWindows(record, '#4285F4');
+  const groups = [...card.walk()].filter((node) => node.classNames.has('limit-window-group'));
+  assert.deepEqual(
+    groups.map((group) => [
+      group.find('limit-window-group-title')?.textContent,
+      [...group.walk()].filter((node) => node.classNames.has('limit-window')).map(rowTitle)
+    ]),
+    [
+      ['Gemini', ['5-hour', 'Weekly']],
+      ['Claude/GPT', ['5-hour', 'Weekly']],
+      ['Gemini 4 Argon', ['Weekly']]
+    ]
+  );
+  const items = dockView().limitProviderUsageItems([record]);
+  assert.deepEqual(items.map((item) => item.label), [
+    'Gemini · 5-hour',
+    'Gemini · Weekly',
+    'Claude/GPT · 5-hour',
+    'Claude/GPT · Weekly',
+    'Gemini 4 Argon · Weekly'
+  ]);
+});
+
 test('a MiMo plan drawn from the balance is the same item as the plan window', () => {
   const planKey = usageItems.limitWindowKey({ kind: 'billing', label: 'Token Plan' });
   const record = {

@@ -490,9 +490,10 @@ function normalizeLimitProvider(input) {
   if (provider === 'antigravity') {
     const groupRank = (window) => {
       const label = String(window.label || '').toLowerCase();
+      if (label.includes('argon')) return 2;
       if (label.includes('gemini')) return 0;
       if (label.includes('claude') || label.includes('gpt')) return 1;
-      return 2;
+      return 3;
     };
     windows.sort((a, b) => groupRank(a) - groupRank(b)
       || WINDOW_ORDER.indexOf(a.kind) - WINDOW_ORDER.indexOf(b.kind));

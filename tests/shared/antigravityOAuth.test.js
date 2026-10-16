@@ -32,6 +32,7 @@ async function quotaEndpointSnapshot(fetchQuota) {
     fetch: async (url, init) => {
       if (url.endsWith(':loadCodeAssist')) return response(200, {});
       assert.ok(url.endsWith(':retrieveUserQuotaSummary'));
+      assert.match(init.headers['user-agent'], /^antigravity\/hub\/2\.23\.1 /);
       assert.deepEqual(JSON.parse(init.body), { project: 'fixture-project' });
       return fetchQuota(url);
     }
@@ -262,14 +263,14 @@ test('fetchRemoteSnapshot follows the Antigravity Hub daily onboarding protocol'
 
   const loadRequest = requests[0];
   assert.deepEqual(loadRequest.body, { metadata: { ideType: 'ANTIGRAVITY' } });
-  assert.match(loadRequest.headers['user-agent'], /^antigravity\/hub\/2\.9\.1 /);
+  assert.match(loadRequest.headers['user-agent'], /^antigravity\/hub\/2\.23\.1 /);
   assert.equal(loadRequest.headers.accept, '*/*');
   const onboardRequest = requests[1];
   assert.deepEqual(onboardRequest.body, {
     tier_id: 'free-tier',
     metadata: {
       ide_type: 'ANTIGRAVITY',
-      ide_version: '2.9.1',
+      ide_version: '2.23.1',
       ide_name: 'antigravity'
     }
   });
