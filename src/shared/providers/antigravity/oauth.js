@@ -422,6 +422,8 @@ async function fetchAvailableModels(accessToken, projectBody, deps = {}) {
 }
 
 function clampFraction(value) {
+  if (value === null || value === undefined || typeof value === 'boolean') return null;
+  if (typeof value === 'string' && !value.trim()) return null;
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : null;
 }

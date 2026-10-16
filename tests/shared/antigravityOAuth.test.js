@@ -497,3 +497,91 @@ test('fetchRemoteSnapshot surfaces Google account verification without swallowin
     return true;
   });
 });
+
+test('modelsFromAvailable, modelsFromBuckets, and fetchRemoteSnapshot preserve null remainingFraction through collapsePools', async () => {
+  const available = antigravityOAuth.modelsFromAvailable({
+    models: {
+      'gemini-4-argon-high': {
+        displayName: 'Gemini 4 Argon (High)',
+        quotaInfo: { remainingFraction: null, resetTime: '2026-10-23T00:33:37Z' }
+      },
+      'gemini-4-argon-medium': {
+        displayName: 'Gemini 4 Argon (Medium)',
+        quotaInfo: { remainingFraction: 0.74, resetTime: '2026-10-23T00:33:37Z' }
+      },
+      'claude-opus-5-5-low': {
+        displayName: 'Claude Opus 5.5 (Low)',
+        quotaInfo: { resetTime: '2026-10-17T10:01:00Z' }
+      }
+    }
+  });
+  assert.deepEqual(available.map((model) => [model.modelId, model.remainingFraction]), [
+    ['gemini-4-argon-high', null],
+    ['gemini-4-argon-medium', 0.74],
+    ['claude-opus-5-5-low', null]
+  ]);
+  assert.deepEqual(antigravityProbe._collapsePools(available).map((pool) => [pool.name, pool.remainingFraction]), [
+    ['Claude', null],
+    ['Gemini 4 Argon', 0.74]
+  ]);
+
+  const buckets = antigravityOAuth.modelsFromBuckets({
+    buckets: [
+      { modelId: 'gemini-4-argon-high', remainingFraction: null, resetTime: '2026-10-23T00:33:37Z' },
+      { modelId: 'gemini-4-argon-high', remainingFraction: 0.74, resetTime: '2026-10-23T00:33:37Z' },
+      { modelId: 'claude-opus-5-5-low', resetTime: '2026-10-17T10:01:00Z' }
+    ]
+  });
+  assert.deepEqual(buckets.map((model) => [model.modelId, model.remainingFraction]), [
+    ['gemini-4-argon-high', 0.74],
+    ['claude-opus-5-5-low', null]
+  ]);
+  assert.deepEqual(antigravityProbe._collapsePools(buckets).map((pool) => [pool.name, pool.remainingFraction]), [
+    ['Claude', null],
+    ['Gemini 4 Argon', 0.74]
+  ]);
+
+  const snapshot = await antigravityOAuth.fetchRemoteSnapshot({
+    id: 'account-1',
+    accountEmail: 'user@example.com',
+    credentials: {
+      accessToken: 'access',
+      expiresAt: Date.now() + 3600_000,
+      clientId: 'client',
+      clientSecret: 'secret',
+      projectId: 'project-1'
+    }
+  }, {
+    collapsePools: antigravityProbe._collapsePools,
+    fetch: async (url) => {
+      if (url.endsWith(':loadCodeAssist')) return response(200, { currentTier: { id: 'standard-tier' } });
+      if (url.endsWith(':fetchAvailableModels')) {
+        return response(200, {
+          models: {
+            'gemini-4-argon-high': {
+              displayName: 'Gemini 4 Argon (High)',
+              quotaInfo: { remainingFraction: null, resetTime: '2026-10-23T00:33:37Z' }
+            },
+            'gemini-4-argon-medium': {
+              displayName: 'Gemini 4 Argon (Medium)',
+              quotaInfo: { remainingFraction: 0.74, resetTime: '2026-10-23T00:33:37Z' }
+            },
+            'claude-opus-5-5-low': {
+              displayName: 'Claude Opus 5.5 (Low)',
+              quotaInfo: { resetTime: '2026-10-17T10:01:00Z' }
+            },
+            'claude-sonnet-5-5-low': {
+              displayName: 'Claude Sonnet 5.5 (Low)',
+              quotaInfo: { remainingFraction: 0.25, resetTime: '2026-10-17T10:01:00Z' }
+            }
+          }
+        });
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }
+  });
+  assert.deepEqual(snapshot.pools.map((pool) => [pool.name, pool.remainingFraction]), [
+    ['Claude', 0.25],
+    ['Gemini 4 Argon', 0.74]
+  ]);
+});
