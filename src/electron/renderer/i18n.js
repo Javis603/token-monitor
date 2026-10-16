@@ -2314,7 +2314,7 @@
       'subscription.tooltip.topUpTotal': '累計儲值',
       'subscription.tooltip.topUpCount': '{count} 筆',
       'subscription.tooltip.balance': '目前餘額',
-      'subscription.tooltip.burnRate': '消耗速度',
+      'subscription.tooltip.burnRate': '消耗速率',
       'subscription.tooltip.perDay': '日均 {amount}',
       'subscription.tooltip.exhausts': '預估用盡',
       'settings.summary.views': '{visible}/{total} 顯示',
