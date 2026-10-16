@@ -176,7 +176,11 @@ for (const usePolling of [false, true]) {
       await waitForEvent(watcher, fileLink, () => fs.appendFileSync(fileTarget, '{}\n'));
     } catch (error) {
       if (process.platform === 'win32' && !usePolling) {
-        await diagnoseWindowsNativeFileLink(f, fileTarget, fileLink);
+        try {
+          await diagnoseWindowsNativeFileLink(f, fileTarget, fileLink);
+        } catch (diagnosticError) {
+          console.log('Windows native file-link diagnostic failed:', diagnosticError.message);
+        }
       }
       throw error;
     }
