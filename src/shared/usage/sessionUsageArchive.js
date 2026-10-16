@@ -199,6 +199,10 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
     ? (deviceRecord.periods?.allTime || deviceRecord.allTime) : fullScan && periodFor(deviceRecord, 'allTime');
   const liveKeys = fullScan ? new Set(Object.values(allTime.sessions || {})
     .map(session => sessionKey(session.client, session.sessionId)).filter(Boolean)) : null;
+  const watchToday = deviceRecord.sessionUsageArchiveFullScan === false
+    ? (options.canonicalSummary === true
+      ? deviceRecord.periods?.today || deviceRecord.today || {}
+      : periodFor(deviceRecord, 'today')) : null;
   for (const periodName of PERIODS) {
     if (periodName === 'today' && archive.prunedDay && day < archive.prunedDay) continue;
     if (periodName === 'month' && archive.prunedMonth && month < archive.prunedMonth) continue;
@@ -216,10 +220,14 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
       }
     }
     for (const session of observations) {
-      if (isReasonixSyntheticSession(session) || !hasSessionUsage(session) && session.totalTokens !== 0) continue;
+      const hasUsage = hasSessionUsage(session);
+      if (isReasonixSyntheticSession(session) || !hasUsage && session.totalTokens !== 0) continue;
       const archiveKey = sessionKey(session.client, session.sessionId);
       if (!archiveKey) continue;
       if (sourceArchivedKeys.has(archiveKey)) continue;
+      // An empty Today scan can leave zero rows in broader anchor deltas.
+      // Only a still-identified Today row proves a watch zero was observed.
+      if (watchToday && periodName !== 'today' && !hasUsage && !watchToday.sessions?.[archiveKey]) continue;
       const entry = archive.sessions[archiveKey] || {
         client: session.client,
         sessionId: session.sessionId,

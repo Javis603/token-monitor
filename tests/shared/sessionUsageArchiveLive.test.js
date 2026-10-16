@@ -284,3 +284,104 @@ test('collector marks only completed full reports; failures and anchored watch r
   assert.ok(calls[0].includes('--today'));
   assert.equal(transform.transform(watch).allTime.totalTokens, 20);
 });
+
+for (const correction of [null, 20]) {
+  test(`an omitted anchored session retains ${correction ?? 100} after SQLite reload and an empty full scan`, async t => {
+    const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+    const { transform, reopen } = setup(t);
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-watch-absence-'));
+    t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+    let tokens = 100, anchor;
+    const calls = [];
+    const options = {
+      clients: 'claude', allTimeSince: '2026-01-01', deviceId: 'fixture',
+      homeDir, env: {}, osInfo: {}, projectsEnabled: false, wslScanEnabled: false,
+      codexLocalUsageEnabled: false, historyEnabled: false,
+      sessionMetadataDeps: { sessionMetadataResolvers: new Map() }, lookupModelPricing: async () => null,
+      onAnchorComputed: value => { anchor = value; },
+      runGraph: async () => { throw new Error('unexpected graph request'); },
+      runTokscale: async ({ flags }) => {
+        calls.push(flags);
+        return { entries: tokens === null ? [] : [
+          { client: 'claude', sessionId: 'one', model: 'fixture', input: tokens, output: 0, cost: tokens / 100 }
+        ] };
+      }
+    };
+    const scan = (now, watch = false) => collectUsageOnce({ ...options, now,
+      ...(watch ? { todayOnlyAnchor: {
+        ...anchor.windowsPeriods, dateKey: localTodayKey(now), todayPartitions: anchor.todayPartitions
+      } } : {})
+    });
+    const values = record => ['today', 'month', 'allTime'].map(name => record[name].totalTokens);
+    const initial = await scan(AT);
+    assert.equal(initial.sessionUsageArchiveFullScan, true);
+    assert.deepEqual(values(transform.transform(initial)), [100, 100, 100]);
+    if (correction !== null) {
+      tokens = correction;
+      const current = await scan(LATER, true);
+      assert.equal(current.sessionUsageArchiveFullScan, false);
+      assert.equal(current.today.sessions['claude:one'].totalTokens, correction,
+        'the scanner still explicitly identifies the corrected session');
+      assert.deepEqual(values(transform.transform(current)), [correction, correction, correction]);
+    }
+    tokens = null;
+    calls.length = 0;
+    const omittedAt = new Date(AT.getTime() + 2000);
+    const omitted = await scan(omittedAt, true);
+    assert.equal(omitted.sessionUsageArchiveFullScan, false);
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0].includes('--today'));
+    assert.equal(omitted.today.sessions['claude:one'], undefined);
+    for (const name of ['month', 'allTime']) {
+      assert.equal(omitted[name].sessions['claude:one'].totalTokens, 0,
+        'the anchor delta retains a synthetic zero row for the absent identity');
+    }
+    transform.transform(omitted);
+    const restarted = reopen();
+    const retained = restarted.read(omittedAt).sessions['claude:one'];
+    const emptyAt = new Date(AT.getTime() + 3000);
+    const empty = await scan(emptyAt);
+    assert.equal(empty.sessionUsageArchiveFullScan, true);
+    assert.deepEqual(values(empty), [0, 0, 0]);
+    const restartedTransform = createUsageTransform({
+      store: restarted, getSettings: () => ({ projectsEnabled: false }), log: () => {}
+    });
+    const expected = correction ?? 100;
+    assert.deepEqual(values(restartedTransform.transform(empty)), [expected, expected, expected]);
+    for (const name of ['today', 'month', 'allTime']) {
+      assert.equal(retained.periods[name].totalTokens, expected, `${name} survives close/reopen`);
+    }
+  });
+}
+
+for (const fullScan of [false, true]) {
+  test(`an identified zero DTO survives SQLite reload (full scan: ${fullScan})`, t => {
+    const { transform, reopen } = setup(t);
+    transform.transform(summary(100));
+    // Test the archive's identified-observation boundary. Zero-token/zero-cost
+    // scanner entries are discarded by the existing usage extractor.
+    const current = { ...summary(0, LATER), sessionUsageArchiveFullScan: fullScan };
+    if (fullScan) current.today = period(null);
+    assert.equal(transform.transform(current).allTime.totalTokens, 0);
+    const archive = reopen().read(LATER);
+    for (const name of ['today', 'month', 'allTime']) assert.equal(archive.sessions['claude:one'].periods[name].totalTokens, 0);
+    assert.equal(applySessionUsageArchive(summary(null, LATER), archive, { now: LATER }).allTime.totalTokens, 0);
+  });
+}
+
+test('watch zero confirmation uses the canonical client and session identity', t => {
+  for (const [retainedClient, todayClient, expected] of [
+    ['claude', 'codex', 100],
+    ['mimo', 'micode', 0]
+  ]) {
+    const { transform, reopen } = setup(t);
+    transform.transform(summary(100, AT, retainedClient));
+    const current = { ...summary(0, LATER, retainedClient), today: period(0, todayClient),
+      sessionUsageArchiveFullScan: false };
+    transform.transform(current);
+    const archive = reopen().read(LATER);
+    for (const name of ['month', 'allTime']) {
+      assert.equal(archive.sessions[`${retainedClient}:one`].periods[name].totalTokens, expected);
+    }
+  }
+});
