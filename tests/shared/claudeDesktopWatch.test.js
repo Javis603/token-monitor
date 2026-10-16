@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const chokidar = require('chokidar');
-const { openWatch, watchIgnoreMatcher } = require('../../src/shared/collector');
+const { openWatch, watchIgnoreMatcher, watcherOptions } = require('../../src/shared/collector');
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 
 installSourceEnvGuard(test);
@@ -123,6 +123,33 @@ async function awaitWatcherLive(watcher, lane) {
   }
 }
 
+async function diagnoseWindowsNativeFileLink(f, fileTarget, fileLink) {
+  // Keep the original assertion failing. Compare the same link without any
+  // Desktop policy, and prove the real target's directory delivers events.
+  const control = chokidar.watch([f.root], watcherOptions(false));
+  const direct = chokidar.watch([path.dirname(fileTarget)], watcherOptions(false));
+  const seen = { unfiltered: [], direct: [] };
+  control.on('all', (event, file) => seen.unfiltered.push(`${event}:${path.basename(file)}`));
+  direct.on('all', (event, file) => seen.direct.push(`${event}:${path.basename(file)}`));
+  try {
+    await Promise.all([control, direct].map(watcher => new Promise((resolve, reject) => {
+      watcher.once('ready', resolve); watcher.once('error', reject);
+    })));
+    await awaitWatcherLive(control, f.lane);
+    await awaitWatcherLive(direct, path.dirname(fileTarget));
+    seen.unfiltered.length = 0;
+    seen.direct.length = 0;
+    await waitForEvent(direct, fileTarget, () => fs.appendFileSync(fileTarget, '{}\n'));
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    console.log('Windows native file-link control:', JSON.stringify({
+      ...seen,
+      linkRegistered: control.getWatched()[path.dirname(fileLink)]?.includes(path.basename(fileLink))
+    }));
+  } finally {
+    await Promise.all([control.close(), direct.close()]);
+  }
+}
+
 for (const usePolling of [false, true]) {
   test(`Desktop reports permitted-link target removal (${usePolling ? 'polling' : 'native'})`, async (t) => {
     const f = fixture(t);
@@ -145,7 +172,14 @@ for (const usePolling of [false, true]) {
     f.watcher = watcher;
     await new Promise((resolve, reject) => { watcher.once('ready', resolve); watcher.once('error', reject); });
     await awaitWatcherLive(watcher, f.lane);
-    await waitForEvent(watcher, fileLink, () => fs.appendFileSync(fileTarget, '{}\n'));
+    try {
+      await waitForEvent(watcher, fileLink, () => fs.appendFileSync(fileTarget, '{}\n'));
+    } catch (error) {
+      if (process.platform === 'win32' && !usePolling) {
+        await diagnoseWindowsNativeFileLink(f, fileTarget, fileLink);
+      }
+      throw error;
+    }
     await waitForEvent(watcher, path.join(laneLink, 'usage.jsonl'), () => fs.appendFileSync(laneFile, '{}\n'));
     await waitForEvent(watcher, fileLink, () => {
       if (fs.existsSync(fileTarget)) fs.unlinkSync(fileTarget);
