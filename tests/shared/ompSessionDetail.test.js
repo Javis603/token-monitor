@@ -105,3 +105,31 @@ test('OMP child sessions resolve by header id and keep usage separate from the p
     assert.equal(Object.hasOwn(unknown, 'error'), false);
   } finally { cleanup(home); }
 });
+
+test('OMP fork details retain copied assistant history and zero-cost new replies', () => {
+  const home = tmpHome();
+  try {
+    const sharedUsage = { input: 100, output: 20, cacheRead: 300, cost: { total: 0.42 } };
+    const sharedReply = assistant(sharedUsage, [{ type: 'toolCall', name: 'read' }]);
+    const copiedReply = JSON.parse(sharedReply);
+    copiedReply.message.usage.cost.total = 0;
+    writeMainSession(home, 'parent', [
+      user('shared prompt'), sharedReply,
+      user('parent work'), assistant({ input: 3, output: 2, cost: { total: 0 } })
+    ]);
+    writeSubagentSession(home, 'parent', 'child', 'Tan-test.jsonl', [
+      user('shared prompt'), JSON.stringify(copiedReply),
+      user('child work'), assistant({ input: 7, output: 3, cost: { total: 0 } })
+    ]);
+    for (const [sessionId, totalTokens] of [['parent', 425], ['child', 430]]) {
+      const detail = readSessionDetail({ client: 'omp', sessionId, home });
+      assert.equal(detail.found, true);
+      assert.equal(detail.totals.totalTokens, totalTokens);
+      assert.equal(detail.totals.turnCount, 2);
+      assert.deepEqual(detail.exchanges.map(exchange => exchange.promptPreview), ['shared prompt', `${sessionId} work`]);
+      assert.equal(detail.exchanges[0].turns[0].tokens.total, 420, 'copied tokens remain transcript context');
+      assert.deepEqual(detail.exchanges[0].tools, ['read']);
+      assert.equal(detail.exchanges[1].turns.length, 1, 'zero cost does not hide a new reply');
+    }
+  } finally { cleanup(home); }
+});

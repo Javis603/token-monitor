@@ -29,7 +29,7 @@ The first line is a fixed-size `title` slot; the `session` header follows it and
 ~/.omp/agent/sessions/<bucket>/<timestamp>_<parentId>/<task-name>.jsonl
 ```
 
-Tokscale's OMP parser delegates to the Pi parser and uses the header `id` as the session id for both main and sub-agent transcripts. Each sub-agent transcript is therefore an independent session, not part of its parent's usage.
+Tokscale's OMP parser delegates to the Pi parser and uses the header `id` as the session id for both main and sub-agent transcripts. Each transcript is scanned independently; copied assistant history is deduplicated across files, so shared usage need not be assigned to the parent session.
 
 ## Session Detail
 
@@ -37,9 +37,11 @@ Main sessions resolve first by the `_<sessionId>.jsonl` filename suffix. If that
 
 OMP writes the same conversation format as Pi, but its session root is deliberately fixed at `~/.omp/agent`: Session Detail does not honor `PI_CODING_AGENT_DIR` or `OMP_PROFILE`, matching tokscale's scan root. `reasoningTokens` is accepted as an informational alias for `reasoning`; it is not added to total tokens. `model_usage` is not handled: tokscale does not count it, and its schema is not established here, so including it could make detail totals disagree with the session row.
 
+OMP forks, including `/tan`, can copy assistant history with token usage intact; `/tan` clears inherited monetary costs. Detail retains the full transcript, including copied history and zero-cost turns. These per-turn transcript counters can differ from the Sessions list's deduplicated usage: Tokscale keeps the first copy in scan-path order, so either session can retain a shared record. Detail does not repeat that cross-file allocation or scan other transcripts to reconcile it.
+
 ## Invariants and known gaps
 
-- Sub-agent usage remains separate from parent usage, matching tokscale's session rows and avoiding double-counting.
+- Detail reads one transcript at a time and never folds child transcripts into a parent. Copied history already inside a transcript remains visible; do not sum related Detail views as deduplicated usage.
 - Only records understood by the shared Pi-format parser contribute to detail totals; adding other OMP-specific records requires confirming tokscale's accounting first.
 
 ## Verification
