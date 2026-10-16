@@ -159,6 +159,16 @@
     return typeof value === 'string' ? value.trim() : '';
   }
 
+  function sessionTitleForDisplay(session) {
+    const title = textValue(session?.title);
+    // OMP persists its title card as <icon> <CODE>: <title>, including /rename
+    // titles. Hide only a private-use icon in that prefix; retain the code,
+    // body and original record for archives/sync, and leave other clients alone.
+    return session?.client === 'omp'
+      ? title.replace(/^[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}] (?=[A-Z0-9]{1,6}: \S)/u, '')
+      : title;
+  }
+
   function clearButtonSemantics(element) {
     for (const attribute of ['tabindex', 'role', 'aria-expanded', 'aria-label']) {
       element.removeAttribute(attribute);
@@ -340,7 +350,7 @@
   }
 
   function sessionRowDetailAvailable(row) {
-    return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy', 'pi'].includes(row?.client)
+    return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy', 'pi', 'omp'].includes(row?.client)
       || (row?.client === 'reasonix' && row?.sessionDetailAvailable === true);
   }
 
@@ -473,7 +483,7 @@
         const { client, titleParts, clientLabel, modelLabel } = sessionTitleParts(session, labels);
         const sessionId = session?.sessionId || key;
         const archived = session?.archived === true || session?.deleted === true || session?.sourceDeleted === true;
-        const sessionTitle = textValue(session?.title);
+        const sessionTitle = sessionTitleForDisplay(session);
         // One derivation, as above. An archived session is idle whatever its
         // timestamp says: the source it was read from is gone, so nothing can
         // still be appending, which is what `sessionActivityState` already
@@ -824,6 +834,7 @@
     sessionCacheHitPercent,
     sessionIdLabel,
     sessionDetailIdLabel,
+    sessionTitleForDisplay,
     // Exported for the edge dock's session rows: a card that shows the top
     // model reads a different name than the list's "N models" for the same
     // session, so both surfaces compose the label from this one helper.

@@ -813,6 +813,20 @@ test('latestFromUpdaterInfo reads every locale from the Atom feed\'s full change
   assert.deepEqual(generatedLeak, [], 'GitHub\'s generated What\'s Changed and New Contributors sections must not leak into locale notes');
 });
 
+test('package build config leaves release notes out of the updater metadata', () => {
+  const { build } = require('../../package.json');
+  assert.equal(
+    build.releaseInfo?.releaseNotes,
+    undefined,
+    'release notes in latest*.yml make electron-updater skip the fullChangelog Atom read'
+  );
+  assert.equal(
+    build.releaseInfo?.releaseNotesFile,
+    undefined,
+    'release notes in latest*.yml make electron-updater skip the fullChangelog Atom read'
+  );
+});
+
 test('latestForCurrentVersion drops remembered releases the running version already has', () => {
   const latest = {
     version: '0.71.0',

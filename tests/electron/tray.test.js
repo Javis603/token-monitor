@@ -587,7 +587,7 @@ test('tray context menu uses the selected locale for every visible level', () =>
   ]);
   assert.equal(template[1].submenu[0].label, '主頁');
   assert.equal(template[3].submenu[0].label, '今日 Tokens');
-  assert.equal(template[3].submenu.find((item) => item.label === '即時速率（tok/s）').checked, false);
+  assert.equal(template[3].submenu.find((item) => item.label === '即時速度（tok/s）').checked, false);
   assert.deepEqual(template[3].submenu.slice(-3).map((item) => item.label), [
     '最低剩餘額度條',
     '僅顯示 App 圖示',

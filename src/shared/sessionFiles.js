@@ -4,8 +4,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { claudeSessionRoots } = require('./providers/claude/paths');
 const { codebuddyProjectsRoot } = require('./providers/codebuddy/paths');
-const { findSubagentSessionFile } = require('./providers/codebuddy/subagents');
 const { resolvePiSessionsDir } = require('./providers/pi/paths');
+const { resolveOmpSessionsDir } = require('./providers/omp/paths');
+const { findOmpSubagentSessionFile } = require('./providers/omp/subagents');
+const { findSubagentSessionFile } = require('./providers/codebuddy/subagents');
 
 // 5.5 moved the WorkBuddy home to ~/.workbuddy-ai and tokscale still scans
 // both, so a session reported from either root resolves from either.
@@ -57,10 +59,9 @@ function findSessionFiles(root, sessionIds) {
   return found;
 }
 
-// Pi names each transcript `<ISO-timestamp>_<sessionId>.jsonl`, so the session
-// id is a suffix of the filename rather than the whole basename (which is what
-// `findSessionFiles` matches on for every other client here).
-function findPiSessionFiles(root, sessionIds) {
+// Pi and OMP name transcripts `<ISO-timestamp>_<sessionId>.jsonl`, so the id
+// is a filename suffix rather than the whole basename matched by findSessionFiles.
+function findTimestampedSessionFiles(root, sessionIds) {
   const wanted = new Map();
   for (const sessionId of sessionIds) {
     if (isSafeSessionId(sessionId)) wanted.set(`${sessionId}.jsonl`, sessionId);
@@ -203,9 +204,15 @@ function resolveSessionFile(client, sessionId, home, options = {}) {
   }
   if (client === 'pi') {
     const sessionsDir = resolvePiSessionsDir({ homeDir: home });
-    return findPiSessionFiles(sessionsDir, [id]).get(id) || '';
+    return findTimestampedSessionFiles(sessionsDir, [id]).get(id) || '';
+  }
+  if (client === 'omp') {
+    const sessionsDir = resolveOmpSessionsDir({ homeDir: home });
+    return findTimestampedSessionFiles(sessionsDir, [id]).get(id)
+      || findOmpSubagentSessionFile(sessionsDir, id, { fs: options.fs })
+      || '';
   }
   return '';
 }
 
-module.exports = { findSessionFiles, findPiSessionFiles, findCodexSessionFiles, preferredCodexSessionFile, codexSessionFile, resolveSessionFile, isSafeSessionId };
+module.exports = { findSessionFiles, findTimestampedSessionFiles, findCodexSessionFiles, preferredCodexSessionFile, codexSessionFile, resolveSessionFile, isSafeSessionId };
