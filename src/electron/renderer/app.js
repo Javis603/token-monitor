@@ -479,16 +479,12 @@ Object.assign(els, {
   reportIssueButton: document.getElementById('reportIssueButton'),
   appUpdatePill: document.getElementById('appUpdatePill'),
   appUpdatePillAction: document.getElementById('appUpdatePillAction'),
-  appUpdatePillLabel: document.getElementById('appUpdatePillLabel'),
-  appUpdatePillRestart: document.getElementById('appUpdatePillRestart'),
-  appUpdatePillRestartLabel: document.getElementById('appUpdatePillRestartLabel'),
-  appUpdatePillDismiss: document.getElementById('appUpdatePillDismiss'),
+  appUpdatePillProgress: document.getElementById('appUpdatePillProgress'),
   appUpdatePopover: document.getElementById('appUpdatePopover'),
   appUpdatePopoverTitle: document.getElementById('appUpdatePopoverTitle'),
+  appUpdatePopoverSubtitle: document.getElementById('appUpdatePopoverSubtitle'),
   appUpdatePopoverBody: document.getElementById('appUpdatePopoverBody'),
-  appUpdatePopoverAction: document.getElementById('appUpdatePopoverAction'),
-  appUpdatePopoverRelease: document.getElementById('appUpdatePopoverRelease'),
-  appUpdatePopoverClose: document.getElementById('appUpdatePopoverClose'),
+  appUpdatePopoverDismiss: document.getElementById('appUpdatePopoverDismiss'),
   appUpdateInstalled: document.getElementById('appUpdateInstalled'),
   automaticAppUpdatesRow: document.getElementById('automaticAppUpdatesRow'),
   automaticAppUpdatesInput: document.getElementById('automaticAppUpdatesInput'),
@@ -1392,6 +1388,14 @@ function formatActiveDuration(ms) {
 function versionText(value) {
   return value ? `v${value}` : 'unknown';
 }
+// The release-note card under the footer update button. It opens on hover the
+// way a tooltip does, because the button's own press is the update action.
+const APP_UPDATE_CARD_OPEN_DELAY_MS = 250;
+const APP_UPDATE_CARD_CLOSE_DELAY_MS = 150;
+let appUpdateCardOpenTimer = 0;
+let appUpdateCardCloseTimer = 0;
+let suppressAppUpdateCardFocusOpen = false;
+
 function setAppUpdatePillDisclosure(available) {
   const action = els.appUpdatePillAction;
   if (available) {
@@ -1404,59 +1408,69 @@ function setAppUpdatePillDisclosure(available) {
   action.removeAttribute('aria-controls');
   action.removeAttribute('aria-expanded');
 }
+function appUpdatePillStatus(s, mode) {
+  if (s.installStarting) return 'installing';
+  // A download starts with a fresh provider check, reported as `checking`.
+  if (s.installPhase === 'downloading' || (s.installPhase === 'checking' && s.installBusy)) return 'downloading';
+  if (mode === 'install') return 'downloaded';
+  if (mode === 'release') return 'release';
+  return 'available';
+}
+function appUpdateDownloadPercent(s) {
+  return s?.installPhase === 'downloading' && Number.isFinite(s.installProgress)
+    ? Math.max(0, Math.min(100, Math.round(s.installProgress)))
+    : 0;
+}
+function appUpdatePillLabel(status, percent) {
+  if (status === 'downloading') return t('settings.appUpdate.downloading', { percent });
+  if (status === 'downloaded') return t('settings.appUpdate.restart');
+  if (status === 'installing') return t('settings.appUpdate.installStarting');
+  if (status === 'release') return t('settings.appUpdate.viewRelease');
+  return t('settings.appUpdate.download');
+}
 function renderAppUpdatePill() {
   const s = state.appUpdate;
   const pill = els.appUpdatePill;
   if (!pill) return;
+  const action = els.appUpdatePillAction;
   const mode = appUpdatePresentationApi.appUpdateActionMode(s);
   const version = s?.latest?.version || s?.installVersion || '';
   if (!s || !mode || !version || !s.showUpdateNotice) {
     pill.classList.add('hidden');
-    pill.classList.remove('is-ready');
-    pill.setAttribute('title', '');
-    els.appUpdatePillLabel.textContent = '';
-    els.appUpdatePillAction.removeAttribute('title');
-    els.appUpdatePillAction.removeAttribute('aria-label');
-    els.appUpdatePillAction.disabled = false;
-    els.appUpdatePillRestart.classList.add('hidden');
-    els.appUpdatePillRestartLabel.textContent = '';
-    els.appUpdatePillRestart.disabled = false;
-    els.appUpdatePillRestart.removeAttribute('title');
-    els.appUpdatePillRestart.removeAttribute('aria-label');
+    hideAppUpdatePopover();
+    action.removeAttribute('aria-label');
+    action.removeAttribute('aria-disabled');
     setAppUpdatePillDisclosure(false);
     syncLiveTokenRateFooterState();
     return;
   }
-  const hasReleaseNotes = releaseNoteGroupsForCurrentLocale(s.latest).length > 0;
-  setAppUpdatePillDisclosure(hasReleaseNotes);
+  const status = appUpdatePillStatus(s, mode);
+  const percent = appUpdateDownloadPercent(s);
   pill.classList.remove('hidden');
-  pill.classList.toggle('is-ready', mode === 'install');
-  els.appUpdatePillDismiss.classList.toggle('hidden', mode === 'install' || s.installBusy);
-  pill.setAttribute('title', '');
-  const releaseLabel = hasReleaseNotes
-    ? t('settings.appUpdate.whatsNew', { version })
-    : (s.latest?.name || `v${version}`);
-  els.appUpdatePillAction.setAttribute('title', releaseLabel);
-  els.appUpdatePillAction.setAttribute('aria-label', releaseLabel);
-  els.appUpdatePillAction.disabled = mode === 'install' && !hasReleaseNotes && !s.latest?.htmlUrl;
-  els.appUpdatePillRestart.classList.toggle('hidden', mode !== 'install');
-  els.appUpdatePillRestart.disabled = Boolean(s.installBusy);
-  els.appUpdatePillRestartLabel.textContent = mode === 'install'
-    ? t('settings.appUpdate.restartShort')
-    : '';
-  els.appUpdatePillRestart.setAttribute('title', t('settings.appUpdate.ready'));
-  els.appUpdatePillRestart.setAttribute('aria-label', t('settings.appUpdate.restart'));
-  if (s.installPhase === 'downloading' && Number.isFinite(s.installProgress)) {
-    els.appUpdatePillLabel.textContent = `${Math.round(s.installProgress)}%`;
-  } else {
-    els.appUpdatePillLabel.textContent = mode === 'install'
-      ? `v${version}`
-      : `↑ v${version}`;
-  }
+  action.dataset.status = status;
+  els.appUpdatePillProgress.style.strokeDashoffset = String(100 - percent);
+  action.setAttribute('aria-label', appUpdatePillLabel(status, percent));
+  // aria-disabled rather than disabled: a disabled button stops receiving the
+  // pointer events that open the card, which is where the progress is shown.
+  if (s.installBusy) action.setAttribute('aria-disabled', 'true');
+  else action.removeAttribute('aria-disabled');
+  setAppUpdatePillDisclosure(true);
   syncLiveTokenRateFooterState();
 }
-function releaseNoteGroupsForCurrentLocale(latest) {
-  return appUpdatePresentationApi.releaseNoteGroupsForLocale(latest?.releaseNotes, currentLocale());
+function releaseNoteHistoryForCurrentLocale(latest) {
+  return appUpdatePresentationApi.releaseNoteHistoryForLocale(latest, currentLocale());
+}
+function buildAppUpdateNoteItemNode(item) {
+  const row = document.createElement('li');
+  const { lead, body } = appUpdatePresentationApi.splitReleaseNoteLead(item);
+  if (!lead) {
+    row.textContent = body;
+    return row;
+  }
+  const strong = document.createElement('strong');
+  strong.textContent = lead;
+  row.append(strong, document.createTextNode(/[:]$/.test(lead) ? ` ${body}` : body));
+  return row;
 }
 function buildAppUpdateNoteGroupNodes(groups) {
   return groups.map((group) => {
@@ -1467,57 +1481,169 @@ function buildAppUpdateNoteGroupNodes(groups) {
     title.textContent = String(group?.title || '');
     const list = document.createElement('ul');
     for (const item of Array.isArray(group?.items) ? group.items : []) {
-      const row = document.createElement('li');
-      row.textContent = String(item || '');
-      list.append(row);
+      list.append(buildAppUpdateNoteItemNode(String(item || '')));
     }
     section.append(title, list);
     return section;
   });
 }
+function buildAppUpdateReleaseLink(className, label, url) {
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = `${className} app-update-release-link`;
+  link.dataset.releaseUrl = url;
+  link.textContent = label;
+  return link;
+}
+// One section per release, newest first. A single release is already named by the
+// heading above it, so it goes without its own version line.
+function buildAppUpdateReleaseNodes(entries) {
+  const showVersions = entries.length > 1;
+  return entries.map((entry) => {
+    const section = document.createElement('section');
+    section.className = 'app-update-release';
+    if (showVersions) {
+      const label = `v${entry.version}`;
+      const head = entry.htmlUrl
+        ? buildAppUpdateReleaseLink('app-update-release-version', label, entry.htmlUrl)
+        : Object.assign(document.createElement('div'), { className: 'app-update-release-version', textContent: label });
+      if (entry.htmlUrl) head.title = t('settings.appUpdate.viewFullRelease');
+      // A wrapper, because a stuck scroll-state container styles its descendants,
+      // not itself.
+      const wrapper = document.createElement('div');
+      wrapper.className = 'app-update-release-head';
+      wrapper.append(head);
+      section.append(wrapper);
+    }
+    // Every item: these are written summaries, so cutting them short hides whole
+    // groups (a release's fixes come last) rather than trimming noise.
+    section.append(...buildAppUpdateNoteGroupNodes(entry.groups));
+    return section;
+  });
+}
+function buildAppUpdateReleaseHistoryNodes(s) {
+  const history = releaseNoteHistoryForCurrentLocale(s?.latest);
+  const entries = history
+    .filter((entry, _index, all) => all.length > 1 || entry.groups.length > 0);
+  const nodes = buildAppUpdateReleaseNodes(entries);
+  // A single release has no version heading to open its page, so it gets an
+  // explicit link after its notes — even when the locale carries no groups and
+  // the link is the body's only node.
+  if (history.length === 1 && history[0]?.htmlUrl) {
+    nodes.push(buildAppUpdateReleaseLink('app-update-release-full', t('settings.appUpdate.viewFullRelease'), history[0].htmlUrl));
+  }
+  if (nodes.length > 0 && s?.latest?.releaseHistoryTruncated && s.releasesUrl) {
+    nodes.push(buildAppUpdateReleaseLink('app-update-release-older', t('settings.appUpdate.olderReleases'), s.releasesUrl));
+  }
+  return { entries, nodes };
+}
+// Download progress pushes many times a second. Rebuilding the notes on each one
+// would reset the reader's scroll position, so they are rebuilt only when what
+// they say changes.
+function appUpdateNotesContentKey(s) {
+  return JSON.stringify([currentLocale(), s?.currentVersion || '', s?.latest?.version || '', s?.latest?.releaseNoteHistory || null, s?.latest?.releaseNotes || null, Boolean(s?.latest?.releaseHistoryTruncated)]);
+}
+// The card explains; the button under it acts. A second action button in the
+// card only repeated the one the pointer had just passed over.
 function renderAppUpdatePopover(s) {
-  const version = s?.latest?.version || '';
-  const groups = releaseNoteGroupsForCurrentLocale(s?.latest);
   const mode = appUpdatePresentationApi.appUpdateActionMode(s);
-  if (!version || groups.length === 0 || !mode) {
-    if (els.appUpdatePopover.matches(':popover-open')) els.appUpdatePopover.hidePopover();
-    els.appUpdatePopoverTitle.textContent = '';
-    els.appUpdatePopoverBody.replaceChildren();
+  const version = s?.latest?.version || s?.installVersion || '';
+  if (!s || !mode || !version) {
+    hideAppUpdatePopover();
     return false;
   }
-  els.appUpdatePopoverTitle.textContent = t('settings.appUpdate.whatsNew', { version });
-  els.appUpdatePopoverBody.replaceChildren(...buildAppUpdateNoteGroupNodes(groups));
-  els.appUpdatePopoverAction.textContent = mode === 'install'
-    ? t('settings.appUpdate.restart')
-    : mode === 'download'
-      ? t('settings.appUpdate.download')
-      : t('settings.appUpdate.viewRelease');
-  els.appUpdatePopoverAction.disabled = Boolean(s.installBusy);
-  els.appUpdatePopoverRelease.classList.toggle('hidden', !s.latest?.htmlUrl);
+  const status = appUpdatePillStatus(s, mode);
+  const percent = appUpdateDownloadPercent(s);
+  const heading = {
+    available: [t('settings.appUpdate.availableTitle', { version }), t('settings.appUpdate.currentVersion', { version: s.currentVersion })],
+    release: [t('settings.appUpdate.availableTitle', { version }), t('settings.appUpdate.currentVersion', { version: s.currentVersion })],
+    downloading: [t('settings.appUpdate.downloading', { percent }), `v${version}`],
+    downloaded: [t('settings.appUpdate.readyTitle', { version }), t('settings.appUpdate.ready')],
+    installing: [t('settings.appUpdate.installStarting'), `v${version}`]
+  }[status];
+  els.appUpdatePopoverTitle.textContent = heading[0];
+  els.appUpdatePopoverSubtitle.textContent = heading[1];
+  const contentKey = appUpdateNotesContentKey(s);
+  if (els.appUpdatePopoverBody.dataset.contentKey !== contentKey) {
+    const { nodes } = buildAppUpdateReleaseHistoryNodes(s);
+    els.appUpdatePopoverBody.replaceChildren(...nodes);
+    els.appUpdatePopoverBody.dataset.contentKey = contentKey;
+    els.appUpdatePopoverBody.classList.toggle('hidden', nodes.length === 0);
+  }
+  els.appUpdatePopoverDismiss.classList.toggle('hidden', mode === 'install' || Boolean(s.installBusy));
   return true;
 }
 function positionAppUpdatePopover() {
   const rect = els.appUpdatePill.getBoundingClientRect();
   const width = Math.min(320, window.innerWidth - 24);
   const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.right - width));
+  const bottom = Math.max(12, window.innerHeight - rect.top + 8);
   els.appUpdatePopover.style.width = `${width}px`;
   els.appUpdatePopover.style.left = `${left}px`;
-  els.appUpdatePopover.style.bottom = `${Math.max(12, window.innerHeight - rect.top + 8)}px`;
+  els.appUpdatePopover.style.bottom = `${bottom}px`;
+  els.appUpdatePopover.style.maxHeight = `${appUpdatePresentationApi.appUpdatePopoverMaxHeight({ viewportHeight: window.innerHeight, bottom })}px`;
+}
+function clearAppUpdateCardTimers() {
+  clearTimeout(appUpdateCardOpenTimer);
+  clearTimeout(appUpdateCardCloseTimer);
+  appUpdateCardOpenTimer = 0;
+  appUpdateCardCloseTimer = 0;
+}
+function showAppUpdatePopover() {
+  clearAppUpdateCardTimers();
+  if (els.appUpdatePill.classList.contains('hidden') || typeof els.appUpdatePopover.showPopover !== 'function') return false;
+  if (!renderAppUpdatePopover(state.appUpdate)) return false;
+  positionAppUpdatePopover();
+  if (!els.appUpdatePopover.matches(':popover-open')) els.appUpdatePopover.showPopover();
+  return true;
+}
+function hideAppUpdatePopover() {
+  clearAppUpdateCardTimers();
+  if (!els.appUpdatePopover?.matches(':popover-open')) return;
+  // Only focus that was inside the card goes back to the button. A card that
+  // closes because the pointer left it must not pull focus to the button.
+  const focusWasInside = els.appUpdatePopover.contains(document.activeElement);
+  els.appUpdatePopover.hidePopover();
+  if (focusWasInside && !els.appUpdatePill.classList.contains('hidden')) {
+    suppressAppUpdateCardFocusOpen = true;
+    els.appUpdatePillAction.focus();
+  }
+}
+function scheduleAppUpdatePopoverOpen() {
+  clearAppUpdateCardTimers();
+  if (els.appUpdatePopover.matches(':popover-open')) return;
+  appUpdateCardOpenTimer = setTimeout(showAppUpdatePopover, APP_UPDATE_CARD_OPEN_DELAY_MS);
+}
+function scheduleAppUpdatePopoverClose() {
+  clearAppUpdateCardTimers();
+  appUpdateCardCloseTimer = setTimeout(() => {
+    appUpdateCardCloseTimer = 0;
+    // Keyboard focus inside the card holds it open until focus leaves.
+    if (els.appUpdatePopover.contains(document.activeElement)) return;
+    hideAppUpdatePopover();
+  }, APP_UPDATE_CARD_CLOSE_DELAY_MS);
 }
 function renderAppUpdateNotes(s) {
   const version = s?.latest?.version || '';
-  const groups = releaseNoteGroupsForCurrentLocale(s?.latest);
-  const visible = Boolean(version && groups.length > 0);
-  els.appUpdateNotes.classList.toggle('hidden', !visible);
-  if (!visible) {
-    setSettingsAccordionExpanded(els.appUpdateNotes, els.appUpdateNotesToggle, els.appUpdateNotesDetails, false);
-    els.appUpdateNotesTitle.textContent = '';
-    els.appUpdateNotesBody.replaceChildren();
-    return;
-  }
+  const contentKey = appUpdateNotesContentKey(s);
+  if (els.appUpdateNotesBody.dataset.contentKey !== contentKey) {
+    const { entries, nodes } = version ? buildAppUpdateReleaseHistoryNodes(s) : { entries: [], nodes: [] };
+    const visible = Boolean(version && nodes.length > 0);
+    els.appUpdateNotes.classList.toggle('hidden', !visible);
+    if (!visible) {
+      setSettingsAccordionExpanded(els.appUpdateNotes, els.appUpdateNotesToggle, els.appUpdateNotesDetails, false);
+      els.appUpdateNotesTitle.textContent = '';
+      els.appUpdateNotesBody.replaceChildren();
+      delete els.appUpdateNotesBody.dataset.contentKey;
+      return;
+    }
 
-  els.appUpdateNotesTitle.textContent = t('settings.appUpdate.whatsNew', { version });
-  els.appUpdateNotesBody.replaceChildren(...buildAppUpdateNoteGroupNodes(groups));
+    els.appUpdateNotesTitle.textContent = entries.length > 1
+      ? t('settings.appUpdate.changesSince', { version: s.currentVersion })
+      : t('settings.appUpdate.whatsNew', { version });
+    els.appUpdateNotesBody.replaceChildren(...nodes);
+    els.appUpdateNotesBody.dataset.contentKey = contentKey;
+  }
   els.appUpdateReleaseNotesButton.classList.toggle('hidden', !s.latest?.htmlUrl);
   if (s.hasUpdate && state.appUpdateNotesPresentedVersion !== version) {
     // The disclosure may have just changed from display:none. Commit its
@@ -12563,7 +12689,7 @@ els.breakdown.addEventListener('click', (event) => {
   }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi') return;
+  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp') return;
   if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
@@ -13300,34 +13426,69 @@ async function runAppUpdateAction() {
 }
 
 els.appUpdatePillAction.addEventListener('click', async () => {
-  if (!renderAppUpdatePopover(state.appUpdate) || typeof els.appUpdatePopover.showPopover !== 'function') {
-    if (appUpdatePresentationApi.appUpdateActionMode(state.appUpdate) === 'install') {
-      const url = state.appUpdate?.latest?.htmlUrl;
-      if (url) await window.tokenMonitor.openExternal(url);
-      return;
-    }
-    await runAppUpdateAction();
+  // While a download or install is under way the press shows its progress.
+  if (els.appUpdatePillAction.getAttribute('aria-disabled') === 'true') {
+    showAppUpdatePopover();
     return;
   }
-  positionAppUpdatePopover();
-  els.appUpdatePopover.showPopover();
-  els.appUpdatePopoverAction.focus();
-});
-
-els.appUpdatePillRestart.addEventListener('click', async () => {
+  if (appUpdatePresentationApi.appUpdateActionMode(state.appUpdate) === 'release') hideAppUpdatePopover();
   await runAppUpdateAction();
 });
 
-els.appUpdatePillDismiss.addEventListener('click', async () => {
-  const version = state.appUpdate?.latest?.version;
-  if (!version) return;
-  state.appUpdate = await window.tokenMonitor.dismissAppUpdate(version);
-  if (els.appUpdatePopover.matches(':popover-open')) els.appUpdatePopover.hidePopover();
-  renderAppUpdatePill();
-});
+for (const target of [els.appUpdatePillAction, els.appUpdatePopover]) {
+  target.addEventListener('pointerenter', (event) => {
+    if (event.pointerType === 'touch') return;
+    if (target === els.appUpdatePopover || els.appUpdatePopover.matches(':popover-open')) clearAppUpdateCardTimers();
+    else scheduleAppUpdatePopoverOpen();
+  });
+  target.addEventListener('pointerleave', (event) => {
+    if (event.pointerType === 'touch') return;
+    scheduleAppUpdatePopoverClose();
+  });
+}
 
-els.appUpdatePopoverClose.addEventListener('click', () => {
-  els.appUpdatePopover.hidePopover();
+// Keyboard users get the card on focus, the same moment pointer users get it on
+// hover, and Tab then moves into it rather than past it.
+els.appUpdatePillAction.addEventListener('focus', () => {
+  if (suppressAppUpdateCardFocusOpen) {
+    suppressAppUpdateCardFocusOpen = false;
+    return;
+  }
+  if (els.appUpdatePillAction.matches(':focus-visible')) showAppUpdatePopover();
+});
+els.appUpdatePillAction.addEventListener('keydown', (event) => {
+  if (event.key !== 'Tab' || event.shiftKey || !els.appUpdatePopover.matches(':popover-open')) return;
+  // Dismiss while it is offered; otherwise the notes body, which is a focusable
+  // scroller. A generic button search lands on a release link deep in the notes,
+  // or finds nothing at all once Dismiss is hidden during an install.
+  const dismiss = els.appUpdatePopoverDismiss.classList.contains('hidden') || els.appUpdatePopoverDismiss.disabled
+    ? null
+    : els.appUpdatePopoverDismiss;
+  const target = dismiss || (els.appUpdatePopoverBody.classList.contains('hidden') ? null : els.appUpdatePopoverBody);
+  if (!target) return;
+  event.preventDefault();
+  target.focus();
+});
+for (const target of [els.appUpdatePillAction, els.appUpdatePopover]) {
+  target.addEventListener('focusout', (event) => {
+    const next = event.relatedTarget;
+    if (next && (els.appUpdatePopover.contains(next) || next === els.appUpdatePillAction)) return;
+    if (els.appUpdatePopover.matches(':hover') || els.appUpdatePillAction.matches(':hover')) return;
+    hideAppUpdatePopover();
+  });
+}
+
+// A manual popover, so a press on the button is not also a light dismiss: the
+// card stays up to show the download it just started. Outside presses and Escape
+// are handled here instead.
+document.addEventListener('pointerdown', (event) => {
+  if (!els.appUpdatePopover.matches(':popover-open')) return;
+  if (els.appUpdatePopover.contains(event.target) || els.appUpdatePill.contains(event.target)) return;
+  hideAppUpdatePopover();
+}, true);
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || !els.appUpdatePopover.matches(':popover-open')) return;
+  hideAppUpdatePopover();
 });
 
 els.appUpdatePopover.addEventListener('toggle', (event) => {
@@ -13335,23 +13496,24 @@ els.appUpdatePopover.addEventListener('toggle', (event) => {
   if (els.appUpdatePillAction.hasAttribute('aria-haspopup')) {
     els.appUpdatePillAction.setAttribute('aria-expanded', String(open));
   }
-  if (!open) {
-    const active = document.activeElement;
-    if (active === document.body || active === els.appUpdatePopover || els.appUpdatePopover.contains(active)) {
-      els.appUpdatePillAction.focus();
-    }
-  }
 });
 
-els.appUpdatePopoverAction.addEventListener('click', async () => {
-  els.appUpdatePopover.hidePopover();
-  await runAppUpdateAction();
+els.appUpdatePopoverDismiss.addEventListener('click', async () => {
+  const version = state.appUpdate?.latest?.version;
+  if (!version) return;
+  hideAppUpdatePopover();
+  state.appUpdate = await window.tokenMonitor.dismissAppUpdate(version);
+  renderAppUpdatePill();
+  renderSettingsAppUpdateRow();
 });
 
-els.appUpdatePopoverRelease.addEventListener('click', async () => {
-  const url = state.appUpdate?.latest?.htmlUrl;
-  if (url) await window.tokenMonitor.openExternal(url);
-});
+for (const container of [els.appUpdatePopoverBody, els.appUpdateNotesBody]) {
+  container.addEventListener('click', async (event) => {
+    const link = event.target.closest('[data-release-url]');
+    if (!link || !container.contains(link)) return;
+    await window.tokenMonitor.openExternal(link.dataset.releaseUrl);
+  });
+}
 
 window.addEventListener('resize', () => {
   if (els.appUpdatePopover.matches(':popover-open')) positionAppUpdatePopover();

@@ -233,6 +233,32 @@ test('small overflow moves smoothly in fractional pixels and finishes promptly',
   assert.equal(h.element.classList.contains('has-overflow-fade'), true);
 });
 
+for (const distance of [100, 1000, 3000]) {
+  test(`${distance}px overflow scrolls at 100 px/s and finishes at its endpoint`, () => {
+    const h = harness(distance);
+    h.hover();
+    h.frame(500);
+    assert.equal(h.element.children[0].style.transform, 'translate3d(-50px, 0, 0)', 'speed is independent of text length');
+    h.frame(distance * 10 - 1);
+    assert.equal(h.frames.size, 1, 'the animation continues until the full distance is covered');
+    h.frame(distance * 10);
+    assert.equal(h.element.children[0].style.transform, `translate3d(-${distance}px, 0, 0)`, 'the full text arrives on time');
+    assert.equal(h.frames.size, 0, 'the animation finishes without a perpetual repaint');
+  });
+}
+
+test('mouseleave cancels an active long-preview animation', () => {
+  const h = harness(3000);
+  h.hover();
+  h.frame(4000);
+  assert.equal(h.element.children[0].style.transform, 'translate3d(-400px, 0, 0)');
+  h.element.mouseleave();
+  assert.equal(h.frames.size, 0);
+  assert.equal(h.element.children[0].style.transform, 'translate3d(0px, 0, 0)');
+  h.frame(30_000);
+  assert.equal(h.element.children[0].style.transform, 'translate3d(0px, 0, 0)', 'cancelled motion cannot resume');
+});
+
 test('unchanged text preserves pending, active and completed hover motion', () => {
   const h = harness(100);
   const content = h.element.children[0];

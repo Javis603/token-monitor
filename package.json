@@ -1,7 +1,7 @@
 {
   "name": "token-monitor",
   "productName": "Token Monitor",
-  "version": "0.71.0",
+  "version": "0.72.0",
   "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
   "main": "src/electron/main.js",
   "scripts": {
@@ -116,9 +116,6 @@
     },
     "portable": {
       "artifactName": "Token-Monitor-${version}.${ext}"
-    },
-    "releaseInfo": {
-      "releaseNotesFile": ".github/RELEASE_TEMPLATE.md"
     },
     "publish": [
       {

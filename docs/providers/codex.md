@@ -59,6 +59,12 @@ Rollout filenames are transcript lookup keys and can contain multiple UUIDs; do 
 
 Cache warmth is an optional `promptCache: { observedAt, ttlSeconds }` estimate from that shared rollout index; it adds no separate file read or JSON parse. Valid cache read/write activity starts a fixed 30-minute display estimate regardless of the model name or route, including third-party and custom APIs. This is a product estimate, not a reported Codex or provider TTL; actual cache retention can differ. Cold responses, model changes and compaction clear it. Repeated unchanged `token_count` accounting never refreshes the anchor. The anchor is a response observation, so remaining time may be overstated; quota accounting and successful reuse are not implied. Home, Edge Dock and Sessions share one metrics slot: recent context takes priority, with the context token/window counts and cache countdown available in the shared detail tooltip by hovering its bar or percentage; then a still-valid cache estimate appears after 10 minutes of inactivity, with the last recorded context counts still available on hover. Turn completion alone clears neither reading; the cache countdown ends at the observed TTL.
 
+## Output-rate timing
+
+Codex can persist `token_count` after local tools finish. Its timestamp is therefore not always the response completion time. New scanner support must pair `token_usage_record.usage` with the same accepted response counters before using its timestamp as completion, and derive the start from request boundaries without moving it forward when an asynchronous tool result arrives during model output. Older records need a conservative event-based estimate; missing, mismatched or non-positive timing must preserve tokens while contributing no performance sample. Never subtract a sum of tool durations: parallel tool execution and model output can overlap.
+
+Keep rate timing independent from the existing session/activity span, including through incremental state serialization and cache migrations. The UI describes an estimated output rate, including first-output waiting, rather than pure model decoding. The vendored binary determines which timing behavior is available; app-side support alone does not update the scanner.
+
 ## Limits sources
 
 The live account normally reads the ChatGPT/Codex backend with the current `auth.json`. The configured `chatgpt_base_url` selects the matching backend path family. The app-server RPC path is a fallback, not an interchangeable authority.
