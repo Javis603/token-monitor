@@ -233,18 +233,30 @@ test('small overflow moves smoothly in fractional pixels and finishes promptly',
   assert.equal(h.element.classList.contains('has-overflow-fade'), true);
 });
 
-test('a long preview scrolls at the constant short-title pace instead of a capped sprint', () => {
-  // A full subagent task brief is several thousand pixels wide. Under the old
-  // 8 s duration ceiling its speed grew with distance and the text flew past
-  // unreadably; the pace must stay the one short titles already had.
-  const h = harness(1000);
+for (const distance of [100, 1000, 3000]) {
+  test(`${distance}px overflow scrolls at 100 px/s and finishes at its endpoint`, () => {
+    const h = harness(distance);
+    h.hover();
+    h.frame(500);
+    assert.equal(h.element.children[0].style.transform, 'translate3d(-50px, 0, 0)', 'speed is independent of text length');
+    h.frame(distance * 10 - 1);
+    assert.equal(h.frames.size, 1, 'the animation continues until the full distance is covered');
+    h.frame(distance * 10);
+    assert.equal(h.element.children[0].style.transform, `translate3d(-${distance}px, 0, 0)`, 'the full text arrives on time');
+    assert.equal(h.frames.size, 0, 'the animation finishes without a perpetual repaint');
+  });
+}
+
+test('mouseleave cancels an active long-preview animation', () => {
+  const h = harness(3000);
   h.hover();
   h.frame(4000);
-  const offset = -Number(h.element.children[0].style.transform.match(/translate3d\(([^p]+)px/)[1]);
-  assert.ok(offset < 500, 'half the distance is not covered within the old fixed cap');
-  h.frame(23_000);
-  assert.equal(h.element.children[0].style.transform, 'translate3d(-1000px, 0, 0)', 'the full text still arrives');
-  assert.equal(h.frames.size, 0, 'the animation finishes without a perpetual repaint');
+  assert.equal(h.element.children[0].style.transform, 'translate3d(-400px, 0, 0)');
+  h.element.mouseleave();
+  assert.equal(h.frames.size, 0);
+  assert.equal(h.element.children[0].style.transform, 'translate3d(0px, 0, 0)');
+  h.frame(30_000);
+  assert.equal(h.element.children[0].style.transform, 'translate3d(0px, 0, 0)', 'cancelled motion cannot resume');
 });
 
 test('unchanged text preserves pending, active and completed hover motion', () => {
