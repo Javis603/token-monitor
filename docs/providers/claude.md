@@ -84,3 +84,9 @@ Run the Claude session, limits and Electron transport tests when changing this n
 ```bash
 node --test tests/shared/claudeSessionActivity.test.js tests/shared/claudeSessionMetadata.test.js tests/shared/limitCollector.claude.test.js tests/electron/claudeWebFetch.test.js
 ```
+
+## Retained Claude Desktop usage
+
+The aligned scanner reads retained Code/Cowork `.claude/projects` and `.claude/transcripts` below `local-agent-mode-sessions` and `claude-code-sessions`, plus the Claude conversation IndexedDB store and its external blobs. Its three app roots are home-relative `Library/Application Support/Claude`, `AppData/Roaming/Claude` and `.config/Claude` on every platform; APPDATA and XDG overrides do not relocate them. Watch only those source trees, pruning VM/runtime files beside the retained transcripts. Host health and WSL discovery share the same registrations.
+
+Desktop Chat, Code and Cowork usage stays under the existing `claude` accounting id. The scanner reconciles retained transcripts against conversation-cache usage. Cumulative balances with no usage date remain undated and are excluded from dated reports, including Token Monitor's bounded all-time scan. An upstream fix does not establish cross-device or host/WSL mirror deduplication.

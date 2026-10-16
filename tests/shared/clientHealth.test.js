@@ -370,7 +370,7 @@ test('Claude source roots follow CLAUDE_CONFIG_DIR like tokscale', () => {
   os.homedir = () => path.join(path.sep, 'home', 'alice');
   process.env.CLAUDE_CONFIG_DIR = path.join(path.sep, 'srv', 'claude-config');
   try {
-    assert.deepEqual(clientSourceRoots('claude').claude, [
+    assert.deepEqual(clientSourceRoots('claude').claude.filter(({ optional }) => !optional), [
       { id: 'claude-projects', dir: path.join(path.sep, 'srv', 'claude-config', 'projects') },
       { id: 'claude-transcripts', dir: path.join(path.sep, 'srv', 'claude-config', 'transcripts') }
     ]);
@@ -479,7 +479,8 @@ test('source resolution feeds watcher paths and exact-file diagnostics without c
     { id: 'codex-sessions', dir: path.join(homeDir, '.codex', 'archived_sessions') }
   ]);
   assert.deepEqual(roots.codex.at(-1), { id: 'custom-scan-path', dir: path.join(homeDir, 'extra-codex'), custom: true });
-  assert.deepEqual(roots.amp, [{ id: 'amp-threads', dir: path.join(homeDir, 'xdg', 'amp', 'threads') }]);
+  assert.ok(roots.amp.some(({ dir }) => dir === path.join(homeDir, 'xdg', 'amp', 'threads')));
+  assert.equal(roots.amp.at(-1).optional, true);
   const zcodeDb = roots.zcode.find((root) => root.id === 'zcode-cli-db');
   assert.deepEqual(zcodeDb, {
     id: 'zcode-cli-db',

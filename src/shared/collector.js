@@ -1561,15 +1561,10 @@ function clientsForWatchPath(filePath, rootsByClient) {
   return matched;
 }
 
-// Inside a Hermes home dir tokscale only reads the SQLite db; the rest is the
-// Desktop App runtime (hermes-agent/node_modules/venv, logs, cache — 150k+ files
-// for some users). A plain recursive watch of ~/.hermes pegged CPU at 100%+
-// (issue #38). Watching the db files directly instead would miss the WAL/SHM
-// sidecars Hermes creates after startup (no seconds-level refresh on a cold
-// start), so we keep watching the dir but hand chokidar an `ignored` matcher
-// that prunes everything under a Hermes home except the db family. chokidar
-// never recurses into an ignored dir (so the runaway poll is gone), yet a
-// newly created state.db-wal is still seen on the next top-level readdir.
+// Hermes database totals also use direct logs/agent.log* siblings as per-call
+// date evidence. Keep those narrow lanes and dynamically created WAL/SHM files
+// under each home/profile watch root, while pruning the Desktop runtime and
+// unrelated logs/cache (issue #38's unbounded polling regression).
 const HERMES_DB_FILES = new Set(['state.db', 'state.db-wal', 'state.db-shm']);
 // OpenClaw keeps each agent's usage sources in a small set of lanes under
 // ~/.openclaw/agents/<agentId>: legacy/published JSONL under sessions/, doctor
@@ -1731,10 +1726,27 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   const withBasename = (client, basename) =>
     (candidates[client] || []).filter((dir) => path.basename(dir) === basename);
 
-  // Hermes: the SQLite trio is the only source, at any depth. Each explicit
+  // Hermes: SQLite totals and per-call logs provide usage and date evidence. Each explicit
   // watch root — the home AND every profile dir under it — is kept by the
   // matcher itself, so a profile's own database still reports.
-  bound('hermes', candidates.hermes || [], (parts) => !HERMES_DB_FILES.has(parts[parts.length - 1]));
+  bound('hermes', candidates.hermes || [], (parts) => {
+    if (HERMES_DB_FILES.has(parts[parts.length - 1])) return false;
+    // Cross-day allocation reads direct logs/agent.log* siblings of state.db.
+    // Keep rotation/create/remove events, but never recurse into runtime logs.
+    return !(parts[0] === 'logs' && (parts.length === 1
+      || (parts.length === 2 && parts[1].startsWith('agent.log'))));
+  });
+
+  // Desktop contains VM/runtime files beside its retained `.claude` trees.
+  // Mirror the scanner's traversal until `.claude`, then keep only its two
+  // transcript lanes. IndexedDB roots and external blob trees are separate.
+  const desktopRoots = clientSourceRoots(clientsCsv, options).claude || [];
+  bound('claude', desktopRoots.filter(({ id, dir }) => id === 'claude-desktop-transcripts' && dirExists(dir)).map(({ dir }) => dir),
+    (parts, resolved) => {
+      const marker = parts.indexOf('.claude');
+      if (marker >= 0) return parts.length > marker + 1 && !['projects', 'transcripts'].includes(parts[marker + 1]);
+      try { return !fs.statSync(resolved).isDirectory(); } catch (_) { return true; }
+    });
 
   bound('openclaw', candidates.openclaw || [], (parts) => {
     // The first level is the dynamic agent id. Keep it so newly created agents
