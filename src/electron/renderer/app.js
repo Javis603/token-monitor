@@ -5182,7 +5182,9 @@ function sessionDetailTitle() {
   const session = request?.client === 'reasonix'
     ? state.stats?.nativeSessions?.[period]?.[request.sessionId]
     : state.stats?.periods?.[period]?.sessions?.[`${request?.client}:${request?.sessionId}`];
-  return session?.title || request?.title || '';
+  return sessionRowsApi.sessionTitleForDisplay({
+    client: request?.client, title: session?.title || request?.title
+  });
 }
 
 function refreshSessionDetailHeading() {
