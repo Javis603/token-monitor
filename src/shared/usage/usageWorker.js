@@ -18,6 +18,7 @@ const { createCursorUsageEventIndex } = require('../providers/cursor/usageEvents
 const { createSessionUsageArchiveStore } = require('./sessionUsageArchiveStore');
 const { trackLiveSubprocesses } = require('../subprocessTermination');
 const { createUsageTransform } = require('./usageTransform');
+const { createLocalTokenLedgerReader } = require('./localTokenLedgers');
 
 const config = workerData || {};
 // Lists this thread's subprocesses where the owner can signal them if the
@@ -40,6 +41,9 @@ function diagnostics() {
 
 const transform = createUsageTransform({
   store,
+  readTokenLedgers: createLocalTokenLedgerReader({
+    onError: (error) => post({ type: 'log', message: `[token-ledger] ${error.message}` })
+  }),
   getSettings: () => config.transformSettings || {},
   isExternalAgentActive,
   onCaptureFailure: () => post({
