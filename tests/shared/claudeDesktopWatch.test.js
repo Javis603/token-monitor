@@ -16,6 +16,9 @@ function fixture(t) {
   const root = path.join(home, 'Library/Application Support/Claude/local-agent-mode-sessions');
   const lane = path.join(root, 'account/session/.claude/projects');
   fs.mkdirSync(lane, { recursive: true });
+  // Seed the startup probe before discovery so polling registers the file,
+  // even if its first directory stat would swallow a post-ready creation.
+  fs.writeFileSync(path.join(lane, 'watch-live.jsonl'), '{}\n');
   const result = { home, root, lane, options: { homeDir: home, env: {} } };
   t.after(async () => {
     await result.watcher?.close();
@@ -113,6 +116,8 @@ async function awaitWatcherLive(watcher, lane) {
   // necessarily native-stream startup. Prove delivery before testing a one-off
   // creation/removal; retries belong only to this disposable startup probe.
   const sentinel = path.join(lane, 'watch-live.jsonl');
+  assert.equal(watcher.getWatched()[lane]?.includes(path.basename(sentinel)), true,
+    'the startup probe must be registered by initial discovery');
   const touch = () => fs.appendFileSync(sentinel, '{}\n');
   const retry = setInterval(touch, 3000);
   try {
