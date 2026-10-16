@@ -367,6 +367,7 @@ const {
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
+  clientCollectsLocally,
   normalizeCursorAccountIds,
   normalizeCursorDisabledAccountIds,
   usageConfigFingerprint,
@@ -562,6 +563,8 @@ function defaultSettings() {
   return {
     hubMode: envHubUrl ? 'client' : 'local',
     hubUrl: envHubUrl,
+    viewerOnly: false,
+    hubSourceDeviceId: '',
     hubHostPort: Math.max(1, Math.min(65535, Number(process.env.TOKEN_MONITOR_PORT) || HUB_DEFAULT_PORT)),
     // Default to TOKEN_MONITOR_SECRET so agents that already trust this env
     // value (matching what the CLI hub uses) can connect to the widget's
@@ -2691,6 +2694,8 @@ function readSettings() {
     merged.cursorManualAccountIds = normalizeCursorAccountIds(merged.cursorManualAccountIds);
     merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
+    merged.viewerOnly = parseBoolean(merged.viewerOnly, false);
+    merged.hubSourceDeviceId = String(merged.hubSourceDeviceId || '').trim();
     delete merged.workbuddyEndpoint;
     merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
     merged.archivedClientUsage = normalizeArchivedClientUsage(merged.archivedClientUsage);
@@ -3423,6 +3428,7 @@ async function startEmbeddedHub() {
       host: '0.0.0.0',
       secret: settings.hubHostSecret,
       syncSessionTitles: settings.hubSyncSessionTitles === true,
+      sourceDeviceId: settings.hubSourceDeviceId || '',
       dataFile: hubDataFile(),
       logger: { error: (err) => console.log(`[hub] ${err?.message || err}`) }
     });
@@ -3454,6 +3460,7 @@ function isExternalAgentActive() {
 function ownsUsageRuntime() {
   return Boolean(
     deviceRuntimeHandle
+    && !(settings?.hubMode === 'client' && settings?.viewerOnly === true)
     && (settings?.hubMode === 'icloud' || canRefreshUsageRuntime(mode, isExternalAgentActive))
   );
 }
@@ -4450,6 +4457,10 @@ function publishSyncDisplayStats({ reason, at, generation, widgetProducerOwner }
 function startSyncCollector() {
   stopSyncCollector();
   if (!effectiveHubConfig().url) return;
+  if (!clientCollectsLocally(settings)) {
+    lastCollectedDevice = null;
+    return;
+  }
   const widgetProducerOwner = captureMacWidgetProducerOwner();
   const syncUploadScheduler = createSyncUploadScheduler({
     intervalMs: syncUploadIntervalMs(),
@@ -6288,7 +6299,7 @@ function startMode() {
       void getSyncContentRuntime().refresh();
       reconcileSharedSubscriptions();
     } else {
-      startLocalCollector();
+      if (clientCollectsLocally(settings)) startLocalCollector();
       reconcileSharedSubscriptions();
     }
   }).catch((err) => {
@@ -6333,7 +6344,7 @@ function restartDeviceRuntimeForMode() {
     });
   }
   if (effectiveHubConfig().url) startSyncCollector();
-  else startLocalCollector();
+  else if (clientCollectsLocally(settings)) startLocalCollector();
 }
 
 function usageCollectorNameForMode() {
@@ -6349,6 +6360,7 @@ function usageConfigForMode() {
 }
 
 function applyUsageRuntimeForMode() {
+  if (!clientCollectsLocally(settings)) return true;
   if (!deviceRuntimeHandle?.reconfigureUsage) {
     restartDeviceRuntimeForMode();
     return Boolean(deviceRuntimeHandle);
@@ -7697,6 +7709,8 @@ app.whenReady().then(() => {
         : normalizeHubMode(settings.hubMode, 'local', process.platform),
       hubHostPort: patch.hubHostPort !== undefined ? normalizeHubPort(patch.hubHostPort, settings.hubHostPort) : settings.hubHostPort,
       hubHostSecret: patch.hubHostSecret !== undefined ? String(patch.hubHostSecret) : settings.hubHostSecret,
+      viewerOnly: parseBoolean(patch.viewerOnly ?? settings.viewerOnly, false),
+      hubSourceDeviceId: String(patch.hubSourceDeviceId ?? settings.hubSourceDeviceId ?? '').trim(),
       hubSyncSessionTitles: parseBoolean(patch.hubSyncSessionTitles ?? settings.hubSyncSessionTitles, false),
       syncContentState: normalizeSyncContentState(settings.syncContentState),
       deviceId: (patch.deviceId !== undefined ? String(patch.deviceId).trim() : settings.deviceId) || defaultDeviceId(),
