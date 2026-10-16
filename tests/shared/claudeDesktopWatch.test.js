@@ -16,8 +16,12 @@ function fixture(t) {
   const root = path.join(home, 'Library/Application Support/Claude/local-agent-mode-sessions');
   const lane = path.join(root, 'account/session/.claude/projects');
   fs.mkdirSync(lane, { recursive: true });
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  return { home, root, lane, options: { homeDir: home, env: {} } };
+  const result = { home, root, lane, options: { homeDir: home, env: {} } };
+  t.after(async () => {
+    await result.watcher?.close();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  return result;
 }
 
 test('Desktop pruning keeps dynamic ancestors and transcript removal without following unrelated trees', (t) => {
@@ -78,19 +82,45 @@ test('Desktop links follow discovery, explicit scan-root and file boundaries', (
 });
 
 async function waitForEvent(watcher, file, action, expectedEvent = null) {
-  let observed = false;
-  const listener = (event, candidate) => {
-    if (path.resolve(candidate) === file && (!expectedEvent || event === expectedEvent)) observed = true;
-  };
-  watcher.on('all', listener);
+  // Once the stream is live, mutate once and require the exact event/path.
+  await new Promise((resolve, reject) => {
+    const observed = [];
+    const cleanup = () => {
+      clearTimeout(timer);
+      watcher.off('all', listener);
+      watcher.off('error', onError);
+    };
+    const listener = (event, candidate) => {
+      observed.push(`${event}:${path.basename(candidate)}`);
+      if (path.resolve(candidate) === file && (!expectedEvent || event === expectedEvent)) {
+        cleanup();
+        resolve();
+      }
+    };
+    const onError = (error) => { cleanup(); reject(error); };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`missing native/polling ${expectedEvent || 'event'}: ${path.basename(file)}; observed: ${observed.join(', ') || 'none'}`));
+    }, 30_000);
+    watcher.on('all', listener);
+    watcher.on('error', onError);
+    try { action(); } catch (error) { onError(error); }
+  });
+}
+
+async function awaitWatcherLive(watcher, lane) {
+  // As in watcherNativeEvents.test.js, ready completes the initial scan, not
+  // necessarily native-stream startup. Prove delivery before testing a one-off
+  // creation/removal; retries belong only to this disposable startup probe.
+  const sentinel = path.join(lane, 'watch-live.jsonl');
+  const touch = () => fs.appendFileSync(sentinel, '{}\n');
+  const retry = setInterval(touch, 3000);
   try {
-    const deadline = Date.now() + 30_000;
-    do {
-      action();
-      await new Promise(resolve => setTimeout(resolve, 1500));
-    } while (!observed && Date.now() < deadline);
-    assert.equal(observed, true, `missing native/polling event: ${path.basename(file)}`);
-  } finally { watcher.off('all', listener); }
+    await waitForEvent(watcher, sentinel, touch);
+  } finally {
+    clearInterval(retry);
+    fs.rmSync(sentinel, { force: true });
+  }
 }
 
 for (const usePolling of [false, true]) {
@@ -112,8 +142,9 @@ for (const usePolling of [false, true]) {
       throw error;
     }
     const watcher = openWatch(chokidar, { ...f.options, clients: 'claude', dirs: [f.root], usePolling });
-    t.after(() => watcher.close());
+    f.watcher = watcher;
     await new Promise((resolve, reject) => { watcher.once('ready', resolve); watcher.once('error', reject); });
+    await awaitWatcherLive(watcher, f.lane);
     await waitForEvent(watcher, fileLink, () => fs.appendFileSync(fileTarget, '{}\n'));
     await waitForEvent(watcher, path.join(laneLink, 'usage.jsonl'), () => fs.appendFileSync(laneFile, '{}\n'));
     await waitForEvent(watcher, fileLink, () => {
@@ -129,10 +160,11 @@ for (const usePolling of [false, true]) {
     const dependencies = path.join(f.root, 'runtime/node_modules/pkg/dist');
     fs.mkdirSync(dependencies, { recursive: true });
     const watcher = openWatch(chokidar, { ...f.options, clients: 'claude', dirs: [f.root], usePolling });
-    t.after(() => watcher.close());
+    f.watcher = watcher;
     const events = [];
     watcher.on('all', (_event, file) => events.push(file));
     await new Promise((resolve, reject) => { watcher.once('ready', resolve); watcher.once('error', reject); });
+    await awaitWatcherLive(watcher, f.lane);
     const existing = path.join(f.lane, 'existing.jsonl');
     await waitForEvent(watcher, existing, () => fs.appendFileSync(existing, '{}\n'));
     const fresh = path.join(f.root, 'new-account/new-session/.claude/transcripts/fresh.jsonl');
