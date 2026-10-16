@@ -212,8 +212,12 @@ function tokscaleEnvWithBlanksDropped(env, platform = process.platform) {
 // same effective CNY rate as the rest of the app; standalone agents use the
 // currency module's built-in rate unless an explicit native override is set.
 function qoderCnCreditUsdRate(options = {}) {
-  const override = Number(process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT ?? options.qoderCnUsdPerCredit);
-  return Number.isFinite(override) && override > 0 ? override : 0.04 / convertUsd(1, 'CNY');
+  const envOverride = Number(process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT);
+  if (Number.isFinite(envOverride) && envOverride > 0) return envOverride;
+  const suppliedRate = Number(options.qoderCnUsdPerCredit);
+  return Number.isFinite(suppliedRate) && suppliedRate > 0
+    ? suppliedRate
+    : 0.04 / convertUsd(1, 'CNY');
 }
 
 function tokscaleCommand(options = {}) {

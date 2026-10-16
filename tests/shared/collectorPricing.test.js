@@ -229,3 +229,31 @@ test('worker scalar FX reaches native command and pricing identity without share
   assert.equal(Number(tokscaleCommand(structuredClone(options)).env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.007);
   assert.notEqual(pricingFingerprint(options), pricingFingerprint({ ...options, qoderCnUsdPerCredit: 0.008 }));
 });
+
+test('invalid Qoder CN environment rates preserve valid worker FX before using the default', t => {
+  const { configureRates } = require('../../src/shared/currency');
+  const { tokscaleCommand } = require('../../src/shared/collector');
+  const previous = process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  t.after(() => {
+    configureRates({});
+    if (previous === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+    else process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = previous;
+  });
+  configureRates({ CNY: 8 });
+  const options = { qoderCnUsdPerCredit: 0.007, binaryRevision: 'test-build' };
+  delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  const revision = pricingFingerprint(options);
+  for (const invalid of ['', ' ', 'invalid', '0', '-1', 'NaN', 'Infinity']) {
+    process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = invalid;
+    assert.equal(Number(tokscaleCommand(options).env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.007,
+      `invalid environment rate ${JSON.stringify(invalid)} preserves the supplied rate`);
+    assert.equal(pricingFingerprint(options), revision, 'the selected rate also controls anchor identity');
+    for (const supplied of [undefined, null, '', 0, -1, NaN, Infinity]) {
+      assert.equal(Number(tokscaleCommand({ qoderCnUsdPerCredit: supplied })
+        .env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.005);
+    }
+  }
+  process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = '0.02';
+  assert.equal(Number(tokscaleCommand(options).env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.02);
+  assert.notEqual(pricingFingerprint(options), revision, 'a valid override takes precedence');
+});
