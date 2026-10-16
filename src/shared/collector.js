@@ -1675,6 +1675,46 @@ const CUSTOM_ROOT_PRUNED_DIRS = new Set([
 ]);
 const pruneDependencyTrees = (parts) => parts.some((part) => CUSTOM_ROOT_PRUNED_DIRS.has(part));
 
+function ignoreDesktopTranscriptPath(parts, resolved) {
+  const marker = parts.indexOf('.claude');
+  const discovery = marker < 0 ? parts : parts.slice(0, marker);
+  if (pruneDependencyTrees(discovery)) return true;
+  if (marker >= 0 && parts.length > marker + 1
+    && !['projects', 'transcripts'].includes(parts[marker + 1])) return true;
+
+  const root = parts.reduce((parent) => path.dirname(parent), resolved);
+  let current = root;
+  for (let index = 0; index < parts.length; index += 1) {
+    current = path.join(current, parts[index]);
+    let stat;
+    try { stat = fs.lstatSync(current); } catch (_) {
+      // A removed directory or transcript must still invalidate the scan.
+      // Missing entries cannot cause chokidar to descend into a new tree.
+      return marker < 0 || parts.length <= marker + 2 ? false : !resolved.endsWith('.jsonl');
+    }
+    const laneRoot = marker >= 0 && index === marker + 1;
+    const transcriptFile = marker >= 0 && index === parts.length - 1 && index > marker + 1;
+    if (stat.isSymbolicLink()) {
+      // WalkDir does not follow discovery/.claude or interior directory links.
+      // Its explicitly discovered scan root and individual file links do work.
+      if (!laneRoot && !transcriptFile) return true;
+      try { stat = fs.statSync(current); } catch (error) {
+        // A previously admitted link can outlive its target. Keep its removal
+        // signal; a missing target cannot cause traversal outside the source.
+        const missing = error.code === 'ENOENT' || error.code === 'ENOTDIR';
+        return !missing || (!laneRoot && !resolved.endsWith('.jsonl'));
+      }
+      if (laneRoot ? !stat.isDirectory() : !stat.isFile()) return true;
+    }
+    if (index < parts.length - 1 || !transcriptFile) {
+      if (!stat.isDirectory()) return true;
+    } else if (!stat.isDirectory() && (!stat.isFile() || !resolved.endsWith('.jsonl'))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Tokscale opens one exact database directly under this root instead of walking
 // it. Keep the direct children it names — including the WAL/SHM sidecars, which
 // are the live-write signal even though tokscale never parses them as databases
@@ -1738,15 +1778,12 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   });
 
   // Desktop contains VM/runtime files beside its retained `.claude` trees.
-  // Mirror the scanner's traversal until `.claude`, then keep only its two
-  // transcript lanes. IndexedDB roots and external blob trees are separate.
+  // Keep dynamic discovery ancestors, pruning dependency/VCS trees. Link
+  // handling differs between discovery, scan roots and individual JSONL files.
+  // IndexedDB roots and external blob trees are separate.
   const desktopRoots = clientSourceRoots(clientsCsv, options).claude || [];
   bound('claude', desktopRoots.filter(({ id, dir }) => id === 'claude-desktop-transcripts' && dirExists(dir)).map(({ dir }) => dir),
-    (parts, resolved) => {
-      const marker = parts.indexOf('.claude');
-      if (marker >= 0) return parts.length > marker + 1 && !['projects', 'transcripts'].includes(parts[marker + 1]);
-      try { return !fs.statSync(resolved).isDirectory(); } catch (_) { return true; }
-    });
+    ignoreDesktopTranscriptPath);
 
   bound('openclaw', candidates.openclaw || [], (parts) => {
     // The first level is the dynamic agent id. Keep it so newly created agents
