@@ -41,6 +41,7 @@ OMP forks, including `/tan`, can copy assistant history with token usage intact;
 
 ## Invariants and known gaps
 
+- OMP's [title cards](https://github.com/can1357/oh-my-pi/blob/a536558dc21634462c1b2647676953204569779c/packages/coding-agent/src/utils/title-card.ts) store `<icon> <CODE>: <title>` directly in the title, for both generated and `/rename` titles. Electron's shared session-row formatter hides a private-use icon only at that card prefix, retaining the code, body and ordinary emoji. Raw collection, archives, Hub records and title sync retain the original text; do not strip private-use characters in the shared usage normalizer to solve a font-dependent display issue.
 - Detail reads one transcript at a time and never folds child transcripts into a parent. Copied history already inside a transcript remains visible; do not sum related Detail views as deduplicated usage.
 - Only records understood by the shared Pi-format parser contribute to detail totals; adding other OMP-specific records requires confirming tokscale's accounting first.
 
@@ -48,4 +49,5 @@ OMP forks, including `/tan`, can copy assistant history with token usage intact;
 
 ```bash
 node --test tests/shared/ompSessionDetail.test.js tests/shared/sessionFiles.test.js tests/shared/sessionDetailResolver.test.js tests/shared/piSessionDetail.test.js
+node --test tests/electron/ompSessionTitle.test.js
 ```

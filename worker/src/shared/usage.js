@@ -140,9 +140,7 @@ function normalizeIsoTimestamp(value) {
 }
 
 function normalizeSessionTitle(value) {
-  return Array.from(String(value || '')
-    .replace(/[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu, '')
-    .replace(/\s+/g, ' ').trim())
+  return Array.from(String(value || '').replace(/\s+/g, ' ').trim())
     .slice(0, SESSION_TITLE_MAX_LENGTH)
     .join('');
 }
