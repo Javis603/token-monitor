@@ -23,7 +23,12 @@
       motion.from = offsets.get(motion.element) || 0;
       motion.distance = distance;
       motion.startedAt = window.performance.now();
-      motion.duration = Math.max(240, Math.min(8000, Math.abs(distance - motion.from) * 22));
+      // A constant pace keeps every preview readable. Capping the duration
+      // would accelerate with distance instead: a full task brief is several
+      // thousand pixels wide, and under a fixed 8 s ceiling that text flew
+      // past far faster than it could be read, while a short title ambled.
+      // 22 ms/px is the pace short titles already had.
+      motion.duration = Math.max(240, Math.abs(distance - motion.from) * 22);
       if (!motion.frameId) motion.frameId = window.requestAnimationFrame(motion.step);
     }
     function update(element) {

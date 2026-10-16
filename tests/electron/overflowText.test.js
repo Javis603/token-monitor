@@ -233,6 +233,20 @@ test('small overflow moves smoothly in fractional pixels and finishes promptly',
   assert.equal(h.element.classList.contains('has-overflow-fade'), true);
 });
 
+test('a long preview scrolls at the constant short-title pace instead of a capped sprint', () => {
+  // A full subagent task brief is several thousand pixels wide. Under the old
+  // 8 s duration ceiling its speed grew with distance and the text flew past
+  // unreadably; the pace must stay the one short titles already had.
+  const h = harness(1000);
+  h.hover();
+  h.frame(4000);
+  const offset = -Number(h.element.children[0].style.transform.match(/translate3d\(([^p]+)px/)[1]);
+  assert.ok(offset < 500, 'half the distance is not covered within the old fixed cap');
+  h.frame(23_000);
+  assert.equal(h.element.children[0].style.transform, 'translate3d(-1000px, 0, 0)', 'the full text still arrives');
+  assert.equal(h.frames.size, 0, 'the animation finishes without a perpetual repaint');
+});
+
 test('unchanged text preserves pending, active and completed hover motion', () => {
   const h = harness(100);
   const content = h.element.children[0];
