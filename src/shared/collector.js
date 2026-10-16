@@ -41,6 +41,7 @@ const {
   createSubprocessTermination,
   terminationUnconfirmedError
 } = require('./subprocessTermination');
+const { lowerSubprocessPriority } = require('./subprocessPriority');
 const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
 const { antigravityConversationSummaryCandidates } = require('./providers/antigravity/sessionMetadata');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
@@ -245,6 +246,7 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
   if (signal?.aborted) return Promise.reject(abortReason(signal));
   return new Promise((resolve, reject) => {
     const child = spawn(bin, [...prefixArgs, ...userArgs], { env, windowsHide: true });
+    lowerSubprocessPriority(child);
     let stdout = '';
     let stderr = '';
     let settled = false;
