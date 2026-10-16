@@ -260,6 +260,7 @@ test('a new Hub local collector batch cannot attribute the old Hub push revision
       electronUsageConfig: () => ({}), electronDeviceEnvelope: () => ({}),
       electronLimitsConfig: () => ({}), electronLimitsDeps: () => ({}),
       recordDiagnosticEvent() {}, drainPendingRuntimeActions() {}, usageConfigFingerprint: () => '',
+      clientCollectsLocally: () => true,
       usageRuntimeReconciler: { setActiveKey() {} }
     });
     vm.runInNewContext(source.slice(source.indexOf('const SYNC_STATS_PUBLISH_WINDOW_MS ='),

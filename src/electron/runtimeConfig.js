@@ -23,7 +23,9 @@ const MODE_STRUCTURAL_KEYS = Object.freeze([
   'secret',
   'hubHostPort',
   'hubHostSecret',
-  'deviceId'
+  'deviceId',
+  'viewerOnly',
+  'hubSourceDeviceId'
 ]);
 const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'clients',
@@ -220,6 +222,12 @@ function envelopeFromSettings(settings = {}, context = {}) {
   };
 }
 
+// Opt-in Client viewer: read the hub only. No collector, limits runtime, local
+// overlay or upload, so another device can stay the hub's sole source.
+function clientCollectsLocally(settings = {}) {
+  return !(settings.hubMode === 'client' && settings.viewerOnly === true);
+}
+
 function classifySettingsChange(previous = {}, next = {}) {
   const limitScopes = [];
   for (const [provider, keys] of Object.entries(LIMIT_PROVIDER_SETTING_KEYS)) {
@@ -239,6 +247,7 @@ module.exports = {
   LIMIT_PROVIDER_SETTING_KEYS,
   USAGE_STRUCTURAL_KEYS,
   classifySettingsChange,
+  clientCollectsLocally,
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,

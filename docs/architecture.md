@@ -112,7 +112,33 @@ Sessions, Home and Edge Dock group the complete member set before applying displ
 
 ## Widget mode switching
 
-`settings.hubMode` selects the source: `local` uses the local IPC collector; `client` uses Hub SSE plus this device's sync collector; `host` adds an embedded Hub; `icloud` uses local collection and iCloud file reconciliation instead of SSE. A live agent PID suppresses widget Hub uploads and owns the local daily-history archive. The agent has no iCloud sink, so the widget must still publish its iCloud record while yielding archive writes.
+`settings.hubMode` selects the source: `local` uses the local IPC collector; `client` uses Hub SSE plus this device's sync collector by default; `host` adds an embedded Hub; `icloud` uses local collection and iCloud file reconciliation instead of SSE. A live agent PID suppresses widget Hub uploads and owns the local daily-history archive. The agent has no iCloud sink, so the widget must still publish its iCloud record while yielding archive writes.
+
+### Viewer-only Client and sole-source embedded Host
+
+These advanced JSON settings are opt-in and default to normal multi-device behavior:
+
+```json
+{
+  "hubMode": "client",
+  "hubUrl": "http://host-a:17321",
+  "viewerOnly": true
+}
+```
+
+`viewerOnly: true` applies only to `hubMode: "client"`. The widget keeps its authenticated Hub reads and SSE stream, but starts no local usage collector, limits runtime, local overlay, or usage upload. `false` (the default), omitted, and every other mode keep existing local collection behavior.
+
+```json
+{
+  "hubMode": "host",
+  "deviceId": "host-a",
+  "hubSourceDeviceId": "host-a"
+}
+```
+
+`hubSourceDeviceId` is an embedded-host-only sole-source setting. The host keeps collecting and writes its own record in-process. Read paths aggregate only that record; stored records from other devices remain on disk untouched. While set, the embedded Hub rejects HTTP usage ingest and device deletion requests, including an authenticated request that claims `host-a`, so a viewer cannot replace or delete the host snapshot by reusing its device ID. This is intentionally not general device filtering for a standalone Hub.
+
+This mode disables only usage and limits production on viewers. Shared subscriptions and supported shared settings remain shared. It does not add role-based authentication or change the trust model for ordinary shared-secret Hub publishers.
 
 **iCloud identity and deletion.** Main persists former Device IDs across mode/ID changes; `icloudSyncRuntime.js` cleans them only after publishing the replacement. Failed publication leaves the former record visible; failed cleanup retries after restart. Until confirmed, aggregate one visible former identity rather than double-counting old and new records. `icloudSync.js` retains revisions and this writer's complete deletion targets locally; losing those targets on restart could resurrect deleted devices. Older ledgers cannot overwrite an unreadable deletion snapshot with an empty one. Tombstones hide records, not erase cloud files.
 

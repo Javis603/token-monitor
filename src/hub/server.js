@@ -48,6 +48,9 @@ function createHub({
   host = '0.0.0.0',
   secret = '',
   syncSessionTitles = false,
+  // An embedded host may choose its own process as the sole usage producer.
+  // Excluded records remain stored; read paths omit them rather than deleting.
+  sourceDeviceId = '',
   staleAfterMs = DEFAULT_STALE_AFTER_MS,
   broadcastDelayMs = 100,
   dataFile = path.join(projectRoot(), 'data', 'devices.json'),
@@ -65,6 +68,7 @@ function createHub({
   store.syncTitlePolicies = Object.assign(Object.create(null), store.syncTitlePolicies || {});
   store.syncSettings = Object.assign(Object.create(null), store.syncSettings || {});
   const bindHost = resolveBindHost(host, secret);
+  const sourceId = String(sourceDeviceId || '').trim();
 
   // Apply the permission at startup, including records from offline devices.
   // Keep disabled policies as tombstones so re-enabling cannot reuse old tokens.
@@ -85,13 +89,19 @@ function createHub({
     writeJsonAtomic(dataFile, store);
   }
 
+  function visibleDevices() {
+    const devices = Object.values(store.devices);
+    return sourceId ? devices.filter((record) => record?.deviceId === sourceId) : devices;
+  }
+
   function getStats() {
-    const stats = aggregateDevices(Object.values(store.devices), staleAfterMs);
+    const devices = visibleDevices();
+    const stats = aggregateDevices(devices, staleAfterMs);
     stats.staleAfterMs = staleAfterMs;
-    const history = aggregateHistory(Object.values(store.devices));
+    const history = aggregateHistory(devices);
     stats.historyPreview = historyPreview(history);
     stats.historyRevision = historyRevision(history);
-    stats.deviceHistoryRevision = deviceHistoryRevision(Object.values(store.devices));
+    stats.deviceHistoryRevision = deviceHistoryRevision(devices);
     // The version of the shared subscription list, never the list itself. A
     // device compares it against the copy it holds and re-reads only when it has
     // been overtaken, so learning about another device's edit costs nothing in
@@ -102,11 +112,11 @@ function createHub({
   }
 
   function getHistory() {
-    return aggregateHistory(Object.values(store.devices));
+    return aggregateHistory(visibleDevices());
   }
 
   function getDevices() {
-    return Object.values(store.devices);
+    return visibleDevices();
   }
 
   const sseClients = new Set();
@@ -182,6 +192,11 @@ function createHub({
       throw new Error('deviceId_required');
     }
     const deviceId = String(payload.deviceId || payload.id);
+    if (sourceId && deviceId !== sourceId) {
+      const error = new Error('source_device_only');
+      error.code = 'source_device_only';
+      throw error;
+    }
     const record = mergeSyncDeviceRecord(store.devices[deviceId], { ...payload, receivedAt: new Date().toISOString() }, {
       preserveSessionTitles: acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[deviceId], payload.sessionTitleSyncGeneration)
     });
@@ -333,7 +348,7 @@ function createHub({
         runtime: 'node-hub',
         version: store.version || 1,
         hubBuild: currentHubBuild('node-hub'),
-        deviceCount: Object.keys(store.devices).length,
+        deviceCount: visibleDevices().length,
         secretRequired: Boolean(secret),
         now: new Date().toISOString()
       });
@@ -399,6 +414,12 @@ function createHub({
     }
 
     if (req.method === 'POST' && url.pathname === '/api/ingest') {
+      // The host writes through ingest() in-process. Network callers are
+      // read-only while a sole source is configured, even if they claim its ID.
+      if (sourceId) {
+        res.shouldKeepAlive = false;
+        return sendJson(res, 403, { error: 'source_device_only' }, { connection: 'close' });
+      }
       try {
         const payload = await readJsonBody(req);
         const record = ingest(payload);
@@ -441,6 +462,7 @@ function createHub({
     }
 
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/devices/')) {
+      if (sourceId) return sendJson(res, 403, { error: 'source_device_only' });
       const deviceId = decodeURIComponent(url.pathname.slice('/api/devices/'.length));
       deleteDevice(deviceId);
       return sendJson(res, 200, { ok: true, deviceId });
