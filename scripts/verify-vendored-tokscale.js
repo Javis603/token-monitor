@@ -639,7 +639,7 @@ function verifyGooseScannerContract(binPath) {
     assert.equal(run({}, ['--since', '2026-08-21', '--until', '2026-08-21']).entries.length, 0);
     fs.rmSync(xdg);
 
-    // First-existing selection: all five contain distinct counters, never a union.
+    // A raw absolute override is authoritative; invalid overrides use defaults.
     const customRoot = path.join(home, 'custom');
     const candidates = [
       path.join(customRoot, 'data', 'sessions', 'sessions.db'), xdg,
@@ -649,23 +649,33 @@ function verifyGooseScannerContract(binPath) {
     ];
     candidates.forEach((file, i) => writeGooseDatabase(file, [{ id: `priority-${i}`, accumulatedInput: (i + 1) * 100 }]));
     const relativeRoot = path.relative(process.cwd(), customRoot);
-    assert.deepEqual(Object.keys(counters(run({ GOOSE_PATH_ROOT: ` ${relativeRoot} ` }))), ['priority-0']);
-    for (let i = 0; i < candidates.length; i += 1) {
-      assert.deepEqual(Object.keys(counters(run({ GOOSE_PATH_ROOT: ` ${customRoot} ` }))), [`priority-${i}`]);
-      // An empty earlier DB still shadows later non-empty candidates.
-      if (i === 0) {
+    assert.deepEqual(Object.keys(counters(run({ GOOSE_PATH_ROOT: relativeRoot }))), ['priority-1']);
+    assert.deepEqual(Object.keys(counters(run({ GOOSE_PATH_ROOT: ` ${customRoot} ` }))), ['priority-1']);
+    assert.deepEqual(Object.keys(counters(run({ GOOSE_PATH_ROOT: customRoot }))), ['priority-0']);
+    fs.rmSync(candidates[0]);
+    assert.equal(run({ GOOSE_PATH_ROOT: customRoot }).entries.length, 0);
+    // Default candidates are first-existing, never a union. Empty shadows too.
+    for (let i = 1; i < candidates.length; i += 1) {
+      assert.deepEqual(Object.keys(counters(run())), [`priority-${i}`]);
+      if (i === 1) {
         fs.rmSync(candidates[i]);
         writeGooseDatabase(candidates[i], []);
-        assert.equal(run({ GOOSE_PATH_ROOT: customRoot }).entries.length, 0);
+        assert.equal(run().entries.length, 0);
       }
       fs.rmSync(candidates[i]);
     }
     const extra = path.join(home, 'extra');
     writeGooseDatabase(path.join(extra, 'sessions.db'));
     assert.equal(run({ TOKSCALE_EXTRA_DIRS: `goose:${extra}` }).entries.length, 0);
-    writeGooseDatabase(path.join(home, 'AppData', 'Roaming', 'Block', 'goose', 'data', 'sessions', 'sessions.db'));
+    const windowsDb = path.join(home, 'AppData', 'Roaming', 'Block', 'goose', 'data', 'sessions', 'sessions.db');
+    writeGooseDatabase(windowsDb);
     writeGooseDatabase(path.join(home, 'Library', 'Application Support', 'Block', 'goose', 'data', 'sessions', 'sessions.db'));
-    assert.equal(run().entries.length, 0);
+    assert.equal(extractUsageFromTokscale(run()).totalTokens, process.platform === 'win32' ? 1540 : 0);
+    // Explicit --home inspects only that profile, on every host platform.
+    assert.equal(extractUsageFromTokscale(run({
+      GOOSE_PATH_ROOT: customRoot, APPDATA: path.join(home, 'unrelated-appdata')
+    }, ['--home', home])).totalTokens, 1540);
+    fs.rmSync(windowsDb);
 
     writer = writeGooseDatabase(xdg, [{}], { wal: true });
     assert.ok(fs.statSync(`${xdg}-wal`).size > 0);

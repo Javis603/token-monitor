@@ -9,7 +9,7 @@ const { tokscaleConfigDir, tokscaleHomeDir } = require('./tokscaleConfig');
 const { claudeSessionRoots } = require('./providers/claude/paths');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
-const { catpawDataSources } = require('./providers/catpaw/paths');
+const { catpawDataSources, nativeWindowsFolders } = require('./providers/catpaw/paths');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
 const { MCODE_SOURCE_CHECK_ID, mcodeSessionDirs } = require('./providers/mcode/paths');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
@@ -52,6 +52,42 @@ function nonBlankEnvPath(name, fallback, env = process.env) {
 function absoluteEnvPath(name, fallback, env = process.env) {
   const value = env[name];
   return typeof value === 'string' && path.isAbsolute(value) ? value : fallback;
+}
+
+function gooseSessionFiles({ homeDir, platform, env, windowsFolders }) {
+  const root = env.GOOSE_PATH_ROOT;
+  // Rust Windows Path::is_absolute requires a prefix as well as a root;
+  // Node also accepts root-relative paths such as \\goose, which Goose ignores.
+  const absoluteRoot = typeof root === 'string' && path.isAbsolute(root)
+    && (process.platform !== 'win32' || path.win32.parse(root).root.length > 1);
+  if (absoluteRoot) return [path.join(root, 'data', 'sessions', 'sessions.db')];
+
+  const home = tokscaleHomeDir({ env, platform, homeDir });
+  const files = [];
+  if (platform === 'win32') {
+    const configuredRoaming = typeof env.APPDATA === 'string' && env.APPDATA.length > 0;
+    if (configuredRoaming) {
+      files.push(path.resolve(env.APPDATA, 'Block', 'goose', 'data', 'sessions', 'sessions.db'));
+    } else {
+      const native = windowsFolders || nativeWindowsFolders();
+      const profile = native.profile || homeDir;
+      const roaming = native.roaming || path.join(profile, 'AppData', 'Roaming');
+      const desktopHome = typeof env.HOME === 'string' && env.HOME.length > 0 ? env.HOME : profile;
+      files.push(
+        path.resolve(roaming, 'Block', 'goose', 'data', 'sessions', 'sessions.db'),
+        path.resolve(desktopHome, 'AppData', 'Roaming', 'Block', 'goose', 'data', 'sessions', 'sessions.db')
+      );
+    }
+  }
+  // Keep every default candidate eligible for watching, so DB creation in an
+  // existing watched parent is discovered. A valid override stays exclusive.
+  files.push(
+    path.resolve(xdgDataHome(home, env), 'goose', 'sessions', 'sessions.db'),
+    path.join(home, 'Library', 'Application Support', 'goose', 'sessions', 'sessions.db'),
+    path.join(home, 'Library', 'Application Support', 'Block', 'goose', 'sessions', 'sessions.db'),
+    path.join(home, '.local', 'share', 'Block', 'goose', 'sessions', 'sessions.db')
+  );
+  return [...new Set(files)];
 }
 
 function cherryStudioTranscriptRoots({ homeDir, platform = process.platform, env = process.env } = {}) {
@@ -196,21 +232,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // `detected` next to usage collected from another directory.
   const tokscaleHome = tokscaleHomeDir({ env, platform, homeDir: home });
   const xdgHome = xdgDataHome(tokscaleHome, env);
-  // fa5f0c13 opens the first existing Goose file in this order, even when it
-  // is empty. Keep every candidate watchable so creation of an earlier file
-  // triggers a rescan. Relative GOOSE_PATH_ROOT is accepted by this scanner
-  // (although Goose itself ignores it); the scanner trims that override.
-  const gooseRoot = typeof env.GOOSE_PATH_ROOT === 'string' ? env.GOOSE_PATH_ROOT.trim() : '';
-  // tokscaleCommand drops blank XDG values before spawning; use the same
-  // blank-as-unset fallback as the other XDG sources for health and watching.
-  const gooseFiles = [
-    ...(gooseRoot ? [path.resolve(gooseRoot, 'data', 'sessions', 'sessions.db')] : []),
-    path.resolve(xdgHome, 'goose', 'sessions', 'sessions.db'),
-    path.join(tokscaleHome, 'Library', 'Application Support', 'goose', 'sessions', 'sessions.db'),
-    path.join(tokscaleHome, 'Library', 'Application Support', 'Block', 'goose', 'sessions', 'sessions.db'),
-    path.join(tokscaleHome, '.local', 'share', 'Block', 'goose', 'sessions', 'sessions.db')
-  ];
-  add('goose', ...[...new Set(gooseFiles)].map((file) => ['goose-db', path.dirname(file), file]));
+  const gooseFiles = enabled.has('goose')
+    ? gooseSessionFiles({ homeDir: home, platform, env, windowsFolders: options.windowsFolders }) : [];
+  add('goose', ...gooseFiles.map((file) => ['goose-db', path.dirname(file), file]));
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
   // The sync cache is config-derived; legacy local threads stay XDG-data
