@@ -12,11 +12,20 @@ const {
 
 const { PRIORITY_ABOVE_NORMAL, PRIORITY_BELOW_NORMAL: BELOW_NORMAL, PRIORITY_LOW, PRIORITY_NORMAL: NORMAL } = os.constants.priority;
 
-async function spawnIdleChild(t) {
+// A child inherits the test runner's priority, and CI runners may already run
+// below normal, so each real-process test pins the child's starting priority.
+// POSIX refuses to raise it for an unprivileged runner; such a test is skipped.
+async function spawnIdleChild(t, priority) {
   const child = childProcess.spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore', windowsHide: true });
   const exited = new Promise((resolve) => child.once('exit', resolve));
   t.after(async () => { child.kill(); await exited; });
   await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
+  try {
+    os.setPriority(child.pid, priority);
+  } catch (error) {
+    t.skip(`cannot start a child at priority ${priority}: ${error.code || error.message}`);
+    return null;
+  }
   return child;
 }
 
@@ -36,16 +45,26 @@ function fakePriorities(initial = NORMAL) {
 }
 
 test('lowerSubprocessPriority moves a running child below normal priority', async (t) => {
-  const child = await spawnIdleChild(t);
+  const child = await spawnIdleChild(t, NORMAL);
+  if (!child) return;
 
   assert.equal(lowerSubprocessPriority(child), true);
   assert.equal(os.getPriority(child.pid), BELOW_NORMAL);
 });
 
+test('a running child that already starts below normal keeps its priority', async (t) => {
+  const child = await spawnIdleChild(t, PRIORITY_LOW);
+  if (!child) return;
+
+  assert.equal(lowerSubprocessPriority(child, { restoreAfterMs: 20 }), false);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(os.getPriority(child.pid), PRIORITY_LOW);
+});
+
 test('a lowered child is raised back to normal on Windows', { skip: process.platform !== 'win32' }, async (t) => {
   // POSIX lets an unprivileged process lower a child's priority but not raise it again.
-  const child = await spawnIdleChild(t);
-  assert.equal(os.getPriority(child.pid), NORMAL);
+  const child = await spawnIdleChild(t, NORMAL);
+  if (!child) return;
 
   assert.equal(lowerSubprocessPriority(child, { restoreAfterMs: 20 }), true);
   assert.equal(os.getPriority(child.pid), BELOW_NORMAL);
