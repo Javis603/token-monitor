@@ -599,6 +599,7 @@ function toggleAccordionRow(row) {
     renderActiveToolDetail();
   }
   renderToolDetailFooter();
+  renderProjectBreakdownFooter();
 }
 
 document.addEventListener('click', (event) => {
@@ -2528,7 +2529,10 @@ function setActiveToolDetailMode(mode) {
 }
 
 function renderProjectBreakdownFooter() {
-  const active = visibleStatsSurface() === 'main' && state.breakdown === 'project';
+  const active = visibleStatsSurface() === 'main'
+    && state.breakdown === 'project'
+    && !els.breakdown.classList.contains('hidden')
+    && Boolean(els.breakdown.querySelector('.row.expanded .row-accordion-inner'));
   els.projectBreakdownFooter.classList.toggle('hidden', !active);
   syncLiveTokenRateFooterState();
   if (!active) return;
@@ -2904,6 +2908,7 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     els.breakdown.replaceChildren();
     renderSessionPager(null);
     state.rowSignature = '';
+    renderProjectBreakdownFooter();
     return;
   }
   const page = breakdownPage(rows, { breakdown: state.breakdown, page: state.sessionPage });
@@ -2974,6 +2979,7 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     rowRenderFingerprints.set(row, fingerprint);
   }
   renderToolDetailFooter();
+  renderProjectBreakdownFooter();
   if (liveMotionSnapshot) animateBreakdownFrom(liveMotionSnapshot, { duration: 600 });
 }
 
@@ -7164,11 +7170,11 @@ function render() {
   stopHomeSessionRepaint();
   stopSessionStatusRepaint();
   els.toolDetailFooter.classList.add('hidden');
+  els.projectBreakdownFooter.classList.add('hidden');
   syncLiveTokenRateFooterState();
   renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
   renderViewSwitcher();
-  renderProjectBreakdownFooter();
   const derivedPeriod = fixedPeriodRangesApi.isDerived(state.period);
   if (derivedPeriod) {
     const signature = fixedPeriodHistorySignature();

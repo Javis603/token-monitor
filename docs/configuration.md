@@ -30,7 +30,7 @@ Under **Multi-device Sync → Additional sync**, Node Hub and Worker connections
 
 When first enabling aliases or prices, choose the current server settings or publish this device's settings if they differ. Future edits share a server revision; a conflict asks you to reload instead of silently overwriting another device. Devices that leave an option off keep their own local settings. An older server without these endpoints continues basic sync and disables optional controls. See [privacy](privacy.md) and the [sync API](API.md#get-apisynccontent).
 
-In the **Projects** view, use the **Tools / Models** toggle at the bottom right to change both the project bars and expanded breakdown. It stays available when all projects are collapsed. **Tools** is the default; the choice is saved locally as `projectBreakdownMode` (`tool` or `model`) and is independent of the Tools view’s **Tokens / Models** choice. Model display aliases are respected; usage without model attribution appears as **Unknown model**. Project token and cost totals stay the same.
+In the **Projects** view, expand a project to reveal the **Tools / Models** toggle at the bottom right. It changes both the project bars and expanded breakdown, and hides when all projects are collapsed. **Tools** is the default; the choice is saved locally as `projectBreakdownMode` (`tool` or `model`) and is independent of the Tools view’s **Tokens / Models** choice. Model display aliases are respected; usage without model attribution appears as **Unknown model**. Project token and cost totals stay the same.
 
 The `⇧` button in the title bar cycles the window behavior.
 
