@@ -421,8 +421,8 @@ test('mergeHistories sums daily across devices and recomputes derived fields', (
   const d7 = m.daily.find((d) => d.date === '2026-06-07');
   assert.equal(d7.tokens, 25);                         // 20 + 5
   assert.equal(d7.activeTimeMs, 150000);                // 120000 + 30000
-  assert.deepEqual(d7.perClient.claude, { tokens: 20, cost: 2, messages: 1 });
-  assert.deepEqual(d7.perClient.codex, { tokens: 5, cost: 0.5, messages: 1 });
+  assert.deepEqual(d7.perClient.claude, { tokens: 20, cost: 2, messages: 1, unclassifiedTokens: 0 });
+  assert.deepEqual(d7.perClient.codex, { tokens: 5, cost: 0.5, messages: 1, unclassifiedTokens: 0 });
   assert.equal(d7.intensity, 4);                       // highest-cost merged day
   assert.equal(m.summary.totalTokens, 35);
   assert.equal(m.summary.currentStreak, 2);

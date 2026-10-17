@@ -349,7 +349,8 @@ function addPerClient(target, source, includeTokenComponents = false) {
       if (num(v.cacheWriteTokens) > 0) t.cacheWriteTokens = num(t.cacheWriteTokens) + num(v.cacheWriteTokens);
       if (num(v.outputTokens) > 0) t.outputTokens = num(t.outputTokens) + num(v.outputTokens);
       const unclassifiedTokens = unclassifiedTokensFor(v);
-      if (unclassifiedTokens > 0) t.unclassifiedTokens = num(t.unclassifiedTokens) + unclassifiedTokens;
+      // Keep explicit zero provenance through repeated merges, just as for models.
+      t.unclassifiedTokens = num(t.unclassifiedTokens) + unclassifiedTokens;
     }
   }
 }
