@@ -13270,8 +13270,11 @@ function syncDockSizeControls(surface) {
 
 // Liquid Glass is offered on the same terms as the widget's own selector. A
 // saved choice the system cannot draw shows as the Frosted Glass it falls back to.
-function syncNotchStyleInput(settings = state.settings) {
+// Appearance previews carry only the controls they own, so the notch style is
+// read from the saved settings underneath them.
+function syncNotchStyleInput(preview) {
   if (!els.notchStyleInput) return;
+  const settings = Object.assign({}, state.settings, ...pendingSettingsPatches, preview);
   const { showBackdropControl } = macBackdropApi.appearanceState(settings, {
     liquidGlassSupported: nativeMaterialState.liquidGlassSupported
   });

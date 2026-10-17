@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const root = path.join(__dirname, '..', '..');
 const main = fs.readFileSync(path.join(root, 'src/electron/main.js'), 'utf8');
@@ -82,9 +83,33 @@ test('the edge dock style is persisted, feeds only the dock glass, and has a loc
 test('the notch style stores Frosted Glass as vibrancy and offers Liquid Glass on the widget selector terms', () => {
   assert.match(html, /<select id="notchStyleInput">[^]*?<option value="vibrancy"[^]*?<option value="liquid-glass"/);
   assert.doesNotMatch(html, /<select id="notchStyleInput">[^]*?<option value="default"/);
-  assert.match(app, /function syncNotchStyleInput\(settings = state\.settings\) \{[^]*?macBackdropApi\.appearanceState\(settings, \{\s+liquidGlassSupported: nativeMaterialState\.liquidGlassSupported/);
-  assert.match(app, /liquidGlass\.hidden = liquidGlass\.disabled = !showBackdropControl/);
-  assert.match(app, /style === 'liquid-glass' && !showBackdropControl \? 'vibrancy' : style/);
-  // Material pushes re-run the appearance pass, so a late Liquid Glass answer updates the select too.
+  // Material pushes and appearance previews re-run this pass, so the select follows both.
   assert.match(app, /edgeDockMacBackdropRow\?\.classList\.toggle\('hidden', !macGlass\.showBackdropControl\);\s+syncNotchStyleInput\(settings\);/);
+
+  const start = app.indexOf('function syncNotchStyleInput(');
+  const end = app.indexOf('function syncNotchCapabilities(', start);
+  assert.ok(start >= 0 && end > start);
+  const run = ({ saved, pending = [], preview, liquidGlassSupported = true }) => {
+    const option = { hidden: false, disabled: false };
+    const select = { value: '', querySelector: (selector) => selector === 'option[value="liquid-glass"]' ? option : null };
+    const context = vm.createContext({
+      els: { notchStyleInput: select },
+      state: { settings: saved },
+      pendingSettingsPatches: new Set(pending),
+      nativeMaterialState: { liquidGlassSupported },
+      macBackdropApi: { appearanceState }
+    });
+    vm.runInContext(`${app.slice(start, end)}; syncNotchStyleInput(${JSON.stringify(preview)});`, context);
+    return { value: select.value, hidden: option.hidden, disabled: option.disabled };
+  };
+
+  // An appearance slider preview carries no notchStyle; the saved style must stay selected.
+  assert.deepEqual(run({ saved: { notchStyle: 'vibrancy' }, preview: { systemGlass: true, macBackdrop: 'vibrancy' } }),
+    { value: 'vibrancy', hidden: false, disabled: false });
+  assert.equal(run({ saved: { notchStyle: 'vibrancy' }, pending: [{ notchStyle: 'inherit' }], preview: { systemGlass: true } }).value, 'inherit');
+  assert.equal(run({ saved: {} }).value, 'black');
+  assert.deepEqual(run({ saved: { notchStyle: 'liquid-glass' } }), { value: 'liquid-glass', hidden: false, disabled: false });
+  // Where Liquid Glass cannot be drawn, the option hides and the saved choice shows its fallback.
+  assert.deepEqual(run({ saved: { notchStyle: 'liquid-glass' }, liquidGlassSupported: false }), { value: 'vibrancy', hidden: true, disabled: true });
+  assert.deepEqual(run({ saved: { notchStyle: 'liquid-glass' }, preview: { systemGlass: false } }), { value: 'vibrancy', hidden: true, disabled: true });
 });
