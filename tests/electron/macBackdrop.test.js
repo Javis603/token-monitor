@@ -15,6 +15,29 @@ const i18n = fs.readFileSync(path.join(rendererDir, 'i18n.js'), 'utf8');
 const { normalizeMacBackdropMode, appearanceState, isLiquidGlassBackdrop, liquidGlassStyle, normalizeLiquidGlassTint, liquidGlassTint } = require('../../src/electron/macBackdropMode');
 const { normalizeNativeMaterialState } = require('../../src/electron/renderer/glassRendering');
 
+test('Tint Reset buttons have localized accessible names without changing their visible glyph or styling', () => {
+  const { applyTranslations, translate } = require('../../src/electron/renderer/i18n');
+  const buttons = ['macGlassTintReset', 'macClearGlassTintReset'].map((id) => {
+    const [, attributes, glyph] = html.match(new RegExp(`<button id="${id}"([^]*?)>([^]*?)</button>`));
+    assert.match(attributes, /class="reset-appearance-button reset-inline"/);
+    assert.match(attributes, /aria-label="Reset tint"/);
+    assert.match(attributes, /data-i18n-aria-label="settings.appearance.resetTint"/);
+    assert.equal(glyph, '↺');
+    return { textContent: glyph, attributes: {}, dataset: {
+      i18nTitle: 'settings.appearance.resetTint', i18nAriaLabel: 'settings.appearance.resetTint'
+    }, setAttribute(name, value) { this.attributes[name] = value; } };
+  });
+  const scope = { querySelectorAll: (selector) => ['[data-i18n-title]', '[data-i18n-aria-label]'].includes(selector) ? buttons : [] };
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt']) {
+    applyTranslations(scope, locale);
+    for (const button of buttons) {
+      assert.equal(button.attributes['aria-label'], translate(locale, 'settings.appearance.resetTint'));
+      assert.equal(button.attributes.title, button.attributes['aria-label']);
+      assert.equal(button.textContent, '↺');
+    }
+  }
+});
+
 test('native glass tints are independent, bounded and retain their previous defaults', () => {
   assert.equal(liquidGlassTint({ macBackdrop: 'liquid-glass-clear', glassOpacity: 90 }), 0.35);
   assert.equal(liquidGlassTint({ macBackdrop: 'liquid-glass', glassOpacity: 90 }), 0);
@@ -43,8 +66,8 @@ test('floating glass previews share live tints without replacing styles or saved
   };
   context = vm.createContext({
     settings, process: { platform: 'darwin' }, normalizeLiquidGlassTint,
-    edgeDockAppearance: () => ({}), settingsForRenderer: () => settings,
-    edgeDockController: { setAppearance: read, stop() {} },
+    settingsForRenderer: () => { throw new Error('preview must not project account settings'); },
+    edgeDockController: { setAppearance: read, isRunning: () => true, stop() {} },
     notchController: { setAppearance: read, isRunning: () => true },
     syncNotch: read, canUseEdgeDock: () => false
   });
@@ -66,11 +89,14 @@ test('frosted glass previews deliver opacity and depth to both floating renderer
     .map((name) => main.match(new RegExp(`function ${name}\\([^]*?\\n\\}`))[0]).join('\n');
   const settings = { systemGlass: true, macBackdrop: 'vibrancy', glassOpacity: 68, glassBlur: 32 };
   const updates = [];
-  const receive = (value) => updates.push([value.glassOpacity, value.glassBlur]);
+  const receive = (value, options) => {
+    assert.equal(options?.preview, true);
+    updates.push([value.glassOpacity, value.glassBlur]);
+  };
   const context = vm.createContext({
     settings, process: { platform: 'darwin' }, normalizeLiquidGlassTint,
-    settingsForRenderer: () => settings,
-    edgeDockController: { setAppearance: receive, stop() {} },
+    settingsForRenderer: () => { throw new Error('preview must not project account settings'); },
+    edgeDockController: { setAppearance: receive, isRunning: () => true, stop() {} },
     notchController: { setAppearance: receive, isRunning: () => true },
     syncNotch() {}, canUseEdgeDock: () => false
   });
@@ -83,6 +109,38 @@ test('frosted glass previews deliver opacity and depth to both floating renderer
   assert.deepEqual(updates.at(-1), [0, 75]);
   context.syncDockSurfaces();
   assert.equal(context.dockAppearanceSettings(), settings);
+});
+
+test('stopped floating controllers retain preview values without projection or dispatch; running ones receive every input', () => {
+  const definitions = ['dockAppearanceSettings', 'previewDockAppearance']
+    .map((name) => main.match(new RegExp(`function ${name}\\([^]*?\\n\\}`))[0]).join('\n');
+  const settings = { macBackdrop: 'liquid-glass', macGlassTint: 12, glassOpacity: 68 };
+  const running = { dock: false, notch: false };
+  const updates = [];
+  const controller = (id) => ({
+    isRunning: () => running[id],
+    isVisible() { throw new Error('running hidden windows must not be skipped'); },
+    setAppearance(value, options) { assert.equal(options.preview, true); updates.push([id, { ...value }]); }
+  });
+  const context = vm.createContext({ settings, normalizeLiquidGlassTint,
+    settingsForRenderer() { throw new Error('must not project account settings'); },
+    edgeDockAppearance() { throw new Error('must not rebuild the full appearance'); },
+    edgeDockController: controller('dock'), notchController: controller('notch') });
+  vm.runInContext(`let dockAppearancePreview = null;\n${definitions}`, context);
+  context.previewDockAppearance({ macGlassTint: 80, glassOpacity: 17 });
+  assert.deepEqual(updates, []);
+  assert.equal(context.dockAppearanceSettings().macGlassTint, 80);
+  assert.equal(context.dockAppearanceSettings().glassOpacity, 17);
+  running.dock = true;
+  for (const glassOpacity of [18, 19, 20]) context.previewDockAppearance({ glassOpacity });
+  assert.deepEqual(updates.map(([id, value]) => [id, value.glassOpacity, value.macGlassTint]),
+    [['dock', 18, 80], ['dock', 19, 80], ['dock', 20, 80]]);
+  running.dock = false; running.notch = true;
+  context.previewDockAppearance({ glassBlur: 75 });
+  assert.equal(updates.at(-1)[0], 'notch');
+  assert.equal(updates.at(-1)[1].glassOpacity, 20);
+  assert.equal(settings.glassOpacity, 68);
+  assert.equal(settings.macGlassTint, 12);
 });
 
 test('appearance controls keep both native tints separate from classic glass when switching modes', () => {

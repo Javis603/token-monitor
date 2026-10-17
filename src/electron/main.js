@@ -5574,9 +5574,9 @@ function previewDockAppearance(patch) {
   // Share glass controls with the floating surfaces, keeping their own styles
   // and saved settings intact until the ordinary settings sync replaces it.
   dockAppearancePreview = { ...dockAppearancePreview, ...preview };
-  const appearance = edgeDockAppearance({ ...settingsForRenderer(), ...dockAppearancePreview });
-  edgeDockController?.setAppearance(appearance);
-  notchController?.setAppearance(appearance);
+  for (const controller of [edgeDockController, notchController]) {
+    if (controller?.isRunning()) controller.setAppearance(dockAppearancePreview, { preview: true });
+  }
 }
 
 let notchRateTimer = null;

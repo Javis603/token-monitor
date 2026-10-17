@@ -645,8 +645,15 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   return { sync, stop, poll, isRunning: () => running, getCapabilities: () => capabilities,
     owns: (win) => surfaces.some((s) => win === windows[s] && alive(win)),
     previewScale(value) { previewScale = normalizeEdgeDockCustomScale(value); windows.bubble?.webContents.setZoomFactor?.(zoom()); refreshLayout(); },
-    setAppearance(value) {
-      appearance = value || {};
+    setAppearance(value, { preview = false } = {}) {
+      if (preview) {
+        // Keep the canonical appearance; the native tint reads settings(),
+        // while only these two preview values need to cross to the renderer.
+        appearance = { ...appearance };
+        for (const key of ['glassOpacity', 'glassBlur']) {
+          if (value?.[key] !== undefined) appearance[key] = value[key];
+        }
+      } else appearance = value || {};
       updateGlassAppearance();
       windows.bubble?.webContents.setZoomFactor?.(zoom()); refreshLayout();
     },

@@ -793,6 +793,43 @@ test('Regular and Clear update the retained dock glass without rebuilding window
   assert.equal(factory.glasses.length, 2);
 });
 
+for (const style of ['frosted', 'regular', 'clear']) {
+  test(`${style}: glass previews preserve canonical appearance while hidden, on reveal and after a full settings update`, (t) => {
+    const factory = fakeGlassFactory();
+    const wanted = style === 'frosted' ? null : { dark: true, style, tintOpacity: 0.64 };
+    const fixture = createFixture({ platform: 'darwin', nativeGlass: true, liquidGlass: () => wanted, createGlass: factory.create });
+    t.after(() => fixture.controller.stop());
+    const original = { language: 'zh-TW', currency: 'HKD', currencyRatesEffective: { HKD: 7.8 },
+      subscriptions: [{ id: 'subscription', amount: 20 }], themeColors: { bg: '#123456' },
+      glassOpacity: 68, glassBlur: 32 };
+    fixture.controller.setAppearance(original);
+    const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+    const windowCount = FakeBrowserWindow.instances.length;
+    rail.visible = card.visible = false;
+    assert.equal(fixture.controller.isRunning(), true);
+    for (const glassOpacity of [17, 0, 84]) {
+      fixture.controller.setAppearance({ glassOpacity, glassBlur: 75, currency: 'USD',
+        subscriptions: [], themeColors: {}, style: 'other', macClearGlassTint: 99 }, { preview: true });
+      for (const [win, surface] of [[rail, 'rail'], [card, 'bubble']]) {
+        assert.deepEqual(sentPayload(win, surface).appearance, { ...original, glassOpacity, glassBlur: 75 });
+      }
+      if (wanted) for (const glass of factory.glasses) {
+        assert.equal(glass.updates.at(-1).style, style);
+        assert.equal(glass.updates.at(-1).tintOpacity, 0.64);
+      }
+    }
+    assert.equal(original.glassOpacity, 68, 'preview must not mutate the canonical snapshot');
+    rail.showInactive(); card.showInactive(); fixture.controller.sync();
+    assert.equal(sentPayload(rail, 'rail').appearance.glassOpacity, 84);
+    assert.equal(sentPayload(card, 'bubble').appearance.currency, 'HKD');
+    assert.equal(FakeBrowserWindow.instances.length, windowCount);
+    const next = { ...original, currency: 'TWD', currencyRatesEffective: { TWD: 32 }, subscriptions: [{ id: 'updated' }] };
+    fixture.controller.setAppearance(next);
+    fixture.controller.setAppearance({ glassOpacity: 25 }, { preview: true });
+    assert.deepEqual(sentPayload(rail, 'rail').appearance, { ...next, glassOpacity: 25 });
+  });
+}
+
 // The rail's entrance is keyed to the reveal rather than to the push, so the page
 // has to be able to tell which payload is the reveal: without that it has neither
 // a transition to fire on nor a way to keep a stats update from replaying the
