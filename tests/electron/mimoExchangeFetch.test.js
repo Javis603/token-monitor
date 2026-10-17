@@ -52,6 +52,43 @@ test('an explicit proxy environment wins before Chromium proxy resolution', asyn
   assert.equal(seen[0].init.redirect, 'manual');
 });
 
+// The transport lives for the whole process, so the app proxy setting saved
+// after it was built has to take effect on the next hop, both ways, and the
+// route's outboundFetch deps (the app proxy's dispatcher) have to come along.
+test('the proxy route is re-read on every hop', async () => {
+  let resolutions = 0;
+  const viaEnv = [];
+  let route = { env: { HTTPS_PROXY: 'http://app-a.example:8080' }, deps: {} };
+  const fetch = createMimoExchangeFetch({
+    session: { resolveProxy: async () => { resolutions += 1; return 'DIRECT'; } },
+    getRoute: () => route,
+    envFetch: async (url) => { viaEnv.push(url); return { status: 200 }; },
+    fetch: async () => ({ status: 200 })
+  });
+  await fetch('https://platform.xiaomimimo.com/api/v1/balance');
+  assert.deepEqual([viaEnv.length, resolutions], [1, 0]);
+  route = { env: {}, deps: {} };
+  await fetch('https://platform.xiaomimimo.com/api/v1/balance');
+  assert.deepEqual([viaEnv.length, resolutions], [1, 1]);
+});
+
+test('the app route hands its dispatcher to the env transport', async () => {
+  const built = [];
+  class RecordingAgent {
+    constructor(config) { built.push(config); }
+    dispatch() { throw new Error('dispatched'); }
+  }
+  const fetch = createMimoExchangeFetch({
+    session: { resolveProxy: async () => { throw new Error('Chromium must not be asked'); } },
+    getRoute: () => ({
+      env: { https_proxy: 'http://app.example:8080', http_proxy: 'http://app.example:8080', no_proxy: '' },
+      deps: { EnvHttpProxyAgent: RecordingAgent }
+    })
+  });
+  await assert.rejects(fetch('https://platform.xiaomimimo.com/api/v1/balance'));
+  assert.deepEqual(built, [{ httpProxy: 'http://app.example:8080', httpsProxy: 'http://app.example:8080', noProxy: '' }]);
+});
+
 test('a resolved proxy becomes a dispatcher on the request', async () => {
   const seen = [];
   const fetch = createMimoExchangeFetch({
