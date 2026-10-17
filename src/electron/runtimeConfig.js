@@ -42,6 +42,7 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
 // whether replacing the active usage runtime would change its collection work.
 // Values arrive from usageConfigFromSettings() after mode-specific normalization.
 const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
+  'qoderCnUsdPerCredit',
   'clients',
   'codexDotsEnabled',
   'customScanPaths',
@@ -100,6 +101,7 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     codexDotsVisible: settings.codexDotsVisible !== false,
     customScanPaths: normalizeCustomScanPaths(settings.customScanPaths),
     allTimeSince: normalizeAllTimeSince(settings.allTimeSince),
+    qoderCnUsdPerCredit: context.qoderCnUsdPerCredit,
     commandTimeoutMs: Number(context.commandTimeoutMs || 120 * 1000),
     deviceId: settings.deviceId || context.defaultDeviceId,
     agentVersion: context.agentVersion,

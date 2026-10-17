@@ -199,3 +199,61 @@ test('a pricing replay preserves independently queued tick waiters', async t => 
   assert.deepEqual(await Promise.all([initiating, queued]), [true, true]);
   assert.equal(calls, 12, 'initial, discarded manual, replay, and independently queued full scan');
 });
+
+test('Qoder CN credits use effective CNY FX and invalidate anchors when that rate changes', t => {
+  const { configureRates } = require('../../src/shared/currency');
+  const { tokscaleCommand } = require('../../src/shared/collector');
+  const f = fixture(t);
+  const previous = process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  t.after(() => {
+    configureRates({});
+    if (previous === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+    else process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = previous;
+  });
+  const options = { pricingPath: f.pricingPath, binaryRevision: 'test-build' };
+  configureRates({ CNY: 8 });
+  const revision = pricingFingerprint(options);
+  assert.equal(Number(tokscaleCommand().env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.005);
+  configureRates({ CNY: 4 });
+  assert.equal(Number(tokscaleCommand().env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.01);
+  assert.notEqual(pricingFingerprint(options), revision, 'FX reprices every window through the existing pricing replay');
+  process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = '0.02';
+  assert.equal(Number(tokscaleCommand().env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.02);
+});
+
+
+test('worker scalar FX reaches native command and pricing identity without shared module state', () => {
+  const { tokscaleCommand } = require('../../src/shared/collector');
+  const options = { qoderCnUsdPerCredit: 0.007, binaryRevision: 'test-build' };
+  assert.equal(Number(tokscaleCommand(structuredClone(options)).env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.007);
+  assert.notEqual(pricingFingerprint(options), pricingFingerprint({ ...options, qoderCnUsdPerCredit: 0.008 }));
+});
+
+test('invalid Qoder CN environment rates preserve valid worker FX before using the default', t => {
+  const { configureRates } = require('../../src/shared/currency');
+  const { tokscaleCommand } = require('../../src/shared/collector');
+  const previous = process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  t.after(() => {
+    configureRates({});
+    if (previous === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+    else process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = previous;
+  });
+  configureRates({ CNY: 8 });
+  const options = { qoderCnUsdPerCredit: 0.007, binaryRevision: 'test-build' };
+  delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  const revision = pricingFingerprint(options);
+  for (const invalid of ['', ' ', 'invalid', '0', '-1', 'NaN', 'Infinity']) {
+    process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = invalid;
+    assert.equal(Number(tokscaleCommand(options).env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.007,
+      `invalid environment rate ${JSON.stringify(invalid)} preserves the supplied rate`);
+    assert.equal(pricingFingerprint(options), revision, 'the selected rate also controls anchor identity');
+    for (const supplied of [undefined, null, '', 0, -1, NaN, Infinity]) {
+      assert.equal(Number(tokscaleCommand({ qoderCnUsdPerCredit: supplied })
+        .env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.005);
+    }
+  }
+  process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = '0.02';
+  assert.equal(Number(tokscaleCommand(options).env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.02);
+  assert.notEqual(pricingFingerprint(options), revision, 'a valid override takes precedence');
+});
