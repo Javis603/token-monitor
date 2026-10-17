@@ -99,8 +99,10 @@ function normalizeWindowBehaviorSettings(settings = {}, patch = {}) {
 // SetWindowPos — so a `floating` widget overlapping the taskbar disappears
 // behind it. Any level outside that set opts out; on win32 they are all
 // equivalent, and `screen-saver` is the one the collapsed bubble already ships.
-// macOS/Linux keep `floating`, where the level maps to a real NSWindow level.
-// Do not "simplify" this back to a bare 'floating' — that is issue #533.
+// macOS maps `floating` to NSFloatingWindowLevel; Linux X11 ignores the level
+// argument and applies the standard window-manager above state. Native Wayland
+// does not support `BrowserWindow.setAlwaysOnTop`.
+// Do not "simplify" this back to a bare 'floating' on Windows — that is issue #533.
 function floatingAlwaysOnTopLevel(platform = process.platform) {
   return platform === 'win32' ? 'screen-saver' : 'floating';
 }
