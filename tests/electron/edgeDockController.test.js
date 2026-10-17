@@ -774,6 +774,25 @@ test('switching the glass style rebuilds the dock and releases its Liquid Glass'
   assert.ok(factory.glasses.every((glass) => glass.disposed !== null));
 });
 
+test('Regular and Clear update the retained dock glass without rebuilding windows', (t) => {
+  const factory = fakeGlassFactory();
+  let wanted = { dark: true, style: 'regular' };
+  const fixture = createFixture({ platform: 'darwin', nativeGlass: true, liquidGlass: () => wanted, createGlass: factory.create });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  for (const [style, tintOpacity] of [['clear', 0.35], ['clear', 0.7], ['regular', 0.12]]) {
+    wanted = { dark: false, style, tintOpacity };
+    fixture.controller.sync();
+    fixture.controller.setAppearance({});
+    assert.equal(fixture.windowFor('rail'), rail);
+    for (const glass of factory.glasses) {
+      assert.equal(glass.updates.at(-1).style, style);
+      assert.equal(glass.updates.at(-1).tintOpacity, tintOpacity);
+    }
+  }
+  assert.equal(factory.glasses.length, 2);
+});
+
 // The rail's entrance is keyed to the reveal rather than to the push, so the page
 // has to be able to tell which payload is the reveal: without that it has neither
 // a transition to fire on nor a way to keep a stats update from replaying the

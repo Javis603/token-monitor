@@ -6,15 +6,36 @@
   if (root) root.TokenMonitorMacBackdropMode = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, () => {
   const MAC_BACKDROP_LIQUID_GLASS = 'liquid-glass';
+  const MAC_BACKDROP_LIQUID_GLASS_CLEAR = 'liquid-glass-clear';
   const MAC_BACKDROP_VIBRANCY = 'vibrancy';
   const EDGE_DOCK_BACKDROP_INHERIT = 'inherit';
 
-  // Classic vibrancy stays the default: the app's own tint keeps dense figures
-  // legible over any wallpaper, whereas the system-managed glass cannot be dimmed.
+  // Keep the existing default and opacity preference for classic vibrancy.
   function normalizeMacBackdropMode(value) {
-    return value === MAC_BACKDROP_LIQUID_GLASS
-      ? MAC_BACKDROP_LIQUID_GLASS
+    return isLiquidGlassBackdrop(value)
+      ? value
       : MAC_BACKDROP_VIBRANCY;
+  }
+
+  function isLiquidGlassBackdrop(value) {
+    return value === MAC_BACKDROP_LIQUID_GLASS || value === MAC_BACKDROP_LIQUID_GLASS_CLEAR;
+  }
+
+  function liquidGlassStyle(value) {
+    return value === MAC_BACKDROP_LIQUID_GLASS_CLEAR ? 'clear' : 'regular';
+  }
+
+  // Native optical effects stay with AppKit; only its public tint is adjustable.
+  // Separate settings preserve each style's value without changing classic glass.
+  function normalizeLiquidGlassTint(value, mode) {
+    const fallback = mode === MAC_BACKDROP_LIQUID_GLASS_CLEAR ? 35 : 0;
+    const parsed = value == null || value === '' ? NaN : Number(value);
+    return Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : fallback;
+  }
+
+  function liquidGlassTint(settings = {}, mode = settings.macBackdrop) {
+    const value = mode === MAC_BACKDROP_LIQUID_GLASS_CLEAR ? settings.macClearGlassTint : settings.macGlassTint;
+    return normalizeLiquidGlassTint(value, mode) / 100;
   }
 
   // The edge dock is a small floating control over other apps' content, which
@@ -22,7 +43,7 @@
   // the dock may pick its own style. It only picks the style: whether there is
   // native material at all stays with System Glass and Reduce Transparency.
   function normalizeEdgeDockBackdropMode(value) {
-    return value === MAC_BACKDROP_LIQUID_GLASS || value === MAC_BACKDROP_VIBRANCY
+    return isLiquidGlassBackdrop(value) || value === MAC_BACKDROP_VIBRANCY
       ? value
       : EDGE_DOCK_BACKDROP_INHERIT;
   }
@@ -43,7 +64,12 @@
 
   return {
     MAC_BACKDROP_LIQUID_GLASS,
+    MAC_BACKDROP_LIQUID_GLASS_CLEAR,
     MAC_BACKDROP_VIBRANCY,
+    isLiquidGlassBackdrop,
+    liquidGlassStyle,
+    normalizeLiquidGlassTint,
+    liquidGlassTint,
     normalizeMacBackdropMode,
     normalizeEdgeDockBackdropMode,
     edgeDockBackdropMode,

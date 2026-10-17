@@ -1875,6 +1875,24 @@ test('Liquid Glass follows both theme directions without recreating windows', (t
   }
 });
 
+test('notch inherits Clear from the widget and switches its own style without recreating windows', (t) => {
+  const updates = [];
+  const f = fixture(t, { notchStyle: 'inherit', macBackdrop: 'liquid-glass-clear', edgeDockMacBackdrop: 'liquid-glass', macGlassTint: 12, macClearGlassTint: 64 }, {
+    nativeGlass: () => true, liquidGlass: () => ({ dark: true }),
+    createGlass: () => ({ update(value) { updates.push([value.style, value.tintOpacity]); }, dispose() {} })
+  });
+  assert.deepEqual(updates.at(-1), ['clear', 0.64]);
+  for (const [style, expected] of [['liquid-glass', 'regular'], ['liquid-glass-clear', 'clear'], ['inherit', 'clear']]) {
+    f.preferences.notchStyle = style;
+    f.controller.sync();
+    assert.deepEqual(updates.at(-1), [expected, expected === 'clear' ? 0.64 : 0.12]);
+    assert.equal(f.windows.length, 2);
+  }
+  f.preferences.macClearGlassTint = 23;
+  f.controller.setAppearance({});
+  assert.deepEqual(updates.at(-1), ['clear', 0.23]);
+});
+
 test('renderer load rejection is logged for each window and can be stopped', async (t) => {
   const messages = [];
   const f = fixture(t, {}, { loadFile: () => Promise.reject(new Error('fixture load failure')), logger: text => messages.push(text) });
