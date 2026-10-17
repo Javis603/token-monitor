@@ -69,6 +69,12 @@ function hasSessionUsage(session) {
   return numberValue(session?.totalTokens) > 0 || numberValue(session?.costUsd) > 0;
 }
 
+function reportingDay(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return '';
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : '';
+}
+
 function normalizeSessionUsageArchive(value) {
   const source = value?.sessions && typeof value.sessions === 'object' ? value.sessions : value;
   const normalized = { version: 1, sessions: {} };
@@ -106,6 +112,9 @@ function normalizeSessionUsageArchive(value) {
       };
       if (periodName === 'today') entry.periodWindows[periodName].day = String(rawWindow.day || rawEntry.day || localDay(rawEntry.capturedAt));
       if (periodName === 'month') entry.periodWindows[periodName].month = String(rawWindow.month || rawEntry.month || localMonth(rawEntry.capturedAt));
+      if (rawWindow.utcOffsetMinutes !== undefined) entry.periodWindows[periodName].utcOffsetMinutes = rawWindow.utcOffsetMinutes;
+      const reportedDay = periodName === 'today' ? reportingDay(rawWindow.reportedDay) : '';
+      if (reportedDay) entry.periodWindows[periodName].reportedDay = reportedDay;
     }
 
     if (!entry.client || !entry.sessionId || Object.keys(entry.periods).length === 0) continue;
@@ -172,6 +181,7 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
   for (const periodName of PERIODS) {
     if (periodName === 'today' && archive.prunedDay && day < archive.prunedDay) continue;
     if (periodName === 'month' && archive.prunedMonth && month < archive.prunedMonth) continue;
+    const reportedDay = periodName === 'today' ? reportingDay(deviceRecord.periodWindows?.today?.key) : '';
     const rawPeriod = deviceRecord?.periods?.[periodName] || deviceRecord?.[periodName];
     const period = options.canonicalSummary === true
       ? (rawPeriod && typeof rawPeriod === 'object' ? rawPeriod : { sessions: {} })
@@ -196,7 +206,7 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
       // for each period when two collectors finish in the opposite order.
       if (Number.isFinite(retainedCaptureTime) && retainedCaptureTime > captureTime) continue;
       const sameWindow = periodName === 'today'
-        ? window.day === day
+        ? window.day === day && (!reportedDay || window.reportedDay === reportedDay)
         : periodName === 'month'
           ? window.month === month
           : true;
@@ -216,8 +226,9 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
       entry.month = month;
       entry.periods[periodName] = nextSession;
       entry.periodWindows = entry.periodWindows || {};
-      entry.periodWindows[periodName] = { capturedAt: capturedAtIso };
+      entry.periodWindows[periodName] = { capturedAt: capturedAtIso, utcOffsetMinutes: -captureDate.getTimezoneOffset() };
       if (periodName === 'today') entry.periodWindows[periodName].day = day;
+      if (reportedDay) entry.periodWindows[periodName].reportedDay = reportedDay;
       if (periodName === 'month') entry.periodWindows[periodName].month = month;
       archive.sessions[archiveKey] = entry;
       changedKeys.add(archiveKey);
@@ -354,9 +365,38 @@ function isLiveUnderSplitId(period, entry, session) {
   return Boolean(period?.sessions?.[`${split}:${sessionId}`]);
 }
 
-function shouldApplyPeriod(periodName, entry, now) {
+// The calendar day an instant falls on at a fixed offset from UTC, stated in
+// minutes ahead of UTC (`utcOffsetMinutes`, so UTC+8 is 480). A period window's
+// day is cut in the frame the capture ran at, so a bucket's own activity has to
+// be read in that same frame before the two days are compared.
+function dayAtOffset(timestamp, utcOffsetMinutes) {
+  if (!Number.isFinite(utcOffsetMinutes) || Math.abs(utcOffsetMinutes) > 14 * 60) return '';
+  const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '';
+  const shifted = new Date(date.getTime() + utcOffsetMinutes * 60000);
+  return Number.isFinite(shifted.getTime()) ? shifted.toISOString().slice(0, 10) : '';
+}
+
+function shouldApplyPeriod(periodName, entry, session, now) {
   const window = entry?.periodWindows?.[periodName] || {};
-  if (periodName === 'today') return (window.day || entry.day) === localDay(now);
+  if (periodName === 'today') {
+    const claimedDay = window.day || entry.day;
+    if (claimedDay !== localDay(now)) return false;
+    // The collector's explicit reporting day outranks activity metadata: a
+    // current observation can legitimately carry an older lastUsedAt. Keep
+    // that evidence when the live row later disappears, including on reload.
+    const reportedDay = reportingDay(window.reportedDay);
+    if (reportedDay) return reportedDay === claimedDay;
+    // Without an explicit reporting day, compare activity in the capture's
+    // frame (#1063 / #986), never in the reader's timezone. Missing or invalid
+    // evidence remains ambiguous; do not re-key or repair stored history.
+    const offset = window.utcOffsetMinutes;
+    if (Number.isFinite(offset) && session?.lastUsedAt) {
+      const activityDay = dayAtOffset(session.lastUsedAt, offset);
+      if (activityDay && activityDay < claimedDay) return false;
+    }
+    return true;
+  }
   if (periodName === 'month') return (window.month || entry.month) === localMonth(now);
   return periodName === 'allTime';
 }
@@ -390,7 +430,7 @@ function applySessionUsageArchive(summary, archive, options = {}) {
   for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
     for (const periodName of PERIODS) {
       const session = entry.periods?.[periodName];
-      if (!session || !hasSessionUsage(session) || !shouldApplyPeriod(periodName, entry, now)) continue;
+      if (!session || !hasSessionUsage(session) || !shouldApplyPeriod(periodName, entry, session, now)) continue;
       // Same rule as the client archive: never create a period the summary does
       // not have. A progressive preview is marked partial by the periods it
       // omits, and a partial that looks complete loses the attribution fields
