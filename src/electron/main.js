@@ -448,7 +448,10 @@ const {
 } = require('./windowsBackdropMode');
 const { applyWindowsAccentBlur } = require('./windowsBackdrop');
 const {
-  MAC_BACKDROP_LIQUID_GLASS,
+  isLiquidGlassBackdrop,
+  liquidGlassStyle,
+  liquidGlassTint,
+  normalizeLiquidGlassTint,
   normalizeMacBackdropMode,
   normalizeEdgeDockBackdropMode,
   edgeDockBackdropMode
@@ -584,6 +587,8 @@ function defaultSettings() {
     refreshMs: Number(process.env.TOKEN_MONITOR_WIDGET_REFRESH_MS || 15000),
     glassOpacity: 68,
     glassBlur: 32,
+    macGlassTint: 0,
+    macClearGlassTint: 35,
     backgroundImageOpacity: 28,
     systemGlass: true,
     windowsBackdrop: 'acrylic',
@@ -2675,6 +2680,8 @@ function readSettings() {
     merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
     merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
+    merged.macGlassTint = normalizeLiquidGlassTint(merged.macGlassTint, 'liquid-glass');
+    merged.macClearGlassTint = normalizeLiquidGlassTint(merged.macClearGlassTint, 'liquid-glass-clear');
     merged.tokenNumberAnimation = tokenNumberAnimationApi.normalize(merged.tokenNumberAnimation);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
@@ -3030,7 +3037,9 @@ function nativeBlurEnabled(source = settings) {
 function nativeMaterialOptions(source = settings, dashboard = false) {
   return {
     enabled: nativeBlurEnabled(source),
-    liquidGlass: normalizeMacBackdropMode(source.macBackdrop) === MAC_BACKDROP_LIQUID_GLASS,
+    liquidGlass: isLiquidGlassBackdrop(source.macBackdrop),
+    style: liquidGlassStyle(source.macBackdrop),
+    tintOpacity: liquidGlassTint(source),
     opaque: dashboard && source.dashboardFlat === true,
     reducedTransparency: nativeTheme.prefersReducedTransparency === true,
     highContrast: nativeTheme.shouldUseHighContrastColors === true,
@@ -5545,6 +5554,31 @@ function pushSettingsToRenderer() {
 
 let edgeDockController = null;
 let notchController = null;
+let dockAppearancePreview = null;
+
+function dockAppearanceSettings() {
+  return dockAppearancePreview ? { ...settings, ...dockAppearancePreview } : settings;
+}
+
+function previewDockAppearance(patch) {
+  const preview = {};
+  for (const key of ['glassOpacity', 'glassBlur']) {
+    const value = Number(patch?.[key]);
+    if (patch?.[key] !== undefined && Number.isFinite(value)) preview[key] = Math.max(0, Math.min(100, value));
+  }
+  for (const [key, mode] of [['macGlassTint', 'liquid-glass'], ['macClearGlassTint', 'liquid-glass-clear']]) {
+    if (patch?.[key] !== undefined) preview[key] = normalizeLiquidGlassTint(patch[key], mode);
+  }
+  if (Object.keys(preview).length === 0) return;
+  // A range input previews before its change event commits the preference.
+  // Share glass controls with the floating surfaces, keeping their own styles
+  // and saved settings intact until the ordinary settings sync replaces it.
+  dockAppearancePreview = { ...dockAppearancePreview, ...preview };
+  for (const controller of [edgeDockController, notchController]) {
+    if (controller?.isRunning()) controller.setAppearance(dockAppearancePreview, { preview: true });
+  }
+}
+
 let notchRateTimer = null;
 const notchRateTrackers = new Map();
 
@@ -5603,7 +5637,7 @@ function ensureNotchController() {
     BrowserWindow, ipcMain, screen, platform: process.platform,
     rendererDir: path.join(__dirname, 'renderer'),
     preloadPath: path.join(__dirname, 'notch', 'preload.js'),
-    getSettings: () => settings,
+    getSettings: () => dockAppearanceSettings(),
     onCapabilitiesChanged: (value) => sendMainWindowEvent('topNotch:capabilities', value, () => notchController?.getCapabilities() === value),
     nativeGlass: () => nativeBlurEnabled(),
     liquidGlass: () => {
@@ -5978,11 +6012,13 @@ function ensureEdgeDockController() {
     // same terms as the main window: Reduce Transparency hands the surface back
     // to the HUD material.
     liquidGlass: () => {
-      const options = nativeMaterialOptions();
+      const source = dockAppearanceSettings();
+      const options = nativeMaterialOptions(source);
       const wanted = process.platform === 'darwin' && options.enabled
-        && edgeDockBackdropMode(settings) === MAC_BACKDROP_LIQUID_GLASS
+        && isLiquidGlassBackdrop(edgeDockBackdropMode(source))
         && !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25;
-      return wanted ? { dark: options.dark } : null;
+      const mode = edgeDockBackdropMode(source);
+      return wanted ? { dark: options.dark, style: liquidGlassStyle(mode), tintOpacity: liquidGlassTint(source, mode) } : null;
     },
     createGlass: (win) => createMacLiquidGlass(win, { shaped: true }),
     // The renderer reads this preference through a media query, which works on both
@@ -6027,6 +6063,7 @@ function ensureEdgeDockController() {
 }
 
 function syncDockSurfaces(rendererSettings) {
+  dockAppearancePreview = null;
   if (!settings) return;
   syncNotch(rendererSettings);
   if (!canUseEdgeDock(settings)) {
@@ -7873,6 +7910,8 @@ app.whenReady().then(() => {
       refreshMs: Math.max(5000, Number(patch.refreshMs ?? settings.refreshMs ?? 15000)),
       glassOpacity: Math.max(0, Math.min(100, Number(patch.glassOpacity ?? settings.glassOpacity ?? 68))),
       glassBlur: Math.max(0, Math.min(100, Number(patch.glassBlur ?? settings.glassBlur ?? 32))),
+      macGlassTint: normalizeLiquidGlassTint(patch.macGlassTint ?? settings.macGlassTint, 'liquid-glass'),
+      macClearGlassTint: normalizeLiquidGlassTint(patch.macClearGlassTint ?? settings.macClearGlassTint, 'liquid-glass-clear'),
       backgroundImageOpacity: normalizeBackgroundImageOpacity(patch.backgroundImageOpacity ?? settings.backgroundImageOpacity),
       systemGlass: patch.systemGlass ?? settings.systemGlass ?? true,
       windowsBackdrop: normalizeWindowsBackdropMode(patch.windowsBackdrop ?? settings.windowsBackdrop),
@@ -8165,10 +8204,11 @@ app.whenReady().then(() => {
     return settingsForRenderer();
   }
   ipcMain.handle('appearance:preview', (event, patch) => {
-    // Preview only the requesting surface: another window still renders its
-    // saved theme until settings:update broadcasts the committed preference.
+    // Other document windows retain their saved theme; glass previews
+    // also reach the floating surfaces so the range control has one meaning.
     const win = BrowserWindow.fromWebContents(event.sender);
     syncNativeMaterialVisibility(win, nativeMaterialOptions({ ...settings, ...patch }, win === dashboardWindow));
+    if (win === mainWindow || win === dashboardWindow) previewDockAppearance(patch);
     if (patch && patch.zoomFactor !== undefined && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.setZoomFactor(clampZoom(patch.zoomFactor));
     }

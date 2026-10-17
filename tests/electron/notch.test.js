@@ -1875,6 +1875,56 @@ test('Liquid Glass follows both theme directions without recreating windows', (t
   }
 });
 
+test('notch inherits Clear from the widget and switches its own style without recreating windows', (t) => {
+  const updates = [];
+  const f = fixture(t, { notchStyle: 'inherit', macBackdrop: 'liquid-glass-clear', edgeDockMacBackdrop: 'liquid-glass', macGlassTint: 12, macClearGlassTint: 64 }, {
+    nativeGlass: () => true, liquidGlass: () => ({ dark: true }),
+    createGlass: () => ({ update(value) { updates.push([value.style, value.tintOpacity]); }, dispose() {} })
+  });
+  assert.deepEqual(updates.at(-1), ['clear', 0.64]);
+  for (const [style, expected] of [['liquid-glass', 'regular'], ['liquid-glass-clear', 'clear'], ['inherit', 'clear']]) {
+    f.preferences.notchStyle = style;
+    f.controller.sync();
+    assert.deepEqual(updates.at(-1), [expected, expected === 'clear' ? 0.64 : 0.12]);
+    assert.equal(f.windows.length, 2);
+  }
+  f.preferences.macClearGlassTint = 23;
+  f.controller.setAppearance({});
+  assert.deepEqual(updates.at(-1), ['clear', 0.23]);
+});
+
+test('Notch glass previews preserve currency and subscriptions across hidden reveal and retain its independent native style', (t) => {
+  const updates = [];
+  const f = fixture(t, { notchStyle: 'liquid-glass-clear', macBackdrop: 'liquid-glass', macClearGlassTint: 64 }, {
+    nativeGlass: () => true, liquidGlass: () => ({ dark: true }),
+    createGlass: () => ({ update(value) { updates.push(value); }, dispose() {} })
+  });
+  const original = { language: 'zh-TW', currency: 'HKD', currencyRatesEffective: { HKD: 7.8 },
+    subscriptions: [{ id: 'subscription', amount: 20 }], themeColors: { bg: '#123456' }, glassOpacity: 68, glassBlur: 32 };
+  f.controller.setAppearance(original);
+  for (const win of f.windows) win.shown = false;
+  assert.equal(f.controller.isRunning(), true);
+  for (const glassOpacity of [17, 0, 84]) {
+    f.controller.setAppearance({ glassOpacity, glassBlur: 75, currency: 'USD', subscriptions: [],
+      themeColors: {}, notchStyle: 'liquid-glass' }, { preview: true });
+    const appearance = last(f.windows[0]).appearance;
+    for (const key of Object.keys(original)) assert.deepEqual(appearance[key], key === 'glassOpacity' ? glassOpacity : key === 'glassBlur' ? 75 : original[key]);
+    assert.equal(updates.at(-1).style, 'clear');
+    assert.equal(updates.at(-1).tintOpacity, 0.64);
+  }
+  assert.equal(original.glassOpacity, 68);
+  f.windows[0].showInactive(); f.controller.sync();
+  assert.equal(last(f.windows[0]).appearance.glassOpacity, 84);
+  assert.equal(last(f.windows[0]).appearance.currency, 'HKD');
+  assert.equal(f.windows.length, 2);
+  const next = { ...original, currency: 'TWD', currencyRatesEffective: { TWD: 32 }, subscriptions: [{ id: 'updated' }] };
+  f.controller.setAppearance(next);
+  f.controller.setAppearance({ glassOpacity: 25 }, { preview: true });
+  assert.deepEqual(last(f.windows[0]).appearance.subscriptions, next.subscriptions);
+  assert.deepEqual(last(f.windows[0]).appearance.currencyRatesEffective, next.currencyRatesEffective);
+  assert.equal(last(f.windows[0]).appearance.currency, 'TWD');
+});
+
 test('renderer load rejection is logged for each window and can be stopped', async (t) => {
   const messages = [];
   const f = fixture(t, {}, { loadFile: () => Promise.reject(new Error('fixture load failure')), logger: text => messages.push(text) });

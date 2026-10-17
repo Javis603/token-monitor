@@ -608,7 +608,7 @@ function createEdgeDockController(deps) {
     const glass = glasses[surface];
     const wanted = liquidGlass();
     try {
-      glass.update({ dark: wanted?.dark !== false, shape: { commands, width, height } });
+      glass.update({ dark: wanted?.dark !== false, style: wanted?.style, tintOpacity: wanted?.tintOpacity, shape: { commands, width, height } });
       return true;
     } catch (error) {
       logger(`[edge-dock] ${surface} Liquid Glass shape failed: ${error.message}`);
@@ -789,14 +789,14 @@ function createEdgeDockController(deps) {
         nativeMaterial.peek = true;
         try {
           if (!glasses.peek) glasses.peek = createGlass(win);
-          glasses.peek.update({ dark: liquidGlass()?.dark !== false, visible: true });
+          glasses.peek.update({ dark: liquidGlass()?.dark !== false, style: liquidGlass()?.style, tintOpacity: liquidGlass()?.tintOpacity, visible: true });
         } catch (error) {
           logger(`[edge-dock] refresh Liquid Glass unavailable: ${error.message}`);
           disposeGlass('peek');
           win.setVibrancy?.('hud');
         }
       } else {
-        try { glasses.peek?.update({ dark: liquidGlass()?.dark !== false, visible: false }); }
+        try { glasses.peek?.update({ dark: liquidGlass()?.dark !== false, style: liquidGlass()?.style, tintOpacity: liquidGlass()?.tintOpacity, visible: false }); }
         catch { disposeGlass('peek'); }
         win.setVibrancy?.('hud');
         nativeMaterial.peek = true;
@@ -1352,13 +1352,20 @@ function createEdgeDockController(deps) {
       render('rail');
       if (bubbleCell !== null) render('bubble');
     },
-    setAppearance(nextAppearance) {
-      appearance = nextAppearance || {};
+    setAppearance(nextAppearance, { preview = false } = {}) {
+      if (preview) {
+        // Keep the canonical currency/subscription projection; slider previews
+        // replace only the CSS glass values. Native tints come from liquidGlass().
+        appearance = { ...appearance };
+        for (const key of ['glassOpacity', 'glassBlur']) {
+          if (nextAppearance?.[key] !== undefined) appearance[key] = nextAppearance[key];
+        }
+      } else appearance = nextAppearance || {};
       if (!running) return;
       const wanted = liquidGlass();
       for (const surface of SURFACES) {
         try {
-          glasses[surface]?.update({ dark: wanted?.dark !== false, visible: surface !== 'peek' || peekMode === 'refresh' });
+          glasses[surface]?.update({ dark: wanted?.dark !== false, style: wanted?.style, tintOpacity: wanted?.tintOpacity, visible: surface !== 'peek' || peekMode === 'refresh' });
         } catch (error) {
           logger(`[edge-dock] ${surface} Liquid Glass appearance failed: ${error.message}`);
         }

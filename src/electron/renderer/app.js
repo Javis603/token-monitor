@@ -361,6 +361,7 @@ state.sessionSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', tokenNumberAnimation: 'roll', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+const nativeGlassTintSettings = [['macGlassTint', 'liquid-glass'], ['macClearGlassTint', 'liquid-glass-clear']];
 let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
 let nativeMaterialRevision = 0;
 let appearancePreview = {};
@@ -488,6 +489,13 @@ Object.assign(els, {
   windowsBackdropNote: document.getElementById('windowsBackdropNote'),
   macBackdropRow: document.getElementById('macBackdropRow'),
   macBackdropInput: document.getElementById('macBackdropInput'),
+  glassOpacityRow: document.getElementById('glassOpacityRow'),
+  macGlassTintRow: document.getElementById('macGlassTintRow'),
+  macGlassTintInput: document.getElementById('macGlassTintInput'),
+  macGlassTintReset: document.getElementById('macGlassTintReset'),
+  macClearGlassTintRow: document.getElementById('macClearGlassTintRow'),
+  macClearGlassTintInput: document.getElementById('macClearGlassTintInput'),
+  macClearGlassTintReset: document.getElementById('macClearGlassTintReset'),
   clearSessionUsageArchiveButton: document.getElementById('clearSessionUsageArchiveButton'),
   startupGroup: document.getElementById('startupGroup'),
   startAtLoginInput: document.getElementById('startAtLoginInput'),
@@ -7656,6 +7664,15 @@ function applyAppearanceSettings(settings) {
   document.documentElement.style.setProperty('--control-alpha', (0.03 + depth * 0.045).toFixed(3));
   document.documentElement.classList.toggle('system-glass-disabled', systemGlassDisabled);
   const nativeMaterial = glassRenderingApi.usesNativeMaterial(nativeMaterialState);
+  const nativeTint = nativeMaterialState.type === 'liquid-glass';
+  els.glassOpacityRow?.classList.toggle('hidden', nativeTint);
+  for (const [key, mode] of nativeGlassTintSettings) {
+    const active = nativeTint && macGlass.backdropMode === mode;
+    els[`${key}Row`]?.classList.toggle('hidden', !active);
+    for (const control of [els[`${key}Input`], els[`${key}Reset`]]) {
+      if (control) control.disabled = !active;
+    }
+  }
   for (const control of [els.glassInput, els.blurInput, els.resetGlassButton, els.resetDepthButton]) {
     if (control) control.disabled = nativeMaterial;
   }
@@ -8448,6 +8465,9 @@ function appearancePatchFromControls() {
     settingsInTitlebar: Boolean(els.swapSettingsRefreshInput.checked),
     glassOpacity: Number(els.glassInput.value === '' ? defaultAppearance.glassOpacity : els.glassInput.value),
     glassBlur: Number(els.blurInput.value === '' ? defaultAppearance.glassBlur : els.blurInput.value),
+    ...Object.fromEntries(nativeGlassTintSettings.map(([key, mode]) => [key,
+      macBackdropApi.normalizeLiquidGlassTint(els[`${key}Input`]?.value, mode)
+    ])),
     backgroundImageOpacity: Number(els.backgroundImageOpacityInput?.value || defaultAppearance.backgroundImageOpacity),
     zoomFactor: Number(els.zoomInput.value === '' ? defaultAppearance.zoomFactor * 100 : els.zoomInput.value) / 100
   };
@@ -8550,6 +8570,7 @@ function syncSliderRow(input) {
 
 function syncSliderRows() {
   syncSliderRow(els.glassInput);
+  for (const [key] of nativeGlassTintSettings) syncSliderRow(els[`${key}Input`]);
   syncSliderRow(els.blurInput);
   syncSliderRow(els.backgroundImageOpacityInput);
   syncSliderRow(els.zoomInput);
@@ -9418,6 +9439,9 @@ function syncSettingsForm() {
         : t('settings.startup.launchAtSignIn');
   }
   els.glassInput.value = String(state.settings.glassOpacity ?? 68);
+  for (const [key, mode] of nativeGlassTintSettings) {
+    if (els[`${key}Input`]) els[`${key}Input`].value = String(macBackdropApi.normalizeLiquidGlassTint(state.settings[key], mode));
+  }
   els.blurInput.value = String(state.settings.glassBlur ?? 32);
   if (els.backgroundImageOpacityInput) els.backgroundImageOpacityInput.value = String(state.settings.backgroundImageOpacity ?? defaultAppearance.backgroundImageOpacity);
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
@@ -13125,6 +13149,16 @@ els.resetGlassButton.addEventListener('click', async () => {
   applyAppearanceFromControls();
   await saveSettings({ glassOpacity: defaultAppearance.glassOpacity });
 });
+for (const [key, mode] of nativeGlassTintSettings) {
+  els[`${key}Input`]?.addEventListener('input', applyAppearanceFromControls);
+  els[`${key}Input`]?.addEventListener('change', saveAppearanceFromControls);
+  els[`${key}Reset`]?.addEventListener('click', async () => {
+    const value = macBackdropApi.normalizeLiquidGlassTint(undefined, mode);
+    els[`${key}Input`].value = String(value);
+    applyAppearanceFromControls();
+    await saveSettings({ [key]: value });
+  });
+}
 els.resetDepthButton.addEventListener('click', async () => {
   els.blurInput.value = String(defaultAppearance.glassBlur);
   applyAppearanceFromControls();
@@ -13278,10 +13312,12 @@ function syncNotchStyleInput(preview) {
   const { showBackdropControl } = macBackdropApi.appearanceState(settings, {
     liquidGlassSupported: nativeMaterialState.liquidGlassSupported
   });
-  const liquidGlass = els.notchStyleInput.querySelector('option[value="liquid-glass"]');
-  if (liquidGlass) liquidGlass.hidden = liquidGlass.disabled = !showBackdropControl;
+  for (const value of ['liquid-glass', 'liquid-glass-clear']) {
+    const option = els.notchStyleInput.querySelector(`option[value="${value}"]`);
+    if (option) option.hidden = option.disabled = !showBackdropControl;
+  }
   const style = settings?.notchStyle || 'black';
-  els.notchStyleInput.value = style === 'liquid-glass' && !showBackdropControl ? 'vibrancy' : style;
+  els.notchStyleInput.value = macBackdropApi.isLiquidGlassBackdrop(style) && !showBackdropControl ? 'vibrancy' : style;
 }
 
 function syncNotchCapabilities() {

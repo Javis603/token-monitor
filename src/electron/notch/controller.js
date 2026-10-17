@@ -6,13 +6,13 @@ const { notchGeometry, notchMaxHeight, notchBounds, notchSummaryMaxWidth, notchC
 const { toSvgPath, bubbleCommands } = require('../renderer/edgeDock/shapes');
 const { readMacNotchScreens } = require('./screen');
 const { readMacMenuWindows } = require('./menuBar');
-const { edgeDockBackdropMode, MAC_BACKDROP_LIQUID_GLASS } = require('../macBackdropMode');
+const { edgeDockBackdropMode, isLiquidGlassBackdrop, liquidGlassStyle, liquidGlassTint } = require('../macBackdropMode');
 const { EDGE_DOCK_TIMING, edgeDockCorridorBounds, edgeDockPollDelay, edgeDockScale, normalizeEdgeDockCustomScale, EDGE_DOCK_METRICS: M } = require('../edgeDock/geometry');
 
 const FULL_SCREEN_POLL_MS = 500;
 
 function normalizeNotchStyle(value) {
-  return ['black', 'inherit', 'vibrancy', 'liquid-glass'].includes(value) ? value : 'black';
+  return ['black', 'inherit', 'vibrancy', 'liquid-glass', 'liquid-glass-clear'].includes(value) ? value : 'black';
 }
 
 function normalizeNotchShape(value) {
@@ -177,9 +177,19 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   function updateGlassAppearance() {
     for (const surface of surfaces) {
       if (!alive(windows[surface]) || !glass[surface]) continue;
-      try { glass[surface].update({ dark: liquidGlass()?.dark === true }); }
+      try { glass[surface].update(glassOptions()); }
       catch (error) { materialFailed(surface, error); }
     }
+  }
+
+  function backdropMode() {
+    // The notch follows the widget, independently of the Edge Dock override.
+    return edgeDockBackdropMode({ macBackdrop: settings().macBackdrop, edgeDockMacBackdrop: normalizeNotchStyle(settings().notchStyle) });
+  }
+
+  function glassOptions() {
+    const mode = backdropMode();
+    return { dark: liquidGlass()?.dark === true, style: liquidGlassStyle(mode), tintOpacity: liquidGlassTint(settings(), mode) };
   }
 
   function shape(surface, points, bounds, display) {
@@ -189,7 +199,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     shapes[surface] = { key, width: bounds.width, height: bounds.height, d };
     const win = windows[surface];
     try {
-      if (glass[surface]) glass[surface].update({ dark: liquidGlass()?.dark === true, shape: { commands: points, width: bounds.width, height: bounds.height } });
+      if (glass[surface]) glass[surface].update({ ...glassOptions(), shape: { commands: points, width: bounds.width, height: bounds.height } });
       else if (nativeMaterial[surface] && applyShapeMask?.(win, points, bounds.width, bounds.height, display) !== true) {
         nativeMaterial[surface] = false;
         win.setVibrancy(null);
@@ -518,8 +528,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     running = true;
     const style = normalizeNotchStyle(settings().notchStyle);
     // `inherit` follows only the widget, never the Edge Dock's own style.
-    const backdrop = edgeDockBackdropMode({ macBackdrop: settings().macBackdrop, edgeDockMacBackdrop: style });
-    const key = style === 'black' || !nativeGlass() ? 'none' : backdrop === MAC_BACKDROP_LIQUID_GLASS && liquidGlass() ? 'liquid' : 'vibrancy';
+    const backdrop = backdropMode();
+    const key = style === 'black' || !nativeGlass() ? 'none' : isLiquidGlassBackdrop(backdrop) && liquidGlass() ? 'liquid' : 'vibrancy';
     if (materialKey !== key || !surfaces.every((s) => alive(windows[s]))) {
       destroyWindows(); materialKey = key; expanded = false; enterAt = leaveAt = null;
       for (const s of surfaces) {
@@ -636,8 +646,15 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   return { sync, stop, poll, isRunning: () => running, getCapabilities: () => capabilities,
     owns: (win) => surfaces.some((s) => win === windows[s] && alive(win)),
     previewScale(value) { previewScale = normalizeEdgeDockCustomScale(value); windows.bubble?.webContents.setZoomFactor?.(zoom()); refreshLayout(); },
-    setAppearance(value) {
-      appearance = value || {};
+    setAppearance(value, { preview = false } = {}) {
+      if (preview) {
+        // Keep the canonical appearance; the native tint reads settings(),
+        // while only these two preview values need to cross to the renderer.
+        appearance = { ...appearance };
+        for (const key of ['glassOpacity', 'glassBlur']) {
+          if (value?.[key] !== undefined) appearance[key] = value[key];
+        }
+      } else appearance = value || {};
       updateGlassAppearance();
       windows.bubble?.webContents.setZoomFactor?.(zoom()); refreshLayout();
     },
