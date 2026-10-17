@@ -17,13 +17,26 @@ function period(tokens) {
 }
 const rowsForPeriod = value => groupSessionRows(sessionRowsForPeriod(value));
 
+// The list's click handler is evaluated together with the shared row-opening
+// helpers it delegates to (app.js), so a click is asserted through the real path
+// rather than through its old inline body.
+function loadRowActivation(context) {
+  const openSource = source.slice(source.indexOf('function sessionRowOpensDetail('), source.indexOf('function renderSessionGroupDetail('));
+  const liveSource = source.slice(source.indexOf('function sessionLiveStatsEntry('), source.indexOf('function sessionDetailLiveSignature('));
+  const start = source.indexOf("els.breakdown.addEventListener('click',");
+  const end = source.indexOf('\n});', start) + 4;
+  vm.runInNewContext(`${liveSource}\n${openSource}\n${source.slice(start, end)}`, {
+    sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
+    openSessionDetail: () => {},
+    ...context
+  });
+}
+
 test('group activation resolves the clicked group when Codex and Grok coexist', () => {
   let activate;
   let rendered;
   const state = { breakdown: 'session', period: 'today', stats: { periods: { today: period(20) } } };
-  const start = source.indexOf("els.breakdown.addEventListener('click',");
-  const end = source.indexOf('\n});', start) + 4;
-  vm.runInNewContext(source.slice(start, end), { state, els: { breakdown: {
+  loadRowActivation({ state, els: { breakdown: {
     addEventListener(_type, handler) { activate = handler; }
   } }, sessionRowsForPeriod: rowsForPeriod, renderSessionGroupDetail(request) { rendered = request; } });
   for (const id of ['cursor-grok-bot', 'codex-auto-review']) {
@@ -161,9 +174,7 @@ test('conflicting absent parents split a shared native identity into stable inde
   assert.deepEqual(rows.map(row => row.key).sort(), reversed.map(row => row.key).sort(), 'input order does not affect identities');
   let activate;
   const state = { breakdown: 'session', period: 'month', stats: { periods: { month: { sessions } } } };
-  const start = source.indexOf("els.breakdown.addEventListener('click',");
-  const end = source.indexOf('\n});', start) + 4;
-  vm.runInNewContext(source.slice(start, end), { state, els: { breakdown: { addEventListener(_event, callback) { activate = callback; } } },
+  loadRowActivation({ state, els: { breakdown: { addEventListener(_event, callback) { activate = callback; } } },
     sessionRowsForPeriod: rowsForPeriod, renderSessionGroupDetail() {} });
   for (const row of rows) {
     activate({ target: { closest: () => ({ dataset: { key: row.key, sessionGroup: row.sessionGroup } }) } });
