@@ -1,6 +1,7 @@
 'use strict';
 
 const { clientsCsvForSetting } = require('../shared/clientTracking');
+const { normalizeAllTimeSince } = require('../shared/usage/allTimeSince');
 const { normalizeHistoryIntervalMs } = require('../shared/collector');
 const {
   normalizeLimitsRefreshMode,
@@ -12,8 +13,6 @@ const { normalizeCustomScanPaths } = require('../shared/customScanPaths');
 const { limitProviderSettingKeys } = require('../shared/limits/accounts');
 const { normalizeCursorAccountIds } = require('../shared/providers/cursor/account');
 const { limitsAccountConfig } = require('./limits/accountSettings');
-
-const DEFAULT_ALL_TIME_SINCE = '2024-01-01';
 
 const normalizeCursorDisabledAccountIds = normalizeCursorAccountIds;
 
@@ -84,13 +83,6 @@ function changedAny(previous, next, keys) {
 
 function usageConfigFingerprint(config = {}) {
   return JSON.stringify(USAGE_CONFIG_FINGERPRINT_KEYS.map((key) => [key, config?.[key] ?? null]));
-}
-
-function normalizeAllTimeSince(value, fallback = DEFAULT_ALL_TIME_SINCE) {
-  const raw = String(value ?? '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return fallback;
-  const date = new Date(`${raw}T00:00:00.000Z`);
-  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === raw ? raw : fallback;
 }
 
 function usageConfigFromSettings(settings = {}, context = {}) {

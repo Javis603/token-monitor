@@ -29,6 +29,9 @@ const {
   createSessionUsageArchiveStore,
   readSessionUsageArchiveSnapshot
 } = require('../shared/usage/sessionUsageArchiveStore');
+const { applyDailyHistoryAllTimeFloor } = require('../shared/usage/clientUsageArchive');
+const { createDailyHistoryFloorReader } = require('../shared/usage/usageTransform');
+const { normalizeAllTimeSince } = require('../shared/usage/allTimeSince');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 
 loadDotEnv();
@@ -50,7 +53,7 @@ const watchDebounceMs = Number(args.watchDebounceMs || process.env.TOKEN_MONITOR
 const clients = seedAgentClients(clientsCsvForSetting(args.clients ?? process.env.TOKEN_MONITOR_CLIENTS), {
   persist: !(args['dry-run'] || args.dryRun)
 });
-const allTimeSince = String(args.since || args.allTimeSince || process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01');
+const allTimeSince = normalizeAllTimeSince(args.since || args.allTimeSince || process.env.TOKEN_MONITOR_ALL_TIME_SINCE);
 const commandTimeoutMs = Number(args.timeoutMs || process.env.TOKEN_MONITOR_TOKSCALE_TIMEOUT_MS || 120 * 1000);
 const limitsEnabled = parseBoolean(args.limits ?? args.limitsEnabled ?? process.env.TOKEN_MONITOR_LIMITS_ENABLED, true);
 const limitProviders = parseLimitProviders(args.limitProviders ?? process.env.TOKEN_MONITOR_LIMIT_PROVIDERS).join(',');
@@ -116,6 +119,12 @@ const limitsOptions = {
 let sessionUsageArchive;
 const cursorUsageEvents = createCursorUsageEventIndex();
 const sessionUsageArchiveStore = dryRun ? null : createSessionUsageArchiveStore({ cursorUsageEvents });
+// The headless agent projects the same archives the widget does, so a rotated
+// source's history must not drop out of its allTime either. The daily history
+// archive is read in both modes; dry-run never writes it.
+const loadDailyHistoryFloor = createDailyHistoryFloorReader({
+  dailyHistoryArchive: sessionUsageArchiveEnabled
+});
 
 function summaryWithSessionUsageArchive(summary, now = new Date()) {
   let visibleSummary = summary;
@@ -140,6 +149,9 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
       now: archiveDate,
       canonical: !dryRun
     });
+    // After the session archive, and gated by the same switch: with the daily
+    // archive off there is nothing on disk to raise allTime to.
+    visibleSummary = applyDailyHistoryAllTimeFloor(visibleSummary, loadDailyHistoryFloor(allTimeSince), { sessionArchive: sessionUsageArchive });
   }
   delete visibleSummary.sessionUsageArchiveFullScan;
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;

@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  allTimeCumulativeFromArchive,
   captureDailyHistoryArchive,
   captureLiveDailyHistory,
   clearDailyHistoryArchive,
@@ -16,6 +17,7 @@ const {
   retainLiveDailyHistory
 } = require('../../src/shared/dailyHistoryArchive');
 const { normalizeHistory, parseGraphResult } = require('../../src/shared/history');
+const { extractUsageFromTokscale } = require('../../src/shared/usage');
 
 function graph(date, clients, extra = {}) {
   return {
@@ -1174,4 +1176,161 @@ test('a Cursor graph day kept on a tied aggregate cost still fills a price only 
   assert.equal(day.perModel['cursor-grok-4.6-high'].cost, 1);
   assert.equal(day.perModel['gpt-5.5'].cost, 3);
   assert.equal(day.cost, 4);
+});
+
+test('allTimeCumulativeFromArchive folds tokscale ids to partition keys and sums every day', () => {
+  const archive = {
+    days: {
+      '2026-06-01': { date: '2026-06-01', observations: [
+        { client: 'claude-code', modelId: 'claude-opus-4-8', tokens: 100000000, cost: 12.5, messages: 1 }
+      ] },
+      '2026-07-01': { date: '2026-07-01', observations: [
+        { client: 'claude-code', modelId: 'claude-opus-4-8', tokens: 134000000, cost: 20, messages: 1 },
+        { client: 'codex', modelId: 'gpt-5.5', tokens: 5000, cost: 0.1, messages: 1 }
+      ] }
+    }
+  };
+  const cumulative = allTimeCumulativeFromArchive(archive);
+  assert.equal(cumulative.claude.totalTokens, 234000000, 'claude-code folds to claude across both days');
+  assert.equal(cumulative.claude.models['claude-opus-4-8'], 234000000);
+  assert.equal(Math.round(cumulative.claude.costUsd * 100) / 100, 32.5);
+  assert.equal(cumulative.codex.totalTokens, 5000);
+});
+
+test('allTimeCumulativeFromArchive folds Cursor Auto model ids to the period key', () => {
+  const archive = {
+    days: {
+      '2026-08-01': { date: '2026-08-01', observations: [
+        { client: 'cursor', modelId: 'auto', tokens: 300, cost: 0, messages: 1 },
+        { client: 'cursor', modelId: 'default', tokens: 200, cost: 0, messages: 1 }
+      ] }
+    }
+  };
+  const cumulative = allTimeCumulativeFromArchive(archive);
+  assert.equal(cumulative.cursor.totalTokens, 500);
+  assert.equal(cumulative.cursor.models['cursor-auto'], 500, 'auto and default both key to cursor-auto');
+});
+
+test('allTimeCumulativeFromArchive drops reserved key names and never pollutes the prototype', () => {
+  const before = Object.prototype.totalTokens;
+  const archive = {
+    days: {
+      '2026-06-01': { date: '2026-06-01', observations: [
+        { client: '__proto__', modelId: 'x', tokens: 500, cost: 1, messages: 1 },
+        { client: 'constructor', modelId: 'y', tokens: 500, cost: 1, messages: 1 },
+        { client: 'claude-code', modelId: 'claude-opus-4-8', tokens: 100, cost: 2, messages: 1 }
+      ] }
+    }
+  };
+
+  const cumulative = allTimeCumulativeFromArchive(archive);
+
+  assert.deepEqual(Object.keys(cumulative), ['claude'], 'reserved client names are dropped');
+  assert.equal(cumulative.claude.totalTokens, 100);
+  assert.equal(Object.prototype.totalTokens, before, 'Object.prototype is untouched');
+});
+
+test('allTimeCumulativeFromArchive includes live-only days and selects the larger daily snapshot', () => {
+  const archive = {
+    version: 1,
+    days: { '2026-07-01': { date: '2026-07-01', clientIdentityGeneration: 2, observations: [
+      { client: 'codex', modelId: 'gpt', tokens: 100, cost: 2, messages: 1 }
+    ] } },
+    liveDays: {
+      '2026-07-01': { date: '2026-07-01', observations: [
+        { client: 'codex', modelId: 'gpt', tokens: 120, cost: 3, messages: 1 }
+      ] },
+      '2026-07-02': { date: '2026-07-02', observations: [
+        { client: 'codex', modelId: 'gpt', tokens: 50, cost: 1, messages: 1 }
+      ] }
+    }
+  };
+
+  const cumulative = allTimeCumulativeFromArchive(archive);
+
+  // 07-01 is in both stores: the larger live reading wins, not the sum.
+  // 07-02 exists only as a live day and still counts.
+  assert.equal(cumulative.codex.totalTokens, 170, '120 (max on 07-01) + 50 (07-02)');
+  assert.equal(cumulative.codex.models.gpt, 170);
+  assert.equal(cumulative.codex.costUsd, 4);
+});
+
+for (const [rawClient, rawModel, canonicalClient, canonicalModel] of [
+  ['claude', 'CaseModel', 'claude', 'casemodel'],
+  ['reasonix', 'deepseek/deepseek-chat', 'reasonix', 'deepseek-chat'],
+  ['Claude Code', 'CaseModel', 'claude', 'casemodel']
+]) {
+  for (const cost of [0, 1]) {
+    test(`canonical overlap keeps the whole selected ${rawClient}/${rawModel} observation at cost ${cost}`, () => {
+      const date = '2026-07-09';
+      const native = extractUsageFromTokscale({ entries: [{
+        client: rawClient, model: rawModel, sessionId: 'canonical-review-fixture',
+        input: 70, output: 20, cacheRead: 25, cacheWrite: 5, cost, messages: 2
+      }] });
+      assert.equal(native.clientModels[canonicalClient][canonicalModel], 120);
+      const oldGraph = graph(date, [{
+        client: rawClient, modelId: rawModel, providerId: 'old-graph-provider',
+        tokens: { input: 10, output: 15, cacheRead: 65, cacheWrite: 10 }, cost: 10, messages: 3
+      }]);
+      const archive = captureLiveDailyHistory(captureDailyHistoryArchive({}, oldGraph), native, { todayKey: date });
+      const before = JSON.stringify(archive);
+      const selectedOnly = captureLiveDailyHistory({}, native, { todayKey: date });
+      const visible = graphFromDailyHistoryArchive([], archive, { todayKey: date });
+      assert.deepEqual(visible, graphFromDailyHistoryArchive([], selectedOnly, { todayKey: date }));
+      assert.equal(visible.contributions[0].clients.length, 1);
+      const cumulative = allTimeCumulativeFromArchive(archive);
+      assert.deepEqual(cumulative, allTimeCumulativeFromArchive(selectedOnly));
+      assert.equal(cumulative[canonicalClient].models[canonicalModel], 120);
+      assert.equal(cumulative[canonicalClient].costUsd, cost);
+      assert.deepEqual(cumulative[canonicalClient].modelComponents[canonicalModel], {
+        cacheReadTokens: 25, cacheWriteTokens: 5, outputTokens: 20, unclassifiedTokens: 0
+      });
+      assert.equal(JSON.stringify(archive), before, 'projection must preserve persisted raw keys and records');
+    });
+  }
+}
+
+for (const oldClient of ['pi', 'omp']) {
+  for (const legacy of [true, false]) {
+    test(`canonical overlap respects the ${legacy ? 'merged-era' : 'post-split'} ${oldClient} family boundary`, () => {
+      const date = '2026-07-09';
+      const selectedClient = oldClient === 'pi' ? 'omp' : 'pi';
+      const native = extractUsageFromTokscale({ entries: [{
+        client: selectedClient, model: 'CaseModel', input: 120, output: 0, cost: 1
+      }] });
+      const old = captureDailyHistoryArchive({}, graph(date, [client(oldClient, 'CaseModel', 100, 10, 1)]));
+      if (legacy) delete old.days[date].clientIdentityGeneration;
+      const archive = captureLiveDailyHistory(old, native, { todayKey: date });
+      const selectedOnly = captureLiveDailyHistory({}, native, { todayKey: date });
+      const visible = graphFromDailyHistoryArchive([], archive, { todayKey: date });
+      const cumulative = allTimeCumulativeFromArchive(archive);
+      assert.equal(cumulative[selectedClient].models.casemodel, 120);
+      assert.equal(cumulative[selectedClient].costUsd, 1);
+      if (legacy) {
+        assert.deepEqual(visible, graphFromDailyHistoryArchive([], selectedOnly, { todayKey: date }));
+        assert.deepEqual(cumulative, allTimeCumulativeFromArchive(selectedOnly));
+      } else {
+        assert.deepEqual(visible, graphFromDailyHistoryArchive([], selectedOnly, { todayKey: date }));
+        assert.equal(cumulative[oldClient].models.casemodel, 100, 'independent post-split products still add');
+        assert.equal(cumulative[oldClient].costUsd, 10);
+      }
+    });
+  }
+}
+
+test('canonical overlap still carries archive-only observations for other clients and models', () => {
+  const date = '2026-07-09';
+  const old = captureDailyHistoryArchive({}, graph(date, [
+    client('claude', 'CaseModel', 100, 10, 1),
+    client('claude', 'archive-only', 3, 0.3, 1),
+    client('codex', 'casemodel', 7, 0.7, 1)
+  ]));
+  const native = extractUsageFromTokscale({ entries: [{ client: 'claude', model: 'CaseModel', input: 120, output: 0, cost: 1 }] });
+  const archive = captureLiveDailyHistory(old, native, { todayKey: date });
+  const visible = historyFrom(graphFromDailyHistoryArchive([], archive, { todayKey: date }), date);
+  assert.equal(visible.daily[0].tokens, 120, 'graph keeps the selected whole day; only recovery candidates carry archive-only rows');
+  const cumulative = allTimeCumulativeFromArchive(archive);
+  assert.equal(cumulative.claude.models.casemodel, 120);
+  assert.equal(cumulative.claude.models['archive-only'], 3);
+  assert.equal(cumulative.codex.models.casemodel, 7);
 });

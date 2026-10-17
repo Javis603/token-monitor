@@ -1,6 +1,6 @@
 'use strict';
 
-const { PERIODS, normalizeClientName, normalizePeriod } = require('../usage');
+const { PERIODS, normalizeClientName, normalizeModelNameForClient, normalizePeriod } = require('../usage');
 const { normalizeTokscaleModelNameForClient } = require('../history');
 const {
   CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry
@@ -248,7 +248,37 @@ function mergeResidueIntoPeriod(oldPeriod, newPeriod) {
   };
 }
 
-function addClientUsage(period, client, usage) {
+// Adds an explicit cache read/write/output split for usage that arrived without
+// session detail. `perModel` only counts for models the caller also added to
+// `usage.models`, so a stray key cannot create a model row.
+function addComponentShare(period, client, components) {
+  const add = (map, key, value) => {
+    const amount = Math.max(0, Math.round(numberValue(value)));
+    if (amount > 0) map[key] = numberValue(map[key]) + amount;
+  };
+  const cacheRead = Math.max(0, Math.round(numberValue(components.cacheReadTokens)));
+  const cacheWrite = Math.max(0, Math.round(numberValue(components.cacheWriteTokens)));
+  const output = Math.max(0, Math.round(numberValue(components.outputTokens)));
+  if (cacheRead > 0) {
+    period.cacheReadTokens += cacheRead;
+    add(period.clientCacheReads, client, cacheRead);
+  }
+  if (cacheWrite > 0) {
+    period.cacheWriteTokens += cacheWrite;
+    add(period.clientCacheWrites, client, cacheWrite);
+  }
+  if (output > 0) {
+    period.outputTokens += output;
+    add(period.clientOutputs, client, output);
+  }
+  for (const [model, part] of Object.entries(components.perModel || {})) {
+    add(period.modelCacheReads, model, part?.cacheReadTokens);
+    add(period.modelCacheWrites, model, part?.cacheWriteTokens);
+    add(period.modelOutputs, model, part?.outputTokens);
+  }
+}
+
+function addClientUsage(period, client, usage, components = null) {
   const tokens = Math.max(0, Math.round(numberValue(usage?.totalTokens)));
   const cost = numberValue(usage?.costUsd);
   const beforeComponents = {
@@ -275,6 +305,12 @@ function addClientUsage(period, client, usage) {
     if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
     period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + numberValue(modelCost);
   }
+  // The daily-history floor knows the restored usage's cache/output split from
+  // the archived record itself — there is no session detail to derive it from —
+  // so it hands the split in. Adding it before the known/unclassified step keeps
+  // restored tokens in their real buckets instead of dumping them all into
+  // unclassified and dropping the period's component capability.
+  if (components) addComponentShare(period, client, components);
   const normalizedSessions = normalizePeriod({ sessions: usage?.sessions }).sessions;
   for (const [key, session] of Object.entries(normalizedSessions)) {
     period.sessions[key] = session;
@@ -284,7 +320,8 @@ function addClientUsage(period, client, usage) {
     period.cacheReadTokens - beforeComponents.cacheRead
     + period.cacheWriteTokens - beforeComponents.cacheWrite
     + period.outputTokens - beforeComponents.output);
-  const unclassified = Math.max(0, tokens - known);
+  const unclassified = components
+    ? numberValue(components.unclassifiedTokens) : Math.max(0, tokens - known);
   if (unclassified > 0) {
     period.unclassifiedTokens += unclassified;
     period.clientUnclassifiedTokens[client] = (period.clientUnclassifiedTokens[client] || 0) + unclassified;
@@ -296,7 +333,9 @@ function addClientUsage(period, client, usage) {
       numberValue(period.modelCacheReads?.[model]) - numberValue(before.cacheRead)
       + numberValue(period.modelCacheWrites?.[model]) - numberValue(before.cacheWrite)
       + numberValue(period.modelOutputs?.[model]) - numberValue(before.output));
-    const modelUnclassified = Math.max(0, Math.round(numberValue(modelTokens)) - modelKnown);
+    const modelUnclassified = components?.perModel?.[model]
+      ? numberValue(components.perModel[model].unclassifiedTokens)
+      : Math.max(0, Math.round(numberValue(modelTokens)) - modelKnown);
     if (modelUnclassified > 0) {
       period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + modelUnclassified;
       period.capabilities.tokenComponents = false;
@@ -524,8 +563,133 @@ function pruneArchivedClientUsage(archive, activeClients) {
   return normalizedArchive;
 }
 
+// Session identity owns corrections; daily aggregates cannot tell a partial
+// source loss from a lower reading. Recover only whole unrepresented models.
+function dailyHistoryCoverage(live, archive, ledgerKeys) {
+  const models = new Map();
+  const unknown = new Set();
+  // Generic daily history is captured before Dots is merged. Its independently
+  // retained rows, including unknown models, do not overlap native recovery.
+  const hasDots = Object.entries(live.sessions || {}).some(([key, session]) =>
+    session.client === 'codex' && (session.usageSource === 'codex-dots-local' || ledgerKeys.has(key)));
+  const nativeCodex = hasDots ? clientUsageFromPeriod(live, 'codex', ledgerKeys) : null;
+  const add = (rawClient, rawModel) => {
+    const client = normalizeClientName(rawClient);
+    const model = normalizeModelNameForClient(rawModel, client);
+    if (!client) return;
+    if (!model || model === 'unknown') { unknown.add(client); return; }
+    if (!models.has(client)) models.set(client, new Set());
+    models.get(client).add(model);
+  };
+  const clients = new Set([...Object.keys(live.clients || {}), ...Object.keys(live.clientCosts || {}),
+    ...Object.keys(live.clientModels || {}), ...Object.keys(live.clientModelCosts || {})]);
+  for (const client of clients) {
+    const native = client === 'codex' ? nativeCodex : null;
+    const tokenModels = native ? native.models : live.clientModels?.[client] || {};
+    const costModels = native ? native.modelCosts : live.clientModelCosts?.[client] || {};
+    for (const model of new Set([...Object.keys(tokenModels), ...Object.keys(costModels)])) add(client, model);
+    // archivedPeriod drops aggregate zero keys. Explicit native zero sessions
+    // still own that model and must exclude a historical maximum.
+    if (native) for (const session of Object.values(native.sessions)) {
+      for (const model of new Set([...Object.keys(session.models || {}), ...Object.keys(session.modelCosts || {})])) add(client, model);
+    }
+    const tokens = Object.values(tokenModels).reduce((sum, n) => sum + numberValue(n), 0);
+    const cost = Object.values(costModels).reduce((sum, n) => sum + numberValue(n), 0);
+    const clientTokens = native ? native.totalTokens : numberValue(live.clients?.[client]);
+    const clientCost = native ? native.costUsd : numberValue(live.clientCosts?.[client]);
+    if (clientTokens > tokens
+      || clientCost - cost > 4 * Number.EPSILON * Math.max(cost, clientCost)) {
+      unknown.add(normalizeClientName(client));
+    }
+  }
+  // Unattributed aggregate usage may overlap any named historical partition.
+  const attributed = [...clients].reduce((sum, client) => sum + numberValue(live.clients?.[client]), 0);
+  const attributedCost = [...clients].reduce((sum, client) => sum + numberValue(live.clientCosts?.[client]), 0);
+  const globalUnknown = numberValue(live.clients?.unknown) > 0 || numberValue(live.clientCosts?.unknown) > 0
+    || numberValue(live.totalTokens) > attributed
+    || numberValue(live.costUsd) - attributedCost > 4 * Number.EPSILON * Math.max(attributedCost, numberValue(live.costUsd));
+  for (const entry of Object.values(archive?.sessions || {})) {
+    const client = normalizeClientName(entry.client);
+    if (!client) continue;
+    const names = new Set(entry.observedModels || []);
+    let hasAttribution = names.size > 0;
+    for (const session of Object.values(entry.periods || {})) {
+      const keys = new Set([...Object.keys(session.models || {}), ...Object.keys(session.modelCosts || {})]);
+      for (const model of keys) names.add(model);
+      hasAttribution ||= keys.size > 0;
+      const tokens = Object.values(session.models || {}).reduce((sum, n) => sum + numberValue(n), 0);
+      if (numberValue(session.totalTokens) > tokens) unknown.add(client);
+    }
+    for (const model of names) add(client, model);
+    if (!hasAttribution || entry.modelHistoryUnknown === true) unknown.add(client);
+  }
+  return {
+    blocks(family, model) {
+      return globalUnknown || models.has('unknown') || unknown.has('unknown')
+        || (family.includes('unknown') && (models.size > 0 || unknown.size > 0))
+        || family.some(client => unknown.has(client)
+        || (model === 'unknown' ? models.get(client)?.size > 0 : models.get(client)?.has(model)));
+    }
+  };
+}
+
+function missingDailyHistoryUsage(floor, family, coverage) {
+  const models = {};
+  const modelCosts = {};
+  const perModelComponents = {};
+  let totalTokens = 0;
+  let costUsd = 0;
+  for (const model of new Set([...Object.keys(floor.models || {}), ...Object.keys(floor.modelCosts || {})])) {
+    if (coverage.blocks(family, model)) continue;
+    const tokens = Math.max(0, Math.round(numberValue(floor.models?.[model])));
+    const cost = Math.max(0, numberValue(floor.modelCosts?.[model]));
+    if (tokens > 0) {
+      models[model] = tokens;
+      totalTokens += tokens;
+      perModelComponents[model] = floor.modelComponents?.[model] || { unclassifiedTokens: tokens };
+    }
+    if (cost > 0) { modelCosts[model] = cost; costUsd += cost; }
+  }
+  if (totalTokens === 0 && costUsd === 0) return null;
+  return {
+    usage: { totalTokens, costUsd, models, modelCosts },
+    components: clientComponentsFrom(perModelComponents, totalTokens)
+  };
+}
+
+function applyDailyHistoryAllTimeFloor(summary, cumulative, options = {}) {
+  if (!cumulative || typeof cumulative !== 'object' || !hasSummaryPeriod(summary, 'allTime')) return summary;
+  const live = periodFor(summary, 'allTime');
+  const coverage = dailyHistoryCoverage(live, options.sessionArchive, new Set(summary.codexLocalSessionKeys || []));
+  const recovered = [];
+  for (const [client, floor] of Object.entries(cumulative)) {
+    const whole = missingDailyHistoryUsage(floor, [client], coverage);
+    if (whole) recovered.push({ client, ...whole });
+    if (floor.legacy) {
+      const family = [client, ...CLIENT_IDENTITY_SPLITS.filter(({ merged }) => merged === client).map(({ split }) => split)];
+      const legacy = missingDailyHistoryUsage(floor.legacy, family, coverage);
+      if (legacy) recovered.push({ client, ...legacy });
+    }
+  }
+  if (recovered.length === 0) return summary;
+  const next = cloneJson(summary);
+  const period = targetPeriod(next, 'allTime');
+  for (const { client, usage, components } of recovered) addClientUsage(period, client, usage, components);
+  return next;
+}
+
+function clientComponentsFrom(perModelComponents, missingTokens) {
+  if (Object.keys(perModelComponents).length === 0 || missingTokens <= 0) return null;
+  const total = { cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0 };
+  for (const part of Object.values(perModelComponents)) {
+    for (const key of Object.keys(total)) total[key] += Math.max(0, Math.round(numberValue(part[key])));
+  }
+  return { ...total, perModel: perModelComponents };
+}
+
 module.exports = {
   applyArchivedClientUsage,
+  applyDailyHistoryAllTimeFloor,
   captureArchivedClientUsage,
   normalizeArchivedClientUsage,
   pruneArchivedClientUsage

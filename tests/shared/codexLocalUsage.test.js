@@ -909,6 +909,45 @@ test('native replacement removes previously observed Dots usage from retained da
   assert.equal(replacement.history.daily[0].tokens, 20, 'generic archive must not resurrect the old Dots maximum');
 });
 
+test('native daily recovery coexists with Dots ledger visibility and native replacement', async (t) => {
+  const { home, env, store, closeables } = fixture(t);
+  store.observe(event({ thread: { ...LOCAL, model: 'unknown' } }));
+  const archiveStore = createSessionUsageArchiveStore({ env });
+  closeables.push(archiveStore);
+  const transform = createUsageTransform({ store: archiveStore, dailyHistoryArchive: { env },
+    getSettings: () => ({ projectsEnabled: false }) });
+  const base = {
+    clients: 'codex', env, homeDir: home, codexLocalUsageStore: store, now: AT,
+    allTimeSince: '2025-01-01', includeHistory: true, dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveOptions: { env }, lookupModelPricing: async () => ({}),
+    runTokscale: async () => ({ entries: [] }),
+    runGraph: async () => ({ contributions: [{ date: '2026-06-07', clients: [{
+      client: 'codex', modelId: 'retired-native', tokens: { input: 100, output: 0 }, messages: 1, cost: 1
+    }] }] })
+  };
+  const visible = transform.transform(await collectUsageOnce(base));
+  assert.equal(visible.allTime.totalTokens, LAST.totalTokens + 100);
+  assert.equal(visible.allTime.clientModels.codex['retired-native'], 100);
+  assert.equal(visible.allTime.sessions[`codex:${ID}`].usageSource, 'codex-dots-local');
+  const hidden = transform.transform(await collectUsageOnce({ ...base, codexDotsVisible: false }));
+  assert.equal(hidden.allTime.totalTokens, 100);
+  assert.equal(Object.keys(hidden.allTime.sessions).length, 0, 'daily history does not invent native session rows');
+  assert.equal(Object.keys(archiveStore.read().sessions).length, 0, 'Dots must stay in its own ledger');
+  assert.equal(store.rows().length, 1, 'hiding keeps the ledger');
+  const replacement = transform.transform(await collectUsageOnce({ ...base,
+    runTokscale: async () => ({ entries: [{ client: 'codex', sessionId: `rollout-${ID}`, model: 'gpt-test', input: 20, output: 0 }] })
+  }));
+  assert.equal(replacement.allTime.totalTokens, 120);
+  assert.equal(replacement.allTime.clientModels.codex['retired-native'], 100);
+  assert.equal(Object.keys(replacement.allTime.sessions).length, 1);
+  const saved = JSON.parse(fs.readFileSync(path.join(home, 'daily-history-archive.json'), 'utf8'));
+  for (const field of ['days', 'liveDays']) {
+    const total = Object.values(saved[field] || {}).flatMap(day => Object.values(day.observations))
+      .reduce((sum, observation) => sum + observation.tokens, 0);
+    assert.ok(total <= 120, 'generic daily archive contains native usage only');
+  }
+});
+
 
 test('missing model or rates remain explicit across period/session/project normalization and display', () => {
   const { mergePeriods, applyProjectRollups } = require('../../src/shared/usage');

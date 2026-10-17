@@ -18,6 +18,7 @@ collector.startCollector = (options) => {
   let tokens = 100;
   const sessionId = options.scriptedSessionId || 'c1';
   const summary = () => {
+    if (options.scriptedSummary) return structuredClone(options.scriptedSummary);
     // Normalized like real collector output, which the transform relies on.
     const period = normalizePeriod({
       totalTokens: tokens,

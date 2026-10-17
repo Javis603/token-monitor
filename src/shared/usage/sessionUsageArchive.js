@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
-const { PERIODS, normalizePeriod } = require('../usage');
+const { PERIODS, normalizeModelNameForClient, normalizePeriod } = require('../usage');
 const {
   cloneJson,
   hasSummaryPeriod,
@@ -69,6 +69,30 @@ function hasSessionUsage(session) {
   return numberValue(session?.totalTokens) > 0 || numberValue(session?.costUsd) > 0;
 }
 
+// Local archive provenance for daily-history recovery. Keep every model this
+// identity has represented, including models replaced by a parser correction.
+// An unclassified observation cannot establish a disjoint model partition.
+function sessionModelCoverage(entry, session) {
+  const models = new Set(Array.isArray(entry.observedModels) ? entry.observedModels : []);
+  let unknown = entry.modelHistoryUnknown === true;
+  for (const retained of [...Object.values(entry.periods || {}), session].filter(Boolean)) {
+    const keys = new Set([...Object.keys(retained.models || {}), ...Object.keys(retained.modelCosts || {})]);
+    let tokens = 0;
+    let cost = 0;
+    for (const raw of keys) {
+      const model = normalizeModelNameForClient(raw, retained.client || entry.client);
+      if (!model || model === 'unknown') unknown = true;
+      else models.add(model);
+      tokens += Math.max(0, numberValue(retained.models?.[raw]));
+      cost += Math.max(0, numberValue(retained.modelCosts?.[raw]));
+    }
+    if (numberValue(retained.totalTokens) > tokens
+      || numberValue(retained.costUsd) - cost > 4 * Number.EPSILON * Math.max(cost, numberValue(retained.costUsd))) unknown = true;
+  }
+  if (models.size === 0) unknown = true;
+  return { observedModels: [...models].sort(), ...(unknown ? { modelHistoryUnknown: true } : {}) };
+}
+
 function normalizeSessionUsageArchive(value) {
   const source = value?.sessions && typeof value.sessions === 'object' ? value.sessions : value;
   const normalized = { version: 1, sessions: {} };
@@ -112,10 +136,22 @@ function normalizeSessionUsageArchive(value) {
     if (!entry.client || !entry.sessionId || Object.keys(entry.periods).length === 0) continue;
     const supersededBy = sessionKey('cursor', String(rawEntry.supersededBy || '').replace(/^cursor:/, ''));
     if (rawEntry.supersededBy && supersededBy && isLegacyCursorEntry(entry)) entry.supersededBy = supersededBy;
+    const recordedModels = Array.isArray(rawEntry.observedModels)
+      ? rawEntry.observedModels.map(model => normalizeModelNameForClient(model, entry.client))
+        .filter(model => model && model !== 'unknown') : [];
+    Object.assign(entry, sessionModelCoverage({ ...entry, observedModels: recordedModels,
+      // Bootstrap older rows from their retained model names. Missing metadata
+      // alone must not exclude every model in this client (#808). Unknown
+      // attribution still excludes the client; future changes retain both names.
+      modelHistoryUnknown: rawEntry.modelHistoryUnknown === true
+        || Array.isArray(rawEntry.observedModels) && rawEntry.observedModels.some(model => !normalizeModelNameForClient(model, entry.client)
+          || normalizeModelNameForClient(model, entry.client) === 'unknown') }));
     const key = `${entry.client}:${entry.sessionId}`;
     const previous = normalized.sessions[key];
     if (!previous) normalized.sessions[key] = entry;
     else {
+      previous.observedModels = [...new Set([...previous.observedModels, ...entry.observedModels])].sort();
+      if (entry.modelHistoryUnknown) previous.modelHistoryUnknown = true;
       // A released client alias may share its ID with the renamed client.
       // Keep whole period observations, including a newer explicit zero.
       for (const name of Object.keys(entry.periods)) {
@@ -239,23 +275,36 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
       };
       const window = entry.periodWindows?.[periodName] || {};
       const retainedCaptureTime = Date.parse(window.capturedAt || '');
-      // SQLite serializes commits, not collection time. Keep the newest event
-      // for each period when two collectors finish in the opposite order.
-      if (Number.isFinite(retainedCaptureTime) && retainedCaptureTime > captureTime) continue;
       const sameWindow = periodName === 'today'
         ? window.day === day
         : periodName === 'month'
           ? window.month === month
           : true;
+      // Unchanged captured rows already carry coverage, so the hot path avoids
+      // rebuilding a model set for every session in all three reports.
+      if (Array.isArray(entry.observedModels) && sameWindow && sameJson(entry.periods[periodName], session)) continue;
+      const coverage = sessionModelCoverage(entry, session);
+      const coverageChanged = !sameJson(entry.observedModels, coverage.observedModels)
+        || Boolean(entry.modelHistoryUnknown) !== Boolean(coverage.modelHistoryUnknown);
+      // An older observation cannot replace accounting, but its model identity
+      // can still exclude an unsafe daily-history recovery.
+      if (Number.isFinite(retainedCaptureTime) && retainedCaptureTime > captureTime) {
+        if (coverageChanged) {
+          Object.assign(entry, coverage);
+          changedKeys.add(archiveKey);
+        }
+        continue;
+      }
       // Every tick carries every session of all three periods, and nearly all of
       // them are unchanged, so compare before copying. A session equal to the
       // stored copy would also be equal after the round-trip; one that differs
       // only in what the round-trip drops is caught by the second comparison.
-      if (sameWindow && sameJson(entry.periods[periodName], session)) continue;
+      if (!coverageChanged && sameWindow && sameJson(entry.periods[periodName], session)) continue;
       const nextSession = cloneJson(session);
       delete nextSession.liveActivity;
       delete nextSession.waitingForInput;
-      if (sameWindow && sameJson(entry.periods[periodName], nextSession)) continue;
+      if (!coverageChanged && sameWindow && sameJson(entry.periods[periodName], nextSession)) continue;
+      Object.assign(entry, coverage);
       entry.client = session.client;
       entry.sessionId = session.sessionId;
       entry.capturedAt = capturedAtIso;

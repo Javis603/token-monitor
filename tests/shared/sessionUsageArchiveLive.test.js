@@ -13,6 +13,7 @@ const {
 } = require('../../src/shared/usage/sessionUsageArchive');
 const { createSessionUsageArchiveStore, readSessionUsageArchiveSnapshot } = require('../../src/shared/usage/sessionUsageArchiveStore');
 const { createUsageTransform } = require('../../src/shared/usage/usageTransform');
+const { applyDailyHistoryAllTimeFloor } = require('../../src/shared/usage/clientUsageArchive');
 
 const AT = new Date('2026-07-09T12:00:00Z');
 const LATER = new Date(AT.getTime() + 1000);
@@ -151,9 +152,10 @@ test('headless projection consumes the full-scan hint without publishing it', t 
       const { store } = setup(t);
       const archive = captureSessionUsageArchive({}, summary(100), AT);
       store.capture(summary(100), AT);
-      const context = { sessionUsageArchiveEnabled, dryRun, projectsEnabled: false,
+      const context = { allTimeSince: undefined, sessionUsageArchiveEnabled, dryRun, projectsEnabled: false,
         sessionUsageArchive: archive, sessionUsageArchiveStore: store, cursorUsageEvents: undefined,
         sessionUsageArchiveDate, updateSessionUsageArchive, applySessionUsageArchive,
+        applyDailyHistoryAllTimeFloor, loadDailyHistoryFloor: () => ({}),
         readSessionUsageArchiveSnapshot: () => archive };
       vm.runInNewContext(body, context);
       const current = { ...summary(20, LATER), today: period(null), sessionUsageArchiveFullScan: true };
@@ -178,8 +180,9 @@ test('headless capture failure preserves committed usage and publication until r
   const source = fs.readFileSync(path.resolve(__dirname, '../../src/agent/agent.js'), 'utf8');
   const start = source.indexOf('function summaryWithSessionUsageArchive(');
   const body = source.slice(start, source.indexOf('\n}\n', start) + 3);
-  const context = { sessionUsageArchiveEnabled: true, dryRun: false, projectsEnabled: false,
+  const context = { allTimeSince: undefined, sessionUsageArchiveEnabled: true, dryRun: false, projectsEnabled: false,
     sessionUsageArchiveStore: store, sessionUsageArchiveDate, applySessionUsageArchive,
+    applyDailyHistoryAllTimeFloor, loadDailyHistoryFloor: () => ({}),
     console: { error() {} } };
   vm.runInNewContext(body, context);
   const { runAgent } = require('../../src/agent/runtime');

@@ -2841,6 +2841,7 @@ const usageTransform = createUsageTransform({
   store: sessionUsageArchiveStore,
   getSettings: () => settings,
   isExternalAgentActive,
+  dailyHistoryArchive: true,
   onCaptureFailure: () => diagnosticJournal.record({ subsystem: 'storage', code: 'storage-archive-update-failed' })
 });
 

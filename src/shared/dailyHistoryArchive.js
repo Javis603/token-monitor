@@ -8,12 +8,17 @@ const {
   normalizeTokscaleClientName, normalizeTokscaleModelNameForClient,
   normalizeTokscaleModelComponentSummary, num, sumOutputTokens, sumTokens
 } = require('./history');
+const { normalizeClientName, normalizeModelNameForClient } = require('./usage');
 const {
-  CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry
+  CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry, mergedClientIdFor
 } = require('./clientIdentitySplits');
 
 const ARCHIVE_VERSION = 1;
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+// Client ids and model names are folded into ordinary period maps downstream, so
+// reject the property names that either mutate a prototype or are silently
+// dropped by a `__proto__` assignment.
+const UNSAFE_MAP_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 function observationKey(value) {
   return JSON.stringify([
@@ -107,7 +112,7 @@ function normalizeComponentValues(value, totalTokens, exact) {
     ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
     ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
     ...(outputTokens > 0 ? { outputTokens } : {}),
-    ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {})
+    ...(unclassifiedTokens > 0 || !exact ? { unclassifiedTokens } : {})
   };
 }
 
@@ -612,8 +617,75 @@ function graphTimeMetrics(graphs, activeTimeMs) {
   };
 }
 
-function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
-  const normalizedArchive = normalizeDailyHistoryArchive(archive);
+function withArchiveOnlyObservations(day, previousDay) {
+  if (dayTokens(day) <= dayTokens(previousDay)) return day;
+  const observations = Object.fromEntries([...selectedDayComponents(day)].map(([observation, components]) => [
+    observationKey(observation), {
+      ...observation, ...components, tokenComponentsAvailable: components.unclassifiedTokens === 0
+    }
+  ]));
+  const summary = day.componentSummary ? {
+    ...day.componentSummary,
+    perClient: { ...day.componentSummary.perClient },
+    perModel: { ...day.componentSummary.perModel }
+  } : null;
+  let changed = false;
+  if (summary) {
+    const { perClient, perModel } = observationTokenMaps(day.observations);
+    for (const [field, tokens] of [['perClient', perClient], ['perModel', perModel]]) {
+      for (const key of Object.keys(tokens)) {
+        const part = summary[field][key] || {};
+        summary[field][key] = { ...part, unclassifiedTokens: num(part.unclassifiedTokens) };
+      }
+    }
+  }
+  const currentObservations = Object.values(day.observations);
+  const canonicalModel = observation => periodModelKeyFor(normalizeClientName(observation.client), observation.modelId);
+  const canonicalKey = observation => JSON.stringify([normalizeClientName(observation.client), canonicalModel(observation)]);
+  // Compare snapshot coverage using period identities without rewriting stored
+  // observation keys or combining the selected and previous records.
+  const currentKeys = new Set(currentObservations.map(canonicalKey));
+  for (const [observation, components] of selectedDayComponents(previousDay)) {
+    const key = observationKey(observation);
+    if (observations[key] || currentKeys.has(canonicalKey(observation))) continue;
+    const legacy = isPreSplitEntry(previousDay);
+    const family = CLIENT_IDENTITY_SPLITS.find(({ merged, split }) => (
+      legacy && (observation.client === merged || observation.client === split)
+    ));
+    // Missing attribution is not evidence that the old source disappeared.
+    if (currentObservations.some((current) => {
+      if (num(current.tokens) <= 0 && (num(observation.tokens) > 0 || num(current.cost) <= 0)) return false;
+      if (current.client === 'unknown' || observation.client === 'unknown') return true;
+      const sameClient = current.client === observation.client
+        || (family && (current.client === family.merged || current.client === family.split));
+      return sameClient && (current.modelId === 'unknown' || observation.modelId === 'unknown');
+    })) continue;
+    if (family && currentObservations.some((current) => (
+      (current.client === family.merged || current.client === family.split) && canonicalModel(current) === canonicalModel(observation)
+    ))) continue;
+    changed = true;
+    observations[key] = {
+      ...observation,
+      ...components,
+      tokenComponentsAvailable: components.unclassifiedTokens === 0,
+      clientIdentityGeneration: previousDay.clientIdentityGeneration ?? 0
+    };
+    if (!summary) continue;
+    if (components.unclassifiedTokens > 0) summary.tokenComponentsAvailable = false;
+    const client = { ...(summary.perClient[observation.client] || {}) };
+    const model = { ...(summary.perModel[observation.modelId] || {}) };
+    for (const [field, value] of Object.entries(components)) {
+      summary[field] = num(summary[field]) + value;
+      client[field] = num(client[field]) + value;
+      model[field] = num(model[field]) + value;
+    }
+    summary.perClient[observation.client] = client;
+    summary.perModel[observation.modelId] = model;
+  }
+  return changed ? { ...day, observations, ...(summary ? { componentSummary: summary } : {}) } : day;
+}
+
+function reconciledArchiveDays(graphs, normalizedArchive, options = {}, includeArchiveOnly = false) {
   const currentDays = observationsFromGraphs(graphs, { archive: normalizedArchive });
   const todayKey = String(options.todayKey || '').slice(0, 10);
   const hasTodayKey = DAY_KEY_RE.test(todayKey);
@@ -625,14 +697,24 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
   for (const [date, liveDay] of Object.entries(normalizedArchive.liveDays || {})) {
     if (hasTodayKey && date > todayKey) continue;
     const previous = currentDays.get(date);
+    const live = { ...liveDay, clientIdentityGeneration: CLIENT_IDENTITY_GENERATION };
     if (!previous) {
-      currentDays.set(date, liveDay);
+      currentDays.set(date, live);
     } else {
-      const selected = liveDayIsGreater(liveDay, previous) ? mergeLiveDayMetadata(liveDay, previous) : previous;
-      currentDays.set(date, withReconciledGraphCosts(selected, previous, liveDay, options.reprice === true));
+      const useLive = liveDayIsGreater(live, previous);
+      let selected = useLive ? mergeLiveDayMetadata(live, previous) : previous;
+      // Graphs keep one whole-day observation. Only allTime recovery receives
+      // archive-only candidates, which still need session coverage filtering.
+      if (includeArchiveOnly && useLive) selected = withArchiveOnlyObservations(selected, previous);
+      currentDays.set(date, withReconciledGraphCosts(selected, previous, live, options.reprice === true));
     }
   }
 
+  return currentDays;
+}
+
+function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
+  const currentDays = reconciledArchiveDays(graphs, normalizeDailyHistoryArchive(archive), options);
   const contributions = [...currentDays.values()]
     .sort((left, right) => left.date.localeCompare(right.date))
     .map((day) => ({
@@ -668,6 +750,95 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
   const activeTimeMs = contributions.reduce((sum, day) => sum + num(day.activeTimeMs), 0);
   const timeMetrics = graphTimeMetrics(graphs, activeTimeMs);
   return { contributions, ...(timeMetrics ? { timeMetrics } : {}) };
+}
+
+function periodModelKeyFor(client, model) {
+  let name = String(model || '');
+  if (client === 'cursor' && (name === 'auto' || name === 'default')) name = 'cursor-auto';
+  return normalizeModelNameForClient(name, client) || name || 'unknown';
+}
+
+function observationComponentSplit(observation) {
+  const cacheReadTokens = Math.max(0, Math.round(num(observation?.cacheReadTokens)));
+  const cacheWriteTokens = Math.max(0, Math.round(num(observation?.cacheWriteTokens)));
+  const outputTokens = Math.max(0, Math.round(num(observation?.outputTokens)));
+  const unclassifiedTokens = Math.max(0, Math.round(num(observation?.unclassifiedTokens
+    ?? (observation?.tokenComponentsAvailable === true
+      ? 0 : num(observation?.tokens) - cacheReadTokens - cacheWriteTokens - outputTokens))));
+  return { cacheReadTokens, cacheWriteTokens, outputTokens, unclassifiedTokens };
+}
+
+function selectedDayComponents(day) {
+  const observations = Object.values(day.observations);
+  const summary = day.componentSummary;
+  const clientCounts = Object.create(null);
+  const modelCounts = Object.create(null);
+  if (summary) {
+    for (const observation of observations) {
+      if (observation.tokens <= 0) continue;
+      clientCounts[observation.client] = num(clientCounts[observation.client]) + 1;
+      modelCounts[observation.modelId] = num(modelCounts[observation.modelId]) + 1;
+    }
+  }
+  return new Map(observations.map((observation) => {
+    let source = observation;
+    if (summary && observation.tokens > 0) {
+      const part = clientCounts[observation.client] === 1
+        ? summary.perClient[observation.client] || {}
+        : modelCounts[observation.modelId] === 1 ? summary.perModel[observation.modelId] || {} : null;
+      // Day summaries have no client-by-model provenance unless one side is unique.
+      if (part) source = {
+        tokens: observation.tokens,
+        ...part,
+        unclassifiedTokens: num(part.unclassifiedTokens),
+        tokenComponentsAvailable: summary.tokenComponentsAvailable
+      };
+    }
+    return [observation, observationComponentSplit(source)];
+  }));
+}
+
+function emptyCumulativeUsage() {
+  return {
+    totalTokens: 0,
+    costUsd: 0,
+    models: Object.create(null),
+    modelCosts: Object.create(null),
+    modelComponents: Object.create(null)
+  };
+}
+
+function allTimeCumulativeFromArchive(archive, { allTimeSince = '' } = {}) {
+  const normalized = normalizeDailyHistoryArchive(archive);
+  const cumulative = Object.create(null);
+  for (const day of reconciledArchiveDays([], normalized, {}, true).values()) {
+    if (day.date < allTimeSince) continue;
+    for (const [observation, split] of selectedDayComponents(day)) {
+      const mergedEra = isPreSplitEntry(observation.clientIdentityGeneration === undefined ? day : observation);
+      let client = normalizeClientName(observation.client);
+      if (!client || UNSAFE_MAP_KEYS.has(client)) continue;
+      if (mergedEra) client = mergedClientIdFor(client) || client;
+      const model = periodModelKeyFor(client, observation.modelId);
+      if (UNSAFE_MAP_KEYS.has(model)) continue;
+      const entry = cumulative[client] || (cumulative[client] = emptyCumulativeUsage());
+      // Legacy rows contain the whole family; post-split rows belong to one client.
+      const usage = mergedEra && CLIENT_IDENTITY_SPLITS.some(({ merged }) => merged === client)
+        ? (entry.legacy ||= emptyCumulativeUsage()) : entry;
+      const tokens = Math.max(0, Math.round(num(observation.tokens)));
+      const cost = Math.max(0, num(observation.cost));
+      usage.totalTokens += tokens;
+      usage.costUsd += cost;
+      if (tokens > 0) usage.models[model] = num(usage.models[model]) + tokens;
+      if (cost > 0) usage.modelCosts[model] = num(usage.modelCosts[model]) + cost;
+      if (tokens > 0) {
+        const bucket = usage.modelComponents[model] || (usage.modelComponents[model] = {
+          cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, unclassifiedTokens: 0
+        });
+        for (const key of Object.keys(bucket)) bucket[key] += split[key];
+      }
+    }
+  }
+  return cumulative;
 }
 
 function dailyHistoryArchivePath(options = {}) {
@@ -792,6 +963,7 @@ function retainLiveDailyHistory(period, options = {}) {
 }
 
 module.exports = {
+  allTimeCumulativeFromArchive,
   captureDailyHistoryArchive,
   clearDailyHistoryArchive,
   dailyHistoryArchivePath,
