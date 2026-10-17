@@ -228,7 +228,7 @@
         parentClient: normalizedId(session.parentClient || session.client),
         parentSessionId: String(session.parentSessionId || ''),
         grokBotSession: session.grokBotSession,
-        title: String(session.title || ''),
+        title: sessionRowsApi.sessionTitleForDisplay(session),
         projectLabel: String(session.projectLabel || ''),
         // Carried so the renderer keys its state map and its flare cache on
         // the same identity this projection used, instead of re-deriving one
@@ -297,7 +297,7 @@
         key: `session:${key}`, kind: 'session', client,
         clientLabel: options.clientLabels?.[client] || client,
         nativeSessionId: normalizedId(session.nativeSessionId), t3ThreadId: String(session.t3ThreadId || ''),
-        name: String(session.title || session.projectLabel || sessionId.slice(0, 12) || '—'),
+        name: sessionRowsApi.sessionTitleForDisplay(session) || String(session.projectLabel || sessionId.slice(0, 12) || '—'),
         titled: Boolean(session.title || session.projectLabel),
         modelTokens: models,
         value: finite(session.totalTokens) || 0, cost: finite(session.costUsd ?? session.reportedCostUsd) || 0,

@@ -2553,10 +2553,11 @@ test('watchIgnoreMatcher prunes the Hermes runtime but keeps the state.db family
     assert.equal(ignored(path.join(hermes, 'state.db')), false);
     assert.equal(ignored(path.join(hermes, 'state.db-wal')), false);
     assert.equal(ignored(path.join(hermes, 'state.db-shm')), false);
-    // The runtime / logs / cache under ~/.hermes are pruned (never recursed).
+    // Runtime, non-usage logs and cache stay pruned. Agent call logs are sources.
     assert.equal(ignored(path.join(hermes, 'hermes-agent')), true);
     assert.equal(ignored(path.join(hermes, 'hermes-agent', 'node_modules')), true);
-    assert.equal(ignored(path.join(hermes, 'logs')), true);
+    assert.equal(ignored(path.join(hermes, 'logs')), false);
+    assert.equal(ignored(path.join(hermes, 'logs', 'debug.log')), true);
     assert.equal(ignored(path.join(hermes, 'cache', 'blob')), true);
     // Other clients' paths are never touched by the matcher.
     assert.equal(ignored(path.join(tmp, '.claude', 'projects', 'p', 'a.jsonl')), false);
@@ -2592,8 +2593,10 @@ test('watchIgnoreMatcher keeps profile dirs and their db family so profile chang
     assert.equal(ignored(path.join(profileDir, 'state.db')), false);
     assert.equal(ignored(path.join(profileDir, 'state.db-wal')), false);
     assert.equal(ignored(path.join(profileDir, 'state.db-shm')), false);
-    // Junk inside a profile dir is still pruned.
-    assert.equal(ignored(path.join(profileDir, 'logs')), true);
+    // Profiles retain direct agent logs without admitting unrelated logs.
+    assert.equal(ignored(path.join(profileDir, 'logs')), false);
+    assert.equal(ignored(path.join(profileDir, 'logs', 'agent.log.1')), false);
+    assert.equal(ignored(path.join(profileDir, 'logs', 'debug.log')), true);
   } finally {
     os.homedir = originalHomedir;
     if (previousHermesHome === undefined) delete process.env.HERMES_HOME;
@@ -2616,7 +2619,8 @@ test('watchIgnoreMatcher honors HERMES_HOME and is absent when Hermes is not tra
     assert.deepEqual(watchPathsForClients('hermes'), [hermesHome]);
     const ignored = watchIgnoreMatcher('hermes');
     assert.equal(ignored(path.join(hermesHome, 'state.db-wal')), false);
-    assert.equal(ignored(path.join(hermesHome, 'logs')), true);
+    assert.equal(ignored(path.join(hermesHome, 'logs')), false);
+    assert.equal(ignored(path.join(hermesHome, 'logs', 'agent.log')), false);
     // No Hermes tracked, no matcher, so other watchers run unchanged.
     assert.equal(watchIgnoreMatcher('claude,codex'), undefined);
   } finally {

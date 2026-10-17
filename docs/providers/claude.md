@@ -3,6 +3,7 @@ summary: "Claude provider notes: transcript metadata, turn boundaries, OAuth/Web
 ids: [claude]
 read_when:
   - Changing Claude session roots, titles, turn state or live context parsing
+  - Changing retained Claude Desktop discovery or transcript watch policies
   - Changing Claude OAuth, Web session or CLI limits collection
   - Changing Claude account identity, prepaid credits or cookie renewal
 ---
@@ -36,6 +37,16 @@ Claude emits `contextTokens`/`contextWindow` from its transcript for sessions th
 An explicit `[1m]` model marker, supported native Claude 1M model ids and recognized provider Sonnet 5 ids map to 1M. Other nonempty model ids map to Claude Code's 200K default, including third-party bridges as a best-effort estimate; do not present that fallback as an authoritative bridge window. A compact boundary or compact summary clears the pair to `0/0` until the next valid assistant response. Oversized JSONL records use bounded head/tail fragments; accept context only from a complete message-level `usage` object and do not mistake nested `model` or `usage` fields in tool content for the response.
 
 Cache warmth is an optional `promptCache: { observedAt, ttlSeconds }` estimate from the same incremental transcript index used for title, context and turn state, with no extra file read or JSON parse, requiring cache activity and a reported 5-minute or 1-hour write tier in the newest serving response. Mixed tiers use the shorter TTL; unknown tiers and compaction hide the estimate. Duplicate assistant records do not refresh it, and sidechain responses are excluded. The anchor is the first available response observation, not the unrecorded request time, so remaining time may be overstated. No status line, plugin or Claude settings changes are needed. Home, Edge Dock and Sessions share one metrics slot: recent context takes priority, with the context token/window counts and cache countdown available in the shared detail tooltip by hovering its bar or percentage; then a still-valid cache estimate appears after 10 minutes of inactivity, with the last recorded context counts still available on hover. Turn completion alone clears neither reading; the cache countdown ends at the observed TTL.
+
+## Retained Claude Desktop usage
+
+The scanner reads retained Code/Cowork `.claude/projects` and `.claude/transcripts` below `local-agent-mode-sessions` and `claude-code-sessions`, plus the Claude conversation IndexedDB store and its external blobs. Its three app roots are home-relative `Library/Application Support/Claude`, `AppData/Roaming/Claude` and `.config/Claude` on every platform; APPDATA and XDG overrides do not relocate them. Host health and WSL discovery share the same registrations.
+
+Desktop Chat, Code and Cowork usage stays under the existing `claude` accounting id. The scanner reconciles retained transcripts against conversation-cache usage. Cumulative balances with no usage date remain undated and are excluded from dated reports, including Token Monitor's bounded all-time scan. This does not establish cross-device or host/WSL mirror deduplication.
+
+Transcript watches retain discovery ancestors and only the `projects` and `transcripts` lanes below `.claude`. Prune dependency/VCS trees before `.claude`, reject directory links in discovery ancestors, at `.claude` and inside lanes, and preserve explicit lane-root directory links and JSONL file links. Keep creation/removal events for sessions added after startup. Apply these rules only to Desktop transcript roots, preserving the union with overlapping sources; IndexedDB and external blobs use separate roots.
+
+Windows native mode still admits file links and observes link removal and supported lane-root directory changes. External file-target changes have the shared [native watcher limitation](../architecture.md#watching); do not disable symlinks globally to work around it.
 
 ## Live waiting status
 
@@ -79,7 +90,7 @@ Prepaid balance is best effort and cached more slowly than usage. A failed or re
 
 ## Verification
 
-Run the Claude session, limits and Electron transport tests when changing this note's scope:
+For retained Desktop discovery and watch rules, run `node --test tests/shared/claudeDesktopWatch.test.js tests/shared/tokscaleUpstreamSources.test.js`. Run the Claude session, limits and Electron transport tests when changing those parts of this note:
 
 ```bash
 node --test tests/shared/claudeSessionActivity.test.js tests/shared/claudeSessionMetadata.test.js tests/shared/limitCollector.claude.test.js tests/electron/claudeWebFetch.test.js

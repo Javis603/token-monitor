@@ -103,6 +103,9 @@ for (const externalAgent of [false, true]) {
         usageOptions: {
           onError: (error) => errors.push(error),
           clients: 'codex', allTimeSince: '2024-01-01', homeDir: dir, env: {},
+          osInfo: {}, sessionMetadataDeps: { sessionMetadataResolvers: new Map() },
+          lookupModelPricing: async () => null,
+          runGraph: async () => { throw new Error('unexpected graph request'); },
           anchorPath: path.join(dir, 'collector-anchor.json'), pricingPath: path.join(dir, 'pricing.json'),
           intervalMs: 3600000, watchEnabled: false, historyEnabled: false,
           dailyHistoryArchiveEnabled: false, anchorPersistenceEnabled: false,
