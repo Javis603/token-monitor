@@ -117,6 +117,42 @@ test('the user\u2019s custom title outranks the generated one', () => {
   assert.equal(session.projectLabel, identity.projectLabel);
 });
 
+test('fills the throughput counters from the shared turn-metrics reader', () => {
+  // WorkBuddy shares the CodeBuddy transcript family and reader, so its rows
+  // get the same tok/s reading its transcripts can now supply.
+  const home = makeHome('.workbuddy');
+  const file = resolveSessionFile('workbuddy', SESSION, home);
+  fs.appendFileSync(file, `${JSON.stringify({ type: 'turn-metrics', durationMs: 60000, tokenDelta: 900000 })}\n`);
+
+  const periods = {
+    today: {
+      timedDurationMs: 0,
+      timedTokens: 0,
+      timedOutputTokens: 0,
+      sessions: {
+        [`workbuddy:${SESSION}`]: {
+          client: 'workbuddy',
+          sessionId: SESSION,
+          outputTokens: 600,
+          timedDurationMs: 0,
+          timedTokens: 0,
+          timedOutputTokens: 0
+        }
+      }
+    },
+    month: { sessions: {} },
+    allTime: { sessions: {} }
+  };
+  applySessionMetadata(periods, home, {});
+
+  const session = periods.today.sessions[`workbuddy:${SESSION}`];
+  assert.equal(session.timedDurationMs, 60000);
+  assert.equal(session.timedOutputTokens, 600);
+  assert.equal(periods.today.timedDurationMs, 60000);
+  assert.equal(periods.today.timedTokens, 900000);
+  assert.equal(periods.today.timedOutputTokens, 600);
+});
+
 for (const cached of [false, true]) {
   test(`isolates equal CodeBuddy and WorkBuddy session IDs with ${cached ? 'cached' : 'missing'} WorkBuddy metadata`, () => {
     const home = makeHome('.workbuddy');

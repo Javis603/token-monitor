@@ -18,6 +18,20 @@ CodeBuddy has three data planes, and they are deliberately separate:
 | Session metadata (title, turn boundary) | collector enrichment, through `providers/codebuddy/sessionMetadata.js` | local transcripts, with an extension conversation-store fallback |
 | Session Detail (per-turn breakdown, prompts, tools) | shared streaming transcript parser and extension reader in `sessionDetail.js`, on demand | local transcripts, with an extension conversation-store fallback |
 
+## Turn throughput (tok/s)
+
+tokscale reports no `performance` block for this client, so its scan rows
+carry no duration and a session would never show a tok/s reading. The
+transcripts do record one `turn-metrics` line per turn with that turn's
+wall-clock `durationMs` and the `tokenDelta` it processed, and the shared
+metadata reader sums both into the same raw throughput counters every other
+client's entries carry (`timedDurationMs`, `timedTokens`). The gate stays the
+one every entry applies: the duration counts the session's output whole, so
+numerator and denominator describe the same turns. A scan that measured a
+session itself always wins; these sums only fill a gap, and a transcript with
+no `turn-metrics` record states nothing. Per-model throughput stays absent —
+a `turn-metrics` record names no model.
+
 ## Where the data lives
 
 The client keeps one transcript per session, in a directory named after the
