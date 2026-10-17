@@ -1,5 +1,47 @@
 'use strict';
 
+// Single source of truth for the main widget's BrowserView size limits, used
+// both by the explicit width/height inputs in Settings and by main.js's
+// WINDOW_LIMITS (restore + drag resize). The height floor (56) admits the
+// compact horizontal bar shown in issue #873 (e.g. 600x80, 800x100); the
+// renderer already lays that compact surface out at these heights.
+const WIDGET_SIZE_LIMITS = { minWidth: 240, minHeight: 56, maxWidth: 1600, maxHeight: 1400 };
+
+function normalizeWidgetDimensions(input, limits = WIDGET_SIZE_LIMITS) {
+  if (!input || typeof input !== 'object') return null;
+  const width = Math.round(Number(input.width));
+  const height = Math.round(Number(input.height));
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return {
+    width: Math.min(limits.maxWidth, Math.max(limits.minWidth, width)),
+    height: Math.min(limits.maxHeight, Math.max(limits.minHeight, height))
+  };
+}
+
+// Keeps the window's current top-left anchor when applying an explicit size,
+// then pulls it back inside the work area so growing the widget can never push
+// it off-screen.
+function resizeWidgetBounds(current, desired, workArea, limits = WIDGET_SIZE_LIMITS) {
+  const size = normalizeWidgetDimensions(desired, limits);
+  if (!size || !current || !workArea) return null;
+  const areaWidth = Number(workArea.width);
+  const areaHeight = Number(workArea.height);
+  if (!Number.isFinite(areaWidth) || !Number.isFinite(areaHeight) || areaWidth <= 0 || areaHeight <= 0) return null;
+  // The global limits can be wider/taller than a display's work area, so fit
+  // the requested size to the work area before anchoring; otherwise a large
+  // request would produce a window bigger than the screen it lives on.
+  const fitWidth = Math.min(size.width, areaWidth);
+  const fitHeight = Math.min(size.height, areaHeight);
+  const minX = Number(workArea.x);
+  const minY = Number(workArea.y);
+  const maxX = minX + areaWidth - fitWidth;
+  const maxY = minY + areaHeight - fitHeight;
+  const x = Math.min(Math.max(Number(current.x), minX), Math.max(minX, maxX));
+  const y = Math.min(Math.max(Number(current.y), minY), Math.max(minY, maxY));
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x: Math.round(x), y: Math.round(y), width: Math.round(fitWidth), height: Math.round(fitHeight) };
+}
+
 function isWindowMaximized(window) {
   return Boolean(
     window &&
@@ -113,11 +155,14 @@ function rebuildWindowBounds(window, state = {}) {
 }
 
 module.exports = {
+  WIDGET_SIZE_LIMITS,
   expandedBoundsForCollapse,
   isWindowMaximized,
   normalWindowBounds,
+  normalizeWidgetDimensions,
   persistWindowState,
   rebuildWindowBounds,
+  resizeWidgetBounds,
   restoreWindowMaximized,
   restoreWindowMaximizedForReveal,
   setWindowMaximizable,
