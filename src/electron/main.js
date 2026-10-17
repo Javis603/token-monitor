@@ -550,6 +550,10 @@ function normalizePeriodMonthMode(value) {
   return PERIOD_MONTH_MODES.has(value) ? value : 'month';
 }
 
+function normalizeProjectBreakdownMode(value) {
+  return value === 'model' ? 'model' : 'tool';
+}
+
 function normalizeHomeLimitAccountCount(value) {
   const count = Math.trunc(Number(value));
   if (!Number.isFinite(count)) return HOME_LIMIT_ACCOUNT_COUNT_DEFAULT;
@@ -644,6 +648,7 @@ function defaultSettings() {
     homeLimitDisplayMode: 'text',
     showHomeLimitProviderNames: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
+    projectBreakdownMode: 'tool',
     historyEnabled: true,
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
     sessionUsageArchiveEnabled: parseBoolean(process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true),
@@ -2631,6 +2636,7 @@ function readSettings() {
     if (saved.projectsEnabled !== undefined) {
       merged.projectsEnabled = parseBoolean(saved.projectsEnabled, true);
     }
+    merged.projectBreakdownMode = normalizeProjectBreakdownMode(merged.projectBreakdownMode);
     if (saved.sessionUsageArchiveEnabled !== undefined) {
       merged.sessionUsageArchiveEnabled = parseBoolean(saved.sessionUsageArchiveEnabled, true);
     }
@@ -7787,6 +7793,7 @@ app.whenReady().then(() => {
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
+      projectBreakdownMode: normalizeProjectBreakdownMode(patch.projectBreakdownMode ?? settings.projectBreakdownMode),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
       sessionUsageArchiveEnabled: parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true),
       wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, true),

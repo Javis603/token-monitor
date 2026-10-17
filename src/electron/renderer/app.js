@@ -3163,8 +3163,12 @@ function projectRowsForPeriod(period) {
     clientLabels,
     clientColors,
     stableColor,
+    shareBy: state.settings?.projectBreakdownMode,
+    modelColor,
     fallbackColors: fallbackModelColors,
     unknownClientLabel: t('projects.unknownTool'),
+    unknownModelLabel: t('projects.unknownModel'),
+    allowSessionModelAttribution: !projectRowsApi.projectBreakdownIncomplete(state.stats, state.period),
     nativeProjects: state.stats?.nativeProjects?.[state.period] || {},
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
@@ -10222,6 +10226,38 @@ function renderProjectSettingsList() {
   text.textContent = t('settings.views.enableProjects');
   label.append(input, text);
   wrap.append(label);
+  const modeRow = document.createElement('div');
+  modeRow.className = 'settings-item';
+  const modeText = document.createElement('span');
+  modeText.className = 'settings-item-text';
+  const modeTitle = document.createElement('span');
+  modeTitle.id = 'projectBreakdownModeLabel';
+  modeTitle.className = 'settings-item-title';
+  modeTitle.textContent = t('settings.views.projectBreakdownMode');
+  modeText.append(modeTitle);
+  const modeOptions = document.createElement('div');
+  modeOptions.className = 'inline-options';
+  modeOptions.setAttribute('role', 'radiogroup');
+  modeOptions.setAttribute('aria-labelledby', modeTitle.id);
+  const selectedMode = state.settings?.projectBreakdownMode === 'model' ? 'model' : 'tool';
+  for (const mode of ['tool', 'model']) {
+    const option = document.createElement('label');
+    option.className = 'inline-option';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'projectBreakdownMode';
+    radio.value = mode;
+    radio.checked = selectedMode === mode;
+    const optionText = document.createElement('span');
+    optionText.textContent = t(mode === 'model' ? 'settings.views.projectBreakdownModels' : 'settings.views.projectBreakdownTools');
+    option.append(radio, optionText);
+    radio.addEventListener('change', () => {
+      if (radio.checked) void saveSettings({ projectBreakdownMode: mode }).catch(() => {});
+    });
+    modeOptions.append(option);
+  }
+  modeRow.append(modeText, modeOptions);
+  wrap.append(modeRow);
   input.addEventListener('change', async () => {
     await setProjectsEnabled(input.checked);
     await refreshStats({ force: true });

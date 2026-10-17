@@ -369,6 +369,21 @@ function emptyProject(label = '') {
   };
 }
 
+function addProjectModels(project, models, tokenLimit) {
+  if (!models || typeof models !== 'object' || Array.isArray(models)) return;
+  let remaining = Math.max(0, Math.round(asNumber(tokenLimit)));
+  const entries = Object.entries(models).sort(([left], [right]) => left.localeCompare(right));
+  for (const [rawModel, value] of entries) {
+    const model = normalizeModelName(rawModel);
+    if (!model || remaining <= 0) continue;
+    const tokens = Math.min(remaining, Math.max(0, Math.round(asNumber(value))));
+    if (tokens <= 0) continue;
+    const target = project.models ||= Object.create(null);
+    target[model] = (target[model] || 0) + tokens;
+    remaining -= tokens;
+  }
+}
+
 // costUsd remains the known subtotal. Missing prices are explicit token counts,
 // never inferred from a zero cost (which can be a valid rate).
 function addUnpricedTokens(target, source, maximum = Infinity) {
@@ -432,9 +447,11 @@ function addProjectInto(projects, rawKey, source) {
   if (!hasOwn(projects, key)) projects[key] = emptyProject(label || rawKey);
   const target = projects[key];
   target.label = deterministicProjectLabel(target.label, label || rawKey);
-  target.tokens += Math.max(0, Math.round(asNumber(source.tokens ?? source.totalTokens)));
+  const tokens = Math.max(0, Math.round(asNumber(source.tokens ?? source.totalTokens)));
+  target.tokens += tokens;
   target.costUsd += asNumber(source.costUsd ?? source.cost);
-  addUnpricedTokens(target, source, Math.max(0, asNumber(source.tokens ?? source.totalTokens)));
+  addUnpricedTokens(target, source, tokens);
+  addProjectModels(target, source.models, tokens);
   for (const [client, tokens] of Object.entries(source.clients || {})) {
     const clientKey = normalizeClientName(client);
     if (!clientKey) continue;
@@ -464,6 +481,7 @@ function projectRollupFromSessions(sessions) {
     project.tokens += tokens;
     project.costUsd += asNumber(session.costUsd);
     addUnpricedTokens(project, session, tokens);
+    addProjectModels(project, session.models, tokens);
     const client = normalizeClientName(session.client);
     if (client && tokens > 0) {
       project.clients[client] = (hasOwn(project.clients, client) ? project.clients[client] : 0) + tokens;
