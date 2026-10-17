@@ -997,8 +997,10 @@ test('a today bucket written from a stale window does not replay into today', ()
 
   const { archive } = updateSessionUsageArchive({ version: 1, sessions: {} }, stale, captureAt);
   const entry = archive.sessions['claude:s-stale'];
-  // The bucket still claims the capture's day — only its replay is refused.
+  // The bucket still claims the capture's day, and the window records the
+  // frame that day was cut in — only its replay is refused.
   assert.equal(entry.periodWindows.today.day, '2026-10-15');
+  assert.equal(entry.periodWindows.today.utcOffsetMinutes, -captureAt.getTimezoneOffset());
   assert.equal(entry.periods.today.totalTokens, 1000);
 
   // A later capture that no longer sees the session must not add its tokens
@@ -1066,6 +1068,64 @@ test('a future-dated activity stamp still lands on the capture day', () => {
   assert.equal(nextDay.sessions['claude:s-ahead'].periods.today, undefined);
 });
 
+test('an activity stamp that only looks earlier in another frame is retained', () => {
+  // The counter-case that exercises the frame comparison: the window was cut
+  // at UTC+8, where the activity falls on the day the bucket claims, but read
+  // at an offset behind UTC+8 the same instant is the previous day. The
+  // summary carries no row for the session, so the replay decision is the
+  // only thing between this bucket and today.
+  const now = localDate(2026, 10, 15, 12, 0);
+  const archive = {
+    version: 1,
+    sessions: {
+      'claude:s-frame': {
+        client: 'claude',
+        sessionId: 's-frame',
+        capturedAt: '2026-10-15T03:25:00.000Z',
+        day: '2026-10-15',
+        month: '2026-10',
+        periodWindows: {
+          today: { capturedAt: '2026-10-15T03:25:00.000Z', day: '2026-10-15', utcOffsetMinutes: 480 }
+        },
+        periods: {
+          today: archiveSession('claude', 's-frame', 900, '2026-10-14T16:30:00.000Z')
+        }
+      }
+    }
+  };
+
+  const visible = applySessionUsageArchive(emptyDeviceSummary(), archive, { now });
+
+  // 00:30 on the 15th at UTC+8 is the day the bucket claims, so it replays.
+  assert.equal(visible.today.sessions['claude:s-frame'].totalTokens, 900);
+});
+
+test('a window with no recorded frame is ambiguous and retained', () => {
+  // Rows written before the offset was recorded carry no frame evidence, so
+  // the activity comparison cannot be made safely and the bucket replays
+  // exactly as it did before.
+  const now = localDate(2026, 10, 15, 12, 0);
+  const archive = {
+    version: 1,
+    sessions: {
+      'claude:s-legacy': {
+        client: 'claude',
+        sessionId: 's-legacy',
+        capturedAt: localIso(2026, 10, 15, 11, 0),
+        day: '2026-10-15',
+        month: '2026-10',
+        periodWindows: { today: { capturedAt: localIso(2026, 10, 15, 11, 0), day: '2026-10-15' } },
+        periods: {
+          today: archiveSession('claude', 's-legacy', 300, localIso(2026, 10, 14, 20, 0))
+        }
+      }
+    }
+  };
+
+  const visible = applySessionUsageArchive(emptyDeviceSummary(), archive, { now });
+  assert.equal(visible.today.sessions['claude:s-legacy'].totalTokens, 300);
+});
+
 test('a today bucket without an activity stamp is retained as ambiguous', () => {
   // Legacy rows carry no `lastUsedAt`; they keep replaying exactly as before.
   const now = localDate(2026, 10, 15, 12, 0);
@@ -1080,7 +1140,13 @@ test('a today bucket without an activity stamp is retained as ambiguous', () => 
         capturedAt: localIso(2026, 10, 15, 11, 0),
         day: '2026-10-15',
         month: '2026-10',
-        periodWindows: { today: { capturedAt: localIso(2026, 10, 15, 11, 0), day: '2026-10-15' } },
+        periodWindows: {
+          today: {
+            capturedAt: localIso(2026, 10, 15, 11, 0),
+            day: '2026-10-15',
+            utcOffsetMinutes: -now.getTimezoneOffset()
+          }
+        },
         periods: { today: legacySession }
       }
     }

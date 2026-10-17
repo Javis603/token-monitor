@@ -107,6 +107,7 @@ function normalizeSessionUsageArchive(value) {
       };
       if (periodName === 'today') entry.periodWindows[periodName].day = String(rawWindow.day || rawEntry.day || localDay(rawEntry.capturedAt));
       if (periodName === 'month') entry.periodWindows[periodName].month = String(rawWindow.month || rawEntry.month || localMonth(rawEntry.capturedAt));
+      if (rawWindow.utcOffsetMinutes !== undefined) entry.periodWindows[periodName].utcOffsetMinutes = rawWindow.utcOffsetMinutes;
     }
 
     if (!entry.client || !entry.sessionId || Object.keys(entry.periods).length === 0) continue;
@@ -263,7 +264,7 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
       entry.month = month;
       entry.periods[periodName] = nextSession;
       entry.periodWindows = entry.periodWindows || {};
-      entry.periodWindows[periodName] = { capturedAt: capturedAtIso };
+      entry.periodWindows[periodName] = { capturedAt: capturedAtIso, utcOffsetMinutes: -captureDate.getTimezoneOffset() };
       if (periodName === 'today') entry.periodWindows[periodName].day = day;
       if (periodName === 'month') entry.periodWindows[periodName].month = month;
       archive.sessions[archiveKey] = entry;
@@ -401,32 +402,38 @@ function isLiveUnderSplitId(period, entry, session) {
   return Boolean(period?.sessions?.[`${split}:${sessionId}`]);
 }
 
-// The day a bucket's own activity falls on, or '' when the bucket carries no
-// usable stamp. The stamp is parsed strictly because `toDate` substitutes
-// "now" for a missing value, which would silently turn an unstamped archived
-// row into today's.
-function sessionActivityDay(session) {
-  const raw = session?.lastUsedAt;
-  if (!raw) return '';
-  const date = raw instanceof Date ? raw : new Date(raw);
-  return Number.isNaN(date.getTime()) ? '' : localDay(date);
+// The calendar day an instant falls on at a fixed offset from UTC, stated in
+// minutes ahead of UTC (`utcOffsetMinutes`, so UTC+8 is 480). A period window's
+// day is cut in the frame the capture ran at, so a bucket's own activity has to
+// be read in that same frame before the two days are compared.
+function dayAtOffset(timestamp, utcOffsetMinutes) {
+  const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Date(date.getTime() + utcOffsetMinutes * 60000).toISOString().slice(0, 10);
 }
 
 function shouldApplyPeriod(periodName, entry, session, now) {
   const window = entry?.periodWindows?.[periodName] || {};
   if (periodName === 'today') {
-    if ((window.day || entry.day) !== localDay(now)) return false;
-    // A `today` bucket whose own activity is from an earlier day was written
-    // from a summary window that did not match its contents — collection
-    // stalled and the capture read the previous day's rows
-    // (token-monitor#986). Replaying it adds those tokens to today on every
-    // later capture, and the max-wins merge locks the figure in. A session the
-    // scanner still reports today never reaches this check: the live row wins
-    // before the archive is consulted, so a valid current-period observation
-    // with older activity metadata is not moved. A bucket with no activity
-    // stamp of its own is ambiguous and is retained as before.
-    const activityDay = sessionActivityDay(session);
-    return !activityDay || activityDay >= localDay(now);
+    const claimedDay = window.day || entry.day;
+    if (claimedDay !== localDay(now)) return false;
+    // A `today` bucket whose own activity falls on an earlier day in the
+    // frame that wrote the window was captured from a summary window that
+    // did not match its contents — collection stalled and the capture read
+    // the previous day's rows (token-monitor#986). Replaying it adds those
+    // tokens to today on every later capture, and the max-wins merge in the
+    // daily history locks the inflated figure in. The frame is what makes
+    // the comparison safe: an activity stamp only looks earlier when it is
+    // read at an offset the capture did not run at, so the day is evaluated
+    // in the capture's own frame. A window written before the offset was
+    // recorded carries no frame evidence, and a bucket with no activity
+    // stamp of its own proves nothing either — both are ambiguous and are
+    // retained as before.
+    const offset = window.utcOffsetMinutes;
+    if (Number.isFinite(offset) && session?.lastUsedAt) {
+      if (dayAtOffset(session.lastUsedAt, offset) < claimedDay) return false;
+    }
+    return true;
   }
   if (periodName === 'month') return (window.month || entry.month) === localMonth(now);
   return periodName === 'allTime';
