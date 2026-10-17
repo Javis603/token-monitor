@@ -34,8 +34,7 @@ function mapValues(value, project) {
     const projected = project(row);
     if (result !== value) { result[key] = projected; continue; }
     if (projected === row) continue;
-    result = {};
-    for (let seen = 0; seen < i; seen += 1) result[keys[seen]] = value[keys[seen]];
+    result = { ...value };
     result[key] = projected;
   }
   return result;
