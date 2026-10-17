@@ -441,7 +441,7 @@ const { rasterizeMask } = require('./edgeDock/mask');
 const { applyVibrancyMask } = require('./edgeDock/macVibrancyMask');
 const { performMacHaptic } = require('./edgeDock/macHaptics');
 const { primaryButtonDown } = require('./edgeDock/pointerButtons');
-const { setMoveToActiveSpace } = require('./macosSpaceBehavior');
+const { preventAppActivation, setMoveToActiveSpace } = require('./macosSpaceBehavior');
 const {
   WINDOWS_BACKDROP_ACCENT,
   normalizeWindowsBackdropMode
@@ -5620,6 +5620,7 @@ function ensureNotchController() {
     onToggleRateMode: toggleDockRateMode,
     canRefreshLimits: () => canRefreshEdgeDockStats(),
     onRefreshLimits: () => refreshStatsFromEdgeDock(),
+    installNonActivatingInput: (win) => preventAppActivation(win),
     primaryButtonDown: () => primaryButtonDown(process.platform),
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
     isFullScreen: createFullScreenProbe({ platform: process.platform, screen, logger: (message) => console.log(message) }),
@@ -5999,7 +6000,8 @@ function ensureEdgeDockController() {
       return applyVibrancyMask(win, png, width, height);
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
-    installNonActivatingInput: (win) => installWindowsNonActivatingInput(win, { logger: (message) => console.log(message) }),
+    installNonActivatingInput: (win) => process.platform === 'darwin' ? preventAppActivation(win)
+      : installWindowsNonActivatingInput(win, { logger: (message) => console.log(message) }),
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
     isFullScreen: createFullScreenProbe({ platform: process.platform, screen, logger: (message) => console.log(message) }),
     // The dock card's Switch button runs the same swap the Limits view does,

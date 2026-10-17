@@ -59,7 +59,7 @@ function fixture(t, settings = {}, options = {}) {
   screen.getCursorScreenPoint = () => screen.point;
   const preferences = { notchEnabled: true, edgeDockEnabled: false, ...settings };
   const deps = { BrowserWindow: RecordingWindow, ipcMain, screen, rendererDir: '/renderer', preloadPath: '/preload', getSettings: () => preferences, nativeGlass: options.nativeGlass || (() => false), liquidGlass: options.liquidGlass, createGlass: options.createGlass, prefersReducedMotion: () => options.reducedMotion !== false, platform: options.platform || 'darwin' };
-  const controller = createNotchController({ ...deps, readScreens: options.readScreens || (() => ({ screens: [native], mainDisplayId: 1 })), onSwitchCodexAccount: (id) => ({ ok: true, id }), onToggleRateMode: options.onToggleRateMode, onCapabilitiesChanged: options.onCapabilitiesChanged, readMenuWindows: options.readMenuWindows || (() => null), primaryButtonDown: options.primaryButtonDown || (() => false), isFullScreen: options.isFullScreen || (() => false), logger: options.logger, performHaptic: options.performHaptic, canRefreshLimits: options.canRefreshLimits, onRefreshLimits: options.onRefreshLimits });
+  const controller = createNotchController({ ...deps, readScreens: options.readScreens || (() => ({ screens: [native], mainDisplayId: 1 })), onSwitchCodexAccount: (id) => ({ ok: true, id }), onToggleRateMode: options.onToggleRateMode, onCapabilitiesChanged: options.onCapabilitiesChanged, installNonActivatingInput: options.installNonActivatingInput, readMenuWindows: options.readMenuWindows || (() => null), primaryButtonDown: options.primaryButtonDown || (() => false), isFullScreen: options.isFullScreen || (() => false), logger: options.logger, performHaptic: options.performHaptic, canRefreshLimits: options.canRefreshLimits, onRefreshLimits: options.onRefreshLimits });
   t.after(() => controller.dispose());
   const setData = controller.setData;
   controller.setData = (value) => {
@@ -2863,4 +2863,15 @@ test('Notch option availability follows the current shape without repeated notif
   assert.deepEqual(f.controller.getCapabilities(), { rings: true, menuAvoidance: false });
   assert.equal(updates.length, 2);
   assert.equal(f.preferences.notchRunningIndicatorEnabled, true);
+});
+
+test('both notch windows keep clicks from activating the app, including rebuilt windows', (t) => {
+  const installed = [];
+  const f = fixture(t, {}, { installNonActivatingInput: (win) => installed.push(win) });
+  assert.deepEqual(installed, f.windows);
+  assert.equal(installed.length, 2);
+  f.preferences.notchEnabled = false; f.controller.sync();
+  f.preferences.notchEnabled = true; f.controller.sync();
+  assert.deepEqual(installed, f.windows);
+  assert.equal(installed.filter((win) => !win.destroyed).length, 2);
 });

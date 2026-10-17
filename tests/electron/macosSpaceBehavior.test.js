@@ -8,6 +8,7 @@ const test = require('node:test');
 const {
   NS_WINDOW_COLLECTION_BEHAVIOR_MOVE_TO_ACTIVE_SPACE,
   createMacSpaceApi,
+  preventAppActivation,
   setMoveToActiveSpace
 } = require('../../src/electron/macosSpaceBehavior');
 
@@ -58,6 +59,43 @@ test('native bridge is a no-op away from macOS', () => {
     }
   };
   assert.equal(setMoveToActiveSpace(win, true, { platform: 'linux' }), false);
+});
+
+function fakeActivationKoffi(responds) {
+  const selectors = new Map([['window', 11n], ['respondsToSelector:', 21n], ['_setPreventsActivation:', 22n]]);
+  const calls = [];
+  return {
+    calls,
+    load() {
+      return {
+        func(name, returnType, argumentTypes) {
+          if (name === 'sel_registerName') return (selector) => selectors.get(selector) ?? 0n;
+          if (name !== 'objc_msgSend') throw new Error(`Unexpected native function: ${name}`);
+          if (returnType === 'uintptr_t') return (receiver, selector) => selector === 11n ? 101n : 0n;
+          if (returnType === 'bool') return (receiver, selector, query) => { calls.push(['responds', receiver, query]); return responds; };
+          if (argumentTypes[2] === 'bool') return (receiver, selector, value) => calls.push(['set', receiver, selector, value]);
+          return () => {};
+        }
+      };
+    }
+  };
+}
+
+test('AppKit bridge sets the window activation guard only where AppKit has it', () => {
+  const supported = fakeActivationKoffi(true);
+  assert.equal(createMacSpaceApi(supported).setPreventsActivation(100n), true);
+  assert.deepEqual(supported.calls, [['responds', 101n, 22n], ['set', 101n, 22n, true]]);
+
+  const missing = fakeActivationKoffi(false);
+  assert.equal(createMacSpaceApi(missing).setPreventsActivation(100n), false);
+  assert.deepEqual(missing.calls, [['responds', 101n, 22n]]);
+});
+
+test('activation guard is a no-op away from macOS and never throws', () => {
+  const win = { getNativeWindowHandle() { throw new Error('must not read a native handle'); } };
+  assert.equal(preventAppActivation(win, { platform: 'win32' }), false);
+  assert.equal(preventAppActivation(win, { platform: 'darwin', api: { setPreventsActivation: () => true } }), false);
+  assert.equal(preventAppActivation({ isDestroyed: () => true }, { platform: 'darwin' }), false);
 });
 
 test('main process reapplies the complete Space policy before showing either mode', () => {

@@ -221,11 +221,12 @@ test('Windows Edge Dock installs non-activating input on every surface, includin
   assert.equal(installed.filter((win) => !win.destroyed).length, 3);
 });
 
-test('macOS Edge Dock keeps its native panel input without installing Windows subclasses', (t) => {
+test('macOS Edge Dock keeps clicks from activating the app on every surface', (t) => {
   const installed = [];
   const fixture = createFixture({ platform: 'darwin', installNonActivatingInput: (win) => installed.push(win) });
   t.after(() => fixture.controller.stop());
-  assert.deepEqual(installed, []);
+  assert.deepEqual(installed, FakeBrowserWindow.instances);
+  assert.equal(installed.length, 3);
 });
 
 test('Windows Edge Dock creates toolbar windows and reasserts taskbar exclusion and topmost after showing', (t) => {

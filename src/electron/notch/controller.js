@@ -28,7 +28,7 @@ function normalizeNotchDetailSide(value) {
 function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   rendererDir, preloadPath, platform = process.platform, readScreens = readMacNotchScreens, readMenuWindows = readMacMenuWindows,
   nativeGlass = () => false, liquidGlass = () => null, createGlass, applyShapeMask,
-  onSwitchCodexAccount, onOpenResetForecastSource, onToggleRateMode, onCapabilitiesChanged = () => {}, primaryButtonDown = () => null, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
+  onSwitchCodexAccount, onOpenResetForecastSource, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, primaryButtonDown = () => null, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
   logger = () => {} }) {
   const surfaces = ['notch', 'bubble'];
   const windows = {}, windowIds = {}, ready = {}, shapes = {}, glass = {}, nativeMaterial = {}, lastSent = {};
@@ -544,6 +544,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
           catch (error) { logger(`[top-notch] glass unavailable: ${error.message}`); }
         }
         win.setAlwaysOnTop(true, 'status');
+        installNonActivatingInput(win);
         win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
         win.setHiddenInMissionControl?.(true); win.setOpacity(0); ignoreMouse(s, true);
         win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
