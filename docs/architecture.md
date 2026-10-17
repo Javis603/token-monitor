@@ -61,6 +61,8 @@ The collector owns one `selfSyncThrottle.js` instance shared by provider self-sy
 
 `SIGTERM` requests termination; it does not establish exit. Aborts, timeouts and pipe failures hold the replacement barrier until `close`, escalating to `SIGKILL` when needed. A bounded final grace reports `subprocess-termination-unconfirmed` instead of deadlocking; generation fences still reject late output.
 
+tokscale scans and Antigravity syncs are lowered to below-normal priority right after spawn (`subprocessPriority.js`). tokscale uses every logical core, and at normal priority a scan can starve foreground input on Windows. A scan still running after 10 seconds returns to the priority it started with, because Windows can hold a below-normal scan past the command timeout while normal-priority work keeps every core busy; POSIX refuses that raise for unprivileged processes, and nice levels there share the CPU proportionally. A scan that inherits below-normal or lower priority from the app is left alone. Both changes are best effort and never fail the scan.
+
 Failed usage reconfiguration restores the last-known-good runtime and retries the latest desired settings with bounded backoff. Exhaustion is reported; a newer setting starts a fresh retry budget.
 
 ### Usage worker
