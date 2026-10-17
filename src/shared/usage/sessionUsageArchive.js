@@ -401,9 +401,33 @@ function isLiveUnderSplitId(period, entry, session) {
   return Boolean(period?.sessions?.[`${split}:${sessionId}`]);
 }
 
-function shouldApplyPeriod(periodName, entry, now) {
+// The day a bucket's own activity falls on, or '' when the bucket carries no
+// usable stamp. The stamp is parsed strictly because `toDate` substitutes
+// "now" for a missing value, which would silently turn an unstamped archived
+// row into today's.
+function sessionActivityDay(session) {
+  const raw = session?.lastUsedAt;
+  if (!raw) return '';
+  const date = raw instanceof Date ? raw : new Date(raw);
+  return Number.isNaN(date.getTime()) ? '' : localDay(date);
+}
+
+function shouldApplyPeriod(periodName, entry, session, now) {
   const window = entry?.periodWindows?.[periodName] || {};
-  if (periodName === 'today') return (window.day || entry.day) === localDay(now);
+  if (periodName === 'today') {
+    if ((window.day || entry.day) !== localDay(now)) return false;
+    // A `today` bucket whose own activity is from an earlier day was written
+    // from a summary window that did not match its contents — collection
+    // stalled and the capture read the previous day's rows
+    // (token-monitor#986). Replaying it adds those tokens to today on every
+    // later capture, and the max-wins merge locks the figure in. A session the
+    // scanner still reports today never reaches this check: the live row wins
+    // before the archive is consulted, so a valid current-period observation
+    // with older activity metadata is not moved. A bucket with no activity
+    // stamp of its own is ambiguous and is retained as before.
+    const activityDay = sessionActivityDay(session);
+    return !activityDay || activityDay >= localDay(now);
+  }
   if (periodName === 'month') return (window.month || entry.month) === localMonth(now);
   return periodName === 'allTime';
 }
@@ -439,7 +463,7 @@ function applySessionUsageArchive(summary, archive, options = {}) {
   for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
     for (const periodName of PERIODS) {
       const session = entry.periods?.[periodName];
-      if (!session || !shouldApplyPeriod(periodName, entry, now)) continue;
+      if (!session || !shouldApplyPeriod(periodName, entry, session, now)) continue;
       // Same rule as the client archive: never create a period the summary does
       // not have. A progressive preview is marked partial by the periods it
       // omits, and a partial that looks complete loses the attribution fields
