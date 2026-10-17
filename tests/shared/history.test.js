@@ -45,6 +45,7 @@ test('sumTokens adds disjoint Tokscale reasoning only for opted-in clients', () 
   assert.equal(sumTokens(b, 'zcode'), 1134);
   assert.equal(sumTokens(b, 'opencode'), 1134);
   assert.equal(sumTokens(b, 'muse'), 1134);
+  assert.equal(sumTokens(b, 'grok'), 1134);
   assert.equal(sumTokens(b, 'hermes'), 1134);
   assert.equal(sumTokens(b, 'claude'), 135);
   assert.equal(sumTokens({}), 0);
@@ -58,6 +59,7 @@ test('sumOutputTokens folds disjoint reasoning into output only for opted-in cli
   for (const client of ['antigravity', 'antigravity-cli', 'antigravity-extension']) assert.equal(sumOutputTokens(b, client), 1019);
   assert.equal(sumOutputTokens(b, 'opencode'), 1019);
   assert.equal(sumOutputTokens(b, 'muse'), 1019);
+  assert.equal(sumOutputTokens(b, 'grok'), 1019);
   assert.equal(sumOutputTokens(b, 'hermes'), 1019);
   assert.equal(sumOutputTokens(b, 'claude'), 20);
 });
