@@ -198,9 +198,12 @@ test('compact Antigravity retains the two tightest groups when more than two are
     { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 70 },
     { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 5 },
     { kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: 20 },
-    { kind: 'session', label: 'Future Group 5-hour', remainingPercent: 10 }
+    { kind: 'weekly', label: 'Gemini 4 Argon weekly', remainingPercent: 10 }
   ];
-  assert.deepEqual(limitProviderCompactWindows('antigravity', windows), [windows[1], windows[3]]);
+  const selected = limitProviderCompactWindows('antigravity', windows);
+  assert.deepEqual(selected, [windows[1], windows[3]]);
+  assert.equal(limitProviderCompactWindowLabel('antigravity', selected[1], selected), 'Gemini 4 Argon');
+  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', selected[1], selected), 'Weekly');
 });
 
 test('compact Antigravity windows prefer 5-hour on ties and preserve legacy pools', () => {
@@ -1172,6 +1175,7 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
   const grouped = vm.runInNewContext(`${quotaGroups}\nantigravityQuotaGroups({ windows: [
     { kind: 'session', label: 'Gemini 5-hour' },
     { kind: 'weekly', label: 'Gemini weekly' },
+    { kind: 'weekly', label: 'Gemini 4 Argon weekly' },
     { kind: 'weekly', label: 'Future Group weekly' }
   ] });`, context);
   assert.deepEqual(JSON.parse(JSON.stringify(grouped)), [
@@ -1180,6 +1184,12 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
       windows: [
         { groupLabel: 'Gemini', windowLabel: '5-hour', window: { kind: 'session', label: 'Gemini 5-hour' } },
         { groupLabel: 'Gemini', windowLabel: 'Weekly', window: { kind: 'weekly', label: 'Gemini weekly' } }
+      ]
+    },
+    {
+      label: 'Gemini 4 Argon',
+      windows: [
+        { groupLabel: 'Gemini 4 Argon', windowLabel: 'Weekly', window: { kind: 'weekly', label: 'Gemini 4 Argon weekly' } }
       ]
     },
     {
