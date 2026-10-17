@@ -40,6 +40,18 @@ function isImeClass(className) {
   return typeof className === 'string' && IME_CLASS.test(className.trim());
 }
 
+// GetClassNameW reports a count of UTF-16 *characters*; Buffer.toString wants its
+// end offset in *bytes*. Reading the count straight in as the offset decodes
+// roughly half the name and truncates the last character into a replacement
+// glyph, so on Windows the three-character class "IME" came out as "I" and no
+// candidate window ever matched IME_CLASS — the guard this file exists for was
+// silently inert. Decode the byte length the count actually implies, and strip
+// the terminator the call leaves in the buffer.
+function decodeClassName(buffer, written) {
+  if (!Number.isInteger(written) || written <= 0) return '';
+  return buffer.toString('utf16le', 0, Math.min(written * 2, buffer.length)).replace(/\0[\s\S]*$/, '').trim();
+}
+
 // Electron hands back the HWND as a raw little-endian buffer, not a number.
 // A BigInt here would never === the plain number koffi returns for the same
 // handle, which makes the whole "is the dock still above it" walk compare
@@ -93,11 +105,16 @@ function createZOrderProbe(platform = process.platform) {
         guard += 1;
         let name = '';
         try {
-          const written = getClassName(hwnd, classBuffer, 256);
-          if (written > 0) name = classBuffer.toString('utf16le', 0, written);
+          name = decodeClassName(classBuffer, getClassName(hwnd, classBuffer, 256));
         } catch { name = ''; }
         entries.push({
-          handle: hwnd,
+          // koffi 3.1.5 hands back `void *` as a BigInt, while nativeHandleOf
+          // returns a plain number. Comparing those with === finds nothing ever,
+          // which reads as "the dock is not on the stack" and raises on every
+          // tick. Normalise to the number the other side produces; window handles
+          // are far below 2^53, and anything that somehow is not is left out
+          // rather than silently compared as an approximate value.
+          handle: (typeof hwnd === 'bigint' ? Number(hwnd) : hwnd),
           visible: Boolean(isVisible(hwnd)),
           topmost: (getExStyle(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) !== 0,
           ime: isImeClass(name)
@@ -224,6 +241,7 @@ function createEdgeDockZOrderKeeper(options = {}) {
 module.exports = {
   createEdgeDockZOrderKeeper,
   createZOrderProbe,
+  decodeClassName,
   isImeClass,
   nativeHandleOf
 };

@@ -5,6 +5,8 @@ const assert = require('node:assert');
 
 const {
   createEdgeDockZOrderKeeper,
+  createZOrderProbe,
+  decodeClassName,
   isImeClass,
   nativeHandleOf
 } = require('../../src/electron/edgeDock/zOrderKeeper');
@@ -255,4 +257,47 @@ test('isImeClass covers the class names Windows actually uses for candidate wind
     assert.equal(isImeClass(name), false, `${name} is not`);
   }
   assert.equal(isImeClass(undefined), false);
+});
+
+// Both of these came out of a real Windows run rather than a reading of the
+// docs, and neither was caught by the tests above — those drove the keeper with a
+// hand-written stack whose handles were plain numbers and whose class names were
+// already correct. The fake was kinder than the platform.
+
+test('a class name is decoded by byte length, not by the character count GetClassNameW returns', () => {
+  // Measured on Windows 11: GetClassNameW returns 3 for the class "IME".
+  for (const name of ['IME', 'Default IME', 'MSCTFIME UI', 'TOOLITIPS2']) {
+    const buffer = Buffer.alloc(512);
+    Buffer.from(`${name}\0`, 'utf16le').copy(buffer);
+    const decoded = decodeClassName(buffer, name.length);
+    assert.equal(decoded, name, `"${name}" must survive the round trip intact`);
+    assert.equal(isImeClass(decoded), true,
+      `if the name comes back truncated to "${decoded}" the IME guard silently stops matching`);
+  }
+  // The buffer is left null-terminated by the call, and the count does not
+  // include the terminator — a name can also be shorter than the buffer.
+  const padded = Buffer.alloc(512);
+  Buffer.from('Chrome_WidgetWin_1\0', 'utf16le').copy(padded);
+  assert.equal(decodeClassName(padded, 'Chrome_WidgetWin_1'.length), 'Chrome_WidgetWin_1');
+  assert.equal(decodeClassName(padded, 0), '');
+  assert.equal(decodeClassName(padded, -1), '');
+});
+
+test('the probe normalises koffi\'s BigInt handles into the number nativeHandleOf produces', async (t) => {
+  if (process.platform !== 'win32') { t.skip('the platform hands out BigInt handles on Windows only'); return; }
+  const probe = createZOrderProbe('win32');
+  let entries;
+  try { entries = await probe(); } catch (error) { t.skip(`probe unavailable: ${error.message}`); return; }
+  if (!Array.isArray(entries) || !entries.length) { t.skip('no desktop stack to read here'); return; }
+
+  // koffi 3.1.5 returns `void *` as a BigInt. If that reaches the comparison
+  // unchanged it never equals the number nativeHandleOf returns, so the dock
+  // entry is never found and the keeper concludes it was overtaken on every tick.
+  assert.ok(entries.every((entry) => typeof entry.handle === 'number'),
+    `handles must be numbers, saw ${[...new Set(entries.map((e) => typeof e.handle))].join(', ')}`);
+
+  // And whatever is on the stack must be classifiable at all.
+  const probeWindow = entries.find((e) => !e.ime);
+  assert.ok(probeWindow !== undefined, 'the stack had at least one non-IME window');
+  assert.equal(typeof probeWindow.topmost, 'boolean');
 });
