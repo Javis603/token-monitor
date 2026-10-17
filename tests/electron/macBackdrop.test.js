@@ -78,3 +78,13 @@ test('the edge dock style is persisted, feeds only the dock glass, and has a loc
     assert.equal((i18n.match(new RegExp(`'settings\\.edgeDock\\.${key}':`, 'g')) || []).length, 6, key);
   }
 });
+
+test('the notch style stores Frosted Glass as vibrancy and offers Liquid Glass on the widget selector terms', () => {
+  assert.match(html, /<select id="notchStyleInput">[^]*?<option value="vibrancy"[^]*?<option value="liquid-glass"/);
+  assert.doesNotMatch(html, /<select id="notchStyleInput">[^]*?<option value="default"/);
+  assert.match(app, /function syncNotchStyleInput\(settings = state\.settings\) \{[^]*?macBackdropApi\.appearanceState\(settings, \{\s+liquidGlassSupported: nativeMaterialState\.liquidGlassSupported/);
+  assert.match(app, /liquidGlass\.hidden = liquidGlass\.disabled = !showBackdropControl/);
+  assert.match(app, /style === 'liquid-glass' && !showBackdropControl \? 'vibrancy' : style/);
+  // Material pushes re-run the appearance pass, so a late Liquid Glass answer updates the select too.
+  assert.match(app, /edgeDockMacBackdropRow\?\.classList\.toggle\('hidden', !macGlass\.showBackdropControl\);\s+syncNotchStyleInput\(settings\);/);
+});

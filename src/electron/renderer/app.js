@@ -7678,6 +7678,7 @@ function applyAppearanceSettings(settings) {
   els.macBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
   // Same terms as the widget's own selector; material pushes land here too.
   els.edgeDockMacBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
+  syncNotchStyleInput(settings);
   if (els.macBackdropInput) els.macBackdropInput.value = macGlass.backdropMode;
   applyReduceMotionPreference(settings?.reduceMotion);
   applyFontSettings(settings);
@@ -13267,6 +13268,19 @@ function syncDockSizeControls(surface) {
   }
 }
 
+// Liquid Glass is offered on the same terms as the widget's own selector. A
+// saved choice the system cannot draw shows as the Frosted Glass it falls back to.
+function syncNotchStyleInput(settings = state.settings) {
+  if (!els.notchStyleInput) return;
+  const { showBackdropControl } = macBackdropApi.appearanceState(settings, {
+    liquidGlassSupported: nativeMaterialState.liquidGlassSupported
+  });
+  const liquidGlass = els.notchStyleInput.querySelector('option[value="liquid-glass"]');
+  if (liquidGlass) liquidGlass.hidden = liquidGlass.disabled = !showBackdropControl;
+  const style = settings?.notchStyle || 'black';
+  els.notchStyleInput.value = style === 'liquid-glass' && !showBackdropControl ? 'vibrancy' : style;
+}
+
 function syncNotchCapabilities() {
   els.notchRunningIndicatorRow?.classList.toggle('hidden', state.notchCapabilities?.rings === false);
   if (els.notchAvoidMenuBarInput) els.notchAvoidMenuBarInput.disabled = state.notchCapabilities?.menuAvoidance === false;
@@ -13297,7 +13311,7 @@ function syncDockControls() {
   els.notchFeature?.classList.toggle('hidden', state.appInfo?.platform !== 'darwin');
   if (els.notchInput) els.notchInput.checked = notchEnabled;
   els.notchOptions?.classList.toggle('hidden', !notchEnabled);
-  if (els.notchStyleInput) els.notchStyleInput.value = state.settings?.notchStyle || 'black';
+  syncNotchStyleInput();
   for (const input of els.notchShapeInputs) input.checked = input.value === (state.settings?.notchShape || 'auto');
   if (els.notchFollowTrayInput) els.notchFollowTrayInput.checked = state.settings?.notchFollowTray !== false;
   if (els.notchSummaryInput) els.notchSummaryInput.checked = state.settings?.notchSummaryEnabled !== false;

@@ -142,7 +142,7 @@ test('a replaced or withdrawn first summary cannot be revealed by a late size re
 });
 
 test('new notch configurations use black and preserve saved style selections', (t) => {
-  for (const style of [undefined, 'black', 'default', 'liquid-glass', 'inherit']) {
+  for (const style of [undefined, 'black', 'vibrancy', 'liquid-glass', 'inherit']) {
     const f = fixture(t, style === undefined ? {} : { notchStyle: style });
     assert.equal(last(f.windows[0]).style, style || 'black');
   }
@@ -163,7 +163,7 @@ test('inherited notch material follows the widget without changing saved indepen
   available = false; f.controller.sync();
   assert.equal(f.windows.at(-2).options.vibrancy, 'hud');
   available = true;
-  f.preferences.notchStyle = 'default'; f.controller.sync();
+  f.preferences.notchStyle = 'vibrancy'; f.controller.sync();
   assert.equal(f.windows.at(-2).options.vibrancy, 'hud');
   f.preferences.notchStyle = 'inherit'; enabled = false; f.controller.sync();
   assert.equal(f.windows.at(-2).options.vibrancy, undefined);
@@ -2031,6 +2031,24 @@ test('same-shape display transfers land on the destination without a spanning ca
       assert.deepEqual(frame(), placed, 'late old-display frames cannot repaint the destination');
     }
   }
+});
+
+test('unlock during a pre-lock hover dwell starts collapsed with a fresh dwell', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
+  const f = fixture(t);
+  const win = f.windows[0], geometry = last(win).geometry;
+  f.screen.point = { x: win.bounds.x + geometry.headerX + 20, y: win.bounds.y + 10 };
+  f.controller.poll(Date.now());
+  f.controller.setLocked(true);
+  t.mock.timers.tick(60000);
+  f.controller.setLocked(false);
+  assert.equal(last(win).expanded, false, 'the pre-lock dwell does not expand on unlock');
+  const resumed = Date.now();
+  f.controller.poll(resumed);
+  f.controller.poll(resumed + EDGE_DOCK_TIMING.revealDelayMs - 1);
+  assert.equal(last(win).expanded, false);
+  f.controller.poll(resumed + EDGE_DOCK_TIMING.revealDelayMs);
+  assert.equal(last(win).expanded, true);
 });
 
 test('locking pauses polling and unlock or repeated sync keeps one timer', (t) => {

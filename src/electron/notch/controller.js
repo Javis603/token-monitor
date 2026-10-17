@@ -12,7 +12,7 @@ const { EDGE_DOCK_TIMING, edgeDockCorridorBounds, edgeDockPollDelay, edgeDockSca
 const FULL_SCREEN_POLL_MS = 500;
 
 function normalizeNotchStyle(value) {
-  return ['black', 'inherit', 'default', 'liquid-glass'].includes(value) ? value : 'black';
+  return ['black', 'inherit', 'vibrancy', 'liquid-glass'].includes(value) ? value : 'black';
 }
 
 function normalizeNotchShape(value) {
@@ -517,8 +517,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (platform !== 'darwin' || settings().notchEnabled !== true) { stop(); return; }
     running = true;
     const style = normalizeNotchStyle(settings().notchStyle);
-    // Keep the legacy default's fixed vibrancy; inherit follows only the widget.
-    const backdrop = edgeDockBackdropMode({ macBackdrop: settings().macBackdrop, edgeDockMacBackdrop: style === 'default' ? 'vibrancy' : style });
+    // `inherit` follows only the widget, never the Edge Dock's own style.
+    const backdrop = edgeDockBackdropMode({ macBackdrop: settings().macBackdrop, edgeDockMacBackdrop: style });
     const key = style === 'black' || !nativeGlass() ? 'none' : backdrop === MAC_BACKDROP_LIQUID_GLASS && liquidGlass() ? 'liquid' : 'vibrancy';
     if (materialKey !== key || !surfaces.every((s) => alive(windows[s]))) {
       destroyWindows(); materialKey = key; expanded = false; enterAt = leaveAt = null;
@@ -644,7 +644,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     setLocked(value) {
       locked = value === true;
       if (locked) {
-        refreshEpoch++; expanded = false;
+        refreshEpoch++; expanded = false; enterAt = leaveAt = null;
         resetShellMotion();
         clearTimeout(pollTimer); pollTimer = null;
       } else if (running) {
