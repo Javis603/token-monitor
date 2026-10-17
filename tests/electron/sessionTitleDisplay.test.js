@@ -140,7 +140,7 @@ test('a stats response started before hiding titles adopts the current display p
     allTimeSessions: { invalidate: noop, attach: value => value },
     observeLiveTokenRate: noop, observeDisplayLiveTokenRates: noop, applyCodexActiveAccountFromStats: noop,
     fixedPeriodRangesApi: { isDerived: () => false }, warmFixedPeriodHistory: async () => {},
-    statsRenderScheduler: { request: () => { rendered += 1; } }, maybeUpdateBarsIcon: noop, console
+    statsRenderScheduler: { request: () => { rendered += 1; } }, maybeUpdateBarsIcon: noop, lightweightUiPaused: () => false, console
   };
   const displayStart = source.indexOf('let localSessionActivity = null;');
   const displayEnd = source.indexOf('\nfunction setRendererSettings(', displayStart);

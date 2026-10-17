@@ -51,7 +51,7 @@ test('only the seed waits for the renderer, so the deferral cannot queue up', ()
   // did-finish-load listener per frame while the renderer loads, and the
   // renderer's own refreshStats() on init already covers what gets dropped.
   assert.match(push, /if \(options\.deferToRenderer\)/);
-  assert.match(push, /else if \(mainWindow && !mainWindow\.isDestroyed\(\)\)/);
+  assert.match(push, /else if \(mainWindow && !mainWindow\.isDestroyed\(\)/);
   assert.equal((main.match(/deferToRenderer: true/g) || []).length, 1, 'exactly one caller may defer');
   // The queued snapshot is only delivered while it is still what was published
   // last; deferredWindowSend.test.js covers the behaviour.

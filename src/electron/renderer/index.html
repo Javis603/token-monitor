@@ -67,6 +67,13 @@
                 <span id="startupNote" class="settings-note settings-item-desc" data-i18n="settings.startup.available">Available in packaged builds. On Linux, run the AppImage build to enable.</span>
               </label>
             </div>
+            <div class="settings-subgroup">
+              <label class="checkbox-label settings-item">
+                <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.lightweightMode">Lightweight mode</span></span>
+                <input id="lightweightModeInput" type="checkbox" aria-describedby="lightweightModeNote" />
+                <span id="lightweightModeNote" class="settings-note settings-item-desc" data-i18n="settings.display.lightweightModeNote">Release interface memory after the window has been hidden for one minute. Background tracking and sync continue; reopening takes a moment.</span>
+              </label>
+            </div>
             <div class="settings-subgroup maintenance-section app-update-settings">
               <div class="settings-group-header maintenance-header"><span data-i18n="settings.appUpdate.title">App Updates</span><span data-i18n="settings.appUpdate.source">GitHub releases</span></div>
               <label id="automaticAppUpdatesRow" class="checkbox-label settings-item">
@@ -1748,6 +1755,7 @@
     <script src="../macBackdropMode.js"></script>
     <script src="glassRendering.js"></script>
     <script src="trayComposer.js"></script>
+    <script src="trayImageRenderer.js"></script>
     <script src="diagnosticsPanel.js"></script>
     <script src="app.js"></script>
   </body>

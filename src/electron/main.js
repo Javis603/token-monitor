@@ -20,8 +20,10 @@ const { installSafeStdout } = require('../shared/safeStdio');
 const { appVersion } = require('../shared/appVersion');
 const { macWidgetRuntimeSupport } = require('../shared/macSystemRequirements');
 const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
-const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
+const { createDefaultTrayLayout, normalizeTrayLayout, trayLayoutNeedsClock } = require('../shared/trayLayout');
 const fontSettingsApi = require('../shared/fontSettings');
+const { createLightweightWindow } = require('./lightweightWindow');
+const { createTrayImageService, createTrayRateTracker, trayRenderInput } = require('./trayImageService');
 const motionPreferenceApi = require('./motionPreference');
 const tokenNumberAnimationApi = require('./tokenNumberAnimation');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
@@ -327,6 +329,7 @@ const {
   shouldUseTemplateTrayIcon,
   trayShowsTitle
 } = require('./tray');
+const { isGeneratedTrayIconMode } = require('../shared/trayText');
 const {
   macActivationPolicyMode,
   mainWindowCloseAction,
@@ -513,6 +516,144 @@ const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'model', 'session', 'device'
 const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
 
 let mainWindow = null;
+let lightweightViewState = null;
+let mainWindowIntent = null;
+const reopeningWindows = new WeakSet();
+let trayImageService = null;
+let trayImageHealthy = false;
+let trayImageTimer = null;
+const trayRendererVisibility = new WeakMap();
+const trayRendererGeneration = new WeakMap();
+let trayArtworkKey = '';
+const trayRateTracker = createTrayRateTracker();
+const lightweightWindow = createLightweightWindow({
+  getWindow: () => mainWindow,
+  enabled: () => settings?.lightweightMode === true && Boolean(tray && !tray.isDestroyed())
+    && trayImageHealthy && !reopeningWindows.has(mainWindow) && !quitRequested,
+  prepare: requestLightweightState,
+  release: (win, viewState) => {
+    lightweightViewState = { ...viewState, source: hubModeGeneration };
+    stopPersistBoundsTimer();
+    persistWindowState(settings, saveSettings, normalWindowBounds(win), Boolean(settings.windowMaximized));
+    mainWindow = null;
+    win.destroy();
+    rendererSnapshots.clear();
+    presentationCache.clear();
+    allTimeSessionsCache.clear();
+  }
+});
+
+function requestLightweightState(win) {
+  return new Promise((resolve) => {
+    const id = crypto.randomUUID();
+    const finish = (value) => {
+      clearTimeout(timer);
+      ipcMain.removeListener('window:lightweightState', onState);
+      win.removeListener('closed', onClosed);
+      resolve(value);
+    };
+    const onClosed = () => finish(null);
+    const onState = (event, data) => {
+      if (event.sender !== win.webContents || data?.id !== id) return;
+      const number = (value) => Math.max(0, Math.min(1e7, Number(value) || 0));
+      finish(data.canSuspend === true ? {
+        scrollTop: number(data.scrollTop), pageScrollTop: number(data.pageScrollTop), sessionPage: number(data.sessionPage),
+        settingsOpen: data.settingsOpen === true,
+        settingsSection: ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'sync'].includes(data.settingsSection) ? data.settingsSection : '',
+        settingsScrollTop: number(data.settingsScrollTop)
+      } : null);
+    };
+    const timer = setTimeout(() => finish(null), 2000);
+    ipcMain.on('window:lightweightState', onState);
+    win.once('closed', onClosed);
+    try { win.webContents.send('window:prepareLightweight', { id }); } catch (_) { finish(null); }
+  });
+}
+
+function backgroundOwnedWindow(win) {
+  return Boolean(edgeDockController?.owns(win) || trayImageService?.owns(win));
+}
+
+function stopTrayImageService(resetRate = true) {
+  if (trayImageTimer) clearTimeout(trayImageTimer);
+  trayImageTimer = null;
+  trayImageService?.stop();
+  trayImageService = null;
+  trayImageHealthy = false;
+  if (resetRate) trayRateTracker.reset();
+}
+
+function visibleTrayRenderer() {
+  return Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()
+    && !mainWindow.isMinimized() && trayRendererVisibility.get(mainWindow.webContents) !== false);
+}
+
+function mainRendererNeedsStats() {
+  return Boolean(mainWindow && !mainWindow.isDestroyed()
+    && (reopeningWindows.has(mainWindow) || visibleTrayRenderer()));
+}
+
+function currentTrayArtworkKey() {
+  return JSON.stringify([process.platform, currentSystemDarkTrayUi(), settings?.showTrayProviderBadge === true]);
+}
+
+function updateIndependentTrayImages() {
+  if (settings?.lightweightMode !== true || !tray || tray.isDestroyed() || quitRequested) {
+    if ((trayImageService || lightweightViewState) && settings?.lightweightMode !== true && tray && !tray.isDestroyed()
+      && (!mainWindow || mainWindow.isDestroyed()) && !quitRequested) focusExistingWindow();
+    stopTrayImageService();
+    return;
+  }
+  const stats = electronPresentationStats(latestStats);
+  trayRateTracker.observe(stats, settings, hubModeGeneration);
+  if (visibleTrayRenderer()) {
+    stopTrayImageService(false);
+    return;
+  }
+  // Text and static marks need no permanent Chromium process. Main retains
+  // the accepted artwork and continues updating title/tooltip/selected mark.
+  if (!isGeneratedTrayIconMode(settings.trayContent) && trayArtworkKey === currentTrayArtworkKey()) {
+    stopTrayImageService(false);
+    trayImageHealthy = true;
+    lightweightWindow.schedule();
+    return;
+  }
+  if (!trayImageService) {
+    trayImageHealthy = false;
+    trayImageService = createTrayImageService({
+      BrowserWindow, ipcMain,
+      applyIcons: (icons) => {
+        applyTrayIcons(icons);
+        trayArtworkKey = currentTrayArtworkKey();
+        trayImageHealthy = true;
+        updateTrayDisplay({ renderIcons: false });
+        if (!isGeneratedTrayIconMode(settings.trayContent)) {
+          stopTrayImageService(false);
+          trayImageHealthy = true;
+        }
+        lightweightWindow.schedule();
+      },
+      onFailure: () => { trayImageHealthy = false; lightweightWindow.cancel(); }
+    });
+  }
+  const active = codexAccountsForRenderer().find((account) => account.id === (codexPresentationPendingAccountId || codexPresentationActiveAccountId));
+  trayImageService.update(trayRenderInput(stats, { ...settings, locale: trayMenuLocale() }, {
+    platform: process.platform,
+    systemDarkUi: currentSystemDarkTrayUi(),
+    rates: effectiveRates,
+    codexActiveAccount: { accountKey: active?.accountKey || localLiveCodexProvider(stats, settings.deviceId)?.accountKey || '' },
+    liveTokenRates: trayRateTracker.samples()
+  }));
+  if (trayImageTimer) clearTimeout(trayImageTimer);
+  const expiry = trayRateTracker.nextExpiryAt();
+  const clock = settings.trayContent === 'custom' && trayLayoutNeedsClock(settings.trayCustomLayout);
+  const next = Math.min(expiry, clock ? Date.now() + 30_000 : Infinity);
+  trayImageTimer = Number.isFinite(next) ? setTimeout(() => {
+    trayImageTimer = null;
+    updateIndependentTrayImages();
+  }, Math.max(10, next - Date.now() + 10)) : null;
+}
+
 let dashboardWindow = null;
 let settingsPath = null;
 let settings = null;
@@ -708,6 +849,7 @@ function defaultSettings() {
     windowMaximized: false,
     zoomFactor: 1,
     showTrayIcon: true,
+    lightweightMode: false,
     trayMode: false,
     hideAppIcon: false,
     trayContent: 'tokens',
@@ -2201,9 +2343,9 @@ function sendFloatingBubbleState() {
   try { mainWindow.webContents.send('floatingBubble:state', floatingBubblePayload()); } catch (_) {}
 }
 
-function sendMainWindowVisibility(win = mainWindow) {
+function sendMainWindowVisibility(win = mainWindow, resume = false) {
   if (!win || win !== mainWindow || win.isDestroyed() || win.webContents.isDestroyed()) return;
-  win.webContents.send('window:visibility', win.isVisible() && !win.isMinimized());
+  win.webContents.send('window:visibility', win.isVisible() && !win.isMinimized(), resume);
 }
 
 function stopFloatingBubbleAutoCollapseTimer() {
@@ -2718,6 +2860,7 @@ function readSettings() {
     merged.edgeDockCustomScale = normalizeEdgeDockCustomScale(merged.edgeDockCustomScale);
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
     merged.trayCustomLayout = normalizeTrayLayout(merged.trayCustomLayout);
+    merged.lightweightMode = parseBoolean(merged.lightweightMode, false);
     merged.showTrayProviderBadge = parseBoolean(merged.showTrayProviderBadge, false);
     merged.windowToggleShortcut = normalizeWindowToggleShortcut(merged.windowToggleShortcut);
     // 如果设置了 opencodeCookie 但没有 profiles，自动迁移
@@ -3067,7 +3210,7 @@ function syncProvenanceActive() {
   return mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim());
 }
 
-const presentationCache = createStatsPresentationCache();
+const presentationCache = createStatsPresentationCache({ limit: () => settings?.lightweightMode === true ? 2 : Infinity });
 
 // Every input besides `stats` belongs in the cache key, or a settings change
 // would keep serving the projection it replaced.
@@ -3087,7 +3230,7 @@ function electronPresentationStats(stats) {
   ));
 }
 
-const allTimeSessionsCache = createStatsPresentationCache();
+const allTimeSessionsCache = createStatsPresentationCache({ limit: () => settings?.lightweightMode === true ? 2 : Infinity });
 const rendererSnapshots = createRendererSnapshots({ source: () => hubModeGeneration });
 // The local record each Hub snapshot was shown with, captured where the
 // snapshot was built. The collector replaces the live one between publishes.
@@ -4849,7 +4992,8 @@ function publishLocalSessionActivity(patch) {
     ...localSnapshot, localDevice: applyActivityPatch(localSnapshot.localDevice, patch)
   });
   if (localStats === previous) localStats = latestStats;
-  const snapshot = rendererSnapshots.updateActivity(previous, latestStats);
+  const snapshot = settings?.lightweightMode === true && !mainRendererNeedsStats()
+    ? null : rendererSnapshots.updateActivity(previous, latestStats);
   edgeDockManualStats = null;
   // Only activity metadata crosses IPC. Accounting freshness, sync uploads,
   // exports, History and rate samples remain on the usage publication lane.
@@ -4872,6 +5016,7 @@ function publishLocalSessionActivity(patch) {
 // frame against a slow load and then replay a burst of superseded stats.
 function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
+  const rendererActive = settings?.lightweightMode !== true || options.deferToRenderer || mainRendererNeedsStats();
   let rendererPayload = payload;
   if (payload?.data?.stats) {
     payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
@@ -4886,7 +5031,7 @@ function sendPush(payload, options = {}) {
     getSyncContentRuntime().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
     migrateCodexAdditionalLimits(visibleStats);
-    rendererPayload = {
+    if (rendererActive) rendererPayload = {
       ...payload,
       data: { ...payload.data, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
     };
@@ -4906,7 +5051,8 @@ function sendPush(payload, options = {}) {
     // walk the numbers backwards until the next push.
     const deferred = payload?.data?.stats;
     sendMainWindowEvent('stats:push', rendererPayload, () => !deferred || latestStats === deferred);
-  } else if (mainWindow && !mainWindow.isDestroyed()) {
+  } else if (mainWindow && !mainWindow.isDestroyed()
+    && rendererActive) {
     try { mainWindow.webContents.send('stats:push', rendererPayload); } catch (_) {}
   }
   if (payload?.data?.stats) {
@@ -4980,7 +5126,33 @@ function refreshTrayContextMenu() {
   if (typeof tray.refreshContextMenu === 'function') tray.refreshContextMenu();
 }
 
-function updateTrayDisplay() {
+function applyTrayIcons(icons) {
+  if (!icons || typeof icons !== 'object') return false;
+  for (const [id, dataUrl] of Object.entries(icons)) {
+    if (dataUrl === null) {
+      delete providerTrayIcons[id];
+      continue;
+    }
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png')) continue;
+    const img = nativeImage.createFromDataURL(dataUrl);
+    if (img.isEmpty()) continue;
+    // Resize by height only; aspect ratio is preserved, so wide bar-style
+    // icons keep their width while square provider icons stay square.
+    // Windows targets its own small-icon metric (16px x the display scale
+    // factor) rather than the macOS menubar height, so a single high-quality
+    // downscale of the 44px-tall renderer source stays crisp in the
+    // notification area instead of the old fixed 20px-for-all blur, and its
+    // square cell gets the bitmap trimmed to the pixels the renderer drew.
+    const sized = prepareTrayIconForPlatform(img, {
+      platform: process.platform,
+      scaleFactor: screen.getPrimaryDisplay().scaleFactor
+    });
+    if (shouldUseTemplateTrayIcon(id, process.platform, settings?.showTrayProviderBadge)) sized.setTemplateImage(true);
+    providerTrayIcons[id] = sized;
+  }
+}
+
+function updateTrayDisplay(options = {}) {
   if (!tray || tray.isDestroyed()) return;
   // Keep the exported D-Bus menu in sync (radio checks, refresh state, Codex
   // accounts) — see the Linux note in createTray().
@@ -5016,6 +5188,7 @@ function updateTrayDisplay() {
     if (usageIconId) icon = providerTrayIcons[usageIconId];
   }
   tray.setImage(icon || getDefaultTrayIcon());
+  if (options.renderIcons !== false) updateIndependentTrayImages();
 }
 
 function recordDiagnosticEvent(event) {
@@ -5255,7 +5428,8 @@ function hidePopover() {
 }
 
 function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow || mainWindow.isDestroyed()) { focusExistingWindow(); return; }
+  if (reopeningWindows.has(mainWindow)) return;
   const action = popoverToggleAction({
     visible: mainWindow.isVisible(),
     focused: mainWindow.isFocused(),
@@ -5268,11 +5442,13 @@ function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null, blurMatc
 }
 
 function focusExistingWindow() {
+  lightweightWindow.cancel();
   applyMacActivationPolicy({ mainWindowVisible: true });
   if (!mainWindow || mainWindow.isDestroyed()) {
-    createWindow();
+    createWindow(undefined, { waitForContent: true, openOnReady: true });
     return;
   }
+  if (reopeningWindows.has(mainWindow)) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   if (settings?.trayMode) showPopover();
   else {
@@ -5467,6 +5643,7 @@ function currentSystemDarkTrayUi() {
 function pushSystemUiThemeToRenderer(dark) {
   const value = typeof dark === 'boolean' ? dark : currentSystemDarkTrayUi();
   currentSystemDarkUi = value;
+  updateIndependentTrayImages();
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try { mainWindow.webContents.send('theme:systemUi', { dark: value }); } catch (_) {}
 }
@@ -5491,6 +5668,8 @@ async function pushSystemUiThemeAfterChange() {
 }
 
 function pushSettingsToRenderer() {
+  updateIndependentTrayImages();
+  lightweightWindow.schedule();
   const payload = settingsForRenderer();
   syncEdgeDock(payload);
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -5906,7 +6085,8 @@ function refreshLimitStatsPresentation() {
   scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
   repaintEdgeDockCells();
   updateTrayDisplay();
-  if (mainWindow && !mainWindow.isDestroyed()) {
+  if (mainWindow && !mainWindow.isDestroyed()
+    && (settings?.lightweightMode !== true || mainRendererNeedsStats())) {
     try {
       mainWindow.webContents.send('stats:push', {
         event: 'stats',
@@ -5935,7 +6115,8 @@ function unregisterWindowToggleShortcut() {
 }
 
 function handleWindowToggleShortcut() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow || mainWindow.isDestroyed()) { focusExistingWindow(); return; }
+  if (reopeningWindows.has(mainWindow)) return;
   const action = windowToggleShortcutAction({
     trayMode: Boolean(settings?.trayMode),
     floatingBubbleCollapsed: Boolean(floatingBubbleState.collapsed),
@@ -5965,6 +6146,10 @@ function trayMenuLocale() {
 // deferredWindowSend.js.
 function sendMainWindowEvent(channel, payload, isStillCurrent) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (reopeningWindows.has(mainWindow) && ['settings:open', 'view:open'].includes(channel)) {
+    mainWindowIntent = { win: mainWindow, channel, payload };
+    return;
+  }
   sendWhenRendererReady(mainWindow.webContents, channel, payload, isStillCurrent);
 }
 
@@ -6193,6 +6378,9 @@ function ensureTray() {
 }
 
 function destroyTray() {
+  lightweightWindow.cancel();
+  if (settings?.lightweightMode && (!mainWindow || mainWindow.isDestroyed()) && !quitRequested) focusExistingWindow();
+  stopTrayImageService();
   if (tray && !tray.isDestroyed()) tray.destroy();
   tray = null;
 }
@@ -6217,7 +6405,8 @@ function enterTrayMode() {
 
 function exitTrayMode() {
   applyMacActivationPolicy({ mainWindowVisible: true });
-  if (mainWindow && !mainWindow.isDestroyed()) {
+  if (!mainWindow || mainWindow.isDestroyed()) focusExistingWindow();
+  if (mainWindow && !mainWindow.isDestroyed() && !reopeningWindows.has(mainWindow)) {
     // Not an unconditional false: leaving tray-only mode with hideAppIcon still
     // on keeps the widget off the taskbar. applyWindowSettings() below would
     // correct it either way, but only after a visible flash of the entry.
@@ -7080,9 +7269,13 @@ function revealWindow(target = mainWindow, options = {}) {
 function loadWindowFile(target, options = {}) {
   let revealed = false;
   const reveal = () => {
-    if (revealed) return;
+    if (revealed || target.isDestroyed() || target !== mainWindow) return;
     revealed = true;
-    if (settings?.trayMode) return; // stay hidden until tray click
+    reopeningWindows.delete(target);
+    if (settings?.trayMode) {
+      if (options.openOnReady) showPopover();
+      return; // stay hidden until an explicit open
+    }
     if (restoreWindowMaximizedForReveal(target, settings, {
       restoreMaximized: options.restoreMaximized === true,
       inactive: options.inactive === true,
@@ -7127,6 +7320,8 @@ function loadWindowFile(target, options = {}) {
 }
 
 function createWindow(boundsOverride, options = {}) {
+  lightweightWindow.cancel();
+  mainWindowIntent = null;
   ensureSettingsLoaded();
   const collapsedFloatingBubble = options.collapsedFloatingBubble === true;
   const glass = nativeBlurEnabled();
@@ -7166,6 +7361,7 @@ function createWindow(boundsOverride, options = {}) {
     }
   });
   mainWindow = win;
+  if (options.openOnReady) reopeningWindows.add(win);
   mainWindowChrome = { collapsedFloatingBubble };
   applyMacSpaceBehavior();
   applyWindowsChrome(win, { round: true });
@@ -7245,13 +7441,35 @@ function createWindow(boundsOverride, options = {}) {
   // The dock's own windows would otherwise keep the process alive after the
   // last real window closes, which window-all-closed relies on for quitting.
   win.on('closed', () => {
-    if (quitRequested || process.platform === 'darwin') return;
-    if (BrowserWindow.getAllWindows().every((other) => edgeDockController?.owns(other))) app.quit();
+    if (quitRequested || process.platform === 'darwin' || lightweightWindow.isReleased(win)) return;
+    if (BrowserWindow.getAllWindows().every(backgroundOwnedWindow)) app.quit();
   });
+  win.on('show', () => lightweightWindow.cancel());
+  win.on('restore', () => lightweightWindow.cancel());
+  win.on('minimize', () => lightweightWindow.cancel());
+  win.on('hide', () => lightweightWindow.schedule());
   win.on('show', () => sendMainWindowVisibility(win));
   win.on('hide', () => sendMainWindowVisibility(win));
   win.on('minimize', () => sendMainWindowVisibility(win));
   win.on('restore', () => sendMainWindowVisibility(win));
+  for (const event of ['show', 'hide', 'minimize', 'restore']) {
+    win.on(event, () => { if (win === mainWindow) updateIndependentTrayImages(); });
+  }
+  const trayRendererUnavailable = () => {
+    if (win !== mainWindow) return;
+    trayRendererVisibility.set(win.webContents, false);
+    updateIndependentTrayImages();
+  };
+  win.webContents.on('render-process-gone', () => {
+    if (win !== mainWindow) return;
+    trayRendererGeneration.set(win.webContents, (trayRendererGeneration.get(win.webContents) || 0) + 1);
+    rendererSnapshots.clear();
+    presentationCache.clear();
+    allTimeSessionsCache.clear();
+    trayRendererUnavailable();
+  });
+  win.on('unresponsive', trayRendererUnavailable);
+  win.on('responsive', () => sendMainWindowVisibility(win, true));
   win.webContents.on('did-finish-load', () => {
     sendFloatingBubbleState();
     // Only report a window that is already on screen. A window still awaiting its
@@ -7264,8 +7482,10 @@ function createWindow(boundsOverride, options = {}) {
     // later loads too: Cmd+Shift+R retains that query flag, so a visible tray
     // window needs its native visibility resynced after every renderer reload.
     if (win.isVisible()) sendMainWindowVisibility(win);
+    else lightweightWindow.schedule();
   });
   loadWindowFile(win, {
+    openOnReady: options.openOnReady === true,
     waitForContent: options.waitForContent === true,
     inactive: options.inactive === true,
     collapsedFloatingBubble,
@@ -7276,11 +7496,14 @@ function createWindow(boundsOverride, options = {}) {
         suppressInitialNumberAnimation: options.suppressInitialNumberAnimation === true,
         viewState: rendererViewState
       }),
-      ...(settings?.trayMode ? { windowHidden: '1' } : {}),
+      ...(settings?.trayMode && !options.openOnReady ? { windowHidden: '1' } : {}),
+      ...(lightweightViewState?.source === hubModeGeneration ? { lightweightView: JSON.stringify(lightweightViewState) } : {}),
       ...(settings?.systemGlass === false ? { systemGlassDisabled: '1' } : {}),
       ...(windowsAccentFallback ? { windowsBackdropFallback: '1' } : {})
     }
   });
+  lightweightViewState = null;
+  return win;
 }
 
 function handleZoomShortcut(event, input) {
@@ -7822,6 +8045,7 @@ app.whenReady().then(() => {
         trayMode: patch.trayMode ?? settings.trayMode,
         hideAppIcon: patch.hideAppIcon ?? settings.hideAppIcon
       }),
+      lightweightMode: parseBoolean(patch.lightweightMode ?? settings.lightweightMode, false),
       trayContent: normalizeTrayContent(patch.trayContent ?? settings.trayContent),
       trayCustomLayout: normalizeTrayLayout(patch.trayCustomLayout ?? settings.trayCustomLayout),
       showTrayProviderBadge: parseBoolean(patch.showTrayProviderBadge ?? settings.showTrayProviderBadge, false),
@@ -8000,6 +8224,12 @@ app.whenReady().then(() => {
     }
     return true;
   });
+  ipcMain.on('window:contentReady', (event) => {
+    const intent = mainWindowIntent;
+    if (!intent || intent.win !== mainWindow || intent.win.isDestroyed() || event.sender !== intent.win.webContents) return;
+    mainWindowIntent = null;
+    intent.win.webContents.send(intent.channel, intent.payload);
+  });
   ipcMain.on('window:viewState', (_event, patch) => {
     updateRendererViewState(patch);
   });
@@ -8080,34 +8310,20 @@ app.whenReady().then(() => {
     sendFloatingBubbleState();
     return true;
   });
-  ipcMain.handle('tray:setIcons', (_event, icons) => {
-    if (!icons || typeof icons !== 'object') return false;
-    for (const [id, dataUrl] of Object.entries(icons)) {
-      if (dataUrl === null) {
-        delete providerTrayIcons[id];
-        continue;
-      }
-      if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png')) continue;
-      const img = nativeImage.createFromDataURL(dataUrl);
-      if (img.isEmpty()) continue;
-      // Resize by height only; aspect ratio is preserved, so wide bar-style
-      // icons keep their width while square provider icons stay square.
-      // Windows targets its own small-icon metric (16px x the display scale
-      // factor) rather than the macOS menubar height, so a single high-quality
-      // downscale of the 44px-tall renderer source stays crisp in the
-      // notification area instead of the old fixed 20px-for-all blur, and its
-      // square cell gets the bitmap trimmed to the pixels the renderer drew.
-      const sized = prepareTrayIconForPlatform(img, {
-        platform: process.platform,
-        scaleFactor: screen.getPrimaryDisplay().scaleFactor
-      });
-      if (shouldUseTemplateTrayIcon(id, process.platform, settings?.showTrayProviderBadge)) sized.setTemplateImage(true);
-      providerTrayIcons[id] = sized;
-    }
+  ipcMain.on('tray:rendererVisibility', (event, visible) => {
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents || typeof visible !== 'boolean') return;
+    trayRendererVisibility.set(event.sender, visible);
+    updateIndependentTrayImages();
+  });
+  ipcMain.handle('tray:setIcons', (event, icons) => {
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false;
+    if (settings?.lightweightMode === true && !visibleTrayRenderer()) return false;
+    applyTrayIcons(icons);
     updateTrayDisplay();
     return true;
   });
-  ipcMain.handle('stats:get', async (_event, options) => {
+  ipcMain.handle('stats:get', async (event, options) => {
+    const rendererGeneration = trayRendererGeneration.get(event?.sender) || 0;
     const revision = statsPushRevision;
     const fetched = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
     // A push from the same source/generation supersedes its pending read. A
@@ -8122,6 +8338,9 @@ app.whenReady().then(() => {
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);
+    if (settings?.lightweightMode === true && (!mainWindow || mainWindow.isDestroyed()
+      || event.sender !== mainWindow.webContents || event.sender.isDestroyed()
+      || (trayRendererGeneration.get(event.sender) || 0) !== rendererGeneration)) return null;
     return rendererSnapshots.stamp(stats, rendererStats(electronPresentationStats(stats)));
   });
   ipcMain.handle('devices:delete', async (_event, deviceId) => {
@@ -9226,10 +9445,11 @@ app.whenReady().then(() => {
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
   app.on('activate', () => {
+    if (settings?.lightweightMode === true && (!mainWindow || mainWindow.isDestroyed())) { focusExistingWindow(); return; }
     const action = activateWindowAction({
       mainWindow,
       windows: BrowserWindow.getAllWindows(),
-      isDockOwned: (win) => Boolean(edgeDockController?.owns(win))
+      isDockOwned: backgroundOwnedWindow
     });
     if (action === 'focusWindow') focusExistingWindow();
     else if (action === 'createWindow') {
@@ -9238,7 +9458,7 @@ app.whenReady().then(() => {
       // was the one path reaching applyMacSpaceBehavior() with a process type
       // nothing had decided, which skipTransformProcessType now preserves.
       applyMacActivationPolicy({ mainWindowVisible: true });
-      createWindow();
+      focusExistingWindow();
     }
   });
   scheduleStartupAppUpdateCheck();
@@ -9246,13 +9466,17 @@ app.whenReady().then(() => {
 });
 
 app.on('second-instance', focusExistingWindow);
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin' && !(settings?.lightweightMode === true && tray && !tray.isDestroyed() && !quitRequested)) app.quit();
+});
 // Every quit route (Cmd+Q, last window closed, system shutdown) lands here.
 // performQuit is synchronous through to the exit, so there is nothing to wait
 // for and deliberately no preventDefault: taking the quit over would cancel an
 // OS-initiated logout or restart on macOS.
 app.on('before-quit', () => {
   quitRequested = true;
+  lightweightWindow.stop();
+  stopTrayImageService();
   antigravityOAuthLoginController?.abort();
   workbuddyManagedAccountService?.cancelLogin();
   resetMacWidgetReloadThrottle();

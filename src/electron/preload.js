@@ -70,10 +70,16 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     return () => ipcRenderer.removeListener('stats:push', listener);
   },
   onWindowVisibilityPush: (callback) => {
-    const listener = (_event, visible) => { try { callback(Boolean(visible)); } catch (_) {} };
+    const listener = (_event, visible, resume) => { try { callback(Boolean(visible), resume === true); } catch (_) {} };
     ipcRenderer.on('window:visibility', listener);
     return () => ipcRenderer.removeListener('window:visibility', listener);
   },
+  onPrepareLightweight: (callback) => {
+    ipcRenderer.on('window:prepareLightweight', (_event, request) => {
+      ipcRenderer.send('window:lightweightState', { ...callback(), id: request.id });
+    });
+  },
+  reportTrayVisibility: (visible) => ipcRenderer.send('tray:rendererVisibility', Boolean(visible)),
   onSettingsPush: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
     ipcRenderer.on('settings:push', listener);

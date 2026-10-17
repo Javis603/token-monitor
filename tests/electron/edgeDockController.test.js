@@ -1557,3 +1557,89 @@ for (const mode of ['autoHide', 'alwaysExceptFullScreen']) {
     assert.deepEqual(await request, { ok: true });
   });
 }
+
+for (const platform of ['darwin', 'win32']) {
+  test(`lightweight ${platform} cards load on demand and release without rebuilding wake surfaces`, (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+    const f = createFixture({ platform, settings: { lightweightMode: true } });
+    t.after(() => f.controller.stop());
+    const peek = f.windowFor('peek');
+    const rail = f.windowFor('rail');
+    assert.equal(f.windowFor('bubble'), undefined);
+    f.controller.sync();
+    assert.equal(f.windowFor('peek'), peek);
+    f.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+    const old = f.windowFor('bubble');
+    assert.ok(old);
+    assert.equal(old.visible, false, 'wait for the requested card to load and measure');
+    old.webContents.emit('did-finish-load');
+    assert.equal(sentPayload(old, 'bubble').cell.id, 'codex');
+    assert.equal(old.opacity, 0);
+    f.ipcMain.emit('edgeDock:bubbleSize', { sender: old.webContents }, { cellId: 'codex', height: 180 });
+    assert.equal(old.opacity, 1);
+    f.controller.setCells([{ id: 'cursor', kind: 'provider', label: 'Cursor' }]);
+    assert.equal(old.opacity, 0);
+    t.mock.timers.tick(30_000);
+    f.controller.sync();
+    f.controller.setAppearance({ dark: true });
+    t.mock.timers.tick(29_999);
+    assert.equal(old.destroyed, false);
+    t.mock.timers.tick(1);
+    assert.equal(old.destroyed, true, 'stats/settings do not postpone the idle deadline');
+    assert.equal(f.windowFor('peek'), peek);
+    assert.equal(f.windowFor('rail'), rail);
+    old.webContents.emit('did-finish-load');
+    f.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
+    const next = f.windowFor('bubble');
+    assert.notEqual(next, old);
+    next.webContents.emit('did-finish-load');
+    assert.equal(sentPayload(next, 'bubble').placed, null);
+    assert.equal(next.opacity, 0, 'old card geometry must not reveal the new card');
+    f.ipcMain.emit('edgeDock:bubbleSize', { sender: old.webContents }, { cellId: 'cursor', height: 400 });
+    assert.equal(next.opacity, 0, 'ignore retired renderer acknowledgements');
+    f.ipcMain.emit('edgeDock:bubbleSize', { sender: next.webContents }, { cellId: 'cursor', height: 140 });
+    assert.equal(next.opacity, 1);
+  });
+}
+
+test('lightweight card reclamation cancels on reuse, disable, rebuild and stop', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+  const f = createFixture({ settings: { lightweightMode: true } });
+  t.after(() => f.controller.stop());
+  const rail = f.windowFor('rail');
+  f.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+  const bubble = f.windowFor('bubble');
+  bubble.webContents.emit('did-finish-load');
+  f.controller.setCells([{ id: 'cursor', kind: 'provider', label: 'Cursor' }]);
+  t.mock.timers.tick(59_000);
+  f.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
+  f.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'cursor', height: 140 });
+  f.screen.point = { x: bubble.bounds.x + 20, y: bubble.bounds.y + 20 };
+  t.mock.timers.tick(2000);
+  assert.equal(bubble.destroyed, false, 'quick reuse cancels the old deadline');
+  f.controller.setCells([]);
+  f.settings.lightweightMode = false;
+  f.controller.sync();
+  t.mock.timers.tick(60_000);
+  assert.equal(bubble.destroyed, false, 'disabled mode retains the card');
+  f.settings.lightweightMode = true;
+  f.controller.sync();
+  f.controller.stop();
+  assert.equal(bubble.destroyed, true);
+  f.controller.sync();
+  const nextRail = f.windowFor('rail');
+  f.ipcMain.emit('edgeDock:click', { sender: nextRail.webContents }, { cellIndex: 0 });
+  t.mock.timers.tick(60_000);
+  assert.equal(f.windowFor('rail'), nextRail, 'retired timers do not destroy replacement surfaces');
+});
+
+test('disabling lightweight mode creates an unused card without rebuilding the rail', (t) => {
+  const f = createFixture({ settings: { lightweightMode: true } });
+  t.after(() => f.controller.stop());
+  const rail = f.windowFor('rail');
+  assert.equal(f.windowFor('bubble'), undefined);
+  f.settings.lightweightMode = false;
+  f.controller.sync();
+  assert.ok(f.windowFor('bubble'));
+  assert.equal(f.windowFor('rail'), rail);
+});

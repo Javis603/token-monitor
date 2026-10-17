@@ -130,6 +130,7 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     maybeAdoptSharedSubscriptionRevision() {}, withoutSessionTitles: titles.withoutSessionTitles,
     mainWindow: { isDestroyed: () => false, webContents: { send: (_topic, payload) => pushes.push(payload) } },
     dashboardWindow: null,
+    trayRendererGeneration: new WeakMap(),
     ipcMain: { handle: (channel, handler) => { if (channel === 'stats:get') get = handler; } }
   };
   vm.runInNewContext(body('function hubModeRequestIsCurrent(', '\nfunction currentHubStatsIdentity(')

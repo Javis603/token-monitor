@@ -162,7 +162,7 @@ test('renderer wires visibility scheduling without deferring tray icon updates',
   assert.match(visibilityListener, /const settingsVisible = isSettingsSurfaceVisible\(\);[\s\S]*if \(settingsVisible \|\| settingsDomSyncPending\) syncSettingsForm\(\);[\s\S]*statsRenderScheduler\.flush\(\)/);
   assert.doesNotMatch(visibilityListener, /statsRenderScheduler\.clear\(\)/);
   assert.match(app, /isHidden: isRendererWindowHidden/);
-  assert.match(app, /onWindowVisibilityPush\?\.\(\(visible\) => \{/);
+  assert.match(app, /onWindowVisibilityPush\?\.\(\(visible, resume\) => \{/);
   assert.match(
     statsPush,
     /state\.stats = sessionStatsForDisplay\(allTimeSessions\.attach\(payload\.data\.stats\)\);[\s\S]*statsRenderScheduler\.request\(\);[\s\S]*maybeUpdateBarsIcon\(\);/
@@ -176,7 +176,7 @@ test('native window visibility covers a tray window that has never been shown', 
 
   assert.match(main, /webContents\.send\('window:visibility'/);
   assert.match(main, /win\.on\('show',[\s\S]*win\.on\('hide',[\s\S]*win\.on\('minimize',[\s\S]*win\.on\('restore'/);
-  assert.match(main, /settings\?\.trayMode \? \{ windowHidden: '1' \} : \{\}/);
+  assert.match(main, /settings\?\.trayMode && !options\.openOnReady \? \{ windowHidden: '1' \} : \{\}/);
   assert.match(preload, /onWindowVisibilityPush:[\s\S]*ipcRenderer\.on\('window:visibility'/);
   assert.match(app, /windowVisible: new URLSearchParams\(window\.location\.search\)\.get\('windowHidden'\) !== '1'/);
   assert.match(app, /return document\.hidden \|\| !state\.windowVisible;/);

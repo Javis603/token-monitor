@@ -278,6 +278,13 @@ function readSharedFile(name) {
 }
 
 function functionBody(source, name, nextName) {
+  if (!source.includes(`function ${name}(`)) {
+    const painter = readRendererFile('trayImageRenderer.js').replace(/^ {4}/gm, '').replaceAll('getState()', 'state');
+    const moved = painter.match(new RegExp(`^function ${name}\\([^\\n]*\\n[\\s\\S]*?^}`, 'm'));
+    assert.ok(moved, `${name} should exist in the shared tray painter`);
+    return moved[0];
+  }
+  if (name === 'maybeUpdateBarsIcon') nextName = 'trayComposerProviderIcon';
   const start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} function should exist`);
   const end = source.indexOf(`function ${nextName}(`, start);
@@ -1064,9 +1071,10 @@ test('provider tray badges are opt-in and keep monochrome assets visible', () =>
   assert.match(providerImage, /if \(!showBadge\) return canvas\.toDataURL\('image\/png'\)/);
   assert.match(providerImage, /shadowColor = 'rgba\(255, 255, 255, 0\.95\)'/);
   assert.match(providerImage, /shadowBlur = Math\.max/);
-  assert.match(app, /function drawCustomTrayProviderImage/);
-  assert.match(app, /showProviderBadge: state\.settings\?\.showTrayProviderBadge === true/);
-  assert.match(app, /globalCompositeOperation = 'destination-out'/);
+  const painter = readRendererFile('trayImageRenderer.js').replaceAll('getState()', 'state');
+  assert.match(painter, /function drawCustomTrayProviderImage/);
+  assert.match(painter, /showProviderBadge: state\.settings\?\.showTrayProviderBadge === true/);
+  assert.match(painter, /globalCompositeOperation = 'destination-out'/);
 });
 
 test('Grok renders its single Monthly billing window full-width instead of an empty session/weekly pair', () => {

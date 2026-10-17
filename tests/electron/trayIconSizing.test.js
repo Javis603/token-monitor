@@ -121,7 +121,8 @@ test('tray:setIcons does not force-square the generated tray icons', () => {
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const handlerStart = main.indexOf("ipcMain.handle('tray:setIcons'");
   assert.notEqual(handlerStart, -1, 'tray:setIcons handler exists');
-  const callStart = main.indexOf('prepareTrayIconForPlatform(', handlerStart);
+  assert.match(main.slice(handlerStart, main.indexOf("ipcMain.handle('stats:get'", handlerStart)), /applyTrayIcons\(icons\)/);
+  const callStart = main.indexOf('prepareTrayIconForPlatform(', main.indexOf('function applyTrayIcons('));
   assert.notEqual(callStart, -1, 'handler calls prepareTrayIconForPlatform');
   const callEnd = main.indexOf('});', callStart);
   assert.notEqual(callEnd, -1, 'resizeTrayIconForPlatform call terminates with });');

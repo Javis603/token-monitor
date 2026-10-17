@@ -48,7 +48,7 @@ function fixture({ visible = true, focused = visible, platform = 'darwin' } = {}
   }
   const screen = { getCursorScreenPoint: () => point };
   const context = vm.createContext({
-    mainWindow: win, win, tray: null, recentPopoverBlur: null,
+    mainWindow: win, win, tray: null, recentPopoverBlur: null, reopeningWindows: new WeakSet(),
     settings: { trayMode: true, showTrayIcon: true },
     process: { platform }, performance: { now: () => now }, screen,
     popoverBlurMatchesPress, popoverToggleAction, trayToggleAction, windowToggleShortcutAction,

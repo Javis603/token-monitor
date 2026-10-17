@@ -43,6 +43,7 @@ const REFRESH_RESULT_HOLD_MS = 900;
 const REFRESH_FADE_OUT_MS = 200;
 const FADE_STEP_MS = 16;
 const WAKE_TOPMOST_RETRY_MS = 500;
+const BUBBLE_IDLE_MS = 60_000;
 
 function edgeDockSupported(platform = process.platform) {
   return platform === 'darwin' || platform === 'win32';
@@ -100,6 +101,7 @@ function createEdgeDockController(deps) {
   let running = false;
   let pollTimer = null;
   let wakeTopmostTimer = null;
+  let bubbleIdleTimer = null;
   let cells = [];
   let appearance = {};
   let builtGlass = null;
@@ -576,6 +578,7 @@ function createEdgeDockController(deps) {
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.webContents.on('will-navigate', (event) => event.preventDefault());
     win.webContents.on('did-finish-load', () => {
+      if (!running || windows[surface] !== win || !alive(win)) return;
       ready[surface] = true;
       lastSent[surface] = '';
       render(surface);
@@ -621,6 +624,7 @@ function createEdgeDockController(deps) {
   }
 
   function destroyWindows() {
+    cancelBubbleIdle();
     for (const surface of SURFACES) {
       const win = windows[surface];
       windows[surface] = null;
@@ -647,6 +651,7 @@ function createEdgeDockController(deps) {
     bubbleVisible = false;
     bubbleCell = null;
     bubblePlaced = null;
+    bubbleHeight = 0;
     builtGlass = null;
     builtMaterial = null;
     for (const surface of SURFACES) {
@@ -740,11 +745,17 @@ function createEdgeDockController(deps) {
     const glass = Boolean(nativeGlass());
     const materialKey = !glass || platform !== 'darwin' ? 'none'
       : liquidGlass() && createGlass ? 'mac-glass' : 'mac';
-    if (builtMaterial === materialKey && SURFACES.every((surface) => alive(windows[surface]))) return;
+    if (builtMaterial === materialKey && ['peek', 'rail'].every((surface) => alive(windows[surface]))) {
+      if (settings().lightweightMode === true) scheduleBubbleIdle();
+      else { cancelBubbleIdle(); ensureBubble(); }
+      return;
+    }
     destroyWindows();
     builtMaterial = materialKey;
     builtGlass = materialKey !== 'none';
-    for (const surface of SURFACES) windows[surface] = createSurface(surface, materialKey);
+    for (const surface of settings().lightweightMode === true ? ['peek', 'rail'] : SURFACES) {
+      windows[surface] = createSurface(surface, materialKey);
+    }
     intent.retract();
     // An always-visible dock stays revealed across a rebuild; the new rail
     // window picks this up when its page finishes loading.
@@ -885,6 +896,8 @@ function createEdgeDockController(deps) {
   }
 
   function showBubble(cellIndex) {
+    cancelBubbleIdle();
+    ensureBubble();
     bubbleCell = cellIndex;
     // Reopening the card that was last shown produces the same payload as the
     // one already sent, which the render de-duplication would swallow, and then
@@ -915,10 +928,48 @@ function createEdgeDockController(deps) {
     const bubble = windows.bubble;
     const hadCell = bubbleCell !== null;
     bubbleCell = null;
+    scheduleBubbleIdle();
     if (hadCell) render('rail');
     if (!alive(bubble) || !bubbleVisible) return;
     bubbleVisible = false;
     setVisible('bubble', false, FADE_OUT_MS);
+  }
+
+  function cancelBubbleIdle() {
+    clearTimeout(bubbleIdleTimer);
+    bubbleIdleTimer = null;
+  }
+
+  function ensureBubble() {
+    if (alive(windows.bubble)) return;
+    ready.bubble = false;
+    lastSent.bubble = '';
+    shapes.bubble = null;
+    bubblePlaced = null;
+    bubbleHeight = 0;
+    bubbleVisible = false;
+    windows.bubble = createSurface('bubble', builtMaterial);
+  }
+
+  function scheduleBubbleIdle() {
+    const target = windows.bubble;
+    if (!running || settings().lightweightMode !== true || bubbleCell !== null
+      || !alive(target) || bubbleIdleTimer !== null) return;
+    bubbleIdleTimer = setTimeout(() => {
+      bubbleIdleTimer = null;
+      if (!running || settings().lightweightMode !== true || bubbleCell !== null || windows.bubble !== target) return;
+      windows.bubble = null;
+      ready.bubble = false;
+      lastSent.bubble = '';
+      shapes.bubble = null;
+      bubblePlaced = null;
+      bubbleHeight = 0;
+      bubbleVisible = false;
+      cancelFade(target);
+      disposeGlass('bubble');
+      if (alive(target)) target.destroy();
+    }, BUBBLE_IDLE_MS);
+    bubbleIdleTimer.unref?.();
   }
 
   function placeBubble() {

@@ -164,7 +164,7 @@ test('title resolution matches between the limits panel and Home', () => {
   }
   // The tray renders account text outside the title resolver, so it reads the
   // same setting rather than its own.
-  const customTrayLayout = balancedBlock(app, 'function renderCustomTrayLayout(');
+  const customTrayLayout = balancedBlock(readRendererFile('trayImageRenderer.js').replaceAll('getState()', 'state'), 'function renderCustomTrayLayout(');
   assert.match(customTrayLayout, /item\.metric === 'account'\s*&& state\.settings\?\.maskLimitAccountEmails === true/);
   assert.match(customTrayLayout, /state\.codexActiveAccount\?\.accountKey/);
   assert.match(customTrayLayout, /\[selectedCodexKey, detectedCodexKey\]\.find/);

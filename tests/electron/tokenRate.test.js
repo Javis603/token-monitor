@@ -662,6 +662,7 @@ test('the live footer rate is opt-in, accessible, and shares the persisted mode'
 });
 
 test('compact display surfaces can render live rates independently of the footer setting', () => {
+  const painter = fs.readFileSync(path.join(rendererDir, 'trayImageRenderer.js'), 'utf8');
   assert.match(trayLayout, /'liveTokenRate'/);
   assert.match(trayLayout, /rateMode: 'speed'/);
   assert.match(trayLayout, /rateScope: 'all'/);
@@ -686,12 +687,12 @@ test('compact display surfaces can render live rates independently of the footer
   assert.match(app, /floatingBubbleEnabled === true/);
   assert.match(app, /floatingBubbleCustomLayout/);
   assert.match(app, /trayLayoutApi\.liveTokenRateItemsForSurfaces\(\[/);
-  assert.match(app, /function liveTokenRateTrayLayout\(\)/);
-  assert.match(app, /if \(mode === 'liveTokenRate'\) \{[\s\S]*liveTokenRateTrayLayout\(\)/);
+  assert.match(painter, /function liveTokenRateTrayLayout\(\)/);
+  assert.match(painter, /if \(mode === 'liveTokenRate'\) \{[\s\S]*liveTokenRateTrayLayout\(\)/);
   assert.match(app, /if \(isSettingsSurfaceVisible\(\)\) refreshTrayComposers\(\)/);
   assert.match(app, /state\.stats = sessionStatsForDisplay\(allTimeSessions\.attach\(nextStats\)\);\s*observeDisplayLiveTokenRates\(nextStats\)/);
   assert.match(app, /state\.stats = sessionStatsForDisplay\(allTimeSessions\.attach\(payload\.data\.stats\)\);\s*observeLiveTokenRate\(state\.stats\);\s*observeDisplayLiveTokenRates\(state\.stats\)/);
-  assert.match(app, /liveTokenRates: options\.liveTokenRates \|\| displayLiveTokenRateSamples\(\)/);
+  assert.match(painter, /liveTokenRates: options\.liveTokenRates \|\| displayLiveTokenRateSamples\(\)/);
   assert.match(app, /renderFloatingBubbleContent\(\);\s*if \(isSettingsSurfaceVisible\(\)\) refreshTrayComposers\(\)/);
   assert.match(app, /trayContentInput\.value = \['tokens',[\s\S]*'liveTokenRate'/);
   const bubbleOptions = html.slice(html.indexOf('id="floatingBubbleContentInput"'), html.indexOf('id="floatingBubbleComposer"'));

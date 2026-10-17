@@ -5,20 +5,51 @@
 // projection of the same object. The projection walks every session, so it runs
 // once per snapshot and settings key rather than once per reader. Keyed by the
 // snapshot object itself: a snapshot is never mutated after it is published, and
-// a WeakMap lets superseded snapshots go with their projections.
-function createStatsPresentationCache() {
-  const cache = new WeakMap();
+// a WeakMap lets superseded snapshots go with their projections. A bounded
+// policy additionally evicts cold derived results even while their immutable
+// snapshot inputs remain addressable. It never stores recomposition recipes.
+function createStatsPresentationCache(options = {}) {
+  let cache = new WeakMap();
+  const hot = new Map();
+  let bounded = false;
+  function limit() {
+    const value = typeof options.limit === 'function' ? options.limit() : options.limit;
+    const maximum = Number.isFinite(value) ? Math.max(1, Math.trunc(value)) : Infinity;
+    if (bounded !== Number.isFinite(maximum)) {
+      cache = new WeakMap();
+      hot.clear();
+      bounded = Number.isFinite(maximum);
+    }
+    return maximum;
+  }
+  function touch(stats, maximum) {
+    if (!bounded) return;
+    hot.delete(stats);
+    hot.set(stats, true);
+    while (hot.size > maximum) {
+      const oldest = hot.keys().next().value;
+      hot.delete(oldest);
+      cache.delete(oldest);
+    }
+  }
   return {
+    clear() { cache = new WeakMap(); hot.clear(); },
     updateActivity(previous, next, project) {
+      const maximum = limit();
       const hit = cache.get(previous);
-      if (hit) cache.set(next, { key: hit.key, result: project(hit.result) });
+      if (hit) {
+        cache.set(next, { key: hit.key, result: project(hit.result) });
+        touch(next, maximum);
+      }
     },
     get(stats, key, project) {
+      const maximum = limit();
       if (!stats || typeof stats !== 'object') return project(stats);
       const hit = cache.get(stats);
-      if (hit && hit.key === key) return hit.result;
+      if (hit && hit.key === key) { touch(stats, maximum); return hit.result; }
       const result = project(stats);
       cache.set(stats, { key, result });
+      touch(stats, maximum);
       return result;
     }
   };
@@ -128,7 +159,7 @@ function createRendererSnapshots(options = {}) {
   const source = options.source;
   if (typeof source !== 'function') throw new TypeError('source must be a function');
   const limit = Math.max(1, Number(options.limit) || 8);
-  const tags = new WeakMap();
+  let tags = new WeakMap();
   const byId = new Map();
   let nextId = 1;
 
@@ -146,6 +177,9 @@ function createRendererSnapshots(options = {}) {
   }
 
   return {
+    // IDs belong to the renderer that can request them. A destroyed main UI
+    // has no remaining consumer; a recreated UI receives fresh monotonic IDs.
+    clear() { byId.clear(); tags = new WeakMap(); },
     updateActivity(previous, next) {
       const tag = register(previous);
       tags.set(next, tag);

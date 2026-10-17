@@ -243,3 +243,56 @@ test('a snapshot stays addressable after newer ones are published', () => {
   assert.equal(snapshots.get(1), first);
   assert.equal(snapshots.get(2), null, 'the re-stamped snapshot counts as recent');
 });
+
+test('bounded derived projections evict independently of eight addressable snapshot inputs', () => {
+  const cache = createStatsPresentationCache({ limit: 2 });
+  const snapshots = createRendererSnapshots({ source: () => 'hub-a' });
+  const inputs = Array.from({ length: 8 }, (_, n) => ({ total: n, history: { clock: n, streak: n + 1 } }));
+  let projections = 0;
+  const project = stats => { projections += 1; return structuredClone(stats); };
+  const tags = inputs.map(stats => snapshots.stamp(stats, stats).snapshot);
+  const first = cache.get(inputs[0], 'aliases', () => project(inputs[0]));
+  cache.get(inputs[1], 'aliases', () => project(inputs[1]));
+  assert.equal(cache.get(inputs[0], 'aliases', () => project(inputs[0])), first, 'a read promotes the hot entry');
+  cache.get(inputs[2], 'aliases', () => project(inputs[2]));
+  assert.equal(cache.get(inputs[0], 'aliases', () => project(inputs[0])), first);
+  for (const stats of inputs.slice(3)) cache.get(stats, 'aliases', () => project(stats));
+  assert.equal(projections, 8);
+  for (let n = 0; n < 8; n += 1) {
+    const original = snapshots.get(tags[n].id);
+    assert.equal(original, inputs[n]);
+    assert.deepEqual(cache.get(original, 'aliases', () => project(original)), original, 'rebuild from captured inputs, including historical clock');
+  }
+  assert.equal(projections, 16, 'old derived results were evicted, while source IDs survived');
+});
+
+test('cache policy switches and activity updates cannot resurrect an evicted projection', () => {
+  let maximum = Infinity;
+  const cache = createStatsPresentationCache({ limit: () => maximum });
+  const a = {}, b = {}, c = {};
+  const old = cache.get(a, 'key', () => ({ counter: 1 }));
+  maximum = 2;
+  const current = cache.get(a, 'key', () => ({ counter: 2 }));
+  assert.notEqual(current, old, 'entering bounded mode drops untracked old entries');
+  cache.updateActivity(a, b, value => ({ counter: value.counter + 1 }));
+  assert.equal(cache.get(b, 'key', () => assert.fail('activity hit')), cache.get(b, 'key', () => null));
+  cache.get(c, 'key', () => ({}));
+  let patched = false;
+  cache.updateActivity(a, {}, () => { patched = true; });
+  assert.equal(patched, false, 'evicted activity inputs rebuild on demand');
+  cache.clear();
+  assert.equal(cache.get(b, 'key', () => ({ counter: 4 })).counter, 4);
+  maximum = Infinity;
+  assert.equal(cache.get(b, 'key', () => ({ counter: 5 })).counter, 5);
+});
+
+test('destroying the only snapshot consumer retires IDs; recreated consumers get fresh monotonic IDs', () => {
+  const snapshots = createRendererSnapshots({ source: () => 'hub-a' });
+  const stats = { total: 10 };
+  const old = snapshots.stamp(stats, {}).snapshot;
+  snapshots.clear();
+  assert.equal(snapshots.get(old.id), null);
+  const next = snapshots.stamp(stats, {}).snapshot;
+  assert.ok(next.id > old.id);
+  assert.equal(snapshots.get(next.id), stats);
+});

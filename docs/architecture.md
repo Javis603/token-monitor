@@ -110,6 +110,16 @@ Sessions, Home and Edge Dock group the complete member set before applying displ
 
 `sessionTitlesEnabled` defaults on and affects Electron presentation only. `src/electron/sessionTitleDisplay.js` hides titles from snapshots, all-time pulls and detail headings without changing collection, metadata caches or local archives. Sync consent is independent, defaults off, and requires the [shared sync protocol](#shared-sync-content).
 
+## Lightweight desktop windows
+
+`lightweightMode` defaults off. `lightweightWindow.js` reclaims only natively hidden windows after an idle grace period, with a healthy tray and renderer approval. Minimized/occluded windows and a visible Floating Bubble retain their identity. UI reclamation must not trigger application quit or stop background services.
+
+Tray painting must survive main-renderer loss. `trayImageService.js` uses an on-demand sandboxed painter with a tray-only DTO; credentials and session trees stay out. Main owns rate sampling and timers across painter handoffs. Static artwork is cached so the helper can exit. Recovery refreshes stats/transport state and rejects replies from retired renderer generations.
+
+Pause hidden UI-only work, but veto reclamation when unsaved or in-flight state needs the renderer; missing approval keeps the window. Restore only bounded navigation state. Derived-cache eviction must preserve addressable snapshots' captured inputs; renderer retirement clears their IDs without clearing persistent scanner caches.
+
+Edge Dock retains peek/rail wake surfaces and creates its bubble on demand. Background updates must not extend idle deadlines. Recreated main/card windows must complete content/geometry readiness before reveal.
+
 ## Widget mode switching
 
 `settings.hubMode` selects the source: `local` uses the local IPC collector; `client` uses Hub SSE plus this device's sync collector; `host` adds an embedded Hub; `icloud` uses local collection and iCloud file reconciliation instead of SSE. A live agent PID suppresses widget Hub uploads and owns the local daily-history archive. The agent has no iCloud sink, so the widget must still publish its iCloud record while yielding archive writes.

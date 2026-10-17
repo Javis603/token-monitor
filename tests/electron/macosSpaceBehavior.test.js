@@ -79,7 +79,7 @@ test('main process reapplies the complete Space policy before showing either mod
   // from the activate handler too, which had no policy call of its own.
   assert.match(
     main,
-    /app\.on\('activate', \(\) => \{[\s\S]*?applyMacActivationPolicy\(\{ mainWindowVisible: true \}\);[\s\S]*?createWindow\(\);/
+    /app\.on\('activate', \(\) => \{[\s\S]*?applyMacActivationPolicy\(\{ mainWindowVisible: true \}\);[\s\S]*?focusExistingWindow\(\);/
   );
   assert.match(policy, /setHiddenInMissionControl\(true\)/);
   assert.match(popover, /applyMacSpaceBehavior\(true\)[\s\S]*mainWindow\.show\(\)/);
