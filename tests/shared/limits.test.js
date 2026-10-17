@@ -1369,6 +1369,48 @@ test('aggregateLimits keeps two Alibaba accounts apart and merges one across dev
   );
 });
 
+// Cline's accountKey names the account rather than the install: it is the hash of
+// the configured key on the key lane and the server-issued account id on the
+// sign-in lane. One install can hold a pool of keys, which is several accounts,
+// and without provider-scoped collapse the second pass folds them into one row
+// and lets whichever key synced last silently replace the other's quota.
+test('aggregateLimits keeps two Cline accounts apart and merges one across devices', () => {
+  const now = '2026-06-24T10:00:00.000Z';
+  const nowMs = Date.parse('2026-06-24T10:02:00.000Z');
+  const clineRow = (accountKey, accountEmail) => ({
+    provider: 'cline',
+    accountKey,
+    accountLabel: '',
+    accountEmail,
+    status: 'ok',
+    source: 'api',
+    updatedAt: now,
+    windows: [{ kind: 'weekly', used: 1, limit: 10 }]
+  });
+  const device = (deviceId, provider) => ({ deviceId, limits: { updatedAt: now, providers: [provider] } });
+  const emails = (aggregate) => aggregate.providers
+    .filter((provider) => provider.provider === 'cline')
+    .map((provider) => provider.accountEmail)
+    .sort();
+
+  assert.deepEqual(
+    emails(aggregateLimits([
+      device('sg', clineRow('sha256:key-a', 'a@example.com')),
+      device('sg', clineRow('sha256:key-b', 'b@example.com'))
+    ], 0, nowMs)),
+    ['a@example.com', 'b@example.com']
+  );
+
+  // The same account seen from two devices is still one row.
+  assert.deepEqual(
+    emails(aggregateLimits([
+      device('mac', clineRow('sha256:key-a', 'a@example.com')),
+      device('sg', clineRow('sha256:key-a', 'a@example.com'))
+    ], 0, nowMs)),
+    ['a@example.com']
+  );
+});
+
 // Regression guard for the renderer's localProviderStatus(): a sync-mode account
 // card (DeepSeek/Minimax/Grok) must read the local device's RAW limits from
 // stats.devices, not stats.limits.providers. This test pins the root cause:
