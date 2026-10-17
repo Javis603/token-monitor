@@ -63,7 +63,7 @@ test('explicit zero, aliases and malformed new subtotals do not fall back to who
 });
 
 test('only timed reasoning is folded into the generated output bucket, once per disjoint client', () => {
-  for (const client of ['antigravity', 'antigravity-cli', 'antigravity-extension', 'codex', 'opencode', 'claude']) {
+  for (const client of ['antigravity', 'antigravity-cli', 'antigravity-extension', 'codex', 'opencode', 'grok', 'claude']) {
     const period = extract(row({ client, reasoning: 80,
       performance: { totalDurationMs: 1_000, timedTokens: 120, timedOutputTokens: 100, timedReasoningTokens: 20 }
     }));
@@ -74,6 +74,30 @@ test('only timed reasoning is folded into the generated output bucket, once per 
     assert.equal(session.timedOutputTokens, period.timedOutputTokens);
     assert.equal(tokenRatePerSecond(period.modelThroughput['shared-model']), disjoint ? 120 : 100);
   }
+});
+
+test('Grok live TPS and model detail exclude untimed legacy output and reasoning', () => {
+  const snapshot = (fresh) => extract(row({
+    client: 'grok', model: 'grok-4.7', output: fresh ? 300 : 200, reasoning: fresh ? 100 : 80,
+    performance: {
+      totalDurationMs: fresh ? 1_500 : 1_000, timedTokens: fresh ? 150 : 120,
+      timedOutputTokens: fresh ? 120 : 100, timedReasoningTokens: fresh ? 25 : 20
+    }
+  }));
+  const before = snapshot(false);
+  const after = snapshot(true);
+  assert.equal(after.totalTokens, 400);
+  assert.equal(after.outputTokens, 400);
+  assert.equal(after.sessions['grok:s1'].timedOutputTokens, 145);
+  const tracker = createLiveTokenRateTracker();
+  assert.equal(tracker.observe(before), null);
+  const sample = tracker.observe(after);
+  assert.equal(sample.speed, 50);
+  assert.deepEqual(sample.models, [{ model: 'grok-4.7', speed: 50, burn: 3_600 }]);
+
+  const untimed = extract(row({ client: 'grok', reasoning: 80, performance: undefined }));
+  assert.equal(untimed.outputTokens, 280);
+  assert.equal(untimed.timedOutputTokens, 0);
 });
 
 test('untimed output append preserves cumulative timing and does not contaminate another client live rate', () => {

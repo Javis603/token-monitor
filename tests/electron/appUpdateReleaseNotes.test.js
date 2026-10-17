@@ -17,13 +17,13 @@ function read(name) {
   return fs.readFileSync(path.join(rendererDir, name), 'utf8');
 }
 
-test('App Updates includes an inline release-note disclosure and full-release action', () => {
+test('App Updates includes an inline release-note disclosure without a duplicate full-release action', () => {
   const html = read('index.html');
   assert.match(html, /<div id="appUpdateNotes" class="app-update-notes hidden">/);
   assert.match(html, /id="appUpdateNotesToggle"[^>]*aria-expanded="false"[^>]*aria-controls="appUpdateNotesDetails"/);
   assert.match(html, /id="appUpdateNotesDetails" class="app-update-notes-details hidden" inert/);
   assert.match(html, /id="appUpdateNotesTitle"/);
-  assert.match(html, /id="appUpdateReleaseNotesButton"[\s\S]*data-i18n="settings\.appUpdate\.viewFullRelease"/);
+  assert.doesNotMatch(html, /id="appUpdateReleaseNotesButton"/);
 });
 
 test('footer update control is one icon button with a hover release-note card', () => {

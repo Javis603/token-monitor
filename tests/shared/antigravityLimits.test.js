@@ -730,9 +730,9 @@ test('fetchAntigravityLimits preserves Gemini 4 Argon from OAuth when local RPC 
   assert.deepEqual(result[0].windows.map((window) => [window.label, window.kind, window.remainingPercent, window.showMeter]), [
     ['Gemini 5-hour', 'session', 90, true],
     ['Gemini weekly', 'weekly', 95, true],
+    ['Gemini 4 Argon weekly', 'weekly', 74, true],
     ['Claude/GPT 5-hour', 'session', null, false],
-    ['Claude/GPT weekly', 'weekly', 0, true],
-    ['Gemini 4 Argon weekly', 'weekly', 74, true]
+    ['Claude/GPT weekly', 'weekly', 0, true]
   ]);
 });
 

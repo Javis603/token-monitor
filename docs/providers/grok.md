@@ -1,18 +1,21 @@
 ---
-summary: "Grok Build sessions are named from the local summary.json. Tokscale reports grok tokens with no timestamp, title or project at all, so the card had nothing to list."
+summary: "Grok Build session metadata fallbacks, disjoint reasoning accounting and request throughput."
 ids: [grok]
 read_when:
   - Changing what a grok session's title, timestamps or project come from
   - Debugging a missing or mislabelled Grok session list
+  - Changing Grok token accounting or throughput
 ---
 
 # Grok Build
 
-Tokscale parses grok end to end and reports tokens, cost, model and message counts correctly. What it does not report is anything that *identifies* a session: its `ModelUsageJson` carries only `client, mergedClients, sessionId, model, provider, input, output, cacheRead, cacheWrite, reasoning, messageCount, cost, performance`. No timestamp, no title, no project — for any client, not just grok.
+Tokscale owns Grok token parsing. Its unified reader splits `completion_tokens` into disjoint `output` and `reasoning` buckets. The shared `TOKSCALE_DISJOINT_REASONING_CLIENTS` registry in `history.js` lists every client whose reasoning must be folded back into Token Monitor's reasoning-inclusive public output and totals exactly once; usage, History and throughput all read that one registry.
 
-That is not cosmetic. `edgeDock/presentation.js` drops a session whose `lastUsedAt` and `startedAt` are both unparseable, so every grok row was discarded and the Grok card showed quota and totals with no sessions. `applyTokscaleSessionMetadata` cannot fill the gap either: it reads `json.sessions` / `json.workspaces`, arrays this tokscale build never emits, so it early-returns for every client.
+Grok throughput requires a vendored scanner build carrying [upstream #1485](https://github.com/junhoyeo/tokscale/pull/1485), which reads each inference's positive `ctx.model_elapsed_ms` into the existing duration pipeline; the current pin predates it, so Grok reports no timed samples and TPS/TPM stay unavailable. On such a build, matched `timedOutputTokens` and `timedReasoningTokens` come from the same timed messages: timed reasoning joins the output numerator only through the disjoint-client registry, untimed legacy output never enters it, and TPM uses all `timedTokens`, which already include reasoning. The timing estimate includes first-output waiting and differs from Grok's decode-only `tokens_per_sec`.
 
-`src/shared/providers/grok/sessionMetadata.js` is therefore the whole answer, reading one small file per session from `~/.grok/sessions/<url-encoded cwd>/<uuid>/summary.json`. It also checks configured Grok extra scan roots, which may name a Grok home, its `sessions` directory or a descendant. The join is exact: tokscale's `sessionId` is the same bare uuid as the directory name and `summary.json`'s `info.id`. If more than one persisted summary claims that directory id across cwd buckets or scan roots, the resolver skips it as ambiguous. The workspace directory name is only a place to start. Worktree sessions use a non-empty `source_workspace_dir` for project grouping; other sessions use `info.cwd`. Neither path needs URL decoding.
+Days whose source logs remain are rebuilt by a later full scan; archived observations retain their recorded `reasoningTokens`, so older archived days remain understated until a migration folds that back.
+
+The bundled fork supplies session/workspace metadata through `applyTokscaleSessionMetadata`. The local fallback, `src/shared/providers/grok/sessionMetadata.js`, reads one small file per session from `~/.grok/sessions/<url-encoded cwd>/<uuid>/summary.json`. It also checks configured Grok extra scan roots, which may name a Grok home, its `sessions` directory or a descendant. The join is exact: tokscale's `sessionId` is the same bare uuid as the directory name. A non-empty `info.id` in `summary.json` must match it; a missing or blank one is accepted. If more than one persisted summary claims that directory id across cwd buckets or scan roots, the resolver skips it as ambiguous. The workspace directory name is only a place to start. Worktree sessions use a non-empty `source_workspace_dir` for project grouping; other sessions use `info.cwd`. Neither path needs URL decoding.
 
 ## Timestamps
 
@@ -37,5 +40,5 @@ Roughly 45% of the session directories on a busy machine are subagent sessions, 
 ## Verification
 
 ```
-node --test tests/shared/grokSessionMetadata.test.js
+node --test tests/shared/grokSessionMetadata.test.js tests/shared/mixedTimingThroughput.test.js tests/shared/history.test.js
 ```

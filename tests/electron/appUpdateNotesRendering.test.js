@@ -32,7 +32,7 @@ function createHarness() {
   };
   const els = Object.fromEntries([
     'appUpdateNotes', 'appUpdateNotesToggle', 'appUpdateNotesDetails',
-    'appUpdateNotesTitle', 'appUpdateNotesBody', 'appUpdateReleaseNotesButton'
+    'appUpdateNotesTitle', 'appUpdateNotesBody'
   ].map((name) => [name, element()]));
   const context = vm.createContext({
     appUpdatePresentationApi, els, state: { appUpdateNotesPresentedVersion: '' },

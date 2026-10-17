@@ -673,7 +673,8 @@ test('mergeDeviceRecord preserves usage for clients omitted by the active tracke
     label: 'Shared App',
     tokens: 175,
     costUsd: 1.75,
-    clients: { codex: 75, hermes: 100 }
+    clients: { codex: 75, hermes: 100 },
+    models: { 'gpt-5': 75, 'claude-3-5-sonnet': 100 }
   });
 });
 

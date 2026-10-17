@@ -385,6 +385,9 @@ Object.assign(els, {
   toolDetailFooter: document.getElementById('toolDetailFooter'),
   toolDetailFooterTokens: document.getElementById('toolDetailFooterTokens'),
   toolDetailFooterModels: document.getElementById('toolDetailFooterModels'),
+  projectBreakdownFooter: document.getElementById('projectBreakdownFooter'),
+  projectBreakdownFooterTools: document.getElementById('projectBreakdownFooterTools'),
+  projectBreakdownFooterModels: document.getElementById('projectBreakdownFooterModels'),
   monthPeriodMenu: document.getElementById('monthPeriodMenu'),
   monthPeriodTab: document.getElementById('monthPeriodTab'),
   periodMonthModeInput: document.getElementById('periodMonthModeInput'),
@@ -497,7 +500,6 @@ Object.assign(els, {
   appUpdateNotesDetails: document.getElementById('appUpdateNotesDetails'),
   appUpdateNotesTitle: document.getElementById('appUpdateNotesTitle'),
   appUpdateNotesBody: document.getElementById('appUpdateNotesBody'),
-  appUpdateReleaseNotesButton: document.getElementById('appUpdateReleaseNotesButton'),
   appUpdateMessage: document.getElementById('appUpdateMessage'),
   titleIconInput: document.getElementById('titleIconInput'),
   tokenNumberAnimationInput: document.getElementById('tokenNumberAnimationInput'),
@@ -597,6 +599,7 @@ function toggleAccordionRow(row) {
     renderActiveToolDetail();
   }
   renderToolDetailFooter();
+  renderProjectBreakdownFooter();
 }
 
 document.addEventListener('click', (event) => {
@@ -614,6 +617,8 @@ document.addEventListener('keydown', (event) => {
 
 els.toolDetailFooterTokens.addEventListener('click', () => setActiveToolDetailMode('tokens'));
 els.toolDetailFooterModels.addEventListener('click', () => setActiveToolDetailMode('models'));
+els.projectBreakdownFooterTools.addEventListener('click', () => { void saveSettings({ projectBreakdownMode: 'tool' }).catch(() => {}); });
+els.projectBreakdownFooterModels.addEventListener('click', () => { void saveSettings({ projectBreakdownMode: 'model' }).catch(() => {}); });
 
 document.addEventListener('pointerdown', (event) => {
   if (state.viewSwitcherOpen && !event.target.closest('#viewSwitcher')) {
@@ -1205,6 +1210,7 @@ function syncLiveTokenRateFooterState() {
   if (!footer) return;
   const enabled = state.settings?.showLiveTokenRate === true;
   const obscured = !els.toolDetailFooter?.classList.contains('hidden')
+    || !els.projectBreakdownFooter?.classList.contains('hidden')
     || !els.appUpdatePill?.classList.contains('hidden');
   footer.classList.toggle('live-token-rate-enabled', enabled);
   footer.classList.toggle('live-token-rate-obscured', enabled && obscured);
@@ -1644,7 +1650,6 @@ function renderAppUpdateNotes(s) {
     els.appUpdateNotesBody.replaceChildren(...nodes);
     els.appUpdateNotesBody.dataset.contentKey = contentKey;
   }
-  els.appUpdateReleaseNotesButton.classList.toggle('hidden', !s.latest?.htmlUrl);
   if (s.hasUpdate && state.appUpdateNotesPresentedVersion !== version) {
     // The disclosure may have just changed from display:none. Commit its
     // collapsed grid once so the first automatic reveal can transition too.
@@ -2523,6 +2528,22 @@ function setActiveToolDetailMode(mode) {
   renderToolDetailFooter();
 }
 
+function renderProjectBreakdownFooter() {
+  const active = visibleStatsSurface() === 'main'
+    && state.breakdown === 'project'
+    && !els.breakdown.classList.contains('hidden')
+    && Boolean(els.breakdown.querySelector('.row.expanded .row-accordion-inner'));
+  els.projectBreakdownFooter.classList.toggle('hidden', !active);
+  syncLiveTokenRateFooterState();
+  if (!active) return;
+  const mode = state.settings?.projectBreakdownMode === 'model' ? 'model' : 'tool';
+  els.projectBreakdownFooter.setAttribute('aria-label', t('views.project'));
+  els.projectBreakdownFooterTools.textContent = t('views.tool');
+  els.projectBreakdownFooterModels.textContent = t('views.model');
+  els.projectBreakdownFooterTools.setAttribute('aria-pressed', String(mode === 'tool'));
+  els.projectBreakdownFooterModels.setAttribute('aria-pressed', String(mode === 'model'));
+}
+
 // The live-session pair: a dot on the tool mark for "this is being written to
 // right now", and a fuel gauge for how much of its context window is left. The
 // dot is drawn only while the agent is working and the gauge only while the
@@ -2887,6 +2908,7 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     els.breakdown.replaceChildren();
     renderSessionPager(null);
     state.rowSignature = '';
+    renderProjectBreakdownFooter();
     return;
   }
   const page = breakdownPage(rows, { breakdown: state.breakdown, page: state.sessionPage });
@@ -2957,6 +2979,7 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     rowRenderFingerprints.set(row, fingerprint);
   }
   renderToolDetailFooter();
+  renderProjectBreakdownFooter();
   if (liveMotionSnapshot) animateBreakdownFrom(liveMotionSnapshot, { duration: 600 });
 }
 
@@ -3165,8 +3188,12 @@ function projectRowsForPeriod(period) {
     clientLabels,
     clientColors,
     stableColor,
+    shareBy: state.settings?.projectBreakdownMode,
+    modelColor,
     fallbackColors: fallbackModelColors,
     unknownClientLabel: t('projects.unknownTool'),
+    unknownModelLabel: t('projects.unknownModel'),
+    allowSessionModelAttribution: !projectRowsApi.projectBreakdownIncomplete(state.stats, state.period),
     nativeProjects: state.stats?.nativeProjects?.[state.period] || {},
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
@@ -7143,6 +7170,7 @@ function render() {
   stopHomeSessionRepaint();
   stopSessionStatusRepaint();
   els.toolDetailFooter.classList.add('hidden');
+  els.projectBreakdownFooter.classList.add('hidden');
   syncLiveTokenRateFooterState();
   renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
@@ -13529,11 +13557,6 @@ els.appUpdateCheckButton.addEventListener('click', async () => {
 
 els.appUpdateViewReleaseButton.addEventListener('click', async () => {
   await runAppUpdateAction();
-});
-
-els.appUpdateReleaseNotesButton.addEventListener('click', async () => {
-  const url = state.appUpdate?.latest?.htmlUrl;
-  if (url) await window.tokenMonitor.openExternal(url);
 });
 
 window.tokenMonitor.onSettingsPush?.((next) => {

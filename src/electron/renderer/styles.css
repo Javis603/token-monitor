@@ -1485,7 +1485,6 @@ span.settings-note.settings-item-desc {
   line-height: 1.45;
 }
 .app-update-note-group li + li { margin-top: 3px; }
-.app-update-notes .inline-link { margin-top: 8px; font-size: 0.625rem; }
 .inline-link {
   padding: 0;
   border: 0;

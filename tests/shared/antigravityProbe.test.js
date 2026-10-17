@@ -402,7 +402,7 @@ test('_collapsePools keeps Gemini 4 Argon separate from Claude and preserves fin
   ]);
 });
 
-test('_quotaSummaryWindows keeps Gemini 4 Argon distinct from Gemini Models and orders it after Claude/GPT', () => {
+test('_quotaSummaryWindows keeps Gemini 4 Argon distinct from Gemini Models and orders it after Gemini', () => {
   const windows = probe._quotaSummaryWindows({
     groups: [
       {
@@ -437,9 +437,9 @@ test('_quotaSummaryWindows keeps Gemini 4 Argon distinct from Gemini Models and 
   assert.deepEqual(windows.map((window) => [window.name, window.kind, window.remainingFraction, window.showMeter]), [
     ['Gemini 5-hour', 'session', 0.98, true],
     ['Gemini weekly', 'weekly', 0.99, true],
+    ['Gemini 4 Argon weekly', 'weekly', 0.74, true],
     ['Claude/GPT 5-hour', 'session', null, false],
-    ['Claude/GPT weekly', 'weekly', 0, true],
-    ['Gemini 4 Argon weekly', 'weekly', 0.74, true]
+    ['Claude/GPT weekly', 'weekly', 0, true]
   ]);
 });
 

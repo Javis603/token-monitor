@@ -503,9 +503,9 @@ function quotaSummaryWindows(payload) {
   }
   const groupRank = (name) => {
     const lower = name.toLowerCase();
-    if (lower.includes('argon')) return 2;
+    if (lower.includes('argon')) return 1;
     if (lower.startsWith('gemini ')) return 0;
-    if (lower.startsWith('claude/gpt ')) return 1;
+    if (lower.startsWith('claude/gpt ')) return 2;
     return 3;
   };
   const kindRank = (kind) => kind === 'session' ? 0 : 1;
