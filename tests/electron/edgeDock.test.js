@@ -115,7 +115,7 @@ test('a long detail total shrinks beside its compact reading instead of wrapping
 test('a card commits after its reported height is clamped to the work area', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('// ---- Wiring'));
-  for (const kind of ['provider', 'stat']) {
+  for (const kind of ['provider', 'stat', 'update']) {
     for (const { measured, maxCardHeight, expected } of [
       // Chromium at 175% scaling can measure a max-height: 851px card this way.
       { measured: 851.000061, maxCardHeight: 851, expected: 851 },
@@ -126,15 +126,16 @@ test('a card commits after its reported height is clamped to the work area', () 
       const reports = [];
       const card = { dataset: {}, style: {}, getBoundingClientRect: () => ({ height: measured }) };
       const renderBubble = Function('deps', `
-        const { root, stagingLayer, providerCard, statCard, fitCardTotal,
+        const { root, stagingLayer, cellCard, fitCardTotal,
           clampBreakdownList, bridge, commitCard } = deps;
         ${source}
         return renderBubble;
       `)({
         root: { dataset: {} },
         stagingLayer: { replaceChildren() {} },
-        providerCard: () => card,
-        statCard: () => card,
+        // The dock's own dispatch, so this keeps covering the placement handshake
+        // for every kind of cell the rail can hold — the update ring included.
+        cellCard: () => card,
         fitCardTotal() {},
         clampBreakdownList() {},
         bridge: { reportBubbleSize: (cellId, height) => reports.push({ cellId, height }) },

@@ -16,13 +16,16 @@
     node ? require('../usageAttributionRows') : root?.TokenMonitorUsageAttributionRows,
     node ? require('../limits/resetMotion') : root?.TokenMonitorLimitResetMotion,
     node ? require('../../../shared/sessionActivityProviders') : root?.TokenMonitorSessionActivityProviders,
-    node ? require('../sessionRows') : root?.TokenMonitorSessionRows
+    node ? require('../sessionRows') : root?.TokenMonitorSessionRows,
+    node ? require('../appUpdatePresentation') : root?.TokenMonitorAppUpdatePresentation
   );
   if (node) module.exports = api;
   if (root) root.TokenMonitorEdgeDockPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive, usageAttributionRows, limitResetMotion, activityProviders, sessionRowsApi) {
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive, usageAttributionRows, limitResetMotion, activityProviders, sessionRowsApi, appUpdatePresentation) {
   // Every account is listed; the card scrolls when they outgrow the screen.
   const MAX_BUBBLE_ACCOUNTS = 50;
+  // Transient: never persist the update in the user-composed item list.
+  const UPDATE_CELL_ID = 'update:app';
 
   function normalizedId(value) {
     return String(value || '').trim().toLowerCase();
@@ -758,6 +761,34 @@
     return providerOrder(groupedProviders(stats).providers, options);
   }
 
+  // Share the settings panel's notice visibility and action policy.
+  function updateCell(appUpdate) {
+    if (!appUpdate || appUpdate.showUpdateNotice !== true) return null;
+    const latest = appUpdate.latest || null;
+    if (!latest?.version) return null;
+    const progress = finite(appUpdate.installProgress);
+    return {
+      id: UPDATE_CELL_ID,
+      kind: 'update',
+      currentVersion: String(appUpdate.currentVersion || ''),
+      version: String(latest.version),
+      htmlUrl: String(latest.htmlUrl || ''),
+      // Resolve the locale in the renderer, as the settings panel does.
+      releaseNotes: latest.releaseNotes || {},
+      action: appUpdatePresentation.appUpdateActionMode(appUpdate),
+      downloading: appUpdate.installPhase === 'checking' || appUpdate.installPhase === 'downloading',
+      downloaded: appUpdate.downloaded === true,
+      starting: appUpdate.installStarting === true,
+      progress: progress === null ? null : clampPercent(progress),
+      installErrorKey: appUpdate.installError
+        ? appUpdatePresentation.appUpdateInstallErrorMessageKey(appUpdate.installErrorKind)
+        : '',
+      checkErrorKey: appUpdate.lastError
+        ? appUpdatePresentation.appUpdateErrorMessageKey(appUpdate.lastErrorKind)
+        : ''
+    };
+  }
+
   function buildEdgeDockCells(stats, options = {}) {
     const { byId, allById } = groupedProviders(stats, options);
     const items = Array.isArray(options.items)
@@ -793,6 +824,8 @@
         }));
       }
     }
+    const update = updateCell(options.appUpdate);
+    if (update) cells.push(update);
     return cells;
   }
 

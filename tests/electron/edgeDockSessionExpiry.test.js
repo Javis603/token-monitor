@@ -77,12 +77,12 @@ test('the edge dock arms a re-projection for the moment its running reading expi
   assert.match(statsPath, /pushEdgeDockCells\(cells\);/);
   const syncPath = main.slice(main.indexOf('function syncEdgeDock('));
   assert.match(syncPath, /const stats = edgeDockStats\(\);/);
-  assert.match(syncPath, /if \(stats\) pushEdgeDockCells\(edgeDockCellsFor\(electronPresentationStats\(stats\)\)\);/);
+  assert.match(syncPath, /pushEdgeDockCells\(edgeDockCellsFor\(stats \? electronPresentationStats\(stats\) : null\)\);/);
   assert.doesNotMatch(main, /controller\.setCells\(edgeDockCellsFor/);
   // The tick re-projects through the same projection the pushes use, so the renderer
   // keeps re-deriving from cells that were built the same way.
   const timerPath = main.slice(main.indexOf('function scheduleEdgeDockSessionExpiry('), main.indexOf('function ensureEdgeDockController('));
   assert.match(timerPath, /repaintEdgeDockCells\(\);/);
   const repaintPath = main.slice(main.indexOf('function repaintEdgeDockCells('), main.indexOf('function edgeDockDerivedSelections('));
-  assert.match(repaintPath, /updateEdgeDockCells\(electronPresentationStats\(stats\)\)/);
+  assert.match(repaintPath, /updateEdgeDockCells\(stats \? electronPresentationStats\(stats\) : null\)/);
 });
