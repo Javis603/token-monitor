@@ -107,6 +107,7 @@ function normalizeSessionUsageArchive(value) {
       };
       if (periodName === 'today') entry.periodWindows[periodName].day = String(rawWindow.day || rawEntry.day || localDay(rawEntry.capturedAt));
       if (periodName === 'month') entry.periodWindows[periodName].month = String(rawWindow.month || rawEntry.month || localMonth(rawEntry.capturedAt));
+      if (rawWindow.utcOffsetMinutes !== undefined) entry.periodWindows[periodName].utcOffsetMinutes = rawWindow.utcOffsetMinutes;
     }
 
     if (!entry.client || !entry.sessionId || Object.keys(entry.periods).length === 0) continue;
@@ -263,7 +264,7 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
       entry.month = month;
       entry.periods[periodName] = nextSession;
       entry.periodWindows = entry.periodWindows || {};
-      entry.periodWindows[periodName] = { capturedAt: capturedAtIso };
+      entry.periodWindows[periodName] = { capturedAt: capturedAtIso, utcOffsetMinutes: -captureDate.getTimezoneOffset() };
       if (periodName === 'today') entry.periodWindows[periodName].day = day;
       if (periodName === 'month') entry.periodWindows[periodName].month = month;
       archive.sessions[archiveKey] = entry;
@@ -401,9 +402,39 @@ function isLiveUnderSplitId(period, entry, session) {
   return Boolean(period?.sessions?.[`${split}:${sessionId}`]);
 }
 
-function shouldApplyPeriod(periodName, entry, now) {
+// The calendar day an instant falls on at a fixed offset from UTC, stated in
+// minutes ahead of UTC (`utcOffsetMinutes`, so UTC+8 is 480). A period window's
+// day is cut in the frame the capture ran at, so a bucket's own activity has to
+// be read in that same frame before the two days are compared.
+function dayAtOffset(timestamp, utcOffsetMinutes) {
+  const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Date(date.getTime() + utcOffsetMinutes * 60000).toISOString().slice(0, 10);
+}
+
+function shouldApplyPeriod(periodName, entry, session, now) {
   const window = entry?.periodWindows?.[periodName] || {};
-  if (periodName === 'today') return (window.day || entry.day) === localDay(now);
+  if (periodName === 'today') {
+    const claimedDay = window.day || entry.day;
+    if (claimedDay !== localDay(now)) return false;
+    // A `today` bucket whose own activity falls on an earlier day in the
+    // frame that wrote the window was captured from a summary window that
+    // did not match its contents — collection stalled and the capture read
+    // the previous day's rows (token-monitor#986). Replaying it adds those
+    // tokens to today on every later capture, and the max-wins merge in the
+    // daily history locks the inflated figure in. The frame is what makes
+    // the comparison safe: an activity stamp only looks earlier when it is
+    // read at an offset the capture did not run at, so the day is evaluated
+    // in the capture's own frame. A window written before the offset was
+    // recorded carries no frame evidence, and a bucket with no activity
+    // stamp of its own proves nothing either — both are ambiguous and are
+    // retained as before.
+    const offset = window.utcOffsetMinutes;
+    if (Number.isFinite(offset) && session?.lastUsedAt) {
+      if (dayAtOffset(session.lastUsedAt, offset) < claimedDay) return false;
+    }
+    return true;
+  }
   if (periodName === 'month') return (window.month || entry.month) === localMonth(now);
   return periodName === 'allTime';
 }
@@ -439,7 +470,7 @@ function applySessionUsageArchive(summary, archive, options = {}) {
   for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
     for (const periodName of PERIODS) {
       const session = entry.periods?.[periodName];
-      if (!session || !shouldApplyPeriod(periodName, entry, now)) continue;
+      if (!session || !shouldApplyPeriod(periodName, entry, session, now)) continue;
       // Same rule as the client archive: never create a period the summary does
       // not have. A progressive preview is marked partial by the periods it
       // omits, and a partial that looks complete loses the attribution fields
