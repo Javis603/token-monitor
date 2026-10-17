@@ -8,11 +8,13 @@ const {
 } = require('./sessionUsageArchive');
 const { readSessionUsageArchiveSnapshot } = require('./sessionUsageArchiveStore');
 const { applyProjectRollups } = require('../usage');
+const { applyLocalTokenLedgers } = require('./localTokenLedgers');
 
 // Every setting project() and transform() read. A transform running on another
 // thread is handed exactly these (see usageTransformSettings).
 const USAGE_TRANSFORM_SETTING_KEYS = Object.freeze([
   'archivedClientUsage',
+  'allTimeSince',
   'clients',
   'projectsEnabled',
   'sessionUsageArchiveEnabled'
@@ -37,6 +39,7 @@ function createUsageTransform(options = {}) {
   const readSnapshot = options.readSnapshot || store?.snapshot || readSessionUsageArchiveSnapshot;
   const onCaptureFailure = options.onCaptureFailure || (() => {});
   const log = options.log || ((message) => console.log(message));
+  const readTokenLedgers = options.readTokenLedgers || (() => []);
   let sessionArchive = null;
   let lastUpdate = {
     at: null,
@@ -103,6 +106,9 @@ function createUsageTransform(options = {}) {
           mutate: true
         });
     delete visibleSummary.sessionUsageArchiveFullScan;
+    applyLocalTokenLedgers(visibleSummary, readTokenLedgers(settings.clients), {
+      allTimeSince: settings.allTimeSince
+    });
     return settings.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
   }
 
