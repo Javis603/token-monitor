@@ -32,6 +32,13 @@ async function waitFor(predicate, timeoutMs = 2000) {
   }
 }
 
+function createScanHome() {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'collector-cancel-'));
+  fs.mkdirSync(path.join(homeDir, '.claude', 'projects'), { recursive: true });
+  fs.mkdirSync(path.join(homeDir, '.dsh', 'sessions'), { recursive: true });
+  return homeDir;
+}
+
 test('whenIdle observes the startup tick registered ahead of its start barrier continuation', async () => {
   let releaseBarrier;
   const startBarrier = new Promise((resolve) => { releaseBarrier = resolve; });
@@ -239,6 +246,7 @@ test('usage replacement abandons its wait for a shared capability probe without 
   };
   delete require.cache[collectorPath];
 
+  const homeDir = createScanHome();
   let runtime = null;
   try {
     const fresh = require(collectorPath);
@@ -253,7 +261,8 @@ test('usage replacement abandons its wait for a shared capability probe without 
       projectsEnabled: false,
       wslScanEnabled: false,
       watchEnabled: false,
-      anchorPersistenceEnabled: false
+      anchorPersistenceEnabled: false,
+      homeDir
     };
     runtime = createDeviceRuntime({ usageOptions }, {
       createUsageRuntime: (next) => fresh.startCollector(next),
@@ -285,7 +294,8 @@ test('usage replacement abandons its wait for a shared capability probe without 
       commandTimeoutMs: 5000,
       deviceId: 'shared-capability-probe-cache-test',
       agentVersion: 'test',
-      limitsEnabled: false
+      limitsEnabled: false,
+      homeDir
     });
     const cacheCheckCalls = calls.slice(callsBeforeCacheCheck);
     assert.equal(calls.filter((args) => args.includes('--help')).length, helpProbesBeforeClose, 'detached probe still populates the shared cache');
@@ -295,6 +305,7 @@ test('usage replacement abandons its wait for a shared capability probe without 
     runtime?.stop();
     if (helpChild && !helpClosed) helpChild.emit('close', 0);
     childProcess.spawn = originalSpawn;
+    fs.rmSync(homeDir, { recursive: true, force: true });
     delete require.cache[collectorPath];
   }
 });

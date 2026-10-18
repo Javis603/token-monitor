@@ -12,6 +12,9 @@ const test = require('node:test');
 const { EventEmitter } = require('node:events');
 const { referencedTerminationOptions } = require('../helpers/referencedTerminationTimers');
 
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const collectorPath = require.resolve('../../src/shared/collector');
 
 function freshCollector() {
@@ -72,9 +75,17 @@ function helpChild(possibleValues) {
   return child;
 }
 
+function createScanHome() {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tokscale-capabilities-'));
+  fs.mkdirSync(path.join(homeDir, '.claude', 'projects'), { recursive: true });
+  fs.mkdirSync(path.join(homeDir, '.dsh', 'sessions'), { recursive: true });
+  return homeDir;
+}
+
 test('a binary that supports every requested client never spawns a capability probe', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
+  const homeDir = createScanHome();
   const calls = [];
   childProcess.spawn = (_bin, args) => {
     calls.push(args);
@@ -89,11 +100,13 @@ test('a binary that supports every requested client never spawns a capability pr
       commandTimeoutMs: 1000,
       deviceId: 'test-device',
       agentVersion: 'test',
-      limitsEnabled: false
+      limitsEnabled: false,
+      homeDir
     });
     assert.equal(calls.length, 3, 'today/month/allTime — no extra --help spawn');
     assert.ok(calls.every((args) => !args.includes('--help')));
   } finally {
+    fs.rmSync(homeDir, { recursive: true, force: true });
     childProcess.spawn = originalSpawn;
     delete require.cache[collectorPath];
   }
@@ -103,6 +116,7 @@ test('an unknown-client rejection probes once, retries, then filters proactively
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
+  const homeDir = createScanHome();
   let helpProbes = 0;
   let forkOnlyProbes = 0;
 
@@ -129,7 +143,8 @@ test('an unknown-client rejection probes once, retries, then filters proactively
       commandTimeoutMs: 1000,
       deviceId: 'test-device',
       agentVersion: 'test',
-      limitsEnabled: false
+      limitsEnabled: false,
+      homeDir
     });
     // today: fail(1) + help(2) + fork-only scan(3) + retry-success(4);
     // month/allTime: filtered up front, one spawn each — 6 total, one probe.
@@ -144,6 +159,7 @@ test('an unknown-client rejection probes once, retries, then filters proactively
     // once the identity's capability set is known) — three filtered spawns.
     assert.equal(clientArgsList.filter((csv) => csv === 'claude').length, 3);
   } finally {
+    fs.rmSync(homeDir, { recursive: true, force: true });
     childProcess.spawn = originalSpawn;
     delete require.cache[collectorPath];
   }
@@ -286,6 +302,7 @@ test('an old binary that rejects both the join and a client retries once per rej
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
+  const homeDir = createScanHome();
 
   childProcess.spawn = (_bin, args) => {
     calls.push(args);
@@ -309,7 +326,8 @@ test('an old binary that rejects both the join and a client retries once per rej
       commandTimeoutMs: 1000,
       deviceId: 'test-device',
       agentVersion: 'test',
-      limitsEnabled: false
+      limitsEnabled: false,
+      homeDir
     });
 
     const groupings = calls
@@ -327,6 +345,7 @@ test('an old binary that rejects both the join and a client retries once per rej
   } finally {
     childProcess.spawn = originalSpawn;
     delete require.cache[collectorPath];
+    fs.rmSync(homeDir, { recursive: true, force: true });
   }
 });
 

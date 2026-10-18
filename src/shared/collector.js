@@ -65,6 +65,12 @@ const { qoderCnDataPaths } = require('./providers/qodercn/paths');
 const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
 const { createLocalUsageSource } = require('./providers/codex/localUsageSource');
 const {
+  OMP_STATS_SOURCE_CHECK_ID,
+  collectOmpUsage,
+  ompStatsDbPath,
+  ompStatsDbPathForClients
+} = require('./providers/omp/usage');
+const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
   isReasonixNativeSessionSidecar,
@@ -541,6 +547,31 @@ function runCursorAwareTokscale(clientFilter, operation, signal) {
   return includesCursor ? withCursorLifecycle(operation, { signal }) : operation();
 }
 
+function clientsWithExistingSources(clients, options = {}) {
+  const normalized = normalizeClientsCsv(clients);
+  if (!normalized) return '';
+
+  const env = options.env || process.env;
+  // Tokscale's inherited extra-dir syntax is intentionally not parsed here.
+  // Keep configured clients eligible when an operator has supplied that
+  // external source list; the registered source roots below cannot prove those
+  // paths absent.
+  if (String(env.TOKSCALE_EXTRA_DIRS || '').trim()) return normalized;
+
+  const checks = clientSourceChecks(normalized, {
+    customScanPaths: options.customScanPaths,
+    homeDir: options.homeDir,
+    env,
+    platform: options.platform,
+    ompStatsDbPath: options.ompStatsDbPath
+  });
+  return normalized.split(',').filter((client) => (
+    client === 'cursor'
+    || client === 'antigravity'
+    || checks[client]?.some((check) => check.exists)
+  )).join(',');
+}
+
 function runTokscale({
   clients,
   flags,
@@ -550,11 +581,17 @@ function runTokscale({
   onTerminationUnconfirmed,
   customScanPaths,
   homeDir,
+  env,
+  platform,
+  ompStatsDbPath,
   workspaces = true
 }) {
   throwIfAborted(signal);
   const command = tokscaleCommand({ customScanPaths, homeDir });
-  const requested = tokscaleClientFilter(clients);
+  const scanClients = flags?.includes('--home')
+    ? clients
+    : clientsWithExistingSources(clients, { customScanPaths, homeDir, env, platform, ompStatsDbPath });
+  const requested = tokscaleClientFilter(scanClients);
   if (!requested) return Promise.resolve({ entries: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
   if (!clientFilter) return Promise.resolve({ entries: [] });
@@ -605,10 +642,11 @@ function runTokscale({
   ), signal);
 }
 
-function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir }) {
+function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir, env, platform, ompStatsDbPath }) {
   throwIfAborted(signal);
   const command = tokscaleCommand({ customScanPaths, homeDir });
-  const requested = tokscaleClientFilter(clients);
+  const scanClients = clientsWithExistingSources(clients, { customScanPaths, homeDir, env, platform, ompStatsDbPath });
+  const requested = tokscaleClientFilter(scanClients);
   if (!requested) return Promise.resolve({ contributions: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
   if (!clientFilter) return Promise.resolve({ contributions: [] });
@@ -823,14 +861,19 @@ async function collectHistoryOnce(options) {
       if (typeof options.logger === 'function') options.logger(`tokscale graph failed: ${error.message}`);
     }
   }
-  // Keep the supplemental ledger out of generic history retention too: a
-  // retained maximum would survive when a native rollout replaces this thread.
-  const withLocalHistory = (history) => {
+  if (options.ompGraph) rawGraphs.push(options.ompGraph);
+  // Keep supplemental ledgers out of generic history retention too: a retained
+  // maximum would survive when a native rollout replaces this thread.
+  const withLocalHistory = (history, { ompIncluded = false } = {}) => {
+    const supplementalGraphs = [
+      options.codexLocalGraph,
+      ...(ompIncluded ? [] : [options.ompGraph])
+    ].filter(Boolean).map((graph) => normalizeHistory(parseGraphResult(graph), { capDays, todayKey }));
     // A failed native scan without retained history is no update, not a new
-    // Dots-only replacement for the device's last successful full history.
-    if (!history && failureCode === 'history-graph-failed') return null;
-    return options.codexLocalGraph
-      ? mergeHistories([history, normalizeHistory(parseGraphResult(options.codexLocalGraph), { capDays, todayKey })].filter(Boolean), { capDays, todayKey })
+    // supplemental-only replacement for the device's last successful history.
+    if (!history && failureCode === 'history-graph-failed' && supplementalGraphs.length === 0) return null;
+    return supplementalGraphs.length
+      ? mergeHistories([history, ...supplementalGraphs].filter(Boolean), { capDays, todayKey })
       : history;
   };
   if (options.dailyHistoryArchiveEnabled) {
@@ -847,7 +890,7 @@ async function collectHistoryOnce(options) {
       const retained = normalizeHistory(parseGraphResult(retainedGraph), { capDays, todayKey });
       const result = retained.daily.length || retained.monthly.length ? retained : null;
       reportStatus(failureCode === null);
-      return withLocalHistory(result);
+      return withLocalHistory(result, { ompIncluded: true });
     } catch (error) {
       failureCode = failureCode || 'daily-history-archive-failed';
       if (typeof options.logger === 'function') options.logger(`daily history archive failed: ${error.message}`);
@@ -892,6 +935,9 @@ async function collectUsageOnce(options) {
     workspaces: projectsEnabled,
     customScanPaths: options.customScanPaths,
     homeDir: options.homeDir,
+    env: options.env,
+    platform: options.platform,
+    ompStatsDbPath: options.ompStatsDbPath,
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
@@ -904,6 +950,9 @@ async function collectUsageOnce(options) {
     ...input,
     customScanPaths: options.customScanPaths,
     homeDir: options.homeDir,
+    env: options.env,
+    platform: options.platform,
+    ompStatsDbPath: options.ompStatsDbPath,
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-graph')
   }));
@@ -943,21 +992,43 @@ async function collectUsageOnce(options) {
     // applySessionMetadata skips the expensive path read per session, not per tick.
     { ...localSessionMetadataDeps, retryMisses, deferT3SessionParents, resolveProjects: projectsEnabled }
   );
+  // OMP is a local Node adapter when its stats database is available. WSL is a
+  // separate environment, so its Tokscale list always retains OMP transcripts.
+  const includesOmp = normalizedClients.split(',').includes('omp');
+  const ompStatsPath = ompStatsDbPathForClients(normalizedClients, {
+    homeDir: options.homeDir,
+    statsDbPath: options.ompStatsDbPath
+  });
+  const ompStatsAvailable = !includesOmp || Boolean(ompStatsPath && localFileExists(ompStatsPath));
+  const ompExpectedMode = includesOmp && options.ompStatsEnabled !== false && ompStatsAvailable ? 'stats-db' : (includesOmp ? 'tokscale' : '');
+  const localClients = new Set(
+    includesOmp && ompStatsAvailable && options.ompStatsEnabled !== false ? ['omp'] : []
+  );
+  let tokscaleClients = normalizedClients
+    ? normalizedClients.split(',').filter((client) => !localClients.has(client)).join(',')
+    : normalizedClients;
+  const wslTokscaleClients = normalizedClients
+    ? normalizedClients.split(',').filter((client) => !localClients.has(client) || (client === 'omp' && includesOmp)).join(',')
+    : normalizedClients;
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
   const targetClientSet = new Set(targetClients);
   const targetClientsCsv = targetClients.join(',');
+  let targetTokscaleClientList = targetClients.filter((client) => !localClients.has(client));
+  let targetTokscaleClientSet = new Set(targetTokscaleClientList);
+  let targetTokscaleClients = targetTokscaleClientList.join(',');
   let today = emptyPeriod();
   let month = emptyPeriod();
   let allTime = emptyPeriod();
   let dailyHistoryLiveDays = options.dailyHistoryLiveDays;
   let todayPartitions = null;
   const anchor = options.todayOnlyAnchor;
-  const anchorUsed = Boolean(
+  let anchorUsed = Boolean(
     anchor
     && anchor.dateKey === localTodayKey(collectedAt)
     && canTargetTodayPartitions(anchor, targetClients)
+    && (!includesOmp || anchor.ompUsageMode === ompExpectedMode)
   );
   // Full-scan rows are native, even when their title matches an old override.
   // Retain their fallback through the progressive metadata passes this tick.
@@ -974,6 +1045,56 @@ async function collectUsageOnce(options) {
     localSessionMetadataDeps.catalogProjects.labels = { ...sessionMetadataFallback.catalogProjects?.labels };
     localSessionMetadataDeps.catalogProjectFallbacks = sessionMetadataFallback;
   }
+  let ompUsage = null;
+  let ompPeriods = null;
+  let ompHistoryGraph = null;
+  let ompReadFailed = false;
+  let ompFallbackUsed = false;
+  const shouldReadOmp = includesOmp
+    && ompStatsAvailable
+    && options.ompStatsEnabled !== false
+    && (!targetRequested || targetClients.includes('omp'));
+  const enableOmpTokscaleFallback = () => {
+    if (!includesOmp) return;
+    localClients.delete('omp');
+    tokscaleClients = normalizedClients
+      ? normalizedClients.split(',').filter((client) => !localClients.has(client)).join(',')
+      : normalizedClients;
+    targetTokscaleClientList = targetClients.filter((client) => !localClients.has(client));
+    targetTokscaleClientSet = new Set(targetTokscaleClientList);
+    targetTokscaleClients = targetTokscaleClientList.join(',');
+    ompFallbackUsed = true;
+  };
+  if (shouldReadOmp) {
+    try {
+      ompUsage = collectOmpUsage({
+        homeDir: options.homeDir,
+        statsDbPath: options.ompStatsDbPath,
+        allTimeSince,
+        now: collectedAt,
+        nowMs: collectedAt.getTime(),
+        sinceMs: anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined,
+        maxGroupRows: options.ompMaxGroupRows,
+        maxSessionRows: options.ompMaxSessionRows
+      });
+      ompPeriods = {
+        today: ompUsage.today,
+        month: ompUsage.month,
+        allTime: ompUsage.allTime
+      };
+      ompHistoryGraph = ompUsage.historyGraph;
+    } catch (error) {
+      ompReadFailed = true;
+      enableOmpTokscaleFallback();
+      if (anchorUsed) anchorUsed = false;
+      if (typeof options.logger === 'function') options.logger(`omp stats parse failed: ${error.message}`);
+    }
+  }
+  const ompUsageMode = includesOmp
+    ? (ompUsage ? 'stats-db' : (ompFallbackUsed ? 'tokscale' : ompExpectedMode))
+    : '';
+  const ompStatsAuthoritative = ompUsageMode === 'stats-db'
+    && (Boolean(ompUsage) || (anchorUsed && anchor?.ompUsageMode === 'stats-db'));
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     try { options.onProgress({ ...periods, updatedAt: new Date().toISOString() }); } catch (_) {}
@@ -1005,7 +1126,7 @@ async function collectUsageOnce(options) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
       // windows exactly via applyPeriodDelta — one spawn instead of three.
-      const scanClients = targetRequested ? targetClientsCsv : normalizedClients;
+      const scanClients = targetRequested ? targetTokscaleClients : tokscaleClients;
       let freshPartitions = Object.create(null);
       let useTargetedPartitions = targetRequested;
       if (scanClients) {
@@ -1034,7 +1155,7 @@ async function collectUsageOnce(options) {
           // the requested set. An unattributed row or an unexpected client would
           // otherwise clear the target while partially overwriting an unrelated
           // anchor partition. Rebuild the complete today snapshot instead.
-          const fullTodayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs, signal: options.signal });
+          const fullTodayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs, signal: options.signal });
           throwIfAborted(options.signal);
           freshPartitions = extractUsageBundleFromTokscale(fullTodayJson).byClient;
           useTargetedPartitions = false;
@@ -1042,6 +1163,21 @@ async function collectUsageOnce(options) {
           // Empty tokscale output uses the unattributed fallback shape. Keep the
           // anchor's real unattributed partition while clearing the target.
           delete freshPartitions[UNATTRIBUTED_USAGE_CLIENT];
+        }
+      }
+      if (ompPeriods) freshPartitions.omp = ompPeriods.today;
+      if (!useTargetedPartitions) {
+        // The fallback rebuilds every Tokscale partition, but local adapters do
+        // not participate in that scan. Preserve any adapter that this tick did
+        // not refresh instead of treating its absence as empty.
+        for (const client of localClients) {
+          if (
+            !targetClientSet.has(client)
+            && !Object.prototype.hasOwnProperty.call(freshPartitions, client)
+            && anchor.todayPartitions?.[client]
+          ) {
+            freshPartitions[client] = anchor.todayPartitions[client];
+          }
         }
       }
       todayPartitions = useTargetedPartitions
@@ -1057,22 +1193,22 @@ async function collectUsageOnce(options) {
       }
       month = applyPeriodDelta(anchor.month, today, anchor.today);
       allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
-    } else if (normalizedClients) {
+    } else if (tokscaleClients) {
       // Serial on purpose: concurrent scans triple the peak CPU/IO load, which
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
-      const todayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs, signal: options.signal });
+      const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal);
       const todayBundle = extractUsageBundleFromTokscale(todayJson);
       today = todayBundle.period;
       todayPartitions = todayBundle.byClient;
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today });
       emitProgress({ today });
-      const monthJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--month'], commandTimeoutMs, signal: options.signal });
+      const monthJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--month'], commandTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal);
       month = extractUsageFromTokscale(monthJson);
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
       emitProgress({ today, month });
-      const allTimeJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs, signal: options.signal });
+      const allTimeJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--since', allTimeSince], commandTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal);
       allTime = extractUsageFromTokscale(allTimeJson);
     }
@@ -1106,6 +1242,12 @@ async function collectUsageOnce(options) {
     } else {
       sessionIdentitiesComplete = decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
     }
+    if (ompPeriods && !anchorUsed) {
+      today = mergePeriods(today, ompPeriods.today);
+      month = mergePeriods(month, ompPeriods.month);
+      allTime = mergePeriods(allTime, ompPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), omp: ompPeriods.today };
+    }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
     // period: a later targeted tick re-merges these sessions into `today`.
@@ -1129,7 +1271,7 @@ async function collectUsageOnce(options) {
   if (normalizedClients && options.wslScanEnabled !== false) {
     if (options.refreshWsl) {
       const wslResult = await collectWsl({
-        clients: normalizedClients,
+        clients: wslTokscaleClients,
         trackedClients: normalizedClients,
         allTimeSince,
         commandTimeoutMs,
@@ -1144,7 +1286,7 @@ async function collectUsageOnce(options) {
       wslBundle = options.wslAnchor;
     } else if (!anchorUsed) {
       const wslResult = await collectWsl({
-        clients: normalizedClients,
+        clients: wslTokscaleClients,
         trackedClients: normalizedClients,
         allTimeSince,
         commandTimeoutMs,
@@ -1252,6 +1394,7 @@ async function collectUsageOnce(options) {
     env: options.env,
     homeDir: options.homeDir,
     platform: platformValue,
+    ompStatsDbPath: options.ompStatsDbPath,
     wslDetected: wslStatus?.detected
   });
 
@@ -1274,7 +1417,9 @@ async function collectUsageOnce(options) {
     sessionUsageArchiveFullScan: !anchorUsed,
     today,
     month,
-    allTime
+    allTime,
+    ...(ompStatsAuthoritative ? { authoritativeSessionClients: ['omp'] } : {}),
+    ...(ompUsageMode ? { ompUsageMode } : {})
   };
   // The request ledger is this source's archive. A second per-session archive
   // would resurrect its contribution after a native rollout takes precedence.
@@ -1327,7 +1472,9 @@ async function collectUsageOnce(options) {
       wslBundle,
       wslStatus,
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
-      ...(summary.nativeProjects ? { nativeProjects: summary.nativeProjects } : {})
+      ...(summary.nativeProjects ? { nativeProjects: summary.nativeProjects } : {}),
+      ...(ompStatsAuthoritative ? { authoritativeSessionClients: ['omp'] } : {}),
+      ...(ompUsageMode ? { ompUsageMode } : {})
     });
   }
   if (options.historyEnabled === false) {
@@ -1335,10 +1482,11 @@ async function collectUsageOnce(options) {
   } else if (options.includeHistory) {
     throwIfAborted(options.signal);
     const history = await collectHistoryOnce({
-      clients: normalizedClients,
+      clients: tokscaleClients,
       codexLocalGraph: codexLocalView?.graph || null,
-      historyEnabled: options.historyEnabled,
+      ompGraph: ompHistoryGraph,
       commandTimeoutMs: options.historyTimeoutMs,
+      historyEnabled: options.historyEnabled,
       capDays: options.historyCapDays,
       todayKey: localTodayKey(collectedAt),
       runGraph: runGraphFn,
@@ -1359,6 +1507,7 @@ async function collectUsageOnce(options) {
   // scan already produced rather than from a second source of truth.
   const clientHealth = deriveClientHealth(normalizedClients, allTime, {
     sourceChecks,
+    collectionFailures: ompReadFailed ? ['omp'] : [],
     wslStatus,
     observedAt: collectedAt,
     lastActivityDays: mergeClientActivityDays(
@@ -1414,6 +1563,7 @@ function clientWatchCandidates(clientsCsv, options = {}) {
     byClient[client] = roots
       .filter((root) => (
         !(client === 'copilot' && root.id === 'copilot-otel')
+        && !(client === 'omp' && root.id === OMP_STATS_SOURCE_CHECK_ID)
         && !INTERVAL_ONLY_SOURCE_CHECK_IDS.has(root.id)
       ))
       .map((root) => root.dir);
@@ -1471,13 +1621,22 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
     const existing = [...new Set(candidates.filter(dirExists))];
     if (existing.length > 0) rootsByClient[client] = existing;
   }
+  const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
+  if (enabled.has('omp')) {
+    const statsRoot = path.dirname(ompStatsDbPath({
+      homeDir: options.homeDir,
+      statsDbPath: options.ompStatsDbPath
+    }));
+    if (dirExists(statsRoot)) {
+      rootsByClient.omp = [...new Set([...(rootsByClient.omp || []), statsRoot])];
+    }
+  }
   for (const [client, dirs] of Object.entries(selfSyncSourceRootsForClients(clientsCsv, options))) {
     rootsByClient[client] = [...new Set([...(rootsByClient[client] || []), ...dirs])];
   }
   // The Antigravity CLI writes parse-local SQLite that tokscale reads directly,
   // so it is also safe to watch and shares the umbrella client id. The filter
   // expands that id to antigravity-cli when the targeted scan runs.
-  const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
   const antigravityCliDir = antigravityCliDataDir(options);
   if (enabled.has('antigravity') && dirExists(antigravityCliDir)) {
     rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), antigravityCliDir])];
@@ -1613,6 +1772,7 @@ const COPILOT_DB_WATCH_PATTERN = /^(?:data|session-store)\.db(?:-(?:wal|shm))?$/
 const ZCODE_DB_WATCH_PATTERN = /^db\.sqlite(?:-(?:wal|shm))?$/;
 const CHERRY_STUDIO_DB_WATCH_PATTERN = /^cherrystudio\.sqlite(?:-(?:wal|shm))?$/;
 const UNSLOTH_DB_WATCH_PATTERN = /^studio\.db(?:-(?:wal|shm))?$/;
+const OMP_DB_FILES = new Set(['stats.db', 'stats.db-wal', 'stats.db-shm']);
 // Bounded to sessions.db directly under each *default* Devin CLI root; the WAL
 // and SHM sidecars ride along as the live-write signal, as with every other
 // direct-database client. Tokscale's own discovery walks those roots to any
@@ -1919,6 +2079,13 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   bound('grok', withBasename('grok', 'logs'), directChildOnly((name) => name === GROK_UNIFIED_LOG_FILE));
   // ZCode v2 is a direct SQLite path, not a recursive project source.
   bound('zcode', withBasename('zcode', 'db'), directChildOnly((name) => ZCODE_DB_WATCH_PATTERN.test(name)));
+  if (String(clientsCsv || '').split(',').map((client) => client.trim().toLowerCase()).includes('omp')) {
+    const statsRoot = path.dirname(ompStatsDbPath({
+      homeDir: options.homeDir,
+      statsDbPath: options.ompStatsDbPath
+    }));
+    bound('omp-stats', [statsRoot], directChildOnly((name) => OMP_DB_FILES.has(name)));
+  }
   bound('kiro', withBasename('kiro', 'kiro-cli'), directChildOnly((name) => KIRO_DB_WATCH_PATTERN.test(name)));
   bound('zed', withBasename('zed', 'threads'), directChildOnly((name) => ZED_DB_WATCH_PATTERN.test(name)));
   bound('codebuddy', withBasename('codebuddy', 'Logs'), (parts) => !CODEBUDDY_EXTENSION_SOURCE_DIRS.has(parts[0]));
@@ -2086,6 +2253,7 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
   const wslDetected = new Set(options.wslStatus?.detected || []);
   const wslWithData = new Set(options.wslStatus?.withData || []);
   const activityDays = options.lastActivityDays || {};
+  const failedClients = new Set(options.collectionFailures || []);
   const throttle = options.selfSyncThrottle || selfSyncThrottle;
   const result = {};
   for (const client of clients) {
@@ -2099,7 +2267,7 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
         detectedCount: detected.length,
         checkedCount: checks.length
       },
-      collection: { state: sync ? sync.state : 'direct' },
+      collection: { state: failedClients.has(client) ? 'failed' : (sync ? sync.state : 'direct') },
       data: { liveTokens: liveTokens > 0 ? liveTokens : 0 }
     };
     // Kept even for a healthy self-synced client: "last synced two minutes ago"
@@ -2198,6 +2366,18 @@ function canTargetTodayPartitions(anchor, targetClients) {
   );
 }
 
+function localFileExists(filePath) {
+  try { return fs.statSync(filePath).isFile(); } catch (_) { return false; }
+}
+
+function ompUsageModeForOptions(clientsCsv, options = {}) {
+  const clients = normalizeClientsCsv(clientsCsv).split(',').filter(Boolean);
+  if (!clients.includes('omp')) return '';
+  if (options.ompStatsEnabled === false) return 'tokscale';
+  const dbPath = ompStatsDbPathForClients(clientsCsv, options);
+  return dbPath && localFileExists(dbPath) ? 'stats-db' : 'tokscale';
+}
+
 // Prices affect every scan window. Read the effective file (including entries
 // hand-authored outside the widget), and distinguish fork builds whose npm
 // version is identical. No transcript cache is changed by this fingerprint.
@@ -2229,6 +2409,10 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qod
   const qoderCnPart = qoderCn ? `|qodercn:${path.resolve(qoderCn)}` : '';
   const qoderCnProjects = String(qoderCnProjectsDir || '').trim();
   const qoderCnProjectsPart = qoderCnProjects ? `|qodercnProjects:${path.resolve(qoderCnProjects)}` : '';
+  const ompStats = ompStatsDbPathForClients(clientsCsv, sourceOptions);
+  const ompStatsPart = ompStats ? `|ompStats:${path.resolve(ompStats)}` : '';
+  const ompMode = ompUsageModeForOptions(clientsCsv, sourceOptions);
+  const ompModePart = ompMode ? `|ompMode:${ompMode}` : '';
   // Custom scan paths change which files Tokscale reads, so an anchor captured
   // before a path was added or removed must not be reused. Empty when none are
   // configured, keeping the fingerprint (and existing anchors) stable for the
@@ -2236,7 +2420,7 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qod
   const scanKey = customScanPathsFingerprint(customScanPaths);
   const scanPart = scanKey ? `|scan:${scanKey}` : '';
   const catpawPart = catpawRevision ? `|catpaw:${catpawRevision}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}${catpawPart}|pricing:${pricingRevision}`;
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${ompStatsPart}${ompModePart}${scanPart}${catpawPart}|pricing:${pricingRevision}`;
 }
 
 function qoderCnSourcesForClients(clientsCsv, options = {}) {
@@ -2267,8 +2451,29 @@ function qoderCnProjectsDirForClients(clientsCsv, options = {}) {
 // collector still reuses the periods then and simply forces a full scan, while
 // a seed has nothing to stand on and declines.
 function collectorAnchorTrust(saved, options = {}) {
-  const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, now = new Date() } = options;
+  const {
+    clients = '',
+    allTimeSince = '',
+    projectsEnabled = true,
+    qoderCnDbPath = '',
+    qoderCnProjectsDir = '',
+    customScanPaths = null,
+    ompStatsDbPath: ompStatsDbPathOption,
+    ompStatsEnabled,
+    homeDir,
+    platform,
+    env,
+    now = new Date()
+  } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
+  const expectedOmpMode = ompUsageModeForOptions(clients, {
+    homeDir,
+    platform,
+    env,
+    ompStatsDbPath: ompStatsDbPathOption,
+    ompStatsEnabled
+  });
+  if (expectedOmpMode && saved.ompUsageMode !== expectedOmpMode) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
   // A flat provenance ledger cannot prove each period's project source.
   if (Object.keys(saved.catalogProjects || {}).length && !saved.catalogProjects.today) return null;
@@ -2276,7 +2481,23 @@ function collectorAnchorTrust(saved, options = {}) {
   // applying a new `cursor-auto` Today delta to them would split one mode.
   if (normalizeClientsCsv(clients).split(',').includes('cursor') && saved.cursorAutoModelVersion !== 1) return null;
   const pricingRevision = options.pricingRevision ?? pricingFingerprint(options);
-  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, pricingRevision, options)) return null;
+  if (saved.configFingerprint !== configFingerprint(
+    clients,
+    allTimeSince,
+    projectsEnabled,
+    qoderCnDbPath,
+    qoderCnProjectsDir,
+    customScanPaths,
+    pricingRevision,
+    {
+      ...options,
+      homeDir,
+      platform,
+      env,
+      ompStatsDbPath: ompStatsDbPathOption,
+      ompStatsEnabled
+    }
+  )) return null;
   const parsed = Date.parse(saved.fullScanAt || '');
   const capturedAtMs = Number.isFinite(parsed) && parsed <= now.getTime() ? parsed : null;
   return { capturedAtMs };
@@ -2557,7 +2778,9 @@ function startCollector(options) {
     customScanPaths: options.customScanPaths,
     env: options.env || options.sessionMetadataDeps?.env,
     homeDir: options.homeDir,
-    platform: options.platform
+    platform: options.platform,
+    ompStatsDbPath: options.ompStatsDbPath,
+    ompStatsEnabled: options.ompStatsEnabled
   };
   const qoderCnSources = qoderCnSourcesForClients(normalizedClients, {
     homeDir: options.homeDir,
@@ -2741,6 +2964,8 @@ function startCollector(options) {
           todayT3Titles: saved.todayT3Titles,
           catalogTitleSources: saved.catalogTitleSources,
           catalogProjects: saved.catalogProjects,
+          ...(saved.authoritativeSessionClients ? { authoritativeSessionClients: saved.authoritativeSessionClients } : {}),
+          ...(saved.ompUsageMode ? { ompUsageMode: saved.ompUsageMode } : {}),
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -2775,6 +3000,8 @@ function startCollector(options) {
         todayT3Titles: anchor.todayT3Titles,
         catalogTitleSources: anchor.catalogTitleSources,
         catalogProjects: anchor.catalogProjects,
+        ...(anchor.authoritativeSessionClients ? { authoritativeSessionClients: anchor.authoritativeSessionClients } : {}),
+        ...(anchor.ompUsageMode ? { ompUsageMode: anchor.ompUsageMode } : {}),
         wslBundle: wslAnchor,
         wslStatus: wslStatusAnchor,
         ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
@@ -3025,6 +3252,8 @@ function startCollector(options) {
           todayT3Titles: captured.t3Titles,
           catalogTitleSources: captured.catalogTitleSources,
           catalogProjects: captured.catalogProjects,
+          ...(captured.authoritativeSessionClients ? { authoritativeSessionClients: captured.authoritativeSessionClients } : {}),
+          ...(captured.ompUsageMode ? { ompUsageMode: captured.ompUsageMode } : {}),
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {})
         };
@@ -3778,6 +4007,7 @@ module.exports = {
   visibleDiagnosticRoots,
   clientSourceChecks,
   clientSourceRoots,
+  clientsWithExistingSources,
   cherryStudioTranscriptRoots,
   clientsForWatchPath,
   clientWatchCandidates,

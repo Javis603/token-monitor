@@ -3424,6 +3424,7 @@ for (const client of ['zcode', 'cherrystudio', 'goose']) {
     try {
       const { startCollector } = freshCollector();
       const updates = [];
+      if (client === 'zcode') fs.writeFileSync(path.join(dbDir, dbName), '');
       handle = startCollector({
         clients: client,
         allTimeSince: '2024-01-01',
@@ -4561,14 +4562,14 @@ test('hourly smart reconciliation starts watching a client directory created aft
     fs.mkdirSync(path.join(tmp, '.claude', 'projects'), { recursive: true });
     nowMs += 60 * 60 * 1000 + 1;
     await waitForCondition(() => updates.length === 2);
-    assert.equal(calls.length, 6, 'missed activity is recovered by a full scan');
+    assert.equal(calls.length, 3, 'only the newly detected source is scanned');
     assert.equal(updates[1].clientStatus.claude, 'waiting', 'new client directory is discovered');
     await waitForCondition(() => typeof watchHandler === 'function');
     assert.equal(watchCalls, 1, 'the successful full scan adds a watcher for the new directory');
 
     watchHandler('change', path.join(tmp, '.claude', 'projects', 'new.jsonl'));
     await waitForCondition(() => updates.length === 3);
-    assert.equal(calls.length, 7, 'later activity in the new directory uses the smart interval scan');
+    assert.equal(calls.length, 4, 'later activity scans today from the new directory');
   } finally {
     if (handle) handle.stop();
     childProcess.spawn = originalSpawn;

@@ -30,6 +30,7 @@ const {
   clientSourceChecks,
   clientSourceRoots,
   clientWatchCandidates,
+  clientsWithExistingSources,
   deriveClientHealth,
   deriveClientStatus,
   mergeClientActivityDays,
@@ -631,6 +632,29 @@ test('clientSourceChecks collapses same-kind roots into one entry', () => {
     for (const check of list) assert.equal(typeof check.exists, 'boolean');
   }
 });
+
+test('Tokscale only scans configured clients with an existing source root', () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-existing-sources-'));
+  const claudeProjects = path.join(homeDir, '.claude', 'projects');
+  const customPiPath = path.join(homeDir, 'custom', 'pi');
+  fs.mkdirSync(claudeProjects, { recursive: true });
+  fs.mkdirSync(customPiPath, { recursive: true });
+  try {
+    assert.equal(
+      clientsWithExistingSources('claude,codex,pi', {
+        homeDir,
+        platform: 'linux',
+        env: {},
+        customScanPaths: { pi: [customPiPath] }
+      }),
+      'claude,pi'
+    );
+    assert.equal(clientsWithExistingSources('codex', { homeDir, platform: 'linux', env: {} }), '');
+  } finally {
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
 
 test('Kilo source health covers its CLI database and extension tasks', () => {
   assert.deepEqual(
