@@ -5987,8 +5987,15 @@ const EDGE_DOCK_EXPIRY_FLOOR_MS = 1_000;
 // armed from what is actually on screen rather than re-projecting to find out.
 let edgeDockLastCells = [];
 let notchLastCells = [];
+// Remote History reloads are throttled: past days move at most once per collection.
+const NOTCH_REMOTE_HISTORY_INTERVAL_MS = 60 * 1000;
 const notchHistory = createNotchHistory({
-  load: () => getDashboardHistory(),
+  load: async (stats) => {
+    const history = await getDashboardHistory({ includeDevices: true });
+    const sources = fixedPeriodRangesApi.joinDeviceHistorySources(history?.deviceHistories || [], stats?.devices || []);
+    return { ...history, devicesComplete: sources.every((source) => source.historyAvailable === true) };
+  },
+  minIntervalMs: () => completeHistorySource(historyResolverOptions()) === 'remote' ? NOTCH_REMOTE_HISTORY_INTERVAL_MS : 0,
   changed: () => repaintDockSurfaces(),
   onError: (error) => console.log(`[notch] history failed: ${error.message}`)
 });

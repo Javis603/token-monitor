@@ -119,7 +119,11 @@ function notchActivity(cells, nowMs = Date.now()) {
   const running = presentation.runningSessionSummary(sessions, nowMs);
   const waiting = presentation.waitingSessionSummary(sessions, nowMs);
   if (!running.count && !waiting.count) return null;
-  const clients = [...new Set([...waiting.rows, ...running.rows].map((row) => String(row.client || '').toLowerCase()).filter(Boolean))];
+  // A grouped session is drawn with the tool that is actually active, not its parent's.
+  const waitingClients = presentation.sessionMembers(waiting.rows)
+    .filter((row) => presentation.sessionActivityState(row, nowMs) === 'waiting')
+    .map((row) => String(row.client || '').toLowerCase());
+  const clients = [...new Set([...waitingClients, ...running.clients].filter(Boolean))];
   return { running: running.count, waiting: waiting.count, clients };
 }
 

@@ -212,6 +212,7 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
   transform-origin: bottom; transition: opacity .25s ease; }
 .notch-panel.is-entering .notch-day-bar { animation: notch-bar-rise .7s var(--notch-spring) both; animation-delay: calc(.12s + var(--i, 0) * 40ms); }
 .notch-day-bar i { display: block; width: 100%; }
+.notch-day-bar i.is-unattributed { background: rgba(var(--overlay-rgb), .28); }
 .notch-day-bar i + i { box-shadow: 0 1px 0 rgba(0,0,0,.55); }
 .notch-day:not(.is-today):not(:hover):not(:focus-visible) .notch-day-bar i { background: transparent !important; box-shadow: none; }
 .notch-day.is-unknown { background: linear-gradient(rgba(var(--overlay-rgb), .25), rgba(var(--overlay-rgb), .25)) center bottom / 8px 2px no-repeat; }

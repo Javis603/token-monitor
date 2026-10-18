@@ -40,6 +40,7 @@
     const refreshEnabled = () => getSettings()?.[refreshKey] === true;
     let drag = null;
     let renderedSignature = '';
+    let renderedRail = null;
 
     function el(tag, className, text) {
       const node = document.createElement(tag);
@@ -453,7 +454,11 @@
       });
       rail.append(add);
       body.append(rail, detail(items));
+      // A horizontal rail keeps its scroll position when selection or sorting rebuilds it.
+      const scrollLeft = renderedRail?.scrollLeft || 0;
       root.replaceChildren(heading, body);
+      if (scrollLeft) rail.scrollLeft = scrollLeft;
+      renderedRail = rail;
       renderedSignature = signature;
     }
 

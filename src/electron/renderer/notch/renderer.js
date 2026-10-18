@@ -108,6 +108,7 @@
     let lastNotchSize = '';
     let notchHeaderKey = '';
     let notchExpanded = false;
+    let panelPainted = false;
     let notchClock = 0;
     let notchRowsPending = false;
     function notchMeasureText(measure, value) {
@@ -585,7 +586,8 @@
         contentLayer.append(body);
       }
       panel.place(payload.geometry, Number(payload.appearance.zoomFactor) || 1);
-      if (payload.expanded || opening || !panel.node.childElementCount) panel.render(payload, { opening });
+      // Render once while closed so the first reveal measures real content.
+      if (payload.expanded || opening || !panelPainted) { panel.render(payload, { opening }); panelPainted = true; }
     }
 
     function renderNotch(payload) {

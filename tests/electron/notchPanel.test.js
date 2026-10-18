@@ -487,3 +487,63 @@ test('partial pricing does not present the known subtotal as a complete cost', t
   f.panel.selectPage('breakdown');
   assert.equal(f.find('notch-breakdown-cost').textContent, '—');
 });
+
+test('a provider without a headline never falls back to an account hidden from the panel', t => {
+  const f = panelFixture(t);
+  const hidden = { provider: 'codex', status: 'ok', accountKey: 'hidden', planLabel: 'HiddenPlan', windows: [{ kind: 'weekly', remainingPercent: 3 }] };
+  const visible = { provider: 'codex', status: 'error', accountKey: 'visible', windows: [] };
+  const cells = buildEdgeDockCells({ limits: { providers: [hidden, visible] } },
+    { includeUnavailableAccounts: true, items: [{ type: 'limit', provider: 'codex', hiddenAccounts: ['hidden'] }] });
+  assert.equal(cells[0].headlineAccount, '');
+  f.panel.render({ ...payload(), cells });
+  assert.doesNotMatch(f.find('notch-fuel').textContent, /3%/, 'Home does not read the hidden account');
+  f.panel.selectPage('limits');
+  assert.equal(f.find('notch-chip'), null, 'the hidden plan is not shown');
+  assert.equal(f.find('notch-limit-number'), null);
+});
+
+test('the TPS reading updates in place so keyboard focus survives live samples', t => {
+  const f = panelFixture(t), data = payload();
+  const rate = value => ({ id: 'stat:liveRate', kind: 'stat', metric: 'liveRate', rate: value, rateMode: 'speed', idle: false });
+  f.panel.render({ ...data, cells: [...data.cells, rate(40)] });
+  const button = f.find('notch-rate');
+  f.panel.render({ ...data, cells: [...data.cells, rate(55)] });
+  assert.equal(f.find('notch-rate'), button, 'the focused button is the same node');
+  assert.match(button.querySelector('.notch-rate-value').textContent, /55/);
+});
+
+test('grouped activity is drawn with the active member tool, not the parent', () => {
+  const nowMs = Date.now(), stats = { periods: { today: { totalTokens: 1 } } };
+  const old = new Date(nowMs - 3600000).toISOString(), now = new Date(nowMs).toISOString();
+  const group = { client: 'claude', sessionGroup: true, groupRows: [{ client: 'claude', lastUsedAt: old }, { client: 'codex', lastUsedAt: now }] };
+  const cells = [{ id: 'stat:sessions', metric: 'sessions', sessions: [group] }];
+  const summary = buildNotchData(stats, cells, { notchSummaryMode: 'sessions' }, { nowMs }).summary;
+  assert.deepEqual(summary.items.filter(item => item.type === 'icon').map(item => item.provider), ['codex']);
+});
+
+test('history keeps the previous week across revisions, throttles reloads and needs every device for zeros', async () => {
+  const pending = [], changes = [];
+  let clock = 0;
+  const timers = [];
+  const cache = createNotchHistory({ load: () => new Promise(resolve => pending.push(resolve)), changed: () => changes.push(true),
+    minIntervalMs: () => 60000, now: () => clock, setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimer: () => {} });
+  const at = revision => ({ historyRevision: revision });
+  cache.read(at('a'), { generation: 1 }); await Promise.resolve();
+  pending[0]({ daily: [{ date: 'first' }], fixedPeriods: { historyTransportAvailable: true }, devicesComplete: false });
+  await new Promise(setImmediate);
+  assert.equal(cache.read(at('a'), { generation: 1 }).complete, false, 'a device without History keeps absent days unknown');
+  clock = 1000;
+  assert.equal(cache.read(at('b'), { generation: 1 }).daily[0].date, 'first', 'a new revision keeps the shown week');
+  assert.equal(pending.length, 1, 'reloads wait for the throttle');
+  assert.equal(timers.at(-1).ms, 59000);
+  clock = 61000;
+  assert.equal(cache.read(at('b'), { generation: 1 }).daily[0].date, 'first');
+  await Promise.resolve();
+  assert.equal(pending.length, 2);
+  pending[1]({ daily: [{ date: 'second' }], fixedPeriods: { historyTransportAvailable: true }, devicesComplete: true });
+  await new Promise(setImmediate);
+  const fresh = cache.read(at('b'), { generation: 1 });
+  assert.equal(fresh.daily[0].date, 'second');
+  assert.equal(fresh.complete, true);
+  assert.equal(cache.read(at('b'), { generation: 2 }), null, 'a backend switch drops the answer');
+});

@@ -17,21 +17,11 @@
   const LIMIT_COLUMNS = 3;
   const ACTIVE_ROWS = 2;
   const BREAKDOWN_ROWS = 4;
-  // Quotas below this read as the rail's critical tone; below LOW as amber.
-  const CRITICAL_PERCENT = 10;
-  const LOW_PERCENT = 25;
 
   // Content height the controller sizes the open shell from, in screen points.
   function panelContentHeight({ attached, zoom = 1 }) {
     const rows = PANEL_METRICS.gap + PANEL_METRICS.pages + PANEL_METRICS.bottom;
     return Math.ceil((attached ? rows : PANEL_METRICS.band + rows) * zoom);
-  }
-
-  function severity(remaining) {
-    if (remaining === null) return '';
-    if (remaining <= CRITICAL_PERCENT) return 'critical';
-    if (remaining <= LOW_PERCENT) return 'low';
-    return '';
   }
 
   // Top rows plus one remainder row, so the shares always sum to the total.
@@ -188,11 +178,16 @@
       const ms = Date.parse(fromValue || '');
       if (!Number.isFinite(ms)) return '';
       const minutes = Math.max(0, Math.round((nowMs - ms) / 60000));
-      if (minutes < 60) return `${minutes}m`;
-      return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
+      if (minutes < 60) return t('notch.durationMinutes', { minutes });
+      return t('notch.durationHours', { hours: Math.floor(minutes / 60), minutes: String(minutes % 60).padStart(2, '0') });
     }
     function clientLabel(id) {
       return CLIENT_LABELS[id] || providerLabel(id);
+    }
+    // The rail's own severity scale, so the panel and the collapsed alert agree.
+    function severity(remaining) {
+      const level = presentation.remainingSeverity(remaining);
+      return level === 'critical' || level === 'low' ? level : '';
     }
     function clientColor(id) {
       return readableColor(clientColors[id] || limitProviderColor(id) || clientColors.default);
@@ -253,32 +248,39 @@
       }
     }
 
+    // The reading is rebuilt only when its structure changes. Live samples
+    // update the existing button in place, so keyboard focus survives pushes.
     function paintStatus() {
       const rate = cell('stat:liveRate');
       const waiting = presentation.waitingSessionSummary(cell('stat:sessions')?.sessions || []).count;
       tabButtons.get('sessions').classList.toggle('has-badge', waiting > 0);
-      const key = JSON.stringify([rate, payload?.refreshEnabled, state.appearanceKey, state.locale]);
-      if (statusKey === key) return;
-      statusKey = key;
-      status.replaceChildren();
-      if (rate) {
-        const hasSample = Number.isFinite(rate.rate);
-        const idle = !hasSample || rate.idle === true;
-        const reading = el('button', 'notch-rate');
-        reading.type = 'button';
-        reading.classList.toggle('is-idle', idle);
-        const value = hasSample ? formatRate(rate.rate) : '—';
-        const unit = rate.rateMode === 'burn' ? 'TPM' : 'tok/s';
-        reading.append(el('span', 'notch-live-dot'), text('notch-rate-value', value), text('notch-rate-unit', unit));
-        reading.title = `${t(!hasSample ? 'edgeDock.rate.noSample' : idle ? 'edgeDock.rate.idle' : 'edgeDock.rate.live')} · ${t('notch.rateToggle')}`;
-        reading.setAttribute('aria-label', `${value} ${unit} · ${reading.title}`);
-        activateOnPress(reading, () => bridge.toggleRateMode());
-        status.append(reading);
+      const key = JSON.stringify([Boolean(rate), payload?.refreshEnabled, state.appearanceKey, state.locale]);
+      if (statusKey !== key) {
+        statusKey = key;
+        status.replaceChildren();
+        if (rate) {
+          const reading = el('button', 'notch-rate');
+          reading.type = 'button';
+          reading.append(el('span', 'notch-live-dot'), text('notch-rate-value', ''), text('notch-rate-unit', ''));
+          activateOnPress(reading, () => bridge.toggleRateMode());
+          status.append(reading);
+        }
+        if (payload?.refreshEnabled) {
+          if (status.childElementCount) status.append(el('span', 'notch-status-rule'));
+          status.append(shared.ensureRefreshButton());
+        }
       }
-      if (payload?.refreshEnabled) {
-        if (status.childElementCount) status.append(el('span', 'notch-status-rule'));
-        status.append(shared.ensureRefreshButton());
-      }
+      const reading = status.querySelector('.notch-rate');
+      if (!rate || !reading) return;
+      const hasSample = Number.isFinite(rate.rate);
+      const idle = !hasSample || rate.idle === true;
+      const value = hasSample ? formatRate(rate.rate) : '—';
+      const unit = t(rate.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit');
+      reading.classList.toggle('is-idle', idle);
+      reading.querySelector('.notch-rate-value').textContent = value;
+      reading.querySelector('.notch-rate-unit').textContent = unit;
+      reading.title = `${t(!hasSample ? 'edgeDock.rate.noSample' : idle ? 'edgeDock.rate.idle' : 'edgeDock.rate.live')} · ${t('notch.rateToggle')}`;
+      reading.setAttribute('aria-label', `${value} ${unit} · ${reading.title}`);
     }
 
     // ---- Home -----------------------------------------------------------------
@@ -385,7 +387,7 @@
       activateOnPress(more, () => selectPage('limits'));
       function show(count) {
         row.replaceChildren(...items.slice(0, count));
-        const hidden = allProviders.length - count;
+        const hidden = items.length - count;
         if (hidden > 0) {
           more.textContent = `+${hidden}`;
           row.append(more);
@@ -419,7 +421,11 @@
 
       const right = el('div', 'notch-week');
       const head = el('div', 'notch-week-head');
-      head.append(text('notch-week-title', new Intl.DateTimeFormat(locale(), { month: 'long' }).format(new Date(nowMs))),
+      // Seven days can cross a month boundary; name both months then.
+      const monthName = new Intl.DateTimeFormat(locale(), { month: 'long', timeZone: 'UTC' });
+      const months = [...new Set([week.days[0]?.date, week.days.at(-1)?.date].filter(Boolean)
+        .map((date) => monthName.format(new Date(`${date.slice(0, 7)}-01T00:00:00Z`))))];
+      head.append(text('notch-week-title', months.length ? months.join('–') : new Intl.DateTimeFormat(locale(), { month: 'long' }).format(new Date(nowMs))),
         text('notch-week-caption', t('notch.last7')));
       const bars = el('div', 'notch-bars');
       const names = el('div', 'notch-week-names');
@@ -439,6 +445,13 @@
             const part = el('i');
             part.style.flex = String(entry.tokens);
             part.style.background = clientColor(entry.client);
+            bar.append(part);
+          }
+          // Unattributed usage keeps its share, so tool colours are not stretched.
+          const remainder = (day.tokens || 0) - clients.reduce((sum, entry) => sum + entry.tokens, 0);
+          if (remainder > 0) {
+            const part = el('i', 'is-unattributed');
+            part.style.flex = String(remainder);
             bar.append(part);
           }
         }
@@ -504,10 +517,15 @@
 
     // ---- Limits ---------------------------------------------------------------
 
+    // The headline may sit past the card's account cap, so it is looked up in
+    // every record. A fallback only ever picks a visible account: the wider list
+    // also holds accounts the user hid from this provider.
     function headlineRecord(entry) {
-      const records = [...(entry.accounts || []).map((account) => account.record), ...(entry.subscriptionAccounts || [])].filter(Boolean);
-      return records.find((record) => resetMotion.providerKey(record) === entry.headlineAccount)
-        || records.find((record) => record.status === 'ok') || records[0] || null;
+      const visible = (entry.accounts || []).map((account) => account.record).filter(Boolean);
+      const headline = entry.headlineAccount
+        ? [...visible, ...(entry.subscriptionAccounts || [])].find((record) => record && resetMotion.providerKey(record) === entry.headlineAccount)
+        : null;
+      return headline || visible.find((record) => record.status === 'ok') || visible[0] || null;
     }
 
     function limitWindows(record) {
@@ -879,5 +897,5 @@
     return { node, render, place, selectPage, suspend, contentHeight: panelContentHeight, view };
   }
 
-  return { PANEL_METRICS, PAGES, breakdownRows, createNotchPanel, panelContentHeight, severity };
+  return { PANEL_METRICS, PAGES, breakdownRows, createNotchPanel, panelContentHeight };
 });
