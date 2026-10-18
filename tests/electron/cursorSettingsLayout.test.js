@@ -1946,6 +1946,7 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   const controls = html.match(/<div class="settings-subgroup settings-collection-cadence"[\s\S]*?<select id="collectionCadenceInput"[\s\S]*?<\/select>[\s\S]*?<\/div>/)?.[0] || '';
   assert.match(controls, /data-i18n="settings\.collection\.cadence"/);
   assert.match(controls, /value="live"/);
+  assert.match(controls, /<option value="15000" data-i18n="settings\.collection\.interval\.15s"/);
   assert.match(controls, /value="smart"[\s\S]*data-i18n="settings\.collection\.mode\.smart"/);
   assert.match(i18n, /'settings\.collection\.modeDesc': 'Smart mode collects after agent activity, with an hourly reconciliation; fixed intervals turn off file watching\.'/);
   assert.match(controls, /<option value="300000"/);
@@ -1959,6 +1960,7 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   const app = readRendererFile('app.js');
   const syncBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
   assert.match(syncBody, /collectionCadenceInput/);
+  assert.match(syncBody, /allowed = \[15000, 300000, 900000, 1800000\]/);
   assert.match(syncBody, /collectionCadenceNote[\s\S]*\.hidden\s*=/);
 
   const listenerSlice = app.slice(
@@ -2692,6 +2694,7 @@ test('main settings normalize collection cadence and replace only usage when it 
   // Smart's fixed cadence must not enter the persisted-interval allowlist, or a
   // smart-mode value survives a switch back to live and changes its backstop.
   assert.doesNotMatch(main, /COLLECTION_INTERVAL_OPTIONS = \[[^\]]*10 \* 60 \* 1000/);
+  assert.match(main, /COLLECTION_INTERVAL_OPTIONS = \[15 \* 1000, 5 \* 60 \* 1000/);
 
   const defaults = main.slice(main.indexOf('function defaultSettings'), main.indexOf('function defaultLimitProviders'));
   assert.match(defaults, /collectionMode: 'live'/);
