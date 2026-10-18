@@ -1,0 +1,67 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const test = require('node:test');
+
+const rendererDir = path.join(__dirname, '../../src/electron/renderer');
+const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+
+function controls(platform, enabled) {
+  const node = () => ({ checked: false, hidden: false, classList: { toggle(_key, hidden) { this.hidden = hidden; } } });
+  const els = { edgeDockInput: node(), experimentalFeaturesGroup: node(), notchFeature: node(), notchOptions: node(), notchInput: node(),
+    notchShapeInputs: [], edgeDockModeInputs: [], edgeDockSideInputs: [] };
+  const state = { appInfo: { platform }, settings: { notchEnabled: enabled } };
+  const patches = [];
+  const context = { els, state, edgeDockAvailable: () => platform !== 'linux',
+    syncDockSizeControls() {}, syncNotchStyleInput() {}, syncNotchCapabilities() {}, syncNotchHoverControls() {},
+    saveSettings: patch => patches.push(JSON.parse(JSON.stringify(patch))), refreshTrayComposers() {}, notchItemsComposer: null, edgeDockComposer: null };
+  const source = app.slice(app.indexOf('function syncDockControls()'), app.indexOf('function createDockItemsComposer('));
+  vm.runInNewContext(source, context);
+  return { ...context, patches };
+}
+
+test('Notch has one opt-in switch inside Advanced, with an accessible experimental notice', () => {
+  const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
+  const advanced = html.slice(html.indexOf('id="advancedSettingsDetails"'), html.indexOf('id="tokscaleGroup"'));
+  const feature = html.slice(html.indexOf('id="notchFeature"'), html.indexOf('id="tokscaleGroup"'));
+  assert.equal((html.match(/id="notchInput"/g) || []).length, 1);
+  assert.match(advanced, /id="experimentalFeaturesGroup"[\s\S]*settings\.advanced\.experimental/);
+  assert.match(advanced, /id="notchInput"[^>]*aria-describedby="notchExperimentalNote"/);
+  assert.match(advanced, /id="notchExperimentalNote"[^>]*settings\.notch\.experimentalNote/);
+  assert.match(feature, /settings\.notch\.experimentalTitle/);
+  assert.match(feature, /id="notchInput"[\s\S]*id="notchOptions"/);
+  assert.ok(html.indexOf('id="notchOptions"') < html.indexOf('id="tokscaleGroup"'));
+});
+
+test('experimental entry is macOS-only and detailed controls require explicit enablement', () => {
+  for (const platform of ['darwin', 'win32', 'linux']) {
+    for (const enabled of [undefined, false, true]) {
+      const f = controls(platform, enabled);
+      f.syncDockControls();
+      const active = platform === 'darwin' && enabled === true;
+      assert.equal(f.els.experimentalFeaturesGroup.classList.hidden, platform !== 'darwin');
+      assert.equal(f.els.notchFeature.classList.hidden, platform !== 'darwin');
+      assert.equal(f.els.notchOptions.classList.hidden, !active);
+      assert.equal(f.els.notchInput.checked, active);
+      assert.equal(f.state.settings.notchEnabled, enabled, 'visibility never rewrites saved preferences');
+      assert.equal(f.patches.length, 0);
+    }
+  }
+});
+
+test('the Advanced switch uses the existing preference and immediately shows or hides its details', () => {
+  const f = controls('darwin', false);
+  let change;
+  f.els.notchInput.addEventListener = (event, handler) => { assert.equal(event, 'change'); change = handler; };
+  const start = app.indexOf("els.notchInput?.addEventListener('change'");
+  vm.runInNewContext(app.slice(start, app.indexOf('for (const input of els.notchShapeInputs)', start)), f);
+  for (const enabled of [true, false, true]) {
+    f.els.notchInput.checked = enabled;
+    change();
+    assert.equal(f.els.notchOptions.classList.hidden, !enabled);
+    assert.deepEqual(f.patches.at(-1), { notchEnabled: enabled });
+  }
+});

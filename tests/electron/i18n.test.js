@@ -333,8 +333,9 @@ test('Notch settings and shared labels are present in every bundled locale', () 
   const fs = require('node:fs');
   const path = require('node:path');
   const html = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/index.html'), 'utf8');
-  const notch = html.split('id="notchFeature"')[1].split('id="edgeDockFeature"')[0];
-  const keys = [...new Set([...notch.matchAll(/data-i18n="([^"]+)"/g)].map(match => match[1]))];
+  const notch = html.split('id="notchFeature"')[1].split('id="tokscaleGroup"')[0];
+  const keys = [...new Set(['settings.advanced.experimental', 'settings.notch.experimentalNote',
+    ...[...notch.matchAll(/data-i18n="([^"]+)"/g)].map(match => match[1])])];
   assert.ok(keys.includes('settings.notch.iconRings'));
   assert.ok(keys.includes('settings.notch.followTrayNote'));
   assert.ok(keys.includes('settings.appearance.macBackdropVibrancy'));
