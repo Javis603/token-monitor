@@ -138,7 +138,8 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
     }
     visibleSummary = applySessionUsageArchive(summary, sessionUsageArchive, {
       now: archiveDate,
-      canonical: !dryRun
+      canonical: !dryRun,
+      authoritativeSessionClients: summary?.authoritativeSessionClients
     });
   }
   delete visibleSummary.sessionUsageArchiveFullScan;

@@ -486,6 +486,7 @@ Object.assign(els, {
   syncUploadIntervalInput: document.getElementById('syncUploadIntervalInput'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
   collectionCadenceNote: document.getElementById('collectionCadenceNote'),
+  collectionCadenceQuickOptions: Array.from(document.querySelectorAll('input[name="collectionCadenceQuickInterval"]')),
   sessionUsageArchiveInput: document.getElementById('sessionUsageArchiveInput'),
   sessionUsageArchiveStatus: document.getElementById('sessionUsageArchiveStatus'),
   reduceMotionInputs: Array.from(document.querySelectorAll('input[name="reduceMotionOption"]')),
@@ -9353,7 +9354,7 @@ function syncSettingsForm() {
   }
   if (els.collectionCadenceInput) {
     const value = Number(state.settings.collectionIntervalMs);
-    const allowed = [300000, 900000, 1800000];
+    const allowed = [15000, 300000, 900000, 1800000];
     els.collectionCadenceInput.value = state.settings.collectionMode === 'smart'
       ? 'smart'
       : state.settings.collectionMode === 'interval'
@@ -9361,6 +9362,10 @@ function syncSettingsForm() {
         : 'live';
     if (els.collectionCadenceNote) {
       els.collectionCadenceNote.hidden = els.collectionCadenceInput.value === 'live';
+    }
+    for (const input of els.collectionCadenceQuickOptions || []) {
+      input.checked = state.settings.collectionMode === 'interval'
+        && Number(state.settings.collectionIntervalMs) === Number(input.value);
     }
   }
   if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled !== false;
@@ -13069,6 +13074,15 @@ els.collectionCadenceInput?.addEventListener('change', async () => {
         : Number(value)
   });
 });
+for (const input of els.collectionCadenceQuickOptions || []) {
+  input.addEventListener('change', async () => {
+    if (!input.checked) return;
+    await saveSettings({
+      collectionMode: 'interval',
+      collectionIntervalMs: Number(input.value)
+    });
+  });
+}
 els.sessionUsageArchiveInput?.addEventListener('change', async () => {
   await saveSettings({ sessionUsageArchiveEnabled: els.sessionUsageArchiveInput.checked });
 });
@@ -17566,13 +17580,15 @@ function setupCustomPricingUI() {
     try {
       const res = await window.tokenMonitor.lookupModelPricing(id);
       if (revision !== lookupRevision) return;
-      if (res?.ok && res.result?.pricing) {
+      if (res?.ok && res.result?.pricing && customPricingFormApi.hasTrustworthyPricingMatch(res.result)) {
         const p = customPricingFormApi.perMillionFromPricing(res.result);
         for (const [el, key] of rateFields) {
           if (!editedFields.has(key)) el.value = p[key] ?? '';
           updateApproximation(el);
         }
         showHint(t('settings.customPricing.currentPrice', { key: res.result.matchedKey || id, source: res.result.source || '' }));
+      } else if (res?.ok && res.result?.pricing) {
+        showHint(t('settings.customPricing.untrustedPrice'));
       } else {
         showHint(t('settings.customPricing.noCurrentPrice'));
       }

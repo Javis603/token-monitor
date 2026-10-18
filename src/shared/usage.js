@@ -189,6 +189,15 @@ function applyParentLink(target, source) {
   else delete target.parentClient;
 }
 
+function normalizeSessionRole(value) {
+  const role = String(value || '').trim().toLowerCase();
+  return role === 'root' || role === 'child' ? role : '';
+}
+
+function normalizeSessionAgentType(value) {
+  return String(value || '').trim().toLowerCase().slice(0, 64);
+}
+
 function stripSessionTextFromPeriod(period, { preserveSessionTitles = false } = {}) {
   if (!period || typeof period !== 'object' || !period.sessions || typeof period.sessions !== 'object') {
     return period;
@@ -654,6 +663,12 @@ function emptySession(client, id) {
     projectLabel: '',
     title: '',
     sessionKind: '',
+    // OMP's stats database gives child-agent files their own transcript id and
+    // records the parent path in the session header. These fields preserve that
+    // relationship without folding child usage into the parent session.
+    parentSessionId: '',
+    sessionRole: '',
+    agentType: '',
     models: {},
     modelCosts: {},
     providers: {}
@@ -753,6 +768,9 @@ function mergeSession(target, source) {
     target.usageSource = 'codex-dots-local';
     target.usageCoverage = 'observed-only';
   }
+  if (!target.sessionRole && source.sessionRole) target.sessionRole = normalizeSessionRole(source.sessionRole);
+  if (!target.agentType && source.agentType) target.agentType = normalizeSessionAgentType(source.agentType);
+  else if (target.agentType && source.agentType && target.agentType !== source.agentType) target.agentType = 'mixed';
   for (const [model, tokens] of Object.entries(source.models || {})) {
     const key = normalizeModelNameForClient(model, target.client);
     if (key) target.models[key] = (target.models[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
@@ -803,7 +821,10 @@ function sessionFromRow(row) {
   session.title = normalizeSessionTitle(firstString(row, SESSION_TITLE_KEYS));
   session.sessionKind = normalizeSessionKind(row.sessionKind || row.session_kind);
   applyParentLink(session, row);
-  const model = detectModel(row, client);
+  session.sessionRole = normalizeSessionRole(row.sessionRole || row.session_role);
+  session.agentType = normalizeSessionAgentType(row.agentType || row.agent_type);
+  let model = detectModel(row, client);
+  if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
   if (model && session.costUsd > 0) session.modelCosts[model] = (session.modelCosts[model] || 0) + session.costUsd;
   const provider = normalizeProviderName(row.provider);
@@ -865,6 +886,8 @@ function normalizeSession(input, fallbackKey) {
     session.usageSource = 'codex-dots-local';
     session.usageCoverage = 'observed-only';
   }
+  session.sessionRole = normalizeSessionRole(input.sessionRole || input.session_role);
+  session.agentType = normalizeSessionAgentType(input.agentType || input.agent_type);
   if (input.models && typeof input.models === 'object') {
     for (const [model, value] of Object.entries(input.models)) {
       const key = normalizeModelNameForClient(model, client);

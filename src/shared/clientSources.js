@@ -20,6 +20,7 @@ const {
   devinCliDbDirs,
   devinDesktopAcpDirs
 } = require('./providers/devin/paths');
+const { ompStatsDbPath, OMP_STATS_SOURCE_CHECK_ID } = require('./providers/omp/usage');
 
 // Windows only: libuv asserts that the filename ReadDirectoryChangesW hands
 // back starts with the directory string it was given, and calls abort() when it
@@ -307,12 +308,15 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const exporter = copilotExporterWatch(home);
   if (exporter) copilotRoots.push(['copilot-otel-exporter', exporter.dir, exporter.file]);
   add('copilot', ...copilotRoots);
-  // Pi and Oh My Pi are two products with two fixed roots. Oh My Pi reads
-  // PI_CODING_AGENT_DIR too, but so does Pi — which is exactly why Tokscale
-  // keeps its root fixed and ignores that variable for `omp`; mirror that here
-  // rather than inventing an env override the scan does not honor.
+  // OMP's stats database is a separate, authoritative usage plane. Keep the
+  // transcript root for Tokscale/source diagnostics, but expose the exact DB
+  // file so health, filtering, and the watcher agree on what the adapter reads.
   add('pi', ...simpleHostSourceRoots('pi', home));
-  add('omp', ...simpleHostSourceRoots('omp', home));
+  add(
+    'omp',
+    ...simpleHostSourceRoots('omp', home),
+    [OMP_STATS_SOURCE_CHECK_ID, path.dirname(ompStatsDbPath({ homeDir: home, statsDbPath: options.ompStatsDbPath })), ompStatsDbPath({ homeDir: home, statsDbPath: options.ompStatsDbPath })]
+  );
   // Zed: tokscale reads the XdgData root on every platform AND the native macOS
   // (Application Support) / Windows (LOCALAPPDATA) roots (see tokscale scanner.rs
   // cfg(macos)/cfg(windows) blocks) — watch all three so native mac/win users get
