@@ -17,6 +17,7 @@
     : root?.TokenMonitorSessionLive;
   const sessionActivityState = sessionLive.sessionActivityState;
   const sessionContextForRow = sessionLive.sessionContextForRow;
+  const isGrokBotSession = sessionLive.isGrokBotSession;
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
 
   function setSessionTooltip(node, context, promptCache, translate, view) {
@@ -291,17 +292,6 @@
     return textValue(session?.sessionKind) === 'background-review';
   }
 
-  // Cursor's sandbox ids identify bot runs independently of the model. A
-  // positive grok-bot model also proves a bot conversation with a regular id;
-  // its other models belong to the same conversation, including Claude.
-  function isGrokBotSession(session, key) {
-    if (session?.client !== 'cursor') return false;
-    if (typeof session.grokBotSession === 'boolean') return session.grokBotSession;
-    const id = textValue(session?.sessionId) || String(key || '').replace(/^cursor:/, '');
-    return /^sand-subagent-.+/.test(id) || Object.entries(session?.models || {})
-      .some(([model, tokens]) => /^grok-bot-.+/.test(model) && finiteNumber(tokens) > 0);
-  }
-
   const botIdentityCache = new WeakMap();
   const botIdSets = new WeakMap();
 
@@ -468,6 +458,9 @@
     const rows = Object.entries(period?.sessions || {})
       .map(([key, session]) => {
         session = sessionLive.sessionWithActivity(period, key, session);
+        const grokBot = isGrokBotSession(session, key) || (session?.client === 'cursor'
+          && botIds.has(textValue(session.sessionId) || key.replace(/^cursor:/, '')));
+        if (grokBot && session.grokBotSession !== true) session = { ...session, grokBotSession: true };
         const native = options.nativeSessions?.[key];
         // A resumed source can be active before accounting replaces its archive.
         // Join only presentation activity; the retained token/cost values stay put.
@@ -544,8 +537,7 @@
           subagent: subagent || undefined,
           subagentLabel: subagent ? subagentLabel : undefined,
           parentKey: subagent ? `session:${parentClient}:${parentSessionId}` : undefined,
-          grokBot: (isGrokBotSession(session, key) || (client === 'cursor'
-            && botIds.has(textValue(session?.sessionId) || key.replace(/^cursor:/, '')))) || undefined,
+          grokBot: grokBot || undefined,
           sortTime: sessionTimestampValue(session),
           title: `${clientLabel} session${sessionIdLabel(sessionId) ? ` ${sessionIdLabel(sessionId)}` : ''}`
         };

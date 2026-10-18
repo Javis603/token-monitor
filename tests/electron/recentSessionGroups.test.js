@@ -107,7 +107,7 @@ test('global reviews stay excluded and Grok bots keep their global group outside
   stats.periods.month.sessions['codex:review'] = session('codex', 'review', {
     parentSessionId: 'same', sessionKind: 'background-review' });
   stats.periods.month.sessions['cursor:bot1'] = session('cursor', 'bot1', {
-    parentClient: 'codex', parentSessionId: 'same', models: { 'grok-bot-automation': 100 } });
+    parentClient: 'codex', parentSessionId: 'same', models: { 'grok-bot-automation': 100 }, turnEnded: false });
   stats.periods.month.sessions['cursor:bot2'] = session('cursor', 'bot2', {
     parentClient: 'codex', parentSessionId: 'same', models: { 'grok-bot-automation': 100 } });
   const rows = presentation.recentSessionRows(stats, 1, { includeRunningBeyondCap: true });

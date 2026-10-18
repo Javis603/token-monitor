@@ -2832,7 +2832,7 @@ test('an active Grok Bot group survives recent caps and running-only selection a
   const sessions = {
     'codex:quiet': { client: 'codex', sessionId: 'quiet', totalTokens: 1, turnEnded: true,
       lastUsedAt: new Date(now - 1000).toISOString() },
-    'cursor:bot-a': { client: 'cursor', sessionId: 'bot-a', grokBotSession: true,
+    'cursor:bot-a': { client: 'cursor', sessionId: 'bot-a', grokBotSession: true, turnEnded: false,
       totalTokens: 10, costUsd: 1, models: { 'grok-bot-test': 10 },
       lastUsedAt: new Date(now - 8 * 60_000).toISOString() },
     'cursor:bot-b': { client: 'cursor', sessionId: 'bot-b', grokBotSession: true, turnEnded: true,
@@ -2849,6 +2849,7 @@ test('an active Grok Bot group survives recent caps and running-only selection a
   assert.equal(dock.sessions.length, 1);
   assert.equal(dock.sessions[0].sessionGroup, 'cursor-grok-bot');
   assert.equal(dock.sessions[0].totalTokens, 30);
+  assert.equal(edgeDockPresentation.sessionActivityState(dock.sessions[0], now + 1000), 'running');
 });
 
 for (const shape of ['independent', 'aliases', 'cross-client child', 'Grok Bot']) {

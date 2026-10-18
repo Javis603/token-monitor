@@ -82,6 +82,16 @@
     return session?.archived === true || session?.deleted === true || session?.sourceDeleted === true;
   }
 
+  // Bot conversations keep their identity across models, period snapshots and
+  // display aliases. The optional flag is an Electron presentation projection.
+  function isGrokBotSession(session, key) {
+    if (session?.client !== 'cursor') return false;
+    if (typeof session.grokBotSession === 'boolean') return session.grokBotSession;
+    const id = String(session.sessionId || '').trim() || String(key || '').replace(/^cursor:/, '');
+    return /^sand-subagent-.+/.test(id) || Object.entries(session.models || {})
+      .some(([model, tokens]) => /^grok-bot-.+/.test(model) && finiteNumber(tokens) > 0);
+  }
+
   function isRunningSession(session, now = Date.now()) {
     // Delegates rather than repeating the window check: a session that reported
     // its turn finished is not running, and two predicates answering that
@@ -113,6 +123,9 @@
     if (!last) return 'idle';
     const recent = nowMs(now) - last <= RUNNING_WINDOW_MS;
     if (session?.turnEnded === true) return recent ? 'ended' : 'idle';
+    // Cloud usage records can arrive after a bot run has finished. Recency
+    // alone cannot prove it is running; only an explicit open turn can.
+    if (isGrokBotSession(session) && session.turnEnded !== false) return 'idle';
     if (recent && session?.client === 'codex' && session.waitingForInput === true) return 'waiting';
     return recent ? 'running' : 'idle';
   }
@@ -253,6 +266,7 @@
     liveActivityExpiryAt,
     contextTone,
     isArchivedSession,
+    isGrokBotSession,
     isRunningSession,
     sessionActivityState,
     sessionContextForRow,

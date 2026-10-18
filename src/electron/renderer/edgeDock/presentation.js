@@ -253,7 +253,7 @@
         startedAt: session.startedAt || null,
         // Carried onto the projected row, not just used here: the dock renderer
         // re-derives the state at paint time and needs the boundary to do it.
-        turnEnded: session.turnEnded === true,
+        turnEnded: session.turnEnded,
         liveActivity: session.liveActivity || null,
         waitingForInput: session.client === 'codex' && session.waitingForInput === true,
         // The archive flags ride along for the same reason, and their absence was a
@@ -277,11 +277,21 @@
   // Group the complete source list before selecting recent/running rows. Keep
   // accounting identities on the members; summaries exist only in presentation.
   function groupedSessionRows(stats, options = {}) {
-    const entries = sessionSourceRows(stats);
-    const states = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
+    const sources = sessionSourceRows(stats);
     const botIds = new Set(Array.isArray(stats?.grokBotSessionIds) ? stats.grokBotSessionIds
-      : sessionRowsApi.grokBotSessionIdsForMaps([Object.fromEntries(entries.map(({ key, session }) => [key, session]))],
+      : sessionRowsApi.grokBotSessionIdsForMaps([Object.fromEntries(sources.map(({ key, session }) => [key, session]))],
         Object.values(stats?.periods || {}).map(period => period?.sessions)));
+    // Resolve bot identity before activity, then retain it for deferred
+    // projection and paint-time expiry checks, including Claude-only periods.
+    const entries = sources.map(entry => {
+      const { key, session } = entry;
+      const client = normalizedId(session.client);
+      const grokBot = sessionLive.isGrokBotSession(client === session.client ? session : { ...session, client }, key)
+        || (client === 'cursor' && botIds.has(String(session.sessionId || '').trim() || key.replace(/^cursor:/, '')));
+      if (client === session.client && (!grokBot || session.grokBotSession === true)) return entry;
+      return { ...entry, session: { ...session, client, ...(grokBot ? { grokBotSession: true } : {}) } };
+    });
+    const states = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
     // Resolve all group identities and totals before caps, but build display
     // rows (context, archive flags and member DTOs) only for selected groups.
     const entriesByKey = new Map();
@@ -305,11 +315,8 @@
         tokenDataUnavailable: session.tokenDataUnavailable === true,
         parentKey: parentSessionId && (parentClient !== client || parentSessionId !== sessionId)
           ? `session:${parentClient}:${parentSessionId}` : undefined,
-        grokBot: client === 'cursor' && (sessionRowsApi.isGrokBotSession({ client, sessionId, models,
-          grokBotSession: session.grokBotSession }, key) || botIds.has(sessionId)),
-        activityState: client === session.client ? states.get(key) : sessionLive.sessionActivityState({ client, lastUsedAt: session.lastUsedAt, liveActivity: session.liveActivity,
-          turnEnded: session.turnEnded === true, archived: session.archived === true, deleted: session.deleted === true,
-          sourceDeleted: session.sourceDeleted === true, waitingForInput: session.client === 'codex' && session.waitingForInput === true }), running: states.get(key) === 'running',
+        grokBot: client === 'cursor' && session.grokBotSession === true,
+        activityState: states.get(key), running: states.get(key) === 'running',
         sortTime: entry.lastUsedMs
       };
     });
@@ -322,12 +329,7 @@
         return ['running', 'waiting'].find(state => memberStates.includes(state)) || memberStates[0] || 'idle';
       }
       const session = entriesByKey.get(row.key).session;
-      return sessionLive.sessionActivityState(row.client === session.client ? session : {
-        client: row.client, lastUsedAt: session.lastUsedAt, liveActivity: session.liveActivity,
-        turnEnded: session.turnEnded === true, archived: session.archived === true,
-        deleted: session.deleted === true, sourceDeleted: session.sourceDeleted === true,
-        waitingForInput: session.client === 'codex' && session.waitingForInput === true
-      }, now);
+      return sessionLive.sessionActivityState(session, now);
     };
     const projected = new Map();
     const projectMember = key => {
