@@ -10052,6 +10052,7 @@
       'settings.customPricing.lookingUp': 'Consultando o preço atual…',
       'settings.customPricing.currentPrice': 'Os preços disponíveis foram preenchidos ({key}, {source}). Confira os campos em branco antes de salvar.',
       'settings.customPricing.noCurrentPrice': 'Nenhum preço atual encontrado; informe o preço do fornecedor.',
+      'settings.customPricing.untrustedPrice': 'A correspondência do catálogo não confirma o provedor ou é aproximada; informe manualmente o preço do fornecedor.',
       'settings.customPricing.save': 'Salvar',
       'settings.customPricing.cancel': 'Cancelar',
       'settings.customPricing.remove': 'Remover',
