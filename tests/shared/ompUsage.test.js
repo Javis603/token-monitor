@@ -10,6 +10,7 @@ let sqlite;
 try { sqlite = require('node:sqlite'); } catch (_) { /* Node 22.15+ only. */ }
 
 const { collectOmpUsage, readOmpStatsRows, sessionIdentity } = require('../../src/shared/providers/omp/usage');
+const { collectHistoryOnce, collectUsageOnce } = require('../../src/shared/collector');
 
 (sqlite ? test : test.skip)('OMP stats adapter reads a bounded snapshot and preserves period/session identity', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'omp-stats-usage-'));
@@ -142,4 +143,117 @@ const { collectOmpUsage, readOmpStatsRows, sessionIdentity } = require('../../sr
     ['2026-09-30', 10],
     ['2026-10-18', 6]
   ]);
+});
+
+(sqlite ? test : test.skip)('collector includes OMP stats on a full target refresh without an anchor', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'omp-collector-usage-'));
+  const homeDir = path.join(root, 'home');
+  const databasePath = path.join(root, 'stats.db');
+  const sessionFile = path.join(homeDir, '.omp', 'agent', 'sessions', 'root.jsonl');
+  fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+  fs.writeFileSync(sessionFile, `${JSON.stringify({ type: 'session', id: 'omp-root' })}\n`);
+  const database = new sqlite.DatabaseSync(databasePath);
+  let databaseOpen = true;
+  t.after(() => {
+    if (databaseOpen) database.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  database.exec(`
+    CREATE TABLE session_rollup (
+      session_file TEXT,
+      started_at INTEGER,
+      ended_at INTEGER,
+      total_tokens INTEGER,
+      cost_total REAL
+    );
+    CREATE TABLE messages (
+      session_file TEXT,
+      model TEXT,
+      provider TEXT,
+      timestamp INTEGER,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      cache_read_tokens INTEGER,
+      cache_write_tokens INTEGER,
+      total_tokens INTEGER,
+      cost_total REAL,
+      agent_type TEXT
+    );
+  `);
+  const now = new Date(2026, 9, 18, 12, 0, 0, 0);
+  const nowMs = now.getTime();
+  database.prepare('INSERT INTO session_rollup VALUES (?, ?, ?, ?, ?)').run(
+    sessionFile,
+    Math.floor((nowMs - 1_000) / 1000),
+    Math.floor(nowMs / 1000),
+    12,
+    3.5
+  );
+  database.prepare('INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    sessionFile,
+    'omp-model',
+    'omp-provider',
+    nowMs - 1_000,
+    2,
+    10,
+    0,
+    0,
+    12,
+    3.5,
+    'interactive'
+  );
+  database.close();
+  databaseOpen = false;
+
+  const calls = [];
+  const summary = await collectUsageOnce({
+    clients: 'omp,claude',
+    targetClients: ['claude'],
+    allTimeSince: '2024-01-01',
+    homeDir,
+    now,
+    ompStatsDbPath: databasePath,
+    ompStatsEnabled: true,
+    historyEnabled: false,
+    dailyHistoryArchiveEnabled: false,
+    projectsEnabled: false,
+    wslScanEnabled: false,
+    runTokscale: async (input) => {
+      calls.push(input);
+      return { entries: [{ client: 'claude', sessionId: 'claude-1', totalTokens: 4, cost: 1, input: 4 }] };
+    },
+    deviceId: 'fixture',
+    agentVersion: 'fixture'
+  });
+
+  assert.equal(calls.length, 3);
+  assert.equal(summary.ompUsageMode, 'stats-db');
+  assert.deepEqual(summary.authoritativeSessionClients, ['omp']);
+  assert.equal(summary.allTime.totalTokens, 16);
+  assert.deepEqual(summary.allTime.clients, { omp: 12, claude: 4 });
+  assert.deepEqual(Object.keys(summary.allTime.sessions).sort(), ['claude:claude-1', 'omp:omp-root']);
+});
+
+test('OMP-only history is reported as successful without duplicate merge', async () => {
+  const statuses = [];
+  const history = await collectHistoryOnce({
+    clients: '',
+    ompGraph: {
+      contributions: [{
+        date: '2026-10-18',
+        clients: [{ client: 'omp', modelId: 'omp-model', tokens: { input: 9 }, cost: 0.9 }]
+      }]
+    },
+    historyEnabled: true,
+    dailyHistoryArchiveEnabled: false,
+    todayKey: '2026-10-18',
+    onHistoryStatus: (status) => statuses.push(status)
+  });
+
+  assert.equal(statuses.length, 1);
+  assert.ok(statuses[0].successAt);
+  assert.equal(statuses[0].failureCode, null);
+  assert.equal(history.daily.length, 1);
+  assert.equal(history.daily[0].tokens, 9);
+  assert.equal(history.daily[0].cost, 0.9);
 });

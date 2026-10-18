@@ -137,6 +137,50 @@ test('Command Code watches its transcript tree and prunes non-transcript events'
   }
 });
 
+test('OMP watcher bounds custom stats DB files and honors the disabled mode', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-omp-watch-'));
+  const homeDir = path.join(root, 'home');
+  const statsRoot = path.join(root, 'omp-data');
+  const statsDbPath = path.join(statsRoot, 'stats.db');
+  fs.mkdirSync(statsRoot, { recursive: true });
+  fs.writeFileSync(statsDbPath, 'fixture');
+  try {
+    const { openWatch, watchIgnoreMatcher, watchPathsForClients } = freshCollector();
+    const options = { homeDir, ompStatsDbPath: statsDbPath };
+    assert.deepEqual(watchPathsForClients('omp', options), [statsRoot]);
+    const ignored = watchIgnoreMatcher('omp', options);
+    assert.equal(ignored(statsRoot), false);
+    for (const name of ['stats.db', 'stats.db-wal', 'stats.db-shm']) {
+      assert.equal(ignored(path.join(statsRoot, name)), false);
+    }
+    assert.equal(ignored(path.join(statsRoot, 'runtime.log')), true);
+    assert.equal(ignored(path.join(statsRoot, 'stats', 'nested.db')), true);
+
+    let opened;
+    openWatch({
+      watch(dirs, config) {
+        opened = { dirs, config };
+        return {};
+      }
+    }, {
+      dirs: [statsRoot],
+      clients: 'omp',
+      homeDir,
+      ompStatsDbPath: statsDbPath
+    });
+    assert.deepEqual(opened.dirs, [statsRoot]);
+    assert.equal(opened.config.ignored(path.join(statsRoot, 'stats.db')), false);
+    assert.equal(opened.config.ignored(path.join(statsRoot, 'runtime.log')), true);
+
+    const disabled = { ...options, ompStatsEnabled: false };
+    assert.deepEqual(watchPathsForClients('omp', disabled), []);
+    assert.equal(watchIgnoreMatcher('omp', disabled), undefined);
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('watchIgnoreMatcher keeps every direct Tokscale MiMo database variant but prunes logs', () => {
   const orcaRoot = path.join('Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data');
   const tmp = withTmpHome([path.join('.local', 'share', 'mimocode'), orcaRoot]);

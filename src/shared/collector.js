@@ -861,7 +861,11 @@ async function collectHistoryOnce(options) {
       if (typeof options.logger === 'function') options.logger(`tokscale graph failed: ${error.message}`);
     }
   }
-  if (options.ompGraph) rawGraphs.push(options.ompGraph);
+  const ompGraphIsPrimary = !clients && Boolean(options.ompGraph);
+  if (options.ompGraph) {
+    rawGraphs.push(options.ompGraph);
+    if (ompGraphIsPrimary) liveHistory = normalizeHistory(parseGraphResult(options.ompGraph), { capDays, todayKey });
+  }
   // Keep supplemental ledgers out of generic history retention too: a retained
   // maximum would survive when a native rollout replaces this thread.
   const withLocalHistory = (history, { ompIncluded = false } = {}) => {
@@ -902,7 +906,7 @@ async function collectHistoryOnce(options) {
   }
   const result = liveHistory.daily.length || liveHistory.monthly.length ? liveHistory : null;
   reportStatus(failureCode === null);
-  return withLocalHistory(result);
+  return withLocalHistory(result, { ompIncluded: ompGraphIsPrimary });
 }
 
 function shouldIncludeHistory(nowMs, lastHistoryAtMs, historyIntervalMs, force, enabled = true) {
@@ -1052,7 +1056,7 @@ async function collectUsageOnce(options) {
   const shouldReadOmp = includesOmp
     && ompStatsAvailable
     && options.ompStatsEnabled !== false
-    && (!targetRequested || targetClients.includes('omp'));
+    && (!targetRequested || targetClients.includes('omp') || !anchorUsed);
   const enableOmpTokscaleFallback = () => {
     if (!includesOmp) return;
     localClients.delete('omp');
@@ -1620,7 +1624,7 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
     if (existing.length > 0) rootsByClient[client] = existing;
   }
   const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
-  if (enabled.has('omp')) {
+  if (enabled.has('omp') && options.ompStatsEnabled !== false) {
     const statsRoot = path.dirname(ompStatsDbPath({
       homeDir: options.homeDir,
       statsDbPath: options.ompStatsDbPath
@@ -2077,7 +2081,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   bound('grok', withBasename('grok', 'logs'), directChildOnly((name) => name === GROK_UNIFIED_LOG_FILE));
   // ZCode v2 is a direct SQLite path, not a recursive project source.
   bound('zcode', withBasename('zcode', 'db'), directChildOnly((name) => ZCODE_DB_WATCH_PATTERN.test(name)));
-  if (String(clientsCsv || '').split(',').map((client) => client.trim().toLowerCase()).includes('omp')) {
+  if (String(clientsCsv || '').split(',').map((client) => client.trim().toLowerCase()).includes('omp') && options.ompStatsEnabled !== false) {
     const statsRoot = path.dirname(ompStatsDbPath({
       homeDir: options.homeDir,
       statsDbPath: options.ompStatsDbPath
@@ -2655,7 +2659,9 @@ function openWatch(chokidar, config = {}) {
     customScanPaths: config.customScanPaths,
     cursorDesktopRoots: config.cursorDesktopRoots,
     homeDir: config.homeDir,
-    env: config.env
+    env: config.env,
+    ompStatsDbPath: config.ompStatsDbPath,
+    ompStatsEnabled: config.ompStatsEnabled
   }), config.usageDirs || config.dirs || [], config.activitySources || []);
   const limit = Number.isInteger(config.pollingEntryLimit) && config.pollingEntryLimit >= 0
     ? config.pollingEntryLimit
@@ -3757,6 +3763,8 @@ function startCollector(options) {
           cursorDesktopRoots: sourceSyncRootsByClient.cursor || [],
           homeDir: sourceOptions.homeDir,
           env: sourceOptions.env,
+          ompStatsDbPath: sourceOptions.ompStatsDbPath,
+          ompStatsEnabled: sourceOptions.ompStatsEnabled,
           usePolling,
           pollingEntryLimit: watchPollingEntryLimit
         },

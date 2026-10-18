@@ -100,6 +100,7 @@ function createUsageTransform(options = {}) {
           now,
           canonical: true,
           canonicalSummary: true,
+          authoritativeSessionClients: summary?.authoritativeSessionClients,
           mutate: true
         });
     delete visibleSummary.sessionUsageArchiveFullScan;
