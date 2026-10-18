@@ -1898,21 +1898,24 @@ test('Liquid Glass follows both theme directions without recreating windows', (t
 });
 
 test('notch inherits Clear from the widget and switches its own style without recreating windows', (t) => {
-  const updates = [];
+  const updates = new Map();
   const f = fixture(t, { notchStyle: 'inherit', macBackdrop: 'liquid-glass-clear', edgeDockMacBackdrop: 'liquid-glass', macGlassTint: 12, macClearGlassTint: 64 }, {
     nativeGlass: () => true, liquidGlass: () => ({ dark: true }),
-    createGlass: () => ({ update(value) { updates.push([value.style, value.tintOpacity]); }, dispose() {} })
+    createGlass: win => ({ update(value) { updates.set(win, [value.style, value.tintOpacity]); }, dispose() {} })
   });
-  assert.deepEqual(updates.at(-1), ['clear', 0.64]);
+  assert.deepEqual(updates.get(f.windows[0]), ['clear', 0]);
+  assert.deepEqual(updates.get(f.windows[1]), ['clear', 0.64]);
   for (const [style, expected] of [['liquid-glass', 'regular'], ['liquid-glass-clear', 'clear'], ['inherit', 'clear']]) {
     f.preferences.notchStyle = style;
     f.controller.sync();
-    assert.deepEqual(updates.at(-1), [expected, expected === 'clear' ? 0.64 : 0.12]);
+    assert.deepEqual(updates.get(f.windows[0]), [expected, 0]);
+    assert.deepEqual(updates.get(f.windows[1]), [expected, expected === 'clear' ? 0.64 : 0.12]);
     assert.equal(f.windows.length, 2);
   }
   f.preferences.macClearGlassTint = 23;
   f.controller.setAppearance({});
-  assert.deepEqual(updates.at(-1), ['clear', 0.23]);
+  assert.deepEqual(updates.get(f.windows[0]), ['clear', 0]);
+  assert.deepEqual(updates.get(f.windows[1]), ['clear', 0.23]);
 });
 
 test('Notch glass previews preserve currency and subscriptions across hidden reveal and retain its independent native style', (t) => {
@@ -3173,12 +3176,18 @@ test('main wires native press monitoring into the Notch controller', () => {
 
 test('attached glass stays dark with a light widget while detail cards retain their appearance', (t) => {
   const updates = new Map();
-  const f = fixture(t, { notchStyle: 'inherit', macBackdrop: 'liquid-glass-clear' }, {
+  const f = fixture(t, { notchStyle: 'inherit', macBackdrop: 'liquid-glass-clear', macClearGlassTint: 64 }, {
     nativeGlass: () => true, liquidGlass: () => ({ dark: false }),
     createGlass: win => ({ update: options => updates.set(win, options), dispose() {} })
   });
   assert.equal(updates.get(f.windows[0]).dark, true);
   assert.equal(updates.get(f.windows[1]).dark, false);
+  assert.equal(updates.get(f.windows[0]).tintOpacity, 0, 'the camera fade is the attached surface tint');
+  assert.equal(updates.get(f.windows[1]).tintOpacity, 0.64, 'detail cards retain the configured tint');
   f.preferences.notchShape = 'pill'; f.controller.sync();
   assert.equal(updates.get(f.windows[0]).dark, false, 'detaching restores the widget appearance');
+  assert.equal(updates.get(f.windows[0]).tintOpacity, 0.64, 'camera-free capsules retain the configured tint');
+  f.preferences.notchShape = 'auto'; f.controller.sync();
+  assert.equal(updates.get(f.windows[0]).tintOpacity, 0, 'reattaching removes the duplicate native tint');
+  assert.equal(f.preferences.macClearGlassTint, 64, 'the saved preference is never rewritten');
 });

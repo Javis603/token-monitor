@@ -53,6 +53,13 @@ test('glass proportions adapt to short, tall and screen-limited bodies without s
   assert.deepEqual(notchGlassGeometry(32, 0), { capEnd: 32, fadeEnd: 32, rimTop: 32, rimBottom: 32 });
 });
 
+test('a normal panel reveals glass before the lower content instead of only at its bottom edge', () => {
+  const profile = notchGlassGeometry(32, 200);
+  assert.equal(profile.capEnd, 80);
+  assert.equal(profile.fadeEnd, 180);
+  assert.ok(profile.rimBottom - profile.fadeEnd >= 50, 'the final quarter of the body retains the clear material');
+});
+
 test('shade proportions use the current frame once, independently of the configured zoom', () => {
   const f = shadeFixture();
   for (const height of [20, 143, 480, 40]) {

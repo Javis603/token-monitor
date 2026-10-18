@@ -248,10 +248,12 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   function glassOptions(surface) {
     const mode = backdropMode();
     // An attached panel joins a black camera housing, so its material keeps a
-    // dark appearance even when the widget uses a light palette. Detached
-    // capsules and detail cards retain the widget's appearance.
+    // dark appearance even when the widget uses a light palette. The hardware
+    // scrim owns its tint: applying the widget tint too would darken it twice.
+    // Detached capsules and detail cards retain the widget's appearance/tint.
     const attached = surface === 'notch' && layout()?.geometry.notched;
-    return { dark: attached || liquidGlass()?.dark === true, style: liquidGlassStyle(mode), tintOpacity: liquidGlassTint(settings(), mode) };
+    return { dark: attached || liquidGlass()?.dark === true, style: liquidGlassStyle(mode),
+      tintOpacity: attached ? 0 : liquidGlassTint(settings(), mode) };
   }
 
   function shape(surface, points, bounds, display) {

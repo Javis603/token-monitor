@@ -10,7 +10,7 @@
   // Optical proportions live in the space below the physical camera band.
   // Motion frames already include content zoom; applying zoom again here would
   // change the balance as cards grow, shrink or hit the screen's height limit.
-  const NOTCH_GLASS_PROFILE = Object.freeze({ cap: 0.30, fade: 0.63 });
+  const NOTCH_GLASS_PROFILE = Object.freeze({ cap: 0.24, fade: 0.50 });
   function notchGlassGeometry(cameraHeight, bodyHeight) {
     const camera = Number.isFinite(cameraHeight) ? Math.max(0, cameraHeight) : 0;
     const body = Number.isFinite(bodyHeight) ? Math.max(0, bodyHeight) : 0;

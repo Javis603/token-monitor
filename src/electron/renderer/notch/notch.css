@@ -10,11 +10,11 @@ html.notch-black .edge-dock-shape-line { stroke: transparent; }
 html:not(.notch-black) .is-notch-attached .notch-hardware-shade,
 html:not(.notch-black) .is-notch-attached .notch-glass-rim { display: inline; }
 .notch-hardware-stop-0 { stop-opacity: 1; }
-.notch-hardware-stop-1 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .14); }
-.notch-hardware-stop-2 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .26); }
-/* Retain a dark floor: the open panel is dense with figures, and a clear
-   material would otherwise let windows behind it read through the numbers. */
-.notch-hardware-stop-3 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .32); }
+.notch-hardware-stop-1 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .36); }
+.notch-hardware-stop-2 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .68); }
+/* The scrim supplies the dark floor once; native glass stays untinted here.
+   Preserve a clear lower region instead of covering its optics in black. */
+.notch-hardware-stop-3 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .77); }
 .notch-glass-rim { fill: none; stroke-width: .75; opacity: var(--notch-content-progress, 0); }
 html:not(.notch-black) .is-notch-attached .edge-dock-shape-line { stroke: transparent; }
 .is-notch-attached .notch-summary { --text: #fff; --muted: rgba(255,255,255,.68); --overlay-rgb: 255,255,255; color: var(--text); }
@@ -125,6 +125,16 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
   color: var(--notch-ink); font-family: var(--notch-ui); font-variant-numeric: tabular-nums;
 }
 .is-notch-attached .notch-panel { padding: 0 calc(24px + 18px); }
+/* Keep labels distinct over a sharp, bright backdrop without darkening the
+   entire glass face. Pure black and detached surfaces keep their own styling. */
+html:not(.notch-black) .is-notch-attached .notch-panel {
+  text-shadow: 0 1px 2px rgba(0,0,0,.9), 0 0 6px rgba(0,0,0,.5);
+}
+html:not(.notch-black) .is-notch-attached .notch-panel .edge-dock-mark {
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.8));
+}
+/* Dark ink on its own light chip already has contrast; a dark halo smears it. */
+html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is-today, .notch-pill) { text-shadow: none; }
 .notch-panel button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 .notch-panel button:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 .notch-panel .edge-dock-mark { width: 13px; height: 13px; flex: 0 0 auto; }

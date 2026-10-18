@@ -120,7 +120,7 @@ Session rows use the widget's interface typography, number formatters and shared
 
 The seven-day chart uses live Today accounting for its newest bar and full History for past-day tool colours. `notch/history.js` caches reads by source generation, history revision, device inventory and local date, rejecting stale async results after source changes or History disablement. Missing history stays unknown; only a successfully read complete history can establish an absent day as zero. No historical split is inferred from today's mix. Breakdown displays tool and model attribution simultaneously, each against the same selected period total. Each column has its own spectrum and keyboard/pointer highlight; overflow folds into Other without losing usage, and unattributed usage remains included.
 
-The renderer refreshes only the selected page, defers chart updates while a day is being inspected, and applies the latest payload on exit. Hidden pages are inert; collapse settles number motion and clears the inspection state. Shell geometry, summary measurement, lock/full-screen behaviour and native material masking remain owned by the existing controller.
+The renderer refreshes only the selected page, defers chart updates while a day is being inspected, and applies the latest payload on exit. Hidden pages are inert; collapse settles number motion and clears the inspection state. Shell geometry, summary measurement, lock/full-screen behaviour and native material masking remain owned by the existing controller. Attached glass uses the camera scrim as its only tint layer; its fade completes before the lower readouts. Capsules and detail cards continue to use the configured native tint.
 
 ## Widget mode switching
 
