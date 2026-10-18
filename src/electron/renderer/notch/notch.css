@@ -6,12 +6,16 @@ html.notch-black .edge-dock-shape-line { stroke: transparent; }
    lower half reveals the selected material only as the panel opens. The same
    animated outline clips the shade; capsules and detached details keep their
    own material without a fabricated camera band. */
-.notch-hardware-shade { display: none; pointer-events: none; }
-html:not(.notch-black) .is-notch-attached .notch-hardware-shade { display: inline; }
+.notch-hardware-shade, .notch-glass-rim { display: none; pointer-events: none; }
+html:not(.notch-black) .is-notch-attached .notch-hardware-shade,
+html:not(.notch-black) .is-notch-attached .notch-glass-rim { display: inline; }
 .notch-hardware-stop-0 { stop-opacity: 1; }
-.notch-hardware-stop-1 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .45); }
-.notch-hardware-stop-2 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .85); }
-.notch-hardware-stop-3 { stop-opacity: calc(1 - var(--notch-content-progress, 0)); }
+.notch-hardware-stop-1 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .36); }
+.notch-hardware-stop-2 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .68); }
+/* Retain a dark floor so bright wallpaper does not wash out the lower rows. */
+.notch-hardware-stop-3 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .77); }
+.notch-glass-rim { fill: none; stroke-width: .75; opacity: var(--notch-content-progress, 0); }
+html:not(.notch-black) .is-notch-attached .edge-dock-shape-line { stroke: transparent; }
 .is-notch-attached .notch-summary { --text: #fff; --muted: rgba(255,255,255,.68); --overlay-rgb: 255,255,255; color: var(--text); }
 /* Light widget ink cannot cross a black camera band. Keep the attached shell
    on the existing dark surface palette; detached cards still follow the theme. */

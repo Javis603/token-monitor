@@ -640,28 +640,47 @@
         gradient.id = 'notch-hardware-gradient';
         gradient.setAttribute('gradientUnits', 'userSpaceOnUse');
         gradient.setAttribute('x1', '0'); gradient.setAttribute('x2', '0');
-        for (const [index, offset] of [0, 0.4, 0.75, 1].entries()) {
+        for (const [index, offset] of [0, 0.35, 0.72, 1].entries()) {
           const stop = svg('stop');
           stop.setAttribute('offset', offset);
           stop.setAttribute('stop-color', '#000');
           stop.setAttribute('class', `notch-hardware-stop-${index}`);
           gradient.append(stop);
         }
-        defs.append(gradient);
+        const rimGradient = svg('linearGradient');
+        rimGradient.id = 'notch-rim-gradient';
+        rimGradient.setAttribute('gradientUnits', 'userSpaceOnUse');
+        rimGradient.setAttribute('x1', '0'); rimGradient.setAttribute('x2', '0');
+        for (const [offset, opacity] of [[0, 0], [0.45, 0.025], [0.8, 0.1], [1, 0.22]]) {
+          const stop = svg('stop');
+          stop.setAttribute('offset', offset);
+          stop.setAttribute('stop-color', '#fff');
+          stop.setAttribute('stop-opacity', opacity);
+          rimGradient.append(stop);
+        }
+        defs.append(gradient, rimGradient);
         shade = svg('path'); shade.setAttribute('class', 'notch-hardware-shade');
         shade.setAttribute('fill', 'url(#notch-hardware-gradient)');
-        shapeLayer.append(defs, shade);
+        const rim = svg('path'); rim.setAttribute('class', 'notch-glass-rim');
+        rim.setAttribute('stroke', 'url(#notch-rim-gradient)');
+        shapeLayer.append(defs, shade, rim);
       }
-      // Anchor the black cap to physical camera height, not a percentage of
-      // the changing panel. The lower stops reveal material as the shell opens;
-      // at rest/peek every stop is opaque, so the entire entry stays black.
-      const core = state.payload.geometry.height;
+      // Always cover the physical camera, then extend the black cap into the
+      // body. Short panels reserve less of that extension so glass remains visible.
+      // At rest/peek every stop is opaque, so the entire entry stays black.
+      const camera = state.payload.geometry.height;
       const zoom = Number(state.payload.appearance?.zoomFactor) || 1;
-      const fade = Math.min(88 * zoom, Math.max(1, frame.bodyHeight) * 0.75);
+      const body = Math.max(0, frame.bodyHeight);
+      const core = camera + Math.min(48 * zoom, body * 0.28);
+      const fade = Math.max(1, Math.min(100 * zoom, body * 0.7));
       const gradient = shapeLayer.querySelector('#notch-hardware-gradient');
       gradient.setAttribute('y1', core);
       gradient.setAttribute('y2', core + fade);
       shade.setAttribute('d', frame.shape.d);
+      const rimGradient = shapeLayer.querySelector('#notch-rim-gradient');
+      rimGradient.setAttribute('y1', camera);
+      rimGradient.setAttribute('y2', camera + Math.max(1, body));
+      shapeLayer.querySelector('.notch-glass-rim').setAttribute('d', frame.shape.d);
     }
 
     function applyNotchMotion(frame) {
