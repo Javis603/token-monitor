@@ -9960,6 +9960,7 @@
       'settings.collection.mode.interval': 'A cada poucos minutos',
       'settings.collection.interval': 'Intervalo',
       'settings.collection.interval.5m': 'A cada 5 minutos',
+      'settings.collection.interval.15s': 'A cada 15 segundos',
       'settings.collection.interval.15m': 'A cada 15 minutos',
       'settings.collection.interval.30m': 'A cada 30 minutos',
       'settings.collection.modeDesc': 'O modo inteligente coleta após a atividade do agente, com uma reconciliação a cada hora; intervalos fixos desativam o monitoramento de arquivos.',
