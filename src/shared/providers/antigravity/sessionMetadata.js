@@ -95,28 +95,29 @@ function readSummaries(dbPath, sqlite, wantedIds) {
     const misses = new Set();
 
     let hasTable;
+    let columns;
     try {
       hasTable = Boolean(
         db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'conversation_summaries'").get()
       );
+      columns = hasTable
+        ? new Set(db.prepare('PRAGMA table_info(conversation_summaries)').all().map((column) => String(column.name)))
+        : null;
     } catch (_) {
       return null;
     }
     if (!hasTable) return null;
 
+    // Subagent columns arrived in a later Antigravity schema. Detect them up
+    // front so a transient prepare failure is never read as an older schema.
+    const optional = ['parent_conversation_id', 'agent_name'].filter((name) => columns.has(name));
     let stmt = null;
     try {
       stmt = db.prepare(
-        'SELECT title, preview, workspace_uris, parent_conversation_id, agent_name FROM conversation_summaries WHERE conversation_id = ?'
+        `SELECT ${['title', 'preview', 'workspace_uris', ...optional].join(', ')} FROM conversation_summaries WHERE conversation_id = ?`
       );
     } catch (_) {
-      try {
-        stmt = db.prepare(
-          'SELECT title, preview, workspace_uris FROM conversation_summaries WHERE conversation_id = ?'
-        );
-      } catch (_) {
-        return null;
-      }
+      return null;
     }
 
     for (const id of wantedIds) {
@@ -193,8 +194,7 @@ function resolveSessionMetadata(sessionIds, context = {}) {
       const row = cached.summaries.get(sessionId);
       if (cached.misses.has(sessionId)) continue;
       if (!row) continue;
-      const agentName = cleanTitle(row?.agent_name);
-      const title = cleanTitle(row?.title) || cleanTitle(row?.preview) || agentName;
+      const title = cleanTitle(row?.title) || cleanTitle(row?.preview) || cleanTitle(row?.agent_name);
       const key = `antigravity:${sessionId}`;
       const selectedSource = context.metadata?.get(key)?.catalogTitleSource || context.deps?.catalogTitleSources?.[key];
       const validated = stamp && cached.validatedIds.has(sessionId);
@@ -215,7 +215,6 @@ function resolveSessionMetadata(sessionIds, context = {}) {
         catalogTitleSource: dbPath,
         ...(title ? { title } : {}),
         ...(parentSessionId && parentSessionId !== sessionId ? { parentSessionId } : {}),
-        ...(agentName ? { agentName } : {}),
         ...(identity || {})
       });
     }
