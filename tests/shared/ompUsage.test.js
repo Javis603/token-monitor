@@ -20,8 +20,9 @@ const { collectOmpUsage, readOmpStatsRows, sessionIdentity } = require('../../sr
   fs.writeFileSync(childSession, `${JSON.stringify({ type: 'session', id: 'child-id', parentSession: 'root-id' })}\n`);
 
   const database = new sqlite.DatabaseSync(databasePath);
+  let databaseOpen = true;
   t.after(() => {
-    database.close();
+    if (databaseOpen) database.close();
     fs.rmSync(root, { recursive: true, force: true });
   });
   database.exec(`
@@ -61,6 +62,8 @@ const { collectOmpUsage, readOmpStatsRows, sessionIdentity } = require('../../sr
   messageInsert.run(childSession, 'omp-model', 'omp-provider', previousMonthMs, 4, 5, 0, 1, 10, 2.5, 'subagent');
   messageInsert.run(rootSession, 'omp-model', 'omp-provider', futureMs, 99, 0, 0, 0, 99, 9, 'interactive');
   messageInsert.run(rootSession, 'omp-model', 'omp-provider', nowMs - 2_000, 0, 0, 0, 0, 0, 0, 'interactive');
+  database.close();
+  databaseOpen = false;
 
   assert.deepEqual(sessionIdentity(rootSession), {
     sessionId: 'root-id',
