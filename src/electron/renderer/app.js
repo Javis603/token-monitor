@@ -6470,25 +6470,6 @@ function homeSessionAgo(value) {
   return t('edgeDock.agoDays', { count: Math.round(hours / 24) });
 }
 
-function homeSessionContext(context, promptCache) {
-  const showUsed = state.settings?.sessionContextMetric !== 'remaining';
-  const percent = showUsed ? context.percentUsed : context.percentLeft;
-  const node = document.createElement('span');
-  node.className = 'home-session-context';
-  node.dataset.tone = context.tone || '';
-  const meter = document.createElement('span');
-  meter.className = 'home-session-context-meter';
-  const fill = document.createElement('span');
-  fill.className = 'home-session-context-fill';
-  fill.style.setProperty('--bar-scale', String(percent / 100));
-  meter.append(fill);
-  const value = document.createElement('span');
-  value.textContent = `${percent}%`;
-  node.append(meter, value);
-  sessionRowsApi.setSessionTooltip(node, context, promptCache, t, limitWindowsView);
-  return node;
-}
-
 function stopHomeSessionRepaint() {
   clearTimeout(state.homeSessionRepaintTimer);
   state.homeSessionRepaintTimer = null;
@@ -6630,17 +6611,9 @@ function renderHomeSessionModule(rows) {
     }
     if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
     meta.append(description);
-    const statusRow = row.groupRows?.[0] || row;
-    const context = window.TokenMonitorSessionLive.sessionActivityState(statusRow) !== 'idle' ? statusRow.context : null;
-    const cache = window.TokenMonitorSessionLive.sessionPromptCacheForRow(statusRow);
-    if (cache && !context) {
-      const badge = document.createElement('span');
-      badge.className = 'home-session-cache';
-      badge.textContent = t('session.cacheEstimate', { minutes: cache.minutes });
-      sessionRowsApi.setSessionTooltip(badge, statusRow, cache, t, limitWindowsView);
-      meta.append(badge);
-    }
-    if (context) meta.append(homeSessionContext(context, cache));
+    const status = sessionRowsApi.sessionStatusNode(document, row, { prefix: 'home-session', translate: t,
+      view: limitWindowsView, showUsed: state.settings?.sessionContextMetric !== 'remaining' });
+    if (status) meta.append(status);
     item.append(mark, stateMark, name, value, meta);
     body.append(item);
   }

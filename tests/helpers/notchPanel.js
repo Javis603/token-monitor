@@ -54,6 +54,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
   t.after(() => { global.requestAnimationFrame = savedRaf; global.cancelAnimationFrame = savedCancel; });
   const document = { activeElement: null };
   document.createElementNS = (_ns, tag) => new Element(tag, document);
+  document.createElement = (tag) => new Element(tag, document);
   const el = (tag, className = '', value) => {
     const node = new Element(tag, document); node.className = className;
     if (value !== undefined) node.textContent = value;

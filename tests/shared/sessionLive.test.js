@@ -112,7 +112,10 @@ test('both renderers read the shared predicate rather than keeping their own cop
   // The dock recomputes running at paint time from the same predicate, because
   // it repaints from its last payload on a timer and a session that stopped in
   // between must stop reading as running.
-  assert.match(dock, /sessionLive\.sessionActivityState/);
+  // Grouped rows go through the presentation wrapper, which delegates to the
+  // shared predicate; status readings come from the shared session-row builder.
+  assert.match(dock, /presentation\.sessionActivityState\(session\)/);
+  assert.match(dock, /sessionRowsApi\.sessionStatusNode\(/);
   assert.match(dock, /edgeDock\.runningCount/);
   // Both surfaces must load the shared module before the file that uses it.
   for (const [htmlPath, moduleRef, consumerRef] of [

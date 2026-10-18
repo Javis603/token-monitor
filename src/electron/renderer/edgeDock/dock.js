@@ -1243,25 +1243,6 @@ function relativeAgo(value) {
 // colour rule as the Sessions list - neutral while healthy, a colour only as it
 // runs out. Absent for a session whose transcript states no window, which is the
 // normal case rather than an error.
-function contextNode(session) {
-  session = session.groupRows?.[0] || session;
-  const context = sessionLive.sessionActivityState(session) !== 'idle' ? session?.context : null;
-  if (!context) return null;
-  const showUsed = appearance().sessionContextMetric !== 'remaining';
-  const percent = showUsed ? context.percentUsed : context.percentLeft;
-  const node = el('span', 'edge-dock-session-context');
-  node.dataset.tone = String(context.tone || '');
-  // The full phrase lives in the tooltip; the line itself stays a bar and a
-  // number so it reads at a glance in the meta row.
-  const meter = el('span', 'edge-dock-session-context-meter');
-  const fill = el('span', 'edge-dock-session-context-fill');
-  fill.style.setProperty('--bar-scale', String(percent / 100));
-  meter.append(fill);
-  node.append(meter, el('span', 'edge-dock-session-context-value', `${percent}%`));
-  sessionRowsApi.setSessionTooltip(node, context, sessionLive.sessionPromptCacheForRow(session), t, limitWindowsView);
-  return node;
-}
-
 // Last activity seen for each session, so the running dot can flare on an
 // actual transcript write instead of pulsing forever. Module state on purpose:
 // the comparison is against the previous payload.
@@ -1424,15 +1405,9 @@ function sessionsContainer(sessions, options = {}) {
     }
     if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
     meta.append(description);
-    const statusRow = session.groupRows?.[0] || session;
-    const context = contextNode(statusRow);
-    const cache = context ? null : sessionLive.sessionPromptCacheForRow(statusRow);
-    if (cache) {
-      const badge = el('span', 'edge-dock-session-cache', t('session.cacheEstimate', { minutes: cache.minutes }));
-      sessionRowsApi.setSessionTooltip(badge, statusRow, cache, t, limitWindowsView);
-      meta.append(badge);
-    }
-    if (context) meta.append(context);
+    const status = sessionRowsApi.sessionStatusNode(document, session, { prefix: 'edge-dock-session', translate: t,
+      view: limitWindowsView, showUsed: appearance().sessionContextMetric !== 'remaining' });
+    if (status) meta.append(status);
     row.append(
       nameNode,
       el('span', 'edge-dock-session-tokens', formatBreakdownTokens(session.totalTokens)),

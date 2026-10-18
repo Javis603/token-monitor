@@ -30,6 +30,46 @@
     view.setDetailTooltip(node, entries);
   }
 
+  // The compact status every glanceable session row shows (Home list, Edge Dock
+  // card, Notch Panel): a context gauge while the session is live, otherwise the
+  // prompt-cache estimate. The cache badge's tooltip still names the context
+  // size when the transcript reported one. Surfaces differ only in class names.
+  function sessionStatusNode(document, row, { prefix, translate, view, showUsed = true, now = Date.now() }) {
+    const statusRow = row?.groupRows?.[0] || row;
+    if (!statusRow) return null;
+    const context = sessionActivityState(statusRow, now) !== 'idle'
+      ? statusRow.context || sessionContextForRow(statusRow, now) || null : null;
+    const promptCache = sessionLive.sessionPromptCacheForRow(statusRow, now);
+    const span = (className, text) => {
+      const node = document.createElement('span');
+      node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    };
+    if (!context) {
+      if (!promptCache) return null;
+      const badge = span(`${prefix}-cache`, translate('session.cacheEstimate', { minutes: promptCache.minutes }));
+      setSessionTooltip(badge, statusRow, promptCache, translate, view);
+      return badge;
+    }
+    const percent = showUsed ? context.percentUsed : context.percentLeft;
+    const node = span(`${prefix}-context`);
+    node.dataset.tone = String(context.tone || '');
+    node.setAttribute('role', 'meter');
+    node.setAttribute('aria-valuemin', '0');
+    node.setAttribute('aria-valuemax', '100');
+    node.setAttribute('aria-valuenow', String(percent));
+    node.setAttribute('aria-label', translate(showUsed ? 'session.contextUsed' : 'session.contextLeft', { percent }));
+    const meter = span(`${prefix}-context-meter`);
+    meter.setAttribute('aria-hidden', 'true');
+    const fill = span(`${prefix}-context-fill`);
+    fill.style.setProperty('--bar-scale', String(percent / 100));
+    meter.append(fill);
+    node.append(meter, span(`${prefix}-context-value`, `${percent}%`));
+    setSessionTooltip(node, context, promptCache, translate, view);
+    return node;
+  }
+
   function finiteNumber(value) {
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
@@ -812,6 +852,7 @@
 
   return {
     setSessionTooltip,
+    sessionStatusNode,
     applyBreakdownRowSemantics,
     archivedSessionCount,
     compactSessionTime,

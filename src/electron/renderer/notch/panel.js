@@ -620,36 +620,10 @@
         `session:${view.page}:${row.key || `${row.client}:${row.sessionId}`}`, row.totalTokens, format);
     }
 
-    // Keep the same eligibility, Remaining/Used direction, cache expiry and
-    // tooltip as the Sessions list. A stale transcript is never a live gauge.
+    // The same status node the Home list and Edge Dock card draw.
     function sessionStatus(row, nowMs) {
-      const source = row.groupRows?.[0] || row;
-      const context = sessionLive.sessionContextForRow(source, nowMs);
-      const cache = sessionLive.sessionPromptCacheForRow(source, nowMs);
-      if (!context && !cache) return null;
-      if (!context) {
-        const badge = text('notch-session-cache', t('session.cacheEstimate', { minutes: cache.minutes }));
-        sessionRows.setSessionTooltip(badge, null, cache, t, limitWindowsView);
-        return badge;
-      }
-      const used = appearance().sessionContextMetric !== 'remaining';
-      const percent = used ? context.percentUsed : context.percentLeft;
-      const node = el('span', 'notch-session-context');
-      node.dataset.tone = context.tone || '';
-      node.setAttribute('role', 'meter');
-      node.setAttribute('aria-valuemin', '0');
-      node.setAttribute('aria-valuemax', '100');
-      node.setAttribute('aria-valuenow', String(percent));
-      const meter = el('span', 'notch-session-context-meter');
-      const fill = el('span', 'notch-session-context-fill');
-      fill.style.setProperty('--bar-scale', String(percent / 100));
-      meter.setAttribute('aria-hidden', 'true');
-      meter.append(fill);
-      node.append(meter);
-      node.append(text('notch-session-context-value', `${percent}%`));
-      sessionRows.setSessionTooltip(node, context, cache, t, limitWindowsView);
-      node.setAttribute('aria-label', t(used ? 'session.contextUsed' : 'session.contextLeft', { percent }));
-      return node;
+      return sessionRows.sessionStatusNode(document, row, { prefix: 'notch-session', translate: t, view: limitWindowsView,
+        showUsed: appearance().sessionContextMetric !== 'remaining', now: nowMs });
     }
 
     function activeRow(row, stateName, nowMs) {

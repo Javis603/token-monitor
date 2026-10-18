@@ -200,6 +200,8 @@ test('session context retains shared eligibility, tooltips and small meters with
   const recent = page.querySelectorAll('.notch-recent');
   assert.equal(recent[0].querySelector('.notch-session-context-value').textContent, '37%', 'a freshly ended turn retains context');
   assert.equal(recent[1].querySelector('.notch-session-cache').textContent, 'Cache 20m');
+  assert.equal(recent[1].querySelector('.notch-session-cache').tooltipEntries[0].full, '74K / 200K',
+    'a cache badge still names the context size, as the Home list and Edge Dock do');
   assert.equal(recent[2].querySelector('.notch-session-context'), null, 'idle sessions do not revive stale context');
   assert.equal(recent[2].querySelector('.notch-session-cache'), null, 'expired cache stays absent');
   f.settings.sessionContextMetric = 'remaining'; f.state.appearanceKey = 'remaining'; f.panel.render(data);
