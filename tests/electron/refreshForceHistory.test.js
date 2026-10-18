@@ -17,7 +17,7 @@ test('the manual refresh button requests today-only usage without a history resc
   assert.match(handler[0], /refreshStats\(\{[^}]*todayOnly: true[^}]*\}\)/);
   assert.match(handler[0], /forceSelfSync: true/);
   assert.match(handler[0], /feedback: true/);
-  assert.match(handler[0], /forceHistory: false/);
+  assert.doesNotMatch(handler[0], /forceHistory: true/);
 });
 
 test('manual refresh keeps the expensive history graph out of ordinary clicks', () => {

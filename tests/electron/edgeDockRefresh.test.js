@@ -88,7 +88,7 @@ for (const first of ['App', 'Edge Dock']) {
     const both = Promise.all(requests).then((values) => { completed = true; return values; });
     assert.equal(JSON.stringify(calls), JSON.stringify([
       ['limits', { all: true }, 'manual'],
-      ['usage', 'manual', { forceHistory: true, forceSelfSync: true }]
+      ['usage', 'manual', { todayOnly: true, forceHistory: false, forceSelfSync: true }]
     ]));
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(completed, false);
