@@ -11,6 +11,7 @@ try { sqlite = require('node:sqlite'); } catch (_) { /* Node 22.15+ only. */ }
 
 const { collectOmpUsage, readOmpStatsRows, sessionIdentity } = require('../../src/shared/providers/omp/usage');
 const { collectHistoryOnce, collectUsageOnce } = require('../../src/shared/collector');
+const { emptyPeriod } = require('../../src/shared/usage');
 
 (sqlite ? test : test.skip)('OMP stats adapter reads a bounded snapshot and preserves period/session identity', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'omp-stats-usage-'));
@@ -182,6 +183,7 @@ const { collectHistoryOnce, collectUsageOnce } = require('../../src/shared/colle
   `);
   const now = new Date(2026, 9, 18, 12, 0, 0, 0);
   const nowMs = now.getTime();
+  const previousMs = new Date(2026, 8, 30, 12, 0, 0, 0).getTime();
   database.prepare('INSERT INTO session_rollup VALUES (?, ?, ?, ?, ?)').run(
     sessionFile,
     Math.floor((nowMs - 1_000) / 1000),
@@ -200,6 +202,19 @@ const { collectHistoryOnce, collectUsageOnce } = require('../../src/shared/colle
     0,
     12,
     3.5,
+    'interactive'
+  );
+  database.prepare('INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    sessionFile,
+    'omp-model',
+    'omp-provider',
+    previousMs,
+    2,
+    3,
+    0,
+    0,
+    5,
+    1,
     'interactive'
   );
   database.close();
@@ -229,9 +244,44 @@ const { collectHistoryOnce, collectUsageOnce } = require('../../src/shared/colle
   assert.equal(calls.length, 3);
   assert.equal(summary.ompUsageMode, 'stats-db');
   assert.deepEqual(summary.authoritativeSessionClients, ['omp']);
-  assert.equal(summary.allTime.totalTokens, 16);
-  assert.deepEqual(summary.allTime.clients, { omp: 12, claude: 4 });
+  assert.equal(summary.allTime.totalTokens, 21);
+  assert.deepEqual(summary.allTime.clients, { omp: 17, claude: 4 });
   assert.deepEqual(Object.keys(summary.allTime.sessions).sort(), ['claude:claude-1', 'omp:omp-root']);
+  const empty = emptyPeriod();
+  const anchored = await collectUsageOnce({
+    clients: 'omp',
+    allTimeSince: '2024-01-01',
+    homeDir,
+    now,
+    ompStatsDbPath: databasePath,
+    ompStatsEnabled: true,
+    todayOnlyAnchor: {
+      dateKey: '2026-10-18',
+      ompUsageMode: 'stats-db',
+      today: empty,
+      month: empty,
+      allTime: empty,
+      todayPartitions: {},
+      sessionIdentityVersion: 2,
+      t3Titles: {},
+      catalogTitleSources: {},
+      catalogProjects: { today: {}, month: {}, allTime: {}, labels: {} }
+    },
+    historyEnabled: true,
+    includeHistory: true,
+    dailyHistoryArchiveEnabled: false,
+    projectsEnabled: false,
+    wslScanEnabled: false,
+    runGraph: async () => ({ contributions: [] }),
+    runTokscale: async () => { throw new Error('unexpected Tokscale scan'); },
+    deviceId: 'fixture',
+    agentVersion: 'fixture'
+  });
+  assert.deepEqual(anchored.history.daily.map((day) => [day.date, day.tokens]), [
+    ['2026-09-30', 5],
+    ['2026-10-18', 12]
+  ]);
+
 });
 
 test('OMP-only history is reported as successful without duplicate merge', async () => {

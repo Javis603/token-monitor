@@ -350,15 +350,21 @@ test('shared home-relative directories retain exact source roots, checks and wat
     droid: [{ id: 'droid-sessions', dir: path.join(homeDir, '.factory', 'sessions') }],
     qwen: [{ id: 'qwen-projects', dir: path.join(homeDir, '.qwen', 'projects') }],
     pi: [{ id: 'pi-sessions', dir: path.join(homeDir, '.pi', 'agent', 'sessions') }],
-    omp: [{ id: 'omp-sessions', dir: path.join(homeDir, '.omp', 'agent', 'sessions') }],
+    omp: [
+      { id: 'omp-sessions', dir: path.join(homeDir, '.omp', 'agent', 'sessions') },
+      { id: 'omp-stats-db', dir: path.join(homeDir, '.omp'), sourcePath: path.join(homeDir, '.omp', 'stats.db') }
+    ],
     commandcode: [{ id: 'commandcode-projects', dir: path.join(homeDir, '.commandcode', 'projects') }]
   };
+  const expectedWatch = { ...expected, omp: [expected.omp[0]] };
   for (const platform of ['darwin', 'linux', 'win32']) {
     const options = { homeDir, platform, env: {} };
     assert.deepEqual(clientSourceRoots(clients, options), expected);
     const candidates = clientWatchCandidates(clients, options);
-    for (const [client, roots] of Object.entries(expected)) {
+    for (const [client, roots] of Object.entries(expectedWatch)) {
       assert.deepEqual(candidates[client], roots.map(({ dir }) => dir));
+    }
+    for (const [client, roots] of Object.entries(expected)) {
       assert.deepEqual(clientSourceChecks(client, options)[client].map(({ id }) => id), roots.map(({ id }) => id));
       for (const { id } of roots) assert.ok(CLIENT_SOURCE_CHECK_IDS.includes(id));
     }
@@ -606,6 +612,7 @@ test('labelling roots keeps diagnostics separate from watcher roots', () => {
       .filter((root) => (
         !(client === 'copilot' && root.id === 'copilot-otel')
         && root.id !== 'kiro-ide-globalstorage'
+        && root.id !== 'omp-stats-db'
       ))
       .map((root) => root.dir);
     assert.deepEqual(dirs, expected);
@@ -653,6 +660,17 @@ test('Tokscale only scans configured clients with an existing source root', () =
   } finally {
     fs.rmSync(homeDir, { recursive: true, force: true });
   }
+});
+
+test('source filtering preserves clients without registered roots', () => {
+  assert.equal(
+    clientsWithExistingSources('gemini', {
+      homeDir: path.join(os.tmpdir(), 'token-monitor-no-registered-source'),
+      platform: 'linux',
+      env: {}
+    }),
+    'gemini'
+  );
 });
 
 

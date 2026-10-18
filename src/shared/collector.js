@@ -568,6 +568,7 @@ function clientsWithExistingSources(clients, options = {}) {
   return normalized.split(',').filter((client) => (
     client === 'cursor'
     || client === 'antigravity'
+    || !checks[client]?.length
     || checks[client]?.some((check) => check.exists)
   )).join(',');
 }
@@ -1075,7 +1076,9 @@ async function collectUsageOnce(options) {
         allTimeSince,
         now: collectedAt,
         nowMs: collectedAt.getTime(),
-        sinceMs: anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined,
+        sinceMs: anchorUsed && !options.includeHistory
+          ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime()
+          : undefined,
         maxGroupRows: options.ompMaxGroupRows,
         maxSessionRows: options.ompMaxSessionRows
       });
@@ -2719,7 +2722,8 @@ function watcherOptions(usePolling, ignored) {
 // adding a client to this list asserts a measurement rather than a hunch.
 // Cherry Studio, CatPaw and Goose also rewrite their wal-index on repeated read-only WAL scans.
 // Cursor's read-only desktop credential/title queries change state.vscdb-shm too.
-const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'catpaw', 'cherrystudio', 'cursor', 'goose', 'qodercn', 'zcode']);
+// OMP's read-only stats adapter can refresh stats.db-shm's WAL index too.
+const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'catpaw', 'cherrystudio', 'cursor', 'goose', 'omp', 'qodercn', 'zcode']);
 
 function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
   // Match SQLite's wal-index suffix, not one client's database basename: ZCode's

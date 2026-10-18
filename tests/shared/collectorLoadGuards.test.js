@@ -3387,7 +3387,8 @@ test('self-watch db-shm events are ignored for every client whose scan recreates
   const antigravityRoot = path.join(os.tmpdir(), '.gemini', 'antigravity');
   const antigravityConversation = path.join(antigravityRoot, 'conversations');
   const cherryRoot = path.join(os.tmpdir(), 'CherryStudio', 'Data');
-  const roots = { antigravity: [antigravityRoot], cherrystudio: [cherryRoot], qodercn: [qoderRoot], zcode: [zcodeRoot] };
+  const ompRoot = path.join(os.tmpdir(), 'omp');
+  const roots = { antigravity: [antigravityRoot], cherrystudio: [cherryRoot], omp: [ompRoot], qodercn: [qoderRoot], zcode: [zcodeRoot] };
 
   // Each client keeps its own database basename: Qoder CN names it local.db,
   // ZCode names it db.sqlite, Antigravity names one per conversation, below its
@@ -3404,6 +3405,10 @@ test('self-watch db-shm events are ignored for every client whose scan recreates
     assert.equal(isSelfWatchSqliteSidecarEvent(path.join(root, base), roots), false,
       'the database itself must still trigger a scan');
   }
+  // OMP's stats database is read-only, but SQLite can still refresh its WAL index.
+  assert.equal(isSelfWatchSqliteSidecarEvent(path.join(ompRoot, 'stats.db-shm'), roots), true);
+  assert.equal(isSelfWatchSqliteSidecarEvent(path.join(ompRoot, 'stats.db-wal'), roots), false);
+  assert.equal(isSelfWatchSqliteSidecarEvent(path.join(ompRoot, 'stats.db'), roots), false);
   assert.equal(isSelfWatchSqliteSidecarEvent(path.join(os.tmpdir(), 'Other', 'db.sqlite-shm'), roots), false);
 
   // The wal-index suffix has to be recognised by its SQLite shape rather than
