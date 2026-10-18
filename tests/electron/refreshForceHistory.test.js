@@ -11,20 +11,19 @@ const test = require('node:test');
 const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 
-test('the manual refresh button asks for a history rescan', () => {
-  const handler = rendererSource.match(/els\.refreshButton\.addEventListener\('click',[\s\S]*?\n\}\);/);
+test('the manual refresh button requests today-only usage without a history rescan', () => {
+  const handler = rendererSource.match(/els\.refreshButton\.addEventListener\('click',([\s\S]*?)\n\}\);/);
   assert.ok(handler, 'refresh button handler exists');
-  assert.match(handler[0], /refreshStats\(\{[^}]*forceHistory: true[^}]*\}\)/);
+  assert.match(handler[0], /refreshStats\(\{[^}]*todayOnly: true[^}]*\}\)/);
+  assert.match(handler[0], /forceSelfSync: true/);
+  assert.match(handler[0], /feedback: true/);
+  assert.match(handler[0], /forceHistory: false/);
 });
 
-test('only the manual refresh button drags history along with force (#177)', () => {
-  // Tool settings, account sign-ins and limits actions all call refreshStats({ force: true });
-  // folding history into plain `force` would re-run the expensive `tokscale graph` on each.
-  const calls = rendererSource.match(/refreshStats\(\{[^}]*\}\)/g) || [];
-  const withHistory = calls.filter((call) => call.includes('forceHistory'));
-  assert.equal(withHistory.length, 1, `exactly one refreshStats call may force history, got: ${withHistory.join(', ')}`);
-  // ...and it is the manual button's (the only call that drives the button feedback).
-  assert.match(withHistory[0], /feedback: true/);
+test('manual refresh keeps the expensive history graph out of ordinary clicks', () => {
+  const handler = rendererSource.match(/els\.refreshButton\.addEventListener\('click',([\s\S]*?)\n\}\);/);
+  assert.ok(handler, 'refresh button handler exists');
+  assert.doesNotMatch(handler[0], /forceHistory: true/);
 });
 
 test('a forced history refresh restores the Home full-history retry budget', () => {
