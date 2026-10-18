@@ -275,7 +275,9 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const win = windows[surface];
     if (!alive(win) || !ready[surface] || !current) return;
     const base = { surface, notch: true, shape: shapes[surface], platform, osRelease: os.release(),
-      appearance: { ...appearance, zoomFactor: zoom(), edgeDockRunningIndicatorEnabled: settings().notchRunningIndicatorEnabled === true }, style: normalizeNotchStyle(settings().notchStyle), glass: nativeMaterial[surface] === true, liquidGlass: Boolean(glass[surface]) };
+      appearance: { ...appearance, zoomFactor: zoom(), notchWarnColors: settings().notchWarnColors === true,
+        edgeDockWarnColors: settings().notchWarnColors === true,
+        edgeDockRunningIndicatorEnabled: settings().notchRunningIndicatorEnabled === true }, style: normalizeNotchStyle(settings().notchStyle), glass: nativeMaterial[surface] === true, liquidGlass: Boolean(glass[surface]) };
     const hasSummary = summaryVisible();
     if (surface === 'notch') {
       // Measurement results must not invalidate the request that produced them.
@@ -288,7 +290,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
         flare: current.geometry.notched ? NOTCH_METRICS.openFlare : 0,
         gapOffset: current.geometry.centerX - current.geometry.gapWidth / 2 - current.closed.x,
         shoulder: current.geometry.notched && hasSummary ? NOTCH_METRICS.restingFlare : 0 },
-      cells: data.cells, summary: hasSummary ? data.summary : null,
+      cells: data.cells, summary: hasSummary ? data.summary : null, panel: data.panel || null,
       summaryMeasurement: summaryMeasurement && { id: summaryMeasurement.id, measuring: summaryMeasurement.measuring },
       refreshEnabled: settings().notchRefreshEnabled === true,
       refreshable: expanded && settings().notchRefreshEnabled === true && canRefreshLimits() === true }

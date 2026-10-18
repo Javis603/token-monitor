@@ -101,7 +101,7 @@ test('light widget palettes get readable ink only on the attached glass surface'
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
   const classes = new Map();
   const create = vm.runInNewContext(`${source};module.exports.createNotchRenderer`, { module: { exports: {} }, ResizeObserver: class { observe() {} disconnect() {} } });
-  const window = { addEventListener() {}, TokenMonitorPressActivation: {}, TokenMonitorEdgeDockPresentation: {}, TokenMonitorThemePresets: require('../../src/electron/renderer/themePresets') };
+  const window = { addEventListener() {}, TokenMonitorNotchPanel: { createNotchPanel: () => ({}) }, TokenMonitorUsageCharts: { clientColors: {} }, TokenMonitorPressActivation: {}, TokenMonitorEdgeDockPresentation: {}, TokenMonitorThemePresets: require('../../src/electron/renderer/themePresets') };
   const deps = { document: { documentElement: { classList: { toggle: (key, value) => classes.set(key, value) } } },
     window, state: {}, root: { classList: { toggle() {} }, addEventListener() {} }, shared: {}, bridge: { onAnimate() {}, onMotion() {} } };
   const renderer = create({ ...deps, surface: 'notch' });

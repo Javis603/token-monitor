@@ -6,9 +6,9 @@ const { bubbleCommands } = require('../renderer/edgeDock/shapes');
 // Logical points for a 179×32pt camera housing. The open panel is a wide, short
 // slab that hangs from the menu bar; the resting outline hugs the housing.
 const NOTCH_METRICS = Object.freeze({
-  openWidth: 345,
-  // Including the camera band. Taller content scrolls inside the panel.
-  openHeight: 175,
+  openWidth: 640,
+  // Including the camera band. The panel reports a fixed content height.
+  openHeight: 240,
   openRadius: 40.5,
   openFlare: 18,
   restingRadius: 10,

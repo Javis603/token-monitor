@@ -406,12 +406,12 @@ Object.assign(els, {
   notchOptions: document.getElementById('notchOptions'),
   notchStyleInput: document.getElementById('notchStyleInput'),
   notchShapeInputs: Array.from(document.querySelectorAll('input[name="notchShape"]')),
-  notchFollowTrayInput: document.getElementById('notchFollowTrayInput'),
+  notchSummaryModeInput: document.getElementById('notchSummaryModeInput'),
   notchSummaryInput: document.getElementById('notchSummaryInput'),
+  notchWarnColorsInput: document.getElementById('notchWarnColorsInput'),
   notchComposer: document.getElementById('notchComposer'),
   notchComposerDetails: document.getElementById('notchComposerDetails'),
   notchItemsComposer: document.getElementById('notchItemsComposer'),
-  notchDetailSideInput: document.getElementById('notchDetailSideInput'),
   notchRunningIndicatorInput: document.getElementById('notchRunningIndicatorInput'),
   notchRunningIndicatorRow: document.getElementById('notchRunningIndicatorRow'),
   notchHapticInput: document.getElementById('notchHapticInput'),
@@ -1043,7 +1043,7 @@ function displayLiveTokenRateItems() {
       layout: state.settings?.floatingBubbleCustomLayout
     },
     {
-      enabled: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchFollowTray === false,
+      enabled: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchSummaryMode === 'custom',
       content: 'custom',
       layout: state.settings?.notchCustomLayout
     }
@@ -13379,9 +13379,9 @@ function syncDockControls() {
   els.notchOptions?.classList.toggle('hidden', !notchEnabled);
   syncNotchStyleInput();
   for (const input of els.notchShapeInputs) input.checked = input.value === (state.settings?.notchShape || 'auto');
-  if (els.notchFollowTrayInput) els.notchFollowTrayInput.checked = state.settings?.notchFollowTray !== false;
+  if (els.notchSummaryModeInput) els.notchSummaryModeInput.value = state.settings?.notchSummaryMode || 'auto';
   if (els.notchSummaryInput) els.notchSummaryInput.checked = state.settings?.notchSummaryEnabled !== false;
-  if (els.notchDetailSideInput) els.notchDetailSideInput.value = state.settings?.notchDetailSide || 'right';
+  if (els.notchWarnColorsInput) els.notchWarnColorsInput.checked = state.settings?.notchWarnColors === true;
   if (els.notchRunningIndicatorInput) els.notchRunningIndicatorInput.checked = state.settings?.notchRunningIndicatorEnabled === true;
   syncNotchCapabilities();
   if (els.notchProgressiveBlurInput) els.notchProgressiveBlurInput.checked = state.settings?.notchProgressiveBlur !== false;
@@ -13441,6 +13441,9 @@ const notchItemsComposer = createDockItemsComposer(els.notchItemsComposer, 'notc
 els.notchSummaryInput?.addEventListener('change', () => {
   void saveSettings({ notchSummaryEnabled: els.notchSummaryInput.checked });
 });
+els.notchWarnColorsInput?.addEventListener('change', () => {
+  void saveSettings({ notchWarnColors: els.notchWarnColorsInput.checked });
+});
 els.notchHideSummaryInFullScreenInput?.addEventListener('change', () => {
   void saveSettings({ notchHideSummaryInFullScreen: els.notchHideSummaryInFullScreenInput.checked });
 });
@@ -13471,9 +13474,7 @@ els.notchAvoidMenuBarInput?.addEventListener('change', () => {
 els.notchRunningIndicatorInput?.addEventListener('change', () => {
   void saveSettings({ notchRunningIndicatorEnabled: els.notchRunningIndicatorInput.checked });
 });
-els.notchDetailSideInput?.addEventListener('change', () => {
-  void saveSettings({ notchDetailSide: els.notchDetailSideInput.value });
-});
+
 els.notchInput?.addEventListener('change', () => {
   state.settings.notchEnabled = els.notchInput.checked;
   syncDockControls();
@@ -13488,10 +13489,10 @@ for (const input of els.notchShapeInputs) {
 els.notchStyleInput?.addEventListener('change', () => {
   void saveSettings({ notchStyle: els.notchStyleInput.value });
 });
-els.notchFollowTrayInput?.addEventListener('change', () => {
-  state.settings.notchFollowTray = els.notchFollowTrayInput.checked;
+els.notchSummaryModeInput?.addEventListener('change', () => {
+  state.settings.notchSummaryMode = els.notchSummaryModeInput.value;
   refreshTrayComposers();
-  void saveSettings({ notchFollowTray: els.notchFollowTrayInput.checked });
+  void saveSettings({ notchSummaryMode: els.notchSummaryModeInput.value });
 });
 
 els.edgeDockInput?.addEventListener('change', () => {
@@ -15059,7 +15060,7 @@ function refreshTrayComposers() {
   const surfaces = [
     { id: 'tray', root: els.trayComposer, visible: state.settings?.showTrayIcon !== false },
     { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleEnabled === true },
-    { id: 'notch', root: els.notchComposer, visibilityRoot: els.notchComposerDetails, visible: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchFollowTray === false }
+    { id: 'notch', root: els.notchComposer, visibilityRoot: els.notchComposerDetails, visible: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchSummaryMode === 'custom' }
   ];
   window.TokenMonitorTrayComposer.syncTrayComposerSurfaces(
     surfaces,

@@ -33,6 +33,7 @@
     // Selection and the open add menu live here rather than in the DOM, because
     // every settings save repaints the whole form.
     const ui = { selected: '', menuOpen: false };
+    const limitsOnly = itemsKey === 'notchItems';
     const refreshItem = { type: 'action', action: 'refresh' };
     const idFor = (item) => item.type === 'action' ? 'action:refresh' : itemsApi.itemId(item);
     const refreshKey = itemsKey === 'notchItems' ? 'notchRefreshEnabled' : 'edgeDockRefreshEnabled';
@@ -48,7 +49,8 @@
     }
 
     function storedItems() {
-      return itemsApi.normalizeEdgeDockItems(getSettings()?.[itemsKey]);
+      const items = itemsApi.normalizeEdgeDockItems(getSettings()?.[itemsKey]);
+      return limitsOnly && items ? items.filter((item) => item.type === 'limit') : items;
     }
 
     function isAutomatic() {
@@ -71,7 +73,8 @@
     // What the dock shows right now: the stored list, or the automatic default
     // materialized from the current stats.
     function effectiveItems() {
-      return storedItems() ?? itemsApi.defaultEdgeDockItems(connectedProviders());
+      const items = storedItems() ?? itemsApi.defaultEdgeDockItems(connectedProviders());
+      return limitsOnly ? items.filter((item) => item.type === 'limit') : items;
     }
 
     function persist(items) {
@@ -177,14 +180,14 @@
         enabledLimitProviders?.() || connectedProviders(),
         items.filter((item) => item.type === 'limit').map((item) => item.provider)
       ).map((provider) => ({ type: 'limit', provider, hiddenAccounts: [], showUsage: true, windowKey: '' })));
-      section('settings.edgeDock.addUsage', itemsApi.STAT_METRICS
+      if (!limitsOnly) section('settings.edgeDock.addUsage', itemsApi.STAT_METRICS
         .filter((metric) => metric !== itemsApi.SESSIONS_METRIC)
         .map((metric) => ({ type: 'stat', metric }))
         .filter((item) => !present.has(itemsApi.itemId(item))));
       // Sessions is its own section rather than another usage figure: it lists
       // the tracked clients' work, not a period's spend, and it is the only
       // item that can show a client with no limits provider.
-      section('settings.edgeDock.addSessions', present.has(itemsApi.itemId({ type: 'stat', metric: itemsApi.SESSIONS_METRIC }))
+      if (!limitsOnly) section('settings.edgeDock.addSessions', present.has(itemsApi.itemId({ type: 'stat', metric: itemsApi.SESSIONS_METRIC }))
         ? []
         : [{ type: 'stat', metric: itemsApi.SESSIONS_METRIC, runningOnly: false, groupBy: 'none' }]);
       section('settings.edgeDock.addActions', refreshEnabled() ? [] : [refreshItem]);
@@ -292,7 +295,7 @@
       const item = items.find((entry) => idFor(entry) === ui.selected);
       if (!item) {
         pane.append(el('p', 'edge-dock-composer-hint', t(isAutomatic()
-          ? 'settings.edgeDock.automaticHint'
+          ? limitsOnly ? 'settings.notch.limitsHint' : 'settings.edgeDock.automaticHint'
           : (items.length ? 'settings.edgeDock.selectHint' : 'settings.edgeDock.emptyHint'))));
         return pane;
       }
@@ -344,13 +347,13 @@
         pane.append(el('p', 'edge-dock-composer-hint', t(noteKey)));
         return pane;
       }
-      pane.append(switchRow('settings.edgeDock.showUsage', item.showUsage !== false, (checked) => {
+      if (!limitsOnly) pane.append(switchRow('settings.edgeDock.showUsage', item.showUsage !== false, (checked) => {
         void updateItem(id, { showUsage: checked });
       }));
-      pane.append(switchRow('settings.edgeDock.showSessions', item.showSessions !== false, (checked) => {
+      if (!limitsOnly) pane.append(switchRow('settings.edgeDock.showSessions', item.showSessions !== false, (checked) => {
         void updateItem(id, { showSessions: checked });
       }));
-      pane.append(windowRow(item, id));
+      if (!limitsOnly) pane.append(windowRow(item, id));
       if (item.provider === 'codex') {
         pane.append(choiceRow('settings.edgeDock.limitValue', item.accountMode === 'lowest' ? 'lowest' : 'active', [
           { value: 'active', labelKey: 'trayComposer.account.active' },
@@ -419,7 +422,7 @@
       if (root.contains(document.activeElement) && document.activeElement?.tagName === 'SELECT') return;
 
       const heading = el('div', 'edge-dock-composer-heading');
-      heading.append(el('span', '', t('settings.edgeDock.items')));
+      heading.append(el('span', '', t(limitsOnly ? 'notch.tab.limits' : 'settings.edgeDock.items')));
       const actions = el('span', 'edge-dock-composer-heading-actions');
       actions.append(el('span', 'edge-dock-composer-heading-hint', t('settings.edgeDock.itemsHint')));
       if (!isAutomatic() || refreshEnabled()) {

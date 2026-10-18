@@ -12,6 +12,7 @@ const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
 function controls(platform, enabled) {
   const node = () => ({ checked: false, hidden: false, classList: { toggle(_key, hidden) { this.hidden = hidden; } } });
   const els = { edgeDockInput: node(), experimentalFeaturesGroup: node(), notchFeature: node(), notchOptions: node(), notchInput: node(),
+    notchWarnColorsInput: node(), edgeDockWarnColorsInput: node(),
     notchShapeInputs: [], edgeDockModeInputs: [], edgeDockSideInputs: [] };
   const state = { appInfo: { platform }, settings: { notchEnabled: enabled } };
   const patches = [];
@@ -63,5 +64,26 @@ test('the Advanced switch uses the existing preference and immediately shows or 
     change();
     assert.equal(f.els.notchOptions.classList.hidden, !enabled);
     assert.deepEqual(f.patches.at(-1), { notchEnabled: enabled });
+  }
+});
+
+test('Notch warning colour control defaults off and saves independently of the side dock', () => {
+  const f = controls('darwin', true);
+  f.state.settings.edgeDockWarnColors = true;
+  f.syncDockControls();
+  assert.equal(f.els.notchWarnColorsInput.checked, false);
+  assert.equal(f.els.edgeDockWarnColorsInput.checked, true);
+  let change;
+  f.els.notchWarnColorsInput.addEventListener = (_event, handler) => { change = handler; };
+  const start = app.indexOf("els.notchWarnColorsInput?.addEventListener('change'");
+  vm.runInNewContext(app.slice(start, app.indexOf('els.notchHideSummaryInFullScreenInput?', start)), f);
+  for (const enabled of [true, false]) {
+    f.els.notchWarnColorsInput.checked = enabled; change();
+    assert.deepEqual(f.patches.at(-1), { notchWarnColors: enabled });
+    Object.assign(f.state.settings, f.patches.at(-1));
+    f.els.notchWarnColorsInput.checked = !enabled;
+    f.syncDockControls();
+    assert.equal(f.els.notchWarnColorsInput.checked, enabled, 'a settings push restores the saved value');
+    assert.equal(f.els.edgeDockWarnColorsInput.checked, true);
   }
 });
