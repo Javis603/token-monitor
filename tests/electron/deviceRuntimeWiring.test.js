@@ -170,6 +170,33 @@ test('only an opted-in manual refresh forces the self-synced clients', async () 
   assert.deepEqual(ticks.map((options) => options.forceSelfSync), [false, true]);
 });
 
+test('settings refresh can update limits without scanning usage', async () => {
+  const calls = [];
+  const runtime = {
+    refreshLimits: async (scope, reason) => { calls.push(['limits', scope, reason]); },
+    tick: async () => { calls.push(['usage']); }
+  };
+
+  await runManualDeviceRefresh(runtime, { refreshUsage: false });
+
+  assert.deepEqual(calls, [['limits', { all: true }, 'manual']]);
+});
+
+test('manual usage refresh can request the exact today delta', async () => {
+  const ticks = [];
+  const runtime = {
+    refreshLimits: async () => {},
+    tick: async (reason, options) => { ticks.push([reason, options]); }
+  };
+
+  await runManualDeviceRefresh(runtime, { refreshUsage: true, todayOnly: true, forceSelfSync: true });
+
+  assert.deepEqual(ticks, [[
+    'manual',
+    { todayOnly: true, forceHistory: false, forceSelfSync: true }
+  ]]);
+});
+
 test('manual refresh reports a late limits failure without rejecting completed usage', async () => {
   const errors = [];
   const runtime = {

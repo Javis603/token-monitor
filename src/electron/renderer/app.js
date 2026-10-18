@@ -13627,11 +13627,10 @@ els.openWebsiteButton?.addEventListener('click', () => window.tokenMonitor.openE
 els.reportIssueButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_ISSUES_URL));
 els.refreshButton.addEventListener('click', () => {
   if (state.breakdown === 'status') refreshStatusViewManually().catch(() => {});
-  // Only this button asks for a history rescan and a self-sync: `{ force: true }` is
-  // used all over the settings/account flows, and folding those into it would re-run
-  // the expensive `tokscale graph`, plus the Cursor and Antigravity sync subprocesses,
-  // on every one of them.
-  else refreshStats({ force: true, forceHistory: true, forceSelfSync: true, feedback: true });
+  // A manual refresh updates the visible windows from today's exact delta and
+  // keeps its explicit self-sync. It deliberately leaves the scheduled History
+  // graph alone: that is the expensive path that made an ordinary click stall.
+  else refreshStats({ force: true, forceUsage: true, todayOnly: true, forceSelfSync: true, feedback: true });
 });
 els.minButton.addEventListener('click', (event) => {
   if (event.detail > 0) els.minButton.blur();
