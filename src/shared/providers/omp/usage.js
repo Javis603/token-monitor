@@ -17,9 +17,12 @@ const OMP_STATS_SOURCE_CHECK_ID = 'omp-stats-db';
 const OMP_STATS_ADAPTER_VERSION = 1;
 const OMP_READ_BUSY_TIMEOUT_MS = 250;
 const OMP_HEADER_READ_BYTES = 64 * 1024;
+const OMP_HEADER_PROBE_BYTES = 4 * 1024;
 const OMP_MAX_GROUP_ROWS = 100_000;
 const OMP_MAX_SESSION_ROWS = 50_000;
 const UUID_RE = /([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})/i;
+const OMP_SESSION_IDENTITY_CACHE_LIMIT = 10_000;
+const sessionIdentityCache = new Map();
 
 const REQUIRED_MESSAGE_COLUMNS = Object.freeze([
   'session_file', 'model', 'provider', 'timestamp',
@@ -103,29 +106,39 @@ function parentSessionId(value) {
   return fallbackSessionId(raw);
 }
 
+function parseSessionHeader(buffer) {
+  const text = buffer.toString('utf8');
+  for (const line of text.split(/\r?\n/).slice(0, 64)) {
+    if (!line.trim()) continue;
+    try {
+      const value = JSON.parse(line);
+      if (value?.type !== 'session') continue;
+      return {
+        id: String(value.id || '').trim(),
+        parentSession: String(value.parentSession || value.parent_session || '').trim()
+      };
+    } catch (_) {
+      // A non-JSON title or a truncated line before the session record does not
+      // make the whole database unreadable; the filename remains a stable key.
+    }
+  }
+  return null;
+}
+
 function readSessionHeader(sessionFile, options = {}) {
   const fsImpl = options.fsImpl || fs;
   const maxBytes = positiveInteger(options.headerReadBytes, OMP_HEADER_READ_BYTES);
+  const probeBytes = Math.min(maxBytes, OMP_HEADER_PROBE_BYTES);
   let fd = null;
   try {
     fd = fsImpl.openSync(sessionFile, 'r');
     const buffer = Buffer.allocUnsafe(maxBytes);
-    const bytes = fsImpl.readSync(fd, buffer, 0, maxBytes, 0);
-    const text = buffer.subarray(0, bytes).toString('utf8');
-    for (const line of text.split(/\r?\n/).slice(0, 64)) {
-      if (!line.trim()) continue;
-      try {
-        const value = JSON.parse(line);
-        if (value?.type !== 'session') continue;
-        return {
-          id: String(value.id || '').trim(),
-          parentSession: String(value.parentSession || value.parent_session || '').trim()
-        };
-      } catch (_) {
-        // A non-JSON title or a truncated line before the session record does not
-        // make the whole database unreadable; the filename remains a stable key.
-      }
-    }
+    let bytes = fsImpl.readSync(fd, buffer, 0, probeBytes, 0);
+    let header = parseSessionHeader(buffer.subarray(0, bytes));
+    if (header || bytes >= maxBytes) return header;
+    bytes += fsImpl.readSync(fd, buffer, bytes, maxBytes - bytes, bytes);
+    header = parseSessionHeader(buffer.subarray(0, bytes));
+    return header;
   } catch (_) {
     return null;
   } finally {
@@ -133,19 +146,46 @@ function readSessionHeader(sessionFile, options = {}) {
       try { fsImpl.closeSync(fd); } catch (_) {}
     }
   }
-  return null;
 }
 
 
 function sessionIdentity(sessionFile, options = {}) {
-  const header = readSessionHeader(sessionFile, options);
-  const sessionId = header?.id || fallbackSessionId(sessionFile);
+  const raw = String(sessionFile || '');
+  const fsImpl = options.fsImpl || fs;
+  let stat = null;
+  if (typeof fsImpl.statSync === 'function') {
+    try { stat = fsImpl.statSync(raw); } catch (_) {}
+  }
+  const cached = sessionIdentityCache.get(raw);
+  if (stat && cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    sessionIdentityCache.delete(raw);
+    sessionIdentityCache.set(raw, cached);
+    return cached.identity;
+  }
+  const header = readSessionHeader(raw, options);
+  const sessionId = header?.id || fallbackSessionId(raw);
   const parentId = parentSessionId(header?.parentSession);
-  return {
+  const identity = {
     sessionId,
     parentSessionId: parentId,
     sessionRole: parentId ? 'child' : 'root'
   };
+  if (stat) {
+    sessionIdentityCache.set(raw, { mtimeMs: stat.mtimeMs, size: stat.size, identity });
+    while (sessionIdentityCache.size > OMP_SESSION_IDENTITY_CACHE_LIMIT) {
+      sessionIdentityCache.delete(sessionIdentityCache.keys().next().value);
+    }
+  }
+  return identity;
+}
+
+function sessionIdentityForRow(sessionFile, identities, options) {
+  const existing = identities.get(sessionFile);
+  if (existing?.sessionId) return existing;
+  const identity = sessionIdentity(sessionFile, options);
+  const merged = { ...(existing || {}), ...identity };
+  identities.set(sessionFile, merged);
+  return merged;
 }
 
 function statementRows(statement, params = [], maxRows, label) {
@@ -273,7 +313,6 @@ function readOmpStatsRows(options = {}) {
         const sessionFile = String(row.session_file || '');
         if (!sessionFile) continue;
         identities.set(sessionFile, {
-          ...sessionIdentity(sessionFile, options),
           startedAt: finiteNumber(row.started_at) * (finiteNumber(row.started_at) < 10 ** 12 ? 1000 : 1),
           lastUsedAt: finiteNumber(row.ended_at) * (finiteNumber(row.ended_at) < 10 ** 12 ? 1000 : 1)
         });
@@ -308,11 +347,16 @@ function readOmpStatsRows(options = {}) {
         maxGroups,
         'message group'
       );
+      const sessionCount = identities.size;
+      for (const row of rows) {
+        const sessionFile = String(row.session_file || '');
+        if (sessionFile) sessionIdentityForRow(sessionFile, identities, options);
+      }
       return {
         dbPath,
         schema,
         rows: rows.map((row) => normalizeMessageRow(row, identities, options)),
-        sessionCount: identities.size
+        sessionCount
       };
     } finally {
       database.exec('ROLLBACK');
