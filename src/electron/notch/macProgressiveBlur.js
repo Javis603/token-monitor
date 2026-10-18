@@ -11,7 +11,7 @@
 
 let api = null;
 
-function createApi(koffi) {
+function createProgressiveBlurApi(koffi) {
   const objc = koffi.load('/usr/lib/libobjc.A.dylib');
   koffi.load('/System/Library/Frameworks/AppKit.framework/AppKit');
   koffi.load('/System/Library/Frameworks/QuartzCore.framework/QuartzCore');
@@ -35,6 +35,7 @@ function createApi(koffi) {
     effectView: getClass('NSVisualEffectView'), data: getClass('NSData'), image: getClass('NSImage'),
     string: getClass('NSString'), number: getClass('NSNumber'), array: getClass('NSArray'), filter: getClass('CAFilter')
   };
+  const supports = (target, ...selectors) => target && selectors.every(name => sendBool(target, sel('respondsToSelector:'), sel(name)));
   const list = (array) => {
     const count = array ? Number(send(array, sel('count'))) : 0;
     return Array.from({ length: count }, (_, index) => sendIndex(array, sel('objectAtIndex:'), index));
@@ -57,7 +58,7 @@ function createApi(koffi) {
 
   return {
     apply(viewHandle, { alphaPng, blurPng, width, height, radius }) {
-      if (!classes.filter) return false;
+      if (!supports(classes.filter, 'filterWithType:')) return false;
       const nsWindow = send(viewHandle, sel('window'));
       if (!nsWindow) return false;
       const effectView = findEffectView(send(send(nsWindow, sel('contentView')), sel('superview')));
@@ -65,7 +66,7 @@ function createApi(koffi) {
       const container = list(send(send(effectView, sel('layer')), sel('sublayers')))[0];
       const layers = list(container && send(container, sel('sublayers')));
       const backdrop = layers.find((layer) => className(layer) === 'CABackdropLayer');
-      if (!backdrop) return false;
+      if (!supports(backdrop, 'setScale:', 'setFilters:') || !supports(effectView, 'setMaskImage:')) return false;
       const mask = image(blurPng, width, height);
       const alpha = image(alphaPng, width, height);
       if (!mask || !alpha) {
@@ -75,7 +76,7 @@ function createApi(koffi) {
       }
       const cgMask = sendImageRect(mask, sel('CGImageForProposedRect:context:hints:'), 0, 0, 0);
       const filter = sendPointer(classes.filter, sel('filterWithType:'), string('variableBlur'));
-      if (!cgMask || !filter) { sendVoid(mask, sel('release')); sendVoid(alpha, sel('release')); return false; }
+      if (!cgMask || !supports(filter, 'setValue:forKey:')) { sendVoid(mask, sel('release')); sendVoid(alpha, sel('release')); return false; }
       sendPair(filter, sel('setValue:forKey:'), sendDouble(classes.number, sel('numberWithDouble:'), radius), string('inputRadius'));
       sendPair(filter, sel('setValue:forKey:'), cgMask, string('inputMaskImage'));
       sendPair(filter, sel('setValue:forKey:'), sendBoolArg(classes.number, sel('numberWithBool:'), true), string('inputNormalizeEdges'));
@@ -96,7 +97,7 @@ function createApi(koffi) {
 function loadApi() {
   if (api !== null) return api;
   try {
-    api = createApi(require('koffi'));
+    api = createProgressiveBlurApi(require('koffi'));
   } catch {
     api = false;
   }
@@ -117,4 +118,4 @@ function applyProgressiveBlur(win, masks, options = {}) {
   }
 }
 
-module.exports = { applyProgressiveBlur };
+module.exports = { createProgressiveBlurApi, applyProgressiveBlur };

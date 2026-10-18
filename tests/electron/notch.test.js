@@ -63,7 +63,7 @@ function fixture(t, settings = {}, options = {}) {
   // Most cases exercise opening on hover; the default grow-only mode has its own cases.
   const preferences = { notchEnabled: true, edgeDockEnabled: false, notchHoverAction: 'open', ...settings };
   const deps = { BrowserWindow: RecordingWindow, ipcMain, screen, rendererDir: '/renderer', preloadPath: '/preload', getSettings: () => preferences, nativeGlass: options.nativeGlass || (() => false), liquidGlass: options.liquidGlass, createGlass: options.createGlass, prefersReducedMotion: () => options.reducedMotion !== false, platform: options.platform || 'darwin' };
-  const controller = createNotchController({ ...deps, readScreens: options.readScreens || (() => ({ screens: [native], mainDisplayId: 1 })), onSwitchCodexAccount: (id) => ({ ok: true, id }), onToggleRateMode: options.onToggleRateMode, onCapabilitiesChanged: options.onCapabilitiesChanged, installNonActivatingInput: options.installNonActivatingInput, readMenuWindows: options.readMenuWindows || (() => null), primaryButtonDown: options.primaryButtonDown || (() => false), isFullScreen: options.isFullScreen || (() => false), logger: options.logger, performHaptic: options.performHaptic, canRefreshLimits: options.canRefreshLimits, onRefreshLimits: options.onRefreshLimits, blurAvailable: options.blurAvailable, applyBlurMask: options.applyBlurMask });
+  const controller = createNotchController({ ...deps, readScreens: options.readScreens || (() => ({ screens: [native], mainDisplayId: 1 })), onSwitchCodexAccount: (id) => ({ ok: true, id }), onToggleRateMode: options.onToggleRateMode, onCapabilitiesChanged: options.onCapabilitiesChanged, installNonActivatingInput: options.installNonActivatingInput, readMenuWindows: options.readMenuWindows || (() => null), primaryButtonDown: options.primaryButtonDown || (() => false), monitorPrimaryPress: options.monitorPrimaryPress, isFullScreen: options.isFullScreen || (() => false), logger: options.logger, performHaptic: options.performHaptic, canRefreshLimits: options.canRefreshLimits, onRefreshLimits: options.onRefreshLimits, blurAvailable: options.blurAvailable, applyBlurMask: options.applyBlurMask });
   t.after(() => controller.dispose());
   const setData = controller.setData;
   controller.setData = (value) => {
@@ -1083,14 +1083,14 @@ test('hover grows the entry by default and opens on click; open mode waits for t
   assert.equal(last(open.windows[0]).expanded, true);
 });
 
-test('full-screen approach follows EdgeDock drag suppression without changing direct contact', (t) => {
+test('full-screen approach suppresses held drags and keeps unknown buttons reachable', (t) => {
   for (const held of [true, null]) {
     const f = fixture(t, {}, { primaryButtonDown: () => held, isFullScreen: () => true });
     const geometry = last(f.windows[0]).geometry;
     const now = Date.now();
     f.screen.point = { x: geometry.centerX, y: geometry.y + geometry.height + 1 };
     f.controller.poll(now); f.controller.poll(now + EDGE_DOCK_TIMING.revealDelayMs);
-    assert.equal(last(f.windows[0]).expanded, false, 'held or unknown button state does not wake the entry');
+    assert.equal(last(f.windows[0]).expanded, held === null, 'only a known held button suppresses approach');
     f.screen.point.y = geometry.y + geometry.height - 1;
     f.controller.poll(now + 500); f.controller.poll(now + 500 + EDGE_DOCK_TIMING.revealDelayMs);
     assert.equal(last(f.windows[0]).expanded, true, 'direct entry contact retains its existing behavior');
@@ -3141,4 +3141,124 @@ test('an unreadable button state falls back to opening on hover in Grow mode', (
   readable.screen.point = { x: 735, y: 10 };
   readable.controller.poll(1000); readable.controller.poll(9000);
   assert.equal(last(readable.windows[0]).expanded, false, 'a readable button keeps Grow mode');
+});
+
+test('a complete click between idle polls opens Grow at its press location', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
+  let press, held = false;
+  const f = fixture(t, { notchHoverAction: 'peek' }, {
+    primaryButtonDown: () => held,
+    monitorPrimaryPress: callback => { press = callback; return () => {}; }
+  });
+  const top = f.windows[0];
+  t.mock.timers.tick(90);
+  t.mock.timers.tick(10);
+  // Press and release before the next idle sample, then move away before delivery.
+  held = true; f.screen.point = { x: 735, y: 10 };
+  t.mock.timers.tick(40);
+  held = false; f.screen.point = { x: 20, y: 400 };
+  press?.({ x: 735, y: 10 });
+  assert.equal(last(top).expanded, true, 'the recorded press opens without a sampled held button');
+});
+
+test('press events outside the entry and held drags into it do not open Grow', (t) => {
+  let press, held = false;
+  const f = fixture(t, { notchHoverAction: 'peek' }, {
+    primaryButtonDown: () => held,
+    monitorPrimaryPress: callback => { press = callback; return () => {}; }
+  });
+  const top = f.windows[0];
+  press?.({ x: 20, y: 400 });
+  held = true; f.screen.point = { x: 735, y: 10 }; f.controller.poll(1000);
+  assert.equal(last(top).expanded, false, 'a press elsewhere cannot become a click by dragging in');
+  for (const point of [null, {}, { x: NaN, y: 10 }, { x: 735, y: Infinity }]) press?.(point);
+  assert.equal(last(top).expanded, false);
+  press?.({ x: 735, y: 10 });
+  assert.equal(last(top).expanded, true, 'a new press over the entry opens');
+});
+
+test('press monitors stop on lock, disable and window replacement without stale callbacks', (t) => {
+  const callbacks = [], removed = [];
+  const f = fixture(t, { notchHoverAction: 'peek' }, {
+    monitorPrimaryPress: callback => {
+      const id = callbacks.push(callback) - 1;
+      return () => removed.push(id);
+    }
+  });
+  assert.equal(callbacks.length, 1);
+  f.controller.sync(); f.controller.sync();
+  assert.equal(callbacks.length, 1, 'settings saves share one subscription');
+  f.controller.setLocked(true);
+  assert.deepEqual(removed, [0]);
+  callbacks[0]({ x: 735, y: 10 });
+  assert.equal(last(f.windows[0]).expanded, false);
+  f.controller.sync();
+  assert.equal(callbacks.length, 1, 'settings saves cannot start monitoring while locked');
+  f.controller.setLocked(false);
+  assert.equal(callbacks.length, 2);
+  callbacks[0]({ x: 735, y: 10 });
+  assert.equal(last(f.windows[0]).expanded, false, 'late delivery from the old subscription is ignored');
+  f.windows[0].destroy(); f.controller.sync();
+  for (const win of f.windows.slice(-2)) f.ipcMain.emit('topNotch:ready', { sender: win.webContents });
+  assert.equal(callbacks.length, 3);
+  assert.deepEqual(removed, [0, 1]);
+  callbacks[1]({ x: 735, y: 10 });
+  assert.equal(last(f.windows.at(-2)).expanded, false);
+  f.preferences.notchEnabled = false; f.controller.sync();
+  assert.deepEqual(removed, [0, 1, 2]);
+  assert.doesNotThrow(() => callbacks[2]({ x: 735, y: 10 }));
+});
+
+test('missing press monitoring falls back to hover even with a readable button', (t) => {
+  for (const monitorPrimaryPress of [() => null, () => { throw new Error('unavailable'); }]) {
+    const f = fixture(t, { notchHoverAction: 'peek', notchHoverDelay: 200 }, { monitorPrimaryPress });
+    f.screen.point = { x: 735, y: 10 };
+    f.controller.poll(1000); f.controller.poll(1199);
+    assert.equal(last(f.windows[0]).expanded, false);
+    f.controller.poll(1200);
+    assert.equal(last(f.windows[0]).expanded, true);
+  }
+});
+
+test('a failed remask hides visible blur and restores it after a successful retry', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
+  let accept = true, failed = 0;
+  const f = fixture(t, {}, { blurAvailable: () => true, applyBlurMask: () => { if (!accept) failed++; return accept; } });
+  f.screen.point = { x: 735, y: 10 }; f.controller.poll(Date.now());
+  const win = f.windows.find(w => !w.query && !w.destroyed), first = { ...win.getBounds() };
+  assert.equal(win.opacity, 1);
+  accept = false;
+  f.ipcMain.emit('topNotch:size', { sender: f.windows[0].webContents }, { height: 40 });
+  assert.notDeepEqual(win.getBounds(), first);
+  assert.ok(failed > 0);
+  assert.equal(win.opacity, 0, 'a resized window cannot expose the old mask');
+  const failures = failed;
+  f.ipcMain.emit('topNotch:size', { sender: f.windows[0].webContents }, { height: 180 });
+  assert.ok(failed > failures, 'returning to the old layout still needs a remask after failed resize');
+  assert.deepEqual(win.getBounds(), first);
+  assert.equal(win.opacity, 0);
+  accept = true; t.mock.timers.tick(16);
+  assert.equal(win.opacity, 1, 'the opacity cache must restore a previously fully visible blur');
+});
+
+test('full-screen approach falls back to hover for an unreadable button but rejects a held drag', (t) => {
+  let held = null;
+  const f = fixture(t, { notchHoverAction: 'peek', notchHoverDelay: 200 }, { isFullScreen: () => true, primaryButtonDown: () => held });
+  const top = f.windows[0], geometry = last(top).geometry;
+  f.screen.point = { x: geometry.centerX, y: geometry.y + geometry.height + 1 };
+  held = true; f.controller.poll(1000); f.controller.poll(2000);
+  assert.equal(last(top).expanded, false, 'a known drag cannot wake the approach band');
+  held = null; f.controller.poll(3000); f.controller.poll(3199);
+  assert.equal(last(top).expanded, false);
+  f.controller.poll(3200);
+  assert.equal(last(top).expanded, true, 'unknown button state keeps the hover fallback reachable');
+});
+
+test('main wires native press monitoring into the Notch controller', () => {
+  const calls = [], remove = () => {};
+  const options = wiredNotchOptions({ monitorMacPrimaryPress: (callback, nativeOptions) => { calls.push({ callback, nativeOptions }); return remove; } });
+  const onPress = () => {};
+  assert.equal(options.monitorPrimaryPress(onPress), remove);
+  assert.equal(calls[0].callback, onPress);
+  assert.equal(typeof calls[0].nativeOptions.logger, 'function');
 });

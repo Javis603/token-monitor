@@ -83,7 +83,7 @@ function normalizeNotchDetailSide(value) {
 function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   rendererDir, preloadPath, platform = process.platform, readScreens = readMacNotchScreens, readMenuWindows = readMacMenuWindows,
   nativeGlass = () => false, liquidGlass = () => null, createGlass, applyShapeMask,
-  onSwitchCodexAccount, onOpenResetForecastSource, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, blurAvailable = () => false, applyBlurMask, primaryButtonDown = () => null, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
+  onSwitchCodexAccount, onOpenResetForecastSource, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, blurAvailable = () => false, applyBlurMask, primaryButtonDown = () => null, monitorPrimaryPress, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
   logger = () => {} }) {
   const surfaces = ['notch', 'bubble'];
   const windows = {}, windowIds = {}, ready = {}, shapes = {}, glass = {}, nativeMaterial = {}, lastSent = {};
@@ -98,6 +98,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   let enterAt = null, leaveAt = null, rowAt = null, hoveredId = null, detailId = null;
   let bubbleHeight = 180, bubblePlaced = null, bubbleBounds = null, detailVisible = false;
   let pollTimer = null, motion = null, screenListeners = false, nearTop = false, buttonDown = false;
+  let removePressMonitor = null;
   let blurWindow = null, blurMaskKey = '', blurOpacity = -1, blurAttempts = 0, blurFailed = false, blurRetry = null, blurCurrent = null;
   let motionGeneration = 0, refreshInFlight = null, refreshEpoch = 0;
   let fullScreen = false, fullScreenCheckedAt = -Infinity, fullScreenDisplayId = null;
@@ -396,8 +397,10 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       const masked = applyBlurMask?.(win, { width: bounds.width, height: bounds.height,
         panel: { ...panel, x: panel.x - bounds.x, y: panel.y - bounds.y }, radius: NOTCH_METRICS.openRadius * zoom() }, current.display) === true;
       if (!masked) {
-        // Layers can lag the first frame; an unmasked material would be a tinted
-        // rectangle, so the blur stays transparent and is dropped if it never lands.
+        // A remask can fail after the window was already visible. Hide the old
+        // mask too, and reset the cache so a successful retry restores opacity.
+        if (blurOpacity !== 0) { win.setOpacity(0); blurOpacity = 0; }
+        blurMaskKey = '';
         if (++blurAttempts > 30) { blurFailed = true; destroyBlur(); logger('[top-notch] progressive blur unavailable'); return; }
         // Animation frames retry on their own; a panel that opened in one step,
         // as under reduced motion, has no next frame to retry on.
@@ -604,6 +607,45 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     }
   }
 
+  function entryBounds(current) {
+    const closed = current.closed.width > 0 ? current.closed : notchBounds(current.display, current.geometry, false, contentHeight, null, zoom());
+    return peeked ? notchPeekBounds(closed) : closed;
+  }
+
+  function stopPressMonitor() {
+    const remove = removePressMonitor;
+    removePressMonitor = null;
+    try { remove?.(); }
+    catch (error) { logger(`[top-notch] click monitor cleanup failed: ${error.message}`); }
+  }
+
+  function startPressMonitor() {
+    if (!monitorPrimaryPress || removePressMonitor || !running || locked || !alive(windows.notch)) return;
+    const win = windows.notch;
+    let active = true;
+    try {
+      const remove = monitorPrimaryPress(point => {
+        if (!active || !running || locked || expanded || windows.notch !== win || !alive(win) || !ready.notch
+          || !Number.isFinite(point?.x) || !Number.isFinite(point?.y)) return;
+        const now = Date.now();
+        if (now - geometryReadAt >= 2000) readGeometry(now);
+        let current = layout();
+        if (!current) return;
+        if (refreshFullScreen(now, current.display)) { refreshLayout(); visibility(); current = layout(); }
+        // Use the delivered event's position, not the pointer at the next poll.
+        // Observing the press leaves the resting window click-through and does
+        // not activate the app or intercept the original event.
+        if (rectContains(entryBounds(current), point)) { setExpanded(true); schedulePoll(); }
+      });
+      if (typeof remove === 'function') {
+        removePressMonitor = () => { active = false; remove(); };
+      } else active = false;
+    } catch (error) {
+      active = false;
+      logger(`[top-notch] click monitoring unavailable: ${error.message}`);
+    }
+  }
+
   function poll(now = Date.now()) {
     if (!running || locked || !alive(windows.notch)) return;
     if (now - geometryReadAt >= 2000) {
@@ -628,32 +670,30 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     // target reaches inward by half the side dock's physical wake depth. It
     // never widens across menu items.
     const approach = fullScreen;
-    // Zero visual clearance leaves the same camera-free hover target alive.
-    const closed = current.closed.width > 0 ? current.closed : notchBounds(current.display, current.geometry, false, contentHeight, null, zoom());
     // The grown outline keeps the hover it was grown for.
-    const entry = peeked ? notchPeekBounds(closed) : closed;
+    const entry = entryBounds(current);
     const trigger = { ...entry, height: entry.height + (approach ? M.wakeDepth / 2 : 0) };
     const onEntry = rectContains(entry, point);
     // null: the button state is unreadable (no native bridge).
     const button = primaryButtonDown();
-    const nearEntry = approach && rectContains(trigger, point) && button === false;
+    const nearEntry = approach && rectContains(trigger, point) && button !== true;
     const inside = (expanded ? rectContains(current.open, point) : onEntry || nearEntry) || inDetail || inCorridor;
     const depth = point.y - current.display.bounds.y;
     nearTop = depth >= 0 && depth < NEAR_TOP_DEPTH && Math.abs(point.x - current.geometry.centerX) < current.canvas.width;
     // Transparent parts of the stable canvas must not swallow desktop clicks.
     ignoreMouse('notch', !expanded || !rectContains(current.open, point));
-    // The resting entry never takes the click itself: a window that receives
-    // it activates the whole app. A press that starts over the entry opens it.
+    // Native monitoring observes presses while the resting window stays
+    // click-through. Retain sampled presses only for injected legacy callers.
     const pressed = button === true;
-    const pressedOnEntry = pressed && !buttonDown && onEntry;
+    const pressedOnEntry = !removePressMonitor && pressed && !buttonDown && onEntry;
     buttonDown = pressed;
     setPeeked(!expanded && (onEntry || nearEntry));
     if (pressedOnEntry && !expanded) setExpanded(true);
     if (inside) {
       leaveAt = null;
-      // Without a readable button a grown entry could never be clicked open,
-      // so hovering opens it instead.
-      const action = button === null ? 'open' : normalizeNotchHoverAction(settings().notchHoverAction);
+      // An unavailable native click monitor or button reader keeps the entry
+      // reachable on hover instead of relying on sampled presses.
+      const action = button === null || (monitorPrimaryPress && !removePressMonitor) ? 'open' : normalizeNotchHoverAction(settings().notchHoverAction);
       if (!expanded && action === 'open') {
         if (enterAt === null) enterAt = now;
         if (now - enterAt >= normalizeNotchHoverDelay(settings().notchHoverDelay)) setExpanded(true);
@@ -694,6 +734,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   }
 
   function destroyWindows() {
+    stopPressMonitor();
     destroyBlur();
     resetShellMotion(); refreshInFlight = null;
     summaryMeasured = false; summaryMeasurement = null; settleSummary = false;
@@ -732,7 +773,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
           if (windows[s] !== win) return;
           windows[s] = null; delete windowIds[s]; delete ignoredMouse[s]; ready[s] = false; shapes[s] = null; lastSent[s] = '';
           disposeGlass(s); nativeMaterial[s] = false;
-          if (s === 'notch') motion = null;
+          if (s === 'notch') { motion = null; stopPressMonitor(); }
           hideDetail();
         });
         const windowId = Number((win.getMediaSourceId?.() || '').split(':')[1]);
@@ -760,6 +801,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (!screenListeners) { for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, invalidateGeometry); screenListeners = true; }
     windows.bubble.webContents.setZoomFactor?.(zoom());
     updateGlassAppearance();
+    startPressMonitor();
     refreshGeometry(); visibility();
     if (!pollTimer) schedulePoll();
   }
@@ -856,9 +898,10 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       locked = value === true;
       if (locked) {
         refreshEpoch++; expanded = peeked = hoverTicked = false; enterAt = leaveAt = null;
-        resetShellMotion(); destroyBlur();
+        resetShellMotion(); destroyBlur(); stopPressMonitor();
         clearTimeout(pollTimer); pollTimer = null;
       } else if (running) {
+        startPressMonitor();
         invalidateGeometry();
         if (!pollTimer) schedulePoll();
       }

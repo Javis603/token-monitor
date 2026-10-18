@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { NOTCH_BLUR_ALPHA, NOTCH_BLUR_FEATHER, NOTCH_BLUR_STRENGTH, notchBlurBounds, notchBlurMask } = require('../../src/electron/notch/blur');
-const { applyProgressiveBlur } = require('../../src/electron/notch/macProgressiveBlur');
+const { createProgressiveBlurApi, applyProgressiveBlur } = require('../../src/electron/notch/macProgressiveBlur');
 
 const display = { bounds: { x: 0, y: 0, width: 1470, height: 956 } };
 
@@ -64,4 +64,45 @@ test('numberWithBool is sent through a BOOL argument binding', () => {
   assert.doesNotMatch(source, /sendDouble\([^)]*numberWithBool/);
   assert.match(source, /objc\.func\('objc_msgSend', 'uintptr_t', \['uintptr_t', 'uintptr_t', 'bool'\]\)/);
   assert.match(source, /sendBoolArg\(classes\.number, sel\('numberWithBool:'\), true\)/);
+});
+
+function fakeBlurKoffi(missing) {
+  const mutations = [];
+  const arrays = { containers: ['container'], layers: ['backdrop', 'tint'] };
+  return {
+    mutations,
+    load: () => ({ func(name) {
+      if (name === 'sel_registerName' || name === 'objc_getClass') return value => value;
+      if (name === 'object_getClassName') return value => value === 'backdrop' ? 'CABackdropLayer' : 'CALayer';
+      assert.equal(name, 'objc_msgSend');
+      return (target, selector, ...args) => {
+        if (selector === 'respondsToSelector:') return args[0] !== missing;
+        if (selector === 'isKindOfClass:') return target === 'effect';
+        if (selector === 'count') return arrays[target]?.length || 0;
+        if (selector === 'objectAtIndex:') return arrays[target][args[0]];
+        if (selector === 'window') return 'window';
+        if (selector === 'contentView') return 'content';
+        if (selector === 'superview') return 'effect';
+        if (selector === 'layer') return 'root';
+        if (selector === 'sublayers') return target === 'root' ? 'containers' : 'layers';
+        if (selector === 'alloc' || selector === 'initWithData:') return 'image';
+        if (selector === 'CGImageForProposedRect:context:hints:') return 'cgImage';
+        if (selector === 'filterWithType:') return 'filter';
+        if (['setValue:forKey:', 'setScale:', 'setFilters:', 'setHidden:', 'setMaskImage:'].includes(selector)) mutations.push(selector);
+        return 1;
+      };
+    } })
+  };
+}
+
+test('blur checks required selectors before mutating the native material', () => {
+  const masks = { alphaPng: Buffer.from([1]), blurPng: Buffer.from([2]), width: 10, height: 10, radius: 1 };
+  for (const missing of ['filterWithType:', 'setScale:', 'setFilters:', 'setMaskImage:', 'setValue:forKey:']) {
+    const koffi = fakeBlurKoffi(missing);
+    assert.equal(createProgressiveBlurApi(koffi).apply(42, masks), false, missing);
+    assert.deepEqual(koffi.mutations, [], 'unsupported material stays untouched');
+  }
+  const supported = fakeBlurKoffi();
+  assert.equal(createProgressiveBlurApi(supported).apply(42, masks), true);
+  assert.ok(supported.mutations.includes('setMaskImage:'));
 });
