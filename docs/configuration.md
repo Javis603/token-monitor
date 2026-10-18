@@ -59,6 +59,8 @@ TOKEN_MONITOR_HISTORY_ENABLED=       # optional — defaults on; 0 skips trend h
 TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # optional — defaults on; 0 stops archiving deleted-session usage
 TOKEN_MONITOR_LIMITS_ENABLED=        # optional — defaults on; 0 skips CLI probing
 TOKEN_MONITOR_LIMIT_PROVIDERS=       # optional — omit for all supported providers; empty probes none
+TOKEN_MONITOR_OMP_STATS_ENABLED=  # optional — defaults on; 0 uses Tokscale transcript fallback
+TOKEN_MONITOR_OMP_STATS_DB_PATH=  # optional — override the default ~/.omp/stats.db path
 TOKEN_MONITOR_LIMITS_REFRESH_MODE=   # optional — fixed (default) or adaptive
 TOKEN_MONITOR_LIMITS_REFRESH_MS=     # optional — interval for fixed mode; defaults to 300000
 # WorkBuddy: the desktop widget auto-detects the signed-in local app when the

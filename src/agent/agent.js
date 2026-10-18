@@ -61,6 +61,18 @@ const syncSessionTitles = parseBoolean(args.syncSessionTitles ?? args['sync-sess
 const projectsEnabled = parseBoolean(args.projects ?? args.projectsEnabled ?? process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true);
 const sessionUsageArchiveEnabled = parseBoolean(args.sessionArchive ?? args.sessionUsageArchiveEnabled ?? process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true);
 const wslScanEnabled = parseBoolean(args.wslScan ?? args.wslScanEnabled ?? process.env.TOKEN_MONITOR_WSL_SCAN, true);
+const ompStatsDbPath = String(
+  args.ompStatsDbPath
+    ?? args['omp-stats-db-path']
+    ?? process.env.TOKEN_MONITOR_OMP_STATS_DB_PATH
+    ?? ''
+).trim();
+const ompStatsEnabled = parseBoolean(
+  args.ompStatsEnabled
+    ?? args['omp-stats-enabled']
+    ?? process.env.TOKEN_MONITOR_OMP_STATS_ENABLED,
+  true
+);
 const opencodeLocalLimitsEnabled = parseBoolean(
   args['opencode-local-limits']
     ?? args.opencodeLocalLimits
@@ -100,6 +112,8 @@ const usageOptions = {
   watchEnabled,
   watchDebounceMs,
   wslScanEnabled,
+  ompStatsDbPath: ompStatsDbPath || undefined,
+  ompStatsEnabled,
   onError: (error, reason) => console.error(`[${new Date().toISOString()}] (${reason}) ${error.message}`),
   logger: (message) => (dryRun ? console.error(message) : console.log(message))
 };

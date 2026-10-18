@@ -93,6 +93,27 @@ test('usage config fingerprint tracks only effective structural values', () => {
   );
 });
 
+test('OMP stats path and enablement stay in the local usage runtime fingerprint', () => {
+  const context = {
+    intervalMs: 5 * 60 * 1000,
+    historyIntervalMs: 15 * 60 * 1000,
+    watchEnabled: true,
+    watchTriggersCollection: true,
+    intervalRequiresActivity: false
+  };
+  const defaults = usageConfigFromSettings({}, context);
+  const configured = usageConfigFromSettings({}, {
+    ...context,
+    ompStatsDbPath: ' /tmp/omp/stats.db ',
+    ompStatsEnabled: false
+  });
+
+  assert.equal(defaults.ompStatsEnabled, true);
+  assert.equal(configured.ompStatsDbPath, '/tmp/omp/stats.db');
+  assert.equal(configured.ompStatsEnabled, false);
+  assert.notEqual(usageConfigFingerprint(defaults), usageConfigFingerprint(configured));
+});
+
 test('usage config fingerprint dedupes raw settings with the same effective runtime', () => {
   const smartContext = {
     intervalMs: 10 * 60 * 1000,

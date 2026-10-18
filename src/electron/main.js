@@ -851,6 +851,8 @@ function electronUsageConfig(errorPrefix) {
     watchTriggersCollection: collectorWatchTriggersCollection(),
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
+    ompStatsDbPath: String(process.env.TOKEN_MONITOR_OMP_STATS_DB_PATH || '').trim() || undefined,
+    ompStatsEnabled: parseBoolean(process.env.TOKEN_MONITOR_OMP_STATS_ENABLED, true),
     dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
     logger: (message) => console.log(`[${errorPrefix}] ${message}`)
