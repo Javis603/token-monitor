@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const test = require('node:test');
 const { normalizeNotchStyle } = require('../../src/electron/notch/controller');
+const { notchGlassGeometry } = require('../../src/electron/renderer/notch/renderer');
 
 function shadeFixture(geometry = { notched: true, height: 32 }, zoom = 1) {
   class Node {
@@ -24,7 +25,7 @@ function shadeFixture(geometry = { notched: true, height: 32 }, zoom = 1) {
   const code = source.slice(source.indexOf('function paintHardwareShade('), source.indexOf('function applyNotchMotion('));
   const shapeLayer = new Node();
   let created = 0;
-  const context = { shapeLayer, state: { payload: { geometry, appearance: { zoomFactor: zoom } } },
+  const context = { shapeLayer, notchGlassGeometry, state: { payload: { geometry, appearance: { zoomFactor: zoom } } },
     document: { createElementNS: () => { created++; return new Node(); } } };
   return { context, shapeLayer, paint: vm.runInNewContext(`${code}; paintHardwareShade`, context), created: () => created };
 }
@@ -32,6 +33,38 @@ function shadeFixture(geometry = { notched: true, height: 32 }, zoom = 1) {
 test('missing or invalid Notch styles inherit while explicit selections stay unchanged', () => {
   for (const value of [undefined, null, '', 'invalid']) assert.equal(normalizeNotchStyle(value), 'inherit');
   for (const value of ['black', 'inherit', 'vibrancy', 'liquid-glass', 'liquid-glass-clear']) assert.equal(normalizeNotchStyle(value), value);
+});
+
+test('glass proportions adapt to short, tall and screen-limited bodies without scaling the camera band', () => {
+  const baseline = notchGlassGeometry(32, 143);
+  const capRatio = (baseline.capEnd - 32) / 143;
+  const fadeRatio = (baseline.fadeEnd - baseline.capEnd) / 143;
+  for (const camera of [24, 32, 40]) {
+    for (const height of [1, 20, 80, 143, 240, 480, 960]) {
+      const profile = notchGlassGeometry(camera, height);
+      assert.ok(profile.capEnd > camera && profile.capEnd < profile.fadeEnd);
+      assert.ok(profile.fadeEnd < camera + height, 'every nonempty body retains a lower glass region');
+      assert.ok(Math.abs((profile.capEnd - camera) / height - capRatio) < 1e-12);
+      assert.ok(Math.abs((profile.fadeEnd - profile.capEnd) / height - fadeRatio) < 1e-12);
+      assert.equal(profile.rimTop, camera);
+      assert.equal(profile.rimBottom, camera + height);
+    }
+  }
+  assert.deepEqual(notchGlassGeometry(32, 0), { capEnd: 32, fadeEnd: 32, rimTop: 32, rimBottom: 32 });
+});
+
+test('shade proportions use the current frame once, independently of the configured zoom', () => {
+  const f = shadeFixture();
+  for (const height of [20, 143, 480, 40]) {
+    f.paint({ shape: { d: `shape-${height}` }, bodyHeight: height });
+    const gradient = f.shapeLayer.querySelector('#notch-hardware-gradient');
+    const bounds = [gradient.attributes.y1, gradient.attributes.y2];
+    for (const zoom of [0.75, 1, 1.5]) {
+      f.context.state.payload.appearance.zoomFactor = zoom;
+      f.paint({ shape: { d: `shape-${height}` }, bodyHeight: height });
+      assert.deepEqual([gradient.attributes.y1, gradient.attributes.y2], bounds, 'frame dimensions already contain zoom');
+    }
+  }
 });
 
 test('the shade and lower rim follow every outline while a thicker cap always covers the camera', () => {

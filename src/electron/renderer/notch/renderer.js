@@ -7,6 +7,21 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorNotchRenderer = api;
 })(typeof window !== 'undefined' ? window : null, function createNotchRendererApi() {
+  // Optical proportions live in the space below the physical camera band.
+  // Motion frames already include content zoom; applying zoom again here would
+  // change the balance as cards grow, shrink or hit the screen's height limit.
+  const NOTCH_GLASS_PROFILE = Object.freeze({ cap: 0.30, fade: 0.63 });
+  function notchGlassGeometry(cameraHeight, bodyHeight) {
+    const camera = Number.isFinite(cameraHeight) ? Math.max(0, cameraHeight) : 0;
+    const body = Number.isFinite(bodyHeight) ? Math.max(0, bodyHeight) : 0;
+    return {
+      capEnd: camera + body * NOTCH_GLASS_PROFILE.cap,
+      fadeEnd: camera + body * (NOTCH_GLASS_PROFILE.cap + NOTCH_GLASS_PROFILE.fade),
+      rimTop: camera,
+      rimBottom: camera + body
+    };
+  }
+
   function createNotchRenderer({ document, window, bridge, surface, state, root, shapeLayer, contentLayer, shared }) {
     const {
       el, t, appearance, prefersReducedMotion, readableColor, providerLabel, limitProviderColor,
@@ -665,21 +680,16 @@
         rim.setAttribute('stroke', 'url(#notch-rim-gradient)');
         shapeLayer.append(defs, shade, rim);
       }
-      // Always cover the physical camera, then extend the black cap into the
-      // body. Short panels reserve less of that extension so glass remains visible.
-      // At rest/peek every stop is opaque, so the entire entry stays black.
-      const camera = state.payload.geometry.height;
-      const zoom = Number(state.payload.appearance?.zoomFactor) || 1;
-      const body = Math.max(0, frame.bodyHeight);
-      const core = camera + Math.min(48 * zoom, body * 0.28);
-      const fade = Math.max(1, Math.min(100 * zoom, body * 0.7));
+      // The same frame drives the shade and rim, including live resizing,
+      // interrupted motion and spring overshoot. Rest/peek stays opaque in CSS.
+      const profile = notchGlassGeometry(state.payload.geometry.height, frame.bodyHeight);
       const gradient = shapeLayer.querySelector('#notch-hardware-gradient');
-      gradient.setAttribute('y1', core);
-      gradient.setAttribute('y2', core + fade);
+      gradient.setAttribute('y1', profile.capEnd);
+      gradient.setAttribute('y2', profile.fadeEnd);
       shade.setAttribute('d', frame.shape.d);
       const rimGradient = shapeLayer.querySelector('#notch-rim-gradient');
-      rimGradient.setAttribute('y1', camera);
-      rimGradient.setAttribute('y2', camera + Math.max(1, body));
+      rimGradient.setAttribute('y1', profile.rimTop);
+      rimGradient.setAttribute('y2', profile.rimBottom);
       shapeLayer.querySelector('.notch-glass-rim').setAttribute('d', frame.shape.d);
     }
 
@@ -905,5 +915,5 @@
       repaint() { notchClock++; renderNotch(state.payload); }
     };
   }
-  return { createNotchRenderer };
+  return { createNotchRenderer, notchGlassGeometry };
 });
