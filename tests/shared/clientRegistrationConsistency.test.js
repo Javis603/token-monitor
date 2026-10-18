@@ -74,6 +74,8 @@ test('source markers declare each WSL path once and preserve discovery order', (
     '.local/share/amp/threads', '.config/tokscale/amp-cache/threads', '.pi/agent/sessions', '.omp/agent/sessions',
     '.local/share/zed/threads/threads.db', '.local/share/kilo/kilo.db',
     '.config/Code/User/globalStorage/kilocode.kilo-code/tasks',
+    'Library/Application Support/Code/User/globalStorage/kilocode.kilo-code/tasks',
+    'AppData/Roaming/Code/User/globalStorage/kilocode.kilo-code/tasks',
     '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks',
     '.commandcode/projects', '.dsh/sessions', '.factory/sessions',
     '.local/share/mimocode/mimocode.db', '.local/share/muse/sessions', '.zcode/projects', '.zcode/cli/db',

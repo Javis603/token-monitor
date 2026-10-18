@@ -14,7 +14,7 @@ Claude has independent local-usage/session and account-limits planes. A Claude C
 
 ## Usage and session metadata
 
-Aggregate tokens and costs come from tokscale. The local adapter in `src/shared/providers/claude/sessionMetadata.js` enriches sessions from `CLAUDE_CONFIG_DIR` or `~/.claude`, checking `projects/` before `transcripts/`.
+Aggregate tokens and costs come from tokscale. Its source cache preserves observed compacted Claude history even after the original transcript disappears; deleting the transcript alone does not remove that retained usage. Clearing the corresponding Tokscale cache removes its retained copy. The local adapter in `src/shared/providers/claude/sessionMetadata.js` enriches sessions from `CLAUDE_CONFIG_DIR` or `~/.claude`, checking `projects/` before `transcripts/`.
 
 Native title lookup reads only persisted `custom-title` and `ai-title` records; it never turns prompt text into a title. Custom titles win within the transcript. The index is keyed by file size and mtime, scans appended bytes after the first pass and keeps reads bounded around oversized JSONL records.
 

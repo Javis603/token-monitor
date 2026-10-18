@@ -52,6 +52,8 @@ const SOURCE_MARKERS = [
   { marker: '.local/share/zed/threads/threads.db', client: 'zed' },
   { marker: '.local/share/kilo/kilo.db', client: 'kilo' },
   { marker: '.config/Code/User/globalStorage/kilocode.kilo-code/tasks', client: 'kilo' },
+  { marker: 'Library/Application Support/Code/User/globalStorage/kilocode.kilo-code/tasks', client: 'kilo' },
+  { marker: 'AppData/Roaming/Code/User/globalStorage/kilocode.kilo-code/tasks', client: 'kilo' },
   { marker: '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks', client: 'kilo' },
   { marker: '.commandcode/projects', client: 'commandcode', hostCheckId: 'commandcode-projects' },
   { marker: '.dsh/sessions', client: 'dsh' },
