@@ -414,7 +414,11 @@ Object.assign(els, {
   notchRunningIndicatorInput: document.getElementById('notchRunningIndicatorInput'),
   notchRunningIndicatorRow: document.getElementById('notchRunningIndicatorRow'),
   notchHapticInput: document.getElementById('notchHapticInput'),
-  notchExpandOnApproachInput: document.getElementById('notchExpandOnApproachInput'),
+  notchHoverActionInputs: Array.from(document.querySelectorAll('input[name="notchHoverAction"]')),
+  notchHoverDelayInput: document.getElementById('notchHoverDelayInput'),
+  notchHoverDelayRow: document.getElementById('notchHoverDelayRow'),
+  resetNotchHoverDelayButton: document.getElementById('resetNotchHoverDelayButton'),
+  notchProgressiveBlurInput: document.getElementById('notchProgressiveBlurInput'),
   notchAvoidMenuBarInput: document.getElementById('notchAvoidMenuBarInput'),
   notchHideSummaryInFullScreenInput: document.getElementById('notchHideSummaryInFullScreenInput'),
   notchSizeInputs: Array.from(document.querySelectorAll('input[name="notchSize"]')),
@@ -13306,6 +13310,26 @@ function syncDockSizeControls(surface) {
 // saved choice the system cannot draw shows as the Frosted Glass it falls back to.
 // Appearance previews carry only the controls they own, so the notch style is
 // read from the saved settings underneath them.
+const NOTCH_HOVER_DELAY_DEFAULT_MS = 0;
+
+// Hover either grows the resting entry (a click opens it) or opens it after
+// the chosen duration; the duration only applies to the second.
+function syncNotchHoverControls() {
+  const action = state.settings?.notchHoverAction === 'open' ? 'open' : 'peek';
+  for (const input of els.notchHoverActionInputs) input.checked = input.value === action;
+  els.notchHoverDelayRow?.classList.toggle('hidden', action !== 'open');
+  if (els.notchHoverDelayInput && document.activeElement !== els.notchHoverDelayInput) {
+    const delay = Number(state.settings?.notchHoverDelay);
+    els.notchHoverDelayInput.value = String(Number.isFinite(delay) ? delay : NOTCH_HOVER_DELAY_DEFAULT_MS);
+  }
+  syncNotchHoverDelayValue();
+}
+
+function syncNotchHoverDelayValue() {
+  const value = els.notchHoverDelayRow?.querySelector('.slider-value');
+  if (value && els.notchHoverDelayInput) value.textContent = `${(Number(els.notchHoverDelayInput.value) / 1000).toFixed(1)} s`;
+}
+
 function syncNotchStyleInput(preview) {
   if (!els.notchStyleInput) return;
   const settings = Object.assign({}, state.settings, ...pendingSettingsPatches, preview);
@@ -13357,8 +13381,9 @@ function syncDockControls() {
   if (els.notchDetailSideInput) els.notchDetailSideInput.value = state.settings?.notchDetailSide || 'right';
   if (els.notchRunningIndicatorInput) els.notchRunningIndicatorInput.checked = state.settings?.notchRunningIndicatorEnabled === true;
   syncNotchCapabilities();
-  if (els.notchHapticInput) els.notchHapticInput.checked = state.settings?.notchHaptic === true;
-  if (els.notchExpandOnApproachInput) els.notchExpandOnApproachInput.checked = state.settings?.notchExpandOnApproach !== false;
+  if (els.notchProgressiveBlurInput) els.notchProgressiveBlurInput.checked = state.settings?.notchProgressiveBlur !== false;
+  if (els.notchHapticInput) els.notchHapticInput.checked = state.settings?.notchHaptic !== false;
+  syncNotchHoverControls();
   if (els.notchAvoidMenuBarInput) els.notchAvoidMenuBarInput.checked = state.settings?.notchAvoidMenuBar !== false;
   if (els.notchHideSummaryInFullScreenInput) els.notchHideSummaryInFullScreenInput.checked = state.settings?.notchHideSummaryInFullScreen !== false;
   els.edgeDockComposerRow?.classList.toggle('hidden', !enabled);
@@ -13416,8 +13441,26 @@ els.notchSummaryInput?.addEventListener('change', () => {
 els.notchHideSummaryInFullScreenInput?.addEventListener('change', () => {
   void saveSettings({ notchHideSummaryInFullScreen: els.notchHideSummaryInFullScreenInput.checked });
 });
-els.notchExpandOnApproachInput?.addEventListener('change', () => {
-  void saveSettings({ notchExpandOnApproach: els.notchExpandOnApproachInput.checked });
+for (const input of els.notchHoverActionInputs) {
+  input.addEventListener('change', () => {
+    if (!input.checked) return;
+    state.settings.notchHoverAction = input.value;
+    syncNotchHoverControls();
+    void saveSettings({ notchHoverAction: input.value });
+  });
+}
+els.notchProgressiveBlurInput?.addEventListener('change', () => {
+  void saveSettings({ notchProgressiveBlur: els.notchProgressiveBlurInput.checked });
+});
+els.notchHoverDelayInput?.addEventListener('input', () => syncNotchHoverDelayValue());
+els.resetNotchHoverDelayButton?.addEventListener('click', () => {
+  if (!els.notchHoverDelayInput) return;
+  els.notchHoverDelayInput.value = String(NOTCH_HOVER_DELAY_DEFAULT_MS);
+  syncNotchHoverDelayValue();
+  void saveSettings({ notchHoverDelay: NOTCH_HOVER_DELAY_DEFAULT_MS });
+});
+els.notchHoverDelayInput?.addEventListener('change', () => {
+  void saveSettings({ notchHoverDelay: Number(els.notchHoverDelayInput.value) });
 });
 els.notchAvoidMenuBarInput?.addEventListener('change', () => {
   void saveSettings({ notchAvoidMenuBar: els.notchAvoidMenuBarInput.checked });

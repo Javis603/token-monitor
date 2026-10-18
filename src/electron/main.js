@@ -419,7 +419,7 @@ const {
 const { applyWindowsChrome } = require('./windowsChrome');
 const { installWindowsNonActivatingInput } = require('./windowsNonActivatingInput');
 const { canUseEdgeDock, createEdgeDockController, edgeDockSupported } = require('./edgeDock/controller');
-const { createNotchController, normalizeNotchStyle, normalizeNotchShape, normalizeNotchDetailSide } = require('./notch/controller');
+const { createNotchController, normalizeNotchStyle, normalizeNotchShape, normalizeNotchDetailSide, normalizeNotchHoverAction, normalizeNotchHoverDelay } = require('./notch/controller');
 const { buildNotchData, summaryLayout: notchSummaryLayout } = require('./notch/data');
 const trayLayoutApi = require('../shared/trayLayout');
 const { createFullScreenProbe } = require('./edgeDock/fullScreenProbe');
@@ -438,6 +438,8 @@ const { normalizeBackgroundImageOpacity } = require('./renderer/glassRendering')
 const tokenRateApi = require('./renderer/tokenRatePresentation');
 const { toPolygons } = require('./renderer/edgeDock/shapes');
 const { rasterizeMask } = require('./edgeDock/mask');
+const { NOTCH_BLUR_ALPHA, NOTCH_BLUR_RADIUS, NOTCH_BLUR_STRENGTH, notchBlurMask } = require('./notch/blur');
+const { applyProgressiveBlur } = require('./notch/macProgressiveBlur');
 const { applyVibrancyMask } = require('./edgeDock/macVibrancyMask');
 const { performMacHaptic } = require('./edgeDock/macHaptics');
 const { primaryButtonDown } = require('./edgeDock/pointerButtons');
@@ -633,9 +635,11 @@ function defaultSettings() {
     notchItems: null,
     notchDetailSide: 'right',
     notchRunningIndicatorEnabled: false,
-    notchExpandOnApproach: true,
+    notchHoverAction: 'peek',
+    notchHoverDelay: 0,
     notchAvoidMenuBar: true,
-    notchHaptic: false,
+    notchHaptic: true,
+    notchProgressiveBlur: true,
     notchHideSummaryInFullScreen: true,
     notchRefreshEnabled: false,
     notchSize: 'medium',
@@ -2740,9 +2744,11 @@ function readSettings() {
     merged.notchItems = normalizeEdgeDockItems(merged.notchItems);
     merged.notchDetailSide = normalizeNotchDetailSide(merged.notchDetailSide);
     merged.notchRunningIndicatorEnabled = parseBoolean(merged.notchRunningIndicatorEnabled, false);
-    merged.notchExpandOnApproach = parseBoolean(merged.notchExpandOnApproach, true);
+    merged.notchHoverAction = normalizeNotchHoverAction(merged.notchHoverAction);
+    merged.notchHoverDelay = normalizeNotchHoverDelay(merged.notchHoverDelay);
     merged.notchAvoidMenuBar = parseBoolean(merged.notchAvoidMenuBar, true);
-    merged.notchHaptic = parseBoolean(merged.notchHaptic, false);
+    merged.notchHaptic = parseBoolean(merged.notchHaptic, true);
+    merged.notchProgressiveBlur = parseBoolean(merged.notchProgressiveBlur, true);
     merged.notchHideSummaryInFullScreen = parseBoolean(merged.notchHideSummaryInFullScreen, true);
     merged.notchRefreshEnabled = parseBoolean(merged.notchRefreshEnabled, false);
     merged.notchFollowTray = parseBoolean(merged.notchFollowTray, true);
@@ -5631,6 +5637,8 @@ function toggleDockRateMode() {
   pushSettingsToRenderer();
 }
 
+let notchBlurMasks = null;
+
 function ensureNotchController() {
   if (notchController) return notchController;
   notchController = createNotchController({
@@ -5655,6 +5663,21 @@ function ensureNotchController() {
     canRefreshLimits: () => canRefreshEdgeDockStats(),
     onRefreshLimits: () => refreshStatsFromEdgeDock(),
     installNonActivatingInput: (win) => preventAppActivation(win),
+    blurAvailable: () => nativeTheme.prefersReducedTransparency !== true,
+    applyBlurMask: (win, mask, display) => {
+      const scale = display?.scaleFactor || 2;
+      const key = JSON.stringify([mask, scale]);
+      if (notchBlurMasks?.key !== key) {
+        const png = (options) => {
+          const { buffer, pixelWidth, pixelHeight } = notchBlurMask({ ...mask, ...options });
+          return nativeImage.createFromBitmap(buffer, { width: pixelWidth, height: pixelHeight }).toPNG();
+        };
+        // The blur mask is sampled per point; the visible fade is drawn at device scale.
+        notchBlurMasks = { key, alphaPng: png({ scale, curve: NOTCH_BLUR_ALPHA }), blurPng: png({ scale: 1, curve: NOTCH_BLUR_STRENGTH }) };
+      }
+      return applyProgressiveBlur(win, { alphaPng: notchBlurMasks.alphaPng, blurPng: notchBlurMasks.blurPng,
+        width: mask.width, height: mask.height, radius: NOTCH_BLUR_RADIUS });
+    },
     primaryButtonDown: () => primaryButtonDown(process.platform),
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
     isFullScreen: createFullScreenProbe({ platform: process.platform, screen, logger: (message) => console.log(message) }),
@@ -7944,9 +7967,11 @@ app.whenReady().then(() => {
       notchItems: normalizeEdgeDockItems('notchItems' in (patch || {}) ? patch.notchItems : settings.notchItems),
       notchDetailSide: normalizeNotchDetailSide(patch.notchDetailSide ?? settings.notchDetailSide),
       notchRunningIndicatorEnabled: parseBoolean(patch.notchRunningIndicatorEnabled ?? settings.notchRunningIndicatorEnabled, false),
-      notchExpandOnApproach: parseBoolean(patch.notchExpandOnApproach ?? settings.notchExpandOnApproach, true),
+      notchHoverAction: normalizeNotchHoverAction(patch.notchHoverAction ?? settings.notchHoverAction),
+      notchHoverDelay: normalizeNotchHoverDelay(patch.notchHoverDelay ?? settings.notchHoverDelay),
       notchAvoidMenuBar: parseBoolean(patch.notchAvoidMenuBar ?? settings.notchAvoidMenuBar, true),
-      notchHaptic: parseBoolean(patch.notchHaptic ?? settings.notchHaptic, false),
+      notchHaptic: parseBoolean(patch.notchHaptic ?? settings.notchHaptic, true),
+      notchProgressiveBlur: parseBoolean(patch.notchProgressiveBlur ?? settings.notchProgressiveBlur, true),
       notchHideSummaryInFullScreen: parseBoolean(patch.notchHideSummaryInFullScreen ?? settings.notchHideSummaryInFullScreen, true),
       notchRefreshEnabled: parseBoolean(patch.notchRefreshEnabled ?? settings.notchRefreshEnabled, false),
       notchFollowTray: parseBoolean(patch.notchFollowTray ?? settings.notchFollowTray, true),

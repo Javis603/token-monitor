@@ -5,8 +5,8 @@ const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { createNotchController } = require('../../src/electron/notch/controller');
-const { notchGeometry, notchMaxHeight, notchBounds, notchSummaryMaxWidth, notchCommands, translateCommands, interpolateCommands } = require('../../src/electron/notch/geometry');
+const { createNotchController, springState, springDuration, NOTCH_SPRINGS, normalizeNotchHoverAction, normalizeNotchHoverDelay } = require('../../src/electron/notch/controller');
+const { NOTCH_METRICS, notchCanvasBounds, notchGeometry, notchMaxHeight, notchBounds, notchSummaryMaxWidth, notchCommands, translateCommands, interpolateCommands } = require('../../src/electron/notch/geometry');
 const { buildNotchData, summaryLayout } = require('../../src/electron/notch/data');
 const { EDGE_DOCK_TIMING, EDGE_DOCK_METRICS } = require('../../src/electron/edgeDock/geometry');
 const { createEdgeDockController } = require('../../src/electron/edgeDock/controller');
@@ -40,6 +40,9 @@ class Window extends EventEmitter {
   setVibrancy() {}
   setHasShadow() {}
   showInactive() { this.shown = true; }
+  hide() { this.shown = false; }
+  getMediaSourceId() { return `window:${this.options.width}:0`; }
+  moveAbove(id) { this.above = id; }
 }
 class Ipc extends EventEmitter {
   constructor() { super(); this.handlers = new Map(); }
@@ -57,9 +60,10 @@ function fixture(t, settings = {}, options = {}) {
   screen.point = { x: 20, y: 400 };
   screen.getAllDisplays = () => [display]; screen.getPrimaryDisplay = () => display;
   screen.getCursorScreenPoint = () => screen.point;
-  const preferences = { notchEnabled: true, edgeDockEnabled: false, ...settings };
+  // Most cases exercise opening on hover; the default grow-only mode has its own cases.
+  const preferences = { notchEnabled: true, edgeDockEnabled: false, notchHoverAction: 'open', ...settings };
   const deps = { BrowserWindow: RecordingWindow, ipcMain, screen, rendererDir: '/renderer', preloadPath: '/preload', getSettings: () => preferences, nativeGlass: options.nativeGlass || (() => false), liquidGlass: options.liquidGlass, createGlass: options.createGlass, prefersReducedMotion: () => options.reducedMotion !== false, platform: options.platform || 'darwin' };
-  const controller = createNotchController({ ...deps, readScreens: options.readScreens || (() => ({ screens: [native], mainDisplayId: 1 })), onSwitchCodexAccount: (id) => ({ ok: true, id }), onToggleRateMode: options.onToggleRateMode, onCapabilitiesChanged: options.onCapabilitiesChanged, installNonActivatingInput: options.installNonActivatingInput, readMenuWindows: options.readMenuWindows || (() => null), primaryButtonDown: options.primaryButtonDown || (() => false), isFullScreen: options.isFullScreen || (() => false), logger: options.logger, performHaptic: options.performHaptic, canRefreshLimits: options.canRefreshLimits, onRefreshLimits: options.onRefreshLimits });
+  const controller = createNotchController({ ...deps, readScreens: options.readScreens || (() => ({ screens: [native], mainDisplayId: 1 })), onSwitchCodexAccount: (id) => ({ ok: true, id }), onToggleRateMode: options.onToggleRateMode, onCapabilitiesChanged: options.onCapabilitiesChanged, installNonActivatingInput: options.installNonActivatingInput, readMenuWindows: options.readMenuWindows || (() => null), primaryButtonDown: options.primaryButtonDown || (() => false), isFullScreen: options.isFullScreen || (() => false), logger: options.logger, performHaptic: options.performHaptic, canRefreshLimits: options.canRefreshLimits, onRefreshLimits: options.onRefreshLimits, blurAvailable: options.blurAvailable, applyBlurMask: options.applyBlurMask });
   t.after(() => controller.dispose());
   const setData = controller.setData;
   controller.setData = (value) => {
@@ -117,13 +121,14 @@ test('first summary is measured and committed before reveal on either screen sha
     assert.equal(measured.summaryMeasurement.measuring, false);
     const expected = notchBounds(display, notchGeometry(display, notched ? native : null), false, 180, slots);
     assert.equal(measured.geometry.headerWidth, expected.width);
-    assert.equal(measured.motion.summaryEdges.left + win.bounds.x, expected.x + (notched ? 4 : 0) + 8);
-    assert.equal(measured.motion.summaryEdges.right + win.bounds.x, expected.x + expected.width - (notched ? 4 : 0) - 8);
+    const shoulder = notched ? NOTCH_METRICS.restingFlare : 0;
+    assert.equal(measured.motion.summaryEdges.left + win.bounds.x, expected.x + shoulder + 8);
+    assert.equal(measured.motion.summaryEdges.right + win.bounds.x, expected.x + expected.width - shoulder - 8);
     assert.equal(win.messages.filter(m => m.channel === 'topNotch:animate').at(-1).payload.duration, 0);
     f.ipcMain.emit('topNotch:size', { sender: win.webContents }, { summaryMeasurement: { id: request.id, ready: true } });
     assert.equal(last(win).summaryMeasurement, null);
     f.ipcMain.emit('topNotch:size', { sender: win.webContents }, { slots: { ...slots, right: 90, minimumRight: 90 } });
-    if (notched) assert.equal(win.messages.filter(m => m.channel === 'topNotch:animate').at(-1).payload.duration, 360, 'later width changes retain motion');
+    if (notched) assert.ok(win.messages.filter(m => m.channel === 'topNotch:animate').at(-1).payload.duration > 0, 'later width changes retain motion');
     else assert.equal(last(win).geometry.headerWidth, notchBounds(display, notchGeometry(display), false, 180, { left: 17, right: 90 }).width, 'resting width follows the compact summary');
   }
 });
@@ -183,31 +188,32 @@ test('physical notch geometry uses AppKit gap and safe top, not menu-bar workAre
   assert.equal(notchCommands(200, 32, false, false).at(-1)[0], 'Z');
 });
 
-test('shoulder uses the EdgeDock curve within the physical notch height at every list size and zoom', () => {
-  const { railCommands } = require('../../src/electron/renderer/edgeDock/shapes');
+test('open flare stays within the physical notch height at every list size and zoom', () => {
   for (const zoom of [0.8, 1, 1.5]) {
-    const short = notchCommands(336 * zoom, 220, true, true, 32, zoom);
-    const tall = notchCommands(336 * zoom, 800, true, true, 32, zoom);
+    const short = notchCommands(381 * zoom, 220, true, true, 32, zoom);
+    const tall = notchCommands(381 * zoom, 800, true, true, 32, zoom);
     assert.deepEqual(short[1], tall[1]);
-    assert.ok(tall[1][6] <= 32, 'shoulder must end before the provider content starts');
-    const cap = Math.min(64 * zoom, 32 / 0.53);
-    const rail = railCommands({ width: cap, height: 336 * zoom, shoulder: 28 * zoom, radius: 20 * zoom });
-    const curve = rail[1];
-    assert.deepEqual(short[1], ['C', curve[2], cap - curve[1], curve[4], cap - curve[3], curve[6], cap - curve[5]]);
+    const f = NOTCH_METRICS.openFlare * zoom;
+    assert.ok(f <= 32, 'the flare must end before the provider content starts');
+    // A short handle off the menu bar and a long one into the side.
+    assert.deepEqual(short[1], ['C', f * 0.35, 0, f, f * 0.15, f, f]);
+    assert.deepEqual(short.at(-2), ['C', 381 * zoom - f, f * 0.15, 381 * zoom - f * 0.35, 0, 381 * zoom, 0]);
   }
 });
 
 test('equal ears reserve the wider content and preserve the physical notch center', () => {
   const geometry = notchGeometry(display, native);
   const closed = notchBounds(display, geometry, false, 180, { left: 17, right: 36 });
-  assert.equal(closed.width, 291);
-  assert.equal(closed.x + 56, 646);
-  assert.equal(closed.x + closed.width - 56, 825);
-  assert.equal(notchBounds(display, geometry, false, 180, null).width, 179);
+  assert.equal(closed.width, 289);
+  assert.equal(closed.x + 55, 646);
+  assert.equal(closed.x + closed.width - 55, 825);
+  assert.equal(notchBounds(display, geometry, false, 180, null).width, 179 + 2 * NOTCH_METRICS.restingFlare, 'a quiet shell hugs the camera with its resting flares');
   const open = notchBounds(display, geometry, true, 800, { left: 17, right: 36 }, 1.5);
   assert.ok(Math.abs(open.x + open.width / 2 - geometry.centerX) <= 0.5, 'expanded shell remains centered on the physical notch');
-  assert.equal(open.width, 505, 'provider card and shoulder follow the app zoom');
-  assert.equal(open.height, 353, 'main cap follows usable logical height, independent of text zoom');
+  assert.equal(open.width, 573, 'panel and flares follow the app zoom');
+  assert.equal(open.height, Math.round(NOTCH_METRICS.openHeight * 1.5), 'the panel keeps its proportions at every zoom');
+  const short = { ...display, bounds: { ...display.bounds, height: 400 }, workArea: { ...display.workArea, height: 367 } };
+  assert.equal(notchBounds(short, notchGeometry(short, native), true, 800, null, 1.5).height, notchMaxHeight(short, notchGeometry(short, native)), 'usable height still caps the panel');
   assert.equal(notchBounds(display, geometry, true, 100, null, 1.5).height, 132, 'reported content is not scaled twice');
 });
 
@@ -291,14 +297,14 @@ test('fixed provider custom fields remain visible after every task ends', (t) =>
 });
 
 test('hover morph retains one opaque primary and unchanged canvas; lock hides all surfaces', (t) => {
-  const { controller, screen, windows } = fixture(t);
+  const { controller, screen, windows } = fixture(t, { notchHoverDelay: 100 });
   const primary = windows[0], bubble = windows[1];
   const canvas = primary.getBounds();
   const head = last(primary).geometry;
   screen.point = { x: canvas.x + head.headerX + 20, y: canvas.y + 10 };
-  controller.poll(100); controller.poll(239);
-  assert.equal(last(primary).expanded, false);
-  controller.poll(240);
+  controller.poll(100); controller.poll(199);
+  assert.equal(last(primary).expanded, false, 'the configured hover duration holds the panel closed');
+  controller.poll(200);
   assert.equal(last(primary).expanded, true);
   assert.equal(primary.opacity, 1);
   assert.deepEqual(primary.getBounds(), canvas);
@@ -306,10 +312,10 @@ test('hover morph retains one opaque primary and unchanged canvas; lock hides al
   assert.equal(bubble.opacity, 0);
   assert.equal(primary.messages.filter((m) => m.channel === 'topNotch:motion').at(-1).payload.progress, 1);
   screen.point = { x: 10, y: 900 };
-  controller.poll(300); controller.poll(619);
+  controller.poll(300); controller.poll(399);
   assert.equal(last(primary).expanded, true);
-  controller.poll(620);
-  assert.equal(last(primary).expanded, false);
+  controller.poll(400);
+  assert.equal(last(primary).expanded, false, 'the panel closes shortly after the pointer leaves');
   assert.equal(primary.opacity, 1, 'closing never fades the summary');
   assert.deepEqual(primary.getBounds(), canvas);
   controller.setLocked(true);
@@ -336,7 +342,9 @@ test('provider hover uses the original EdgeDock bubble without altering primary 
   assert.equal(last(bubble).omitQuotaBars, true, 'secondary retains original details and omits only overview quotas');
   ipcMain.emit('topNotch:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 250 });
   assert.equal(bubble.opacity, 1);
-  assert.ok(bubble.getBounds().x > primary.getBounds().x + primary.getBounds().width - 28);
+  // The canvas carries the panel's shadow; the card meets the visible panel.
+  const panel = last(primary).motion.bodyBox;
+  assert.ok(bubble.getBounds().x > primary.getBounds().x + panel.x + panel.width - 28);
   assert.deepEqual(primary.getBounds(), canvas);
   screen.point = { x: bubble.getBounds().x + 20, y: bubble.getBounds().y + 20 };
   controller.poll(1000);
@@ -382,7 +390,7 @@ test('empty custom summary hides both ears while retaining provider data and hov
     const f = fixture(t, settings);
     f.controller.setData(data);
     const top = f.windows[0];
-    assert.equal(last(top).geometry.headerWidth, 179);
+    assert.equal(last(top).geometry.headerWidth, 179 + 2 * NOTCH_METRICS.restingFlare, 'the quiet shell hugs the camera');
     assert.equal(last(top).geometry.shoulder, 0);
     assert.equal(last(top).summary, null);
     f.screen.point = { x: 735, y: 10 };
@@ -392,7 +400,7 @@ test('empty custom summary hides both ears while retaining provider data and hov
     f.screen.point = { x: 10, y: 500 };
     f.controller.poll(300); f.controller.poll(620);
     assert.equal(last(top).expanded, false);
-    assert.equal(last(top).geometry.headerWidth, 179);
+    assert.equal(last(top).geometry.headerWidth, 179 + 2 * NOTCH_METRICS.restingFlare);
   }
   assert.ok(buildNotchData(input, cells, { trayContent: 'tokens', showTrayIcon: false }).summary,
     'hiding the actual tray never hides an independently configured notch summary');
@@ -430,9 +438,10 @@ test('resting curves and expanded EdgeDock curves interpolate linearly without a
     const b = notchCommands(336, 300, notched, true);
     assert.deepEqual(a.map((c) => [c[0], c.length]), b.map((c) => [c[0], c.length]));
     const half = interpolateCommands(a, b, 0.5);
-    assert.deepEqual(interpolateCommands(a, b, 0), a);
-    assert.deepEqual(interpolateCommands(a, b, 1), b);
-    for (let i = 0; i < a.length; i++) for (let j = 1; j < a[i].length; j++) assert.equal(half[i][j], (a[i][j] + b[i][j]) / 2);
+    const near = (x, y) => x.forEach((c, i) => c.forEach((v, j) => (j ? assert.ok(Math.abs(v - y[i][j]) < 1e-9) : assert.equal(v, y[i][j]))));
+    near(interpolateCommands(a, b, 0), a);
+    near(interpolateCommands(a, b, 1), b);
+    for (let i = 0; i < a.length; i++) for (let j = 1; j < a[i].length; j++) assert.ok(Math.abs(half[i][j] - (a[i][j] + b[i][j]) / 2) < 1e-9);
     assert.deepEqual(interpolateCommands(half, a, 0), half, 'reverse starts at the visible frame');
     if (notched) { assert.equal(a[1][0], 'C'); assert.ok(a[1][6] > 0 && a[1][6] < 32); }
   }
@@ -447,13 +456,14 @@ test('display-frame driven expansion survives resize and rejects stale or invali
   screen.point = { x: canvas.x + head.headerX + 20, y: 10 };
   controller.poll(100); controller.poll(240);
   const first = animation();
-  assert.equal(first.duration, 360);
+  assert.equal(first.duration, springDuration(NOTCH_SPRINGS.open));
   tick(first.id, 120);
   const middle = frame();
   assert.ok(middle.progress > 0 && middle.progress < 1);
   tick(first.id, 80);
   assert.deepEqual(frame(), middle, 'out-of-order frame cannot rewind the visible shape');
-  ipcMain.emit('topNotch:size', { sender: primary.webContents }, { height: 250 });
+  // A shorter list than the panel's cap changes the open shape mid-motion.
+  ipcMain.emit('topNotch:size', { sender: primary.webContents }, { height: 100 });
   const resumed = animation();
   assert.ok(resumed.id > first.id);
   const resized = frame();
@@ -462,7 +472,7 @@ test('display-frame driven expansion survives resize and rejects stale or invali
   tick(resumed.id, resumed.duration);
   assert.equal(frame().progress, 1);
   assert.equal(primary.opacity, 1);
-  assert.equal(primary.getBounds().height, 282);
+  assert.equal(primary.getBounds().height, notchCanvasBounds({ x: 0, y: 0, width: 381, height: 132 }, { x: 0, y: 0, width: 185, height: 32 }).height);
   tick(undefined, 0);
   assert.equal(frame().progress, 1, 'missing transition is rejected');
 });
@@ -665,7 +675,8 @@ test('layered height caps use current work area without stretching or double sca
     assert.equal(notchMaxHeight(d, g), mainCap);
     assert.equal(notchMaxHeight(d, g, true), detailCap);
     for (const zoom of [0.85, 1, 1.25, 1.5]) {
-      assert.equal(notchBounds(d, g, true, 4000, null, zoom).height, mainCap);
+      assert.equal(notchBounds(d, g, true, 4000, null, zoom).height, Math.round(Math.min(mainCap, NOTCH_METRICS.openHeight * zoom)),
+        'long lists scroll inside the panel, which the usable height can only shorten');
       assert.equal(notchBounds(d, g, true, 100, null, zoom).height, 132,
         'short physical content retains natural height at every zoom');
     }
@@ -680,19 +691,21 @@ test('notch detail side mirrors placement and clamps both placed and measured he
   const f = fixture(t, { notchDetailSide: 'left', notchStyle: 'black' });
   f.controller.setData(buildNotchData(stats(), buildEdgeDockCells(stats()), {}, {}));
   const top = f.windows[0];
-  f.ipcMain.emit('topNotch:size', { sender: top.webContents }, { height: 100, rows: [{ id: 'codex', x: 28, y: 32, width: 280, height: 80 }] });
-  f.screen.point = { x: top.bounds.x + 40, y: 15 };f.controller.poll(1000);f.controller.poll(1200);
-  f.screen.point = { x: top.bounds.x + 60, y: 60 };f.controller.poll(1300);f.controller.poll(1400);
+  // Rows arrive in canvas coordinates; the canvas also holds the panel's shadow.
+  const panel = () => last(top).motion.bodyBox;
+  f.ipcMain.emit('topNotch:size', { sender: top.webContents }, { height: 100, rows: [{ id: 'codex', x: panel().x + 28, y: 32, width: 280, height: 80 }] });
+  f.screen.point = { x: 735, y: 15 };f.controller.poll(1000);f.controller.poll(1200);
+  f.screen.point = { x: top.bounds.x + panel().x + 60, y: 60 };f.controller.poll(1300);f.controller.poll(1400);
   const detail = f.windows[1];
   f.ipcMain.emit('topNotch:bubbleSize', { sender: detail.webContents }, { cellId: 'codex', height: 4000 });
   assert.equal(last(detail).side, 'right', 'tail faces the top list when detail is on its left');
-  assert.ok(detail.bounds.x + detail.bounds.width <= top.bounds.x + 28, 'detail belongs on the left');
+  assert.ok(detail.bounds.x + detail.bounds.width <= top.bounds.x + panel().x + 28, 'detail belongs on the left');
   assert.equal(detail.bounds.height, 570);
   assert.equal(last(detail).placed.height, last(detail).maxCardHeight);
   assert.equal(last(detail).style, 'black');
   f.preferences.notchDetailSide = 'right';f.controller.sync();
   assert.equal(last(detail).side, 'left');
-  assert.ok(detail.bounds.x >= top.bounds.x + top.bounds.width - 28);
+  assert.ok(detail.bounds.x >= top.bounds.x + panel().x + panel().width - 28);
   const small = { ...display, bounds: { x: -1470, y: -200, width: 1470, height: 750 },
     workArea: { x: -1470, y: -167, width: 1470, height: 600 } };
   f.screen.getAllDisplays = () => [small]; f.screen.getPrimaryDisplay = () => small;
@@ -998,11 +1011,11 @@ test('summary minimum follows each screen gap and measured content rather than a
       const longer = notchBounds(display, geometry, false, 180, { left: iconWidth, right: 60 });
       assert.ok(longer.width > minimum.width);
       const leftEar = (minimum.width - gapWidth) / 2;
-      assert.ok(leftEar >= iconWidth + 16 + 4, 'the measured icon and existing clearances fit');
-      assert.ok(leftEar < iconWidth + 16 + 4 + 1, 'no extra fixed content reservation is added');
+      assert.ok(leftEar >= iconWidth + 16 + NOTCH_METRICS.restingFlare, 'the measured icon and existing clearances fit');
+      assert.ok(leftEar < iconWidth + 16 + NOTCH_METRICS.restingFlare + 1, 'no extra fixed content reservation is added');
       assert.ok(Math.abs(minimum.x + minimum.width / 2 - geometry.centerX) <= 0.5);
       assert.ok(Math.abs(longer.x + longer.width / 2 - geometry.centerX) <= 0.5);
-      assert.equal(notchBounds(display, geometry, false, 180, null).width, gapWidth);
+      assert.equal(notchBounds(display, geometry, false, 180, null).width, gapWidth + 2 * NOTCH_METRICS.restingFlare);
     }
   }
 });
@@ -1040,41 +1053,39 @@ test('native geometry refreshes on configuration changes while routine polling r
 });
 
 
-test('approach expansion defaults on, stays local and narrows EdgeDock distance while retaining dwell', (t) => {
-  for (const size of ['small', 'large']) {
-    for (const enabled of [undefined, false, true]) {
-      const f = fixture(t, { notchExpandOnApproach: enabled, notchSize: size });
-      const geometry = last(f.windows[0]).geometry;
-      const y = geometry.y + geometry.height + EDGE_DOCK_METRICS.wakeDepth / 2 - 1;
-      const enter = (point, at) => {
-        f.screen.point = point;
-        f.controller.poll(at);
-        f.controller.poll(at + EDGE_DOCK_TIMING.revealDelayMs - 1);
-        assert.equal(last(f.windows[0]).expanded, false, 'brief passes do not expand');
-        f.controller.poll(at + EDGE_DOCK_TIMING.revealDelayMs);
-      };
-      let at = Date.now();
-      enter({ x: geometry.centerX, y: y + 2 }, at);
-      assert.equal(last(f.windows[0]).expanded, false, 'outside the wake distance');
-      f.screen.point = { x: 20, y: 400 }; f.controller.poll(at += 500);
-      enter({ x: geometry.centerX + geometry.headerWidth / 2 + 1, y }, at += 500);
-      assert.equal(last(f.windows[0]).expanded, false, 'nearby menu items do not trigger');
-      f.screen.point = { x: 20, y: 400 }; f.controller.poll(at += 500);
-      enter({ x: geometry.centerX, y }, at += 500);
-      assert.equal(last(f.windows[0]).expanded, enabled !== false, 'the setting controls the additional physical range');
-      f.screen.point = { x: 20, y: 400 }; f.controller.poll(at += 500);
-      f.controller.poll(at += EDGE_DOCK_TIMING.hideDelayMs);
-      assert.equal(last(f.windows[0]).expanded, false);
-      enter({ x: geometry.centerX, y: geometry.y + geometry.height - 1 }, at + 500);
-      assert.equal(last(f.windows[0]).expanded, true, 'direct contact still opens in either mode');
-    }
-  }
+test('hover grows the entry by default and opens on click; open mode waits for the hover duration', (t) => {
+  let held = false;
+  const f = fixture(t, { notchHoverAction: 'peek' }, { primaryButtonDown: () => held });
+  const top = f.windows[0];
+  const shape = () => {
+    const message = top.messages.filter((m) => m.channel === 'topNotch:motion' || m.payload?.motion?.shape).at(-1);
+    return (message.channel === 'topNotch:motion' ? message.payload : message.payload.motion).shape.d;
+  };
+  const resting = shape();
+  f.screen.point = { x: 735, y: 10 };
+  f.controller.poll(1000);
+  const grown = shape();
+  assert.notEqual(grown, resting, 'hovering the entry grows it');
+  f.controller.poll(5000);
+  assert.equal(last(top).expanded, false, 'growing never opens the panel by itself');
+  f.screen.point = { x: 20, y: 400 }; f.controller.poll(5100);
+  assert.equal(shape(), resting, 'leaving restores the resting outline');
+  f.screen.point = { x: 735, y: 10 }; f.controller.poll(6000);
+  held = true; f.controller.poll(6016);
+  assert.equal(last(top).expanded, true, 'a press on the entry opens it');
+  held = false;
+
+  const open = fixture(t, { notchHoverAction: 'open', notchHoverDelay: 300 });
+  open.screen.point = { x: 735, y: 10 };
+  open.controller.poll(1000); open.controller.poll(1299);
+  assert.equal(last(open.windows[0]).expanded, false, 'brief passes do not open');
+  open.controller.poll(1300);
+  assert.equal(last(open.windows[0]).expanded, true);
 });
 
-
-test('approach expansion follows EdgeDock drag suppression without changing direct contact', (t) => {
+test('full-screen approach follows EdgeDock drag suppression without changing direct contact', (t) => {
   for (const held of [true, null]) {
-    const f = fixture(t, { notchExpandOnApproach: true }, { primaryButtonDown: () => held });
+    const f = fixture(t, {}, { primaryButtonDown: () => held, isFullScreen: () => true });
     const geometry = last(f.windows[0]).geometry;
     const now = Date.now();
     f.screen.point = { x: geometry.centerX, y: geometry.y + geometry.height + 1 };
@@ -1147,7 +1158,7 @@ test('menu avoidance bounds all active summary fields and keeps the camera cente
   const primary = f.windows[0];
   f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 17, right: 600, minimumLeft: 17, minimumRight: 37 } });
   let geometry = last(primary).geometry;
-  assert.equal(geometry.summaryBudget, 41);
+  assert.equal(geometry.summaryBudget, 42);
   assert.equal(geometry.headerWidth, 301, 'raw widths above 220pt are budgeted, not silently mismeasured');
   assert.equal(geometry.gapOffset, (geometry.headerWidth - geometry.gapWidth) / 2);
   f.controller.poll(Date.now() + 1000);
@@ -1160,7 +1171,7 @@ test('menu avoidance bounds all active summary fields and keeps the camera cente
   assert.equal(geometry.headerWidth, 213);
   windows = null;
   f.screen.emit('display-metrics-changed');
-  assert.equal(last(primary).geometry.summaryBudget, 625, 'unknown menu clearance falls back to the screen capacity');
+  assert.equal(last(primary).geometry.summaryBudget, 626, 'unknown menu clearance falls back to the screen capacity');
 });
 
 
@@ -1173,8 +1184,8 @@ test('disabled menu avoidance retains full summary widths and stops menu samplin
   const primary = f.windows[0];
   f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 17, right: 300, minimumLeft: 17, minimumRight: 300 } });
   assert.equal(reads, 0);
-  assert.equal(last(primary).geometry.summaryBudget, 625);
-  assert.equal(last(primary).geometry.headerWidth, 819);
+  assert.equal(last(primary).geometry.summaryBudget, 626);
+  assert.equal(last(primary).geometry.headerWidth, 817);
   f.preferences.notchAvoidMenuBar = true;
   f.controller.poll(Date.now() + 2500);
   assert.equal(reads, 1);
@@ -1183,7 +1194,7 @@ test('disabled menu avoidance retains full summary widths and stops menu samplin
   f.controller.sync();
   f.controller.poll(Date.now() + 5000);
   assert.equal(reads, 1, 'disabled avoidance performs no native menu reads');
-  assert.equal(last(primary).geometry.summaryBudget, 625);
+  assert.equal(last(primary).geometry.summaryBudget, 626);
 });
 
 test('capsules keep their complete summary and skip menu reads regardless of avoidance', (t) => {
@@ -1275,15 +1286,15 @@ test('a single custom label preserves shared formatting and uses the menu budget
   assert.equal(data.summary.items[0].text, trayLayout.resolveTrayLayout(summaryLayout({ notchFollowTray: false, notchCustomLayout: { version: trayLayout.VERSION, items: [item] } }), stats()).items[0].text);
   f.controller.setData(data);assert.equal(reads, 1);
   const primary = f.windows[0];
-  f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 0, right: 41, minimumLeft: 0, minimumRight: 0 } });
-  assert.equal(last(primary).geometry.summaryBudget, 41);
+  f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 0, right: 42, minimumLeft: 0, minimumRight: 0 } });
+  assert.equal(last(primary).geometry.summaryBudget, 42);
   assert.equal(last(primary).geometry.headerWidth, 301);
 });
 
 
 test('full-screen quiet mode retracts ears, retains configuration and restores it on hover and exit', (t) => {
   let full = false, reads = 0;
-  const f = fixture(t, { notchExpandOnApproach: false }, {
+  const f = fixture(t, {}, {
     isFullScreen: d => {
       assert.equal(d.id, 1);
       reads += 1;
@@ -1299,7 +1310,7 @@ test('full-screen quiet mode retracts ears, retains configuration and restores i
   const primary = f.windows[0];
   assert.equal(last(primary).quietFullScreen, true);
   assert.equal(last(primary).summary, null);
-  assert.equal(last(primary).geometry.headerWidth, 179);
+  assert.equal(last(primary).geometry.headerWidth, 179 + 2 * NOTCH_METRICS.restingFlare);
   assert.equal(primary.opacity, 1);
   const count = reads;
   f.controller.poll(now + 100);
@@ -1314,7 +1325,7 @@ test('full-screen quiet mode retracts ears, retains configuration and restores i
   f.controller.poll(now + 500 + EDGE_DOCK_TIMING.hideDelayMs);
   assert.equal(last(primary).expanded, false);
   assert.equal(last(primary).summary, null);
-  assert.equal(last(primary).geometry.headerWidth, 179);
+  assert.equal(last(primary).geometry.headerWidth, 179 + 2 * NOTCH_METRICS.restingFlare);
   full = false;
   f.controller.poll(now + 2000);
   assert.equal(last(primary).summary, data.summary);
@@ -1404,7 +1415,7 @@ test('Notch visibility and refresh settings preserve defaults and explicit switc
 
 test('the full-screen setting saves both checkbox states through its change event', () => {
   const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-  const source = app.slice(app.indexOf("els.notchHideSummaryInFullScreenInput?.addEventListener("), app.indexOf("els.notchExpandOnApproachInput?.addEventListener("));
+  const source = app.slice(app.indexOf("els.notchHideSummaryInFullScreenInput?.addEventListener("), app.indexOf("for (const input of els.notchHoverActionInputs) {"));
   let change;
   const patches = [];
   const input = { checked: false, addEventListener: (_event, callback) => { change = callback; } };
@@ -1488,18 +1499,20 @@ test('Notch reuses EdgeDock haptics once per expansion and visible detail visit'
   const f = fixture(t, { notchHaptic: true }, { performHaptic: (...args) => ticks.push(args) });
   const { controller, screen, windows, ipcMain, preferences } = f;
   const [primary, bubble] = windows;
+  // Rows and pointers sit on the visible panel, inside the shadow-carrying canvas.
+  const offset = last(primary).motion.bodyBox.x;
   const cells = [{ id: 'codex', accounts: [] }, { id: 'claude', accounts: [] }];
   const data = { sessions: [], summary: null, cells };
   const size = { height: 180, rows: [
-    { id: 'codex', x: 28, y: 32, width: 280, height: 70 },
-    { id: 'claude', x: 28, y: 102, width: 280, height: 70 }
+    { id: 'codex', x: offset + 28, y: 32, width: 280, height: 70 },
+    { id: 'claude', x: offset + 28, y: 102, width: 280, height: 70 }
   ] };
   controller.setData(data);
   ipcMain.emit('topNotch:size', { sender: primary.webContents }, size);
   screen.point = { x: 735, y: 10 };
   controller.poll(100); controller.poll(240); controller.poll(260);
   assert.deepEqual(ticks, [['generic', 'default']]);
-  screen.point = { x: primary.bounds.x + 40, y: 50 };
+  screen.point = { x: primary.bounds.x + offset + 40, y: 50 };
   controller.poll(300); controller.poll(370);
   assert.equal(ticks.length, 1, 'waiting for detail measurement does not tick');
   const measure = (id, height = 250) => ipcMain.emit('topNotch:bubbleSize',
@@ -1510,7 +1523,7 @@ test('Notch reuses EdgeDock haptics once per expansion and visible detail visit'
   ipcMain.emit('topNotch:size', { sender: primary.webContents }, size);
   controller.previewScale(1.1); controller.previewScale(1);
   assert.equal(ticks.length, 2, 'repaints, resizing and zoom previews do not tick');
-  screen.point = { x: primary.bounds.x + 40, y: 130 };
+  screen.point = { x: primary.bounds.x + offset + 40, y: 130 };
   controller.poll(400); controller.poll(410); measure('claude');
   assert.equal(last(bubble).cell.id, 'claude');
   assert.equal(ticks.length, 2, 'provider switching inside a visible detail is quiet');
@@ -1521,14 +1534,14 @@ test('Notch reuses EdgeDock haptics once per expansion and visible detail visit'
   assert.equal(last(primary).expanded, false); assert.equal(ticks.length, 2);
   preferences.notchHaptic = false;
   screen.point = { x: 735, y: 10 }; controller.poll(900); controller.poll(1040);
-  screen.point = { x: primary.bounds.x + 40, y: 50 };
+  screen.point = { x: primary.bounds.x + offset + 40, y: 50 };
   controller.poll(1100); controller.poll(1170); measure('codex');
   assert.equal(ticks.length, 2, 'the independent switch disables both Notch triggers');
   preferences.notchHaptic = true; measure('codex'); controller.setData(data);
   assert.equal(ticks.length, 2, 'enabling midway does not replay a visible visit');
   controller.setLocked(true); controller.setLocked(false);
   screen.point = { x: 735, y: 10 }; controller.poll(1300); controller.poll(1440);
-  screen.point = { x: primary.bounds.x + 40, y: 50 };
+  screen.point = { x: primary.bounds.x + offset + 40, y: 50 };
   controller.poll(1500); controller.poll(1570); measure('codex');
   assert.equal(ticks.length, 4, 'a later expansion and new detail visit each tick once');
   const nativeCalls = [];
@@ -1671,8 +1684,8 @@ test('compact entries widen around the same center and reserve the complete list
       assert.ok(closed.width < open.width);
       assert.ok(Math.abs(closed.x + closed.width / 2 - geometry.centerX) <= 0.5);
       assert.ok(Math.abs(open.x + open.width / 2 - geometry.centerX) <= 0.5);
-      assert.equal(open.height, 180, 'no permanent summary row without hardware');
-      assert.ok(open.width >= Math.ceil((EDGE_DOCK_METRICS.bubbleWidth + (geometry.notched ? 2 * EDGE_DOCK_METRICS.shoulder : 0)) * zoom));
+      assert.equal(open.height, Math.round(Math.min(180, NOTCH_METRICS.openHeight * zoom)), 'no permanent summary row without hardware');
+      assert.ok(open.width >= Math.ceil((NOTCH_METRICS.openWidth + (geometry.notched ? 2 * NOTCH_METRICS.openFlare : 0)) * zoom));
     }
   }
   const physicalPill = notchGeometry(display, native, 'pill');
@@ -1694,8 +1707,10 @@ test('compact summary stays together through expansion and restores on reversal'
   f.screen.point={x:display.bounds.width/2,y:42};
   f.controller.poll(10000); f.controller.poll(10200);
   const animation=win.messages.filter(m=>m.channel==='topNotch:animate').at(-1).payload;
-  f.ipcMain.emit('topNotch:frame',{sender:win.webContents},{id:animation.id,elapsed:animation.duration/2});
+  // Early in the spring, before it reaches (and overshoots) the open shape.
+  f.ipcMain.emit('topNotch:frame',{sender:win.webContents},{id:animation.id,elapsed:60});
   const halfway=frame();
+  assert.ok(halfway.progress>0&&halfway.progress<1);
   assert.deepEqual(halfway.summaryEdges,closed.summaryEdges);
   assert.ok(halfway.headerHeight>0&&halfway.headerHeight<32);
   f.ipcMain.emit('topNotch:frame',{sender:win.webContents},{id:animation.id,elapsed:animation.duration});
@@ -1711,8 +1726,9 @@ test('capsule details meet the visible edge on either side without a phantom hea
       f.controller.setData({cells:[{id:'codex',provider:'codex',accounts:[]}],sessions:[],summary:null});
       const y=last(top).geometry.y;
       f.screen.point={x:display.bounds.width/2,y:y+10};f.controller.poll(1000);f.controller.poll(1200);
-      const b=top.getBounds();
-      f.ipcMain.emit('topNotch:size',{sender:top.webContents},{height:100,rows:[{id:'codex',x:30,y:0,width:b.width-60,height:80}]});
+      // The visible capsule, inside the canvas that also carries its shadow.
+      const canvas=top.getBounds(),body=last(top).motion.bodyBox,b={x:canvas.x+body.x,width:body.width};
+      f.ipcMain.emit('topNotch:size',{sender:top.webContents},{height:100,rows:[{id:'codex',x:body.x+30,y:0,width:b.width-60,height:80}]});
       f.screen.point={x:b.x+40,y:y+20};f.controller.poll(1300);f.controller.poll(1400);
       f.ipcMain.emit('topNotch:bubbleSize',{sender:bubble.webContents},{cellId:'codex',height:220});
       const detail=bubble.getBounds();
@@ -1829,7 +1845,7 @@ test('camera-free quiet entries hide the empty shell and remain hoverable', (t) 
 });
 
 
-test('Notch haptics default off and stay independent of side dock settings', (t) => {
+test('Notch haptics default on and stay independent of side dock settings', (t) => {
   for (const edgeDockHaptic of [false, true]) for (const notchHaptic of [undefined, false, true]) {
     let ticks = 0;
     const f = fixture(t, { edgeDockHaptic, notchHaptic }, { performHaptic: () => ticks++ });
@@ -1837,7 +1853,7 @@ test('Notch haptics default off and stay independent of side dock settings', (t)
     f.screen.point = { x: 735, y: 10 };
     f.controller.poll(100); f.controller.poll(100 + EDGE_DOCK_TIMING.revealDelayMs);
     assert.equal(last(f.windows[0]).expanded, true);
-    assert.equal(ticks, notchHaptic === true ? 1 : 0);
+    assert.equal(ticks, notchHaptic === false ? 0 : 1);
   }
 });
 
@@ -2085,7 +2101,7 @@ test('same-shape display transfers land on the destination without a spanning ca
 
 test('unlock during a pre-lock hover dwell starts collapsed with a fresh dwell', (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
-  const f = fixture(t);
+  const f = fixture(t, { notchHoverDelay: 300 });
   const win = f.windows[0], geometry = last(win).geometry;
   f.screen.point = { x: win.bounds.x + geometry.headerX + 20, y: win.bounds.y + 10 };
   f.controller.poll(Date.now());
@@ -2095,9 +2111,9 @@ test('unlock during a pre-lock hover dwell starts collapsed with a fresh dwell',
   assert.equal(last(win).expanded, false, 'the pre-lock dwell does not expand on unlock');
   const resumed = Date.now();
   f.controller.poll(resumed);
-  f.controller.poll(resumed + EDGE_DOCK_TIMING.revealDelayMs - 1);
+  f.controller.poll(resumed + 299);
   assert.equal(last(win).expanded, false);
-  f.controller.poll(resumed + EDGE_DOCK_TIMING.revealDelayMs);
+  f.controller.poll(resumed + 300);
   assert.equal(last(win).expanded, true);
 });
 
@@ -2118,7 +2134,7 @@ test('locking pauses polling and unlock or repeated sync keeps one timer', (t) =
   assert.equal(cursorReads, stopped, 'unlock never starts a disabled entry');
 });
 
-test('Notch shares the dock idle and approach polling cadence', (t) => {
+test('Notch polls at display rate near the menu bar and at the dock idle cadence elsewhere', (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
   const f = fixture(t);
   const reads = [];
@@ -2128,16 +2144,18 @@ test('Notch shares the dock idle and approach polling cadence', (t) => {
   const top = f.windows[0], payload = last(top);
   f.screen.point = { x: top.bounds.x + payload.geometry.headerX + 10, y: top.bounds.y + 10 };
   t.mock.timers.tick(90); assert.equal(reads.at(-1), 10180);
-  t.mock.timers.tick(39); assert.equal(reads.length, 2);
-  t.mock.timers.tick(1); assert.equal(reads.at(-1), 10220);
-  for (let i = 0; i < 3; i++) t.mock.timers.tick(40);
   assert.equal(last(top).expanded, true);
+  // Hover feedback follows the pointer frame by frame near the entry.
+  t.mock.timers.tick(15); assert.equal(reads.length, 2);
+  t.mock.timers.tick(1); assert.equal(reads.at(-1), 10196);
   f.screen.point = { x: 20, y: 400 };
-  for (let i = 0; i < 9; i++) t.mock.timers.tick(40);
+  for (let i = 0; i < 20; i++) t.mock.timers.tick(40);
   assert.equal(last(top).expanded, false);
   const idle = reads.length;
-  t.mock.timers.tick(89); assert.equal(reads.length, idle);
-  t.mock.timers.tick(1); assert.equal(reads.length, idle + 1);
+  while (reads.length === idle) t.mock.timers.tick(1);
+  const start = reads.at(-1);
+  t.mock.timers.tick(89); assert.equal(reads.at(-1), start);
+  t.mock.timers.tick(1); assert.equal(reads.at(-1), start + 90);
 });
 
 test('disable and re-enable recreates renderer windows and rejects their old senders', (t) => {
@@ -2390,9 +2408,9 @@ test('disabling menu avoidance still bounds both ears to the screen capacity', (
   const primary = f.windows[0];
   f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 1000, right: 2000 } });
   const geometry = last(primary).geometry;
-  assert.equal(geometry.summaryBudget, 625);
+  assert.equal(geometry.summaryBudget, 626);
   assert.equal(geometry.headerWidth, 1469);
-  assert.equal((geometry.headerWidth - geometry.gapWidth) / 2 - 20, geometry.summaryBudget);
+  assert.equal((geometry.headerWidth - geometry.gapWidth) / 2 - 16 - NOTCH_METRICS.restingFlare, geometry.summaryBudget);
 });
 
 test('both physical ears use the same finite budget', () => {
@@ -2678,7 +2696,7 @@ test('transformed summary measurements ignore subpixel noise before rounding log
   assert.equal(reports[1].left, 29);
 });
 
-test('summary resizing during reveal preserves the existing motion deadline', (t) => {
+test('summary resizing during reveal continues from the visible frame', (t) => {
   const f = fixture(t, { notchShape: 'pill' }, { reducedMotion: false });
   const top = f.windows[0];
   f.controller.setData({ cells: [], sessions: Object.values(stats().periods.today.sessions), summary: { items: [{ type: 'text', text: '51.7M' }] } });
@@ -2690,7 +2708,9 @@ test('summary resizing during reveal preserves the existing motion deadline', (t
   f.ipcMain.emit('topNotch:size', { sender: top.webContents }, { slots: { left: 17, right: 65, minimumLeft: 17, minimumRight: 65 } });
   const resized = top.messages.filter(message => message.channel === 'topNotch:animate').at(-1).payload;
   assert.notEqual(resized.id, first.id);
-  assert.equal(resized.duration, first.duration - 200, 'measurement must not restart a full 360ms reveal');
+  const motions = top.messages.filter(message => message.channel === 'topNotch:motion').map(message => message.payload);
+  const before = motions.findLast(frame => frame.motionId === first.id);
+  assert.equal(motions.at(-1).progress, before.progress, 'measurement continues from the visible frame instead of restarting the reveal');
   f.ipcMain.emit('topNotch:frame', { sender: top.webContents }, { id: resized.id, elapsed: resized.duration });
   const frame = top.messages.filter(message => message.channel === 'topNotch:motion').at(-1).payload;
   assert.equal(frame.progress, 1);
@@ -2865,7 +2885,7 @@ test('camera-free notch avoidance uses one centered budget and hides an empty re
   });
   f.controller.setData(buildNotchData(stats(), [], { trayContent: 'tokens' }));
   const win = f.windows[0];
-  assert.equal(last(win).geometry.summaryBudget, 290);
+  assert.equal(last(win).geometry.summaryBudget, 292);
   assert.equal(reads, 1);
   f.preferences.notchAvoidMenuBar = false;
   f.controller.sync();
@@ -2924,4 +2944,121 @@ test('both notch windows keep clicks from activating the app, including rebuilt 
   f.preferences.notchEnabled = true; f.controller.sync();
   assert.deepEqual(installed, f.windows);
   assert.equal(installed.filter((win) => !win.destroyed).length, 2);
+});
+
+test('progressive blur fades in under the open panel once its mask lands and tears down with the setting or lock', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
+  let accept = false;
+  const masks = [];
+  const f = fixture(t, {}, { blurAvailable: () => true, applyBlurMask: (_win, mask) => { masks.push(mask); return accept; } });
+  // The blur window is the only one that never loads a renderer.
+  const blur = () => f.windows.find((win) => !win.query && !win.destroyed);
+  assert.equal(blur(), undefined, 'nothing is created while the entry rests');
+  f.screen.point = { x: 735, y: 10 }; f.controller.poll(Date.now());
+  assert.equal(last(f.windows[0]).expanded, true);
+  const win = blur();
+  assert.equal(win.shown, true); assert.equal(win.ignoreMouse, true);
+  assert.equal(win.opacity, 0, 'an unmasked material would be a tinted rectangle');
+  assert.equal(f.windows[0].above, win.getMediaSourceId(), 'the entry stays above its blur');
+  accept = true; t.mock.timers.tick(16);
+  assert.equal(win.opacity, 1, 'a panel that opened in one step still retries its mask');
+  const mask = masks.at(-1);
+  assert.deepEqual([mask.panel.y, mask.panel.width, mask.radius], [0, NOTCH_METRICS.openWidth, NOTCH_METRICS.openRadius], 'the blur follows the panel body, not its flares');
+  assert.ok(mask.panel.x > 0 && mask.width > mask.panel.width && mask.height > mask.panel.height);
+  f.screen.point = { x: 20, y: 500 }; f.controller.poll(Date.now()); t.mock.timers.tick(100); f.controller.poll(Date.now());
+  assert.equal(last(f.windows[0]).expanded, false);
+  assert.equal(win.opacity, 0); assert.equal(win.shown, false);
+  f.preferences.notchProgressiveBlur = false; f.controller.sync();
+  assert.equal(win.destroyed, true, 'turning the setting off releases the window');
+  f.preferences.notchProgressiveBlur = true; f.controller.sync();
+  f.screen.point = { x: 735, y: 10 }; f.controller.poll(Date.now());
+  assert.ok(blur());
+  f.controller.setLocked(true);
+  assert.equal(blur(), undefined, 'locking releases the window');
+});
+
+test('progressive blur gives up quietly when its mask never lands or the system asks for less transparency', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
+  const logs = [];
+  const f = fixture(t, {}, { blurAvailable: () => true, applyBlurMask: () => false, logger: (line) => logs.push(line) });
+  const blur = () => f.windows.find((win) => !win.query && !win.destroyed);
+  f.screen.point = { x: 735, y: 10 }; f.controller.poll(Date.now());
+  for (let i = 0; i < 40; i++) t.mock.timers.tick(16);
+  assert.equal(blur(), undefined);
+  assert.ok(logs.some((line) => line.includes('progressive blur unavailable')));
+  assert.equal(last(f.windows[0]).expanded, true, 'the panel itself is unaffected');
+  const reduced = fixture(t, {}, { blurAvailable: () => false, applyBlurMask: () => true });
+  reduced.screen.point = { x: 735, y: 10 }; reduced.controller.poll(Date.now());
+  assert.equal(reduced.windows.find((win) => !win.query), undefined);
+});
+
+test('the canvas reserves the shadow and spring overshoot, and a half-point camera centre stays exact', () => {
+  const halfPoint = { ...native, left: { origin: { x: 0, y: 924 }, size: { width: 645.5, height: 32 } },
+    right: { origin: { x: 824.5, y: 924 }, size: { width: 645.5, height: 32 } } };
+  const geometry = notchGeometry(display, halfPoint);
+  assert.equal(geometry.centerX, 735);
+  const closed = notchBounds(display, geometry, false, 180, null);
+  const open = notchBounds(display, geometry, true, 800, null);
+  assert.equal(closed.x, 645.5 - NOTCH_METRICS.restingFlare, 'the resting shell hugs the hardware gap');
+  assert.equal(open.x + open.width / 2, 735, 'an odd width starts on a half point instead of rounding off centre');
+  const canvas = notchCanvasBounds(open, closed);
+  for (const value of Object.values(canvas)) assert.ok(Number.isInteger(value), 'only the native canvas is integral');
+  const reach = NOTCH_METRICS.shadowBlur * 3;
+  assert.ok(open.x - canvas.x >= reach && canvas.x + canvas.width - open.x - open.width >= reach);
+  assert.ok(canvas.y + canvas.height - open.y - open.height >= reach + NOTCH_METRICS.shadowDrop);
+  const css = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/notch.css'), 'utf8');
+  assert.match(css, new RegExp(`drop-shadow\\(0 calc\\(${NOTCH_METRICS.shadowDrop}px.*?\\) calc\\(${NOTCH_METRICS.shadowBlur}px`), 'the stylesheet draws the shadow the canvas reserves');
+});
+
+test('notch springs settle on target, overshoot only when opening and carry velocity', () => {
+  for (const [name, spec] of Object.entries(NOTCH_SPRINGS)) {
+    const end = springState(springDuration(spec) / 1000, spec);
+    assert.ok(Math.abs(end.value - 1) < 0.01, `${name} settles within its duration`);
+  }
+  const peak = (spec) => Math.max(...Array.from({ length: 200 }, (_, i) => springState(i / 200, spec).value));
+  assert.ok(peak(NOTCH_SPRINGS.open) > 1 && peak(NOTCH_SPRINGS.open) < 1.1, 'opening overshoots slightly');
+  assert.ok(peak(NOTCH_SPRINGS.close) <= 1 + 1e-9, 'closing never overshoots');
+  assert.ok(springState(0.02, NOTCH_SPRINGS.open, 5).value > springState(0.02, NOTCH_SPRINGS.open, 0).value, 'an interrupted motion keeps its speed');
+});
+
+test('Notch hover, haptic and blur settings default and normalize in both settings paths', () => {
+  const start = mainSource.indexOf('    notchEnabled:', mainSource.indexOf('function defaultSettings('));
+  const defaults = vm.runInNewContext(`({${mainSource.slice(start, mainSource.indexOf('    edgeDockEnabled:', start))}})`, { createDefaultTrayLayout: trayLayout.createDefaultTrayLayout });
+  assert.deepEqual([defaults.notchHoverAction, defaults.notchHoverDelay, defaults.notchHaptic, defaults.notchProgressiveBlur], ['peek', 0, true, true]);
+  assert.equal('notchExpandOnApproach' in defaults, false);
+  const loadedStart = mainSource.indexOf('    merged.notchHoverAction =');
+  const loadedSource = mainSource.slice(loadedStart, mainSource.indexOf('    merged.notchFollowTray =', loadedStart));
+  const patchStart = mainSource.indexOf('      notchHoverAction: normalizeNotchHoverAction(');
+  const patchSource = mainSource.slice(patchStart, mainSource.indexOf('      notchFollowTray:', patchStart));
+  const helpers = { parseBoolean, normalizeNotchHoverAction, normalizeNotchHoverDelay };
+  for (const [input, expected] of [
+    [{}, ['peek', 0, true, true]],
+    [{ notchHoverAction: 'open', notchHoverDelay: 340, notchHaptic: false, notchProgressiveBlur: false }, ['open', 300, false, false]],
+    [{ notchHoverAction: 'hover', notchHoverDelay: 5000, notchHaptic: 'maybe', notchProgressiveBlur: 'maybe' }, ['peek', 0, true, true]]
+  ]) {
+    const merged = { ...input };
+    const context = { merged, patch: { ...input }, settings: defaults, ...helpers };
+    vm.runInNewContext(loadedSource, context);
+    const patched = vm.runInNewContext(`({${patchSource}})`, context);
+    for (const result of [merged, patched]) {
+      assert.deepEqual([result.notchHoverAction, result.notchHoverDelay, result.notchHaptic, result.notchProgressiveBlur], expected);
+    }
+  }
+});
+
+test('the hover duration reset restores the instant default', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const constant = app.slice(app.indexOf('const NOTCH_HOVER_DELAY_DEFAULT_MS'), app.indexOf(';', app.indexOf('const NOTCH_HOVER_DELAY_DEFAULT_MS')) + 1);
+  const start = app.indexOf('els.resetNotchHoverDelayButton?.addEventListener(');
+  const source = app.slice(start, app.indexOf('\n});', start) + 4);
+  let click;
+  const patches = [];
+  const input = { value: '400' };
+  vm.runInNewContext(`${constant.replace('const ', 'var ')}\n${source}`, {
+    els: { notchHoverDelayInput: input, resetNotchHoverDelayButton: { addEventListener: (_event, callback) => { click = callback; } } },
+    saveSettings: (patch) => patches.push({ ...patch }), syncNotchHoverDelayValue() {}
+  });
+  click();
+  assert.equal(input.value, '0');
+  assert.deepEqual(patches, [{ notchHoverDelay: 0 }]);
 });

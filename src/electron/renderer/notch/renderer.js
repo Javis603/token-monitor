@@ -617,7 +617,9 @@
       const list = contentLayer.querySelector('.notch-providers');
       if (!rows || !list) return;
       const zoom = Number(state.payload?.appearance.zoomFactor) || 1;
-      const height = Math.ceil(notchLogicalPoint(rows.getBoundingClientRect().height + parseFloat(getComputedStyle(list).paddingBottom) * zoom));
+      // The list is scaled with the shell during motion; report its open size.
+      const scale = Number(root.style.getPropertyValue('--notch-content-scale')) || 1;
+      const height = Math.ceil(notchLogicalPoint(rows.getBoundingClientRect().height / scale + parseFloat(getComputedStyle(list).paddingBottom) * zoom));
       const origin = root.getBoundingClientRect();
       const rects = [...rows.children].filter((row) => row.dataset.cellId).map((row) => {
         const r = row.getBoundingClientRect();
@@ -643,6 +645,10 @@
       // Shell and content share one progress value.
       const contentProgress = Math.max(0, Math.min(1, frame.progress));
       root.style.setProperty('--notch-content-progress', contentProgress);
+      // Content shows early while opening and is gone before the shell settles
+      // when closing; its size follows the shell's width, overshoot included.
+      root.style.setProperty('--notch-content-opacity', Math.max(0, Math.min(1, frame.progress * 1.4 - 0.2)));
+      root.style.setProperty('--notch-content-scale', Number.isFinite(frame.contentScale) ? frame.contentScale : 1);
       root.style.setProperty('--notch-summary-opacity', 1 - contentProgress);
       const header = contentLayer.querySelector('.notch-summary');
       const geometry = state.payload?.geometry;

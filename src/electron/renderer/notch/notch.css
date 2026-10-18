@@ -2,6 +2,11 @@
 html.notch-black { --glass-rgb: 0,0,0 !important; --text: #fff !important; --muted: rgba(255,255,255,.58) !important; --overlay-rgb: 255,255,255; --line: transparent; }
 html.notch-black .edge-dock-shape-fill { fill: #000; }
 html.notch-black .edge-dock-shape-line { stroke: transparent; }
+/* The open panel lifts off the page on a soft shadow that fades in with it;
+   geometry.js reserves canvas room for the same blur radius and offset. */
+html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
+  filter: drop-shadow(0 calc(6.5px * var(--notch-zoom, 1)) calc(19.5px * var(--notch-zoom, 1)) rgba(0, 0, 0, calc(.59 * var(--notch-content-progress, 0))));
+}
 .edge-dock-root[data-surface="notch"] .edge-dock-content { overflow: hidden; }
 /* Retain the summary in its own compositor layer while the silhouette changes. */
 .notch-summary { opacity: var(--notch-summary-opacity, 1); pointer-events: none; transform: translate3d(0, calc(-1 * var(--notch-progress, 0) * var(--edge-dock-card-enter-shift)), 0); z-index: 1; position: absolute; top: 0; display: grid; align-items: center; flex: 0 0 auto; gap: 0; padding: 0; box-sizing: border-box; }
@@ -21,9 +26,11 @@ html.notch-black .edge-dock-shape-line { stroke: transparent; }
 .notch-bars { flex-direction: column; }
 .notch-bar { background: rgba(var(--overlay-rgb), .18); overflow: hidden; }
 .notch-bar-fill { display: block; height: 100%; background: var(--text); border-radius: inherit; transition: width 420ms cubic-bezier(.2,.8,.2,1); }
-.notch-body { position: absolute; top: var(--notch-header-height, 32px); left: 0; width: 100%; height: var(--notch-body-height, 0px); overflow: hidden; opacity: var(--notch-content-progress, 0); }
-.notch-providers { height: 100%; zoom: var(--notch-zoom, 1); min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 28px; box-sizing: border-box; scrollbar-width: none; }
-.notch-provider-list { transform: translateY(calc((1 - var(--notch-content-progress, 0)) * var(--edge-dock-card-enter-shift))); width: 100%; min-width: 0; margin: 0 auto; }
+.notch-body { position: absolute; top: var(--notch-header-height, 32px); left: 0; width: 100%; height: var(--notch-body-height, 0px); overflow: hidden; opacity: var(--notch-content-opacity, 0); }
+/* Content resolves out of a blur as the panel opens and dissolves back into it. */
+.notch-body { filter: blur(calc((1 - var(--notch-content-progress, 0)) * 10px)); }
+.notch-providers { transform: scale(var(--notch-content-scale, 1)); transform-origin: 50% 0; height: 100%; zoom: var(--notch-zoom, 1); min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 28px; box-sizing: border-box; scrollbar-width: none; }
+.notch-provider-list { width: 100%; min-width: 0; margin: 0 auto; }
 .notch-providers .edge-dock-card { width: 100%; }
 .notch-providers .edge-dock-card + .edge-dock-card { border-top: 1px solid var(--line); }
 .notch-providers .edge-dock-accounts { max-height: none; overflow: visible; }
