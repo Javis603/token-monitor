@@ -29,8 +29,8 @@ test('missing or invalid modes default to sessions without converting the old fo
   for (const mode of ['auto', 'sessions', 'tray', 'custom']) assert.equal(notchSummaryMode({ notchSummaryMode: mode }), mode);
 });
 
-test('Notch TPS follows the shared live, retained-idle and unavailable samples', t => {
-  const f = panelFixture(t), data = payload();
+test('Notch renderer forwards the TPS formatter through live, retained-idle and unavailable states', t => {
+  const f = panelFixture(t, {}, { viaRenderer: true }), data = payload();
   const tracker = createLiveTokenRateGroupTracker({ now: Date.now });
   const period = { timedTokens: 100, timedOutputTokens: 50, timedDurationMs: 1000 };
   const entries = () => [{ id: 'device', period }];

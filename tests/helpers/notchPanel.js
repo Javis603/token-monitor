@@ -47,7 +47,7 @@ class Element {
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
 }
 
-function panelFixture(t, settings = {}) {
+function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.parse('2026-10-18T10:00:00Z') });
   const savedRaf = global.requestAnimationFrame, savedCancel = global.cancelAnimationFrame;
   global.requestAnimationFrame = () => 1; global.cancelAnimationFrame = () => {};
@@ -111,8 +111,21 @@ function panelFixture(t, settings = {}) {
     appearance: () => settings, prefersReducedMotion: () => settings.reduceMotion === true,
     ensureRefreshButton: () => el('button', 'edge-dock-refresh')
   };
-  const panel = createNotchPanel({ document, window, el, t: (key, params) => i18n.translate(state.locale, key, params), state,
-    bridge: { toggleRateMode() {} }, shared });
+  const deps = { document, window, el, t: (key, params) => i18n.translate(state.locale, key, params), state,
+    bridge: { toggleRateMode() {}, onAnimate() {}, onMotion() {} }, shared };
+  let panel;
+  if (viaRenderer) {
+    // Exercise the real dependency handoff instead of giving the panel helpers
+    // directly: the renderer must forward everything its child needs.
+    window.TokenMonitorNotchPanel = { createNotchPanel: options => (panel = createNotchPanel(options)) };
+    const { createNotchRenderer } = require('../../src/electron/renderer/notch/renderer');
+    const previousObserver = global.ResizeObserver;
+    global.ResizeObserver = window.ResizeObserver;
+    try {
+      createNotchRenderer({ ...deps, surface: 'notch', root: el('main'), shapeLayer: el('svg'), contentLayer: el('div'),
+        shared: { ...shared, el, t: deps.t } });
+    } finally { global.ResizeObserver = previousObserver; }
+  } else panel = createNotchPanel(deps);
   t.after(() => panel.suspend());
   return { panel, document, state, settings, rolls, settled, el, overflowText,
     resize: () => resizeObservers.forEach(observer => { if (observer.node) observer.callback(); }),
