@@ -72,6 +72,11 @@ const { collectOmpUsage, readOmpStatsRows, sessionIdentity } = require('../../sr
     parentSessionId: 'root-id',
     sessionRole: 'child'
   });
+  assert.deepEqual(sessionIdentity(String.raw`C:\\Users\\omp\\sessions\\123e4567-e89b-12d3-a456-426614174000.jsonl`), {
+    sessionId: '123e4567-e89b-12d3-a456-426614174000',
+    parentSessionId: '',
+    sessionRole: 'root'
+  });
 
   const rows = readOmpStatsRows({
     statsDbPath: databasePath,
