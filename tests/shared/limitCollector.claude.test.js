@@ -11,13 +11,16 @@ const { aggregateLimits } = require('../../src/shared/limits/core');
 const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider, normalizeClaudeWebCookieInput } = require('../../src/shared/limits/collector');
 const { listClaudeWebOrganizations, runClaudeAuthStatus, touchClaudeAuthPath } = require('../../src/shared/providers/claude/limits');
 
-function fakeSpawnForClaudeUsage(expectedCommand = 'cmd.exe') {
+function fakeSpawnForClaudeUsage(expectedCommand = 'cmd.exe', expectedCwd = null) {
   return (command, args, options) => {
     assert.equal(command, expectedCommand);
     assert.deepEqual(args, ['/d', '/s', '/c', '""claude.cmd" /usage"']);
     assert.equal(options.shell, false);
     assert.equal(options.windowsVerbatimArguments, true);
     assert.equal(options.env.DISABLE_AUTOUPDATER, '1');
+    if (expectedCwd !== null) {
+      assert.equal(options.cwd, expectedCwd);
+    }
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -820,11 +823,13 @@ test('Claude Web authentication failure does not silently fall back to another l
 });
 
 test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is unavailable', async () => {
+  const probeDir = path.join(os.tmpdir(), 'token-monitor-claude-probe-test-win');
   const provider = await fetchClaudeLimits({}, {
     platform: 'win32',
     env: {},
     now: () => Date.parse('2026-06-11T00:00:00Z'),
     claudeCredentialPath: 'C:\\Users\\Javis\\.claude\\.credentials.json',
+    claudeProbeDir: probeDir,
     stat: async () => ({ mtimeMs: 1 }),
     readFile: async () => JSON.stringify({
       claudeAiOauth: {
@@ -839,7 +844,7 @@ test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is
     }),
     existsSync: () => false,
     isClaudeCliAuthenticated: async () => true,
-    spawn: fakeSpawnForClaudeUsage()
+    spawn: fakeSpawnForClaudeUsage('cmd.exe', probeDir)
   });
 
   assert.equal(provider.provider, 'claude');
@@ -849,6 +854,59 @@ test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is
   assert.equal(provider.windows[0].usedPercent, 5);
   assert.equal(provider.windows[1].kind, 'weekly');
   assert.equal(provider.windows[1].usedPercent, 20);
+});
+
+test('Claude CLI probe cleans residual session files from probe directory', async (t) => {
+  const probeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'token-monitor-claude-clean-'));
+  t.after(() => fs.rm(probeDir, { recursive: true, force: true }));
+
+  const provider = await fetchClaudeLimits({}, {
+    platform: 'win32',
+    env: {},
+    now: () => Date.parse('2026-06-11T00:00:00Z'),
+    claudeCredentialPath: 'C:\\Users\\Javis\\.claude\\.credentials.json',
+    claudeProbeDir: probeDir,
+    stat: async () => ({ mtimeMs: 1 }),
+    readFile: async () => JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresAt: Date.parse('2026-06-12T00:00:00Z')
+      }
+    }),
+    fetch: async () => ({ ok: false, status: 500 }),
+    existsSync: () => false,
+    isClaudeCliAuthenticated: async () => true,
+    spawn: (command, args, options) => {
+      // Simulate Claude Code creating residual session files in probeDir/.claude/projects/
+      const projectsDir = path.join(options.cwd, '.claude', 'projects', 'test-project');
+      const nodeFs = require('node:fs');
+      nodeFs.mkdirSync(projectsDir, { recursive: true });
+      nodeFs.writeFileSync(path.join(projectsDir, 'session-abc.jsonl'), '{"type":"session"}\n');
+
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.stdin = { end() {} };
+      child.kill = () => {};
+      process.nextTick(() => {
+        child.stdout.emit('data', Buffer.from([
+          'Current session',
+          '95% left',
+          'Resets 6pm',
+          'Current week',
+          '80% left',
+          'Resets Jun 18'
+        ].join('\n')));
+        child.emit('close', 0);
+      });
+      return child;
+    }
+  });
+
+  assert.equal(provider.status, 'ok');
+  const projectDir = path.join(probeDir, '.claude', 'projects');
+  assert.equal(require('node:fs').existsSync(projectDir), false);
 });
 
 test('Claude limits fall back to CLI usage when OAuth credentials are not discoverable', async () => {
@@ -1073,8 +1131,12 @@ test('Claude CLI commands execute from a Windows path containing spaces', {
     env: { ...process.env, TOKEN_MONITOR_CLAUDE_COMMAND: command },
     now: () => Date.parse('2026-06-13T07:00:00Z'),
     claudeCredentialPath: path.join(fixtureDir, 'missing-credentials.json'),
-    stat: async () => {
-      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    claudeProbeDir: fixtureDir,
+    stat: async (target) => {
+      if (target === path.join(fixtureDir, 'missing-credentials.json')) {
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      }
+      return fs.stat(target);
     },
     readdirSync: () => [],
     readWindowsCredentialSecret: async () => ''

@@ -1804,6 +1804,22 @@ finally:
 `.trim();
 }
 
+function claudeProbeDir(deps = {}) {
+  const probeDir = deps.claudeProbeDir || path.join(os.tmpdir(), 'token-monitor-claude-probe');
+  fs.mkdirSync(probeDir, { recursive: true });
+  return probeDir;
+}
+
+function cleanClaudeProbeSessions(probeDir) {
+  try {
+    const claudeDir = path.join(probeDir, '.claude');
+    const projectsDir = path.join(claudeDir, 'projects');
+    if (fs.existsSync(projectsDir)) {
+      fs.rmSync(projectsDir, { recursive: true, force: true });
+    }
+  } catch (_) {}
+}
+
 async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
   if ((deps.platform || process.platform) === 'win32') {
     throw errorWithStatus('unavailable', 'Claude CLI PTY probe is not available on Windows yet');
@@ -1812,8 +1828,7 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
   const platform = deps.platform || process.platform;
   const command = existingClaudeCommandCandidates(claudeCommandCandidates(env, platform), deps)[0];
   if (!command) throw errorWithStatus('notConfigured', 'Claude CLI not found');
-  const probeDir = deps.claudeProbeDir || path.join(os.tmpdir(), 'token-monitor-claude-probe');
-  fs.mkdirSync(probeDir, { recursive: true });
+  const probeDir = claudeProbeDir(deps);
   const runEnv = {
     ...env,
     DISABLE_AUTOUPDATER: '1',
@@ -1829,13 +1844,16 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
   let lastError = null;
   for (const python of pythonCandidates) {
     try {
-      return await runProcessText(python, ['-c', claudePtyPythonScript()], {
+      const result = await runProcessText(python, ['-c', claudePtyPythonScript()], {
         ...deps,
         env: runEnv,
         cwd: probeDir,
         timeoutMs: Number(deps.claudeCliTimeoutMs || 45000)
       });
+      cleanClaudeProbeSessions(probeDir);
+      return result;
     } catch (error) {
+      cleanClaudeProbeSessions(probeDir);
       lastError = error;
       if (error.code !== 'ENOENT') break;
     }
@@ -1855,7 +1873,7 @@ function claudeDirectInvocation(command, args, platform, env) {
   };
 }
 
-function runClaudeDirectCommand(args, deps = {}, timeoutMs = 12000) {
+function runClaudeDirectCommand(args, deps = {}, timeoutMs = 12000, options = {}) {
   const platform = deps.platform || process.platform;
   const env = deps.env || process.env;
   const command = existingClaudeCommandCandidates(claudeCommandCandidates(env, platform), deps)[0];
@@ -1863,6 +1881,7 @@ function runClaudeDirectCommand(args, deps = {}, timeoutMs = 12000) {
   const invocation = claudeDirectInvocation(command, args, platform, env);
   return runProcessText(invocation.command, invocation.args, {
     ...deps,
+    cwd: options.cwd || deps.cwd,
     env: withClaudePathHints(env, platform),
     closeStdin: true,
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
@@ -1901,12 +1920,21 @@ async function runClaudeUsageCli(deps = {}) {
   return runClaudePtyProbe('/usage', 'currentsession.*?[0-9]{1,3}(?:\\.[0-9]+)?%', deps);
 }
 
-function runClaudeDirectUsageCli(deps = {}) {
-  return runClaudeDirectCommand(
-    ['/usage'],
-    deps,
-    Number(deps.claudeDirectCliTimeoutMs || 12000)
-  );
+async function runClaudeDirectUsageCli(deps = {}) {
+  const probeDir = claudeProbeDir(deps);
+  try {
+    const result = await runClaudeDirectCommand(
+      ['/usage'],
+      deps,
+      Number(deps.claudeDirectCliTimeoutMs || 12000),
+      { cwd: probeDir }
+    );
+    cleanClaudeProbeSessions(probeDir);
+    return result;
+  } catch (error) {
+    cleanClaudeProbeSessions(probeDir);
+    throw error;
+  }
 }
 
 async function touchClaudeAuthPath(deps = {}) {
