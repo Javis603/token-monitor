@@ -1016,7 +1016,6 @@ async function collectUsageOnce(options) {
   const targetClientSet = new Set(targetClients);
   const targetClientsCsv = targetClients.join(',');
   let targetTokscaleClientList = targetClients.filter((client) => !localClients.has(client));
-  let targetTokscaleClientSet = new Set(targetTokscaleClientList);
   let targetTokscaleClients = targetTokscaleClientList.join(',');
   let today = emptyPeriod();
   let month = emptyPeriod();
@@ -1061,7 +1060,6 @@ async function collectUsageOnce(options) {
       ? normalizedClients.split(',').filter((client) => !localClients.has(client)).join(',')
       : normalizedClients;
     targetTokscaleClientList = targetClients.filter((client) => !localClients.has(client));
-    targetTokscaleClientSet = new Set(targetTokscaleClientList);
     targetTokscaleClients = targetTokscaleClientList.join(',');
     ompFallbackUsed = true;
   };
