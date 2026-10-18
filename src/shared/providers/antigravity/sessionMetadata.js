@@ -107,10 +107,16 @@ function readSummaries(dbPath, sqlite, wantedIds) {
     let stmt = null;
     try {
       stmt = db.prepare(
-        'SELECT title, preview, workspace_uris FROM conversation_summaries WHERE conversation_id = ?'
+        'SELECT title, preview, workspace_uris, parent_conversation_id, agent_name FROM conversation_summaries WHERE conversation_id = ?'
       );
     } catch (_) {
-      return null;
+      try {
+        stmt = db.prepare(
+          'SELECT title, preview, workspace_uris FROM conversation_summaries WHERE conversation_id = ?'
+        );
+      } catch (_) {
+        return null;
+      }
     }
 
     for (const id of wantedIds) {
@@ -187,7 +193,8 @@ function resolveSessionMetadata(sessionIds, context = {}) {
       const row = cached.summaries.get(sessionId);
       if (cached.misses.has(sessionId)) continue;
       if (!row) continue;
-      const title = cleanTitle(row?.title) || cleanTitle(row?.preview);
+      const agentName = cleanTitle(row?.agent_name);
+      const title = cleanTitle(row?.title) || cleanTitle(row?.preview) || agentName;
       const key = `antigravity:${sessionId}`;
       const selectedSource = context.metadata?.get(key)?.catalogTitleSource || context.deps?.catalogTitleSources?.[key];
       const validated = stamp && cached.validatedIds.has(sessionId);
@@ -198,12 +205,17 @@ function resolveSessionMetadata(sessionIds, context = {}) {
       if (priorities.has(sessionId) && priorities.get(sessionId) >= priority) continue;
       priorities.set(sessionId, priority);
       const identity = projectFromWorkspaceUris(row?.workspace_uris, context);
+      const parentSessionId = typeof row?.parent_conversation_id === 'string'
+        ? row.parent_conversation_id.trim()
+        : '';
       result.set(sessionId, {
         catalogOnly: true,
         catalogTitle: title || null,
         catalogProjectResolved: true,
         catalogTitleSource: dbPath,
         ...(title ? { title } : {}),
+        ...(parentSessionId && parentSessionId !== sessionId ? { parentSessionId } : {}),
+        ...(agentName ? { agentName } : {}),
         ...(identity || {})
       });
     }

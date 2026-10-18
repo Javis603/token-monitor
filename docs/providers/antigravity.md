@@ -51,7 +51,8 @@ Antigravity session entries are joined against the local `conversation_summaries
 
 For each conversation ID:
 
-- The title is resolved from the `title` column (falling back to `preview` when the title is empty). Titles are trimmed and limited to 96 code points.
+- The title is resolved from the `title` column (falling back to `preview` when the title is empty, and falling back to `agent_name` when both are empty). Titles are trimmed and limited to 96 code points.
+- Subagent relationships are resolved from `parent_conversation_id` when present, populating `parentSessionId` on the session row. This enables grouping of child subagent conversations under their parent in the Sessions and Edge Dock views.
 - A missing project association is resolved from `workspace_uris` (file URLs); later summary changes refresh or clear that association across today/month/all-time and the persisted anchor. Provenance is per period: a native historical project remains authoritative even when Today receives the same project ID from the summary. WSL workspace URLs are decoded as POSIX paths even though the reader runs on Windows.
 - Summary updates preserve transcript activity timestamps, turn state, context and cache observations. `last_modified_time` is not a generation timestamp: renaming a conversation must not make it appear running.
 

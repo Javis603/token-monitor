@@ -144,6 +144,72 @@ test('Antigravity joins conversation_summaries titles by conversation id and see
   assert.equal(periods.today.sessions['antigravity:session-1'].title, 'Renamed auth bug title');
 });
 
+test('Antigravity resolves parent_conversation_id and agent_name from conversation_summaries', { skip: !sqlite }, (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-subagents-'));
+  const dbDir = path.join(home, '.gemini', 'antigravity');
+  fs.mkdirSync(dbDir, { recursive: true });
+  const dbPath = path.join(dbDir, 'conversation_summaries.db');
+  const db = new sqlite.DatabaseSync(dbPath);
+
+  t.after(() => {
+    db.close();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec(`
+    CREATE TABLE conversation_summaries (
+      conversation_id TEXT PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT "",
+      preview TEXT NOT NULL DEFAULT "",
+      workspace_uris TEXT,
+      last_modified_time TEXT,
+      parent_conversation_id TEXT,
+      agent_name TEXT
+    )
+  `);
+
+  const put = db.prepare(`
+    INSERT INTO conversation_summaries
+    (conversation_id, title, preview, workspace_uris, last_modified_time, parent_conversation_id, agent_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  put.run('parent-1', 'Main Task', '', null, null, null, null);
+  put.run('child-1', '', '', null, null, 'parent-1', 'report-humanizer');
+  put.run('child-2', 'Child Task', '', null, null, 'parent-1', 'browser-inspector');
+  put.run('self-parent', 'Self', '', null, null, 'self-parent', null);
+
+  const deps = { sqlite, antigravityTitleCache: new Map() };
+  const context = { home, deps, resolveProjects: false };
+
+  const resolved = resolveSessionMetadata(new Set(['parent-1', 'child-1', 'child-2', 'self-parent']), context);
+  assert.equal(resolved.get('parent-1')?.parentSessionId, undefined);
+  assert.equal(resolved.get('child-1')?.parentSessionId, 'parent-1');
+  assert.equal(resolved.get('child-1')?.agentName, 'report-humanizer');
+  assert.equal(resolved.get('child-2')?.parentSessionId, 'parent-1');
+  assert.equal(resolved.get('child-2')?.agentName, 'browser-inspector');
+  assert.equal(resolved.get('self-parent')?.parentSessionId, undefined, 'self-parent link is ignored');
+
+  const periods = {
+    today: {
+      sessions: {
+        'antigravity:parent-1': { client: 'antigravity', sessionId: 'parent-1' },
+        'antigravity:child-1': { client: 'antigravity', sessionId: 'child-1' },
+        'antigravity:child-2': { client: 'antigravity', sessionId: 'child-2' }
+      }
+    }
+  };
+
+  applySessionMetadata(periods, home, { ...deps, metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set() });
+
+  assert.equal(periods.today.sessions['antigravity:parent-1'].parentSessionId, undefined);
+  assert.equal(periods.today.sessions['antigravity:child-1'].parentSessionId, 'parent-1');
+  assert.equal(periods.today.sessions['antigravity:child-1'].title, 'report-humanizer', 'agent_name falls back as session title when title/preview are missing');
+  assert.equal(periods.today.sessions['antigravity:child-2'].parentSessionId, 'parent-1');
+  assert.equal(periods.today.sessions['antigravity:child-2'].title, 'Child Task', 'explicit title takes precedence over agent_name');
+});
+
 test('Antigravity returns empty when database or table is missing', { skip: !sqlite }, (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-empty-'));
   t.after(() => {
