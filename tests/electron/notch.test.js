@@ -3062,3 +3062,83 @@ test('the hover duration reset restores the instant default', () => {
   assert.equal(input.value, '0');
   assert.deepEqual(patches, [{ notchHoverDelay: 0 }]);
 });
+
+test('a pending blur retry repaints the current layout, not the one it was scheduled for', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
+  let accept = false;
+  const f = fixture(t, {}, { blurAvailable: () => true, applyBlurMask: () => accept });
+  f.screen.point = { x: 735, y: 10 }; f.controller.poll(Date.now());
+  const win = f.windows.find((w) => !w.query && !w.destroyed);
+  const first = { ...win.getBounds() };
+  // The first mask misses and a retry is queued; a shorter list then lands a mask.
+  accept = true;
+  f.ipcMain.emit('topNotch:size', { sender: f.windows[0].webContents }, { height: 40 });
+  const resized = { ...win.getBounds() };
+  assert.ok(resized.height < first.height);
+  t.mock.timers.tick(16); t.mock.timers.tick(1600);
+  assert.deepEqual(win.getBounds(), resized, 'the queued retry cannot restore the stale bounds');
+  assert.equal(win.opacity, 1);
+});
+
+test('a blur given up on stays off across settings saves until it is switched off and on', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
+  let calls = 0;
+  const f = fixture(t, {}, { blurAvailable: () => true, applyBlurMask: () => { calls++; return false; }, logger: () => {} });
+  const blur = () => f.windows.find((w) => !w.query && !w.destroyed);
+  const reopen = () => {
+    f.screen.point = { x: 20, y: 500 }; f.controller.poll(Date.now()); t.mock.timers.tick(100); f.controller.poll(Date.now());
+    f.screen.point = { x: 735, y: 10 }; f.controller.poll(Date.now());
+    for (let i = 0; i < 40; i++) t.mock.timers.tick(16);
+  };
+  f.screen.point = { x: 735, y: 10 }; f.controller.poll(Date.now());
+  for (let i = 0; i < 40; i++) t.mock.timers.tick(16);
+  assert.equal(calls, 31); assert.equal(blur(), undefined);
+  f.controller.sync(); reopen();
+  assert.equal(calls, 31, 'an ordinary settings save does not start another round');
+  f.preferences.notchProgressiveBlur = false; f.controller.sync();
+  f.preferences.notchProgressiveBlur = true; f.controller.sync(); reopen();
+  assert.ok(calls > 31, 'switching the blur off and on tries again');
+});
+
+test('a pointer on a display above the notch keeps the idle poll cadence', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
+  const f = fixture(t);
+  const reads = [];
+  f.screen.getCursorScreenPoint = () => { reads.push(Date.now()); return f.screen.point; };
+  // Directly above the notch, on a screen arranged over the built-in one.
+  f.screen.point = { x: 735, y: -500 };
+  t.mock.timers.tick(90); assert.deepEqual(reads, [10090]);
+  t.mock.timers.tick(89); assert.equal(reads.length, 1, 'no display-rate polling off this display');
+  t.mock.timers.tick(1); assert.deepEqual(reads, [10090, 10180]);
+});
+
+test('in full screen the default Grow mode grows from the approach band and opens on click', (t) => {
+  let held = false;
+  const f = fixture(t, { notchHoverAction: 'peek' }, { isFullScreen: () => true, primaryButtonDown: () => held });
+  const top = f.windows[0];
+  const shape = () => {
+    const message = top.messages.filter((m) => m.channel === 'topNotch:motion' || m.payload?.motion?.shape).at(-1);
+    return (message.channel === 'topNotch:motion' ? message.payload : message.payload.motion).shape.d;
+  };
+  f.controller.poll(1000);
+  const geometry = last(top).geometry, resting = shape();
+  f.screen.point = { x: geometry.centerX, y: geometry.y + geometry.height + 1 };
+  f.controller.poll(2000); f.controller.poll(7000);
+  assert.notEqual(shape(), resting, 'approaching grows the entry');
+  assert.equal(last(top).expanded, false, 'Grow mode never opens on approach alone');
+  held = true; f.controller.poll(7016);
+  assert.equal(last(top).expanded, true, 'a press on the grown entry opens it');
+});
+
+test('an unreadable button state falls back to opening on hover in Grow mode', (t) => {
+  const f = fixture(t, { notchHoverAction: 'peek', notchHoverDelay: 200 }, { primaryButtonDown: () => null });
+  f.screen.point = { x: 735, y: 10 };
+  f.controller.poll(1000); f.controller.poll(1199);
+  assert.equal(last(f.windows[0]).expanded, false);
+  f.controller.poll(1200);
+  assert.equal(last(f.windows[0]).expanded, true, 'the entry stays reachable without a click');
+  const readable = fixture(t, { notchHoverAction: 'peek' }, { primaryButtonDown: () => false });
+  readable.screen.point = { x: 735, y: 10 };
+  readable.controller.poll(1000); readable.controller.poll(9000);
+  assert.equal(last(readable.windows[0]).expanded, false, 'a readable button keeps Grow mode');
+});

@@ -98,7 +98,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   let enterAt = null, leaveAt = null, rowAt = null, hoveredId = null, detailId = null;
   let bubbleHeight = 180, bubblePlaced = null, bubbleBounds = null, detailVisible = false;
   let pollTimer = null, motion = null, screenListeners = false, nearTop = false, buttonDown = false;
-  let blurWindow = null, blurMaskKey = '', blurOpacity = -1, blurAttempts = 0, blurFailed = false, blurRetry = null;
+  let blurWindow = null, blurMaskKey = '', blurOpacity = -1, blurAttempts = 0, blurFailed = false, blurRetry = null, blurCurrent = null;
   let motionGeneration = 0, refreshInFlight = null, refreshEpoch = 0;
   let fullScreen = false, fullScreenCheckedAt = -Infinity, fullScreenDisplayId = null;
   let progress = 0, commands = null, frame = null, layoutKey = '', viewport = null;
@@ -347,7 +347,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
 
   function destroyBlur() {
     const win = blurWindow;
-    clearTimeout(blurRetry); blurRetry = null;
+    clearTimeout(blurRetry); blurRetry = null; blurCurrent = null;
     blurWindow = null; blurMaskKey = ''; blurOpacity = -1;
     if (alive(win)) win.destroy();
   }
@@ -373,6 +373,9 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const opacity = Math.round(Math.max(0, Math.min(1, value)) * 100) / 100;
     if (!blurEnabled() || blurFailed || !current) { if (alive(blurWindow)) destroyBlur(); return; }
     if (opacity === 0 && !alive(blurWindow)) return;
+    // A pending retry repaints whatever layout is current by then, never the
+    // one it was scheduled for.
+    blurCurrent = current;
     const win = ensureBlur();
     const flare = current.geometry.notched ? NOTCH_METRICS.openFlare * zoom() : 0;
     const panel = { x: current.open.x + flare, y: current.open.y, width: current.open.width - 2 * flare, height: current.open.height };
@@ -398,9 +401,10 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
         if (++blurAttempts > 30) { blurFailed = true; destroyBlur(); logger('[top-notch] progressive blur unavailable'); return; }
         // Animation frames retry on their own; a panel that opened in one step,
         // as under reduced motion, has no next frame to retry on.
-        if (!blurRetry) blurRetry = setTimeout(() => { blurRetry = null; paintBlur(current, progress); }, 16);
+        if (!blurRetry) blurRetry = setTimeout(() => { blurRetry = null; paintBlur(blurCurrent, progress); }, 16);
         return;
       }
+      clearTimeout(blurRetry); blurRetry = null;
       blurMaskKey = key;
     }
     if (!blurMaskKey || opacity === blurOpacity) return;
@@ -630,21 +634,27 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const entry = peeked ? notchPeekBounds(closed) : closed;
     const trigger = { ...entry, height: entry.height + (approach ? M.wakeDepth / 2 : 0) };
     const onEntry = rectContains(entry, point);
-    const nearEntry = approach && rectContains(trigger, point) && primaryButtonDown() === false;
+    // null: the button state is unreadable (no native bridge).
+    const button = primaryButtonDown();
+    const nearEntry = approach && rectContains(trigger, point) && button === false;
     const inside = (expanded ? rectContains(current.open, point) : onEntry || nearEntry) || inDetail || inCorridor;
-    nearTop = point.y - current.display.bounds.y < NEAR_TOP_DEPTH && Math.abs(point.x - current.geometry.centerX) < current.canvas.width;
+    const depth = point.y - current.display.bounds.y;
+    nearTop = depth >= 0 && depth < NEAR_TOP_DEPTH && Math.abs(point.x - current.geometry.centerX) < current.canvas.width;
     // Transparent parts of the stable canvas must not swallow desktop clicks.
     ignoreMouse('notch', !expanded || !rectContains(current.open, point));
     // The resting entry never takes the click itself: a window that receives
     // it activates the whole app. A press that starts over the entry opens it.
-    const pressed = primaryButtonDown() === true;
+    const pressed = button === true;
     const pressedOnEntry = pressed && !buttonDown && onEntry;
     buttonDown = pressed;
     setPeeked(!expanded && (onEntry || nearEntry));
     if (pressedOnEntry && !expanded) setExpanded(true);
     if (inside) {
       leaveAt = null;
-      if (!expanded && normalizeNotchHoverAction(settings().notchHoverAction) === 'open') {
+      // Without a readable button a grown entry could never be clicked open,
+      // so hovering opens it instead.
+      const action = button === null ? 'open' : normalizeNotchHoverAction(settings().notchHoverAction);
+      if (!expanded && action === 'open') {
         if (enterAt === null) enterAt = now;
         if (now - enterAt >= normalizeNotchHoverDelay(settings().notchHoverDelay)) setExpanded(true);
       }
@@ -743,7 +753,9 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
           .catch(error => logger(`[top-notch] ${s} load failed: ${error.message}`));
       }
     }
-    blurFailed = false;
+    // A blur given up on stays off until the setting or Reduce Transparency
+    // turns it off and on again; ordinary settings saves do not retry it.
+    if (settings().notchProgressiveBlur === false || blurAvailable() !== true) blurFailed = false;
     if (!blurEnabled()) destroyBlur();
     if (!screenListeners) { for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, invalidateGeometry); screenListeners = true; }
     windows.bubble.webContents.setZoomFactor?.(zoom());

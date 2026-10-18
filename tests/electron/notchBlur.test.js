@@ -57,3 +57,11 @@ test('progressive blur bridge is macOS-only and tolerates missing native pieces'
   assert.equal(applyProgressiveBlur(win, masks, { platform: 'darwin', api: { apply: () => { throw new Error('missing'); } } }), false);
   assert.equal(applyProgressiveBlur(win, masks, { platform: 'darwin', api: { apply: () => 'yes' } }), false);
 });
+
+test('numberWithBool is sent through a BOOL argument binding', () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../src/electron/notch/macProgressiveBlur.js'), 'utf8');
+  // A double travels in a floating-point register; the BOOL is read from an integer one.
+  assert.doesNotMatch(source, /sendDouble\([^)]*numberWithBool/);
+  assert.match(source, /objc\.func\('objc_msgSend', 'uintptr_t', \['uintptr_t', 'uintptr_t', 'bool'\]\)/);
+  assert.match(source, /sendBoolArg\(classes\.number, sel\('numberWithBool:'\), true\)/);
+});

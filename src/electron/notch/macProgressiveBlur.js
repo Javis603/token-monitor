@@ -25,6 +25,7 @@ function createApi(koffi) {
   const sendBool = objc.func('objc_msgSend', 'bool', ['uintptr_t', 'uintptr_t', 'uintptr_t']);
   const sendSetBool = objc.func('objc_msgSend', 'void', ['uintptr_t', 'uintptr_t', 'bool']);
   const sendDouble = objc.func('objc_msgSend', 'uintptr_t', ['uintptr_t', 'uintptr_t', 'double']);
+  const sendBoolArg = objc.func('objc_msgSend', 'uintptr_t', ['uintptr_t', 'uintptr_t', 'bool']);
   const sendString = objc.func('objc_msgSend', 'uintptr_t', ['uintptr_t', 'uintptr_t', 'str']);
   const sendBytes = objc.func('objc_msgSend', 'uintptr_t', ['uintptr_t', 'uintptr_t', 'void *', 'uint64_t']);
   const sendImageRect = objc.func('objc_msgSend', 'uintptr_t', ['uintptr_t', 'uintptr_t', 'uintptr_t', 'uintptr_t', 'uintptr_t']);
@@ -77,7 +78,7 @@ function createApi(koffi) {
       if (!cgMask || !filter) { sendVoid(mask, sel('release')); sendVoid(alpha, sel('release')); return false; }
       sendPair(filter, sel('setValue:forKey:'), sendDouble(classes.number, sel('numberWithDouble:'), radius), string('inputRadius'));
       sendPair(filter, sel('setValue:forKey:'), cgMask, string('inputMaskImage'));
-      sendPair(filter, sel('setValue:forKey:'), sendDouble(classes.number, sel('numberWithBool:'), 1), string('inputNormalizeEdges'));
+      sendPair(filter, sel('setValue:forKey:'), sendBoolArg(classes.number, sel('numberWithBool:'), true), string('inputNormalizeEdges'));
       // The material samples the desktop at an eighth of its resolution, which
       // softens text even where the mask asks for no blur; full-resolution
       // sampling keeps the edge of the fade crisp.
