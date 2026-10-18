@@ -13,7 +13,7 @@ const { NOTCH_PANEL_STAT_ITEMS, notchLimitItems, notchPanelItems, notchWeek } = 
 // its own data and interaction coverage in notchPanel.test.js.
 function buildNotchData(stats, cells, settings, options) {
   const preferences = Object.create(null, Object.getOwnPropertyDescriptors(settings || {}));
-  if (preferences.notchFollowTray === undefined) preferences.notchFollowTray = true;
+  if (preferences.notchSummaryMode === undefined) preferences.notchSummaryMode = 'tray';
   return projectNotchData(stats, cells, preferences, options);
 }
 const { EDGE_DOCK_TIMING, EDGE_DOCK_METRICS } = require('../../src/electron/edgeDock/geometry');
@@ -293,7 +293,7 @@ test('fixed provider custom fields remain visible after every task ends', (t) =>
   const icon = trayLayout.createTrayLayoutItem('providerIcon');
   const percent = trayLayout.createTrayLayoutItem('percent');
   icon.source.provider = percent.source.provider = 'codex';
-  const settings = { notchSummaryMode: 'custom', notchFollowTray: false, notchCustomLayout: { version: trayLayout.VERSION, items: [icon, percent] } };
+  const settings = { notchSummaryMode: 'custom', notchCustomLayout: { version: trayLayout.VERSION, items: [icon, percent] } };
   const data = buildNotchData(input, [], settings);
   assert.equal(data.summary.items[0].provider, 'codex');
   assert.equal(data.summary.items[0].providerCell.remainingPercent, 67);
@@ -390,8 +390,8 @@ test('empty custom summary hides both ears while retaining provider data and hov
   const input = stats();
   const cells = buildEdgeDockCells(input);
   for (const settings of [
-    { notchSummaryMode: 'custom', notchFollowTray: false, notchCustomLayout: { version: 3, items: [] } },
-    { notchFollowTray: true, trayContent: 'custom', trayCustomLayout: { version: 3, items: [] } }
+    { notchSummaryMode: 'custom', notchCustomLayout: { version: 3, items: [] } },
+    { notchSummaryMode: 'tray', trayContent: 'custom', trayCustomLayout: { version: 3, items: [] } }
   ]) {
     const data = buildNotchData(input, cells, settings);
     assert.equal(data.summary, null);
@@ -419,10 +419,10 @@ test('notch summary switch preserves custom configuration, provider data and tra
   const input = stats();
   const cells = buildEdgeDockCells(input);
   const layout = trayLayout.createDefaultTrayLayout();
-  for (const followTray of [true, false]) {
-    const settings = { notchFollowTray: followTray, notchCustomLayout: layout, trayContent: 'tokens', showTrayIcon: false };
+  for (const summaryMode of ['tray', 'custom']) {
+    const settings = { notchSummaryMode: summaryMode, notchCustomLayout: layout, trayContent: 'tokens', showTrayIcon: false };
     const before = JSON.stringify(settings);
-    assert.ok(buildNotchData(input, cells, settings).summary, 'older preferences default to showing summary');
+    assert.ok(buildNotchData(input, cells, settings).summary, 'both explicit summary modes show their configured content');
     const hidden = buildNotchData(input, cells, { ...settings, notchSummaryEnabled: false });
     assert.equal(hidden.summary, null);
     assert.equal(hidden.cells, cells);
@@ -434,8 +434,8 @@ test('notch summary switch preserves custom configuration, provider data and tra
 test('custom top layout is independent of tray layout and carries raw animation values', () => {
   const layout = { version: trayLayout.VERSION, items: [trayLayout.createTrayLayoutItem('tokens')] };
   const input = stats();
-  const data = buildNotchData(input, [], { notchSummaryMode: 'custom', notchFollowTray: false, notchCustomLayout: layout, trayContent: 'icon' });
-  assert.deepEqual(summaryLayout({ notchSummaryMode: 'custom', notchFollowTray: false, notchCustomLayout: layout }), trayLayout.normalizeTrayLayout(layout));
+  const data = buildNotchData(input, [], { notchSummaryMode: 'custom', notchCustomLayout: layout, trayContent: 'icon' });
+  assert.deepEqual(summaryLayout({ notchSummaryMode: 'custom', notchCustomLayout: layout }), trayLayout.normalizeTrayLayout(layout));
   assert.ok(data.summary.items.some((item) => item.measure?.value === 100));
   assert.equal(summaryLayout({ trayContent: 'icon' }).items.length, 1);
 });
@@ -1249,7 +1249,7 @@ test('embedded summary icons use the tray preferred row and retain provider stat
       const item = trayLayout.createTrayLayoutItem(style);
       item.icon = icon;
       item.rows = [{ provider: 'codex', window: 'primary', metric: 'percent' }, { provider: 'claude', window: 'primary', metric: 'percent' }];
-      const data = buildNotchData(input, [], { notchSummaryMode: 'custom', notchFollowTray: false, notchCustomLayout: { version: trayLayout.VERSION, items: [item] } });
+      const data = buildNotchData(input, [], { notchSummaryMode: 'custom', notchCustomLayout: { version: trayLayout.VERSION, items: [item] } });
       const output = data.summary.items[0];
       assert.equal(output.iconProvider, expected);
       if (expected && expected !== 'app') assert.equal(output.providerCell.provider, expected);
@@ -1261,7 +1261,7 @@ test('summary clock preserves shared percent-reset headlines and updates without
   const input = stats(), now = Date.parse('2026-10-09T00:00:00Z');
   input.limits.providers[0].windows[0].resetsAt = new Date(now + 54 * 60_000).toISOString();
   const item = trayLayout.createTrayLayoutItem('percentReset');item.source.provider = 'codex';
-  const summary = buildNotchData(input, [], { notchSummaryMode: 'custom', notchFollowTray: false, notchCustomLayout: { version: trayLayout.VERSION, items: [item] } }, { nowMs: now }).summary;
+  const summary = buildNotchData(input, [], { notchSummaryMode: 'custom', notchCustomLayout: { version: trayLayout.VERSION, items: [item] } }, { nowMs: now }).summary;
   assert.equal(summary.needsClock, true);
   const row = summary.items[0];
   assert.equal(row.clock.headline, '67%');
@@ -1284,8 +1284,8 @@ test('a single custom label preserves shared formatting and uses the menu budget
   let reads = 0;
   const f = fixture(t, {}, { readMenuWindows: () => { reads += 1; return [{ id: 7, x: 894, y: 0, width: 24, height: 33 }]; } });
   const item = trayLayout.createTrayLayoutItem('customText');item.text = 'Long label '.repeat(4);
-  const data = buildNotchData(stats(), [], { notchSummaryMode: 'custom', notchFollowTray: false, notchCustomLayout: { version: trayLayout.VERSION, items: [item] } });
-  assert.equal(data.summary.items[0].text, trayLayout.resolveTrayLayout(summaryLayout({ notchSummaryMode: 'custom', notchFollowTray: false, notchCustomLayout: { version: trayLayout.VERSION, items: [item] } }), stats()).items[0].text);
+  const data = buildNotchData(stats(), [], { notchSummaryMode: 'custom', notchCustomLayout: { version: trayLayout.VERSION, items: [item] } });
+  assert.equal(data.summary.items[0].text, trayLayout.resolveTrayLayout(summaryLayout({ notchSummaryMode: 'custom', notchCustomLayout: { version: trayLayout.VERSION, items: [item] } }), stats()).items[0].text);
   f.controller.setData(data);assert.equal(reads, 1);
   const primary = f.windows[0];
   f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 0, right: 42, minimumLeft: 0, minimumRight: 0 } });
@@ -1400,9 +1400,9 @@ test('Notch visibility and refresh settings preserve defaults and explicit switc
   assert.equal(defaults.notchHideSummaryInFullScreen, true);
   assert.equal(defaults.notchAvoidMenuBar, true);
   assert.equal(defaults.notchRefreshEnabled, false);
-  const loadedSource = mainSource.slice(mainSource.indexOf('    merged.notchAvoidMenuBar ='), mainSource.indexOf('    merged.notchFollowTray ='));
+  const loadedSource = mainSource.slice(mainSource.indexOf('    merged.notchAvoidMenuBar ='), mainSource.indexOf('    merged.notchSummaryMode ='));
   const patchStart = mainSource.indexOf('      notchAvoidMenuBar: parseBoolean(');
-  const patchSource = mainSource.slice(patchStart, mainSource.indexOf('      notchFollowTray:', patchStart));
+  const patchSource = mainSource.slice(patchStart, mainSource.indexOf('      notchSummaryMode:', patchStart));
   for (const [hide, refresh, avoid] of [[undefined, undefined, undefined], [false, true, false], [true, false, true]]) {
     const merged = { notchHideSummaryInFullScreen: hide, notchRefreshEnabled: refresh, notchAvoidMenuBar: avoid };
     const context = { merged, patch: { ...merged }, settings: defaults, parseBoolean };
@@ -1835,7 +1835,7 @@ test('camera-free quiet entries hide the empty shell and remain hoverable', (t) 
     const input = stats();
     if (!active) for (const session of Object.values(input.periods.today.sessions)) session.turnEnded = true;
     f.controller.setData(buildNotchData(input, [{ id: 'codex', provider: 'codex', accounts: [] }], {
-      notchSummaryEnabled: !active, notchSummaryMode: 'custom', notchFollowTray: false, notchCustomLayout: { version: 3, items: [] }
+      notchSummaryEnabled: !active, notchSummaryMode: 'custom', notchCustomLayout: { version: 3, items: [] }
     }));
     assert.equal(primary.opacity, 0, 'empty custom content or summary off leaves no empty shell');
     const g = last(primary).geometry;
@@ -2262,7 +2262,7 @@ test('disabled summary skips layout resolution while retaining provider data', (
   const stats = { periods: { today: { sessions: {
     live: { sessionId: 'live', client: 'codex', lastUsedAt: new Date().toISOString(), totalTokens: 50 }
   } } } };
-  const settings = { notchSummaryEnabled: false, notchFollowTray: false,
+  const settings = { notchSummaryEnabled: false, notchSummaryMode: 'custom',
     get notchCustomLayout() { throw new Error('disabled layout must not be read'); } };
   const data = buildNotchData(stats, cells, settings);
   assert.equal(data.summary, null);
@@ -2327,7 +2327,7 @@ test('summary readings and standalone rings follow the same pending or active Co
   const reading = trayLayout.createTrayLayoutItem('percent');
   reading.source.provider = 'codex';
   reading.source.accountMode = 'active';
-  const preferences = { deviceId: 'here', currency: 'USD', notchFollowTray: false,
+  const preferences = { deviceId: 'here', currency: 'USD', notchSummaryMode: 'custom',
     notchCustomLayout: { version: trayLayout.VERSION, items: [icon, reading] } };
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const code = main.slice(main.indexOf('function notchDataFor('), main.indexOf('function toggleDockRateMode('));
@@ -2441,7 +2441,7 @@ test('independent notch rate preview joins shared sampling only on enabled macOS
   const rate = trayLayout.createTrayLayoutItem('liveTokenRate');
   const state = { appInfo: { platform: 'darwin' }, settings: {
     trayContent: 'tokens', floatingBubbleEnabled: false, notchEnabled: true,
-    notchSummaryMode: 'custom', notchFollowTray: false, notchCustomLayout: { version: trayLayout.VERSION, items: [rate] }
+    notchSummaryMode: 'custom', notchCustomLayout: { version: trayLayout.VERSION, items: [rate] }
   } };
   const items = vm.runInNewContext(`${code}; displayLiveTokenRateItems`, { state, trayLayoutApi: trayLayout });
   assert.equal(items().length, 1);
@@ -2518,7 +2518,7 @@ test('restoring a rate summary starts a new baseline instead of reporting usage 
   const tokenRateApi = require('../../src/electron/renderer/tokenRatePresentation');
   const rate = trayLayout.createTrayLayoutItem('liveTokenRate');
   const tokens = trayLayout.createTrayLayoutItem('tokens');
-  const preferences = { notchFollowTray: false, deviceId: 'here',
+  const preferences = { notchSummaryMode: 'custom', deviceId: 'here',
     notchCustomLayout: { version: trayLayout.VERSION, items: [rate] } };
   let now = 0;
   const context = {
@@ -2935,9 +2935,9 @@ test('Notch hover, haptic and blur settings default and normalize in both settin
   assert.deepEqual([defaults.notchHoverAction, defaults.notchHoverDelay, defaults.notchHaptic, defaults.notchProgressiveBlur], ['peek', 0, true, true]);
   assert.equal('notchExpandOnApproach' in defaults, false);
   const loadedStart = mainSource.indexOf('    merged.notchHoverAction =');
-  const loadedSource = mainSource.slice(loadedStart, mainSource.indexOf('    merged.notchFollowTray =', loadedStart));
+  const loadedSource = mainSource.slice(loadedStart, mainSource.indexOf('    merged.notchSummaryMode =', loadedStart));
   const patchStart = mainSource.indexOf('      notchHoverAction: normalizeNotchHoverAction(');
-  const patchSource = mainSource.slice(patchStart, mainSource.indexOf('      notchFollowTray:', patchStart));
+  const patchSource = mainSource.slice(patchStart, mainSource.indexOf('      notchSummaryMode:', patchStart));
   const helpers = { parseBoolean, normalizeNotchHoverAction, normalizeNotchHoverDelay };
   for (const [input, expected] of [
     [{}, ['peek', 0, true, true]],

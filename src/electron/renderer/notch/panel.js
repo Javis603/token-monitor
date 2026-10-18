@@ -44,7 +44,7 @@
   }
 
   function createNotchPanel({ document, window, el, t, state, bridge, shared }) {
-    const { markNode, hasMask, providerLabel, limitProviderColor, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost,
+    const { markNode, hasMask, providerLabel, limitProviderColor, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, formatRate,
       appearance, prefersReducedMotion, readableColor = color => color, limitAccountTitle, overflowText, limitWindowsView } = shared;
     const presentation = window.TokenMonitorEdgeDockPresentation;
     const trayText = window.TokenMonitorTrayText;
@@ -261,13 +261,17 @@
       if (statusKey === key) return;
       statusKey = key;
       status.replaceChildren();
-      if (rate && !rate.idle && Number.isFinite(rate.rate) && rate.rate > 0) {
+      if (rate) {
+        const hasSample = Number.isFinite(rate.rate);
+        const idle = !hasSample || rate.idle === true;
         const reading = el('button', 'notch-rate');
         reading.type = 'button';
-        reading.append(el('span', 'notch-live-dot'), text('notch-rate-value', trayText.formatCompactNumber(rate.rate, {
-          compactTokenUnits: appearance().compactTokenUnits, locale: locale()
-        })), text('notch-rate-unit', rate.rateMode === 'burn' ? 'TPM' : 'tok/s'));
-        reading.title = t('notch.rateToggle');
+        reading.classList.toggle('is-idle', idle);
+        const value = hasSample ? formatRate(rate.rate) : '—';
+        const unit = rate.rateMode === 'burn' ? 'TPM' : 'tok/s';
+        reading.append(el('span', 'notch-live-dot'), text('notch-rate-value', value), text('notch-rate-unit', unit));
+        reading.title = `${t(!hasSample ? 'edgeDock.rate.noSample' : idle ? 'edgeDock.rate.idle' : 'edgeDock.rate.live')} · ${t('notch.rateToggle')}`;
+        reading.setAttribute('aria-label', `${value} ${unit} · ${reading.title}`);
         activateOnPress(reading, () => bridge.toggleRateMode());
         status.append(reading);
       }

@@ -167,13 +167,13 @@
                             <label id="notchRunningIndicatorRow" class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.iconRings">Quota &amp; activity status</span></span><input id="notchRunningIndicatorInput" type="checkbox" /></label>
                             <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.warnColors">Highlight low limits in colour</span></span><input id="notchWarnColorsInput" type="checkbox" /></label>
                             <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.haptic">Trackpad haptic feedback</span></span><input id="notchHapticInput" type="checkbox" /></label>
-                            <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.summaryMode">Collapsed content</span></span><select id="notchSummaryModeInput"><option value="auto" data-i18n="settings.notch.summaryMode.auto">Automatic</option><option value="tray" data-i18n="settings.notch.summaryMode.tray">Same as tray</option><option value="custom" data-i18n="settings.notch.summaryMode.custom">Custom</option></select><span class="settings-item-desc" data-i18n="settings.notch.summaryModeNote">Automatic: active or waiting sessions first, then a quota about to run out, otherwise today’s tokens.</span></label>
+                            <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.summaryMode">Collapsed content</span></span><select id="notchSummaryModeInput" aria-describedby="notchSummaryModeNote"><option value="sessions" data-i18n="settings.notch.summaryMode.sessions">Session activity only</option><option value="auto" data-i18n="settings.notch.summaryMode.auto">Automatic</option><option value="tray" data-i18n="settings.notch.summaryMode.tray">Same as tray</option><option value="custom" data-i18n="settings.notch.summaryMode.custom">Custom</option></select><span id="notchSummaryModeNote" class="settings-item-desc" data-i18n="settings.notch.summaryMode.sessionsNote">Show running or waiting sessions. Hide the summary when there is no activity.</span></label>
                             <div id="notchComposerDetails" class="cursor-settings-details hidden" inert>
                               <div id="notchComposer" class="tray-composer" data-surface="notch"></div>
                             </div>
                           </div>
                         </div>
-                        <div id="notchItemsComposer" class="edge-dock-composer"></div>
+                        <div id="notchItemsComposer" class="edge-dock-composer notch-limits-composer"></div>
                       </div>
                     </div>
                   </div>

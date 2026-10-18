@@ -9,6 +9,7 @@ const { createNotchHistory } = require('../../src/electron/notch/history');
 const { breakdownRows, panelContentHeight } = require('../../src/electron/renderer/notch/panel');
 const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
 const { providerKey } = require('../../src/electron/renderer/limits/resetMotion');
+const { createLiveTokenRateGroupTracker } = require('../../src/electron/renderer/tokenRatePresentation');
 
 function payload(tokens = 100) {
   return { cells: [{ id: 'stat:today', available: true, totalTokens: tokens, costUsd: 2, clients: [], models: [] },
@@ -18,11 +19,68 @@ function payload(tokens = 100) {
     ], todayClients: [{ client: 'codex', tokens }] } } };
 }
 
-test('new installs default to automatic summary while legacy tray/custom choices survive', () => {
-  assert.equal(notchSummaryMode({}), 'auto');
-  assert.equal(notchSummaryMode({ notchFollowTray: true }), 'tray');
-  assert.equal(notchSummaryMode({ notchFollowTray: false }), 'custom');
+test('missing or invalid modes default to sessions without converting the old follow-tray flag', () => {
+  assert.equal(notchSummaryMode({}), 'sessions');
+  assert.equal(notchSummaryMode({ notchSummaryMode: 'unknown' }), 'sessions');
+  assert.equal(notchSummaryMode({ notchFollowTray: true }), 'sessions');
+  assert.equal(notchSummaryMode({ notchFollowTray: false }), 'sessions');
   assert.equal(notchSummaryMode({ notchFollowTray: false, notchSummaryMode: 'auto' }), 'auto');
+  assert.equal(notchSummaryMode({ notchFollowTray: true, notchSummaryMode: 'sessions' }), 'sessions');
+  for (const mode of ['auto', 'sessions', 'tray', 'custom']) assert.equal(notchSummaryMode({ notchSummaryMode: mode }), mode);
+});
+
+test('Notch TPS follows the shared live, retained-idle and unavailable samples', t => {
+  const f = panelFixture(t), data = payload();
+  const tracker = createLiveTokenRateGroupTracker({ now: Date.now });
+  const period = { timedTokens: 100, timedOutputTokens: 50, timedDurationMs: 1000 };
+  const entries = () => [{ id: 'device', period }];
+  tracker.reset(entries());
+  const renderRate = mode => {
+    data.cells = buildEdgeDockCells({}, { items: [{ type: 'stat', metric: 'liveRate' }],
+      liveRate: tracker.getSample(), tokenRateMode: mode });
+    f.panel.render(data);
+    return f.find('notch-rate');
+  };
+  assert.ok(renderRate().classList.contains('is-idle'));
+  assert.equal(f.find('notch-rate-value').textContent, '—');
+  period.timedTokens += 200; period.timedOutputTokens += 100; period.timedDurationMs += 2000;
+  tracker.observe(entries());
+  assert.equal(renderRate().classList.contains('is-idle'), false);
+  assert.equal(f.find('notch-rate-value').textContent, '50');
+  t.mock.timers.tick(8001);
+  assert.equal(renderRate().classList.contains('is-idle'), true, 'idle retains the last useful reading');
+  assert.equal(f.find('notch-rate-value').textContent, '50');
+  assert.match(f.find('notch-rate').title, /Idle/);
+  renderRate('burn');
+  assert.equal(f.find('notch-rate-value').textContent, '6.0K');
+  assert.equal(f.find('notch-rate-unit').textContent, 'TPM');
+  t.mock.timers.tick(172000);
+  assert.equal(tracker.getSample(), null);
+  assert.ok(renderRate().classList.contains('is-idle'));
+  assert.equal(f.find('notch-rate-value').textContent, '—');
+  period.timedTokens += 200; period.timedDurationMs += 2000;
+  tracker.observe(entries()); renderRate();
+  assert.equal(f.find('notch-rate-value').textContent, '0', 'a measured zero output speed is a valid reading');
+  data.cells[0].rate = 0.05; f.panel.render(data);
+  assert.equal(f.find('notch-rate-value').textContent, '<0.1', 'small rates use the shared rate formatter');
+});
+
+test('sessions-only summary stays quiet without live work and never falls back to quotas or usage', () => {
+  const nowMs = Date.now(), settings = { notchSummaryMode: 'sessions', notchWarnColors: true };
+  const stats = { periods: { today: { totalTokens: 123456 } } };
+  const quota = { kind: 'provider', provider: 'devin', status: 'ok', remainingPercent: 0 };
+  const live = { id: 'stat:sessions', metric: 'sessions', sessions: [{ client: 'codex',
+    lastUsedAt: new Date(nowMs).toISOString(), totalTokens: 5 }] };
+  const data = buildNotchData(stats, [live, quota], settings, { nowMs });
+  assert.equal(data.summary.items.at(-1).running, 1);
+  assert.equal(data.panel.week.days.at(-1).tokens, 123456, 'the open panel remains populated');
+  assert.equal(buildNotchData(stats, [live, quota], settings, { nowMs: nowMs + 3600000 }).summary, null);
+  assert.equal(buildNotchData(stats, [quota], settings, { nowMs }).summary, null);
+  assert.equal(buildNotchData(stats, [], settings, { nowMs }).summary, null);
+  const waiting = { ...live, sessions: [{ client: 'claude', turnEnded: true,
+    liveActivity: { state: 'waiting', observedAt: new Date(nowMs).toISOString() } }] };
+  assert.equal(buildNotchData(stats, [waiting, quota], settings, { nowMs }).summary.items.at(-1).waiting, 1);
+  assert.equal(buildNotchData(stats, [live], { ...settings, notchSummaryEnabled: false }, { nowMs }).summary, null);
 });
 
 test('automatic summary prioritizes running and waiting sessions over exhausted quotas', () => {
@@ -30,31 +88,31 @@ test('automatic summary prioritizes running and waiting sessions over exhausted 
   const live = { id: 'stat:sessions', metric: 'sessions', sessions: [{ client: 'codex', lastUsedAt: new Date(nowMs).toISOString(), totalTokens: 5 }] };
   const quota = { kind: 'provider', provider: 'devin', status: 'ok', remainingPercent: 0 };
   for (const notchWarnColors of [false, true]) {
-    const summary = buildNotchData(stats, [live, quota], { notchWarnColors }, { nowMs }).summary;
+    const summary = buildNotchData(stats, [live, quota], { notchSummaryMode: 'auto', notchWarnColors }, { nowMs }).summary;
     assert.equal(summary.automatic, 'activity');
     assert.equal(summary.items.at(-1).running, 1);
   }
   const waiting = { ...live, sessions: [{ client: 'codex', turnEnded: true,
     liveActivity: { state: 'waiting', observedAt: new Date(nowMs).toISOString() } }] };
-  assert.equal(buildNotchData(stats, [waiting, quota], {}, { nowMs }).summary.items.at(-1).waiting, 1);
-  assert.equal(buildNotchData(stats, [live, quota], {}, { nowMs: nowMs + 3600000 }).summary.automatic, 'alert');
-  assert.equal(buildNotchData(stats, [live], {}, { nowMs }).summary.automatic, 'activity');
-  assert.equal(buildNotchData(stats, [live], {}, { nowMs: nowMs + 3600000 }).summary.items[1].measure.value, 100);
-  assert.equal(buildNotchData(stats, [quota], { limitsEnabled: false }).summary.automatic, undefined);
+  assert.equal(buildNotchData(stats, [waiting, quota], { notchSummaryMode: 'auto' }, { nowMs }).summary.items.at(-1).waiting, 1);
+  assert.equal(buildNotchData(stats, [live, quota], { notchSummaryMode: 'auto' }, { nowMs: nowMs + 3600000 }).summary.automatic, 'alert');
+  assert.equal(buildNotchData(stats, [live], { notchSummaryMode: 'auto' }, { nowMs }).summary.automatic, 'activity');
+  assert.equal(buildNotchData(stats, [live], { notchSummaryMode: 'auto' }, { nowMs: nowMs + 3600000 }).summary.items[1].measure.value, 100);
+  assert.equal(buildNotchData(stats, [quota], { notchSummaryMode: 'auto', limitsEnabled: false }).summary.automatic, undefined);
 });
 
 test('automatic quota summary colours are opt-in and independent of the side dock', () => {
   const quota = { kind: 'provider', provider: 'devin', status: 'ok', remainingPercent: 0 };
   for (const settings of [{}, { notchWarnColors: false }, { edgeDockWarnColors: true }]) {
-    const summary = buildNotchData({}, [quota], settings).summary;
+    const summary = buildNotchData({}, [quota], { ...settings, notchSummaryMode: 'auto' }).summary;
     assert.equal(summary.automatic, 'alert');
     assert.equal(summary.items[1].text, '0%');
     assert.equal(summary.items[1].tone, undefined);
   }
-  const coloured = buildNotchData({}, [quota], { notchWarnColors: true, edgeDockWarnColors: false }).summary;
+  const coloured = buildNotchData({}, [quota], { notchSummaryMode: 'auto', notchWarnColors: true, edgeDockWarnColors: false }).summary;
   assert.equal(coloured.items[1].tone, 'alert');
   assert.equal(coloured.items[1].text, '0%');
-  const used = buildNotchData({}, [quota], { notchWarnColors: true, showLimitUsed: true }).summary;
+  const used = buildNotchData({}, [quota], { notchSummaryMode: 'auto', notchWarnColors: true, showLimitUsed: true }).summary;
   assert.equal(used.items[1].text, '100%');
   assert.equal(used.items[1].unit, 'used');
 });

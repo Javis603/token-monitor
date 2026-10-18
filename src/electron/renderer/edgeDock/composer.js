@@ -355,7 +355,7 @@
       }));
       if (!limitsOnly) pane.append(windowRow(item, id));
       if (item.provider === 'codex') {
-        pane.append(choiceRow('settings.edgeDock.limitValue', item.accountMode === 'lowest' ? 'lowest' : 'active', [
+        pane.append(choiceRow(limitsOnly ? 'settings.notch.accountTitle' : 'settings.edgeDock.limitValue', item.accountMode === 'lowest' ? 'lowest' : 'active', [
           { value: 'active', labelKey: 'trayComposer.account.active' },
           { value: 'lowest', labelKey: 'trayComposer.account.lowest' }
         ], (accountMode) => {
@@ -459,6 +459,7 @@
 
     drag = createRowDrag({
       getList: () => root.querySelector('.edge-dock-composer-rail'),
+      ...(limitsOnly ? { axis: 'x', getScrollPanel: () => root.querySelector('.edge-dock-composer-rail') } : {}),
       rowSelector: '.edge-dock-composer-item[data-item-id]',
       idKey: 'itemId',
       dragExcluded: '.edge-dock-composer-add',

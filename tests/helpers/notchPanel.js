@@ -105,6 +105,9 @@ function panelFixture(t, settings = {}) {
     providerLabel: id => id, limitProviderColor: () => '#888',
     limitAccountTitle: (_id, record, index, peers) => window.TokenMonitorAccountIdentity.accountTitleLabel(record, peers, { index, maskEmail: settings.maskLimitAccountEmails === true }),
     formatTokens: value => String(value), formatCardTokens: value => String(value), formatBreakdownTokens: value => String(value), formatCost: value => `$${value}`,
+    formatRate: value => value > 0 && value < 0.1 ? '<0.1' : value > 0 && value < 1
+      ? value.toLocaleString(state.locale, { maximumFractionDigits: 1 })
+      : window.TokenMonitorTrayText.formatCompactNumber(value, { compactTokenUnits: settings.compactTokenUnits, locale: state.locale }),
     appearance: () => settings, prefersReducedMotion: () => settings.reduceMotion === true,
     ensureRefreshButton: () => el('button', 'edge-dock-refresh')
   };

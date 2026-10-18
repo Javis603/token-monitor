@@ -142,6 +142,8 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
 .notch-status { justify-self: end; display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--notch-dim); white-space: nowrap; }
 .notch-rate { display: inline-flex; align-items: center; gap: 6px; }
 .notch-rate-value { color: var(--notch-ink); }
+.notch-rate.is-idle .notch-rate-value { color: var(--notch-dim); }
+.notch-rate.is-idle .notch-live-dot { background: var(--notch-faint); box-shadow: none; animation: none; }
 .notch-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 8px var(--blue); animation: notch-breathe 1.6s ease-in-out infinite; }
 .notch-status-rule { width: 1px; height: 12px; background: var(--notch-rule); }
 .notch-status .edge-dock-refresh { width: 24px; height: 24px; }

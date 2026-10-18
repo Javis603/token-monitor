@@ -631,8 +631,7 @@ function defaultSettings() {
     notchEnabled: false,
     notchStyle: 'inherit',
     notchShape: 'auto',
-    notchFollowTray: true,
-    notchSummaryMode: 'auto',
+    notchSummaryMode: 'sessions',
     notchSummaryEnabled: true,
     notchCustomLayout: createDefaultTrayLayout(),
     notchDisplayId: null,
@@ -2757,8 +2756,7 @@ function readSettings() {
     merged.notchProgressiveBlur = parseBoolean(merged.notchProgressiveBlur, true);
     merged.notchHideSummaryInFullScreen = parseBoolean(merged.notchHideSummaryInFullScreen, true);
     merged.notchRefreshEnabled = parseBoolean(merged.notchRefreshEnabled, false);
-    merged.notchFollowTray = parseBoolean(merged.notchFollowTray, true);
-    merged.notchSummaryMode = notchSummaryMode({ ...saved, notchFollowTray: saved.notchFollowTray === undefined ? undefined : merged.notchFollowTray });
+    merged.notchSummaryMode = notchSummaryMode(merged);
     merged.notchSummaryEnabled = parseBoolean(merged.notchSummaryEnabled, true);
     merged.notchCustomLayout = normalizeTrayLayout(merged.notchCustomLayout);
     merged.notchDisplayId = normalizeEdgeDockDisplayId(merged.notchDisplayId);
@@ -5602,8 +5600,8 @@ function notchDataFor(visibleStats, cells) {
     notchRateTrackers.clear();
     return buildNotchData(visibleStats, cells, settings);
   }
-  // The automatic summary never shows a rate; only a tray or custom layout can.
-  const rateItems = notchSummaryMode(settings) === 'auto' ? [] : trayLayoutApi.liveTokenRateItems(notchSummaryLayout(settings));
+  // Only an explicit tray or custom layout can request a rate.
+  const rateItems = ['tray', 'custom'].includes(notchSummaryMode(settings)) ? trayLayoutApi.liveTokenRateItems(notchSummaryLayout(settings)) : [];
   const liveTokenRates = {};
   let nextExpiry = 0;
   const scopes = new Set(rateItems.map((item) => item.rateScope));
@@ -7992,9 +7990,7 @@ app.whenReady().then(() => {
       notchProgressiveBlur: parseBoolean(patch.notchProgressiveBlur ?? settings.notchProgressiveBlur, true),
       notchHideSummaryInFullScreen: parseBoolean(patch.notchHideSummaryInFullScreen ?? settings.notchHideSummaryInFullScreen, true),
       notchRefreshEnabled: parseBoolean(patch.notchRefreshEnabled ?? settings.notchRefreshEnabled, false),
-      notchFollowTray: parseBoolean(patch.notchFollowTray ?? settings.notchFollowTray, true),
-      notchSummaryMode: notchSummaryMode(patch.notchSummaryMode !== undefined ? { notchSummaryMode: patch.notchSummaryMode }
-        : patch.notchFollowTray !== undefined ? { notchFollowTray: parseBoolean(patch.notchFollowTray, true) } : settings),
+      notchSummaryMode: notchSummaryMode({ notchSummaryMode: patch.notchSummaryMode ?? settings.notchSummaryMode }),
       notchSummaryEnabled: parseBoolean(patch.notchSummaryEnabled ?? settings.notchSummaryEnabled, true),
       notchCustomLayout: normalizeTrayLayout(patch.notchCustomLayout ?? settings.notchCustomLayout),
       notchDisplayId: normalizeEdgeDockDisplayId(patch.notchDisplayId ?? settings.notchDisplayId),

@@ -407,6 +407,7 @@ Object.assign(els, {
   notchStyleInput: document.getElementById('notchStyleInput'),
   notchShapeInputs: Array.from(document.querySelectorAll('input[name="notchShape"]')),
   notchSummaryModeInput: document.getElementById('notchSummaryModeInput'),
+  notchSummaryModeNote: document.getElementById('notchSummaryModeNote'),
   notchSummaryInput: document.getElementById('notchSummaryInput'),
   notchWarnColorsInput: document.getElementById('notchWarnColorsInput'),
   notchComposer: document.getElementById('notchComposer'),
@@ -13379,7 +13380,7 @@ function syncDockControls() {
   els.notchOptions?.classList.toggle('hidden', !notchEnabled);
   syncNotchStyleInput();
   for (const input of els.notchShapeInputs) input.checked = input.value === (state.settings?.notchShape || 'auto');
-  if (els.notchSummaryModeInput) els.notchSummaryModeInput.value = state.settings?.notchSummaryMode || 'auto';
+  syncNotchSummaryMode();
   if (els.notchSummaryInput) els.notchSummaryInput.checked = state.settings?.notchSummaryEnabled !== false;
   if (els.notchWarnColorsInput) els.notchWarnColorsInput.checked = state.settings?.notchWarnColors === true;
   if (els.notchRunningIndicatorInput) els.notchRunningIndicatorInput.checked = state.settings?.notchRunningIndicatorEnabled === true;
@@ -13392,6 +13393,16 @@ function syncDockControls() {
   els.edgeDockComposerRow?.classList.toggle('hidden', !enabled);
   if (enabled) edgeDockComposer?.render();
   if (notchEnabled) notchItemsComposer?.render();
+}
+
+function syncNotchSummaryMode() {
+  const mode = state.settings?.notchSummaryMode || 'sessions';
+  if (els.notchSummaryModeInput) els.notchSummaryModeInput.value = mode;
+  if (els.notchSummaryModeNote) {
+    const key = mode === 'auto' ? 'settings.notch.summaryModeNote' : `settings.notch.summaryMode.${mode}Note`;
+    els.notchSummaryModeNote.dataset.i18n = key;
+    els.notchSummaryModeNote.textContent = t(key);
+  }
 }
 
 function createDockItemsComposer(root, itemsKey) {
@@ -13491,6 +13502,7 @@ els.notchStyleInput?.addEventListener('change', () => {
 });
 els.notchSummaryModeInput?.addEventListener('change', () => {
   state.settings.notchSummaryMode = els.notchSummaryModeInput.value;
+  syncNotchSummaryMode();
   refreshTrayComposers();
   void saveSettings({ notchSummaryMode: els.notchSummaryModeInput.value });
 });

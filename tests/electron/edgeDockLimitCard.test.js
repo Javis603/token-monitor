@@ -2058,14 +2058,14 @@ test('Notch ears preserve configured tray items and embedded fields across all s
     const separator = trayLayout.createTrayLayoutItem('separatorDot');
     const readings = !['icon', 'spacer'].includes(item.type);
     if (readings) {
-      const summary = buildNotchData(stats, [], { notchFollowTray: false,
+      const summary = buildNotchData(stats, [], { notchSummaryMode: 'custom',
         notchCustomLayout: { version: trayLayout.VERSION, items: [icon, item] } }).summary;
       const single = context.notchSummary({ summary, geometry: { gapWidth: 179 }, appearance: {} });
       assert.equal(single.find('notch-left').querySelectorAll('.notch-reading').length, 0, `${style} remains one field even with multiple rows`);
       assert.equal(single.find('notch-right').querySelectorAll('.notch-reading').length, 1);
     }
     for (const gapWidth of [179, 0]) {
-      const summary = buildNotchData(stats, [], { notchFollowTray: false,
+      const summary = buildNotchData(stats, [], { notchSummaryMode: 'custom',
         notchCustomLayout: { version: trayLayout.VERSION, items: [icon, item, separator, cost] }
       }).summary;
       const head = context.notchSummary({ summary, geometry: { gapWidth }, appearance: {} });

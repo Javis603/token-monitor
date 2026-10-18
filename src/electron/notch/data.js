@@ -7,15 +7,12 @@ const { limitProviderForClient } = require('../../shared/limits/providers');
 const presentation = require('../renderer/edgeDock/presentation');
 const { notchWeek } = require('./panel');
 
-const NOTCH_SUMMARY_MODES = Object.freeze(['auto', 'tray', 'custom']);
+const NOTCH_SUMMARY_MODES = Object.freeze(['auto', 'sessions', 'tray', 'custom']);
 
-// `auto` adapts to what is happening; `tray` mirrors the menu-bar preset and
-// `custom` reads the notch's own layout. Older settings stored only the
-// follow-tray switch, whose off state meant the custom layout.
+// `auto` adapts to what is happening; `sessions` stays quiet between sessions;
+// `tray` mirrors the menu-bar preset; `custom` reads the notch's own layout.
 function notchSummaryMode(settings = {}) {
-  if (NOTCH_SUMMARY_MODES.includes(settings.notchSummaryMode)) return settings.notchSummaryMode;
-  if (settings.notchFollowTray === false) return 'custom';
-  return settings.notchFollowTray === true ? 'tray' : 'auto';
+  return NOTCH_SUMMARY_MODES.includes(settings.notchSummaryMode) ? settings.notchSummaryMode : 'sessions';
 }
 
 // Ordinary tray presets select canonical provider/account pairs before layout.
@@ -126,8 +123,7 @@ function notchActivity(cells, nowMs = Date.now()) {
   return { running: running.count, waiting: waiting.count, clients };
 }
 
-// Live work takes priority; a known low quota must not hide session activity.
-function automaticSummary(stats, cells, settings, options) {
+function activitySummary(cells, options) {
   const activity = notchActivity(cells, options.nowMs);
   if (activity) {
     const providers = activity.clients.slice(0, 3);
@@ -137,6 +133,13 @@ function automaticSummary(stats, cells, settings, options) {
         provider: activity.clients[0] || '' }
     ] };
   }
+  return null;
+}
+
+// Live work takes priority; a known low quota must not hide session activity.
+function automaticSummary(stats, cells, settings, options) {
+  const activity = activitySummary(cells, options);
+  if (activity) return activity;
   const alert = notchAlert(cells, settings);
   if (alert) {
     const used = settings.showLimitUsed === true;
@@ -158,12 +161,14 @@ function automaticIdleLayout() {
 function buildNotchData(stats, cells, settings, options = {}) {
   const panel = { week: notchWeek(stats, new Date(options.nowMs ?? Date.now()), settings.historyEnabled === false ? null : stats?.historyPreview) };
   if (settings.notchSummaryEnabled === false) return { cells, summary: null, panel };
-  if (notchSummaryMode(settings) === 'auto') {
+  const mode = notchSummaryMode(settings);
+  if (mode === 'sessions') return { cells, summary: activitySummary(cells, options), panel };
+  if (mode === 'auto') {
     const automatic = automaticSummary(stats, cells, settings, options);
     if (automatic) return { cells, summary: automatic, panel };
   }
-  const picks = notchSummaryMode(settings) === 'auto' ? null : trayQuotaPicks(stats, settings);
-  const layout = notchSummaryMode(settings) === 'auto' ? automaticIdleLayout() : summaryLayout(settings, stats, picks);
+  const picks = mode === 'auto' ? null : trayQuotaPicks(stats, settings);
+  const layout = mode === 'auto' ? automaticIdleLayout() : summaryLayout(settings, stats, picks);
   // Preserve the selected record even for legacy accounts without accountKey:
   // reselecting all records can borrow a secondary window from another account.
   const summaryStats = picks ? { ...stats, limits: { ...stats?.limits, providers: picks.map(pick => pick.providerRecord) } } : stats;

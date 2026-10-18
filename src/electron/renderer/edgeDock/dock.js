@@ -1841,7 +1841,7 @@ const notchRenderer = surface === 'notch' || query.get('owner') === 'notch'
     document, window, bridge, surface, state, root, shapeLayer, contentLayer,
     shared: {
       el, t, appearance, prefersReducedMotion, readableColor, providerLabel, limitProviderColor,
-      markNode, hasMask, providerCellNode, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, overflowText, limitWindowsView,
+      markNode, hasMask, providerCellNode, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, formatRate, overflowText, limitWindowsView,
       limitAccountTitle: (...args) => limitWindowsView.limitAccountTitle(...args),
       captureRingResetMotion, animateRingResets, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit
     }
