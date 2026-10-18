@@ -6745,7 +6745,7 @@ function refreshManualStats() {
   }
   const revision = statsPushRevision;
   const request = { runtime, generation, promise: null };
-  request.promise = fetchStats({ force: true, forceHistory: true, forceSelfSync: true }).then((stats) => {
+  request.promise = fetchStats({ force: true, forceUsage: true, todayOnly: true, forceSelfSync: true }).then((stats) => {
     // Both buttons update the dock once. A push received while this read was
     // pending has already taken over, so a late read must not replace it.
     if (runtime === deviceRuntimeHandle && generation === hubModeGeneration && revision === statsPushRevision) {
@@ -6764,13 +6764,18 @@ async function fetchStats(options = {}) {
   const requestGeneration = hubModeGeneration;
   const requestHubIdentity = currentHubStatsIdentity(settings?.hubMode === 'icloud' ? 'icloud' : 'client');
   const force = Boolean(options?.force);
-  // forceHistory and forceSelfSync stay independent of `force` on purpose: tool
-  // settings, account sign-ins and limits actions all refresh with { force: true },
-  // so folding them in would spawn the expensive `tokscale graph` — and the Cursor
-  // and Antigravity sync subprocesses — on every one of them. Only the manual
-  // refresh button opts in.
+  // Generic `{ force: true }` calls from settings and account forms only need
+  // fresh limits. A full usage tick reads every tracked source and can take
+  // seconds, so only an explicit usage request may start it. The refresh button
+  // opts in through forceUsage/todayOnly and keeps its explicit self-sync; the
+  // History graph remains reserved for operations that explicitly need that pass.
   if (force && ownsUsageRuntime()) {
+    const refreshUsage = options?.forceUsage === true
+      || options?.forceHistory === true
+      || options?.forceSelfSync === true;
     await runManualDeviceRefresh(deviceRuntimeHandle, {
+      refreshUsage,
+      todayOnly: options?.todayOnly === true,
       forceHistory: Boolean(options?.forceHistory),
       forceSelfSync: Boolean(options?.forceSelfSync),
       onLimitsError: (error) => console.log(`[limits-runtime] manual refresh failed: ${error.message}`)
