@@ -631,6 +631,39 @@
 
     // Shape-only frames never reconstruct the summary, provider rows or numbers.
     // Persistent summary nodes keep equal outer margins on this same frame.
+    function paintHardwareShade(frame) {
+      if (!state.payload?.geometry?.notched) return;
+      let shade = shapeLayer.querySelector('.notch-hardware-shade');
+      if (!shade) {
+        const svg = (name) => document.createElementNS('http://www.w3.org/2000/svg', name);
+        const defs = svg('defs'), gradient = svg('linearGradient');
+        gradient.id = 'notch-hardware-gradient';
+        gradient.setAttribute('gradientUnits', 'userSpaceOnUse');
+        gradient.setAttribute('x1', '0'); gradient.setAttribute('x2', '0');
+        for (const [index, offset] of [0, 0.4, 0.75, 1].entries()) {
+          const stop = svg('stop');
+          stop.setAttribute('offset', offset);
+          stop.setAttribute('stop-color', '#000');
+          stop.setAttribute('class', `notch-hardware-stop-${index}`);
+          gradient.append(stop);
+        }
+        defs.append(gradient);
+        shade = svg('path'); shade.setAttribute('class', 'notch-hardware-shade');
+        shade.setAttribute('fill', 'url(#notch-hardware-gradient)');
+        shapeLayer.append(defs, shade);
+      }
+      // Anchor the black cap to physical camera height, not a percentage of
+      // the changing panel. The lower stops reveal material as the shell opens;
+      // at rest/peek every stop is opaque, so the entire entry stays black.
+      const core = state.payload.geometry.height;
+      const zoom = Number(state.payload.appearance?.zoomFactor) || 1;
+      const fade = Math.min(88 * zoom, Math.max(1, frame.bodyHeight) * 0.75);
+      const gradient = shapeLayer.querySelector('#notch-hardware-gradient');
+      gradient.setAttribute('y1', core);
+      gradient.setAttribute('y2', core + fade);
+      shade.setAttribute('d', frame.shape.d);
+    }
+
     function applyNotchMotion(frame) {
       if (!frame?.shape) return;
       const shape = frame.shape;
@@ -645,6 +678,7 @@
       // Shell and content share one progress value.
       const contentProgress = Math.max(0, Math.min(1, frame.progress));
       root.style.setProperty('--notch-content-progress', contentProgress);
+      paintHardwareShade(frame);
       // Content shows early while opening and is gone before the shell settles
       // when closing; its size follows the shell's width, overshoot included.
       root.style.setProperty('--notch-content-opacity', Math.max(0, Math.min(1, frame.progress * 1.4 - 0.2)));
@@ -838,6 +872,8 @@
       omitQuotaRows: omitNotchQuotaRows,
       applyAppearance(payload) {
         document.documentElement.classList.toggle('notch-black', payload.style === 'black');
+        document.documentElement.classList.toggle('notch-hardware-light', surface === 'notch' && payload.style !== 'black' && payload.geometry?.notched === true
+          && window.TokenMonitorThemePresets?.isLightHex(payload.appearance?.themeColors?.bg) === true);
         root.classList.toggle('is-notch-detail', surface === 'bubble');
       },
       sessionCells() {

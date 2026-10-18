@@ -627,7 +627,7 @@ function defaultSettings() {
     floatingBubbleCustomLayout: createDefaultTrayLayout(),
     floatingBubbleBounds: null,
     notchEnabled: false,
-    notchStyle: 'black',
+    notchStyle: 'inherit',
     notchShape: 'auto',
     notchFollowTray: true,
     notchSummaryEnabled: true,

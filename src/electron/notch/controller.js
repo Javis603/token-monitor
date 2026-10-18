@@ -67,7 +67,7 @@ function normalizeNotchHoverDelay(value) {
 }
 
 function normalizeNotchStyle(value) {
-  return ['black', 'inherit', 'vibrancy', 'liquid-glass', 'liquid-glass-clear'].includes(value) ? value : 'black';
+  return ['black', 'inherit', 'vibrancy', 'liquid-glass', 'liquid-glass-clear'].includes(value) ? value : 'inherit';
 }
 
 function normalizeNotchShape(value) {
@@ -235,7 +235,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   function updateGlassAppearance() {
     for (const surface of surfaces) {
       if (!alive(windows[surface]) || !glass[surface]) continue;
-      try { glass[surface].update(glassOptions()); }
+      try { glass[surface].update(glassOptions(surface)); }
       catch (error) { materialFailed(surface, error); }
     }
   }
@@ -245,9 +245,13 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     return edgeDockBackdropMode({ macBackdrop: settings().macBackdrop, edgeDockMacBackdrop: normalizeNotchStyle(settings().notchStyle) });
   }
 
-  function glassOptions() {
+  function glassOptions(surface) {
     const mode = backdropMode();
-    return { dark: liquidGlass()?.dark === true, style: liquidGlassStyle(mode), tintOpacity: liquidGlassTint(settings(), mode) };
+    // An attached panel joins a black camera housing, so its material keeps a
+    // dark appearance even when the widget uses a light palette. Detached
+    // capsules and detail cards retain the widget's appearance.
+    const attached = surface === 'notch' && layout()?.geometry.notched;
+    return { dark: attached || liquidGlass()?.dark === true, style: liquidGlassStyle(mode), tintOpacity: liquidGlassTint(settings(), mode) };
   }
 
   function shape(surface, points, bounds, display) {
@@ -257,7 +261,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     shapes[surface] = { key, width: bounds.width, height: bounds.height, d };
     const win = windows[surface];
     try {
-      if (glass[surface]) glass[surface].update({ ...glassOptions(), shape: { commands: points, width: bounds.width, height: bounds.height } });
+      if (glass[surface]) glass[surface].update({ ...glassOptions(surface), shape: { commands: points, width: bounds.width, height: bounds.height } });
       else if (nativeMaterial[surface] && applyShapeMask?.(win, points, bounds.width, bounds.height, display) !== true) {
         nativeMaterial[surface] = false;
         win.setVibrancy(null);

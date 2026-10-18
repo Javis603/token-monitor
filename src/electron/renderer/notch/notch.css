@@ -2,6 +2,28 @@
 html.notch-black { --glass-rgb: 0,0,0 !important; --text: #fff !important; --muted: rgba(255,255,255,.58) !important; --overlay-rgb: 255,255,255; --line: transparent; }
 html.notch-black .edge-dock-shape-fill { fill: #000; }
 html.notch-black .edge-dock-shape-line { stroke: transparent; }
+/* A glass entry still joins the physical camera housing as solid black. Its
+   lower half reveals the selected material only as the panel opens. The same
+   animated outline clips the shade; capsules and detached details keep their
+   own material without a fabricated camera band. */
+.notch-hardware-shade { display: none; pointer-events: none; }
+html:not(.notch-black) .is-notch-attached .notch-hardware-shade { display: inline; }
+.notch-hardware-stop-0 { stop-opacity: 1; }
+.notch-hardware-stop-1 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .45); }
+.notch-hardware-stop-2 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .85); }
+.notch-hardware-stop-3 { stop-opacity: calc(1 - var(--notch-content-progress, 0)); }
+.is-notch-attached .notch-summary { --text: #fff; --muted: rgba(255,255,255,.68); --overlay-rgb: 255,255,255; color: var(--text); }
+/* Light widget ink cannot cross a black camera band. Keep the attached shell
+   on the existing dark surface palette; detached cards still follow the theme. */
+html.notch-hardware-light {
+  --glass-rgb: 48,52,56 !important;
+  --text: #eef5fb !important;
+  --number: #eef5fb !important;
+  --muted: #a3adbb !important;
+  --overlay-rgb: 255,255,255 !important;
+  --line: rgba(255,255,255,.14) !important;
+  --line-strong: rgba(255,255,255,.22) !important;
+}
 /* The open panel lifts off the page on a soft shadow that fades in with it;
    geometry.js reserves canvas room for the same blur radius and offset. */
 html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {

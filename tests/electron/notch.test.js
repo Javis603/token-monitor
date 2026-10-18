@@ -146,10 +146,10 @@ test('a replaced or withdrawn first summary cannot be revealed by a late size re
   assert.equal(last(win).summary, null); assert.equal(last(win).summaryMeasurement, null);
 });
 
-test('new notch configurations use black and preserve saved style selections', (t) => {
-  for (const style of [undefined, 'black', 'vibrancy', 'liquid-glass', 'inherit']) {
+test('Notch defaults to the widget material and supports each explicit style', (t) => {
+  for (const style of [undefined, 'black', 'vibrancy', 'liquid-glass', 'liquid-glass-clear', 'inherit']) {
     const f = fixture(t, style === undefined ? {} : { notchStyle: style });
-    assert.equal(last(f.windows[0]).style, style || 'black');
+    assert.equal(last(f.windows[0]).style, style || 'inherit');
   }
 });
 
@@ -522,6 +522,7 @@ test('header outer margins stay equal through motion at each summary zoom', () =
       contentLayer: { querySelector: (selector) => selector === '.notch-summary' ? head : body },
       shapeLayer: { firstChild: true, dataset: {}, setAttribute() {}, querySelector: () => ({ setAttribute() {} }) },
       root: { style: { setProperty(key, value) { properties[key] = value; } } }, state: { payload: { geometry: header } },
+      paintHardwareShade() {},
       getComputedStyle: () => { styleReads++; return { zoom: summaryZoom }; }
     });
     // Production CSS anchors outer edges, so the different content widths
@@ -1394,6 +1395,7 @@ test('Notch visibility and refresh settings preserve defaults and explicit switc
   const start = mainSource.indexOf('    notchEnabled:', mainSource.indexOf('function defaultSettings('));
   const defaultsSource = mainSource.slice(start, mainSource.indexOf('    edgeDockEnabled:', start));
   const defaults = vm.runInNewContext(`({${defaultsSource}})`, { createDefaultTrayLayout: trayLayout.createDefaultTrayLayout });
+  assert.equal(defaults.notchStyle, 'inherit');
   assert.equal(defaults.notchHideSummaryInFullScreen, true);
   assert.equal(defaults.notchAvoidMenuBar, true);
   assert.equal(defaults.notchRefreshEnabled, false);
@@ -3261,4 +3263,16 @@ test('main wires native press monitoring into the Notch controller', () => {
   assert.equal(options.monitorPrimaryPress(onPress), remove);
   assert.equal(calls[0].callback, onPress);
   assert.equal(typeof calls[0].nativeOptions.logger, 'function');
+});
+
+test('attached glass stays dark with a light widget while detail cards retain their appearance', (t) => {
+  const updates = new Map();
+  const f = fixture(t, { notchStyle: 'inherit', macBackdrop: 'liquid-glass-clear' }, {
+    nativeGlass: () => true, liquidGlass: () => ({ dark: false }),
+    createGlass: win => ({ update: options => updates.set(win, options), dispose() {} })
+  });
+  assert.equal(updates.get(f.windows[0]).dark, true);
+  assert.equal(updates.get(f.windows[1]).dark, false);
+  f.preferences.notchShape = 'pill'; f.controller.sync();
+  assert.equal(updates.get(f.windows[0]).dark, false, 'detaching restores the widget appearance');
 });

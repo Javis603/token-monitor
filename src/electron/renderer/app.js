@@ -13340,7 +13340,7 @@ function syncNotchStyleInput(preview) {
     const option = els.notchStyleInput.querySelector(`option[value="${value}"]`);
     if (option) option.hidden = option.disabled = !showBackdropControl;
   }
-  const style = settings?.notchStyle || 'black';
+  const style = settings?.notchStyle || 'inherit';
   els.notchStyleInput.value = macBackdropApi.isLiquidGlassBackdrop(style) && !showBackdropControl ? 'vibrancy' : style;
 }
 

@@ -279,7 +279,7 @@ test('the notch style stores Frosted Glass as vibrancy and offers Liquid Glass o
   assert.deepEqual(run({ saved: { notchStyle: 'vibrancy' }, preview: { systemGlass: true, macBackdrop: 'vibrancy' } }),
     { value: 'vibrancy', hidden: false, disabled: false });
   assert.equal(run({ saved: { notchStyle: 'vibrancy' }, pending: [{ notchStyle: 'inherit' }], preview: { systemGlass: true } }).value, 'inherit');
-  assert.equal(run({ saved: {} }).value, 'black');
+  assert.equal(run({ saved: {} }).value, 'inherit');
   assert.deepEqual(run({ saved: { notchStyle: 'liquid-glass' } }), { value: 'liquid-glass', hidden: false, disabled: false });
   assert.equal(run({ saved: { notchStyle: 'liquid-glass-clear' } }).value, 'liquid-glass-clear');
   assert.equal(run({ saved: { notchStyle: 'liquid-glass-clear' }, liquidGlassSupported: false }).value, 'vibrancy');
