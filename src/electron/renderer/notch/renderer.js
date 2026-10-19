@@ -25,7 +25,7 @@
   function createNotchRenderer({ document, window, bridge, surface, state, root, shapeLayer, contentLayer, shared }) {
     const {
       el, t, appearance, prefersReducedMotion, providerLabel, limitProviderColor, readableColor, limitAccountTitle,
-      markNode, hasMask, providerCellNode, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, formatRate, overflowText, limitWindowsView,
+      markNode, hasMask, providerCellNode, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate, overflowText, limitWindowsView,
       captureRingResetMotion, animateRingResets, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit
     } = shared;
     const presentation = window.TokenMonitorEdgeDockPresentation;
@@ -41,7 +41,7 @@
     const { clientColors } = window.TokenMonitorUsageCharts;
     const panelApi = window.TokenMonitorNotchPanel;
     const panel = surface === 'notch' ? panelApi.createNotchPanel({ document, window, el, t, state, bridge, shared: {
-      markNode, hasMask, providerLabel, limitProviderColor, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, formatRate,
+      markNode, hasMask, providerLabel, limitProviderColor, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate,
       appearance, prefersReducedMotion, ensureRefreshButton, readableColor, limitAccountTitle, overflowText, limitWindowsView
     } }) : null;
 

@@ -33,7 +33,7 @@
   }
 
   function createNotchPanel({ document, window, el, t, state, bridge, shared }) {
-    const { markNode, hasMask, providerLabel, limitProviderColor, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, formatRate,
+    const { markNode, hasMask, providerLabel, limitProviderColor, formatTokens, formatCardTokens, formatBreakdownTokens, usageCostNode: usageCost, formatRate,
       appearance, prefersReducedMotion, readableColor = color => color, limitAccountTitle, overflowText, limitWindowsView } = shared;
     const presentation = window.TokenMonitorEdgeDockPresentation;
     const trayText = window.TokenMonitorTrayText;
@@ -202,10 +202,6 @@
       const node = el('span', className, value);
       if (title) node.title = title;
       return node;
-    }
-    function usageCost(className, usage) {
-      return text(className, usage?.unpricedTokens > 0 ? '—' : formatCost(usage?.costUsd), usage?.unpricedTokens > 0
-        ? t('usage.excludedFromCost', { tokens: formatCardTokens(usage.unpricedTokens) }) : '');
     }
     function fitTokenFigure(number, size) {
       number.style.fontSize = `${size}px`;
@@ -527,8 +523,8 @@
         playRolls(pageNode, snapshot);
         const reading = value ? value.day : today?.available ? today : null;
         const costReading = reading ? usageCost('', reading) : text('', '');
-        cost.textContent = costReading.textContent;
-        cost.title = costReading.title || '';
+        cost.replaceChildren(...costReading.children);
+        cost.classList.toggle('edge-dock-cost-reading', Boolean(reading));
         if (leaving) renderPage('home');
       }
       pageNode.replaceChildren(left, right);

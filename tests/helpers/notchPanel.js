@@ -2,6 +2,7 @@
 
 const { createNotchPanel } = require('../../src/electron/renderer/notch/panel');
 const i18n = require('../../src/electron/renderer/i18n');
+const fs = require('node:fs');
 
 class Element {
   constructor(tag = 'div', document) {
@@ -119,8 +120,9 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
     overflowText,
     limitWindowsView: {
       // Like the real one, the tooltip names its entries as the element's label.
-      setDetailTooltip(node, entries) {
+      setDetailTooltip(node, entries, options) {
         node.tooltipEntries = entries;
+        node.tooltipOptions = options;
         node.setAttribute('aria-label', entries.map(entry => Array.isArray(entry) ? entry.join(': ') : entry.full).join(', '));
       },
       limitAccountPlan: (...args) => plans.limitAccountPlan(...args),
@@ -136,6 +138,13 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
     appearance: () => settings, prefersReducedMotion: () => settings.reduceMotion === true,
     ensureRefreshButton: () => el('button', 'edge-dock-refresh')
   };
+  // Exercise the production cost builder supplied by the dock script, whose
+  // top-level boot requires Electron. Do not mirror its partial-pricing policy.
+  const dockSource = fs.readFileSync(require.resolve('../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const costSource = dockSource.match(/function usageCostNode\([^]*?\n\}/)[0];
+  shared.usageCostNode = Function('el', 'formatCost', 't', 'formatCardTokens', 'limitWindowsView', `return (${costSource})`)(
+    el, shared.formatCost, (key, params) => i18n.translate(state.locale, key, params), shared.formatCardTokens, shared.limitWindowsView
+  );
   const deps = { document, window, el, t: (key, params) => i18n.translate(state.locale, key, params), state,
     bridge: { toggleRateMode() {}, onAnimate() {}, onMotion() {} }, shared };
   let panel;

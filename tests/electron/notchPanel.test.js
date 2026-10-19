@@ -287,7 +287,8 @@ test('week footer marks a missing day and explains it with a centered shared inf
   assert.equal(tooltip.style['position-anchor'], info.style['anchor-name']);
   assert.equal(f.find('notch-week-cost-value').attributes['aria-label'], 'Total cost: $3');
   data.panel.week.days[0].unpricedTokens = 10; f.panel.render(data);
-  assert.equal(f.find('notch-week-cost-value').textContent, '—');
+  assert.equal(f.find('notch-week-cost-value').textContent, '$3');
+  assert.match(f.find('notch-week-cost-value').querySelector('.usage-cost-info').tooltipEntries[0].full, /10/);
 });
 
 test('a partial device response keeps its total and info icon until history is complete', t => {
@@ -712,14 +713,63 @@ test('panel height scales once', () => {
   assert.equal(panelContentHeight({ attached: false, zoom: 1.5 }), 351);
 });
 
-test('partial pricing does not present the known subtotal as a complete cost', t => {
-  const f = panelFixture(t), data = payload();
+test('partial pricing retains the shared known subtotal and info disclosure on Home, week and Breakdown', t => {
+  const f = panelFixture(t, {}, { viaRenderer: true }), data = payload();
+  data.cells[0].costUsd = 12;
   data.cells[0].unpricedTokens = 40;
+  data.panel.week.days[0].unpricedTokens = 10;
+  f.panel.render(data);
+  const check = (name, cost, tokens) => {
+    const node = f.find(name), info = node.querySelector('.usage-cost-info');
+    assert.equal(node.textContent, cost);
+    assert.equal(info.tooltipEntries[0].full, `${tokens} tokens excluded from the cost estimate`);
+    assert.deepEqual(info.tooltipOptions, { centered: true });
+  };
+  check('notch-cost', '$12', 40);
+  check('notch-week-cost-value', '$13', 50);
+  const bars = f.find('notch-week-bars');
+  bars.children[0].fire('pointerenter');
+  check('notch-cost', '$1', 10);
+  bars.fire('pointerleave');
+  check('notch-cost', '$12', 40);
+  data.panel.week.days[0].unpricedTokens = 0; f.panel.render(data);
+  f.find('notch-week-bars').children[0].fire('pointerenter');
+  assert.equal(f.find('notch-cost').textContent, '$1');
+  assert.equal(f.find('notch-cost').querySelector('.usage-cost-info'), null);
+  f.find('notch-week-bars').fire('pointerleave');
+  check('notch-cost', '$12', 40);
+  f.panel.selectPage('breakdown');
+  check('notch-breakdown-cost', '$12', 40);
+  data.cells.push({ id: 'stat:month', available: true, totalTokens: 500, costUsd: 20, unpricedTokens: 80, clients: [], models: [] });
+  f.find('notch-breakdown-period').querySelectorAll('button')[1].fire('click', { detail: 0 });
+  check('notch-breakdown-cost', '$20', 80);
+});
+
+test('cost readouts distinguish all-unpriced, priced zero, and fully priced usage without stale info', t => {
+  const f = panelFixture(t), data = payload();
+  data.cells[0].costUsd = 0;
+  data.cells[0].unpricedTokens = 40;
+  data.panel.week.days[0].costUsd = 0;
   f.panel.render(data);
   assert.equal(f.find('notch-cost').textContent, '—');
-  assert.match(f.find('notch-cost').title, /40/);
+  assert.equal(f.find('notch-week-cost-value').textContent, '—');
+  assert.ok(f.find('notch-cost').querySelector('.usage-cost-info'));
   f.panel.selectPage('breakdown');
   assert.equal(f.find('notch-breakdown-cost').textContent, '—');
+  assert.ok(f.find('notch-breakdown-cost').querySelector('.usage-cost-info'));
+  data.cells[0].unpricedTokens = 0;
+  f.panel.render(data);
+  assert.equal(f.find('notch-breakdown-cost').textContent, '$0');
+  assert.equal(f.find('notch-breakdown-cost').querySelector('.usage-cost-info'), null);
+  f.panel.selectPage('home');
+  assert.equal(f.find('notch-cost').textContent, '$0');
+  assert.equal(f.find('notch-cost').querySelector('.usage-cost-info'), null);
+  assert.equal(f.find('notch-week-cost-value'), null);
+  data.cells[0].costUsd = 12;
+  f.panel.render(data);
+  assert.equal(f.find('notch-cost').textContent, '$12');
+  assert.equal(f.find('notch-cost').querySelector('.usage-cost-info'), null);
+  assert.equal(f.find('notch-week-cost-value').textContent, '$12');
 });
 
 test('a provider without a headline never falls back to an account hidden from the panel', t => {
