@@ -5659,7 +5659,7 @@ function ensureNotchController() {
     createGlass: (win) => createMacLiquidGlass(win, { shaped: true }),
     applyShapeMask: (win, commands, width, height, display) => {
       const { buffer, pixelWidth, pixelHeight } = rasterizeMask(toPolygons(commands), width, height, display?.scaleFactor || 2);
-      return applyVibrancyMask(win, nativeImage.createFromBitmap(buffer, { width: pixelWidth, height: pixelHeight }).toPNG(), width, height);
+      return applyVibrancyMask(win, { buffer, pixelWidth, pixelHeight }, width, height);
     },
     prefersReducedMotion: () => motionPreferenceApi.shouldReduceMotion(settings?.reduceMotion, systemPreferences.getAnimationSettings?.().prefersReducedMotion === true),
     onToggleRateMode: toggleDockRateMode,
@@ -6072,8 +6072,7 @@ function ensureEdgeDockController() {
     applyShapeMask: (win, commands, width, height, currentDisplay) => {
       const scale = currentDisplay?.scaleFactor || screen.getDisplayMatching?.(win.getBounds())?.scaleFactor || 2;
       const { buffer, pixelWidth, pixelHeight } = rasterizeMask(toPolygons(commands), width, height, scale);
-      const png = nativeImage.createFromBitmap(buffer, { width: pixelWidth, height: pixelHeight }).toPNG();
-      return applyVibrancyMask(win, png, width, height);
+      return applyVibrancyMask(win, { buffer, pixelWidth, pixelHeight }, width, height);
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
     installNonActivatingInput: (win) => process.platform === 'darwin' ? preventAppActivation(win)
