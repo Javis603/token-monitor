@@ -94,3 +94,42 @@ test('LimitsRuntime drops provider:* placeholder after account-keyed Desktop ok'
   assert.equal(row.source, 'local');
   assert.equal(row.stale, true);
 });
+
+test('aggregateLimits keeps stale Desktop local ok over a fresh empty failure from another device', () => {
+  // Live Mac Pro bug: Mac has Desktop sample (ok/local, ages stale); NAS reports
+  // fresh claude notConfigured with no windows. Cross-device empty failure must
+  // not eclipse the Desktop sample or leave Not signed in.
+  const summary = aggregateLimits([
+    {
+      deviceId: 'mac-pro',
+      limits: {
+        providers: [{ ...DESKTOP_OK }],
+        refreshMs: 300_000,
+        updatedAt: DESKTOP_OK.updatedAt
+      }
+    },
+    {
+      deviceId: 'nas-201',
+      limits: {
+        providers: [{
+          provider: 'claude',
+          status: 'notConfigured',
+          windows: [],
+          updatedAt: new Date(NOW - 30_000).toISOString()
+        }],
+        refreshMs: 300_000,
+        updatedAt: new Date(NOW - 30_000).toISOString()
+      }
+    }
+  ], 600_000, NOW);
+
+  const claude = summary.providers.filter((p) => p.provider === 'claude');
+  assert.equal(claude.length, 1, `expected one claude row, got ${JSON.stringify(claude.map((p) => ({
+    s: p.status, src: p.source, stale: p.stale, device: p.sourceDeviceId, w: p.windows?.length
+  })))}`);
+  assert.equal(claude[0].status, 'ok');
+  assert.equal(claude[0].source, 'local');
+  assert.equal(claude[0].accountKey, DESKTOP_OK.accountKey);
+  assert.equal(claude[0].windows.length, 2);
+  assert.equal(claude[0].stale, true);
+});

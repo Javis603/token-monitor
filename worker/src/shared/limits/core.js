@@ -634,6 +634,13 @@ function isUsefulLimitObservation(provider) {
   return false;
 }
 
+// Claude Desktop local-only rows are read from a sample file on one machine.
+// Another device reporting an empty failure only means that device has no
+// Desktop data; it says nothing about this account being signed out.
+function isLocalSampleProvider(provider) {
+  return Boolean(provider && provider.provider === 'claude' && provider.source === 'local' && provider.accountKey);
+}
+
 function providerCollapseKey(provider) {
   // Known WorkBuddy identities survive missing credentials and refresh-token
   // rotation. Keep every account separate even while its login is unavailable.
@@ -997,6 +1004,11 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
         stale: isProviderStale(provider, summary, device, staleAfterMs, nowMs)
       };
       if (isConfiguredProvider(provider)) providersWithConfiguredAccounts.add(provider.provider);
+      // A stale Desktop sample still proves the account is configured, so an
+      // empty failure from another device must not replace it.
+      if (isLocalSampleProvider(provider) && isConfiguredProvider(provider)) {
+        providersWithFreshConfiguredAccounts.add(provider.provider);
+      }
       if (!candidate.stale) {
         providersWithFreshObservations.add(provider.provider);
         if (isConfiguredProvider(provider)) providersWithFreshConfiguredAccounts.add(provider.provider);
@@ -1039,11 +1051,13 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
     const freshPeers = freshCandidatesByProvider.get(candidate.provider) || [];
     // A fresh empty failure on the SAME device as this stale useful row does
     // not eclipse it — Claude Desktop local-only ages by sample timestamp while
-    // a leftover notConfigured placeholder stays "fresh". Useful fresh peers,
-    // or any fresh peer from another device, still eclipse (signed-out Codex).
+    // a leftover notConfigured placeholder stays "fresh". Fresh peers from
+    // another device still eclipse (signed-out Codex), except when this row is
+    // a Claude Desktop local sample: another machine without Desktop data is
+    // not a sign-out.
     const hasEclipsingFreshObservation = freshPeers.some((peer) => (
       isUsefulLimitObservation(peer)
-      || peer.sourceDeviceId !== candidate.sourceDeviceId
+      || (peer.sourceDeviceId !== candidate.sourceDeviceId && !isLocalSampleProvider(candidate))
     ));
     const hasFreshObservation = providersWithFreshObservations.has(candidate.provider);
     // Fresh siblings cannot establish freshness for a different account. The
