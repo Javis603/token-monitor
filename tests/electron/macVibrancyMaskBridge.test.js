@@ -82,7 +82,7 @@ const mask = { buffer: Buffer.alloc(16), pixelWidth: 2, pixelHeight: 2 };
 
 test('raw upload passes the expected CoreGraphics arguments and releases in order', () => {
   const native = bridge();
-  assert.equal(applyVibrancyMask(native.win, mask, 2, 2, { api: native.api }), true);
+  assert.equal(applyVibrancyMask(native.win, mask, 2, 2, { api: native.api, platform: 'darwin' }), true);
   const calls = native.calls;
   const data = calls.find((call) => call.symbol === 'CFDataCreate');
   assert.deepEqual(data.values.slice(0, 1), [0]);
@@ -99,20 +99,20 @@ test('raw upload passes the expected CoreGraphics arguments and releases in orde
 
 test('a window with a shadow refreshes it after the image is committed', () => {
   const native = bridge({ hasShadow: true });
-  assert.equal(applyVibrancyMask(native.win, mask, 2, 2, { api: native.api }), true);
+  assert.equal(applyVibrancyMask(native.win, mask, 2, 2, { api: native.api, platform: 'darwin' }), true);
   assert.ok(native.calls.some((call) => call.target === 21 && call.selector === 'invalidateShadow'));
 });
 
 test('CGImageCreate returning null releases every earlier reference', () => {
   const native = bridge({ image: 0 });
-  assert.equal(applyVibrancyMask(native.win, mask, 2, 2, { api: native.api }), false);
+  assert.equal(applyVibrancyMask(native.win, mask, 2, 2, { api: native.api, platform: 'darwin' }), false);
   assert.deepEqual(native.calls.filter((call) => call.symbol === 'CFRelease').map((call) => call.values[0]), [102, 101, 100]);
   assert.equal(native.calls.some((call) => call.selector === 'setMaskImage:'), false);
 });
 
 test('a throwing CoreGraphics call still unwinds every reference', () => {
   const native = bridge({ image: 'throw' });
-  assert.equal(applyVibrancyMask(native.win, mask, 2, 2, { api: native.api }), false);
+  assert.equal(applyVibrancyMask(native.win, mask, 2, 2, { api: native.api, platform: 'darwin' }), false);
   assert.deepEqual(native.calls.filter((call) => call.symbol === 'CFRelease').map((call) => call.values[0]), [102, 101, 100]);
   assert.equal(native.calls.some((call) => call.selector === 'setMaskImage:'), false);
 });
