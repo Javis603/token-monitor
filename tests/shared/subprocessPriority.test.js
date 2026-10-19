@@ -4,7 +4,9 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const childProcess = require('node:child_process');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
 const os = require('node:os');
+const path = require('node:path');
 const {
   RESTORE_PRIORITY_AFTER_MS,
   lowerSubprocessPriority
@@ -20,6 +22,7 @@ async function spawnIdleChild(t, priority) {
   const exited = new Promise((resolve) => child.once('exit', resolve));
   t.after(async () => { child.kill(); await exited; });
   await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
+  if (priority === undefined) return child;
   try {
     os.setPriority(child.pid, priority);
   } catch (error) {
@@ -38,18 +41,42 @@ function fakePriorities(initial = NORMAL) {
   let current = initial;
   const calls = [];
   return {
+    platform: 'win32',
     calls,
     getPriority: () => current,
     setPriority: (pid, priority) => { calls.push([pid, priority]); current = priority; }
   };
 }
 
-test('lowerSubprocessPriority moves a running child below normal priority', async (t) => {
+test('lowerSubprocessPriority moves a running Windows child below normal priority', { skip: process.platform !== 'win32' }, async (t) => {
   const child = await spawnIdleChild(t, NORMAL);
   if (!child) return;
 
   assert.equal(lowerSubprocessPriority(child), true);
   assert.equal(os.getPriority(child.pid), BELOW_NORMAL);
+});
+
+for (const platform of ['darwin', 'linux']) {
+  test(`${platform} leaves subprocess priority untouched without a restore timer`, (t) => {
+    const child = fakeChild();
+    const getPriority = t.mock.fn(() => NORMAL);
+    const setPriority = t.mock.fn();
+    const timer = t.mock.method(globalThis, 'setTimeout', () => ({ unref() {} }));
+
+    assert.equal(lowerSubprocessPriority(child, { platform, getPriority, setPriority }), false);
+    assert.equal(getPriority.mock.callCount(), 0);
+    assert.equal(setPriority.mock.callCount(), 0);
+    assert.equal(timer.mock.callCount(), 0);
+    assert.equal(child.listenerCount('exit'), 0);
+  });
+}
+
+test('a real POSIX child keeps its starting priority', { skip: process.platform === 'win32' }, async (t) => {
+  const child = await spawnIdleChild(t);
+  const initial = os.getPriority(child.pid);
+
+  assert.equal(lowerSubprocessPriority(child), false);
+  assert.equal(os.getPriority(child.pid), initial);
 });
 
 test('a running child that already starts below normal keeps its priority', async (t) => {
@@ -113,7 +140,7 @@ test('a refused restore is ignored', (t) => {
     if (priority === NORMAL) throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
   };
 
-  assert.equal(lowerSubprocessPriority(fakeChild(), { getPriority: () => NORMAL, setPriority }), true);
+  assert.equal(lowerSubprocessPriority(fakeChild(), { platform: 'win32', getPriority: () => NORMAL, setPriority }), true);
   assert.doesNotThrow(() => t.mock.timers.tick(RESTORE_PRIORITY_AFTER_MS));
 });
 
@@ -127,11 +154,11 @@ test('lowerSubprocessPriority skips a child without a pid', () => {
 
 test('lowerSubprocessPriority leaves the child running when the change is refused', () => {
   const refuse = () => { throw Object.assign(new Error('no such process'), { code: 'ESRCH' }); };
-  assert.equal(lowerSubprocessPriority({ pid: 4242 }, { getPriority: refuse, setPriority: refuse }), false);
-  assert.equal(lowerSubprocessPriority({ pid: 4242 }, { getPriority: () => NORMAL, setPriority: refuse }), false);
+  assert.equal(lowerSubprocessPriority({ pid: 4242 }, { platform: 'win32', getPriority: refuse, setPriority: refuse }), false);
+  assert.equal(lowerSubprocessPriority({ pid: 4242 }, { platform: 'win32', getPriority: () => NORMAL, setPriority: refuse }), false);
 });
 
-test('tokscale scans start below normal priority', async (t) => {
+test('tokscale scans and Antigravity syncs apply the host platform priority policy', async (t) => {
   const originalSpawn = childProcess.spawn;
   const originalGetPriority = os.getPriority;
   const originalSetPriority = os.setPriority;
@@ -145,6 +172,7 @@ test('tokscale scans start below normal priority', async (t) => {
     child.kill = () => true;
     setImmediate(() => {
       child.stdout.emit('data', Buffer.from(JSON.stringify({ pricing: {} })));
+      child.emit('exit', 0);
       child.emit('close', 0);
     });
     return child;
@@ -162,5 +190,22 @@ test('tokscale scans start below normal priority', async (t) => {
 
   await lookupModelPricing('sample-model');
 
-  assert.deepEqual(priorities.calls, [[4242, BELOW_NORMAL]]);
+  assert.deepEqual(priorities.calls, process.platform === 'win32' ? [[4242, BELOW_NORMAL]] : []);
+
+  const syncPriorities = fakePriorities();
+  os.getPriority = syncPriorities.getPriority;
+  os.setPriority = syncPriorities.setPriority;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-priority-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+  const { createAntigravitySelfSync } = require('../../src/shared/providers/antigravity/selfSync');
+  const { createSelfSyncThrottle } = require('../../src/shared/selfSyncThrottle');
+  const { maybeSyncAntigravity } = createAntigravitySelfSync({
+    selfSyncThrottle: createSelfSyncThrottle(),
+    tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} })
+  });
+
+  await maybeSyncAntigravity('antigravity', null, home);
+
+  assert.deepEqual(syncPriorities.calls, process.platform === 'win32' ? [[4242, BELOW_NORMAL]] : []);
 });
