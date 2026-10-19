@@ -15,7 +15,6 @@
   const PANEL_METRICS = Object.freeze({ band: 34, pages: 176, gap: 6, bottom: 18, padding: 24 });
   const PAGES = Object.freeze(['home', 'limits', 'sessions', 'breakdown']);
   const LIMIT_COLUMNS = 3;
-  const ACTIVE_ROWS = 2;
   const BREAKDOWN_ROWS = 4;
 
   // Content height the controller sizes the open shell from, in screen points.
@@ -794,6 +793,7 @@
 
     function activeRow(row, stateName, nowMs) {
       const node = el('div', `notch-active is-${stateName}`);
+      node.setAttribute('role', 'listitem');
       node.style.setProperty('--notch-accent', clientColor(row.client));
       const body = el('div', 'notch-active-body');
       body.append(sessionHeading(row, 'notch-active-title'));
@@ -810,21 +810,27 @@
       return node;
     }
 
-    function renderSessions(pageNode, nowMs, scrollTop = 0) {
+    function renderSessions(pageNode, nowMs, scroll = {}) {
       const sessions = cell('stat:sessions')?.sessions || [];
       const states = sessions.map((row) => presentation.sessionActivityState(row, nowMs));
+      // The shared session projection already orders these rows. Partition the
+      // columns without changing the relative order inside either one.
       const active = sessions.map((row, index) => ({ row, state: states[index] }))
-        .filter((entry) => entry.state === 'running' || entry.state === 'waiting')
-        // Running first, as Home's now row picks it; waiting keeps its count.
-        .sort((a, b) => Number(b.state === 'running') - Number(a.state === 'running'));
+        .filter((entry) => entry.state === 'running' || entry.state === 'waiting');
       const recent = sessions.filter((_row, index) => states[index] !== 'running' && states[index] !== 'waiting');
       const left = el('div', 'notch-sessions-active');
       const leftHead = el('div', 'notch-section-head');
       leftHead.append(text('notch-kicker', t('notch.active')), text('notch-section-count', active.length ? t('notch.activeCount', { count: active.length }) : ''));
       left.append(leftHead);
+      let activeList;
       if (active.length) {
-        for (const entry of active.slice(0, ACTIVE_ROWS)) left.append(activeRow(entry.row, entry.state, nowMs));
-        if (active.length > ACTIVE_ROWS) left.append(text('notch-more', t('notch.moreActive', { count: active.length - ACTIVE_ROWS })));
+        activeList = el('div', 'notch-active-list');
+        activeList.setAttribute('role', 'list');
+        activeList.setAttribute('aria-label', t('notch.active'));
+        activeList.tabIndex = 0;
+        activeList.dataset.focusKey = 'active:list';
+        for (const entry of active) activeList.append(activeRow(entry.row, entry.state, nowMs));
+        left.append(activeList);
       } else {
         const empty = el('div', 'notch-sessions-empty');
         empty.append(text('notch-empty-title', t('notch.idle')));
@@ -858,7 +864,8 @@
       if (!recent.length) list.append(text('notch-empty', t('notch.noSessions')));
       right.append(list);
       pageNode.replaceChildren(left, el('div', 'notch-rule'), right);
-      list.scrollTop = scrollTop;
+      if (activeList) activeList.scrollTop = scroll.active || 0;
+      list.scrollTop = scroll.recent || 0;
     }
 
     // ---- Breakdown --------------------------------------------------------------
@@ -990,13 +997,16 @@
       pageKeys.set(page, key);
       const pageNode = pageNodes.get(page);
       const focused = pageNode.contains(document.activeElement) ? document.activeElement?.dataset.focusKey : null;
-      const recentScroll = pageNode.querySelector('.notch-recent-list')?.scrollTop || 0;
+      const sessionScroll = {
+        active: pageNode.querySelector('.notch-active-list')?.scrollTop || 0,
+        recent: pageNode.querySelector('.notch-recent-list')?.scrollTop || 0
+      };
       const snapshot = page === view.page ? captureRolls(pageNode) : new Map();
       const previous = el('div');
       previous.append(...pageNode.children);
       if (page === 'home') renderHome(pageNode, nowMs);
       else if (page === 'limits') renderLimits(pageNode, nowMs);
-      else if (page === 'sessions') renderSessions(pageNode, nowMs, recentScroll);
+      else if (page === 'sessions') renderSessions(pageNode, nowMs, sessionScroll);
       else renderBreakdown(pageNode, nowMs);
       overflowText.preserveReading(previous, pageNode);
       overflowText.refresh();

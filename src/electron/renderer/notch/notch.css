@@ -297,7 +297,7 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-rule { background: var(--notch-rule); }
 .notch-section-head { display: flex; align-items: center; justify-content: space-between; height: 12px; margin-bottom: 12px; }
 .notch-section-count { font-size: 10.5px; color: var(--notch-dim); }
-.notch-sessions-active { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.notch-sessions-active { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
 .notch-page-sessions .notch-section-head { height: 18px; flex: 0 0 auto; margin-bottom: 10px; }
 .notch-sessions-active .notch-section-head { margin-bottom: 2px; }
 .notch-active { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 8px; margin-left: -8px; border-radius: 14px; }
@@ -312,16 +312,14 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-active-meta > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .notch-active-value { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; text-align: right; }
 .notch-active-tokens { display: block; font-size: 13px; line-height: 1.15; }
-.notch-more { font-size: 10.5px; color: var(--notch-faint); }
-.notch-sessions-active:has(.notch-more) { gap: 6px; }
-.notch-sessions-active:has(.notch-more) .notch-section-head { margin-bottom: 0; }
-.notch-sessions-active:has(.notch-more) .notch-active { padding-block: 6px; }
+.notch-active-list { display: flex; flex-direction: column; gap: 8px; margin-left: -8px; padding-left: 8px; }
+.notch-active-list > .notch-active { flex-shrink: 0; }
 .notch-sessions-empty { flex: 1; display: grid; place-content: center; text-align: center; gap: 6px; font-size: 11px; color: var(--notch-faint); }
 .notch-empty-title { font: 500 14px/1.4 var(--notch-display); color: var(--notch-dim); }
 .notch-sessions-recent { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 /* Keep overlay scrollbars outside the token and context readouts. */
-.notch-recent-list { flex: 1; min-height: 0; margin-right: -12px; padding-right: 12px; overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--notch-fill-strong) transparent; scrollbar-gutter: stable; }
-.notch-recent-list:focus-visible { outline: 1px solid var(--blue); outline-offset: -1px; }
+.notch-active-list, .notch-recent-list { flex: 1; min-height: 0; margin-right: -12px; padding-right: 12px; overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--notch-fill-strong) transparent; scrollbar-gutter: stable; }
+.notch-active-list:focus-visible, .notch-recent-list:focus-visible { outline: 1px solid var(--blue); outline-offset: -1px; }
 .notch-recent { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: start; min-height: 46px; padding: 6px 0; }
 .notch-recent + .notch-recent { margin-top: 3px; }
 .notch-recent .edge-dock-mark { opacity: .85; }

@@ -304,7 +304,7 @@ test('a partial device response keeps its total and info icon until history is c
   assert.equal(notchWeek({}, new Date(2026, 9, 19, 12), { daily: [], complete: true }).complete, true);
 });
 
-test('running sessions lead the active list so two waiting ones cannot hide them', t => {
+test('active sessions retain the shared projection order across running and waiting states', t => {
   const f = panelFixture(t), data = payload();
   const now = Date.now(), ago = minutes => new Date(now - minutes * 60000).toISOString();
   const row = (id, state, minutes) => ({ key: `codex:${id}`, client: 'codex', sessionId: id, title: id, totalTokens: 1,
@@ -312,8 +312,36 @@ test('running sessions lead the active list so two waiting ones cannot hide them
   data.cells[1].sessions = [row('waiting-a', 'waiting', 1), row('waiting-b', 'waiting', 2), row('running-c', 'running', 3)];
   f.panel.render(data); f.panel.selectPage('sessions');
   const titles = f.find('notch-page-sessions').querySelectorAll('.notch-active').map(node => node.querySelector('.notch-active-title').textContent);
-  assert.deepEqual(titles, ['running-c', 'waiting-a']);
-  assert.match(f.find('notch-more').textContent, /1/);
+  assert.deepEqual(titles, ['waiting-a', 'waiting-b', 'running-c']);
+  assert.equal(f.find('notch-more'), null);
+});
+
+test('active sessions remain reachable and retain independent scroll and focus across live updates', t => {
+  const f = panelFixture(t), data = payload(), now = Date.now();
+  const active = Array.from({ length: 6 }, (_, index) => ({ key: `codex:active-${index}`, client: 'codex',
+    sessionId: `active-${index}`, title: `Active ${index + 1}`, totalTokens: index + 1,
+    lastUsedAt: new Date(now).toISOString(), liveActivity: { state: 'running', observedAt: new Date(now).toISOString() } }));
+  const quiet = Array.from({ length: 5 }, (_, index) => ({ key: `codex:quiet-${index}`, client: 'codex',
+    sessionId: `quiet-${index}`, title: `Quiet ${index + 1}`, totalTokens: index + 1, lastUsedAt: '2026-10-17T10:00:00Z' }));
+  data.cells[1].sessions = [...active, ...quiet];
+  f.panel.render(data); f.panel.selectPage('sessions');
+  const page = f.find('notch-page-sessions');
+  const list = page.querySelector('.notch-active-list');
+  assert.equal(list.querySelectorAll('.notch-active').length, 6);
+  assert.equal(list.attributes.role, 'list');
+  assert.equal(list.attributes['aria-label'], 'Active');
+  assert.equal(list.tabIndex, 0);
+  assert.equal(list.querySelectorAll('.notch-active').at(-1).attributes.role, 'listitem');
+  list.scrollTop = 150; list.focus();
+  page.querySelector('.notch-recent-list').scrollTop = 75;
+  active[0].totalTokens += 1; f.panel.render(data);
+  assert.equal(page.querySelector('.notch-active-list').scrollTop, 150);
+  assert.equal(page.querySelector('.notch-recent-list').scrollTop, 75);
+  assert.equal(f.document.activeElement.dataset.focusKey, 'active:list');
+  assert.equal(page.querySelectorAll('.notch-active-title').at(-1).textContent, 'Active 6');
+  data.cells[1].sessions = quiet; f.panel.render(data);
+  assert.equal(page.querySelector('.notch-active-list'), null);
+  assert.ok(page.querySelector('.notch-sessions-empty'));
 });
 
 test('quiet sessions use concise age metadata and explicit empty-state copy', t => {
