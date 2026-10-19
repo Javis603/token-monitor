@@ -67,7 +67,7 @@ test('Notch renderer forwards the TPS formatter through live, retained-idle and 
 test('sessions-only summary stays quiet without live work and never falls back to quotas or usage', () => {
   const nowMs = Date.now(), settings = { notchSummaryMode: 'sessions', notchWarnColors: true };
   const stats = { periods: { today: { totalTokens: 123456 } } };
-  const quota = { kind: 'provider', provider: 'devin', status: 'ok', remainingPercent: 0 };
+  const quota = { kind: 'provider', provider: 'devin', status: 'ok', remainingPercent: 0, severityPercent: 0 };
   const live = { id: 'stat:sessions', metric: 'sessions', sessions: [{ client: 'codex',
     lastUsedAt: new Date(nowMs).toISOString(), totalTokens: 5 }] };
   const data = buildNotchData(stats, [live, quota], settings, { nowMs });
@@ -85,7 +85,7 @@ test('sessions-only summary stays quiet without live work and never falls back t
 test('automatic summary prioritizes running and waiting sessions over exhausted quotas', () => {
   const nowMs = Date.now(), stats = { periods: { today: { totalTokens: 100 } } };
   const live = { id: 'stat:sessions', metric: 'sessions', sessions: [{ client: 'codex', lastUsedAt: new Date(nowMs).toISOString(), totalTokens: 5 }] };
-  const quota = { kind: 'provider', provider: 'devin', status: 'ok', remainingPercent: 0 };
+  const quota = { kind: 'provider', provider: 'devin', status: 'ok', remainingPercent: 0, severityPercent: 0 };
   for (const notchWarnColors of [false, true]) {
     const summary = buildNotchData(stats, [live, quota], { notchSummaryMode: 'auto', notchWarnColors }, { nowMs }).summary;
     assert.equal(summary.automatic, 'activity');
@@ -101,7 +101,7 @@ test('automatic summary prioritizes running and waiting sessions over exhausted 
 });
 
 test('automatic quota summary colours are opt-in and independent of the side dock', () => {
-  const quota = { kind: 'provider', provider: 'devin', status: 'ok', remainingPercent: 0 };
+  const quota = { kind: 'provider', provider: 'devin', status: 'ok', remainingPercent: 0, severityPercent: 0 };
   for (const settings of [{}, { notchWarnColors: false }, { edgeDockWarnColors: true }]) {
     const summary = buildNotchData({}, [quota], { ...settings, notchSummaryMode: 'auto' }).summary;
     assert.equal(summary.automatic, 'alert');
@@ -114,6 +114,56 @@ test('automatic quota summary colours are opt-in and independent of the side doc
   const used = buildNotchData({}, [quota], { notchSummaryMode: 'auto', notchWarnColors: true, showLimitUsed: true }).summary;
   assert.equal(used.items[1].text, '100%');
   assert.equal(used.items[1].unit, 'used');
+});
+
+test('automatic alerts rank providers and display the tightest projected quota rather than the headline', () => {
+  const stats = { periods: { today: { totalTokens: 100 } }, limits: { providers: [
+    { provider: 'claude', status: 'ok', windows: [{ kind: 'session', remainingPercent: 80 }, { kind: 'weekly', remainingPercent: 5 }] },
+    { provider: 'codex', status: 'ok', windows: [{ kind: 'session', remainingPercent: 7 }, { kind: 'weekly', remainingPercent: 50 }] }
+  ] } };
+  const cells = buildEdgeDockCells(stats, { items: [{ type: 'limit', provider: 'claude' }, { type: 'limit', provider: 'codex' }] });
+  assert.deepEqual(cells.map(cell => [cell.provider, cell.remainingPercent, cell.severityPercent]), [['claude', 80, 5], ['codex', 7, 7]]);
+  for (const showLimitUsed of [false, true]) {
+    const summary = buildNotchData(stats, cells, { notchSummaryMode: 'auto', showLimitUsed }).summary;
+    assert.equal(summary.automatic, 'alert');
+    assert.equal(summary.items[0].provider, 'claude');
+    assert.equal(summary.items[1].text, showLimitUsed ? '95%' : '5%');
+    assert.equal(summary.items[1].measure.value, showLimitUsed ? 95 : 5);
+    assert.equal(summary.items[1].unit, showLimitUsed ? 'used' : 'left');
+    const secondaryOnly = buildNotchData(stats, [cells[0]], { notchSummaryMode: 'auto', showLimitUsed }).summary;
+    assert.equal(secondaryOnly.automatic, 'alert', 'a critical secondary pool cannot fall back to daily usage');
+    assert.equal(secondaryOnly.items[1].text, showLimitUsed ? '95%' : '5%');
+  }
+  assert.equal(cells[0].remainingPercent, 80, 'alert projection does not rewrite the shared headline');
+});
+
+test('automatic alerts keep unknown severity unknown and ignore stale or failed readings', () => {
+  const stats = { periods: { today: { totalTokens: 100 } } };
+  const cell = { kind: 'provider', provider: 'claude', status: 'ok', remainingPercent: 0 };
+  for (const severityPercent of [null, undefined, NaN, Infinity]) {
+    const summary = buildNotchData(stats, [{ ...cell, severityPercent }], { notchSummaryMode: 'auto' }).summary;
+    assert.equal(summary.automatic, undefined);
+    assert.equal(summary.items.at(-1).measure.value, 100);
+  }
+  for (const status of ['stale', 'error']) {
+    assert.equal(buildNotchData(stats, [{ ...cell, status, severityPercent: 0 }], { notchSummaryMode: 'auto' }).summary.automatic, undefined);
+  }
+  assert.equal(buildNotchData(stats, [{ ...cell, severityPercent: 0 }], { notchSummaryMode: 'auto' }).summary.items.at(-1).text, '0%');
+});
+
+test('automatic alerts respect the shared headline account and hidden-account selection', () => {
+  const stats = { periods: { today: { totalTokens: 100 } }, limits: { providers: [
+    { provider: 'claude', accountKey: 'hidden', status: 'ok', windows: [{ kind: 'session', remainingPercent: 80 }, { kind: 'weekly', remainingPercent: 1 }] },
+    { provider: 'claude', accountKey: 'visible', status: 'ok', windows: [{ kind: 'session', remainingPercent: 90 }, { kind: 'weekly', remainingPercent: 50 }] }
+  ] } };
+  for (const hide of [false, true]) {
+    const cells = buildEdgeDockCells(stats, { items: [{ type: 'limit', provider: 'claude', hiddenAccounts: hide ? ['hidden'] : [] }] });
+    assert.equal(cells[0].severityPercent, hide ? 50 : 1);
+    const summary = buildNotchData(stats, cells, { notchSummaryMode: 'auto' }).summary;
+    assert.equal(summary.automatic, hide ? undefined : 'alert');
+    if (!hide) assert.equal(summary.items.at(-1).text, '1%');
+    assert.equal(buildNotchData(stats, cells, { notchSummaryMode: 'auto', limitsEnabled: false }).summary.automatic, undefined);
+  }
 });
 
 test('fixed panel readouts do not inherit legacy usage cards or pinned quota windows', () => {

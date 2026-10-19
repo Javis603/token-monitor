@@ -102,14 +102,17 @@ function attachSummaryClock(row, metric, nowMs) {
   row.clock = { resetsAt, headline: metric === 'percentReset' ? (suffix && row.text.endsWith(suffix) ? row.text.slice(0, -suffix.length) : row.text) : '' };
 }
 
-// When sessions are quiet, surface the tightest quota using the rail's scale.
+// The shared projection's severity covers the selected account's tightest
+// metered pool, which can differ from its headline. Keep ranking and readout
+// tied to that same value without rescanning hidden or unselected accounts.
 function notchAlert(cells, settings) {
   if (settings.limitsEnabled === false) return null;
   let worst = null;
   for (const cell of cells) {
-    if (cell.kind !== 'provider' || cell.status !== 'ok' || !Number.isFinite(cell.remainingPercent)) continue;
-    if (presentation.remainingSeverity(cell.remainingPercent) !== 'critical') continue;
-    if (!worst || cell.remainingPercent < worst.remainingPercent) worst = cell;
+    const remainingPercent = cell.severityPercent;
+    if (cell.kind !== 'provider' || cell.status !== 'ok' || !Number.isFinite(remainingPercent)) continue;
+    if (presentation.remainingSeverity(remainingPercent) !== 'critical') continue;
+    if (!worst || remainingPercent < worst.remainingPercent) worst = { provider: cell.provider, remainingPercent };
   }
   return worst;
 }
