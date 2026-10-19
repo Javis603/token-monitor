@@ -419,9 +419,9 @@ Object.assign(els, {
   notchHoverActionInputs: Array.from(document.querySelectorAll('input[name="notchHoverAction"]')),
   notchHoverDelayInput: document.getElementById('notchHoverDelayInput'),
   notchHoverDelayRow: document.getElementById('notchHoverDelayRow'),
+  notchSwipeGesturesInput: document.getElementById('notchSwipeGesturesInput'),
   resetNotchHoverDelayButton: document.getElementById('resetNotchHoverDelayButton'),
   notchProgressiveBlurInput: document.getElementById('notchProgressiveBlurInput'),
-  notchAvoidMenuBarInput: document.getElementById('notchAvoidMenuBarInput'),
   notchHideSummaryInFullScreenInput: document.getElementById('notchHideSummaryInFullScreenInput'),
   notchSizeInputs: Array.from(document.querySelectorAll('input[name="notchSize"]')),
   notchCustomScaleInput: document.getElementById('notchCustomScaleInput'),
@@ -13288,11 +13288,16 @@ function syncDockSizeControls(surface) {
 const NOTCH_HOVER_DELAY_DEFAULT_MS = 0;
 
 // Hover either grows the resting entry (a click opens it) or opens it after
-// the chosen duration; the duration only applies to the second.
+// the chosen duration; the duration only applies to the second, scroll
+// gestures only to the first.
 function syncNotchHoverControls() {
   const action = state.settings?.notchHoverAction === 'open' ? 'open' : 'peek';
   for (const input of els.notchHoverActionInputs) input.checked = input.value === action;
   els.notchHoverDelayRow?.classList.toggle('hidden', action !== 'open');
+  if (els.notchSwipeGesturesInput) {
+    els.notchSwipeGesturesInput.closest('.settings-item')?.classList.toggle('hidden', action !== 'peek');
+    els.notchSwipeGesturesInput.checked = state.settings?.notchSwipeGestures !== false;
+  }
   if (els.notchHoverDelayInput && document.activeElement !== els.notchHoverDelayInput) {
     const delay = Number(state.settings?.notchHoverDelay);
     els.notchHoverDelayInput.value = String(Number.isFinite(delay) ? delay : NOTCH_HOVER_DELAY_DEFAULT_MS);
@@ -13321,7 +13326,6 @@ function syncNotchStyleInput(preview) {
 
 function syncNotchCapabilities() {
   els.notchRunningIndicatorRow?.classList.toggle('hidden', state.notchCapabilities?.rings === false);
-  if (els.notchAvoidMenuBarInput) els.notchAvoidMenuBarInput.disabled = state.notchCapabilities?.menuAvoidance === false;
 }
 
 function syncDockControls() {
@@ -13361,7 +13365,6 @@ function syncDockControls() {
   if (els.notchProgressiveBlurInput) els.notchProgressiveBlurInput.checked = state.settings?.notchProgressiveBlur !== false;
   if (els.notchHapticInput) els.notchHapticInput.checked = state.settings?.notchHaptic !== false;
   syncNotchHoverControls();
-  if (els.notchAvoidMenuBarInput) els.notchAvoidMenuBarInput.checked = state.settings?.notchAvoidMenuBar !== false;
   if (els.notchHideSummaryInFullScreenInput) els.notchHideSummaryInFullScreenInput.checked = state.settings?.notchHideSummaryInFullScreen !== false;
   els.edgeDockComposerRow?.classList.toggle('hidden', !enabled);
   if (enabled) edgeDockComposer?.render();
@@ -13452,8 +13455,8 @@ els.resetNotchHoverDelayButton?.addEventListener('click', () => {
 els.notchHoverDelayInput?.addEventListener('change', () => {
   void saveSettings({ notchHoverDelay: Number(els.notchHoverDelayInput.value) });
 });
-els.notchAvoidMenuBarInput?.addEventListener('change', () => {
-  void saveSettings({ notchAvoidMenuBar: els.notchAvoidMenuBarInput.checked });
+els.notchSwipeGesturesInput?.addEventListener('change', () => {
+  void saveSettings({ notchSwipeGestures: els.notchSwipeGesturesInput.checked });
 });
 els.notchRunningIndicatorInput?.addEventListener('change', () => {
   void saveSettings({ notchRunningIndicatorEnabled: els.notchRunningIndicatorInput.checked });

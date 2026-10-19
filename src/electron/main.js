@@ -442,7 +442,6 @@ const { toPolygons } = require('./renderer/edgeDock/shapes');
 const { rasterizeMask } = require('./edgeDock/mask');
 const { NOTCH_BLUR_ALPHA, NOTCH_BLUR_RADIUS, NOTCH_BLUR_STRENGTH, notchBlurMask } = require('./notch/blur');
 const { applyProgressiveBlur } = require('./notch/macProgressiveBlur');
-const { monitorMacPrimaryPress } = require('./notch/macPrimaryPress');
 const { applyVibrancyMask } = require('./edgeDock/macVibrancyMask');
 const { performMacHaptic } = require('./edgeDock/macHaptics');
 const { primaryButtonDown } = require('./edgeDock/pointerButtons');
@@ -640,7 +639,7 @@ function defaultSettings() {
     notchWarnColors: false,
     notchHoverAction: 'peek',
     notchHoverDelay: 0,
-    notchAvoidMenuBar: true,
+    notchSwipeGestures: true,
     notchHaptic: true,
     notchProgressiveBlur: true,
     notchHideSummaryInFullScreen: true,
@@ -2749,7 +2748,7 @@ function readSettings() {
     merged.notchWarnColors = parseBoolean(merged.notchWarnColors, false);
     merged.notchHoverAction = normalizeNotchHoverAction(merged.notchHoverAction);
     merged.notchHoverDelay = normalizeNotchHoverDelay(merged.notchHoverDelay);
-    merged.notchAvoidMenuBar = parseBoolean(merged.notchAvoidMenuBar, true);
+    merged.notchSwipeGestures = parseBoolean(merged.notchSwipeGestures, true);
     merged.notchHaptic = parseBoolean(merged.notchHaptic, true);
     merged.notchProgressiveBlur = parseBoolean(merged.notchProgressiveBlur, true);
     merged.notchHideSummaryInFullScreen = parseBoolean(merged.notchHideSummaryInFullScreen, true);
@@ -5682,7 +5681,8 @@ function ensureNotchController() {
         width: mask.width, height: mask.height, radius: NOTCH_BLUR_RADIUS });
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
-    monitorPrimaryPress: (onPress) => monitorMacPrimaryPress(onPress, { logger: (message) => console.log(message) }),
+    // An absent key is the system default, natural scrolling on.
+    naturalScrolling: () => systemPreferences.getUserDefault?.('com.apple.swipescrolldirection', 'string') !== '0',
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
     isFullScreen: createFullScreenProbe({ platform: process.platform, screen, logger: (message) => console.log(message) }),
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
@@ -7986,7 +7986,7 @@ app.whenReady().then(() => {
       notchWarnColors: parseBoolean(patch.notchWarnColors ?? settings.notchWarnColors, false),
       notchHoverAction: normalizeNotchHoverAction(patch.notchHoverAction ?? settings.notchHoverAction),
       notchHoverDelay: normalizeNotchHoverDelay(patch.notchHoverDelay ?? settings.notchHoverDelay),
-      notchAvoidMenuBar: parseBoolean(patch.notchAvoidMenuBar ?? settings.notchAvoidMenuBar, true),
+      notchSwipeGestures: parseBoolean(patch.notchSwipeGestures ?? settings.notchSwipeGestures, true),
       notchHaptic: parseBoolean(patch.notchHaptic ?? settings.notchHaptic, true),
       notchProgressiveBlur: parseBoolean(patch.notchProgressiveBlur ?? settings.notchProgressiveBlur, true),
       notchHideSummaryInFullScreen: parseBoolean(patch.notchHideSummaryInFullScreen ?? settings.notchHideSummaryInFullScreen, true),
