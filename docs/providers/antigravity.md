@@ -117,7 +117,7 @@ Grouped quota responses map into the normalized limits windows used by every pro
 - five-hour windows;
 - weekly windows.
 
-Older model-config responses are pooled into compatible fallback windows (`Gemini Pro`, `Gemini Flash`, `Claude`, and `Gemini 4 Argon`). UI labels and grouping should describe the upstream pool rather than inventing per-model precision the response does not contain.
+Older model-config responses are pooled into compatible fallback windows (`Gemini Pro`, `Gemini Flash`, `Claude`, and `Gemini 4 Argon`). UI labels and grouping should describe the upstream pool rather than inventing per-model precision the response does not contain. A pool without a finite remaining fraction stays in the normalized record with its reset information and meter disabled, but the renderer hides its entire row, including the name and reset. Apply the same visibility rule to the Limits page, Edge Dock, Home compact windows, and usage checklist. A real zero remains a visible, metered, exhausted allowance in both remaining and used display modes. This rule does not hide unknown or disabled buckets in the normal grouped-quota layout.
 
 The Limits page and Edge Dock preserve the existing Gemini and Claude/GPT quota pairs, then append the separate Gemini 4 Argon group. A weekly-only Argon allowance spans the full row. Apply this ordering in the shared renderer rather than changing normalized window order; an unavailable bucket must not gain an invented percentage or meter.
 

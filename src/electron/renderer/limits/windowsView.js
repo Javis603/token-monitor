@@ -1016,7 +1016,9 @@
         }
       } else {
         const weeklyWindows = windowsForKind(provider, 'weekly');
-        const visibleWindows = weeklyWindows.length > 0 ? weeklyWindows : [null];
+        const visibleWindows = weeklyWindows.length > 0
+          ? weeklyWindows.filter(presentationApi.antigravityQuotaWindowVisible)
+          : [null];
         for (const quotaWindow of visibleWindows) {
           const node = limitWindowNode(providerWindowLabel(provider, quotaWindow, 'Weekly'), quotaWindow, color, 0.78);
           node.classList.add('limit-window-wide');

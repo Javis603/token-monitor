@@ -33,6 +33,7 @@ const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../
 const { aggregateLimits, normalizeLimitProvider } = require('../../src/shared/limits/core');
 const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
 const { fetchMinimaxLimits } = require('../../src/shared/providers/minimax/limits');
+const { fetchAntigravityLimits } = require('../../src/shared/providers/antigravity/limits');
 
 const root = path.join(__dirname, '../..');
 
@@ -1845,19 +1846,19 @@ test('an Antigravity group whose rows are all unchecked goes with them', () => {
   assert.doesNotMatch(card.text, /Claude/);
 });
 
-for (const unavailable of [false, true]) test(`Antigravity keeps the original quota pairs above Argon weekly with Claude 5-hour ${unavailable ? 'unavailable' : 'available'}`, () => {
+for (const unavailable of [false, true]) for (const showLimitUsed of [false, true]) test(`Antigravity keeps the original quota pairs above Argon weekly with Claude 5-hour ${unavailable ? 'unavailable' : 'available'} in ${showLimitUsed ? 'used' : 'remaining'} mode`, () => {
   const record = normalizeLimitProvider({
     provider: 'antigravity',
     windows: [
-      { kind: 'weekly', label: 'Gemini 4 Argon weekly', remainingPercent: 37 },
-      { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 98 },
-      { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 99 },
-      { kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: unavailable ? null : 100, showMeter: !unavailable },
-      { kind: 'weekly', label: 'Claude/GPT weekly', remainingPercent: 100 }
+      { kind: 'weekly', label: 'Gemini 4 Argon weekly', usedPercent: 63 },
+      { kind: 'session', label: 'Gemini 5-hour', usedPercent: 2 },
+      { kind: 'weekly', label: 'Gemini weekly', usedPercent: 1 },
+      { kind: 'session', label: 'Claude/GPT 5-hour', usedPercent: unavailable ? null : 0, showMeter: !unavailable },
+      { kind: 'weekly', label: 'Claude/GPT weekly', usedPercent: 100 }
     ]
   });
   const before = structuredClone(record);
-  const card = dockView().renderProviderWindows(record, '#4285F4');
+  const card = dockView({ showLimitUsed }).renderProviderWindows(record, '#4285F4');
   const groups = [...card.walk()].filter((node) => node.classNames.has('limit-window-group'));
   assert.deepEqual(
     groups.map((group) => [
@@ -1879,7 +1880,87 @@ for (const unavailable of [false, true]) test(`Antigravity keeps the original qu
     'Gemini 4 Argon · Weekly'
   ]);
   assert.equal([...card.walk()].filter((node) => node.classNames.has('limit-meter')).length, unavailable ? 4 : 5);
+  const expectedRemaining = [98, 99, unavailable ? null : 100, 0, 37];
+  const rows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  rows.forEach((row, index) => {
+    const remaining = expectedRemaining[index];
+    const fill = row.find('limit-meter-fill');
+    if (remaining === null) {
+      assert.equal(fill, null);
+      assert.doesNotMatch(row.text, /%/);
+    } else {
+      const percent = showLimitUsed ? 100 - remaining : remaining;
+      assert.ok(row.text.includes(`${percent}% ${showLimitUsed ? 'used' : 'left'}`), row.text);
+      assert.equal(Number(fill.style['--bar-scale']), percent / 100);
+    }
+  });
   assert.deepEqual(record, before, 'display ordering does not mutate the normalized quota record');
+});
+
+test('Antigravity OAuth legacy fallback keeps unknown, exhausted and numeric quotas distinct in both display modes', async () => {
+  const resetTime = '2030-06-03T04:00:00Z';
+  const providers = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'legacy', accountEmail: 'legacy@example.com',
+      credentials: { accessToken: 'fixture-token', expiresAt: Date.now() + 3600_000,
+        clientId: 'client', clientSecret: 'secret', projectId: 'fixture-project' }
+    }]
+  }, {
+    antigravityProbe: async () => { throw new Error('local RPC unavailable'); },
+    fetch: async (url) => {
+      let payload;
+      if (url.endsWith(':loadCodeAssist')) payload = {};
+      else if (url.endsWith(':retrieveUserQuotaSummary')) payload = { groups: [] };
+      else if (url.endsWith(':fetchAvailableModels')) payload = { models: {
+        'gemini-4-argon-high': { displayName: 'Gemini 4 Argon', quotaInfo: { remainingFraction: null, resetTime } },
+        'gemini-flash': { displayName: 'Gemini Flash', quotaInfo: { remainingFraction: 0.8, resetTime } },
+        'claude-sonnet': { displayName: 'Claude', quotaInfo: { remainingFraction: 0, resetTime } }
+      } };
+      else throw new Error(`Unexpected URL ${url}`);
+      return { ok: true, status: 200, json: async () => payload };
+    }
+  });
+  assert.equal(providers.length, 1);
+  const provider = providers[0];
+  assert.equal(provider.source, 'oauth');
+  const unknown = provider.windows.find((window) => window.label === 'Gemini 4 Argon');
+  assert.equal(unknown.remainingPercent, null);
+  assert.equal(unknown.usedPercent, null);
+  assert.equal(unknown.showMeter, false);
+  assert.equal(unknown.resetsAt, new Date(resetTime).toISOString());
+  const before = structuredClone(provider);
+
+  for (const showLimitUsed of [false, true]) {
+    const card = dockView({ showLimitUsed }).renderProviderWindows(provider, '#4285F4');
+    const rows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+    const argon = rows.find((row) => row.text.includes('Gemini 4 Argon'));
+    assert.equal(argon, undefined, 'unknown legacy pools do not render their name or reset');
+    assert.equal(rows.length, 2);
+    for (const [label, remaining] of [['Gemini Flash', 80], ['Claude', 0]]) {
+      const row = rows.find((entry) => entry.text.includes(label));
+      const percent = showLimitUsed ? 100 - remaining : remaining;
+      assert.ok(row.text.includes(`${percent}% ${showLimitUsed ? 'used' : 'left'}`), row.text);
+      assert.equal(Number(row.find('limit-meter-fill').style['--bar-scale']), percent / 100);
+    }
+  }
+  assert.deepEqual(dockView().limitProviderUsageItems([provider]).map((item) => item.label), ['Gemini Flash', 'Claude']);
+  assert.deepEqual(limitPresentationApi.limitProviderCompactWindows('antigravity', provider.windows).map((window) => window.label), ['Gemini Flash', 'Claude']);
+  assert.deepEqual(provider, before, 'hidden legacy pools retain their source data');
+});
+
+test('Antigravity hides an all-unknown legacy pool without adding a placeholder quota', () => {
+  const provider = normalizeLimitProvider({ provider: 'antigravity', windows: [
+    { kind: 'weekly', label: 'Gemini 4 Argon', usedPercent: null, resetsAt: '2030-06-03T04:00:00Z' }
+  ] });
+  const before = structuredClone(provider);
+  for (const showLimitUsed of [false, true]) {
+    const card = dockView({ showLimitUsed }).renderProviderWindows(provider, '#4285F4');
+    assert.equal(card.children.length, 0);
+    assert.equal(card.text, '');
+  }
+  assert.deepEqual(dockView().limitProviderUsageItems([provider]), []);
+  assert.deepEqual(limitPresentationApi.limitProviderCompactWindows('antigravity', provider.windows), []);
+  assert.deepEqual(provider, before);
 });
 
 test('a MiMo plan drawn from the balance is the same item as the plan window', () => {

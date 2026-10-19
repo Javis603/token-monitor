@@ -249,8 +249,8 @@ test('compact Codex windows never backfill canonical lanes with additional quota
 
 test('compact Antigravity labels preserve legacy and mixed-payload fallbacks', () => {
   const legacy = [
-    { kind: 'session', label: 'Gemini Pro' },
-    { kind: 'session', label: 'Gemini Flash' }
+    { kind: 'session', label: 'Gemini Pro', usedPercent: 25 },
+    { kind: 'session', label: 'Gemini Flash', usedPercent: 25 }
   ];
 
   const mixed = [{ kind: 'session', label: 'Gemini 5-hour' }, legacy[0]];

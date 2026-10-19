@@ -68,7 +68,8 @@ function mapAntigravitySnapshot(snapshot, { nowMs, source = 'rpc', account = nul
           ? Math.max(0, Math.min(100, (1 - pool.remainingFraction) * 100))
           : null,
         resetsAt: pool.resetTime || null,
-        windowMinutes: null
+        windowMinutes: null,
+        showMeter: Number.isFinite(pool.remainingFraction)
       }));
   return normalizeLimitProvider({
     provider: 'antigravity',
