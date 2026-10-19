@@ -97,6 +97,7 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
 .notch-activity-waiting { color: var(--yellow); }
 .notch-waiting-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
 .notch-wave { display: inline-flex; align-items: center; gap: 2.5px; height: 16px; }
+.notch-summary .notch-wave { scale: 1 1.15; }
 .notch-wave i { width: 3px; border-radius: 2px; background: var(--notch-accent, var(--text)); animation: notch-wave 1.05s ease-in-out infinite; }
 .notch-wave i:nth-child(1) { height: 7px; animation-delay: -.2s; }
 .notch-wave i:nth-child(2) { height: 13px; animation-delay: -.55s; }
