@@ -610,6 +610,7 @@ function defaultSettings() {
     tokenRateMode: 'speed',
     heatmapMetric: 'cost',
     modelRankingMetric: 'tokens',
+    modelClientBreakdown: true,
     homeActiveDaysWindow: 'all',
     // How a live session's context gauge reads. That direction is a choice the
     // gauge cannot make on its own, so it is stated here rather than assumed:
@@ -2702,6 +2703,7 @@ function readSettings() {
     merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
+    merged.modelClientBreakdown = parseBoolean(merged.modelClientBreakdown, true);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
     merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
@@ -8066,6 +8068,7 @@ app.whenReady().then(() => {
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
+      modelClientBreakdown: parseBoolean(patch.modelClientBreakdown ?? settings.modelClientBreakdown, true),
       sessionTitlesEnabled: parseBoolean(patch.sessionTitlesEnabled ?? settings.sessionTitlesEnabled, true),
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
