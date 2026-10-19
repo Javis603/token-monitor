@@ -73,6 +73,7 @@
     // .omp/agent/sessions root as its own `omp` client, so the row is a real
     // client, not a sub-source of Pi.
     { id: 'omp', label: 'Oh My Pi' },
+    { id: 'goose', label: 'Goose' },
     { id: 'zed', label: 'Zed' },
     { id: 'kilo', label: 'Kilo' },
     { id: 'commandcode', label: 'Command Code' },
@@ -83,6 +84,7 @@
     { id: 'codebuddy', label: 'CodeBuddy' },
     { id: 'workbuddy', label: 'WorkBuddy' },
     { id: 'proma', label: 'Proma', forkOnly: true },
+    { id: 'catpaw', label: 'CatPaw', defaultTracked: false, forkOnly: true },
     { id: 'qodercn', label: 'Qoder CN', defaultTracked: false, forkOnly: true },
     { id: 'reasonix', label: 'Reasonix' },
     { id: 'dsh', label: 'DeepSeek Harness' },

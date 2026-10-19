@@ -291,6 +291,30 @@ test('composer visibility destroys hidden surfaces and creates newly visible sur
   ]);
 });
 
+test('animated composer visibility collapses its disclosure and releases the editor without clearing its frame', () => {
+  const root = fakeElement('div');
+  const disclosure = fakeElement('div');
+  const composers = {};
+  const destroyed = [];
+  let created = 0;
+  const create = () => { created += 1; return { destroy: (options) => destroyed.push(options) }; };
+  const surface = { id: 'notch', root, visibilityRoot: disclosure, visible: true };
+  syncTrayComposerSurfaces([surface], composers, create);
+  assert.equal(disclosure.inert, false);
+  surface.visible = false;
+  syncTrayComposerSurfaces([surface], composers, create);
+  syncTrayComposerSurfaces([surface], composers, create);
+  assert.equal(disclosure.classList.contains('hidden'), true);
+  assert.equal(disclosure.inert, true);
+  assert.deepEqual(destroyed, [{ preserveContent: true }]);
+  assert.equal('notch' in composers, false);
+  surface.visible = true;
+  syncTrayComposerSurfaces([surface], composers, create);
+  assert.equal(disclosure.classList.contains('hidden'), false);
+  assert.equal(disclosure.inert, false);
+  assert.equal(created, 2);
+});
+
 const balanceStats = {
   periods: { today: {}, month: {}, allTime: {} },
   limits: {
@@ -439,14 +463,14 @@ function fakeElement(tag) {
   return el;
 }
 
-function renderComposer({ preview = {}, editable = false, onCustomize = () => {} }) {
+function renderComposer({ preview = {}, editable = false, onCustomize = () => {}, onRendered = () => {} }) {
   const saved = { document: global.document, window: global.window, Image: global.Image };
   global.document = { createElement: (tag) => fakeElement(tag) };
   global.window = { addEventListener() {}, removeEventListener() {} };
   global.Image = function FakeImage() { return fakeElement('img'); };
   const root = fakeElement('div');
   try {
-    createTrayComposer({
+    const composer = createTrayComposer({
       root,
       surface: 'tray',
       layoutApi: trayLayoutApi,
@@ -457,14 +481,27 @@ function renderComposer({ preview = {}, editable = false, onCustomize = () => {}
       onLayoutChange() {},
       label: (key) => key
     });
+    onRendered(composer, root);
   } finally {
     global.document = saved.document;
     global.window = saved.window;
     global.Image = saved.Image;
   }
   const [heading, strip] = root.children;
-  return { root, heading, strip, content: strip.children[0].children[0] };
+  return { root, heading, strip, content: strip?.children[0]?.children[0] };
 }
+
+test('destroy retains the closing frame only when requested; normal teardown clears it', () => {
+  renderComposer({
+    onRendered(composer, root) {
+      const children = [...root.children];
+      composer.destroy({ preserveContent: true });
+      assert.deepEqual(root.children, children);
+      composer.destroy();
+      assert.deepEqual(root.children, []);
+    }
+  });
+});
 
 test('a non-custom surface previews the real tray image behind a Customize button', () => {
   const { root, heading, strip, content } = renderComposer({

@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { clientGradient, projectBreakdownIncomplete, projectRowsForPeriod } = require('../../src/electron/renderer/projectRows');
+const { projectModelAliasStats } = require('../../src/electron/modelAliasPresentation');
 
 test('projectBreakdownIncomplete only flags the all-time project breakdown', () => {
   const stats = { projectsIncomplete: true };
@@ -62,6 +63,114 @@ test('projectRowsForPeriod prefers the bounded project rollup', () => {
     { key: 'codex', value: 200 },
     { key: 'claude', value: 100 }
   ]);
+});
+
+test('project rows default to tool share and can show alias-aware model share with an unknown remainder', () => {
+  const period = {
+    projects: {
+      app: {
+        label: 'App',
+        tokens: 200,
+        costUsd: 1.25,
+        clients: { codex: 150, claude: 50 },
+        models: { 'vendor/gpt-5': 70, 'gpt-5': 50, 'claude-sonnet': 40 }
+      }
+    }
+  };
+  const tools = projectRowsForPeriod(period, { clientLabels: { codex: 'Codex', claude: 'Claude Code' } });
+  assert.equal(tools[0].value, 200);
+  assert.deepEqual(tools[0].accordionRows.map(({ key, value }) => ({ key, value })), [
+    { key: 'codex', value: 150 },
+    { key: 'claude', value: 50 }
+  ]);
+
+  const aliasedStats = projectModelAliasStats({ periods: { today: period } }, { 'vendor/gpt-5': 'gpt-5' });
+  const models = projectRowsForPeriod(aliasedStats.periods.today, {
+    shareBy: 'model',
+    modelColor: (model) => model === 'gpt-5' ? '#111111' : '#eeeeee',
+    unknownModelLabel: 'Unknown model'
+  });
+  assert.equal(models[0].value, 200);
+  assert.equal(models[0].cost, 1.25);
+  assert.deepEqual(models[0].accordionRows.map(({ key, name, value }) => ({ key, name, value })), [
+    { key: 'gpt-5', name: 'gpt-5', value: 120 },
+    { key: 'claude-sonnet', name: 'claude-sonnet', value: 40 },
+    { key: 'unknown', name: 'Unknown model', value: 40 }
+  ]);
+  assert.equal(models[0].accordionRows.reduce((sum, row) => sum + row.value, 0), models[0].value);
+  assert.match(models[0].barBackground, /#111111/);
+  assert.match(models[0].barBackground, /#eeeeee/);
+  assert.match(models[0].barBackground, /var\(--muted\)/);
+});
+
+test('project model share caps malformed attribution at the project total', () => {
+  const [row] = projectRowsForPeriod({
+    projects: { app: { label: 'App', tokens: 50, models: { alpha: 40, beta: 40 } } }
+  }, { shareBy: 'model', unknownModelLabel: 'Unknown model' });
+  assert.equal(row.value, 50);
+  assert.deepEqual(row.accordionRows.map(({ key, value }) => ({ key, value })), [
+    { key: 'alpha', value: 40 },
+    { key: 'beta', value: 10 }
+  ]);
+  assert.equal(row.accordionRows.reduce((sum, entry) => sum + entry.value, 0), 50);
+});
+
+test('project model share does not infer missing model data from partial session details', () => {
+  for (const models of [undefined, { 'gpt-5': 0 }]) {
+    const project = { label: 'App', tokens: 100, clients: { codex: 100 } };
+    if (models !== undefined) project.models = models;
+    const [row] = projectRowsForPeriod({
+      projects: { app: project },
+      sessions: {
+        partial: {
+          client: 'codex',
+          projectLabel: 'App',
+          totalTokens: 100,
+          models: { 'gpt-5': 100 }
+        }
+      }
+    }, { shareBy: 'model', unknownModelLabel: 'Unknown model' });
+
+    assert.equal(row.value, 100);
+    assert.deepEqual(row.accordionRows.map(({ key, name, value }) => ({ key, name, value })), [
+      { key: 'unknown', name: 'Unknown model', value: 100 }
+    ]);
+  }
+});
+
+test('project model share leaves incomplete session-derived project usage unattributed', () => {
+  const [row] = projectRowsForPeriod({
+    sessions: {
+      partial: {
+        client: 'codex',
+        projectLabel: 'App',
+        totalTokens: 100,
+        models: { 'gpt-5': 100 }
+      }
+    }
+  }, {
+    shareBy: 'model',
+    allowSessionModelAttribution: false,
+    unknownModelLabel: 'Unknown model'
+  });
+
+  assert.equal(row.value, 100);
+  assert.deepEqual(row.accordionRows.map(({ key, name, value }) => ({ key, name, value })), [
+    { key: 'unknown', name: 'Unknown model', value: 100 }
+  ]);
+});
+
+test('project model maps safely retain reserved keys without prototype pollution', () => {
+  const period = JSON.parse('{"projects":{"app":{"label":"App","tokens":9,"models":{"__proto__":4,"constructor":3,"prototype":2}}}}');
+  const [row] = projectRowsForPeriod(period, { shareBy: 'model' });
+
+  assert.equal(Object.getPrototypeOf(row.modelTokens), null);
+  assert.deepEqual(row.accordionRows.map(({ key, value }) => ({ key, value })), [
+    { key: '__proto__', value: 4 },
+    { key: 'constructor', value: 3 },
+    { key: 'prototype', value: 2 }
+  ]);
+  assert.equal({}.polluted, undefined);
 });
 
 test('projectRowsForPeriod recovers trusted native attribution from local sessions when the native rollup is absent', () => {

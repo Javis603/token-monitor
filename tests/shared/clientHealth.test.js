@@ -326,10 +326,15 @@ test('every source-root id the collector emits is in the allowlist', () => {
   for (const id of ['antigravity-ide-source', 'antigravity-cli-data']) {
     assert.ok(CLIENT_SOURCE_CHECK_IDS.includes(id));
   }
-  // And nothing in the allowlist is dead weight. Two ids are exempt because they
-  // are discovered rather than constructed: `hermes-profile` comes from profiles
-  // found on disk, and `wsl-home` only appears on Windows with a running distro.
-  const discoveryDependent = new Set(['copilot-otel-exporter', 'hermes-profile', 'wsl-home']);
+  // And nothing in the allowlist is dead weight. Some ids are exempt because no
+  // client can construct them here: `copilot-otel-exporter` and `hermes-profile`
+  // come from files found on disk, `wsl-home` only appears on Windows with a
+  // running distro, and CatPaw is both platform- and discovery-conditional —
+  // `catpaw-data` is built only on darwin/win32, and `catpaw-db` only once an
+  // account database is actually found.
+  const discoveryDependent = new Set([
+    'copilot-otel-exporter', 'hermes-profile', 'wsl-home', 'catpaw-data', 'catpaw-db'
+  ]);
   const checked = new Set([...emitted, 'antigravity-ide-source', 'antigravity-cli-data']);
   for (const id of CLIENT_SOURCE_CHECK_IDS) {
     if (discoveryDependent.has(id)) continue;
@@ -365,7 +370,7 @@ test('Claude source roots follow CLAUDE_CONFIG_DIR like tokscale', () => {
   os.homedir = () => path.join(path.sep, 'home', 'alice');
   process.env.CLAUDE_CONFIG_DIR = path.join(path.sep, 'srv', 'claude-config');
   try {
-    assert.deepEqual(clientSourceRoots('claude').claude, [
+    assert.deepEqual(clientSourceRoots('claude').claude.filter(({ optional }) => !optional), [
       { id: 'claude-projects', dir: path.join(path.sep, 'srv', 'claude-config', 'projects') },
       { id: 'claude-transcripts', dir: path.join(path.sep, 'srv', 'claude-config', 'transcripts') }
     ]);
@@ -474,7 +479,8 @@ test('source resolution feeds watcher paths and exact-file diagnostics without c
     { id: 'codex-sessions', dir: path.join(homeDir, '.codex', 'archived_sessions') }
   ]);
   assert.deepEqual(roots.codex.at(-1), { id: 'custom-scan-path', dir: path.join(homeDir, 'extra-codex'), custom: true });
-  assert.deepEqual(roots.amp, [{ id: 'amp-threads', dir: path.join(homeDir, 'xdg', 'amp', 'threads') }]);
+  assert.ok(roots.amp.some(({ dir }) => dir === path.join(homeDir, 'xdg', 'amp', 'threads')));
+  assert.equal(roots.amp.at(-1).optional, true);
   const zcodeDb = roots.zcode.find((root) => root.id === 'zcode-cli-db');
   assert.deepEqual(zcodeDb, {
     id: 'zcode-cli-db',

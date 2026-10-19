@@ -23,9 +23,13 @@ To dry-run the agent without posting: `npm run agent:once -- --dry-run`.
 | Changing… | Read first |
 |---|---|
 | a boundary shared by the widget, agent, Hub or Worker; the collector, limits runtime, credentials or wire record | `docs/architecture.md` |
-| anything under `src/shared/providers/<id>/` or `src/electron/providers/<id>/` | `docs/providers/README.md`, then the note whose `ids:` front matter lists that id if one exists — `grep -lE '^ids:.*[[, ]<id>[],]' docs/providers/*.md`. Most providers have no note; the README and the code/tests are then authoritative |
-| adding or renaming a tracked client or limits provider | `docs/providers/README.md` (both registration checklists) |
+| an existing provider under `src/shared/providers/<id>/` or `src/electron/providers/<id>/` | The note whose `ids:` front matter lists that id — `grep -lE '^ids:.*[[, ]<id>[],]' docs/providers/*.md`; use its `read_when` to select relevant guidance. If none exists, use the code/tests and [shared code layout](docs/providers/README.md#where-provider-code-lives) |
+| adding or renaming a tracked client | [Tracked-client checklist](docs/providers/README.md#adding-a-tracked-client), including its partition invariants |
+| adding or renaming a limits provider | [Limits-provider checklist](docs/providers/README.md#adding-a-limits-provider) |
+| watch roots, event handling or targeted refreshes | [Watching](docs/architecture.md#watching), [partition invariants](docs/providers/README.md#partition-invariants), and the matching provider note's source rules |
 | the device wire shape or Hub endpoints | `docs/API.md` |
+
+Before editing, verify the actual runtime entry point, authoritative implementation and callers; resolve any mismatch with the guidance first.
 
 Update the matching document in the same change when its contract moves, and delete stale claims rather than preserving history.
 
@@ -77,7 +81,8 @@ Never add an AI `Co-Authored-By` trailer. **Do** keep the genuine human `Co-auth
 ### Pull requests
 
 - PR titles follow the commit-message convention above — they become the squash-merge subject.
-- In the description: summarize the behaviour change, note the commands you ran (`npm run verify` at minimum), attach screenshots/GIFs for UI changes, and link the related issue.
+- In the description: summarize the change and why it is needed, link any related issue, and record checks and results, including `npm run verify` or why it could not be completed. For bug fixes, include a regression check that fails before and passes after the fix, or explain why that proof is unavailable.
+- Match further validation to the changed behaviour: include reproducible before/after evidence where applicable (screenshots/GIFs for UI changes), and state relevant untested platforms and outstanding manual acceptance checks. Documentation-only edits need relevant guidance/link checks; unrelated manual runtime checks are not required.
 
 ### Authoring GitHub content via `gh`
 

@@ -104,6 +104,13 @@ test('a long detail total shrinks beside its compact reading instead of wrapping
   fitCardTotal({ querySelector: () => row });
   assert.equal(number.style.fontSize, '24px');
   number.style = {};
+  number.getBoundingClientRect = () => ({ width: 236 * 1.6 });
+  compact.getBoundingClientRect = () => ({ width: 47 * 1.6 });
+  fitCardTotal({ querySelector: () => row }, 1.6);
+  assert.equal(number.style.fontSize, '24px', 'text zoom must not change the logical fit');
+  number.getBoundingClientRect = () => ({ width: 236 });
+  compact.getBoundingClientRect = () => ({ width: 47 });
+  number.style = {};
   row.querySelector = (selector) => selector === 'strong' ? number : null;
   fitCardTotal({ querySelector: () => row });
   assert.equal(number.style.fontSize, undefined);
@@ -114,7 +121,7 @@ test('a long detail total shrinks beside its compact reading instead of wrapping
 
 test('a card commits after its reported height is clamped to the work area', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('// ---- Wiring'));
+  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const notchRenderer ='));
   for (const kind of ['provider', 'stat']) {
     for (const { measured, maxCardHeight, expected } of [
       // Chromium at 175% scaling can measure a max-height: 851px card this way.
@@ -127,16 +134,17 @@ test('a card commits after its reported height is clamped to the work area', () 
       const card = { dataset: {}, style: {}, getBoundingClientRect: () => ({ height: measured }) };
       const renderBubble = Function('deps', `
         const { root, stagingLayer, providerCard, statCard, fitCardTotal,
-          clampBreakdownList, bridge, commitCard } = deps;
+          clampBreakdownList, reserveAccountHeight, bridge, commitCard } = deps;
         ${source}
         return renderBubble;
       `)({
-        root: { dataset: {} },
+        root: { dataset: {}, classList: { toggle() {} } },
         stagingLayer: { replaceChildren() {} },
         providerCard: () => card,
         statCard: () => card,
         fitCardTotal() {},
         clampBreakdownList() {},
+        reserveAccountHeight() {},
         bridge: { reportBubbleSize: (cellId, height) => reports.push({ cellId, height }) },
         commitCard: (_card, cellId) => { visibleId = cellId; }
       });
@@ -256,13 +264,13 @@ test('the card takes the forecast separator from the page instead of redrawing i
   );
 });
 
-test('the Sessions list uses a plain dot, not the dock card glyph stack', () => {
+test('the Sessions list keeps the running dot and adds a static waiting mark', () => {
   // This row already leads with the client's own icon, so a spinner or check
   // drawn at its corner reads as part of that logo. The card has no such icon,
   // which is why the richer states live there and the old dot idiom stays here.
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  assert.match(app, /rowLiveMarkup = '<span class="row-live-dot"><\/span>'/);
+  assert.match(app, /rowLiveMarkup = '<span class="row-live-dot"><\/span><span class="row-live-waiting"><\/span>'/);
   const sessionList = app.slice(app.indexOf('function updateRowLive('), app.indexOf('function updateRow(', app.indexOf('function updateRowLive(')));
   assert.doesNotMatch(sessionList, /sessionStateMarkup\(\{/);
   assert.doesNotMatch(styles, /row-live-spin|row-live-check|row-live-idle/);
@@ -326,7 +334,7 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   assert.match(sessions, /sessionRowsApi\.sessionModelLabel\(session\)/);
   assert.match(sessions, /if \(context\) meta\.append\(context\)/);
   // Running is a dot beside the name, not a recoloured title.
-  assert.match(sessions, /nameNode\.append\(stateMark\(session, key, state\)\)/);
+  assert.match(sessions, /nameNode\.append\(stateMark\(session, key, activityState\)\)/);
   assert.match(sessions, /el\('span', 'edge-dock-session-title', name\)/);
   assert.match(sessions, /overflowText\.bind\(title\)/);
   assert.match(sessions, /nameNode\.append\(title\)/);
@@ -354,7 +362,7 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   assert.match(readRendererFile(path.join('icons', 'actions', 'spinner.svg')), /<animate attributeName="opacity"/);
   // The slot is reserved on EVERY row and only painted while running, so the
   // titles of running and idle rows start at the same x.
-  assert.match(sessions, /const state = stateByKey\.get\(key\) \|\| 'idle'/);
+  assert.match(sessions, /const activityState = stateByKey\.get\(key\) \|\| 'idle'/);
   // The flare is one-shot, so an idle card animates nothing.
   // The flare rides along with the spin rather than replacing it, and adds no
   // `infinite` of its own: a flare always means a write.
@@ -425,6 +433,43 @@ test('Home session preview uses the sidebar timeline and keeps running rows with
       .map((row) => row.sessionId),
     ['0', '1', '2', '3', '4', '5']
   );
+});
+
+test('Home and Dock group raw history without building session detail DTOs', () => {
+  const sessionRows = require('../../src/electron/renderer/sessionRows');
+  const original = sessionRows.sessionRowsForPeriod;
+  sessionRows.sessionRowsForPeriod = () => assert.fail('recent cards must not format historical detail DTOs');
+  try {
+    const now = Date.now();
+    const sessions = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`codex:history-${i}`, {
+      client: 'codex', sessionId: `history-${i}`, totalTokens: 10, costUsd: 1,
+      models: { a: 10 }, lastUsedAt: new Date(now - 86400000 - i).toISOString(), turnEnded: true
+    }]));
+    sessions['codex:old-main'] = { client: 'codex', sessionId: 'old-main', t3ThreadId: 'app-main',
+      totalTokens: 500, costUsd: 2, models: { a: 500 }, lastUsedAt: new Date(now - 60000).toISOString(), turnEnded: true };
+    sessions['claude:new-main'] = { client: 'claude', sessionId: 'new-main', t3ThreadId: 'app-main',
+      totalTokens: 0, tokenDataUnavailable: true, lastUsedAt: new Date(now).toISOString(), turnEnded: true };
+    sessions['codex:child'] = { client: 'codex', sessionId: 'child', t3ThreadId: 'app-child',
+      parentSessionId: 'old-main', totalTokens: 100, costUsd: 1, models: { b: 100 }, lastUsedAt: new Date(now).toISOString() };
+    const stats = { periods: { today: { sessions: {} }, month: { sessions } } };
+    const home = edgeDockPresentation.recentSessionRows(stats, 5);
+    const dock = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] })[0].sessions;
+    for (const rows of [home, dock]) {
+      const group = rows.find(row => row.subagentGroup);
+      assert.ok(group);
+      assert.equal(group.groupRows.length, 3);
+      assert.equal(group.subagentCount, 1);
+      assert.equal(group.totalTokens, 600);
+      assert.equal(group.costUsd, 3);
+      assert.equal(group.tokenDataUnavailable, false, 'a new pre-token main does not hide accounted members');
+      assert.deepEqual(group.models, { a: 500, b: 100 });
+      assert.equal(group.running, true);
+      assert.equal(group.summary, undefined, 'full detail presentation stays in Sessions');
+    }
+    assert.equal(home.length, 5);
+  } finally {
+    sessionRows.sessionRowsForPeriod = original;
+  }
 });
 
 test('a startedAt-only session keeps its display age without becoming running', () => {
@@ -989,12 +1034,53 @@ test('the sessions rate line carries no unreachable tooltip', () => {
 // `.edge-dock-session-list` - and that is the one which overflows there, because running
 // rows are never capped. Reading only the first selector meant every clock repaint of
 // that card reset it to the top, mid-read.
+test('provider detail reserves natural account height without exceeding half the card', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const source = dock.slice(dock.indexOf('function reserveAccountHeight('), dock.indexOf('function fitCardTotal('));
+  const reserve = Function(`${source}; return reserveAccountHeight;`)();
+  for (const [natural, cap, expected] of [[75.15, 570, '76px'], [1200, 570, '285px'], [75.15, 228, '76px']]) {
+    const accounts = { style: { flexShrink: '' }, getBoundingClientRect: () => ({ height: accounts.style.flexShrink === '0' ? natural : 48 }) };
+    const card = { querySelector: selector => selector.endsWith('accounts') ? accounts : {} };
+    reserve(card, cap);
+    assert.equal(accounts.style.minHeight, expected);
+    assert.equal(accounts.style.flexShrink, '', 'keep the original shared scrolling/flex rule');
+  }
+  const accounts = { style: {}, getBoundingClientRect: () => { throw new Error('no need to measure without sessions'); } };
+  reserve({ querySelector: selector => selector.endsWith('accounts') ? accounts : null }, 570);
+  assert.equal(accounts.style.minHeight, undefined);
+});
+
+test('shared card repaint preserves both account and session scroll positions independently', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const source = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('// The period card'));
+  let previous;
+  const commit = Function('deps', `const {contentLayer, overflowText, document, cardResetAnimator, CARD_SCROLL_SELECTOR} = deps; ${source}; return commitCard;`)({
+    contentLayer: { querySelector: () => previous, replaceChildren() {} },
+    overflowText: { refresh() {}, preserveReading() {} },
+    cardResetAnimator: { capture() {}, animate() {} },
+    CARD_SCROLL_SELECTOR: '.edge-dock-accounts, .edge-dock-session-list', document: {}
+  });
+  const make = (id, positions) => {
+    const lists = Object.values(positions);
+    lists.forEach(list => { list.closest = () => null; });
+    return { dataset: { cellId: id }, querySelectorAll: () => lists };
+  };
+  previous = make('codex', { '.edge-dock-accounts': { scrollTop: 25 }, '.edge-dock-session-list': { scrollTop: 150 } });
+  const positions = { '.edge-dock-accounts': { scrollTop: 0 }, '.edge-dock-session-list': { scrollTop: 0 } };
+  commit(make('codex', positions), 'codex');
+  assert.equal(positions['.edge-dock-accounts'].scrollTop, 25);
+  assert.equal(positions['.edge-dock-session-list'].scrollTop, 150);
+  commit(make('claude', positions), 'claude');
+  assert.equal(positions['.edge-dock-accounts'].scrollTop, 0);
+  assert.equal(positions['.edge-dock-session-list'].scrollTop, 0);
+});
+
 test('a repainted card restores the scroll container it actually uses', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const css = readRendererFile(path.join('edgeDock', 'dock.css'));
   const commit = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('function renderBubble('));
-  assert.match(commit, /querySelector\(CARD_SCROLL_SELECTOR\)/);
-  assert.match(commit, /list\.scrollTop = scrollTop;/);
+  assert.match(commit, /querySelectorAll\(CARD_SCROLL_SELECTOR\)/);
+  assert.match(commit, /list\.scrollTop = scrollTops\[index\] \|\| 0;/);
   // Both containers are named, read from the declaration so a third cannot be added to
   // the card without this failing.
   const declaration = dock.match(/const CARD_SCROLL_SELECTOR = '([^']+)';/);
@@ -1023,7 +1109,7 @@ test('the self-repaint cadence matches what each surface actually needs', () => 
   const period = dock.slice(dock.indexOf('const BUBBLE_REPAINT_MS'), dock.indexOf('function repaintSelf('));
   // The card keeps the 30s it always had.
   assert.match(period, /const BUBBLE_REPAINT_MS = 30_000;/);
-  assert.match(period, /const period = surface === 'bubble' \? BUBBLE_REPAINT_MS : 0;/);
+  assert.match(period, /notchRenderer\.needsClock\(\)/);
   // A rail only wakes for a sessions expiry, and reports 0 when there is none - which
   // is what leaves its timer unarmed rather than polling it.
   assert.match(period, /if \(!surfacesShowingSessions\(\)\) return 0;/);
@@ -2457,7 +2543,7 @@ test('the rail entrance moves the whole surface and stops under reduced motion',
   // payload, so a page keying on the state would never see the rail leave and would
   // read the next reveal as no change at all - one entrance per page load.
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  assert.match(dock, /if \(railReveal !== null && reveal !== railReveal\) playRailReveal\(\);/);
+  assert.match(dock, /const revealing = railReveal !== null && reveal !== railReveal;\s*if \(revealing\) playRailReveal\(\);/);
 });
 
 // The work indicator must fit between the provider mark and the quota reading,
@@ -2493,6 +2579,26 @@ test('the running arc resumes its phase rather than restarting on every repaint'
   const ring = dock.slice(dock.indexOf('function ringNode('), dock.indexOf('function providerCellNode('));
   assert.match(ring, /spinner\.style\.animationDelay/);
   assert.match(ring, /spinner\.setAttribute\('aria-hidden', 'true'\)/);
+});
+
+test('waiting ring keeps its phase across renewals and resets after waiting clears', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const body = dock.slice(dock.indexOf('function waitingRingStart('), dock.indexOf('function ringNode('));
+  const starts = new Map();
+  let clock = 100;
+  const start = Function('waitingRingStarts', 'performance', `return (${body})`)(
+    starts, { now: () => clock }
+  );
+  assert.equal(start('claude', true), 100);
+  clock = 1500;
+  assert.equal(start('claude', true), 100, 'a heartbeat must not replay the entry');
+  assert.equal(start('codex', true), 1500, 'providers enter waiting independently');
+  clock = 5000;
+  assert.equal(start('claude', true), 100, 'a long wait keeps the original phase anchor');
+  assert.equal(start('claude', false), null);
+  assert.equal(starts.has('claude'), false);
+  assert.equal(start('claude', true), 5000, 'a later wait gets its own entry');
+  assert.equal(start('codex', true), 1500, 'another provider remains undisturbed');
 });
 
 // The handle's exit is a move now rather than a blink. The window's fade is the main
@@ -2641,4 +2747,194 @@ test('a larger dock that would not fit shrinks to the largest size that keeps fu
   assert.equal(edgeDockFittingScale({ workArea, cellKinds: ['provider'], scale: 1.25 }), 1.25, 'a dock that fits keeps its size');
   assert.equal(edgeDockFittingScale({ workArea, cellKinds: kinds, scale: 0.85 }), 0.85, 'a smaller one is left alone');
   assert.equal(edgeDockFittingScale({ workArea: { ...workArea, height: 400 }, cellKinds: kinds, scale: 1.5 }), 1, 'one too long even at 100% keeps today\'s density');
+});
+
+
+test('Notch detail can retain aggregate failures without changing rail visibility or hidden accounts', () => {
+  const healthy = { provider: 'codex', status: 'ok', accountKey: 'healthy', windows: [{ kind: 'session', remainingPercent: 80 }] };
+  const failures = ['unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error', 'notConfigured']
+    .map((status) => ({ provider: 'codex', status, accountKey: status, windows: [] }));
+  const localOnly = { provider: 'codex', status: 'unauthorized', accountKey: 'local-only', windows: [] };
+  const stats = { limits: { providers: [healthy, ...failures] }, devices: [{ deviceId: 'here', limits: { providers: [localOnly] } }] };
+  const options = { items: [{ type: 'limit', provider: 'codex', hiddenAccounts: ['error'] }], localDeviceId: 'here' };
+  const rail = buildEdgeDockCells(stats, options)[0];
+  const top = buildEdgeDockCells(stats, { ...options, includeUnavailableAccounts: true })[0];
+  assert.deepEqual(rail.accounts.map((a) => a.accountKey), ['healthy']);
+  assert.equal(top.accountCount, 6);
+  assert.deepEqual(top.accounts.map((a) => a.accountKey), ['healthy', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'notConfigured']);
+  assert.equal(top.headlineAccount, rail.headlineAccount);
+  assert.equal(top.remainingPercent, 80);
+  assert.ok(top.accounts.slice(1).every((a) => a.headlineRemaining === null));
+  assert.ok(top.subscriptionAccounts.some((a) => a.accountKey === 'local-only'), 'identity-only records still cannot become display rows');
+});
+
+test('provider card repaint preserves both account and session scroll and ignores nested families', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const start = dock.indexOf('function commitCard(');
+  const body = dock.slice(start, dock.indexOf('\n}', start) + 2);
+  const list = (scrollTop, nested = false) => ({ scrollTop,
+    closest: () => nested ? {} : null });
+  const previous = { dataset: { cellId: 'codex' },
+    querySelectorAll: () => [list(17), list(140), list(4, true)] };
+  const accounts = list(0), sessions = list(0), nested = list(0, true);
+  const next = { dataset: { cellId: 'codex' }, querySelectorAll: () => [accounts, sessions, nested] };
+  const commit = Function('contentLayer', 'overflowText', 'document', 'cardResetAnimator', 'CARD_SCROLL_SELECTOR',
+    `${body}\nreturn commitCard;`)(
+    { querySelector: () => previous, replaceChildren() {} },
+    { refresh() {}, preserveReading() {} }, {}, { capture() {}, animate() {} }, '.scroll');
+  commit(next, 'codex');
+  assert.deepEqual([accounts.scrollTop, sessions.scrollTop, nested.scrollTop], [17, 140, 0]);
+  commit(next, 'claude');
+  assert.deepEqual([accounts.scrollTop, sessions.scrollTop], [0, 0], 'another card starts at the top');
+});
+
+test('recent cards project only selected display rows while aliases and cross-client children precede caps', (t) => {
+  const now = Date.parse('2026-10-11T12:00:00Z');
+  t.mock.method(Date, 'now', () => now);
+  const live = require('../../src/shared/sessionLive');
+  const context = live.sessionContextForRow;
+  const projectedIds = new Set();
+  t.mock.method(live, 'sessionContextForRow', session => {
+    projectedIds.add(session.sessionId);
+    return context(session);
+  });
+  const sessions = {};
+  const add = (client, id, minutes, extra = {}) => {
+    sessions[`${client}:${id}`] = { client, sessionId: id, title: id, totalTokens: 10, costUsd: 1,
+      models: { a: 10 }, lastUsedAt: new Date(now - minutes * 60_000).toISOString(), turnEnded: true, ...extra };
+  };
+  for (let i = 0; i < 100; i++) add('dsh', `history-${i}`, 60 + i);
+  add('codex', 'main-old', 40, { t3ThreadId: 'app-main' });
+  add('claude', 'main-new', 20, { t3ThreadId: 'app-main', totalTokens: 20, costUsd: 2, models: { b: 20 } });
+  add('codex', 'child', 8, { parentClient: 'claude', parentSessionId: 'main-new', turnEnded: false });
+  add('codex', 'waiting', 9, { turnEnded: false, waitingForInput: true });
+  add('codex', 'running', 7, { turnEnded: false });
+  add('codex', 'quiet', 1);
+  const stats = { periods: { month: { sessions }, today: { sessions: {} } }, grokBotSessionIds: [] };
+  const home = edgeDockPresentation.recentSessionRows(stats, 1, { includeRunningBeyondCap: true });
+  assert.deepEqual(home.map(row => row.sessionId), ['quiet', 'running', 'main-new', 'waiting']);
+  const group = home.find(row => row.subagentGroup);
+  assert.deepEqual(group.groupRows.map(row => row.sessionId), ['main-new', 'main-old', 'child']);
+  assert.equal(group.totalTokens, 40);
+  assert.equal(group.costUsd, 4);
+  assert.deepEqual(group.models, { b: 20, a: 20 });
+  assert.equal(group.subagentCount, 1);
+  assert.ok(![...projectedIds].some(id => id.startsWith('history-')), 'discarded history must not build context/display DTOs');
+  const [dock] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  assert.deepEqual(dock.sessions.map(row => row.sessionId), ['quiet', 'running', 'main-new', 'waiting', 'history-0', 'history-1']);
+  assert.equal(dock.sessions.find(row => row.subagentGroup).totalTokens, 40);
+  assert.ok(![...projectedIds].some(id => /^history-/.test(id) && !['history-0', 'history-1'].includes(id)));
+});
+
+test('an active Grok Bot group survives recent caps and running-only selection after deferred projection', (t) => {
+  const now = Date.parse('2026-10-11T12:00:00Z');
+  t.mock.method(Date, 'now', () => now);
+  const sessions = {
+    'codex:quiet': { client: 'codex', sessionId: 'quiet', totalTokens: 1, turnEnded: true,
+      lastUsedAt: new Date(now - 1000).toISOString() },
+    'cursor:bot-a': { client: 'cursor', sessionId: 'bot-a', grokBotSession: true, turnEnded: false,
+      totalTokens: 10, costUsd: 1, models: { 'grok-bot-test': 10 },
+      lastUsedAt: new Date(now - 8 * 60_000).toISOString() },
+    'cursor:bot-b': { client: 'cursor', sessionId: 'bot-b', grokBotSession: true, turnEnded: true,
+      totalTokens: 20, costUsd: 2, models: { other: 20 },
+      lastUsedAt: new Date(now - 9 * 60_000).toISOString() }
+  };
+  const stats = { periods: { month: { sessions }, today: { sessions: {} } } };
+  const home = edgeDockPresentation.recentSessionRows(stats, 1, { includeRunningBeyondCap: true });
+  assert.equal(home.length, 2);
+  assert.equal(home[1].totalTokens, 30);
+  assert.equal(home[1].costUsd, 3);
+  assert.equal(home[1].groupRows.length, 2);
+  const [dock] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true }] });
+  assert.equal(dock.sessions.length, 1);
+  assert.equal(dock.sessions[0].sessionGroup, 'cursor-grok-bot');
+  assert.equal(dock.sessions[0].totalTokens, 30);
+  assert.equal(edgeDockPresentation.sessionActivityState(dock.sessions[0], now + 1000), 'running');
+});
+
+for (const shape of ['independent', 'aliases', 'cross-client child', 'Grok Bot']) {
+  test(`recent selection rechecks leases after grouping for ${shape} rows`, (t) => {
+    const start = Date.parse('2026-10-11T12:00:00Z');
+    let clock = start;
+    t.mock.method(Date, 'now', () => clock);
+    const rowsApi = require('../../src/electron/renderer/sessionRows');
+    const group = rowsApi.groupSessionRows;
+    t.mock.method(rowsApi, 'groupSessionRows', (...args) => {
+      const result = group(...args);
+      clock += 10;
+      return result;
+    });
+    const sessions = {};
+    const providerId = shape === 'Grok Bot' ? 'cursor' : shape === 'cross-client child' ? 'claude' : 'codex';
+    for (let i = 0; i < 10; i++) sessions[`${providerId}:quiet-${i}`] = {
+      client: providerId, sessionId: `quiet-${i}`, title: `quiet-${i}`, totalTokens: 1,
+      lastUsedAt: new Date(start - 86400000 - i).toISOString()
+    };
+    const client = shape === 'Grok Bot' ? 'cursor' : 'codex';
+    const active = { client, sessionId: 'expired', title: 'expired', totalTokens: 10,
+      lastUsedAt: new Date(start - 2 * 86400000).toISOString(),
+      liveActivity: { state: 'running', observedAt: new Date(start - 30000 + 5).toISOString() } };
+    sessions[`${client}:expired`] = active;
+    if (shape === 'aliases') {
+      active.t3ThreadId = 'app';
+      sessions['claude:alias'] = { ...active, client: 'claude', sessionId: 'alias', totalTokens: 20 };
+    } else if (shape === 'cross-client child') {
+      sessions['claude:parent'] = { client: 'claude', sessionId: 'parent', totalTokens: 20,
+        lastUsedAt: active.lastUsedAt };
+      active.parentClient = 'claude';
+      active.parentSessionId = 'parent';
+    } else if (shape === 'Grok Bot') active.grokBotSession = true;
+    const stats = { periods: { month: { sessions }, today: { sessions: {} } } };
+    for (const activity of ['running', 'waiting']) {
+      active.liveActivity.state = activity;
+      if (shape === 'aliases') sessions['claude:alias'].liveActivity.state = activity;
+      clock = start;
+      assert.deepEqual(edgeDockPresentation.recentSessionRows(stats, 1, { runningOnly: true }), []);
+      clock = start;
+      assert.deepEqual(edgeDockPresentation.recentSessionRows(stats, 1, { includeRunningBeyondCap: true })
+        .map(row => row.sessionId), ['quiet-0']);
+      clock = start;
+      const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true }] });
+      assert.deepEqual(cell.sessions, []);
+      assert.equal(cell.runningExpiresAt, 0);
+      clock = start;
+      const [provider] = buildEdgeDockCells(stats, { items: [{ type: 'limit', provider: providerId }] });
+      assert.ok(!provider.sessions.some(row => row.sessionId === 'expired' || row.groupRows),
+        'expired active groups cannot bypass the provider quiet cap');
+    }
+  });
+}
+
+test('expired idle leases restore transcript running and waiting before Home and provider selection', (t) => {
+  const start = Date.parse('2026-10-11T12:00:00Z');
+  let clock = start;
+  t.mock.method(Date, 'now', () => clock);
+  const rowsApi = require('../../src/electron/renderer/sessionRows');
+  const group = rowsApi.groupSessionRows;
+  t.mock.method(rowsApi, 'groupSessionRows', (...args) => {
+    const result = group(...args);
+    clock += 10;
+    return result;
+  });
+  for (const waitingForInput of [false, true]) {
+    const sessions = {
+      'codex:new': { client: 'codex', sessionId: 'new', totalTokens: 1, turnEnded: true,
+        lastUsedAt: new Date(start - 1000).toISOString() },
+      'codex:old': { client: 'codex', sessionId: 'old', totalTokens: 2, waitingForInput,
+        lastUsedAt: new Date(start - 2000).toISOString(),
+        liveActivity: { state: 'idle', observedAt: new Date(start - 30000 + 5).toISOString() } }
+    };
+    const stats = { periods: { month: { sessions }, today: { sessions: {} } } };
+    clock = start;
+    const home = edgeDockPresentation.recentSessionRows(stats, 1);
+    assert.deepEqual(home.map(row => row.sessionId), ['old']);
+    assert.equal(edgeDockPresentation.sessionActivityState(home[0]), waitingForInput ? 'waiting' : 'running');
+    clock = start;
+    const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true }] });
+    assert.deepEqual(cell.sessions.map(row => row.sessionId), waitingForInput ? [] : ['old']);
+    if (!waitingForInput) assert.ok(cell.runningExpiresAt > clock);
+    clock = start;
+    const [provider] = buildEdgeDockCells(stats, { items: [{ type: 'limit', provider: 'codex' }] });
+    assert.deepEqual(provider.sessions.map(row => row.sessionId), ['old', 'new']);
+  }
 });

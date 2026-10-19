@@ -12,6 +12,61 @@ const {
 
 const aliases = { 'anthropic/claude-opus-5': 'claude-opus-5' };
 
+for (const labels of [['__proto__', 'app'], ['app', '__proto__']]) {
+  for (const aliasedProject of labels) {
+    test(`project aliases retain reserved rollup keys with ${labels.join(', ')} and ${aliasedProject} aliased`, () => {
+      const { projectRollupFromSessions } = require('../../src/shared/usage');
+      const { projectRowsForPeriod } = require('../../src/electron/renderer/projectRows');
+      const sessions = Object.fromEntries(labels.map((label, index) => [`session-${index}`, {
+        client: 'codex', projectLabel: label, totalTokens: 100, costUsd: 1,
+        models: { [label === aliasedProject ? 'anthropic/claude-opus-5' : 'gpt-5']: 100 }
+      }]));
+      const projects = projectRollupFromSessions(sessions);
+      const stats = { periods: { allTime: { totalTokens: 200, costUsd: 2, projects } } };
+      const before = JSON.stringify(stats);
+      const projected = projectModelAliasStats(stats, aliases).periods.allTime;
+
+      assert.equal(Object.hasOwn(projected.projects, '__proto__'), true);
+      assert.deepEqual(Object.keys(projected.projects), labels);
+      assert.deepEqual(projected.projects[aliasedProject].models, { 'claude-opus-5': 100 });
+      const rows = projectRowsForPeriod(projected, { shareBy: 'model' });
+      assert.deepEqual(rows.map(row => row.name).sort(), [...labels].sort());
+      assert.equal(rows.reduce((sum, row) => sum + row.value, 0), 200);
+      assert.equal(rows.reduce((sum, row) => sum + row.cost, 0), 2);
+      assert.equal(JSON.stringify(stats), before, 'alias projection leaves the source rollup intact');
+      assert.strictEqual(projectModelAliasStats(stats, { absent: 'other' }).periods.allTime.projects, projects);
+    });
+  }
+}
+
+test('bot conversation grouping survives model aliases in stats and pulled session lists', () => {
+  const { groupSessionRows, sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
+  const sessions = {
+    'cursor:bot': { client: 'cursor', sessionId: 'bot', totalTokens: 40, costUsd: 2,
+      models: { 'grok-bot-default': 30, 'claude-opus-5-5-medium': 10 } },
+    'cursor:ordinary': { client: 'cursor', sessionId: 'ordinary', totalTokens: 20,
+      models: { 'claude-opus-5-5-medium': 20 } }
+  };
+  const before = structuredClone(sessions);
+  const aliases = { 'grok-bot-default': 'My Model' };
+  const today = { sessions };
+  const projected = projectModelAliasStats({ periods: { today }, devices: [{ periods: { today } }] }, aliases);
+  for (const list of [projected.periods.today.sessions, projected.devices[0].periods.today.sessions,
+    projectModelAliasSessions({}, sessions, aliases)]) {
+    const grouped = groupSessionRows(sessionRowsForPeriod({ sessions: list }));
+    const bot = grouped.find(row => row.sessionGroup === 'cursor-grok-bot');
+    assert.equal(bot.value, 40);
+    assert.equal(bot.groupRows.length, 1);
+    assert.equal(list['cursor:bot'].grokBotSession, true);
+    assert.deepEqual(list['cursor:bot'].models, { 'My Model': 30, 'claude-opus-5-5-medium': 10 });
+    assert.equal(grouped.find(row => row.key === 'session:cursor:ordinary').value, 20);
+  }
+  const misleadingAlias = projectModelAliasSessions({}, sessions, { 'claude-opus-5-5-medium': 'grok-bot-user-label' });
+  const ordinary = sessionRowsForPeriod({ sessions: misleadingAlias }).find(row => row.key === 'session:cursor:ordinary');
+  assert.equal(ordinary.grokBot, undefined, 'a display alias must not invent bot provenance');
+  assert.deepEqual(sessions, before);
+});
+
 test('model aliases keep unpriced attribution attached to the displayed model', () => {
   const today = {
     totalTokens: 100, costUsd: 0, unpricedTokens: 100,

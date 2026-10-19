@@ -1,6 +1,6 @@
 'use strict';
 
-// Public AppKit API only. Keep Electron's content view and Chromium hierarchy
+// Keep Electron's content view and Chromium hierarchy
 // intact: reparenting them from a Koffi call can synchronously re-enter V8 on
 // Koffi's alternate native stack and terminate the process (not a JS exception).
 let cachedApi;
@@ -25,6 +25,7 @@ function loadApi() {
   const setRect = objc.func('objc_msgSend', 'void', ['uintptr_t', 'uintptr_t', rect]);
   const string = objc.func('objc_msgSend', 'uintptr_t', ['uintptr_t', 'uintptr_t', 'str']);
   const object = objc.func('objc_msgSend', 'uintptr_t', ['uintptr_t', 'uintptr_t', 'uintptr_t']);
+  const color = objc.func('objc_msgSend', 'uintptr_t', ['uintptr_t', 'uintptr_t', 'double', 'double', 'double', 'double']);
   // NSRect is a 32-byte return: Intel uses the explicit stret entry point,
   // whereas arm64 uses objc_msgSend with the ordinary structure-return ABI.
   const frame = process.arch === 'x64'
@@ -61,6 +62,8 @@ function loadApi() {
     // assume it, so a macOS that drops it falls back instead of crashing.
     supportsPath: responds(glassClass, sel('instancesRespondToSelector:'), sel('_setPath:')),
     supportsSubdued: responds(glassClass, sel('instancesRespondToSelector:'), sel('set_subduedState:')),
+    supportsForceMainAppearance: responds(cls('NSWindow'), sel('instancesRespondToSelector:'), sel('_setForceMainAppearance:'))
+      && responds(cls('NSWindow'), sel('instancesRespondToSelector:'), sel('_forceMainAppearance')),
     setPath(target, commands, height) {
       const cg = loadPathApi();
       const path = cg.create();
@@ -81,11 +84,13 @@ function loadApi() {
       if (window) release(window, sel('invalidateShadow'));
     },
     get: (target, name) => get(target, sel(name)),
+    flag: (target, name) => boolean(target, sel(name)),
     call: (target, name) => release(target, sel(name)),
     addBelow: (parent, child) => addSubview(parent, sel('addSubview:positioned:relativeTo:'), child, -1, 0),
     put: (target, name, value) => put(target, sel(name), value),
     number: (target, name, value) => number(target, sel(name), value),
     setFrame: (target, value) => setRect(target, sel('setFrame:'), value),
+    tintColor: (opacity) => color(cls('NSColor'), sel('colorWithSRGBRed:green:blue:alpha:'), 0, 0, 0, opacity),
     appearance(dark) {
       const name = string(cls('NSString'), sel('stringWithUTF8String:'), dark ? 'NSAppearanceNameDarkAqua' : 'NSAppearanceNameAqua');
       return object(cls('NSAppearance'), sel('appearanceNamed:'), name);
@@ -108,6 +113,15 @@ function createMacLiquidGlass(win, { shaped = false } = {}) {
   const bounds = api.getBounds(original);
   let glass = 0;
   let disposed = false;
+  const originalForceMainAppearance = api.supportsForceMainAppearance && api.flag(window, '_forceMainAppearance');
+  let forcedMainAppearance = false;
+
+  function syncGlassAppearance(forceMain) {
+    if (!api.supportsForceMainAppearance || originalForceMainAppearance) return;
+    if (forceMain === forcedMainAppearance) return;
+    api.put(window, '_setForceMainAppearance:', forceMain ? 1 : 0);
+    forcedMainAppearance = forceMain;
+  }
 
   function dispose({ windowClosed = false } = {}) {
     if (disposed) return;
@@ -115,8 +129,13 @@ function createMacLiquidGlass(win, { shaped = false } = {}) {
     // We own only the background view, never Electron's root view. After close
     // its native parent is already torn down; just release our retained object.
     if (glass) {
-      if (!windowClosed && !win.isDestroyed()) api.call(glass, 'removeFromSuperview');
-      api.call(glass, 'release');
+      try {
+        if (!windowClosed && !win.isDestroyed()) {
+          try { syncGlassAppearance(false); }
+          finally { api.call(glass, 'removeFromSuperview'); }
+        }
+      }
+      finally { api.call(glass, 'release'); }
     }
   }
 
@@ -133,13 +152,38 @@ function createMacLiquidGlass(win, { shaped = false } = {}) {
     // Private, so probed: without it the glass keeps the system behaviour.
     if (api.supportsSubdued) api.put(glass, 'set_subduedState:', 1);
     api.addBelow(original, glass);
+    let lastStyle = 'regular';
+    let lastTint = 0;
     let lastDark;
     let lastRadius;
     let lastShape;
     let lastVisible;
     return {
-      update({ dark, radius, shape, visible = true }) {
+      update({ dark, radius, shape, visible = true, style = 'regular', tintOpacity }) {
         if (disposed) return;
+        const nextStyle = style === 'clear' ? 'clear' : 'regular';
+        if (nextStyle !== lastStyle) {
+          api.put(glass, 'setStyle:', nextStyle === 'clear' ? 1 : 0); // NSGlassEffectViewStyle
+          // Subduing Regular removes its focused-window wash, but subduing
+          // Clear replaces its sharp backdrop with a heavily blurred one.
+          // Restore each style's state when switching the retained view.
+          if (api.supportsSubdued) api.put(glass, 'set_subduedState:', nextStyle === 'clear' ? 0 : 1);
+          lastStyle = nextStyle;
+        }
+        // Tint changes must reach the retained view even without a style change.
+        // Zero restores the system tint; blur and refraction remain native.
+        const parsedTint = tintOpacity == null ? NaN : Number(tintOpacity);
+        const tint = Number.isFinite(parsedTint) ? Math.max(0, Math.min(1, parsedTint)) : nextStyle === 'clear' ? 0.35 : 0;
+        // Inactive Regular glass fades even an opaque tint, so the same value
+        // looks pale on the Dock and dark on a focused main window. Keep tinted
+        // Regular on the same appearance policy as Clear, preserving Regular's
+        // untinted default. This changes appearance, never actual input focus.
+        // The private override is probed and restored when no longer needed.
+        syncGlassAppearance(nextStyle === 'clear' || tint > 0);
+        if (tint !== lastTint) {
+          api.put(glass, 'setTintColor:', tint > 0 ? api.tintColor(tint) : 0);
+          lastTint = tint;
+        }
         if (visible !== lastVisible) {
           api.put(glass, 'setHidden:', visible ? 0 : 1);
           lastVisible = visible;

@@ -100,6 +100,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     zedCookie: ['providers', 'zed', 'cookie'],
     typesafeCookie: ['providers', 'typesafe', 'cookie'],
     stepfunToken: ['providers', 'stepfun', 'token'],
+    notionCookie: ['providers', 'notion', 'cookie'],
     commandcodeCookie: ['providers', 'commandcode', 'cookie'],
     zaiApiKey: ['providers', 'zai', 'apiKey'],
     zaiTeamApiKey: ['providers', 'zaiTeam', 'apiKey'],
@@ -162,8 +163,9 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     devin: ['devinBearerToken', 'devinOrganization'],
     typesafe: ['typesafeCookie'],
     stepfun: ['stepfunToken'],
+    notion: ['notionCookie', 'notionWorkspaceId'],
     openrouter: ['openrouterProfiles'],
-    minimax: ['minimaxApiKey', 'minimaxApiRegion'],
+    minimax: ['minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode'],
     volcengine: [
       'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
       'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'
@@ -267,17 +269,18 @@ test('settings:update normalizes provider fields and strips separately managed a
   const fields = LIMIT_PROVIDER_REGISTRY.flatMap(({ fields }) => fields);
   const normalizedKeys = fields.filter(({ normalize, persist }) => normalize && persist !== 'never').map(({ key }) => key);
   assert.deepEqual(normalizedKeys.sort(), [
-    'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'minimaxApiKey', 'minimaxApiRegion', 'copilotApiToken', 'copilotEnterpriseHost',
+    'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode', 'copilotApiToken', 'copilotEnterpriseHost',
     'factoryApiKey', 'clineApiKey', 'zaiApiKey', 'zaiApiRegion', 'zaiTeamApiKey',
     'zaiTeamOrganizationId', 'zaiTeamProjectId', 'volcengineAccessKeyId',
     'volcengineSecretAccessKey', 'volcengineRegion', 'volcengineAgentAccessKeyId',
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
     'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
-    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie'
+    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId'
   ].sort());
   for (const key of normalizedKeys) {
-    const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test' : ' example ';
+    const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test'
+      : key === 'notionWorkspaceId' ? ' 11111111222233334444555555555555 ' : ' example ';
     const patch = { [key]: value };
     const normalized = { ...patch };
     normalizeAccountPatch(patch, normalized);
@@ -507,12 +510,12 @@ test('static account statuses refresh in both paths while descriptor panels use 
 test('every provider with an account panel has its group and status markup in index.html', () => {
   const nodes = evalTopLevel(appSource, 'const LIMIT_PROVIDER_ACCOUNT_NODES = {', '\nconst LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS');
   const groupIds = Object.fromEntries(Object.entries(nodes).map(([provider, node]) => [provider, node.group]));
-  // Not every catalog provider has a hand-written panel: grok, kiro and workbuddy
+  // Not every catalog provider has a hand-written panel: grok and kiro
   // take their credentials from the tool itself, and the account-form providers
   // get theirs generated. The map is the list of those whose markup is static.
   assert.deepEqual(
     LIMIT_PROVIDER_IDS.filter((provider) => !groupIds[provider]).sort(),
-    ['grok', 'kiro', 'workbuddy', ...limitAccountFormsForRenderer().map(({ id }) => id)].sort()
+    ['grok', 'kiro', ...limitAccountFormsForRenderer().map(({ id }) => id)].sort()
   );
   for (const [provider, id] of Object.entries(groupIds)) {
     assert.ok(LIMIT_PROVIDER_IDS.includes(provider), `${provider} is a catalog id`);
@@ -538,6 +541,26 @@ test('MiniMax implicit region remains env-driven after unrelated saves and reloa
   const previous = { ...saved, minimaxApiKey: 'test-key', limitProviders: 'minimax' };
   const next = { ...previous, ...finalAccountSettings({ minimaxApiRegion: 'cn' }, previous) };
   assert.equal(next.minimaxApiKey, 'test-key');
+  const change = classifySettingsChange(previous, next);
+  assert.deepEqual(change.limitScopes, [{ provider: 'minimax' }]);
+  assert.equal(change.usageStructural, false);
+  const { settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
+  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax' }, reason: 'settings-change', options: { clear: true } }]);
+});
+
+test('MiniMax billing choice survives reload and clears only its provider quota', () => {
+  const { initialAccountSettings } = require('../../src/electron/limits/accountSettings');
+  assert.equal(initialAccountSettings({}).minimaxBillingMode, 'token-plan');
+  assert.equal(limitsConfigFromSettings({}, { env: {} }).minimaxBillingMode, 'token-plan');
+  assert.equal(accountFieldProjection({}).minimaxBillingMode, 'token-plan');
+  assert.equal(finalAccountSettings({}, {}).minimaxBillingMode, 'token-plan');
+  assert.equal(normalizeAccountField('minimaxBillingMode', ' API '), 'api');
+  assert.equal(normalizeAccountField('minimaxBillingMode', 'unknown'), 'token-plan');
+  const previous = { ...finalAccountSettings({}, {}), minimaxApiKey: 'existing-key', minimaxBillingMode: 'token-plan', limitProviders: 'minimax' };
+  const next = JSON.parse(JSON.stringify({ ...previous, ...finalAccountSettings({ minimaxBillingMode: 'api' }, previous) }));
+  assert.equal(next.minimaxApiKey, previous.minimaxApiKey);
+  assert.equal(limitsConfigFromSettings(next, { env: {} }).minimaxBillingMode, 'api');
+  assert.equal(accountFieldProjection(next).minimaxBillingMode, 'api');
   const change = classifySettingsChange(previous, next);
   assert.deepEqual(change.limitScopes, [{ provider: 'minimax' }]);
   assert.equal(change.usageStructural, false);

@@ -181,3 +181,20 @@ test('applyPeriodDelta clamps float residue at zero and never mutates its inputs
   assert.equal(JSON.stringify(baseMonth), baseSnapshot);
   assert.equal(anchorToday.costUsd, 0.1 + 1e-15);
 });
+
+
+test('session deltas preserve parent ID and client atomically before the collector replacement gate', () => {
+  const row = { client: 'claude', sessionId: 'child', totalTokens: 10, costUsd: 2 };
+  for (const [baseLink, freshLink] of [
+    [{ parentSessionId: 'claude-parent' }, { parentSessionId: 'codex-parent', parentClient: 'codex' }],
+    [{ parentSessionId: 'codex-parent', parentClient: 'codex' }, { parentSessionId: 'claude-parent' }]
+  ]) {
+    const base = period({ sessions: { 'claude:child': { ...row, ...baseLink } } });
+    const fresh = period({ sessions: { 'claude:child': { ...row, totalTokens: 20, ...freshLink } } });
+    const result = applyPeriodDelta(base, fresh, base).sessions['claude:child'];
+    assert.equal(result.parentSessionId, baseLink.parentSessionId);
+    assert.equal(result.parentClient, baseLink.parentClient);
+    assert.equal(result.totalTokens, 20); assert.equal(result.costUsd, 2);
+    assert.equal(applyPeriodDelta(period(), fresh, period()).sessions['claude:child'].parentClient, freshLink.parentClient);
+  }
+});

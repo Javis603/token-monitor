@@ -72,6 +72,10 @@ const EDGE_DOCK_TIMING = Object.freeze({
   bubbleDelayMs: 70
 });
 
+function edgeDockPollDelay({ drag, revealed, near }) {
+  return drag ? 16 : (revealed || near ? 40 : 90);
+}
+
 // `alwaysExceptFullScreen` behaves as `always` on the desktop and as
 // `autoHide` while a full-screen app covers the dock's display.
 const EDGE_DOCK_MODES = Object.freeze(['autoHide', 'always', 'alwaysExceptFullScreen']);
@@ -568,6 +572,7 @@ module.exports = {
   edgeDockHandleZones,
   edgeDockPeekBounds,
   edgeDockPlacementForDrop,
+  edgeDockPollDelay,
   edgeDockRailBounds,
   edgeDockRefreshBounds,
   edgeDockRefreshCorridor,

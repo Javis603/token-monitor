@@ -69,6 +69,7 @@ const supportedToolOrder = [
   'AI Chat Models',
   'Pi',
   'Oh My Pi',
+  'Goose',
   'Zed',
   'Kilo',
   'Command Code',
@@ -79,6 +80,7 @@ const supportedToolOrder = [
   'CodeBuddy',
   'WorkBuddy',
   'Proma',
+  'CatPaw',
   'Qoder',
   'Reasonix',
   'DeepSeek / DeepSeek Harness',
@@ -95,6 +97,7 @@ const supportedToolOrder = [
   'Trae CN',
   'Alibaba Cloud',
   'StepFun',
+  'Notion AI',
   'Third-party APIs'
 ];
 
@@ -116,6 +119,7 @@ const supportedToolIdOrder = [
   'gcmp',
   'pi',
   'omp',
+  'goose',
   'zed',
   'kilo',
   'commandcode',
@@ -126,6 +130,7 @@ const supportedToolIdOrder = [
   'codebuddy',
   'workbuddy',
   'proma',
+  'catpaw',
   'qoder',
   'reasonix',
   'deepseek',
@@ -142,6 +147,7 @@ const supportedToolIdOrder = [
   'trae',
   'alibaba',
   'stepfun',
+  'notion',
   'thirdparty'
 ];
 

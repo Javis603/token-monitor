@@ -45,6 +45,8 @@ test('sumTokens adds disjoint Tokscale reasoning only for opted-in clients', () 
   assert.equal(sumTokens(b, 'zcode'), 1134);
   assert.equal(sumTokens(b, 'opencode'), 1134);
   assert.equal(sumTokens(b, 'muse'), 1134);
+  assert.equal(sumTokens(b, 'grok'), 1134);
+  assert.equal(sumTokens(b, 'hermes'), 1134);
   assert.equal(sumTokens(b, 'claude'), 135);
   assert.equal(sumTokens({}), 0);
   assert.equal(sumTokens(null), 0);
@@ -57,6 +59,8 @@ test('sumOutputTokens folds disjoint reasoning into output only for opted-in cli
   for (const client of ['antigravity', 'antigravity-cli', 'antigravity-extension']) assert.equal(sumOutputTokens(b, client), 1019);
   assert.equal(sumOutputTokens(b, 'opencode'), 1019);
   assert.equal(sumOutputTokens(b, 'muse'), 1019);
+  assert.equal(sumOutputTokens(b, 'grok'), 1019);
+  assert.equal(sumOutputTokens(b, 'hermes'), 1019);
   assert.equal(sumOutputTokens(b, 'claude'), 20);
 });
 
@@ -113,6 +117,35 @@ test('parseGraphResult folds client rows into perClient/perModel and derives day
     unclassifiedTokens: 0,
     cacheReadTokens: 2, cacheWriteTokens: 1, outputTokens: 5
   });
+});
+
+test('Hermes graph reasoning is folded once across daily, monthly and summary totals', () => {
+  const raw = { contributions: [{ date: '2026-10-12', clients: [{
+    client: 'hermes', modelId: 'claude-sonnet-4-5',
+    tokens: { input: 1000, output: 250, cacheRead: 200, cacheWrite: 50, reasoning: 150 },
+    cost: 1.25, messages: 1
+  }] }] };
+  const parsed = parseGraphResult(raw);
+  const day = parsed.contributions[0];
+  assert.equal(day.tokens, 1650);
+  assert.equal(day.outputTokens, 400);
+  assert.equal(day.cost, 1.25);
+  for (const breakdown of [day.perClient.hermes, day.perModel['claude-sonnet-4-5']]) {
+    assert.equal(breakdown.tokens, 1650);
+    assert.equal(breakdown.outputTokens, 400);
+    assert.equal(breakdown.cacheReadTokens, 200);
+    assert.equal(breakdown.cacheWriteTokens, 50);
+  }
+  const history = normalizeHistory(parsed, { todayKey: '2026-10-13' });
+  assert.equal(history.monthly[0].tokens, 1650);
+  assert.equal(history.summary.totalTokens, 1650);
+  const merged = mergeHistories([history], { todayKey: '2026-10-13' });
+  assert.equal(merged.daily[0].tokens, 1650);
+  assert.equal(merged.daily[0].outputTokens, 400);
+  assert.equal(merged.daily[0].perClient.hermes.outputTokens, 400);
+  assert.equal(merged.monthly[0].tokens, 1650);
+  assert.equal(merged.summary.totalTokens, 1650);
+  assert.equal(merged.summary.totalCost, 1.25);
 });
 
 test('Cursor Auto and default graph rows share one model without renaming other clients', () => {
@@ -388,8 +421,8 @@ test('mergeHistories sums daily across devices and recomputes derived fields', (
   const d7 = m.daily.find((d) => d.date === '2026-06-07');
   assert.equal(d7.tokens, 25);                         // 20 + 5
   assert.equal(d7.activeTimeMs, 150000);                // 120000 + 30000
-  assert.deepEqual(d7.perClient.claude, { tokens: 20, cost: 2, messages: 1 });
-  assert.deepEqual(d7.perClient.codex, { tokens: 5, cost: 0.5, messages: 1 });
+  assert.deepEqual(d7.perClient.claude, { tokens: 20, cost: 2, messages: 1, unclassifiedTokens: 0 });
+  assert.deepEqual(d7.perClient.codex, { tokens: 5, cost: 0.5, messages: 1, unclassifiedTokens: 0 });
   assert.equal(d7.intensity, 4);                       // highest-cost merged day
   assert.equal(m.summary.totalTokens, 35);
   assert.equal(m.summary.currentStreak, 2);

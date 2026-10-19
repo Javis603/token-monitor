@@ -270,6 +270,14 @@ test('matchProviderAccount claims the sole account when every candidate misses',
   assert.equal(needsRebinding(sub, providers), false);
 });
 
+test('WorkBuddy stable context bindings never heal onto a sibling with matching display metadata', () => {
+  const sub = subscription({ provider: 'workbuddy', binding: { accountKey: 'saved-c', profileName: 'Same name', accountEmail: 'same@example.com' } });
+  const sibling = { provider: 'workbuddy', accountKey: 'live-a', accountName: 'Same name', accountEmail: 'same@example.com' };
+  assert.equal(matchProviderAccount(sub, [sibling]), null);
+  const unavailable = { ...sibling, accountKey: 'saved-c', status: 'notConfigured' };
+  assert.equal(matchProviderAccount(sub, [sibling, unavailable]), unavailable);
+});
+
 test('needsRebinding only fires on a genuine ambiguity', () => {
   const sub = subscription({ provider: 'qoder', binding: { accountKey: 'sha256:stale' } });
 

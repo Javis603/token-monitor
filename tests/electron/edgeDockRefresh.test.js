@@ -10,7 +10,8 @@ const { createStatsPublicationBatcher } = require('../../src/electron/statsPubli
 
 const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 const refreshSource = main.slice(main.indexOf('let manualStatsRefreshInFlight ='), main.indexOf('function managedPricingSidecarPath('));
-const dockSource = main.slice(main.indexOf('// Week / last-7 / last-30 are not collector periods'), main.indexOf('// Hand cells to the controller'));
+const dockSource = main.slice(main.indexOf('function configuredDockItemLists('), main.indexOf('function edgeDockShowsLiveRate('))
+  + main.slice(main.indexOf('// Week / last-7 / last-30 are not collector periods'), main.indexOf('// Hand cells to the controller'));
 const pushSource = main.slice(main.indexOf('function sendPush('), main.indexOf('function statsHistoryRevision('));
 
 function deferred() {
@@ -40,6 +41,7 @@ function fixture() {
     runManualDeviceRefresh,
     electronPresentationStats: (stats) => stats,
     edgeDockController: { isRunning: () => true },
+    notchController: null,
     pushEdgeDockCells: (cells) => { context.dockStats = cells.stats; context.dockPeriods = cells.derivedPeriods; },
     buildEdgeDockCells: (stats, options) => ({ stats, derivedPeriods: options.derivedPeriods }),
     EDGE_DOCK_DERIVED_PERIODS: ['week', 'last7', 'last30'],
@@ -199,7 +201,7 @@ test('a delayed derived-period repaint retains the manually refreshed snapshot u
   const pushed = { historyRevision: '3', devices: [{ today: 'pushed' }] };
   context.sendPush({ event: 'stats', data: { stats: pushed } });
   await new Promise((resolve) => setImmediate(resolve));
-  context.repaintEdgeDockCells();
+  context.repaintDockSurfaces();
   assert.equal(context.dockStats, pushed, 'a new push must replace the manually refreshed source');
   assert.equal(context.dockPeriods.week, pushed.devices[0]);
 });
@@ -211,18 +213,19 @@ test('dock re-projections keep manual stats through settings updates but never a
   usage.resolve(true);
   await context.refreshStatsFromEdgeDock();
   const fresh = context.localStats;
-  const syncSource = main.slice(main.indexOf('function syncEdgeDock('), main.indexOf('function refreshLimitStatsPresentation('));
+  const syncSource = main.slice(main.indexOf('function syncDockSurfaces('), main.indexOf('function refreshLimitStatsPresentation('));
   Object.assign(context, {
     canUseEdgeDock: () => true,
+    syncNotch() {},
     ensureEdgeDockController: () => ({ setAppearance() {}, sync() {} }),
     edgeDockAppearance: () => ({}),
-    scheduleEdgeDockSessionExpiry() {}
+    scheduleSessionExpiry() {}
   });
   vm.runInNewContext(syncSource, context);
-  context.syncEdgeDock({});
+  context.syncDockSurfaces({});
   assert.equal(context.dockStats, fresh, 'settings must re-project the manual snapshot');
   context.hubModeGeneration += 1;
-  context.repaintEdgeDockCells();
+  context.repaintDockSurfaces();
   assert.equal(context.dockStats, old, 'a different mode must not reuse the manual snapshot');
   limits.resolve();
 });
@@ -248,7 +251,7 @@ test('forecast completion and session expiry re-project the manually refreshed d
   });
   const schedulerSource = main.slice(main.indexOf('function edgeDockNextSessionExpiry('), main.indexOf('function ensureEdgeDockController('));
   vm.runInNewContext(schedulerSource, context);
-  context.scheduleEdgeDockSessionExpiry();
+  context.scheduleSessionExpiry();
   assert.equal(timers.length, 1);
   timers[0]();
   assert.equal(context.dockStats, context.localStats, 'session expiry must retain the manual snapshot');
@@ -291,7 +294,7 @@ test('App-only Client refresh updates the dock and replaces its previous manual 
   const newer = { updatedAt: 'newer' };
   context.fetch = async () => ({ ok: true, json: async () => newer });
   assert.equal(await context.refreshManualStats(), newer);
-  context.repaintEdgeDockCells();
+  context.repaintDockSurfaces();
   assert.equal(context.dockStats, newer);
 });
 
@@ -306,7 +309,7 @@ for (const entry of ['App', 'Edge Dock']) {
     response.resolve(freshRead);
     await request;
     assert.equal(context.dockStats, pushed, 'late manual completion must not repaint over the push');
-    context.repaintEdgeDockCells();
+    context.repaintDockSurfaces();
     assert.equal(context.dockStats, pushed, 'late manual completion must not retain an override');
   });
 }
@@ -322,7 +325,7 @@ test('runtime replacement without a mode change invalidates the dock manual sour
   context.deviceRuntimeHandle.tick = () => nextUsage.promise;
   const pending = context.refreshManualStats();
   context.deviceRuntimeHandle = null;
-  context.repaintEdgeDockCells();
+  context.repaintDockSurfaces();
   assert.equal(context.dockStats, old);
   nextUsage.resolve(true);
   await pending;
@@ -359,7 +362,21 @@ for (const entry of ['App', 'Edge Dock']) {
     await request;
     assert.equal(context.dockStats.remote, 'fresh');
     assert.equal(context.dockStats.local, 'fresh');
-    context.repaintEdgeDockCells();
+    context.repaintDockSurfaces();
     assert.equal(context.dockStats.remote, 'fresh');
   });
 }
+
+
+test('manual App refresh feeds an independently enabled Notch through the same snapshot source', async () => {
+  const { context, usage, limits } = fixture();
+  context.edgeDockController = null;
+  context.notchController = { isRunning: () => true };
+  let topStats;
+  context.pushNotchCells = (stats) => { topStats = stats; };
+  const refreshed = context.refreshManualStats();
+  usage.resolve(true);
+  await refreshed;
+  assert.equal(topStats, context.localStats);
+  limits.resolve();
+});

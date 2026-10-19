@@ -113,6 +113,110 @@ test('sync endpoint reuses hover reading and preserves its wrapper across settin
   assert.equal(endpoint.title, 'Saved Hub URL');
 });
 
+for (const className of ['detail-ex-title', 'detail-heading']) {
+  for (const [midFlight, finalUpdate, earlyLeave] of [[false, false, false], [true, false, false], [true, true, false], [true, true, true]]) {
+    test(`${className} reading catches the final detail update on leave (${midFlight ? `read in flight${finalUpdate ? ', final stats update' : ''}${earlyLeave ? ', early leave' : ''}` : 'read not started'})`, async () => {
+      const h = harness(400);
+      h.element.classList.add(className);
+      h.element.closest = () => ({});
+      const endpoint = h.node();
+      endpoint.id = 'syncConnectionEndpoint';
+      endpoint.closest = () => null;
+      const document = {
+        createElement: h.node,
+        querySelectorAll: () => [h.element, endpoint],
+        // This harness has one reading target and no tooltip or ancestor holds.
+        // Evaluate the production selector against its actual event-driven classes.
+        querySelector: selectors => selectors.split(',').some(selector => {
+          const rule = selector.trim();
+          return !/[ :]/.test(rule) && rule.startsWith('.')
+            && rule.slice(1).split('.').every(name => h.element.classList.contains(name));
+        }) ? h.element : null
+      };
+      const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+      const setup = app.slice(app.indexOf('const overflowText ='), app.indexOf('// Two clicks to remove from sync settings'));
+      const hold = app.slice(app.indexOf('function sessionTooltipShouldHoldRender()'), app.indexOf('function flushPendingLimitDetailTooltipRender()'));
+      const detail = app.slice(app.indexOf('function applySessionDetailResult('), app.indexOf('\nfunction toggleDetailSort'));
+      const renders = [];
+      let reads = 0;
+      let finishRead;
+      let defer = false;
+      const state = { period: 'today', breakdown: 'session', stats: { periods: { today: {
+        sessions: { 'claude:s': { totalTokens: 100, costUsd: 1 } }
+      } } } };
+      const context = vm.createContext({
+        document, state, els: { syncConnectionEndpoint: endpoint },
+        window: { ...h.window, TokenMonitorOverflowText: { create }, tokenMonitor: { getSessionDetail: async () => {
+          reads += 1;
+          if (defer) return new Promise(resolve => { finishRead = resolve; });
+          return { found: true, marker: reads };
+        } } },
+        requestAnimationFrame: h.window.requestAnimationFrame,
+        prefersReducedMotion: () => false, homeSessionRenderPending: false,
+        visibleStatsSurface: () => 'main', isRendererWindowHidden: () => false,
+        statsRenderScheduler: { request() {} }, renderSessionDetail: options => renders.push(options)
+      });
+      vm.runInContext(`${setup}\n${hold}\n${detail}`, context);
+      context.bindHoverMarquee(h.element);
+      await context.openSessionDetail({ client: 'claude', sessionId: 's', sessionCost: 1 });
+      h.frame(0);
+      state.stats.periods.today.sessions['claude:s'] = { totalTokens: 200, costUsd: 2 };
+      let reading;
+      if (midFlight) {
+        defer = true;
+        reading = context.refreshOpenSessionDetail();
+      }
+      h.hover();
+      assert.equal(h.element.classList.contains('is-hover-reading'), true);
+      assert.equal(context.sessionTooltipShouldHoldRender(), true, 'the real marquee class triggers the real hold selector');
+      if (midFlight) {
+        if (finalUpdate) {
+          state.stats.periods.today.sessions['claude:s'] = { totalTokens: 300, costUsd: 3 };
+          await context.refreshOpenSessionDetail();
+          assert.equal(reads, 2, 'a final push during the held read must not start another read');
+        }
+        if (earlyLeave) {
+          h.element.mouseleave();
+          h.frame(100);
+          await new Promise(resolve => setImmediate(resolve));
+          assert.equal(reads, 2, 'leave while busy must not start a concurrent read');
+          assert.equal(state.openSession.detailLiveBusy, true);
+          assert.equal(renders.at(-1).detail.marker, 1);
+          defer = false;
+        }
+        finishRead({ found: true, marker: 2 });
+        await reading;
+        if (!earlyLeave) {
+          assert.equal(state.openSession.detailRenderPending, true);
+          assert.equal(state.openSession.liveSignature, JSON.stringify([200, 2, 0]));
+        }
+      } else {
+        await context.refreshOpenSessionDetail();
+        assert.equal(reads, 1, 'the held update has not started a read');
+      }
+      if (!earlyLeave) {
+        assert.equal(renders.at(-1).detail.marker, 1);
+        defer = false;
+        h.element.mouseleave();
+        h.frame(100);
+      }
+      await new Promise(resolve => setImmediate(resolve));
+      const finalReads = finalUpdate ? 3 : 2;
+      assert.equal(reads, finalReads, 'leave performs exactly the missing read, if any');
+      assert.equal(renders.at(-1).detail.marker, finalReads, 'the final update paints without another stats push');
+      assert.equal(state.openSession.liveSignature, JSON.stringify(finalUpdate ? [300, 3, 0] : [200, 2, 0]));
+      assert.equal(state.openSession.sessionCost, finalUpdate ? 3 : 2);
+      assert.deepEqual(renders.filter(render => render.detail).map(render => render.detail.marker), finalUpdate ? [1, 2, 3] : [1, 2]);
+      assert.equal(renders.at(-1).preserveScroll, true);
+      assert.equal(Boolean(state.openSession.detailRenderPending), false);
+      h.element.mouseleave();
+      h.frame(101);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(reads, finalReads, 'idle leave does not read again');
+    });
+  }
+}
+
 test('small overflow moves smoothly in fractional pixels and finishes promptly', () => {
   const h = harness();
   h.hover();
@@ -127,6 +231,32 @@ test('small overflow moves smoothly in fractional pixels and finishes promptly',
   h.element.mouseleave();
   assert.equal(content.style.transform, 'translate3d(0px, 0, 0)');
   assert.equal(h.element.classList.contains('has-overflow-fade'), true);
+});
+
+for (const distance of [100, 1000, 3000]) {
+  test(`${distance}px overflow scrolls at 100 px/s and finishes at its endpoint`, () => {
+    const h = harness(distance);
+    h.hover();
+    h.frame(500);
+    assert.equal(h.element.children[0].style.transform, 'translate3d(-50px, 0, 0)', 'speed is independent of text length');
+    h.frame(distance * 10 - 1);
+    assert.equal(h.frames.size, 1, 'the animation continues until the full distance is covered');
+    h.frame(distance * 10);
+    assert.equal(h.element.children[0].style.transform, `translate3d(-${distance}px, 0, 0)`, 'the full text arrives on time');
+    assert.equal(h.frames.size, 0, 'the animation finishes without a perpetual repaint');
+  });
+}
+
+test('mouseleave cancels an active long-preview animation', () => {
+  const h = harness(3000);
+  h.hover();
+  h.frame(4000);
+  assert.equal(h.element.children[0].style.transform, 'translate3d(-400px, 0, 0)');
+  h.element.mouseleave();
+  assert.equal(h.frames.size, 0);
+  assert.equal(h.element.children[0].style.transform, 'translate3d(0px, 0, 0)');
+  h.frame(30_000);
+  assert.equal(h.element.children[0].style.transform, 'translate3d(0px, 0, 0)', 'cancelled motion cannot resume');
 });
 
 test('unchanged text preserves pending, active and completed hover motion', () => {
@@ -207,13 +337,13 @@ for (const phase of ['pending', 'active', 'completed']) {
     // A detached replacement has no text geometry until commitCard mounts it.
     const content = replacement.children[0];
     content.getBoundingClientRect = () => ({ width: replacement.isConnected ? 300 : 0 });
-    const previousList = { scrollTop: 37 };
-    const nextList = { scrollTop: 0 };
+    const previousList = { scrollTop: 37, closest: () => null };
+    const nextList = { scrollTop: 0, closest: () => null };
     function card(title, list) {
       return {
         dataset: { cellId: 'sessions', breakdownMode: 'session' },
         querySelector: () => list,
-        querySelectorAll: selector => selector === '.fade-overflow'
+        querySelectorAll: selector => selector === '.scroll' ? [list] : selector === '.fade-overflow'
           || (selector === '.fade-overflow.is-hover-reading' && title.classList.contains('is-hover-reading'))
           ? [title] : []
       };
@@ -236,6 +366,7 @@ for (const phase of ['pending', 'active', 'completed']) {
     const end = dock.indexOf('\n}', start) + 2;
     assert.ok(start >= 0 && end > start, 'commitCard source boundaries exist');
     const context = {
+      document: h.document,
       contentLayer, overflowText: h.api, CARD_SCROLL_SELECTOR: '.scroll',
       cardResetAnimator: { capture: () => null, animate() {} }
     };
@@ -393,8 +524,9 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
+    rowNumberAnimations: new Map(), cancelRowNumberAnimation() {},
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {},
-    sessionRowsApi: { applyBreakdownRowSemantics(_row, _head, options) { interactive = options.interactive; } },
+    sessionRowsApi: { ...require('../../src/electron/renderer/sessionRows'), applyBreakdownRowSemantics(_row, _head, options) { interactive = options.interactive; } },
     t: key => key
   };
   vm.runInNewContext(`${app.slice(start, end)}\nglobalThis.update = updateRow;`, context);
@@ -436,7 +568,7 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
       : ['Codex · gpt-5', '12:00 · 2 calls', sessionId]);
     assert.equal(interactive, true, 'title mode changes preserve detail navigation');
   }
-  context.update(row, { name: 'Reviews', detail: '3 runs', kind: 'summary', reviewGroup: true, value: 100 });
+  context.update(row, { name: 'Reviews', detail: '3 runs', kind: 'summary', sessionGroup: 'codex-auto-review', value: 100 });
   assert.equal(interactive, true);
   assert.equal(row.querySelector('.row-detail').textContent, '3 runs');
   assert.equal(row.querySelector('.row-detail').classList.contains('hidden'), false);
@@ -460,8 +592,9 @@ test('a token and cost update through updateRow keeps the hovered title moving',
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
+    rowNumberAnimations: new Map(), cancelRowNumberAnimation() {},
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {},
-    sessionRowsApi: { applyBreakdownRowSemantics() {} }, t: key => key
+    sessionRowsApi: { ...require('../../src/electron/renderer/sessionRows'), applyBreakdownRowSemantics() {} }, t: key => key
   };
   vm.runInNewContext(`${body}\nglobalThis.update = updateRow;`, context);
   const data = { name: h.element.textContent, detail: 'session-id', kind: 'session', client: 'codex', value: 100, cost: 1 };
@@ -477,4 +610,81 @@ test('a token and cost update through updateRow keeps the hovered title moving',
   assert.equal(content.style.transform, before);
   h.frame(1000);
   assert.notEqual(content.style.transform, before);
+});
+
+
+test('actual shared row rendering keeps group availability and binds Auto Review model labels with trailing time', t => {
+  // Row construction and the adapter's default date formatter share one local day.
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 9, 11, 12, 0).getTime() });
+  const h = harness(0);
+  const rowsApi = require('../../src/electron/renderer/sessionRows');
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const makeNode = () => {
+    const node = h.node();
+    node.querySelector = selector => {
+      const name = selector.slice(1);
+      const find = children => {
+        for (const child of children || []) {
+          if (child.classList?.contains(name) || String(child.className || '').split(' ').includes(name)) return child;
+          const nested = find(child.children); if (nested) return nested;
+        }
+        return null;
+      };
+      return find(node.children);
+    };
+    return node;
+  };
+  const makeRow = () => {
+    const row = makeNode(); const nodes = new Map();
+    row.querySelector = selector => { if (!nodes.has(selector)) nodes.set(selector, makeNode()); return nodes.get(selector); };
+    return row;
+  };
+  const bindings = [];
+  const context = {
+    state: { breakdown: 'session' }, rowWidth: () => 50, iconKindFor: () => ({ kind: 'dot' }),
+    setHoverMarqueeText: h.api.setText, overflowText: h.api, formatNumber: String, formatCost: String,
+    rowNumberAnimations: new Map(),
+    updateRowContext() {}, updateRowLive() {}, applyBarScale() {}, cancelRowNumberAnimation() {},
+    document: { createElement: makeNode, createTextNode: text => ({ textContent: text }) },
+    limitWindowsView: { setDetailTooltip(node, entries) {
+      node.classList.toggle('limit-detail-tooltip-wrap', Boolean(entries));
+      if (entries) bindings.push({ node, entries });
+    } },
+    sessionRowsApi: { ...rowsApi, applyBreakdownRowSemantics() {} }, t: key => key,
+    rowTemplate: makeRow, openSessionDetail() {}
+  };
+  const update = app.slice(app.indexOf('function updateRow('), app.indexOf('function applyHomeListMark('));
+  const member = app.slice(app.indexOf('function sessionGroupRunNode('), app.indexOf('function renderSessionGroupDetail('));
+  vm.runInNewContext(`${update}\n${member}\nglobalThis.update = updateRow; globalThis.member = sessionGroupRunNode;`, context);
+  const now = new Date();
+  const accounting = { client: 'codex', sessionId: 'old', t3ThreadId: 'main', totalTokens: 500, costUsd: 2,
+    models: { a: 500 }, lastUsedAt: new Date(2026, 9, 11, 8, 0).toISOString() };
+  const native = { client: 'claude', sessionId: 'new', t3ThreadId: 'main', tokenDataUnavailable: true,
+    totalTokens: 0, lastUsedAt: now.toISOString(), native: true };
+  const [group] = rowsApi.groupSessionRows(rowsApi.sessionRowsForPeriod({ sessions: { old: accounting } }, {
+    now, nativeSessions: { new: native }, clientLabels: { codex: 'Codex', claude: 'Claude Code' }
+  }));
+  const row = makeRow(); context.update(row, group);
+  assert.equal(group.tokenDataUnavailable, false);
+  assert.equal(row.querySelector('.row-value').textContent, '500');
+  assert.equal(row.querySelector('.row-cost').textContent, '2');
+  assert.equal(row.dataset.tokenDataUnavailable, undefined);
+  const [unavailable] = rowsApi.groupSessionRows(rowsApi.sessionRowsForPeriod({ sessions: {} }, {
+    now, nativeSessions: { new: native, other: { ...native, sessionId: 'other' } }
+  }));
+  context.update(row, unavailable);
+  assert.equal(row.dataset.tokenDataUnavailable, 'true');
+  assert.equal(row.querySelector('.row-cost').textContent, '');
+  for (const titled of [true, false]) {
+    const [review] = rowsApi.sessionRowsForPeriod({ sessions: { review: { ...accounting,
+      sessionId: 'review', sessionKind: 'background-review', title: titled ? 'Review' : '', models: { a: 300, b: 200 }
+    } } }, { now, clientLabels: { codex: 'Codex' } });
+    bindings.length = 0;
+    const rendered = context.member(review, 500, { summary: { sessionGroup: 'codex-auto-review' } });
+    assert.equal(bindings.length, 1, 'adapter plus updateRow binds one tooltip');
+    assert.equal(bindings[0].node.textContent, '2 models');
+    assert.deepEqual(bindings[0].entries, review.modelTooltipEntries);
+    assert.equal(rendered.querySelector('.row-title').textContent, '2 models · 08:00');
+    assert.equal(rendered.classList.contains('session-group-run'), true, 'existing tooltip repaint guard includes the target');
+  }
 });

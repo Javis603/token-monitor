@@ -20,13 +20,17 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-A855F7?style=flat-square" alt="授權：MIT" /></a>
 </p>
 
+<p align="center">
+    <a href="https://trendshift.io/repositories/47497?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-47497" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/47497" alt="Javis603%2Ftoken-monitor | Trendshift" width="250" height="55"/></a>
+</p>
+
 <div align="center">
     <img src=".github/assets/demo.gif">
 </div>
 
 ## 什麼是 Token Monitor？
 
-一款桌面小工具，即時顯示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 44+ 種 AI 編程工具的 Token 用量與 AI 工具額度，具備即時多裝置同步與歷史使用趨勢功能，並支援依工具、裝置、模型、session 或專案分項顯示。
+一款桌面小工具，即時顯示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 47+ 種 AI 編程工具的 Token 用量與 AI 工具額度，具備即時多裝置同步與歷史使用趨勢功能，並支援依工具、裝置、模型、session 或專案分項顯示。
 
 ## 支援的工具
 
@@ -49,10 +53,11 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/`（`sessions/`、`logs/unified.jsonl`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`、`~/.copilot/`（`otel/`、`data.db`、`session-store.db`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/gcmp.png" width="28" alt="AI Chat Models" /> | AI Chat Models | VS Code `globalStorage/vicanent.gcmp/usages/` 按小時 JSONL（AI Chat Models 擴充功能的 Copilot Chat 用量；可選開啟） | ✅ | — | — |
-| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `~/.local/share/goose/sessions/sessions.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`；VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`）—— 擴充套件記錄僅限 Linux 與遠端/WSL | ✅ | — | — |
+| <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`；VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | — | — |
@@ -61,6 +66,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 與 IDE / VS Code 擴充套件日誌 | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（僅限中國版） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/`（`session.jsonl`、`session.jsonl.zstd`） | ✅ | ✅ | ✅ |
@@ -77,6 +83,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Trae CN access token（透過 trae.cn 查詢 Trae CN／SOLO credits） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | 阿里雲控制台 cookie（百鍊／Model Studio Token Plan 額度，團隊版與個人版） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token（Coding Plan／Token Plan 額度） | — | ✅ | — |
+| <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Notion AI 滾動／每月額度，限 Business/Enterprise；手動 token_v2 Cookie + 明確的工作區 ID | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="第三方 API" /> | 第三方 API | New API / Sub2API 相容帳戶預設方案（包括相容的 One API 分支）、New API 金鑰預設方案與自訂餘額端點 | — | ✅ | — |
 
 <details>
@@ -84,10 +91,13 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 
 <br>
 
-- 上表為預設路徑。Token Monitor 與 Tokscale 遵循相同的環境變數覆寫：`~/.local/share/` 下的路徑跟隨 `$XDG_DATA_HOME`，各工具另有 `$CODEX_HOME`、`$GROK_HOME`、`$HERMES_HOME`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME` 以及 `$CLINE_*` 系列。
+- 上表為預設路徑。Token Monitor 與 Tokscale 遵循相同的環境變數覆寫：`~/.local/share/` 下的路徑跟隨 `$XDG_DATA_HOME`，各工具另有 `$CODEX_HOME`、`$GROK_HOME`、`$HERMES_HOME`、`$GOOSE_PATH_ROOT`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME` 以及 `$CLINE_*` 系列。
+- Goose 的跨日用量仍計入會話建立日；暫不支援遠端 goosed 與自訂掃描路徑。詳見 [Goose 資料來源說明](docs/providers/goose.md)。
+- CatPaw 預設關閉，可在 Settings → tools 中啟用；讀取 macOS 和 Windows 上國內版與海外版助手的資料庫。路徑與驗證邊界見 [CatPaw 資料來源說明](docs/providers/catpaw.md)。
 - LM Studio 追蹤目前僅涵蓋伺服器日誌中記錄的 OpenAI 相容 `/v1/chat/completions` 與 `/v1/responses` 請求。透過 LM Studio 內建 Chat 介面發起的對話，以及原生 `/api/v1/chat` 請求均不包含在內。
 - Unsloth Studio 從 `studio.db` 追蹤 Studio 對話與本機 API 的推論用量。本機推論的 API 費用為零；可識別的按量計費供應商使用 Tokscale 的價格估算。不包含訓練 Token。詳見 [Unsloth 資料來源說明](docs/providers/unsloth.md)。
 - Devin 從本機 `sessions.db` 追蹤 Devin CLI 會話，並從 `acp-events` ACP 日誌追蹤 Devin Desktop 代理會話；同一 session 兩邊都有資料時以 CLI 資料庫為準。Desktop 的涵蓋範圍取決於連接的 ACP 代理：只有會在本機寫入 `usage_update` 事件的代理才會計入，而 Devin Desktop 預設的 `devin-cloud` 代理在伺服器端計量，因此預設的 Desktop 設定不會回報 Desktop token。session 標題與專案歸屬取自 CLI 資料庫。詳見 [Devin 資料來源說明](docs/providers/devin.md)。
+- Notion AI 使用內部 API，需手動貼上 `token_v2` Cookie 與明確的 Business/Enterprise 工作區 ID。目前僅以測試資料驗證，尚無真實回應樣本，實際登入驗證待批准。不會自動取得 Cookie，也不保證公開 API 相容性。詳見 [Notion 資料來源說明](docs/providers/notion.md)。
 - MiniMax Code 讀取 CLI 寫入的本機工作階段記錄，位於 `~/.minimax` 或 `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR`（亦包括 `~/.mavis` 與 `~/.minimax-<profile>` / `~/.mavis-<profile>`），並加上以 `tokscale headless mcode` 擷取的執行；兩邊都有的同一輪只計一次。
 
 - Command Code transcript 不包含實際 Token 數或每則訊息的模型資料。Token 用量依 transcript 文字估算；模型歸屬與推算成本則可能反映目前設定的模型，而非每次請求當時實際使用的模型。
@@ -130,7 +140,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 
 ### 用量追蹤
 
-- **即時 Token 追蹤**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 36+ 種 AI 工具，每輪對話後 UI 在數秒內更新（完整清單見上方表格）
+- **即時 Token 追蹤**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 38+ 種 AI 工具，每輪對話後 UI 在數秒內更新（完整清單見上方表格）
 - **即時 Token 速率**：可選顯示的即時讀數，以 `tok/s` 顯示生成速度或以 `tok/min` 顯示總消耗
 - **單一 session 明細**：點進某個 session，可看每則提問的 Token 消耗，並展開查看每次回覆的 Token 拆分與用到的工具（開啟時才即時讀取本機 transcript 或資料庫，絕不同步）
 - **快取命中統計**：點擊任何工具或模型，展開查看輸入 Token（快取命中與未命中）、輸出 Token 的詳細分類及命中率百分比
@@ -140,7 +150,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 
 ### 額度、趨勢與匯出
 
-- **AI 工具額度偵測**：涵蓋 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 28+ 家供應商的 session、每日、每週、帳單與 credits 視窗，支援多個 OpenRouter／第三方 profile，以及餘額型帳戶（Claude credits、DeepSeek 預付餘額與消費歷史、第三方餘額）
+- **AI 工具額度偵測**：涵蓋 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 29+ 家供應商的 session、每日、每週、帳單與 credits 視窗，支援多個 OpenRouter／第三方 profile，以及餘額型帳戶（Claude credits、DeepSeek 預付餘額與消費歷史、第三方餘額）
 - **多帳號與 Codex 帳號切換**：同一供應商可追蹤多個帳號、各自顯示額度；已加入追蹤的 Codex 帳號還能一鍵切換為本機使用帳號，免重新登入授權
 - **Codex 重置預測**：可選開啟的第三方重置預測，顯示預計重置時間、重置類型（Regular 或 Banked）與上次重置時間
 - **保留已刪除會話用量**：許多工具會定期清除舊 session（Claude Code 預設清 30 天前的 transcript），一刪就再也算不到。開啟後，Token Monitor 會在本機不設期限地封存已觀測到的每日工具／模型用量，讓熱力圖與趨勢即使在來源檔案被清掉後仍然完整（詳見下方[〈會話資料保留期〉](#會話資料保留期)）

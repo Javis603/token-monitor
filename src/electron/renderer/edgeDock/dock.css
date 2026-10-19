@@ -16,6 +16,7 @@ html, body.edge-dock {
    edgeDockShapes.js, the same commands that mask the native material on macOS,
    so the tint and the glass behind it share one edge. */
 .edge-dock-root {
+  --edge-dock-card-enter-shift: 3px;
   position: relative;
   width: 100%;
   height: 100%;
@@ -208,13 +209,32 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   stroke-width: 1.5;
   stroke-linecap: round;
 }
-.edge-dock-cell[data-running="yes"] .edge-dock-ring-spinner {
+.edge-dock-cell[data-running="yes"]:not([data-waiting="yes"]) .edge-dock-ring-spinner {
   opacity: 1;
   animation: edge-dock-running-spin 1400ms linear infinite;
 }
 @keyframes edge-dock-running-spin {
   from { transform: rotate(-90deg); }
   to { transform: rotate(270deg); }
+}
+.edge-dock-ring-waiting {
+  pointer-events: none;
+  opacity: 0;
+}
+.edge-dock-ring-waiting circle {
+  fill: none;
+  stroke: var(--orange);
+  stroke-width: 1.5;
+}
+/* Waiting takes priority over work in another session. A gentle pulse remains
+   visible throughout the wait; reduced motion keeps the complete ring still. */
+.edge-dock-cell[data-waiting="yes"] .edge-dock-ring-waiting {
+  opacity: 1;
+  animation: edge-dock-waiting-pulse 2400ms ease-in-out infinite;
+}
+@keyframes edge-dock-waiting-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 /* The flare a quota refill lands with — the ring's counterpart to the meter's
@@ -296,6 +316,11 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   text-overflow: clip;
 }
 .edge-dock-cell-stat.is-idle .edge-dock-stat-value { color: var(--muted); }
+/* A rolling readout's glyphs leave its line box and fade out through the mask
+   (see .token-number-glyphs); clipping would cut them with a straight edge. */
+.edge-dock-stat-value[data-token-number-animation="roll"],
+.edge-dock-stat-cost[data-token-number-animation="roll"],
+.edge-dock-cell-rate:has([data-token-number-animation="roll"]) { overflow: visible; }
 /* The tools with work in flight, drawn with their own marks. The cell is 56px
    of a 64px rail, so the row is capped in the projection (runningClients) and
    the remainder is stated as a count rather than shrunk below legibility. */
@@ -514,13 +539,15 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
    area, so a block that refuses to shrink is clipped rather than scrolled. The
    accounts block keeps flex-grow, so it yields space first. */
 .edge-dock-sessions {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   min-height: 0;
   flex: 0 1 auto;
 }
 .edge-dock-section-title { color: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; }
 .edge-dock-section-head {
+  flex-shrink: 0;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -534,6 +561,8 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
    section out of a window the OS has already clamped to the work area. */
 .edge-dock-session-list {
   display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: 8px;
   min-height: 0;
   overflow-y: auto;
@@ -588,7 +617,9 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
 }
 .edge-dock-session-dot[data-state="running"] .edge-dock-session-spin,
 .edge-dock-session-dot[data-state="ended"] .edge-dock-session-check,
+.edge-dock-session-dot[data-state="waiting"] .edge-dock-session-waiting,
 .edge-dock-session-dot[data-state="idle"] .edge-dock-session-idle { display: block; }
+.edge-dock-session-waiting { color: var(--orange); }
 
 /* Running: the only perpetual animation in the dock, and it is bounded by real
    work rather than by the card being open. The shape is the repo's own
@@ -916,7 +947,7 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
 .edge-dock-root.is-revealing { animation: edge-dock-rail-in 150ms cubic-bezier(0.33, 1, 0.68, 1) both; }
 
 @keyframes edge-dock-card-in {
-  from { opacity: 0; transform: translateY(3px); }
+  from { opacity: 0; transform: translateY(var(--edge-dock-card-enter-shift)); }
   to { opacity: 1; transform: none; }
 }
 .edge-dock-root.is-card-changed .edge-dock-card { animation: edge-dock-card-in 160ms ease-out both; }
@@ -984,3 +1015,25 @@ html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge
 .edge-dock-rate-device.is-separated { margin-top: 2px; padding-top: 8px; border-top: 1px solid rgba(var(--line-rgb), 0.16); }
 
 .edge-dock-cost-reading { display: inline-flex; align-items: center; gap: 3px; }
+
+.edge-dock-session-family > summary { cursor: pointer; list-style: none; }
+.edge-dock-session-family > summary::-webkit-details-marker { display: none; }
+.edge-dock-session-family > summary:focus-visible { outline: 1px solid var(--muted); outline-offset: 2px; }
+/* Membership is the quiet disclosure cue; the title keeps the same layout as
+   ordinary session rows, without another leading control column. */
+.edge-dock-session-member-count {
+  text-decoration: underline;
+  text-decoration-color: rgba(var(--line-rgb), 0.3);
+  text-underline-offset: 3px;
+}
+.edge-dock-session-family > summary:hover .edge-dock-session-member-count,
+.edge-dock-session-family > summary:focus-visible .edge-dock-session-member-count,
+.edge-dock-session-family[open] > summary .edge-dock-session-member-count {
+  color: var(--text);
+  text-decoration-color: currentColor;
+}
+.edge-dock-session-description { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A family participates in its outer list's scrolling. A second scroller
+   inside details traps wheel gestures once the card hits the work-area cap. */
+.edge-dock-session-family > .edge-dock-sessions { padding: 8px 0 0 16px; }
+.edge-dock-session-family .edge-dock-session-list { overflow: visible; }

@@ -162,8 +162,8 @@ test('both renderers paint from the shared modules, not their own copies', () =>
   // hands the view per-provider options — which mark, colour and plan text an
   // account takes is the view's policy, so the two surfaces cannot be told
   // different things about the same provider.
-  assert.match(dock, /limitWindowsView\.renderLimitProviderSolo\(/);
-  assert.match(dock, /limitWindowsView\.renderLimitProviderGroup\(/);
+  assert.match(dock, /view\.renderLimitProviderSolo\(/);
+  assert.match(dock, /view\.renderLimitProviderGroup\(/);
   assert.match(dock, /limitWindowText: limitWindowTextApi\.limitWindowText/);
   for (const page of [app, dock]) {
     assert.doesNotMatch(page, /groupPlanText|markIdForProvider|colorForProvider|planTextForProvider/);

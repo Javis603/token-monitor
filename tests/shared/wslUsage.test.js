@@ -15,6 +15,7 @@ const {
 test('homeHasData returns the client ids whose markers are present', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const present = new Set([
+    `${home}\\.local\\share\\goose\\sessions\\sessions.db`,
     `${home}\\.codex\\sessions`,
     `${home}\\.hermes`,
     `${home}\\.local\\share\\opencode`,
@@ -22,7 +23,7 @@ test('homeHasData returns the client ids whose markers are present', () => {
   ]);
   const existsSync = (p) => present.has(p);
   const ids = homeHasData(home, existsSync);
-  assert.deepEqual([...ids].sort(), ['codex', 'hermes', 'opencode', 'zcode']);
+  assert.deepEqual([...ids].sort(), ['codex', 'goose', 'hermes', 'opencode', 'zcode']);
 });
 
 test('each shared host directory discovers and attributes a WSL-only home', async () => {
@@ -430,13 +431,13 @@ test('collectWslUsage scans a Proma-only WSL home through tokscale --home', asyn
   assert.equal(bundle.today.clients.proma, 10);
 });
 
-test('collectWslUsage keeps Qoder CN out of WSL scans', async () => {
+test('collectWslUsage keeps Qoder CN and CatPaw out of WSL scans', async () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const seen = [];
   const { detected } = await collectWslUsage(
     {
-      clients: 'claude,qodercn',
-      trackedClients: 'claude,qodercn',
+      clients: 'claude,catpaw,qodercn',
+      trackedClients: 'claude,catpaw,qodercn',
       allTimeSince: '2025-01-01',
       commandTimeoutMs: 1000,
       runTokscale: async ({ clients }) => {

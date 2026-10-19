@@ -3,7 +3,10 @@
 
 'use strict';
 
+const { isSessionActivityClient } = require('./sessionActivityProviders');
+
 const PERIODS = ['today', 'month', 'allTime'];
+const { normalizeLiveActivity, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
@@ -72,6 +75,14 @@ function firstNumber(obj, keys) {
   return 0;
 }
 
+function firstPresent(obj, keys) {
+  if (!obj || typeof obj !== 'object') return undefined;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
+  }
+  return undefined;
+}
+
 function firstString(obj, keys) {
   if (!obj || typeof obj !== 'object') return '';
   for (const key of keys) {
@@ -136,6 +147,49 @@ function normalizeSessionTitle(value) {
 
 function normalizeSessionKind(value) {
   return String(value || '').trim() === 'background-review' ? 'background-review' : '';
+}
+
+// The id of the session that started this one (a subagent or a background
+// review). parentClient defaults to the child's client. Absent for top-level sessions and for
+// forks the user made themselves, so the field is only set when present.
+function normalizeParentSessionId(value, sessionId, parentClient, client) {
+  const parent = normalizeSessionId(value);
+  return parent && (parent !== sessionId || (parentClient && parentClient !== client)) ? parent : '';
+}
+
+const conflictingNativeIdentities = new WeakSet();
+function applyNativeSessionId(target, source) {
+  // Only the Codex header reader establishes this optional conversation identity.
+  // Keep the accounting key separate and reject conflicts across device sources.
+  const id = source.client === 'codex' && typeof source.nativeSessionId === 'string'
+    && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(source.nativeSessionId)
+    ? source.nativeSessionId.toLowerCase() : '';
+  if (!id || conflictingNativeIdentities.has(target)) return;
+  if (target.nativeSessionId && target.nativeSessionId !== id) {
+    delete target.nativeSessionId;
+    conflictingNativeIdentities.add(target);
+  } else target.nativeSessionId = id;
+}
+
+const conflictingT3Identities = new WeakSet();
+function applyT3ThreadId(target, source) {
+  const id = typeof source.t3ThreadId === 'string'
+    && source.t3ThreadId.length <= 1024 && /^[a-z0-9][a-z0-9:%_.-]*$/i.test(source.t3ThreadId)
+    ? source.t3ThreadId : '';
+  if (!id || conflictingT3Identities.has(target)) return;
+  if (target.t3ThreadId && target.t3ThreadId !== id) {
+    delete target.t3ThreadId;
+    conflictingT3Identities.add(target);
+  } else target.t3ThreadId = id;
+}
+
+function applyParentLink(target, source) {
+  const parentClient = normalizeClientName(source.parentClient ?? source.parent_client) || target.client;
+  const parentSessionId = normalizeParentSessionId(source.parentSessionId ?? source.parent_session_id, target.sessionId, parentClient, target.client);
+  if (!parentSessionId) return;
+  target.parentSessionId = parentSessionId;
+  if (parentClient !== target.client) target.parentClient = parentClient;
+  else delete target.parentClient;
 }
 
 function stripSessionTextFromPeriod(period, { preserveSessionTitles = false } = {}) {
@@ -236,6 +290,7 @@ function normalizeClientName(value) {
   if (raw.includes('claude')) return 'claude';
   if (raw.includes('codex')) return 'codex';
   if (raw.includes('hermes')) return 'hermes';
+  if (raw === 'goose') return 'goose';
   if (raw.includes('gemini')) return 'gemini';
   if (raw.includes('cursor')) return 'cursor';
   if (raw.includes('antigravity')) return 'antigravity';
@@ -261,6 +316,7 @@ function normalizeClientName(value) {
   if (raw.includes('workbuddy')) return 'workbuddy';
   if (raw.includes('proma')) return 'proma';
   if (raw.includes('gcmp')) return 'gcmp';
+  if (raw === 'catpaw') return 'catpaw';
   if (raw.includes('qodercn') || raw === 'qoder-cn' || raw === 'qoder cn') return 'qodercn';
   if (raw.includes('reasonix')) return 'reasonix';
   if (/cherry[\s_-]*studio/.test(raw)) return 'cherrystudio';
@@ -315,6 +371,21 @@ function emptyProject(label = '') {
     costUsd: 0,
     clients: Object.create(null)
   };
+}
+
+function addProjectModels(project, models, tokenLimit) {
+  if (!models || typeof models !== 'object' || Array.isArray(models)) return;
+  let remaining = Math.max(0, Math.round(asNumber(tokenLimit)));
+  const entries = Object.entries(models).sort(([left], [right]) => left.localeCompare(right));
+  for (const [rawModel, value] of entries) {
+    const model = normalizeModelName(rawModel);
+    if (!model || remaining <= 0) continue;
+    const tokens = Math.min(remaining, Math.max(0, Math.round(asNumber(value))));
+    if (tokens <= 0) continue;
+    const target = project.models ||= Object.create(null);
+    target[model] = (target[model] || 0) + tokens;
+    remaining -= tokens;
+  }
 }
 
 // costUsd remains the known subtotal. Missing prices are explicit token counts,
@@ -380,9 +451,11 @@ function addProjectInto(projects, rawKey, source) {
   if (!hasOwn(projects, key)) projects[key] = emptyProject(label || rawKey);
   const target = projects[key];
   target.label = deterministicProjectLabel(target.label, label || rawKey);
-  target.tokens += Math.max(0, Math.round(asNumber(source.tokens ?? source.totalTokens)));
+  const tokens = Math.max(0, Math.round(asNumber(source.tokens ?? source.totalTokens)));
+  target.tokens += tokens;
   target.costUsd += asNumber(source.costUsd ?? source.cost);
-  addUnpricedTokens(target, source, Math.max(0, asNumber(source.tokens ?? source.totalTokens)));
+  addUnpricedTokens(target, source, tokens);
+  addProjectModels(target, source.models, tokens);
   for (const [client, tokens] of Object.entries(source.clients || {})) {
     const clientKey = normalizeClientName(client);
     if (!clientKey) continue;
@@ -412,6 +485,7 @@ function projectRollupFromSessions(sessions) {
     project.tokens += tokens;
     project.costUsd += asNumber(session.costUsd);
     addUnpricedTokens(project, session, tokens);
+    addProjectModels(project, session.models, tokens);
     const client = normalizeClientName(session.client);
     if (client && tokens > 0) {
       project.clients[client] = (hasOwn(project.clients, client) ? project.clients[client] : 0) + tokens;
@@ -561,9 +635,9 @@ function emptySession(client, id) {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     reasoningTokens: 0,
-    // The session's share of the period throughput counters: raw sums, gated
-    // per tokscale entry exactly as the period's are, so a row divides them at
-    // display time into its own tok/s. 0/0 means the client reported no
+    // The session's share of the period throughput counters: raw sums from
+    // the same timed messages, divided at display time into its own tok/s.
+    // 0/0 means the client reported no
     // durations for this session, not that it generated nothing.
     timedOutputTokens: 0,
     timedDurationMs: 0,
@@ -656,8 +730,29 @@ function mergeSession(target, source) {
     if (sourceLastUsed > targetLastUsed) target.turnEnded = sourceEnded;
     else if (sourceEnded && sourceLastUsed === targetLastUsed) target.turnEnded = true;
   }
+  // Question state follows transcript activity. At equal timestamps a cleared
+  // request wins, preventing an older period from resurrecting an answered call.
+  if (source.client === 'codex' && typeof source.waitingForInput === 'boolean') {
+    if (sourceLastUsed > targetLastUsed || (sourceLastUsed === targetLastUsed
+      && (target.waitingForInput !== false || source.waitingForInput === false))) {
+      target.waitingForInput = source.waitingForInput;
+    }
+  }
+  // Registry observations have their own clock: waiting can change without a
+  // token or transcript write. An explicit unknown reading clears old evidence.
+  if (isSessionActivityClient(source.client)) {
+    const reading = normalizeLiveActivity(source.liveActivity);
+    if (reading && canReplaceLiveActivity(target.liveActivity, reading)) {
+      target.liveActivity = reading;
+    }
+  }
   if (!target.title && source.title) target.title = normalizeSessionTitle(source.title);
   if (!target.sessionKind && source.sessionKind) target.sessionKind = normalizeSessionKind(source.sessionKind);
+  applyNativeSessionId(target, source);
+  applyT3ThreadId(target, source);
+  if (!target.parentSessionId && source.parentSessionId) {
+    applyParentLink(target, source);
+  }
   if (source.usageSource === 'codex-dots-local') {
     target.usageSource = 'codex-dots-local';
     target.usageCoverage = 'observed-only';
@@ -704,13 +799,14 @@ function sessionFromRow(row) {
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
   Object.assign(session, sessionTokenComponents(row));
   session.outputTokens = Math.max(0, Math.round(outputValueForClient(row, client)));
-  Object.assign(session, entryThroughput(row, session.outputTokens));
+  Object.assign(session, entryThroughput(row, session.outputTokens, client));
   session.startedAt = normalizeIsoTimestamp(firstString(row, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(row, LAST_USED_AT_KEYS));
   session.projectId = String(row.projectId || row.project_id || '').trim();
   session.projectLabel = String(row.projectLabel || row.project_label || '').trim();
   session.title = normalizeSessionTitle(firstString(row, SESSION_TITLE_KEYS));
   session.sessionKind = normalizeSessionKind(row.sessionKind || row.session_kind);
+  applyParentLink(session, row);
   const model = detectModel(row, client);
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
   if (model && session.costUsd > 0) session.modelCosts[model] = (session.modelCosts[model] || 0) + session.costUsd;
@@ -755,10 +851,20 @@ function normalizeSession(input, fallbackKey) {
   // when the same session arrives from a source that had no evidence.
   if (input.turnEnded === true) session.turnEnded = true;
   else if (input.turnEnded === false) session.turnEnded = false;
+  if (client === 'codex' && typeof input.waitingForInput === 'boolean') {
+    session.waitingForInput = input.waitingForInput;
+  }
+  if (isSessionActivityClient(client)) {
+    const activity = normalizeLiveActivity(input.liveActivity);
+    if (activity) session.liveActivity = activity;
+  }
   session.projectId = String(input.projectId || input.project_id || '').trim();
   session.projectLabel = String(input.projectLabel || input.project_label || '').trim();
   session.title = normalizeSessionTitle(input.title || input.sessionTitle || input.session_title);
   session.sessionKind = normalizeSessionKind(input.sessionKind || input.session_kind);
+  applyNativeSessionId(session, input);
+  applyT3ThreadId(session, input);
+  applyParentLink(session, input);
   if (client === 'codex' && input.usageSource === 'codex-dots-local') {
     session.usageSource = 'codex-dots-local';
     session.usageCoverage = 'observed-only';
@@ -997,7 +1103,7 @@ function normalizePeriod(input, options = {}) {
   reconcileCursorAutoGlobalModels(period, input);
   if (input.sessions && typeof input.sessions === 'object') {
     for (const [key, value] of Object.entries(input.sessions)) {
-      const session = normalizeSession(value, key);
+      const session = normalizeSession(sessionWithActivity(input, key, value), key);
       if (!session) continue;
       if (!projectsEnabled) {
         session.projectId = '';
@@ -1051,15 +1157,20 @@ function normalizeModelThroughput(value, period) {
 }
 
 
-// One tokscale entry's throughput counters. An entry contributes its output to
-// the numerator exactly when it contributes a duration to the denominator, so
-// the two always describe the same entries. Gating rather than scaling by
-// tokscale's `tokenCoverage` keeps both plain counters that merge and delta
-// like every other token field.
-function entryThroughput(row, output) {
+// Exact per-message subtotals are authoritative, including zero. Older binaries
+// lack these fields, so retain their legacy whole-row behavior until upgraded.
+// Coverage measures all token buckets and cannot apportion generated output.
+function entryThroughput(row, output, client) {
   const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
   const timedDurationMs = Math.max(0, Math.round(firstNumber(performance, TIMED_DURATION_KEYS)));
-  return { timedOutputTokens: timedDurationMs > 0 ? output : 0, timedDurationMs };
+  const timedOutput = firstPresent(performance, ['timedOutputTokens', 'timed_output_tokens']);
+  if (timedOutput === undefined) return { timedOutputTokens: timedDurationMs > 0 ? output : 0, timedDurationMs };
+  const reasoning = hasDisjointReasoning(client)
+    ? Math.max(0, Math.round(asNumber(firstPresent(performance, ['timedReasoningTokens', 'timed_reasoning_tokens'])))) : 0;
+  return {
+    timedOutputTokens: normalizeTimedOutputTokens(Math.max(0, Math.round(asNumber(timedOutput))) + reasoning, output, timedDurationMs),
+    timedDurationMs
+  };
 }
 
 function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
@@ -1071,7 +1182,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const output = Math.max(0, Math.round(outputValueForClient(row, client)));
   const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
   const timedTokens = Math.max(0, Math.round(firstNumber(performance, TIMED_TOKEN_KEYS)));
-  const { timedOutputTokens, timedDurationMs } = entryThroughput(row, output);
+  const { timedOutputTokens, timedDurationMs } = entryThroughput(row, output, client);
   const model = detectModel(row, client);
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;
@@ -1878,6 +1989,14 @@ function deltaValue(base, fresh, anchor, key) {
         anchor ? anchor[childKey] : undefined,
         childKey
       );
+    }
+    // A parent ID and its client namespace are one relationship fact. Keep
+    // the base pair intact; the collector's fresh-link gate decides whether
+    // to replace it. Field-wise fallback can invent a cross-provider parent.
+    if (sample.client && sample.sessionId) {
+      delete result.parentSessionId;
+      delete result.parentClient;
+      applyParentLink(result, base?.parentSessionId ? base : fresh || {});
     }
     return result;
   }

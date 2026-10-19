@@ -5,6 +5,10 @@ on:
     branches: ['main']
     paths:
       - 'site/**'
+      # site/scripts/islands.jsx imports this module, so the islands bundle
+      # embeds it. Without this path a change here would deploy nothing and the
+      # live site would keep rolling with the old animation.
+      - 'src/electron/tokenNumberAnimation.js'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 

@@ -42,7 +42,7 @@ test('clientsCsvForSetting uses defaults only for missing settings', () => {
 
 test('default tracked clients include current tokscale-supported tools', () => {
   const clients = DEFAULT_CLIENTS.split(',');
-  for (const client of ['cline', 'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'muse', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth', 'devin', 'fx', 'mcode']) {
+  for (const client of ['goose', 'cline', 'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'muse', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth', 'devin', 'fx', 'mcode']) {
     assert.ok(clients.includes(client), `${client} should be tracked by default`);
   }
 });
@@ -76,7 +76,7 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in q
 test('tracked client defaults and README share one display order', () => {
   const known = KNOWN_CLIENTS.split(',');
   assert.deepEqual(readmeTrackedClientIds(), known);
-  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => !['qodercn', 'gcmp'].includes(client)));
+  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => !['catpaw', 'qodercn', 'gcmp'].includes(client)));
 });
 
 test('documented client CSV follows the canonical catalog order', () => {

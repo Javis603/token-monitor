@@ -136,18 +136,71 @@ test('compact Antigravity windows surface critical weekly quotas per model group
   assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', selected[1], selected), '5-hour');
 });
 
-test('compact Antigravity windows keep 5-hour primary until weekly is critical', () => {
+test('compact Antigravity windows keep 5-hour primary until weekly is critical with multiple groups', () => {
   const aboveCritical = [
     { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 60 },
-    { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 30 }
+    { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 30 },
+    { kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: 80 }
   ];
   const critical = [
     { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 60 },
-    { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 10 }
+    { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 10 },
+    aboveCritical[2]
   ];
 
-  assert.deepEqual(limitProviderCompactWindows('antigravity', aboveCritical), [aboveCritical[0]]);
-  assert.deepEqual(limitProviderCompactWindows('antigravity', critical), [critical[1]]);
+  assert.deepEqual(limitProviderCompactWindows('antigravity', aboveCritical), [aboveCritical[0], aboveCritical[2]]);
+  assert.deepEqual(limitProviderCompactWindows('antigravity', critical), [critical[1], critical[2]]);
+});
+
+test('compact Antigravity single groups retain both periods in session-first order', () => {
+  for (const group of ['Gemini', 'Claude/GPT', 'Future Group']) {
+    for (const remainingPercent of [80, 10, 0, null]) {
+      const weekly = { kind: 'weekly', label: `${group} weekly`, remainingPercent };
+      const session = { kind: 'session', label: `${group} 5-hour`, remainingPercent: 60 };
+      const windows = [weekly, session];
+      const selected = limitProviderCompactWindows({ provider: 'antigravity' }, windows);
+      assert.deepEqual(selected, [session, weekly]);
+      assert.deepEqual(windows, [weekly, session], 'selection does not mutate the provider');
+      for (const [window, period] of [[session, '5-hour'], [weekly, 'Weekly']]) {
+        assert.equal(limitProviderCompactWindowLabel('antigravity', window, selected), `${group} ${period}`);
+        assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', window, selected), '', 'period is already in the main label');
+      }
+    }
+  }
+});
+
+test('compact Antigravity single groups select the tightest duplicate of each period', () => {
+  const windows = [
+    { kind: 'weekly', label: 'Gemini weekly', usedPercent: 20 },
+    { kind: 'session', label: 'Gemini 5-hour', remainingPercent: null },
+    { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 40 },
+    { kind: 'weekly', label: 'Gemini weekly', usedPercent: 90 },
+    { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 40 }
+  ];
+  assert.deepEqual(limitProviderCompactWindows('antigravity', windows), [windows[2], windows[3]]);
+});
+
+test('compact Antigravity single windows keep their group and period without filling a missing lane', () => {
+  for (const [kind, period] of [['session', '5-hour'], ['weekly', 'Weekly']]) {
+    const window = { kind, label: `Gemini ${period}`, usedPercent: 25 };
+    assert.deepEqual(limitProviderCompactWindows('antigravity', [window]), [window]);
+    assert.equal(limitProviderCompactWindowLabel('antigravity', window, [window]), `Gemini ${period}`);
+    assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', window, [window]), '');
+  }
+  assert.deepEqual(limitProviderCompactWindows('antigravity'), []);
+  assert.deepEqual(limitProviderCompactWindows('antigravity', null), null);
+  assert.equal(limitProviderCompactWindowLabel('antigravity', null), '');
+  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', null), '');
+});
+
+test('compact Antigravity retains the two tightest groups when more than two are visible', () => {
+  const windows = [
+    { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 70 },
+    { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 5 },
+    { kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: 20 },
+    { kind: 'session', label: 'Future Group 5-hour', remainingPercent: 10 }
+  ];
+  assert.deepEqual(limitProviderCompactWindows('antigravity', windows), [windows[1], windows[3]]);
 });
 
 test('compact Antigravity windows prefer 5-hour on ties and preserve legacy pools', () => {
@@ -191,17 +244,16 @@ test('compact Codex windows never backfill canonical lanes with additional quota
   );
 });
 
-test('compact Antigravity labels preserve period fallback when groups are not distinct', () => {
-  const differentPeriods = [
-    { kind: 'session', label: 'Gemini 5-hour' },
-    { kind: 'weekly', label: 'Gemini weekly' }
-  ];
+test('compact Antigravity labels preserve legacy and mixed-payload fallbacks', () => {
   const legacy = [
     { kind: 'session', label: 'Gemini Pro' },
     { kind: 'session', label: 'Gemini Flash' }
   ];
 
-  assert.equal(limitProviderCompactWindowLabel('antigravity', differentPeriods[0], differentPeriods), '');
+  const mixed = [{ kind: 'session', label: 'Gemini 5-hour' }, legacy[0]];
+  assert.equal(limitProviderCompactWindows('antigravity', mixed), mixed);
+  assert.equal(limitProviderCompactWindowLabel('antigravity', mixed[0], mixed), '');
+  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', mixed[0], mixed), '');
   assert.equal(limitProviderCompactWindowLabel('antigravity', legacy[0], legacy), '');
 });
 
@@ -450,7 +502,7 @@ test('capability tags explain how each provider is collected in settings', () =>
   assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Auto', 'Web']);
   assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['Auto', 'OAuth/App/CLI']);
   assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Auto', 'API/Web']);
-  assert.deepEqual(limitProviderCapabilityTags('minimax'), ['Token Plan', 'API key']);
+  assert.deepEqual(limitProviderCapabilityTags('minimax'), ['Token Plan', 'Pay-as-you-go', 'API key']);
   assert.deepEqual(limitProviderCapabilityTags('grok'), ['Auto', 'CLI/Web']);
   assert.deepEqual(limitProviderCapabilityTags('copilot'), ['Manual login', 'API']);
   assert.deepEqual(limitProviderCapabilityTags('unknown'), []);
@@ -909,6 +961,7 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.match(renderLimitSessionsIcon, /·/);
   assert.match(maybeUpdateBarsIcon, /TokenMonitorTrayText\.isGeneratedTrayIconMode\(mode\)/);
   assert.match(maybeUpdateBarsIcon, /edgeDockAvailable\(\) && state\.settings\?\.edgeDockEnabled === true\) edgeDockComposer\?\.render\(\)/);
+  assert.match(maybeUpdateBarsIcon, /state\.settings\?\.notchEnabled === true\) notchItemsComposer\?\.render\(\)/);
   assert.match(maybeUpdateBarsIcon, /trayDataUrlForMode\(mode, 44, colors, \{ trayInk: true \}\)/);
   // The tray ink must come from the platform-aware helper, not the app theme:
   // macOS needs the black its template inversion expects, while a dark Windows
@@ -3028,7 +3081,7 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
   assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Auto', 'API key', 'CLI']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ['Manual login', 'Web']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Auto', 'Desktop app']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Auto', 'Desktop app', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'Web']);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'factory', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zai', source: 'api' }), 'API');
@@ -3517,7 +3570,7 @@ test('switching to another edit preserves its form values during a canceled clos
       matchProviderAccount: () => account,
       amountUnits: (subscription) => subscription.amountMinor / 100
     },
-    limitProvidersForSubscriptions: () => [],
+    subscriptionAccountChoices: () => [],
     subscriptionAccountValue: () => 'acct-b',
     renderSubscriptionPickers() {},
     setSubscriptionFormMode: () => {},
@@ -4189,7 +4242,7 @@ test('one account holds one subscription record', () => {
     {
       subscriptionApi,
       accountIdentityApi: require('../../src/electron/renderer/accountIdentity'),
-      limitProvidersForSubscriptions: () => accounts,
+      subscriptionAccountChoices: () => accounts.map((provider) => ({ provider })),
       list: existing,
       target,
       excludeId
@@ -5309,7 +5362,8 @@ test('a stats frame stamped with a newer subscription version is read back, once
   // The stamp is only useful if both stats paths consult it: the stream while it
   // is up, and the widget's own read when it is not.
   assert.match(functionBody(main, 'sendPush', 'statsHistoryRevision'), /maybeAdoptSharedSubscriptionRevision\(/);
-  assert.match(main, /const stats = await \(options\?\.force === true && options\?\.feedback === true \? refreshManualStats\(\) : fetchStats\(options\)\);[\s\S]{0,240}maybeAdoptSharedSubscriptionRevision\(stats\);/);
+  assert.match(main, /const fetched = await \(options\?\.force === true && options\?\.feedback === true \? refreshManualStats\(\) : fetchStats\(options\)\);/);
+  assert.match(main, /const stats = latestStats \|\| current;[\s\S]{0,300}maybeAdoptSharedSubscriptionRevision\(stats\);/);
   // And there is no periodic subscription read left behind it. One existed while
   // the stamp did not; keeping it would spend a request every five minutes per
   // device to be told what every frame already says.

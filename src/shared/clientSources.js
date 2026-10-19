@@ -9,6 +9,7 @@ const { tokscaleConfigDir, tokscaleHomeDir } = require('./tokscaleConfig');
 const { claudeSessionRoots } = require('./providers/claude/paths');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
+const { catpawDataSources, nativeWindowsFolders } = require('./providers/catpaw/paths');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
 const { MCODE_SOURCE_CHECK_ID, mcodeSessionDirs } = require('./providers/mcode/paths');
 const {
@@ -55,6 +56,42 @@ function nonBlankEnvPath(name, fallback, env = process.env) {
 function absoluteEnvPath(name, fallback, env = process.env) {
   const value = env[name];
   return typeof value === 'string' && path.isAbsolute(value) ? value : fallback;
+}
+
+function gooseSessionFiles({ homeDir, platform, env, windowsFolders }) {
+  const root = env.GOOSE_PATH_ROOT;
+  // Rust Windows Path::is_absolute requires a prefix as well as a root;
+  // Node also accepts root-relative paths such as \\goose, which Goose ignores.
+  const absoluteRoot = typeof root === 'string' && path.isAbsolute(root)
+    && (process.platform !== 'win32' || path.win32.parse(root).root.length > 1);
+  if (absoluteRoot) return [path.join(root, 'data', 'sessions', 'sessions.db')];
+
+  const home = tokscaleHomeDir({ env, platform, homeDir });
+  const files = [];
+  if (platform === 'win32') {
+    const configuredRoaming = typeof env.APPDATA === 'string' && env.APPDATA.length > 0;
+    if (configuredRoaming) {
+      files.push(path.resolve(env.APPDATA, 'Block', 'goose', 'data', 'sessions', 'sessions.db'));
+    } else {
+      const native = windowsFolders || nativeWindowsFolders();
+      const profile = native.profile || homeDir;
+      const roaming = native.roaming || path.join(profile, 'AppData', 'Roaming');
+      const desktopHome = typeof env.HOME === 'string' && env.HOME.length > 0 ? env.HOME : profile;
+      files.push(
+        path.resolve(roaming, 'Block', 'goose', 'data', 'sessions', 'sessions.db'),
+        path.resolve(desktopHome, 'AppData', 'Roaming', 'Block', 'goose', 'data', 'sessions', 'sessions.db')
+      );
+    }
+  }
+  // Keep every default candidate eligible for watching, so DB creation in an
+  // existing watched parent is discovered. A valid override stays exclusive.
+  files.push(
+    path.resolve(xdgDataHome(home, env), 'goose', 'sessions', 'sessions.db'),
+    path.join(home, 'Library', 'Application Support', 'goose', 'sessions', 'sessions.db'),
+    path.join(home, 'Library', 'Application Support', 'Block', 'goose', 'sessions', 'sessions.db'),
+    path.join(home, '.local', 'share', 'Block', 'goose', 'sessions', 'sessions.db')
+  );
+  return [...new Set(files)];
 }
 
 function cherryStudioTranscriptRoots({ homeDir, platform = process.platform, env = process.env } = {}) {
@@ -167,7 +204,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
     }
   };
   const claudeRoots = claudeSessionRoots({ homeDir: home });
-  add('claude', ['claude-projects', claudeRoots.projects], ['claude-transcripts', claudeRoots.transcripts]);
+  add('claude', ['claude-projects', claudeRoots.projects], ['claude-transcripts', claudeRoots.transcripts],
+    ...simpleHostSourceRoots('claude', tokscaleHomeDir({ env, platform, homeDir: home }))
+      .map(([id, dir]) => [id, dir, null, true]));
   const codexHome = nonBlankEnvPath('CODEX_HOME', path.join(home, '.codex'));
   add(
     'codex',
@@ -197,15 +236,17 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // `detected` next to usage collected from another directory.
   const tokscaleHome = tokscaleHomeDir({ env, platform, homeDir: home });
   const xdgHome = xdgDataHome(tokscaleHome, env);
+  const gooseFiles = enabled.has('goose')
+    ? gooseSessionFiles({ homeDir: home, platform, env, windowsFolders: options.windowsFolders }) : [];
+  add('goose', ...gooseFiles.map((file) => ['goose-db', path.dirname(file), file]));
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
-  // Amp (Sourcegraph / AmpCode): tokscale reads the XDG-data root on every
-  // platform — clients.rs declares PathRoot::XdgData + relative "amp/threads",
-  // pattern T-*.json (the thread JSON holds a usageLedger and per-assistant-
-  // message usage). So this follows XDG_DATA_HOME like opencode/zed/kilo rather
-  // than a home-relative literal; a Windows or macOS install keeps the XDG
-  // convention instead of an Application Support tree.
-  add('amp', ['amp-threads', path.join(xdgHome, 'amp', 'threads')]);
+  // The sync cache is config-derived; legacy local threads stay XDG-data
+  // derived. Token Monitor reads both and watches external `tokscale amp sync`
+  // writes; it does not create this cache during collection.
+  add('amp',
+    ['amp-threads', path.join(xdgHome, 'amp', 'threads')],
+    ['amp-threads', path.join(tokscaleConfigDir({ env, platform, homeDir: home }), 'amp-cache', 'threads'), null, true]);
   // Droid (Factory): tokscale reads the home-relative ~/.factory/sessions tree on
   // every platform (clients.rs PathRoot::Home). The Factory desktop app is an
   // Electron shell over the same bundled droid kernel and keeps no session data
@@ -286,16 +327,19 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['zed-threads', path.join(home, 'Library', 'Application Support', 'Zed', 'threads')],
     ['zed-threads', path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Zed', 'threads')]
   );
-  // Kilo is one Token Monitor client backed by two Tokscale sources. `kilo`
-  // reads the CLI's XDG-data SQLite database, while `kilocode` reads the VS Code
-  // extension's Linux/local and remote task roots. Keep the native macOS and
-  // Windows VS Code roots out until Tokscale scans them; otherwise they would be
-  // dead watches and false presence signals.
+  // Kilo joins the CLI's XDG database with every extension task root the
+  // scanner reads. Native macOS/Windows roots are home-relative on all hosts;
+  // only Windows additionally follows an APPDATA override.
+  const kiloTaskSuffix = path.join('Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks');
   add(
     'kilo',
     ['kilo-db', path.join(xdgHome, 'kilo'), path.join(xdgHome, 'kilo', 'kilo.db')],
-    ['kilocode-tasks', path.join(home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')],
-    ['kilocode-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')]
+    ['kilocode-tasks', path.join(tokscaleHome, '.config', kiloTaskSuffix)],
+    ['kilocode-tasks', path.join(tokscaleHome, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')],
+    ['kilocode-tasks', path.join(tokscaleHome, 'Library', 'Application Support', kiloTaskSuffix)],
+    ['kilocode-tasks', path.join(tokscaleHome, 'AppData', 'Roaming', kiloTaskSuffix)],
+    ...(platform === 'win32' && env.APPDATA
+      ? [['kilocode-tasks', path.join(env.APPDATA, kiloTaskSuffix)]] : [])
   );
   add('commandcode', ...simpleHostSourceRoots('commandcode', home));
   // MiMo: tokscale 4.8.0 unions the XDG data dir with orca's hook-sandbox
@@ -368,6 +412,13 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // per-hour tree is what a tick actually reads.
   add('gcmp', ...gcmpUsagesRoots({ homeDir: home, platform, env })
     .map((dir) => [GCMP_SOURCE_CHECK_ID, dir]));
+  if (enabled.has('catpaw')) {
+    const catpaw = catpawDataSources({ ...options, platform, env });
+    add('catpaw',
+      ...catpaw.roots.map((dir) => ['catpaw-data', dir]),
+      ...catpaw.dbPaths.map((file) => ['catpaw-db', path.dirname(file), file])
+    );
+  }
   // Qoder CN — legacy SQLite DB under the platform Application Support dir,
   // or the JSONL transcript tree used by current builds.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform, env });
@@ -501,14 +552,15 @@ function clientSourceRoots(clientsCsv, options = {}) {
 
 // The Antigravity CLI's parse-local directory is watched and checked as a
 // source; unlike the IDE cache, it is written by agy rather than our self-sync.
-function antigravityCliDataDir() {
-  const geminiHome = process.env.GEMINI_CLI_HOME || path.join(os.homedir(), '.gemini');
+function antigravityCliDataDir({ homeDir = os.homedir(), env = process.env } = {}) {
+  const geminiHome = env.GEMINI_CLI_HOME || path.join(homeDir, '.gemini');
   return path.join(geminiHome, 'antigravity-cli', 'conversations');
 }
 
 module.exports = {
   antigravityCliDataDir,
   canonicalWatchPath,
+  canonicalWatchFilePath,
   cherryStudioTranscriptRoots,
   clientSourceRoots,
   copilotExporterWatch

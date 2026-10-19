@@ -7,10 +7,10 @@ const test = require('node:test');
 const presentation = require('../../src/electron/renderer/edgeDock/presentation');
 const sessionLive = require('../../src/shared/sessionLive');
 
-test('Home sessions repaint at successive running expiries without a stats push', () => {
+for (const focus of ['module', 'heading']) test(`Home sessions repaint once at successive expiries and retain ${focus} focus`, () => {
   const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-  const source = app.slice(app.indexOf('function stopHomeSessionRepaint()'), app.indexOf('function renderHomeSessionModule()'));
-  assert.match(app, /if \(moduleIds\.includes\('session'\)\) scheduleHomeSessionRepaint\(\);/);
+  const source = app.slice(app.indexOf('function stopHomeSessionRepaint()'), app.indexOf('function renderHomeSessionModule('));
+  assert.match(app, /if \(moduleIds\.includes\('session'\)\) scheduleHomeSessionRepaint\(sessionRows\);/);
   assert.match(app, /allTimeSessions\.ensure\(\);\s*stopHomeSessionRepaint\(\);/);
 
   let now = 1_000_000;
@@ -22,25 +22,29 @@ test('Home sessions repaint at successive running expiries without a stats push'
   ];
   const counts = [2];
   const document = { activeElement: null };
+  let projections = 0;
   let current;
   function node(runningCount) {
+    const head = { focus() { document.activeElement = this; } };
     return {
+      querySelector: () => head,
       runningCount,
       replaceWith(next) { current = next; counts.push(next.runningCount); },
       focus() { document.activeElement = this; }
     };
   }
   current = node(2);
-  current.focus();
+  (focus === 'module' ? current : current.querySelector()).focus();
   const state = { stats: {}, breakdown: 'home', homeSessionRepaintTimer: null };
   const { scheduleHomeSessionRepaint, stopHomeSessionRepaint } = Function(
-    'state', 'window', 'Date', 'setTimeout', 'clearTimeout', 'visibleStatsSurface', 'els', 'document', 'renderHomeSessionModule',
+    'state', 'window', 'Date', 'setTimeout', 'clearTimeout', 'visibleStatsSurface', 'els', 'document', 'renderHomeSessionModule', 'sessionPresentationOptions',
     `${source}\nreturn { scheduleHomeSessionRepaint, stopHomeSessionRepaint };`
   )(
     state,
     { TokenMonitorEdgeDockPresentation: {
-      recentSessionRows: () => rows,
-      nextRunningExpiryAt: presentation.nextRunningExpiryAt
+      recentSessionRows: () => { projections += 1; return rows; },
+      nextRunningExpiryAt: presentation.nextRunningExpiryAt,
+      sessionMembers: presentation.sessionMembers
     }, TokenMonitorSessionLive: sessionLive },
     { now: () => now },
     (callback, delay) => { const id = ++nextTimerId; timers.set(id, { callback, at: now + delay }); return id; },
@@ -48,7 +52,8 @@ test('Home sessions repaint at successive running expiries without a stats push'
     () => 'main',
     { homePanel: { querySelector: () => current } },
     document,
-    () => node(rows.filter((row) => sessionLive.sessionActivityState(row, now) === 'running').length)
+    () => node(rows.filter((row) => sessionLive.sessionActivityState(row, now) === 'running').length),
+    () => ({})
   );
 
   function fireNext() {
@@ -63,10 +68,12 @@ test('Home sessions repaint at successive running expiries without a stats push'
   assert.ok([...timers.values()][0].at < now + 3_000);
   fireNext();
   assert.deepEqual(counts, [2, 1]);
-  assert.equal(document.activeElement, current);
+  assert.equal(document.activeElement, focus === 'module' ? current : current.querySelector());
+  assert.equal(projections, 2, 'one selection per render, reused for timer scheduling');
   assert.ok([...timers.values()][0].at < now + 5_000);
   fireNext();
   assert.deepEqual(counts, [2, 1, 0]);
+  assert.equal(projections, 3);
   assert.equal(timers.size, 1, 'relative ages keep updating after running has stopped');
   stopHomeSessionRepaint();
   assert.equal(timers.size, 0);

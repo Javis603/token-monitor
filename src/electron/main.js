@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, screen, session, shell, systemPreferences } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, screen, session, shell, systemPreferences } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
 const {
@@ -23,12 +23,15 @@ const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
+const tokenNumberAnimationApi = require('./tokenNumberAnimation');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
 const { createMimoExchangeFetch } = require('./providers/mimo/exchangeFetch');
 const { runAntigravityOAuthLogin } = require('./providers/antigravity/oauthLogin');
 const antigravityOAuth = require('../shared/providers/antigravity/oauth');
+const workbuddyOAuth = require('../shared/providers/workbuddy/oauth');
+const { createWorkbuddyManagedAccounts } = require('./providers/workbuddy/managedAccounts');
 const {
   createWorkbuddyLocalAuth,
   isSupportedWorkbuddyLocalAppPlatform
@@ -105,6 +108,7 @@ const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { actionWindowForEvent, activateWindowAction, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
 const { applyCodexAdditionalLimitsMigration } = require('./codexAdditionalLimitsMigration');
+const { applyActivityPatch, materializeActivity } = require('../shared/sessionActivityProjection');
 const { createDeviceRuntime } = require('../shared/usage/deviceRuntime');
 const { externalAgentActive } = require('../shared/usage/agentPid');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
@@ -185,15 +189,18 @@ const {
   normalizeHomeModuleOrder
 } = require('./renderer/homeModulePreferences');
 const {
+  APP_UPDATE_STARTUP_DELAY_MS,
   appUpdateInstallSupport,
   classifyAppUpdateError,
   checkLatestRelease,
   deriveAppUpdateAvailability,
   downloadedAppUpdateMatchesLatest,
   installFailureErrorKind,
+  latestForCurrentVersion,
   latestFromUpdaterInfo,
   mergeLatestReleaseMetadata,
   providerUpdateCheckAvailability,
+  RELEASES_URL,
   resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
   shouldSkipAppUpdateCheck,
@@ -201,6 +208,7 @@ const {
 } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/providers/cursor/auth');
 const cursorProbe = require('../shared/providers/cursor/probe');
+const { stepfunToken } = require('../shared/providers/stepfun/limits');
 const opencodeWeb = require('../shared/providers/opencode/web');
 const opencodeGoApi = require('../shared/providers/opencode/goApi');
 const opencodeProfiles = require('../shared/providers/opencode/profiles');
@@ -323,6 +331,8 @@ const {
   macActivationPolicyMode,
   mainWindowCloseAction,
   normalizeTrayModeSettings,
+  popoverBlurMatchesPress,
+  popoverToggleAction,
   shouldCreateTray,
   skipTaskbarForSettings,
   trayToggleAction
@@ -336,7 +346,9 @@ const {
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
   composeLocalOnlySummary,
-  composeLocalSyncSummary
+  composeLocalSyncSummary,
+  projectLocalActivity,
+  localActivityPatch
 } = require('./syncDisplayStats');
 const {
   createRendererSnapshots,
@@ -405,7 +417,11 @@ const {
   restoreFloatingBubbleWindow
 } = require('./floatingBubble');
 const { applyWindowsChrome } = require('./windowsChrome');
+const { installWindowsNonActivatingInput } = require('./windowsNonActivatingInput');
 const { canUseEdgeDock, createEdgeDockController, edgeDockSupported } = require('./edgeDock/controller');
+const { createNotchController, normalizeNotchStyle, normalizeNotchShape, normalizeNotchDetailSide, normalizeNotchHoverAction, normalizeNotchHoverDelay } = require('./notch/controller');
+const { buildNotchData, summaryLayout: notchSummaryLayout } = require('./notch/data');
+const trayLayoutApi = require('../shared/trayLayout');
 const { createFullScreenProbe } = require('./edgeDock/fullScreenProbe');
 const {
   normalizeEdgeDockCustomScale,
@@ -422,17 +438,23 @@ const { normalizeBackgroundImageOpacity } = require('./renderer/glassRendering')
 const tokenRateApi = require('./renderer/tokenRatePresentation');
 const { toPolygons } = require('./renderer/edgeDock/shapes');
 const { rasterizeMask } = require('./edgeDock/mask');
+const { NOTCH_BLUR_ALPHA, NOTCH_BLUR_RADIUS, NOTCH_BLUR_STRENGTH, notchBlurMask } = require('./notch/blur');
+const { applyProgressiveBlur } = require('./notch/macProgressiveBlur');
+const { monitorMacPrimaryPress } = require('./notch/macPrimaryPress');
 const { applyVibrancyMask } = require('./edgeDock/macVibrancyMask');
 const { performMacHaptic } = require('./edgeDock/macHaptics');
 const { primaryButtonDown } = require('./edgeDock/pointerButtons');
-const { setMoveToActiveSpace } = require('./macosSpaceBehavior');
+const { preventAppActivation, setMoveToActiveSpace } = require('./macosSpaceBehavior');
 const {
   WINDOWS_BACKDROP_ACCENT,
   normalizeWindowsBackdropMode
 } = require('./windowsBackdropMode');
 const { applyWindowsAccentBlur } = require('./windowsBackdrop');
 const {
-  MAC_BACKDROP_LIQUID_GLASS,
+  isLiquidGlassBackdrop,
+  liquidGlassStyle,
+  liquidGlassTint,
+  normalizeLiquidGlassTint,
   normalizeMacBackdropMode,
   normalizeEdgeDockBackdropMode,
   edgeDockBackdropMode
@@ -537,6 +559,10 @@ function normalizePeriodMonthMode(value) {
   return PERIOD_MONTH_MODES.has(value) ? value : 'month';
 }
 
+function normalizeProjectBreakdownMode(value) {
+  return value === 'model' ? 'model' : 'tool';
+}
+
 function normalizeHomeLimitAccountCount(value) {
   const count = Math.trunc(Number(value));
   if (!Number.isFinite(count)) return HOME_LIMIT_ACCOUNT_COUNT_DEFAULT;
@@ -564,11 +590,14 @@ function defaultSettings() {
     refreshMs: Number(process.env.TOKEN_MONITOR_WIDGET_REFRESH_MS || 15000),
     glassOpacity: 68,
     glassBlur: 32,
+    macGlassTint: 0,
+    macClearGlassTint: 35,
     backgroundImageOpacity: 28,
     systemGlass: true,
     windowsBackdrop: 'acrylic',
     macBackdrop: 'vibrancy',
     reduceMotion: 'system',
+    tokenNumberAnimation: 'roll',
     showLiveDot: true,
     showToolIcons: true,
     titleIconOnly: true,
@@ -597,6 +626,25 @@ function defaultSettings() {
     floatingBubbleContent: 'icon',
     floatingBubbleCustomLayout: createDefaultTrayLayout(),
     floatingBubbleBounds: null,
+    notchEnabled: false,
+    notchStyle: 'inherit',
+    notchShape: 'auto',
+    notchFollowTray: true,
+    notchSummaryEnabled: true,
+    notchCustomLayout: createDefaultTrayLayout(),
+    notchDisplayId: null,
+    notchItems: null,
+    notchDetailSide: 'right',
+    notchRunningIndicatorEnabled: false,
+    notchHoverAction: 'peek',
+    notchHoverDelay: 0,
+    notchAvoidMenuBar: true,
+    notchHaptic: true,
+    notchProgressiveBlur: true,
+    notchHideSummaryInFullScreen: true,
+    notchRefreshEnabled: false,
+    notchSize: 'medium',
+    notchCustomScale: 1,
     edgeDockEnabled: false,
     edgeDockRefreshEnabled: false,
     edgeDockRunningIndicatorEnabled: true,
@@ -630,6 +678,7 @@ function defaultSettings() {
     homeLimitDisplayMode: 'text',
     showHomeLimitProviderNames: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
+    projectBreakdownMode: 'tool',
     historyEnabled: true,
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
     sessionUsageArchiveEnabled: parseBoolean(process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true),
@@ -672,6 +721,7 @@ function defaultSettings() {
     // Third-party global reset predictions are opt-in and remain separate from
     // the account-specific limits wire shape.
     codexResetForecastEnabled: false,
+    workbuddyQuotaTotalEnabled: false,
     showCodexAdditionalLimits: true,
     showLimitUsed: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_USED, false),
     // Manual subscription metadata. Plain preferences, not credentials, so they
@@ -818,6 +868,8 @@ function electronLimitsConfig() {
     workbuddyDesktopSessionSupported,
     workbuddyDesktopSessionEnabled,
     workbuddyLocalSession: workbuddyDesktopSessionEnabled ? electronWorkbuddyLocalAuth.getSessionInfo() : {},
+    workbuddyLocalSessions: workbuddyDesktopSessionEnabled ? electronWorkbuddyLocalAuth.getSessionInfos() : [],
+    workbuddyManagedAccounts: workbuddyAccountsForRenderer(),
     defaultLimitProviders: defaultLimitProviders(),
     codexManagedAccounts: codexManagedAccountsForCollector(),
     antigravityManagedAccounts: antigravityManagedAccountsForCollector(),
@@ -858,6 +910,25 @@ function persistClaudeWebCookieRenewal({ previousCookie, cookie } = {}) {
   return true;
 }
 
+// The StepFun Oasis token's access half expires every 30 minutes; the limits
+// fetcher rotates it through the platform's own RefreshToken endpoint. The
+// rotated pair lands here and is stored only while the setting still holds the
+// token that was refreshed, so a fresh paste landing mid-flight always wins.
+// Values are compared in the fetcher's normalized form (a pasted raw cookie
+// header and its bare token compare equal), and the stored value is normalized
+// on the way in.
+function persistStepfunTokenRenewal({ previousToken, token } = {}) {
+  if (!settings?.stepfunToken) return false;
+  const expected = stepfunToken({}, { stepfunToken: previousToken });
+  const renewed = stepfunToken({}, { stepfunToken: token });
+  if (!expected || !renewed) return false;
+  if (stepfunToken({}, { stepfunToken: settings.stepfunToken }) !== expected) return false;
+  if (settings.stepfunToken === renewed) return true;
+  settings.stepfunToken = renewed;
+  saveSettings({ throwOnError: true });
+  return true;
+}
+
 // A save-time probe gets the collector's transports but none of its write-backs:
 // a credential that has not been saved yet must not renew itself into
 // settings, so a rotation is reported into `renewed` and stored with the rest
@@ -870,6 +941,10 @@ function credentialProbeDeps(renewed = {}) {
     claudeWebFetch: electronClaudeWebFetch,
     onClaudeWebCookieRenewed: ({ cookie }) => {
       renewed.claudeWebCookie = cookie;
+      return true;
+    },
+    onStepfunTokenRenewed: ({ token }) => {
+      renewed.stepfunToken = token;
       return true;
     },
     providerRuntimeState: new Map(),
@@ -893,7 +968,9 @@ function electronLimitsDeps() {
     },
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
+    onStepfunTokenRenewed: persistStepfunTokenRenewal,
     onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
+    resolveWorkbuddyManagedCredential: (account, options) => workbuddyAccountService().resolveCredential(account, options),
     onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
     onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey
   };
@@ -1089,6 +1166,50 @@ function codexManagedAccountsForCollector() {
 
 function normalizeAntigravityManagedAccounts(value) {
   return antigravityOAuth.normalizeManagedAccounts(value);
+}
+
+let workbuddyManagedAccountService = null;
+
+function workbuddyAccountsForRenderer() {
+  return workbuddyOAuth.normalizeManagedAccounts(settings?.workbuddyManagedAccounts);
+}
+
+function workbuddyAccountService() {
+  if (!workbuddyManagedAccountService) {
+    workbuddyManagedAccountService = createWorkbuddyManagedAccounts({
+      getAccounts: () => settings?.workbuddyManagedAccounts,
+      setAccounts: (accounts) => { settings.workbuddyManagedAccounts = accounts; },
+      saveSettings: () => saveSettings({ throwOnError: true }),
+      credentialStore: ensureCredentialStore(),
+      fetch: electronLimitsFetch(),
+      openExternal: (url) => shell.openExternal(url),
+      onChanged: (account, reason, options = {}) => {
+        pushSettingsToRenderer();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          try { mainWindow.webContents.send('workbuddy:accounts', workbuddyAccountsForRenderer()); } catch (_) {}
+        }
+        const scope = { provider: 'workbuddy', accountId: account.id, accountKey: account.accountKey };
+        // Removal can uncover an independent app-owned session for this identity.
+        // Clear only the removed row, then rebuild the complete discovery union.
+        void queueLimitInvalidation(scope, reason === 'account-enabled' ? 'account-state' : reason, options)
+          .then(() => reason === 'account-removed'
+            ? queueLimitInvalidation({ provider: 'workbuddy' }, 'account-state', { refresh: true })
+            : undefined)
+          .catch(() => {});
+      }
+    });
+  }
+  return workbuddyManagedAccountService;
+}
+
+async function workbuddyAccountOperation(operation) {
+  try {
+    return await operation(workbuddyAccountService());
+  } catch (_) {
+    // Storage/transport errors may contain paths or credential material. IPC
+    // returns the bounded setup error and never forwards their raw message.
+    return { ok: false, errorCode: 'credentialStorageUnavailable' };
+  }
 }
 
 function antigravityAccountsForRenderer() {
@@ -2347,6 +2468,7 @@ function setZoomFactor(value) {
   settings.zoomFactor = next;
   saveSettings();
   applyZoomFactor();
+  if (notchController?.isRunning()) syncNotch(settingsForRenderer());
 }
 
 function adjustZoom(delta) {
@@ -2524,6 +2646,7 @@ function readSettings() {
     merged.homeLimitDisplayMode = normalizeHomeLimitDisplayMode(merged.homeLimitDisplayMode);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
     merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
+    merged.workbuddyQuotaTotalEnabled = parseBoolean(merged.workbuddyQuotaTotalEnabled, false);
     merged.showCodexAdditionalLimits = parseBoolean(merged.showCodexAdditionalLimits, true);
     merged.opencodeLocalLimitsEnabled = parseBoolean(merged.opencodeLocalLimitsEnabled, false);
     delete merged.workbuddyLocalAppEnabled;
@@ -2544,6 +2667,7 @@ function readSettings() {
     if (saved.projectsEnabled !== undefined) {
       merged.projectsEnabled = parseBoolean(saved.projectsEnabled, true);
     }
+    merged.projectBreakdownMode = normalizeProjectBreakdownMode(merged.projectBreakdownMode);
     if (saved.sessionUsageArchiveEnabled !== undefined) {
       merged.sessionUsageArchiveEnabled = parseBoolean(saved.sessionUsageArchiveEnabled, true);
     }
@@ -2561,6 +2685,9 @@ function readSettings() {
     merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
     merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
+    merged.macGlassTint = normalizeLiquidGlassTint(merged.macGlassTint, 'liquid-glass');
+    merged.macClearGlassTint = normalizeLiquidGlassTint(merged.macClearGlassTint, 'liquid-glass-clear');
+    merged.tokenNumberAnimation = tokenNumberAnimationApi.normalize(merged.tokenNumberAnimation);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
@@ -2583,6 +2710,7 @@ function readSettings() {
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
     merged.antigravityManagedAccounts = normalizeAntigravityManagedAccounts(merged.antigravityManagedAccounts);
+    merged.workbuddyManagedAccounts = workbuddyOAuth.normalizeManagedAccounts(merged.workbuddyManagedAccounts);
     merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
     if (saved.keepAboveTaskbar !== undefined) {
       merged.keepAboveTaskbar = parseBoolean(saved.keepAboveTaskbar, false);
@@ -2609,6 +2737,25 @@ function readSettings() {
     merged.floatingBubbleTrigger = merged.floatingBubbleTrigger === 'hover' ? 'hover' : 'click';
     merged.floatingBubbleContent = normalizeTrayContent(merged.floatingBubbleContent, 'icon');
     merged.floatingBubbleCustomLayout = normalizeTrayLayout(merged.floatingBubbleCustomLayout);
+    merged.notchEnabled = parseBoolean(merged.notchEnabled, false);
+    merged.notchStyle = normalizeNotchStyle(merged.notchStyle);
+    merged.notchShape = normalizeNotchShape(merged.notchShape);
+    merged.notchSize = normalizeEdgeDockSize(merged.notchSize);
+    merged.notchCustomScale = normalizeEdgeDockCustomScale(merged.notchCustomScale);
+    merged.notchItems = normalizeEdgeDockItems(merged.notchItems);
+    merged.notchDetailSide = normalizeNotchDetailSide(merged.notchDetailSide);
+    merged.notchRunningIndicatorEnabled = parseBoolean(merged.notchRunningIndicatorEnabled, false);
+    merged.notchHoverAction = normalizeNotchHoverAction(merged.notchHoverAction);
+    merged.notchHoverDelay = normalizeNotchHoverDelay(merged.notchHoverDelay);
+    merged.notchAvoidMenuBar = parseBoolean(merged.notchAvoidMenuBar, true);
+    merged.notchHaptic = parseBoolean(merged.notchHaptic, true);
+    merged.notchProgressiveBlur = parseBoolean(merged.notchProgressiveBlur, true);
+    merged.notchHideSummaryInFullScreen = parseBoolean(merged.notchHideSummaryInFullScreen, true);
+    merged.notchRefreshEnabled = parseBoolean(merged.notchRefreshEnabled, false);
+    merged.notchFollowTray = parseBoolean(merged.notchFollowTray, true);
+    merged.notchSummaryEnabled = parseBoolean(merged.notchSummaryEnabled, true);
+    merged.notchCustomLayout = normalizeTrayLayout(merged.notchCustomLayout);
+    merged.notchDisplayId = normalizeEdgeDockDisplayId(merged.notchDisplayId);
     merged.edgeDockEnabled = parseBoolean(merged.edgeDockEnabled, false);
     merged.edgeDockRefreshEnabled = parseBoolean(merged.edgeDockRefreshEnabled, false);
     merged.edgeDockRunningIndicatorEnabled = parseBoolean(merged.edgeDockRunningIndicatorEnabled, true);
@@ -2761,7 +2908,22 @@ const usageTransform = createUsageTransform({
 // in-process collector and `usageTransform` above runs on this thread.
 let latestUsageHost = null;
 function createElectronUsageRuntime(options) {
-  latestUsageHost = createUsageHost(options, {
+  // A transformed delivery confirms the worker has taken over projection.
+  // The cold anchor's main-thread archive is then redundant. In-process
+  // deliveries have no such marker and keep/reload their own archive instead.
+  const releaseOnWorkerDelivery = (callback) => (summary, reason, meta) => {
+    if (meta?.transformed === true) {
+      try { usageTransform.release(); } catch (error) {
+        console.log(`[session-archive] release failed: ${error.message}`);
+      }
+    }
+    return callback?.(summary, reason, meta);
+  };
+  latestUsageHost = createUsageHost({
+    ...options,
+    onUpdate: releaseOnWorkerDelivery(options.onUpdate),
+    ...(options.onPreview ? { onPreview: releaseOnWorkerDelivery(options.onPreview) } : {})
+  }, {
     agentPidPath: AGENT_PID_PATH,
     transformSettings: usageTransformSettings(settings)
   });
@@ -2882,7 +3044,9 @@ function nativeBlurEnabled(source = settings) {
 function nativeMaterialOptions(source = settings, dashboard = false) {
   return {
     enabled: nativeBlurEnabled(source),
-    liquidGlass: normalizeMacBackdropMode(source.macBackdrop) === MAC_BACKDROP_LIQUID_GLASS,
+    liquidGlass: isLiquidGlassBackdrop(source.macBackdrop),
+    style: liquidGlassStyle(source.macBackdrop),
+    tintOpacity: liquidGlassTint(source),
     opaque: dashboard && source.dashboardFlat === true,
     reducedTransparency: nativeTheme.prefersReducedTransparency === true,
     highContrast: nativeTheme.shouldUseHighContrastColors === true,
@@ -2940,6 +3104,7 @@ let latestHubStatsIdentity = null;
 let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
+let statsPushSource = null;
 let statsPushRevision = 0;
 let macWidgetSnapshotController = null;
 let macWidgetDemand = null;
@@ -2996,7 +3161,7 @@ function rendererAllTimeSessions(stats) {
     const complete = completeLocalSyncStats(stats);
     const hubSnapshot = snapshotLocalDevices.get(stats);
     const sessions = hubSnapshot
-      ? mergedLocalAllTimeSessions(complete.periods, hubSnapshot.localDevice)
+      ? mergedLocalAllTimeSessions(complete.periods, materializeActivity(hubSnapshot.localDevice))
       : complete.periods?.allTime?.sessions || {};
     return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, aliases, { grouping });
   });
@@ -3014,6 +3179,7 @@ function exportIntervalMs() {
   return Number.isFinite(v) && v >= 1000 ? v : DEFAULT_EXPORT_INTERVAL_MS;
 }
 let suppressNextBlurHide = false;
+let recentPopoverBlur = null;
 const providerTrayIcons = {};
 let registeredWindowToggleShortcut = '';
 let windowToggleShortcutRegistered = false;
@@ -4296,6 +4462,7 @@ async function startIcloudCollector() {
       transformUsage: usageTransform.transform,
       usageOptions,
       sink,
+      onSessionActivity: publishLocalSessionActivity,
       onDiagnosticEvent: recordDiagnosticEvent,
       onError: (error, reason) => console.log(`[icloud-collector] ${reason}: ${error.message}`)
     }, {
@@ -4377,6 +4544,7 @@ function startSyncCollector() {
     transformUsage: usageTransform.transform,
     usageOptions,
     sink,
+    onSessionActivity: publishLocalSessionActivity,
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
   }, {
@@ -4434,6 +4602,7 @@ function startHostCollector() {
     transformUsage: usageTransform.transform,
     usageOptions,
     sink,
+    onSessionActivity: publishLocalSessionActivity,
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
   }, {
@@ -4491,6 +4660,8 @@ function injectLocalDeviceStatus(stats) {
       if (lastCollectedDevice.clientHealth) device.clientHealth = lastCollectedDevice.clientHealth;
       if (lastCollectedDevice.wslStatus) device.wslStatus = lastCollectedDevice.wslStatus;
     }
+    const activity = localActivityPatch(lastCollectedDevice);
+    if (activity) stats = projectLocalActivity(stats, activity);
   }
   if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
   return stats;
@@ -4719,6 +4890,33 @@ function scheduleMacWidgetSnapshot(stats, producerOwner) {
   return ensureMacWidgetSnapshotController()?.enqueue({ stats, producerOwner }) || false;
 }
 
+function publishLocalSessionActivity(patch) {
+  if (!lastCollectedDevice || !ownsUsageRuntime()) return;
+  const previousDevice = lastCollectedDevice;
+  lastCollectedDevice = projectLocalActivity(lastCollectedDevice, patch);
+  if (localDevice) localDevice = localDevice === previousDevice ? lastCollectedDevice : applyActivityPatch(localDevice, patch);
+  if (!latestStats) return;
+  const previous = latestStats;
+  latestStats = projectLocalActivity(previous, patch);
+  const localSnapshot = snapshotLocalDevices.get(previous);
+  if (localSnapshot) snapshotLocalDevices.set(latestStats, {
+    ...localSnapshot, localDevice: applyActivityPatch(localSnapshot.localDevice, patch)
+  });
+  if (localStats === previous) localStats = latestStats;
+  const snapshot = rendererSnapshots.updateActivity(previous, latestStats);
+  edgeDockManualStats = null;
+  // Only activity metadata crosses IPC. Accounting freshness, sync uploads,
+  // exports, History and rate samples remain on the usage publication lane.
+  const displayPatch = localActivityPatch(latestStats);
+  const visiblePatch = settings.sessionTitlesEnabled === false
+    ? { ...displayPatch, nativeSessions: Object.fromEntries(Object.entries(displayPatch.nativeSessions)
+        .map(([name, sessions]) => [name, withoutSessionTitles(sessions)])) }
+    : displayPatch;
+  presentationCache.updateActivity(previous, latestStats, (stats) => applyActivityPatch(stats, visiblePatch));
+  updateEdgeDockCells(electronPresentationStats(latestStats));
+  sendPush({ event: 'session-activity', data: { patch: visiblePatch, snapshot } });
+}
+
 // Two options, both for the cold-start seed and neither for live stats.
 // `skipExport` keeps a republished snapshot from spending the auto-export
 // interval that this run's first real scan needs. `deferToRenderer` waits for
@@ -4730,11 +4928,14 @@ function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   let rendererPayload = payload;
   if (payload?.data?.stats) {
-    injectLocalDeviceStatus(payload.data.stats);
+    payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
     // Client local batches overlay usage on the cached Hub snapshot; they do
     // not supersede an in-flight read of fresh remote stats.
-    if (!(settings?.hubMode === 'client' && payload.data.reason === 'local')) statsPushRevision += 1;
+    if (!(settings?.hubMode === 'client' && payload.data.reason === 'local')) {
+      statsPushRevision += 1;
+      statsPushSource = { generation: hubModeGeneration, identity: currentHubStatsIdentity() };
+    }
     edgeDockManualStats = null;
     getSyncContentRuntime().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
@@ -4939,11 +5140,17 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
   // reads low for anyone with an un-tracked client or retained sessions, and then
   // jumps when the first scan lands. Read-only on purpose: the capture step
   // records a fresh observation, and an anchor from hours ago is not one.
-  const visible = usageTransform.project(
-    deviceRecord,
-    settings?.sessionUsageArchiveEnabled === false ? null : usageTransform.ensureLoaded(),
-    sessionUsageArchiveDate(deviceRecord)
-  );
+  let visible;
+  try {
+    visible = usageTransform.project(
+      deviceRecord,
+      settings?.sessionUsageArchiveEnabled === false ? null : usageTransform.ensureLoaded(),
+      sessionUsageArchiveDate(deviceRecord)
+    );
+  } catch (error) {
+    sendStatus(false, { reason: `session-archive:${error.message}` });
+    return;
+  }
   localDevice = visible;
   localStats = withHistoryPreview(aggregateDevices([visible], 0), [visible]);
   // Through the normal publisher, not straight to the renderer: the tray reads
@@ -4975,6 +5182,7 @@ function startLocalCollector() {
     transformUsage: usageTransform.transform,
     usageOptions,
     progressive: true,
+    onSessionActivity: publishLocalSessionActivity,
     onRecord: (summary, meta) => {
       seedInitialLimitProviders(summary);
       const reason = meta.reason;
@@ -5079,6 +5287,7 @@ async function startStatsStream(options = {}) {
 
 function showPopover(clickPoint = null) {
   if (!mainWindow || mainWindow.isDestroyed() || !tray) return;
+  recentPopoverBlur = null;
   applyMacActivationPolicy();
   applyMacSpaceBehavior(true);
   applyWindowSettings();
@@ -5094,13 +5303,21 @@ function showPopover(clickPoint = null) {
 }
 
 function hidePopover() {
+  recentPopoverBlur = null;
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isVisible()) mainWindow.hide();
 }
 
-function togglePopover(clickPoint = null) {
+function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isVisible() && mainWindow.isFocused()) hidePopover();
+  const action = popoverToggleAction({
+    visible: mainWindow.isVisible(),
+    focused: mainWindow.isFocused(),
+    visibleAtMouseDown: wasVisibleAtMouseDown,
+    blurMatchedAtMouseDown
+  });
+  recentPopoverBlur = null;
+  if (action === 'hide') hidePopover();
   else showPopover(clickPoint);
 }
 
@@ -5248,6 +5465,7 @@ function settingsForRenderer() {
     ...accountFieldProjection(settings, process.env),
     codexManagedAccounts: codexAccountsForRenderer(),
     antigravityManagedAccounts: antigravityAccountsForRenderer(),
+    workbuddyManagedAccounts: workbuddyAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
     ...accountStatusProjection(settings, process.env),
     limitAccountForms: limitAccountFormsForRenderer(),
@@ -5328,7 +5546,7 @@ async function pushSystemUiThemeAfterChange() {
 
 function pushSettingsToRenderer() {
   const payload = settingsForRenderer();
-  syncEdgeDock(payload);
+  syncDockSurfaces(payload);
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('settings:push', payload); } catch (_) {}
   }
@@ -5342,6 +5560,152 @@ function pushSettingsToRenderer() {
 }
 
 let edgeDockController = null;
+let notchController = null;
+let dockAppearancePreview = null;
+
+function dockAppearanceSettings() {
+  return dockAppearancePreview ? { ...settings, ...dockAppearancePreview } : settings;
+}
+
+function previewDockAppearance(patch) {
+  const preview = {};
+  for (const key of ['glassOpacity', 'glassBlur']) {
+    const value = Number(patch?.[key]);
+    if (patch?.[key] !== undefined && Number.isFinite(value)) preview[key] = Math.max(0, Math.min(100, value));
+  }
+  for (const [key, mode] of [['macGlassTint', 'liquid-glass'], ['macClearGlassTint', 'liquid-glass-clear']]) {
+    if (patch?.[key] !== undefined) preview[key] = normalizeLiquidGlassTint(patch[key], mode);
+  }
+  if (Object.keys(preview).length === 0) return;
+  // A range input previews before its change event commits the preference.
+  // Share glass controls with the floating surfaces, keeping their own styles
+  // and saved settings intact until the ordinary settings sync replaces it.
+  dockAppearancePreview = { ...dockAppearancePreview, ...preview };
+  for (const controller of [edgeDockController, notchController]) {
+    if (controller?.isRunning()) controller.setAppearance(dockAppearancePreview, { preview: true });
+  }
+}
+
+let notchRateTimer = null;
+const notchRateTrackers = new Map();
+
+function notchDataFor(visibleStats, cells) {
+  clearTimeout(notchRateTimer);
+  notchRateTimer = null;
+  if (settings.notchSummaryEnabled === false) {
+    notchRateTrackers.clear();
+    return buildNotchData(visibleStats, cells, settings);
+  }
+  const layout = notchSummaryLayout(settings);
+  const rateItems = trayLayoutApi.liveTokenRateItems(layout);
+  const liveTokenRates = {};
+  let nextExpiry = 0;
+  const scopes = new Set(rateItems.map((item) => item.rateScope));
+  for (const scope of notchRateTrackers.keys()) {
+    if (!scopes.has(scope)) notchRateTrackers.delete(scope);
+  }
+  for (const scope of scopes) {
+    const selection = tokenRateApi.selectLiveTokenRatePeriods(visibleStats, settings.deviceId, settings.hubMode, scope);
+    const context = [mode, settings.hubMode, settings.hubUrl, settings.deviceId, selection.source].join('|');
+    let held = notchRateTrackers.get(scope);
+    if (!held || held.context !== context) {
+      held = { context, tracker: tokenRateApi.createLiveTokenRateGroupTracker({ now: Date.now }) };
+      held.tracker.reset(selection.entries);
+      notchRateTrackers.set(scope, held);
+    } else held.tracker.observe(selection.entries);
+    liveTokenRates[scope] = held.tracker.getSample();
+    const expiry = held.tracker.nextExpiryAt();
+    if (expiry && (!nextExpiry || expiry < nextExpiry)) nextExpiry = expiry;
+  }
+  if (nextExpiry && notchController?.isRunning()) {
+    notchRateTimer = setTimeout(() => {
+      notchRateTimer = null;
+      repaintDockSurfaces();
+    }, Math.max(1000, nextExpiry - Date.now() + 20));
+  }
+  const codexManagedAccounts = codexAccountsForRenderer();
+  const activeCodexAccountId = codexPresentationPendingAccountId || codexPresentationActiveAccountId;
+  return buildNotchData(visibleStats, cells, settings, {
+    ...compactTokenDisplayOptions(), currency: normalizeCurrency(settings.currency), liveTokenRates,
+    activeAccountKeys: { codex: codexManagedAccounts.find((account) => account.id === activeCodexAccountId)?.accountKey },
+    cellOptions: { codexManagedAccounts, activeCodexAccountId, localDeviceId: settings.deviceId, syncActive: syncProvenanceActive() }
+  });
+}
+
+function toggleDockRateMode() {
+  settings.tokenRateMode = settings.tokenRateMode === 'burn' ? 'speed' : 'burn';
+  saveSettings();
+  pushSettingsToRenderer();
+}
+
+let notchBlurMasks = null;
+
+function ensureNotchController() {
+  if (notchController) return notchController;
+  notchController = createNotchController({
+    BrowserWindow, ipcMain, screen, platform: process.platform,
+    rendererDir: path.join(__dirname, 'renderer'),
+    preloadPath: path.join(__dirname, 'notch', 'preload.js'),
+    getSettings: () => dockAppearanceSettings(),
+    onCapabilitiesChanged: (value) => sendMainWindowEvent('topNotch:capabilities', value, () => notchController?.getCapabilities() === value),
+    nativeGlass: () => nativeBlurEnabled(),
+    liquidGlass: () => {
+      const options = nativeMaterialOptions();
+      return options.enabled && !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25
+        ? { dark: options.dark } : null;
+    },
+    createGlass: (win) => createMacLiquidGlass(win, { shaped: true }),
+    applyShapeMask: (win, commands, width, height, display) => {
+      const { buffer, pixelWidth, pixelHeight } = rasterizeMask(toPolygons(commands), width, height, display?.scaleFactor || 2);
+      return applyVibrancyMask(win, nativeImage.createFromBitmap(buffer, { width: pixelWidth, height: pixelHeight }).toPNG(), width, height);
+    },
+    prefersReducedMotion: () => motionPreferenceApi.shouldReduceMotion(settings?.reduceMotion, systemPreferences.getAnimationSettings?.().prefersReducedMotion === true),
+    onToggleRateMode: toggleDockRateMode,
+    canRefreshLimits: () => canRefreshEdgeDockStats(),
+    onRefreshLimits: () => refreshStatsFromEdgeDock(),
+    installNonActivatingInput: (win) => preventAppActivation(win),
+    blurAvailable: () => nativeTheme.prefersReducedTransparency !== true,
+    applyBlurMask: (win, mask, display) => {
+      const scale = display?.scaleFactor || 2;
+      const key = JSON.stringify([mask, scale]);
+      if (notchBlurMasks?.key !== key) {
+        const png = (options) => {
+          const { buffer, pixelWidth, pixelHeight } = notchBlurMask({ ...mask, ...options });
+          return nativeImage.createFromBitmap(buffer, { width: pixelWidth, height: pixelHeight }).toPNG();
+        };
+        // The blur mask is sampled per point; the visible fade is drawn at device scale.
+        notchBlurMasks = { key, alphaPng: png({ scale, curve: NOTCH_BLUR_ALPHA }), blurPng: png({ scale: 1, curve: NOTCH_BLUR_STRENGTH }) };
+      }
+      return applyProgressiveBlur(win, { alphaPng: notchBlurMasks.alphaPng, blurPng: notchBlurMasks.blurPng,
+        width: mask.width, height: mask.height, radius: NOTCH_BLUR_RADIUS });
+    },
+    primaryButtonDown: () => primaryButtonDown(process.platform),
+    monitorPrimaryPress: (onPress) => monitorMacPrimaryPress(onPress, { logger: (message) => console.log(message) }),
+    performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
+    isFullScreen: createFullScreenProbe({ platform: process.platform, screen, logger: (message) => console.log(message) }),
+    onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
+    onOpenResetForecastSource: () => {
+      if (isAllowedExternalUrl(CODEX_RESET_FORECAST_SOURCE_URL)) void shell.openExternal(CODEX_RESET_FORECAST_SOURCE_URL);
+    },
+    logger: (message) => console.log(message)
+  });
+  return notchController;
+}
+
+function syncNotch(rendererSettings) {
+  if (process.platform !== 'darwin' || settings?.notchEnabled !== true) {
+    notchController?.stop();
+    clearTimeout(notchRateTimer);
+    notchRateTimer = null;
+    notchRateTrackers.clear();
+    return;
+  }
+  const controller = ensureNotchController();
+  controller.setAppearance(edgeDockAppearance(rendererSettings));
+  controller.sync();
+  const stats = edgeDockStats();
+  if (stats) pushNotchCells(electronPresentationStats(stats));
+}
 
 // The dock renderer is a floating surface outside the widget, so it gets an
 // allowlisted appearance projection instead of the full renderer settings.
@@ -5359,6 +5723,7 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     glassBlur: source.glassBlur,
     systemGlass: source.systemGlass,
     reduceMotion: source.reduceMotion,
+    tokenNumberAnimation: source.tokenNumberAnimation,
     interfaceFontFamily: source.interfaceFontFamily,
     displayFontFamily: source.displayFontFamily,
     showLimitUsed: source.showLimitUsed,
@@ -5369,6 +5734,7 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     limitProviderHiddenItems: source.limitProviderHiddenItems,
     showLimitSource: source.showLimitSource,
     codexResetForecastEnabled: source.codexResetForecastEnabled,
+    workbuddyQuotaTotalEnabled: source.workbuddyQuotaTotalEnabled,
     claudePrepaidBalanceEnabled: source.claudePrepaidBalanceEnabled,
     // The dock's session rows carry the same context gauge as the Sessions
     // list, so its Remaining/Used preference has to reach this renderer too.
@@ -5394,8 +5760,13 @@ let edgeDockRateTracker = null;
 let edgeDockRateContext = '';
 let edgeDockRateTimer = null;
 
+function configuredDockItemLists() {
+  return [...(settings?.edgeDockEnabled !== false ? [settings?.edgeDockItems] : []),
+    ...(settings?.notchEnabled === true && process.platform === 'darwin' ? [settings?.notchItems] : [])];
+}
+
 function edgeDockShowsLiveRate() {
-  const items = Array.isArray(settings?.edgeDockItems) ? settings.edgeDockItems : [];
+  const items = configuredDockItemLists().flatMap((list) => Array.isArray(list) ? list : []);
   // A live-rate item needs the sample for its own headline; a sessions item needs
   // it only when its rail cell was set to show the rate instead of tool marks. The
   // tracker is the same either way, so this is the one gate that has to know both.
@@ -5420,14 +5791,9 @@ function edgeDockLiveRateSample(visibleStats) {
   const context = [mode, hubMode || '', settings?.hubUrl || '', settings?.deviceId || '', scope, selection.source].join('|');
   if (!edgeDockRateTracker) {
     edgeDockRateTracker = tokenRateApi.createLiveTokenRateGroupTracker({
-      // Epoch time, not the module's default monotonic clock. This tracker is the
-      // only one whose expiry is compared against a timer scheduled here
-      // (`expiresAt - Date.now()`), and the two scales are not interchangeable:
-      // `performance.now()` on this process starts near zero, so the difference is a
-      // huge negative number that clamps to the 20ms floor and re-projects the dock
-      // about fifty times a second for as long as a sample is retained. The renderer's
-      // own tracker keeps the default, since it only ever compares its clock with
-      // itself.
+      // Expiry timers subtract Date.now(), so samples must use epoch time too.
+      // The default monotonic clock would produce a negative delay and repeatedly
+      // repaint at the timer floor while a sample is retained.
       now: Date.now,
       activeMs: EDGE_DOCK_RATE_ACTIVE_MS,
       clearMs: EDGE_DOCK_RATE_CLEAR_MS
@@ -5444,7 +5810,7 @@ function edgeDockLiveRateSample(visibleStats) {
   if (expiresAt) {
     edgeDockRateTimer = setTimeout(() => {
       edgeDockRateTimer = null;
-      repaintEdgeDockCells();
+      repaintDockSurfaces();
     }, Math.max(0, expiresAt - Date.now()) + 20);
   }
   return edgeDockRateTracker.getSample();
@@ -5465,13 +5831,13 @@ function edgeDockStats() {
     ? edgeDockManualStats.stats : latestStats;
 }
 
-function repaintEdgeDockCells() {
+function repaintDockSurfaces() {
   const stats = edgeDockStats();
   if (stats) updateEdgeDockCells(electronPresentationStats(stats));
 }
 
 function edgeDockDerivedSelections() {
-  const items = Array.isArray(settings?.edgeDockItems) ? settings.edgeDockItems : [];
+  const items = configuredDockItemLists().flatMap((list) => Array.isArray(list) ? list : []);
   return EDGE_DOCK_DERIVED_PERIODS.filter((period) => items.some((item) => item.type === 'stat' && item.metric === period));
 }
 
@@ -5529,14 +5895,15 @@ let edgeDockForecastInFlight = false;
 
 function edgeDockForecastWanted() {
   if (settings?.codexResetForecastEnabled !== true) return false;
-  const items = settings?.edgeDockItems;
-  // Automatic items follow the connected providers, which may include Codex.
-  return !Array.isArray(items) || items.some((item) => item.type === 'limit' && item.provider === 'codex');
+  // Automatic selections may contain Codex; either independent surface can ask.
+  return configuredDockItemLists().some((items) => !Array.isArray(items)
+    || items.some((item) => item.type === 'limit' && item.provider === 'codex'));
 }
 
 function refreshEdgeDockForecast() {
   if (!edgeDockForecastWanted()) {
     edgeDockForecast = null;
+    edgeDockForecastAt = 0;
     return;
   }
   if (edgeDockForecastInFlight || Date.now() - edgeDockForecastAt < EDGE_DOCK_FORECAST_REFRESH_MS) return;
@@ -5544,9 +5911,10 @@ function refreshEdgeDockForecast() {
   edgeDockForecastAt = Date.now();
   Promise.resolve(codexResetForecastClient.getForecast({ force: false }))
     .then((forecast) => {
+      if (!edgeDockForecastWanted()) return;
       const changed = JSON.stringify(forecast || null) !== JSON.stringify(edgeDockForecast);
       edgeDockForecast = forecast || null;
-      if (changed) repaintEdgeDockCells();
+      if (changed) repaintDockSurfaces();
     })
     .catch((error) => console.log(`[edge-dock] reset forecast failed: ${error.message}`))
     .finally(() => { edgeDockForecastInFlight = false; });
@@ -5561,18 +5929,19 @@ async function refreshStatsFromEdgeDock() {
   return { ok: true };
 }
 
-function edgeDockCellsFor(visibleStats) {
+function edgeDockCellsFor(visibleStats, items = settings?.edgeDockItems, options = {}) {
   refreshEdgeDockDerivedPeriods(visibleStats);
   refreshEdgeDockForecast();
   syncCodexPresentationActiveAccount();
   return buildEdgeDockCells(visibleStats, {
+    includeUnavailableAccounts: options.includeUnavailableAccounts === true,
     derivedPeriods: edgeDockDerivedPeriods,
     codexResetForecast: edgeDockForecastWanted() ? edgeDockForecast : null,
     localDeviceId: settings?.deviceId,
     // What the card's rows need to name the device a reading came from. The
     // dock window is handed cells and nothing else, so both ride the cell.
     syncActive: syncProvenanceActive(),
-    items: settings?.edgeDockItems,
+    items,
     showCodexAdditionalLimits: settings?.showCodexAdditionalLimits,
     codexManagedAccounts: codexAccountsForRenderer(),
     activeCodexAccountId: codexPresentationPendingAccountId || codexPresentationActiveAccountId,
@@ -5585,9 +5954,9 @@ function edgeDockCellsFor(visibleStats) {
 }
 
 function updateEdgeDockCells(visibleStats) {
-  if (!edgeDockController?.isRunning() || !visibleStats) return;
-  const cells = edgeDockCellsFor(visibleStats);
-  pushEdgeDockCells(cells);
+  if ((!edgeDockController?.isRunning() && !notchController?.isRunning()) || !visibleStats) return;
+  if (edgeDockController?.isRunning()) pushEdgeDockCells(edgeDockCellsFor(visibleStats));
+  if (notchController?.isRunning()) pushNotchCells(visibleStats);
 }
 
 // Hand cells to the controller and arm the expiry timer from them. Split out from
@@ -5597,7 +5966,7 @@ function updateEdgeDockCells(visibleStats) {
 function pushEdgeDockCells(cells) {
   edgeDockLastCells = cells;
   edgeDockController?.setCells(cells);
-  scheduleEdgeDockSessionExpiry();
+  scheduleSessionExpiry();
 }
 
 // Running is a function of time: a session crosses the ten-minute window with no
@@ -5612,6 +5981,13 @@ const EDGE_DOCK_EXPIRY_FLOOR_MS = 1_000;
 // The cells most recently handed to the controller, so the expiry timer can be
 // armed from what is actually on screen rather than re-projecting to find out.
 let edgeDockLastCells = [];
+let notchLastCells = [];
+
+function pushNotchCells(visibleStats) {
+  notchLastCells = edgeDockCellsFor(visibleStats, settings.notchItems, { includeUnavailableAccounts: true });
+  notchController.setData(notchDataFor(visibleStats, notchLastCells));
+  scheduleSessionExpiry();
+}
 
 // The soonest moment any sessions cell stops reading as running, or 0 when none
 // of them does. A quiet cell never becomes running on its own, so 0 means there
@@ -5630,16 +6006,18 @@ function edgeDockNextSessionExpiry(cells) {
   return soonest;
 }
 
-function scheduleEdgeDockSessionExpiry() {
+function scheduleSessionExpiry() {
   if (edgeDockSessionExpiryTimer) clearTimeout(edgeDockSessionExpiryTimer);
   edgeDockSessionExpiryTimer = null;
-  if (!edgeDockController?.isRunning()) return;
-  const expiresAt = edgeDockNextSessionExpiry(edgeDockLastCells);
+  if (!edgeDockController?.isRunning() && !notchController?.isRunning()) return;
+  const cells = [...(edgeDockController?.isRunning() ? edgeDockLastCells : []),
+    ...(notchController?.isRunning() ? notchLastCells : [])];
+  const expiresAt = edgeDockNextSessionExpiry(cells);
   if (!expiresAt) return;
   const delay = Math.max(EDGE_DOCK_EXPIRY_FLOOR_MS, expiresAt - Date.now() + 50);
   edgeDockSessionExpiryTimer = setTimeout(() => {
     edgeDockSessionExpiryTimer = null;
-    repaintEdgeDockCells();
+    repaintDockSurfaces();
   }, delay);
 }
 
@@ -5648,6 +6026,7 @@ function ensureEdgeDockController() {
   edgeDockController = createEdgeDockController({
     BrowserWindow,
     ipcMain,
+    powerMonitor,
     screen,
     platform: process.platform,
     rendererDir: path.join(__dirname, 'renderer'),
@@ -5658,11 +6037,13 @@ function ensureEdgeDockController() {
     // same terms as the main window: Reduce Transparency hands the surface back
     // to the HUD material.
     liquidGlass: () => {
-      const options = nativeMaterialOptions();
+      const source = dockAppearanceSettings();
+      const options = nativeMaterialOptions(source);
       const wanted = process.platform === 'darwin' && options.enabled
-        && edgeDockBackdropMode(settings) === MAC_BACKDROP_LIQUID_GLASS
+        && isLiquidGlassBackdrop(edgeDockBackdropMode(source))
         && !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25;
-      return wanted ? { dark: options.dark } : null;
+      const mode = edgeDockBackdropMode(source);
+      return wanted ? { dark: options.dark, style: liquidGlassStyle(mode), tintOpacity: liquidGlassTint(source, mode) } : null;
     },
     createGlass: (win) => createMacLiquidGlass(win, { shaped: true }),
     // The renderer reads this preference through a media query, which works on both
@@ -5680,6 +6061,8 @@ function ensureEdgeDockController() {
       return applyVibrancyMask(win, png, width, height);
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
+    installNonActivatingInput: (win) => process.platform === 'darwin' ? preventAppActivation(win)
+      : installWindowsNonActivatingInput(win, { logger: (message) => console.log(message) }),
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
     isFullScreen: createFullScreenProbe({ platform: process.platform, screen, logger: (message) => console.log(message) }),
     // The dock card's Switch button runs the same swap the Limits view does,
@@ -5691,11 +6074,7 @@ function ensureEdgeDockController() {
       if (isAllowedExternalUrl(CODEX_RESET_FORECAST_SOURCE_URL)) void shell.openExternal(CODEX_RESET_FORECAST_SOURCE_URL);
     },
     // The same setting the widget's rate readout toggles, so both stay in step.
-    onToggleRateMode: () => {
-      settings.tokenRateMode = settings.tokenRateMode === 'burn' ? 'speed' : 'burn';
-      saveSettings();
-      pushSettingsToRenderer();
-    },
+    onToggleRateMode: toggleDockRateMode,
     onPlacementChange: ({ side, offset, displayId }) => {
       settings.edgeDockSide = normalizeEdgeDockSide(side);
       settings.edgeDockOffset = normalizeEdgeDockOffset(offset);
@@ -5708,12 +6087,17 @@ function ensureEdgeDockController() {
   return edgeDockController;
 }
 
-function syncEdgeDock(rendererSettings) {
+function syncDockSurfaces(rendererSettings) {
+  dockAppearancePreview = null;
   if (!settings) return;
+  syncNotch(rendererSettings);
   if (!canUseEdgeDock(settings)) {
     edgeDockController?.stop();
-    if (edgeDockRateTimer) clearTimeout(edgeDockRateTimer);
-    edgeDockRateTimer = null;
+    // The same sample feeds top-only rate and sessions items.
+    if (!notchController?.isRunning()) {
+      if (edgeDockRateTimer) clearTimeout(edgeDockRateTimer);
+      edgeDockRateTimer = null;
+    }
     return;
   }
   const controller = ensureEdgeDockController();
@@ -5728,7 +6112,7 @@ function syncEdgeDock(rendererSettings) {
   controller.sync();
   // Now that the controller is running (sync() starts it when enabled), arm the
   // timer against the cells that were just handed over.
-  scheduleEdgeDockSessionExpiry();
+  scheduleSessionExpiry();
 }
 
 function refreshLimitStatsPresentation() {
@@ -5736,7 +6120,7 @@ function refreshLimitStatsPresentation() {
   const visibleStats = electronPresentationStats(latestStats);
   migrateCodexAdditionalLimits(visibleStats);
   scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
-  repaintEdgeDockCells();
+  repaintDockSurfaces();
   updateTrayDisplay();
   if (mainWindow && !mainWindow.isDestroyed()) {
     try {
@@ -5780,9 +6164,9 @@ function handleWindowToggleShortcut() {
   else focusExistingWindow();
 }
 
-function handleTrayToggle(_tray, clickPoint = null) {
+function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false) {
   const action = trayToggleAction(settings);
-  if (action === 'togglePopover') togglePopover(clickPoint);
+  if (action === 'togglePopover') togglePopover(clickPoint, wasVisibleAtMouseDown, blurMatchedAtMouseDown);
   else if (action === 'focusWindow') focusExistingWindow();
 }
 
@@ -5833,6 +6217,7 @@ function setTrayContentFromMenu(value) {
 }
 
 function setEdgeDockFromMenu(patch = {}) {
+  if (patch.notchEnabled !== undefined) settings.notchEnabled = parseBoolean(patch.notchEnabled, false);
   if (patch.edgeDockEnabled !== undefined) settings.edgeDockEnabled = parseBoolean(patch.edgeDockEnabled, false);
   if (patch.edgeDockMode !== undefined) settings.edgeDockMode = normalizeEdgeDockMode(patch.edgeDockMode);
   if (patch.edgeDockSide !== undefined) settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
@@ -5989,6 +6374,8 @@ function ensureTray() {
         codexSwitching: codex.switching,
         maskAccountEmails: Boolean(settings?.maskLimitAccountEmails),
         edgeDockSupported: edgeDockSupported(process.platform),
+        notchSupported: process.platform === 'darwin',
+        notchEnabled: settings?.notchEnabled === true,
         edgeDockEnabled: settings?.edgeDockEnabled === true,
         edgeDockMode: settings?.edgeDockMode,
         edgeDockSide: settings?.edgeDockSide,
@@ -6003,6 +6390,13 @@ function ensureTray() {
       };
     },
     onToggle: handleTrayToggle,
+    getWindowVisible: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()),
+    onMouseDown: (pressPoint) => {
+      const matched = popoverBlurMatchesPress({ recentBlur: recentPopoverBlur, pressPoint, now: performance.now() });
+      recentPopoverBlur = null;
+      return matched;
+    },
+    onCancelMouseDown: () => { recentPopoverBlur = null; },
     onOpenView: openViewFromTray,
     onRefresh: () => { void refreshFromTray(); },
     onSetTrayContent: setTrayContentFromMenu,
@@ -6356,7 +6750,7 @@ function refreshManualStats() {
     // pending has already taken over, so a late read must not replace it.
     if (runtime === deviceRuntimeHandle && generation === hubModeGeneration && revision === statsPushRevision) {
       edgeDockManualStats = { stats, generation, runtime };
-      repaintEdgeDockCells();
+      repaintDockSurfaces();
     }
     return stats;
   }).finally(() => {
@@ -6489,6 +6883,9 @@ function configureNativeAppUpdater() {
   appUpdateNativeConfigured = true;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
+  // Notes for every release between this version and the latest, not only the
+  // latest's, so the update card covers everything the user is about to receive.
+  autoUpdater.fullChangelog = true;
   autoUpdater.logger = console;
   autoUpdater.on('download-progress', (progress) => {
     setNativeAppUpdateState({
@@ -6575,7 +6972,7 @@ async function checkAppUpdateProvider() {
 function deriveAppUpdateState() {
   const block = settings?.appUpdate || {};
   const currentVersion = app.getVersion();
-  const latest = block.lastKnownLatest || null;
+  const latest = latestForCurrentVersion(block.lastKnownLatest || null, currentVersion);
   const dismissedVersion = block.dismissedVersion || null;
   const installSupport = appUpdateInstallSupport({ isPackaged: app.isPackaged, platform: process.platform, env: process.env });
   const availability = deriveAppUpdateAvailability({
@@ -6588,6 +6985,7 @@ function deriveAppUpdateState() {
   return {
     currentVersion,
     latest,
+    releasesUrl: RELEASES_URL,
     hasUpdate: availability.hasUpdate,
     showUpdateNotice: availability.showUpdateNotice,
     dismissedVersion,
@@ -6736,10 +7134,21 @@ function maybeRunBackgroundUpdateCheck() {
   runAppUpdateCheck({ force: false }).catch(() => {});
 }
 
+function scheduleStartupAppUpdateCheck() {
+  const timer = setTimeout(() => {
+    runAppUpdateCheck({ bypassCooldown: true }).catch(() => {});
+  }, APP_UPDATE_STARTUP_DELAY_MS);
+  timer.unref?.();
+}
+
 function startAppUpdateBackgroundChecks() {
   if (appUpdateBackgroundTimer) return;
   appUpdateBackgroundTimer = setInterval(maybeRunBackgroundUpdateCheck, 60 * 60 * 1000);
   appUpdateBackgroundTimer.unref?.();
+  // A machine that slept overnight should not wait for the next hourly tick to
+  // notice a release. Both still go through the cooldown.
+  powerMonitor.on('resume', maybeRunBackgroundUpdateCheck);
+  powerMonitor.on('unlock-screen', maybeRunBackgroundUpdateCheck);
 }
 
 function dismissAppUpdateVersion(version) {
@@ -7020,7 +7429,17 @@ function createWindow(boundsOverride, options = {}) {
   });
   win.on('blur', () => {
     nudgeTaskbarZOrder();
-    if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) hidePopover();
+    if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) {
+      const wasVisible = win.isVisible();
+      const point = wasVisible && process.platform === 'darwin' ? screen.getCursorScreenPoint() : null;
+      if (wasVisible) {
+        hidePopover();
+        // Cocoa can send this blur before Tray.mouse-down for the same click.
+        // The cursor point lets that later click identify its own blur without
+        // mistaking a quick click on another app followed by a tray click.
+        if (point && tray?.isPointerOverIcon?.(point)) recentPopoverBlur = { at: performance.now(), point };
+      }
+    }
     else if (!quitRequested) scheduleFloatingBubbleAutoCollapse();
   });
   win.on('resized', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
@@ -7046,7 +7465,7 @@ function createWindow(boundsOverride, options = {}) {
   // last real window closes, which window-all-closed relies on for quitting.
   win.on('closed', () => {
     if (quitRequested || process.platform === 'darwin') return;
-    if (BrowserWindow.getAllWindows().every((other) => edgeDockController?.owns(other))) app.quit();
+    if (BrowserWindow.getAllWindows().every((other) => (edgeDockController?.owns(other) || notchController?.owns(other)))) app.quit();
   });
   win.on('show', () => sendMainWindowVisibility(win));
   win.on('hide', () => sendMainWindowVisibility(win));
@@ -7261,6 +7680,8 @@ function rebuildWindow() {
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
+  powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
+  powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
   // it — nothing else in the app would notice the change.
@@ -7268,6 +7689,7 @@ app.whenReady().then(() => {
     applyNativeMaterial();
     // Rebuilds the dock only when Reduce Transparency moved its material.
     if (edgeDockController?.isRunning()) edgeDockController.sync();
+    if (notchController?.isRunning()) notchController.sync();
     void pushSystemUiThemeAfterChange();
   });
   const widgetRuntime = macWidgetRuntimeSupport({
@@ -7323,7 +7745,7 @@ app.whenReady().then(() => {
   applyEffectiveRates();                 // use cache/defaults immediately, avoid first-paint gap
   refreshExchangeRates();                // non-blocking: only fetches when stale
   rateRefreshTimer = setInterval(() => { refreshExchangeRates(); }, 6 * 60 * 60 * 1000);
-  syncEdgeDock();
+  syncDockSurfaces();
   ipcMain.handle('settings:get', () => settingsForRenderer());
   ipcMain.handle('appearance:getBackgroundImage', () => getBackgroundImage(app.getPath('userData')));
   ipcMain.handle('appearance:chooseBackgroundImage', async () => {
@@ -7349,7 +7771,7 @@ app.whenReady().then(() => {
   ipcMain.handle('subscriptions:adoptOrphans', async () => {
     try {
       const next = await adoptOrphanedSubscriptions();
-      syncEdgeDock();
+      syncDockSurfaces();
       return next;
     } catch (error) {
       throw new Error(subscriptionWriteFailureCode(error), { cause: error });
@@ -7358,14 +7780,14 @@ app.whenReady().then(() => {
 
   ipcMain.handle('subscriptions:discardOrphans', () => {
     const next = discardOrphanedSubscriptions();
-    syncEdgeDock();
+    syncDockSurfaces();
     return next;
   });
 
   ipcMain.handle('subscriptions:save', async (_event, subscriptions, base) => {
     try {
       const next = await saveSubscriptions(subscriptions, base);
-      syncEdgeDock();
+      syncDockSurfaces();
       return next;
     } catch (error) {
       // The renderer has to tell "another device won" apart from "the hub is
@@ -7513,11 +7935,14 @@ app.whenReady().then(() => {
       refreshMs: Math.max(5000, Number(patch.refreshMs ?? settings.refreshMs ?? 15000)),
       glassOpacity: Math.max(0, Math.min(100, Number(patch.glassOpacity ?? settings.glassOpacity ?? 68))),
       glassBlur: Math.max(0, Math.min(100, Number(patch.glassBlur ?? settings.glassBlur ?? 32))),
+      macGlassTint: normalizeLiquidGlassTint(patch.macGlassTint ?? settings.macGlassTint, 'liquid-glass'),
+      macClearGlassTint: normalizeLiquidGlassTint(patch.macClearGlassTint ?? settings.macClearGlassTint, 'liquid-glass-clear'),
       backgroundImageOpacity: normalizeBackgroundImageOpacity(patch.backgroundImageOpacity ?? settings.backgroundImageOpacity),
       systemGlass: patch.systemGlass ?? settings.systemGlass ?? true,
       windowsBackdrop: normalizeWindowsBackdropMode(patch.windowsBackdrop ?? settings.windowsBackdrop),
       macBackdrop: normalizeMacBackdropMode(patch.macBackdrop ?? settings.macBackdrop),
       reduceMotion: motionPreferenceApi.normalize(patch.reduceMotion ?? settings.reduceMotion),
+      tokenNumberAnimation: tokenNumberAnimationApi.normalize(patch.tokenNumberAnimation ?? settings.tokenNumberAnimation),
       showLiveDot: patch.showLiveDot ?? settings.showLiveDot ?? true,
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
@@ -7536,6 +7961,25 @@ app.whenReady().then(() => {
       ),
       tokenRateMode: normalizeTokenRateMode(patch.tokenRateMode ?? settings.tokenRateMode),
       floatingBubbleEnabled: parseBoolean(patch.floatingBubbleEnabled ?? settings.floatingBubbleEnabled, false),
+      notchEnabled: parseBoolean(patch.notchEnabled ?? settings.notchEnabled, false),
+      notchStyle: normalizeNotchStyle(patch.notchStyle ?? settings.notchStyle),
+      notchShape: normalizeNotchShape(patch.notchShape ?? settings.notchShape),
+      notchSize: normalizeEdgeDockSize(patch.notchSize ?? settings.notchSize),
+      notchCustomScale: normalizeEdgeDockCustomScale(patch.notchCustomScale ?? settings.notchCustomScale),
+      notchItems: normalizeEdgeDockItems('notchItems' in (patch || {}) ? patch.notchItems : settings.notchItems),
+      notchDetailSide: normalizeNotchDetailSide(patch.notchDetailSide ?? settings.notchDetailSide),
+      notchRunningIndicatorEnabled: parseBoolean(patch.notchRunningIndicatorEnabled ?? settings.notchRunningIndicatorEnabled, false),
+      notchHoverAction: normalizeNotchHoverAction(patch.notchHoverAction ?? settings.notchHoverAction),
+      notchHoverDelay: normalizeNotchHoverDelay(patch.notchHoverDelay ?? settings.notchHoverDelay),
+      notchAvoidMenuBar: parseBoolean(patch.notchAvoidMenuBar ?? settings.notchAvoidMenuBar, true),
+      notchHaptic: parseBoolean(patch.notchHaptic ?? settings.notchHaptic, true),
+      notchProgressiveBlur: parseBoolean(patch.notchProgressiveBlur ?? settings.notchProgressiveBlur, true),
+      notchHideSummaryInFullScreen: parseBoolean(patch.notchHideSummaryInFullScreen ?? settings.notchHideSummaryInFullScreen, true),
+      notchRefreshEnabled: parseBoolean(patch.notchRefreshEnabled ?? settings.notchRefreshEnabled, false),
+      notchFollowTray: parseBoolean(patch.notchFollowTray ?? settings.notchFollowTray, true),
+      notchSummaryEnabled: parseBoolean(patch.notchSummaryEnabled ?? settings.notchSummaryEnabled, true),
+      notchCustomLayout: normalizeTrayLayout(patch.notchCustomLayout ?? settings.notchCustomLayout),
+      notchDisplayId: normalizeEdgeDockDisplayId(patch.notchDisplayId ?? settings.notchDisplayId),
       edgeDockEnabled: parseBoolean(patch.edgeDockEnabled ?? settings.edgeDockEnabled, false),
       edgeDockRefreshEnabled: parseBoolean(patch.edgeDockRefreshEnabled ?? settings.edgeDockRefreshEnabled, false),
       edgeDockRunningIndicatorEnabled: parseBoolean(patch.edgeDockRunningIndicatorEnabled ?? settings.edgeDockRunningIndicatorEnabled, true),
@@ -7592,6 +8036,7 @@ app.whenReady().then(() => {
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
+      projectBreakdownMode: normalizeProjectBreakdownMode(patch.projectBreakdownMode ?? settings.projectBreakdownMode),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
       sessionUsageArchiveEnabled: parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true),
       wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, true),
@@ -7607,6 +8052,7 @@ app.whenReady().then(() => {
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
       codexResetForecastEnabled: parseBoolean(patch.codexResetForecastEnabled ?? settings.codexResetForecastEnabled, false),
+      workbuddyQuotaTotalEnabled: parseBoolean(patch.workbuddyQuotaTotalEnabled ?? settings.workbuddyQuotaTotalEnabled, false),
       showCodexAdditionalLimits: parseBoolean(patch.showCodexAdditionalLimits ?? settings.showCodexAdditionalLimits, true),
       opencodeAmbientEnabled: parseBoolean(patch.opencodeAmbientEnabled ?? settings.opencodeAmbientEnabled, true),
       opencodeLocalLimitsEnabled: parseBoolean(patch.opencodeLocalLimitsEnabled ?? settings.opencodeLocalLimitsEnabled, false),
@@ -7687,7 +8133,7 @@ app.whenReady().then(() => {
     ) && latestStats) updateDiscordRpcDisplay(latestStats);
     applyWindowSettings();
     syncFloatingBubbleAvailability();
-    syncEdgeDock();
+    syncDockSurfaces();
     const nextNativeMaterial = nativeBlurEnabled();
     const nextWindowsBackdrop = normalizeWindowsBackdropMode(settings?.windowsBackdrop);
     const windowsBackdropChanged = previousWindowsBackdrop !== nextWindowsBackdrop
@@ -7785,15 +8231,19 @@ app.whenReady().then(() => {
     return settingsForRenderer();
   }
   ipcMain.handle('appearance:preview', (event, patch) => {
-    // Preview only the requesting surface: another window still renders its
-    // saved theme until settings:update broadcasts the committed preference.
+    // Other document windows retain their saved theme; glass previews
+    // also reach the floating surfaces so the range control has one meaning.
     const win = BrowserWindow.fromWebContents(event.sender);
     syncNativeMaterialVisibility(win, nativeMaterialOptions({ ...settings, ...patch }, win === dashboardWindow));
+    if (win === mainWindow || win === dashboardWindow) previewDockAppearance(patch);
     if (patch && patch.zoomFactor !== undefined && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.setZoomFactor(clampZoom(patch.zoomFactor));
     }
     if (patch && patch.edgeDockCustomScale !== undefined && edgeDockController?.isRunning()) {
       edgeDockController.previewScale(patch.edgeDockCustomScale);
+    }
+    if (patch && patch.notchCustomScale !== undefined && notchController?.isRunning()) {
+      notchController.previewScale(patch.notchCustomScale);
     }
     return true;
   });
@@ -7905,7 +8355,17 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('stats:get', async (_event, options) => {
-    const stats = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
+    const revision = statsPushRevision;
+    const fetched = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
+    // A push from the same source/generation supersedes its pending read. A
+    // retried read after a Hub switch must adopt the new source instead.
+    // Compare the source of the revision, not the latest local composition:
+    // a local B publication must not relabel a revision advanced by Hub A.
+    const sameSource = statsPushSource?.generation === hubModeGeneration
+      && statsPushSource.identity === currentHubStatsIdentity();
+    const current = sameSource && statsPushRevision !== revision && latestStats ? latestStats : fetched;
+    if (current !== latestStats) sendPush({ event: 'stats', data: { stats: current, reason: 'read' } }, { skipExport: true });
+    const stats = latestStats || current;
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);
@@ -7967,6 +8427,7 @@ app.whenReady().then(() => {
     return getNativeMaterialState(win);
   });
   ipcMain.handle('app:getInfo', () => ({
+    notchCapabilities: notchController?.getCapabilities() || null,
     version: app.getVersion(),
     platform: process.platform,
     arch: process.arch,
@@ -8058,6 +8519,11 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('app:openUserData', () => shell.openPath(app.getPath('userData')));
   ipcMain.handle('antigravity:accounts', () => antigravityAccountsForRenderer());
+  ipcMain.handle('workbuddy:accounts', () => workbuddyAccountsForRenderer());
+  ipcMain.handle('workbuddy:addAccount', (_event, realm) => workbuddyAccountOperation((service) => service.addAccount(realm)));
+  ipcMain.handle('workbuddy:cancelLogin', () => workbuddyManagedAccountService?.cancelLogin() || false);
+  ipcMain.handle('workbuddy:removeAccount', (_event, id) => workbuddyAccountOperation((service) => service.removeAccount(id)));
+  ipcMain.handle('workbuddy:setAccountEnabled', (_event, id, enabled) => workbuddyAccountOperation((service) => service.setAccountEnabled(id, enabled)));
   ipcMain.handle('antigravity:addAccount', () => addAntigravityManagedAccount());
   ipcMain.handle('antigravity:cancelLogin', () => cancelAntigravityManagedAccountLogin());
   ipcMain.handle('antigravity:setAccountEnabled', (_event, id, enabled) => setAntigravityManagedAccountEnabled(id, enabled));
@@ -9011,7 +9477,7 @@ app.whenReady().then(() => {
     const action = activateWindowAction({
       mainWindow,
       windows: BrowserWindow.getAllWindows(),
-      isDockOwned: (win) => Boolean(edgeDockController?.owns(win))
+      isDockOwned: (win) => Boolean(edgeDockController?.owns(win) || notchController?.owns(win))
     });
     if (action === 'focusWindow') focusExistingWindow();
     else if (action === 'createWindow') {
@@ -9023,7 +9489,7 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
-  maybeRunBackgroundUpdateCheck();
+  scheduleStartupAppUpdateCheck();
   startAppUpdateBackgroundChecks();
 });
 
@@ -9036,12 +9502,15 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 app.on('before-quit', () => {
   quitRequested = true;
   antigravityOAuthLoginController?.abort();
+  workbuddyManagedAccountService?.cancelLogin();
   resetMacWidgetReloadThrottle();
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
   stopTaskbarZOrderKeeper();
   unregisterWindowToggleShortcut();
   edgeDockController?.stop();
+  notchController?.dispose();
+  clearTimeout(notchRateTimer);
   electronWorkbuddyLocalAuth.dispose();
   if (skipForcedQuit) return;
   performQuit();

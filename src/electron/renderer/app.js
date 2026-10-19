@@ -32,6 +32,7 @@ function renderAccountShellError(id) {
 }
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
+const tokenNumberAnimationApi = window.TokenMonitorTokenNumberAnimation;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
 const macBackdropApi = window.TokenMonitorMacBackdropMode;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
@@ -98,6 +99,7 @@ const LIMIT_PROVIDER_ACCOUNT_NODES = {
   kimi: { group: 'kimiAccountGroup', status: 'kimiAccountStatus' },
   copilot: { group: 'copilotAccountGroup', status: 'copilotApiTokenStatus' },
   mimo: { group: 'mimoAccountGroup', status: 'mimoAccountStatus' },
+  workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus' },
   openrouter: { group: 'openrouterAccountGroup', status: 'openrouterStatus' },
   volcengine: { group: 'volcengineAccountGroup', status: 'volcengineAccountStatus' },
   thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
@@ -188,6 +190,7 @@ const {
   rowRenderFingerprint,
   rowWidth,
   shouldAnimateBreakdownRows,
+  visibleBreakdownNumberRows,
   toolIconsEnabled
 } = breakdownRenderPolicyApi;
 const deviceBreakdownApi = window.TokenMonitorDeviceBreakdown;
@@ -306,7 +309,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
@@ -357,7 +360,8 @@ state.projectSettingsExpanded = false;
 state.sessionSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', tokenNumberAnimation: 'roll', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+const nativeGlassTintSettings = [['macGlassTint', 'liquid-glass'], ['macClearGlassTint', 'liquid-glass-clear']];
 let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
 let nativeMaterialRevision = 0;
 let appearancePreview = {};
@@ -382,6 +386,9 @@ Object.assign(els, {
   toolDetailFooter: document.getElementById('toolDetailFooter'),
   toolDetailFooterTokens: document.getElementById('toolDetailFooterTokens'),
   toolDetailFooterModels: document.getElementById('toolDetailFooterModels'),
+  projectBreakdownFooter: document.getElementById('projectBreakdownFooter'),
+  projectBreakdownFooterTools: document.getElementById('projectBreakdownFooterTools'),
+  projectBreakdownFooterModels: document.getElementById('projectBreakdownFooterModels'),
   monthPeriodMenu: document.getElementById('monthPeriodMenu'),
   monthPeriodTab: document.getElementById('monthPeriodTab'),
   periodMonthModeInput: document.getElementById('periodMonthModeInput'),
@@ -393,6 +400,35 @@ Object.assign(els, {
   backHomeButton: document.getElementById('backHomeButton'),
   systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
+  experimentalFeaturesGroup: document.getElementById('experimentalFeaturesGroup'),
+  notchFeature: document.getElementById('notchFeature'),
+  notchInput: document.getElementById('notchInput'),
+  notchOptions: document.getElementById('notchOptions'),
+  notchStyleInput: document.getElementById('notchStyleInput'),
+  notchShapeInputs: Array.from(document.querySelectorAll('input[name="notchShape"]')),
+  notchFollowTrayInput: document.getElementById('notchFollowTrayInput'),
+  notchSummaryInput: document.getElementById('notchSummaryInput'),
+  notchComposer: document.getElementById('notchComposer'),
+  notchComposerDetails: document.getElementById('notchComposerDetails'),
+  notchItemsComposer: document.getElementById('notchItemsComposer'),
+  notchDetailSideInput: document.getElementById('notchDetailSideInput'),
+  notchRunningIndicatorInput: document.getElementById('notchRunningIndicatorInput'),
+  notchRunningIndicatorRow: document.getElementById('notchRunningIndicatorRow'),
+  notchHapticInput: document.getElementById('notchHapticInput'),
+  notchHoverActionInputs: Array.from(document.querySelectorAll('input[name="notchHoverAction"]')),
+  notchHoverDelayInput: document.getElementById('notchHoverDelayInput'),
+  notchHoverDelayRow: document.getElementById('notchHoverDelayRow'),
+  resetNotchHoverDelayButton: document.getElementById('resetNotchHoverDelayButton'),
+  notchProgressiveBlurInput: document.getElementById('notchProgressiveBlurInput'),
+  notchAvoidMenuBarInput: document.getElementById('notchAvoidMenuBarInput'),
+  notchHideSummaryInFullScreenInput: document.getElementById('notchHideSummaryInFullScreenInput'),
+  notchSizeInputs: Array.from(document.querySelectorAll('input[name="notchSize"]')),
+  notchCustomScaleInput: document.getElementById('notchCustomScaleInput'),
+  notchCustomScaleRow: document.getElementById('notchCustomScaleRow'),
+  notchMoreOptionsGroup: document.getElementById('notchMoreOptionsGroup'),
+  notchMoreOptionsToggle: document.getElementById('notchMoreOptionsToggle'),
+  notchMoreOptionsDetails: document.getElementById('notchMoreOptionsDetails'),
+  edgeDockComposerRow: document.getElementById('edgeDockComposerRow'),
   edgeDockFeature: document.getElementById('edgeDockFeature'),
   edgeDockInput: document.getElementById('edgeDockInput'),
   edgeDockOptions: document.getElementById('edgeDockOptions'),
@@ -458,6 +494,13 @@ Object.assign(els, {
   windowsBackdropNote: document.getElementById('windowsBackdropNote'),
   macBackdropRow: document.getElementById('macBackdropRow'),
   macBackdropInput: document.getElementById('macBackdropInput'),
+  glassOpacityRow: document.getElementById('glassOpacityRow'),
+  macGlassTintRow: document.getElementById('macGlassTintRow'),
+  macGlassTintInput: document.getElementById('macGlassTintInput'),
+  macGlassTintReset: document.getElementById('macGlassTintReset'),
+  macClearGlassTintRow: document.getElementById('macClearGlassTintRow'),
+  macClearGlassTintInput: document.getElementById('macClearGlassTintInput'),
+  macClearGlassTintReset: document.getElementById('macClearGlassTintReset'),
   clearSessionUsageArchiveButton: document.getElementById('clearSessionUsageArchiveButton'),
   startupGroup: document.getElementById('startupGroup'),
   startAtLoginInput: document.getElementById('startAtLoginInput'),
@@ -476,16 +519,12 @@ Object.assign(els, {
   reportIssueButton: document.getElementById('reportIssueButton'),
   appUpdatePill: document.getElementById('appUpdatePill'),
   appUpdatePillAction: document.getElementById('appUpdatePillAction'),
-  appUpdatePillLabel: document.getElementById('appUpdatePillLabel'),
-  appUpdatePillRestart: document.getElementById('appUpdatePillRestart'),
-  appUpdatePillRestartLabel: document.getElementById('appUpdatePillRestartLabel'),
-  appUpdatePillDismiss: document.getElementById('appUpdatePillDismiss'),
+  appUpdatePillProgress: document.getElementById('appUpdatePillProgress'),
   appUpdatePopover: document.getElementById('appUpdatePopover'),
   appUpdatePopoverTitle: document.getElementById('appUpdatePopoverTitle'),
+  appUpdatePopoverSubtitle: document.getElementById('appUpdatePopoverSubtitle'),
   appUpdatePopoverBody: document.getElementById('appUpdatePopoverBody'),
-  appUpdatePopoverAction: document.getElementById('appUpdatePopoverAction'),
-  appUpdatePopoverRelease: document.getElementById('appUpdatePopoverRelease'),
-  appUpdatePopoverClose: document.getElementById('appUpdatePopoverClose'),
+  appUpdatePopoverDismiss: document.getElementById('appUpdatePopoverDismiss'),
   appUpdateInstalled: document.getElementById('appUpdateInstalled'),
   automaticAppUpdatesRow: document.getElementById('automaticAppUpdatesRow'),
   automaticAppUpdatesInput: document.getElementById('automaticAppUpdatesInput'),
@@ -498,9 +537,9 @@ Object.assign(els, {
   appUpdateNotesDetails: document.getElementById('appUpdateNotesDetails'),
   appUpdateNotesTitle: document.getElementById('appUpdateNotesTitle'),
   appUpdateNotesBody: document.getElementById('appUpdateNotesBody'),
-  appUpdateReleaseNotesButton: document.getElementById('appUpdateReleaseNotesButton'),
   appUpdateMessage: document.getElementById('appUpdateMessage'),
   titleIconInput: document.getElementById('titleIconInput'),
+  tokenNumberAnimationInput: document.getElementById('tokenNumberAnimationInput'),
   showCompactTotalTokensInput: document.getElementById('showCompactTotalTokensInput'),
   showLiveTokenRateInput: document.getElementById('showLiveTokenRateInput'),
   liveTokenRateScopeRow: document.getElementById('liveTokenRateScopeRow'),
@@ -597,6 +636,7 @@ function toggleAccordionRow(row) {
     renderActiveToolDetail();
   }
   renderToolDetailFooter();
+  renderProjectBreakdownFooter();
 }
 
 document.addEventListener('click', (event) => {
@@ -614,6 +654,8 @@ document.addEventListener('keydown', (event) => {
 
 els.toolDetailFooterTokens.addEventListener('click', () => setActiveToolDetailMode('tokens'));
 els.toolDetailFooterModels.addEventListener('click', () => setActiveToolDetailMode('models'));
+els.projectBreakdownFooterTools.addEventListener('click', () => { void saveSettings({ projectBreakdownMode: 'tool' }).catch(() => {}); });
+els.projectBreakdownFooterModels.addEventListener('click', () => { void saveSettings({ projectBreakdownMode: 'model' }).catch(() => {}); });
 
 document.addEventListener('pointerdown', (event) => {
   if (state.viewSwitcherOpen && !event.target.closest('#viewSwitcher')) {
@@ -999,6 +1041,11 @@ function displayLiveTokenRateItems() {
       enabled: state.settings?.floatingBubbleEnabled === true,
       content: state.settings?.floatingBubbleContent,
       layout: state.settings?.floatingBubbleCustomLayout
+    },
+    {
+      enabled: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchFollowTray === false,
+      content: 'custom',
+      layout: state.settings?.notchCustomLayout
     }
   ]);
 }
@@ -1205,6 +1252,7 @@ function syncLiveTokenRateFooterState() {
   if (!footer) return;
   const enabled = state.settings?.showLiveTokenRate === true;
   const obscured = !els.toolDetailFooter?.classList.contains('hidden')
+    || !els.projectBreakdownFooter?.classList.contains('hidden')
     || !els.appUpdatePill?.classList.contains('hidden');
   footer.classList.toggle('live-token-rate-enabled', enabled);
   footer.classList.toggle('live-token-rate-obscured', enabled && obscured);
@@ -1388,6 +1436,14 @@ function formatActiveDuration(ms) {
 function versionText(value) {
   return value ? `v${value}` : 'unknown';
 }
+// The release-note card under the footer update button. It opens on hover the
+// way a tooltip does, because the button's own press is the update action.
+const APP_UPDATE_CARD_OPEN_DELAY_MS = 250;
+const APP_UPDATE_CARD_CLOSE_DELAY_MS = 150;
+let appUpdateCardOpenTimer = 0;
+let appUpdateCardCloseTimer = 0;
+let suppressAppUpdateCardFocusOpen = false;
+
 function setAppUpdatePillDisclosure(available) {
   const action = els.appUpdatePillAction;
   if (available) {
@@ -1400,59 +1456,69 @@ function setAppUpdatePillDisclosure(available) {
   action.removeAttribute('aria-controls');
   action.removeAttribute('aria-expanded');
 }
+function appUpdatePillStatus(s, mode) {
+  if (s.installStarting) return 'installing';
+  // A download starts with a fresh provider check, reported as `checking`.
+  if (s.installPhase === 'downloading' || (s.installPhase === 'checking' && s.installBusy)) return 'downloading';
+  if (mode === 'install') return 'downloaded';
+  if (mode === 'release') return 'release';
+  return 'available';
+}
+function appUpdateDownloadPercent(s) {
+  return s?.installPhase === 'downloading' && Number.isFinite(s.installProgress)
+    ? Math.max(0, Math.min(100, Math.round(s.installProgress)))
+    : 0;
+}
+function appUpdatePillLabel(status, percent) {
+  if (status === 'downloading') return t('settings.appUpdate.downloading', { percent });
+  if (status === 'downloaded') return t('settings.appUpdate.restart');
+  if (status === 'installing') return t('settings.appUpdate.installStarting');
+  if (status === 'release') return t('settings.appUpdate.viewRelease');
+  return t('settings.appUpdate.download');
+}
 function renderAppUpdatePill() {
   const s = state.appUpdate;
   const pill = els.appUpdatePill;
   if (!pill) return;
+  const action = els.appUpdatePillAction;
   const mode = appUpdatePresentationApi.appUpdateActionMode(s);
   const version = s?.latest?.version || s?.installVersion || '';
   if (!s || !mode || !version || !s.showUpdateNotice) {
     pill.classList.add('hidden');
-    pill.classList.remove('is-ready');
-    pill.setAttribute('title', '');
-    els.appUpdatePillLabel.textContent = '';
-    els.appUpdatePillAction.removeAttribute('title');
-    els.appUpdatePillAction.removeAttribute('aria-label');
-    els.appUpdatePillAction.disabled = false;
-    els.appUpdatePillRestart.classList.add('hidden');
-    els.appUpdatePillRestartLabel.textContent = '';
-    els.appUpdatePillRestart.disabled = false;
-    els.appUpdatePillRestart.removeAttribute('title');
-    els.appUpdatePillRestart.removeAttribute('aria-label');
+    hideAppUpdatePopover();
+    action.removeAttribute('aria-label');
+    action.removeAttribute('aria-disabled');
     setAppUpdatePillDisclosure(false);
     syncLiveTokenRateFooterState();
     return;
   }
-  const hasReleaseNotes = releaseNoteGroupsForCurrentLocale(s.latest).length > 0;
-  setAppUpdatePillDisclosure(hasReleaseNotes);
+  const status = appUpdatePillStatus(s, mode);
+  const percent = appUpdateDownloadPercent(s);
   pill.classList.remove('hidden');
-  pill.classList.toggle('is-ready', mode === 'install');
-  els.appUpdatePillDismiss.classList.toggle('hidden', mode === 'install' || s.installBusy);
-  pill.setAttribute('title', '');
-  const releaseLabel = hasReleaseNotes
-    ? t('settings.appUpdate.whatsNew', { version })
-    : (s.latest?.name || `v${version}`);
-  els.appUpdatePillAction.setAttribute('title', releaseLabel);
-  els.appUpdatePillAction.setAttribute('aria-label', releaseLabel);
-  els.appUpdatePillAction.disabled = mode === 'install' && !hasReleaseNotes && !s.latest?.htmlUrl;
-  els.appUpdatePillRestart.classList.toggle('hidden', mode !== 'install');
-  els.appUpdatePillRestart.disabled = Boolean(s.installBusy);
-  els.appUpdatePillRestartLabel.textContent = mode === 'install'
-    ? t('settings.appUpdate.restartShort')
-    : '';
-  els.appUpdatePillRestart.setAttribute('title', t('settings.appUpdate.ready'));
-  els.appUpdatePillRestart.setAttribute('aria-label', t('settings.appUpdate.restart'));
-  if (s.installPhase === 'downloading' && Number.isFinite(s.installProgress)) {
-    els.appUpdatePillLabel.textContent = `${Math.round(s.installProgress)}%`;
-  } else {
-    els.appUpdatePillLabel.textContent = mode === 'install'
-      ? `v${version}`
-      : `↑ v${version}`;
-  }
+  action.dataset.status = status;
+  els.appUpdatePillProgress.style.strokeDashoffset = String(100 - percent);
+  action.setAttribute('aria-label', appUpdatePillLabel(status, percent));
+  // aria-disabled rather than disabled: a disabled button stops receiving the
+  // pointer events that open the card, which is where the progress is shown.
+  if (s.installBusy) action.setAttribute('aria-disabled', 'true');
+  else action.removeAttribute('aria-disabled');
+  setAppUpdatePillDisclosure(true);
   syncLiveTokenRateFooterState();
 }
-function releaseNoteGroupsForCurrentLocale(latest) {
-  return appUpdatePresentationApi.releaseNoteGroupsForLocale(latest?.releaseNotes, currentLocale());
+function releaseNoteHistoryForCurrentLocale(latest) {
+  return appUpdatePresentationApi.releaseNoteHistoryForLocale(latest, currentLocale());
+}
+function buildAppUpdateNoteItemNode(item) {
+  const row = document.createElement('li');
+  const { lead, body } = appUpdatePresentationApi.splitReleaseNoteLead(item);
+  if (!lead) {
+    row.textContent = body;
+    return row;
+  }
+  const strong = document.createElement('strong');
+  strong.textContent = lead;
+  row.append(strong, document.createTextNode(/[:]$/.test(lead) ? ` ${body}` : body));
+  return row;
 }
 function buildAppUpdateNoteGroupNodes(groups) {
   return groups.map((group) => {
@@ -1463,58 +1529,169 @@ function buildAppUpdateNoteGroupNodes(groups) {
     title.textContent = String(group?.title || '');
     const list = document.createElement('ul');
     for (const item of Array.isArray(group?.items) ? group.items : []) {
-      const row = document.createElement('li');
-      row.textContent = String(item || '');
-      list.append(row);
+      list.append(buildAppUpdateNoteItemNode(String(item || '')));
     }
     section.append(title, list);
     return section;
   });
 }
+function buildAppUpdateReleaseLink(className, label, url) {
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = `${className} app-update-release-link`;
+  link.dataset.releaseUrl = url;
+  link.textContent = label;
+  return link;
+}
+// One section per release, newest first. A single release is already named by the
+// heading above it, so it goes without its own version line.
+function buildAppUpdateReleaseNodes(entries) {
+  const showVersions = entries.length > 1;
+  return entries.map((entry) => {
+    const section = document.createElement('section');
+    section.className = 'app-update-release';
+    if (showVersions) {
+      const label = `v${entry.version}`;
+      const head = entry.htmlUrl
+        ? buildAppUpdateReleaseLink('app-update-release-version', label, entry.htmlUrl)
+        : Object.assign(document.createElement('div'), { className: 'app-update-release-version', textContent: label });
+      if (entry.htmlUrl) head.title = t('settings.appUpdate.viewFullRelease');
+      // A wrapper, because a stuck scroll-state container styles its descendants,
+      // not itself.
+      const wrapper = document.createElement('div');
+      wrapper.className = 'app-update-release-head';
+      wrapper.append(head);
+      section.append(wrapper);
+    }
+    // Every item: these are written summaries, so cutting them short hides whole
+    // groups (a release's fixes come last) rather than trimming noise.
+    section.append(...buildAppUpdateNoteGroupNodes(entry.groups));
+    return section;
+  });
+}
+function buildAppUpdateReleaseHistoryNodes(s) {
+  const history = releaseNoteHistoryForCurrentLocale(s?.latest);
+  const entries = history
+    .filter((entry, _index, all) => all.length > 1 || entry.groups.length > 0);
+  const nodes = buildAppUpdateReleaseNodes(entries);
+  // A single release has no version heading to open its page, so it gets an
+  // explicit link after its notes — even when the locale carries no groups and
+  // the link is the body's only node.
+  if (history.length === 1 && history[0]?.htmlUrl) {
+    nodes.push(buildAppUpdateReleaseLink('app-update-release-full', t('settings.appUpdate.viewFullRelease'), history[0].htmlUrl));
+  }
+  if (nodes.length > 0 && s?.latest?.releaseHistoryTruncated && s.releasesUrl) {
+    nodes.push(buildAppUpdateReleaseLink('app-update-release-older', t('settings.appUpdate.olderReleases'), s.releasesUrl));
+  }
+  return { entries, nodes };
+}
+// Download progress pushes many times a second. Rebuilding the notes on each one
+// would reset the reader's scroll position, so they are rebuilt only when what
+// they say changes.
+function appUpdateNotesContentKey(s) {
+  return JSON.stringify([currentLocale(), s?.currentVersion || '', s?.latest?.version || '', s?.latest?.releaseNoteHistory || null, s?.latest?.releaseNotes || null, Boolean(s?.latest?.releaseHistoryTruncated)]);
+}
+// The card explains; the button under it acts. A second action button in the
+// card only repeated the one the pointer had just passed over.
 function renderAppUpdatePopover(s) {
-  const version = s?.latest?.version || '';
-  const groups = releaseNoteGroupsForCurrentLocale(s?.latest);
   const mode = appUpdatePresentationApi.appUpdateActionMode(s);
-  if (!version || groups.length === 0 || !mode) {
-    if (els.appUpdatePopover.matches(':popover-open')) els.appUpdatePopover.hidePopover();
-    els.appUpdatePopoverTitle.textContent = '';
-    els.appUpdatePopoverBody.replaceChildren();
+  const version = s?.latest?.version || s?.installVersion || '';
+  if (!s || !mode || !version) {
+    hideAppUpdatePopover();
     return false;
   }
-  els.appUpdatePopoverTitle.textContent = t('settings.appUpdate.whatsNew', { version });
-  els.appUpdatePopoverBody.replaceChildren(...buildAppUpdateNoteGroupNodes(groups));
-  els.appUpdatePopoverAction.textContent = mode === 'install'
-    ? t('settings.appUpdate.restart')
-    : mode === 'download'
-      ? t('settings.appUpdate.download')
-      : t('settings.appUpdate.viewRelease');
-  els.appUpdatePopoverAction.disabled = Boolean(s.installBusy);
-  els.appUpdatePopoverRelease.classList.toggle('hidden', !s.latest?.htmlUrl);
+  const status = appUpdatePillStatus(s, mode);
+  const percent = appUpdateDownloadPercent(s);
+  const heading = {
+    available: [t('settings.appUpdate.availableTitle', { version }), t('settings.appUpdate.currentVersion', { version: s.currentVersion })],
+    release: [t('settings.appUpdate.availableTitle', { version }), t('settings.appUpdate.currentVersion', { version: s.currentVersion })],
+    downloading: [t('settings.appUpdate.downloading', { percent }), `v${version}`],
+    downloaded: [t('settings.appUpdate.readyTitle', { version }), t('settings.appUpdate.ready')],
+    installing: [t('settings.appUpdate.installStarting'), `v${version}`]
+  }[status];
+  els.appUpdatePopoverTitle.textContent = heading[0];
+  els.appUpdatePopoverSubtitle.textContent = heading[1];
+  const contentKey = appUpdateNotesContentKey(s);
+  if (els.appUpdatePopoverBody.dataset.contentKey !== contentKey) {
+    const { nodes } = buildAppUpdateReleaseHistoryNodes(s);
+    els.appUpdatePopoverBody.replaceChildren(...nodes);
+    els.appUpdatePopoverBody.dataset.contentKey = contentKey;
+    els.appUpdatePopoverBody.classList.toggle('hidden', nodes.length === 0);
+  }
+  els.appUpdatePopoverDismiss.classList.toggle('hidden', mode === 'install' || Boolean(s.installBusy));
   return true;
 }
 function positionAppUpdatePopover() {
   const rect = els.appUpdatePill.getBoundingClientRect();
   const width = Math.min(320, window.innerWidth - 24);
   const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.right - width));
+  const bottom = Math.max(12, window.innerHeight - rect.top + 8);
   els.appUpdatePopover.style.width = `${width}px`;
   els.appUpdatePopover.style.left = `${left}px`;
-  els.appUpdatePopover.style.bottom = `${Math.max(12, window.innerHeight - rect.top + 8)}px`;
+  els.appUpdatePopover.style.bottom = `${bottom}px`;
+  els.appUpdatePopover.style.maxHeight = `${appUpdatePresentationApi.appUpdatePopoverMaxHeight({ viewportHeight: window.innerHeight, bottom })}px`;
+}
+function clearAppUpdateCardTimers() {
+  clearTimeout(appUpdateCardOpenTimer);
+  clearTimeout(appUpdateCardCloseTimer);
+  appUpdateCardOpenTimer = 0;
+  appUpdateCardCloseTimer = 0;
+}
+function showAppUpdatePopover() {
+  clearAppUpdateCardTimers();
+  if (els.appUpdatePill.classList.contains('hidden') || typeof els.appUpdatePopover.showPopover !== 'function') return false;
+  if (!renderAppUpdatePopover(state.appUpdate)) return false;
+  positionAppUpdatePopover();
+  if (!els.appUpdatePopover.matches(':popover-open')) els.appUpdatePopover.showPopover();
+  return true;
+}
+function hideAppUpdatePopover() {
+  clearAppUpdateCardTimers();
+  if (!els.appUpdatePopover?.matches(':popover-open')) return;
+  // Only focus that was inside the card goes back to the button. A card that
+  // closes because the pointer left it must not pull focus to the button.
+  const focusWasInside = els.appUpdatePopover.contains(document.activeElement);
+  els.appUpdatePopover.hidePopover();
+  if (focusWasInside && !els.appUpdatePill.classList.contains('hidden')) {
+    suppressAppUpdateCardFocusOpen = true;
+    els.appUpdatePillAction.focus();
+  }
+}
+function scheduleAppUpdatePopoverOpen() {
+  clearAppUpdateCardTimers();
+  if (els.appUpdatePopover.matches(':popover-open')) return;
+  appUpdateCardOpenTimer = setTimeout(showAppUpdatePopover, APP_UPDATE_CARD_OPEN_DELAY_MS);
+}
+function scheduleAppUpdatePopoverClose() {
+  clearAppUpdateCardTimers();
+  appUpdateCardCloseTimer = setTimeout(() => {
+    appUpdateCardCloseTimer = 0;
+    // Keyboard focus inside the card holds it open until focus leaves.
+    if (els.appUpdatePopover.contains(document.activeElement)) return;
+    hideAppUpdatePopover();
+  }, APP_UPDATE_CARD_CLOSE_DELAY_MS);
 }
 function renderAppUpdateNotes(s) {
   const version = s?.latest?.version || '';
-  const groups = releaseNoteGroupsForCurrentLocale(s?.latest);
-  const visible = Boolean(version && groups.length > 0);
-  els.appUpdateNotes.classList.toggle('hidden', !visible);
-  if (!visible) {
-    setSettingsAccordionExpanded(els.appUpdateNotes, els.appUpdateNotesToggle, els.appUpdateNotesDetails, false);
-    els.appUpdateNotesTitle.textContent = '';
-    els.appUpdateNotesBody.replaceChildren();
-    return;
-  }
+  const contentKey = appUpdateNotesContentKey(s);
+  if (els.appUpdateNotesBody.dataset.contentKey !== contentKey) {
+    const { entries, nodes } = version ? buildAppUpdateReleaseHistoryNodes(s) : { entries: [], nodes: [] };
+    const visible = Boolean(version && nodes.length > 0);
+    els.appUpdateNotes.classList.toggle('hidden', !visible);
+    if (!visible) {
+      setSettingsAccordionExpanded(els.appUpdateNotes, els.appUpdateNotesToggle, els.appUpdateNotesDetails, false);
+      els.appUpdateNotesTitle.textContent = '';
+      els.appUpdateNotesBody.replaceChildren();
+      delete els.appUpdateNotesBody.dataset.contentKey;
+      return;
+    }
 
-  els.appUpdateNotesTitle.textContent = t('settings.appUpdate.whatsNew', { version });
-  els.appUpdateNotesBody.replaceChildren(...buildAppUpdateNoteGroupNodes(groups));
-  els.appUpdateReleaseNotesButton.classList.toggle('hidden', !s.latest?.htmlUrl);
+    els.appUpdateNotesTitle.textContent = entries.length > 1
+      ? t('settings.appUpdate.changesSince', { version: s.currentVersion })
+      : t('settings.appUpdate.whatsNew', { version });
+    els.appUpdateNotesBody.replaceChildren(...nodes);
+    els.appUpdateNotesBody.dataset.contentKey = contentKey;
+  }
   if (s.hasUpdate && state.appUpdateNotesPresentedVersion !== version) {
     // The disclosure may have just changed from display:none. Commit its
     // collapsed grid once so the first automatic reveal can transition too.
@@ -1662,7 +1839,10 @@ function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
 let numberAnimHandle = 0;
 let numberAnimTarget = null;
 let numberAnimValue = 0;
+let settleNumberRoll = null;
 function cancelNumberAnimation() {
+  settleNumberRoll?.();
+  settleNumberRoll = null;
   if (numberAnimHandle) cancelAnimationFrame(numberAnimHandle);
   numberAnimHandle = 0;
   numberAnimTarget = null;
@@ -1672,7 +1852,9 @@ function headlineNumberIsAnimatingTo(value) {
   return Boolean(numberAnimHandle) && numberAnimTarget === value;
 }
 
-function animateNumber(el, from, to, duration = 1000, onDone = null) {
+function animateNumber(el, from, to, duration = 1000, onDone = null, { synchronized = false } = {}) {
+  const rolling = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) === 'roll';
+  const rollSnapshot = rolling ? tokenNumberAnimationApi.capture(el) : null;
   cancelNumberAnimation();
   if (prefersReducedMotion()) {
     el.textContent = formatNumber(to);
@@ -1680,17 +1862,28 @@ function animateNumber(el, from, to, duration = 1000, onDone = null) {
     if (typeof onDone === 'function') onDone();
     return;
   }
+  if (rolling) {
+    duration = tokenNumberAnimationApi.duration;
+    settleNumberRoll = tokenNumberAnimationApi.beginRoll(el, formatNumber(from), formatNumber(to), to > from, () => {
+      el.textContent = formatNumber(to);
+      updateTotalCompact(to);
+    }, rollSnapshot, { period: synchronized });
+  }
   const start = performance.now();
   const delta = to - from;
   numberAnimTarget = to;
-  numberAnimValue = from;
+  numberAnimValue = rolling ? to : from;
   function frame(now) {
     const progress = Math.min(1, (now - start) / duration);
-    numberAnimValue = from + delta * easeOutQuart(progress);
-    el.textContent = formatNumber(numberAnimValue);
+    if (!rolling) {
+      numberAnimValue = from + delta * easeOutQuart(progress);
+      el.textContent = formatNumber(numberAnimValue);
+    }
     if (progress < 1) {
       numberAnimHandle = requestAnimationFrame(frame);
     } else {
+      settleNumberRoll?.();
+      settleNumberRoll = null;
       numberAnimHandle = 0;
       numberAnimTarget = null;
       numberAnimValue = to;
@@ -1700,12 +1893,13 @@ function animateNumber(el, from, to, duration = 1000, onDone = null) {
   numberAnimHandle = requestAnimationFrame(frame);
 }
 
-function animateTotalNumber(el, from, to, duration) {
-  animateNumber(el, from, to, duration, () => updateTotalCompact(to));
+function animateTotalNumber(el, from, to, duration, options) {
+  animateNumber(el, from, to, duration, () => updateTotalCompact(to), options);
 }
 
 const rowNumberAnimations = new Map();
 const rowBarAnimations = new Map();
+let breakdownNumberMotionVisibleOnly = false;
 const rowRenderFingerprints = new WeakMap();
 const toolDetailData = new WeakMap();
 
@@ -1719,19 +1913,24 @@ function settleMotionAnimations() {
   numberAnimValue = state.currentTotal;
   els.totalTokens.textContent = formatNumber(state.currentTotal);
   updateTotalCompact(state.currentTotal);
+  settleRowNumberAnimations();
+  limitResetAnimator.settle(els.limitsPanel);
+  for (const animation of document.getAnimations?.() || []) {
+    try { animation.finish(); } catch (_) { animation.cancel(); }
+  }
+  rowBarAnimations.clear();
+}
+
+function settleRowNumberAnimations() {
   for (const [el, motion] of rowNumberAnimations) {
     cancelAnimationFrame(motion.handle);
+    motion.settleRoll?.();
     const target = Number(motion.target ?? el.dataset.motionTarget ?? el.dataset.motionValue ?? 0);
     el.textContent = formatNumber(target);
     el.dataset.motionValue = String(target);
     delete el.dataset.motionTarget;
   }
   rowNumberAnimations.clear();
-  limitResetAnimator.settle(els.limitsPanel);
-  for (const animation of document.getAnimations?.() || []) {
-    try { animation.finish(); } catch (_) { animation.cancel(); }
-  }
-  rowBarAnimations.clear();
 }
 
 function applyReduceMotionPreference(value) {
@@ -1743,26 +1942,41 @@ function applyReduceMotionPreference(value) {
 
 function captureBreakdownMotion() {
   const rows = Array.from(els.breakdown?.querySelectorAll('.row[data-key]') || []);
-  if (!shouldAnimateBreakdownRows(rows.length, { reducedMotion: prefersReducedMotion() })) return null;
+  if (prefersReducedMotion()) return null;
+  const animateLayout = shouldAnimateBreakdownRows(rows.length, { reducedMotion: prefersReducedMotion() });
+  if (!animateLayout && state.breakdown !== 'session') return null;
+  const visibleNumbersOnly = !animateLayout || tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) === 'roll';
+  const motionRows = new Set(!visibleNumbersOnly ? rows : visibleBreakdownNumberRows(rows,
+    els.breakdown.getBoundingClientRect(), row => row.querySelector('.row-value')?.getBoundingClientRect()));
   const snapshot = new Map();
   for (const row of rows) {
-    const rect = row.getBoundingClientRect();
-    const fill = row.querySelector('.bar-fill');
+    // Keep cheap old values for every key: a reordered row may become visible
+    // after the update. Only visible readings need a glyph/layout snapshot.
+    const valueEl = row.querySelector('.row-value');
+    const rect = animateLayout ? row.getBoundingClientRect() : null;
+    const fill = animateLayout ? row.querySelector('.bar-fill') : null;
     const trackWidth = fill?.parentElement?.getBoundingClientRect().width || 0;
     const fillWidth = fill?.getBoundingClientRect().width || 0;
     snapshot.set(row.dataset.key, {
-      top: rect.top,
-      value: Number(row.querySelector('.row-value')?.dataset.motionValue || row.dataset.motionValue || 0),
+      layoutCaptured: animateLayout,
+      top: rect?.top,
+      value: Number(valueEl?.dataset.motionValue || row.dataset.motionValue || 0),
+      rollSnapshot: motionRows.has(row) ? tokenNumberAnimationApi.capture(valueEl) : null,
       barScale: trackWidth > 0 ? Math.max(0, Math.min(1, fillWidth / trackWidth)) : 0
     });
   }
   return snapshot;
 }
 
-function animateRowNumber(el, from, to, duration = 420) {
+function animateRowNumber(el, from, to, duration = 420, capturedRoll = null, { synchronized = false } = {}) {
   const previous = rowNumberAnimations.get(el);
-  if (previous?.target === to) return;
-  if (previous) cancelAnimationFrame(previous.handle);
+  if (previous?.target === to && !prefersReducedMotion()) return;
+  const rolling = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) === 'roll';
+  const rollSnapshot = rolling ? capturedRoll || tokenNumberAnimationApi.capture(el) : null;
+  if (previous) {
+    cancelAnimationFrame(previous.handle);
+    previous.settleRoll?.();
+  }
   const startValue = Number.isFinite(previous?.value) ? previous.value : from;
   if (!Number.isFinite(startValue) || !Number.isFinite(to) || startValue === to || prefersReducedMotion()) {
     el.textContent = formatNumber(to);
@@ -1774,11 +1988,19 @@ function animateRowNumber(el, from, to, duration = 420) {
   const startedAt = performance.now();
   const delta = to - startValue;
   const motion = { handle: 0, target: to, value: startValue };
-  el.textContent = formatNumber(startValue);
-  el.dataset.motionValue = String(startValue);
+  if (rolling) {
+    duration = tokenNumberAnimationApi.duration;
+    motion.value = to;
+    motion.settleRoll = tokenNumberAnimationApi.beginRoll(el, formatNumber(startValue), formatNumber(to), to > startValue, null, rollSnapshot,
+      { period: synchronized, whole: synchronized });
+  } else {
+    el.textContent = formatNumber(startValue);
+  }
+  el.dataset.motionValue = String(motion.value);
   el.dataset.motionTarget = String(to);
   function frame(now) {
     if (prefersReducedMotion()) {
+      motion.settleRoll?.();
       el.textContent = formatNumber(to);
       el.dataset.motionValue = String(Number(to) || 0);
       delete el.dataset.motionTarget;
@@ -1786,12 +2008,15 @@ function animateRowNumber(el, from, to, duration = 420) {
       return;
     }
     const progress = Math.min(1, (now - startedAt) / duration);
-    motion.value = startValue + delta * easeOutQuart(progress);
-    el.textContent = formatNumber(motion.value);
-    el.dataset.motionValue = String(motion.value);
+    if (!rolling) {
+      motion.value = startValue + delta * easeOutQuart(progress);
+      el.textContent = formatNumber(motion.value);
+      el.dataset.motionValue = String(motion.value);
+    }
     if (progress < 1) {
       motion.handle = requestAnimationFrame(frame);
     } else {
+      motion.settleRoll?.();
       delete el.dataset.motionTarget;
       if (rowNumberAnimations.get(el) === motion) rowNumberAnimations.delete(el);
     }
@@ -1804,16 +2029,43 @@ function cancelRowNumberAnimation(el) {
   if (!el) return;
   const motion = rowNumberAnimations.get(el);
   if (motion) cancelAnimationFrame(motion.handle);
+  motion?.settleRoll?.();
   rowNumberAnimations.delete(el);
   delete el.dataset.motionTarget;
 }
 
-function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
-  if (!snapshot) return;
+function settleOffscreenBreakdownNumbers() {
+  if (!breakdownNumberMotionVisibleOnly || rowNumberAnimations.size === 0) return;
+  const visible = new Set(visibleBreakdownNumberRows([...rowNumberAnimations.keys()],
+    els.breakdown.getBoundingClientRect(), el => el.getBoundingClientRect()));
+  for (const [el, motion] of rowNumberAnimations) {
+    if (visible.has(el)) continue;
+    cancelRowNumberAnimation(el);
+    el.textContent = formatNumber(motion.target);
+    el.dataset.motionValue = String(motion.target);
+  }
+}
+
+// A period switch (synchronized) starts every row on the headline's frame,
+// each sweeping its own reading left to right; live updates keep the gentle
+// entering stagger.
+function animateBreakdownFrom(snapshot, { duration = 420, synchronized = false } = {}) {
+  if (!snapshot || prefersReducedMotion()) return;
   const rows = Array.from(els.breakdown?.querySelectorAll('.row[data-key]') || []);
-  if (!shouldAnimateBreakdownRows(rows.length, { reducedMotion: prefersReducedMotion() })) return;
+  const animateLayout = shouldAnimateBreakdownRows(rows.length, { reducedMotion: prefersReducedMotion() });
+  if (!animateLayout && state.breakdown !== 'session') return;
+  breakdownNumberMotionVisibleOnly = !animateLayout || tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) === 'roll';
+  const motionRows = !breakdownNumberMotionVisibleOnly ? rows : visibleBreakdownNumberRows(rows,
+    els.breakdown.getBoundingClientRect(), row => row.querySelector('.row-value')?.getBoundingClientRect());
+  const animatedValues = new Set(motionRows.map(row => row.querySelector('.row-value')));
+  for (const [el, motion] of rowNumberAnimations) {
+    if (animatedValues.has(el)) continue;
+    cancelRowNumberAnimation(el);
+    el.textContent = formatNumber(motion.target);
+    el.dataset.motionValue = String(motion.target);
+  }
   let enteringIndex = 0;
-  for (const row of rows) {
+  for (const row of motionRows) {
     // An unavailable native session value must stay a semantic label. The
     // ordinary row-number tween formats its zero placeholder as "0", which
     // would turn unknown data into a false numeric reading after every render.
@@ -1823,6 +2075,19 @@ function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
     }
     const previous = snapshot.get(row.dataset.key);
     const value = Number(row.dataset.motionValue || 0);
+    const valueEl = row.querySelector('.row-value');
+    const animateReading = () => {
+      if (!breakdownNumberMotionVisibleOnly || !previous || previous.value !== value || rowNumberAnimations.has(valueEl)) {
+        animateRowNumber(valueEl, previous?.value ?? 0, value,
+          duration, previous?.rollSnapshot, { synchronized });
+      }
+    };
+    // Crossing back under the row budget cannot recover the old geometry.
+    // Keep number motion, but do not treat the uncaptured bar scale as zero.
+    if (!animateLayout || previous?.layoutCaptured === false) {
+      animateReading();
+      continue;
+    }
     const fill = row.querySelector('.bar-fill');
     const targetScale = Math.max(0, Math.min(1, Number(fill?.style.getPropertyValue('--bar-scale')) || 0));
     if (previous) {
@@ -1834,23 +2099,28 @@ function animateBreakdownFrom(snapshot, { duration = 420 } = {}) {
         ], { duration: 280, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
       }
       animateBarBetween(fill, previous.barScale, targetScale, 0, duration);
-      animateRowNumber(row.querySelector('.row-value'), previous.value, value, duration);
+      animateReading();
       continue;
     }
+    const delay = synchronized ? 0 : Math.min(enteringIndex, 6) * 18;
     row.animate([
       { opacity: 0, transform: 'translate3d(0, 7px, 0)' },
       { opacity: 1, transform: 'translate3d(0, 0, 0)' }
     ], {
       duration: 240,
-      delay: Math.min(enteringIndex, 6) * 18,
+      delay,
       easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
       fill: 'backwards'
     });
-    const delay = Math.min(enteringIndex, 6) * 18;
     animateBarBetween(fill, 0, targetScale, delay, Math.max(1, duration - delay));
-    animateRowNumber(row.querySelector('.row-value'), 0, value, duration);
+    animateReading();
     enteringIndex += 1;
   }
+}
+
+function periodBreakdownMotionDuration() {
+  return tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) === 'roll'
+    ? tokenNumberAnimationApi.layoutDuration : 800;
 }
 
 function animateBarBetween(
@@ -2045,10 +2315,14 @@ document.addEventListener('pointerdown', (event) => {
 let homeSessionRenderPending = false;
 const overflowText = window.TokenMonitorOverflowText.create({
   document, window, prefersReducedMotion,
-  enabled: element => Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint'),
+  enabled: element => !element.classList.contains('has-subagent-count')
+    && Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint'),
   onLeave: () => requestAnimationFrame(() => {
     if (homeSessionRenderPending && state.breakdown === 'home'
       && visibleStatsSurface() === 'main' && state.stats) renderHome();
+    // A final stats update may have been held before reading or before painting.
+    // Reuse the refresh guards to catch up without waiting for another push.
+    if (state.openSession?.kind === 'session') void refreshOpenSessionDetail();
   })
 });
 
@@ -2296,6 +2570,22 @@ function setActiveToolDetailMode(mode) {
   renderToolDetailFooter();
 }
 
+function renderProjectBreakdownFooter() {
+  const active = visibleStatsSurface() === 'main'
+    && state.breakdown === 'project'
+    && !els.breakdown.classList.contains('hidden')
+    && Boolean(els.breakdown.querySelector('.row.expanded .row-accordion-inner'));
+  els.projectBreakdownFooter.classList.toggle('hidden', !active);
+  syncLiveTokenRateFooterState();
+  if (!active) return;
+  const mode = state.settings?.projectBreakdownMode === 'model' ? 'model' : 'tool';
+  els.projectBreakdownFooter.setAttribute('aria-label', t('views.project'));
+  els.projectBreakdownFooterTools.textContent = t('views.tool');
+  els.projectBreakdownFooterModels.textContent = t('views.model');
+  els.projectBreakdownFooterTools.setAttribute('aria-pressed', String(mode === 'tool'));
+  els.projectBreakdownFooterModels.setAttribute('aria-pressed', String(mode === 'model'));
+}
+
 // The live-session pair: a dot on the tool mark for "this is being written to
 // right now", and a fuel gauge for how much of its context window is left. The
 // dot is drawn only while the agent is working and the gauge only while the
@@ -2343,19 +2633,20 @@ function updateRowContext(row, context, promptCache, contextSnapshot) {
 // The old idiom is kept - a green dot means "active right now" - with the dot
 // simply not drawn once the transcript says the turn is over. No spinner, no
 // check, no idle placeholder: a quiet row shows nothing, exactly as before.
-const rowLiveMarkup = '<span class="row-live-dot"></span>';
+const rowLiveMarkup = '<span class="row-live-dot"></span><span class="row-live-waiting"></span>';
 
 function updateRowLive(row, activityState, activityAt) {
   const dot = row.querySelector('.row-live');
   if (!dot) return;
-  // Only one thing is drawn here, and only while the agent is working: the dot
-  // is absent for every other state, which is what a session list full of past
-  // sessions should look like. The turn-end boundary is still read, so the dot
-  // clears the moment the transcript says the answer is finished rather than
-  // holding green until the recency window expires.
+  // Running keeps the green dot; explicit waiting gets a static attention mark.
+  // Finished and historical rows stay quiet.
   const active = activityState === 'running';
   dot.classList.toggle('is-active', active);
-  dot.title = active ? (t('session.running') || 'Running') : '';
+  dot.classList.toggle('is-waiting', activityState === 'waiting');
+  dot.title = activityState === 'waiting' ? t('session.waiting') : active ? (t('session.running') || 'Running') : '';
+  dot.setAttribute('aria-label', dot.title);
+  dot.setAttribute('role', 'img');
+  dot.setAttribute('aria-hidden', dot.title ? 'false' : 'true');
   const previous = Number(row.dataset.activityAt || 0);
   const next = Number(activityAt) || 0;
   if (next > 0) row.dataset.activityAt = String(next);
@@ -2367,7 +2658,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2386,17 +2677,15 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
   if (platform !== undefined) row.dataset.platform = platform || '';
   if (client !== undefined) row.dataset.client = client || '';
   if (kind !== undefined) row.dataset.kind = kind || '';
-  if (reviewGroup === true) row.dataset.reviewGroup = 'true';
-  else delete row.dataset.reviewGroup;
+  if (sessionGroup) row.dataset.sessionGroup = sessionGroup;
+  else delete row.dataset.sessionGroup;
   if (kind === 'session' && client === 'reasonix') {
     row.dataset.detailUnavailable = sessionDetailAvailable === true ? 'false' : 'true';
   } else if (row.hasAttribute('data-detail-unavailable')) {
     row.removeAttribute('data-detail-unavailable');
   }
-  const interactive = reviewGroup === true || (
-    kind === 'session'
-    && ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy'].includes(client)
-  ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
+  const interactive = Boolean(sessionGroup) || (kind === 'session'
+    && sessionRowsApi.sessionRowDetailAvailable({ client, sessionDetailAvailable }));
   const mark = row.querySelector('.row-mark');
   const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '', modelSource }, state.breakdown);
   if (iconKind.kind === 'icon') {
@@ -2409,29 +2698,57 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
   const titleEl = row.querySelector('.row-title');
   setHoverMarqueeText(titleEl, name);
   const subtitleEl = row.querySelector('.row-subtitle');
+  let subtitleTextEl = subtitleEl;
+  const splitSubtitle = Boolean(subagentCountLabel);
+  subtitleEl.classList.toggle('has-subagent-count', splitSubtitle);
+  if (splitSubtitle) {
+    subtitleTextEl = subtitleEl.querySelector('.session-subtitle-identity');
+    if (!subtitleTextEl) {
+      subtitleTextEl = document.createElement('span');
+      subtitleTextEl.className = 'session-subtitle-identity';
+      const count = document.createElement('span');
+      count.className = 'session-subagent-count';
+      const content = subtitleEl.querySelector('.overflow-text-content') || subtitleEl;
+      content.replaceChildren(subtitleTextEl, count);
+      bindHoverMarquee(subtitleTextEl);
+    }
+    subtitleEl.querySelector('.session-subagent-count').textContent = `${subtitleIdentity ? ' · ' : ''}${subagentCountLabel}`;
+    overflowText.update(subtitleEl);
+  }
+  const subtitleText = splitSubtitle ? subtitleIdentity || '' : subtitle;
   // A multi-model session abbreviates to "N models"; that label opens the same
   // tooltip the context gauge carries, one row per model with its tokens and
   // share of the session. A titled row prints the label inside the
   // client · model line, so the trigger is just the "N models" span; an
   // untitled row folds it into the title instead, whose whole text then opens
   // the tooltip. The trigger mirrors the row's own wording rather than adding
-  // chrome, so there is nothing extra on a single-model row.
+  // chrome, so there is nothing extra on a single-model row. A review heading
+  // explicitly identifies its model span before the trailing time.
   const modelEntries = Array.isArray(modelTooltipEntries) && modelTooltipEntries.length > 1
     ? modelTooltipEntries : null;
-  const subtitleShowsModel = Boolean(modelEntries && modelLabel && String(subtitle || '').endsWith(modelLabel));
+  const subtitleShowsModel = Boolean(!titleModelLabel && modelEntries && modelLabel && String(subtitleText || '').endsWith(modelLabel));
   if (subtitleShowsModel) {
     const models = document.createElement('span');
     models.className = 'session-models';
     models.textContent = modelLabel;
     // Inside the marquee's own wrapper, so a long line still scrolls on hover.
-    const subtitleContent = subtitleEl.querySelector('.overflow-text-content') || subtitleEl;
-    subtitleContent.replaceChildren(document.createTextNode(subtitle.slice(0, -modelLabel.length)), models);
-    overflowText.update(subtitleEl);
+    const subtitleContent = subtitleTextEl.querySelector('.overflow-text-content') || subtitleTextEl;
+    subtitleContent.replaceChildren(document.createTextNode(subtitleText.slice(0, -modelLabel.length)), models);
+    overflowText.update(subtitleTextEl);
     limitWindowsView.setDetailTooltip(models, modelEntries);
   } else {
-    setHoverMarqueeText(subtitleEl, subtitle);
+    setHoverMarqueeText(subtitleTextEl, subtitleText);
   }
-  if (!subtitleShowsModel && modelEntries && modelLabel && String(name || '').endsWith(modelLabel)) {
+  if (modelEntries && titleModelLabel && String(name || '').startsWith(titleModelLabel)) {
+    const models = document.createElement('span');
+    models.className = 'session-models';
+    models.textContent = titleModelLabel;
+    const titleContent = titleEl.querySelector('.overflow-text-content') || titleEl;
+    titleContent.replaceChildren(models, document.createTextNode(name.slice(titleModelLabel.length)));
+    overflowText.update(titleEl);
+    limitWindowsView.setDetailTooltip(models, modelEntries);
+  }
+  if (!subtitleShowsModel && !titleModelLabel && modelEntries && modelLabel && String(name || '').endsWith(modelLabel)) {
     limitWindowsView.setDetailTooltip(titleEl, modelEntries);
   } else if (titleEl.classList.contains('limit-detail-tooltip-wrap')) {
     limitWindowsView.setDetailTooltip(titleEl, null);
@@ -2456,7 +2773,12 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, unprice
     valueEl.textContent = t('detailTokenUnavailable') || 'Unavailable';
   } else {
     delete row.dataset.tokenDataUnavailable;
-    valueEl.textContent = formatNumber(value);
+    // Metadata-only updates must not replace the glyphs of a matching roll.
+    // Changed readings are restarted from the captured visual value below.
+    if (rowNumberAnimations.get(valueEl)?.target !== Number(value)) {
+      cancelRowNumberAnimation(valueEl);
+      valueEl.textContent = formatNumber(value);
+    }
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
@@ -2628,6 +2950,7 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     els.breakdown.replaceChildren();
     renderSessionPager(null);
     state.rowSignature = '';
+    renderProjectBreakdownFooter();
     return;
   }
   const page = breakdownPage(rows, { breakdown: state.breakdown, page: state.sessionPage });
@@ -2671,6 +2994,10 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     ? captureBreakdownMotion()
     : null;
   if (structureChanged) {
+    const retainedKeys = new Set(visibleRows.map((row) => row.key));
+    for (const [key, row] of existing) {
+      if (!retainedKeys.has(key)) cancelRowNumberAnimation(row.querySelector('.row-value'));
+    }
     const nodes = visibleRows.map((row) => existing.get(row.key) || rowTemplate(row));
     if (incompleteHint) {
       const hint = existingHint || document.createElement('p');
@@ -2694,6 +3021,7 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     rowRenderFingerprints.set(row, fingerprint);
   }
   renderToolDetailFooter();
+  renderProjectBreakdownFooter();
   if (liveMotionSnapshot) animateBreakdownFrom(liveMotionSnapshot, { duration: 600 });
 }
 
@@ -2849,31 +3177,49 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
   return toolRowsForPeriod(period);
 }
 
-function rawSessionRowsForPeriod(period) {
-  return sessionRowsApi.sessionRowsForPeriod(period, {
+function sessionPresentationOptions() {
+  return {
     clientLabels,
     clientColors,
     modelColor,
     stableColor,
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived'),
+    subagentLabel: t('sessions.subagent'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
-    nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
-  });
-}
-
-function sessionRowsForPeriod(period) {
-  const rows = rawSessionRowsForPeriod(period);
-  if (rows.length > 0) {
-    rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
-    return sessionRowsApi.groupBackgroundReviewRows(rows, {
+    sourcePeriods: state.stats?.periods,
+    grokBotSessionIds: state.stats?.grokBotSessionIds,
+    nativeSessions: state.stats?.nativeSessions?.[state.period] || {},
+    subagents: {
+      countLabel: (count) => t('sessions.subagentCount', { count }),
+      unattributedLabel: t('dashboard.tooltip.unclassified')
+    },
+    backgroundReviews: {
       label: t('sessions.backgroundReviews'),
       countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
       summaryLabel: ({ latestTime, latestValue }) => [
         latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
         latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
       ].filter(Boolean).join(' · ')
-    });
+    },
+    grokBot: {
+      label: t('sessions.grokBot'),
+      countLabel: (count) => t('sessions.grokBotCount', { count }),
+      summaryLabel: ({ latestTime }) => latestTime
+        ? t('sessions.backgroundReviewLatest', { time: latestTime }) : ''
+    }
+  };
+}
+
+function rawSessionRowsForPeriod(period) {
+  return sessionRowsApi.sessionRowsForPeriod(period, sessionPresentationOptions());
+}
+
+function sessionRowsForPeriod(period) {
+  const rows = rawSessionRowsForPeriod(period);
+  if (rows.length > 0) {
+    rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
+    return sessionRowsApi.groupSessionRows(rows, sessionPresentationOptions());
   }
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
@@ -2884,8 +3230,12 @@ function projectRowsForPeriod(period) {
     clientLabels,
     clientColors,
     stableColor,
+    shareBy: state.settings?.projectBreakdownMode,
+    modelColor,
     fallbackColors: fallbackModelColors,
     unknownClientLabel: t('projects.unknownTool'),
+    unknownModelLabel: t('projects.unknownModel'),
+    allowSessionModelAttribution: !projectRowsApi.projectBreakdownIncomplete(state.stats, state.period),
     nativeProjects: state.stats?.nativeProjects?.[state.period] || {},
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
@@ -3006,8 +3356,52 @@ function limitProvidersForSubscriptions() {
 // kind says which shape is being recorded, so hiding the accounts only got in
 // the way of reaching them.
 function subscriptionAccountChoices() {
-  const visible = limitProvidersForSubscriptions()
-    .filter((provider) => provider?.provider && provider.status !== 'notConfigured');
+  const observed = limitProvidersForSubscriptions()
+    .filter((provider) => !limitProviderPresentationApi.isWorkbuddyPlaceholder(provider))
+    .map((provider) => ({ ...provider }));
+  const known = [...observed];
+  // Managed identities remain selectable before a first successful quota read.
+  for (const account of state.settings?.workbuddyManagedAccounts || []) {
+    if (!account.accountKey) continue;
+    const existing = known.find((provider) => provider.provider === 'workbuddy' && provider.accountKey === account.accountKey);
+    if (existing) {
+      if (!existing.accountName) existing.accountName = account.accountName;
+      if (!existing.accountEmail) existing.accountEmail = account.accountEmail;
+    } else {
+      known.push({ provider: 'workbuddy', status: 'notConfigured', accountKey: account.accountKey,
+        accountName: account.accountName, accountEmail: account.accountEmail, windows: [] });
+    }
+  }
+  const saved = state.settings?.subscriptions || [];
+  // A stored binding also names an account while a device or credential is gone.
+  for (const subscription of saved) {
+    if (!subscription.provider || !subscription.binding) continue;
+    const binding = subscription.binding;
+    const account = { provider: subscription.provider, status: 'notConfigured', windows: [],
+      accountKey: binding.accountKey || '', accountEmail: binding.accountEmail || '', accountName: binding.profileName || '' };
+    // Token/cookie-based providers heal rotated keys against the observed pool
+    // before a saved-only virtual row can claim the obsolete exact key.
+    const healed = subscription.provider === 'workbuddy' ? null
+      : subscriptionApi.matchProviderAccount(subscription, observed);
+    const existing = healed || known.find((provider) => {
+      if (provider.provider !== account.provider) return false;
+      if (account.accountKey) return accountIdentityApi.accountKeyFamily(provider).has(account.accountKey);
+      if (account.accountEmail) return String(provider.accountEmail || provider.email || '').toLowerCase() === account.accountEmail.toLowerCase();
+      if (account.accountName) return provider.accountName === account.accountName;
+      return !provider.accountKey && !provider.accountEmail && !provider.email && !provider.accountName;
+    });
+    if (existing) {
+      if (!existing.accountName) existing.accountName = account.accountName;
+      if (!existing.accountEmail) existing.accountEmail = account.accountEmail;
+    } else known.push(account);
+  }
+  const visible = known.filter((provider) => {
+    if (!provider?.provider) return false;
+    if (provider.status === 'ok') return true;
+    if (provider.accountKey || provider.accountEmail || provider.email || provider.accountName) return true;
+    return saved.some((subscription) => subscription.provider === provider.provider && subscription.binding
+      && !subscription.binding.accountKey && !subscription.binding.accountEmail && !subscription.binding.profileName);
+  });
   return visible.map((provider, index) => ({
     provider,
     value: subscriptionAccountValue(provider),
@@ -3018,13 +3412,12 @@ function subscriptionAccountChoices() {
   }));
 }
 
-// The picker's value for one choice, which is only ever compared against another
-// choice from the same freshly built list: distinct per account, stable for one
-// record. It carries the address as well, so the two accounts a provider reports
-// by address alone are two choices rather than one — while "is this the same
-// account?" stays with accountIdentity.sameAccount(), where the matcher's rule
-// lives.
+// A known key stays stable through renamed profiles, changed email metadata and
+// failed quota reads. Address-only accounts retain the legacy disambiguation.
 function subscriptionAccountValue(provider) {
+  const id = String(provider?.provider || '').trim().toLowerCase();
+  const key = String(provider?.accountKey || '').trim();
+  if (key) return [id, key].join('\0');
   return [
     String(provider?.provider || '').trim().toLowerCase(),
     String(provider?.accountKey || '').trim(),
@@ -3054,7 +3447,7 @@ function subscriptionSelectedAccount() {
 // replaced the old one.
 function subscriptionForAccount(list, providerId, account, excludeId) {
   if (!account) return null;
-  const accounts = limitProvidersForSubscriptions();
+  const accounts = subscriptionAccountChoices().map((choice) => choice.provider);
   return list.find((entry) => {
     if (entry.id === excludeId || entry.provider !== providerId) return false;
     const bound = subscriptionApi.matchProviderAccount(entry, accounts);
@@ -3204,7 +3597,7 @@ function renderSubscriptionRows() {
     return;
   }
 
-  const providers = limitProvidersForSubscriptions();
+  const providers = subscriptionAccountChoices().map((choice) => choice.provider);
   for (const subscription of list) {
     const account = subscriptionApi.matchProviderAccount(subscription, providers);
     const row = document.createElement('div');
@@ -3850,7 +4243,7 @@ function beginSubscriptionEdit(id) {
   }
   state.subscriptionEditingId = id;
 
-  const account = subscriptionApi.matchProviderAccount(subscription, limitProvidersForSubscriptions());
+  const account = subscriptionApi.matchProviderAccount(subscription, subscriptionAccountChoices().map((choice) => choice.provider));
   if (els.subscriptionProviderInput) els.subscriptionProviderInput.value = subscription.provider;
   renderSubscriptionPickers();
   if (account && els.subscriptionAccountInput) {
@@ -4019,7 +4412,7 @@ function limitDetailTooltipShouldHoldRender() {
 }
 
 function sessionTooltipShouldHoldRender() {
-  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
+  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .session-group-run .is-hover-reading, .session-group-run:focus-within, .session-group-run .limit-detail-tooltip-wrap:hover, .session-group-run .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.is-hover-reading, .detail-heading.is-hover-reading, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
 }
 
 function flushPendingLimitDetailTooltipRender() {
@@ -4126,6 +4519,9 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   currencyApi,
   formatCost,
   subscriptions: () => state.settings?.subscriptions,
+  // The quota group uses the complete observed pool, including non-reporting
+  // identities. Saved-only bindings stay in the form choices; the stable-key
+  // matcher refuses to heal their tooltips onto another observed account.
   subscriptionAccounts: () => limitProvidersForSubscriptions(),
   monthClientCosts: () => state.stats?.periods?.month?.clientCosts,
   resetForecast: () => ({ busy: state.codexResetForecastBusy, forecast: state.codexResetForecast })
@@ -4389,6 +4785,7 @@ function renderLimits() {
       state.settings?.showToolIcons !== false,
       state.settings?.claudePrepaidBalanceEnabled !== false,
       state.settings?.codexResetForecastEnabled === true,
+      state.settings?.workbuddyQuotaTotalEnabled === true,
       state.settings?.showCodexAdditionalLimits !== false,
       state.settings?.limitProviderHiddenItems || {},
       state.settings?.currency || '',
@@ -4642,20 +5039,102 @@ function applySessionDetailResult(request, options) {
   renderSessionDetail(options);
 }
 
-async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null }) {
+async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null, titleFollowsSession = false }) {
+  // A review run is headed by model and time; a named group run (a subagent, a
+  // Grok Bot record) is headed by its session title and follows title display.
+  const fixedGroupHeading = returnTo?.kind === 'session-group' && titleFollowsSession !== true;
   const request = { kind: 'session', client, sessionId, sessionCost,
-    title: state.settings?.sessionTitlesEnabled === false && returnTo?.kind !== 'background-review-group' ? '' : title,
-    period: state.period, detail: null, returnTo };
+    title: state.settings?.sessionTitlesEnabled === false && !fixedGroupHeading ? '' : title,
+    period: state.period, detail: null, returnTo, titleFollowsSession: titleFollowsSession === true };
   state.openSession = request;
   renderSessionDetail({ loading: true });
+  // Read before the request, not after: a stats push that lands while it is in
+  // flight has to stay unseen so catch-up re-reads, instead of being written
+  // off against a response that predates it.
+  const liveSignature = sessionDetailLiveSignature();
   try {
     const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: request.period, sessionCost });
     if (state.openSession === request) {
       request.detail = detail;
+      request.liveSignature = liveSignature;
       applySessionDetailResult(request, { detail });
+      // The final push may have arrived while detail was still null. Use the
+      // existing guards now; a held/hidden page catches up on leave/visibility.
+      if (detail?.found === true && !detail.error) void refreshOpenSessionDetail();
     }
   } catch (_) {
     applySessionDetailResult(request, { error: true });
+  }
+}
+
+function sessionLiveStatsEntry(request) {
+  if (!request) return null;
+  const periodKey = request.period || state.period;
+  return request.client === 'reasonix'
+    ? state.stats?.nativeSessions?.[periodKey]?.[request.sessionId] || null
+    : state.stats?.periods?.[periodKey]?.sessions?.[`${request.client}:${request.sessionId}`] || null;
+}
+
+function sessionLiveCost(entry, client) {
+  return client === 'reasonix' ? Number(entry?.reportedCostUsd || 0) : Number(entry?.costUsd || 0);
+}
+
+function sessionDetailLiveSignature() {
+  const entry = sessionLiveStatsEntry(state.openSession);
+  if (!entry) return '';
+  return JSON.stringify([
+    Number(entry.totalTokens) || 0,
+    Number(entry.costUsd) || 0,
+    Number(entry.reportedCostUsd) || 0
+  ]);
+}
+
+// The Details page is a point-in-time reading of a transcript: the reader runs
+// once per click, while the session keeps accruing usage through `stats:push`
+// and the refresh timer. Without a re-read, someone who opens a session mid-run
+// watches every other surface move while this one freezes until it is reopened.
+// Re-read only when the reported usage actually changed, and never mid-hover: a
+// rebuild replaces every row node, which would kill a tooltip or focus the
+// reader is using. The next tick picks it up once the hover ends.
+async function refreshOpenSessionDetail() {
+  const request = state.openSession;
+  if (request?.kind !== 'session' || !request.detail || request.detailLiveBusy) return;
+  if (visibleStatsSurface() !== 'main' || sessionTooltipShouldHoldRender()) return;
+  // Paint a held result once, then check whether usage advanced during its read.
+  // An unchanged signature still avoids another transcript read.
+  if (request.detailRenderPending) {
+    request.detailRenderPending = false;
+    renderSessionDetail({ detail: request.detail, preserveScroll: true });
+  }
+  const signature = sessionDetailLiveSignature();
+  if (!signature || signature === request.liveSignature) return;
+  const sessionCost = sessionLiveCost(sessionLiveStatsEntry(request), request.client);
+  request.detailLiveBusy = true;
+  let readSucceeded = false;
+  try {
+    const detail = await window.tokenMonitor.getSessionDetail({
+      client: request.client, sessionId: request.sessionId, period: request.period, sessionCost
+    });
+    if (state.openSession !== request) return;
+    // Readers resolve filesystem failures as payloads rather than rejecting.
+    // Keep the last good snapshot and signature so the next tick can retry.
+    if (!detail || detail.found !== true || detail.error) return;
+    request.sessionCost = sessionCost;
+    request.detail = detail;
+    request.liveSignature = signature;
+    readSucceeded = true;
+    // The reader can start a hover while the read is in flight, so the hold is
+    // rechecked here rather than trusted from the call site.
+    if (sessionTooltipShouldHoldRender()) { request.detailRenderPending = true; return; }
+    renderSessionDetail({ detail, preserveScroll: true });
+  } catch (_) {
+    // Keep the last good reading; the next stats tick tries again.
+  } finally {
+    request.detailLiveBusy = false;
+    // Leave can run while busy. A successful read checks for a final push via
+    // the same visibility/hold/signature guards; failures wait for a later retry.
+    if (readSucceeded && state.openSession === request
+      && sessionDetailLiveSignature() !== request.liveSignature) void refreshOpenSessionDetail();
   }
 }
 
@@ -4675,20 +5154,31 @@ function closeSessionDetail() {
 
 function sessionDetailBack() {
   const returnTo = state.openSession?.returnTo;
-  if (returnTo?.kind === 'background-review-group') {
+  if (returnTo?.kind === 'session-group') {
     state.openSession = returnTo;
-    renderBackgroundReviewDetail(returnTo);
+    renderSessionGroupDetail(returnTo);
     return;
   }
   closeSessionDetail();
 }
 
-function renderSessionDetail({ detail, loading, error } = {}) {
+function renderSessionDetail({ detail, loading, error, preserveScroll = false } = {}) {
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
   const head = els.sessionDetailHead;       // static layer — rows scroll independently below it
   const container = els.sessionDetail;
+  container.classList.remove('session-group-list');
+  // Anchor the row being read: new content can grow above or below it, and
+  // token sorting can reorder exchanges without changing the total height.
+  const previousScroll = preserveScroll ? captureSessionDetailScroll(container) : null;
+  // A reader who opened an exchange keeps it open; a rebuild that collapsed it
+  // would look like the page had reset itself under them.
+  const expandedKeys = preserveScroll
+    ? new Set([...container.children]
+      .filter((node) => node.classList.contains('expanded'))
+      .map((node) => node.dataset.exchangeKey))
+    : null;
   head.replaceChildren();
   container.replaceChildren();
 
@@ -4717,36 +5207,104 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   head.append(sort);
 
   const max = Math.max(1, ...rows.map((row) => row.value));
-  for (const row of rows) container.append(exchangeNode(row, max));
+  for (const row of rows) container.append(exchangeNode(row, max, expandedKeys?.has(row.key) === true));
+  if (previousScroll) restoreSessionDetailScroll(container, previousScroll);
+}
+
+function captureSessionDetailScroll(container) {
+  const top = container.scrollTop;
+  if (top === 0) return { top };
+  const viewportTop = container.getBoundingClientRect().top + container.clientTop;
+  for (const exchange of container.children) {
+    if (!exchange.dataset.exchangeKey || exchange.getBoundingClientRect().bottom <= viewportTop) continue;
+    const candidates = [exchange.querySelector('.detail-ex-head')];
+    if (exchange.classList.contains('expanded')) candidates.push(...exchange.querySelectorAll('.detail-turn'));
+    const node = candidates.find(candidate => candidate && candidate.getBoundingClientRect().bottom > viewportTop);
+    if (node) return {
+      top, exchangeKey: exchange.dataset.exchangeKey, turnKey: node.dataset.key,
+      offset: node.getBoundingClientRect().top - viewportTop
+    };
+  }
+  return { top };
+}
+
+function restoreSessionDetailScroll(container, anchor) {
+  const exchange = [...container.children].find(node => node.dataset.exchangeKey === anchor.exchangeKey);
+  const node = exchange && (anchor.turnKey
+    ? [...exchange.querySelectorAll('.detail-turn')].find(turn => turn.dataset.key === anchor.turnKey)
+    : exchange.querySelector('.detail-ex-head'));
+  if (node && anchor.top > 0) {
+    const viewportTop = container.getBoundingClientRect().top + container.clientTop;
+    container.scrollTop += node.getBoundingClientRect().top - viewportTop - anchor.offset;
+  } else {
+    container.scrollTop = anchor.top;
+  }
 }
 
 function sessionDetailTitle() {
   const request = state.openSession;
-  // Review runs use a model/time heading, which is independent of session
+  // Group runs use a model/time heading, which is independent of session
   // title visibility. Ordinary Details follow the current session metadata.
-  if (request?.returnTo?.kind === 'background-review-group') return request.title;
+  if (request?.returnTo?.kind === 'session-group' && request.titleFollowsSession !== true) return request.title;
   if (state.settings?.sessionTitlesEnabled === false) return '';
   const period = request?.period || state.period;
   const session = request?.client === 'reasonix'
     ? state.stats?.nativeSessions?.[period]?.[request.sessionId]
     : state.stats?.periods?.[period]?.sessions?.[`${request?.client}:${request?.sessionId}`];
-  return session?.title || request?.title || '';
+  return sessionRowsApi.sessionTitleForDisplay({
+    client: request?.client, title: session?.title || request?.title
+  });
 }
 
 function refreshSessionDetailHeading() {
   if (state.openSession?.kind !== 'session') return;
+  // The group a Details page returns to is labelled by its summary, and a
+  // subagent group's summary quotes the parent's title. Follow the current
+  // stats so the back label, and the group page it returns to, honour title
+  // display like every other surface.
+  const group = state.openSession.returnTo;
+  const period = group?.kind === 'session-group' && group.summary?.key
+    ? state.stats?.periods?.[group.period || state.period] : null;
+  if (period) {
+    const rows = sessionRowsForPeriod(period);
+    const memberKey = `session:${state.openSession.client}:${state.openSession.sessionId}`;
+    const holds = (row) => row.groupRows?.some((member) => member.key === memberKey);
+    // The same group counts only while it still holds this session: a child
+    // moved to another parent must not return to its old one.
+    const latest = rows.find((row) => row.key === group.summary.key && holds(row));
+    if (latest) {
+      group.summary = latest;
+    } else {
+      // The group is gone or no longer holds this session (its parent left the
+      // list, or the session now sits under another parent). A cached summary
+      // would keep quoting titles the current stats no longer carry, so return
+      // to whichever group holds this session now, or to Sessions when none does.
+      const holder = rows.find(holds);
+      state.openSession.returnTo = holder ? { kind: 'session-group', period: group.period, summary: holder } : null;
+    }
+  }
   const head = els.sessionDetailHead;
-  if ((head.querySelector('.detail-heading')?.textContent || '') === sessionDetailTitle()) return;
+  if (state.openSession.headingSignature === sessionDetailHeadingSignature()) return;
   // Retain the body, loading/error state and sort control. Unchanged headings
   // also retain their hover-reading motion through periodic stats updates.
   head.replaceChildren(sessionDetailBackButton(), ...Array.from(head.children).slice(1));
 }
 
+function sessionDetailBackLabel() {
+  return state.openSession?.returnTo?.kind === 'session-group'
+    ? state.openSession.returnTo.summary?.name || t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
+}
+
+function sessionDetailHeadingSignature() {
+  return JSON.stringify([sessionDetailTitle(), sessionDetailBackLabel()]);
+}
+
 function sessionDetailBackButton() {
   const back = document.createElement('button');
   const title = sessionDetailTitle();
-  const backLabel = state.openSession?.returnTo?.kind === 'background-review-group'
-    ? t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
+  const backLabel = sessionDetailBackLabel();
+  // Every heading is built here, so the open request records what it shows.
+  if (state.openSession) state.openSession.headingSignature = JSON.stringify([title, backLabel]);
   back.type = 'button';
   back.className = title ? 'detail-back detail-back-titled' : 'detail-back';
   if (!title) back.textContent = `‹ ${backLabel}`;
@@ -4791,60 +5349,56 @@ function sessionIdLine(idLabel) {
   return line;
 }
 
-function backgroundReviewRunNode(row, max, parent) {
-  const wrap = document.createElement('div');
-  wrap.className = 'detail-exchange background-review-run';
-  wrap.setAttribute('role', 'button');
-  wrap.setAttribute('tabindex', '0');
-  wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">›</span>'
-    + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span></div>'
-    + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
-    + '<div class="bar"><div class="bar-fill"></div></div>';
-  const time = sessionRowsApi.compactSessionTime(row.sortTime, new Date());
-  const title = [row.modelLabel, time].filter(Boolean).join(' · ') || t('sessions.backgroundReviews');
-  const titleEl = wrap.querySelector('.detail-ex-title');
-  titleEl.textContent = title;
-  titleEl.title = title;
-  bindHoverMarquee(titleEl);
-  // A multi-model run reads "N models · time" here — the same label the
-  // Sessions list opens for its per-model shares, so the title opens it too.
-  if (row.modelTooltipEntries?.length > 1) {
-    limitWindowsView.setDetailTooltip(titleEl, row.modelTooltipEntries);
+function sessionGroupRunNode(row, max, parent) {
+  const subagentGroup = parent.summary?.subagentGroup === true;
+  const namedGroup = subagentGroup || parent.summary?.sessionGroup === 'cursor-grok-bot';
+  const title = namedGroup ? row.name
+    : [row.modelLabel, sessionRowsApi.compactSessionTime(row.sortTime)].filter(Boolean).join(' · ')
+      || t('sessions.backgroundReviews');
+  // Group members are still session rows. Share the template, metrics, tooltip
+  // and activity rendering; exchange rows belong only to the actual transcript.
+  const member = { ...row, name: title, titleModelLabel: namedGroup ? undefined : row.modelLabel };
+  if (subagentGroup) {
+    member.subtitle = [row.clientLabel, row.modelLabel].filter(Boolean).join(' · ');
+    member.activity = row.activitySummary;
   }
-  wrap.querySelector('.detail-ex-sub').textContent = row.detail || '';
-  wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
-  wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0, row.unpricedTokens);
-  applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
-  const open = () => openSessionDetail({
-    client: row.client,
-    sessionId: String(row.key || '').replace(/^session:[^:]+:/, ''),
-    sessionCost: Number(row.cost || 0),
-    title,
-    returnTo: parent
-  });
-  wrap.addEventListener('click', open);
-  wrap.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    open();
-  });
+  const wrap = rowTemplate(member);
+  updateRow(wrap, { ...member, barValue: member.barValue ?? member.value, max });
+  // Keep the existing repaint guard for model hover and keyboard focus.
+  wrap.classList.add('session-group-run');
+  if (sessionRowsApi.sessionRowDetailAvailable(row)) {
+    wrap.addEventListener('click', () => {
+      const sessionId = String(row.key || '').replace(/^session:[^:]+:/, '');
+      openSessionDetail({
+        client: row.client,
+        sessionId: row.client === 'reasonix' ? `reasonix:${sessionId}` : sessionId,
+        sessionCost: Number(row.cost || 0),
+        title,
+        returnTo: parent,
+        titleFollowsSession: namedGroup
+      });
+    });
+    wrap.addEventListener('keydown', sessionRowsApi.handleBreakdownRowKeydown);
+  }
   return wrap;
 }
 
-function renderBackgroundReviewDetail(request) {
+function renderSessionGroupDetail(request) {
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
   const head = els.sessionDetailHead;
   const container = els.sessionDetail;
   head.replaceChildren();
+  container.classList.add('session-group-list');
   container.replaceChildren();
 
+  const label = request?.summary?.name || t('sessions.backgroundReviews');
   const back = document.createElement('button');
   back.type = 'button';
   back.className = 'detail-back detail-back-titled';
   back.setAttribute('aria-label', t('sessions.backToWithTitle', {
-    title: t('sessions.backgroundReviews'), destination: t('sessions') || 'Sessions'
+    title: label, destination: t('sessions') || 'Sessions'
   }));
   back.addEventListener('click', closeSessionDetail);
   const arrow = document.createElement('span');
@@ -4853,25 +5407,45 @@ function renderBackgroundReviewDetail(request) {
   arrow.setAttribute('aria-hidden', 'true');
   const heading = document.createElement('span');
   heading.className = 'detail-heading';
-  heading.textContent = t('sessions.backgroundReviews');
+  heading.textContent = label;
   bindHoverMarquee(heading);
   back.append(arrow, heading);
   head.append(back);
 
-  const rows = request?.summary?.backgroundReviewRows || [];
+  const rows = request?.summary?.groupRows || [];
   if (rows.length === 0) {
     container.append(detailNote(t('detailEmpty') || 'No activity in this period.'));
     return;
   }
   const overview = document.createElement('div');
-  overview.className = 'background-review-overview';
-  overview.innerHTML = '<span class="background-review-count"></span><span class="background-review-totals"></span>';
-  overview.querySelector('.background-review-count').textContent = t('sessions.backgroundReviewCount', { count: rows.length });
-  overview.querySelector('.background-review-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0)}`;
+  overview.className = 'session-group-overview';
+  overview.innerHTML = '<span class="session-group-count"></span><span class="session-group-totals"></span>';
+  overview.querySelector('.session-group-count').textContent = request.summary.subagentGroup
+    ? t('dashboard.stat.totalTokens') : request.summary.groupDetail || request.summary.detail;
+  overview.querySelector('.session-group-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0, request.summary.unpricedTokens)}`;
   container.append(overview);
 
   const max = Math.max(1, ...rows.map((row) => Number(row.value) || 0));
-  for (const row of rows) container.append(backgroundReviewRunNode(row, max, request));
+  if (request.summary.subagentGroup) {
+    // Roles come from the grouping projection, including every main continuation.
+    // Older member DTOs without a role retain the original first-row main fallback.
+    const isMain = row => row.groupRole === 'main' || (!row.groupRole && row.key === rows[0].key);
+    const mainHeading = document.createElement('h3');
+    mainHeading.className = 'session-group-section-heading is-first';
+    mainHeading.textContent = t('sessions.mainSession');
+    container.append(mainHeading);
+    for (const row of rows.filter(isMain)) container.append(sessionGroupRunNode(row, max, request));
+    const children = rows.filter(row => !isMain(row));
+    if (children.length) {
+      const heading = document.createElement('h3');
+      heading.className = 'session-group-section-heading';
+      heading.textContent = `${t('sessions.subagent')} · ${request.summary.subagentCount}`;
+      container.append(heading);
+      for (const row of children) container.append(sessionGroupRunNode(row, max, request));
+    }
+  } else {
+    for (const row of rows) container.append(sessionGroupRunNode(row, max, request));
+  }
 }
 
 function detailNote(text) {
@@ -4881,7 +5455,7 @@ function detailNote(text) {
   return note;
 }
 
-function exchangeNode(row, max) {
+function exchangeNode(row, max, expanded = false) {
   const wrap = document.createElement('div');
   wrap.className = 'detail-exchange';
   wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">▸</span>'
@@ -4912,10 +5486,17 @@ function exchangeNode(row, max) {
   const turnsEl = wrap.querySelector('.detail-turns');
   for (const turn of row.turns) turnsEl.append(turnNode(turn));
 
-  const head = wrap.querySelector('.detail-ex-head');
-  head.addEventListener('click', () => {
-    const collapsed = turnsEl.classList.toggle('hidden');
-    wrap.querySelector('.detail-chev').textContent = collapsed ? '▸' : '▾';
+  // Row keys are assigned in transcript order before display sorting, so
+  // equal or missing timestamps do not reopen or anchor a different exchange.
+  wrap.dataset.exchangeKey = row.key;
+  const setExpanded = (open) => {
+    turnsEl.classList.toggle('hidden', !open);
+    wrap.classList.toggle('expanded', open);
+    wrap.querySelector('.detail-chev').textContent = open ? '▾' : '▸';
+  };
+  setExpanded(expanded);
+  wrap.querySelector('.detail-ex-head').addEventListener('click', () => {
+    setExpanded(turnsEl.classList.contains('hidden'));
   });
   return wrap;
 }
@@ -4923,6 +5504,7 @@ function exchangeNode(row, max) {
 function turnNode(turn) {
   const el = document.createElement('div');
   el.className = 'detail-turn';
+  el.dataset.key = turn.key;
   const tk = turn.tokens || {};
   // "cache" folds cache reads + cache writes (Claude's cache_creation) into one bucket so the
   // in/out/cache breakdown sums to the turn total; reason is an informational subset of out.
@@ -5644,7 +6226,7 @@ function homeLimitRows() {
   return homeOverviewApi.homeLimitAccountsForProviders({
     // Hidden rows go before the compact pick, so Antigravity's tightest window
     // per group is chosen among the ones the user still shows.
-    providers: (state.stats?.limits?.providers || []).map((provider) => ({
+    providers: limitWindowsView.collapseWorkbuddyAccounts(state.stats?.limits?.providers || []).map((provider) => ({
       ...provider,
       windows: limitProviderPresentationApi.limitProviderCompactWindows(
         provider,
@@ -5911,14 +6493,14 @@ function stopHomeSessionRepaint() {
   state.homeSessionRepaintTimer = null;
 }
 
-function scheduleHomeSessionRepaint() {
+function scheduleHomeSessionRepaint(rows) {
   stopHomeSessionRepaint();
-  const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
+  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
   if (!rows.length) return;
   const now = Date.now();
   const expiry = window.TokenMonitorEdgeDockPresentation.nextRunningExpiryAt(rows, now);
   // Refresh relative ages once a minute, or sooner when a running session expires.
-  const cacheExpiry = window.TokenMonitorSessionLive?.nextSessionStatusChangeAt(rows, now) || 0;
+  const cacheExpiry = window.TokenMonitorSessionLive?.nextSessionStatusChangeAt(window.TokenMonitorEdgeDockPresentation.sessionMembers(rows), now) || 0;
   const nextExpiry = [expiry, cacheExpiry].filter((at) => at > now).sort((a, b) => a - b)[0];
   const delay = nextExpiry ? Math.min(60_000, Math.max(1_000, nextExpiry - now + 50)) : 60_000;
   state.homeSessionRepaintTimer = setTimeout(() => {
@@ -5927,10 +6509,19 @@ function scheduleHomeSessionRepaint() {
     const current = els.homePanel?.querySelector('.home-module-session');
     if (!current) return;
     const hadFocus = document.activeElement === current;
-    const next = renderHomeSessionModule();
+    const hadHeadFocus = document.activeElement === current.querySelector?.('.home-module-head');
+    const focusedKey = document.activeElement?.closest?.('.home-session-row')?.dataset?.key;
+    const nextRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+    const next = renderHomeSessionModule(nextRows);
     current.replaceWith(next);
     if (hadFocus) next.focus();
-    scheduleHomeSessionRepaint();
+    if (hadHeadFocus) next.querySelector('.home-module-head')?.focus({ preventScroll: true });
+    if (focusedKey) {
+      const row = [...next.querySelectorAll('.home-session-row')]
+        .find(node => node.dataset.key === focusedKey);
+      (row || next).focus({ preventScroll: true });
+    }
+    scheduleHomeSessionRepaint(nextRows);
   }, delay);
 }
 
@@ -5943,7 +6534,11 @@ function stopSessionStatusRepaint() {
 function scheduleSessionStatusRepaint(period, incompleteHint = '') {
   stopSessionStatusRepaint();
   const now = Date.now();
-  const next = window.TokenMonitorSessionLive.nextSessionStatusChangeAt(Object.values(period?.sessions || {}), now);
+  const sessions = [
+    ...Object.entries(period?.sessions || {}).map(([key, session]) => window.TokenMonitorSessionLive.sessionWithActivity(period, key, session)),
+    ...Object.values(state.stats?.nativeSessions?.[state.period] || {})
+  ];
+  const next = window.TokenMonitorSessionLive.nextSessionStatusChangeAt(sessions, now);
   if (!next) return;
   sessionStatusRepaintTimer = setTimeout(() => {
     sessionStatusRepaintTimer = null;
@@ -5953,14 +6548,14 @@ function scheduleSessionStatusRepaint(period, incompleteHint = '') {
   }, Math.min(60_000, Math.max(1_000, next - now + 50)));
 }
 
-function renderHomeSessionModule() {
+function renderHomeSessionModule(rows) {
   const current = els.homePanel?.querySelector('.home-module-session');
   if (current && sessionTooltipShouldHoldRender()) {
     homeSessionRenderPending = true;
     return current;
   }
-  const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
-  const runningCount = rows.filter((row) => window.TokenMonitorSessionLive.sessionActivityState(row) === 'running').length;
+  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+  const runningCount = window.TokenMonitorEdgeDockPresentation.runningSessionSummary(rows).count;
   const meta = runningCount > 0 ? t('home.runningSessions', { count: runningCount }) : '';
   const { module, body } = homeModuleShell('session', t('home.sessions'), 'session', meta);
   if (rows.length === 0) {
@@ -5971,21 +6566,28 @@ function renderHomeSessionModule() {
     return module;
   }
   for (const row of rows) {
-    const activityState = window.TokenMonitorSessionLive.sessionActivityState(row);
+    const activityState = window.TokenMonitorEdgeDockPresentation.sessionActivityState(row);
     const item = document.createElement('div');
     item.className = 'home-list-row home-session-row';
+    item.dataset.key = row.key;
     const mark = document.createElement('span');
     applyHomeListMark(mark, iconKindFor({ client: row.client }, 'session'), clientColors[row.client] || stableColor(row.key, fallbackModelColors));
     const stateMark = document.createElement('span');
     stateMark.className = 'home-session-state';
     stateMark.dataset.state = activityState;
     stateMark.setAttribute('aria-hidden', 'true');
+    if (activityState === 'waiting') {
+      stateMark.setAttribute('aria-hidden', 'false');
+      stateMark.setAttribute('role', 'img');
+      stateMark.setAttribute('aria-label', t('session.waiting'));
+    }
     stateMark.innerHTML = window.TokenMonitorSessionLive.sessionStateMarkup({
       spin: 'home-session-spin',
       check: 'home-session-check',
-      idle: 'home-session-idle'
+      idle: 'home-session-idle',
+      waiting: 'home-session-waiting'
     });
-    stateMark.title = t(activityState === 'running' ? 'session.running'
+    stateMark.title = t(activityState === 'waiting' ? 'session.waiting' : activityState === 'running' ? 'session.running'
       : activityState === 'ended' ? 'session.finished' : 'session.idle');
     const name = document.createElement('span');
     name.className = 'home-list-name';
@@ -5999,6 +6601,9 @@ function renderHomeSessionModule() {
     const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
     const description = document.createElement('span');
     description.className = 'home-list-sub';
+    const memberLabel = row.sessionGroup && (!row.subagentGroup || row.subagentCount > 0)
+      ? (row.subagentGroup ? t('sessions.subagentCount', { count: row.subagentCount })
+        : t('sessions.grokBotCount', { count: row.groupRows.length })) : '';
     // The same "N models" hover the Sessions list draws: the label stays the
     // row's own text, and the tooltip lists the models behind the count.
     const modelLabel = sessionRowsApi.sessionModelLabel(row);
@@ -6006,24 +6611,32 @@ function renderHomeSessionModule() {
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatCompact
     });
-    if (modelLabel && modelEntries.length > 1) {
-      const models = document.createElement('span');
-      models.className = 'session-models';
-      models.textContent = modelLabel;
-      limitWindowsView.setDetailTooltip(models, modelEntries);
-      description.append(models);
-      if (age) description.append(document.createTextNode(` · ${age}`));
-    } else {
-      description.textContent = [modelLabel, age].filter(Boolean).join(' · ');
+    if (modelLabel) {
+      if (modelEntries.length > 1) {
+        const models = document.createElement('span');
+        models.className = 'session-models';
+        models.textContent = modelLabel;
+        limitWindowsView.setDetailTooltip(models, modelEntries);
+        description.append(models);
+      } else description.append(document.createTextNode(modelLabel));
     }
+    if (memberLabel) {
+      if (modelLabel) description.append(document.createTextNode(' · '));
+      const count = document.createElement('span');
+      count.className = 'home-session-member-count';
+      count.textContent = memberLabel;
+      description.append(count);
+    }
+    if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
     meta.append(description);
-    const context = window.TokenMonitorSessionLive.sessionActivityState(row) !== 'idle' ? row.context : null;
-    const cache = window.TokenMonitorSessionLive.sessionPromptCacheForRow(row);
+    const statusRow = row.groupRows?.[0] || row;
+    const context = window.TokenMonitorSessionLive.sessionActivityState(statusRow) !== 'idle' ? statusRow.context : null;
+    const cache = window.TokenMonitorSessionLive.sessionPromptCacheForRow(statusRow);
     if (cache && !context) {
       const badge = document.createElement('span');
       badge.className = 'home-session-cache';
       badge.textContent = t('session.cacheEstimate', { minutes: cache.minutes });
-      sessionRowsApi.setSessionTooltip(badge, row, cache, t, limitWindowsView);
+      sessionRowsApi.setSessionTooltip(badge, statusRow, cache, t, limitWindowsView);
       meta.append(badge);
     }
     if (context) meta.append(homeSessionContext(context, cache));
@@ -6525,16 +7138,20 @@ function renderHome() {
     hideHomeActivityTooltip();
     return;
   }
+  let sessionRows;
   const nodes = moduleIds.map((id) => {
     if (id === 'limits') return renderHomeLimitModule();
     if (id === 'tool') return renderHomeToolModule(period);
     if (id === 'device') return renderHomeDeviceModule();
     if (id === 'model') return renderHomeModelModule(period);
-    if (id === 'session') return renderHomeSessionModule();
+    if (id === 'session') {
+      sessionRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+      return renderHomeSessionModule(sessionRows);
+    }
     return renderHomeTrendsModule();
   });
   els.homePanel.replaceChildren(...nodes);
-  if (moduleIds.includes('session')) scheduleHomeSessionRepaint();
+  if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
   // setupHomeActivityScroller first runs while its module is detached, where
   // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
   // attached, before the browser paints or hover restoration measures the new cell.
@@ -6548,14 +7165,32 @@ function renderHome() {
   // ResizeObserver repeats the scroll + hover restoration once layout fully settles.
 }
 
+let localSessionActivity = null;
+function applyLocalSessionActivity(stats) {
+  const incoming = localSessionActivity;
+  if (!stats || !incoming || incoming.snapshot?.id !== stats.snapshot?.id
+    || incoming.snapshot?.source !== stats.snapshot?.source) return stats;
+  return window.TokenMonitorSessionActivityProjection.applyActivityPatch(stats, incoming.patch);
+}
+
 function sessionStatsForDisplay(stats) {
+  const current = applyLocalSessionActivity(stats);
   return state.settings?.sessionTitlesEnabled === false
-    ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitleStats(stats) : stats;
+    ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitleStats(current) : current;
 }
 
 function setRendererSettings(next) {
   const titlesChanged = (state.settings?.sessionTitlesEnabled !== false) !== (next.sessionTitlesEnabled !== false);
+  const animationChanged = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation)
+    !== tokenNumberAnimationApi.normalize(next.tokenNumberAnimation);
   state.settings = next;
+  if (animationChanged) {
+    cancelNumberAnimation();
+    settleRowNumberAnimations();
+    numberAnimValue = state.currentTotal;
+    els.totalTokens.textContent = formatNumber(state.currentTotal);
+    updateTotalCompact(state.currentTotal);
+  }
   if (titlesChanged) {
     if (next.sessionTitlesEnabled === false) state.stats = sessionStatsForDisplay(state.stats);
     // Main may have returned a titleless map while disabled. Pull it again
@@ -6577,6 +7212,7 @@ function render() {
   stopHomeSessionRepaint();
   stopSessionStatusRepaint();
   els.toolDetailFooter.classList.add('hidden');
+  els.projectBreakdownFooter.classList.add('hidden');
   syncLiveTokenRateFooterState();
   renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
@@ -6627,15 +7263,17 @@ function render() {
     updateTotalCompact(nextTotal);
     state.suppressInitialNumberAnimation = false;
   } else if (totalChanged) {
-    // Keep the compact chip visible through the count-up and lock the font to the
-    // widest endpoint first (a downward roll starts wider than it settles), so the
-    // number never vanishes, clips, or resizes mid-roll. Re-fit on completion so a
-    // window resize during the animation, or a downward settle, still ends correct.
     const animationFrom = numberAnimHandle ? numberAnimValue : state.currentTotal;
-    const widest = formatNumber(nextTotal).length >= formatNumber(animationFrom).length ? nextTotal : animationFrom;
-    els.totalTokens.textContent = formatNumber(widest);
-    updateTotalCompact(nextTotal);
-    animateTotalNumber(els.totalTokens, animationFrom, nextTotal, state.periodMotionActive ? 800 : 1000);
+    // Count-up keeps a stable font throughout its intermediate values. Digit
+    // roll measures the old layout before fitting its destination, so geometry
+    // and font scaling finish together without a second jump on cleanup.
+    if (tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation) !== 'roll') {
+      const widest = formatNumber(nextTotal).length >= formatNumber(animationFrom).length ? nextTotal : animationFrom;
+      els.totalTokens.textContent = formatNumber(widest);
+      updateTotalCompact(nextTotal);
+    }
+    animateTotalNumber(els.totalTokens, animationFrom, nextTotal, state.periodMotionActive ? 800 : 1000,
+      { synchronized: state.periodMotionActive });
     pulseLiveDot();
   } else if (!headlineNumberIsAnimatingTo(nextTotal)) {
     cancelNumberAnimation();
@@ -6692,13 +7330,14 @@ function render() {
     els.trendsPanel.classList.add('hidden');
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
-    if (state.openSession.kind === 'background-review-group') {
-      const latest = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
-      if (latest) state.openSession.summary = latest;
+    if (state.openSession.kind === 'session-group') {
+      const latest = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
+      if (!latest) { closeSessionDetail(); return; }
+      state.openSession.summary = latest;
       // The rebuild replaces every run node, so a hovered run tooltip would die
       // mid-read (and a keyboard focus with it); hold until it closes, as the
       // session and home lists already do.
-      if (!sessionTooltipShouldHoldRender()) renderBackgroundReviewDetail(state.openSession);
+      if (!sessionTooltipShouldHoldRender()) renderSessionGroupDetail(state.openSession);
     }
     refreshSessionDetailHeading();
     if (state.openSession.renderOptions) {
@@ -6706,6 +7345,7 @@ function render() {
       state.openSession.renderOptions = null;
       renderSessionDetail(options);
     }
+    void refreshOpenSessionDetail();
   } else {
     els.homePanel.classList.add('hidden');
     els.limitsPanel.classList.add('hidden');
@@ -7029,6 +7669,15 @@ function applyAppearanceSettings(settings) {
   document.documentElement.style.setProperty('--control-alpha', (0.03 + depth * 0.045).toFixed(3));
   document.documentElement.classList.toggle('system-glass-disabled', systemGlassDisabled);
   const nativeMaterial = glassRenderingApi.usesNativeMaterial(nativeMaterialState);
+  const nativeTint = nativeMaterialState.type === 'liquid-glass';
+  els.glassOpacityRow?.classList.toggle('hidden', nativeTint);
+  for (const [key, mode] of nativeGlassTintSettings) {
+    const active = nativeTint && macGlass.backdropMode === mode;
+    els[`${key}Row`]?.classList.toggle('hidden', !active);
+    for (const control of [els[`${key}Input`], els[`${key}Reset`]]) {
+      if (control) control.disabled = !active;
+    }
+  }
   for (const control of [els.glassInput, els.blurInput, els.resetGlassButton, els.resetDepthButton]) {
     if (control) control.disabled = nativeMaterial;
   }
@@ -7051,6 +7700,7 @@ function applyAppearanceSettings(settings) {
   els.macBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
   // Same terms as the widget's own selector; material pushes land here too.
   els.edgeDockMacBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
+  syncNotchStyleInput(settings);
   if (els.macBackdropInput) els.macBackdropInput.value = macGlass.backdropMode;
   applyReduceMotionPreference(settings?.reduceMotion);
   applyFontSettings(settings);
@@ -7809,6 +8459,7 @@ function appearancePatchFromControls() {
     windowsBackdrop: windowsGlassApi.normalizeWindowsBackdropMode(els.windowsBackdropInput?.value),
     macBackdrop: macBackdropApi.normalizeMacBackdropMode(els.macBackdropInput?.value),
     reduceMotion: els.reduceMotionInputs?.find((input) => input.checked)?.value || 'system',
+    tokenNumberAnimation: tokenNumberAnimationApi.normalize(els.tokenNumberAnimationInput?.value),
     showLiveDot: Boolean(els.liveDotInput.checked),
     showToolIcons: Boolean(els.toolIconsInput.checked),
     titleIconOnly: Boolean(els.titleIconInput.checked),
@@ -7819,6 +8470,9 @@ function appearancePatchFromControls() {
     settingsInTitlebar: Boolean(els.swapSettingsRefreshInput.checked),
     glassOpacity: Number(els.glassInput.value === '' ? defaultAppearance.glassOpacity : els.glassInput.value),
     glassBlur: Number(els.blurInput.value === '' ? defaultAppearance.glassBlur : els.blurInput.value),
+    ...Object.fromEntries(nativeGlassTintSettings.map(([key, mode]) => [key,
+      macBackdropApi.normalizeLiquidGlassTint(els[`${key}Input`]?.value, mode)
+    ])),
     backgroundImageOpacity: Number(els.backgroundImageOpacityInput?.value || defaultAppearance.backgroundImageOpacity),
     zoomFactor: Number(els.zoomInput.value === '' ? defaultAppearance.zoomFactor * 100 : els.zoomInput.value) / 100
   };
@@ -7921,6 +8575,7 @@ function syncSliderRow(input) {
 
 function syncSliderRows() {
   syncSliderRow(els.glassInput);
+  for (const [key] of nativeGlassTintSettings) syncSliderRow(els[`${key}Input`]);
   syncSliderRow(els.blurInput);
   syncSliderRow(els.backgroundImageOpacityInput);
   syncSliderRow(els.zoomInput);
@@ -8737,6 +9392,9 @@ function syncSettingsForm() {
   els.liveDotInput.checked = state.settings.showLiveDot !== false;
   els.toolIconsInput.checked = state.settings.showToolIcons !== false;
   els.titleIconInput.checked = state.settings.titleIconOnly === true;
+  if (els.tokenNumberAnimationInput) {
+    els.tokenNumberAnimationInput.value = tokenNumberAnimationApi.normalize(state.settings.tokenNumberAnimation);
+  }
   els.showCompactTotalTokensInput.checked = state.settings.showCompactTotalTokens === true;
   els.showLiveTokenRateInput.checked = state.settings.showLiveTokenRate === true;
   if (els.liveTokenRateScopeInput) {
@@ -8760,7 +9418,7 @@ function syncSettingsForm() {
   for (const input of els.floatingBubbleTriggerInputs || []) input.checked = input.value === floatingBubbleTrigger;
   if (els.floatingBubbleContentInput) els.floatingBubbleContentInput.value = normalizeTrayContentValue(state.settings.floatingBubbleContent);
   els.floatingBubbleOptions?.classList.toggle('hidden', state.settings.floatingBubbleEnabled !== true);
-  syncEdgeDockControls();
+  syncDockControls();
   const showTrayIcon = state.settings.showTrayIcon !== false;
   if (els.showTrayIconInput) els.showTrayIconInput.checked = showTrayIcon;
   els.trayModeInput.disabled = !showTrayIcon;
@@ -8786,6 +9444,9 @@ function syncSettingsForm() {
         : t('settings.startup.launchAtSignIn');
   }
   els.glassInput.value = String(state.settings.glassOpacity ?? 68);
+  for (const [key, mode] of nativeGlassTintSettings) {
+    if (els[`${key}Input`]) els[`${key}Input`].value = String(macBackdropApi.normalizeLiquidGlassTint(state.settings[key], mode));
+  }
   els.blurInput.value = String(state.settings.glassBlur ?? 32);
   if (els.backgroundImageOpacityInput) els.backgroundImageOpacityInput.value = String(state.settings.backgroundImageOpacity ?? defaultAppearance.backgroundImageOpacity);
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
@@ -8796,6 +9457,7 @@ function syncSettingsForm() {
     if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
   }
   renderAntigravityStatus();
+  renderWorkbuddyStatus();
   renderMimoStatus();
   renderCopilotStatus();
   renderViewPreferences();
@@ -11311,6 +11973,12 @@ const LIMIT_PROVIDER_SETTINGS = {
     descKey: 'settings.limits.codexResetForecastDesc',
     defaultValue: false
   }],
+  workbuddy: [{
+    key: 'workbuddyQuotaTotalEnabled',
+    titleKey: 'settings.workbuddy.showQuotaTotal',
+    descKey: 'settings.workbuddy.showQuotaTotalDesc',
+    defaultValue: false
+  }],
   opencode: [{
     key: 'opencodeLocalLimitsEnabled',
     titleKey: 'settings.limits.opencodeLocalLimits',
@@ -11944,8 +12612,16 @@ async function init() {
     void maybeUpdateBarsIcon();
     void deliverTrayProviderIcons();
   };
+  let notchCapabilitiesSeeded = false;
+  window.tokenMonitor.onNotchCapabilitiesPush?.((value) => {
+    notchCapabilitiesSeeded = true;
+    state.notchCapabilities = value;
+    syncNotchCapabilities();
+  });
   window.tokenMonitor.onSystemUiThemePush?.((payload) => applySystemUiTheme(payload?.dark === true));
   try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
+  if (!notchCapabilitiesSeeded) state.notchCapabilities = state.appInfo?.notchCapabilities || null;
+  syncNotchCapabilities();
   // Seeding assigns directly: the rest of init delivers both icon sets anyway,
   // and settings have not loaded yet, so repainting from here would only churn.
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
@@ -12008,11 +12684,11 @@ for (const tab of document.querySelectorAll('.tab')) {
     if (!setPeriod(targetPeriod)) return;
     syncPeriodTabs();
     if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session')) {
-      if (state.openSession.kind === 'background-review-group') {
+      if (state.openSession.kind === 'session-group') {
         const period = state.stats?.periods?.[state.period];
-        const summary = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+        const summary = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
         if (summary) {
-          state.openSession = { kind: 'background-review-group', period: state.period, summary };
+          state.openSession = { kind: 'session-group', period: state.period, summary };
         } else {
           state.openSession = null;
         }
@@ -12026,7 +12702,7 @@ for (const tab of document.querySelectorAll('.tab')) {
     state.periodMotionActive = true;
     render();
     state.periodMotionActive = false;
-    animateBreakdownFrom(snapshot, { duration: 800 });
+    animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
   });
 }
 
@@ -12035,6 +12711,7 @@ for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]'
     event.stopPropagation();
     const selection = fixedPeriodRangesApi.normalizeMonthMode(button.dataset.fixedPeriod);
     setPeriodMenuOpen(false, { restoreFocus: true });
+    const snapshot = captureBreakdownMotion();
     const changed = setPeriod(selection);
     state.settings.periodMonthMode = selection;
     syncPeriodTabs();
@@ -12044,6 +12721,7 @@ for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]'
       state.periodMotionActive = true;
       render();
       state.periodMotionActive = false;
+      animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
     }
     await saveSettings({ periodMonthMode: selection });
   });
@@ -12091,23 +12769,24 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+els.breakdown.addEventListener('scroll', settleOffscreenBreakdownNumbers, { passive: true });
 els.breakdown.addEventListener('click', (event) => {
   if (state.breakdown !== 'session') return;
   const rowEl = event.target.closest('.row');
   if (!rowEl) return;
-  if (rowEl.dataset.reviewGroup === 'true') {
+  if (rowEl.dataset.sessionGroup) {
     const period = state.stats?.periods?.[state.period];
-    const summary = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
+    const summary = sessionRowsForPeriod(period).find((row) => row.key === rowEl.dataset.key);
     if (summary) {
-      const request = { kind: 'background-review-group', period: state.period, summary };
+      const request = { kind: 'session-group', period: state.period, summary };
       state.openSession = request;
-      renderBackgroundReviewDetail(request);
+      renderSessionGroupDetail(request);
     }
     return;
   }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy') return;
+  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp') return;
   if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
@@ -12475,6 +13154,16 @@ els.resetGlassButton.addEventListener('click', async () => {
   applyAppearanceFromControls();
   await saveSettings({ glassOpacity: defaultAppearance.glassOpacity });
 });
+for (const [key, mode] of nativeGlassTintSettings) {
+  els[`${key}Input`]?.addEventListener('input', applyAppearanceFromControls);
+  els[`${key}Input`]?.addEventListener('change', saveAppearanceFromControls);
+  els[`${key}Reset`]?.addEventListener('click', async () => {
+    const value = macBackdropApi.normalizeLiquidGlassTint(undefined, mode);
+    els[`${key}Input`].value = String(value);
+    applyAppearanceFromControls();
+    await saveSettings({ [key]: value });
+  });
+}
 els.resetDepthButton.addEventListener('click', async () => {
   els.blurInput.value = String(defaultAppearance.glassBlur);
   applyAppearanceFromControls();
@@ -12535,6 +13224,7 @@ setupSettingsAccordion(els.advancedSettingsGroup, els.advancedSettingsToggle, el
 setupSettingsAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails);
 setupSettingsAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails);
 setupSettingsAccordion(els.edgeDockMoreOptionsGroup, els.edgeDockMoreOptionsToggle, els.edgeDockMoreOptionsDetails);
+setupSettingsAccordion(els.notchMoreOptionsGroup, els.notchMoreOptionsToggle, els.notchMoreOptionsDetails);
 for (const input of els.systemGlassInputs || []) {
   input.addEventListener('change', () => {
     if (input.checked) saveAppearanceFromControls();
@@ -12556,6 +13246,7 @@ els.toolIconsInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
+els.tokenNumberAnimationInput?.addEventListener('change', saveAppearanceFromControls);
 els.showCompactTotalTokensInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
@@ -12605,7 +13296,61 @@ function edgeDockAvailable() {
   return platform === 'darwin' || platform === 'win32';
 }
 
-function syncEdgeDockControls() {
+function syncDockSizeControls(surface) {
+  const sizes = (els[`${surface}SizeInputs`] || []).map((input) => input.value);
+  const size = sizes.includes(state.settings?.[`${surface}Size`]) ? state.settings[`${surface}Size`] : 'medium';
+  for (const input of els[`${surface}SizeInputs`] || []) input.checked = input.value === size;
+  els[`${surface}CustomScaleRow`]?.classList.toggle('hidden', size !== 'custom');
+  if (els[`${surface}CustomScaleInput`] && document.activeElement !== els[`${surface}CustomScaleInput`]) {
+    els[`${surface}CustomScaleInput`].value = String(Math.round((Number(state.settings?.[`${surface}CustomScale`]) || 1) * 100));
+    syncSliderRow(els[`${surface}CustomScaleInput`]);
+  }
+}
+
+// Liquid Glass is offered on the same terms as the widget's own selector. A
+// saved choice the system cannot draw shows as the Frosted Glass it falls back to.
+// Appearance previews carry only the controls they own, so the notch style is
+// read from the saved settings underneath them.
+const NOTCH_HOVER_DELAY_DEFAULT_MS = 0;
+
+// Hover either grows the resting entry (a click opens it) or opens it after
+// the chosen duration; the duration only applies to the second.
+function syncNotchHoverControls() {
+  const action = state.settings?.notchHoverAction === 'open' ? 'open' : 'peek';
+  for (const input of els.notchHoverActionInputs) input.checked = input.value === action;
+  els.notchHoverDelayRow?.classList.toggle('hidden', action !== 'open');
+  if (els.notchHoverDelayInput && document.activeElement !== els.notchHoverDelayInput) {
+    const delay = Number(state.settings?.notchHoverDelay);
+    els.notchHoverDelayInput.value = String(Number.isFinite(delay) ? delay : NOTCH_HOVER_DELAY_DEFAULT_MS);
+  }
+  syncNotchHoverDelayValue();
+}
+
+function syncNotchHoverDelayValue() {
+  const value = els.notchHoverDelayRow?.querySelector('.slider-value');
+  if (value && els.notchHoverDelayInput) value.textContent = `${(Number(els.notchHoverDelayInput.value) / 1000).toFixed(1)} s`;
+}
+
+function syncNotchStyleInput(preview) {
+  if (!els.notchStyleInput) return;
+  const settings = Object.assign({}, state.settings, ...pendingSettingsPatches, preview);
+  const { showBackdropControl } = macBackdropApi.appearanceState(settings, {
+    liquidGlassSupported: nativeMaterialState.liquidGlassSupported
+  });
+  for (const value of ['liquid-glass', 'liquid-glass-clear']) {
+    const option = els.notchStyleInput.querySelector(`option[value="${value}"]`);
+    if (option) option.hidden = option.disabled = !showBackdropControl;
+  }
+  const style = settings?.notchStyle || 'inherit';
+  els.notchStyleInput.value = macBackdropApi.isLiquidGlassBackdrop(style) && !showBackdropControl ? 'vibrancy' : style;
+}
+
+function syncNotchCapabilities() {
+  els.notchRunningIndicatorRow?.classList.toggle('hidden', state.notchCapabilities?.rings === false);
+  if (els.notchAvoidMenuBarInput) els.notchAvoidMenuBarInput.disabled = state.notchCapabilities?.menuAvoidance === false;
+}
+
+function syncDockControls() {
   if (!els.edgeDockInput) return;
   const available = edgeDockAvailable();
   els.edgeDockFeature?.classList.toggle('hidden', !available);
@@ -12617,14 +13362,8 @@ function syncEdgeDockControls() {
   const modes = (els.edgeDockModeInputs || []).map((input) => input.value);
   const mode = modes.includes(state.settings?.edgeDockMode) ? state.settings.edgeDockMode : 'autoHide';
   for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
-  const sizes = (els.edgeDockSizeInputs || []).map((input) => input.value);
-  const size = sizes.includes(state.settings?.edgeDockSize) ? state.settings.edgeDockSize : 'medium';
-  for (const input of els.edgeDockSizeInputs || []) input.checked = input.value === size;
-  els.edgeDockCustomScaleRow?.classList.toggle('hidden', size !== 'custom');
-  if (els.edgeDockCustomScaleInput && document.activeElement !== els.edgeDockCustomScaleInput) {
-    els.edgeDockCustomScaleInput.value = String(Math.round((Number(state.settings?.edgeDockCustomScale) || 1) * 100));
-    syncSliderRow(els.edgeDockCustomScaleInput);
-  }
+  syncDockSizeControls('edgeDock');
+  syncDockSizeControls('notch');
   els.edgeDockHapticRow?.classList.toggle('hidden', state.appInfo?.platform !== 'darwin');
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
   if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
@@ -12632,52 +13371,132 @@ function syncEdgeDockControls() {
   if (els.edgeDockMacBackdropInput) {
     els.edgeDockMacBackdropInput.value = macBackdropApi.normalizeEdgeDockBackdropMode(state.settings?.edgeDockMacBackdrop);
   }
+  const notchAvailable = state.appInfo?.platform === 'darwin';
+  const notchEnabled = notchAvailable && state.settings?.notchEnabled === true;
+  els.experimentalFeaturesGroup?.classList.toggle('hidden', !notchAvailable);
+  els.notchFeature?.classList.toggle('hidden', !notchAvailable);
+  if (els.notchInput) els.notchInput.checked = notchEnabled;
+  els.notchOptions?.classList.toggle('hidden', !notchEnabled);
+  syncNotchStyleInput();
+  for (const input of els.notchShapeInputs) input.checked = input.value === (state.settings?.notchShape || 'auto');
+  if (els.notchFollowTrayInput) els.notchFollowTrayInput.checked = state.settings?.notchFollowTray !== false;
+  if (els.notchSummaryInput) els.notchSummaryInput.checked = state.settings?.notchSummaryEnabled !== false;
+  if (els.notchDetailSideInput) els.notchDetailSideInput.value = state.settings?.notchDetailSide || 'right';
+  if (els.notchRunningIndicatorInput) els.notchRunningIndicatorInput.checked = state.settings?.notchRunningIndicatorEnabled === true;
+  syncNotchCapabilities();
+  if (els.notchProgressiveBlurInput) els.notchProgressiveBlurInput.checked = state.settings?.notchProgressiveBlur !== false;
+  if (els.notchHapticInput) els.notchHapticInput.checked = state.settings?.notchHaptic !== false;
+  syncNotchHoverControls();
+  if (els.notchAvoidMenuBarInput) els.notchAvoidMenuBarInput.checked = state.settings?.notchAvoidMenuBar !== false;
+  if (els.notchHideSummaryInFullScreenInput) els.notchHideSummaryInFullScreenInput.checked = state.settings?.notchHideSummaryInFullScreen !== false;
+  els.edgeDockComposerRow?.classList.toggle('hidden', !enabled);
   if (enabled) edgeDockComposer?.render();
+  if (notchEnabled) notchItemsComposer?.render();
 }
 
-const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComposer
-  ? window.TokenMonitorEdgeDockComposer.createEdgeDockComposer({
-    root: els.edgeDockComposer,
-    t,
-    itemsApi: window.TokenMonitorEdgeDockItems,
-    presentationApi: window.TokenMonitorEdgeDockPresentation,
-    getSettings: () => state.settings,
-    getStats: () => state.stats,
-    save: (patch) => saveSettings(patch),
-    providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
-    providerColor: (id) => limitProviderColor(id),
-    windowLabel: (record, quotaWindow) => record?.provider === 'codex' && quotaWindow.additional === true
-      ? limitWindowsView.codexAdditionalWindowLabel(
-        quotaWindow,
-        (record.windows || []).filter((entry) => entry?.additional === true)
-      )
-      : limitWindowsView.providerWindowLabel(record, quotaWindow, 'Quota'),
-    hasProviderMark: (id) => limitMarksWithIcon.has(id),
-    // Offer every enabled provider in the user's limits order, including those
-    // without quota data. Keep the ordering rule here rather than in the composer.
-    enabledLimitProviders: () => limitProviderOrderApi
-      .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
-      .filter(({ id }) => enabledLimitProviderSet().has(id))
-      .map(({ id }) => id),
-    isWindowHidden: (providerId, quotaWindow) => limitUsageItemsApi.isLimitWindowHidden(
-      state.settings?.limitProviderHiddenItems, providerId, quotaWindow
-    ),
-    maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
-      ? accountIdentityApi.maskEmailAddress(email)
-      : String(email || '')),
-    mimoProductLabel,
-    createRowDrag: (config) => rowDragControllerApi.createRowDragController({
-      dragSort: verticalDragSortApi,
-      getScrollPanel: () => els.settingsPanel,
-      preserveScroll: preserveSettingsPanelScroll,
-      ...config
+function createDockItemsComposer(root, itemsKey) {
+  return root && window.TokenMonitorEdgeDockComposer
+    ? window.TokenMonitorEdgeDockComposer.createEdgeDockComposer({
+      root, itemsKey,
+      t,
+      itemsApi: window.TokenMonitorEdgeDockItems,
+      presentationApi: window.TokenMonitorEdgeDockPresentation,
+      getSettings: () => state.settings,
+      getStats: () => state.stats,
+      save: (patch) => saveSettings(patch),
+      providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
+      providerColor: (id) => limitProviderColor(id),
+      windowLabel: (record, quotaWindow) => record?.provider === 'codex' && quotaWindow.additional === true
+        ? limitWindowsView.codexAdditionalWindowLabel(
+          quotaWindow,
+          (record.windows || []).filter((entry) => entry?.additional === true)
+        )
+        : limitWindowsView.providerWindowLabel(record, quotaWindow, 'Quota'),
+      hasProviderMark: (id) => limitMarksWithIcon.has(id),
+      // Offer every enabled provider in the user's limits order, including those
+      // without quota data. Keep the ordering rule here rather than in the composer.
+      enabledLimitProviders: () => limitProviderOrderApi
+        .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
+        .filter(({ id }) => enabledLimitProviderSet().has(id))
+        .map(({ id }) => id),
+      isWindowHidden: (providerId, quotaWindow) => limitUsageItemsApi.isLimitWindowHidden(
+        state.settings?.limitProviderHiddenItems, providerId, quotaWindow
+      ),
+      maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
+        ? accountIdentityApi.maskEmailAddress(email)
+        : String(email || '')),
+      mimoProductLabel,
+      createRowDrag: (config) => rowDragControllerApi.createRowDragController({
+        dragSort: verticalDragSortApi,
+        getScrollPanel: () => els.settingsPanel,
+        preserveScroll: preserveSettingsPanelScroll,
+        ...config
+      })
     })
-  })
-  : null;
+    : null;
+}
+const edgeDockComposer = createDockItemsComposer(els.edgeDockComposer, 'edgeDockItems');
+const notchItemsComposer = createDockItemsComposer(els.notchItemsComposer, 'notchItems');
+
+els.notchSummaryInput?.addEventListener('change', () => {
+  void saveSettings({ notchSummaryEnabled: els.notchSummaryInput.checked });
+});
+els.notchHideSummaryInFullScreenInput?.addEventListener('change', () => {
+  void saveSettings({ notchHideSummaryInFullScreen: els.notchHideSummaryInFullScreenInput.checked });
+});
+for (const input of els.notchHoverActionInputs) {
+  input.addEventListener('change', () => {
+    if (!input.checked) return;
+    state.settings.notchHoverAction = input.value;
+    syncNotchHoverControls();
+    void saveSettings({ notchHoverAction: input.value });
+  });
+}
+els.notchProgressiveBlurInput?.addEventListener('change', () => {
+  void saveSettings({ notchProgressiveBlur: els.notchProgressiveBlurInput.checked });
+});
+els.notchHoverDelayInput?.addEventListener('input', () => syncNotchHoverDelayValue());
+els.resetNotchHoverDelayButton?.addEventListener('click', () => {
+  if (!els.notchHoverDelayInput) return;
+  els.notchHoverDelayInput.value = String(NOTCH_HOVER_DELAY_DEFAULT_MS);
+  syncNotchHoverDelayValue();
+  void saveSettings({ notchHoverDelay: NOTCH_HOVER_DELAY_DEFAULT_MS });
+});
+els.notchHoverDelayInput?.addEventListener('change', () => {
+  void saveSettings({ notchHoverDelay: Number(els.notchHoverDelayInput.value) });
+});
+els.notchAvoidMenuBarInput?.addEventListener('change', () => {
+  void saveSettings({ notchAvoidMenuBar: els.notchAvoidMenuBarInput.checked });
+});
+els.notchRunningIndicatorInput?.addEventListener('change', () => {
+  void saveSettings({ notchRunningIndicatorEnabled: els.notchRunningIndicatorInput.checked });
+});
+els.notchDetailSideInput?.addEventListener('change', () => {
+  void saveSettings({ notchDetailSide: els.notchDetailSideInput.value });
+});
+els.notchInput?.addEventListener('change', () => {
+  state.settings.notchEnabled = els.notchInput.checked;
+  syncDockControls();
+  refreshTrayComposers();
+  void saveSettings({ notchEnabled: els.notchInput.checked });
+});
+for (const input of els.notchShapeInputs) {
+  input.addEventListener('change', () => {
+    if (input.checked) void saveSettings({ notchShape: input.value });
+  });
+}
+els.notchStyleInput?.addEventListener('change', () => {
+  void saveSettings({ notchStyle: els.notchStyleInput.value });
+});
+els.notchFollowTrayInput?.addEventListener('change', () => {
+  state.settings.notchFollowTray = els.notchFollowTrayInput.checked;
+  refreshTrayComposers();
+  void saveSettings({ notchFollowTray: els.notchFollowTrayInput.checked });
+});
 
 els.edgeDockInput?.addEventListener('change', () => {
   state.settings.edgeDockEnabled = els.edgeDockInput.checked;
-  els.edgeDockOptions?.classList.toggle('hidden', !els.edgeDockInput.checked);
+  syncDockControls();
   void saveSettings({ edgeDockEnabled: els.edgeDockInput.checked });
 });
 for (const input of els.edgeDockSideInputs || []) {
@@ -12694,6 +13513,9 @@ els.edgeDockRunningIndicatorInput?.addEventListener('change', () => {
 els.edgeDockMacBackdropInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockMacBackdrop: macBackdropApi.normalizeEdgeDockBackdropMode(els.edgeDockMacBackdropInput.value) });
 });
+els.notchHapticInput?.addEventListener('change', () => {
+  void saveSettings({ notchHaptic: els.notchHapticInput.checked });
+});
 els.edgeDockHapticInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockHaptic: els.edgeDockHapticInput.checked });
 });
@@ -12702,22 +13524,25 @@ for (const input of els.edgeDockModeInputs || []) {
     if (input.checked) void saveSettings({ edgeDockMode: input.value });
   });
 }
-for (const input of els.edgeDockSizeInputs || []) {
-  input.addEventListener('change', () => {
-    if (!input.checked) return;
-    els.edgeDockCustomScaleRow?.classList.toggle('hidden', input.value !== 'custom');
-    void saveSettings({ edgeDockSize: input.value });
+for (const surface of ['edgeDock', 'notch']) {
+  for (const input of els[`${surface}SizeInputs`] || []) {
+    input.addEventListener('change', () => {
+      if (!input.checked) return;
+      els[`${surface}CustomScaleRow`]?.classList.toggle('hidden', input.value !== 'custom');
+      void saveSettings({ [`${surface}Size`]: input.value });
+    });
+  }
+  // Like the Zoom slider: the dock previews each step while the slider is dragged
+  // and the size is saved on release, since a save redraws the settings form.
+  els[`${surface}CustomScaleInput`]?.addEventListener('input', () => {
+    syncSliderRow(els[`${surface}CustomScaleInput`]);
+    window.tokenMonitor.previewAppearance?.({ [`${surface}CustomScale`]: Number(els[`${surface}CustomScaleInput`].value) / 100 }).catch(() => {});
+  });
+  els[`${surface}CustomScaleInput`]?.addEventListener('change', () => {
+    void saveSettings({ [`${surface}CustomScale`]: Number(els[`${surface}CustomScaleInput`].value) / 100 });
   });
 }
-// Like the Zoom slider: the dock previews each step while the slider is dragged
-// and the size is saved on release, since a save redraws the settings form.
-els.edgeDockCustomScaleInput?.addEventListener('input', () => {
-  syncSliderRow(els.edgeDockCustomScaleInput);
-  window.tokenMonitor.previewAppearance?.({ edgeDockCustomScale: Number(els.edgeDockCustomScaleInput.value) / 100 }).catch(() => {});
-});
-els.edgeDockCustomScaleInput?.addEventListener('change', () => {
-  void saveSettings({ edgeDockCustomScale: Number(els.edgeDockCustomScaleInput.value) / 100 });
-});
+
 
 for (const input of els.floatingBubbleTriggerInputs || []) {
   input.addEventListener('change', () => {
@@ -12843,34 +13668,69 @@ async function runAppUpdateAction() {
 }
 
 els.appUpdatePillAction.addEventListener('click', async () => {
-  if (!renderAppUpdatePopover(state.appUpdate) || typeof els.appUpdatePopover.showPopover !== 'function') {
-    if (appUpdatePresentationApi.appUpdateActionMode(state.appUpdate) === 'install') {
-      const url = state.appUpdate?.latest?.htmlUrl;
-      if (url) await window.tokenMonitor.openExternal(url);
-      return;
-    }
-    await runAppUpdateAction();
+  // While a download or install is under way the press shows its progress.
+  if (els.appUpdatePillAction.getAttribute('aria-disabled') === 'true') {
+    showAppUpdatePopover();
     return;
   }
-  positionAppUpdatePopover();
-  els.appUpdatePopover.showPopover();
-  els.appUpdatePopoverAction.focus();
-});
-
-els.appUpdatePillRestart.addEventListener('click', async () => {
+  if (appUpdatePresentationApi.appUpdateActionMode(state.appUpdate) === 'release') hideAppUpdatePopover();
   await runAppUpdateAction();
 });
 
-els.appUpdatePillDismiss.addEventListener('click', async () => {
-  const version = state.appUpdate?.latest?.version;
-  if (!version) return;
-  state.appUpdate = await window.tokenMonitor.dismissAppUpdate(version);
-  if (els.appUpdatePopover.matches(':popover-open')) els.appUpdatePopover.hidePopover();
-  renderAppUpdatePill();
-});
+for (const target of [els.appUpdatePillAction, els.appUpdatePopover]) {
+  target.addEventListener('pointerenter', (event) => {
+    if (event.pointerType === 'touch') return;
+    if (target === els.appUpdatePopover || els.appUpdatePopover.matches(':popover-open')) clearAppUpdateCardTimers();
+    else scheduleAppUpdatePopoverOpen();
+  });
+  target.addEventListener('pointerleave', (event) => {
+    if (event.pointerType === 'touch') return;
+    scheduleAppUpdatePopoverClose();
+  });
+}
 
-els.appUpdatePopoverClose.addEventListener('click', () => {
-  els.appUpdatePopover.hidePopover();
+// Keyboard users get the card on focus, the same moment pointer users get it on
+// hover, and Tab then moves into it rather than past it.
+els.appUpdatePillAction.addEventListener('focus', () => {
+  if (suppressAppUpdateCardFocusOpen) {
+    suppressAppUpdateCardFocusOpen = false;
+    return;
+  }
+  if (els.appUpdatePillAction.matches(':focus-visible')) showAppUpdatePopover();
+});
+els.appUpdatePillAction.addEventListener('keydown', (event) => {
+  if (event.key !== 'Tab' || event.shiftKey || !els.appUpdatePopover.matches(':popover-open')) return;
+  // Dismiss while it is offered; otherwise the notes body, which is a focusable
+  // scroller. A generic button search lands on a release link deep in the notes,
+  // or finds nothing at all once Dismiss is hidden during an install.
+  const dismiss = els.appUpdatePopoverDismiss.classList.contains('hidden') || els.appUpdatePopoverDismiss.disabled
+    ? null
+    : els.appUpdatePopoverDismiss;
+  const target = dismiss || (els.appUpdatePopoverBody.classList.contains('hidden') ? null : els.appUpdatePopoverBody);
+  if (!target) return;
+  event.preventDefault();
+  target.focus();
+});
+for (const target of [els.appUpdatePillAction, els.appUpdatePopover]) {
+  target.addEventListener('focusout', (event) => {
+    const next = event.relatedTarget;
+    if (next && (els.appUpdatePopover.contains(next) || next === els.appUpdatePillAction)) return;
+    if (els.appUpdatePopover.matches(':hover') || els.appUpdatePillAction.matches(':hover')) return;
+    hideAppUpdatePopover();
+  });
+}
+
+// A manual popover, so a press on the button is not also a light dismiss: the
+// card stays up to show the download it just started. Outside presses and Escape
+// are handled here instead.
+document.addEventListener('pointerdown', (event) => {
+  if (!els.appUpdatePopover.matches(':popover-open')) return;
+  if (els.appUpdatePopover.contains(event.target) || els.appUpdatePill.contains(event.target)) return;
+  hideAppUpdatePopover();
+}, true);
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || !els.appUpdatePopover.matches(':popover-open')) return;
+  hideAppUpdatePopover();
 });
 
 els.appUpdatePopover.addEventListener('toggle', (event) => {
@@ -12878,23 +13738,24 @@ els.appUpdatePopover.addEventListener('toggle', (event) => {
   if (els.appUpdatePillAction.hasAttribute('aria-haspopup')) {
     els.appUpdatePillAction.setAttribute('aria-expanded', String(open));
   }
-  if (!open) {
-    const active = document.activeElement;
-    if (active === document.body || active === els.appUpdatePopover || els.appUpdatePopover.contains(active)) {
-      els.appUpdatePillAction.focus();
-    }
-  }
 });
 
-els.appUpdatePopoverAction.addEventListener('click', async () => {
-  els.appUpdatePopover.hidePopover();
-  await runAppUpdateAction();
+els.appUpdatePopoverDismiss.addEventListener('click', async () => {
+  const version = state.appUpdate?.latest?.version;
+  if (!version) return;
+  hideAppUpdatePopover();
+  state.appUpdate = await window.tokenMonitor.dismissAppUpdate(version);
+  renderAppUpdatePill();
+  renderSettingsAppUpdateRow();
 });
 
-els.appUpdatePopoverRelease.addEventListener('click', async () => {
-  const url = state.appUpdate?.latest?.htmlUrl;
-  if (url) await window.tokenMonitor.openExternal(url);
-});
+for (const container of [els.appUpdatePopoverBody, els.appUpdateNotesBody]) {
+  container.addEventListener('click', async (event) => {
+    const link = event.target.closest('[data-release-url]');
+    if (!link || !container.contains(link)) return;
+    await window.tokenMonitor.openExternal(link.dataset.releaseUrl);
+  });
+}
 
 window.addEventListener('resize', () => {
   if (els.appUpdatePopover.matches(':popover-open')) positionAppUpdatePopover();
@@ -12908,11 +13769,6 @@ els.appUpdateCheckButton.addEventListener('click', async () => {
 
 els.appUpdateViewReleaseButton.addEventListener('click', async () => {
   await runAppUpdateAction();
-});
-
-els.appUpdateReleaseNotesButton.addEventListener('click', async () => {
-  const url = state.appUpdate?.latest?.htmlUrl;
-  if (url) await window.tokenMonitor.openExternal(url);
 });
 
 window.tokenMonitor.onSettingsPush?.((next) => {
@@ -12988,6 +13844,7 @@ function renderStatsUpdate() {
   if (!isSettingsSurfaceVisible()) return;
   renderCodexAccounts();
   renderMimoStatus();
+  renderWorkbuddyStatus();
   renderSettingsSummaries();
   renderLimitProviderCheckboxes();
   renderToolPreferences();
@@ -13008,7 +13865,8 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
   render: renderStatsUpdate
 });
 // Pulled once up front, then only while something on screen reads it: the
-// archived count in Settings, or the TOTAL session and project lists.
+// archived count in Settings, or TOTAL sessions/projects. Bot identity arrives
+// in a compact snapshot projection and does not need a full history pull.
 function allTimeSessionsNeeded() {
   if (!allTimeSessions.loaded() || isSettingsPanelOpen()) return true;
   return state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');
@@ -13021,7 +13879,7 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
     ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitles(sessions) : sessions,
   projectionKey: () => state.settings?.sessionTitlesEnabled !== false,
   onLoaded: () => {
-    if (state.stats) state.stats = allTimeSessions.attach(state.stats);
+    if (state.stats) state.stats = sessionStatsForDisplay(allTimeSessions.attach(state.stats));
     statsRenderScheduler.request();
   },
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
@@ -13053,6 +13911,12 @@ window.tokenMonitor.onWindowVisibilityPush?.((visible) => {
 
 window.tokenMonitor.onStatsPush?.((payload) => {
   if (!payload) return;
+  if (payload.event === 'session-activity') {
+    localSessionActivity = payload.data;
+    state.stats = applyLocalSessionActivity(state.stats);
+    statsRenderScheduler.request();
+    return;
+  }
   const wasStreamConnected = state.streamConnected;
   if (payload.event === 'status') {
     state.streamConnected = Boolean(payload.data?.connected);
@@ -13060,10 +13924,10 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
     state.streamFailure = state.streamConnected ? null : (payload.data?.reason ? { reason: payload.data.reason, detail: payload.data.detail ?? null } : state.streamFailure);
   } else if (payload.data?.stats) {
-    // Local collector overlays update client-mode data independently of the
+    // Local overlays and adopted reads update data independently of the
     // Hub SSE transport. Preserve its current Offline/error state until a
     // real stream status or remote stats event proves the connection changed.
-    if (payload.data?.reason !== 'local' && payload.data?.reason !== 'presentation') {
+    if (!['local', 'presentation', 'read'].includes(payload.data?.reason)) {
       state.streamConnected = true;
       state.streamFailure = null;
     }
@@ -13487,22 +14351,15 @@ function drawTrayFallbackMark(ctx, value, x, y, size, color) {
 }
 
 function trayTextCanvasFont(item, fontSize, defaultWeight) {
-  const style = item?.fontStyle || 'normal';
-  const family = style === 'compactMono'
-    ? 'ui-monospace, ".AppleSystemUIFontMonospaced", "SFMono-Regular", "SF Mono", Menlo, monospace'
-    : '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif';
-  const weight = style === 'menubar' ? 700 : style === 'compactMono' ? 600 : defaultWeight;
-  return `${weight} ${fontSize}px ${family}`;
+  return window.TokenMonitorTrayTypography.font(item, fontSize, defaultWeight);
 }
 
 function trayTextHorizontalScale(item) {
-  if (item?.fontStyle === 'condensed') return 0.86;
-  if (item?.fontStyle === 'menubar') return 0.92;
-  return 1;
+  return window.TokenMonitorTrayTypography.horizontalScale(item);
 }
 
 function trayTextSpaceScale(item) {
-  return item?.fontStyle === 'compactMono' ? 0.55 : 1;
+  return window.TokenMonitorTrayTypography.spaceScale(item);
 }
 
 function trayTextRuns(ctx, text, item) {
@@ -13617,11 +14474,9 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
 
   if (item.type === 'spacer') {
     const isDot = item.variant === 'dot';
-    const ratios = isDot
-      ? { narrow: 0.18, regular: 0.24, wide: 0.34 }
-      : { narrow: 0.07, regular: 0.14, wide: 0.27 };
+
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(2, Math.round(h * (ratios[item.size] || ratios.regular)));
+    canvas.width = window.TokenMonitorTrayTypography.spacerWidth(item, h);
     canvas.height = h;
     if (isDot) {
       const ctx = canvas.getContext('2d');
@@ -13725,7 +14580,7 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
       ? 'app'
       : trayLayoutApi.preferredRowProvider(rows, preferredIndex);
     const iconSize = h;
-    const iconGap = Math.max(2, Math.round(h * 0.08));
+    const iconGap = window.TokenMonitorTrayTypography.iconGap(h);
     const fontSize = Math.max(8, Math.round(h * 0.43));
     const font = trayTextCanvasFont(item, fontSize, 600);
     const horizontalScale = trayTextHorizontalScale(item);
@@ -13882,6 +14737,7 @@ async function maybeUpdateBarsIcon(options = {}) {
   if (options.refreshComposers !== false && isSettingsSurfaceVisible()) {
     refreshTrayComposers();
     if (edgeDockAvailable() && state.settings?.edgeDockEnabled === true) edgeDockComposer?.render();
+    if (state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true) notchItemsComposer?.render();
   } else {
     syncCustomTrayClockTimer();
   }
@@ -14088,6 +14944,9 @@ function renderStandardTrayPreview(mode, stats) {
 }
 
 function trayComposerPreview(surface) {
+  if (surface === 'notch') {
+    return { src: renderCustomTrayLayout(statsForTrayComposer(), state.settings?.notchCustomLayout, currentFloatingBubbleBitmapHeight(), floatingBubbleGeneratedColors(), { showProviderBadge: false }) };
+  }
   const isTray = surface === 'tray';
   const contentKey = isTray ? 'trayContent' : 'floatingBubbleContent';
   const layoutKey = isTray ? 'trayCustomLayout' : 'floatingBubbleCustomLayout';
@@ -14133,8 +14992,9 @@ function activateTrayComposer(surface) {
 
 function createTrayComposer(surface) {
   const isTray = surface === 'tray';
-  const root = isTray ? els.trayComposer : els.floatingBubbleComposer;
-  const layoutKey = isTray ? 'trayCustomLayout' : 'floatingBubbleCustomLayout';
+  const isNotch = surface === 'notch';
+  const root = isNotch ? els.notchComposer : isTray ? els.trayComposer : els.floatingBubbleComposer;
+  const layoutKey = isNotch ? 'notchCustomLayout' : isTray ? 'trayCustomLayout' : 'floatingBubbleCustomLayout';
   const contentKey = isTray ? 'trayContent' : 'floatingBubbleContent';
   return window.TokenMonitorTrayComposer.createTrayComposer({
     root,
@@ -14155,7 +15015,7 @@ function createTrayComposer(surface) {
       showProviderBadge: isTray && state.settings?.showTrayProviderBadge === true
     }),
     getPreview: () => trayComposerPreview(surface),
-    isEditable: () => state.settings?.[contentKey] === 'custom',
+    isEditable: () => isNotch || state.settings?.[contentKey] === 'custom',
     onCustomize: () => activateTrayComposer(surface),
     providerChoices: trayComposerProviderChoices,
     accountChoices: trayComposerAccountChoices,
@@ -14165,6 +15025,7 @@ function createTrayComposer(surface) {
       state.settings[layoutKey] = trayLayoutApi.normalizeTrayLayout(nextLayout);
       observeDisplayLiveTokenRates(state.stats);
       if (isTray) void maybeUpdateBarsIcon({ refreshComposers: commit });
+      else if (isNotch) { if (commit) refreshTrayComposers(); }
       else {
         renderFloatingBubbleContent();
         if (commit) refreshTrayComposers();
@@ -14197,7 +15058,8 @@ function syncCustomTrayClockTimer() {
 function refreshTrayComposers() {
   const surfaces = [
     { id: 'tray', root: els.trayComposer, visible: state.settings?.showTrayIcon !== false },
-    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleEnabled === true }
+    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleEnabled === true },
+    { id: 'notch', root: els.notchComposer, visibilityRoot: els.notchComposerDetails, visible: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchFollowTray === false }
   ];
   window.TokenMonitorTrayComposer.syncTrayComposerSurfaces(
     surfaces,
@@ -14638,6 +15500,239 @@ function localProviderStatuses(name) {
     ? localProviders
     : (state.stats?.limits?.providers || []);
   return providers.filter((provider) => provider.provider === name);
+}
+
+function workbuddyAccountError(code, fallback = 'loginFailed') {
+  const keys = {
+    TIMEOUT: 'loginTimeout',
+    STATE_MISMATCH: 'loginStateMismatch',
+    INVALID_STATE: 'loginStateMismatch',
+    INVALID_LOGIN_URL: 'loginStateMismatch',
+    CONTEXT_CHANGED: 'loginStateMismatch',
+    credentialStorageUnavailable: 'credentialStorageUnavailable',
+    PERSISTENCE_FAILED: 'credentialStorageUnavailable',
+    ROLLBACK_FAILED: 'credentialStorageUnavailable',
+    loginInProgress: 'loginInProgress'
+  };
+  return t(`settings.workbuddy.${Object.hasOwn(keys, code) ? keys[code] : fallback}`);
+}
+
+function applyWorkbuddyAccounts(accounts) {
+  if (!state.settings || !Array.isArray(accounts)) return;
+  state.workbuddyAccountsRevision = (state.workbuddyAccountsRevision || 0) + 1;
+  state.settings.workbuddyManagedAccounts = accounts;
+  renderWorkbuddyStatus();
+  renderSettingsSummaries();
+  renderSubscriptionSettings();
+}
+
+async function mutateWorkbuddyAccount(id, operation, enabled) {
+  if (state.workbuddyMutationBusy || state.workbuddySignInBusy || state.workbuddyCancelBusy) return;
+  state.workbuddyMutationBusy = true;
+  state.workbuddyAccountError = '';
+  renderWorkbuddyStatus();
+  try {
+    const api = window.tokenMonitor.workbuddy;
+    const result = operation === 'remove'
+      ? await api.removeAccount(id)
+      : await api.setAccountEnabled(id, enabled);
+    if (!result?.ok) {
+      state.workbuddyAccountError = workbuddyAccountError(result?.errorCode,
+        operation === 'remove' ? 'removeFailed' : 'toggleFailed');
+    } else {
+      applyWorkbuddyAccounts(result.accounts);
+      refreshStats({ force: true }).catch(() => {});
+    }
+  } catch (_) {
+    state.workbuddyAccountError = workbuddyAccountError('', operation === 'remove' ? 'removeFailed' : 'toggleFailed');
+  } finally {
+    state.workbuddyMutationBusy = false;
+    renderWorkbuddyStatus();
+  }
+}
+
+function finishWorkbuddyLogin(attempt, result) {
+  if (state.workbuddyLoginAttempt !== attempt) return;
+  if (state.workbuddyCancelBusy) {
+    state.workbuddyPendingLoginResult = { attempt, result };
+    return;
+  }
+  state.workbuddySignInBusy = false;
+  state.workbuddyAccountError = '';
+  if (result?.ok) {
+    applyWorkbuddyAccounts(result.accounts);
+    state.workbuddyLoginStatusKey = '';
+    refreshStats({ force: true }).catch(() => {});
+  } else if (['CANCELED', 'CANCELLED'].includes(result?.errorCode)) {
+    state.workbuddyLoginStatusKey = 'loginCancelled';
+  } else {
+    state.workbuddyLoginStatusKey = '';
+    state.workbuddyAccountError = workbuddyAccountError(result?.errorCode);
+  }
+  renderWorkbuddyStatus();
+}
+
+async function startWorkbuddyLogin(realm) {
+  if (!['cn', 'ai'].includes(realm) || state.workbuddySignInBusy || state.workbuddyCancelBusy || state.workbuddyMutationBusy) return;
+  const attempt = (state.workbuddyLoginAttempt || 0) + 1;
+  state.workbuddyLoginAttempt = attempt;
+  state.workbuddySignInBusy = true;
+  state.workbuddyPendingLoginResult = null;
+  state.workbuddyAccountError = '';
+  state.workbuddyLoginStatusKey = 'loginStatus';
+  renderWorkbuddyStatus();
+  let result;
+  try {
+    result = await window.tokenMonitor.workbuddy.addAccount(realm);
+  } catch (_) {
+    result = { ok: false };
+  }
+  finishWorkbuddyLogin(attempt, result);
+}
+
+async function cancelWorkbuddyLogin() {
+  if (!state.workbuddySignInBusy || state.workbuddyCancelBusy) return;
+  state.workbuddyCancelBusy = true;
+  state.workbuddyAccountError = '';
+  renderWorkbuddyStatus();
+  let cancelled = false;
+  try {
+    const result = await window.tokenMonitor.workbuddy.cancelLogin();
+    cancelled = result === true || result?.ok === true;
+  } catch (_) {}
+  state.workbuddyCancelBusy = false;
+  if (cancelled) {
+    // A cancelled IPC promise may settle later, including after the next login.
+    state.workbuddyLoginAttempt = (state.workbuddyLoginAttempt || 0) + 1;
+    state.workbuddySignInBusy = false;
+    state.workbuddyPendingLoginResult = null;
+    state.workbuddyLoginStatusKey = 'loginCancelled';
+  } else if (state.workbuddyPendingLoginResult) {
+    const pending = state.workbuddyPendingLoginResult;
+    state.workbuddyPendingLoginResult = null;
+    finishWorkbuddyLogin(pending.attempt, pending.result);
+  } else {
+    state.workbuddyAccountError = workbuddyAccountError('', 'cancelFailed');
+  }
+  renderWorkbuddyStatus();
+}
+
+function renderWorkbuddyStatus() {
+  const list = document.getElementById('workbuddyAccountList');
+  if (!list || !state.settings) return;
+  const accounts = Array.isArray(state.settings.workbuddyManagedAccounts) ? state.settings.workbuddyManagedAccounts : [];
+  const busy = Boolean(state.workbuddySignInBusy || state.workbuddyCancelBusy || state.workbuddyMutationBusy);
+  accountShellApi.render({
+    status: document.getElementById('workbuddyAccountStatus'),
+    statusText: accounts.length
+      ? t('settings.workbuddy.connected', { linked: accounts.filter((a) => a.enabled !== false).length, total: accounts.length })
+      : t('settings.workbuddy.notConfigured'),
+    progress: document.getElementById('workbuddyLoginStatus'),
+    progressText: state.workbuddyCancelBusy
+      ? t('settings.workbuddy.cancelling')
+      : state.workbuddyLoginStatusKey ? t(`settings.workbuddy.${state.workbuddyLoginStatusKey}`) : '',
+    error: document.getElementById('workbuddyAccountErrorMessage'),
+    errorText: state.workbuddyAccountError
+  });
+  for (const [id, key] of [['workbuddyAddCnAccountButton', 'addCnAccount'], ['workbuddyAddAiAccountButton', 'addAiAccount']]) {
+    const button = document.getElementById(id);
+    if (!button) continue;
+    button.disabled = busy;
+    button.textContent = t(`settings.workbuddy.${key}`);
+  }
+  const cancel = document.getElementById('workbuddyCancelLoginButton');
+  if (cancel) {
+    cancel.classList.toggle('hidden', !state.workbuddySignInBusy && !state.workbuddyCancelBusy);
+    cancel.disabled = Boolean(state.workbuddyCancelBusy);
+  }
+  list.replaceChildren();
+  if (!accounts.length) {
+    const empty = document.createElement('p');
+    empty.className = 'settings-note';
+    empty.textContent = t('settings.workbuddy.empty');
+    list.append(empty);
+  }
+  const providers = localProviderStatuses('workbuddy');
+  accounts.forEach((account, index) => {
+    const name = accountIdentityApi.accountTitleLabel({ provider: 'workbuddy', ...account }, accounts, {
+      maskEmail: state.settings.maskLimitAccountEmails === true, index
+    }) || t('settings.workbuddy.accountFallback', { number: index + 1 });
+    const row = document.createElement('div');
+    row.className = 'managed-account-row';
+    row.classList.toggle('disabled', account.enabled === false);
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = 'managed-account-checkbox';
+    input.checked = account.enabled !== false;
+    input.disabled = busy;
+    input.setAttribute('aria-label', t('settings.workbuddy.toggleAccount', { account: name }));
+    input.addEventListener('change', () => mutateWorkbuddyAccount(account.id, 'toggle', input.checked));
+    const main = document.createElement('div');
+    main.className = 'managed-account-main';
+    const title = document.createElement('div');
+    title.className = 'managed-account-email';
+    title.textContent = name;
+    title.title = name;
+    const meta = document.createElement('div');
+    meta.className = 'workbuddy-account-meta';
+    meta.textContent = t(account.realm === 'ai' ? 'settings.workbuddy.realmAi' : 'settings.workbuddy.realmCn');
+    main.append(title, meta);
+    const right = document.createElement('span');
+    right.className = 'managed-account-right';
+    const info = document.createElement('span');
+    info.className = 'managed-account-info';
+    // Nicknames, realm labels and email addresses never redirect a quota lookup.
+    const provider = account.accountKey
+      ? providers.find((candidate) => candidate.accountKey === account.accountKey)
+      : null;
+    info.textContent = account.enabled === false ? t('settings.workbuddy.disabled')
+      : provider ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
+        : t('settings.workbuddy.notChecked');
+    info.title = info.textContent;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'managed-account-remove';
+    remove.textContent = '✕';
+    remove.title = t('settings.workbuddy.remove');
+    remove.setAttribute('aria-label', t('settings.workbuddy.removeConfirm', { account: name }));
+    remove.disabled = busy;
+    let armed = false;
+    remove.addEventListener('click', () => {
+      if (busy) return;
+      if (!armed) {
+        armed = true;
+        remove.classList.add('confirming');
+        remove.textContent = '✓';
+        remove.title = t('settings.workbuddy.removeConfirm', { account: name });
+        return;
+      }
+      return mutateWorkbuddyAccount(account.id, 'remove');
+    });
+    right.append(info, remove);
+    row.append(input, main, right);
+    list.append(row);
+  });
+}
+
+function initWorkbuddyAccountSettings() {
+  const api = window.tokenMonitor.workbuddy;
+  const toggle = document.getElementById('workbuddySettingsToggle');
+  if (!api || !toggle) return;
+  toggle.addEventListener('click', () => setAccountGroupExpanded('workbuddy', !state.workbuddyAccountExpanded, 'workbuddyAccountExpanded'));
+  setAccountGroupExpanded('workbuddy', false, 'workbuddyAccountExpanded');
+  renderWorkbuddyStatus();
+  api.onAccounts(applyWorkbuddyAccounts);
+  const revision = state.workbuddyAccountsRevision || 0;
+  api.accounts().then((accounts) => {
+    if ((state.workbuddyAccountsRevision || 0) === revision) applyWorkbuddyAccounts(accounts);
+  }).catch(() => {
+    if ((state.workbuddyAccountsRevision || 0) !== revision) return;
+    state.workbuddyAccountError = workbuddyAccountError('', 'accountsFailed');
+    renderWorkbuddyStatus();
+  });
+  document.getElementById('workbuddyAddCnAccountButton')?.addEventListener('click', () => startWorkbuddyLogin('cn'));
+  document.getElementById('workbuddyAddAiAccountButton')?.addEventListener('click', () => startWorkbuddyLogin('ai'));
+  document.getElementById('workbuddyCancelLoginButton')?.addEventListener('click', cancelWorkbuddyLogin);
 }
 
 function renderAntigravityStatus() {
@@ -17086,6 +18181,8 @@ function setupCursorAccountUI() {
       });
     }
   }
+
+  initWorkbuddyAccountSettings();
 
   const antigravityToggle = document.getElementById('antigravitySettingsToggle');
   if (antigravityToggle && window.tokenMonitor.antigravity) {

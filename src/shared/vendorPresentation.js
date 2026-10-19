@@ -51,6 +51,7 @@
     { id: 'gcmp', color: '#3B82F6' },
     { id: 'pi', color: '#000', widgetInk: true },
     { id: 'omp', color: '#ED4ABF' },
+    { id: 'goose', color: '#FFFFFF' },
     { id: 'zed', color: '#4173e7', widgetColor: '#5C8BFF' },
     { id: 'kilo', color: '#F8F676' },
     { id: 'commandcode', color: '#8C4EDD', widgetColor: '#9D66E7' },
@@ -61,6 +62,7 @@
     { id: 'codebuddy', color: '#6C4DFF', widgetColor: '#8064FF' },
     { id: 'workbuddy', color: '#0DC8A5' },
     { id: 'proma', color: '#000000', widgetInk: true },
+    { id: 'catpaw', color: '#00FFA2' },
     { id: 'qodercn', color: '#2ADB5C' },
     { id: 'reasonix', color: '#4d6bfe' },
     { id: 'dsh', color: '#4d6bfe' },
@@ -94,6 +96,7 @@
     { id: 'stepfun', label: 'StepFun', color: '#000000', widgetInk: true },
     { id: 'nvidia', label: 'NVIDIA', color: '#74B71B' },
     { id: 'typesafe', label: 'TypeSafe', color: '#000000', widgetInk: true },
+    { id: 'notion', label: 'Notion AI', color: '#FFFFFF' },
     { id: 'thirdparty', label: 'Third-party APIs', color: '#8090A6' },
     // Marks without a colour of their own. Factory is the limits provider for
     // the Droid client and borrows its mark; the relays only ever appear as a

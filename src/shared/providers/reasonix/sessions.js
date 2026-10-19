@@ -468,6 +468,15 @@ function projectEntry(projects, session) {
   if (!Number.isFinite(tokens) || tokens <= 0) return;
   project.tokens += tokens;
   project.clients[REASONIX_CLIENT] = (project.clients[REASONIX_CLIENT] || 0) + tokens;
+  let modelTokensRemaining = tokens;
+  for (const [model, value] of Object.entries(session.models || {}).sort(([left], [right]) => left.localeCompare(right))) {
+    if (modelTokensRemaining <= 0) break;
+    const attributed = Math.min(modelTokensRemaining, Math.max(0, Math.round(Number(value) || 0)));
+    if (attributed <= 0) continue;
+    const models = project.models ||= Object.create(null);
+    models[model] = (models[model] || 0) + attributed;
+    modelTokensRemaining -= attributed;
+  }
   if (!project.sessionIds.includes(session.sessionId)) project.sessionIds.push(session.sessionId);
 }
 

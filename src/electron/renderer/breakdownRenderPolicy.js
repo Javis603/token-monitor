@@ -8,6 +8,7 @@
   // FLIP captures force synchronous layout and every animated row creates both Web
   // Animations and a number-counting rAF. Keep that polish for the compact views it was
   // designed for, but never fan it out across a Hub-sized session collection.
+  // Large session lists can still roll the visible readings within this budget.
   const MAX_ANIMATED_BREAKDOWN_ROWS = 40;
   const SESSION_BREAKDOWN_PAGE_SIZE = 100;
 
@@ -18,6 +19,21 @@
 
   function shouldAnimateBreakdownRows(count, options = {}) {
     return options.reducedMotion !== true && rowCount(count) <= MAX_ANIMATED_BREAKDOWN_ROWS;
+  }
+
+  function visibleBreakdownNumberRows(rows, viewport, readRect) {
+    if (!viewport || !(viewport.bottom > viewport.top) || !(viewport.right > viewport.left)) return [];
+    const visible = [];
+    for (const row of rows) {
+      const rect = readRect(row);
+      if (rect && rect.bottom > rect.top && rect.right > rect.left
+        && rect.bottom > viewport.top && rect.top < viewport.bottom
+        && rect.right > viewport.left && rect.left < viewport.right) {
+        visible.push(row);
+        if (visible.length === MAX_ANIMATED_BREAKDOWN_ROWS) break;
+      }
+    }
+    return visible;
   }
 
   function toolIconsEnabled(value) {
@@ -85,6 +101,7 @@
     rowRenderFingerprint,
     rowWidth,
     shouldAnimateBreakdownRows,
+    visibleBreakdownNumberRows,
     toolIconsEnabled
   };
 });

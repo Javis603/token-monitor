@@ -351,3 +351,56 @@ test('Refresh can be added and removed without freezing automatic providers or c
     assert.equal(settings.edgeDockRefreshEnabled, true);
   } finally { global.document = previousDocument; }
 });
+
+test('independent Notch composer writes its item key without changing the side composer', () => {
+  const previous = global.document;
+  global.document = { createElement: (tag) => new Element(tag), activeElement: null };
+  try {
+    const settings = { edgeDockRefreshEnabled: true, edgeDockItems: [{ type: 'stat', metric: 'today' }], notchItems: [{ type: 'limit', provider: 'claude' }] };
+    const root = new Element('div');
+    let saved;
+    const composer = createEdgeDockComposer({ root, itemsApi, itemsKey: 'notchItems', t: (key) => key, presentationApi: {}, getSettings: () => settings, getStats: () => ({}), save: (patch) => { saved = patch;Object.assign(settings, patch); }, providerLabel: (id) => id, providerColor: () => '#fff', windowLabel: () => '', hasProviderMark: () => false, maskEmail: (s) => s, createRowDrag: () => ({ deferRender: () => false }) });
+    const descendants = (node) => [node, ...node.children.flatMap(descendants)];
+    composer.render();
+    descendants(root).find((n) => n.dataset.itemId === 'limit:claude').listeners.click();
+    const control = descendants(root).find((n) => n.tagName === 'INPUT');
+    control.checked = false;control.listeners.change();
+    assert.deepEqual(Object.keys(saved), ['notchItems']);
+    assert.equal(settings.notchItems[0].showUsage, false);
+    assert.equal(settings.edgeDockItems[0].metric, 'today');
+    composer.render();
+    assert.equal(descendants(root).some((n) => n.dataset.itemId === 'action:refresh'), false);
+    descendants(root).find((n) => n.className === 'edge-dock-composer-reset').listeners.click();
+    assert.deepEqual(saved, { notchItems: null, notchRefreshEnabled: false });
+    assert.equal(settings.edgeDockRefreshEnabled, true);
+    assert.equal(settings.edgeDockItems[0].metric, 'today');
+  } finally { global.document = previous; }
+});
+
+
+test('Notch refresh action uses the shared composer without changing side settings or automatic providers', () => {
+  const previous = global.document;
+  global.document = { createElement: tag => new Element(tag), activeElement: null };
+  try {
+    const settings = { notchItems: null, edgeDockRefreshEnabled: true };
+    const root = new Element('div'); const saves = [];
+    const composer = createEdgeDockComposer({ root, itemsApi, itemsKey: 'notchItems',
+      t: key => key, presentationApi: { connectedLimitProviders: () => ['codex'] },
+      getSettings: () => settings, getStats: () => ({}),
+      save: patch => { saves.push(patch); Object.assign(settings, patch); composer.render(); },
+      providerLabel: id => id, providerColor: () => '#fff', hasProviderMark: () => false,
+      createRowDrag: () => ({ deferRender: () => false }) });
+    const all = n => [n, ...n.children.flatMap(all)];
+    const find = cls => all(root).find(n => n.className === cls);
+    composer.render(); assert.equal(all(root).some(n => n.dataset.itemId === 'action:refresh'), false);
+    find('edge-dock-composer-add').listeners.click();
+    all(root).find(n => n.className === 'edge-dock-composer-menu-option'
+      && n.children.some(c => c.textContent === 'settings.common.refresh')).listeners.click();
+    assert.deepEqual(saves.at(-1), { notchRefreshEnabled: true });
+    assert.equal(settings.notchItems, null); assert.equal(settings.edgeDockRefreshEnabled, true);
+    assert.ok(all(root).some(n => n.textContent === 'settings.notch.refreshNote'));
+    find('edge-dock-composer-remove').listeners.click();
+    assert.deepEqual(saves.at(-1), { notchRefreshEnabled: false });
+    assert.equal(settings.edgeDockRefreshEnabled, true);
+  } finally { global.document = previous; }
+});

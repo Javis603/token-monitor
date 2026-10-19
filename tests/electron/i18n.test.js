@@ -45,6 +45,12 @@ test('WSL SQLite recovery guidance is localized without English fallback', () =>
   }
 });
 
+test('WSL SQLite recovery guidance names Antigravity in every locale', () => {
+  for (const locale of LANGUAGE_OPTIONS.map((option) => option.value).filter((value) => value !== 'auto')) {
+    assert.match(MESSAGES[locale]['settings.collection.wslPanel.sqliteHelp'], /Antigravity/, locale);
+  }
+});
+
 test('Unlimited remains a provider quota value token in every locale', () => {
   for (const locale of LANGUAGE_OPTIONS.map((option) => option.value).filter((value) => value !== 'auto')) {
     assert.equal(MESSAGES[locale]['settings.thirdparty.unlimited'], 'Unlimited', locale);
@@ -320,4 +326,27 @@ test('view switcher actions are localized', () => {
   assert.equal(translate('en', 'views.backHome'), 'Back to Home');
   assert.equal(translate('zh-TW', 'views.backHome'), '返回主頁');
   assert.equal(translate('zh-CN', 'views.backHome'), '返回主页');
+});
+
+
+test('Notch settings and shared labels are present in every bundled locale', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/index.html'), 'utf8');
+  const notch = html.split('id="notchFeature"')[1].split('id="tokscaleGroup"')[0];
+  const keys = [...new Set(['settings.advanced.experimental', 'settings.notch.experimentalNote',
+    ...[...notch.matchAll(/data-i18n="([^"]+)"/g)].map(match => match[1])])];
+  assert.ok(keys.includes('settings.notch.iconRings'));
+  assert.ok(keys.includes('settings.notch.followTrayNote'));
+  assert.ok(keys.includes('settings.appearance.macBackdropVibrancy'));
+  for (const locale of LANGUAGE_OPTIONS.map(option => option.value).filter(value => value !== 'auto')) {
+    for (const key of keys) {
+      assert.ok(MESSAGES[locale][key]?.trim(), `${locale}: ${key} must not rely on fallback`);
+      const label = fakeElement({ i18n: key });
+      applyTranslations({ querySelectorAll: selector => selector === '[data-i18n]' ? [label] : [] }, locale);
+      assert.equal(label.textContent, MESSAGES[locale][key]);
+    }
+  }
+  assert.equal(translate('zh-CN', 'settings.notch.iconRings'), '显示额度与采集状态');
+  assert.equal(translate('zh-CN', 'settings.notch.followTrayNote'), '收起摘要与托盘一致。');
 });

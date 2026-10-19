@@ -59,20 +59,23 @@ test('source markers declare each WSL path once and preserve discovery order', (
   assert.equal(new Set(SOURCE_MARKERS.map(({ marker }) => marker)).size, SOURCE_MARKERS.length);
   assert.deepEqual(WSL_DATA_MARKERS, SOURCE_MARKERS.map(({ marker }) => marker));
   assert.deepEqual(Object.entries(MARKER_CLIENTS), SOURCE_MARKERS.map(({ marker, client }) => [marker, client]));
-  assert.deepEqual(SOURCE_MARKERS.filter(({ hostCheckId }) => hostCheckId).map(({ client }) => client), [
-    'qwen', 'pi', 'omp', 'commandcode', 'droid', 'fx'
+  assert.deepEqual([...new Set(SOURCE_MARKERS.filter(({ hostCheckId }) => hostCheckId).map(({ client }) => client))], [
+    'qwen', 'pi', 'omp', 'commandcode', 'droid', 'fx', 'claude'
   ]);
   assert.deepEqual(WSL_DATA_MARKERS, [
     '.claude/projects', '.claude/transcripts', '.codex/sessions', '.local/share/opencode',
     '.openclaw/agents', '.clawdbot/agents', '.moltbot/agents', '.moldbot/agents',
+    '.local/share/goose/sessions/sessions.db', '.local/share/Block/goose/sessions/sessions.db',
     '.hermes', '.kimi/sessions', '.kimi-code/sessions', '.qwen/projects',
     '.grok/sessions', '.copilot/otel', '.gemini/antigravity-cli/conversations',
     '.gemini/antigravity/conversations',
     '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks',
     '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks',
-    '.local/share/amp/threads', '.pi/agent/sessions', '.omp/agent/sessions',
+    '.local/share/amp/threads', '.config/tokscale/amp-cache/threads', '.pi/agent/sessions', '.omp/agent/sessions',
     '.local/share/zed/threads/threads.db', '.local/share/kilo/kilo.db',
     '.config/Code/User/globalStorage/kilocode.kilo-code/tasks',
+    'Library/Application Support/Code/User/globalStorage/kilocode.kilo-code/tasks',
+    'AppData/Roaming/Code/User/globalStorage/kilocode.kilo-code/tasks',
     '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks',
     '.commandcode/projects', '.dsh/sessions', '.factory/sessions',
     '.local/share/mimocode/mimocode.db', '.local/share/muse/sessions', '.zcode/projects', '.zcode/cli/db',
@@ -84,6 +87,18 @@ test('source markers declare each WSL path once and preserve discovery order', (
     '.local/share/devin/cli/sessions.db', 'AppData/Roaming/devin/cli/sessions.db',
     '.config/Devin/User/acp-events', '.config/devin/User/acp-events',
     'AppData/Roaming/Devin/User/acp-events', 'Library/Application Support/Devin/User/acp-events',
-    '.fx/sessions', '.minimax/v2/sessions', '.mavis/v2/sessions'
+    '.fx/sessions', '.minimax/v2/sessions', '.mavis/v2/sessions',
+    'Library/Application Support/Claude/local-agent-mode-sessions',
+    'Library/Application Support/Claude/claude-code-sessions',
+    'Library/Application Support/Claude/IndexedDB/https_claude.ai_0.indexeddb.leveldb',
+    'Library/Application Support/Claude/IndexedDB/https_claude.ai_0.indexeddb.blob',
+    'AppData/Roaming/Claude/local-agent-mode-sessions',
+    'AppData/Roaming/Claude/claude-code-sessions',
+    'AppData/Roaming/Claude/IndexedDB/https_claude.ai_0.indexeddb.leveldb',
+    'AppData/Roaming/Claude/IndexedDB/https_claude.ai_0.indexeddb.blob',
+    '.config/Claude/local-agent-mode-sessions',
+    '.config/Claude/claude-code-sessions',
+    '.config/Claude/IndexedDB/https_claude.ai_0.indexeddb.leveldb',
+    '.config/Claude/IndexedDB/https_claude.ai_0.indexeddb.blob'
   ]);
 });

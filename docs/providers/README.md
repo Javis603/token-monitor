@@ -18,9 +18,9 @@ Every note declares the catalog ids it covers in its front matter, so routing ne
 grep -lE '^ids:.*[[, ]<id>[],]' docs/providers/*.md
 ```
 
-A product family shares one note when splitting it would hide a coupled contract — `droid.md` covers both the `droid` tracked client and the `factory` limits provider. If no note claims an id, this README and the code/tests are authoritative; do not create an empty placeholder. `tests/docs/providerGuidance.test.js` fails when a note claims an id that is in neither catalog (so a rename cannot leave a note pointing at nothing), when two notes claim the same id, or when a filename is not one of its own ids.
+A product family shares one note when splitting it would hide a coupled contract — `droid.md` covers both the `droid` tracked client and the `factory` limits provider. If no note claims an id, use the relevant shared contracts and the code/tests; do not create an empty placeholder. `tests/docs/providerGuidance.test.js` fails when a note claims an id that is in neither catalog (so a rename cannot leave a note pointing at nothing), when two notes claim the same id, or when a filename is not one of its own ids.
 
-Read the matching note before changing that provider, and update it in the same change when its documented contract moves.
+Use the matching note's `read_when` to select relevant guidance, and update it in the same change when its documented contract moves. Consult the [tracked-client checklist](#adding-a-tracked-client) or [limits-provider checklist](#adding-a-limits-provider) only when changing that catalog or wiring; read both only when the change spans both.
 
 ## Writing a note
 
@@ -77,6 +77,21 @@ Targeted watch ticks make the client id a correctness surface, because the scan 
 3. the filter must never emit `synthetic`.
 
 The first two are correctness: break either and a watch tick zeroes a client's partition, feeding a negative delta into month/allTime until the next full scan. The third is performance — `synthetic` makes tokscale enable *every* client, so the targeted scan silently degrades into a full one with correct numbers and none of the saving. Don't diagnose one as the other. `tests/shared/clientPartitionInvariants.test.js` enforces all three.
+
+## Adding a live activity adapter
+
+Register only reliable identity/state/resolution evidence; missing evidence clears the prior observation to `unknown` and restores transcript fallback. Do not infer waiting from prompt text or shell arguments.
+
+1. Add the canonical client id, `metadataDepsKey` and optional verified `t3Driver` to portable `sessionActivityProviders.js`; bind an explicit lazy loader in `sessionActivityRegistry.js`. Disabled adapters must not load or probe.
+2. Implement `readActivity(summary, options)` returning `{ readings: Map<sessionId, liveActivity>, sessions: localZeroTokenRows }`, and `projectActivity(summary, activity, now)` returning a new snapshot or `null` when unchanged. Reuse `sessionActivityProjection` for bounded lookups, overlays and clearing; share accounting maps and preserve archive exclusions.
+3. If transcript events are insufficient, expose bounded `activityWatchTargets(options)` declarations: `{ target, floor, kind }` with `pid-registry` or `sqlite`. The shared watcher admits only the ancestor chain and source files, including SQLite WAL and an explicitly declared `runtimeFile`, excluding SHM. New source shapes need a bounded matcher; no adapter owns another watcher or timer.
+4. Test protocol identity, pending/resolved states, stale/future observations, archives, zero-token replacement and collector cancellation. Run `npm run update:hub-build` after portable changes, then `npm run verify`.
+
+Declarations drive common dispatch, rendering, normalization and expiry; native transcript fallbacks remain provider-specific. See [architecture](../architecture.md) for accounting and publication boundaries.
+
+## T3 Code session relationships
+
+T3 delegation uses one shared relationship reader, independent of the provider. `src/shared/t3SessionIdentity.js` binds its strong native ids to accounting clients. For a new direct driver or ACP Registry agent, verify that T3’s native id is the same id Tokscale emits before adding the binding; otherwise provide a verified conversion separately. ACP instances require the colocated T3 server configuration, not an instance-name convention or model guess. See [the architecture contract](../architecture.md#session-relationships) for ownership, historical-run and missing-parent rules. These bindings do not register a new usage source, title resolver or live-activity adapter.
 
 ## Adding a limits provider
 

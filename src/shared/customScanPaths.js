@@ -26,10 +26,13 @@ const CUSTOM_SCAN_PATH_LIMIT_ERRORS = Object.freeze({
 // extra roots, so persisted Kilo roots are forwarded to the latter. MiniMax
 // Code's runtime store is read by the fork only from its data directories, so
 // an extra `mcode` root would reach upstream's headless-capture scan alone.
+// Goose selects one database from its fixed/env candidates; extra directories
+// are ignored by the pinned scanner.
 const UNSUPPORTED_CUSTOM_SCAN_CLIENTS = new Set([
   ...FORK_ONLY_CLIENT_IDS,
   'opencode',
   'cursor',
+  'goose',
   'mcode'
 ]);
 const CUSTOM_SCAN_CLIENT_IDS = Object.freeze(

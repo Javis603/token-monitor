@@ -8,7 +8,7 @@ const { FORK_ONLY_CLIENT_IDS } = require('../../src/shared/clientCatalog');
 const { tokscaleClientFilter } = require('../../src/shared/collector');
 
 // Every effective client id tokscale itself is expected to recognize — every
-// KNOWN_CLIENTS entry except the fork-only ones (proma, qodercn), plus
+// KNOWN_CLIENTS entry except the fork-only ones (proma, catpaw, qodercn), plus
 // their TOKSCALE_CLIENT_ALIASES expansion (e.g. antigravity -> antigravity,
 // antigravity-cli) — since that's the exact CSV runTokscale/runTokscaleGraph
 // send, not just the logical client entries. Opt-in clients (qodercn) are in
@@ -134,6 +134,6 @@ test('a binary without the fork client module fails closed', () => {
       spawn,
       log: () => {}
     }),
-    /does not accept the fork-only client ids proma, qodercn \(scan exited 2/
+    /does not accept the fork-only client ids proma, catpaw, qodercn \(scan exited 2/
   );
 });

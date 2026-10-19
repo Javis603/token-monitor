@@ -20,13 +20,17 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-A855F7?style=flat-square" alt="ライセンス: MIT" /></a>
 </p>
 
+<p align="center">
+    <a href="https://trendshift.io/repositories/47497?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-47497" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/47497" alt="Javis603%2Ftoken-monitor | Trendshift" width="250" height="55"/></a>
+</p>
+
 <div align="center">
     <img src=".github/assets/demo.gif">
 </div>
 
 ## Token Monitor とは
 
-Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 44+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップウィジェットです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。
+Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 47+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップウィジェットです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。
 
 ## 対応ツール
 
@@ -49,10 +53,11 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/`（`sessions/`、`logs/unified.jsonl`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`、`~/.copilot/`（`otel/`、`data.db`、`session-store.db`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/gcmp.png" width="28" alt="AI Chat Models" /> | AI Chat Models | VS Code `globalStorage/vicanent.gcmp/usages/` の 1 時間ごとの JSONL（AI Chat Models 拡張経由の Copilot Chat 利用、オプトイン） | ✅ | — | — |
-| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `~/.local/share/goose/sessions/sessions.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`、VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — 拡張機能のログは Linux およびリモート/WSL のみ | ✅ | — | — |
+| <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`、VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | — | — |
@@ -61,6 +66,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code 拡張ログ | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（中国版のみ） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/`（`session.jsonl`、`session.jsonl.zstd`） | ✅ | ✅ | ✅ |
@@ -77,6 +83,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Trae CN access token（trae.cn で Trae CN／SOLO credits を取得） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | Alibaba Cloud コンソール cookie（Bailian／Model Studio Token Plan のクォータ、Team と Personal） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token（Coding Plan／Token Plan のクォータ） | — | ✅ | — |
+| <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Business/Enterprise 向けの Notion AI ローリング／月間使用枠；手動 token_v2 Cookie + 明示的なワークスペース ID | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="サードパーティAPI" /> | サードパーティAPI | New API / Sub2API互換アカウントプリセット（互換性のあるOne APIフォークを含む）、New APIキープリセット、カスタム残高エンドポイント | — | ✅ | — |
 
 <details>
@@ -84,10 +91,13 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 <br>
 
-- 上記はデフォルトのパスです。Token Monitor は Tokscale と同じ環境変数の上書きに従います。`~/.local/share/` 配下は `$XDG_DATA_HOME`、ツール個別では `$CODEX_HOME`、`$GROK_HOME`、`$HERMES_HOME`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME`、`$CLINE_*` などです。
+- 上記はデフォルトのパスです。Token Monitor は Tokscale と同じ環境変数の上書きに従います。`~/.local/share/` 配下は `$XDG_DATA_HOME`、ツール個別では `$CODEX_HOME`、`$GROK_HOME`、`$HERMES_HOME`、`$GOOSE_PATH_ROOT`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME`、`$CLINE_*` などです。
+- Goose の使用量は、翌日以降の分もセッション作成日に計上されます。リモート goosed とカスタムスキャンパスは対象外です。[Goose のデータソース](docs/providers/goose.md)を参照してください。
+- CatPaw は既定で無効です。Settings → tools で有効にすると、macOS と Windows の中国版・海外版アシスタントのデータベースを読み取ります。パスと検証範囲は [CatPaw のデータソース](docs/providers/catpaw.md)を参照してください。
 - LM Studio の追跡対象は現在、サーバーログに記録される OpenAI 互換の `/v1/chat/completions` および `/v1/responses` リクエストのみです。LM Studio 内蔵 Chat UI から開始した会話と、ネイティブの `/api/v1/chat` リクエストは含まれません。
 - Unsloth Studio は `studio.db` から Studio のチャットとローカル API の推論使用量を追跡します。ローカル推論の API コストはゼロで、識別可能な従量課金プロバイダーには Tokscale の推定価格を使用します。学習トークンは含まれません。[Unsloth のデータソース](docs/providers/unsloth.md)も参照してください。
 - Devin はローカルの `sessions.db` から Devin CLI セッションを、`acp-events` ACP ログから Devin Desktop のエージェントセッションを追跡します。同じセッションが両方にある場合は CLI データベースが優先されます。Desktop の対象範囲は接続する ACP エージェントに依存します。ローカルに `usage_update` イベントを書き出すエージェントのみが集計対象で、Devin Desktop の既定の `devin-cloud` エージェントはサーバー側で計測されるため、既定の Desktop 構成では Desktop のトークンは報告されません。セッションタイトルとプロジェクト帰属は CLI データベースから取得します。詳しくは [Devin のデータソース](docs/providers/devin.md)を参照してください。
+- Notion AI は内部 API を使用します。`token_v2` Cookie の手動貼り付けと Business/Enterprise の明示的なワークスペース ID が必要です。テストデータのみで検証しており、実際のレスポンスサンプルはなく、実際の認証検証は承認待ちです。Cookie の自動取得は行わず、公開 API としての互換性は保証されません。[Notion のデータソース](docs/providers/notion.md)を参照してください。
 - MiniMax Code は、CLI が書き込むローカルのセッション履歴（`~/.minimax` または `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR`、`~/.mavis` と `~/.minimax-<profile>` / `~/.mavis-<profile>` も含む）と、`tokscale headless mcode` でキャプチャした実行を読み取ります。両方にある同じターンは 1 回だけ集計されます。
 
 - Command Code の transcript には実際のトークン数やメッセージごとのモデル情報が含まれません。トークン使用量は transcript テキストから推定され、モデルの帰属と推定コストには各リクエストで過去に使用したモデルではなく、現在設定されているモデルが反映される場合があります。
@@ -130,7 +140,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 ### 使用量の追跡
 
-- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 36+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
+- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 38+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
 - **リアルタイムトークンレート** — 生成速度を `tok/s`、総消費を `tok/min` で表示する任意のライブ表示
 - **セッション別詳細** — セッションを開くとプロンプトごとのトークン、各応答のトークン分割・使用ツールまで展開（ローカル transcript/DB を必要時のみ読み込み、同期しない）
 - **キャッシュヒット統計** — ツール・モデルをクリックすると入力トークン（キャッシュ hit/miss）、出力トークン、ヒット率の詳細
@@ -140,7 +150,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 ### 制限・トレンド・エクスポート
 
-- **AI ツール制限検出** — Claude Code、Codex、Cursor、OpenRouter、サードパーティAPI、GLM、Kimi など 28+ プロバイダーの session/daily/weekly/billing/credits、複数の OpenRouter／サードパーティプロファイル、残高型アカウント（Claude クレジット、DeepSeek のプリペイド残高と使用履歴、サードパーティ残高）
+- **AI ツール制限検出** — Claude Code、Codex、Cursor、OpenRouter、サードパーティAPI、GLM、Kimi など 29+ プロバイダーの session/daily/weekly/billing/credits、複数の OpenRouter／サードパーティプロファイル、残高型アカウント（Claude クレジット、DeepSeek のプリペイド残高と使用履歴、サードパーティ残高）
 - **複数アカウントと Codex 切り替え** — 1 つのプロバイダーで複数アカウントを追跡し、それぞれの制限を表示。追跡済みの Codex アカウントは、再認証なしでローカルアカウントとしてワンクリック切り替え可能
 - **Codex リセット予測** — 任意で有効にできるサードパーティのリセット予測。予測されるリセット時刻、リセットタイプ（Regular / Banked）、前回のリセット時刻を表示
 - **削除されたセッション使用量を保持** — 多くのツールは古いセッションを削除します（Claude Code はデフォルトで 30 日後にトランスクリプトを削除）。有効にすると、Token Monitor は観測済みの日別ツール/モデル使用量をローカルにアーカイブし、元ファイルが消えてもヒートマップとトレンドを維持します（下記 [セッションデータの保持期間](#セッションデータの保持期間) を参照）

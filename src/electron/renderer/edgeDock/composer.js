@@ -16,6 +16,7 @@
       itemsApi,
       presentationApi,
       getSettings,
+      itemsKey = 'edgeDockItems',
       getStats,
       save,
       providerLabel,
@@ -34,7 +35,8 @@
     const ui = { selected: '', menuOpen: false };
     const refreshItem = { type: 'action', action: 'refresh' };
     const idFor = (item) => item.type === 'action' ? 'action:refresh' : itemsApi.itemId(item);
-    const refreshEnabled = () => getSettings()?.edgeDockRefreshEnabled === true;
+    const refreshKey = itemsKey === 'notchItems' ? 'notchRefreshEnabled' : 'edgeDockRefreshEnabled';
+    const refreshEnabled = () => getSettings()?.[refreshKey] === true;
     let drag = null;
     let renderedSignature = '';
 
@@ -46,7 +48,7 @@
     }
 
     function storedItems() {
-      return itemsApi.normalizeEdgeDockItems(getSettings()?.edgeDockItems);
+      return itemsApi.normalizeEdgeDockItems(getSettings()?.[itemsKey]);
     }
 
     function isAutomatic() {
@@ -73,7 +75,7 @@
     }
 
     function persist(items) {
-      return save({ edgeDockItems: items });
+      return save({ [itemsKey]: items });
     }
 
     function updateItem(id, change) {
@@ -161,7 +163,7 @@
           option.addEventListener('click', () => {
             ui.menuOpen = false;
             ui.selected = idFor(item);
-            if (item.type === 'action') void save({ edgeDockRefreshEnabled: true });
+            if (item.type === 'action') void save({ [refreshKey]: true });
             else void persist([...items.filter((entry) => entry.type !== 'action'), item]);
           });
           group.append(option);
@@ -301,14 +303,14 @@
       remove.type = 'button';
       remove.addEventListener('click', () => {
         ui.selected = '';
-        if (item.type === 'action') void save({ edgeDockRefreshEnabled: false });
+        if (item.type === 'action') void save({ [refreshKey]: false });
         else void persist(items.filter((entry) => entry.type !== 'action' && idFor(entry) !== id));
       });
       head.append(remove);
       pane.append(head);
 
       if (item.type === 'action') {
-        pane.append(el('p', 'edge-dock-composer-hint', t('settings.edgeDock.refreshNote')));
+        pane.append(el('p', 'edge-dock-composer-hint', t(itemsKey === 'notchItems' ? 'settings.notch.refreshNote' : 'settings.edgeDock.refreshNote')));
         return pane;
       }
       if (item.type === 'stat') {
@@ -426,7 +428,7 @@
         reset.addEventListener('click', () => {
           ui.selected = '';
           ui.menuOpen = false;
-          void save({ edgeDockItems: null, edgeDockRefreshEnabled: false });
+          void save({ [itemsKey]: null, [refreshKey]: false });
         });
         actions.append(reset);
       }

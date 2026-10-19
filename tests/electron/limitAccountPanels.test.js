@@ -145,7 +145,8 @@ for (const form of limitAccountFormsForRenderer()) {
     await submit.click();
     // Clearing the draft empties secrets and leaves settings beside them.
     for (const field of form.fields) {
-      assert.equal(group.byId(`${field.key}Input`).value, field.secret ? '' : field.options[0].value, field.key);
+      assert.equal(group.byId(`${field.key}Input`).value,
+        field.secret ? '' : field.input === 'select' ? field.options[0].value : `${field.key}-draft`, field.key);
     }
   });
 }
@@ -353,6 +354,14 @@ test('every shared account message exists in each locale with its placeholders',
   }
 });
 
+test('MiniMax key hints cover both billing types in every locale', () => {
+  for (const locale of Object.keys(i18n.MESSAGES)) {
+    const hint = i18n.translate(locale, 'settings.minimax.apiKeyPlaceholder');
+    assert.match(hint, /sk-cp-/, locale);
+    assert.match(hint, /sk-api-/, locale);
+  }
+});
+
 test('MiniMax explicit regions drive Open before a probe and override stale status', async () => {
   const { resolveOpenUrl, syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
@@ -374,6 +383,31 @@ test('MiniMax explicit regions drive Open before a probe and override stale stat
   provider = null;
   panel.group.byId('minimaxOpenBrowser').click();
   assert.equal(opened.pop(), 'https://platform.minimaxi.com/user-center/payment/token-plan');
+});
+
+test('MiniMax billing choice waits for saving before key submission and follows the balance setup link', async () => {
+  const { resolveOpenUrl, syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
+  const drafts = [];
+  let finish;
+  const panel = renderPanel(form, {
+    onFieldChange: () => new Promise((resolve) => { finish = resolve; }),
+    onSave: (_, values) => drafts.push(values)
+  });
+  syncCredentialFields(form, { document: panel.document, settings: { minimaxApiRegion: 'intl' } });
+  const mode = panel.group.byId('minimaxBillingModeInput');
+  assert.equal(mode.value, 'token-plan');
+  mode.change('api');
+  assert.equal(resolveOpenUrl(form, { document: panel.document, provider: null }), 'https://platform.minimax.io/user-center/payment/balance');
+  panel.group.byId('minimaxApiKeyInput').value = 'sk-api-test';
+  const pending = panel.group.byId('minimaxCredentialSubmit').click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(drafts, []);
+  finish();
+  await pending;
+  assert.deepEqual(drafts, [{ minimaxApiKey: 'sk-api-test' }]);
+  syncCredentialFields(form, { document: panel.document, settings: { minimaxBillingMode: 'api', minimaxApiRegion: 'auto' } });
+  assert.equal(resolveOpenUrl(form, { document: panel.document, provider: { region: 'cn' } }), 'https://platform.minimaxi.com/user-center/payment/balance');
 });
 
 test('MiniMax key submission waits for a region save without submitting an implicit region', async () => {

@@ -20,13 +20,17 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-A855F7?style=flat-square" alt="License: MIT" /></a>
 </p>
 
+<p align="center">
+    <a href="https://trendshift.io/repositories/47497?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-47497" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/47497" alt="Javis603%2Ftoken-monitor | Trendshift" width="250" height="55"/></a>
+</p>
+
 <div align="center">
     <img src=".github/assets/demo.gif">
 </div>
 
 ## What is Token Monitor?
 
-A desktop widget that shows live token usage and AI Tool Limits across 44+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
+A desktop widget that shows live token usage and AI Tool Limits across 47+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
 
 ## Supported Tools
 
@@ -49,10 +53,11 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/` (`sessions/`, `logs/unified.jsonl`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`, `~/.copilot/` (`otel/`, `data.db`, `session-store.db`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/gcmp.png" width="28" alt="AI Chat Models" /> | AI Chat Models | VS Code `globalStorage/vicanent.gcmp/usages/` per-hour JSONL (Copilot Chat via the AI Chat Models extension; opt-in) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `~/.local/share/goose/sessions/sessions.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`; VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — extension logs on Linux & remote/WSL only | ✅ | — | — |
+| <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`; VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | — | — |
@@ -61,6 +66,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code extension logs | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db` (CN only) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/` (`session.jsonl`, `session.jsonl.zstd`) | ✅ | ✅ | ✅ |
@@ -77,6 +83,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Trae CN access token (Trae CN / SOLO credits via trae.cn) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | Alibaba Cloud console cookie (Bailian / Model Studio Token Plan quota, Team & Personal) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token (Coding Plan / Token Plan quota) | — | ✅ | — |
+| <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Notion AI rolling/monthly allowance for Business/Enterprise; manual token_v2 cookie + explicit workspace ID | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="Third-party APIs" /> | Third-party APIs | New API / Sub2API-compatible account presets (including compatible One API forks), a New API API-key preset, and a Custom balance endpoint | — | ✅ | — |
 
 <details>
@@ -84,10 +91,13 @@ Token Monitor supports token usage, account-limit checks, and session details se
 
 <br>
 
-- Paths above are the defaults. Token Monitor follows the same environment overrides Tokscale does — `$XDG_DATA_HOME` for the `~/.local/share/` roots, and per-tool variables such as `$CODEX_HOME`, `$GROK_HOME`, `$HERMES_HOME`, `$KIMI_CODE_HOME`, `$UNSLOTH_STUDIO_HOME`, `$LM_STUDIO_HOME`, `$DSH_HOME`, `$REASONIX_STATE_HOME`, `$REASONIX_HOME` and the `$CLINE_*` family.
+- Paths above are the defaults. Token Monitor follows the same environment overrides Tokscale does — `$XDG_DATA_HOME` for the `~/.local/share/` roots, and per-tool variables such as `$CODEX_HOME`, `$GROK_HOME`, `$HERMES_HOME`, `$GOOSE_PATH_ROOT`, `$KIMI_CODE_HOME`, `$UNSLOTH_STUDIO_HOME`, `$LM_STUDIO_HOME`, `$DSH_HOME`, `$REASONIX_STATE_HOME`, `$REASONIX_HOME` and the `$CLINE_*` family.
+- Goose counts all session usage on its creation day, including usage on later days. Remote goosed servers and custom scan paths are not supported. See [Goose source notes](docs/providers/goose.md).
+- CatPaw is off by default; enable it in Settings → tools. It reads domestic and overseas assistant databases on macOS and Windows. See [CatPaw source notes](docs/providers/catpaw.md) for paths and verification boundaries.
 - LM Studio tracking currently covers OpenAI-compatible `/v1/chat/completions` and `/v1/responses` requests recorded in server logs. Conversations started from LM Studio's built-in Chat UI and native `/api/v1/chat` requests are not included.
 - Unsloth Studio tracks inference usage from `studio.db`: Studio chats and its local API. Local inference has zero API cost; recognized metered providers use Tokscale's price estimates. Training tokens are not included. See [Unsloth source notes](docs/providers/unsloth.md).
 - Devin tracks Devin CLI sessions from the local `sessions.db` and Devin Desktop agent sessions from `acp-events` ACP logs; where both cover the same session the CLI database is authoritative. Desktop coverage depends on the connected ACP agent: only agents that write `usage_update` events locally are counted, and Devin Desktop's default `devin-cloud` agent meters its usage server-side, so a default Desktop setup reports no Desktop tokens. Session titles and project attribution come from the CLI database. See [Devin source notes](docs/providers/devin.md).
+- Notion AI uses internal APIs with a manually pasted `token_v2` cookie and an explicit Business/Enterprise workspace ID. Only fixtures have been validated; a real response sample is unavailable and live authentication awaits approval. There is no automatic cookie retrieval or public API guarantee. See [Notion source notes](docs/providers/notion.md).
 - MiniMax Code reads the local session history the CLI writes, under `~/.minimax` or `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR` (also `~/.mavis` and `~/.minimax-<profile>` / `~/.mavis-<profile>`), plus runs captured with `tokscale headless mcode`; a turn found in both counts once.
 
 - Command Code transcripts do not contain actual token counts or per-message model metadata. Token usage is estimated from transcript text, while model attribution and derived cost may reflect the currently configured model rather than the model historically used for each request.
@@ -128,7 +138,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Tracking usage
 
-- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 36+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
+- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 38+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
 - **Live token rate** — an optional live readout of generation speed in `tok/s` or total burn in `tok/min`
 - **Per-session detail** — open a session to see tokens per prompt, expandable to each reply's exact token split and tools used (read on-demand from local transcripts or databases, never synced)
 - **Cache hit statistics** — click any tool or model to expand a detailed breakdown of input tokens (cache hit vs miss), output tokens, and hit-rate percentages
@@ -138,7 +148,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Limits, trends & export
 
-- **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 28+ providers, including multiple OpenRouter/third-party profiles and balance-style accounts (Claude credits, DeepSeek prepaid balance and spend history, third-party balances)
+- **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 29+ providers, including multiple OpenRouter/third-party profiles and balance-style accounts (Claude credits, DeepSeek prepaid balance and spend history, third-party balances)
 - **Multiple accounts & Codex switching** — track several accounts per provider, each with its own limits; a tracked Codex account can be switched as the active local account in one click, without re-authenticating
 - **Codex reset forecast** — an optional third-party forecast below Codex limits, showing the expected reset time, the reset type (Regular or Banked), and when the window last reset
 - **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)

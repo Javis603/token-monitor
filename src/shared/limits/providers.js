@@ -61,6 +61,7 @@
     { id: 'trae', label: 'Trae CN' },
     { id: 'alibaba', label: 'Alibaba Cloud' },
     { id: 'stepfun', label: 'StepFun' },
+    { id: 'notion', label: 'Notion AI' },
     { id: 'thirdparty', label: 'Third-party APIs' }
   ].map((provider) => Object.freeze({ ...provider })));
 

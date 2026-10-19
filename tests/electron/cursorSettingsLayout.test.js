@@ -752,7 +752,7 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   const forms = limitAccountFormsForRenderer();
   const expectedFields = {
     deepseek: [['deepseekApiKey', 'password']],
-    minimax: [['minimaxApiRegion', 'select'], ['minimaxApiKey', 'password']]
+    minimax: [['minimaxBillingMode', 'select'], ['minimaxApiRegion', 'select'], ['minimaxApiKey', 'password']]
   };
   for (const id of ['deepseek', 'minimax']) {
     assert.doesNotMatch(html, new RegExp(`id="${id}(AccountGroup|ManualPanel|ApiKeyInput)"`), id);
@@ -791,7 +791,11 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
       cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
       en: 'https://platform.minimax.io/user-center/payment/token-plan'
     },
-    default: 'https://platform.minimaxi.com/user-center/payment/token-plan'
+    default: 'https://platform.minimaxi.com/user-center/payment/token-plan',
+    pathByField: {
+      byField: 'minimaxBillingMode',
+      values: { 'token-plan': '/user-center/payment/token-plan', api: '/user-center/payment/balance' }
+    }
   });
 
   // The region is a plain setting beside the credential, so Clear leaves it
@@ -804,7 +808,7 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   for (const { labelKey } of region.options) {
     assert.match(labelKey, /^settings\.minimax\./, labelKey);
   }
-  assert.deepEqual(minimax.top, [{ field: 'minimaxApiRegion' }]);
+  assert.deepEqual(minimax.top, [{ field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' }]);
 
   // The region never becomes a credential: no store path, so it stays in
   // settings.json only after a selection; an implicit default stays empty.
@@ -1794,17 +1798,19 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(main, /delete result\.account\.cookieHeader/);
 });
 
-test('WorkBuddy settings uses the same automatic provider row as other ambient integrations', () => {
+test('WorkBuddy settings retain automatic detection alongside managed regional account login', () => {
   const html = readRendererFile('index.html');
-  assert.doesNotMatch(html, /workbuddy(?:Settings|AccountGroup|LocalApp|Open|Refresh|Privacy|OptIn|Error)/);
-
+  assert.match(html, /id="workbuddyAccountGroup"/);
+  assert.match(html, /id="workbuddyAddCnAccountButton"/);
+  assert.match(html, /id="workbuddyAddAiAccountButton"/);
+  assert.match(html, /id="workbuddyAccountStatus"/);
   const app = readRendererFile('app.js');
   assert.match(app, /workbuddy: 'settings\.limits\.connection\.workbuddy'/);
-  assert.doesNotMatch(app, /workbuddyAccountGroup|workbuddyAccountStatus|renderWorkbuddyStatus/);
-  assert.doesNotMatch(app, /window\.tokenMonitor\.workbuddy/);
-
+  assert.match(app, /renderWorkbuddyStatus/);
+  assert.match(app, /window\.tokenMonitor\.workbuddy/);
+  assert.doesNotMatch(html, /workbuddy(?:AccessToken|RefreshToken|Privacy|OptIn)/);
   const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
-  assert.doesNotMatch(preload, /workbuddy:/);
+  assert.match(preload, /addAccount: \(realm\) => ipcRenderer\.invoke\('workbuddy:addAccount', realm\)/);
 });
 
 test('WorkBuddy auth is resolved only when its enabled local provider is active', () => {

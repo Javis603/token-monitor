@@ -46,6 +46,14 @@ TOKEN_MONITOR_DEVICE_ID=build-server
 
 无论从哪个目录启动，agent 都会读取 checkout 根目录下的 `.env`。
 
+### 标题同步状态与迁移
+
+标题同步默认关闭，需分别在 Hub 和 agent 上开启。agent 使用 `TOKEN_MONITOR_SYNC_SESSION_TITLES=1` 或 `--sync-session-titles`，与 widget 的标题显示设置独立。协议及旧版 agent 的清理说明见[标题同步 API](API.md#put-apisynctitlesdeviceid)。
+
+删除或迁移 agent 的状态目录（若设置了 `TOKEN_MONITOR_SHARED_DIR`，则为该目录）前，先停止 agent 或其服务，再使用原来的 Hub URL、凭据、设备 ID 和状态目录运行 `npm run agent:once -- --sync-session-titles=false`。确认撤销成功前不要删除状态；仍有清理待处理或状态警告时，应保留它。这个命令在清理后仍会正常采集并上传不含标题的用量。
+
+若不想再次上传用量，可改为在旧 Hub 上删除旧设备，并保持原 agent 停止，避免它重新创建设备。撤销无法删除已导出的副本或备份。
+
 ## 验证
 
 打印 agent 将要发送的摘要，但不发送到 hub：
@@ -91,6 +99,8 @@ npm ci
 然后重新启动。如果固定的 tokscale 版本有变化，下次启动时会自动获取。
 
 ## 卸载
+
+如果这个 agent 曾经同步过标题，删除状态目录前必须完成[标题同步清理](#标题同步状态与迁移)。仅删除本地状态文件，不会撤销旧 Hub 上的标题。
 
 停止并移除服务，删除 checkout，再删除 agent 的状态目录：Linux 为 `~/.config/Token Monitor/`，macOS 为 `~/Library/Application Support/Token Monitor/`，Windows 为 `%APPDATA%\Token Monitor\`（若设置了 `TOKEN_MONITOR_SHARED_DIR` 则为该目录）。如果这台机器也装了 widget，这同时也是 widget 的数据目录。tokscale 的设置与价格缓存位于 `%APPDATA%\tokscale\`（Windows）或 `~/.config/tokscale/`（其他系统）；除非你也在使用 tokscale CLI，否则一并删除。要把设备从面板中移除，请在已连接 widget 的设备列表中删除它。
 

@@ -112,8 +112,7 @@ test('small action glyphs stay fixed while text scales', () => {
     ['.managed-account-remove', '11px'],
     ['.subscription-topup-remove', '11px'],
     ['.subscription-row-actions button', '11px'],
-    ['.opencode-profile-item .profile-delete', '11px'],
-    ['.update-pill-dismiss', '12px']
+    ['.opencode-profile-item .profile-delete', '11px']
   ]) {
     const rule = cssRules.find((r) => r.selector === selector);
     assert.ok(rule, selector);

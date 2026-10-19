@@ -82,7 +82,8 @@ function applyCustomPricing(settingValue, { pricingPath, sidecarPath }) {
 
   const { models, managedIds } = mergeManaged(existingModels, managedModels, previousManagedIds);
 
-  writeJsonAtomic(pricingPath, { models });
+  const manualFields = existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {};
+  writeJsonAtomic(pricingPath, { ...manualFields, models });
   writeJsonAtomic(sidecarPath, { version: 1, managedIds });
   return { models, managedIds };
 }

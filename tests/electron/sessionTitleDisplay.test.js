@@ -83,7 +83,7 @@ test('saving the title preference immediately republishes Today and Home data fr
     presentationCache: createStatsPresentationCache(), syncProvenanceActive: () => false,
     projectLimitStatsForDisplay: value => value,
     migrateCodexAdditionalLimits: noop, scheduleMacWidgetSnapshot: noop, captureMacWidgetProducerOwner: noop,
-    repaintEdgeDockCells: noop, updateTrayDisplay: noop,
+    repaintDockSurfaces: noop, updateTrayDisplay: noop,
     rendererSnapshots: { stamp: (_raw, value) => value }, rendererStats: value => value,
     pushSettingsToRenderer() { events.push('settings'); },
     mainWindow: { isDestroyed: () => false, webContents: { send(_channel, payload) {
@@ -142,7 +142,7 @@ test('a stats response started before hiding titles adopts the current display p
     fixedPeriodRangesApi: { isDerived: () => false }, warmFixedPeriodHistory: async () => {},
     statsRenderScheduler: { request: () => { rendered += 1; } }, maybeUpdateBarsIcon: noop, console
   };
-  const displayStart = source.indexOf('function sessionStatsForDisplay(');
+  const displayStart = source.indexOf('let localSessionActivity = null;');
   const displayEnd = source.indexOf('\nfunction setRendererSettings(', displayStart);
   const refreshStart = source.indexOf('async function refreshStats(');
   const refreshEnd = source.indexOf('\nasync function refreshStatusViewManually(', refreshStart);

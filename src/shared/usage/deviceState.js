@@ -2,6 +2,7 @@
 
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
 const { filterReasonixSyntheticSessions } = require('../providers/reasonix/sessionGuard');
+const { applyActivityPatch, materializeActivity } = require('../sessionActivityProjection');
 
 const PARTIAL_USAGE_CARRY_FIELDS = Object.freeze([
   'month',
@@ -100,7 +101,7 @@ function createDeviceState(options = {}) {
   }
 
   function recordFrom(parts) {
-    const record = { ...cloneValue(parts.usagePart), ...cloneValue(envelope) };
+    const record = { ...cloneValue(materializeActivity(parts.usagePart)), ...cloneValue(envelope) };
     if (parts.limitsPart !== undefined) record.limits = cloneValue(parts.limitsPart);
     return record;
   }
@@ -135,6 +136,15 @@ function createDeviceState(options = {}) {
     return publish('limits', reason);
   }
 
+  function updateActivity(patch, meta = {}) {
+    if (!accepts(meta) || !usagePart || !hasCompleteUsageBaseline) return false;
+    // Copy only the bounded patch. Accounting maps remain shared; ordinary
+    // session rows are materialized only for a real publish/snapshot request.
+    usagePart = applyActivityPatch(usagePart, cloneValue(patch));
+    if (published) published = { usagePart, limitsPart: published.limitsPart };
+    return true;
+  }
+
   function getSnapshot() {
     return published ? recordFrom(published) : null;
   }
@@ -147,6 +157,7 @@ function createDeviceState(options = {}) {
     getSnapshot,
     stop,
     updateLimits,
+    updateActivity,
     updateUsage
   };
 }

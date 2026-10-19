@@ -421,6 +421,9 @@ test('watchIgnoreMatcher bounds Antigravity roots to source and metadata inputs'
     assert.equal(ignored(path.join(tmp, root, 'conversations', 'session-a.db-wal')), false);
     assert.equal(ignored(path.join(tmp, root, 'annotations', 'session-a.pbtxt')), false);
     assert.equal(ignored(path.join(tmp, root, 'agyhub_summaries_proto.pb')), false);
+    assert.equal(ignored(path.join(tmp, root, 'conversation_summaries.db')), false);
+    assert.equal(ignored(path.join(tmp, root, 'conversation_summaries.db-wal')), false);
+    assert.equal(ignored(path.join(tmp, root, 'conversation_summaries.db-shm')), true);
     assert.equal(ignored(path.join(tmp, root, 'builtin', 'keep.txt')), true);
     assert.equal(ignored(path.join(tmp, root, 'crashes', 'crash_1.log')), true);
     assert.equal(ignored(path.join(tmp, root, 'antigravity_state.pbtxt')), true);
@@ -430,6 +433,180 @@ test('watchIgnoreMatcher bounds Antigravity roots to source and metadata inputs'
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('Antigravity summary overrides watch and attribute only their exact database files', () => {
+  const tmp = withTmpHome(['catalog', path.join('.gemini', 'antigravity-cli', 'conversations')]);
+  const originalHome = os.homedir;
+  os.homedir = () => tmp;
+  try {
+    process.env.ANTIGRAVITY_HOME = path.join(tmp, 'catalog');
+    process.env.ANTIGRAVITY_DATA_DIR = tmp;
+    const { watchPathsForClients, watchAttributionRootsForClients, watchIgnoreMatcher, clientsForWatchPath } = freshCollector();
+    const roots = { antigravity: watchPathsForClients('antigravity') };
+    const attributed = watchAttributionRootsForClients('antigravity', roots);
+    const ignored = watchIgnoreMatcher('antigravity');
+    for (const dir of [tmp, path.join(tmp, 'catalog'), path.join(tmp, '.gemini', 'antigravity-cli')]) {
+      assert.ok(roots.antigravity.includes(dir), 'the parent is watched before the DB exists');
+      for (const suffix of ['', '-wal']) {
+        const file = path.join(dir, `conversation_summaries.db${suffix}`);
+        assert.equal(ignored(file), false);
+        assert.deepEqual(clientsForWatchPath(file, attributed), ['antigravity']);
+      }
+      assert.equal(ignored(path.join(dir, 'conversation_summaries.db-shm')), true);
+      assert.deepEqual(clientsForWatchPath(path.join(dir, 'unrelated.json'), attributed), []);
+    }
+    assert.equal(ignored(path.join(tmp, 'catalog', 'runtime', 'nested.db')), true);
+    const cliWrite = path.join(tmp, '.gemini', 'antigravity-cli', 'conversations', 'session.db-wal');
+    assert.equal(ignored(cliWrite), false, 'the CLI transcript root retains its recursive policy');
+    assert.deepEqual(clientsForWatchPath(cliWrite, attributed), ['antigravity']);
+    assert.equal(watchPathsForClients('claude').includes(path.join(tmp, 'catalog')), false);
+  } finally {
+    os.homedir = originalHome;
+    delete require.cache[collectorPath];
+    const temp = fs.realpathSync.native(os.tmpdir());
+    assert.ok(path.resolve(tmp).startsWith(path.resolve(temp) + path.sep));
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Antigravity summary watches follow homeDir without replacing the process home', () => {
+  const roots = [path.join('.gemini', 'antigravity'), path.join('.gemini', 'antigravity-cli')];
+  const homeDir = withTmpHome(roots);
+  try {
+    const { watchPathsForClients, watchAttributionRootsForClients, watchIgnoreMatcher, clientsForWatchPath } = freshCollector();
+    const options = { homeDir, env: {} };
+    const watched = { antigravity: watchPathsForClients('antigravity', options) };
+    const attributed = watchAttributionRootsForClients('antigravity', watched, options);
+    const ignored = watchIgnoreMatcher('antigravity', options);
+    for (const root of roots) {
+      const dir = path.join(homeDir, root);
+      assert.ok(watched.antigravity.includes(dir));
+      for (const suffix of ['', '-wal']) {
+        const file = path.join(dir, `conversation_summaries.db${suffix}`);
+        assert.equal(ignored(file), false);
+        assert.deepEqual(clientsForWatchPath(file, attributed), ['antigravity']);
+      }
+      assert.equal(ignored(path.join(dir, 'conversation_summaries.db-shm')), true);
+      assert.equal(ignored(path.join(dir, 'unrelated.json')), true);
+      assert.deepEqual(clientsForWatchPath(path.join(dir, 'unrelated.json'), attributed),
+        root === path.join('.gemini', 'antigravity') ? ['antigravity'] : []);
+    }
+  } finally {
+    delete require.cache[collectorPath];
+    const temp = fs.realpathSync.native(os.tmpdir());
+    assert.ok(path.resolve(homeDir).startsWith(path.resolve(temp) + path.sep));
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+for (const source of ['native', 'override', 'configured-home', 'injected-env', 'metadata-env', 'env-precedence', 'cli-home']) {
+  test(`Antigravity ${source} summary WAL events refresh titles with an exact today delta`, async (t) => {
+    // Keep both 11-second advances on one local day, even at midnight.
+    t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 9, 11, 12, 0).getTime() });
+    let sqlite;
+    try { sqlite = require('node:sqlite'); } catch (_) { t.skip('node:sqlite unavailable'); return; }
+    const sourceRoot = path.join('.gemini', 'antigravity');
+    const tmp = withTmpHome([sourceRoot, 'catalog', path.join('.config', 'tokscale', 'antigravity-cache')]);
+    const originalHome = os.homedir;
+    const chokidar = require('chokidar');
+    const originalWatch = chokidar.watch;
+    let handle;
+    let db;
+    t.after(() => {
+      handle?.stop();
+      db?.close();
+      os.homedir = originalHome;
+      chokidar.watch = originalWatch;
+      delete require.cache[collectorPath];
+      const temp = fs.realpathSync.native(os.tmpdir());
+      assert.ok(path.resolve(tmp).startsWith(path.resolve(temp) + path.sep));
+      fs.rmSync(tmp, { recursive: true, force: true });
+    });
+    if (source !== 'configured-home') os.homedir = () => tmp;
+    const cliHome = path.join(tmp, 'relocated-gemini');
+    if (source === 'cli-home') {
+      process.env.GEMINI_CLI_HOME = cliHome;
+      fs.mkdirSync(path.join(cliHome, 'antigravity-cli', 'conversations'), { recursive: true });
+    }
+    const dir = ['override', 'injected-env', 'metadata-env', 'env-precedence'].includes(source) ? path.join(tmp, 'catalog')
+      : source === 'cli-home' ? path.join(cliHome, 'antigravity-cli') : path.join(tmp, sourceRoot);
+    const depsDir = source === 'env-precedence' ? path.join(tmp, 'deps-catalog') : dir;
+    if (source === 'env-precedence') fs.mkdirSync(depsDir);
+    if (source === 'override') process.env.ANTIGRAVITY_HOME = dir;
+    const dbPath = path.join(dir, 'conversation_summaries.db');
+    db = new sqlite.DatabaseSync(dbPath);
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, workspace_uris TEXT)');
+    db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?)').run('title-session', 'Old title', '', null);
+    let watchHandler;
+    let ignored;
+    chokidar.watch = (dirs, options) => {
+      assert.ok(dirs.includes(dir), 'the summary parent is passed to the watch host');
+      if (source === 'env-precedence') assert.equal(dirs.includes(depsDir), false, 'top-level env takes precedence over metadata deps');
+      ignored = options.ignored;
+      const watcher = {
+        on(event, callback) { if (event === 'all') watchHandler = callback; return watcher; },
+        close() {}
+      };
+      return watcher;
+    };
+    const calls = [];
+    let syncs = 0;
+    const updates = [];
+    const { startCollector } = freshCollector();
+    handle = startCollector({
+      clients: 'antigravity', allTimeSince: '2024-01-01', commandTimeoutMs: 1000,
+      homeDir: source === 'configured-home' ? tmp : undefined,
+      env: source === 'injected-env' || source === 'env-precedence' ? { ANTIGRAVITY_HOME: dir } : undefined,
+      deviceId: 'fixture-device', agentVersion: 'fixture', intervalMs: 60 * 60 * 1000,
+      watchEnabled: true, watchUsePolling: false, watchTriggersCollection: true, watchDebounceMs: 10,
+      historyEnabled: false, dailyHistoryArchiveEnabled: false, anchorPersistenceEnabled: false,
+      codexLocalUsageEnabled: false, wslScanEnabled: false,
+      sessionMetadataDeps: {
+        sqlite, antigravityTitleCache: new Map(),
+        ...(['metadata-env', 'env-precedence'].includes(source) ? { env: { ANTIGRAVITY_HOME: depsDir } } : {})
+      }, runAntigravitySync: async () => { syncs += 1; },
+      runTokscale: async (input) => {
+        calls.push(input);
+        return { entries: [{ client: 'antigravity', sessionId: 'title-session', model: 'fixture-model', input: 100, output: 30, cost: 0.5 }] };
+      },
+      onUpdate: (summary) => updates.push(summary)
+    });
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(updates[0].today.sessions['antigravity:title-session'].title, 'Old title');
+    assert.equal(calls.length, 3);
+    const initialSyncs = syncs;
+    t.mock.timers.tick(11000);
+    db.prepare('UPDATE conversation_summaries SET title = ?').run('Renamed title');
+    assert.equal(ignored(`${dbPath}-wal`), false);
+    watchHandler('change', `${dbPath}-wal`);
+    await waitForCondition(() => updates.length === 2);
+    assert.equal(calls.length, 4, 'one today scan replaces the three full-period scans');
+    assert.equal(syncs, initialSyncs, 'a pure summary rename never earns a source self-sync');
+    assert.equal(ignored(path.join(dir, 'runtime.json')), true, 'the watch host receives the same environment as discovery');
+    assert.deepEqual(calls[3].flags, ['--today']);
+    assert.equal(calls[3].clients, 'antigravity');
+    for (const name of ['today', 'month', 'allTime']) {
+      assert.equal(updates[1][name].sessions['antigravity:title-session'].title, 'Renamed title');
+      assert.equal(updates[1][name].totalTokens, updates[0][name].totalTokens);
+      assert.equal(updates[1][name].costUsd, updates[0][name].costUsd);
+    }
+    assert.equal(ignored(`${dbPath}-shm`), true);
+    await handle.whenIdle();
+    watchHandler('change', `${dbPath}-shm`);
+    await new Promise((resolve) => setTimeout(resolve, handle.getDiagnostics().watchDebounceMs + 30));
+    assert.equal(calls.length, 4, 'reader-created SHM writes never schedule another scan');
+    if (source === 'native' || source === 'configured-home') {
+      t.mock.timers.tick(11000);
+      const usageFile = path.join(dir, 'conversations', 'title-session.pb');
+      assert.equal(ignored(usageFile), false);
+      watchHandler('change', usageFile);
+      await waitForCondition(() => updates.length === 3);
+      assert.equal(calls.length, 5);
+      assert.equal(syncs, initialSyncs + 1, 'genuine conversation writes retain source self-sync');
+    }
+  });
+}
 
 test('watchIgnoreMatcher watches brain session dirs but never recurses into them', () => {
   // A new session shows up as a new brain/<id> directory, so brain/ itself has
@@ -1750,13 +1927,16 @@ test('Kimi metadata discovery indexes session directories instead of probing eve
       period.sessions[`kimi:missing-${index}`] = { client: 'kimi', sessionId: `missing-${index}`, totalTokens: 1 };
     }
     let statCalls = 0;
+    let t3StoreProbes = 0;
     fs.statSync = (...args) => {
-      statCalls += 1;
+      if (String(args[0]).endsWith(`${path.sep}statev2.sqlite`) || String(args[0]).endsWith(`${path.sep}state.sqlite`)) t3StoreProbes += 1;
+      else statCalls += 1;
       return originalStatSync(...args);
     };
     const { applySessionTimestamps } = freshCollector();
     applySessionTimestamps({ allTime: period }, tmp, { resolveProjects: true });
     assert.equal(statCalls, 0, 'missing ids should not trigger workspace x session state.json probes');
+    assert.ok(t3StoreProbes <= 6, 'T3 discovery stays bounded independently of session count');
   } finally {
     fs.statSync = originalStatSync;
     os.homedir = originalHomedir;
@@ -2238,6 +2418,7 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     path.join('.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'),
     path.join('.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'),
     path.join('Library', 'Application Support', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'),
+    path.join('AppData', 'Roaming', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'),
     path.join('.local', 'share', 'mimocode'),
     path.join('.zcode', 'projects'),
     path.join('.kiro', 'sessions', 'workspace-a', 'sess_123'),
@@ -2260,9 +2441,8 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'kilo')));
     assert.ok(dirs.includes(path.join(tmp, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')));
     assert.ok(dirs.includes(path.join(tmp, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')));
-    // Tokscale does not scan Kilo's native macOS/Windows VS Code globalStorage,
-    // so we must not watch it (would be a dead watch + a false "active" status).
-    assert.ok(!dirs.includes(path.join(tmp, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')));
+    assert.ok(dirs.includes(path.join(tmp, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')));
+    assert.ok(dirs.includes(path.join(tmp, 'AppData', 'Roaming', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')));
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'mimocode')));
     assert.ok(dirs.includes(path.join(tmp, '.zcode', 'projects')));
     // Kiro sessions and the bounded kiro-cli database keep seconds-level
@@ -2373,10 +2553,11 @@ test('watchIgnoreMatcher prunes the Hermes runtime but keeps the state.db family
     assert.equal(ignored(path.join(hermes, 'state.db')), false);
     assert.equal(ignored(path.join(hermes, 'state.db-wal')), false);
     assert.equal(ignored(path.join(hermes, 'state.db-shm')), false);
-    // The runtime / logs / cache under ~/.hermes are pruned (never recursed).
+    // Runtime, non-usage logs and cache stay pruned. Agent call logs are sources.
     assert.equal(ignored(path.join(hermes, 'hermes-agent')), true);
     assert.equal(ignored(path.join(hermes, 'hermes-agent', 'node_modules')), true);
-    assert.equal(ignored(path.join(hermes, 'logs')), true);
+    assert.equal(ignored(path.join(hermes, 'logs')), false);
+    assert.equal(ignored(path.join(hermes, 'logs', 'debug.log')), true);
     assert.equal(ignored(path.join(hermes, 'cache', 'blob')), true);
     // Other clients' paths are never touched by the matcher.
     assert.equal(ignored(path.join(tmp, '.claude', 'projects', 'p', 'a.jsonl')), false);
@@ -2412,8 +2593,10 @@ test('watchIgnoreMatcher keeps profile dirs and their db family so profile chang
     assert.equal(ignored(path.join(profileDir, 'state.db')), false);
     assert.equal(ignored(path.join(profileDir, 'state.db-wal')), false);
     assert.equal(ignored(path.join(profileDir, 'state.db-shm')), false);
-    // Junk inside a profile dir is still pruned.
-    assert.equal(ignored(path.join(profileDir, 'logs')), true);
+    // Profiles retain direct agent logs without admitting unrelated logs.
+    assert.equal(ignored(path.join(profileDir, 'logs')), false);
+    assert.equal(ignored(path.join(profileDir, 'logs', 'agent.log.1')), false);
+    assert.equal(ignored(path.join(profileDir, 'logs', 'debug.log')), true);
   } finally {
     os.homedir = originalHomedir;
     if (previousHermesHome === undefined) delete process.env.HERMES_HOME;
@@ -2436,7 +2619,8 @@ test('watchIgnoreMatcher honors HERMES_HOME and is absent when Hermes is not tra
     assert.deepEqual(watchPathsForClients('hermes'), [hermesHome]);
     const ignored = watchIgnoreMatcher('hermes');
     assert.equal(ignored(path.join(hermesHome, 'state.db-wal')), false);
-    assert.equal(ignored(path.join(hermesHome, 'logs')), true);
+    assert.equal(ignored(path.join(hermesHome, 'logs')), false);
+    assert.equal(ignored(path.join(hermesHome, 'logs', 'agent.log')), false);
     // No Hermes tracked, no matcher, so other watchers run unchanged.
     assert.equal(watchIgnoreMatcher('claude,codex'), undefined);
   } finally {
@@ -3204,7 +3388,7 @@ test('a SQLite client whose scan does not recreate its sidecar still watches db-
 // was actually about. A suppressed shm event must not spawn a scan, while a real
 // -wal change from the same directory still must — otherwise the fix would have
 // traded a runaway loop for silent staleness.
-for (const client of ['zcode', 'cherrystudio']) {
+for (const client of ['zcode', 'cherrystudio', 'goose']) {
   test(`a ${client} shm event does not spawn a scan while WAL and database changes still do`, async () => {
     const tmp = withTmpHome([]);
     const originalHomedir = os.homedir;
@@ -3212,10 +3396,10 @@ for (const client of ['zcode', 'cherrystudio']) {
     os.homedir = () => tmp;
     process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
     const { clientSourceRoots } = freshCollector();
-    const dbDir = clientSourceRoots(client)[client].find((root) => root.id === (client === 'zcode' ? 'zcode-db' : 'cherrystudio-db'))?.dir
+    const dbDir = clientSourceRoots(client)[client].find((root) => root.id === `${client}-db`)?.dir
       || path.join(tmp, '.zcode', 'cli', 'db');
     fs.mkdirSync(dbDir, { recursive: true });
-    const dbName = client === 'zcode' ? 'db.sqlite' : 'cherrystudio.sqlite';
+    const dbName = { zcode: 'db.sqlite', cherrystudio: 'cherrystudio.sqlite', goose: 'sessions.db' }[client];
 
     const chokidar = require('chokidar');
     const originalWatch = chokidar.watch;
@@ -3848,8 +4032,10 @@ test('watch roots reach chokidar canonicalised on Windows and untouched elsewher
   const chokidar = require('chokidar');
   const originalWatch = chokidar.watch;
   let watchedDirs = null;
-  chokidar.watch = (dirs) => {
+  let watchOptions = null;
+  chokidar.watch = (dirs, options) => {
     watchedDirs = dirs;
+    watchOptions = options;
     return { on: () => {}, close: () => {} };
   };
 
@@ -3879,11 +4065,13 @@ test('watch roots reach chokidar canonicalised on Windows and untouched elsewher
       // The junction must have been resolved away. Handing libuv a path it will
       // report events under in a different form is what fires the fs-event
       // assert, and that abort is not something the watcher can recover from.
-      assert.deepEqual(watchedDirs, [path.join(real, '.claude', 'projects')]);
+      assert.deepEqual(watchedDirs, [path.join(real, '.claude', 'projects'), path.join(real, '.claude')]);
+      assert.equal(watchOptions.ignored(path.join(real, '.claude', 'sessions', '123.json')), false);
     } else {
       // Off Windows this must be identity: resolving here would make the watch
       // roots disagree with the paths tokscale is pointed at.
-      assert.deepEqual(watchedDirs, [path.join(alias, '.claude', 'projects')]);
+      assert.deepEqual(watchedDirs, [path.join(alias, '.claude', 'projects'), path.join(alias, '.claude')]);
+      assert.equal(watchOptions.ignored(path.join(alias, '.claude', 'sessions', '123.json')), false);
     }
   } finally {
     if (handle) handle.stop();
@@ -4866,6 +5054,27 @@ test('custom roots prune dependency and VCS trees without touching built-in root
     os.homedir = originalHomedir;
     if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = originalCodexHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Antigravity CLI polling counts overlapping summary parents and conversation roots once', () => {
+  const tmp = withTmpHome([path.join('.gemini', 'antigravity-cli', 'conversations')]);
+  try {
+    const { openWatch, watchPathsForClients } = freshCollector();
+    const conversations = path.join(tmp, '.gemini', 'antigravity-cli', 'conversations');
+    for (let index = 0; index < 10001; index += 1) fs.writeFileSync(path.join(conversations, `${index}.db`), '');
+    const options = { homeDir: tmp, env: {} };
+    const dirs = watchPathsForClients('antigravity', options);
+    assert.ok(dirs.includes(conversations));
+    assert.ok(dirs.includes(path.dirname(conversations)));
+    let opened = 0;
+    const chokidar = { watch: () => { opened += 1; return {}; } };
+    assert.doesNotThrow(() => openWatch(chokidar, { ...options, dirs, clients: 'antigravity', usePolling: true }));
+    assert.equal(opened, 1);
+    assert.throws(() => openWatch(chokidar, { ...options, dirs, clients: 'antigravity', usePolling: true, pollingEntryLimit: 10000 }), { code: 'watch-polling-limit' });
+  } finally {
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }

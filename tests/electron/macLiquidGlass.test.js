@@ -11,10 +11,12 @@ const bounds = { origin: { x: 3, y: 7 }, size: { width: 360, height: 480 } };
 
 // Load the complete production bridge with only its foreign-function boundary
 // replaced. Each load has an independent API cache and architecture.
-function bridge(arch, { failAt, mainThread = true, available = true, pathSupported = true, subduedSupported = true } = {}) {
+function bridge(arch, { failAt, mainThread = true, available = true, pathSupported = true, subduedSupported = true,
+  forceAppearanceSupported = true, initialForceAppearance = false } = {}) {
   const calls = [];
   const bindings = [];
   const structs = {};
+  let forceAppearance = initialForceAppearance;
   const koffi = {
     struct(name, fields) { return (structs[name] = { name, fields }); },
     pointer(type) { return { pointer: type }; },
@@ -56,7 +58,11 @@ function bridge(arch, { failAt, mainThread = true, available = true, pathSupport
             case 'instancesRespondToSelector:':
               if (parameters[0] === '_setPath:') return pathSupported;
               if (parameters[0] === 'set_subduedState:') return subduedSupported;
+              if (parameters[0] === '_setForceMainAppearance:' || parameters[0] === '_forceMainAppearance') return forceAppearanceSupported;
               throw new Error(`unexpected probe ${parameters[0]}`);
+            case '_forceMainAppearance': assert.equal(target, 20); return forceAppearance;
+            case '_setForceMainAppearance:': assert.equal(target, 20); forceAppearance = parameters[0] === 1; return;
+            case 'colorWithSRGBRed:green:blue:alpha:': assert.equal(target, 'NSColor'); return 60;
             case 'contentView': assert.equal(target, 20); return 30;
             case 'bounds':
               assert.equal(arch, 'arm64');
@@ -88,6 +94,54 @@ function bridge(arch, { failAt, mainThread = true, available = true, pathSupport
 }
 
 for (const arch of ['arm64', 'x64']) {
+  test(`${arch}: Regular tint keeps the same appearance on nonactivating panels and restores untinted defaults`, () => {
+    const native = bridge(arch);
+    const glass = native.create();
+    for (const tintOpacity of [0, 0.25, 0.7, 0, 0.4]) {
+      glass.update({ dark: true, radius: 14, style: 'regular', tintOpacity });
+    }
+    assert.deepEqual(native.calls().filter((call) => call.selector === '_setForceMainAppearance:').map((call) => call.parameters), [[1], [0], [1]]);
+    assert.deepEqual(native.calls().filter((call) => call.selector === 'set_subduedState:').map((call) => call.parameters), [[1]]);
+    glass.dispose();
+    assert.deepEqual(native.calls().filter((call) => call.selector === '_setForceMainAppearance:').at(-1).parameters, [0]);
+    assert.equal(native.calls().some((call) => /makeKey|makeMain|setContentView/.test(call.selector)), false);
+  });
+
+  test(`${arch}: tint updates without a style change and zero restores the system tint`, () => {
+    const native = bridge(arch);
+    const glass = native.create();
+    for (const tintOpacity of [0.1, 0.1, 0.65, 0, -1, 2, NaN]) {
+      glass.update({ dark: true, radius: 14, style: 'clear', tintOpacity });
+    }
+    assert.deepEqual(native.calls().filter((call) => call.selector === 'colorWithSRGBRed:green:blue:alpha:')
+      .map((call) => call.parameters.at(-1)), [0.1, 0.65, 1, 0.35]);
+    assert.deepEqual(native.calls().filter((call) => call.selector === 'setTintColor:')
+      .map((call) => call.parameters), [[60], [60], [0], [60], [60]]);
+    glass.update({ dark: true, radius: 14, style: 'regular', tintOpacity: 0.25 });
+    assert.equal(native.calls().filter((call) => call.selector === 'colorWithSRGBRed:green:blue:alpha:').at(-1).parameters.at(-1), 0.25);
+    assert.equal(native.calls().filter((call) => call.selector === 'alloc').length, 1);
+  });
+
+  test(`${arch}: Regular stays unwashed and Clear stays unsubdued on the retained view`, () => {
+    const native = bridge(arch);
+    const glass = native.create();
+    for (const style of ['regular', 'clear', 'clear', 'regular', 'clear', 'invalid']) {
+      glass.update({ dark: true, radius: 14, style });
+    }
+    assert.deepEqual(native.calls().filter((call) => call.selector === 'setStyle:').map((call) => call.parameters),
+      [[0], [1], [0], [1], [0]]);
+    assert.deepEqual(native.calls().filter((call) => call.selector === 'set_subduedState:').map((call) => call.parameters),
+      [[1], [0], [1], [0], [1]]);
+    assert.deepEqual(native.calls().filter((call) => call.selector === '_setForceMainAppearance:').map((call) => call.parameters),
+      [[1], [0], [1], [0]]);
+    assert.deepEqual(native.calls().filter((call) => call.selector === 'setTintColor:').map((call) => call.parameters),
+      [[60], [0], [60], [0]]);
+    assert.ok(native.calls().filter((call) => call.selector === 'colorWithSRGBRed:green:blue:alpha:')
+      .every((call) => JSON.stringify(call.parameters) === JSON.stringify([0, 0, 0, 0.35])));
+    assert.equal(native.calls().some((call) => /makeKey|makeMain|setContentView/.test(call.selector)), false);
+    assert.equal(native.calls().filter((call) => call.selector === 'alloc').length, 1);
+  });
+
   test(`${arch}: bridge reads NSRect through the correct ABI and preserves Electron's root`, () => {
     const native = bridge(arch);
     const glass = native.create();
@@ -131,6 +185,31 @@ for (const arch of ['arm64', 'x64']) {
   });
 }
 
+test('Clear restores only the window appearance override it owns on disable', () => {
+  for (const initialForceAppearance of [false, true]) {
+    const native = bridge('arm64', { initialForceAppearance });
+    const glass = native.create();
+    glass.update({ dark: true, radius: 14, style: 'clear' });
+    glass.dispose();
+    assert.deepEqual(native.calls().filter((call) => call.selector === '_setForceMainAppearance:').map((call) => call.parameters),
+      initialForceAppearance ? [] : [[1], [0]]);
+  }
+});
+
+test('Clear does not touch a closed native window and skips an unavailable appearance override', () => {
+  const native = bridge('arm64');
+  const glass = native.create();
+  glass.update({ dark: true, radius: 14, style: 'clear' });
+  native.win.isDestroyed = () => true;
+  glass.dispose({ windowClosed: true });
+  assert.deepEqual(native.calls().filter((call) => call.selector === '_setForceMainAppearance:').map((call) => call.parameters), [[1]]);
+  const unsupported = bridge('arm64', { forceAppearanceSupported: false });
+  const fallback = unsupported.create();
+  fallback.update({ dark: true, radius: 14, style: 'clear' });
+  fallback.dispose();
+  assert.equal(unsupported.calls().some((call) => call.selector === '_setForceMainAppearance:'), false);
+});
+
 test('the glass is subdued before it joins the window, and skips the state when missing', () => {
   const native = bridge('arm64');
   native.create();
@@ -140,7 +219,9 @@ test('the glass is subdued before it joins the window, and skips the state when 
   assert.ok(selectors.indexOf('set_subduedState:') < selectors.indexOf('addSubview:positioned:relativeTo:'));
 
   const unsupported = bridge('arm64', { subduedSupported: false });
-  assert.doesNotThrow(() => unsupported.create());
+  const glass = unsupported.create();
+  assert.doesNotThrow(() => glass.update({ dark: true, radius: 14, style: 'clear' }));
+  assert.doesNotThrow(() => glass.update({ dark: true, radius: 14, style: 'regular' }));
   assert.equal(unsupported.calls().some((call) => call.selector === 'set_subduedState:'), false);
   assert.ok(unsupported.calls().some((call) => call.selector === 'addSubview:positioned:relativeTo:'));
 });
@@ -209,3 +290,14 @@ test('role changes hide only the retained background glass and preserve its shap
   assert.equal(native.calls().filter((call) => call.selector === 'alloc').length, 1);
   assert.equal(native.calls().filter((call) => call.selector === '_setPath:').length, 1);
 });
+
+for (const arch of ['arm64', 'x64']) {
+  test(`${arch}: failed detach still releases the owned view exactly once`, () => {
+    const native = bridge(arch, { failAt: 'removeFromSuperview' });
+    const glass = native.create();
+    assert.throws(() => glass.dispose(), /injected native failure/);
+    assert.deepEqual(native.calls().filter(call => call.selector === 'release').map(call => call.target), [40]);
+    const disposed = native.calls();
+    glass.dispose(); assert.deepEqual(native.calls(), disposed);
+  });
+}

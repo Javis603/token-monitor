@@ -1350,6 +1350,22 @@ span.settings-note.settings-item-desc {
   color: var(--red);
   background: rgba(255, 91, 91, 0.12);
 }
+/* Keep regional sign-in actions and long account identities inside the widget. */
+.workbuddy-login-actions {
+  flex-wrap: wrap;
+}
+.workbuddy-login-actions button {
+  white-space: normal;
+}
+.workbuddy-account-meta {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.5625rem;
+  overflow-wrap: anywhere;
+}
+.workbuddy-credit-summary {
+  margin-block: 8px;
+}
 .codex-login-output {
   max-height: 120px;
   margin: 0;
@@ -1469,7 +1485,6 @@ span.settings-note.settings-item-desc {
   line-height: 1.45;
 }
 .app-update-note-group li + li { margin-top: 3px; }
-.app-update-notes .inline-link { margin-top: 8px; font-size: 0.625rem; }
 .inline-link {
   padding: 0;
   border: 0;
@@ -3119,7 +3134,8 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .view-switcher-menu,
 .select-control-popup,
 .sync-content-dialog,
-.settings-help-popover {
+.settings-help-popover,
+.app-update-popover {
   border: 1px solid rgba(var(--line-rgb), 0.22);
   border-radius: 7px;
   background:
@@ -3328,6 +3344,12 @@ html.is-windows .settings-panel select option {
   text-wrap: balance;
 }
 .total-panel {
+  /* The gaps double as the room a rolling number may fade into (below). */
+  --total-number-gap: 8px;
+  --total-cost-gap: 6px;
+  --token-number-fade-top: var(--total-number-gap);
+  /* + the cost line's own leading above its ink. */
+  --token-number-fade-bottom: calc(var(--total-cost-gap) + 1px);
   position: relative;
   z-index: 1;
   padding: 2px 2px 12px;
@@ -3347,7 +3369,7 @@ html.is-windows .settings-panel select option {
 .total-number {
   flex: 0 1 auto;
   min-width: 0;
-  margin-top: 8px;
+  margin-top: var(--total-number-gap);
   color: var(--number);
   font-family: var(--display-font, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif);
   font-weight: 500;
@@ -3360,6 +3382,59 @@ html.is-windows .settings-panel select option {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Ellipsis reserves another glyph beside the outgoing places on a long
+   downward roll, even when the pre-fitted digits themselves fit. */
+[data-token-number-animation="roll"] {
+  position: relative;
+  text-overflow: clip;
+}
+.total-number[data-token-number-animation="roll"] { overflow: visible; }
+.token-number-reading {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.token-number-glyphs {
+  --token-number-fade-top-room: var(--token-number-fade-top, 0.12em);
+  --token-number-fade-bottom-room: var(--token-number-fade-bottom, 0.12em);
+  /* Sideways the mask stays opaque: room for blur, plus the outgoing
+     reading's overhang, which beginRoll measures. */
+  --token-number-left-room: calc(0.25em + var(--token-number-overhang-left, 0px));
+  --token-number-right-room: calc(0.25em + var(--token-number-overhang-right, 0px));
+  display: inline-flex;
+  position: relative;
+  vertical-align: bottom;
+  /* Rolling glyphs leave the line box, as native numericText's do. Fade them
+     out across the room before the neighbouring text instead of cutting them
+     with a straight edge. A mask only paints inside its box (Chromium ignores
+     mask-clip: no-clip), so padding cancelled by margin gives it that room
+     without moving layout; NumberFlow uses the same technique. */
+  margin: calc(-1 * var(--token-number-fade-top-room)) calc(-1 * var(--token-number-right-room))
+    calc(-1 * var(--token-number-fade-bottom-room)) calc(-1 * var(--token-number-left-room));
+  padding: var(--token-number-fade-top-room) var(--token-number-right-room)
+    var(--token-number-fade-bottom-room) var(--token-number-left-room);
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--token-number-fade-top-room),
+    #000 calc(100% - var(--token-number-fade-bottom-room)), transparent);
+}
+.token-number-place {
+  display: inline-grid;
+  position: relative;
+  flex: 0 0 auto;
+  overflow: visible;
+  transform-origin: top left;
+}
+.token-number-glyph {
+  grid-area: 1 / 1;
+}
+.token-number-glyph {
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+.token-number-previous { position: absolute; }
 .total-compact {
   flex: 0 0 auto;
   color: var(--muted);
@@ -3367,7 +3442,7 @@ html.is-windows .settings-panel select option {
   font-weight: 500;
   white-space: nowrap;
 }
-.cost { margin-top: 6px; color: var(--readable-muted); font-size: 0.75rem; }
+.cost { margin-top: var(--total-cost-gap); color: var(--readable-muted); font-size: 0.75rem; }
 .cost { display: flex; align-items: center; gap: 3px; }
 .usage-cost-value { white-space: nowrap; }
 .usage-cost-info.limit-detail-tooltip-wrap {
@@ -3437,6 +3512,10 @@ html.is-windows .settings-panel select option {
   flex-direction: column;
   gap: 10px;
   overflow: hidden auto;
+  /* Room (cancelled by the margin) so the scroller does not cut the first
+     row's rolling value with a straight edge. */
+  margin-top: -5px;
+  padding-top: 5px;
   padding-right: 2px;
   scrollbar-width: none;
 }
@@ -3482,7 +3561,8 @@ html.is-windows .settings-panel select option {
 .home-module:focus-visible {
   opacity: 0.94;
 }
-.home-module:focus-visible {
+.home-module:focus-visible,
+.home-module-head[role="button"]:focus-visible {
   outline: 2px solid rgba(var(--accent-rgb), 0.32);
   outline-offset: 4px;
 }
@@ -3658,7 +3738,9 @@ html.is-windows .settings-panel select option {
 }
 .home-session-state[data-state="running"] .home-session-spin,
 .home-session-state[data-state="ended"] .home-session-check,
+.home-session-state[data-state="waiting"] .home-session-waiting,
 .home-session-state[data-state="idle"] .home-session-idle { display: block; }
+.home-session-waiting { color: var(--orange); }
 .home-session-spin {
   background: var(--text);
   -webkit-mask: url("icons/actions/spinner.svg") center / contain no-repeat;
@@ -4180,7 +4262,33 @@ html.is-windows .settings-panel select option {
 .row-detail {
   opacity: 0.84;
 }
-.row-metrics { display: grid; flex: 0 0 auto; gap: 2px; min-width: max-content; text-align: right; }
+.row-subtitle.has-subagent-count > .overflow-text-content {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+.session-subtitle-identity {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-subagent-count {
+  flex: 0 0 auto;
+  white-space: pre;
+}
+.row-metrics {
+  /* Fade a rolling value out before the cost line's ink: the 2px gap plus
+     that line's leading. The list keeps the room above the first row. */
+  --token-number-fade-top: 5px;
+  --token-number-fade-bottom: 3px;
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+  min-width: max-content;
+  text-align: right;
+}
 .row-value { color: var(--text); white-space: nowrap; }
 .row-cost { color: var(--muted); font-size: 0.625rem; white-space: nowrap; }
 .bar { width: 100%; height: 6px; overflow: hidden; border-radius: 3px; background: rgba(var(--sunken-rgb), 0.46); box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.04); }
@@ -4231,7 +4339,19 @@ html.is-windows .settings-panel select option {
 .row-name { position: relative; }
 .row-live { display: none; }
 /* Absolutely positioned so a running row never shifts against its neighbours. */
- .row-live.is-active { display: block; position: absolute; top: 8px; left: 6px; }
+ .row-live.is-active,
+ .row-live.is-waiting { display: block; position: absolute; top: 8px; left: 6px; }
+.row-live-waiting { display: none; }
+.row-live.is-waiting .row-live-dot { display: none; }
+.row-live.is-waiting .row-live-waiting {
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: -2px;
+  background: var(--orange);
+  -webkit-mask: url("icons/actions/attention.svg") center / contain no-repeat;
+  mask: url("icons/actions/attention.svg") center / contain no-repeat;
+}
 .row-live-dot {
   display: block;
   width: 5px;
@@ -4301,7 +4421,8 @@ html.is-windows .settings-panel select option {
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .row-context-fill { transition: none; }
 }
-.shell.session-mode .breakdown {
+.shell.session-mode .breakdown,
+.shell.session-mode .session-group-list {
   gap: 7px;
 }
 .shell.session-mode .row {
@@ -4375,7 +4496,8 @@ html.is-windows .settings-panel select option {
    applyBreakdownRowSemantics), so a row with no detail stays inert. The list
    gets a little room (cancelled by its margin) so the wash can reach past the
    text it frames without the scroller clipping the first row's. */
-.shell.session-mode .breakdown {
+.shell.session-mode .breakdown,
+.shell.session-mode .session-group-list {
   margin: -5px -6px 0;
   padding: 5px 8px 0 6px;
 }
@@ -5953,10 +6075,10 @@ html.is-windows .limit-live-badge {
 html.native-liquid-glass {
   --liquid-glass-specular: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.035);
 }
-html.native-liquid-glass :is(.tabs, .tab, .tab-indicator, .tool-detail-footer, #utilityActions button) {
+html.native-liquid-glass :is(.tabs, .tab, .tab-indicator, .tool-detail-footer, #utilityActions button, .update-pill-action) {
   border-radius: 999px;
 }
-html.native-liquid-glass :is(.tabs, .tab-indicator, .tool-detail-footer, #utilityActions button:not(.is-refreshing, .is-refreshed, .is-refresh-error), .view-switcher-current, .view-switcher-disclosure) {
+html.native-liquid-glass :is(.tabs, .tab-indicator, .tool-detail-footer, #utilityActions button:not(.is-refreshing, .is-refreshed, .is-refresh-error), .update-pill-action, .view-switcher-current, .view-switcher-disclosure) {
   box-shadow: var(--liquid-glass-specular);
 }
 html.native-liquid-glass :is(.tabs, .tab-indicator, .tool-detail-footer, #utilityActions button, .view-switcher-current, .view-switcher-disclosure) {
@@ -5964,6 +6086,11 @@ html.native-liquid-glass :is(.tabs, .tab-indicator, .tool-detail-footer, #utilit
   backdrop-filter: none;
 }
 html.native-liquid-glass .tab-indicator { background: rgba(var(--overlay-rgb), 0.11); }
+/* The update button joins the capsule rules above; only its download progress,
+   drawn along the button outline, needs the capsule path spelled out. */
+html.native-liquid-glass .update-pill-progress-bar {
+  d: path("M17 .5H19A14.5 14.5 0 0 1 19 29.5H15A14.5 14.5 0 0 1 15 .5Z");
+}
 html.native-liquid-glass .view-switcher-current { border-radius: 999px 0 0 999px; padding-left: 11px; }
 html.native-liquid-glass .view-switcher-disclosure { width: 28px; flex-basis: 28px; padding-right: 3px; border-radius: 0 999px 999px 0; }
 /* The menu is the one layer that floats over content, and the page is drawn
@@ -5975,7 +6102,8 @@ html.native-liquid-glass .view-switcher-menu { padding: 5px; }
 html.native-liquid-glass .select-control-popup,
 html.native-liquid-glass .view-switcher-menu,
 html.native-liquid-glass .sync-content-dialog,
-html.native-liquid-glass .settings-help-popover {
+html.native-liquid-glass .settings-help-popover,
+html.native-liquid-glass .app-update-popover {
   border-color: rgba(var(--line-rgb), 0.16);
   border-radius: 14px;
   background:
@@ -6031,21 +6159,14 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .mode-button { width: auto; max-width: 52%; min-width: 0; height: 30px; padding: 0 10px; overflow: hidden; color: var(--muted); text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .mode-button:hover { border-color: rgba(115, 189, 245, 0.62); color: var(--blue); }
 .error { color: var(--red); }
+/* The footer update control is one icon button, the size of the settings gear
+   beside it. Its state reads from the icon (download, progress ring, restart),
+   and the version and release notes live in the hover card above it. */
 .update-pill {
   display: inline-flex;
-  align-items: center;
-  gap: 0;
-  padding: 0;
-  border-radius: 999px;
-  background: rgba(115, 189, 245, 0.12);
-  border: 1px solid rgba(115, 189, 245, 0.32);
-  color: var(--blue);
-  font-size: 0.625rem;
-  line-height: 1;
-  white-space: nowrap;
-  transition: opacity 120ms ease, background-color 120ms ease, border-color 120ms ease;
+  flex: 0 0 auto;
+  transition: opacity 120ms ease;
 }
-.update-pill:hover { background: rgba(115, 189, 245, 0.18); border-color: rgba(115, 189, 245, 0.52); }
 .footer:has(.utility-actions:hover) .update-pill,
 .footer:has(.utility-actions :focus-visible) .update-pill,
 .footer:has(.refresh-button:is(.is-refreshing, .is-refreshed, .is-refresh-error)) .update-pill,
@@ -6054,97 +6175,104 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   pointer-events: none;
 }
 .update-pill-action {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  border-radius: 999px 0 0 999px;
-  color: inherit;
-  display: inline-flex;
-  align-items: center;
-  font: inherit;
-  line-height: 1;
-  padding: 3px 4px 3px 8px;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid rgba(var(--blue-rgb), 0.34);
+  border-radius: 7px;
+  background: rgba(var(--blue-rgb), 0.1);
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.08);
+  color: var(--blue);
   cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
 }
-.update-pill-action:hover,
-.update-pill-restart:hover { background: rgba(115, 189, 245, 0.1); }
-.update-pill-action:focus-visible,
-.update-pill-restart:focus-visible {
-  outline: 1px solid rgba(115, 189, 245, 0.72);
+.update-pill-action > * { grid-area: 1 / 1; }
+.update-pill-action:hover { background: rgba(var(--blue-rgb), 0.17); border-color: rgba(var(--blue-rgb), 0.52); }
+.update-pill-action:focus-visible {
+  outline: 1px solid rgba(var(--blue-rgb), 0.72);
   outline-offset: 1px;
 }
-.update-pill-action:disabled,
-.update-pill-restart:disabled { cursor: default; opacity: 0.55; }
-.update-pill.is-ready .update-pill-action { padding-right: 7px; }
-.update-pill-label { letter-spacing: 0.02em; }
-.update-pill-restart {
-  appearance: none;
-  align-self: stretch;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px 3px 7px;
-  border: 0;
-  border-left: 1px solid rgba(115, 189, 245, 0.28);
-  border-radius: 0 999px 999px 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  font-weight: 600;
-  line-height: 1;
-}
-@media (max-width: 300px) {
-  .update-pill-restart { gap: 0; padding-inline: 7px; }
-  .update-pill-restart-label { display: none; }
-}
-.update-pill-dismiss {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: var(--blue);
-  opacity: 0.6;
-  font-size: 12px;
-  line-height: 1;
+.update-pill-action[aria-disabled="true"] { cursor: default; }
+.update-pill-icon {
   width: 14px;
   height: 14px;
-  margin-right: 6px;
-  padding: 0;
-  cursor: pointer;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/download.svg") center / contain no-repeat;
+  mask: url("icons/actions/download.svg") center / contain no-repeat;
 }
-.update-pill-dismiss:hover { opacity: 1; }
-.app-update-popover {
-  inset: auto;
-  margin: 0;
-  max-height: min(360px, calc(100vh - 64px));
-  padding: 12px;
-  overflow: auto;
-  border: 1px solid rgba(var(--line-rgb), 0.22);
-  border-radius: 10px;
-  background:
-    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)),
-    rgba(var(--glass-rgb), 0.76);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(var(--overlay-rgb), 0.1);
-  -webkit-backdrop-filter: blur(28px) saturate(115%);
-  backdrop-filter: blur(28px) saturate(115%);
-  color: var(--muted);
-  font-size: 0.625rem;
-  opacity: 0;
-  transform: translateY(5px) scale(0.985);
-  transition: opacity 140ms ease, transform 140ms cubic-bezier(0.22, 1, 0.36, 1), overlay 140ms allow-discrete, display 140ms allow-discrete;
+.update-pill-action:is([data-status="downloaded"], [data-status="installing"]) .update-pill-icon {
+  -webkit-mask-image: url("icons/actions/rotate-cw.svg");
+  mask-image: url("icons/actions/rotate-cw.svg");
 }
-.app-update-popover:popover-open { opacity: 1; transform: none; }
-@starting-style {
-  .app-update-popover:popover-open { opacity: 0; transform: translateY(5px) scale(0.985); }
+.update-pill-action[data-status="installing"] .update-pill-icon { animation: sync-signal-spin 1.4s linear infinite; }
+/* Download progress runs along the button's own outline, starting top centre,
+   with the dimmed border as its track: a ring inside the box read as a second
+   frame. */
+.update-pill-progress {
+  position: absolute;
+  inset: -1px;
+  display: none;
+  width: 34px;
+  height: 30px;
+  overflow: visible;
+  pointer-events: none;
 }
-.app-update-popover::backdrop { background: transparent; }
-.app-update-popover-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+.update-pill-action[data-status="downloading"] { border-color: rgba(var(--blue-rgb), 0.16); }
+.update-pill-action[data-status="downloading"] .update-pill-progress { display: block; }
+.update-pill-progress-bar {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 300ms ease-out;
 }
-.app-update-popover-header strong { color: var(--text); font-size: 0.6875rem; line-height: 1.35; }
+/* Available: a dot in the empty corner above the tray, clear of the arrow.
+   Downloaded: a check on the restart arrow, which is cut away around the badge
+   so the two read apart without an outline in some guessed background colour. */
+.update-pill-badge {
+  position: absolute;
+  display: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+.update-pill-action:is([data-status="available"], [data-status="release"]) .update-pill-badge {
+  display: block;
+  top: 6px;
+  right: 8px;
+  width: 5px;
+  height: 5px;
+}
+.update-pill-action[data-status="downloaded"] .update-pill-badge {
+  display: grid;
+  place-items: center;
+  right: 7px;
+  bottom: 6px;
+  width: 8px;
+  height: 8px;
+}
+.update-pill-action[data-status="downloaded"] .update-pill-badge::before {
+  content: "";
+  width: 5.5px;
+  height: 5.5px;
+  background: rgb(var(--glass-rgb));
+  -webkit-mask: url("icons/actions/check.svg") center / contain no-repeat;
+  mask: url("icons/actions/check.svg") center / contain no-repeat;
+}
+.update-pill-action[data-status="downloaded"] .update-pill-icon {
+  -webkit-mask:
+    url("icons/actions/rotate-cw.svg") center / contain no-repeat,
+    radial-gradient(circle at 12px 12px, transparent 5.5px, #000 6px);
+  -webkit-mask-composite: source-in;
+  mask:
+    url("icons/actions/rotate-cw.svg") center / contain no-repeat,
+    radial-gradient(circle at 12px 12px, transparent 5.5px, #000 6px);
+  mask-composite: intersect;
+}
 .app-update-popover-close {
   width: 22px;
   height: 22px;
@@ -6158,26 +6286,164 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   line-height: 1;
 }
 .app-update-popover-close:hover { background: rgba(var(--overlay-rgb), 0.07); color: var(--text); }
-.app-update-popover button:focus-visible {
-  outline: 1px solid rgba(115, 189, 245, 0.72);
+.app-update-popover {
+  inset: auto;
+  margin: 0;
+  /* Keep the layout through the discrete display/overlay exit transition. */
+  flex-direction: column;
+  max-height: min(440px, calc(100vh - 64px));
+  padding: 0;
+  /* When the window is too short for even the header, the whole card scrolls
+     rather than clipping the title and the dismiss control off the top. */
+  overflow: auto;
+  /* The shared popup surface, denser: this one is paragraphs of release notes
+     over the dashboard, not a short list of labels. */
+  background:
+    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)),
+    rgba(var(--glass-rgb), 0.9);
+  color: var(--muted);
+  font-size: 0.625rem;
+  opacity: 0;
+  transform: translateY(5px) scale(0.985);
+  transition: opacity 140ms ease, transform 140ms cubic-bezier(0.22, 1, 0.36, 1), overlay 140ms allow-discrete, display 140ms allow-discrete;
+}
+/* Only while open: a display on the base rule would override the UA rule that
+   hides a closed popover. */
+.app-update-popover:popover-open { display: flex; opacity: 1; transform: none; }
+@starting-style {
+  .app-update-popover:popover-open { opacity: 0; transform: translateY(5px) scale(0.985); }
+}
+.app-update-popover-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 12px 12px 0;
+}
+.app-update-popover-header > :not(.app-update-popover-dismiss) { grid-column: 1; }
+.app-update-popover-header:has(+ .app-update-popover-body.hidden) { padding-bottom: 12px; }
+.app-update-popover-dismiss {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.59375rem;
+}
+.app-update-popover-dismiss:hover { color: var(--text); }
+.app-update-popover-header strong { color: var(--text); font-size: 0.6875rem; line-height: 1.35; }
+.app-update-popover-subtitle { color: var(--muted); font-size: 0.59375rem; line-height: 1.35; }
+.app-update-popover-subtitle:empty { display: none; }
+.app-update-popover-body {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-content: start;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 0 12px 12px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.app-update-release { display: grid; gap: 6px; min-width: 0; }
+.app-update-release + .app-update-release {
+  padding-top: 10px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.14);
+}
+.app-update-release-version {
+  justify-self: start;
+  color: var(--text);
+  font-size: 0.65625rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.app-update-release .app-update-note-title { color: var(--muted); }
+.app-update-note-group li { color: var(--readable-muted); }
+.app-update-note-group li strong { color: var(--text); font-weight: 600; }
+.app-update-release-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.35;
+}
+.app-update-release-link::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  background: currentColor;
+  opacity: 0.8;
+  -webkit-mask: url("icons/actions/external-link.svg") center / contain no-repeat;
+  mask: url("icons/actions/external-link.svg") center / contain no-repeat;
+}
+.app-update-release-head { display: flex; min-width: 0; }
+.app-update-release-head > .app-update-release-version { flex: 1 1 auto; }
+/* In the card each version line stays pinned while its release scrolls past, so
+   a reader mid-list knows which version an item belongs to. It takes a surface
+   only while actually stuck: at rest it is part of the card, and a filled strip
+   between releases read as a solid bar. The strip spans the card edge to edge.
+   The settings accordion scrolls with the page, so nothing pins there. */
+.app-update-popover .app-update-release-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  container-type: scroll-state;
+  margin-inline: -12px;
+}
+.app-update-popover .app-update-release-head > .app-update-release-version {
+  padding: 2px 12px 4px;
+  border-radius: 0;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+@container scroll-state(stuck: top) {
+  .app-update-popover .app-update-release-head > .app-update-release-version {
+    background:
+      linear-gradient(rgba(var(--overlay-rgb), 0.055), rgba(var(--overlay-rgb), 0.055)),
+      rgb(var(--glass-rgb));
+    box-shadow: 0 1px 0 rgba(var(--line-rgb), 0.14);
+  }
+}
+.app-update-release-link.app-update-release-version { color: var(--text); font-size: 0.65625rem; font-weight: 600; }
+.app-update-release-link:not(.app-update-release-version) {
+  font-size: 0.59375rem;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.app-update-release-link:hover { color: var(--blue); }
+.app-update-release-link:focus-visible {
+  outline: 1px solid rgba(var(--blue-rgb), 0.72);
   outline-offset: 2px;
 }
-.app-update-popover .app-update-notes-body { max-height: 230px; overflow: auto; }
-.app-update-popover-actions { display: flex; align-items: center; gap: 10px; margin-top: 11px; }
-.app-update-popover-primary {
-  min-height: 27px;
-  padding: 0 10px;
-  border: 1px solid rgba(115, 189, 245, 0.46);
-  border-radius: 6px;
-  background: rgba(115, 189, 245, 0.14);
-  color: var(--blue);
-  cursor: pointer;
-  font-size: 0.625rem;
-  font-weight: 600;
+/* Full width, so the rule above it matches the ones between releases; the
+   label stays at the start. */
+.app-update-release-older {
+  justify-self: stretch;
+  padding-top: 10px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.14);
 }
-.app-update-popover-primary:hover { background: rgba(115, 189, 245, 0.22); }
-.app-update-popover-primary:disabled { cursor: default; opacity: 0.5; }
-.app-update-popover .inline-link { font-size: 0.625rem; }
+/* Part of the release above it, so no separating rule. */
+.app-update-release-full { padding-top: 4px; }
+.app-update-popover button:focus-visible {
+  outline: 1px solid rgba(var(--blue-rgb), 0.72);
+  outline-offset: 2px;
+}
+/* Inset so the card's own overflow does not clip the ring. */
+.app-update-popover-body:focus-visible {
+  outline: 1px solid rgba(var(--blue-rgb), 0.72);
+  outline-offset: -2px;
+}
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .update-pill,
   :root:not([data-reduce-motion="off"]) .app-update-popover { transition-duration: 0.01ms; }
@@ -6219,11 +6485,11 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 @media (max-height: 200px) {
   .shell { gap: 8px; padding: 12px 14px; }
   .titlebar { min-height: clamp(28px, 8vh, 38px); }
-  .total-panel { padding: 2px 2px; }
+  .total-panel { --total-number-gap: clamp(2px, 1.2vh, 8px); --total-cost-gap: clamp(2px, 1vh, 6px); padding: 2px 2px; }
   .label-row { font-size: calc(clamp(11px, 2.6vw, 16px) * var(--ui-text-scale)); }
-  .total-number { margin-top: clamp(2px, 1.2vh, 8px); font-size: clamp(22px, 13vw, 60px); }
+  .total-number { font-size: clamp(22px, 13vw, 60px); }
   .total-compact { font-size: calc(clamp(11px, 3vw, 16px) * var(--ui-text-scale)); }
-  .cost { margin-top: clamp(2px, 1vh, 6px); font-size: calc(clamp(12px, 2.8vw, 18px) * var(--ui-text-scale)); }
+  .cost { font-size: calc(clamp(12px, 2.8vw, 18px) * var(--ui-text-scale)); }
   .breakdown,
   .home-panel,
   .service-status-panel { display: none; }
@@ -6348,9 +6614,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .detail-role-user { color: #bda5f5; }
 .detail-role-sep { color: var(--muted); }
 .detail-turn-title { color: var(--muted); }
-.background-review-overview { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 4px 0 6px; color: var(--muted); font-size: 0.625rem; }
-.background-review-totals { white-space: nowrap; color: var(--text); }
-.background-review-run:focus-visible,
+.session-group-overview { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 4px 0 6px; color: var(--muted); font-size: 0.625rem; }
+.session-group-section-heading { margin: 8px 0 2px; color: var(--muted); font-size: 0.625rem; font-weight: 400; }
+.session-group-section-heading.is-first { margin-top: 0; }
+.session-group-totals { white-space: nowrap; color: var(--text); }
 .row[role="button"]:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.35); outline-offset: 2px; }
 .row[role="button"] { cursor: pointer; }
 .detail-session-id { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted, #8a8a90); font-size: 0.625rem; }

@@ -1,0 +1,142 @@
+/* Scoped to the macOS top entry; quota/account styles remain the EdgeDock's. */
+html.notch-black { --glass-rgb: 0,0,0 !important; --text: #fff !important; --muted: rgba(255,255,255,.58) !important; --overlay-rgb: 255,255,255; --line: transparent; }
+html.notch-black .edge-dock-shape-fill { fill: #000; }
+html.notch-black .edge-dock-shape-line { stroke: transparent; }
+/* A glass entry still joins the physical camera housing as solid black. Its
+   lower half reveals the selected material only as the panel opens. The same
+   animated outline clips the shade; capsules and detached details keep their
+   own material without a fabricated camera band. */
+.notch-hardware-shade, .notch-glass-rim { display: none; pointer-events: none; }
+html:not(.notch-black) .is-notch-attached .notch-hardware-shade,
+html:not(.notch-black) .is-notch-attached .notch-glass-rim { display: inline; }
+.notch-hardware-stop-0 { stop-opacity: 1; }
+.notch-hardware-stop-1 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .36); }
+.notch-hardware-stop-2 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .68); }
+/* Retain a dark floor so bright wallpaper does not wash out the lower rows. */
+.notch-hardware-stop-3 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .77); }
+.notch-glass-rim { fill: none; stroke-width: .75; opacity: var(--notch-content-progress, 0); }
+html:not(.notch-black) .is-notch-attached .edge-dock-shape-line { stroke: transparent; }
+.is-notch-attached .notch-summary { --text: #fff; --muted: rgba(255,255,255,.68); --overlay-rgb: 255,255,255; color: var(--text); }
+/* Light widget ink cannot cross a black camera band. Keep the attached shell
+   on the existing dark surface palette; detached cards still follow the theme. */
+html.notch-hardware-light {
+  --glass-rgb: 48,52,56 !important;
+  --text: #eef5fb !important;
+  --number: #eef5fb !important;
+  --muted: #a3adbb !important;
+  --overlay-rgb: 255,255,255 !important;
+  --line: rgba(255,255,255,.14) !important;
+  --line-strong: rgba(255,255,255,.22) !important;
+}
+/* The open panel lifts off the page on a soft shadow that fades in with it;
+   geometry.js reserves canvas room for the same blur radius and offset. */
+html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
+  filter: drop-shadow(0 calc(6.5px * var(--notch-zoom, 1)) calc(19.5px * var(--notch-zoom, 1)) rgba(0, 0, 0, calc(.59 * var(--notch-content-progress, 0))));
+}
+.edge-dock-root[data-surface="notch"] .edge-dock-content { overflow: hidden; }
+/* Retain the summary in its own compositor layer while the silhouette changes. */
+.notch-summary { opacity: var(--notch-summary-opacity, 1); pointer-events: none; transform: translate3d(0, calc(-1 * var(--notch-progress, 0) * var(--edge-dock-card-enter-shift)), 0); z-index: 1; position: absolute; top: 0; display: grid; align-items: center; flex: 0 0 auto; gap: 0; padding: 0; box-sizing: border-box; }
+.notch-slot { display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; overflow: visible; white-space: nowrap; }
+.notch-left { justify-content: flex-start; padding-left: calc(var(--notch-shoulder, 0px) + 8px); box-sizing: border-box; }
+.notch-right { justify-content: flex-end; padding-right: calc(var(--notch-shoulder, 0px) + 8px); box-sizing: border-box; }
+.notch-slot-content { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; width: max-content; zoom: var(--notch-summary-zoom, 1); }
+.notch-summary-field { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.notch-gap { flex: 0 0 auto; }
+.notch-summary .edge-dock-mark { flex-shrink: 0; width: 17px; height: 17px; }
+.notch-app-mark { font-size: 18px; font-weight: 650; line-height: 1; color: var(--text); }
+.notch-reading { display: inline-flex; flex-shrink: 0; align-items: center; font-family: var(--display-font); line-height: 1.2; font-variant-numeric: tabular-nums; }
+.notch-stack { flex-direction: column; align-items: flex-end; }
+.notch-text-layout { display: inline-block; flex: 0 0 auto; }
+.notch-text-run { display: inline-block; width: max-content; white-space: nowrap; vertical-align: bottom; transform-origin: left center; overflow: hidden; text-overflow: ellipsis; }
+.notch-text-run.is-unavailable { color: rgba(var(--overlay-rgb), .32); }
+.notch-bars { flex-direction: column; }
+.notch-bar { background: rgba(var(--overlay-rgb), .18); overflow: hidden; }
+.notch-bar-fill { display: block; height: 100%; background: var(--text); border-radius: inherit; transition: width 420ms cubic-bezier(.2,.8,.2,1); }
+.notch-body { position: absolute; top: var(--notch-header-height, 32px); left: 0; width: 100%; height: var(--notch-body-height, 0px); overflow: hidden; opacity: var(--notch-content-opacity, 0); }
+/* Content resolves out of a blur as the panel opens and dissolves back into it. */
+.notch-body { filter: blur(calc((1 - var(--notch-content-progress, 0)) * 10px)); }
+.notch-providers { transform: scale(var(--notch-content-scale, 1)); transform-origin: 50% 0; height: 100%; zoom: var(--notch-zoom, 1); min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 28px; box-sizing: border-box; scrollbar-width: none; }
+.notch-provider-list { width: 100%; min-width: 0; margin: 0 auto; }
+.notch-providers .edge-dock-card { width: 100%; }
+.notch-providers .edge-dock-card + .edge-dock-card { border-top: 1px solid var(--line); }
+.notch-providers .edge-dock-accounts { max-height: none; overflow: visible; }
+.edge-dock-root[data-surface="notch"]:not(.is-notch-attached) .notch-providers { padding-left: 0; padding-right: 0; }
+
+.notch-overview .home-limit-account + .home-limit-account { margin-top: 12px; }
+.notch-overview .home-limit-account-head { grid-template-columns: 12px minmax(0, 1fr) fit-content(42%); }
+.notch-overview .home-limit-account-head .limit-icon { width: 12px; height: 12px; }
+.notch-overview .limit-windows { margin-top: 0; }
+.notch-overview .home-limit-account { padding: 0; border: 0; }
+/* Match the shared stale row tone without changing the widget-like name size. */
+.notch-overview .limit-row.stale .home-list-name { color: var(--muted); }
+
+/* Top-layer popovers still have to fit the small native detail window. Tall
+   subscription cards scroll inside it; their pointer stays in the same wrap. */
+.is-notch-detail .limit-detail-tooltip {
+  max-width: min(248px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  box-sizing: border-box;
+  overflow: auto;
+  pointer-events: auto;
+  scrollbar-width: none;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+}
+.is-notch-detail .limit-detail-tooltip-triple {
+  grid-template-columns: repeat(3, minmax(0, max-content));
+}
+.is-notch-detail .limit-detail-tooltip-row span {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Match the controller's minimum detail height so an empty provider card can
+   acknowledge the placed size rather than endlessly requesting 36px in 40px. */
+.is-notch-detail .edge-dock-card { min-height: 40px; }
+
+/* Use a horizontal readout with a fixed row rhythm for present/missing values.
+   Rich breakdowns and complete precision remain in the shared detail card. */
+.notch-stat-overview { padding: 8px 14px; }
+.notch-stat-overview .edge-dock-cell {
+  position: static; width: 100%; height: auto; min-height: 30px;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  justify-content: initial; gap: 8px; align-items: center;
+}
+.notch-stat-overview .edge-dock-stat-label { min-width: 0; max-width: 100%; font-size: 12px; line-height: 1.2; grid-column: 1; justify-self: start; }
+.notch-stat-reading { grid-column: 3; min-width: 0; max-width: 100%; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; justify-self: end; }
+.notch-stat-overview .edge-dock-stat-value { min-width: 0; max-width: 100%; font-size: 14px; line-height: 1.1; text-overflow: ellipsis; }
+.notch-stat-overview .edge-dock-stat-cost { grid-column: 3; grid-row: 1; max-width: 100%; justify-self: end; text-overflow: ellipsis; }
+.notch-stat-reading.is-rate { flex-direction: row; align-items: baseline; gap: 4px; }
+.notch-stat-overview [data-metric="liveRate"] { cursor: pointer; }
+.notch-empty { min-height: 40px; justify-content: center; text-align: center; }
+
+.notch-stat-overview [data-metric="sessions"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.notch-stat-overview [data-metric="sessions"] .notch-stat-reading { grid-column: 3; }
+.notch-stat-overview .edge-dock-cell-marks,
+.notch-stat-overview .edge-dock-cell-rate { grid-column: 2; grid-row: 1; justify-self: center; width: 100%; min-width: 0; }
+.notch-stat-overview .edge-dock-cell-marks { height: 20px; gap: 5px; }
+.notch-stat-overview .edge-dock-cell-marks .edge-dock-mark { width: 20px; height: 20px; flex-shrink: 0; }
+.notch-stat-overview .edge-dock-cell-marks [hidden] { display: none; }
+.notch-stat-overview .edge-dock-cell-more { flex-shrink: 0; font-size: 10.5px; line-height: 20px; text-align: center; }
+.notch-stat-overview .edge-dock-cell-rate { white-space: nowrap; }
+.notch-stat-overview .notch-stat-reading.is-rate { grid-column: 2 / 4; justify-self: end; justify-content: flex-end; width: auto; }
+.notch-stat-reading .edge-dock-cell-rate-unit { flex-shrink: 0; }
+.is-notch-detail .edge-dock-card { scrollbar-width: none; }
+
+/* Exact period totals sit on the physical center; fees keep their rail style. */
+.notch-stat-overview.is-usage .notch-stat-reading { grid-column: 2; grid-row: 1; justify-self: stretch; width: 100%; flex-direction: row; align-items: baseline; justify-content: center; }
+.notch-stat-overview.is-usage .edge-dock-stat-value { max-width: 100%; }
+
+/* Preserve mark size; shared rings grow outward on hardware-free entries. */
+.notch-summary .notch-provider-icon { position: static; left: auto; right: auto; width: var(--notch-ring-size, 28px); height: var(--notch-ring-size, 28px); gap: 0; flex: 0 0 auto; }
+.notch-summary .notch-provider-icon .edge-dock-ring { width: var(--notch-ring-size, 28px); height: var(--notch-ring-size, 28px); }
+.notch-summary .notch-provider-icon .edge-dock-mark { width: 17px; height: 17px; }
+.notch-providers::-webkit-scrollbar,
+.is-notch-detail .edge-dock-card::-webkit-scrollbar,
+.is-notch-detail .limit-detail-tooltip::-webkit-scrollbar { display: none; }
+
+/* Author flex styles must not override the native hidden attribute. */
+.notch-slot-content > [hidden] { display: none !important; }
+
+/* The shared refresh button is a compact footer, not another provider row. */
+.notch-refresh-footer { display: flex; justify-content: center; padding: 0 14px 10px; }
+.notch-refresh-footer .edge-dock-refresh { width: 28px; height: 28px; flex: 0 0 auto; }
