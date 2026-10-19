@@ -38,7 +38,6 @@
       appearance, prefersReducedMotion, readableColor = color => color, limitAccountTitle, overflowText, limitWindowsView } = shared;
     const presentation = window.TokenMonitorEdgeDockPresentation;
     const trayText = window.TokenMonitorTrayText;
-    const trayLayout = window.TokenMonitorTrayLayout;
     const balance = window.TokenMonitorLimitBalanceDisplay;
     const windowLabels = window.TokenMonitorLimitWindowLabels;
     const windowText = window.TokenMonitorLimitWindowText;
@@ -444,7 +443,7 @@
         .map((date) => monthName.format(new Date(`${date.slice(0, 7)}-01T00:00:00Z`))))];
       head.append(text('notch-week-title', months.length ? months.join('–') : new Intl.DateTimeFormat(locale(), { month: 'long' }).format(new Date(nowMs))),
         text('notch-week-caption', t('notch.last7')));
-      const bars = el('div', 'notch-bars');
+      const bars = el('div', 'notch-week-bars');
       const names = el('div', 'notch-week-names');
       const dates = el('div', 'notch-week-dates');
       const weekday = new Intl.DateTimeFormat(locale(), { weekday: 'narrow', timeZone: 'UTC' });
@@ -635,8 +634,9 @@
           value.append(text('notch-limit-number', shown === null ? '—' : String(shown)));
           if (shown !== null) value.append(text('notch-limit-percent', '%'));
         }
-        const reset = trayLayout.formatResetCountdown(reading.window.resetsAt, nowMs);
-        row.append(label, value, text('notch-limit-reset', reset ? t('notch.resetIn', { time: reset }) : ''));
+        // The Limits view's own boundary line: an expiring grant says Expires
+        // and a mixed one Changes in, never a Reset that implies a refill.
+        row.append(label, value, text('notch-limit-reset', limitPresentation.limitBoundaryText(reading.window)));
         list.append(row);
       }
       if (!readings.length) {

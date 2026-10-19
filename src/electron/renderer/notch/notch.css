@@ -205,8 +205,8 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-week-head { display: flex; justify-content: space-between; align-items: baseline; }
 .notch-week-title { font: 600 16px/1 var(--notch-display); letter-spacing: -.01em; }
 .notch-week-caption { font-size: 10.5px; color: var(--notch-faint); }
-.notch-bars, .notch-week-names, .notch-week-dates { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
-.notch-bars { height: 76px; margin-top: 14px; align-items: end; }
+.notch-week-bars, .notch-week-names, .notch-week-dates { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+.notch-week-bars { height: 76px; margin-top: 14px; align-items: end; }
 .notch-panel .notch-day { height: 100%; display: flex; flex-direction: column; justify-content: flex-end; min-width: 0; }
 .notch-day-bar { width: 100%; display: flex; flex-direction: column-reverse; border-radius: 6px; overflow: hidden; background: rgba(var(--overlay-rgb), .15);
   transform-origin: bottom; transition: opacity .25s ease; }
@@ -219,7 +219,7 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-day.is-today .notch-day-bar.is-plain { background: var(--blue); }
 .notch-day.is-today .notch-day-bar { box-shadow: 0 0 18px rgba(115,189,245,.22); }
 .notch-day:not(.is-today):hover .notch-day-bar { background: rgba(var(--overlay-rgb), .32); }
-.notch-bars:hover .notch-day:not(:hover) .notch-day-bar { opacity: .55; }
+.notch-week-bars:hover .notch-day:not(:hover) .notch-day-bar { opacity: .55; }
 @keyframes notch-bar-rise { from { transform: scaleY(.02); } }
 .notch-week-names { margin-top: 9px; text-align: center; font: 500 10.5px/1 var(--notch-display); color: var(--notch-faint); }
 .notch-week-dates { margin-top: 7px; text-align: center; font: 500 11.5px/18px var(--notch-display); color: var(--notch-dim); }

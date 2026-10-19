@@ -135,24 +135,41 @@ test('week uses local calendar dates and History attribution while today follows
   assert.equal(notchWeek(stats, now, null).days[0].tokens, null, 'unavailable history is not a zero');
 });
 
+// A fixed local midday, so the week's local dates do not depend on when the suite runs.
+const DAY = new Date(2026, 9, 19, 12);
+
+test('history picks the local week by date even when a remote source is already a day ahead', async () => {
+  const pending = [];
+  const cache = createNotchHistory({ load: () => new Promise(resolve => pending.push(resolve)), changed: () => {} });
+  cache.read({}, { generation: 1, now: DAY }); await Promise.resolve();
+  // Seven rows ending tomorrow (a remote device past midnight): position would
+  // drop the local week's first day.
+  const days = ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18', '2026-10-19', '2026-10-20']
+    .map(date => ({ date, tokens: 100, cost: 1 }));
+  pending[0]({ daily: days, fixedPeriods: { historyTransportAvailable: true } }); await new Promise(setImmediate);
+  const week = cache.read({}, { generation: 1, now: DAY }).daily;
+  assert.deepEqual(week.map(day => day.date), ['2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18', '2026-10-19']);
+  assert.equal(week.reduce((sum, day) => sum + day.tokens, 0), 700);
+});
+
 test('history reads cache a revision and reject late results after a backend switch or disable/re-enable', async () => {
   const pending = [], changes = [];
   const cache = createNotchHistory({ load: () => new Promise(resolve => pending.push(resolve)), changed: () => changes.push(true) });
   const stats = { historyRevision: 'same' };
-  cache.read(stats, { generation: 1 }); await Promise.resolve();
-  cache.read(stats, { generation: 2 }); await Promise.resolve();
-  pending[0]({ daily: [{ date: 'old' }] }); await new Promise(setImmediate);
+  cache.read(stats, { generation: 1, now: DAY }); await Promise.resolve();
+  cache.read(stats, { generation: 2, now: DAY }); await Promise.resolve();
+  pending[0]({ daily: [{ date: '2026-10-13' }] }); await new Promise(setImmediate);
   assert.equal(changes.length, 0);
-  pending[1]({ daily: [{ date: 'new' }] }); await new Promise(setImmediate);
-  assert.equal(cache.read(stats, { generation: 2 }).daily[0].date, 'new');
+  pending[1]({ daily: [{ date: '2026-10-19' }] }); await new Promise(setImmediate);
+  assert.equal(cache.read(stats, { generation: 2, now: DAY }).daily[0].date, '2026-10-19');
   assert.equal(pending.length, 2);
-  cache.read(stats, { generation: 3 }); await Promise.resolve();
+  cache.read(stats, { generation: 3, now: DAY }); await Promise.resolve();
   cache.read(stats, { enabled: false });
-  cache.read(stats, { generation: 3 }); await Promise.resolve();
-  pending[2]({ daily: [{ date: 'withdrawn' }] }); await new Promise(setImmediate);
-  assert.equal(cache.read(stats, { generation: 3 }), null);
+  cache.read(stats, { generation: 3, now: DAY }); await Promise.resolve();
+  pending[2]({ daily: [{ date: '2026-10-14' }] }); await new Promise(setImmediate);
+  assert.equal(cache.read(stats, { generation: 3, now: DAY }), null);
   pending[3]({ daily: [] }); await new Promise(setImmediate);
-  assert.deepEqual(cache.read(stats, { generation: 3 }).daily, []);
+  assert.deepEqual(cache.read(stats, { generation: 3, now: DAY }).daily, []);
 });
 
 test('tabs expose one active panel and support arrows, Home and End without focusing hidden controls', t => {
@@ -288,7 +305,7 @@ test('scrubbing freezes the historical reading and returning applies the latest 
   assert.equal(f.find('notch-big').textContent, '30');
   f.panel.render(payload(200));
   assert.equal(f.find('notch-big').textContent, '30');
-  f.find('notch-bars').fire('pointerleave');
+  f.find('notch-week-bars').fire('pointerleave');
   assert.equal(f.find('notch-big').textContent, '200');
   assert.equal(f.panel.view.scrub, null);
 });
@@ -508,6 +525,27 @@ test('limit columns past one page scroll a page per wheel gesture and keep their
   assert.equal(f.find('notch-limits').scrollLeft, 0);
 });
 
+test('limit boundaries use the Limits view wording, so an expiring grant never reads as a reset', t => {
+  const f = panelFixture(t);
+  const now = Date.now(), hours = h => new Date(now + h * 3600000).toISOString();
+  const record = { provider: 'kiro', status: 'ok', windows: [
+    { kind: 'session', remainingPercent: 60, resetsAt: hours(3) },
+    { kind: 'monthly', remainingPercent: 40, resetsAt: hours(48), boundaryKind: 'expiry' },
+    { kind: 'weekly', remainingPercent: 20, resetsAt: hours(5), boundaryKind: 'mixed' }
+  ] };
+  const cells = buildEdgeDockCells({ limits: { providers: [record] } }, { items: [{ type: 'limit', provider: 'kiro' }] });
+  f.panel.render({ ...payload(), cells }); f.panel.selectPage('limits');
+  assert.deepEqual(f.all('notch-limit-reset').map(node => node.textContent), ['Reset 3h 0m', 'Changes in 5h 0m', 'Expires 2d 0h']);
+});
+
+test('the week chart keeps its layout rules off the collapsed summary bars', () => {
+  const css = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../src/electron/renderer/notch/notch.css'), 'utf8');
+  for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    if (!/\.notch-bars\b/.test(selector)) continue;
+    assert.doesNotMatch(body, /grid|height/, `${selector.trim()} must not size the summary bars`);
+  }
+});
+
 test('money quotas and unlimited readings keep their values without fabricated percentages', t => {
   const f = panelFixture(t), record = { provider: 'cline', status: 'ok', windows: [
     { kind: 'billing', metric: 'credits', remaining: 12, currency: 'USD', showMeter: false },
@@ -619,22 +657,22 @@ test('history keeps the previous week across revisions, throttles reloads and ne
   const cache = createNotchHistory({ load: () => new Promise(resolve => pending.push(resolve)), changed: () => changes.push(true),
     minIntervalMs: () => 60000, now: () => clock, setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimer: () => {} });
   const at = revision => ({ historyRevision: revision });
-  cache.read(at('a'), { generation: 1 }); await Promise.resolve();
-  pending[0]({ daily: [{ date: 'first' }], fixedPeriods: { historyTransportAvailable: true }, devicesComplete: false });
+  cache.read(at('a'), { generation: 1, now: DAY }); await Promise.resolve();
+  pending[0]({ daily: [{ date: '2026-10-15' }], fixedPeriods: { historyTransportAvailable: true }, devicesComplete: false });
   await new Promise(setImmediate);
-  assert.equal(cache.read(at('a'), { generation: 1 }).complete, false, 'a device without History keeps absent days unknown');
+  assert.equal(cache.read(at('a'), { generation: 1, now: DAY }).complete, false, 'a device without History keeps absent days unknown');
   clock = 1000;
-  assert.equal(cache.read(at('b'), { generation: 1 }).daily[0].date, 'first', 'a new revision keeps the shown week');
+  assert.equal(cache.read(at('b'), { generation: 1, now: DAY }).daily[0].date, '2026-10-15', 'a new revision keeps the shown week');
   assert.equal(pending.length, 1, 'reloads wait for the throttle');
   assert.equal(timers.at(-1).ms, 59000);
   clock = 61000;
-  assert.equal(cache.read(at('b'), { generation: 1 }).daily[0].date, 'first');
+  assert.equal(cache.read(at('b'), { generation: 1, now: DAY }).daily[0].date, '2026-10-15');
   await Promise.resolve();
   assert.equal(pending.length, 2);
-  pending[1]({ daily: [{ date: 'second' }], fixedPeriods: { historyTransportAvailable: true }, devicesComplete: true });
+  pending[1]({ daily: [{ date: '2026-10-16' }], fixedPeriods: { historyTransportAvailable: true }, devicesComplete: true });
   await new Promise(setImmediate);
-  const fresh = cache.read(at('b'), { generation: 1 });
-  assert.equal(fresh.daily[0].date, 'second');
+  const fresh = cache.read(at('b'), { generation: 1, now: DAY });
+  assert.equal(fresh.daily[0].date, '2026-10-16');
   assert.equal(fresh.complete, true);
-  assert.equal(cache.read(at('b'), { generation: 2 }), null, 'a backend switch drops the answer');
+  assert.equal(cache.read(at('b'), { generation: 2, now: DAY }), null, 'a backend switch drops the answer');
 });
