@@ -111,7 +111,7 @@ function createApi(koffi) {
         try { sendVoid(image, selectors.release); } catch { /* keep the result */ }
       }
       // The window shadow is computed from content alpha and cached. A window
-      // created without one has nothing to invalidate.
+      // without one has nothing to invalidate.
       if (refreshShadow) sendVoid(nsWindow, selectors.invalidateShadow);
       return true;
     }

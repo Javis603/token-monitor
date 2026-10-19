@@ -84,7 +84,7 @@ function loadApi() {
         cg.release(path); // the view retains its own reference
       }
       // The window shadow is computed from content alpha and cached. A window
-      // created without one has nothing to invalidate.
+      // without one has nothing to invalidate.
       const window = get(target, sel('window'));
       if (window && refreshShadow) release(window, sel('invalidateShadow'));
     },
