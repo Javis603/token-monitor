@@ -490,16 +490,19 @@
       });
       bars.addEventListener('pointerleave', () => scrub(null));
       const foot = el('div', 'notch-week-foot');
-      // The glance reads plainly; a week some device has not answered for says
-      // so on hover (and to assistive tech) rather than relabelling the total.
+      // Keep the total plain; the shared info icon makes incomplete history
+      // discoverable without turning the number itself into a hover target.
       const partial = week.complete === false || week.days.some((day) => day.tokens === null);
       const total = el('div', 'notch-week-summary');
       const weekTokens = text('notch-week-tokens notch-strong', formatTokens(week.total));
-      // The shared tooltip names its own entries as the label, so the total is
-      // labelled after it is attached.
-      if (partial) limitWindowsView.setDetailTooltip(weekTokens, [{ full: t('notch.partialHistory') }]);
-      weekTokens.setAttribute('aria-label', `${t('notch.totalUsage')}: ${weekTokens.textContent}${partial ? `. ${t('notch.partialHistory')}` : ''}`);
+      weekTokens.setAttribute('aria-label', `${t('notch.totalUsage')}: ${weekTokens.textContent}`);
       total.append(weekTokens);
+      if (partial) {
+        const info = limitWindowsView.limitDetailInfoNode([{ full: t('notch.partialHistory') }], 'notch-week-info', t('notch.partialHistory'));
+        info.querySelector('.limit-detail-tooltip').classList.add('is-centered');
+        info.querySelector('.limit-detail-tooltip-trigger').dataset.focusKey = 'week:history-info';
+        total.append(info);
+      }
       foot.append(total);
       if (week.cost > 0 || week.days.some(day => day.unpricedTokens > 0)) {
         const cost = el('div', 'notch-week-summary notch-week-cost');

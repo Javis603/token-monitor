@@ -112,7 +112,8 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
   const plans = require('../../src/electron/renderer/limits/windowsView').createLimitWindowsView({
     document, t: (key, params) => i18n.translate(state.locale, key, params), settings: () => settings,
     currentLocale: () => state.locale, presentation: window.TokenMonitorLimitProviderPresentation,
-    motion: window.TokenMonitorLimitResetMotion
+    motion: window.TokenMonitorLimitResetMotion,
+    tooltip: { hasOpened: () => false, markOpened() {}, release() {} }
   });
   const shared = {
     overflowText,
@@ -122,7 +123,8 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
         node.tooltipEntries = entries;
         node.setAttribute('aria-label', entries.map(entry => Array.isArray(entry) ? entry.join(': ') : entry.full).join(', '));
       },
-      limitAccountPlan: (...args) => plans.limitAccountPlan(...args)
+      limitAccountPlan: (...args) => plans.limitAccountPlan(...args),
+      limitDetailInfoNode: (...args) => plans.limitDetailInfoNode(...args)
     },
     markNode: id => el('span', 'edge-dock-mark', id), hasMask: () => true,
     providerLabel: id => id, limitProviderColor: () => '#888',

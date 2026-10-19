@@ -226,7 +226,16 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-week-names .is-today { color: var(--notch-ink); }
 .notch-week-dates .is-today { justify-self: center; width: 22px; border-radius: 9px; background: var(--notch-ink); color: #000; font-weight: 700; }
 .notch-week-foot { margin-top: auto; display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
-.notch-week-summary { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 11.5px; line-height: 12px; white-space: nowrap; }
+.notch-week-summary { display: flex; align-items: baseline; gap: 5px; min-width: 0; font-size: 11.5px; line-height: 12px; white-space: nowrap; }
+.notch-week-info { align-self: center; }
+.notch-week-info .limit-detail-tooltip {
+  right: auto; left: anchor(center);
+  translate: calc(-50% + var(--tooltip-shift, 0px)) 0;
+  max-width: calc(100vw - 16px);
+}
+.notch-week-info .limit-detail-tooltip::after {
+  right: auto; left: calc(50% - 4px - var(--tooltip-shift, 0px));
+}
 .notch-week-cost { flex-shrink: 0; }
 .notch-week-cost-value { color: var(--notch-dim); white-space: nowrap; }
 
