@@ -84,6 +84,22 @@ test('the switch reads the setting or the env var, and the env var cannot be ove
   assert.equal(claudeDesktopLocalOnly({ TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY: '1' }, {}), true);
   assert.equal(claudeDesktopLocalOnly({ TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY: 'true' }, { claudeDesktopLocalOnly: false }), true);
   assert.equal(claudeDesktopLocalOnly({ TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY: '0' }, {}), false);
+  // deps.claudeDesktopLocalOnly is how credential form probes pass the flag
+  // after blanking env so a sibling credential cannot answer for a bad paste.
+  assert.equal(claudeDesktopLocalOnly({}, {}, { claudeDesktopLocalOnly: true }), true);
+});
+
+test('a sanitized deps.env cannot defeat the process-env kill switch', () => {
+  const previous = process.env.TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY;
+  process.env.TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY = '1';
+  try {
+    // Empty object is truthy, so `deps.env || process.env` would pick it and
+    // hide the kill switch without the process.env fall-through.
+    assert.equal(claudeDesktopLocalOnly({}, { claudeDesktopLocalOnly: false }), true);
+  } finally {
+    if (previous === undefined) delete process.env.TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY;
+    else process.env.TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY = previous;
+  }
 });
 
 for (const [name, options, env] of [
@@ -140,4 +156,16 @@ test('the account fields are declared settings with env fallbacks', () => {
   assert.equal(fields.claudeDesktopLocalOnly.configNormalize('1'), true);
   assert.ok(fields.claudeDesktopOrgId, 'claudeDesktopOrgId field');
   assert.deepEqual(fields.claudeDesktopOrgId.envFallback, ['TOKEN_MONITOR_CLAUDE_DESKTOP_ORG_ID']);
+});
+
+test('readClaudeCredentials refuses to touch the keychain in local-only mode', async () => {
+  const { readClaudeCredentials } = require('../../src/shared/providers/claude/limits');
+  const { deps, touched } = tripwireDeps({
+    env: {},
+    platform: 'darwin',
+    claudeDesktopLocalOnly: true,
+    readMacKeychain: () => { throw new Error('keychain'); }
+  });
+  await assert.rejects(readClaudeCredentials(deps), (error) => error.status === 'disabled');
+  assert.deepEqual(touched, []);
 });

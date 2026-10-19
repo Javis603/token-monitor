@@ -222,7 +222,7 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
     if (!cookie) return { status: 'notConfigured', choices: [] };
     const renewed = {};
     try {
-      const choices = await entry.limits[form.discover.fn](cookie, { ...probeDeps(renewed), env: {} });
+      const choices = await entry.limits[form.discover.fn](cookie, { ...probeDeps(renewed), env: {}, claudeDesktopLocalOnly: limitsAccountConfig(getSettings(), { env }).claudeDesktopLocalOnly === true });
       if (renewed[form.discover.credential] && getSettings()[form.discover.credential] === cookie) {
         applySettingsPatch({ [form.discover.credential]: renewed[form.discover.credential] });
       }

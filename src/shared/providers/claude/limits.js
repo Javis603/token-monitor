@@ -106,12 +106,27 @@ function claudePrepaidBalanceEnabled(env = process.env, options = {}) {
 function normalizeClaudeDesktopLocalOnly(value) {
   if (value === true) return true;
   if (value === false || value === undefined || value === null) return false;
-  return parseBoolean(String(value), false);
+  return /^(1|true|yes|on)$/i.test(String(value).trim());
 }
 
-function claudeDesktopLocalOnly(env = process.env, options = {}) {
-  return normalizeClaudeDesktopLocalOnly(options.claudeDesktopLocalOnly)
-    || normalizeClaudeDesktopLocalOnly(env.TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY);
+// Local-only may be turned on by the stored setting, by deps.claudeDesktopLocalOnly
+// (form probes blank their env), or by TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY.
+// The process env is always consulted as a kill switch: a sanitized deps.env
+// (for example `env: {}` on a credential form probe) must not defeat it.
+function claudeDesktopLocalOnly(env = process.env, options = {}, deps = {}) {
+  if (normalizeClaudeDesktopLocalOnly(options.claudeDesktopLocalOnly)) return true;
+  // hasOwn: tripwire deps Proxies treat a missing key as a networked-lane
+  // dependency. Only honour an explicitly provided flag.
+  if (deps && Object.prototype.hasOwnProperty.call(deps, 'claudeDesktopLocalOnly')
+    && normalizeClaudeDesktopLocalOnly(deps.claudeDesktopLocalOnly)) {
+    return true;
+  }
+  if (normalizeClaudeDesktopLocalOnly(env && env.TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY)) return true;
+  if (env !== process.env
+    && normalizeClaudeDesktopLocalOnly(process.env.TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY)) {
+    return true;
+  }
+  return false;
 }
 
 function localOnlyBlocked(operation) {
@@ -244,6 +259,9 @@ function claudeCredentialsFromOauth(oauth, meta = {}) {
 }
 
 async function readClaudeCredentials(deps = {}) {
+  if (claudeDesktopLocalOnly(deps.env || process.env, {}, deps)) {
+    throw localOnlyBlocked('Claude credential read');
+  }
   const env = deps.env || process.env;
   if (env.CLAUDE_CODE_OAUTH_TOKEN) {
     return {
@@ -700,6 +718,9 @@ async function persistClaudeRefresh(credentials, refreshed, deps = {}) {
 }
 
 function callClaudeUsage(accessToken, deps = {}) {
+  if (claudeDesktopLocalOnly(deps.env || process.env, {}, deps)) {
+    throw localOnlyBlocked('Claude OAuth usage request');
+  }
   return fetchJson(`${CLAUDE_USAGE_URL}?${CLAUDE_RESET_GRANTS_QUERY}`, {
     accept: 'application/json',
     authorization: `Bearer ${accessToken}`,
@@ -995,7 +1016,7 @@ function createClaudeWebSession(cookie) {
 }
 
 async function listClaudeWebOrganizations(cookie, deps = {}) {
-  if (deps.claudeDesktopLocalOnly === true || claudeDesktopLocalOnly(deps.env || process.env)) {
+  if (claudeDesktopLocalOnly(deps.env || process.env, {}, deps)) {
     throw localOnlyBlocked('Claude Web organization discovery');
   }
   const session = createClaudeWebSession(cookie);
@@ -1175,6 +1196,9 @@ function cacheClaudePrepaid(key, balance, deps = {}) {
 }
 
 async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
+  if (claudeDesktopLocalOnly(deps.env || process.env, options, deps)) {
+    throw localOnlyBlocked('Claude Web usage request');
+  }
   const nowMs = (deps.now || Date.now)();
   const baseUrl = String(deps.claudeWebBaseUrl || CLAUDE_WEB_BASE_URL).replace(/\/$/, '');
   const session = createClaudeWebSession(cookie);
@@ -1390,8 +1414,11 @@ async function refreshClaudeCredentials(currentCredentials, deps = {}) {
 async function fetchClaudeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   // Checked before anything else so local-only mode cannot reach a network
-  // lane through any fallback below.
-  if (claudeDesktopLocalOnly(deps.env || process.env, options)) return fetchClaudeDesktopLocalLimits(options, deps);
+  // lane through any fallback below. options, deps.claudeDesktopLocalOnly and
+  // process.env are all consulted — see claudeDesktopLocalOnly().
+  if (claudeDesktopLocalOnly(deps.env || process.env, options, deps)) {
+    return fetchClaudeDesktopLocalLimits(options, deps);
+  }
   const platform = deps.platform || process.platform;
   const webCookie = claudeWebCookie(deps.env || process.env, options);
   if (webCookie) return fetchClaudeWebLimits(webCookie, deps, options);
@@ -1927,6 +1954,9 @@ function runClaudeAuthStatus(deps = {}) {
 }
 
 async function isClaudeCliAuthenticated(deps = {}) {
+  if (claudeDesktopLocalOnly(deps.env || process.env, {}, deps)) {
+    throw localOnlyBlocked('Claude CLI auth status');
+  }
   if (typeof deps.isClaudeCliAuthenticated === 'function') {
     return await deps.isClaudeCliAuthenticated() === true;
   }
@@ -1943,6 +1973,9 @@ async function isClaudeCliAuthenticated(deps = {}) {
 }
 
 async function runClaudeUsageCli(deps = {}) {
+  if (claudeDesktopLocalOnly(deps.env || process.env, {}, deps)) {
+    throw localOnlyBlocked('Claude CLI usage probe');
+  }
   if (deps.runClaudeUsageCli) return deps.runClaudeUsageCli();
   if ((deps.platform || process.platform) === 'win32') return runClaudeDirectUsageCli(deps);
   return runClaudePtyProbe('/usage', 'currentsession.*?[0-9]{1,3}(?:\\.[0-9]+)?%', deps);
@@ -1959,6 +1992,9 @@ function runClaudeDirectUsageCli(deps = {}) {
 }
 
 async function touchClaudeAuthPath(deps = {}) {
+  if (claudeDesktopLocalOnly(deps.env || process.env, {}, deps)) {
+    throw localOnlyBlocked('Claude CLI auth touch');
+  }
   if (deps.touchClaudeAuthPath) return deps.touchClaudeAuthPath();
   // Spawn `claude /status` in PTY to let Claude Code itself perform an auth check
   // and refresh the OAuth token if needed. We don't parse output — the side-effect
@@ -1977,6 +2013,7 @@ module.exports = {
   claudeWebCookie,
   delegatedClaudeRefresh,
   fetchClaudeDesktopLocalLimits,
+  readClaudeCredentials,
   fetchClaudeLimits,
   listClaudeWebOrganizations,
   isClaudeCliAuthenticated,

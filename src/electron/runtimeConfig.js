@@ -66,7 +66,12 @@ const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsRefreshMode',
   'limitsRefreshMs',
   'cursorDisabledAccountIds',
-  'opencodeLocalLimitsEnabled'
+  'opencodeLocalLimitsEnabled',
+  // Must reconfigure so the runtime's options carry the flag; relying only on
+  // resolveConfigSnapshot is not enough when a probe is already in flight with
+  // a cloned pre-toggle snapshot, and clears the previous notConfigured row.
+  'claudeDesktopLocalOnly',
+  'claudeDesktopOrgId'
 ]);
 const SINK_STRUCTURAL_KEYS = Object.freeze(['syncUploadIntervalMs']);
 // Derived from the account declarations: every watched field plus a

@@ -718,6 +718,10 @@ function defaultSettings() {
     // Carve Claude Desktop sessions out of the Claude Code usage row (default on).
     // Off restores upstream behaviour: Desktop transcripts stay under `claude`.
     claudeDesktopSplitEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_DESKTOP_SPLIT, true),
+    // Seed from the kill-switch env so a first launch with the var set already
+    // has the flag in settings before any UI toggle. Account field initial is
+    // null (omit); this line is what makes the env visible on a fresh install.
+    claudeDesktopLocalOnly: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY, false),
     // The key OpenCode stores for itself needs no setup, so tracking it is the
     // default. This turns that off for a machine that is signed in to an account
     // the user does not want reported.
@@ -971,6 +975,10 @@ function electronLimitsDeps() {
         json: () => result.json()
       };
     },
+    // Prefer the real process env. Never pass a blank env object here: an empty
+    // deps.env is truthy and would hide TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY
+    // from claudeDesktopLocalOnly()'s first lane.
+    env: process.env,
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
     onStepfunTokenRenewed: persistStepfunTokenRenewal,
@@ -8078,6 +8086,10 @@ app.whenReady().then(() => {
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
       claudeDesktopSplitEnabled: parseBoolean(patch.claudeDesktopSplitEnabled ?? settings.claudeDesktopSplitEnabled, true),
+      // Persist explicitly (not only via account persist:spread) so an unrelated
+      // settings:update cannot drop the flag, and so limitsConfigFromSettings
+      // always sees a boolean rather than an absent key.
+      claudeDesktopLocalOnly: parseBoolean(patch.claudeDesktopLocalOnly ?? settings.claudeDesktopLocalOnly, false),
       codexResetForecastEnabled: parseBoolean(patch.codexResetForecastEnabled ?? settings.codexResetForecastEnabled, false),
       workbuddyQuotaTotalEnabled: parseBoolean(patch.workbuddyQuotaTotalEnabled ?? settings.workbuddyQuotaTotalEnabled, false),
       showCodexAdditionalLimits: parseBoolean(patch.showCodexAdditionalLimits ?? settings.showCodexAdditionalLimits, true),
