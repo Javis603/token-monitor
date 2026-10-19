@@ -1771,10 +1771,14 @@ function watchPolicyEntries(clientsCsv, options = {}) {
 
   const deeptutorDb = deeptutorDatabasePath(options);
   if (deeptutorDb) {
-    const basename = path.basename(deeptutorDb);
+    const filenameKey = name => (options.platform || process.platform) === 'win32' ? name.toLowerCase() : name;
+    const basename = filenameKey(path.basename(deeptutorDb));
     for (const client of DEEPTUTOR_CLIENTS) {
-      bound(client, candidates[client] || [], (parts) => !(parts.length === 1
-        && (parts[0] === basename || parts[0] === `${basename}-wal`)));
+      bound(client, candidates[client] || [], (parts) => {
+        if (parts.length !== 1) return true;
+        const name = filenameKey(parts[0]);
+        return name !== basename && name !== `${basename}-wal`;
+      });
     }
   }
 

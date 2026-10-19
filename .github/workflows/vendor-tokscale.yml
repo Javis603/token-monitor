@@ -46,6 +46,8 @@ on:
       - 'tests/shared/vendoredScriptContract.test.js'
       - 'tests/shared/collectorCapabilityFallback.test.js'
       - 'tests/shared/tokscaleTokenContracts.test.js'
+      - 'tests/shared/deeptutorBinary.test.js'
+      - 'tests/fixtures/deeptutor.js'
       - '.github/workflows/release.yml'
       - '.github/workflows/vendor-tokscale.yml'
       - 'package.json'
@@ -101,5 +103,10 @@ jobs:
         run: node scripts/ensure-vendored-tokscale.js
       - name: Verify DEFAULT_CLIENTS against the vendored binary's real capabilities
         run: node scripts/verify-vendored-tokscale-clients.js
+      - name: Verify DeepTutor snapshot and precision contracts
+        shell: bash
+        run: |
+          binary="$(node -e 'const v = require("./scripts/vendoredTokscale"); console.log(v.resolveTargetBinPath(v.resolveManifestEntry(v.loadManifest()).entry));')"
+          TOKEN_MONITOR_TEST_TOKSCALE="$binary" node --test tests/shared/deeptutorBinary.test.js
       - name: Verify Tokscale token contracts
         run: node scripts/verify-vendored-tokscale.js

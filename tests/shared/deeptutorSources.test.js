@@ -7,7 +7,7 @@ const { deeptutorDatabasePath, deeptutorSourceFingerprint } = require('../../src
 const { CLIENT_CATALOG } = require('../../src/shared/clientCatalog');
 const { clientSourceRoots } = require('../../src/shared/clientSources');
 const { normalizeClientName } = require('../../src/shared/usage');
-const { configFingerprint, watchIgnoreMatcher } = require('../../src/shared/collector');
+const { configFingerprint, watchIgnoreMatcher, clientWatchCandidates, clientsForWatchPath } = require('../../src/shared/collector');
 
 test('DeepTutor uses explicit absolute paths with no cwd or account discovery', () => {
   assert.equal(deeptutorDatabasePath({ env: {}, platform: 'win32' }), '');
@@ -26,11 +26,30 @@ test('DeepTutor watches only the selected DB and WAL, not private neighboring da
     path.join(path.dirname(db), 'conversations', 'private.json')]) assert.equal(ignore(file), true, file);
 });
 
+test('DeepTutor filename matching follows Windows case-insensitive paths', { skip: process.platform !== 'win32' }, () => {
+  const db = path.resolve('synthetic-tutor', 'Usage.sqlite3');
+  const ignore = watchIgnoreMatcher('deeptutor', { env: { TOKEN_MONITOR_DEEPTUTOR_DB_PATH: db } });
+  assert.equal(ignore(path.join(path.dirname(db), 'usage.sqlite3-wal')), false);
+  assert.equal(ignore(path.join(path.dirname(db), 'USAGE.SQLITE3')), false);
+  assert.equal(ignore(path.join(path.dirname(db), 'USAGE.SQLITE3-SHM')), true);
+});
+
 test('changing the selected DeepTutor ledger invalidates the collector anchor', () => {
   const fingerprint = (client, db) => configFingerprint(client, '2026-01-01', true, '', '', null,
     'fixed-pricing', { env: { TOKEN_MONITOR_DEEPTUTOR_DB_PATH: path.resolve(db) } }, '');
   assert.notEqual(fingerprint('deeptutor', 'first.db'), fingerprint('deeptutor', 'second.db'));
+  assert.notEqual(fingerprint('deeptutor-estimated', 'first.db'), fingerprint('deeptutor-estimated', 'second.db'));
   assert.equal(fingerprint('codex', 'first.db'), fingerprint('codex', 'second.db'));
+});
+
+test('one ledger event refreshes every selected DeepTutor partition', () => {
+  const db = path.resolve('synthetic-tutor', 'usage.sqlite3');
+  const options = { env: { TOKEN_MONITOR_DEEPTUTOR_DB_PATH: db } };
+  for (const clients of ['deeptutor', 'deeptutor-estimated', 'deeptutor,deeptutor-estimated']) {
+    const roots = clientWatchCandidates(clients, options);
+    assert.deepEqual(clientsForWatchPath(`${db}-wal`, roots).sort(), clients.split(',').sort());
+    assert.deepEqual(clientsForWatchPath(path.resolve('unrelated', 'usage.sqlite3'), roots), []);
+  }
 });
 
 test('DeepTutor exact and estimated partitions are opt-in and remain separate', () => {

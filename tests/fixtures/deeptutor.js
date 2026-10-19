@@ -7,7 +7,8 @@ function writeDeepTutorLedger(home) {
   const { DatabaseSync } = require('node:sqlite');
   const dir = path.join(home, 'deeptutor-fixture', 'data', 'user');
   fs.mkdirSync(dir, { recursive: true });
-  const db = new DatabaseSync(path.join(dir, 'usage.sqlite3'));
+  const dbPath = path.join(dir, 'usage.sqlite3');
+  const db = new DatabaseSync(dbPath);
   try {
     db.exec('CREATE TABLE IF NOT EXISTS llm_calls (call_id TEXT PRIMARY KEY, started_at REAL, session_id TEXT, turn_id TEXT, source TEXT, usage_json TEXT)');
     const insert = db.prepare('INSERT OR IGNORE INTO llm_calls VALUES (?, ?, ?, ?, ?, ?)');
@@ -19,6 +20,7 @@ function writeDeepTutorLedger(home) {
       }));
     }
   } finally { db.close(); }
+  return dbPath;
 }
 
 module.exports = { writeDeepTutorLedger };
