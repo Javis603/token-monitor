@@ -30,8 +30,9 @@ const SCROLL_REVERSAL_MIN = 4;
 const SCROLL_DECAY = 0.5;
 const SCROLL_RISE = 3;
 const SCROLL_RISE_MIN = 8;
-// Mirrors `--notch-band-height`: the open panel's tab/status row, the only
-// part without its own vertical scrolling.
+// The open panel's tab/status row, the only part without its own vertical
+// scrolling. Mirrors `place()` in renderer/notch/panel.js: an attached panel's
+// row is the camera band, a capsule's is this many CSS pixels at its zoom.
 const NOTCH_BAND_HEIGHT = 34;
 
 // SwiftUI-style springs: `response` is the undamped period in seconds and
@@ -530,10 +531,14 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   // rectangle. It passes the pointer through, with moves forwarded so the page
   // can report it, and takes input only while the pointer is on the visible
   // entry or open panel. Clicks and wheel events then reach the page directly
-  // and never the app beneath. A drag arriving held from elsewhere is not taken.
-  function syncCapture(button = null) {
+  // and never the app beneath. A drag arriving held from elsewhere is not taken,
+  // so only a poll that has just read the button may start taking input; other
+  // callers (motion, data pushes) may keep or release it. An unreadable button
+  // counts as up: refusing input would leave the entry unclickable.
+  function syncCapture(button) {
     if (!alive(windows.notch)) return;
-    capturing = !locked && pointerInside && !shellHidden() && (capturing || button !== true);
+    const mayStart = button !== undefined && button !== true;
+    capturing = !locked && pointerInside && !shellHidden() && (capturing || mayStart);
     ignoreMouse('notch', !capturing);
   }
 
@@ -661,7 +666,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const current = layout();
     if (!current) return;
     const band = { x: current.open.x, y: current.open.y, width: current.open.width,
-      height: Math.max(current.geometry.height, NOTCH_BAND_HEIGHT * zoom()) };
+      height: current.geometry.notched && current.geometry.gapWidth > 0 ? current.geometry.height : NOTCH_BAND_HEIGHT * zoom() };
     if (!rectContains(expanded ? band : entryBounds(current), screen.getCursorScreenPoint())) { scrollGesture.travel = 0; return; }
     scrollGesture.travel += hand;
     if (Math.abs(scrollGesture.travel) < SCROLL_GESTURE_DISTANCE) return;

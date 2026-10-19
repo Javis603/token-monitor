@@ -2882,6 +2882,21 @@ test('the resting window takes input only while the pointer is on the visible en
   assert.equal(top.ignoreMouse, false, 'the open panel takes input across its whole outline');
 });
 
+test('a held drag stays click-through when motion or data would refresh input', (t) => {
+  let held = true;
+  const f = fixture(t, { notchHoverAction: 'peek' }, { reducedMotion: false, primaryButtonDown: () => held });
+  const top = f.windows[0];
+  const animation = () => top.messages.filter(m => m.channel === 'topNotch:animate').at(-1).payload;
+  f.screen.point = { x: 735, y: 10 }; f.controller.poll(1000);
+  assert.equal(top.ignoreMouse, true);
+  f.ipcMain.emit('topNotch:frame', { sender: top.webContents }, { id: animation().id, elapsed: animation().duration });
+  assert.equal(top.ignoreMouse, true, 'finishing the hover motion does not take a held drag');
+  f.controller.setData(buildNotchData(stats(), [], { trayContent: 'tokens' }));
+  assert.equal(top.ignoreMouse, true, 'a data push does not take a held drag');
+  held = false; f.controller.poll(1100);
+  assert.equal(top.ignoreMouse, false, 'releasing the button over the entry takes input');
+});
+
 test('forwarded pointer moves reach the entry before the next cursor poll', (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
   const f = fixture(t, { notchHoverAction: 'peek' });
@@ -3068,6 +3083,27 @@ test('scroll gestures act only on the entry or the open band', (t) => {
   f.screen.point = { x: 735, y: 10 };
   f.scroll(-40);
   assert.equal(last(f.top).expanded, false);
+});
+
+test('swipes close only on the rendered top row, at any size and shape', async (t) => {
+  // The renderer draws an attached row as the camera band and a capsule's as
+  // 34 CSS pixels at its zoom; a swipe just below must reach the page instead.
+  for (const [settings, below] of [
+    [{ notchSize: 'custom', notchCustomScale: 1.5 }, 42],
+    [{ notchSize: 'custom', notchCustomScale: 0.75, notchShape: 'pill' }, 38 + 29]
+  ]) await t.test(JSON.stringify(settings), (t) => {
+    const f = scrollFixture(t, settings);
+    const geometry = last(f.top).geometry;
+    f.screen.point = { x: geometry.centerX, y: geometry.y + 4 };
+    f.controller.poll(Date.now()); press(f);
+    assert.equal(last(f.top).expanded, true);
+    f.screen.point = { x: geometry.centerX, y: below };
+    f.scroll(-40);
+    assert.equal(last(f.top).expanded, true, `content below the row keeps its scrolling (${JSON.stringify(settings)})`);
+    f.screen.point = { x: geometry.centerX, y: geometry.y + 4 };
+    f.scroll(-40);
+    assert.equal(last(f.top).expanded, false);
+  });
 });
 
 test('scroll direction follows the hand when natural scrolling is off', (t) => {
