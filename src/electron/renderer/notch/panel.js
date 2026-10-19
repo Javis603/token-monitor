@@ -568,8 +568,8 @@
 
     function limitColumn({ entry, account, record, records, key }, nowMs) {
       const column = el('div', 'notch-limit');
-      // The name has the column's full width; the plan rides the line below,
-      // where it no longer squeezes names like Command Code or DeepSeek.
+      // The plan sits beside the name, as on the Limits view; fitLimitPlans()
+      // moves it to the line below only where it would cut the name short.
       const head = el('div', 'notch-limit-head');
       const name = text('notch-limit-name', providerLabel(entry.provider));
       name.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'name']);
@@ -579,6 +579,7 @@
       // The Limits view's own plan text: Claude and Codex keep the plan in
       // accountLabel, which planLabel alone never sees.
       const plan = usable ? String(limitWindowsView.limitAccountPlan(record, { grouped: records.length > 1 }) || '').trim() : '';
+      if (plan) head.append(text('notch-chip', plan));
       const sub = el('div', 'notch-limit-sub');
       if (records.length > 1) {
         const shown = limitAccountTitle(entry.provider, record, records.indexOf(record), records);
@@ -594,19 +595,18 @@
       } else if (record?.updatedAt) {
         sub.append(text('notch-limit-updated', t('notch.updated', { time: relativeAgo(record.updatedAt, nowMs) })));
       }
-      if (plan) sub.append(text('notch-chip', plan));
       column.append(head, sub);
-      // An account with three or four windows takes two column slots and lays
-      // them out two by two at the usual size, so Command Code's grant or
-      // Antigravity's second group need no page of their own. Only a longer
-      // list pages, four at a time.
+      // The column fits up to four windows, drawing them tighter as there are
+      // more, so Command Code's grant or Antigravity's second group need no
+      // page of their own. Only a longer list pages, three at a time beside
+      // its page button.
       const allReadings = usable ? accountReadings(record, nowMs) : [];
-      const perPage = allReadings.length <= 2 ? 2 : 4;
-      if (perPage > 2) column.classList.add('is-wide');
+      const perPage = allReadings.length > 4 ? 3 : 4;
       const windowCount = Math.ceil(allReadings.length / perPage);
       const windowPage = Math.min(windowPages.get(key) || 0, Math.max(0, windowCount - 1));
       const readings = allReadings.slice(windowPage * perPage, windowPage * perPage + perPage);
       const list = el('div', 'notch-limit-windows');
+      list.dataset.count = String(Math.max(1, readings.length + (windowCount > 1 ? 1 : 0)));
       for (const reading of readings) {
         const row = el('div', 'notch-limit-window');
         const tone = appearance().notchWarnColors === true ? severity(reading.remaining) : '';
@@ -666,37 +666,40 @@
       return starts.length > 1 ? starts[1].offsetLeft - starts[0].offsetLeft : 0;
     }
 
+    // A name that does not fit beside its plan keeps the full width; the plan
+    // drops to the line below. Measured, so a short name keeps the chip up.
+    let fitLimitPlans = () => {};
+
     function renderLimits(pageNode, nowMs) {
+      const columns = limitColumns();
+      const pageCount = Math.max(1, Math.ceil(columns.length / LIMIT_COLUMNS));
+      view.limitPage = Math.min(view.limitPage, pageCount - 1);
       const strip = el('div', 'notch-limits');
-      // Columns fill pages slot by slot. A wide column that would straddle a
-      // page boundary starts the next page, and fillers keep every page - the
-      // last one too - exactly LIMIT_COLUMNS slots wide so each snaps flush.
-      const filler = () => el('div', 'notch-limit notch-limit-filler');
-      let used = 0;
-      let pageCount = 0;
-      for (const column of limitColumns()) {
-        const node = limitColumn(column, nowMs);
-        const slots = node.classList.contains('is-wide') ? 2 : 1;
-        if (used + slots > LIMIT_COLUMNS) {
-          for (; used < LIMIT_COLUMNS; used += 1) strip.append(filler());
-          used = 0;
-        }
-        if (used === 0) {
-          node.classList.add('is-page-start');
-          pageCount += 1;
-        }
-        strip.append(node);
-        used = (used + slots) % LIMIT_COLUMNS;
-      }
-      view.limitPage = Math.min(view.limitPage, Math.max(0, pageCount - 1));
       strip.classList.toggle('is-paged', pageCount > 1);
-      // The tail spacer gives back the peek on the last page.
+      columns.forEach((column, index) => {
+        const node = limitColumn(column, nowMs);
+        if (index % LIMIT_COLUMNS === 0) node.classList.add('is-page-start');
+        strip.append(node);
+      });
+      // Fillers complete the last page, and the tail spacer gives back the
+      // peek, so every page - the last one too - can snap flush to the left.
       if (pageCount > 1) {
-        for (; used > 0 && used < LIMIT_COLUMNS; used += 1) strip.append(filler());
+        for (let index = columns.length; index < pageCount * LIMIT_COLUMNS; index += 1) strip.append(el('div', 'notch-limit notch-limit-filler'));
         strip.append(el('div', 'notch-limits-tail'));
       }
-      if (!pageCount) strip.append(text('notch-empty', t('notch.noLimits')));
+      if (!columns.length) strip.append(text('notch-empty', t('notch.noLimits')));
       pageNode.replaceChildren(strip);
+      fitLimitPlans = () => {
+        for (const column of strip.querySelectorAll('.notch-limit')) {
+          const head = column.querySelector('.notch-limit-head');
+          const name = column.querySelector('.notch-limit-name');
+          const chip = column.querySelector('.notch-chip');
+          if (!head || !name || !chip || !(name.clientWidth > 0)) continue;
+          if (chip.parentNode !== head) head.append(chip);
+          if (name.scrollWidth > name.clientWidth + 1) column.querySelector('.notch-limit-sub').append(chip);
+        }
+      };
+      fitLimitPlans();
       if (pageCount <= 1) return;
       const pager = el('div', 'notch-pager');
       const dots = [];
@@ -1013,8 +1016,9 @@
       view.scrub = null;
     }
     const fuelObserver = typeof window.ResizeObserver === 'function'
-      ? new window.ResizeObserver(() => fitHomeFuel()) : null;
+      ? new window.ResizeObserver(() => { fitHomeFuel(); fitLimitPlans(); }) : null;
     fuelObserver?.observe(pageNodes.get('home'));
+    fuelObserver?.observe(pageNodes.get('limits'));
     window.addEventListener('pagehide', () => { suspend(); fuelObserver?.disconnect(); }, { once: true });
     paintTabs();
     return { node, render, place, selectPage, suspend, contentHeight: panelContentHeight, view };

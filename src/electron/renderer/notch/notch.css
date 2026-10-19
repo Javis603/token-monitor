@@ -239,9 +239,7 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-limits::-webkit-scrollbar { display: none; }
 .notch-limits.is-paged { --notch-limit-peek: 64px; }
 .notch-limits.has-after { mask-image: linear-gradient(to right, #000 calc(100% - var(--notch-limit-peek)), transparent); }
-.notch-limit { --notch-limit-slot: calc((100% - 2 * var(--notch-limit-gap) - var(--notch-limit-peek)) / 3);
-  position: relative; flex: 0 0 var(--notch-limit-slot); display: flex; flex-direction: column; min-width: 0; }
-.notch-limit.is-wide { flex-basis: calc(2 * var(--notch-limit-slot) + var(--notch-limit-gap)); }
+.notch-limit { position: relative; flex: 0 0 calc((100% - 2 * var(--notch-limit-gap) - var(--notch-limit-peek)) / 3); display: flex; flex-direction: column; min-width: 0; }
 .notch-limit.is-page-start { scroll-snap-align: start; }
 .notch-limit + .notch-limit:not(.notch-limit-filler)::before { content: ''; position: absolute; top: 0; bottom: 0; left: calc(var(--notch-limit-gap) / -2); border-left: 1px solid var(--notch-rule); }
 .notch-limits-tail { flex: 0 0 calc(var(--notch-limit-peek) - var(--notch-limit-gap)); }
@@ -253,7 +251,7 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-limit-account { overflow: hidden; text-overflow: ellipsis; }
 .notch-limit-active { flex: none; color: var(--notch-dim); }
 .notch-limit-updated { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.notch-limit-sub .notch-chip { flex: none; }
+:is(.notch-limit-head, .notch-limit-sub) .notch-chip { flex: none; }
 .notch-limit-windows { margin-top: 24px; display: grid; gap: 16px; }
 .notch-limit-window { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 6px 8px; }
 .notch-limit-label { font-size: 10.5px; color: var(--notch-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -264,8 +262,18 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-panel .notch-window-page { align-self: flex-end; margin-top: auto; min-height: 20px; padding: 2px 6px; font-size: 10px; color: var(--notch-dim); }
 .notch-window-page:hover { color: var(--notch-ink); }
 .notch-limit-reset { font-size: 10.5px; color: var(--notch-faint); white-space: nowrap; }
-/* Three or four windows: two by two across a double-width column. */
-.notch-limit.is-wide .notch-limit-windows { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--notch-limit-gap); }
+/* Three or four windows (or three beside a page button) tighten to fit the
+   column's height. */
+.notch-limit-windows:is([data-count="3"], [data-count="4"]) .notch-limit-window { row-gap: 1px; }
+.notch-limit-windows:is([data-count="3"], [data-count="4"]) :is(.notch-limit-label, .notch-limit-reset) { font-size: 10px; line-height: 11.5px; }
+.notch-limit-windows[data-count="3"] { margin-top: 14px; gap: 8px; }
+.notch-limit-windows[data-count="3"] .notch-limit-value { font-size: 24px; }
+.notch-limit-windows[data-count="3"] .notch-limit-money { font-size: 19px; }
+.notch-limit-windows[data-count="4"] { margin-top: 10px; gap: 4px; }
+.notch-limit-windows[data-count="4"] .notch-limit-value { font-size: 20px; }
+.notch-limit-windows[data-count="4"] .notch-limit-money { font-size: 16px; }
+.notch-limit-windows:is([data-count="3"], [data-count="4"]) .notch-limit-percent { font-size: 11px; }
+.notch-limit-windows:is([data-count="3"], [data-count="4"]) .notch-limit-detail { font-size: 12px; }
 .notch-limit-window[data-tone] .notch-limit-number { color: var(--notch-tone); text-shadow: 0 0 18px color-mix(in srgb, var(--notch-tone) 45%, transparent); }
 .notch-limit-note { font-size: 11px; color: var(--notch-faint); }
 .notch-pager { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; gap: 5px; }

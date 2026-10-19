@@ -35,6 +35,7 @@ class Element {
   fire(name, event = {}) { for (const fn of this.listeners[name] || []) fn(event); }
   scrollTo({ left }) { this.scrollLeft = left; this.fire('scroll'); }
   // Every child is laid out 40 units after the previous one.
+  get parentNode() { return this.parent || null; }
   get offsetLeft() { return this.parent ? this.parent.children.indexOf(this) * 40 : 0; }
   contains(node) { return this === node || this.children.some(child => child.contains(node)); }
   focus() {
