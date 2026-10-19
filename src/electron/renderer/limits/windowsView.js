@@ -166,7 +166,15 @@
       if (!groups.has(entry.groupLabel)) groups.set(entry.groupLabel, []);
       groups.get(entry.groupLabel).push(entry);
     }
-    return [...groups].map(([label, windows]) => ({ label, windows }));
+    // Keep the original quota pairs in place even when normalization places
+    // Argon beside the other Gemini windows. This order belongs to the view.
+    const groupOrder = ['Gemini', 'Claude/GPT', 'Gemini 4 Argon'];
+    const rank = ({ label }) => {
+      const index = groupOrder.indexOf(label);
+      return index < 0 ? groupOrder.length : index;
+    };
+    return [...groups].map(([label, windows]) => ({ label, windows }))
+      .sort((a, b) => rank(a) - rank(b));
   }
 
   function formatLimitAmount(value) {

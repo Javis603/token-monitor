@@ -119,6 +119,8 @@ Grouped quota responses map into the normalized limits windows used by every pro
 
 Older model-config responses are pooled into compatible fallback windows (`Gemini Pro`, `Gemini Flash`, `Claude`, and `Gemini 4 Argon`). UI labels and grouping should describe the upstream pool rather than inventing per-model precision the response does not contain.
 
+The Limits page and Edge Dock preserve the existing Gemini and Claude/GPT quota pairs, then append the separate Gemini 4 Argon group. A weekly-only Argon allowance spans the full row. Apply this ordering in the shared renderer rather than changing normalized window order; an unavailable bucket must not gain an invented percentage or meter.
+
 ### Identity and aggregation
 
 Managed OAuth accounts use a normalized Google email to derive their stable `accountKey`. An identified local RPC row uses the same derivation, allowing RPC/OAuth deduplication and cross-device collapse for the same account.

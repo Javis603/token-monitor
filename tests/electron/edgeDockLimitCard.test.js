@@ -1845,17 +1845,18 @@ test('an Antigravity group whose rows are all unchecked goes with them', () => {
   assert.doesNotMatch(card.text, /Claude/);
 });
 
-test('Antigravity renders Gemini 4 Argon as its own group with a single Weekly row', () => {
-  const record = {
+for (const unavailable of [false, true]) test(`Antigravity keeps the original quota pairs above Argon weekly with Claude 5-hour ${unavailable ? 'unavailable' : 'available'}`, () => {
+  const record = normalizeLimitProvider({
     provider: 'antigravity',
     windows: [
+      { kind: 'weekly', label: 'Gemini 4 Argon weekly', remainingPercent: 37 },
       { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 98 },
       { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 99 },
-      { kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: null, showMeter: false },
-      { kind: 'weekly', label: 'Claude/GPT weekly', remainingPercent: 0 },
-      { kind: 'weekly', label: 'Gemini 4 Argon weekly', remainingPercent: 37 }
+      { kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: unavailable ? null : 100, showMeter: !unavailable },
+      { kind: 'weekly', label: 'Claude/GPT weekly', remainingPercent: 100 }
     ]
-  };
+  });
+  const before = structuredClone(record);
   const card = dockView().renderProviderWindows(record, '#4285F4');
   const groups = [...card.walk()].filter((node) => node.classNames.has('limit-window-group'));
   assert.deepEqual(
@@ -1877,6 +1878,8 @@ test('Antigravity renders Gemini 4 Argon as its own group with a single Weekly r
     'Claude/GPT · Weekly',
     'Gemini 4 Argon · Weekly'
   ]);
+  assert.equal([...card.walk()].filter((node) => node.classNames.has('limit-meter')).length, unavailable ? 4 : 5);
+  assert.deepEqual(record, before, 'display ordering does not mutate the normalized quota record');
 });
 
 test('a MiMo plan drawn from the balance is the same item as the plan window', () => {
