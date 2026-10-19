@@ -15,6 +15,10 @@ const { abortError } = require('../../probeDeadline');
 const { hashKey } = require('../../hashKey');
 const { claudeProbeDir } = require('./probe');
 const {
+  claudeDesktopPlanProviderInput,
+  collectClaudeDesktopPlanUsage
+} = require('./desktopPlanUsage');
+const {
   PLAN_LABEL_ALIASES,
   TOKEN_MONITOR_USER_AGENT,
   cleanPlanText,
@@ -91,6 +95,39 @@ function claudePrepaidBalanceEnabled(env = process.env, options = {}) {
   }
   const configured = env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE;
   return configured === undefined || configured === '' ? true : parseBoolean(configured, true);
+}
+
+// Claude Desktop local-only mode: the limits row comes from the Desktop app's
+// own plan-usage samples on disk, and the three networked lanes below (Web
+// sessionKey, Claude Code OAuth, interactive CLI probe) are not entered at all —
+// no request to claude.ai or api.anthropic.com, no credential read, no `claude`
+// subprocess. Either lane switches it on: the settings value, or the env var as
+// a machine-wide kill switch the settings UI cannot override.
+function normalizeClaudeDesktopLocalOnly(value) {
+  if (value === true) return true;
+  if (value === false || value === undefined || value === null) return false;
+  return parseBoolean(String(value), false);
+}
+
+function claudeDesktopLocalOnly(env = process.env, options = {}) {
+  return normalizeClaudeDesktopLocalOnly(options.claudeDesktopLocalOnly)
+    || normalizeClaudeDesktopLocalOnly(env.TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY);
+}
+
+function localOnlyBlocked(operation) {
+  return errorWithStatus('disabled', `${operation} is disabled in Claude Desktop local-only mode`);
+}
+
+async function fetchClaudeDesktopLocalLimits(options = {}, deps = {}) {
+  const collected = collectClaudeDesktopPlanUsage(options, {
+    fs: deps.fs,
+    env: deps.env || process.env,
+    homeDir: deps.homeDir,
+    platform: deps.platform,
+    now: deps.now,
+    claudeDesktopRoots: deps.claudeDesktopRoots
+  });
+  return normalizeLimitProvider(claudeDesktopPlanProviderInput(collected));
 }
 
 function claudeWebCookie(env = process.env, options = {}) {
@@ -958,6 +995,9 @@ function createClaudeWebSession(cookie) {
 }
 
 async function listClaudeWebOrganizations(cookie, deps = {}) {
+  if (deps.claudeDesktopLocalOnly === true || claudeDesktopLocalOnly(deps.env || process.env)) {
+    throw localOnlyBlocked('Claude Web organization discovery');
+  }
   const session = createClaudeWebSession(cookie);
   const baseUrl = String(deps.claudeWebBaseUrl || CLAUDE_WEB_BASE_URL).replace(/\/$/, '');
   const body = await fetchClaudeWebJson(`${baseUrl}/api/organizations`, session.headers(), deps, {
@@ -1349,6 +1389,9 @@ async function refreshClaudeCredentials(currentCredentials, deps = {}) {
 
 async function fetchClaudeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
+  // Checked before anything else so local-only mode cannot reach a network
+  // lane through any fallback below.
+  if (claudeDesktopLocalOnly(deps.env || process.env, options)) return fetchClaudeDesktopLocalLimits(options, deps);
   const platform = deps.platform || process.platform;
   const webCookie = claudeWebCookie(deps.env || process.env, options);
   if (webCookie) return fetchClaudeWebLimits(webCookie, deps, options);
@@ -1930,13 +1973,16 @@ async function touchClaudeAuthPath(deps = {}) {
 
 module.exports = {
   claudeCommandCandidates,
+  claudeDesktopLocalOnly,
   claudeWebCookie,
   delegatedClaudeRefresh,
+  fetchClaudeDesktopLocalLimits,
   fetchClaudeLimits,
   listClaudeWebOrganizations,
   isClaudeCliAuthenticated,
   mapClaudeCliUsageToProvider,
   mapClaudeUsageToProvider,
+  normalizeClaudeDesktopLocalOnly,
   normalizeClaudeWebCookieInput,
   normalizeClaudeWebOrganizationId,
   parseClaudeCliUsageText,

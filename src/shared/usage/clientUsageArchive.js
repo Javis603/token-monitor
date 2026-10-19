@@ -360,7 +360,7 @@ function shouldApplyPeriod(periodName, entry, now) {
 function mergedSnapshotFor(client, entry) {
   for (const splitDef of CLIENT_IDENTITY_SPLITS) {
     if (client !== splitDef.merged) continue;
-    if (!isPreSplitEntry(entry)) continue;
+    if (!isPreSplitEntry(entry, splitDef)) continue;
     return splitDef;
   }
   return null;

@@ -22,6 +22,11 @@ const { tokscalePackageNameForPlatform } = require('./tokscalePlatform');
 const { createTokscaleCapabilityResolver, filterSupportedClients, parseSupportedClients } = require('./tokscaleCapabilities');
 const { normalizeCustomScanPaths, customScanPathsFingerprint, tokscaleExtraDirsEnv } = require('./customScanPaths');
 const { TOKSCALE_CLIENT_ALIASES, tokscaleScanClientIds } = require('./tokscaleClientMapping');
+const { DERIVED_CLIENT_PARENTS } = require('./clientCatalog');
+const {
+  createClaudeDesktopSessionIndex,
+  splitClaudeDesktopRows
+} = require('./providers/claude/desktopSessions');
 const {
   applyPeriodDelta,
   emptyPeriod,
@@ -425,6 +430,57 @@ async function probeTokscaleCapabilities(command, options = {}) {
     }
   }
   return supported;
+}
+
+// Claude Desktop split (see providers/claude/desktopSessions.js). tokscale
+// reports Desktop's transcripts under `claude`; when the scan asked for the
+// derived `claude-desktop` row, rows of official Desktop sessions move onto it,
+// and when it asked for `claude-desktop` without `claude`, the remaining
+// Claude Code rows are not the user's selection and are dropped. The index is
+// module-level so its directory and per-transcript caches survive ticks.
+let defaultClaudeDesktopSessionIndex = null;
+
+function claudeDesktopSessionIndexFor(options = {}) {
+  if (options.claudeDesktopSessionIndex) return options.claudeDesktopSessionIndex;
+  if (options.homeDir || options.env) {
+    return createClaudeDesktopSessionIndex({ homeDir: options.homeDir, env: options.env });
+  }
+  defaultClaudeDesktopSessionIndex ||= createClaudeDesktopSessionIndex();
+  return defaultClaudeDesktopSessionIndex;
+}
+
+function applyClaudeDesktopSplit(json, clientsCsv, options = {}) {
+  const requested = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
+  if (!requested.has('claude-desktop')) return { moved: 0, dropped: 0 };
+  return splitClaudeDesktopRows(json, claudeDesktopSessionIndexFor(options), {
+    keepClaude: requested.has('claude')
+  });
+}
+
+// A watch tick that targets `claude` must rescan `claude-desktop` too (and the
+// reverse): both rows come from one tokscale client, so a scan of either
+// rewrites both, and replacing only one partition would leave the other stale.
+function expandDerivedTargets(targets, tracked) {
+  const out = [...targets];
+  const add = (client) => { if (tracked.has(client) && !out.includes(client)) out.push(client); };
+  for (const client of targets) {
+    const parent = DERIVED_CLIENT_PARENTS[client];
+    if (parent) add(parent);
+    for (const [derived, derivedParent] of Object.entries(DERIVED_CLIENT_PARENTS)) {
+      if (derivedParent === client) add(derived);
+    }
+  }
+  return out;
+}
+
+function derivedTargetGroups(targets) {
+  const groups = new Map();
+  for (const client of targets) {
+    const key = DERIVED_CLIENT_PARENTS[client] || client;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(client);
+  }
+  return [...groups.values()];
 }
 
 function tokscaleClientFilter(clients) {
@@ -899,6 +955,7 @@ async function collectUsageOnce(options) {
   }));
   const runTokscaleFn = async (input) => {
     const json = await runTokscaleScan(input);
+    applyClaudeDesktopSplit(json, input?.clients, options);
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
     return json;
   };
@@ -946,7 +1003,10 @@ async function collectUsageOnce(options) {
     { ...localSessionMetadataDeps, retryMisses, deferT3SessionParents, resolveProjects: projectsEnabled }
   );
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
-  const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
+  const targetClients = expandDerivedTargets(
+    [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))],
+    trackedClientSet
+  );
   const targetRequested = targetClients.length > 0;
   const targetClientSet = new Set(targetClients);
   const targetClientsCsv = targetClients.join(',');
@@ -1017,9 +1077,13 @@ async function collectUsageOnce(options) {
         freshPartitions = bundle.byClient;
         const unattributed = freshPartitions[UNATTRIBUTED_USAGE_CLIENT];
         const attributedClients = Object.keys(freshPartitions).filter((client) => client !== UNATTRIBUTED_USAGE_CLIENT);
+        // A derived row and its parent come out of one tokscale client, so
+        // they are one scan target here: a day with no Desktop session yet is
+        // not a missing partition of a unioned scan.
+        const targetGroups = derivedTargetGroups(targetClients);
         const hasMissingTargetPartition = (
-          targetClients.length > 1
-          && targetClients.some((client) => !Object.prototype.hasOwnProperty.call(freshPartitions, client))
+          targetGroups.length > 1
+          && targetGroups.some((group) => !group.some((client) => Object.prototype.hasOwnProperty.call(freshPartitions, client)))
         );
         const hasUnsafeTargetedResult = (
           periodHasUsage(unattributed)
@@ -1402,7 +1466,9 @@ function activityReadOptions(options, extras, providers) {
 // exhaustion the same tree becomes an even more expensive 2-second polling
 // watch. Regular interval ticks (five minutes by default), manual refreshes, and
 // hourly full reconciliation still scan it through the unchanged Kiro client.
-const INTERVAL_ONLY_SOURCE_CHECK_IDS = new Set(['kiro-ide-globalstorage']);
+// `claude-desktop-app` is Claude Desktop's userData root: a presence check for
+// the derived row, whose transcripts are already watched through `claude`.
+const INTERVAL_ONLY_SOURCE_CHECK_IDS = new Set(['kiro-ide-globalstorage', 'claude-desktop-app']);
 
 // The watcher only ever wants paths, so it keeps its original shape rather than
 // learning about check ids it would immediately discard.
@@ -3824,6 +3890,8 @@ module.exports = {
   tokscaleClientFilter,
   tokscaleEnvWithBlanksDropped,
   TOKSCALE_CLIENT_ALIASES,
+  applyClaudeDesktopSplit,
+  expandDerivedTargets,
   watchAttributionRootsForClients,
   watcherOptions,
   watchIgnoreMatcher,

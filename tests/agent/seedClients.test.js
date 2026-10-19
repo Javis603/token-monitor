@@ -18,11 +18,11 @@ function markerPath(dir) {
 
 test('a real launch seeds the split client once and records it', () => {
   const { dir, env } = tempSharedDir();
-  assert.equal(seedAgentClients('claude,pi', { env }), 'claude,pi,omp');
+  assert.equal(seedAgentClients('claude,pi', { env }), 'claude,claude-desktop,pi,omp');
   const marker = JSON.parse(fs.readFileSync(markerPath(dir), 'utf8'));
-  assert.deepEqual(marker.applied, ['omp']);
+  assert.deepEqual(marker.applied, ['omp', 'claude-desktop']);
   assert.equal(marker.sourceCsv, 'claude,pi');
-  assert.equal(marker.clients, 'claude,pi,omp');
+  assert.equal(marker.clients, 'claude,claude-desktop,pi,omp');
 });
 
 // A --dry-run preview must not consume the one-shot migration: recording it on
@@ -30,12 +30,12 @@ test('a real launch seeds the split client once and records it', () => {
 // and silently drop the split client's usage.
 test('a dry run resolves the split client without recording the migration', () => {
   const { dir, env } = tempSharedDir();
-  assert.equal(seedAgentClients('claude,pi', { persist: false, env }), 'claude,pi,omp');
+  assert.equal(seedAgentClients('claude,pi', { persist: false, env }), 'claude,claude-desktop,pi,omp');
   assert.equal(fs.existsSync(markerPath(dir)), false, 'dry run must not write the marker');
 
   // The next real launch still performs the migration.
-  assert.equal(seedAgentClients('claude,pi', { env }), 'claude,pi,omp');
-  assert.deepEqual(JSON.parse(fs.readFileSync(markerPath(dir), 'utf8')).applied, ['omp']);
+  assert.equal(seedAgentClients('claude,pi', { env }), 'claude,claude-desktop,pi,omp');
+  assert.deepEqual(JSON.parse(fs.readFileSync(markerPath(dir), 'utf8')).applied, ['omp', 'claude-desktop']);
 });
 
 // The env CSV is redeclared on every launch, so the seeded result is what must
@@ -44,8 +44,8 @@ test('a dry run resolves the split client without recording the migration', () =
 test('an unchanged CSV keeps the seeded client on every later launch', () => {
   const { env } = tempSharedDir();
   seedAgentClients('claude,pi', { env });
-  assert.equal(seedAgentClients('claude,pi', { env }), 'claude,pi,omp');
-  assert.equal(seedAgentClients('claude,pi', { env }), 'claude,pi,omp');
+  assert.equal(seedAgentClients('claude,pi', { env }), 'claude,claude-desktop,pi,omp');
+  assert.equal(seedAgentClients('claude,pi', { env }), 'claude,claude-desktop,pi,omp');
 });
 
 // Editing the CSV is a new declaration and is taken literally. That is also the

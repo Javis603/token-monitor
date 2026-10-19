@@ -16,10 +16,27 @@
 // the pair back together for days that were captured while they were merged,
 // and the session archive treats an archived merged-id session as already
 // covered when the split id reports the same session live.
+//
+// Claude Desktop splits from Claude Code the same way. tokscale has always
+// reported Desktop's Code-tab and Cowork transcripts under `claude`; Token
+// Monitor now moves the Desktop-started sessions onto a derived
+// `claude-desktop` row (claudeDesktopSessions.js), so every `claude` snapshot
+// stored before that includes Desktop usage.
+//
+// `generation` is the client-identity generation that introduced the split: an
+// archive entry written under an older generation predates *that* split, even
+// when it postdates an earlier one (a generation-2 entry is post-split for
+// pi/omp but still merged for claude/claude-desktop).
 const CLIENT_IDENTITY_SPLITS = Object.freeze([
   Object.freeze({
     merged: 'pi',
     split: 'omp',
+    generation: 2
+  }),
+  Object.freeze({
+    merged: 'claude',
+    split: 'claude-desktop',
+    generation: 3
   })
 ]);
 
@@ -36,11 +53,15 @@ const MERGED_TO_SPLIT = new Map(CLIENT_IDENTITY_SPLITS.map(({ merged, split }) =
 // only the merged client look identical ("pi, no omp" is a legal post-split
 // state), and a post-split day that legitimately records Pi first and Oh My Pi
 // later would otherwise be folded forever.
-const CLIENT_IDENTITY_GENERATION = 2;
+//
+// The current generation is the newest split's. Pass the split definition to
+// ask about one split; without it the question is "older than any split".
+const CLIENT_IDENTITY_GENERATION = Math.max(...CLIENT_IDENTITY_SPLITS.map((split) => split.generation));
 
-function isPreSplitEntry(entry) {
+function isPreSplitEntry(entry, splitDef = null) {
   const generation = Number(entry?.clientIdentityGeneration);
-  return !Number.isFinite(generation) || generation < CLIENT_IDENTITY_GENERATION;
+  const threshold = Number.isFinite(splitDef?.generation) ? splitDef.generation : CLIENT_IDENTITY_GENERATION;
+  return !Number.isFinite(generation) || generation < threshold;
 }
 
 // The id a split client rows were recorded under before the split, or null

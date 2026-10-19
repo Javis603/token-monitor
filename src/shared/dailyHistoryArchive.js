@@ -238,10 +238,10 @@ function graphsArray(graphs) {
 function foldClientForDate(client, date, options = {}) {
   if (!client) return client;
   const day = options.archive?.days?.[date];
-  if (!day || !isPreSplitEntry(day)) return client;
-  for (const { merged, split } of CLIENT_IDENTITY_SPLITS) {
-    if (client !== split) continue;
-    return merged;
+  if (!day) return client;
+  for (const splitDef of CLIENT_IDENTITY_SPLITS) {
+    if (client !== splitDef.split || !isPreSplitEntry(day, splitDef)) continue;
+    return splitDef.merged;
   }
   return client;
 }
@@ -314,11 +314,18 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
     // Anything else is written at the current generation, which is what stops a
     // post-split day from being absorbed into the merged id when Pi happens to be
     // scanned first.
+    //
+    // The same holds per split: a day first stored under an older generation
+    // keeps that generation, so it stays merged for every split that came after
+    // it while remaining post-split for the ones before.
     const legacy = existing !== null && isPreSplitEntry(existing);
+    const existingGeneration = Number(existing?.clientIdentityGeneration);
     const next = {
       date,
       activeTimeMs: Math.max(previous.activeTimeMs, incoming.activeTimeMs),
-      ...(legacy ? {} : { clientIdentityGeneration: CLIENT_IDENTITY_GENERATION }),
+      ...(legacy
+        ? (Number.isFinite(existingGeneration) ? { clientIdentityGeneration: existingGeneration } : {})
+        : { clientIdentityGeneration: CLIENT_IDENTITY_GENERATION }),
       observations: { ...previous.observations }
     };
     for (const [key, observation] of Object.entries(incoming.observations)) {

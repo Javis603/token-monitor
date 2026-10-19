@@ -122,7 +122,9 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
       if (field.secret && !Object.hasOwn(candidate, field.key)) options[field.key] = '';
     }
     const renewed = {};
-    const deps = { ...probeDeps(renewed), env: {} };
+    // Local-only mode (a declared account setting) must also stop the form's
+    // discovery request, which receives deps rather than the options below.
+    const deps = { ...probeDeps(renewed), env: {}, claudeDesktopLocalOnly: options.claudeDesktopLocalOnly === true };
     let discoveredChoices;
     const selectionRequired = (choices) => {
       if (discover && renewed[discover.credential]) {

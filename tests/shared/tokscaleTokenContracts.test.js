@@ -13,13 +13,17 @@ const LEGACY_CLIENT_IDS = new Set(
   'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,amp,droid,kimi,qwen,grok,copilot,pi,omp,zed,kilo,commandcode,mimo,zcode,kiro,codebuddy,workbuddy,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin'.split(',')
 );
 
+// Derived rows (claude-desktop) are carved out of their parent's scan by Token
+// Monitor; tokscale never emits them, so the parent's contract covers them.
+const tokscaleParsedClients = () => CLIENT_CATALOG.filter(({ derivedFrom }) => !derivedFrom).map(({ id }) => id);
+
 function missingContracts(clientIds) {
   const covered = new Set(TOKEN_CONTRACT_CASES.map(({ client }) => client));
   return clientIds.filter((id) => !LEGACY_CLIENT_IDS.has(id) && !covered.has(id));
 }
 
 test('every newly added Tokscale-parsed client has a runnable token contract fixture', () => {
-  const tokScaleClients = CLIENT_CATALOG.map(({ id }) => id);
+  const tokScaleClients = tokscaleParsedClients();
   const fixtureIds = TOKEN_CONTRACT_CASES.map(({ client }) => client);
   assert.equal(new Set(fixtureIds).size, fixtureIds.length, 'duplicate token contract fixture');
   assert.deepEqual(missingContracts(tokScaleClients), [], 'new Tokscale clients need a binary token contract fixture');
@@ -35,7 +39,7 @@ test('every newly added Tokscale-parsed client has a runnable token contract fix
 });
 
 test('the token contract gate rejects an untested future Tokscale client', () => {
-  const tokScaleClients = CLIENT_CATALOG.map(({ id }) => id);
+  const tokScaleClients = tokscaleParsedClients();
   assert.deepEqual(missingContracts([...tokScaleClients, 'future-client']), ['future-client']);
 });
 

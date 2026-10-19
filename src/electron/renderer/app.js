@@ -11940,6 +11940,11 @@ const LIMIT_PROVIDER_SETTINGS = {
     descKey: 'settings.limits.prepaidBalanceDesc',
     requiresConfiguredKey: 'claudeWebCookieConfigured',
     defaultValue: true
+  }, {
+    key: 'claudeDesktopLocalOnly',
+    titleKey: 'settings.limits.claudeDesktopLocalOnly',
+    descKey: 'settings.limits.claudeDesktopLocalOnlyDesc',
+    defaultValue: false
   }],
   codex: [{
     key: 'codexResetForecastEnabled',

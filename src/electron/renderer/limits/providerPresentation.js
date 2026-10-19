@@ -26,7 +26,7 @@
   };
 
   const PROVIDER_SOURCE_LABELS = {
-    claude: { oauth: 'OAuth', cli: 'CLI', web: 'Web' },
+    claude: { oauth: 'OAuth', cli: 'CLI', web: 'Web', local: 'Desktop' },
     codex: { rpc: 'RPC' },
     opencode: { local: 'Local', web: 'Web', api: 'API' },
     cursor: { web: 'Web' },
