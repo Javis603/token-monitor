@@ -8,9 +8,7 @@
 const SUBSAMPLES = 8;
 
 // Scratch arrays are reused across calls. The main process is single-threaded
-// and rasterizeMask never re-enters, so one set serves every caller. The
-// returned buffer is a view into one pooled backing store: callers consume it
-// synchronously and it stays valid only until the next call.
+// and rasterizeMask never re-enters, so one set serves every caller.
 let coverage = new Float32Array(0);
 let crossings = new Float64Array(0);
 let edges = new Float64Array(0);
@@ -18,17 +16,15 @@ const starts = new Float64Array(SUBSAMPLES);
 const ends = new Float64Array(SUBSAMPLES);
 
 // One mask per animation frame otherwise leaves ~175MB of short-lived buffers
-// per open at 60Hz. The returned buffer is owned by this module and valid until
-// the next call; every caller consumes it synchronously (native image creation
-// copies it, the Windows region reader finishes before returning). Oversized
-// masks stay unpooled so a pathological input cannot pin memory.
+// per open at 60Hz. The pool returns an exact-length view that callers consume
+// synchronously; native image creation copies it and the Windows region reader
+// finishes before returning. Oversized masks stay unpooled so a pathological
+// input cannot pin memory.
 const POOL_LIMIT = 16 * 1024 * 1024;
 let pooledBuffer = null;
 
 function maskBuffer(byteLength) {
   if (pooledBuffer && pooledBuffer.length >= byteLength) {
-    // A view keeps the returned length exact for callers that compare or
-    // encode the whole buffer, while the backing store stays pooled.
     const buffer = pooledBuffer.subarray(0, byteLength);
     buffer.fill(0);
     return buffer;
@@ -44,13 +40,10 @@ function ensureScratch(pixelWidth, edgeCount) {
   if (edges.length < edgeCount * 4) edges = new Float64Array(edgeCount * 4);
 }
 
-// Same scanline math, same order, same rounding as the previous
-// implementation: the edge list is built once per call instead of once per row
-// and per sample, the two crossings are ordered with min/max, and
-// rows whose eight samples all describe one span fill their fully covered
-// interior directly with 1.0 (the value the per-sample loop reaches by adding
-// 1/8 eight times). Rows with no span or several spans take the reference path
-// unchanged.
+// Keeps the previous implementation's scanline math, sample order and
+// rounding, so the alpha mask stays byte-identical. The fast path only accepts
+// rows whose eight samples each describe one span; rows with no span, several
+// spans or non-finite crossings take the reference path below.
 function rasterizeMask(polygons, width, height, scale = 1) {
   const pixelWidth = Math.max(1, Math.round(width * scale));
   const pixelHeight = Math.max(1, Math.round(height * scale));
@@ -109,8 +102,8 @@ function rasterizeMask(polygons, width, height, scale = 1) {
             count += 1;
           }
         }
-        // Array#sort matches the reference for non-finite crossings; the
-        // allocation-free insertion sort above does not order NaN the same way.
+        // Array#sort keeps the previous ordering for non-finite crossings;
+        // the fast path above bails out before ordering them.
         const sorted = [];
         for (let index = 0; index < count; index += 1) sorted.push(crossings[index]);
         sorted.sort((a, b) => a - b);
