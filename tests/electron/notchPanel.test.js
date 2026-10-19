@@ -419,11 +419,58 @@ test('limits give every account its own column with the Limits view plan and Hom
   assert.deepEqual(f.all('notch-limit-account').map(node => node.textContent), ['a@example.test', 'b@example.test']);
   assert.equal(f.all('notch-limit-active').length, 1);
   assert.ok(f.all('notch-limit')[1].contains(f.find('notch-limit-active')));
-  // Session before weekly, as Home's limits card orders them; monthly is next.
-  assert.deepEqual(f.all('notch-limit-number').map(node => node.textContent), ['60', '70', '100']);
-  f.find('notch-window-page').fire('click', { detail: 0 });
-  assert.deepEqual(f.all('notch-limit-number').map(node => node.textContent), ['90', '100']);
+  // Session before weekly, as Home's limits card orders them; monthly is next,
+  // in a double-width column rather than on a page of its own.
+  assert.deepEqual(f.all('notch-limit-number').map(node => node.textContent), ['60', '70', '90', '100']);
+  assert.deepEqual(f.all('notch-limit').map(node => node.classList.contains('is-wide')), [true, false]);
+  assert.equal(f.all('notch-window-page').length, 0);
+  // Three slots fill one page exactly, so there is nothing to page through.
   assert.equal(f.all('notch-pager').length, 0);
+});
+
+test('a grant measured against an allowance reads as a percentage while a bare balance keeps its money', t => {
+  const f = panelFixture(t);
+  const { normalizeLimitWindow } = require('../../src/shared/limits/core');
+  const records = [
+    { provider: 'commandcode', status: 'ok', windows: [normalizeLimitWindow({ kind: 'billing', metric: 'credits', label: 'Monthly',
+      remaining: 4.79, limit: 10, used: 5.21, currency: 'USD' })] },
+    { provider: 'deepseek', status: 'ok', windows: [normalizeLimitWindow({ kind: 'billing', metric: 'credits', label: 'Balance',
+      remaining: 6.86, currency: 'CNY', showMeter: false })] }
+  ];
+  const cells = buildEdgeDockCells({ limits: { providers: records } }, { items: records.map(record => ({ type: 'limit', provider: record.provider })) });
+  f.panel.render({ ...payload(), cells }); f.panel.selectPage('limits');
+  assert.deepEqual(f.all('notch-limit-number').map(node => node.textContent), ['48']);
+  assert.equal(f.all('notch-limit-value')[0].title, '$4.79 / $10.00');
+  assert.equal(f.all('notch-limit-money').length, 1);
+  assert.match(f.find('notch-limit-money').textContent, /6\.86/);
+});
+
+test('only a column with more than four windows pages them, four at a time', t => {
+  const f = panelFixture(t);
+  const record = { provider: 'codex', status: 'ok', windows: [10, 20, 30, 40, 50].map(remainingPercent => ({ kind: 'weekly', remainingPercent })) };
+  const cells = buildEdgeDockCells({ limits: { providers: [record] } }, { items: [{ type: 'limit', provider: 'codex' }] });
+  f.panel.render({ ...payload(), cells }); f.panel.selectPage('limits');
+  assert.deepEqual(f.all('notch-limit-number').map(node => node.textContent), ['10', '20', '30', '40']);
+  assert.equal(f.find('notch-window-page').textContent, '1 / 2');
+  f.find('notch-window-page').fire('click', { detail: 0 });
+  assert.deepEqual(f.all('notch-limit-number').map(node => node.textContent), ['50']);
+});
+
+test('a wide column that would straddle a page starts the next one, and the last page is squared off', t => {
+  const f = panelFixture(t);
+  const records = [
+    ...['a', 'b'].map(id => ({ provider: 'codex', status: 'ok', accountKey: `key:${id}`, accountEmail: `${id}@example.test`,
+      windows: [{ kind: 'weekly', remainingPercent: 50 }] })),
+    { provider: 'cursor', status: 'ok', windows: [70, 80, 90].map(remainingPercent => ({ kind: 'monthly', remainingPercent })) }
+  ];
+  const cells = buildEdgeDockCells({ limits: { providers: records } }, { items: [{ type: 'limit', provider: 'codex' }, { type: 'limit', provider: 'cursor' }] });
+  f.panel.render({ ...payload(), cells }); f.panel.selectPage('limits');
+  const strip = f.find('notch-limits');
+  const kinds = strip.children.map(node => node.classList.contains('notch-limits-tail') ? 'tail'
+    : node.classList.contains('notch-limit-filler') ? 'filler' : node.classList.contains('is-wide') ? 'wide' : 'one');
+  assert.deepEqual(kinds, ['one', 'one', 'filler', 'wide', 'filler', 'tail']);
+  assert.deepEqual(strip.children.map(node => node.classList.contains('is-page-start')), [true, false, false, true, false, false]);
+  assert.equal(f.find('notch-pager').children.length, 2);
 });
 
 test('limit columns past one page scroll a page per wheel gesture and keep their page across pushes', t => {

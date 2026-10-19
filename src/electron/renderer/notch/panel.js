@@ -568,42 +568,63 @@
 
     function limitColumn({ entry, account, record, records, key }, nowMs) {
       const column = el('div', 'notch-limit');
+      // The name has the column's full width; the plan rides the line below,
+      // where it no longer squeezes names like Command Code or DeepSeek.
       const head = el('div', 'notch-limit-head');
-      head.append(mark(entry.provider), text('notch-limit-name', providerLabel(entry.provider)));
+      const name = text('notch-limit-name', providerLabel(entry.provider));
+      name.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'name']);
+      overflowText.bind(name);
+      head.append(mark(entry.provider), name);
       const usable = record && (record.status === 'ok' || record.stale);
       // The Limits view's own plan text: Claude and Codex keep the plan in
       // accountLabel, which planLabel alone never sees.
       const plan = usable ? String(limitWindowsView.limitAccountPlan(record, { grouped: records.length > 1 }) || '').trim() : '';
-      if (plan) head.append(text('notch-chip', plan));
       const sub = el('div', 'notch-limit-sub');
       if (records.length > 1) {
         const shown = limitAccountTitle(entry.provider, record, records.indexOf(record), records);
-        sub.append(text('notch-limit-account', shown || t('settings.codex.nAccounts', { count: records.length }), shown));
+        const accountName = text('notch-limit-account', shown || t('settings.codex.nAccounts', { count: records.length }), shown);
+        accountName.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'account']);
+        overflowText.bind(accountName);
+        sub.append(accountName);
         if (account?.active) {
           const live = text('notch-limit-active', '✓', t('limits.codex.activeAccountHint'));
           live.setAttribute('aria-label', t('limits.codex.activeAccountHint'));
           sub.append(live);
         }
       } else if (record?.updatedAt) {
-        sub.append(text('', t('notch.updated', { time: relativeAgo(record.updatedAt, nowMs) })));
+        sub.append(text('notch-limit-updated', t('notch.updated', { time: relativeAgo(record.updatedAt, nowMs) })));
       }
+      if (plan) sub.append(text('notch-chip', plan));
       column.append(head, sub);
+      // An account with three or four windows takes two column slots and lays
+      // them out two by two at the usual size, so Command Code's grant or
+      // Antigravity's second group need no page of their own. Only a longer
+      // list pages, four at a time.
       const allReadings = usable ? accountReadings(record, nowMs) : [];
-      const windowCount = Math.ceil(allReadings.length / 2);
+      const perPage = allReadings.length <= 2 ? 2 : 4;
+      if (perPage > 2) column.classList.add('is-wide');
+      const windowCount = Math.ceil(allReadings.length / perPage);
       const windowPage = Math.min(windowPages.get(key) || 0, Math.max(0, windowCount - 1));
-      const readings = allReadings.slice(windowPage * 2, windowPage * 2 + 2);
+      const readings = allReadings.slice(windowPage * perPage, windowPage * perPage + perPage);
       const list = el('div', 'notch-limit-windows');
       for (const reading of readings) {
         const row = el('div', 'notch-limit-window');
         const tone = appearance().notchWarnColors === true ? severity(reading.remaining) : '';
         if (tone) row.dataset.tone = tone;
-        const label = el('span', 'notch-limit-label');
-        label.append(text('', windowLabels.limitWindowLabel(entry.provider, reading.window, t('notch.quota'))));
+        // Long labels (Antigravity's "Claude/GPT 5-hour") fade and scroll into
+        // view on hover, as session titles do, instead of ending in an ellipsis.
+        const label = text('notch-limit-label', windowLabels.limitWindowLabel(entry.provider, reading.window, t('notch.quota')));
+        label.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'window', windowPage, readings.indexOf(reading)]);
+        overflowText.bind(label);
         const value = el('span', 'notch-limit-value');
         const description = windowText.limitWindowText(reading.record, reading.window, { showLimitUsed: appearance().showLimitUsed, formatCompact: formatTokens });
         const note = String(reading.window.detail || '').toLowerCase() === 'unlimited'
           ? t('settings.thirdparty.unlimited') : description.value || (reading.remaining === null ? reading.window.detail : '');
-        if (reading.credits) {
+        // Money leads only where the Limits view leads with it: a balance with
+        // no allowance. A grant measured against one reads as its percentage,
+        // with the amounts on hover, as the Limits view prints them.
+        if (description.detail) value.title = description.detail;
+        if (reading.credits && !description.percentLeads) {
           const amount = balance.creditsAmount(reading.record, reading.window);
           value.append(text('notch-limit-money', balance.formatCompactMoney(amount, balance.creditsCurrency(reading.record, reading.window),
             appearance().compactTokenUnits, locale())));
@@ -634,35 +655,49 @@
       return column;
     }
 
-    // The columns scroll sideways a page of LIMIT_COLUMNS at a time: a trackpad
-    // swipe is native (scroll snapping keeps pages whole), a vertical wheel steps
-    // one page per gesture, and the dots only show where the strip is. Past one
-    // page the next column peeks in at the edge, so there is visibly more.
+    // The columns scroll sideways a page of LIMIT_COLUMNS slots at a time: a
+    // trackpad swipe is native (scroll snapping keeps pages whole), a vertical
+    // wheel steps one page per gesture, and the dots only show where the strip
+    // is. Past one page the next column peeks in at the edge.
     const limitWheel = { sum: 0, stepped: false, timer: null };
 
     function limitPageWidth(strip) {
-      const first = strip.querySelector('.notch-limit');
-      if (!first) return strip.clientWidth;
-      const gap = parseFloat(window.getComputedStyle(strip).columnGap) || 0;
-      return LIMIT_COLUMNS * (first.offsetWidth + gap);
+      const starts = strip.querySelectorAll('.is-page-start');
+      return starts.length > 1 ? starts[1].offsetLeft - starts[0].offsetLeft : 0;
     }
 
     function renderLimits(pageNode, nowMs) {
-      const columns = limitColumns();
-      const pageCount = Math.max(1, Math.ceil(columns.length / LIMIT_COLUMNS));
-      view.limitPage = Math.min(view.limitPage, pageCount - 1);
       const strip = el('div', 'notch-limits');
+      // Columns fill pages slot by slot. A wide column that would straddle a
+      // page boundary starts the next page, and fillers keep every page - the
+      // last one too - exactly LIMIT_COLUMNS slots wide so each snaps flush.
+      const filler = () => el('div', 'notch-limit notch-limit-filler');
+      let used = 0;
+      let pageCount = 0;
+      for (const column of limitColumns()) {
+        const node = limitColumn(column, nowMs);
+        const slots = node.classList.contains('is-wide') ? 2 : 1;
+        if (used + slots > LIMIT_COLUMNS) {
+          for (; used < LIMIT_COLUMNS; used += 1) strip.append(filler());
+          used = 0;
+        }
+        if (used === 0) {
+          node.classList.add('is-page-start');
+          pageCount += 1;
+        }
+        strip.append(node);
+        used = (used + slots) % LIMIT_COLUMNS;
+      }
+      view.limitPage = Math.min(view.limitPage, Math.max(0, pageCount - 1));
       strip.classList.toggle('is-paged', pageCount > 1);
-      for (const column of columns) strip.append(limitColumn(column, nowMs));
-      // Fillers complete the last page, and the tail spacer gives back the
-      // peek, so every page - the last one too - can snap flush to the left.
+      // The tail spacer gives back the peek on the last page.
       if (pageCount > 1) {
-        for (let index = columns.length; index < pageCount * LIMIT_COLUMNS; index += 1) strip.append(el('div', 'notch-limit notch-limit-filler'));
+        for (; used > 0 && used < LIMIT_COLUMNS; used += 1) strip.append(filler());
         strip.append(el('div', 'notch-limits-tail'));
       }
-      if (!columns.length) strip.append(text('notch-empty', t('notch.noLimits')));
+      if (!pageCount) strip.append(text('notch-empty', t('notch.noLimits')));
       pageNode.replaceChildren(strip);
-      if (pageCount === 1) return;
+      if (pageCount <= 1) return;
       const pager = el('div', 'notch-pager');
       const dots = [];
       const goTo = (index) => {
