@@ -8,7 +8,6 @@ const { notchPanelItems, notchWeek } = require('../../src/electron/notch/panel')
 const { createNotchHistory } = require('../../src/electron/notch/history');
 const { breakdownRows, panelContentHeight } = require('../../src/electron/renderer/notch/panel');
 const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
-const { providerKey } = require('../../src/electron/renderer/limits/resetMotion');
 const { createLiveTokenRateGroupTracker } = require('../../src/electron/renderer/tokenRatePresentation');
 
 function payload(tokens = 100) {
@@ -403,18 +402,59 @@ test('unknown and zero usage remain distinct in both breakdown columns', t => {
   assert.ok(f.all('notch-breakdown-column').every(column => /No usage yet/.test(column.textContent)));
 });
 
-test('limits retain the shared current account beyond the detail cap and expose every quota page', t => {
+test('limits give every account its own column with the Limits view plan and Home window order', t => {
   const f = panelFixture(t);
-  const records = Array.from({ length: 55 }, (_, index) => ({ provider: 'codex', status: 'ok', accountKey: `key:${index}`, accountEmail: `${index}@example.test`,
-    windows: [{ kind: 'session', remainingPercent: 60 }, { kind: 'weekly', remainingPercent: 70 }, { kind: 'daily', remainingPercent: 80 }] }));
+  const records = [
+    { provider: 'codex', status: 'ok', accountKey: 'key:a', accountEmail: 'a@example.test', accountLabel: 'Pro',
+      windows: [{ kind: 'weekly', remainingPercent: 70 }, { kind: 'monthly', remainingPercent: 90 }, { kind: 'session', remainingPercent: 60 }] },
+    { provider: 'codex', status: 'ok', accountKey: 'key:b', accountEmail: 'b@example.test', accountLabel: 'Plus',
+      windows: [{ kind: 'session', remainingPercent: 100 }] }
+  ];
   const cells = buildEdgeDockCells({ limits: { providers: records } }, { items: [{ type: 'limit', provider: 'codex' }] });
-  cells[0].headlineAccount = providerKey(records.at(-1));
+  cells[0].accounts[0].active = false; cells[0].accounts[1].active = true;
   f.panel.render({ ...payload(), cells }); f.panel.selectPage('limits');
-  assert.match(f.find('notch-limit-account').textContent, /54@example.test/);
-  assert.equal(f.all('notch-limit-window').length, 2);
+  assert.equal(f.all('notch-limit').length, 2);
+  // The plan lives in accountLabel, which the panel used to miss.
+  assert.deepEqual(f.all('notch-chip').map(node => node.textContent), ['Pro', 'Plus']);
+  assert.deepEqual(f.all('notch-limit-account').map(node => node.textContent), ['a@example.test', 'b@example.test']);
+  assert.equal(f.all('notch-limit-active').length, 1);
+  assert.ok(f.all('notch-limit')[1].contains(f.find('notch-limit-active')));
+  // Session before weekly, as Home's limits card orders them; monthly is next.
+  assert.deepEqual(f.all('notch-limit-number').map(node => node.textContent), ['60', '70', '100']);
   f.find('notch-window-page').fire('click', { detail: 0 });
-  assert.equal(f.all('notch-limit-window').length, 1);
-  assert.equal(f.find('notch-limit-number').textContent, '80');
+  assert.deepEqual(f.all('notch-limit-number').map(node => node.textContent), ['90', '100']);
+  assert.equal(f.all('notch-pager').length, 0);
+});
+
+test('limit columns past one page scroll a page per wheel gesture and keep their page across pushes', t => {
+  const f = panelFixture(t);
+  const records = Array.from({ length: 4 }, (_, index) => ({ provider: 'codex', status: 'ok', accountKey: `key:${index}`,
+    accountEmail: `${index}@example.test`, windows: [{ kind: 'weekly', remainingPercent: 50 + index }] }));
+  const cells = buildEdgeDockCells({ limits: { providers: records } }, { items: [{ type: 'limit', provider: 'codex' }] });
+  f.panel.render({ ...payload(), cells }); f.panel.selectPage('limits');
+  const strip = f.find('notch-limits');
+  assert.ok(strip.classList.contains('is-paged') && strip.classList.contains('has-after'));
+  // Two fillers square off the last page so it can snap flush like the first.
+  assert.equal(f.all('notch-limit-filler').length, 2);
+  assert.equal(f.find('notch-pager').children.length, 2);
+  let prevented = 0;
+  const wheel = deltaY => strip.fire('wheel', { deltaX: 0, deltaY, preventDefault: () => { prevented += 1; } });
+  wheel(30); wheel(30);
+  assert.equal(prevented, 2);
+  assert.equal(strip.scrollLeft, 120);
+  assert.equal(f.find('notch-pager').children[1].classList.contains('is-selected'), true);
+  assert.equal(strip.classList.contains('has-after'), false);
+  // A later push rebuilds the strip on the same page.
+  records[0].windows[0].remainingPercent = 10;
+  f.panel.render({ ...payload(), cells: buildEdgeDockCells({ limits: { providers: records } }, { items: [{ type: 'limit', provider: 'codex' }] }) });
+  assert.notEqual(f.find('notch-limits'), strip);
+  assert.equal(f.find('notch-limits').scrollLeft, 120);
+  // Horizontal swipes stay native; a new vertical gesture steps back.
+  f.find('notch-limits').fire('wheel', { deltaX: 40, deltaY: 2, preventDefault: () => { prevented += 1; } });
+  assert.equal(prevented, 2);
+  t.mock.timers.tick(200);
+  f.find('notch-limits').fire('wheel', { deltaX: 0, deltaY: -30, preventDefault() {} });
+  assert.equal(f.find('notch-limits').scrollLeft, 0);
 });
 
 test('money quotas and unlimited readings keep their values without fabricated percentages', t => {

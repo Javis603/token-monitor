@@ -9,6 +9,7 @@ class Element {
     this.children = []; this.dataset = {}; this.attributes = {}; this.listeners = {};
     this.style = { setProperty(key, value) { this[key] = value; } };
     this.classes = new Set();
+    this.scrollLeft = 0; this.offsetWidth = 0; this.clientWidth = 0;
     this.classList = {
       add: (...names) => names.forEach(name => this.classes.add(name)),
       remove: (...names) => names.forEach(name => this.classes.delete(name)),
@@ -32,6 +33,7 @@ class Element {
   removeAttribute(key) { delete this.attributes[key]; }
   addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn); }
   fire(name, event = {}) { for (const fn of this.listeners[name] || []) fn(event); }
+  scrollTo({ left }) { this.scrollLeft = left; this.fire('scroll'); }
   contains(node) { return this === node || this.children.some(child => child.contains(node)); }
   focus() {
     if (this.ownerDocument.activeElement === this) return;
@@ -64,6 +66,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
   const resizeObservers = [];
   const window = {
     addEventListener() {},
+    getComputedStyle: () => ({ columnGap: '40px' }),
     ResizeObserver: class {
       constructor(callback) { this.callback = callback; resizeObservers.push(this); }
       observe(node) { this.node = node; }
@@ -82,6 +85,8 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
     TokenMonitorUsageCharts: require('../../src/electron/renderer/usageCharts'),
     TokenMonitorClientCatalog: require('../../src/shared/clientCatalog'),
     TokenMonitorPressActivation: require('../../src/electron/renderer/pressActivation'),
+    TokenMonitorHomeOverview: require('../../src/electron/renderer/homeOverview'),
+    TokenMonitorLimitProviderPresentation: require('../../src/electron/renderer/limits/providerPresentation'),
     TokenMonitorTokenNumberAnimation: {
       duration: 1000, normalize: value => value === 'count' ? 'count' : 'roll',
       capture: node => node.rolling ? ['in-flight'] : null,
@@ -99,9 +104,18 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
     preserveReading(previous, next) { this.preserved.push({ previous, next }); },
     refresh() {}
   };
+  // The real Limits-view plan text, so the panel is held to the same labels.
+  const plans = require('../../src/electron/renderer/limits/windowsView').createLimitWindowsView({
+    document, t: (key, params) => i18n.translate(state.locale, key, params), settings: () => settings,
+    currentLocale: () => state.locale, presentation: window.TokenMonitorLimitProviderPresentation,
+    motion: window.TokenMonitorLimitResetMotion
+  });
   const shared = {
     overflowText,
-    limitWindowsView: { setDetailTooltip(node, entries) { node.tooltipEntries = entries; } },
+    limitWindowsView: {
+      setDetailTooltip(node, entries) { node.tooltipEntries = entries; },
+      limitAccountPlan: (...args) => plans.limitAccountPlan(...args)
+    },
     markNode: id => el('span', 'edge-dock-mark', id), hasMask: () => true,
     providerLabel: id => id, limitProviderColor: () => '#888',
     limitAccountTitle: (_id, record, index, peers) => window.TokenMonitorAccountIdentity.accountTitleLabel(record, peers, { index, maskEmail: settings.maskLimitAccountEmails === true }),

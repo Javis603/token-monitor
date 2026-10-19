@@ -48,6 +48,8 @@
     const { clientColors, modelColor } = window.TokenMonitorUsageCharts;
     const { CLIENT_LABELS } = window.TokenMonitorClientCatalog;
     const { activateOnPress } = window.TokenMonitorPressActivation;
+    const homeOverview = window.TokenMonitorHomeOverview;
+    const limitPresentation = window.TokenMonitorLimitProviderPresentation;
 
     const view = { page: 'home', limitPage: 0, breakdownPeriod: 'today', scrub: null };
     const node = el('div', 'notch-panel');
@@ -301,9 +303,24 @@
     }
 
     function quotaReadings(entry, nowMs = Date.now()) {
-      const record = headlineRecord(entry);
+      return accountReadings(headlineRecord(entry), nowMs);
+    }
+
+    // An account's windows, led by the pair Home's limits card shows: the same
+    // compact pick (Antigravity's tightest per model group, Codex's canonical
+    // windows) in the same shortest-cycle-first order. The rest follow in the
+    // collector's order, so a third window is one window page away.
+    function orderedWindows(record) {
+      const windows = limitWindows(record);
+      const lead = new Set(limitPresentation.limitProviderCompactWindows(record, windows));
+      const rank = (value) => homeOverview.compactWindowRank(record.provider, value);
+      return [...windows.filter((value) => lead.has(value)).sort((a, b) => rank(a) - rank(b)),
+        ...windows.filter((value) => !lead.has(value))];
+    }
+
+    function accountReadings(record, nowMs = Date.now()) {
       if (!record) return [];
-      return limitWindows(record).map((windowValue) => {
+      return orderedWindows(record).map((windowValue) => {
         const remaining = trayText.remainingPercent(windowValue, record);
         return { window: windowValue, record, remaining: remaining === null ? null : Math.round(remaining),
           credits: balance.isCreditsWindow(windowValue), nowMs };
@@ -534,26 +551,46 @@
         && !(record.provider === 'codex' && value.additional === true && options.showCodexAdditionalLimits === false));
     }
 
-    function limitColumn(entry, nowMs) {
+    // One column per visible account, in the collector's order (as the Limits
+    // view lists them), so a provider with several logins shows every one of
+    // them rather than only its headline. A provider with nothing to report
+    // keeps one column for its status.
+    function limitColumns() {
+      return providerCells().flatMap((entry) => {
+        const records = (entry.accounts || []).map((account) => account.record).filter(Boolean);
+        if (!records.length) return [{ entry, account: null, record: null, records, key: entry.id }];
+        return (entry.accounts || []).filter((account) => account.record).map((account, index) => ({
+          entry, account, record: account.record, records,
+          key: `${entry.id}:${resetMotion.providerKey(account.record) || index}`
+        }));
+      });
+    }
+
+    function limitColumn({ entry, account, record, records, key }, nowMs) {
       const column = el('div', 'notch-limit');
-      const record = headlineRecord(entry);
       const head = el('div', 'notch-limit-head');
       head.append(mark(entry.provider), text('notch-limit-name', providerLabel(entry.provider)));
-      const plan = String(record?.planLabel || '').trim();
+      const usable = record && (record.status === 'ok' || record.stale);
+      // The Limits view's own plan text: Claude and Codex keep the plan in
+      // accountLabel, which planLabel alone never sees.
+      const plan = usable ? String(limitWindowsView.limitAccountPlan(record, { grouped: records.length > 1 }) || '').trim() : '';
       if (plan) head.append(text('notch-chip', plan));
       const sub = el('div', 'notch-limit-sub');
-      if ((entry.accountCount || 0) > 1) {
-        const peers = (entry.accounts || []).map(account => account.record).filter(Boolean);
-        if (record && !peers.includes(record)) peers.push(record);
-        const shown = record ? limitAccountTitle(entry.provider, record, peers.indexOf(record), peers) : '';
-        sub.append(text('notch-limit-account', shown || t('settings.codex.nAccounts', { count: entry.accountCount }), shown));
+      if (records.length > 1) {
+        const shown = limitAccountTitle(entry.provider, record, records.indexOf(record), records);
+        sub.append(text('notch-limit-account', shown || t('settings.codex.nAccounts', { count: records.length }), shown));
+        if (account?.active) {
+          const live = text('notch-limit-active', '✓', t('limits.codex.activeAccountHint'));
+          live.setAttribute('aria-label', t('limits.codex.activeAccountHint'));
+          sub.append(live);
+        }
       } else if (record?.updatedAt) {
         sub.append(text('', t('notch.updated', { time: relativeAgo(record.updatedAt, nowMs) })));
       }
       column.append(head, sub);
-      const allReadings = record ? quotaReadings(entry, nowMs) : [];
+      const allReadings = usable ? accountReadings(record, nowMs) : [];
       const windowCount = Math.ceil(allReadings.length / 2);
-      const windowPage = Math.min(windowPages.get(entry.id) || 0, Math.max(0, windowCount - 1));
+      const windowPage = Math.min(windowPages.get(key) || 0, Math.max(0, windowCount - 1));
       const readings = allReadings.slice(windowPage * 2, windowPage * 2 + 2);
       const list = el('div', 'notch-limit-windows');
       for (const reading of readings) {
@@ -581,40 +618,91 @@
         row.append(label, value, text('notch-limit-reset', reset ? t('notch.resetIn', { time: reset }) : ''));
         list.append(row);
       }
-      if (!readings.length || entry.status !== 'ok') list.append(text('notch-limit-note', t(entry.status === 'stale' ? 'settings.limits.status.stale' : 'edgeDock.unavailable')));
+      if (!readings.length) {
+        const stale = record ? record.status === 'stale' : entry.status === 'stale';
+        list.append(text('notch-limit-note', t(stale ? 'settings.limits.status.stale' : 'edgeDock.unavailable')));
+      }
       column.append(list);
       if (windowCount > 1) {
         const more = el('button', 'notch-window-page', `${windowPage + 1} / ${windowCount}`);
         more.type = 'button';
-        more.dataset.focusKey = `windows:${entry.id}`;
+        more.dataset.focusKey = `windows:${key}`;
         more.setAttribute('aria-label', `${providerLabel(entry.provider)} · ${t('notch.pageLabel', { page: (windowPage + 1) % windowCount + 1, count: windowCount })}`);
-        activateOnPress(more, () => { windowPages.set(entry.id, (windowPage + 1) % windowCount); renderPage('limits', { force: true }); });
+        activateOnPress(more, () => { windowPages.set(key, (windowPage + 1) % windowCount); renderPage('limits', { force: true }); });
         column.append(more);
       }
       return column;
     }
 
+    // The columns scroll sideways a page of LIMIT_COLUMNS at a time: a trackpad
+    // swipe is native (scroll snapping keeps pages whole), a vertical wheel steps
+    // one page per gesture, and the dots only show where the strip is. Past one
+    // page the next column peeks in at the edge, so there is visibly more.
+    const limitWheel = { sum: 0, stepped: false, timer: null };
+
+    function limitPageWidth(strip) {
+      const first = strip.querySelector('.notch-limit');
+      if (!first) return strip.clientWidth;
+      const gap = parseFloat(window.getComputedStyle(strip).columnGap) || 0;
+      return LIMIT_COLUMNS * (first.offsetWidth + gap);
+    }
+
     function renderLimits(pageNode, nowMs) {
-      const entries = providerCells();
-      const pageCount = Math.max(1, Math.ceil(entries.length / LIMIT_COLUMNS));
+      const columns = limitColumns();
+      const pageCount = Math.max(1, Math.ceil(columns.length / LIMIT_COLUMNS));
       view.limitPage = Math.min(view.limitPage, pageCount - 1);
-      const grid = el('div', 'notch-limits');
-      for (const entry of entries.slice(view.limitPage * LIMIT_COLUMNS, (view.limitPage + 1) * LIMIT_COLUMNS)) grid.append(limitColumn(entry, nowMs));
-      if (!entries.length) grid.append(text('notch-empty', t('notch.noLimits')));
-      pageNode.replaceChildren(grid);
+      const strip = el('div', 'notch-limits');
+      strip.classList.toggle('is-paged', pageCount > 1);
+      for (const column of columns) strip.append(limitColumn(column, nowMs));
+      // Fillers complete the last page, and the tail spacer gives back the
+      // peek, so every page - the last one too - can snap flush to the left.
       if (pageCount > 1) {
-        const pager = el('div', 'notch-pager');
-        for (let index = 0; index < pageCount; index += 1) {
-          const dot = el('button', index === view.limitPage ? 'is-selected' : '');
-          dot.type = 'button';
-          dot.setAttribute('aria-label', t('notch.pageLabel', { page: index + 1, count: pageCount }));
-          dot.setAttribute('aria-pressed', String(index === view.limitPage));
-          dot.dataset.focusKey = `limits:${index}`;
-          activateOnPress(dot, () => { view.limitPage = index; renderPage('limits'); });
-          pager.append(dot);
-        }
-        pageNode.append(pager);
+        for (let index = columns.length; index < pageCount * LIMIT_COLUMNS; index += 1) strip.append(el('div', 'notch-limit notch-limit-filler'));
+        strip.append(el('div', 'notch-limits-tail'));
       }
+      if (!columns.length) strip.append(text('notch-empty', t('notch.noLimits')));
+      pageNode.replaceChildren(strip);
+      if (pageCount === 1) return;
+      const pager = el('div', 'notch-pager');
+      const dots = [];
+      const goTo = (index) => {
+        const page = Math.max(0, Math.min(pageCount - 1, index));
+        strip.scrollTo({ left: page * limitPageWidth(strip), behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+      };
+      const sync = () => {
+        // A strip that is not laid out (the panel is closed) keeps its page.
+        const width = limitPageWidth(strip);
+        if (width > 0) view.limitPage = Math.max(0, Math.min(pageCount - 1, Math.round(strip.scrollLeft / width)));
+        dots.forEach((dot, index) => {
+          dot.classList.toggle('is-selected', index === view.limitPage);
+          dot.setAttribute('aria-pressed', String(index === view.limitPage));
+        });
+        strip.classList.toggle('has-after', view.limitPage < pageCount - 1);
+      };
+      for (let index = 0; index < pageCount; index += 1) {
+        const dot = el('button');
+        dot.type = 'button';
+        dot.setAttribute('aria-label', t('notch.pageLabel', { page: index + 1, count: pageCount }));
+        dot.dataset.focusKey = `limits:${index}`;
+        activateOnPress(dot, () => goTo(index));
+        dots.push(dot);
+        pager.append(dot);
+      }
+      pageNode.append(pager);
+      strip.scrollLeft = view.limitPage * limitPageWidth(strip);
+      sync();
+      strip.addEventListener('scroll', sync, { passive: true });
+      strip.addEventListener('wheel', (event) => {
+        if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+        event.preventDefault();
+        clearTimeout(limitWheel.timer);
+        limitWheel.timer = setTimeout(() => { limitWheel.sum = 0; limitWheel.stepped = false; }, 180);
+        if (limitWheel.stepped) return;
+        limitWheel.sum += event.deltaY;
+        if (Math.abs(limitWheel.sum) < 24) return;
+        limitWheel.stepped = true;
+        goTo(view.limitPage + Math.sign(limitWheel.sum));
+      }, { passive: false });
     }
 
     // ---- Sessions -------------------------------------------------------------
@@ -825,7 +913,7 @@
       const base = [state.appearanceKey, state.locale, minute];
       if (page === 'home') return JSON.stringify([...base, cell('stat:today'), cell('stat:sessions')?.sessions, payload?.panel?.week,
         status, providerCells().map((entry) => [entry.id, entry.remainingPercent, entry.headlineAccount, entry.accounts?.map((account) => account.record)])]);
-      if (page === 'limits') return JSON.stringify([...base, view.limitPage, providerCells().map((entry) => [entry.id, entry.status, entry.headlineAccount, entry.accountCount, entry.accounts?.map((account) => account.record), headlineRecord(entry)])]);
+      if (page === 'limits') return JSON.stringify([...base, providerCells().map((entry) => [entry.id, entry.status, entry.accounts?.map((account) => [account.record, account.active])])]);
       if (page === 'sessions') return JSON.stringify([...base, cell('stat:sessions')?.sessions, status]);
       return JSON.stringify([...base, view.breakdownPeriod, cell(`stat:${view.breakdownPeriod}`)]);
     }
