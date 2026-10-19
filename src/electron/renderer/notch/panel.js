@@ -48,6 +48,7 @@
     const { CLIENT_LABELS } = window.TokenMonitorClientCatalog;
     const { activateOnPress } = window.TokenMonitorPressActivation;
     const homeOverview = window.TokenMonitorHomeOverview;
+    const usageItems = window.TokenMonitorLimitUsageItems;
     const limitPresentation = window.TokenMonitorLimitProviderPresentation;
 
     const view = { page: 'home', limitPage: 0, breakdownPeriod: 'today', scrub: null };
@@ -298,7 +299,7 @@
       const max = Math.max(1, ...days.map((day) => day.tokens || 0));
       const total = days.reduce((sum, day) => sum + (day.tokens || 0), 0);
       const cost = days.reduce((sum, day) => sum + (day.costUsd || 0), 0);
-      return { days, max, total, cost, clients: week.todayClients || [], nowMs };
+      return { days, max, total, cost, clients: week.todayClients || [], complete: week.complete, nowMs };
     }
 
     function quotaReadings(entry, nowMs = Date.now()) {
@@ -488,7 +489,8 @@
       });
       bars.addEventListener('pointerleave', () => scrub(null));
       const foot = el('div', 'notch-week-foot');
-      const partial = week.days.some((day) => day.tokens === null);
+      // A day some device has not answered for is a subtotal, not the total.
+      const partial = week.complete === false || week.days.some((day) => day.tokens === null);
       const total = el('div', 'notch-week-summary');
       if (partial) total.append(text('notch-summary-label', t('notch.recorded')));
       const weekTokens = text('notch-week-tokens notch-strong', formatTokens(week.total));
@@ -544,10 +546,14 @@
       return headline || visible.find((record) => record.status === 'ok') || visible[0] || null;
     }
 
+    // Windows the user hid on the Limits page stay hidden here, before the
+    // compact pick, exactly as Home and the Edge Dock card apply them.
     function limitWindows(record) {
       const options = { showCodexAdditionalLimits: appearance().showCodexAdditionalLimits };
+      const hidden = appearance().limitProviderHiddenItems;
       return (record?.windows || []).filter((value) => value
-        && !(record.provider === 'codex' && value.additional === true && options.showCodexAdditionalLimits === false));
+        && !(record.provider === 'codex' && value.additional === true && options.showCodexAdditionalLimits === false)
+        && !usageItems.isLimitWindowHidden(hidden, record.provider, value));
     }
 
     // One column per visible account, in the collector's order (as the Limits
@@ -591,8 +597,15 @@
           live.setAttribute('aria-label', t('limits.codex.activeAccountHint'));
           sub.append(live);
         }
-      } else if (record?.updatedAt) {
-        sub.append(text('notch-limit-updated', t('notch.updated', { time: relativeAgo(record.updatedAt, nowMs) })));
+      }
+      // The Limits view's freshness reading, so an offline cached row says
+      // Stale rather than passing for a fresh one.
+      const freshness = record ? limitPresentation.limitProviderFreshness(record, { nowMs }) : null;
+      if (freshness?.tone === 'stale') column.dataset.tone = 'stale';
+      if (records.length > 1) {
+        if (freshness?.tone === 'stale') sub.append(text('notch-limit-stale', 'Stale', freshness.text));
+      } else if (freshness) {
+        sub.append(text('notch-limit-updated', freshness.text));
       }
       column.append(head, sub);
       // The column fits up to four windows, drawing them tighter as there are
@@ -793,7 +806,8 @@
       const states = sessions.map((row) => presentation.sessionActivityState(row, nowMs));
       const active = sessions.map((row, index) => ({ row, state: states[index] }))
         .filter((entry) => entry.state === 'running' || entry.state === 'waiting')
-        .sort((a, b) => Number(a.state === 'running') - Number(b.state === 'running'));
+        // Running first, as Home's now row picks it; waiting keeps its count.
+        .sort((a, b) => Number(b.state === 'running') - Number(a.state === 'running'));
       const recent = sessions.filter((_row, index) => states[index] !== 'running' && states[index] !== 'waiting');
       const left = el('div', 'notch-sessions-active');
       const leftHead = el('div', 'notch-section-head');

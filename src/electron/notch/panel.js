@@ -60,6 +60,8 @@ function notchWeek(stats, now = new Date(), history = stats?.historyPreview) {
     .sort((a, b) => b.tokens - a.tokens);
   return {
     days,
+    // Past days are whole only when every joined device answered for History.
+    complete: history?.complete === true,
     todayClients: clients,
     available: days.some((day, index) => index < days.length - 1 && day.tokens !== null)
   };

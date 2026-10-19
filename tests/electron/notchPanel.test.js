@@ -207,11 +207,12 @@ test('session context retains shared eligibility, tooltips and small meters with
   f.panel.selectPage('sessions');
   const page = f.find('notch-page-sessions'), active = page.querySelectorAll('.notch-active');
   assert.equal(active.length, 2);
-  assert.deepEqual(active.map(node => node.querySelector('.notch-session-context-fill').style['--bar-scale']), ['0.95', '0.37']);
-  assert.equal(active[0].querySelector('.notch-session-context').dataset.tone, 'low');
+  // Running leads; the waiting session follows.
+  assert.deepEqual(active.map(node => node.querySelector('.notch-session-context-fill').style['--bar-scale']), ['0.37', '0.95']);
+  assert.equal(active[1].querySelector('.notch-session-context').dataset.tone, 'low');
   assert.equal(page.querySelector('.notch-active-context-fill'), null);
   assert.equal(page.querySelector('.notch-active-cost'), null, 'both priced and partially priced sessions omit cost');
-  const runningContext = active[1].querySelector('.notch-session-context');
+  const runningContext = active[0].querySelector('.notch-session-context');
   assert.deepEqual(runningContext.tooltipEntries.map(entry => entry.full), ['74K / 200K', 'Cache ~29m left']);
   const recent = page.querySelectorAll('.notch-recent');
   assert.equal(recent[0].querySelector('.notch-session-context-value').textContent, '37%', 'a freshly ended turn retains context');
@@ -221,7 +222,7 @@ test('session context retains shared eligibility, tooltips and small meters with
   assert.equal(recent[2].querySelector('.notch-session-context'), null, 'idle sessions do not revive stale context');
   assert.equal(recent[2].querySelector('.notch-session-cache'), null, 'expired cache stays absent');
   f.settings.sessionContextMetric = 'remaining'; f.state.appearanceKey = 'remaining'; f.panel.render(data);
-  const remaining = page.querySelectorAll('.notch-active')[1];
+  const remaining = page.querySelectorAll('.notch-active')[0];
   assert.equal(remaining.querySelector('.notch-session-context-fill').style['--bar-scale'], '0.63');
   assert.equal(remaining.querySelector('.notch-session-context').attributes['aria-valuenow'], '63');
 });
@@ -269,6 +270,29 @@ test('week footer omits redundant labels while qualifying partial history and ac
   assert.equal(f.find('notch-week-cost-value').attributes['aria-label'], 'Recorded cost: $3');
   data.panel.week.days[0].unpricedTokens = 10; f.panel.render(data);
   assert.equal(f.find('notch-week-cost-value').textContent, '—');
+});
+
+test('a week some device has not answered for reads as recorded, not as the total', t => {
+  const f = panelFixture(t), data = payload();
+  // Every day has a figure, but History came back from only some devices.
+  data.panel.week.complete = false; f.panel.render(data);
+  assert.deepEqual(f.find('notch-week-foot').querySelectorAll('.notch-summary-label').map(node => node.textContent), ['Recorded']);
+  assert.equal(f.find('notch-week-tokens').attributes['aria-label'], 'Recorded: 130');
+  const { notchWeek } = require('../../src/electron/notch/panel');
+  assert.equal(notchWeek({}, new Date(2026, 9, 19, 12), { daily: [], complete: false }).complete, false);
+  assert.equal(notchWeek({}, new Date(2026, 9, 19, 12), { daily: [], complete: true }).complete, true);
+});
+
+test('running sessions lead the active list so two waiting ones cannot hide them', t => {
+  const f = panelFixture(t), data = payload();
+  const now = Date.now(), ago = minutes => new Date(now - minutes * 60000).toISOString();
+  const row = (id, state, minutes) => ({ key: `codex:${id}`, client: 'codex', sessionId: id, title: id, totalTokens: 1,
+    lastUsedAt: ago(minutes), liveActivity: { state, observedAt: ago(0) }, ...(state === 'waiting' ? { waitingForInput: true } : {}) });
+  data.cells[1].sessions = [row('waiting-a', 'waiting', 1), row('waiting-b', 'waiting', 2), row('running-c', 'running', 3)];
+  f.panel.render(data); f.panel.selectPage('sessions');
+  const titles = f.find('notch-page-sessions').querySelectorAll('.notch-active').map(node => node.querySelector('.notch-active-title').textContent);
+  assert.deepEqual(titles, ['running-c', 'waiting-a']);
+  assert.match(f.find('notch-more').textContent, /1/);
 });
 
 test('quiet sessions use concise age metadata and explicit empty-state copy', t => {
@@ -544,6 +568,35 @@ test('the week chart keeps its layout rules off the collapsed summary bars', () 
     if (!/\.notch-bars\b/.test(selector)) continue;
     assert.doesNotMatch(body, /grid|height/, `${selector.trim()} must not size the summary bars`);
   }
+});
+
+test('windows hidden on the Limits page stay hidden on Limits and Home', t => {
+  const { limitUsageItemId } = require('../../src/shared/limits/usageItems');
+  const f = panelFixture(t, { limitProviderHiddenItems: { claude: [limitUsageItemId({ kind: 'weekly' }, 'claude')] } }), data = payload();
+  const record = { provider: 'claude', status: 'ok', windows: [{ kind: 'session', remainingPercent: 60 }, { kind: 'weekly', remainingPercent: 10 }] };
+  data.cells.push(...buildEdgeDockCells({ limits: { providers: [record] } }, { items: [{ type: 'limit', provider: 'claude' }] }));
+  f.panel.render(data);
+  assert.deepEqual(f.all('notch-fuel-value').map(node => node.textContent), ['60%']);
+  f.panel.selectPage('limits');
+  assert.deepEqual(f.all('notch-limit-number').map(node => node.textContent), ['60']);
+});
+
+test('a cached offline reading says Stale with the Limits view wording and dims its figures', t => {
+  const f = panelFixture(t);
+  const at = new Date(Date.now() - 55 * 60000).toISOString();
+  const records = [
+    { provider: 'claude', status: 'ok', stale: true, updatedAt: at, windows: [{ kind: 'session', remainingPercent: 60 }] },
+    ...['a', 'b'].map(id => ({ provider: 'codex', status: 'ok', stale: id === 'b', updatedAt: at, accountKey: `key:${id}`,
+      accountEmail: `${id}@example.test`, windows: [{ kind: 'weekly', remainingPercent: 50 }] }))
+  ];
+  const cells = buildEdgeDockCells({ limits: { providers: records } }, { items: [{ type: 'limit', provider: 'claude' }, { type: 'limit', provider: 'codex' }] });
+  f.panel.render({ ...payload(), cells }); f.panel.selectPage('limits');
+  const [claude, codexA, codexB] = f.all('notch-limit');
+  assert.equal(claude.querySelector('.notch-limit-updated').textContent, 'Stale · 55m ago');
+  assert.equal(claude.dataset.tone, 'stale');
+  assert.equal(codexA.dataset.tone, undefined);
+  assert.equal(codexA.querySelector('.notch-limit-stale'), null);
+  assert.equal(codexB.querySelector('.notch-limit-stale').textContent, 'Stale');
 });
 
 test('money quotas and unlimited readings keep their values without fabricated percentages', t => {

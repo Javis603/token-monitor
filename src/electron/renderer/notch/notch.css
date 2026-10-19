@@ -249,6 +249,9 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-chip { margin-left: auto; font: 500 10px/1 var(--notch-ui); color: var(--notch-faint); padding: 3px 6px; border-radius: 5px; background: var(--notch-fill); }
 .notch-limit-sub { margin-top: 8px; display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--notch-faint); white-space: nowrap; overflow: hidden; }
 .notch-limit-account { overflow: hidden; text-overflow: ellipsis; }
+/* A cached reading is dimmed, as stale rows are on the Edge Dock and Home. */
+.notch-limit-stale { flex: none; color: var(--notch-dim); }
+.notch-limit[data-tone="stale"] .notch-limit-value { opacity: .55; }
 .notch-limit-active { flex: none; color: var(--notch-dim); }
 .notch-limit-updated { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 :is(.notch-limit-head, .notch-limit-sub) .notch-chip { flex: none; }

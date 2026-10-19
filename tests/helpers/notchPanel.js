@@ -89,6 +89,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
     TokenMonitorClientCatalog: require('../../src/shared/clientCatalog'),
     TokenMonitorPressActivation: require('../../src/electron/renderer/pressActivation'),
     TokenMonitorHomeOverview: require('../../src/electron/renderer/homeOverview'),
+    TokenMonitorLimitUsageItems: require('../../src/shared/limits/usageItems'),
     TokenMonitorLimitProviderPresentation: require('../../src/electron/renderer/limits/providerPresentation'),
     TokenMonitorTokenNumberAnimation: {
       duration: 1000, normalize: value => value === 'count' ? 'count' : 'roll',
