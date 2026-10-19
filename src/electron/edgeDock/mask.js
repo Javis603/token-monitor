@@ -98,7 +98,10 @@ function rasterizeMask(polygons, width, height, scale = 1) {
       if (count !== 2) { oneSpan = false; break; }
       const start = Math.max(0, crossings[0]);
       const end = Math.min(pixelWidth, crossings[1]);
-      if (end <= start) { oneSpan = false; break; }
+      // A NaN crossing must take the reference path: NaN > start is false, so
+      // it would otherwise be stored and turn the row's interior fill into a
+      // full-width opaque span.
+      if (!Number.isFinite(start) || !Number.isFinite(end) || !(end > start)) { oneSpan = false; break; }
       starts[sample] = start;
       ends[sample] = end;
     }
@@ -116,17 +119,13 @@ function rasterizeMask(polygons, width, height, scale = 1) {
             count += 1;
           }
         }
-        for (let index = 1; index < count; index += 1) {
-          const value = crossings[index];
-          let position = index - 1;
-          while (position >= 0 && crossings[position] > value) {
-            crossings[position + 1] = crossings[position];
-            position -= 1;
-          }
-          crossings[position + 1] = value;
-        }
-        for (let index = 0; index + 1 < count; index += 2) {
-          addSpan(Math.max(0, crossings[index]), Math.min(pixelWidth, crossings[index + 1]), pixelWidth);
+        // Array#sort matches the reference for non-finite crossings; the
+        // allocation-free insertion sort above does not order NaN the same way.
+        const sorted = [];
+        for (let index = 0; index < count; index += 1) sorted.push(crossings[index]);
+        sorted.sort((a, b) => a - b);
+        for (let index = 0; index + 1 < sorted.length; index += 2) {
+          addSpan(Math.max(0, sorted[index]), Math.min(pixelWidth, sorted[index + 1]), pixelWidth);
         }
       }
     } else {

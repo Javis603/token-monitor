@@ -90,6 +90,11 @@ test('mask matches the reference on degenerate and random polygons', () => {
   assertSame([], 40, 30, 2);
   assertSame([[[5, 5]]], 40, 30, 2);
   assertSame([[[5, 5], [5, 5], [5, 5]]], 40, 30, 2);
+  // Non-finite crossings must take the reference path instead of turning a
+  // row's interior into an opaque span.
+  assertSame([[[0, 0], [NaN, 10], [10, 10], [10, 0]]], 8, 8, 1);
+  assertSame([[[0, 0], [Infinity, 10], [10, 10], [10, 0]]], 8, 8, 1);
+  assertSame([[[0, 0], [8, 0], [8, 8], [0, 8]], [[2, 2], [NaN, 2], [2, 6], [2, 6]]], 8, 8, 1);
   // Deterministic pseudo-random polygons, including self-intersections and
   // multi-span rows, which take the reference fallback per row.
   let seed = 0x2f6e2b1;
