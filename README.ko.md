@@ -30,7 +30,7 @@
 
 ## Token Monitor란?
 
-Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 46개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 위젯입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다.
+Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 48개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 위젯입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다.
 
 ## 지원 도구
 
@@ -75,6 +75,8 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/devin.png" width="28" alt="Devin" /> | Devin CLI / Devin Desktop | `~/.local/share/devin/cli/sessions.db`, `<platform-app-data>/Devin/User/acp-events/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/fx.png" width="28" alt="fx" /> | fx | `~/.fx/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/minimax.png" width="28" alt="MiniMax" /> | MiniMax / MiniMax Code | `~/.minimax/v2/sessions/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/deeptutor.svg" width="28" alt="DeepTutor" /> | DeepTutor (reported) | `TOKEN_MONITOR_DEEPTUTOR_DB_PATH` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/deeptutor-estimated.svg" width="28" alt="DeepTutor estimates" /> | DeepTutor (estimated) | `TOKEN_MONITOR_DEEPTUTOR_DB_PATH` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console Cookie (청구 잔액 및 토큰 사용량 기반 예상 지출) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API 키 (사용량/키 한도, credits 접근 승인 시 잔액 표시; 공식 문서는 Management 키 지정) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key 또는 Volcengine AK/SK (Volcengine API로 Ark Coding Plan / Agent Plan 할당량 조회) | — | ✅ | — |
@@ -97,6 +99,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 - Unsloth Studio는 `studio.db`에서 Studio 채팅과 로컬 API의 추론 사용량을 추적합니다. 로컬 추론의 API 비용은 0이며, 식별 가능한 종량제 제공업체에는 Tokscale의 추정 가격을 사용합니다. 학습 토큰은 포함하지 않습니다. [Unsloth 데이터 소스 설명](docs/providers/unsloth.md)을 참고하세요.
 - Devin은 로컬 `sessions.db`에서 Devin CLI 세션을, `acp-events` ACP 로그에서 Devin Desktop 에이전트 세션을 추적합니다. 같은 세션이 양쪽에 있으면 CLI 데이터베이스가 우선입니다. Desktop 적용 범위는 연결된 ACP 에이전트에 따라 달라집니다. 로컬에 `usage_update` 이벤트를 기록하는 에이전트만 집계되며, Devin Desktop의 기본 `devin-cloud` 에이전트는 서버 측에서 계측되므로 기본 Desktop 구성에서는 Desktop 토큰이 보고되지 않습니다. 세션 제목과 프로젝트 귀속은 CLI 데이터베이스에서 가져옵니다. [Devin 데이터 소스 설명](docs/providers/devin.md)을 참고하세요.
 - Notion AI는 내부 API를 사용합니다. `token_v2` Cookie를 수동으로 붙여넣고 Business/Enterprise 워크스페이스 ID를 명시해야 합니다. 테스트 데이터로만 검증했으며 실제 응답 샘플은 없고 실제 인증 검증은 승인을 기다리고 있습니다. Cookie를 자동으로 가져오지 않으며 공개 API 호환성을 보장하지 않습니다. [Notion 데이터 소스 설명](docs/providers/notion.md)을 참고하세요.
+- [DeepTutor 설정 및 정확도](docs/providers/deeptutor.md): 같은 도구의 보고된 값과 추정값을 별도로 선택합니다. 기본적으로 꺼져 있으며 호환되는 파서 릴리스가 필요합니다.
 - MiniMax Code는 CLI가 기록하는 로컬 세션 기록(`~/.minimax` 또는 `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR`, `~/.mavis`와 `~/.minimax-<profile>` / `~/.mavis-<profile>` 포함)과 `tokscale headless mcode`로 캡처한 실행을 읽습니다. 양쪽에 모두 있는 같은 턴은 한 번만 집계됩니다.
 
 - Command Code transcript에는 실제 토큰 수나 메시지별 모델 정보가 포함되지 않습니다. 토큰 사용량은 transcript 텍스트에서 추정되며, 모델 귀속과 추정 비용에는 각 요청에서 과거에 사용한 모델이 아니라 현재 설정된 모델이 반영될 수 있습니다.
@@ -141,7 +144,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 
 ### 사용량 추적
 
-- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 37개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
+- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 39개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
 - **실시간 토큰 속도** — 생성 속도를 `tok/s`로, 총 소모를 `tok/min`으로 보여주는 선택형 실시간 표시
 - **세션별 상세** — 세션을 열면 프롬프트별 토큰, 응답별 토큰 분할·사용 도구까지 확장 (로컬 transcript/DB를 필요할 때만 읽으며 동기화하지 않음)
 - **캐시 히트 통계** — 도구·모델 클릭 시 입력 토큰(캐시 hit/miss), 출력 토큰, 히트율 상세

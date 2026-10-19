@@ -30,7 +30,7 @@
 
 ## O que é o Token Monitor?
 
-Um widget de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 46+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto.
+Um widget de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 48+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto.
 
 ## Ferramentas suportadas
 
@@ -75,6 +75,8 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 | <img src=".github/assets/tools-icon/devin.png" width="28" alt="Devin" /> | Devin CLI / Devin Desktop | `~/.local/share/devin/cli/sessions.db`, `<platform-app-data>/Devin/User/acp-events/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/fx.png" width="28" alt="fx" /> | fx | `~/.fx/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/minimax.png" width="28" alt="MiniMax" /> | MiniMax / MiniMax Code | `~/.minimax/v2/sessions/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/deeptutor.svg" width="28" alt="DeepTutor" /> | DeepTutor (reported) | `TOKEN_MONITOR_DEEPTUTOR_DB_PATH` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/deeptutor-estimated.svg" width="28" alt="DeepTutor estimates" /> | DeepTutor (estimated) | `TOKEN_MONITOR_DEEPTUTOR_DB_PATH` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | Cookie do TypeSafe Console (saldo de cobrança e gasto estimado em tokens via dados de uso) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | Chave de API do OpenRouter (uso/limite da chave; saldo quando o acesso a créditos é autorizado, documentado para chaves Management) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Chave de API do Ark ou AK/SK da Volcengine (cota do Ark Coding Plan e do Agent Plan via API da Volcengine) | — | ✅ | — |
@@ -97,6 +99,7 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 - O Unsloth Studio acompanha o uso de inferência a partir do `studio.db`: os chats do Studio e a sua API local. A inferência local tem custo de API zero; provedores medidos reconhecidos usam as estimativas de preço do Tokscale. Tokens de treinamento não são incluídos. Veja as [notas da origem do Unsloth](docs/providers/unsloth.md).
 - O Devin acompanha as sessões do Devin CLI no `sessions.db` local e as sessões de agente do Devin Desktop nos logs ACP `acp-events`; quando ambos cobrem a mesma sessão, o banco do CLI é a fonte autoritativa. A cobertura do Desktop depende do agente ACP conectado: apenas agentes que gravam eventos `usage_update` localmente são contados, e o agente `devin-cloud` padrão do Devin Desktop mede o uso no servidor, então uma configuração padrão do Desktop não informa tokens do Desktop. Os títulos das sessões e a atribuição de projetos vêm do banco do CLI. Veja as [notas da origem do Devin](docs/providers/devin.md).
 - O Notion AI usa APIs internas, com um cookie `token_v2` colado manualmente e um ID explícito de workspace Business/Enterprise. A validação usa apenas dados de teste; não há uma amostra real de resposta e a autenticação real aguarda aprovação. Não há obtenção automática de cookies nem garantia de API pública. Veja as [notas da origem do Notion](docs/providers/notion.md).
+- [Configuração e precisão do DeepTutor](docs/providers/deeptutor.md): duas categorias opcionais da mesma ferramenta, valores reportados e estimados. Requer uma versão compatível do parser.
 - O MiniMax Code lê o histórico local de sessões gravado pelo CLI em `~/.minimax` ou `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR` (também em `~/.mavis` e `~/.minimax-<profile>` / `~/.mavis-<profile>`), além das execuções capturadas com `tokscale headless mcode`; um turno encontrado nas duas fontes é contado uma única vez.
 
 - As transcrições do Command Code não contêm contagens reais de tokens nem metadados de modelo por mensagem. O uso de tokens é estimado a partir do texto das transcrições, enquanto a atribuição de modelo e o custo derivado podem refletir o modelo configurado no momento, e não o modelo usado historicamente em cada requisição.
@@ -136,7 +139,7 @@ A maioria dos monitores de uso só é útil na máquina em que roda. O Token Mon
 
 ### Acompanhamento de uso
 
-- **Rastreamento de tokens ao vivo** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode e 37+ ferramentas de IA, com a interface atualizando poucos segundos após cada turno (lista completa na tabela acima)
+- **Rastreamento de tokens ao vivo** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode e 39+ ferramentas de IA, com a interface atualizando poucos segundos após cada turno (lista completa na tabela acima)
 - **Taxa de tokens ao vivo** — uma leitura opcional da velocidade de geração em `tok/s` ou do consumo total em `tok/min`
 - **Detalhes por sessão** — abra uma sessão para ver os tokens por prompt, expansível até a divisão exata de tokens de cada resposta e as ferramentas usadas (lido sob demanda de transcrições ou bancos locais, nunca sincronizado)
 - **Estatísticas de acerto de cache** — clique em qualquer ferramenta ou modelo para expandir um detalhamento completo dos tokens de entrada (acerto no cache vs. fora do cache), tokens de saída e as porcentagens de acerto

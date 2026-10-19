@@ -309,6 +309,7 @@ test('countOverall tallies by headline state', () => {
 // but this test stops a new client's root from being silently dropped on ingest.
 test('every source-root id the collector emits is in the allowlist', () => {
   const roots = clientSourceRoots(KNOWN_CLIENTS, {
+    env: { ...process.env, TOKEN_MONITOR_DEEPTUTOR_DB_PATH: path.resolve('tmp', 'tutor', 'usage.sqlite3') },
     customScanPaths: { codex: [path.resolve('tmp', 'codex-extra')] }
   });
   const emitted = new Set();
