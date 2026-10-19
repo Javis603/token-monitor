@@ -17,6 +17,27 @@ let edges = new Float64Array(0);
 const starts = new Float64Array(SUBSAMPLES);
 const ends = new Float64Array(SUBSAMPLES);
 
+// One mask per animation frame otherwise leaves ~175MB of short-lived buffers
+// per open at 60Hz. The returned buffer is owned by this module and valid until
+// the next call; every caller consumes it synchronously (native image creation
+// copies it, the Windows region reader finishes before returning). Oversized
+// masks stay unpooled so a pathological input cannot pin memory.
+const POOL_LIMIT = 16 * 1024 * 1024;
+let pooledBuffer = null;
+
+function maskBuffer(byteLength) {
+  if (pooledBuffer && pooledBuffer.length >= byteLength) {
+    // A view keeps the returned length exact for callers that compare or
+    // encode the whole buffer, while the backing store stays pooled.
+    const buffer = pooledBuffer.subarray(0, byteLength);
+    buffer.fill(0);
+    return buffer;
+  }
+  const buffer = Buffer.alloc(byteLength);
+  if (byteLength <= POOL_LIMIT) pooledBuffer = buffer;
+  return buffer;
+}
+
 function ensureScratch(pixelWidth, edgeCount) {
   if (coverage.length < pixelWidth) coverage = new Float32Array(pixelWidth);
   if (crossings.length < edgeCount) crossings = new Float64Array(edgeCount);
@@ -32,7 +53,7 @@ function ensureScratch(pixelWidth, edgeCount) {
 function rasterizeMask(polygons, width, height, scale = 1) {
   const pixelWidth = Math.max(1, Math.round(width * scale));
   const pixelHeight = Math.max(1, Math.round(height * scale));
-  const buffer = Buffer.alloc(pixelWidth * pixelHeight * 4);
+  const buffer = maskBuffer(pixelWidth * pixelHeight * 4);
   let edgeCount = 0;
   for (const polygon of polygons) edgeCount += polygon.length;
   ensureScratch(pixelWidth, edgeCount);
