@@ -107,12 +107,18 @@ function seedSplitClients(clientsCsv, options = {}) {
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean);
   const present = new Set(tracked);
+  // A disabled Claude Desktop split must not seed `claude-desktop`, and must
+  // not mark it evaluated either: enabling the setting later still has to run
+  // the one-shot seed for users who already tracked `claude`.
+  const splitEnabled = (split) => (
+    split !== 'claude-desktop' || options.claudeDesktopSplitEnabled !== false
+  );
   const seeded = [];
   const clients = [];
   for (const client of tracked) {
     clients.push(client);
     for (const { merged, split } of CLIENT_IDENTITY_SPLITS) {
-      if (client !== merged || applied.has(split)) continue;
+      if (client !== merged || applied.has(split) || !splitEnabled(split)) continue;
       if (present.has(split)) continue;
       // Directly after its parent, so the CSV reads in the order the split
       // actually happened instead of growing an unrelated tail.
@@ -120,13 +126,14 @@ function seedSplitClients(clientsCsv, options = {}) {
       seeded.push(split);
     }
   }
-  // Every split is decided by this pass, whether or not its parent is tracked.
-  // An install that happens not to track the parent still has to record that
-  // the migration ran, or the decision waits for whatever the user tracks at
-  // some later launch and fires on a deliberate post-split choice instead.
+  // Every enabled split is decided by this pass, whether or not its parent is
+  // tracked. An install that happens not to track the parent still has to
+  // record that the migration ran, or the decision waits for whatever the user
+  // tracks at some later launch and fires on a deliberate post-split choice
+  // instead.
   const evaluated = CLIENT_IDENTITY_SPLITS
     .map(({ split }) => split)
-    .filter((split) => !applied.has(split));
+    .filter((split) => !applied.has(split) && splitEnabled(split));
   return { clients: clients.join(','), evaluated, seeded };
 }
 

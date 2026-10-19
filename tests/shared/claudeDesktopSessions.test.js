@@ -251,3 +251,30 @@ test('the claude/claude-desktop identity split has its own generation', () => {
   assert.deepEqual(seeded.seeded, ['claude-desktop']);
   assert.equal(seedSplitClients('claude,codex', { applied: ['omp', 'claude-desktop'] }).clients, 'claude,codex', 'seeded once');
 });
+
+test('disabling the Desktop split leaves tokscale rows under claude', () => {
+  const index = { classify: (id) => (id === 'd1' ? 'desktop' : null) };
+  const rows = () => ({ entries: [{ client: 'claude', sessionId: 'd1' }, { client: 'claude', sessionId: 'c1' }] });
+  const both = rows();
+  applyClaudeDesktopSplit(both, 'claude,claude-desktop', {
+    claudeDesktopSessionIndex: index,
+    claudeDesktopSplitEnabled: false
+  });
+  assert.deepEqual(both.entries.map(({ client }) => client), ['claude', 'claude']);
+  const desktopOnly = rows();
+  applyClaudeDesktopSplit(desktopOnly, 'claude-desktop', {
+    claudeDesktopSessionIndex: index,
+    claudeDesktopSplitEnabled: false
+  });
+  assert.deepEqual(desktopOnly.entries, [], 'desktop-only tracking with the split off keeps no Claude Code rows');
+});
+
+test('seedSplitClients skips claude-desktop while the split is disabled', () => {
+  const off = seedSplitClients('claude,codex', { applied: ['omp'], claudeDesktopSplitEnabled: false });
+  assert.equal(off.clients, 'claude,codex');
+  assert.deepEqual(off.seeded, []);
+  assert.ok(!off.evaluated.includes('claude-desktop'));
+  const on = seedSplitClients('claude,codex', { applied: ['omp'], claudeDesktopSplitEnabled: true });
+  assert.equal(on.clients, 'claude,claude-desktop,codex');
+  assert.deepEqual(on.seeded, ['claude-desktop']);
+});

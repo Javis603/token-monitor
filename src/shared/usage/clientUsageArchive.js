@@ -357,9 +357,14 @@ function shouldApplyPeriod(periodName, entry, now) {
 // a `pi` snapshot written after it: a user who untracks Pi today stores a
 // genuinely Pi-only entry, and treating that as merged would subtract the live
 // split client from usage which never contained it.
-function mergedSnapshotFor(client, entry) {
+function mergedSnapshotFor(client, entry, options = {}) {
   for (const splitDef of CLIENT_IDENTITY_SPLITS) {
     if (client !== splitDef.merged) continue;
+    // A disabled Desktop split treats every `claude` snapshot as merged again,
+    // so live Desktop usage under `claude` is netted out of the archive.
+    if (splitDef.split === 'claude-desktop' && options.claudeDesktopSplitEnabled === false) {
+      return splitDef;
+    }
     if (!isPreSplitEntry(entry, splitDef)) continue;
     return splitDef;
   }

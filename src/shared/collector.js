@@ -452,6 +452,15 @@ function claudeDesktopSessionIndexFor(options = {}) {
 function applyClaudeDesktopSplit(json, clientsCsv, options = {}) {
   const requested = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
   if (!requested.has('claude-desktop')) return { moved: 0, dropped: 0 };
+  // Off: behave like upstream — tokscale's `claude` rows stay under `claude`.
+  // When only the derived row is tracked there is no Desktop identity to keep,
+  // so the Claude Code rows are dropped rather than attributed to an unexpected
+  // client. The empty `claude-desktop` partition still gets cleared by the
+  // targeted-watch expansion below.
+  if (options.claudeDesktopSplitEnabled === false) {
+    if (requested.has('claude')) return { moved: 0, dropped: 0 };
+    return splitClaudeDesktopRows(json, { classify: () => null }, { keepClaude: false });
+  }
   return splitClaudeDesktopRows(json, claudeDesktopSessionIndexFor(options), {
     keepClaude: requested.has('claude')
   });
@@ -895,6 +904,7 @@ async function collectHistoryOnce(options) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
         ...(options.dailyHistoryArchiveOptions || {}),
+        claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled !== false,
         liveDays: options.dailyHistoryLiveDays,
         pricingRevision: options.pricingRevision,
         customPricingActive: options.customPricingActive,
@@ -1240,6 +1250,7 @@ async function collectUsageOnce(options) {
     try {
       const retainedLive = retainLiveDailyHistory(today, {
         ...(options.dailyHistoryArchiveOptions || {}),
+        claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled !== false,
         liveDays: dailyHistoryLiveDays,
         todayKey: localTodayKey(collectedAt),
         pricingRevision: options.pricingRevision,
@@ -1413,6 +1424,7 @@ async function collectUsageOnce(options) {
       dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,
       dailyHistoryArchiveOptions: options.dailyHistoryArchiveOptions,
       dailyHistoryLiveDays,
+      claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled,
       pricingRevision: options.pricingRevision,
       customPricingActive: options.customPricingActive,
       onHistoryStatus: options.onHistoryStatus,
@@ -3191,6 +3203,7 @@ function startCollector(options) {
             : visibleSummary.today;
           const retainedLive = retainLiveDailyHistory(retainedToday, {
             ...(options.dailyHistoryArchiveOptions || {}),
+            claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled !== false,
             liveDays: liveDailyHistoryDays,
             todayKey: visibleDateKey,
             pricingRevision: tickPricingRevision,

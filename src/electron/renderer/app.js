@@ -11945,6 +11945,11 @@ const LIMIT_PROVIDER_SETTINGS = {
     titleKey: 'settings.limits.claudeDesktopLocalOnly',
     descKey: 'settings.limits.claudeDesktopLocalOnlyDesc',
     defaultValue: false
+  }, {
+    key: 'claudeDesktopSplitEnabled',
+    titleKey: 'settings.limits.claudeDesktopSplit',
+    descKey: 'settings.limits.claudeDesktopSplitDesc',
+    defaultValue: true
   }],
   codex: [{
     key: 'codexResetForecastEnabled',
@@ -12034,8 +12039,12 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
     input.type = 'checkbox';
     const available = !setting.requiresConfiguredKey || Boolean(state.settings?.[setting.requiresConfiguredKey]);
     const storedValue = state.settings?.[setting.key];
-    const defaultValue = setting.defaultValue !== false;
-    input.checked = available && (storedValue === undefined ? defaultValue : storedValue !== false);
+    const defaultsOn = setting.defaultValue !== false;
+    // default-off toggles (Claude Desktop local-only) must require an explicit
+    // true; default-on toggles treat anything other than false as on.
+    input.checked = available && (storedValue === undefined
+      ? defaultsOn
+      : (defaultsOn ? storedValue !== false : storedValue === true));
     input.disabled = !available;
     item.classList.toggle('is-disabled', !available);
     if (!existingInput) {

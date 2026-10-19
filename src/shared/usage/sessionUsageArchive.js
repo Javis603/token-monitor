@@ -438,13 +438,20 @@ function applySessionUsageArchive(summary, archive, options = {}) {
   const retainedRows = new Map();
   for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
     for (const periodName of PERIODS) {
-      const session = entry.periods?.[periodName];
+      let session = entry.periods?.[periodName];
       if (!session || !shouldApplyPeriod(periodName, entry, now)) continue;
       // Same rule as the client archive: never create a period the summary does
       // not have. A progressive preview is marked partial by the periods it
       // omits, and a partial that looks complete loses the attribution fields
       // deviceState would otherwise carry forward.
       if (!hasSummaryPeriod(next, periodName)) continue;
+      // When the Claude Desktop split is off, archived Desktop sessions fold
+      // onto `claude` so they net against the live scan that now reports them
+      // under that id, instead of landing beside it as a second row.
+      if (options.claudeDesktopSplitEnabled === false
+          && (session.client || entry.client) === 'claude-desktop') {
+        session = { ...session, client: 'claude' };
+      }
       const period = targetFor(periodName);
       const key = sessionKey(session.client || entry.client, session.sessionId || entry.sessionId) || archiveKey;
       if (period.sessions[key]) continue;

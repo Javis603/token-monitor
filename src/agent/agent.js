@@ -47,7 +47,12 @@ const watchDebounceMs = Number(args.watchDebounceMs || process.env.TOKEN_MONITOR
 // a CSV written before the split listed the merged id and counted both products.
 // The marker therefore lives beside the collector anchor, and it is what stops
 // the seed from re-adding a client the operator deliberately removed afterwards.
+const claudeDesktopSplitEnabled = parseBoolean(
+  args.claudeDesktopSplit ?? args.claudeDesktopSplitEnabled ?? process.env.TOKEN_MONITOR_CLAUDE_DESKTOP_SPLIT,
+  true
+);
 const clients = seedAgentClients(clientsCsvForSetting(args.clients ?? process.env.TOKEN_MONITOR_CLIENTS), {
+  claudeDesktopSplitEnabled,
   persist: !(args['dry-run'] || args.dryRun)
 });
 const allTimeSince = String(args.since || args.allTimeSince || process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01');
@@ -91,6 +96,7 @@ const usageOptions = {
   agentVersion: appVersion(),
   agentRuntime: 'headless-agent',
   projectsEnabled,
+  claudeDesktopSplitEnabled,
   historyEnabled,
   historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
   dailyHistoryArchiveEnabled: sessionUsageArchiveEnabled,
@@ -138,6 +144,9 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
     }
     visibleSummary = applySessionUsageArchive(summary, sessionUsageArchive, {
       now: archiveDate,
+      // typeof is safe when this function is eval'd without the module binding
+      // (sessionUsageArchiveLive.test.js); the agent module always has it.
+      claudeDesktopSplitEnabled: typeof claudeDesktopSplitEnabled === 'undefined' ? true : claudeDesktopSplitEnabled,
       canonical: !dryRun
     });
   }
