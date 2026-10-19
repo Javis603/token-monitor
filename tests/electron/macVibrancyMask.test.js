@@ -42,6 +42,7 @@ test('raw masks must carry a full bitmap and a finite size', () => {
   assert.equal(applyVibrancyMask(win, { buffer: Buffer.alloc(16), pixelWidth: 2.5, pixelHeight: 2 }, 2, 2, { api }), false);
   assert.equal(applyVibrancyMask(win, { buffer: Buffer.alloc(16), pixelWidth: 2, pixelHeight: 2 }, 0, 2, { api }), false);
   assert.equal(applyVibrancyMask(win, Buffer.alloc(0), 2, 2, { api }), false);
+  assert.equal(applyVibrancyMask(win, { buffer: new Uint8Array(16), pixelWidth: 2, pixelHeight: 2 }, 2, 2, { api }), false);
   assert.equal(applyVibrancyMask(win, { buffer: Buffer.alloc(16), pixelWidth: 2, pixelHeight: 2 }, 2, 2, { api }), true);
   assert.equal(calls.length, 1);
 });

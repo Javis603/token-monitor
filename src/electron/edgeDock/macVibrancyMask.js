@@ -129,9 +129,10 @@ function applyVibrancyMask(win, mask, width, height, options = {}) {
     if (mask.length === 0) return false;
   } else {
     // The bridge reads exactly pixelWidth * pixelHeight * 4 bytes from the
-    // caller's buffer; a mismatch would read past it.
+    // caller's buffer; a mismatch would read past it. length is bytes only for
+    // a Buffer, so require one.
     const { buffer, pixelWidth, pixelHeight } = mask;
-    if (!buffer || !Number.isInteger(pixelWidth) || !Number.isInteger(pixelHeight)
+    if (!Buffer.isBuffer(buffer) || !Number.isInteger(pixelWidth) || !Number.isInteger(pixelHeight)
       || pixelWidth <= 0 || pixelHeight <= 0 || buffer.length < pixelWidth * pixelHeight * 4) return false;
   }
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return false;
