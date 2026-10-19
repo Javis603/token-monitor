@@ -597,6 +597,9 @@ test('a cached offline reading says Stale with the Limits view wording and dims 
   assert.equal(codexA.dataset.tone, undefined);
   assert.equal(codexA.querySelector('.notch-limit-stale'), null);
   assert.equal(codexB.querySelector('.notch-limit-stale').textContent, 'Stale');
+  assert.equal(codexB.querySelector('.notch-limit-stale').title, 'Stale · 55m ago');
+  f.state.locale = 'zh-TW'; f.state.appearanceKey = 'zh'; f.panel.render({ ...payload(), cells });
+  assert.equal(f.all('notch-limit')[2].querySelector('.notch-limit-stale').textContent, '資料過期');
 });
 
 test('money quotas and unlimited readings keep their values without fabricated percentages', t => {

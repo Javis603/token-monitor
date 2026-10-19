@@ -603,7 +603,7 @@
       const freshness = record ? limitPresentation.limitProviderFreshness(record, { nowMs }) : null;
       if (freshness?.tone === 'stale') column.dataset.tone = 'stale';
       if (records.length > 1) {
-        if (freshness?.tone === 'stale') sub.append(text('notch-limit-stale', 'Stale', freshness.text));
+        if (freshness?.tone === 'stale') sub.append(text('notch-limit-stale', t('settings.limits.status.stale'), freshness.text));
       } else if (freshness) {
         sub.append(text('notch-limit-updated', freshness.text));
       }
