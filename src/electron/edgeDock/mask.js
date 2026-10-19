@@ -46,7 +46,7 @@ function ensureScratch(pixelWidth, edgeCount) {
 
 // Same scanline math, same order, same rounding as the previous
 // implementation: the edge list is built once per call instead of once per row
-// and per sample, the crossing sort is an allocation-free insertion sort, and
+// and per sample, the two crossings are ordered with min/max, and
 // rows whose eight samples all describe one span fill their fully covered
 // interior directly with 1.0 (the value the per-sample loop reaches by adding
 // 1/8 eight times). Rows with no span or several spans take the reference path
@@ -86,21 +86,11 @@ function rasterizeMask(polygons, width, height, scale = 1) {
           count += 1;
         }
       }
-      for (let index = 1; index < count; index += 1) {
-        const value = crossings[index];
-        let position = index - 1;
-        while (position >= 0 && crossings[position] > value) {
-          crossings[position + 1] = crossings[position];
-          position -= 1;
-        }
-        crossings[position + 1] = value;
-      }
       if (count !== 2) { oneSpan = false; break; }
-      const start = Math.max(0, crossings[0]);
-      const end = Math.min(pixelWidth, crossings[1]);
-      // A NaN crossing must take the reference path: NaN > start is false, so
-      // it would otherwise be stored and turn the row's interior fill into a
-      // full-width opaque span.
+      const start = Math.max(0, Math.min(crossings[0], crossings[1]));
+      const end = Math.min(pixelWidth, Math.max(crossings[0], crossings[1]));
+      // Non-finite crossings take the reference path; NaN would otherwise
+      // leave the row's bounds undefined and fill the whole interior.
       if (!Number.isFinite(start) || !Number.isFinite(end) || !(end > start)) { oneSpan = false; break; }
       starts[sample] = start;
       ends[sample] = end;
