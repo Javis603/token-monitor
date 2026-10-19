@@ -7,10 +7,10 @@
 
 const SUBSAMPLES = 8;
 
-// Scratch buffers reused across calls. The main process is single-threaded and
-// rasterizeMask never re-enters, so one set serves every caller. Only the
-// returned buffer is per call: callers hand it to native code and must not see
-// another surface's bytes.
+// Scratch arrays are reused across calls. The main process is single-threaded
+// and rasterizeMask never re-enters, so one set serves every caller. The
+// returned buffer is a view into one pooled backing store: callers consume it
+// synchronously and it stays valid only until the next call.
 let coverage = new Float32Array(0);
 let crossings = new Float64Array(0);
 let edges = new Float64Array(0);
@@ -44,12 +44,13 @@ function ensureScratch(pixelWidth, edgeCount) {
   if (edges.length < edgeCount * 4) edges = new Float64Array(edgeCount * 4);
 }
 
-// Same scanline math, same order, same rounding as the reference below: the
-// edge list is built once per call instead of once per row and per sample, the
-// crossing sort is an allocation-free insertion sort, and rows whose eight
-// samples all describe one span fill their fully covered interior directly
-// with 1.0 (the value the per-sample loop reaches by adding 1/8 eight times).
-// Rows with no span or several spans take the reference path unchanged.
+// Same scanline math, same order, same rounding as the previous
+// implementation: the edge list is built once per call instead of once per row
+// and per sample, the crossing sort is an allocation-free insertion sort, and
+// rows whose eight samples all describe one span fill their fully covered
+// interior directly with 1.0 (the value the per-sample loop reaches by adding
+// 1/8 eight times). Rows with no span or several spans take the reference path
+// unchanged.
 function rasterizeMask(polygons, width, height, scale = 1) {
   const pixelWidth = Math.max(1, Math.round(width * scale));
   const pixelHeight = Math.max(1, Math.round(height * scale));

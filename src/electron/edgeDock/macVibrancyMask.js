@@ -55,6 +55,12 @@ function createApi(koffi) {
     if (!data) return 0;
     const provider = api.provider(data);
     const space = api.colorSpace();
+    if (!provider || !space) {
+      if (space) api.release(space);
+      if (provider) api.release(provider);
+      api.release(data);
+      return 0;
+    }
     // kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little: the buffer
     // is BGRA, and its RGB stays 0, so premultiplied black is exact.
     const image = api.imageCreate(pixelWidth, pixelHeight, 8, 32, pixelWidth * 4, space, 8194, provider, 0, false, 0);
@@ -119,7 +125,16 @@ function loadApi() {
 function applyVibrancyMask(win, mask, width, height, options = {}) {
   if ((options.platform || process.platform) !== 'darwin') return false;
   if (!win || win.isDestroyed?.() || !mask) return false;
-  if (!mask.buffer && !mask.length) return false;
+  if (Buffer.isBuffer(mask)) {
+    if (mask.length === 0) return false;
+  } else {
+    // The bridge reads exactly pixelWidth * pixelHeight * 4 bytes from the
+    // caller's buffer; a mismatch would read past it.
+    const { buffer, pixelWidth, pixelHeight } = mask;
+    if (!buffer || !Number.isInteger(pixelWidth) || !Number.isInteger(pixelHeight)
+      || pixelWidth <= 0 || pixelHeight <= 0 || buffer.length < pixelWidth * pixelHeight * 4) return false;
+  }
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return false;
   const bridge = options.api || loadApi();
   if (!bridge) return false;
   try {

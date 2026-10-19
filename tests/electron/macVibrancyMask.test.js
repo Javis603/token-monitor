@@ -33,6 +33,20 @@ test('a window without hasShadow keeps invalidating its shadow', () => {
   assert.equal(calls[0][4], true);
 });
 
+test('raw masks must carry a full bitmap and a finite size', () => {
+  const calls = [];
+  const api = { apply: (...args) => { calls.push(args); return true; } };
+  const win = { isDestroyed: () => false, getNativeWindowHandle: windowHandle };
+  // The native bridge reads pixelWidth * pixelHeight * 4 bytes.
+  assert.equal(applyVibrancyMask(win, { buffer: Buffer.alloc(4), pixelWidth: 2, pixelHeight: 2 }, 2, 2, { api }), false);
+  assert.equal(applyVibrancyMask(win, { buffer: Buffer.alloc(16), pixelWidth: 0, pixelHeight: 2 }, 2, 2, { api }), false);
+  assert.equal(applyVibrancyMask(win, { buffer: Buffer.alloc(16), pixelWidth: 2.5, pixelHeight: 2 }, 2, 2, { api }), false);
+  assert.equal(applyVibrancyMask(win, { buffer: Buffer.alloc(16), pixelWidth: 2, pixelHeight: 2 }, 0, 2, { api }), false);
+  assert.equal(applyVibrancyMask(win, Buffer.alloc(0), 2, 2, { api }), false);
+  assert.equal(applyVibrancyMask(win, { buffer: Buffer.alloc(16), pixelWidth: 2, pixelHeight: 2 }, 2, 2, { api }), true);
+  assert.equal(calls.length, 1);
+});
+
 test('an encoded mask still reaches the legacy bridge and other platforms stop early', () => {
   const calls = [];
   const api = { apply: (...args) => { calls.push(args); return true; } };
