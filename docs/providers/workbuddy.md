@@ -39,6 +39,10 @@ The shared metadata scanner still skips records above 64 KiB, so oversized user 
 
 `parsePersonalUsage()` fails closed when any active package carries unusable quota data: a partial aggregate would look plausible while silently omitting a package. An account with no active package stays a configured row with zero resources instead of becoming an error.
 
+### Credits spend history
+
+The billing API reports one current-cycle used total per account and no period rollups — the official client itself has no daily or monthly usage endpoint — so the Spend row's Today/Week/Month/All-time figures are tracked locally, the way DeepSeek, Z.ai and MiMo derive theirs. `providers/workbuddy/usageHistory.js` keeps one ledger per account key in `workbuddy-usage-v1.json` under the shared data directory: each successful observation records the positive delta of the aggregate used Credits into the local day's bucket, and a drop — a cycle reset, an expiring package, a changed package set — only moves the baseline without recording negative spend. Daily buckets are pruned after 40 days while `allTimeSpend` keeps accumulating; `trackingSince` and `monthSinceTracking` mark the local coverage so a row can state that its month figure is partial. The store path is overridable through `deps.workbuddyUsageStorePath`, and the save-time credential probe (`deps.probe`) never writes history. Because the figures are observations, spend that crosses a cycle reset while the collector is not running is not observable; the row states tracked spend, not a provider-certified total.
+
 ### Source selection
 
 The widget keeps app-owned discovery and adds explicit managed accounts. `workbuddyDesktopSessionOnly` continues to suppress legacy settings/env tokens: a stale `.env` must not silently outrank the discovered session. Managed accounts enter a separate runtime context, with secrets resolved in main through the existing `CredentialStore`. The headless agent and CLI retain their existing `TOKEN_MONITOR_WORKBUDDY_*` path and never read widget credentials.
