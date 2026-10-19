@@ -1031,6 +1031,61 @@ test('hover growth scales both ears with the shell and keeps the camera gap fixe
   }
 });
 
+test('wide hover summaries stay outside the camera through overshoot, reversal and opening at every zoom', (t) => {
+  for (const zoom of [0.8, 1, 1.2]) for (const widths of [[160, 160], [17, 240], [240, 42], [0, 160], [160, 0]]) {
+    let down = false;
+    const f = fixture(t, { notchHoverAction: 'peek', notchSize: 'custom', notchCustomScale: zoom },
+      { reducedMotion: false, primaryButtonDown: () => down });
+    f.controller.setData({ cells: [], summary: { items: [{ type: 'text', text: 'Long summary' }] } });
+    const win = f.windows[0];
+    f.ipcMain.emit('topNotch:size', { sender: win.webContents }, { slots: { left: widths[0], right: widths[1] } });
+    const frame = () => win.messages.filter(message => message.channel === 'topNotch:motion').at(-1).payload;
+    const animation = () => win.messages.filter(message => message.channel === 'topNotch:animate').at(-1).payload;
+    const check = () => {
+      const g = last(win).geometry, m = frame();
+      const leftEnd = win.bounds.x + m.summaryEdges.left + widths[0] * m.summaryScale;
+      const rightStart = win.bounds.x + m.summaryEdges.right - widths[1] * m.summaryScale;
+      assert.ok(leftEnd <= g.centerX - g.gapWidth / 2 - 8 + 1e-8, `left clearance at zoom ${zoom}, widths ${widths}`);
+      assert.ok(rightStart >= g.centerX + g.gapWidth / 2 + 8 - 1e-8, `right clearance at zoom ${zoom}, widths ${widths}`);
+    };
+    const tick = elapsed => { f.ipcMain.emit('topNotch:frame', { sender: win.webContents }, { id: animation().id, elapsed }); check(); };
+    tick(animation().duration);
+    f.screen.point = { x: last(win).geometry.centerX, y: 10 }; f.controller.poll(1000);
+    for (let elapsed = 0; elapsed < animation().duration; elapsed += 16) tick(elapsed);
+    tick(animation().duration);
+    assert.ok(frame().summaryScale > 1 && frame().summaryScale < 37 / 32, 'wide summaries still grow within their available clearance');
+    f.screen.point = { x: 20, y: 400 }; f.controller.poll(1100); tick(30);
+    f.screen.point = { x: last(win).geometry.centerX, y: 10 }; f.controller.poll(1200); tick(60);
+    down = true; f.controller.poll(1300);
+    for (let elapsed = 0; elapsed < animation().duration; elapsed += 16) tick(elapsed);
+    tick(animation().duration);
+  }
+});
+
+test('live summary width changes preserve camera clearance while the hover shell resizes', (t) => {
+  const f = fixture(t, { notchHoverAction: 'peek' }, { reducedMotion: false });
+  f.controller.setData({ cells: [], summary: { items: [{ type: 'text', text: 'Live summary' }] } });
+  const win = f.windows[0];
+  const frame = () => win.messages.filter(message => message.channel === 'topNotch:motion').at(-1).payload;
+  const animation = () => win.messages.filter(message => message.channel === 'topNotch:animate').at(-1).payload;
+  const tick = elapsed => f.ipcMain.emit('topNotch:frame', { sender: win.webContents }, { id: animation().id, elapsed });
+  tick(animation().duration);
+  f.screen.point = { x: last(win).geometry.centerX, y: 10 }; f.controller.poll(1000);
+  tick(animation().duration);
+  for (const [left, right, iconInset] of [[160, 17, 12.5], [42, 240, 0], [0, 0, 0], [17, 42, 0]]) {
+    f.ipcMain.emit('topNotch:size', { sender: win.webContents }, { slots: { left, right, iconInset } });
+    for (let elapsed = 0; elapsed <= animation().duration + 16; elapsed += 16) {
+      tick(Math.min(elapsed, animation().duration));
+      const g = last(win).geometry, m = frame();
+      const leftEnd = win.bounds.x + m.summaryEdges.left + m.summaryIconInset - iconInset + left * m.summaryScale;
+      const rightStart = win.bounds.x + m.summaryEdges.right - right * m.summaryScale;
+      if (left) assert.ok(leftEnd <= g.centerX - g.gapWidth / 2 - 8 + 1e-8, 'resizing left content clears the camera');
+      if (right) assert.ok(rightStart >= g.centerX + g.gapWidth / 2 + 8 - 1e-8, 'resizing right content clears the camera');
+      assert.ok(Number.isFinite(m.summaryScale), 'empty slots do not produce invalid transforms');
+    }
+  }
+});
+
 test('hover reversal and clicking through to the panel preserve the in-flight content scale', (t) => {
   let down = false;
   const f = fixture(t, { notchHoverAction: 'peek' }, { reducedMotion: false, primaryButtonDown: () => down });

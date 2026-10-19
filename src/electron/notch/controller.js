@@ -337,6 +337,16 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       summaryHeight: peeked && !expanded ? current.peek.height : current.geometry.height,
       summaryScale: peeked && !expanded ? current.peek.height / current.closed.height : 1, summaryIconInset: current.summaryIconInset,
       summaryEdges: summaryEdges(current), bodyBox: { x: current.open.x - canvas.x, width: current.open.width }, ...extra };
+    if (current.geometry.gapWidth > 0 && summaryVisible()) {
+      // Outer-edge scaling grows toward the fixed camera. Bound every frame,
+      // including spring overshoot, by the measured widths in screen points.
+      const gapLeft = current.geometry.centerX - current.geometry.gapWidth / 2 - canvas.x;
+      const gapRight = gapLeft + current.geometry.gapWidth;
+      const left = frame.summaryEdges.left + frame.summaryIconInset - current.summaryIconInset;
+      const leftScale = slots.left > 0 ? (gapLeft - 8 - left) / slots.left : Infinity;
+      const rightScale = slots.right > 0 ? (frame.summaryEdges.right - gapRight - 8) / slots.right : Infinity;
+      frame.summaryScale = Math.max(0, Math.min(frame.summaryScale, leftScale, rightScale));
+    }
     // The camera cap must share the native material's compositor transaction.
     // An SVG cap arrives later through Chromium, leaving a moving glass fringe.
     const hardwareShade = current.geometry.notched && glass.notch?.hardwareShade === true
