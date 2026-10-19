@@ -341,8 +341,12 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     // An SVG cap arrives later through Chromium, leaving a moving glass fringe.
     const hardwareShade = current.geometry.notched && glass.notch?.hardwareShade === true
       ? { ...notchGlassGeometry(current.geometry.height, frame.bodyHeight), progress: value } : undefined;
+    const hadMaterial = nativeMaterial.notch === true;
     shape('notch', points, canvas, current.display, hardwareShade);
     frame.shape = shapes.notch;
+    // A failed native update removes the material immediately. Restore the
+    // renderer's SVG fallback with this completed frame, not at spring settle.
+    if (hadMaterial && nativeMaterial.notch !== true) send('notch', current);
     paintBlur(current, value);
     if (alive(windows.notch) && ready.notch) windows.notch.webContents.send('topNotch:motion', frame);
   }

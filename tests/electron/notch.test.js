@@ -1953,6 +1953,46 @@ test('material failure still falls back when native cleanup also throws', (t) =>
   assert.doesNotThrow(() => f.controller.stop());
 });
 
+test('a mid-animation material failure restores fallback state on the failing frame', (t) => {
+  for (const cleanupThrows of [false, true]) {
+    let fail = false, updates = 0, disposals = 0;
+    const f = fixture(t, { notchStyle: 'liquid-glass-clear' }, {
+      reducedMotion: false, nativeGlass: () => true, liquidGlass: () => ({ dark: true }),
+      createGlass: () => ({ hardwareShade: true,
+        update() { updates++; if (fail) throw new Error('injected animation material failure'); },
+        dispose() { disposals++; if (cleanupThrows) throw new Error('injected cleanup failure'); }
+      })
+    });
+    const win = f.windows[0], geometry = last(win).geometry;
+    f.screen.point = { x: geometry.centerX, y: 10 }; f.controller.poll(1000);
+    const animation = win.messages.filter(message => message.channel === 'topNotch:animate').at(-1).payload;
+    const tick = elapsed => f.ipcMain.emit('topNotch:frame', { sender: win.webContents }, { id: animation.id, elapsed });
+    tick(80);
+    assert.equal(last(win).nativeHardwareShade, true, 'glass initialized and painted successfully');
+    fail = true;
+    const start = win.messages.length;
+    tick(120);
+    const messages = win.messages.slice(start);
+    const fallback = messages.find(message => message.channel === 'topNotch:render')?.payload;
+    assert.ok(fallback, 'failure must notify the renderer before the animation completes');
+    assert.equal(fallback.glass, false);
+    assert.equal(fallback.liquidGlass, false);
+    assert.equal(fallback.nativeHardwareShade, false);
+    assert.ok(fallback.motion.progress > 0 && fallback.motion.progress < 1);
+    assert.equal(fallback.motion.motionId, animation.id);
+    assert.deepEqual(fallback.motion, messages.find(message => message.channel === 'topNotch:motion').payload);
+    assert.ok(fallback.motion.shape.d, 'the fallback receives the current outline');
+    assert.equal(disposals, 1);
+    const stopped = updates, renderCount = win.messages.filter(message => message.channel === 'topNotch:render').length;
+    tick(160);
+    assert.equal(updates, stopped, 'the failed native material is not retried');
+    assert.equal(win.messages.filter(message => message.channel === 'topNotch:render').length, renderCount, 'ordinary frames stay shape-only');
+    tick(animation.duration);
+    assert.equal(last(win).nativeHardwareShade, false);
+    assert.equal(last(win).motion.progress, 1);
+  }
+});
+
 test('unexpectedly closed windows cannot be polled or receive stale IPC', (t) => {
   const f = fixture(t);
   const win = f.windows[0];

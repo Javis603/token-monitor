@@ -556,7 +556,6 @@
       paintRefreshButton();
       root.classList.toggle('is-notch-open', payload.expanded === true);
       root.classList.toggle('is-notch-attached', payload.geometry.notched === true);
-      root.classList.toggle('has-native-hardware-shade', payload.nativeHardwareShade === true);
       root.style.setProperty('--notch-zoom', Number(payload.appearance.zoomFactor) || 1);
       const headerActivity = (payload.summary?.items || []).map((item) => item.providerCell ? [
         runningSessionSummary(item.providerCell.sessions).count,
@@ -631,6 +630,9 @@
       render: renderNotch,
       applyMotion: applyNotchMotion,
       applyAppearance(payload) {
+        // Material ownership must update even when a tooltip holds the panel's
+        // content render; otherwise a failed native scrim leaves the SVG hidden.
+        root.classList.toggle('has-native-hardware-shade', payload.nativeHardwareShade === true);
         document.documentElement.classList.toggle('notch-black', payload.style === 'black');
         document.documentElement.classList.toggle('notch-hardware-light', payload.style !== 'black' && payload.geometry?.notched === true
           && window.TokenMonitorThemePresets?.isLightHex(payload.appearance?.themeColors?.bg) === true);

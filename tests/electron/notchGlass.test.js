@@ -120,3 +120,23 @@ test('light widget palettes get readable ink only on the attached glass surface'
   renderer.applyAppearance({ ...payload, geometry: { notched: false } });
   assert.equal(classes.get('notch-hardware-light'), false, 'capsules keep the selected theme');
 });
+
+test('native shade ownership changes before any deferred panel render', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
+  const createNotchRenderer = vm.runInNewContext(`${source}; module.exports.createNotchRenderer`, {
+    module: { exports: {} }, ResizeObserver: class { observe() {} disconnect() {} }
+  });
+  const classes = new Map();
+  const renderer = createNotchRenderer({
+    document: { documentElement: { classList: { toggle() {} } } },
+    window: { addEventListener() {}, TokenMonitorNotchPanel: { createNotchPanel: () => ({}) },
+      TokenMonitorUsageCharts: { clientColors: {} }, TokenMonitorEdgeDockPresentation: {} },
+    state: {}, root: { classList: { toggle: (key, value) => classes.set(key, value) } },
+    bridge: { onAnimate() {}, onMotion() {} }, shared: {}
+  });
+  const payload = { nativeHardwareShade: true, style: 'liquid-glass-clear', geometry: { notched: true }, appearance: {} };
+  renderer.applyAppearance(payload);
+  assert.equal(classes.get('has-native-hardware-shade'), true);
+  renderer.applyAppearance({ ...payload, nativeHardwareShade: false, glass: false, liquidGlass: false });
+  assert.equal(classes.get('has-native-hardware-shade'), false, 'SVG fallback is restored even while panel content is held');
+});
