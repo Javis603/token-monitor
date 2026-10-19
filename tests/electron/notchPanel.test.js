@@ -255,7 +255,7 @@ test('recent sessions retain all quiet rows and preserve scroll and focus across
   assert.equal(page.querySelectorAll('.notch-recent').length, 1);
 });
 
-test('week footer omits redundant labels while qualifying partial history and accessible values', t => {
+test('week footer reads plainly and explains a missing day only on hover', t => {
   const f = panelFixture(t), data = payload();
   f.panel.render(data);
   const summary = f.find('notch-week-foot');
@@ -264,20 +264,27 @@ test('week footer omits redundant labels while qualifying partial history and ac
   assert.equal(f.find('notch-week-tokens').textContent, '130');
   assert.equal(f.find('notch-week-tokens').attributes['aria-label'], 'Total usage: 130');
   assert.equal(f.find('notch-week-cost-value').attributes['aria-label'], 'Total cost: $3');
+  assert.equal(f.find('notch-week-tokens').tooltipEntries, undefined);
   data.panel.week.days[0].tokens = null; f.panel.render(data);
-  assert.deepEqual(f.find('notch-week-foot').querySelectorAll('.notch-summary-label').map(node => node.textContent), ['Recorded']);
-  assert.equal(f.find('notch-week-tokens').attributes['aria-label'], 'Recorded: 100');
-  assert.equal(f.find('notch-week-cost-value').attributes['aria-label'], 'Recorded cost: $3');
+  // A day without data draws like any other day; nothing relabels the total.
+  assert.equal(f.find('notch-week-bars').querySelectorAll('.is-unknown').length, 0);
+  assert.equal(f.find('notch-week-foot').querySelectorAll('.notch-summary-label').length, 0);
+  assert.equal(f.find('notch-week-tokens').textContent, '100');
+  assert.deepEqual(f.find('notch-week-tokens').tooltipEntries.map(entry => entry.full),
+    ['Some devices have not reported their history, so earlier days may be incomplete.']);
+  assert.match(f.find('notch-week-tokens').attributes['aria-label'], /^Total usage: 100\. Some devices/);
+  assert.equal(f.find('notch-week-cost-value').attributes['aria-label'], 'Total cost: $3');
   data.panel.week.days[0].unpricedTokens = 10; f.panel.render(data);
   assert.equal(f.find('notch-week-cost-value').textContent, '—');
 });
 
-test('a week some device has not answered for reads as recorded, not as the total', t => {
+test('a week some device has not answered for keeps its total and explains it on hover', t => {
   const f = panelFixture(t), data = payload();
   // Every day has a figure, but History came back from only some devices.
   data.panel.week.complete = false; f.panel.render(data);
-  assert.deepEqual(f.find('notch-week-foot').querySelectorAll('.notch-summary-label').map(node => node.textContent), ['Recorded']);
-  assert.equal(f.find('notch-week-tokens').attributes['aria-label'], 'Recorded: 130');
+  assert.equal(f.find('notch-week-foot').querySelectorAll('.notch-summary-label').length, 0);
+  assert.equal(f.find('notch-week-tokens').tooltipEntries.length, 1);
+  assert.match(f.find('notch-week-tokens').attributes['aria-label'], /^Total usage: 130\. Some devices/);
   const { notchWeek } = require('../../src/electron/notch/panel');
   assert.equal(notchWeek({}, new Date(2026, 9, 19, 12), { daily: [], complete: false }).complete, false);
   assert.equal(notchWeek({}, new Date(2026, 9, 19, 12), { daily: [], complete: true }).complete, true);

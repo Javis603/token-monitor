@@ -473,7 +473,6 @@
           }
         }
         if (day.today && !clients.length) bar.classList.add('is-plain');
-        if (day.tokens === null) column.classList.add('is-unknown');
         column.append(bar);
         column.title = `${day.date} · ${day.tokens === null ? '—' : formatTokens(day.tokens)}`;
         column.setAttribute('aria-label', column.title);
@@ -489,18 +488,19 @@
       });
       bars.addEventListener('pointerleave', () => scrub(null));
       const foot = el('div', 'notch-week-foot');
-      // A day some device has not answered for is a subtotal, not the total.
+      // The glance reads plainly; a week some device has not answered for says
+      // so on hover (and to assistive tech) rather than relabelling the total.
       const partial = week.complete === false || week.days.some((day) => day.tokens === null);
       const total = el('div', 'notch-week-summary');
-      if (partial) total.append(text('notch-summary-label', t('notch.recorded')));
       const weekTokens = text('notch-week-tokens notch-strong', formatTokens(week.total));
-      weekTokens.setAttribute('aria-label', `${t(partial ? 'notch.recorded' : 'notch.totalUsage')}: ${weekTokens.textContent}`);
+      weekTokens.setAttribute('aria-label', `${t('notch.totalUsage')}: ${weekTokens.textContent}${partial ? `. ${t('notch.partialHistory')}` : ''}`);
+      if (partial) limitWindowsView.setDetailTooltip(weekTokens, [{ full: t('notch.partialHistory') }]);
       total.append(weekTokens);
       foot.append(total);
       if (week.cost > 0 || week.days.some(day => day.unpricedTokens > 0)) {
         const cost = el('div', 'notch-week-summary notch-week-cost');
         const value = usageCost('notch-week-cost-value', { costUsd: week.cost, unpricedTokens: week.days.reduce((sum, day) => sum + day.unpricedTokens, 0) });
-        value.setAttribute('aria-label', `${t(partial ? 'notch.recordedCost' : 'notch.totalCost')}: ${value.textContent}`);
+        value.setAttribute('aria-label', `${t('notch.totalCost')}: ${value.textContent}`);
         cost.append(value);
         foot.append(cost);
       }
