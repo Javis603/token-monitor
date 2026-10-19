@@ -140,20 +140,11 @@ function applyVibrancyMask(win, mask, width, height, options = {}) {
   try {
     const handle = win.getNativeWindowHandle();
     const view = handle.length >= 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE());
-    return bridge.apply(Number(view), mask, width, height, hasSystemShadow(win)) === true;
+    const shadow = typeof win.hasShadow === 'function' ? win.hasShadow() !== false : true;
+    return bridge.apply(Number(view), mask, width, height, shadow) === true;
   } catch {
     return false;
   }
-}
-
-// The shadow flag cannot change for a given window, and asking Electron every
-// frame would trade one native call for another.
-const shadowState = new WeakMap();
-function hasSystemShadow(win) {
-  if (!shadowState.has(win)) {
-    shadowState.set(win, typeof win.hasShadow === 'function' ? win.hasShadow() !== false : true);
-  }
-  return shadowState.get(win);
 }
 
 module.exports = { applyVibrancyMask };

@@ -130,9 +130,6 @@ function createMacLiquidGlass(win, { shaped = false } = {}) {
   const original = window && api.get(window, 'contentView');
   if (!original) throw new Error('Window content view unavailable');
   const bounds = api.getBounds(original);
-  // The notch and dock windows are created without a system shadow; asking
-  // Electron once here avoids an AppKit call on every shape frame.
-  const hasSystemShadow = typeof win.hasShadow === 'function' ? win.hasShadow() !== false : true;
   let glass = 0;
   let shade = 0, shadeMask = 0, lastShade, shadeActive = false;
   let disposed = false;
@@ -256,7 +253,12 @@ function createMacLiquidGlass(win, { shaped = false } = {}) {
                   .map(stop => api.scalar(Math.max(0, Math.min(1, (cap + (fade - cap) * stop) / shape.height))))));
               }
             }
-            if (key !== lastShape) api.setPath(glass, shape.commands, shape.height, shadeMask, hasSystemShadow);
+            if (key !== lastShape) {
+              // A window can change its shadow flag after creation, so read the
+              // current value when a new path is actually committed.
+              const refreshShadow = typeof win.hasShadow === 'function' ? win.hasShadow() !== false : true;
+              api.setPath(glass, shape.commands, shape.height, shadeMask, refreshShadow);
+            }
           });
           lastShape = key; lastShade = shadeKey; shadeActive = Boolean(hardwareShade);
         } else if (radius !== lastRadius) {

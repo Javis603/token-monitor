@@ -10,7 +10,7 @@ function windowHandle() {
   return handle;
 }
 
-test('raw masks forward the cached window shadow state', () => {
+test('raw masks forward the current window shadow state', () => {
   const calls = [];
   const api = { apply: (...args) => { calls.push(args); return true; } };
   let hasShadow = false;
@@ -18,11 +18,10 @@ test('raw masks forward the cached window shadow state', () => {
   const mask = { buffer: Buffer.alloc(16), pixelWidth: 2, pixelHeight: 2 };
   assert.equal(applyVibrancyMask(win, mask, 2, 2, { api }), true);
   assert.equal(calls[0][4], false);
-  // The flag cannot change for a retained window; the second upload reuses it
-  // instead of asking Electron again.
+  // A window can enable its shadow later; the next upload must see it.
   hasShadow = true;
   assert.equal(applyVibrancyMask(win, mask, 2, 2, { api }), true);
-  assert.equal(calls[1][4], false);
+  assert.equal(calls[1][4], true);
 });
 
 test('a window without hasShadow keeps invalidating its shadow', () => {
