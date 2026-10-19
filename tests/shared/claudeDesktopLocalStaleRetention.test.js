@@ -1,0 +1,96 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const { aggregateLimits, isUsefulLimitObservation } = require('../../src/shared/limits/core');
+const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+const { composeLocalOnlySummary } = require('../../src/electron/syncDisplayStats');
+
+const NOW = Date.parse('2026-10-19T15:30:00.000Z');
+const DESKTOP_OK = {
+  provider: 'claude',
+  accountKey: 'sha256:a983ccabcdef0123456789',
+  status: 'ok',
+  source: 'local',
+  sourceDetail: 'app',
+  updatedAt: '2026-10-19T09:28:42.066Z',
+  windows: [
+    { kind: 'session', usedPercent: 97, windowMinutes: 300 },
+    { kind: 'weekly', usedPercent: 59, windowMinutes: 10080 }
+  ]
+};
+
+test('isUsefulLimitObservation treats empty failures as non-useful', () => {
+  assert.equal(isUsefulLimitObservation(DESKTOP_OK), true);
+  assert.equal(isUsefulLimitObservation({ provider: 'claude', status: 'notConfigured', windows: [] }), false);
+  assert.equal(isUsefulLimitObservation({ provider: 'claude', status: 'unavailable', windows: [] }), false);
+  assert.equal(isUsefulLimitObservation({
+    provider: 'claude', status: 'unavailable', windows: [{ kind: 'session', usedPercent: 10 }]
+  }), true);
+});
+
+test('aggregateLimits keeps a stale Desktop ok over a fresh empty failure', () => {
+  const summary = aggregateLimits([{
+    deviceId: 'mac-local',
+    limits: {
+      providers: [
+        {
+          provider: 'claude',
+          status: 'notConfigured',
+          windows: [],
+          updatedAt: new Date(NOW - 60_000).toISOString()
+        },
+        { ...DESKTOP_OK }
+      ],
+      refreshMs: 300_000
+    }
+  }], 5 * 60 * 1000, NOW);
+
+  const claude = summary.providers.filter((p) => p.provider === 'claude');
+  assert.ok(claude.some((p) => p.status === 'ok' && p.windows?.length === 2),
+    `expected ok Desktop row, got ${JSON.stringify(claude.map((p) => ({ s: p.status, w: p.windows?.length, stale: p.stale })))}`);
+  const ok = claude.find((p) => p.status === 'ok');
+  assert.equal(ok.stale, true);
+  assert.equal(ok.source, 'local');
+});
+
+test('LimitsRuntime drops provider:* placeholder after account-keyed Desktop ok', async () => {
+  const notConfigured = {
+    provider: 'claude',
+    status: 'notConfigured',
+    windows: [],
+    updatedAt: new Date(NOW - 60_000).toISOString()
+  };
+  const runtime = createLimitsRuntime(
+    {
+      limitsEnabled: true,
+      limitProviders: 'claude',
+      previousLimits: { providers: [notConfigured], refreshMs: 300_000 }
+    },
+    {
+      now: () => NOW,
+      autoStart: false,
+      autoRetry: false,
+      probeProvider: async () => [DESKTOP_OK]
+    }
+  );
+  await runtime.refresh({ provider: 'claude' }, 'manual');
+  const providers = runtime.getSnapshot().providers;
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].status, 'ok');
+  assert.equal(providers[0].accountKey, DESKTOP_OK.accountKey);
+
+  const device = {
+    deviceId: 'mac-local',
+    limits: runtime.getSnapshot(),
+    periods: { today: {}, month: {}, allTime: {} }
+  };
+  const composed = composeLocalOnlySummary(device, (s) => s, { nowMs: NOW });
+  const row = composed.limits.providers.find((p) => p.provider === 'claude');
+  assert.ok(row, 'claude row present');
+  assert.equal(row.status, 'ok');
+  assert.equal(row.windows.length, 2);
+  assert.equal(row.source, 'local');
+  assert.equal(row.stale, true);
+});
