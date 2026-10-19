@@ -2000,24 +2000,24 @@ test('WorkBuddy groups count accounts and retain failures without repeating the 
 
 
 
-test('notch detail render hold retains the current provider but releases when the hovered provider changes', () => {
+test('EdgeDock render hold preserves account gestures and open tooltips', () => {
   const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
   const start = source.indexOf('function deferBubbleRender(');
   const end = source.indexOf('bridge.onRender(render);', start);
+  let accountHeld = false, tooltipHeld = false;
   const context = {
-    surface: 'bubble', state: { payload: { omitQuotaBars: true, cell: { id: 'cline' } } },
-    contentLayer: { querySelector: () => ({ dataset: { cellId: 'codex' } }) },
-    codexAccountControl: { deferRender: () => false },
-    limitTooltipShouldHoldRender: () => true,
-    limitTooltip: { pending: false }
+    contentLayer: {}, codexAccountControl: { deferRender: () => accountHeld },
+    limitTooltipShouldHoldRender: () => tooltipHeld, limitTooltip: { pending: false }
   };
   vm.runInNewContext(source.slice(start, end), context);
-  assert.equal(context.deferBubbleRender(), false, 'focused tooltip on old Codex card must not block Cline sizing');
-  context.state.payload.cell.id = 'codex';
-  assert.equal(context.deferBubbleRender(), true, 'same provider must keep the existing tooltip while data refreshes');
-  context.state.payload.omitQuotaBars = false;
-  context.state.payload.cell.id = 'cline';
-  assert.equal(context.deferBubbleRender(), true, 'ordinary EdgeDock keeps its existing behavior');
+  assert.equal(context.deferBubbleRender(), false);
+  accountHeld = true;
+  assert.equal(context.deferBubbleRender(), true, 'an in-progress account gesture keeps its DOM');
+  accountHeld = false; tooltipHeld = true;
+  assert.equal(context.deferBubbleRender(), true, 'an open tooltip holds the update');
+  assert.equal(context.limitTooltip.pending, true);
+  tooltipHeld = false;
+  assert.equal(context.deferBubbleRender(), false, 'closing the tooltip releases the update');
 });
 
 

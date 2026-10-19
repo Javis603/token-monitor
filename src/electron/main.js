@@ -419,7 +419,7 @@ const {
 const { applyWindowsChrome } = require('./windowsChrome');
 const { installWindowsNonActivatingInput } = require('./windowsNonActivatingInput');
 const { canUseEdgeDock, createEdgeDockController, edgeDockSupported } = require('./edgeDock/controller');
-const { createNotchController, normalizeNotchStyle, normalizeNotchShape, normalizeNotchDetailSide, normalizeNotchHoverAction, normalizeNotchHoverDelay } = require('./notch/controller');
+const { createNotchController, normalizeNotchStyle, normalizeNotchShape, normalizeNotchHoverAction, normalizeNotchHoverDelay } = require('./notch/controller');
 const { buildNotchData, notchSummaryMode, summaryLayout: notchSummaryLayout } = require('./notch/data');
 const { NOTCH_PANEL_STAT_ITEMS, notchLimitItems, notchPanelItems, notchWeek } = require('./notch/panel');
 const { createNotchHistory } = require('./notch/history');
@@ -636,7 +636,6 @@ function defaultSettings() {
     notchCustomLayout: createDefaultTrayLayout(),
     notchDisplayId: null,
     notchItems: null,
-    notchDetailSide: 'right',
     notchRunningIndicatorEnabled: false,
     notchWarnColors: false,
     notchHoverAction: 'peek',
@@ -2746,7 +2745,6 @@ function readSettings() {
     merged.notchSize = normalizeEdgeDockSize(merged.notchSize);
     merged.notchCustomScale = normalizeEdgeDockCustomScale(merged.notchCustomScale);
     merged.notchItems = normalizeEdgeDockItems(merged.notchItems);
-    merged.notchDetailSide = normalizeNotchDetailSide(merged.notchDetailSide);
     merged.notchRunningIndicatorEnabled = parseBoolean(merged.notchRunningIndicatorEnabled, false);
     merged.notchWarnColors = parseBoolean(merged.notchWarnColors, false);
     merged.notchHoverAction = normalizeNotchHoverAction(merged.notchHoverAction);
@@ -5688,9 +5686,6 @@ function ensureNotchController() {
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
     isFullScreen: createFullScreenProbe({ platform: process.platform, screen, logger: (message) => console.log(message) }),
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
-    onOpenResetForecastSource: () => {
-      if (isAllowedExternalUrl(CODEX_RESET_FORECAST_SOURCE_URL)) void shell.openExternal(CODEX_RESET_FORECAST_SOURCE_URL);
-    },
     logger: (message) => console.log(message)
   });
   return notchController;
@@ -7987,7 +7982,6 @@ app.whenReady().then(() => {
       notchSize: normalizeEdgeDockSize(patch.notchSize ?? settings.notchSize),
       notchCustomScale: normalizeEdgeDockCustomScale(patch.notchCustomScale ?? settings.notchCustomScale),
       notchItems: normalizeEdgeDockItems('notchItems' in (patch || {}) ? patch.notchItems : settings.notchItems),
-      notchDetailSide: normalizeNotchDetailSide(patch.notchDetailSide ?? settings.notchDetailSide),
       notchRunningIndicatorEnabled: parseBoolean(patch.notchRunningIndicatorEnabled ?? settings.notchRunningIndicatorEnabled, false),
       notchWarnColors: parseBoolean(patch.notchWarnColors ?? settings.notchWarnColors, false),
       notchHoverAction: normalizeNotchHoverAction(patch.notchHoverAction ?? settings.notchHoverAction),

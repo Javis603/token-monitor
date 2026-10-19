@@ -1,10 +1,10 @@
-/* Scoped to the macOS top entry; quota/account styles remain the EdgeDock's. */
+/* Scoped to the macOS top entry and its fixed-page panel. */
 html.notch-black { --glass-rgb: 0,0,0 !important; --text: #fff !important; --muted: rgba(255,255,255,.58) !important; --overlay-rgb: 255,255,255; --line: transparent; }
 html.notch-black .edge-dock-shape-fill { fill: #000; }
 html.notch-black .edge-dock-shape-line { stroke: transparent; }
 /* A glass entry still joins the physical camera housing as solid black. Its
    lower half reveals the selected material only as the panel opens. The same
-   animated outline clips the shade; capsules and detached details keep their
+   animated outline clips the shade; capsules keep their
    own material without a fabricated camera band. */
 .notch-hardware-shade, .notch-glass-rim { display: none; pointer-events: none; }
 html:not(.notch-black) .is-notch-attached .notch-hardware-shade,
@@ -19,7 +19,7 @@ html:not(.notch-black) .is-notch-attached .notch-glass-rim { display: inline; }
 html:not(.notch-black) .is-notch-attached .edge-dock-shape-line { stroke: transparent; }
 .is-notch-attached .notch-summary { --text: #fff; --muted: rgba(255,255,255,.68); --overlay-rgb: 255,255,255; color: var(--text); }
 /* Light widget ink cannot cross a black camera band. Keep the attached shell
-   on the existing dark surface palette; detached cards still follow the theme. */
+   on the existing dark surface palette; detached capsules still follow the theme. */
 html.notch-hardware-light {
   --glass-rgb: 48,52,56 !important;
   --text: #eef5fb !important;
@@ -54,36 +54,10 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
 .notch-bar { background: rgba(var(--overlay-rgb), .18); overflow: hidden; }
 .notch-bar-fill { display: block; height: 100%; background: var(--text); border-radius: inherit; transition: width 420ms cubic-bezier(.2,.8,.2,1); }
 
-/* Top-layer popovers still have to fit the small native detail window. Tall
-   subscription cards scroll inside it; their pointer stays in the same wrap. */
-.is-notch-detail .limit-detail-tooltip {
-  max-width: min(248px, calc(100vw - 16px));
-  max-height: calc(100vh - 16px);
-  box-sizing: border-box;
-  overflow: auto;
-  pointer-events: auto;
-  scrollbar-width: none;
-  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
-}
-.is-notch-detail .limit-detail-tooltip-triple {
-  grid-template-columns: repeat(3, minmax(0, max-content));
-}
-.is-notch-detail .limit-detail-tooltip-row span {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-/* Match the controller's minimum detail height so an empty provider card can
-   acknowledge the placed size rather than endlessly requesting 36px in 40px. */
-.is-notch-detail .edge-dock-card { min-height: 40px; }
-.is-notch-detail .edge-dock-card { scrollbar-width: none; }
-
 /* Preserve mark size; shared rings grow outward on hardware-free entries. */
 .notch-summary .notch-provider-icon { position: static; left: auto; right: auto; width: var(--notch-ring-size, 28px); height: var(--notch-ring-size, 28px); gap: 0; flex: 0 0 auto; }
 .notch-summary .notch-provider-icon .edge-dock-ring { width: var(--notch-ring-size, 28px); height: var(--notch-ring-size, 28px); }
 .notch-summary .notch-provider-icon .edge-dock-mark { width: 17px; height: 17px; }
-.is-notch-detail .edge-dock-card::-webkit-scrollbar,
-.is-notch-detail .limit-detail-tooltip::-webkit-scrollbar { display: none; }
 
 /* Author flex styles must not override the native hidden attribute. */
 .notch-slot-content > [hidden] { display: none !important; }

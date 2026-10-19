@@ -1792,7 +1792,6 @@ function renderBubble(payload) {
     return;
   }
   const card = cell.kind === 'stat' ? statCard(cell) : providerCard(cell);
-  if (payload.omitQuotaBars && cell.kind !== 'stat') notchRenderer.omitQuotaRows(card, cell);
   card.dataset.cellId = cell.id;
   if (payload.maxCardHeight) card.style.maxHeight = `${payload.maxCardHeight}px`;
   stagingLayer.replaceChildren(card);
@@ -1803,17 +1802,14 @@ function renderBubble(payload) {
   if (payload.placed?.cellId === cell.id && payload.placed.height === height) {
     commitCard(card, cell.id);
   } else {
-    // The native top-entry detail reveals after this size acknowledgement.
-    // Its retained card must already contain fresh data before that reveal.
-    if (payload.visible === true && notchRenderer) commitCard(card, cell.id);
     bridge.reportBubbleSize(cell.id, height);
   }
 }
 
 
-const notchRenderer = surface === 'notch' || query.get('owner') === 'notch'
+const notchRenderer = surface === 'notch'
   ? window.TokenMonitorNotchRenderer.createNotchRenderer({
-    document, window, bridge, surface, state, root, shapeLayer, contentLayer,
+    document, window, bridge, state, root, shapeLayer, contentLayer,
     shared: {
       el, t, appearance, prefersReducedMotion, readableColor, providerLabel, limitProviderColor,
       markNode, hasMask, providerCellNode, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate, overflowText, limitWindowsView,
@@ -1829,10 +1825,6 @@ function render(payload) {
   state.payload = payload;
   applyAppearance(payload);
   notchRenderer?.applyAppearance(payload);
-  if (surface === 'bubble' && notchRenderer && payload.visible === false) {
-    scheduleSelfRepaint();
-    return;
-  }
   if (surface === 'notch') notchRenderer.applyMotion(payload.motion);
   else updateShape(payload);
   if (surface === 'peek') renderPeek(payload);
@@ -1847,10 +1839,6 @@ function render(payload) {
 // A repaint replaces the whole card, so it waits for whatever the pointer is
 // currently inside: an account control mid-gesture, or an open detail tooltip.
 function deferBubbleRender() {
-  // A focused tooltip belongs to its provider, not to every subsequent card.
-  // The new top-entry detail must be measured before its native window appears.
-  if (surface === 'bubble' && state.payload?.omitQuotaBars
-    && contentLayer.querySelector('.edge-dock-card')?.dataset.cellId !== state.payload.cell?.id) return false;
   if (codexAccountControl.deferRender(contentLayer)) return true;
   if (!limitTooltipShouldHoldRender()) return false;
   limitTooltip.pending = true;
@@ -1927,7 +1915,6 @@ function sessionsExpiryDelayMs() {
 // would rebuild its children for nothing. Both are re-armed after every repaint, so a
 // shortened wait does not lower the period that follows it.
 function selfRepaintDelayMs() {
-  if (surface === 'bubble' && notchRenderer && state.payload?.visible === false) return 0;
   const expiry = sessionsExpiryDelayMs();
   const period = surface === 'bubble' || surface === 'notch' && notchRenderer.needsClock() ? BUBBLE_REPAINT_MS : 0;
   const waits = [period, expiry].filter((value) => value > 0);

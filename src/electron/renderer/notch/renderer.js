@@ -1,7 +1,7 @@
 'use strict';
 
-// The top entry owns its layout, measurements and animation state. Cards and
-// quota/session semantics are supplied by the shared dock renderer.
+// The top entry owns its layout, measurements and animation state, while
+// sharing quota/session semantics and formatting with the dock renderer.
 (function exposeNotchRenderer(root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -9,7 +9,7 @@
 })(typeof window !== 'undefined' ? window : null, function createNotchRendererApi() {
   // Optical proportions live in the space below the physical camera band.
   // Motion frames already include content zoom; applying zoom again here would
-  // change the balance as cards grow, shrink or hit the screen's height limit.
+  // change the balance as panels grow, shrink or hit the screen's height limit.
   const NOTCH_GLASS_PROFILE = Object.freeze({ cap: 0.24, fade: 0.50 });
   function notchGlassGeometry(cameraHeight, bodyHeight) {
     const camera = Number.isFinite(cameraHeight) ? Math.max(0, cameraHeight) : 0;
@@ -22,7 +22,7 @@
     };
   }
 
-  function createNotchRenderer({ document, window, bridge, surface, state, root, shapeLayer, contentLayer, shared }) {
+  function createNotchRenderer({ document, window, bridge, state, root, shapeLayer, contentLayer, shared }) {
     const {
       el, t, appearance, prefersReducedMotion, providerLabel, limitProviderColor, readableColor, limitAccountTitle,
       markNode, hasMask, providerCellNode, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate, overflowText, limitWindowsView,
@@ -37,69 +37,12 @@
     const compactMoneyApi = window.TokenMonitorCompactMoney;
     const balanceDisplay = window.TokenMonitorLimitBalanceDisplay;
     const accountIdentityApi = window.TokenMonitorAccountIdentity;
-    const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
     const { clientColors } = window.TokenMonitorUsageCharts;
     const panelApi = window.TokenMonitorNotchPanel;
-    const panel = surface === 'notch' ? panelApi.createNotchPanel({ document, window, el, t, state, bridge, shared: {
+    const panel = panelApi.createNotchPanel({ document, window, el, t, state, bridge, shared: {
       markNode, hasMask, providerLabel, limitProviderColor, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate,
       appearance, prefersReducedMotion, ensureRefreshButton, readableColor, limitAccountTitle, overflowText, limitWindowsView
-    } }) : null;
-
-    function notchOverviewRecords(cell) {
-      const records = cell.accounts.filter((account) => account.record).map((account) => account.record);
-      // Every provider follows the shared EdgeDock headline. Only Codex has a
-      // local-login selector; the others retain their existing representative rule.
-      // The headline may sit beyond the detail's 50-row cap.
-      const headline = [...records, ...(cell.subscriptionAccounts || [])].find((record) => (
-        limitResetMotionApi.providerKey(record) === cell.headlineAccount
-      ));
-      // No usable headline: keep the first reportable row's original status.
-      // Failed records without old quotas belong to the detail, not a fake meter.
-      const fallback = records.find((record) => !record.status || record.status === 'ok' || record.windows?.length);
-      return headline ? [headline] : fallback ? [fallback] : [];
-    }
-
-    // Preserve the original detail card and omit only the quota rows already
-    // drawn above. Notes, account controls and forecasts keep their DOM.
-    function notchQuotaRows(container) {
-      return [...container.querySelectorAll('.limit-window')].filter((row) => (
-        !row.classList.contains('limit-window-note') || row.querySelector('.limit-meter')
-        || (row.dataset.usageItem && !['resets', 'spend'].includes(row.dataset.usageItem))
-      ));
-    }
-    function omitNotchQuotaRows(card, cell) {
-      const keys = cell ? new Set(notchOverviewRecords(cell).map((record) => limitResetMotionApi.providerKey(record))) : null;
-      const scopes = keys ? [...card.querySelectorAll('.limit-row')].filter((row) => keys.has(row.dataset.limitMotionKey)) : [card];
-      for (const quota of scopes.flatMap(notchQuotaRows)) {
-        const info = [...quota.querySelectorAll('.limit-detail-tooltip-wrap')];
-        if (info.length) {
-          const note = el('div', 'limit-window limit-window-wide limit-window-note');
-          const label = quota.querySelector('.limit-window-text > span')?.textContent;
-          if (label) note.append(el('span', 'limit-note', label));
-          note.append(...info);
-          quota.replaceWith(note);
-        } else quota.remove();
-      }
-      for (const container of card.querySelectorAll('.limit-window-group, .limit-windows')) {
-        if (!container.querySelector('.limit-window')) container.remove();
-      }
-      return card;
-    }
-
-    // The shared popover escapes card overflow, but cannot escape a native window.
-    // Keep this viewport accommodation local to the top entry's detail surface.
-    function fitNotchTooltip(tooltip) {
-      if (surface !== 'bubble' || !state.payload?.omitQuotaBars || !tooltip.matches('.limit-detail-tooltip')) return;
-      tooltip.style.translate = 'none';
-      const rect = tooltip.getBoundingClientRect();
-      const zoom = rect.width / tooltip.offsetWidth || 1;
-      const x = Math.max(8, Math.min(rect.left, innerWidth - rect.width - 8));
-      const y = Math.max(8, Math.min(rect.top, innerHeight - rect.height - 8));
-      tooltip.style.translate = `${(x - rect.left) / zoom}px ${(y - rect.top) / zoom}px`;
-    }
-    root.addEventListener('toggle', (event) => {
-      if (event.newState === 'open') requestAnimationFrame(() => fitNotchTooltip(event.target));
-    }, true);
+    } });
 
     // ---- Top notch ------------------------------------------------------------
 
@@ -232,13 +175,13 @@
       const scale = Number(run.dataset.horizontalScale) || 1;
       run.parentElement.style.width = `${Math.ceil(run.offsetWidth * scale)}px`;
     }
-    const notchSummaryObserver = surface === 'notch' ? new ResizeObserver((entries) => {
+    const notchSummaryObserver = new ResizeObserver((entries) => {
       for (const { target } of entries) {
         if (target.classList.contains('notch-text-run')) fitNotchTypeface(target);
       }
       const head = contentLayer.querySelector('.notch-summary');
       if (head) { reportNotchSlots(head); animateNotchNumbers(); }
-    }) : null;
+    });
 
     function notchText(item, row, key, used) {
       row = notchDisplayRow(row);
@@ -469,7 +412,7 @@
       const key = JSON.stringify([slots, measurement?.measuring ? measurement.id : null]);
       if (key !== lastNotchSlots) {
         lastNotchSlots = key;
-        bridge.reportNotchSize(0, slots, null, measurement?.measuring ? { id: measurement.id } : undefined);
+        bridge.reportNotchSize(0, slots, measurement?.measuring ? { id: measurement.id } : undefined);
       }
     }
     // The open panel has a fixed height; only the shell shape decides it.
@@ -479,7 +422,7 @@
       const zoom = Number(state.payload.appearance.zoomFactor) || 1;
       const height = panelApi.panelContentHeight({ attached: geometry.notched === true && geometry.gapWidth > 0, zoom });
       const key = JSON.stringify([height]);
-      if (key !== lastNotchSize) { lastNotchSize = key; bridge.reportNotchSize(height, null, []); }
+      if (key !== lastNotchSize) { lastNotchSize = key; bridge.reportNotchSize(height); }
     }
 
     // Shape-only frames never reconstruct the summary, provider rows or numbers.
@@ -636,7 +579,7 @@
       reportNotchContentSize();
       // The native window can appear only after this measured shape and header
       // have been applied together, not when the raw width report reaches main.
-      if (payload.summaryMeasurement?.measuring === false) bridge.reportNotchSize(0, null, null, { id: payload.summaryMeasurement.id, ready: true });
+      if (payload.summaryMeasurement?.measuring === false) bridge.reportNotchSize(0, null, { id: payload.summaryMeasurement.id, ready: true });
     }
     let notchAnimation = null;
     function startNotchAnimation(config) {
@@ -653,22 +596,20 @@
       animation.tick = tick;
       animation.handle = requestAnimationFrame(tick);
     }
-    if (surface === 'notch') {
-      bridge.onAnimate(startNotchAnimation);
-      bridge.onMotion((frame) => {
-        if (state.payload) state.payload.motion = frame;
-        applyNotchMotion(frame);
-        if (notchAnimation && notchAnimation.id === frame.motionId) {
-          if (frame.done) { cancelAnimationFrame(notchAnimation.handle); notchAnimation = null; }
-          else notchAnimation.handle = requestAnimationFrame(notchAnimation.tick);
-        }
-        if (frame.done) reportNotchContentSize();
-        if (notchRowsPending && (frame.progress === 0 || frame.progress === 1) && state.payload) {
-          notchRowsPending = false;
-          renderNotch(state.payload);
-        }
-      });
-    }
+    bridge.onAnimate(startNotchAnimation);
+    bridge.onMotion((frame) => {
+      if (state.payload) state.payload.motion = frame;
+      applyNotchMotion(frame);
+      if (notchAnimation && notchAnimation.id === frame.motionId) {
+        if (frame.done) { cancelAnimationFrame(notchAnimation.handle); notchAnimation = null; }
+        else notchAnimation.handle = requestAnimationFrame(notchAnimation.tick);
+      }
+      if (frame.done) reportNotchContentSize();
+      if (notchRowsPending && (frame.progress === 0 || frame.progress === 1) && state.payload) {
+        notchRowsPending = false;
+        renderNotch(state.payload);
+      }
+    });
 
 
     window.addEventListener('pagehide', () => {
@@ -678,12 +619,10 @@
     return {
       render: renderNotch,
       applyMotion: applyNotchMotion,
-      omitQuotaRows: omitNotchQuotaRows,
       applyAppearance(payload) {
         document.documentElement.classList.toggle('notch-black', payload.style === 'black');
-        document.documentElement.classList.toggle('notch-hardware-light', surface === 'notch' && payload.style !== 'black' && payload.geometry?.notched === true
+        document.documentElement.classList.toggle('notch-hardware-light', payload.style !== 'black' && payload.geometry?.notched === true
           && window.TokenMonitorThemePresets?.isLightHex(payload.appearance?.themeColors?.bg) === true);
-        root.classList.toggle('is-notch-detail', surface === 'bubble');
       },
       sessionCells() {
         return [...(state.payload?.expanded ? state.payload.cells || [] : []), ...(state.payload?.summary?.items || []).map(item => item.providerCell).filter(Boolean)];

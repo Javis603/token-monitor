@@ -119,7 +119,4 @@ test('light widget palettes get readable ink only on the attached glass surface'
   assert.equal(classes.get('notch-hardware-light'), false, 'pure black keeps its own palette');
   renderer.applyAppearance({ ...payload, geometry: { notched: false } });
   assert.equal(classes.get('notch-hardware-light'), false, 'capsules keep the selected theme');
-  const detail = create({ ...deps, surface: 'bubble' });
-  detail.applyAppearance(payload);
-  assert.equal(classes.get('notch-hardware-light'), false, 'detail cards do not get the camera palette');
 });

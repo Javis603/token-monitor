@@ -2,13 +2,13 @@
 
 const os = require('node:os');
 const path = require('node:path');
-const { NOTCH_METRICS, notchPeekBounds, notchCanvasBounds, notchGeometry, notchMaxHeight, notchBounds, notchSummaryMaxWidth, notchCommands, translateCommands, interpolateCommands, rectContains } = require('./geometry');
-const { toSvgPath, bubbleCommands } = require('../renderer/edgeDock/shapes');
+const { NOTCH_METRICS, notchPeekBounds, notchCanvasBounds, notchGeometry, notchBounds, notchSummaryMaxWidth, notchCommands, translateCommands, interpolateCommands, rectContains } = require('./geometry');
+const { toSvgPath } = require('../renderer/edgeDock/shapes');
 const { readMacNotchScreens } = require('./screen');
 const { notchBlurBounds } = require('./blur');
 const { readMacMenuWindows } = require('./menuBar');
 const { edgeDockBackdropMode, isLiquidGlassBackdrop, liquidGlassStyle, liquidGlassTint } = require('../macBackdropMode');
-const { EDGE_DOCK_TIMING, edgeDockCorridorBounds, edgeDockPollDelay, edgeDockScale, normalizeEdgeDockCustomScale, EDGE_DOCK_METRICS: M } = require('../edgeDock/geometry');
+const { edgeDockPollDelay, edgeDockScale, normalizeEdgeDockCustomScale, EDGE_DOCK_METRICS: M } = require('../edgeDock/geometry');
 
 const FULL_SCREEN_POLL_MS = 500;
 // Polling cadence while the pointer is near the top of the entry's display, so
@@ -74,18 +74,14 @@ function normalizeNotchShape(value) {
   return ['auto', 'notch', 'pill'].includes(value) ? value : 'auto';
 }
 
-function normalizeNotchDetailSide(value) {
-  return value === 'left' ? 'left' : 'right';
-}
-
-// One persistent shell, plus the existing EdgeDock bubble renderer. Data is
-// shared with the side dock; window ownership, intent and IPC are independent.
+// One persistent panel shell shares data with the side dock; window ownership,
+// intent and IPC are independent.
 function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   rendererDir, preloadPath, platform = process.platform, readScreens = readMacNotchScreens, readMenuWindows = readMacMenuWindows,
   nativeGlass = () => false, liquidGlass = () => null, createGlass, applyShapeMask,
-  onSwitchCodexAccount, onOpenResetForecastSource, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, blurAvailable = () => false, applyBlurMask, primaryButtonDown = () => null, monitorPrimaryPress, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
+  onSwitchCodexAccount, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, blurAvailable = () => false, applyBlurMask, primaryButtonDown = () => null, monitorPrimaryPress, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
   logger = () => {} }) {
-  const surfaces = ['notch', 'bubble'];
+  const surfaces = ['notch'];
   const windows = {}, windowIds = {}, ready = {}, shapes = {}, glass = {}, nativeMaterial = {}, lastSent = {};
   let materialKey = '', running = false, expanded = false, peeked = false, hoverTicked = false, locked = false;
   let capabilities = null;
@@ -94,9 +90,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   let geometryConfigs = new Map(), displays = [], primaryDisplay = null;
   const ignoredMouse = {};
   let menuWindows = null, menuReadAt = -Infinity;
-  let contentHeight = 180, slots = { left: 17, right: 42 }, rows = [];
-  let enterAt = null, leaveAt = null, rowAt = null, hoveredId = null, detailId = null;
-  let bubbleHeight = 180, bubblePlaced = null, bubbleBounds = null, detailVisible = false;
+  let contentHeight = 180, slots = { left: 17, right: 42 };
+  let enterAt = null, leaveAt = null;
   let pollTimer = null, motion = null, screenListeners = false, nearTop = false, buttonDown = false;
   let removePressMonitor = null;
   let blurWindow = null, blurMaskKey = '', blurOpacity = -1, blurAttempts = 0, blurFailed = false, blurRetry = null, blurCurrent = null;
@@ -250,7 +245,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     // An attached panel joins a black camera housing, so its material keeps a
     // dark appearance even when the widget uses a light palette. The hardware
     // scrim owns its tint: applying the widget tint too would darken it twice.
-    // Detached capsules and detail cards retain the widget's appearance/tint.
+    // Detached capsules retain the widget's appearance/tint.
     const attached = surface === 'notch' && layout()?.geometry.notched;
     return { dark: attached || liquidGlass()?.dark === true, style: liquidGlassStyle(mode),
       tintOpacity: attached ? 0 : liquidGlassTint(settings(), mode) };
@@ -281,13 +276,11 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
         edgeDockWarnColors: settings().notchWarnColors === true,
         edgeDockRunningIndicatorEnabled: settings().notchRunningIndicatorEnabled === true }, style: normalizeNotchStyle(settings().notchStyle), glass: nativeMaterial[surface] === true, liquidGlass: Boolean(glass[surface]) };
     const hasSummary = summaryVisible();
-    if (surface === 'notch') {
-      // Measurement results must not invalidate the request that produced them.
-      const key = hasSummary ? JSON.stringify([data.summary, zoom(), current.display.id, current.geometry, settings().notchAvoidMenuBar !== false, menuWindows]) : null;
-      if (!hasSummary) summaryMeasurement = null;
-      else if (!summaryMeasured && summaryMeasurement?.key !== key) summaryMeasurement = { id: ++summaryGeneration, key, measuring: true };
-    }
-    const payload = surface === 'notch' ? { ...base, expanded, visible: expanded, quietFullScreen: fullScreen, motion: frame,
+    // Measurement results must not invalidate the request that produced them.
+    const measurementKey = hasSummary ? JSON.stringify([data.summary, zoom(), current.display.id, current.geometry, settings().notchAvoidMenuBar !== false, menuWindows]) : null;
+    if (!hasSummary) summaryMeasurement = null;
+    else if (!summaryMeasured && summaryMeasurement?.key !== measurementKey) summaryMeasurement = { id: ++summaryGeneration, key: measurementKey, measuring: true };
+    const payload = { ...base, expanded, visible: expanded, quietFullScreen: fullScreen, motion: frame,
       geometry: { ...current.geometry, summaryBudget: current.summaryBudget, headerX: current.closed.x - (viewport || current.canvas).x, headerWidth: current.closed.width,
         flare: current.geometry.notched ? NOTCH_METRICS.openFlare : 0,
         gapOffset: current.geometry.centerX - current.geometry.gapWidth / 2 - current.closed.x,
@@ -295,9 +288,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       cells: data.cells, summary: hasSummary ? data.summary : null, panel: data.panel || null,
       summaryMeasurement: summaryMeasurement && { id: summaryMeasurement.id, measuring: summaryMeasurement.measuring },
       refreshEnabled: settings().notchRefreshEnabled === true,
-      refreshable: expanded && settings().notchRefreshEnabled === true && canRefreshLimits() === true }
-      : { ...base, visible: Boolean(detailId) && !locked, side: settings().notchDetailSide === 'left' ? 'right' : 'left', cell: data.cells.find((c) => c.id === detailId) || null, placed: bubblePlaced,
-        omitQuotaBars: true, maxCardHeight: notchMaxHeight(current.display, current.geometry, true) / zoom() };
+      refreshable: expanded && settings().notchRefreshEnabled === true && canRefreshLimits() === true };
     const key = JSON.stringify(payload);
     if (lastSent[surface] === key) return;
     lastSent[surface] = key;
@@ -397,7 +388,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       win.setOpacity(0);
       win.setBounds(bounds);
       win.showInactive();
-      // Keep both entry surfaces above the blur they sit on.
+      // Keep the panel shell above its blur.
       for (const s of surfaces) if (alive(windows[s])) windows[s].moveAbove?.(win.getMediaSourceId());
     }
     if (win.isVisible() && key !== blurMaskKey) {
@@ -422,47 +413,6 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     blurOpacity = opacity;
     win.setOpacity(opacity);
     if (opacity === 0) win.hide();
-  }
-
-  function hideDetail() {
-    detailId = hoveredId = null; rowAt = null; bubblePlaced = bubbleBounds = null; detailVisible = false;
-    if (alive(windows.bubble)) {
-      if (windows.bubble.getOpacity() !== 0) windows.bubble.setOpacity(0);
-      ignoreMouse('bubble', true); send('bubble');
-    }
-  }
-
-  function placeDetail(current) {
-    const row = rows.find((r) => r.id === detailId);
-    if (!current || !row || !alive(windows.bubble)) return;
-    const width = Math.round((M.bubbleWidth + M.bubbleTail) * zoom());
-    const height = Math.round(Math.min(bubbleHeight * zoom(), notchMaxHeight(current.display, current.geometry, true)));
-    const centerY = current.open.y + row.y + row.height / 2;
-    const area = current.display.workArea || current.display.bounds;
-    const top = Math.max(current.open.y + (current.geometry.gapWidth > 0 ? current.geometry.height : 0), area.y);
-    const bottom = Math.min(current.display.bounds.y + current.display.bounds.height, area.y + area.height);
-    const y = Math.round(Math.max(top, Math.min(centerY - height / 2, bottom - height - M.screenMargin)));
-    const left = settings().notchDetailSide === 'left';
-    // Only an attached notch has concave side shoulders. A capsule's full
-    // width is its visible body; subtracting shoulders overlaps both windows.
-    const shoulder = current.geometry.notched ? NOTCH_METRICS.openFlare * zoom() : 0;
-    const idealX = left ? current.open.x + shoulder - M.bubbleGap - width
-      : current.open.x + current.open.width - shoulder + M.bubbleGap;
-    const x = Math.round(Math.max(current.display.bounds.x + M.screenMargin,
-      Math.min(idealX, current.display.bounds.x + current.display.bounds.width - width - M.screenMargin)));
-    const changed = !bubbleBounds || bubbleBounds.x !== x || bubbleBounds.y !== y || bubbleBounds.width !== width || bubbleBounds.height !== height;
-    bubbleBounds = { x, y, width, height };
-    if (changed) windows.bubble.setBounds(bubbleBounds);
-    shape('bubble', bubbleCommands({ width, height, side: left ? 'right' : 'left', tail: M.bubbleTail * zoom(), tailY: centerY - y,
-      neck: M.bubbleNeck * zoom(), radius: M.bubbleRadius * zoom() }), bubbleBounds, current.display);
-    send('bubble', current);
-    if (ready.bubble && bubblePlaced && !locked) {
-      if (!windows.bubble.isVisible()) windows.bubble.showInactive();
-      if (windows.bubble.getOpacity() !== 1) windows.bubble.setOpacity(1);
-      ignoreMouse('bubble', false);
-      // One tick per visible visit, not per size report, repaint or provider switch.
-      if (!detailVisible) { detailVisible = true; hapticTick(); }
-    }
   }
 
   function refreshLayout() {
@@ -515,7 +465,6 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       }
     }
     send('notch', current);
-    if (detailId) placeDetail(current);
     visibility();
   }
 
@@ -531,14 +480,13 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const opacity = hidden ? 0 : 1;
     if (win.getOpacity() !== opacity) win.setOpacity(opacity);
     ignoreMouse('notch', locked || !expanded);
-    if (locked) hideDetail();
   }
 
   function setExpanded(value) {
     if (expanded === value || locked) return;
     expanded = value; enterAt = leaveAt = null;
     if (value) peeked = false;
-    else { refreshEpoch++; hideDetail(); }
+    else refreshEpoch++;
     const current = layout();
     if (!current) return;
     // Full-screen reveal restores the summary and can change both ear widths.
@@ -663,17 +611,12 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (!current) return;
     publishCapabilities(current);
     if (refreshFullScreen(now, current.display)) {
-      if (fullScreen) { setExpanded(false); enterAt = leaveAt = null; hideDetail(); }
+      if (fullScreen) { setExpanded(false); enterAt = leaveAt = null; }
       refreshLayout(); visibility();
       current = layout();
     }
     if (refreshMenu(now, current.geometry)) { refreshLayout(); current = layout(); }
     const point = screen.getCursorScreenPoint();
-    const inDetail = detailId && bubbleBounds && rectContains(bubbleBounds, point);
-    // Bubble placement is anchored to the body, excluding concave shoulders.
-    const shoulder = current.geometry.notched ? NOTCH_METRICS.openFlare * zoom() : 0;
-    const body = { ...current.open, x: current.open.x + shoulder, width: current.open.width - 2 * shoulder };
-    const inCorridor = detailId && bubbleBounds && rectContains(edgeDockCorridorBounds(body, bubbleBounds), point);
     // A hidden full-screen summary leaves only the camera housing, so the
     // target reaches inward by half the side dock's physical wake depth. It
     // never widens across menu items.
@@ -685,7 +628,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     // null: the button state is unreadable (no native bridge).
     const button = primaryButtonDown();
     const nearEntry = approach && rectContains(trigger, point) && button !== true;
-    const inside = (expanded ? rectContains(current.open, point) : onEntry || nearEntry) || inDetail || inCorridor;
+    const inside = expanded ? rectContains(current.open, point) : onEntry || nearEntry;
     const depth = point.y - current.display.bounds.y;
     nearTop = depth >= 0 && depth < NEAR_TOP_DEPTH && Math.abs(point.x - current.geometry.centerX) < current.canvas.width;
     // Transparent parts of the stable canvas must not swallow desktop clicks.
@@ -709,17 +652,6 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     } else {
       enterAt = null;
       if (expanded) { if (leaveAt === null) leaveAt = now; if (now - leaveAt >= NOTCH_HIDE_DELAY_MS) setExpanded(false); }
-    }
-    if (!expanded || motion || progress < 1 || inDetail || inCorridor) return;
-    const row = rows.find((r) => rectContains({ x: (viewport || current.canvas).x + r.x, y: current.open.y + r.y, width: r.width, height: r.height }, point));
-    const rowId = row?.id || null;
-    if (rowId !== hoveredId) { hoveredId = rowId; rowAt = now; }
-    if (row && row.id !== detailId && now - rowAt >= (detailId ? 0 : EDGE_DOCK_TIMING.bubbleDelayMs)) {
-      detailId = row.id; bubblePlaced = null;
-      send('bubble', current);
-    }
-    if (!row && detailId && !inDetail) {
-      if (rowAt !== null && now - rowAt >= EDGE_DOCK_TIMING.hideDelayMs) hideDetail();
     }
   }
 
@@ -746,7 +678,6 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     destroyBlur();
     resetShellMotion(); refreshInFlight = null;
     summaryMeasured = false; summaryMeasurement = null; settleSummary = false;
-    hideDetail(); rows = [];
     for (const s of surfaces) {
       disposeGlass(s);
       const win = windows[s];
@@ -782,7 +713,6 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
           windows[s] = null; delete windowIds[s]; delete ignoredMouse[s]; ready[s] = false; shapes[s] = null; lastSent[s] = '';
           disposeGlass(s); nativeMaterial[s] = false;
           if (s === 'notch') { motion = null; stopPressMonitor(); }
-          hideDetail();
         });
         const windowId = Number((win.getMediaSourceId?.() || '').split(':')[1]);
         if (Number.isFinite(windowId) && windowId > 0) windowIds[s] = windowId;
@@ -798,7 +728,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
         win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
         win.webContents.on('will-navigate', (event) => event.preventDefault());
         win.webContents.on('did-fail-load', (_event, code, message) => logger(`[top-notch] renderer failed: ${code} ${message}`));
-        win.loadFile(path.join(rendererDir, 'edgeDock', 'index.html'), { query: { surface: s, owner: 'notch' } })
+        win.loadFile(path.join(rendererDir, 'edgeDock', 'index.html'), { query: { surface: s } })
           .catch(error => logger(`[top-notch] ${s} load failed: ${error.message}`));
       }
     }
@@ -807,7 +737,6 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (settings().notchProgressiveBlur === false || blurAvailable() !== true) blurFailed = false;
     if (!blurEnabled()) destroyBlur();
     if (!screenListeners) { for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, invalidateGeometry); screenListeners = true; }
-    windows.bubble.webContents.setZoomFactor?.(zoom());
     updateGlassAppearance();
     startPressMonitor();
     refreshGeometry(); visibility();
@@ -846,22 +775,13 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
         const width = name => Math.max(0, Math.min(10000, Number(payload.slots[name]) || 0));
         slots = { left: width('left'), right: width('right'), iconInset: width('iconInset') };
       }
-      if (Array.isArray(payload?.rows)) rows = payload.rows.filter((r) => data.cells.some((c) => c.id === r.id) && ['x', 'y', 'width', 'height'].every((key) => Number.isFinite(r[key]) && Math.abs(r[key]) < 10000));
       refreshLayout();
-    },
-    'topNotch:bubbleSize': (event, payload) => {
-      if (ownedSender(event.sender) !== 'bubble' || payload?.cellId !== detailId || !Number.isFinite(payload.height)) return;
-      const current = layout();
-      if (!current) return;
-      bubbleHeight = Math.min(notchMaxHeight(current.display, current.geometry, true) / zoom(), Math.max(40, payload.height));
-      bubblePlaced = { cellId: detailId, height: bubbleHeight }; placeDetail(layout());
     },
     'topNotch:toggleRateMode': (event) => {
       if (!ownedSender(event.sender)) return;
       try { onToggleRateMode?.(); } catch (error) { logger(`[top-notch] rate mode toggle failed: ${error.message}`); }
     },
-    'topNotch:dismiss': (event) => { if (ownedSender(event.sender)) setExpanded(false); },
-    'topNotch:openResetForecastSource': (event) => { if (ownedSender(event.sender)) onOpenResetForecastSource?.(); }
+    'topNotch:dismiss': (event) => { if (ownedSender(event.sender)) setExpanded(false); }
   };
   for (const [channel, handler] of Object.entries(handlers)) ipcMain.on(channel, handler);
   ipcMain.handle('topNotch:refreshLimits', (event) => {
@@ -888,7 +808,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   });
   return { sync, stop, poll, isRunning: () => running, getCapabilities: () => capabilities,
     owns: (win) => surfaces.some((s) => win === windows[s] && alive(win)),
-    previewScale(value) { previewScale = normalizeEdgeDockCustomScale(value); windows.bubble?.webContents.setZoomFactor?.(zoom()); refreshLayout(); },
+    previewScale(value) { previewScale = normalizeEdgeDockCustomScale(value); refreshLayout(); },
     setAppearance(value, { preview = false } = {}) {
       if (preview) {
         // Keep the canonical appearance; the native tint reads settings(),
@@ -899,9 +819,9 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
         }
       } else appearance = value || {};
       updateGlassAppearance();
-      windows.bubble?.webContents.setZoomFactor?.(zoom()); refreshLayout();
+      refreshLayout();
     },
-    setData(value) { data = value; if (detailId && !data.cells.some((c) => c.id === detailId)) hideDetail(); refreshMenu(); refreshLayout(); },
+    setData(value) { data = value; refreshMenu(); refreshLayout(); },
     setLocked(value) {
       locked = value === true;
       if (locked) {
@@ -918,5 +838,5 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     dispose() { stop(); for (const [channel, handler] of Object.entries(handlers)) ipcMain.removeListener(channel, handler); ipcMain.removeHandler('topNotch:switchCodexAccount'); ipcMain.removeHandler('topNotch:refreshLimits'); }
   };
 }
-module.exports = { createNotchController, normalizeNotchStyle, normalizeNotchShape, normalizeNotchDetailSide, normalizeNotchHoverAction, normalizeNotchHoverDelay,
+module.exports = { createNotchController, normalizeNotchStyle, normalizeNotchShape, normalizeNotchHoverAction, normalizeNotchHoverDelay,
   springState, springDuration, NOTCH_SPRINGS, NOTCH_HOVER_DELAYS };

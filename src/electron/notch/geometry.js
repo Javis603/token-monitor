@@ -57,16 +57,15 @@ function notchGeometry(display, native, shape = 'auto') {
 }
 
 // Logical screen points, independent of content zoom or Retina pixel scale.
-// These are caps only: short cards keep their measured natural height.
-function notchMaxHeight(display, geometry, detail = false) {
+// Cap the panel without stretching its fixed content height.
+function notchMaxHeight(display, geometry) {
   const area = display.workArea || display.bounds;
   const top = Math.max(display.bounds.y, area.y);
   const bottom = Math.min(display.bounds.y + display.bounds.height, area.y + area.height);
   const usableHeight = Math.max(0, bottom - top);
-  const origin = detail ? Math.max(top, geometry.y + geometry.height) : geometry.y;
-  return Math.max(geometry.height, Math.min(detail ? 640 : 480,
-    Math.round(usableHeight * (detail ? 0.618 : 0.382)),
-    Math.floor(bottom - origin - (detail ? EDGE_DOCK_METRICS.screenMargin : 12))));
+  return Math.max(geometry.height, Math.min(480,
+    Math.round(usableHeight * 0.382),
+    Math.floor(bottom - geometry.y - 12)));
 }
 
 function notchBounds(display, geometry, expanded, contentHeight = 180, slots = { left: 17, right: 42 }, zoom = 1, maxWidth = display.bounds.width) {
