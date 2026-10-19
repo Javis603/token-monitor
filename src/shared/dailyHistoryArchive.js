@@ -63,6 +63,7 @@ function normalizeObservation(value) {
     tokens,
     cost,
     messages,
+    ...(Number.isFinite(Number(value.utcOffsetMinutes)) ? { utcOffsetMinutes: Math.round(Number(value.utcOffsetMinutes)) } : {}),
     ...(typeof value.pricingRevision === 'string' ? { pricingRevision: value.pricingRevision } : {}),
     ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {}),
     ...(tokenComponentsAvailable ? {
@@ -80,6 +81,7 @@ function addObservation(previous, candidate) {
   return normalizeObservation({
     ...candidate,
     providerId: candidate.providerId || previous.providerId,
+    utcOffsetMinutes: candidate.utcOffsetMinutes !== undefined ? candidate.utcOffsetMinutes : previous.utcOffsetMinutes,
     tokens: previous.tokens + candidate.tokens,
     cost: previous.cost + candidate.cost,
     messages: previous.messages + candidate.messages,
@@ -189,6 +191,9 @@ function normalizeDay(value, fallbackDate = '') {
   const componentSummary = normalizeComponentSummary(
     normalizeTokscaleModelComponentSummary(value?.componentSummary, source), observations
   );
+  const utcOffsetMinutes = Number.isFinite(Number(value?.utcOffsetMinutes))
+    ? Math.round(Number(value.utcOffsetMinutes))
+    : undefined;
   return {
     date,
     activeTimeMs: Math.max(0, Math.round(num(value?.activeTimeMs))),
@@ -198,6 +203,7 @@ function normalizeDay(value, fallbackDate = '') {
     ...(value?.clientIdentityGeneration !== undefined
       ? { clientIdentityGeneration: num(value.clientIdentityGeneration) }
       : {}),
+    ...(utcOffsetMinutes !== undefined ? { utcOffsetMinutes } : {}),
     observations,
     ...(componentSummary ? { componentSummary } : {})
   };
@@ -252,7 +258,15 @@ function observationsFromGraphs(graphs, options = {}) {
     for (const row of (Array.isArray(graph.contributions) ? graph.contributions : [])) {
       const date = String(row?.date || '').slice(0, 10);
       if (!DAY_KEY_RE.test(date)) continue;
-      const day = days.get(date) || { date, activeTimeMs: 0, observations: {} };
+      const dayOffset = Number.isFinite(Number(row?.utcOffsetMinutes))
+        ? Math.round(Number(row.utcOffsetMinutes))
+        : captureOffsetMinutes(options);
+      const day = days.get(date) || {
+        date,
+        activeTimeMs: 0,
+        ...(dayOffset !== null ? { utcOffsetMinutes: dayOffset } : {}),
+        observations: {}
+      };
       day.activeTimeMs += Math.max(0, Math.round(num(row.activeTimeMs ?? row.active_time_ms)));
       for (const raw of (Array.isArray(row?.clients) ? row.clients : [])) {
         const client = foldClientForDate(normalizeTokscaleClientName(raw?.client), date, options) || 'unknown';
@@ -264,7 +278,8 @@ function observationsFromGraphs(graphs, options = {}) {
           tokenComponentsAvailable: raw?.tokenComponentsAvailable !== false,
           cacheReadTokens: raw?.tokens?.cacheRead ?? raw?.tokens?.cache_read,
           cacheWriteTokens: raw?.tokens?.cacheWrite ?? raw?.tokens?.cache_write,
-          outputTokens: sumOutputTokens(raw?.tokens, client)
+          outputTokens: sumOutputTokens(raw?.tokens, client),
+          ...(dayOffset !== null ? { utcOffsetMinutes: dayOffset } : {})
         });
         if (!candidate) continue;
         const key = observationKey(candidate);
@@ -276,8 +291,24 @@ function observationsFromGraphs(graphs, options = {}) {
   return days;
 }
 
-function shouldReplaceObservation(previous, incoming) {
+function captureOffsetMinutes(options = {}) {
+  if (Number.isFinite(Number(options?.utcOffsetMinutes))) {
+    return Math.round(Number(options.utcOffsetMinutes));
+  }
+  return null;
+}
+
+function shouldReplaceObservation(previous, incoming, options = {}) {
   if (!previous) return true;
+  const currentOffset = captureOffsetMinutes(options);
+  const prevOffset = previous.utcOffsetMinutes;
+  const incomingOffset = incoming.utcOffsetMinutes;
+  // If both have finite offset stamps and they differ:
+  // An observation matching the active system capture offset is authoritative for this calendar day.
+  if (currentOffset !== null && Number.isFinite(prevOffset) && Number.isFinite(incomingOffset) && prevOffset !== incomingOffset) {
+    if (incomingOffset === currentOffset) return true;
+    if (prevOffset === currentOffset) return false;
+  }
   if (incoming.tokens !== previous.tokens) return incoming.tokens > previous.tokens;
   if (incoming.messages !== previous.messages) return incoming.messages > previous.messages;
   // Equal usage can legitimately receive corrected pricing or richer metadata.
@@ -300,10 +331,45 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
   }
   const todayKey = String(options.todayKey || '').slice(0, 10);
   const hasTodayKey = DAY_KEY_RE.test(todayKey);
-  const incomingDays = observationsFromGraphs(graphs, { archive });
+  const incomingDays = observationsFromGraphs(graphs, { archive, utcOffsetMinutes: options.utcOffsetMinutes });
   // A failed/empty graph did not confirm any current prices. Keep the old
   // revision so a later successful scan still reconciles retained live costs.
   if (incomingDays.size > 0 && typeof options.pricingRevision === 'string') archive.pricingRevision = options.pricingRevision;
+
+  const currentOffset = captureOffsetMinutes(options);
+
+  // If the active timezone offset changed, reconcile archive dates that were
+  // previously recorded under a different offset within the scanned range.
+  // When a timezone change moves all usage across midnight (e.g. from date D to D-1),
+  // date D is absent from incomingDays. Purging stale cross-offset entries in the
+  // confirmed window prevents the same usage from persisting on both dates.
+  if (currentOffset !== null && incomingDays.size > 0) {
+    let minIncomingDate = null;
+    let maxIncomingDate = null;
+    for (const date of incomingDays.keys()) {
+      if (!DAY_KEY_RE.test(date)) continue;
+      if (minIncomingDate === null || date < minIncomingDate) minIncomingDate = date;
+      if (maxIncomingDate === null || date > maxIncomingDate) maxIncomingDate = date;
+    }
+    if (minIncomingDate !== null && maxIncomingDate !== null) {
+      for (const [date, existingDay] of Object.entries(archive.days)) {
+        if (date < minIncomingDate || date > maxIncomingDate) continue;
+        if (incomingDays.has(date)) continue;
+        if (Number.isFinite(existingDay?.utcOffsetMinutes) && existingDay.utcOffsetMinutes !== currentOffset) {
+          delete archive.days[date];
+        }
+      }
+      if (archive.liveDays) {
+        for (const [date, liveDay] of Object.entries(archive.liveDays)) {
+          if (date < minIncomingDate || date > maxIncomingDate) continue;
+          if (incomingDays.has(date)) continue;
+          if (Number.isFinite(liveDay?.utcOffsetMinutes) && liveDay.utcOffsetMinutes !== currentOffset) {
+            delete archive.liveDays[date];
+          }
+        }
+      }
+    }
+  }
 
   for (const [date, incoming] of incomingDays) {
     if (hasTodayKey && date > todayKey) continue;
@@ -315,15 +381,27 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
     // post-split day from being absorbed into the merged id when Pi happens to be
     // scanned first.
     const legacy = existing !== null && isPreSplitEntry(existing);
+    const offsetChanged = (
+      currentOffset !== null
+      && Number.isFinite(incoming.utcOffsetMinutes)
+      && incoming.utcOffsetMinutes === currentOffset
+      && Number.isFinite(previous.utcOffsetMinutes)
+      && previous.utcOffsetMinutes !== incoming.utcOffsetMinutes
+    );
     const next = {
       date,
-      activeTimeMs: Math.max(previous.activeTimeMs, incoming.activeTimeMs),
+      activeTimeMs: offsetChanged ? incoming.activeTimeMs : Math.max(previous.activeTimeMs, incoming.activeTimeMs),
       ...(legacy ? {} : { clientIdentityGeneration: CLIENT_IDENTITY_GENERATION }),
-      observations: { ...previous.observations }
+      ...(incoming.utcOffsetMinutes !== undefined
+        ? { utcOffsetMinutes: incoming.utcOffsetMinutes }
+        : (previous.utcOffsetMinutes !== undefined ? { utcOffsetMinutes: previous.utcOffsetMinutes } : {})),
+      observations: offsetChanged ? { ...incoming.observations } : { ...previous.observations }
     };
-    for (const [key, observation] of Object.entries(incoming.observations)) {
-      if (shouldReplaceObservation(previous.observations[key], observation)) {
-        next.observations[key] = observation;
+    if (!offsetChanged) {
+      for (const [key, observation] of Object.entries(incoming.observations)) {
+        if (shouldReplaceObservation(previous.observations[key], observation, options)) {
+          next.observations[key] = observation;
+        }
       }
     }
     const normalized = normalizeDay(next, date);
@@ -469,14 +547,21 @@ function dayComponentQuality(day) {
   )) ? 1 : 0;
 }
 
-function liveDayIsGreater(incoming, previous) {
+function liveDayIsGreater(incoming, previous, options = {}) {
+  const currentOffset = captureOffsetMinutes(options);
+  const prevOffset = previous?.utcOffsetMinutes;
+  const incomingOffset = incoming?.utcOffsetMinutes;
+  if (currentOffset !== null && Number.isFinite(prevOffset) && Number.isFinite(incomingOffset) && prevOffset !== incomingOffset) {
+    if (incomingOffset === currentOffset) return true;
+    if (prevOffset === currentOffset) return false;
+  }
   const incomingTokens = dayTokens(incoming);
   const previousTokens = dayTokens(previous);
   if (incomingTokens !== previousTokens) return incomingTokens > previousTokens;
   const qualityDifference = dayComponentQuality(incoming) - dayComponentQuality(previous);
   if (qualityDifference !== 0) return qualityDifference > 0;
-  // Equal usage can receive a corrected price in either direction. The later
-  // live observation is authoritative once its provenance quality is equal.
+  // Equal usage can legitimately receive corrected pricing or richer metadata.
+  // The later live observation is authoritative once its provenance quality is equal.
   return dayCost(incoming) !== dayCost(previous);
 }
 
@@ -562,8 +647,17 @@ function captureLiveDailyHistory(existingArchive, period, options = {}) {
       if (liveDate > date) delete archive.liveDays[liveDate];
     }
   }
+  const dayOffset = Number.isFinite(Number(period?.utcOffsetMinutes))
+    ? Math.round(Number(period.utcOffsetMinutes))
+    : captureOffsetMinutes(options);
   const incoming = periodLiveDay(period, date);
   if (!incoming) return archive;
+  if (dayOffset !== null) {
+    incoming.utcOffsetMinutes = dayOffset;
+    for (const observation of Object.values(incoming.observations)) {
+      observation.utcOffsetMinutes = dayOffset;
+    }
+  }
   if (typeof options.pricingRevision === 'string') {
     for (const observation of Object.values(incoming.observations)) {
       observation.pricingRevision = options.pricingRevision;
@@ -584,7 +678,7 @@ function captureLiveDailyHistory(existingArchive, period, options = {}) {
       observation.tokens !== previous.observations[key]?.tokens
     ))
   );
-  if (!previous || liveDayIsGreater(incoming, previous) || revisionChanged || attributionChanged) {
+  if (!previous || liveDayIsGreater(incoming, previous, options) || revisionChanged || attributionChanged) {
     let selected = incoming;
     if (equalUsage && dayComponentQuality(incoming) < dayComponentQuality(previous)) {
       selected = mergeLiveDayMetadata(incoming, previous);
@@ -628,7 +722,7 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
     if (!previous) {
       currentDays.set(date, liveDay);
     } else {
-      const selected = liveDayIsGreater(liveDay, previous) ? mergeLiveDayMetadata(liveDay, previous) : previous;
+      const selected = liveDayIsGreater(liveDay, previous, options) ? mergeLiveDayMetadata(liveDay, previous) : previous;
       currentDays.set(date, withReconciledGraphCosts(selected, previous, liveDay, options.reprice === true));
     }
   }
@@ -731,12 +825,12 @@ function clearDailyHistoryArchive(options = {}) {
   }
 }
 
-function mergeLiveDaysIntoArchive(existingArchive, liveDays) {
+function mergeLiveDaysIntoArchive(existingArchive, liveDays, options = {}) {
   const archive = normalizeDailyHistoryArchive(existingArchive);
   const incoming = normalizeDailyHistoryArchive({ liveDays }).liveDays || {};
   for (const [date, liveDay] of Object.entries(incoming)) {
     const previous = archive.liveDays?.[date];
-    if (!previous || liveDayIsGreater(liveDay, previous)) {
+    if (!previous || liveDayIsGreater(liveDay, previous, options)) {
       archive.liveDays = { ...(archive.liveDays || {}), [date]: liveDay };
     }
   }
@@ -752,7 +846,7 @@ function archiveWriteEnabled(options = {}) {
 function retainDailyHistory(graphs, options = {}) {
   const previous = readDailyHistoryArchive(options);
   const capture = (archive) => captureDailyHistoryArchive(
-    mergeLiveDaysIntoArchive(archive, options.liveDays),
+    mergeLiveDaysIntoArchive(archive, options.liveDays, options),
     graphs,
     options
   );
@@ -776,7 +870,7 @@ function retainDailyHistory(graphs, options = {}) {
 function retainLiveDailyHistory(period, options = {}) {
   const previous = readDailyHistoryArchive(options);
   const capture = (archive) => captureLiveDailyHistory(
-    mergeLiveDaysIntoArchive(archive, options.liveDays),
+    mergeLiveDaysIntoArchive(archive, options.liveDays, options),
     period,
     options
   );
