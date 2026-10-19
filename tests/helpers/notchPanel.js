@@ -117,7 +117,11 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
   const shared = {
     overflowText,
     limitWindowsView: {
-      setDetailTooltip(node, entries) { node.tooltipEntries = entries; },
+      // Like the real one, the tooltip names its entries as the element's label.
+      setDetailTooltip(node, entries) {
+        node.tooltipEntries = entries;
+        node.setAttribute('aria-label', entries.map(entry => Array.isArray(entry) ? entry.join(': ') : entry.full).join(', '));
+      },
       limitAccountPlan: (...args) => plans.limitAccountPlan(...args)
     },
     markNode: id => el('span', 'edge-dock-mark', id), hasMask: () => true,

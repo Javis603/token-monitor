@@ -255,7 +255,7 @@ test('recent sessions retain all quiet rows and preserve scroll and focus across
   assert.equal(page.querySelectorAll('.notch-recent').length, 1);
 });
 
-test('week footer reads plainly and explains a missing day only on hover', t => {
+test('week footer reads plainly, marks a missing day and explains it on hover', t => {
   const f = panelFixture(t), data = payload();
   f.panel.render(data);
   const summary = f.find('notch-week-foot');
@@ -266,8 +266,8 @@ test('week footer reads plainly and explains a missing day only on hover', t => 
   assert.equal(f.find('notch-week-cost-value').attributes['aria-label'], 'Total cost: $3');
   assert.equal(f.find('notch-week-tokens').tooltipEntries, undefined);
   data.panel.week.days[0].tokens = null; f.panel.render(data);
-  // A day without data draws like any other day; nothing relabels the total.
-  assert.equal(f.find('notch-week-bars').querySelectorAll('.is-unknown').length, 0);
+  // A day without data keeps its baseline mark; nothing relabels the total.
+  assert.equal(f.find('notch-week-bars').querySelectorAll('.is-unknown').length, 1);
   assert.equal(f.find('notch-week-foot').querySelectorAll('.notch-summary-label').length, 0);
   assert.equal(f.find('notch-week-tokens').textContent, '100');
   assert.deepEqual(f.find('notch-week-tokens').tooltipEntries.map(entry => entry.full),

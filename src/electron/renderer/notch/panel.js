@@ -474,6 +474,8 @@
         }
         if (day.today && !clients.length) bar.classList.add('is-plain');
         column.append(bar);
+        // A day without data keeps a small baseline mark, so it does not read as a quiet day.
+        if (day.tokens === null) column.classList.add('is-unknown');
         column.title = `${day.date} · ${day.tokens === null ? '—' : formatTokens(day.tokens)}`;
         column.setAttribute('aria-label', column.title);
         column.addEventListener('pointerenter', () => {
@@ -493,8 +495,10 @@
       const partial = week.complete === false || week.days.some((day) => day.tokens === null);
       const total = el('div', 'notch-week-summary');
       const weekTokens = text('notch-week-tokens notch-strong', formatTokens(week.total));
-      weekTokens.setAttribute('aria-label', `${t('notch.totalUsage')}: ${weekTokens.textContent}${partial ? `. ${t('notch.partialHistory')}` : ''}`);
+      // The shared tooltip names its own entries as the label, so the total is
+      // labelled after it is attached.
       if (partial) limitWindowsView.setDetailTooltip(weekTokens, [{ full: t('notch.partialHistory') }]);
+      weekTokens.setAttribute('aria-label', `${t('notch.totalUsage')}: ${weekTokens.textContent}${partial ? `. ${t('notch.partialHistory')}` : ''}`);
       total.append(weekTokens);
       foot.append(total);
       if (week.cost > 0 || week.days.some(day => day.unpricedTokens > 0)) {
