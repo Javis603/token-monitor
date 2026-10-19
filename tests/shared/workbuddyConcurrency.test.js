@@ -1,9 +1,18 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
 const { providerPhysicalBoundMs } = require('../../src/shared/limits/collector');
+
+// The usage ledger defaults to the app's own data directory, which a test must
+// never write: the same isolation the archive tests make with this variable,
+// applied for the whole file (node runs each test file in its own process).
+const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workbuddy-concurrency-tests-'));
+test.after(() => fs.rmSync(testDataDir, { recursive: true, force: true }));
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 const quota = () => ({ ok: true, status: 200, json: async () => ({ code: 0, data: {
@@ -26,7 +35,7 @@ test('WorkBuddy bounds mixed managed/local credential and quota work to four acc
     try { await turn(); return result; } finally { active -= 1; }
   };
   const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed,
-    workbuddyDesktopSessionEnabled: true, workbuddyLocalSessions: locals }, { env: {},
+    workbuddyDesktopSessionEnabled: true, workbuddyLocalSessions: locals }, { env: { TOKEN_MONITOR_SHARED_DIR: testDataDir },
     resolveWorkbuddyManagedCredential: async () => operation({ accessToken: 'fixture' }),
     fetch: async () => operation(quota()), workbuddyFetch: async () => operation(quota()) });
   assert.equal(peak, 4);
@@ -45,7 +54,7 @@ test('WorkBuddy keeps unauthorized billing, refresh and retry within the same fo
     peak = Math.max(peak, active);
     try { await turn(); return result; } finally { active -= 1; }
   };
-  const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed }, { env: {},
+  const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed }, { env: { TOKEN_MONITOR_SHARED_DIR: testDataDir },
     resolveWorkbuddyManagedCredential: async (account, { forceRefresh }) => {
       if (forceRefresh) refreshed.push(account.id);
       return operation({ accessToken: `${account.id}:${forceRefresh ? 'new' : 'old'}` });
@@ -67,7 +76,7 @@ for (const phase of ['credential', 'quota']) {
     const signals = [];
     let localCalls = 0;
     const pending = fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed,
-      workbuddyDesktopSessionEnabled: true, workbuddyLocalSessions: locals }, { env: {}, signal: controller.signal,
+      workbuddyDesktopSessionEnabled: true, workbuddyLocalSessions: locals }, { env: { TOKEN_MONITOR_SHARED_DIR: testDataDir }, signal: controller.signal,
       resolveWorkbuddyManagedCredential: async (account, { signal }) => {
         calls.push(account.id);
         if (phase === 'credential') { signals.push(signal); return new Promise(() => {}); }
@@ -91,7 +100,7 @@ test('WorkBuddy already-canceled batches do not resolve credentials or send quot
   const controller = new AbortController();
   controller.abort();
   let calls = 0;
-  const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed }, { env: {}, signal: controller.signal,
+  const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed }, { env: { TOKEN_MONITOR_SHARED_DIR: testDataDir }, signal: controller.signal,
     resolveWorkbuddyManagedCredential: async () => { calls += 1; }, fetch: async () => { calls += 1; } });
   assert.equal(calls, 0);
   assert.equal(rows.length, managed.length);
@@ -101,7 +110,7 @@ test('WorkBuddy already-canceled batches do not resolve credentials or send quot
 test('WorkBuddy isolates credential and billing failures without dropping or reordering queued accounts', async () => {
   const managed = accounts(13);
   const resolved = [];
-  const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed }, { env: {},
+  const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed }, { env: { TOKEN_MONITOR_SHARED_DIR: testDataDir },
     resolveWorkbuddyManagedCredential: async (account) => {
       resolved.push(account.id);
       await turn();
@@ -127,7 +136,7 @@ test('WorkBuddy shares the provider budget across waves so stalled first account
   const controller = new AbortController();
   const resolved = [];
   const firstSignals = [];
-  const pending = fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed }, { env: {}, signal: controller.signal,
+  const pending = fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed }, { env: { TOKEN_MONITOR_SHARED_DIR: testDataDir }, signal: controller.signal,
     workbuddyFetchTimeoutMs: budgetMs * 2,
     resolveWorkbuddyManagedCredential: async (account, { signal }) => {
       resolved.push(account.id);
@@ -161,7 +170,7 @@ test('WorkBuddy account budgets cover resolve, unauthorized quota, refresh and r
   const controller = new AbortController();
   const resolved = [];
   const refreshed = [];
-  const pending = fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed }, { env: {}, signal: controller.signal,
+  const pending = fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed }, { env: { TOKEN_MONITOR_SHARED_DIR: testDataDir }, signal: controller.signal,
     providerPhysicalBounds: { workbuddy: 120 }, workbuddyFetchTimeoutMs: 1000,
     resolveWorkbuddyManagedCredential: async (account, { forceRefresh }) => {
       if (forceRefresh) refreshed.push(account.id);
@@ -194,7 +203,7 @@ test('WorkBuddy exhausted provider budgets skip queued work and reject late cred
   let requests = 0;
   let finishCredentials;
   const credentials = new Promise((resolve) => { finishCredentials = resolve; });
-  const pending = fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed }, { env: {},
+  const pending = fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed }, { env: { TOKEN_MONITOR_SHARED_DIR: testDataDir },
     providerPhysicalBounds: { workbuddy: 120 }, workbuddyFetchTimeoutMs: 1000,
     resolveWorkbuddyManagedCredential: async (account) => { calls.push(account.id); return credentials; },
     fetch: async () => { requests += 1; return quota(); } });

@@ -1,16 +1,45 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
+const workbuddyLimits = require('../../src/shared/providers/workbuddy/limits');
 const {
   WORKBUDDY_DEFAULT_ENDPOINT,
-  fetchWorkbuddyLimits,
   parseEnterpriseUsage,
   parsePersonalUsage,
   workbuddyAccountKey
-} = require('../../src/shared/providers/workbuddy/limits');
+} = workbuddyLimits;
 const { collectLimitsOnce } = require('../../src/shared/limits/collector');
+
+// The usage ledger defaults to the app's own data directory, which a test must
+// never write: the same isolation the archive tests make with this variable,
+// applied for the whole file (node runs each test file in its own process).
+// Tests that assert on the ledger still inject their own store.
+const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workbuddy-limits-tests-'));
+test.after(() => fs.rmSync(testDataDir, { recursive: true, force: true }));
+
+function fetchWorkbuddyLimits(options, deps = {}) {
+  const env = { TOKEN_MONITOR_SHARED_DIR: testDataDir, ...(deps.env || {}) };
+  return workbuddyLimits.fetchWorkbuddyLimits(options, { ...deps, env });
+}
+
+function memUsageStore() {
+  const box = { value: null, writes: 0 };
+  return {
+    io: {
+      readJson: () => box.value,
+      writeJsonAtomic: (_storePath, value) => {
+        box.value = JSON.parse(JSON.stringify(value));
+        box.writes += 1;
+      }
+    },
+    writes: () => box.writes
+  };
+}
 
 const NOW = Date.parse('2026-08-09T10:00:00Z');
 const PERSONAL_REQUEST_NOW = new Date(2026, 7, 9, 10, 11, 12).getTime();
@@ -152,6 +181,7 @@ test('parsePersonalUsage fails closed when any active resource package has unusa
 
 test('fetchWorkbuddyLimits sends the private personal billing request without exposing credentials', async () => {
   const requests = [];
+  const usage = memUsageStore();
   const provider = await fetchWorkbuddyLimits(
     {
       workbuddyAccessToken: 'fixture-access-token',
@@ -163,6 +193,8 @@ test('fetchWorkbuddyLimits sends the private personal billing request without ex
     {
       env: {},
       now: () => PERSONAL_REQUEST_NOW,
+      workbuddyUsageStorePath: '/x/wb-usage.json',
+      ...usage.io,
       fetch: async (url, init) => {
         requests.push({ url: String(url), init });
         return response({
@@ -204,16 +236,105 @@ test('fetchWorkbuddyLimits sends the private personal billing request without ex
   assert.equal(provider.windows[0].currency, 'CREDITS');
   assert.equal(provider.balance.amount, 76);
   assert.equal(provider.balance.currency, 'CREDITS');
-  assert.equal(provider.balance.todaySpend, null);
-  assert.equal(provider.balance.weekSpend, null);
-  assert.equal(provider.balance.monthSpend, null);
-  assert.equal(provider.balance.allTimeSpend, null);
-  assert.equal(provider.balance.trackingSince, null);
-  assert.equal(provider.balance.monthSinceTracking, false);
+  // The first observation baselines the ledger: it states no spend yet, and
+  // records when local tracking began for this account.
+  assert.equal(provider.balance.todaySpend, 0);
+  assert.equal(provider.balance.weekSpend, 0);
+  assert.equal(provider.balance.monthSpend, 0);
+  assert.equal(provider.balance.allTimeSpend, 0);
+  assert.equal(provider.balance.trackingSince, new Date(PERSONAL_REQUEST_NOW).toISOString());
+  assert.equal(provider.balance.monthSinceTracking, true);
+  assert.equal(usage.writes(), 1);
   assert.doesNotMatch(
     JSON.stringify(provider),
     /fixture-access-token|user-123|enterprise-456|Engineering|copilot\.tencent\.com/
   );
+});
+
+test('fetchWorkbuddyLimits derives Credits spend from consecutive billing observations', async () => {
+  const usage = memUsageStore();
+  const requests = [];
+  const options = {
+    workbuddyAccessToken: 'fixture-access-token',
+    workbuddyUserId: 'user-123',
+    workbuddyDomain: 'copilot.tencent.com'
+  };
+  const deps = (remaining) => ({
+    env: {},
+    now: () => PERSONAL_REQUEST_NOW,
+    workbuddyUsageStorePath: '/x/wb-spend.json',
+    ...usage.io,
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return response({
+        data: {
+          Response: {
+            Data: {
+              Accounts: [{
+                CycleCapacitySizePrecise: 100,
+                CycleCapacityRemainPrecise: remaining,
+                DeductionEndTime: '2026-09-01T00:00:00Z'
+              }]
+            }
+          }
+        }
+      });
+    }
+  });
+
+  const first = await fetchWorkbuddyLimits(options, deps(76));
+  assert.equal(first.balance.todaySpend, 0);
+
+  // One hour later the same account has spent 20 of its 100 Credits.
+  const second = await fetchWorkbuddyLimits(options, {
+    ...deps(56),
+    now: () => PERSONAL_REQUEST_NOW + 60 * 60 * 1000
+  });
+  assert.equal(requests.length, 2);
+  assert.equal(second.balance.todaySpend, 20);
+  assert.equal(second.balance.weekSpend, 20);
+  assert.equal(second.balance.monthSpend, 20);
+  assert.equal(second.balance.allTimeSpend, 20);
+  assert.equal(second.balance.trackingSince, new Date(PERSONAL_REQUEST_NOW).toISOString());
+  assert.equal(usage.writes(), 2);
+});
+
+test('fetchWorkbuddyLimits probe checks a credential without writing usage history', async () => {
+  const usage = memUsageStore();
+  const provider = await fetchWorkbuddyLimits(
+    {
+      workbuddyAccessToken: 'fixture-access-token',
+      workbuddyUserId: 'user-123',
+      workbuddyDomain: 'copilot.tencent.com'
+    },
+    {
+      env: {},
+      probe: true,
+      now: () => PERSONAL_REQUEST_NOW,
+      workbuddyUsageStorePath: '/x/wb-probe.json',
+      ...usage.io,
+      fetch: async () => response({
+        data: {
+          Response: {
+            Data: {
+              Accounts: [{
+                CycleCapacitySizePrecise: 100,
+                CycleCapacityRemainPrecise: 76,
+                DeductionEndTime: '2026-09-01T00:00:00Z'
+              }]
+            }
+          }
+        }
+      })
+    }
+  );
+
+  // The save-time probe answers the balance but leaves the ledger untouched:
+  // it is the user checking a credential, not the collector's cadence.
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.balance.amount, 76);
+  assert.equal(provider.balance.todaySpend, null);
+  assert.equal(usage.writes(), 0);
 });
 
 test('fetchWorkbuddyLimits uses the WorkBuddy app session without asking users for a token', async () => {

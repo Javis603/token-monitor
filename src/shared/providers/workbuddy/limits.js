@@ -1,9 +1,12 @@
 'use strict';
 
+const path = require('node:path');
 const { hashKey } = require('../../hashKey');
+const { sharedDataDir } = require('../../config');
 const { normalizeLimitProvider } = require('../../limits/core');
 const { cleanSecret, numberOrNull } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
+const { recordWorkbuddyUsage } = require('./usageHistory');
 
 const WORKBUDDY_FETCH_TIMEOUT_MS = 12_000;
 const WORKBUDDY_ACCOUNT_CONCURRENCY = 4;
@@ -481,10 +484,32 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
         body = await requestQuota();
       }
       const usage = enterpriseId ? parseEnterpriseUsage(body) : parsePersonalUsage(body);
+      const resolvedAccountKey = managed || userId
+        ? accountKey
+        : workbuddyAccountKey(explicitToken, userId, enterpriseId, usage.accountId, realm);
+      // What the account spent between two observations of its aggregate used
+      // Credits — the only way to state Today/Week/Month on a billing API with
+      // no period rollups. A probe does not write history: it is the user
+      // checking the credential they just saved, not the collector's cadence.
+      const tracked = usage.window && !deps.probe ? recordWorkbuddyUsage({
+        accountKey: resolvedAccountKey,
+        used: usage.used,
+        now,
+        storePath: deps.workbuddyUsageStorePath
+          || path.join(sharedDataDir({ env }), 'workbuddy-usage-v1.json'),
+        readJson: deps.readJson,
+        writeJsonAtomic: deps.writeJsonAtomic
+      }) : null;
       return row('ok', {
-        accountKey: managed || userId ? accountKey : workbuddyAccountKey(explicitToken, userId, enterpriseId, usage.accountId, realm),
+        accountKey: resolvedAccountKey,
         windows: usage.window ? [usage.window] : [],
-        ...(usage.window ? { balance: { amount: usage.remaining, currency: 'CREDITS' } } : {})
+        ...(usage.window ? {
+          balance: {
+            amount: usage.remaining,
+            currency: 'CREDITS',
+            ...(tracked || {})
+          }
+        } : {})
       });
     }, { signal: deps.signal, deadlineMs: deps.workbuddyAccountTimeoutMs || WORKBUDDY_PROBE_BUDGET_MS });
   } catch (error) { return row(workbuddyStatus(error)); }
