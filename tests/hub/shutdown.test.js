@@ -87,6 +87,45 @@ test('stop keeps an admitted upload and saves its final data after draining', as
   assert.equal(devices['in-flight'].periods.today.totalTokens, 17);
 });
 
+test('drained keep-alive uploads close without waiting for the force-close deadline', async (t) => {
+  const { hub, read } = fixture(t);
+  await hub.start();
+  const agent = new http.Agent({ keepAlive: true });
+  const requested = once(hub.server, 'request');
+  const request = http.request({
+    host: '127.0.0.1', port: hub.server.address().port, agent,
+    path: '/api/ingest', method: 'POST', headers: { 'content-type': 'application/json' }
+  });
+  const response = new Promise((resolve, reject) => {
+    request.once('error', reject);
+    request.once('response', (res) => {
+      res.resume();
+      res.once('end', () => resolve(res.statusCode));
+    });
+  });
+  request.write('{"deviceId":"keep-alive","today":');
+  await requested;
+  const stopped = hub.stop();
+  let timeout;
+  try {
+    request.end('{"totalTokens":17}}');
+    assert.equal(await response, 200);
+    await Promise.race([
+      stopped,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('drained keep-alive socket blocked shutdown')), 2000);
+      })
+    ]);
+    assert.equal(read().devices['keep-alive'].periods.today.totalTokens, 17);
+  } finally {
+    clearTimeout(timeout);
+    request.destroy();
+    agent.destroy();
+    hub.server.closeAllConnections();
+    await stopped;
+  }
+});
+
 test('concurrent stops share completion and force-close a stuck upload after the drain deadline', async (t) => {
   const { hub, read } = fixture(t);
   await hub.start();
@@ -216,6 +255,27 @@ test('a final save failure rejects stop and a later stop can retry without losin
     mocked.mock.restore();
   }
   await hub.stop();
+  assert.equal(read().devices.accepted.periods.today.totalTokens, 42);
+});
+
+test('restarting after a failed stop schedules retained pending data without another ingest', async (t) => {
+  const { hub, dataFile, read } = fixture(t, { logger: { error() {} } });
+  hub.ingest({ deviceId: 'accepted', today: { totalTokens: 42 } });
+  const write = fs.writeFileSync;
+  const mocked = t.mock.method(fs, 'writeFileSync', (file, ...args) => {
+    if (file === `${dataFile}.tmp`) throw new Error('synthetic persistent write failure');
+    return write(file, ...args);
+  });
+  try {
+    await assert.rejects(hub.stop(), /synthetic persistent write failure/);
+  } finally {
+    mocked.mock.restore();
+  }
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  await hub.start();
+  t.mock.timers.tick(299999);
+  assert.equal(fs.existsSync(dataFile), false);
+  t.mock.timers.tick(1);
   assert.equal(read().devices.accepted.periods.today.totalTokens, 42);
 });
 

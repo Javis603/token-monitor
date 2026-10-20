@@ -489,6 +489,10 @@ function createHub({
   }
 
   const server = http.createServer((req, res) => {
+    res.once('finish', () => {
+      // A request can become idle after close() has already swept idle sockets.
+      if (stopping) server.closeIdleConnections();
+    });
     handleRequest(req, res).catch((error) => {
       (logger.error || console.error)(error);
       sendJson(res, 500, { error: 'internal_error', message: error.message });
@@ -500,7 +504,11 @@ function createHub({
     stopping = false;
     return new Promise((resolve, reject) => {
       const onError = (err) => { server.off('listening', onListening); reject(err); };
-      const onListening = () => { server.off('error', onError); resolve(); };
+      const onListening = () => {
+        server.off('error', onError);
+        if (persistPending) queuePersist();
+        resolve();
+      };
       server.once('error', onError);
       server.once('listening', onListening);
       server.listen(port, bindHost);
