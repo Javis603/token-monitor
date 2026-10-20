@@ -32,6 +32,7 @@ const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/ht
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+const SHUTDOWN_DRAIN_TIMEOUT_MS = 5000;
 
 // Without a secret the hub cannot tell its own widget from any other caller, so it
 // must not expose account identity (email/plan/key) to the network. Binding to
@@ -71,6 +72,8 @@ function createHub({
   const bindHost = resolveBindHost(host, secret);
   let persistTimer = null;
   let persistPending = false;
+  let stopping = false;
+  let stopPromise = null;
 
   // Apply the permission at startup, including records from offline devices.
   // Keep disabled policies as tombstones so re-enabling cannot reuse old tokens.
@@ -97,6 +100,8 @@ function createHub({
   function queuePersist() {
     if (persistIntervalMs === 0) return persist();
     persistPending = true;
+    // Admitted HTTP uploads can finish during stop; its final flush owns them.
+    if (stopping) return;
     // Keep the first deadline: continuous uploads must not postpone saving.
     if (persistTimer) return;
     persistTimer = setTimeout(() => {
@@ -201,6 +206,11 @@ function createHub({
   // Transport-agnostic core: both the HTTP POST handler and the same-process
   // widget call these, so a host-mode widget never has to loopback to itself.
   function ingest(payload) {
+    if (stopping) throw Object.assign(new Error('Hub is stopping'), { code: 'hub_stopping' });
+    return ingestRecord(payload);
+  }
+
+  function ingestRecord(payload) {
     if (!payload || (!payload.deviceId && !payload.id)) {
       throw new Error('deviceId_required');
     }
@@ -346,6 +356,12 @@ function createHub({
   }
 
   async function handleRequest(req, res) {
+    // Existing sockets can finish their headers after server.close(). In
+    // particular, do not admit a new SSE stream after ending the old streams.
+    if (stopping) {
+      res.shouldKeepAlive = false;
+      return sendJson(res, 503, { error: 'hub_stopping' }, { connection: 'close' });
+    }
     if (req.method === 'OPTIONS') return sendText(res, 204, '');
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
@@ -424,7 +440,7 @@ function createHub({
     if (req.method === 'POST' && url.pathname === '/api/ingest') {
       try {
         const payload = await readJsonBody(req);
-        const record = ingest(payload);
+        const record = ingestRecord(payload);
         const response = { ok: true, deviceId: record.deviceId };
         return sendJson(res, 200, wantsMinimalResponse(req) ? response : { ...response, stats: getStats() });
       } catch (error) {
@@ -480,6 +496,8 @@ function createHub({
   });
 
   function start() {
+    if (stopPromise) return Promise.reject(new Error('Hub is stopping'));
+    stopping = false;
     return new Promise((resolve, reject) => {
       const onError = (err) => { server.off('listening', onListening); reject(err); };
       const onListening = () => { server.off('error', onError); resolve(); };
@@ -490,21 +508,36 @@ function createHub({
   }
 
   function stop() {
-    return new Promise((resolve, reject) => {
+    if (stopPromise) return stopPromise;
+    stopping = true;
+    const operation = new Promise((resolve, reject) => {
+      clearTimeout(persistTimer);
+      persistTimer = null;
       if (broadcastTimer) clearTimeout(broadcastTimer);
       broadcastTimer = null;
       for (const client of sseClients) { try { client.res.end(); } catch (_) {} }
       sseClients.clear();
-      server.close(() => {
+      // Save acknowledged uploads even if another request never finishes.
+      // A transient failure still gets a second attempt after draining.
+      try { if (persistPending) persist(); } catch (error) {
+        (logger.error || console.error)('Hub failed to save before draining requests:', error);
+      }
+      const deadline = setTimeout(() => server.closeAllConnections(), SHUTDOWN_DRAIN_TIMEOUT_MS);
+      deadline.unref();
+      server.close((error) => {
+        clearTimeout(deadline);
         try {
-          // Closing first lets in-flight ingests finish before the final save.
+          // Include uploads whose bodies completed while connections drained.
           if (persistPending) persist();
+          if (error && error.code !== 'ERR_SERVER_NOT_RUNNING') throw error;
           resolve();
         } catch (error) {
           reject(error);
         }
       });
     });
+    stopPromise = operation.finally(() => { stopPromise = null; });
+    return stopPromise;
   }
 
   return {

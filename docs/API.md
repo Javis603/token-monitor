@@ -20,6 +20,8 @@ X-Token-Monitor-Secret: <secret>
 
 The Node hub is header-only. The Cloudflare Worker still accepts `?secret=` as a limited compatibility / migration path for iOS widget runtimes that cannot set `Authorization`. A secret in the URL can appear in proxy, platform, and history logs; new clients should send a header.
 
+During Node Hub shutdown, new requests receive `503` with `{ "error": "hub_stopping" }` and `Connection: close`, including requests completed on previously connected sockets. Already-admitted uploads can finish during the drain period; remaining HTTP connections are force-closed after a five-second timer target. Pending usage is saved before and after draining. This lifecycle response does not apply to the Cloudflare Worker.
+
 ## `GET /api/health`
 
 Health check. Does not require authentication.
