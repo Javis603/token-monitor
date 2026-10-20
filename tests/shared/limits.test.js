@@ -952,6 +952,44 @@ test('aggregateLimits resolves OpenCode components independently of device order
   assert.deepEqual(reverse, forward);
 });
 
+test('aggregateLimits keeps the Antigravity snapshot that carries Gemini 4 Argon over a fresher partial one', () => {
+  const groups = [
+    { kind: 'session', label: 'Gemini 5-hour', usedPercent: 0, windowMinutes: 300 },
+    { kind: 'weekly', label: 'Gemini weekly', usedPercent: 1, windowMinutes: 10080 },
+    { kind: 'session', label: 'Claude/GPT 5-hour', usedPercent: 0, windowMinutes: 300 },
+    { kind: 'weekly', label: 'Claude/GPT weekly', usedPercent: 0, windowMinutes: 10080 }
+  ];
+  const device = (deviceId, updatedAt, windows) => ({
+    deviceId,
+    limits: {
+      updatedAt,
+      providers: [{
+        provider: 'antigravity',
+        accountKey: 'sha256:antigravity-shared',
+        accountEmail: 'user@example.com',
+        status: 'ok',
+        source: 'oauth',
+        updatedAt,
+        windows
+      }]
+    }
+  });
+  const withArgon = device('new-build', '2026-10-20T11:40:00.000Z', [
+    ...groups.slice(0, 2),
+    { kind: 'weekly', label: 'Gemini 4 Argon weekly', usedPercent: 0, windowMinutes: 10080 },
+    ...groups.slice(2)
+  ]);
+  const withoutArgon = device('old-build', '2026-10-20T11:44:00.000Z', groups);
+  const now = Date.parse('2026-10-20T11:45:00.000Z');
+  const forward = aggregateLimits([withArgon, withoutArgon], 600_000, now);
+  const reverse = aggregateLimits([withoutArgon, withArgon], 600_000, now);
+
+  assert.equal(forward.providers.length, 1);
+  assert.equal(forward.providers[0].sourceDeviceId, 'new-build');
+  assert.ok(forward.providers[0].windows.some((window) => window.label === 'Gemini 4 Argon weekly'));
+  assert.deepEqual(reverse, forward);
+});
+
 test('aggregateLimits preserves Go authority within one legacy OpenCode observation', () => {
   const aggregateLegacy = (windows) => aggregateLimits([{
     deviceId: 'legacy-device',
