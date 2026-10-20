@@ -864,7 +864,7 @@ async function collectHistoryOnce(options) {
       if (typeof options.logger === 'function') options.logger(`tokscale graph failed: ${error.message}`);
     }
   }
-  const ompGraphIsPrimary = !clients && Boolean(options.ompGraph);
+  const ompGraphIsPrimary = !String(clients || '').trim() && Boolean(options.ompGraph);
   if (options.ompGraph) {
     rawGraphs.push(options.ompGraph);
     if (ompGraphIsPrimary) liveHistory = normalizeHistory(parseGraphResult(options.ompGraph), { capDays, todayKey });
@@ -876,9 +876,11 @@ async function collectHistoryOnce(options) {
       options.codexLocalGraph,
       ...(ompIncluded ? [] : [options.ompGraph])
     ].filter(Boolean).map((graph) => normalizeHistory(parseGraphResult(graph), { capDays, todayKey }));
-    // A failed native scan without retained history is no update, not a new
-    // supplemental-only replacement for the device's last successful history.
-    if (!history && failureCode === 'history-graph-failed' && supplementalGraphs.length === 0) return null;
+    // A native scan that failed and retained nothing is no update. Folding a
+    // supplemental ledger in here would publish it as the device's history and
+    // drop the last complete snapshot, which is what the failure path exists to
+    // protect; only OMP running as the sole plane can stand in for a native one.
+    if (!history && failureCode === 'history-graph-failed' && !ompGraphIsPrimary) return null;
     return supplementalGraphs.length
       ? mergeHistories([history, ...supplementalGraphs].filter(Boolean), { capDays, todayKey })
       : history;

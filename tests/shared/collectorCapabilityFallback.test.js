@@ -353,6 +353,18 @@ async function collectWithFallback(clients, acceptsForkOnly, rejectedForkClients
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
+  // Collection only scans clients that have a source on disk, so the capability
+  // conversation needs a home where every id it talks about actually exists.
+  // CatPaw has no Linux root at all, which leaves it with no checks to fail.
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tokscale-fallback-'));
+  for (const dir of [
+    path.join(homeDir, '.claude', 'projects'),
+    path.join(homeDir, '.local', 'share', 'amp', 'threads'),
+    path.join(homeDir, '.proma', 'agent-sessions'),
+    path.join(homeDir, '.qoder-cn', 'projects')
+  ]) fs.mkdirSync(dir, { recursive: true });
+  const previousDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(homeDir, '.local', 'share');
   childProcess.spawn = (_bin, args) => {
     if (args.includes('--help')) return helpChild(['claude', 'dsh']);
     const requested = args[args.indexOf('--client') + 1].split(',');
@@ -371,12 +383,16 @@ async function collectWithFallback(clients, acceptsForkOnly, rejectedForkClients
       commandTimeoutMs: 1000,
       deviceId: 'test-device',
       agentVersion: 'test',
-      limitsEnabled: false
+      limitsEnabled: false,
+      homeDir
     });
     return calls;
   } finally {
     childProcess.spawn = originalSpawn;
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousDataHome;
     delete require.cache[collectorPath];
+    fs.rmSync(homeDir, { recursive: true, force: true });
   }
 }
 
