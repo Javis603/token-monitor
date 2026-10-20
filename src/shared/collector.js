@@ -2277,6 +2277,9 @@ function collectorAnchorTrust(saved, options = {}) {
   // Old Cursor anchors preserve `default` in their broad-period model maps;
   // applying a new `cursor-auto` Today delta to them would split one mode.
   if (normalizeClientsCsv(clients).split(',').includes('cursor') && saved.cursorAutoModelVersion !== 1) return null;
+  // Same for Qoder CN anchors written before its internal model codes were
+  // mapped app-side (`qfmodel` -> `Qwen3.8-Flash`).
+  if (normalizeClientsCsv(clients).split(',').includes('qodercn') && saved.qoderCnModelVersion !== 1) return null;
   const pricingRevision = options.pricingRevision ?? pricingFingerprint(options);
   if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, pricingRevision, options)) return null;
   const parsed = Date.parse(saved.fullScanAt || '');
@@ -2770,6 +2773,7 @@ function startCollector(options) {
         dateKey: anchor.dateKey,
         sessionIdentityVersion: anchor.sessionIdentityVersion,
         cursorAutoModelVersion: 1,
+        qoderCnModelVersion: 1,
         today: anchor.today,
         month: anchor.month,
         allTime: anchor.allTime,

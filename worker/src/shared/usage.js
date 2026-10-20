@@ -890,28 +890,38 @@ function normalizeSession(input, fallbackKey) {
   return session;
 }
 
-function cursorAutoRawModels(source, roundTokens) {
+// Client-scoped model renames (Cursor `auto`/`default` -> `cursor-auto`, Qoder
+// CN internal codes -> display names) are applied to the per-client maps, but a
+// stored period's global maps carry no client. Find the raw global buckets the
+// per-client maps say were renamed, and how much of each moved where.
+function clientRenamedRawModels(source, roundTokens) {
   const totals = new Map();
-  for (const [client, models] of Object.entries(source || {})) {
-    if (normalizeClientName(client) !== 'cursor' || !models || typeof models !== 'object') continue;
+  for (const [rawClient, models] of Object.entries(source || {})) {
+    if (!models || typeof models !== 'object') continue;
+    const client = normalizeClientName(rawClient);
+    if (!client) continue;
     for (const [model, value] of Object.entries(models)) {
       const raw = normalizeModelName(model);
-      if (raw !== 'auto' && raw !== 'default') continue;
+      const target = normalizeModelName(normalizeTokscaleModelNameForClient(model, client));
+      if (!raw || !target || raw === target) continue;
+      const key = `${raw}\u0000${target}`;
       const next = Math.max(0, roundTokens ? Math.round(asNumber(value)) : asNumber(value));
-      totals.set(raw, (totals.get(raw) || 0) + next);
+      const entry = totals.get(key) || { raw, target, moved: 0 };
+      entry.moved += next;
+      totals.set(key, entry);
     }
   }
-  return totals;
+  return [...totals.values()];
 }
 
-function reconcileCursorAutoGlobalModels(period, input) {
-  for (const [raw, moved] of cursorAutoRawModels(input.clientModels, true)) {
+function reconcileClientRenamedGlobalModels(period, input) {
+  for (const { raw, target, moved } of clientRenamedRawModels(input.clientModels, true)) {
     const available = Math.max(0, Math.round(asNumber(period.models[raw])));
     if (moved <= 0 || moved > available) continue;
     const exclusive = moved === available;
     period.models[raw] = available - moved;
     if (period.models[raw] === 0) delete period.models[raw];
-    period.models['cursor-auto'] = (period.models['cursor-auto'] || 0) + moved;
+    period.models[target] = (period.models[target] || 0) + moved;
     if (exclusive) {
       for (const key of [
         'modelCacheReads',
@@ -921,7 +931,7 @@ function reconcileCursorAutoGlobalModels(period, input) {
         'modelUnpricedTokens'
       ]) {
         if (!period[key]?.[raw]) continue;
-        period[key]['cursor-auto'] = (period[key]['cursor-auto'] || 0) + period[key][raw];
+        period[key][target] = (period[key][target] || 0) + period[key][raw];
         delete period[key][raw];
       }
     } else {
@@ -929,20 +939,20 @@ function reconcileCursorAutoGlobalModels(period, input) {
       // clients. Keep the token split, but do not invent a cache/output split.
       for (const key of ['modelCacheReads', 'modelCacheWrites', 'modelOutputs']) delete period[key][raw];
       period.modelUnclassifiedTokens[raw] = period.models[raw];
-      period.modelUnclassifiedTokens['cursor-auto'] = Math.min(
-        period.models['cursor-auto'],
-        (period.modelUnclassifiedTokens['cursor-auto'] || 0) + moved
+      period.modelUnclassifiedTokens[target] = Math.min(
+        period.models[target],
+        (period.modelUnclassifiedTokens[target] || 0) + moved
       );
       period.capabilities.tokenComponents = false;
     }
   }
-  for (const [raw, requested] of cursorAutoRawModels(input.clientModelCosts, false)) {
+  for (const { raw, target, moved: requested } of clientRenamedRawModels(input.clientModelCosts, false)) {
     const available = Math.max(0, asNumber(period.modelCosts[raw]));
     if (requested <= 0 || requested > available + 1e-9) continue;
     const moved = Math.min(requested, available);
     period.modelCosts[raw] = available - moved;
     if (period.modelCosts[raw] === 0) delete period.modelCosts[raw];
-    period.modelCosts['cursor-auto'] = (period.modelCosts['cursor-auto'] || 0) + moved;
+    period.modelCosts[target] = (period.modelCosts[target] || 0) + moved;
   }
 }
 
@@ -1099,7 +1109,7 @@ function normalizePeriod(input, options = {}) {
       }
     }
   }
-  reconcileCursorAutoGlobalModels(period, input);
+  reconcileClientRenamedGlobalModels(period, input);
   if (input.sessions && typeof input.sessions === 'object') {
     for (const [key, value] of Object.entries(input.sessions)) {
       const session = normalizeSession(sessionWithActivity(input, key, value), key);
