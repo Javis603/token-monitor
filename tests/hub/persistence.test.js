@@ -152,6 +152,31 @@ test('invalid CLI and environment intervals fail before the standalone Hub start
   }
 });
 
+test('a missing CLI persistence value fails startup even with a valid environment fallback', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-missing-interval-'));
+  t.after(() => fs.rmSync(dir, { recursive: true }));
+  const dataFile = path.join(dir, 'devices.json');
+  const serverFile = path.resolve(__dirname, '../../src/hub/server.js');
+  for (const value of ['', '300000']) {
+    for (const args of [
+      ['--persistIntervalMs'],
+      ['--persistIntervalMs', '--syncSessionTitles'],
+      ['--persistIntervalMs='],
+      ['--persistIntervalMs', '   ']
+    ]) {
+      const result = spawnSync(process.execPath, [serverFile, '--host=127.0.0.1', '--port=0', `--dataFile=${dataFile}`, ...args], {
+        env: { ...process.env, TOKEN_MONITOR_SECRET: 'test-secret', TOKEN_MONITOR_PERSIST_INTERVAL_MS: value },
+        encoding: 'utf8', timeout: 5000
+      });
+      assert.doesNotMatch(result.stdout, /hub listening|Persistence interval:/);
+      assert.equal(result.error, undefined);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /--persistIntervalMs requires a numeric value/);
+      assert.equal(fs.existsSync(dataFile), false);
+    }
+  }
+});
+
 test('shared settings and title revocation save immediately during a pending batch', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { hub, dataFile } = fixture(t, 300000, { syncSessionTitles: true });

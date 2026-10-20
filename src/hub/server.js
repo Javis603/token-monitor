@@ -557,6 +557,10 @@ function createHub({
 if (require.main === module) {
   loadDotEnv();
   const args = parseArgs(process.argv.slice(2));
+  if (args.persistIntervalMs === true || (typeof args.persistIntervalMs === 'string' && !args.persistIntervalMs.trim())) {
+    console.error('Hub failed to start: --persistIntervalMs requires a numeric value');
+    process.exit(1);
+  }
   const port = Number(args.port || process.env.TOKEN_MONITOR_PORT || 17321);
   const host = String(args.host || process.env.TOKEN_MONITOR_HOST || '0.0.0.0');
   const secret = String(args.secret || process.env.TOKEN_MONITOR_SECRET || '').trim();
