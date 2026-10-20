@@ -876,6 +876,51 @@ test('a retained row from a failed probe never becomes the burn-rate baseline', 
   }
 });
 
+test('partial cached quotas retry without becoming a burn-rate baseline', async () => {
+  const clock = fakeClock(1_000);
+  const calls = [];
+  const events = [];
+  const included = (usedPercent) => ({ kind: 'weekly', label: 'Included usage', usedPercent });
+  const team = (usedPercent) => ({ kind: 'billing', label: 'Team pool', usedPercent });
+  const previous = providerRow('cursor', 'acct', 'Account', { windows: [included(30), team(10)] });
+  const runtime = createLimitsRuntime({
+    limitProviders: ['cursor'], limitsRefreshMode: 'adaptive', previousLimits: { providers: [previous] }
+  }, runtimeDeps({
+    autoStart: true,
+    now: clock.now, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
+    retryBaseMs: 60_000, random: () => 0.5,
+    onEvent: (event) => events.push(event),
+    probeProvider: async (provider, _config, context) => {
+      calls.push(context.reason);
+      const partial = calls.length === 1;
+      return [{
+        ...providerRow(provider, 'acct', 'Account', {
+          updatedAt: new Date(clock.now()).toISOString(),
+          windows: partial ? [team(75)] : [included(88), team(90)]
+        }),
+        ...(partial ? { invalidateCachedWindowLabels: ['Cursor Models', 'Other Models'] } : {})
+      }];
+    }
+  }));
+  try {
+    await waitFor(() => events.some((event) => event.type === 'retry-scheduled'), 'partial-result retry');
+    const partial = runtime.getSnapshot().providers[0];
+    assert.equal(partial.status, 'unavailable');
+    assert.equal(partial.updatedAt, previous.updatedAt);
+    assert.deepEqual(partial.windows.map((window) => [window.label, window.usedPercent]), [['Included usage', 30], ['Team pool', 75]]);
+    clock.advance(60_000);
+    await waitFor(() => runtime.getSnapshot().providers[0]?.status === 'ok', 'retry recovery');
+    assert.deepEqual(calls, ['startup', 'retry']);
+    // Neither the persisted included quota nor the partially refreshed team
+    // quota is a fresh baseline. Recovery starts sampling, without an early
+    // urgency refresh inferred from the gap before it.
+    assert.deepEqual(clock.delays(), [240_000]);
+    assert.equal(runtime.getSnapshot().providers[0].updatedAt, new Date(clock.now()).toISOString());
+  } finally {
+    runtime.stop();
+  }
+});
+
 // Any provider committing rebuilds the whole snapshot, which still holds the
 // persisted rows of providers that have not answered yet. Sampling one of those
 // would date a previous session's usage to now and invent a huge burn rate.

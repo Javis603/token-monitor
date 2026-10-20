@@ -6,6 +6,7 @@ const https = require('node:https');
 const test = require('node:test');
 const { fetchCursorLimits } = require('../../src/shared/providers/cursor/limits');
 const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+const { normalizeLimitProvider } = require('../../src/shared/limits/core');
 
 const {
   parseGrokBotUsage,
@@ -528,6 +529,115 @@ test('Cursor unknown-plan results invalidate only cached legacy seat quotas thro
           ['Cursor Models', 0], ['Other Models', 0]
         ]);
       }
+    });
+  }
+});
+
+test('unknown plans retain cached unified usage as stale while refreshing independent windows', async (t) => {
+  for (const scenario of [
+    { name: 'team', team: true },
+    { name: 'spend', spend: true },
+    { name: 'team and spend', team: true, spend: true },
+    { name: 'independent data without a cached unified window', team: true, spend: true, noIncluded: true }
+  ]) {
+    await t.test(scenario.name, async (t) => {
+      const account = { id: 'partial-fixture', sessionToken: 'tok' };
+      const payloads = {
+        '/api/usage-summary': {
+          individualUsage: {
+            plan: { autoPercentUsed: 0, apiPercentUsed: 0 },
+            ...(scenario.spend ? { onDemand: { used: 300, limit: 1000 } } : {})
+          },
+          ...(scenario.team ? { teamUsage: { pooled: { used: 7500, limit: 10000 } } } : {})
+        },
+        '/api/dashboard/get-plan-info': null,
+        '/api/dashboard/get-sand-usage-status': null
+      };
+      const fetchCurrent = () => fetchCursorLimits({}, {
+        readActiveAccount: () => account,
+        now: () => new Date('2026-10-20T00:00:00.000Z'),
+        httpsLib: dashboardFakeHttps(payloads)
+      });
+      const current = await fetchCurrent();
+      const previousAt = '2026-10-19T00:00:00.000Z';
+      const included = { kind: 'weekly', label: 'Included usage', usedPercent: 40 };
+      const previous = {
+        ...current, status: 'ok', updatedAt: previousAt,
+        windows: [
+          ...(scenario.noIncluded ? [] : [included]),
+          ...['Requests', 'Cursor Models', 'Other Models', 'Overall'].map((label) => ({ kind: 'billing', label, usedPercent: 0 })),
+          ...current.windows.map((window) => ({ ...window, usedPercent: 10, used: 1 }))
+        ]
+      };
+      const other = { ...previous, accountKey: 'unaffected-account' };
+      const events = [];
+      const runtime = createLimitsRuntime({
+        limitProviders: ['cursor'], previousLimits: { providers: [previous, other] }
+      }, {
+        autoStart: false, autoRetry: false,
+        probeProvider: async () => [await fetchCurrent()],
+        onEvent: (event) => events.push(event)
+      });
+      t.after(() => runtime.stop());
+      const scope = { provider: 'cursor', accountKey: current.accountKey };
+      const rowFor = (snapshot) => snapshot.providers.find((row) => row.accountKey === current.accountKey);
+      const before = runtime.getSnapshot();
+      await runtime.refresh(scope, 'credential-change');
+      const snapshot = runtime.getSnapshot();
+      const row = rowFor(snapshot);
+      const expectedLabels = [...(scenario.noIncluded ? [] : ['Included usage']), ...current.windows.map((window) => window.label)];
+      assert.deepEqual(row.windows.map((window) => window.label), expectedLabels);
+      assert.deepEqual(row.windows.slice(scenario.noIncluded ? 0 : 1), normalizeLimitProvider(current).windows);
+      if (scenario.team) assert.equal(row.windows.find((window) => window.label === 'Team pool').usedPercent, 75);
+      if (scenario.spend) assert.equal(row.windows.find((window) => window.label === 'On-demand spend').used, 3);
+      assert.equal(row.status, scenario.noIncluded ? 'ok' : 'unavailable');
+      assert.equal(row.updatedAt, scenario.noIncluded ? current.updatedAt : previousAt);
+      assert.equal(events.some((event) => event.type === 'retry-scheduled' && event.reason === 'unavailable'), !scenario.noIncluded);
+      assert.deepEqual(snapshot.providers.find((provider) => provider.accountKey === other.accountKey),
+        before.providers.find((provider) => provider.accountKey === other.accountKey));
+      assert.equal(JSON.stringify(snapshot).includes('invalidateCachedWindowLabels'), false);
+      if (scenario.noIncluded) return;
+
+      // Repeated partial reads replace independent values without duplicates or
+      // promoting the retained included pool to a fresh successful reading.
+      if (scenario.team) payloads['/api/usage-summary'].teamUsage.pooled.used = 8000;
+      if (scenario.spend) payloads['/api/usage-summary'].individualUsage.onDemand.used = 400;
+      await runtime.refresh(scope, 'credential-change');
+      const repeated = rowFor(runtime.getSnapshot());
+      assert.equal(repeated.status, 'unavailable');
+      assert.equal(repeated.updatedAt, previousAt);
+      assert.deepEqual(repeated.windows.map((window) => window.label), expectedLabels);
+      assert.equal(repeated.windows[0].usedPercent, 40);
+      if (scenario.team) assert.equal(repeated.windows.find((window) => window.label === 'Team pool').usedPercent, 80);
+      if (scenario.spend) assert.equal(repeated.windows.find((window) => window.label === 'On-demand spend').used, 4);
+
+      payloads['/api/usage-summary'] = null;
+      await runtime.refresh(scope, 'credential-change');
+      assert.deepEqual(rowFor(runtime.getSnapshot()), repeated);
+      const restarted = createLimitsRuntime({
+        limitProviders: ['cursor'], previousLimits: runtime.getSnapshot()
+      }, { autoStart: false, autoRetry: false });
+      t.after(() => restarted.stop());
+      assert.deepEqual(rowFor(restarted.getSnapshot()), repeated);
+
+      // A confirmed current unified reading replaces the cache normally.
+      payloads['/api/usage-summary'] = {};
+      payloads['/api/dashboard/get-plan-info'] = { isMerged: true };
+      payloads['/api/dashboard/get-sand-usage-status'] = { isUnified: true, usagePercent: 55 };
+      await runtime.refresh(scope, 'credential-change');
+      const recovered = rowFor(runtime.getSnapshot());
+      assert.equal(recovered.status, 'ok');
+      assert.notEqual(recovered.updatedAt, previousAt);
+      assert.deepEqual(recovered.windows.map((window) => [window.label, window.usedPercent]), [['Included usage', 55]]);
+
+      // A confirmed legacy plan also replaces the cache, restoring real zeros.
+      payloads['/api/usage-summary'] = { individualUsage: { plan: { autoPercentUsed: 0, apiPercentUsed: 0 } } };
+      payloads['/api/dashboard/get-plan-info'] = {};
+      payloads['/api/dashboard/get-sand-usage-status'] = null;
+      await runtime.refresh(scope, 'credential-change');
+      const legacy = rowFor(runtime.getSnapshot());
+      assert.equal(legacy.status, 'ok');
+      assert.deepEqual(legacy.windows.map((window) => [window.label, window.usedPercent]), [['Cursor Models', 0], ['Other Models', 0]]);
     });
   }
 });
