@@ -5,7 +5,7 @@ const { normalizeLimitProvider } = require('../../limits/core');
 const { cleanSecret, numberOrNull } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 const { recordWorkbuddyUsage } = require('./usageHistory');
-const { WORKBUDDY_USAGE_ACTION } = require('./usageRecords');
+const { WORKBUDDY_USAGE_PATH } = require('./usageRecords');
 
 const WORKBUDDY_FETCH_TIMEOUT_MS = 12_000;
 const WORKBUDDY_ACCOUNT_CONCURRENCY = 4;
@@ -472,11 +472,10 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
         };
         return send(0);
       };
-      // The ledger action is a sibling of the quota action under the realm's
-      // billing prefix, so it inherits both the `/v2` form and the AI realm's
-      // shorter fallback without duplicating the prefix here.
-      const spendPaths = workbuddyBillingPaths(realm, Boolean(enterpriseId))
-        .map((billingPath) => `${billingPath.slice(0, billingPath.lastIndexOf('/') + 1)}${WORKBUDDY_USAGE_ACTION}`);
+      // The ledger read uses one fixed path per realm, which is NOT derived from
+      // the quota path: the server serves it unversioned and answers a `/v2`
+      // form with 404.
+      const spendPaths = [WORKBUDDY_USAGE_PATH];
       const requestQuota = () => billingPost(workbuddyBillingPaths(realm, Boolean(enterpriseId)),
         enterpriseId ? {} : {
           PageNumber: 1, PageSize: 100, ProductCode: WORKBUDDY_PRODUCT_CODE, Status: [0, 3],

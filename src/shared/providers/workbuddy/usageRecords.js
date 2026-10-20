@@ -16,9 +16,9 @@
 // truncated scan reports itself instead of silently understating spend.
 const WORKBUDDY_USAGE_PAGE_SIZE = 100;
 const WORKBUDDY_USAGE_MAX_PAGES = 50;
-// Sibling of the quota actions (`get-user-resource`, `get-enterprise-user-usage`)
-// under the realm's `/v2/billing/meter` prefix, which the caller owns.
-const WORKBUDDY_USAGE_ACTION = 'get-user-request-usage';
+// Unlike the quota actions, this read lives at the UNVERSIONED path: the server
+// answers `/v2/billing/meter/get-user-request-usage` with 404 Route Not Found.
+const WORKBUDDY_USAGE_PATH = '/billing/meter/get-user-request-usage';
 const WORKBUDDY_WEEK_DAYS = 7;
 
 function round2(value) {
@@ -167,9 +167,9 @@ async function fetchWorkbuddyUsageSpend(post, now) {
 }
 
 module.exports = {
-  WORKBUDDY_USAGE_ACTION,
   WORKBUDDY_USAGE_MAX_PAGES,
   WORKBUDDY_USAGE_PAGE_SIZE,
+  WORKBUDDY_USAGE_PATH,
   fetchWorkbuddyUsageSpend,
   formatUsageDateTime,
   localDayKey,
