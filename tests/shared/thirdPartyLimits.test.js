@@ -383,6 +383,38 @@ test('New API account adapter keeps the all-time spend when the usage dashboard 
   assert.equal(provider.balance.allTimeSpend, 2);
 });
 
+for (const flag of [false, true, undefined]) {
+  for (const staleRows of [false, true]) {
+    test(`New API export flag ${String(flag)} with ${staleRows ? 'existing' : 'empty'} dashboard rows`, async (t) => {
+      fixtureTimezone(t);
+      const statusBody = {
+        quota_per_unit: DEFAULT_QUOTA_PER_UNIT,
+        ...(flag !== undefined ? { enable_data_export: flag } : {})
+      };
+      const rows = staleRows ? [{ quota: 500_000 }] : [];
+      const [provider] = await fetchThirdPartyLimits({
+        thirdPartyProfiles: { work: {
+          adapter: NEWAPI_ACCOUNT_ADAPTER, baseUrl: 'https://export.example', accessToken: 'fixture'
+        } }
+      }, {
+        env: {}, now: () => Date.parse('2026-07-24T08:00:00Z'),
+        fetch: apiFetch({ 'https://export.example': {
+          accessToken: 'fixture', statusBody,
+          accountBody: { quota: 2_500_000, used_quota: 1_000_000 },
+          usageTodayRows: rows, usageWeekRows: rows, usageMonthRows: rows
+        } })
+      });
+      assert.equal(provider.status, 'ok');
+      assert.equal(provider.balance.amount, 5);
+      assert.equal(provider.balance.allTimeSpend, 2);
+      const expected = flag === false ? null : staleRows ? 1 : 0;
+      assert.deepEqual([
+        provider.balance.todaySpend, provider.balance.weekSpend, provider.balance.monthSpend
+      ], [expected, expected, expected]);
+    });
+  }
+}
+
 test('New API spend rejects malformed periods without publishing zero or partial totals', () => {
   const account = { quota: 2_500_000, used_quota: 1_000_000 };
   const malformed = [

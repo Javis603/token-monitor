@@ -473,9 +473,12 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
     unit(statusPayload) {
       return quotaPerUnit(statusPayload);
     },
-    quota(payload, unit, _account, _statusPayload, enrichmentPayloads) {
+    quota(payload, unit, _account, statusPayload, enrichmentPayloads) {
       const data = responseData(payload);
-      return data ? newapiAccountQuota(data, unit, enrichmentPayloads) : null;
+      // Disabled exports leave the endpoint readable but its rows may be empty
+      // or stale. Only an explicit false disables spend on compatible forks.
+      const usage = responseData(statusPayload)?.enable_data_export === false ? null : enrichmentPayloads;
+      return data ? newapiAccountQuota(data, unit, usage) : null;
     },
     planLabel() {
       return 'Account';
