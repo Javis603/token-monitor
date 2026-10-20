@@ -18,6 +18,10 @@ const turn = () => new Promise((resolve) => setImmediate(resolve));
 const quota = () => ({ ok: true, status: 200, json: async () => ({ code: 0, data: {
   Accounts: [{ Status: 0, CycleCapacitySizePrecise: 100, CycleCapacityRemainPrecise: 70 }]
 } }) });
+// The Spend ledger is a separate read on the successful path; these cases are
+// about scheduling, so it always answers an empty page beyond the first.
+const spend = () => ({ ok: true, status: 200, json: async () => ({ code: 0, data: { data: [], total: 0 } }) });
+const billingResult = (url) => (String(url).includes('get-user-request-usage') ? spend() : quota());
 const accounts = (count) => Array.from({ length: count }, (_, index) => {
   const account = { id: `user-${index}`, userId: `user-${index}`, realm: index % 2 ? 'ai' : 'cn',
     domain: index % 2 ? 'www.workbuddy.ai' : 'www.codebuddy.cn', enabled: true };
@@ -37,7 +41,7 @@ test('WorkBuddy bounds mixed managed/local credential and quota work to four acc
   const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed,
     workbuddyDesktopSessionEnabled: true, workbuddyLocalSessions: locals }, { env: { TOKEN_MONITOR_SHARED_DIR: testDataDir },
     resolveWorkbuddyManagedCredential: async () => operation({ accessToken: 'fixture' }),
-    fetch: async () => operation(quota()), workbuddyFetch: async () => operation(quota()) });
+    fetch: async (url) => operation(billingResult(url)), workbuddyFetch: async (url) => operation(billingResult(url)) });
   assert.equal(peak, 4);
   assert.equal(active, 0);
   assert.deepEqual(rows.map((row) => row.accountKey), [...managed, ...locals].map((account) => account.accountKey));
@@ -58,8 +62,8 @@ test('WorkBuddy keeps unauthorized billing, refresh and retry within the same fo
     resolveWorkbuddyManagedCredential: async (account, { forceRefresh }) => {
       if (forceRefresh) refreshed.push(account.id);
       return operation({ accessToken: `${account.id}:${forceRefresh ? 'new' : 'old'}` });
-    }, fetch: async (_, init) => operation(init.headers.Authorization.endsWith(':old')
-      ? { ok: false, status: 401, json: async () => ({}) } : quota()) });
+    }, fetch: async (url, init) => operation(init.headers.Authorization.endsWith(':old')
+      ? { ok: false, status: 401, json: async () => ({}) } : billingResult(url)) });
   assert.equal(peak, 4);
   assert.equal(active, 0);
   assert.equal(new Set(refreshed).size, managed.length);
@@ -82,7 +86,7 @@ for (const phase of ['credential', 'quota']) {
         if (phase === 'credential') { signals.push(signal); return new Promise(() => {}); }
         return { accessToken: account.id };
       }, fetch: async (_, init) => { signals.push(init.signal); return new Promise(() => {}); },
-      workbuddyFetch: async () => { localCalls += 1; return quota(); } });
+      workbuddyFetch: async (url) => { localCalls += 1; return billingResult(url); } });
     await turn();
     controller.abort();
     const rows = await pending;
@@ -117,10 +121,10 @@ test('WorkBuddy isolates credential and billing failures without dropping or reo
       if (account.id === 'user-1') throw Object.assign(new Error('fixture'), { status: 'notConfigured' });
       if (account.id === 'user-5') throw new Error('fixture');
       return { accessToken: account.id };
-    }, fetch: async (_, init) => {
+    }, fetch: async (url, init) => {
       await turn();
       return init.headers.Authorization === 'Bearer user-8'
-        ? { ok: false, status: 429, json: async () => ({}) } : quota();
+        ? { ok: false, status: 429, json: async () => ({}) } : billingResult(url);
     } });
   assert.equal(new Set(resolved).size, managed.length);
   assert.deepEqual(rows.map((row) => row.accountKey), managed.map((account) => account.accountKey));
@@ -142,11 +146,13 @@ test('WorkBuddy shares the provider budget across waves so stalled first account
       resolved.push(account.id);
       if (Number(account.id.slice(5)) < 4) { firstSignals.push(signal); return new Promise(() => {}); }
       return { accessToken: account.id };
-    }, fetch: async (_, init) => {
-      if (init.headers.Authorization === 'Bearer user-11') {
+    }, fetch: async (url, init) => {
+      // Only the quota read is paced here: the wave timeline this test drives is
+      // the quota lane's, and the Spend ledger read must not add its own delay.
+      if (init.headers.Authorization === 'Bearer user-11' && !String(url).includes('get-user-request-usage')) {
         await new Promise((resolve) => setTimeout(resolve, budgetMs / 3 - 1));
       }
-      return quota();
+      return billingResult(url);
     } });
   try {
     await turn();
@@ -177,11 +183,11 @@ test('WorkBuddy account budgets cover resolve, unauthorized quota, refresh and r
       else resolved.push(account.id);
       if (Number(account.id.slice(5)) < 4) await new Promise((resolve) => setTimeout(resolve, 20));
       return { accessToken: `${account.id}:${forceRefresh ? 'new' : 'old'}` };
-    }, fetch: async (_, init) => {
+    }, fetch: async (url, init) => {
       const token = init.headers.Authorization;
       if (/user-[0-3]:/.test(token)) await new Promise((resolve) => setTimeout(resolve, 20));
       return token.endsWith(':old') && /user-[0-3]:/.test(token)
-        ? { ok: false, status: 401, json: async () => ({}) } : quota();
+        ? { ok: false, status: 401, json: async () => ({}) } : billingResult(url);
     } });
   try {
     await turn();
@@ -206,7 +212,7 @@ test('WorkBuddy exhausted provider budgets skip queued work and reject late cred
   const pending = fetchWorkbuddyLimits({ workbuddyManagedAccounts: managed }, { env: { TOKEN_MONITOR_SHARED_DIR: testDataDir },
     providerPhysicalBounds: { workbuddy: 120 }, workbuddyFetchTimeoutMs: 1000,
     resolveWorkbuddyManagedCredential: async (account) => { calls.push(account.id); return credentials; },
-    fetch: async () => { requests += 1; return quota(); } });
+    fetch: async (url) => { requests += 1; return billingResult(url); } });
   await turn();
   t.mock.timers.tick(120);
   await turn();
