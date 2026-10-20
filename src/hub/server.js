@@ -23,7 +23,10 @@ const {
 const { CURRENCY_CODES, normalizeCurrency } = require('../shared/currency');
 const { currentHubBuild } = require('../shared/hubBuildIdentity');
 const {
-  freshnessEvent,
+  encodeSseEvent,
+  prepareSseFanout,
+  sseClientKinds,
+  sseFrameForClient,
   hubStatsContentKey,
   wantsFreshnessEvents,
   wantsMinimalResponse
@@ -142,18 +145,19 @@ function createHub({
   let broadcastTimer = null;
   let lastSseContentKey = '';
 
-  function sseFormat(event, data) {
-    return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  }
-
-  function writeSse(client, event, data) {
+  function writeSseFrame(client, frame) {
+    if (!frame) return false;
     try {
-      client.res.write(sseFormat(event, data));
+      client.res.write(frame);
       return true;
     } catch (_) {
       sseClients.delete(client);
       return false;
     }
+  }
+
+  function fanoutSseFrames(frames) {
+    for (const client of sseClients) writeSseFrame(client, sseFrameForClient(frames, client));
   }
 
   function notifyStatsListeners(reason, stats = getStats(), at = new Date().toISOString()) {
@@ -171,8 +175,16 @@ function createHub({
     const stats = getStats();
     const at = new Date().toISOString();
     if (sseClients.size > 0) {
-      lastSseContentKey = hubStatsContentKey(stats);
-      for (const client of sseClients) writeSse(client, 'stats', { type: 'stats', reason, stats, at });
+      const frames = prepareSseFanout({
+        reason,
+        stats,
+        at,
+        lastContentKey: lastSseContentKey,
+        ...sseClientKinds(sseClients),
+        allowFreshness: false
+      });
+      lastSseContentKey = frames.contentKey;
+      fanoutSseFrames(frames);
     }
     notifyStatsListeners(reason, stats, at);
   }
@@ -181,21 +193,16 @@ function createHub({
     broadcastTimer = null;
     if (sseClients.size === 0) return;
     const stats = getStats();
-    const nextContentKey = hubStatsContentKey(stats);
     const at = new Date().toISOString();
-    if (!lastSseContentKey || nextContentKey !== lastSseContentKey) {
-      lastSseContentKey = nextContentKey;
-      for (const client of sseClients) writeSse(client, 'stats', { type: 'stats', reason: 'ingest', stats, at });
-      return;
-    }
-    const event = freshnessEvent(stats, 'ingest', at);
-    for (const client of sseClients) {
-      if (client.freshnessEvents) {
-        writeSse(client, 'freshness', event);
-      } else {
-        writeSse(client, 'stats', { type: 'stats', reason: 'ingest', stats, at });
-      }
-    }
+    const frames = prepareSseFanout({
+      reason: 'ingest',
+      stats,
+      at,
+      lastContentKey: lastSseContentKey,
+      ...sseClientKinds(sseClients)
+    });
+    lastSseContentKey = frames.contentKey;
+    fanoutSseFrames(frames);
   }
 
   function queueStatsBroadcast() {
@@ -418,7 +425,7 @@ function createHub({
         'connection': 'keep-alive',
         'x-accel-buffering': 'no'
       });
-      res.write(sseFormat('snapshot', { type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString() }));
+      res.write(encodeSseEvent('snapshot', { type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString() }));
       const client = { res, freshnessEvents: wantsFreshnessEvents(req) };
       if (sseClients.size === 0) lastSseContentKey = hubStatsContentKey(stats);
       sseClients.add(client);

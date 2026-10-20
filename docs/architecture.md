@@ -159,6 +159,8 @@ Manual device removal requires a known remote device marked stale in main's late
 
 Settings keys, env vars, CLI flags, endpoints and wire fields have external users: treat incompatible changes as breaking and plan migration. Stale devices intentionally remain in stats with `stale: true`; they are not silently deleted.
 
+SSE broadcasts serialize each required frame once per fan-out; the Worker also encodes each frame once. Timestamp-only ingest updates send `freshness` to capable clients and full `stats` to legacy clients. Explicit mutation broadcasts force full stats even when the content key is unchanged. Initial snapshots remain per connection.
+
 ## Shared subscriptions
 
 The account picker retains healthy readings even when a provider cannot supply a stable account key or display identity. Missing identity alone does not imply an unconfigured placeholder; known failed identities and saved bindings remain available independently.
