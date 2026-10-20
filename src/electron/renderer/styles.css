@@ -6702,6 +6702,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .home-module-preference-row:has(.view-subgroup-toggle) {
   grid-template-columns: minmax(0, 1fr) repeat(3, 22px);
 }
+.settings-panel .home-module-count-setting > input[type="number"],
 .settings-panel .home-limit-account-count-setting > input[type="number"] {
   height: 20px;
   min-height: 20px;

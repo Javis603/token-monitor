@@ -111,7 +111,7 @@ test('the cold-start seed accepts an anchor configured for Qoder CN', () => {
   const clients = 'claude,qodercn';
   const anchor = anchorFixture({
     configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, cnPaths.dbPaths[0], cnPaths.projectsDir),
-    qoderCnModelVersion: 1
+    qoderCnModelVersion: 2
   });
 
   const record = deviceRecordFromAnchor(anchor, seedOptions({ clients, homeDir }));

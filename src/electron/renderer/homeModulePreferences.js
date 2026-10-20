@@ -7,6 +7,25 @@
 })(typeof window !== 'undefined' ? window : null, function createHomeModulePreferencesApi() {
   const DEFAULT_HOME_MODULE_ORDER = 'limits,tool,model,session,device,trends';
 
+  const HOME_MODULE_COUNT_MAX = 50;
+  const HOME_MODULE_COUNT_DEFAULTS = Object.freeze({ tool: 5, model: 5, session: 5, device: 4 });
+
+  function normalizeHomeModuleCounts(value, previous) {
+    const counts = {};
+    for (const [id, fallback] of Object.entries(HOME_MODULE_COUNT_DEFAULTS)) {
+      const raw = value && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, id)
+        ? value[id] : previous?.[id];
+      const count = typeof raw === 'number' || (typeof raw === 'string' && raw.trim())
+        ? Math.trunc(Number(raw)) : NaN;
+      counts[id] = Number.isFinite(count) ? Math.max(1, Math.min(HOME_MODULE_COUNT_MAX, count)) : fallback;
+    }
+    return counts;
+  }
+
+  function homeModuleCount(settings, id) {
+    return normalizeHomeModuleCounts(settings?.homeModuleCounts)[id];
+  }
+
   function normalizeHomeLimitDisplayMode(value) {
     return value === 'bars' ? 'bars' : 'text';
   }
@@ -86,6 +105,9 @@
 
   return {
     DEFAULT_HOME_MODULE_ORDER,
+    HOME_MODULE_COUNT_MAX,
+    homeModuleCount,
+    normalizeHomeModuleCounts,
     defaultHomeModulePreferences,
     moveHomeModuleOrder,
     normalizeHiddenHomeModules,

@@ -695,6 +695,115 @@ test('an OpenRouter card carries the balance meter and its detail tooltip', () =
   assert.match(tooltip.text, /All time/);
 });
 
+test('a Sub2API card keeps Month and All time in the summary and its original usage tooltip', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'sub2api', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, currency: 'USD' }],
+    balance: { amount: 12.5, currency: 'USD', monthSpend: 2.5, allTimeSpend: 18.75 },
+    usageSummary: {
+      period: 'month', requests: 21, totalTokens: 1940, inputTokens: 1234,
+      outputTokens: 456, cacheReadTokens: 200, cacheCreationTokens: 50,
+      averageDurationMs: 850, standardCost: 3
+    }
+  }, '#888888');
+  assert.equal(card.find('limit-spend-summary').text, 'Month $2.50 · All time $18.75');
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.deepEqual(tooltip.children.map((row) => row.text), [
+    'Month requests 21', 'Month tokens 1,940', 'Input tokens 1,234',
+    'Output tokens 456', 'Cache tokens 250', 'Avg response 850 ms', 'Standard cost $3.00'
+  ]);
+  assert.equal(tooltip.find('is-separated'), null);
+});
+
+test('a third-party card summarizes Today and Month and details every period', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty',
+    adapterId: 'newapi-account',
+    status: 'ok',
+    planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 11.42, currency: 'USD' }],
+    balance: {
+      amount: 11.42,
+      currency: 'USD',
+      todaySpend: 0,
+      weekSpend: 1.44,
+      monthSpend: 1.44,
+      allTimeSpend: 18.58
+    }
+  }, '#888888');
+
+  assert.match(card.text, /Spend Today \$0\.00 · Month \$1\.44/);
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.ok(tooltip, 'the card should carry the ⓘ tooltip, not only the summary');
+  assert.match(tooltip.text, /Today \$0\.00/);
+  assert.match(tooltip.text, /Week \$1\.44/);
+  assert.match(tooltip.text, /All time \$18\.58/);
+});
+
+test('a third-party tooltip keeps account details above spend without duplicate spoken periods', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 11.42, limit: 30, currency: 'USD' }],
+    balance: {
+      amount: 11.42, currency: 'USD', todaySpend: 0, weekSpend: 1.44,
+      monthSpend: 1.44, allTimeSpend: 18.58, requestCount: 12345, quotaGroup: 'default'
+    }
+  }, '#888888');
+  const tooltip = card.find('limit-detail-tooltip');
+  const rows = tooltip.children.map((row) => row.text);
+  assert.deepEqual(rows, [
+    'Total quota $30.00', 'Requests 12,345', 'Group default', '',
+    'Today $0.00', 'Week $1.44', 'Month $1.44', 'All time $18.58'
+  ]);
+  assert.ok(tooltip.children[3].classList.contains('is-separated'));
+  const spoken = card.find('limit-spend').attributes['aria-label'];
+  assert.equal(spoken.match(/Today/g)?.length, 1);
+  assert.equal(spoken.match(/Month/g)?.length, 1);
+});
+
+test('a third-party card falls back to all-time when dashboard periods are unknown', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 39.45, currency: 'USD' }],
+    balance: {
+      amount: 39.45, currency: 'USD', todaySpend: null, weekSpend: null,
+      monthSpend: null, allTimeSpend: 140.57
+    }
+  }, '#888888');
+  assert.match(card.text, /Spend All time \$140\.57/);
+  assert.doesNotMatch(card.text, /Today|Week|Month|\$0\.00/);
+});
+
+test('a third-party tooltip keeps the original account format when all-time is the summary', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 39.45, limit: 180.02, currency: 'USD' }],
+    balance: {
+      amount: 39.45, currency: 'USD', todaySpend: null, weekSpend: null,
+      monthSpend: null, allTimeSpend: 140.57, requestCount: 30836, quotaGroup: 'default'
+    }
+  }, '#888888');
+  assert.match(card.find('limit-spend-summary').text, /All time \$140\.57/);
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.deepEqual(tooltip.children.map((row) => row.text), [
+    'Total quota $180.02', 'Requests 30,836', 'Group default'
+  ]);
+  assert.doesNotMatch(tooltip.text, /Today|Week|Month|All time/);
+  assert.equal(tooltip.find('is-separated'), null);
+});
+
+test('a third-party card retains zero account details when spend is unavailable', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 0, limit: 0, currency: 'USD' }],
+    balance: { amount: 0, currency: 'USD', requestCount: 0, quotaGroup: 'default' }
+  }, '#888888');
+  assert.match(card.find('limit-spend').text, /Details/);
+  assert.deepEqual(card.find('limit-detail-tooltip').children.map((row) => row.text), [
+    'Total quota $0.00', 'Requests 0', 'Group default'
+  ]);
+});
+
 test('a MiMo membership row meters like any percent quota, WorkBuddy included', () => {
   // The membership lane answers with a percentage and nothing else — the app's
   // own card prints "{{percent}}% remaining" from that field, and no endpoint

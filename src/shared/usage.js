@@ -346,9 +346,12 @@ function normalizeModelNameForClient(value, client) {
   return qualified?.[1] || normalized;
 }
 
-function normalizeSessionId(value) {
+function normalizeSessionId(value, client) {
   const raw = String(value || '').trim();
-  return raw || null;
+  // A transcript path is a source location, not the Qoder conversation ID.
+  // Keep legacy SQLite and missing-session namespaces source-local.
+  const jsonl = client === 'qodercn' && /^qodercn:jsonl:[a-f0-9]{12}:(.+)$/.exec(raw);
+  return jsonl && jsonl[1] !== 'unknown' ? `qodercn:jsonl:session:${jsonl[1]}` : raw || null;
 }
 
 function normalizeProviderName(value) {
@@ -580,7 +583,7 @@ function detectModel(obj, client = detectClient(obj)) {
 }
 
 function detectSessionId(obj) {
-  return normalizeSessionId(firstString(obj, SESSION_ID_KEYS));
+  return normalizeSessionId(firstString(obj, SESSION_ID_KEYS), detectClient(obj));
 }
 
 function sessionKey(client, sessionId) {
@@ -822,7 +825,7 @@ function normalizeSession(input, fallbackKey) {
   if (!input || typeof input !== 'object') return null;
   if (isReasonixSyntheticSession(input, fallbackKey)) return null;
   const client = normalizeClientName(input.client || input.source || input.platform || input.agent || input.tool);
-  const id = normalizeSessionId(input.sessionId || input.session_id || input.session || input.conversationId || input.conversation_id || input.threadId || input.thread_id || fallbackKey);
+  const id = normalizeSessionId(input.sessionId || input.session_id || input.session || input.conversationId || input.conversation_id || input.threadId || input.thread_id || fallbackKey, client);
   if (!client || client === REASONIX_CLIENT || !id) return null;
   const session = emptySession(client, id);
   const components = sessionTokenComponents(input);
@@ -931,7 +934,20 @@ function reconcileClientRenamedGlobalModels(period, input) {
         period[key][target] = (period[key][target] || 0) + period[key][raw];
         delete period[key][raw];
       }
+      const throughput = period.modelThroughput?.[raw];
+      if (throughput) {
+        const counters = period.modelThroughput[target] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+        for (const key of ['timedTokens', 'timedOutputTokens', 'timedDurationMs']) counters[key] += throughput[key];
+        delete period.modelThroughput[raw];
+      }
     } else {
+      // Unpriced/throughput attribution is equally ambiguous. Preserve the
+      // period totals without attaching the whole raw bucket to one client.
+      if (period.modelUnpricedTokens) {
+        delete period.modelUnpricedTokens[raw];
+        if (Object.keys(period.modelUnpricedTokens).length === 0) delete period.modelUnpricedTokens;
+      }
+      if (period.modelThroughput?.[raw]) delete period.modelThroughput;
       // The source period has one global component bucket for multiple
       // clients. Keep the token split, but do not invent a cache/output split.
       for (const key of ['modelCacheReads', 'modelCacheWrites', 'modelOutputs']) delete period[key][raw];

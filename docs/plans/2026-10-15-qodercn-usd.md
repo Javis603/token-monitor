@@ -22,14 +22,10 @@ Collect real CLI tokens where exposed, value reported CN credits in USD, and use
 - Local package includes the tested native binary, preserves existing data/config and has an independently usable rollback.
 - Submit native PR and update app PR/issue with actual checks and release dependency.
 
-## Progress
+## Worker FX and validation boundary
 
-- Compared Claude, Codex, Qwen, Kiro and Qoder CN native paths.
-- Real native token exposure proved; correct model catalog and CN pricing verified.
-- Native parser tests pass; package and upstream integration checks in progress.
+The desktop usage collector normally runs in a worker thread, with its own currency-module instance. Pass the effective USD-per-credit scalar through the serializable runtime configuration, include it in runtime/pricing fingerprints, and reconcile the usage runtime when effective CNY FX changes. Scan and graph use the same scalar.
 
-### Worker FX and local acceptance
+Preserve measured tokens across newer masked copies and reconcile transitive message/envelope aliases conservatively. Canonicalize source-qualified JSONL conversations app-side so copying a file cannot add a second archived cost. Migrate exclusive model throughput with display names, and retain totals without guessing shared-model metadata. Version-2 Qoder anchors force a full rescan of prior keys.
 
-The desktop usage collector normally runs in a worker thread, not the main process's currency-module instance. Pass one effective USD-per-credit scalar through the existing serializable runtime configuration; include it in runtime/pricing fingerprints and reconcile the usage runtime when effective CNY FX changes. Scan and graph use the same scalar. Lint plus 93 affected runtime/worker/pricing/anchor tests pass.
-
-The native source build passed real-source credit reconciliation and a four-client fixture comparison: unrelated client token/cost rows are unchanged, measured Qoder counts remain actual tokens, and copied credit requests count once. The signed packaged binary passed direct native execution and dependency loading. Local-only package provenance records both source commits; signing changes executable signature bytes, so the signed artifact integrity is recorded separately from the pre-sign vendor/download digest. No official vendor artifacts have been published.
+The separate review handoff records exact final source refs, local binary integrity, regressions and checks. Official vendor publication/pinning and real Desktop acceptance remain outstanding. Synthetic parser/report/archive evidence does not establish packaged or real Desktop behavior.

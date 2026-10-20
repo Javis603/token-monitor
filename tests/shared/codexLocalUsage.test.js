@@ -701,11 +701,10 @@ for (const [protocol, executorCommand] of [
   ['legacy', '/app/codex exec-server --environment-id executor-local'],
   ['desktop-config', '/app/codex -c forced_login_method=chatgpt exec-server --environment-id executor-local']
 ]) {
-  test(`reconnect discards its initial snapshot and offline gap, retaining only later observed requests (${protocol})`, { timeout: 2000 }, async (t) => {
+  test(`reconnect discards its initial snapshot and offline gap, retaining only later observed requests (${protocol})`, { timeout: 15_000 }, async (t) => {
     const { store } = fixture(t);
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.now() });
     const sockets = [];
-    let connected;
-    const reconnect = new Promise((resolve) => { connected = resolve; });
     const source = createLocalUsageSource({ store }, {
       pollMs: 5, idlePollMs: 5,
       shouldYield: () => false,
@@ -714,7 +713,7 @@ for (const [protocol, executorCommand] of [
       makeSocket() {
         const socket = new FakeSocket();
         sockets.push(socket);
-        queueMicrotask(() => { socket.dispatchEvent(new Event('open')); if (sockets.length === 2) connected(); });
+        queueMicrotask(() => socket.dispatchEvent(new Event('open')));
         return { socket };
       }, now: () => new Date(AT)
     });
@@ -727,9 +726,15 @@ for (const [protocol, executorCommand] of [
     assert.equal(store.rows().length, 0, 'old last request must not be charged on connection');
     notify(sockets[0], addCounters(TOTAL, LAST));
     sockets[0].close();
-    await reconnect;
+    assert.equal(source.getDiagnostics().state, 'retrying');
+    t.mock.timers.tick(4);
+    await source.whenIdle();
+    assert.equal(sockets.length, 1, 'the disconnected socket waits for the retry deadline');
+    t.mock.timers.tick(1);
     await new Promise(setImmediate);
     await source.whenIdle();
+    assert.equal(sockets.length, 2);
+    assert.equal(source.getDiagnostics().subscriptions, 1, 'reconnection has resumed the local thread');
     const gap = addCounters(addCounters(addCounters(TOTAL, LAST), LAST), LAST);
     notify(sockets[1], gap);
     assert.equal(store.rows().length, 1);

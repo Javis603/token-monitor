@@ -1847,3 +1847,28 @@ test('normalizePeriod reconciles stored Qoder CN qfmodel global models using cli
   assert.deepEqual({ ...period.clientModels.qodercn }, { 'qwen3.8-flash': 10 });
   assert.deepEqual(normalizePeriod(period), period);
 });
+
+
+test('stored Qoder model renames preserve exclusive throughput and discard ambiguous attribution', () => {
+  const old = {
+    totalTokens: 150, clients: { qodercn: 150 }, models: { qfmodel: 150 },
+    clientModels: { qodercn: { qfmodel: 150 } },
+    outputTokens: 18, modelOutputs: { qfmodel: 18 },
+    timedTokens: 150, timedOutputTokens: 18, timedDurationMs: 1000,
+    modelThroughput: { qfmodel: { timedTokens: 150, timedOutputTokens: 18, timedDurationMs: 1000 } },
+    unpricedTokens: 100, modelUnpricedTokens: { qfmodel: 100 }
+  };
+  const exclusive = normalizePeriod(old);
+  assert.deepEqual({ ...exclusive.modelThroughput }, { 'qwen3.8-flash': old.modelThroughput.qfmodel });
+  assert.equal(exclusive.modelUnpricedTokens['qwen3.8-flash'], 100);
+  assert.deepEqual(normalizePeriod(exclusive), exclusive);
+  const shared = normalizePeriod({ ...old,
+    clients: { qodercn: 100, other: 50 },
+    clientModels: { qodercn: { qfmodel: 100 }, other: { qfmodel: 50 } }
+  });
+  assert.equal(shared.models.qfmodel, 50);
+  assert.equal(shared.modelThroughput, undefined);
+  assert.equal(shared.modelUnpricedTokens?.qfmodel, undefined);
+  assert.equal(shared.unpricedTokens, 100);
+  assert.deepEqual(normalizePeriod(shared), shared);
+});

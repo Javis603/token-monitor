@@ -1,5 +1,5 @@
 ---
-summary: "Qoder CN token exposure, CLI credit-to-USD accounting, source discovery and model identities."
+summary: "Qoder CN token exposure, request credit-to-USD accounting, source discovery and model identities."
 ids: [qoder, qodercn]
 read_when:
   - Changing or debugging Qoder CN usage, model names or collection roots
@@ -21,11 +21,15 @@ qoderclicn
 
 The CLI also reads its global `~/.qoder-cn/.env` when no project dotenv takes precedence. Existing CLI processes must restart to load a new setting. A real persisted request with this switch reported 132 input and 18 output tokens, and the native parser returned those exact counts. Already masked historical counters cannot be reconstructed. BYOK/custom-model records containing measured token fields continue to work without this switch.
 
+The token-exposure switch was verified with CLI 1.1.62, not the Desktop app. Desktop JSONL with measured token fields is supported, as is the legacy IDE SQLite source. Masked Desktop counters contribute no tokens; enabling the CLI switch is not a verified Desktop workaround.
+
 JSONL `input_tokens` includes `cache_read_input_tokens`; the parser subtracts that cached subset before emitting uncached input. Credits and context-window occupancy are never converted to tokens.
 
-## Convert CLI credits to the standard USD cost
+## Convert request credits to the standard USD cost
 
-The native parser reads finite, nonnegative numeric `message.usage.credits` from assistant records with `entrypoint: "cli"`. It retains credit-bearing requests even when their token fields are masked. `original_credits`, result/session cumulative totals and account-quota deltas are not substitutes for per-request usage.
+The native parser reads finite, nonnegative numeric `message.usage.credits` from assistant records in Qoder CN’s configured JSONL projects root. CLI, Desktop and records without an `entrypoint` use the same per-request field contract. It retains credit-bearing requests even when their token fields are masked, provided they have a stable request, message or envelope ID. `original_credits`, result/session cumulative totals and account-quota deltas are not substitutes for per-request usage.
+
+Desktop credit accounting is covered by synthetic JSONL tests. Real Desktop installation/transcript acceptance has not been performed, so this establishes parser support for that format rather than verified coverage of every Desktop version or mode.
 
 The reference resource-pack price is **¥40 / 1,000 credits**, or **¥0.04 per credit** ([official CN pricing](https://docs.qoder.cn/product-overview/billing-description)). Conversion is:
 
@@ -37,7 +41,7 @@ The desktop passes its effective CNY exchange rate (manual override, fetched rat
 
 This is an estimated resource value, like other model-cost estimates, not the user's cash invoice: subscription discounts and free promotions can differ. `billable: false` does not change the resource unit. The CN price is different from global Qoder and Kiro pricing.
 
-Credit-derived USD enters the ordinary native cost field. It replaces token-catalog estimation for the same request, including explicit zero, so one request is not charged twice. Existing explicit custom pricing keeps its normal precedence. Stable request ids (then message id or envelope uuid) deduplicate copied/resumed transcripts and subagent files before aggregation. Legacy database/token-only records retain their existing accounting behavior.
+Credit-derived USD enters the ordinary native cost field. It replaces token-catalog estimation for the same request, including explicit zero, so one request is not charged twice. Existing explicit custom pricing keeps its normal precedence. Stable request ids deduplicate copied/resumed transcripts and subagent files before aggregation. Session-scoped message/envelope aliases may link through multiple copies only when the connected group identifies at most one explicit request; conflicting request IDs remain distinct. The latest measured token observation survives newer masked copies, while the latest explicit credit value (including zero) remains authoritative. Missing-session fallbacks stay source-local. Legacy database records retain their existing accounting behavior.
 
 No separate credits card, model-row style, device wire field or SQLite credit ledger is needed. Existing USD totals, model/client ranking, sessions, archives and DAY/MONTH/TOTAL selections consume the same report as other CLIs.
 
@@ -45,7 +49,9 @@ No separate credits card, model-row style, device wire field or SQLite credit le
 
 The native display-name table maps `qfmodel` to `Qwen3.8-Flash`, verified against Qoder CN's own `get_models` catalog on 2026-10-15. Internal routing tiers name a tier, not its underlying model. Unknown/custom ids pass through; do not guess a family from an opaque id. Existing model aliases can override a display name if the account catalog changes.
 
-Token Monitor mirrors the same code table app-side in `normalizeTokscaleModelNameForClient` (scoped to the `qodercn` client), so `qfmodel` already shows as `Qwen3.8-Flash` with a vendored tokscale whose table lacks that row. Names the native parser has already mapped pass through unchanged. Stored periods are reconciled on load, and collector anchors carry `qoderCnModelVersion` so an anchor written before the mapping forces one full rescan.
+Token Monitor mirrors the same code table app-side in `normalizeTokscaleModelNameForClient` (scoped to the `qodercn` client), so `qfmodel` already shows as `Qwen3.8-Flash` with a vendored tokscale whose table lacks that row. Names the native parser has already mapped pass through unchanged. Stored periods are reconciled on load, including model throughput when client attribution is exclusive. Shared raw model buckets retain period totals but discard ambiguous component, throughput and unpriced-model attribution rather than guessing a split. Collector anchors carry `qoderCnModelVersion: 2`, forcing a full rescan of earlier model/session keys.
+
+For JSONL with a real `sessionId`, the app canonicalizes the native `qodercn:jsonl:<source-hash>:<sessionId>` key to `qodercn:jsonl:session:<sessionId>`. Copying a transcript must not create a second archived conversation. Existing JSON/SQLite archive aliases replay one latest whole snapshot per period, including explicit zero; live report rows still aggregate by conversation. Missing/`unknown` session IDs and legacy database keys remain source-local.
 
 ## Sources and recovery
 

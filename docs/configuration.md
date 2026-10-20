@@ -56,6 +56,7 @@ The agent and hub have no UI. Configure them with a `.env` file in the project r
 TOKEN_MONITOR_HUB_URL=               # required in sync mode — Worker URL or http://<lan-ip>:17321
 TOKEN_MONITOR_SECRET=                # shared secret; must match the hub
 TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to the hostname
+TOKEN_MONITOR_PERSIST_INTERVAL_MS=   # Node Hub only — 0/default saves each upload; 300000 batches for 5min
 TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # optional — 0/live, 600000/10min, 1200000/20min, 1800000/30min
 TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported tools; empty disables tracking
 TOKEN_MONITOR_PROJECTS_ENABLED=      # optional — defaults on; 0 stops collecting project metadata
@@ -82,6 +83,10 @@ TOKEN_MONITOR_WORKBUDDY_LOCALE=       # headless only — en or zh
 Provider credentials (Grok, DeepSeek, Minimax, Copilot, GLM / GLM Team, Volcengine, Qoder, Command Code, WorkBuddy, Ollama, Kimi, Alibaba Token Plan, …) and proxy settings live in the same file. **`.env.example` is the complete, authoritative list** — start from it rather than copying keys by hand, since it stays in sync with the code. The desktop widget automatically reads the session owned by the local WorkBuddy app when that provider is enabled; the WorkBuddy token fields above remain only for headless/CLI deployments.
 
 The widget reads most settings as first-run defaults. WorkBuddy follows the same provider checkbox as other auto-detected integrations on macOS and Windows; Linux local-app monitoring is unsupported. Desktop users do not copy a token, and the WorkBuddy token fields above apply only to the headless agent/CLI. The agent and hub take a CLI flag over an env var over the built-in default.
+
+The standalone Node Hub accepts `--persistIntervalMs` or `TOKEN_MONITOR_PERSIST_INTERVAL_MS`. Values must be finite numbers from `0` through `2147483647` milliseconds; invalid values fail startup. The CLI flag requires a nonblank value, such as `--persistIntervalMs=300000`; a missing value fails startup even when the environment variable is valid. Leave it at `0` to save synchronously after each upload. A positive value, such as `300000`, batches usage snapshots at a fixed deadline after the first pending upload; continuous uploads do not reset it. API/SSE reads still update immediately. A failed timer save is logged and keeps the latest records pending for the next upload batch or normal shutdown. File-based readers can lag by the interval while writes succeed, and abrupt termination can lose updates accepted since the last save. Device deletion, subscription edits, shared settings and title policy changes save immediately.
+
+On SIGINT/SIGTERM, the Node Hub saves pending usage before waiting for already-admitted uploads, rejects new requests, ends SSE streams, and saves again after draining. Remaining HTTP connections are force-closed after a five-second drain target; a busy event loop can delay this timer. A failed final save is reported with a nonzero exit code. SIGKILL and crashes cannot run this shutdown path.
 
 One-shot run (collect once and exit — useful for cron / launchd):
 

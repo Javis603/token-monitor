@@ -46,3 +46,17 @@ test('CatPaw nonzero fixtures run only on supported app platforms', () => {
   assert.ok(!applicableTokenContracts('linux').some(({ client }) => client === 'catpaw'));
   assert.ok(applicableTokenContracts('linux').some(({ client }) => client === 'qodercn'));
 });
+
+test('the Qoder binary contract addresses the session produced by App normalization', () => {
+  const { extractUsageFromTokscale } = require('../../src/shared/usage');
+  const contract = TOKEN_CONTRACT_CASES.find(({ client }) => client === 'qodercn');
+  const period = extractUsageFromTokscale({ entries: [{
+    ...contract.expectedRow, client: 'qodercn', sessionId: 'qodercn:jsonl:0123456789ab:qsess-1'
+  }] });
+  const id = contract.expectedSession.id;
+  const key = id instanceof RegExp
+    ? Object.keys(period.sessions).find(candidate => id.test(candidate))
+    : `qodercn:${id}`;
+  assert.ok(period.sessions[key], 'vendor acceptance must address the normalized session');
+  assert.equal(period.sessions[key].totalTokens, contract.expectedSession.totalTokens);
+});

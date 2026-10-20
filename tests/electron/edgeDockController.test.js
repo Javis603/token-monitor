@@ -129,6 +129,14 @@ function sentPayload(win, surface) {
   )).at(-1)?.payload;
 }
 
+// Drive the controller's polling, intent grace and animation frames on one clock.
+function mockDockClock(t) {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+  return (ms) => {
+    for (let elapsed = 0; elapsed < ms; elapsed += 16) t.mock.timers.tick(Math.min(16, ms - elapsed));
+  };
+}
+
 function createFixture(options = {}) {
   FakeBrowserWindow.instances = [];
   FakeBrowserWindow.zOrder = [];
@@ -1508,11 +1516,7 @@ for (const change of ['stop', 'restart', 'remove', 'disable haptics']) {
 for (const mode of ['always', 'alwaysExceptFullScreen']) {
   for (const outcome of ['success', 'failure', 'throw']) {
     test(`${mode} refresh stays visible after pointer leave until ${outcome}`, async (t) => {
-      t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
-      // Advance through frames so feedback expiry and opacity steps share one clock.
-      const advance = (ms) => {
-        for (let elapsed = 0; elapsed < ms; elapsed += 16) t.mock.timers.tick(Math.min(16, ms - elapsed));
-      };
+      const advance = mockDockClock(t);
       let finish;
       let fail;
       const animated = mode === 'always' && outcome === 'success';
@@ -1554,6 +1558,7 @@ for (const mode of ['always', 'alwaysExceptFullScreen']) {
 }
 
 test('busy visibility yields to dragging and removing the action', async (t) => {
+  const advance = mockDockClock(t);
   let finish;
   const fixture = createFixture({
     canRefreshLimits: () => true,
@@ -1563,12 +1568,12 @@ test('busy visibility yields to dragging and removing the action', async (t) => 
   const peek = fixture.windowFor('peek');
   const rail = fixture.windowFor('rail');
   fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 40 };
-  await new Promise((resolve) => setTimeout(resolve, 105));
+  advance(105);
   fixture.paintPeek();
   const request = fixture.ipcMain.handlers.get('edgeDock:refreshLimits')({ sender: peek.webContents });
   await Promise.resolve();
   fixture.screen.point = { x: 100, y: 100 };
-  await new Promise((resolve) => setTimeout(resolve, 105));
+  advance(105);
   assert.equal(peek.ignoreMouse, false);
   fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetY: 20 });
   assert.equal(peek.ignoreMouse, true);
@@ -1584,6 +1589,7 @@ test('busy visibility yields to dragging and removing the action', async (t) => 
 
 for (const rebuild of ['material', 'restart']) {
   test(`refresh joined after ${rebuild} rebuild keeps the new window busy and holds its result`, async (t) => {
+    const advance = mockDockClock(t);
     let finish;
     let calls = 0;
     let glass = null;
@@ -1598,7 +1604,7 @@ for (const rebuild of ['material', 'restart']) {
     let peek = fixture.windowFor('peek');
     let rail = fixture.windowFor('rail');
     fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 40 };
-    await new Promise((resolve) => setTimeout(resolve, 105));
+    advance(105);
     fixture.paintPeek();
     const handler = fixture.ipcMain.handlers.get('edgeDock:refreshLimits');
     const original = handler({ sender: peek.webContents });
@@ -1612,28 +1618,29 @@ for (const rebuild of ['material', 'restart']) {
     rail = fixture.windowFor('rail');
     assert.notEqual(peek, oldPeek);
     fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 40 };
-    await new Promise((resolve) => setTimeout(resolve, 105));
+    advance(105);
     fixture.paintPeek();
     const joined = handler({ sender: peek.webContents });
     await Promise.resolve();
     assert.equal(calls, 1, 'rejoining does not dispatch another refresh');
     fixture.screen.point = { x: 100, y: 100 };
-    await new Promise((resolve) => setTimeout(resolve, 450));
+    advance(450);
     assert.equal(peek.ignoreMouse, false, 'new busy window remains visible after pointer leave');
     fixture.hapticCalls.length = 0;
     finish({ ok: true });
     assert.deepEqual(await original, { ok: true });
     assert.deepEqual(await joined, { ok: true });
     assert.deepEqual(fixture.hapticCalls, [{ pattern: 'generic', performanceTime: 'default' }]);
-    await new Promise((resolve) => setTimeout(resolve, 450));
+    advance(450);
     assert.equal(peek.ignoreMouse, false, 'the new window holds its result');
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    advance(800);
     assert.equal(peek.ignoreMouse, true, 'the new window hides after the hold');
   });
 }
 
 for (const mode of ['autoHide', 'alwaysExceptFullScreen']) {
   test(`${mode} keeps auto-hide behaviour during refresh in its auto-hide state`, async (t) => {
+    const advance = mockDockClock(t);
     let finish;
     const fixture = createFixture({
       settings: { edgeDockMode: mode }, isFullScreen: () => true,
@@ -1648,13 +1655,10 @@ for (const mode of ['autoHide', 'alwaysExceptFullScreen']) {
     const request = fixture.ipcMain.handlers.get('edgeDock:refreshLimits')({ sender: peek.webContents });
     await Promise.resolve();
     fixture.screen.point = { x: 100, y: 100 };
-    // The retract lands about 400 ms after leaving, so a fixed 450 ms wait left
-    // too little room for timer jitter on loaded Windows runners. Wait for it
-    // with a bounded deadline instead.
-    const deadline = Date.now() + 2000;
-    while (rail.ignoreMouse !== true && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    advance(90); // Let the cursor poll observe departure before the hide grace.
+    advance(EDGE_DOCK_TIMING.hideDelayMs - 1);
+    assert.equal(rail.ignoreMouse, false, 'refresh does not bypass the normal leave grace');
+    advance(41);
     assert.equal(rail.ignoreMouse, true, 'leaving still retracts the auto-hide rail while refreshing');
     assert.equal(sentPayload(peek, 'peek').peekMode, 'handle');
     finish({ ok: true });

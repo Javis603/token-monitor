@@ -60,10 +60,11 @@ function cursorBillingWindow(label, fields = {}) {
 // Grok Bot allowance would count the same pool twice.
 // Plan info is authoritative, as in Cursor's own settings; the sand status's
 // unified flag only stands in when plan info is unavailable.
-function isUnifiedPlan(usage) {
-  return usage.planInfo
-    ? usage.planInfo.isMerged === true
-    : usage.grokBot?.isUnified === true;
+function cursorPlanType(usage) {
+  if (usage.planInfo) return usage.planInfo.isMerged === true ? 'unified' : 'legacy';
+  if (usage.grokBot) return usage.grokBot.isUnified === true ? 'unified' : 'legacy';
+  // A failed lookup is not a proto3 response with an omitted false flag.
+  return 'unknown';
 }
 
 function cursorIncludedWindow(usage, billingResetsAt) {
@@ -168,7 +169,9 @@ async function fetchCursorAccountLimits(account, deps = {}) {
 
   const { usage } = result;
   const resetsAt = cursorResetIso(usage) || usage.planInfo?.billingCycleEnd || null;
-  const unified = isUnifiedPlan(usage);
+  const planType = cursorPlanType(usage);
+  const unified = planType === 'unified';
+  const legacy = planType === 'legacy';
   const hasRequestUsage = finiteNumber(usage.requestsUsed) !== null
     && finiteNumber(usage.requestsLimit) !== null
     && usage.requestsLimit > 0;
@@ -177,7 +180,7 @@ async function fetchCursorAccountLimits(account, deps = {}) {
   if (unified) {
     const includedWindow = cursorIncludedWindow(usage, resetsAt);
     if (includedWindow) windows.push(includedWindow);
-  } else if (hasRequestUsage) {
+  } else if (legacy && hasRequestUsage) {
     windows.push(cursorBillingWindow('Requests', {
       usedPercent: percentFromUsedLimit(usage.requestsUsed, usage.requestsLimit),
       used: usage.requestsUsed,
@@ -187,7 +190,7 @@ async function fetchCursorAccountLimits(account, deps = {}) {
       windowMinutes: null,
       resetDescription: usage.membershipType ? `Cursor ${usage.membershipType}` : ''
     }));
-  } else if (finiteNumber(usage.autoPercent) !== null || finiteNumber(usage.apiPercent) !== null) {
+  } else if (legacy && (finiteNumber(usage.autoPercent) !== null || finiteNumber(usage.apiPercent) !== null)) {
     if (finiteNumber(usage.autoPercent) !== null) windows.push(cursorBillingWindow('Cursor Models', {
       usedPercent: usage.autoPercent,
       resetsAt,
@@ -198,7 +201,7 @@ async function fetchCursorAccountLimits(account, deps = {}) {
       resetsAt,
       windowMinutes: null
     }));
-  } else if (usage.hasOverallUsage && finiteNumber(usage.planPercent) !== null) {
+  } else if (legacy && usage.hasOverallUsage && finiteNumber(usage.planPercent) !== null) {
     windows.push(cursorBillingWindow('Overall', {
       usedPercent: usage.planPercent,
       used: usage.planUsedUsd,
@@ -249,7 +252,11 @@ async function fetchCursorAccountLimits(account, deps = {}) {
     accountLabel: result.user?.email || account.label || formatCursorMembership(usage.membershipType) || '',
     accountEmail: result.user?.email || '',
     planLabel: formatCursorMembership(usage.membershipType) || (unified ? usage.planInfo?.planName || '' : ''),
-    status: 'ok',
+    status: planType === 'unknown' && windows.length === 0 ? 'unavailable' : 'ok',
+    // Runtime-only: these legacy seat quotas are untrusted even in lastGood.
+    ...(planType === 'unknown' ? {
+      invalidateCachedWindowLabels: ['Requests', 'Cursor Models', 'Other Models', 'Overall']
+    } : {}),
     source: 'web',
     updatedAt,
     windows

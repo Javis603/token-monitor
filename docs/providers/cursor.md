@@ -51,6 +51,8 @@ Unified plans (The X Subscription: Plus, Premium, Super and unified Ultra) are d
 
 Account-scoped enable/disable affects limits collection only. The active tokscale account and self-synced history are managed by the explicit Cursor lifecycle operations.
 
+If both plan-info and sand lookups fail, the plan type stays unknown: a successful legacy response with omitted proto3 false flags is different from a failed lookup. Unknown plans do not expose `Requests`, `Cursor Models`, `Other Models` or `Overall`, even when usage-summary reports zero used, and invalidate those labels in that account's last-good cache. Independently reported team pool and on-demand spend remain available; with no current windows, the provider reports unavailable. Previously confirmed unified windows follow the shared [partial-result retention contract](../architecture.md#limits-collector). This does not change token-event synchronization or recover missing token history.
+
 The best-effort current-period RPC has a wall-clock deadline of at most five seconds, preserving a shorter configured timeout. This covers DNS, connection setup and response reads, destroys the request on expiry, and retains parent cancellation. The deadline timer and parent listener are cleaned up when the call settles. On timeout, normal percentage fallback still applies; this is a deadline for this RPC, not for the entire account probe.
 
 ## Verification

@@ -6393,7 +6393,7 @@ function renderHomeLimitModule() {
 
 function renderHomeModelModule(period) {
   const { module, body } = homeModuleShell('model', t('home.models'), 'model');
-  const rows = homeOverviewApi.homeModelRows(modelRowsForPeriod(period, 'tokens'), period?.totalTokens, 5);
+  const rows = homeOverviewApi.homeModelRows(modelRowsForPeriod(period, 'tokens'), period?.totalTokens, homeModulePreferencesApi.homeModuleCount(state.settings, 'model'));
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -6432,7 +6432,7 @@ function homeToolSourceRows(period) {
 
 function renderHomeToolModule(period) {
   const { module, body } = homeModuleShell('tool', t('home.tools'), 'tool');
-  const rows = homeOverviewApi.homeToolRows(homeToolSourceRows(period), period?.totalTokens, 5);
+  const rows = homeOverviewApi.homeToolRows(homeToolSourceRows(period), period?.totalTokens, homeModulePreferencesApi.homeModuleCount(state.settings, 'tool'));
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -6477,7 +6477,7 @@ function stopHomeSessionRepaint() {
 
 function scheduleHomeSessionRepaint(rows) {
   stopHomeSessionRepaint();
-  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
   if (!rows.length) return;
   const now = Date.now();
   const expiry = window.TokenMonitorEdgeDockPresentation.nextRunningExpiryAt(rows, now);
@@ -6493,7 +6493,7 @@ function scheduleHomeSessionRepaint(rows) {
     const hadFocus = document.activeElement === current;
     const hadHeadFocus = document.activeElement === current.querySelector?.('.home-module-head');
     const focusedKey = document.activeElement?.closest?.('.home-session-row')?.dataset?.key;
-    const nextRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+    const nextRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
     const next = renderHomeSessionModule(nextRows);
     current.replaceWith(next);
     if (hadFocus) next.focus();
@@ -6536,7 +6536,7 @@ function renderHomeSessionModule(rows) {
     homeSessionRenderPending = true;
     return current;
   }
-  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
   const runningCount = window.TokenMonitorEdgeDockPresentation.runningSessionSummary(rows).count;
   const meta = runningCount > 0 ? t('home.runningSessions', { count: runningCount }) : '';
   const { module, body } = homeModuleShell('session', t('home.sessions'), 'session', meta);
@@ -6625,7 +6625,7 @@ function renderHomeDeviceModule() {
   const rows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
     localDeviceId: state.settings?.deviceId || '',
     period: state.period,
-    limit: 4
+    limit: homeModulePreferencesApi.homeModuleCount(state.settings, 'device')
   });
   if (rows.length === 0) {
     const empty = document.createElement('div');
@@ -7119,7 +7119,7 @@ function renderHome() {
     if (id === 'device') return renderHomeDeviceModule();
     if (id === 'model') return renderHomeModelModule(period);
     if (id === 'session') {
-      sessionRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+      sessionRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
       return renderHomeSessionModule(sessionRows);
     }
     return renderHomeTrendsModule();
@@ -9572,7 +9572,7 @@ function applyPreferenceOrder(kind, order) {
     const companionId = kind === 'view'
       ? ({ home: 'homeSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', session: 'sessionSettingsContainer', status: 'serviceProvidersContainer' })[id]
       : kind === 'homeModule'
-        ? ({ limits: 'homeLimitProviderContainer', trends: 'homeActivitySettingsContainer' })[id]
+        ? HOME_MODULE_SUBGROUPS[id]?.[1]
         : '';
     const companion = companionId ? document.getElementById(companionId) : null;
     if (companion) list.appendChild(companion);
@@ -9612,7 +9612,11 @@ const VIEW_PREFERENCE_SUBGROUPS = {
 
 const HOME_MODULE_SUBGROUPS = {
   limits: ['homeLimitSettingsExpanded', 'homeLimitProviderContainer'],
-  trends: ['homeActivitySettingsExpanded', 'homeActivitySettingsContainer']
+  trends: ['homeActivitySettingsExpanded', 'homeActivitySettingsContainer'],
+  tool: ['homeToolSettingsExpanded', 'homeToolSettingsContainer'],
+  model: ['homeModelSettingsExpanded', 'homeModelSettingsContainer'],
+  session: ['homeSessionSettingsExpanded', 'homeSessionSettingsContainer'],
+  device: ['homeDeviceSettingsExpanded', 'homeDeviceSettingsContainer']
 };
 
 function expandedPreferenceSubgroups(definitions) {
@@ -10064,6 +10068,48 @@ function renderHomeLimitProviderList() {
   return wrap;
 }
 
+function renderHomeModuleCountSettings(id) {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-nested-list';
+  const label = document.createElement('label');
+  label.className = 'settings-item home-module-count-setting';
+  const text = document.createElement('span');
+  text.className = 'settings-item-text';
+  const title = document.createElement('span');
+  title.className = 'settings-item-title';
+  title.textContent = t('settings.home.itemCount');
+  text.append(title);
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '1';
+  input.max = String(homeModulePreferencesApi.HOME_MODULE_COUNT_MAX);
+  input.step = '1';
+  input.inputMode = 'numeric';
+  input.value = String(homeModulePreferencesApi.homeModuleCount(state.settings, id));
+  input.addEventListener('change', async () => {
+    const counts = homeModulePreferencesApi.normalizeHomeModuleCounts({ [id]: input.value }, state.settings?.homeModuleCounts);
+    input.value = String(counts[id]);
+    try {
+      await saveSettings({ homeModuleCounts: { [id]: counts[id] } });
+    } catch (_) {
+      // saveSettings reports the failure and restores persisted settings and UI.
+      return;
+    }
+    renderHomeIfVisible();
+  });
+  label.append(text, input);
+  wrap.append(label);
+  if (id === 'session') {
+    const note = document.createElement('p');
+    note.id = 'homeSessionCountNote';
+    note.className = 'settings-note';
+    note.textContent = t('settings.home.sessionCountNote');
+    input.setAttribute('aria-describedby', note.id);
+    wrap.append(note);
+  }
+  return wrap;
+}
+
 function renderHomeSettingsList() {
   const wrap = document.createElement('div');
   wrap.id = 'homeSettingsList';
@@ -10113,12 +10159,13 @@ function renderHomeSettingsList() {
     name.textContent = label;
     const actions = document.createElement('div');
     actions.className = 'tool-preference-actions';
-    if (id === 'limits' || id === 'trends') {
+    if (HOME_MODULE_SUBGROUPS[id]) {
       const configure = document.createElement('button');
       configure.type = 'button';
-      const expanded = id === 'limits' ? state.homeLimitSettingsExpanded : state.homeActivitySettingsExpanded;
+      const expanded = state[HOME_MODULE_SUBGROUPS[id][0]];
       configure.className = `view-subgroup-toggle${expanded ? ' is-expanded' : ''}`;
-      configure.title = t(id === 'limits' ? 'settings.home.configureLimits' : 'settings.home.configureActivity');
+      configure.title = t(id === 'limits' ? 'settings.home.configureLimits'
+        : id === 'trends' ? 'settings.home.configureActivity' : 'settings.home.configureModule', { name: label });
       configure.setAttribute('aria-label', configure.title);
       configure.setAttribute('aria-expanded', String(Boolean(expanded)));
       const toggleIcon = document.createElement('span');
@@ -10141,23 +10188,15 @@ function renderHomeSettingsList() {
     row.append(name, actions);
     row.addEventListener('pointerdown', (event) => homeModulePreferenceRowDrag.startRowDrag(event, id));
     wrap.append(row);
-    if (id === 'limits') {
+    const subgroup = HOME_MODULE_SUBGROUPS[id];
+    if (subgroup) {
       const listContainer = document.createElement('div');
-      listContainer.id = 'homeLimitProviderContainer';
-      listContainer.className = `accordion-animated-container${state.homeLimitSettingsExpanded ? '' : ' hidden'}`;
+      listContainer.id = subgroup[1];
+      listContainer.className = `accordion-animated-container${state[subgroup[0]] ? '' : ' hidden'}`;
       const inner = document.createElement('div');
       inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderHomeLimitProviderList());
-      listContainer.appendChild(inner);
-      wrap.append(listContainer);
-    }
-    if (id === 'trends') {
-      const listContainer = document.createElement('div');
-      listContainer.id = 'homeActivitySettingsContainer';
-      listContainer.className = `accordion-animated-container${state.homeActivitySettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderHomeActivitySettings());
+      inner.appendChild(id === 'limits' ? renderHomeLimitProviderList()
+        : id === 'trends' ? renderHomeActivitySettings() : renderHomeModuleCountSettings(id));
       listContainer.appendChild(inner);
       wrap.append(listContainer);
     }
