@@ -250,8 +250,8 @@ test('Home limit provider settings expand with the shared accordion transition',
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
   const renderHomeSettingsList = functionBody(app, 'renderHomeSettingsList', 'renderTrendSettingsList');
-  assert.match(renderHomeSettingsList, /homeLimitProviderContainer/);
-  assert.match(renderHomeSettingsList, /accordion-animated-container\$\{state\.homeLimitSettingsExpanded \? '' : ' hidden'\}/);
+  assert.match(app, /limits: \['homeLimitSettingsExpanded', 'homeLimitProviderContainer'\]/);
+  assert.match(renderHomeSettingsList, /accordion-animated-container\$\{state\[subgroup\[0\]\] \? '' : ' hidden'\}/);
   assert.match(renderHomeSettingsList, /accordion-animation-inner/);
   assert.match(renderHomeSettingsList, /togglePreferenceSubgroup\(HOME_MODULE_SUBGROUPS, '\.home-module-preference-row', id\)/);
   const sharedExpansion = functionBody(app, 'setPreferenceSubgroupsExpanded', 'togglePreferenceSubgroup');
