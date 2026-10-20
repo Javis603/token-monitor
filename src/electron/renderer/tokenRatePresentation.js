@@ -207,7 +207,13 @@
         && Object.values(remainder).every((value) => value >= 0)
         && (remainder.timedDurationMs > 0 || (remainder.timedTokens === 0 && remainder.timedOutputTokens === 0))) {
         modelSamples = nextModels;
-        unattributedSample = remainder.timedDurationMs > 0 ? { ...remainder, sampledAt } : null;
+        if (remainder.timedDurationMs > 0) {
+          unattributedSample = { ...remainder, sampledAt, independent: true };
+        } else if (!unattributedSample?.independent || sampledAt >= unattributedSample.sampledAt + lifetime) {
+          // Only a consistent remainder is disjoint from the retained model samples.
+          // A fallback after re-attribution may include those same models.
+          unattributedSample = null;
+        }
       } else {
         modelSamples = new Map();
         unattributedSample = { ...stepDelta, sampledAt };

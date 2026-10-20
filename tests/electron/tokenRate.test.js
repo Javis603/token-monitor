@@ -1046,3 +1046,33 @@ test('changing a model alias cannot turn historical counters into a live model d
   assert.equal(partialRegression.speed, 40);
   assert.deepEqual(partialRegression.models, []);
 });
+
+test('attributed ticks retain a consistent unattributed remainder only until its own expiry', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now });
+  const entries = (period) => [{ id: 'local', period }];
+  const base = modelRatePeriod({});
+  const unknown = { timedTokens: 100, timedOutputTokens: 80, timedDurationMs: 1000, modelThroughput: {} };
+  const known = {
+    timedTokens: 300, timedOutputTokens: 100, timedDurationMs: 3000,
+    modelThroughput: { beta: { timedTokens: 200, timedOutputTokens: 20, timedDurationMs: 2000 } }
+  };
+  tracker.reset(entries(base));
+  now = 100;
+  tracker.observe(entries(unknown));
+  assert.equal(tracker.getSample().speed, 80);
+  now = 200;
+  tracker.observe(entries(known));
+  assert.equal(tracker.getSample().speed, 100 / 3);
+  assert.equal(tracker.getSample().burn, 6000);
+  assert.equal(tracker.nextExpiryAt(), 8100);
+  assert.deepEqual(tracker.getSample().devices[0].models, [{ model: 'beta', speed: 10, burn: 6000 }]);
+  now = 8000;
+  assert.equal(tracker.observe(entries(known)).changed, false);
+  assert.equal(tracker.nextExpiryAt(), 8100, 'duplicate pushes do not renew the unknown sample');
+  now = 8100;
+  assert.equal(tracker.getSample().speed, 10);
+  assert.equal(tracker.nextExpiryAt(), 8200);
+  now = 8200;
+  assert.equal(tracker.getSample().idle, true);
+});
