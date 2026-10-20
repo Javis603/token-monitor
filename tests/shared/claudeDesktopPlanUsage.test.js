@@ -77,6 +77,16 @@ test('candidates cover macOS, Windows (APPDATA, MSIX, Claude-Data) and Linux, fo
   assert.equal(variantForDir('/x/Claude'), '1p');
 });
 
+test('a Windows home keeps Windows separators when a macOS or Linux layout is simulated', () => {
+  // CI runs the fixture tests on Windows with platform 'linux'/'darwin' and a
+  // real C:\\ temp dir; path.posix would turn it into a path that never exists.
+  const linux = claudeDesktopUserDataCandidates({ platform: 'linux', homeDir: 'C:\\Temp\\h', env: {} });
+  assert.deepEqual(linux.map(({ dir }) => dir), ['C:\\Temp\\h\\.config\\Claude', 'C:\\Temp\\h\\.config\\Claude-3p']);
+  const mac = claudeDesktopUserDataCandidates({ platform: 'darwin', homeDir: 'D:\\a\\home', env: {} });
+  assert.equal(mac[0].dir, 'D:\\a\\home\\Library\\Application Support\\Claude');
+  assert.equal(mac[1].variant, '3p');
+});
+
 test('only existing roots are returned', () => {
   const home = tempDir();
   fs.mkdirSync(path.join(home, '.config', 'Claude'), { recursive: true });

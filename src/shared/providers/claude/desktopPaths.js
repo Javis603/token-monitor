@@ -30,8 +30,17 @@ function nonBlank(value) {
   return text || '';
 }
 
-function pathApiFor(platform) {
-  return platform === 'win32' ? path.win32 : path.posix;
+// A drive-letter or UNC path is a Windows filesystem path whatever platform
+// layout is being resolved (tests simulate macOS/Linux layouts inside a real
+// Windows temp dir); joining it with path.posix would produce a path that
+// never exists.
+function isWindowsAbsolutePath(value) {
+  return /^(?:[A-Za-z]:[\\/]|\\\\)/.test(String(value || ''));
+}
+
+function pathApiFor(platform, homeDir) {
+  if (platform === 'win32' || isWindowsAbsolutePath(homeDir)) return path.win32;
+  return path.posix;
 }
 
 function variantForDir(dir) {
@@ -49,7 +58,7 @@ function claudeDesktopUserDataCandidates(options = {}) {
   const platform = options.platform || process.platform;
   const env = options.env || process.env;
   const homeDir = options.homeDir || os.homedir();
-  const p = pathApiFor(platform);
+  const p = pathApiFor(platform, homeDir);
   const out = [];
   const add = (dir, source) => {
     if (!dir) return;
