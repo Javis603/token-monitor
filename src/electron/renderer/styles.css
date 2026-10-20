@@ -3714,6 +3714,74 @@ html.is-windows .settings-panel select option {
   grid-template-columns: 10px minmax(0, 1fr) minmax(42px, auto) minmax(31px, auto);
   column-gap: 8px;
 }
+.home-tool-card {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 7px 9px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(var(--overlay-rgb), 0.03);
+}
+.home-tool-detail {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding-left: 18px;
+}
+.home-tool-split {
+  display: flex;
+  height: 4px;
+  overflow: hidden;
+  gap: 1px;
+  border-radius: 2px;
+  background: rgba(var(--overlay-rgb), 0.06);
+}
+.home-tool-split > span { min-width: 2px; flex-basis: 0; }
+.home-tool-split-read,
+.home-tool-swatch-read { background: var(--blue); }
+.home-tool-split-miss,
+.home-tool-swatch-miss { background: var(--orange); }
+.home-tool-split-output,
+.home-tool-swatch-output { background: var(--purple); }
+.home-tool-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px 14px;
+}
+.home-tool-stat {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+.home-tool-stat-label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--readable-muted);
+  font-size: 0.625rem;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-tool-swatch {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+}
+.home-tool-stat-value {
+  flex: none;
+  color: var(--text);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  white-space: nowrap;
+}
 .home-device-row {
   grid-template-columns: 10px minmax(0, 1fr) minmax(42px, auto);
   column-gap: 8px;

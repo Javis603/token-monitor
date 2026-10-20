@@ -6455,9 +6455,104 @@ function renderHomeToolModule(period) {
     share.className = 'home-list-aux';
     share.textContent = formatPercent(row.share * 100);
     item.append(mark, name, value, share);
-    body.append(item);
+    const card = document.createElement('div');
+    card.className = 'home-tool-card';
+    card.append(item);
+    const stats = renderHomeToolStats(homeToolStats(period, row.key, row.value));
+    if (stats) card.append(stats);
+    body.append(card);
   }
   return module;
+}
+
+// Per-tool detail shown under each Home tool row: the token split and, for tools whose
+// logs carry generation timing, the summed model time and the output speed it implies.
+// The split is decided per tool: a period can mix tools that report token components
+// with tools that do not, and only the latter should lose their breakdown.
+function homeToolStats(period, client, totalTokens) {
+  const parts = fixedPeriodRangesApi.tokenComponentBreakdown({
+    totalTokens,
+    cacheReadTokens: attributionComponent(period, 'clientCacheReads', client),
+    outputTokens: attributionComponent(period, 'clientOutputs', client),
+    unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client)
+  });
+  const throughput = period?.clientThroughput?.[client];
+  const durationMs = Math.max(0, Number(throughput?.timedDurationMs) || 0);
+  const timedOutput = Math.max(0, Number(throughput?.timedOutputTokens) || 0);
+  return {
+    parts: parts.unclassified < totalTokens ? parts : null,
+    durationMs,
+    tokensPerSecond: durationMs > 0 && timedOutput > 0 ? timedOutput / (durationMs / 1000) : null
+  };
+}
+
+function formatHomeToolDuration(ms) {
+  const totalSeconds = Math.round(Math.max(0, ms) / 1000);
+  if (totalSeconds < 60) return t('home.toolStats.seconds', { s: totalSeconds });
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  if (hours > 0) return t('home.toolStats.hoursMinutes', { h: hours, m: minutes });
+  return t('home.toolStats.minutesSeconds', { m: minutes, s: totalSeconds % 60 });
+}
+
+function homeToolStatCell(key, text, swatch) {
+  const cell = document.createElement('div');
+  cell.className = 'home-tool-stat';
+  const label = document.createElement('span');
+  label.className = 'home-tool-stat-label';
+  if (swatch) {
+    const dot = document.createElement('i');
+    dot.className = `home-tool-swatch home-tool-swatch-${swatch}`;
+    label.append(dot);
+  }
+  label.append(t(`home.toolStats.${key}`));
+  const value = document.createElement('span');
+  value.className = 'home-tool-stat-value';
+  value.textContent = text;
+  cell.append(label, value);
+  return cell;
+}
+
+function renderHomeToolStats({ parts, durationMs, tokensPerSecond }) {
+  const cells = [];
+  let bar = null;
+  if (parts) {
+    const input = parts.cacheRead + parts.cacheMiss;
+    const classified = input + parts.output;
+    cells.push(
+      homeToolStatCell('cacheHit', input > 0 ? formatPercent(toolDetailsApi.tokenInputPercentages(parts).hit) : '--'),
+      homeToolStatCell('cacheRead', formatCompact(parts.cacheRead), 'read'),
+      homeToolStatCell('uncachedInput', formatCompact(parts.cacheMiss), 'miss'),
+      homeToolStatCell('output', formatCompact(parts.output), 'output')
+    );
+    if (classified > 0) {
+      bar = document.createElement('div');
+      bar.className = 'home-tool-split';
+      bar.setAttribute('aria-hidden', 'true');
+      for (const [kind, amount] of [['read', parts.cacheRead], ['miss', parts.cacheMiss], ['output', parts.output]]) {
+        if (amount <= 0) continue;
+        const segment = document.createElement('span');
+        segment.className = `home-tool-split-${kind}`;
+        segment.style.flexGrow = String(amount / classified);
+        bar.append(segment);
+      }
+    }
+  }
+  if (durationMs > 0) {
+    cells.push(
+      homeToolStatCell('modelTime', formatHomeToolDuration(durationMs)),
+      homeToolStatCell('speed', tokensPerSecond ? t('home.toolStats.tps', { value: formatNumber(tokensPerSecond) }) : '--')
+    );
+  }
+  if (!cells.length) return null;
+  const wrap = document.createElement('div');
+  wrap.className = 'home-tool-detail';
+  const grid = document.createElement('div');
+  grid.className = 'home-tool-stats';
+  grid.append(...cells);
+  if (bar) wrap.append(bar);
+  wrap.append(grid);
+  return wrap;
 }
 
 function homeSessionAgo(value) {

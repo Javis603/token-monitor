@@ -28,7 +28,7 @@ test('defaultHomeModulePreferences includes Sessions and shows it by default', (
   assert.equal(DEFAULT_HOME_MODULE_ORDER, 'limits,tool,model,session,device,trends');
   assert.deepEqual(defaultHomeModulePreferences(), {
     homeModuleOrder: 'limits,tool,model,session,device,trends',
-    hiddenHomeModules: 'tool,device'
+    hiddenHomeModules: 'device'
   });
 });
 
@@ -51,7 +51,7 @@ test('default Home module preferences show Sessions in the overview', () => {
     orderedHomeModules(modules, defaultHomeModulePreferences().homeModuleOrder)
       .map((module) => module.id)
       .filter((id) => !hidden.has(id)),
-    ['limits', 'model', 'session', 'trends']
+    ['limits', 'tool', 'model', 'session', 'trends']
   );
 });
 
