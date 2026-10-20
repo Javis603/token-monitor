@@ -3038,6 +3038,9 @@ test('collectUsageOnce runs the three tokscale scans serially, not concurrently'
     const { collectUsageOnce } = freshCollector();
     await collectUsageOnce({
       clients: 'claude',
+      // With no source on disk the client is filtered out and no scan starts,
+      // which would leave maxActive at 0 and assert against the wrong thing.
+      homeDir: withTmpHome(['.claude/projects']),
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1000,
       deviceId: 'test-device',

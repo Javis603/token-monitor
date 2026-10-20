@@ -10,11 +10,11 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { EventEmitter } = require('node:events');
-const { referencedTerminationOptions } = require('../helpers/referencedTerminationTimers');
-
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { referencedTerminationOptions } = require('../helpers/referencedTerminationTimers');
+
 const collectorPath = require.resolve('../../src/shared/collector');
 
 function freshCollector() {
@@ -361,11 +361,17 @@ async function collectWithFallback(clients, acceptsForkOnly, rejectedForkClients
   // conversation needs a home where every id it talks about actually exists.
   // CatPaw has no Linux root at all, which leaves it with no checks to fail.
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tokscale-fallback-'));
+  // CatPaw registers roots only on macOS and Windows; on Linux it has none, so
+  // leaving it out here is invisible until the macOS job runs the case.
+  const catpawRoot = process.platform === 'darwin'
+    ? path.join(homeDir, 'Library', 'Application Support', 'catpaw-moon')
+    : process.platform === 'win32' ? path.join(homeDir, 'AppData', 'Roaming', 'catpaw-moon') : null;
   for (const dir of [
     path.join(homeDir, '.claude', 'projects'),
     path.join(homeDir, '.local', 'share', 'amp', 'threads'),
     path.join(homeDir, '.proma', 'agent-sessions'),
-    path.join(homeDir, '.qoder-cn', 'projects')
+    path.join(homeDir, '.qoder-cn', 'projects'),
+    ...(catpawRoot ? [catpawRoot] : [])
   ]) fs.mkdirSync(dir, { recursive: true });
   const previousDataHome = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = path.join(homeDir, '.local', 'share');
