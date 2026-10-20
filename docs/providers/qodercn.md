@@ -45,6 +45,8 @@ No separate credits card, model-row style, device wire field or SQLite credit le
 
 The native display-name table maps `qfmodel` to `Qwen3.8-Flash`, verified against Qoder CN's own `get_models` catalog on 2026-10-15. Internal routing tiers name a tier, not its underlying model. Unknown/custom ids pass through; do not guess a family from an opaque id. Existing model aliases can override a display name if the account catalog changes.
 
+Token Monitor mirrors the same code table app-side in `normalizeTokscaleModelNameForClient` (scoped to the `qodercn` client), so `qfmodel` already shows as `Qwen3.8-Flash` with a vendored tokscale whose table lacks that row. Names the native parser has already mapped pass through unchanged. Stored periods are reconciled on load, and collector anchors carry `qoderCnModelVersion` so an anchor written before the mapping forces one full rescan.
+
 ## Sources and recovery
 
 The pinned `Javis603/tokscale` fork parses Qoder CN; upstream tokscale does not yet provide this client. The JSONL projects root resolves in this order:

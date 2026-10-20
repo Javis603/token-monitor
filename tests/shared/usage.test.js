@@ -1799,3 +1799,50 @@ test('aggregateDevices folds a pre-rename micode device into the mimo row', () =
   assert.equal(aggregate.periods.today.clients.micode, undefined);
   assert.equal(aggregate.periods.today.clientCosts.mimo, 2);
 });
+
+test('extractUsageFromTokscale maps Qoder CN internal model codes to display names only for Qoder CN', () => {
+  // Upstream tokscale 4.20.0 maps most Qoder CN codes but not `qfmodel`, the
+  // auto router's code. The app-side table must fill that in, case-insensitively,
+  // without renaming the same string on another client or unknown codes.
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [
+      { client: 'qodercn', sessionId: 'q-1', model: 'qfmodel', provider: 'unpriced:qodercn', input: 4, output: 6, cost: 0.1 },
+      { client: 'qodercn', sessionId: 'q-1', model: 'QFMODEL', provider: 'unpriced:qodercn', input: 1, output: 1, cost: 0 },
+      { client: 'qodercn', sessionId: 'q-2', model: 'Qwen3.8-Flash', provider: 'unpriced:qodercn', input: 3, output: 0, cost: 0 },
+      { client: 'qodercn', sessionId: 'q-2', model: 'my-custom-model', provider: 'unpriced:qodercn', input: 2, output: 0, cost: 0 },
+      { client: 'claude', sessionId: 'c-1', model: 'qfmodel', provider: 'anthropic', input: 5, output: 0, cost: 0 }
+    ]
+  });
+
+  assert.equal(period.sessions['qodercn:q-1'].models['qwen3.8-flash'], 12);
+  assert.equal(period.sessions['qodercn:q-1'].models.qfmodel, undefined);
+  assert.equal(period.sessions['qodercn:q-2'].models['qwen3.8-flash'], 3);
+  assert.equal(period.sessions['qodercn:q-2'].models['my-custom-model'], 2);
+  assert.equal(period.sessions['claude:c-1'].models.qfmodel, 5);
+  assert.equal(period.models['qwen3.8-flash'], 15);
+  assert.equal(period.models.qfmodel, 5);
+  assert.equal(period.clientModels.qodercn['qwen3.8-flash'], 15);
+  assert.equal(period.clientModels.qodercn.qfmodel, undefined);
+});
+
+test('normalizePeriod reconciles stored Qoder CN qfmodel global models using client attribution', () => {
+  const old = {
+    totalTokens: 10,
+    clients: { qodercn: 10 },
+    models: { qfmodel: 10 },
+    modelCosts: { qfmodel: 0.5 },
+    modelCacheReads: { qfmodel: 4 },
+    modelOutputs: { qfmodel: 6 },
+    clientModels: { qodercn: { qfmodel: 10 } },
+    clientModelCosts: { qodercn: { qfmodel: 0.5 } }
+  };
+  const period = normalizePeriod(old);
+  assert.deepEqual({ ...period.models }, { 'qwen3.8-flash': 10 });
+  assert.equal(period.modelCosts['qwen3.8-flash'], 0.5);
+  assert.equal(period.modelCosts.qfmodel, undefined);
+  assert.equal(period.modelCacheReads['qwen3.8-flash'], 4);
+  assert.equal(period.modelOutputs['qwen3.8-flash'], 6);
+  assert.deepEqual({ ...period.clientModels.qodercn }, { 'qwen3.8-flash': 10 });
+  assert.deepEqual(normalizePeriod(period), period);
+});
