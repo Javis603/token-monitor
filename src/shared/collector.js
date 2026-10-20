@@ -1513,6 +1513,7 @@ async function collectUsageOnce(options) {
   const clientHealth = deriveClientHealth(normalizedClients, allTime, {
     sourceChecks,
     collectionFailures: ompReadFailed ? ['omp'] : [],
+    staleIndexClients: ompUsage?.indexLag?.stale ? ['omp'] : [],
     wslStatus,
     observedAt: collectedAt,
     lastActivityDays: mergeClientActivityDays(
@@ -2259,6 +2260,11 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
   const wslWithData = new Set(options.wslStatus?.withData || []);
   const activityDays = options.lastActivityDays || {};
   const failedClients = new Set(options.collectionFailures || []);
+  // Client ids whose local index is behind its own source tree. Reported as a
+  // diagnostic rather than an `attention` overall state: the numbers shown are
+  // correct for what was imported, so nothing is failing — they are just not
+  // current, and the fix belongs to the client's own indexer.
+  const staleIndexClients = new Set(options.staleIndexClients || []);
   const throttle = options.selfSyncThrottle || selfSyncThrottle;
   const result = {};
   for (const client of clients) {
@@ -2287,11 +2293,18 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
     const activityDay = activityDays[client];
     if (activityDay) entry.data.lastActivityDay = activityDay;
     const overall = deriveClientOverall(entry);
+    const codes = [];
+    // The index can be behind while everything else about the client is healthy:
+    // its sources exist, its tokens were counted, and only the most recent
+    // imports are missing. That is exactly the case this code exists for, so it
+    // is collected before the not-healthy gate below and pushed first so the
+    // diagnostic cap can never drop it. A client with no detected source cannot
+    // have a stale index — there would be nothing to import — so it stays out.
+    if (staleIndexClients.has(client) && detected.length > 0) codes.push('index-stale');
     if (overall !== 'healthy') {
       if (checks.length > 0 && detected.length < checks.length) {
         entry.source.checks = checks.map(({ id, exists }) => ({ id, exists }));
       }
-      const codes = [];
       // Only "nothing at all" is a fault. A client's roots are alternatives, not
       // dependencies — Antigravity's IDE cache, native sources and CLI data are
       // three ways to have it installed, and so are Kiro's three — so a partial
@@ -2304,16 +2317,19 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
       // States a fact, not a cause: a marker without usage can equally mean the
       // tool is installed in that distro and simply unused.
       if (wslDetected.has(client) && !wslWithData.has(client)) codes.push('wsl-detected-no-data');
-      // An object per diagnostic even though `code` is the only field today: the
-      // extension point is inside the entry, and every diagnostics format worth
-      // copying (LSP, ESLint, SARIF, RFC 9457) is shaped this way. Growing an
-      // object stays compatible; turning `string[]` into `object[]` would not.
-      // Severity is deliberately absent — it depends on which client the code
-      // lands on, which only the renderer knows.
-      if (codes.length > 0) {
-        entry.diagnostics = codes.slice(0, MAX_DIAGNOSTICS_PER_CLIENT).map((code) => ({ code }));
-      }
     }
+    // An object per diagnostic even though `code` is the only field today: the
+    // extension point is inside the entry, and every diagnostics format worth
+    // copying (LSP, ESLint, SARIF, RFC 9457) is shaped this way. Growing an
+    // object stays compatible; turning `string[]` into `object[]` would not.
+    // Severity is deliberately absent — it depends on which client the code
+    // lands on, which only the renderer knows.
+    if (codes.length > 0) {
+      entry.diagnostics = codes.slice(0, MAX_DIAGNOSTICS_PER_CLIENT).map((code) => ({ code }));
+    }
+    // `source-checks` on a healthy entry would be detail the fixed core does not
+    // need; the diagnostics above are the one exception because they state
+    // something the core cannot.
     entry.overall = overall;
     result[client] = entry;
   }

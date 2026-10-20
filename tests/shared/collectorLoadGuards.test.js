@@ -3449,6 +3449,11 @@ for (const client of ['zcode', 'cherrystudio', 'goose']) {
       || path.join(tmp, '.zcode', 'cli', 'db');
     fs.mkdirSync(dbDir, { recursive: true });
     const dbName = { zcode: 'db.sqlite', cherrystudio: 'cherrystudio.sqlite', goose: 'sessions.db' }[client];
+    // The database has to exist for the client to be scanned at all: a source
+    // tree without its file is filtered out before the scan, so a `-wal` event
+    // there would prove nothing about the sidecar filter. A WAL sidecar cannot
+    // outlive the database it belongs to, so creating it is the realistic shape.
+    fs.writeFileSync(path.join(dbDir, dbName), '');
 
     const chokidar = require('chokidar');
     const originalWatch = chokidar.watch;
@@ -3473,7 +3478,6 @@ for (const client of ['zcode', 'cherrystudio', 'goose']) {
     try {
       const { startCollector } = freshCollector();
       const updates = [];
-      if (client === 'zcode') fs.writeFileSync(path.join(dbDir, dbName), '');
       handle = startCollector({
         clients: client,
         allTimeSince: '2024-01-01',

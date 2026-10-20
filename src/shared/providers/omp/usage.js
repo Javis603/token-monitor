@@ -23,6 +23,22 @@ const OMP_MAX_SESSION_ROWS = 50_000;
 const UUID_RE = /([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})/i;
 const OMP_SESSION_IDENTITY_CACHE_LIMIT = 10_000;
 const sessionIdentityCache = new Map();
+// OMP ingests its transcripts into stats.db only while its own dashboard or
+// `/usage` view is open. Nothing in Token Monitor can trigger that ingest, so a
+// closed dashboard means `today` silently freezes at whatever was indexed last.
+// A healthy ingest re-syncs a changed transcript within a debounce (~1 s) and
+// full-scans every 5 minutes, so an hour of unread growth is unambiguously
+// abnormal for an index that is running at all. Reporting earlier than that
+// would flag the ordinary case of OMP having been used with its dashboard
+// closed, which the note would then describe as a fresh problem on every scan.
+const OMP_INDEX_LAG_THRESHOLD_MS = 60 * 60 * 1000;
+// Only sessions that were actually touched recently are worth reporting: once the
+// user stops using OMP the index stays behind forever, and a note about a
+// yesterday-only gap would outlive the problem it describes.
+const OMP_INDEX_LAG_ACTIVE_MS = 24 * 60 * 60 * 1000;
+// Bounded so a machine with thousands of live sessions pays a few stats, not a
+// full-tree walk. Sessions are considered newest-first.
+const OMP_INDEX_LAG_SESSION_LIMIT = 200;
 
 const REQUIRED_MESSAGE_COLUMNS = Object.freeze([
   'session_file', 'model', 'provider', 'timestamp',
@@ -283,6 +299,79 @@ function normalizeMessageRow(row, identities, options = {}) {
   };
 }
 
+// OMP ingests only while its own dashboard (or the `/usage` view) is open, so the
+// observable failure is a transcript that keeps growing while its `file_offsets`
+// cursor stands still. Comparing the file's mtime with the cursor's own
+// `last_modified` is per-file, so one session being ingested does not mask
+// another that is hours behind; requiring unread bytes (`size > offset`) keeps a
+// touch without new content out of the signal.
+//
+// Returns null when the schema carries no cursor table, which is the same
+// "cannot tell" answer a missing column produces elsewhere in this adapter.
+//
+// The same transcript can have more than one cursor row: OMP's session tree is
+// reachable through both `~/.omp/agent/sessions` and a profile directory that
+// symlinks to it, and a row left behind under the abandoned spelling keeps its
+// old offset forever. Grouping by the file's device+inode before comparing means
+// a superseded row cannot claim a lag the live row does not have.
+function detectOmpIndexLag(database, options = {}) {
+  const nowMs = finiteNumber(options.nowMs) || Date.now();
+  const activeMs = positiveInteger(options.activeMs, OMP_INDEX_LAG_ACTIVE_MS);
+  const thresholdMs = positiveInteger(options.thresholdMs, OMP_INDEX_LAG_THRESHOLD_MS);
+  const limit = positiveInteger(options.limit, OMP_INDEX_LAG_SESSION_LIMIT);
+  let rows;
+  try {
+    // Ordered by the cursor's own clock, not rowid: OMP upserts with
+    // INSERT OR REPLACE, so a row's rowid changes on every re-import and row
+    // order says nothing about which session was ingested last.
+    rows = boundedStatementRows(
+      database,
+      'SELECT session_file, offset, last_modified FROM file_offsets ORDER BY last_modified DESC LIMIT ?',
+      [limit],
+      limit,
+      'file offset'
+    );
+  } catch (_) {
+    return null;
+  }
+  // One entry per physical transcript: `offset` is the furthest byte any cursor
+  // has consumed, `cursorMs` the newest import time, `mtimeMs` the file's own.
+  const files = new Map();
+  for (const row of rows) {
+    const sessionFile = String(row.session_file || '');
+    const cursorMs = finiteNumber(row.last_modified);
+    const offset = finiteNumber(row.offset);
+    if (!sessionFile || cursorMs <= 0) continue;
+    let stat;
+    try { stat = fs.statSync(sessionFile); } catch (_) { continue; }
+    const key = `${stat.dev}:${stat.ino}`;
+    const seen = files.get(key);
+    if (!seen) {
+      files.set(key, { offset, cursorMs, mtimeMs: stat.mtimeMs, size: stat.size });
+      continue;
+    }
+    seen.offset = Math.max(seen.offset, offset);
+    seen.cursorMs = Math.max(seen.cursorMs, cursorMs);
+  }
+  let lagMs = 0;
+  let stalledSessions = 0;
+  for (const file of files.values()) {
+    // Only a transcript still being written can make the index stale. Once this
+    // client stops being used its files stop growing and the gap stops mattering.
+    if (nowMs - file.mtimeMs > activeMs) continue;
+    if (file.size <= file.offset) continue;
+    stalledSessions += 1;
+    lagMs = Math.max(lagMs, file.mtimeMs - file.cursorMs);
+  }
+  return {
+    active: stalledSessions > 0,
+    lagMs,
+    stale: stalledSessions > 0 && lagMs >= thresholdMs,
+    stalledSessions,
+    checked: rows.length
+  };
+}
+
 function readOmpStatsRows(options = {}) {
   const dbPath = ompStatsDbPath(options);
   const nowMs = finiteNumber(options.nowMs) || Date.now();
@@ -356,7 +445,8 @@ function readOmpStatsRows(options = {}) {
         dbPath,
         schema,
         rows: rows.map((row) => normalizeMessageRow(row, identities, options)),
-        sessionCount
+        sessionCount,
+        indexLag: detectOmpIndexLag(database, options)
       };
     } finally {
       database.exec('ROLLBACK');
@@ -464,6 +554,7 @@ module.exports = {
   buildOmpHistoryGraph,
   buildOmpPeriods,
   collectOmpUsage,
+  detectOmpIndexLag,
   ompStatsDbPath,
   ompStatsDbPathForClients,
   readOmpStatsRows,

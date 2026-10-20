@@ -801,6 +801,57 @@ test('deriveClientHealth reports every tracked client within the declared shape'
   assert.equal(deriveClientHealth('', {}), null);
 });
 
+// The index behind a client's own database can stop importing while everything
+// else about that client looks fine: roots exist, tokens were counted, nothing
+// failed. Only a diagnostic can say the newest usage is missing, and it has to
+// survive the hub's consistency pass to reach the renderer.
+test('deriveClientHealth reports a stale local index without changing overall', () => {
+  const sourceChecks = { omp: [{ id: 'omp-sessions', exists: true }, { id: 'omp-stats-db', exists: true }] };
+  const stale = deriveClientHealth('omp', { clients: { omp: 500 } }, {
+    sourceChecks,
+    staleIndexClients: ['omp']
+  }).clients.omp;
+  assert.equal(stale.overall, 'healthy');
+  assert.deepEqual(stale.diagnostics, [{ code: 'index-stale' }]);
+
+  // A client whose sources are absent cannot have a stale index; the note would
+  // be describing a different problem.
+  const absent = deriveClientHealth('omp', { clients: {} }, {
+    sourceChecks: { omp: [{ id: 'omp-sessions', exists: false }] },
+    staleIndexClients: ['omp']
+  }).clients.omp;
+  assert.equal(absent.source.state, 'missing');
+  assert.deepEqual(absent.diagnostics, [{ code: 'source-missing' }]);
+
+  // The wire form keeps it next to `healthy`, which is the case it exists for.
+  const normalized = normalizeClientHealth({
+    clients: {
+      omp: {
+        source: { state: 'detected', detectedCount: 2, checkedCount: 2 },
+        collection: { state: 'direct' },
+        data: { liveTokens: 500 },
+        diagnostics: [{ code: 'index-stale' }],
+        overall: 'healthy'
+      }
+    }
+  });
+  assert.equal(normalized.clients.omp.overall, 'healthy');
+  assert.deepEqual(normalized.clients.omp.diagnostics, [{ code: 'index-stale' }]);
+
+  // ...but a stale index next to a missing source is still a contradiction.
+  const contradictory = normalizeClientHealth({
+    clients: {
+      omp: {
+        source: { state: 'missing', detectedCount: 0, checkedCount: 2 },
+        collection: { state: 'direct' },
+        data: { liveTokens: 0 },
+        diagnostics: [{ code: 'index-stale' }]
+      }
+    }
+  });
+  assert.equal(Object.hasOwn(contradictory.clients.omp, 'diagnostics'), false);
+});
+
 // The same shape rules, against whatever this machine actually has. Asserts only
 // what holds on any filesystem — the test above pins the values.
 test('deriveClientHealth holds its own invariants against a real machine', () => {

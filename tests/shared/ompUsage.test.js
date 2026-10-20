@@ -9,7 +9,7 @@ const test = require('node:test');
 let sqlite;
 try { sqlite = require('node:sqlite'); } catch (_) { /* Node 22.15+ only. */ }
 
-const { collectOmpUsage, readOmpStatsRows, sessionIdentity } = require('../../src/shared/providers/omp/usage');
+const { collectOmpUsage, detectOmpIndexLag, readOmpStatsRows, sessionIdentity } = require('../../src/shared/providers/omp/usage');
 const { collectHistoryOnce, collectUsageOnce } = require('../../src/shared/collector');
 const { emptyPeriod } = require('../../src/shared/usage');
 
@@ -282,6 +282,69 @@ const { emptyPeriod } = require('../../src/shared/usage');
     ['2026-10-18', 12]
   ]);
 
+});
+
+(sqlite ? test : test.skip)('OMP index lag is detected from a growing transcript, not a stale cursor row', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'omp-stats-lag-'));
+  const databasePath = path.join(root, 'stats.db');
+  const liveSession = path.join(root, 'live.jsonl');
+  const idleSession = path.join(root, 'idle.jsonl');
+  const nowMs = new Date(2026, 9, 18, 12, 0, 0, 0).getTime();
+  fs.writeFileSync(liveSession, 'x'.repeat(400));
+  fs.writeFileSync(idleSession, 'x'.repeat(400));
+  const twoHoursAgo = nowMs - 2 * 60 * 60 * 1000;
+  fs.utimesSync(liveSession, nowMs / 1000, nowMs / 1000);
+  fs.utimesSync(idleSession, nowMs / 1000, nowMs / 1000);
+
+  const database = new sqlite.DatabaseSync(databasePath);
+  let databaseOpen = true;
+  t.after(() => {
+    if (databaseOpen) database.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  database.exec(`
+    CREATE TABLE session_rollup (session_file TEXT, started_at INTEGER, ended_at INTEGER, total_tokens INTEGER, cost_total REAL);
+    CREATE TABLE messages (
+      session_file TEXT, model TEXT, provider TEXT, timestamp INTEGER,
+      input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER,
+      total_tokens INTEGER, cost_total REAL, agent_type TEXT
+    );
+    CREATE TABLE file_offsets (session_file TEXT PRIMARY KEY, offset INTEGER, last_modified REAL, parser_state TEXT);
+  `);
+  const insertCursor = database.prepare('INSERT INTO file_offsets VALUES (?, ?, ?, NULL)');
+  // `live` has 400 bytes on disk with only 100 imported, and its cursor is two
+  // hours old: the index stopped importing a transcript OMP is still writing.
+  insertCursor.run(liveSession, 100, twoHoursAgo);
+  // `idle` is fully imported, so its old cursor is not a lag.
+  insertCursor.run(idleSession, 400, twoHoursAgo);
+
+  const lag = detectOmpIndexLag(database, { nowMs, activeMs: 24 * 60 * 60 * 1000 });
+  assert.equal(lag.active, true);
+  assert.equal(lag.stale, true);
+  assert.equal(lag.stalledSessions, 1);
+  assert.equal(lag.checked, 2);
+  // File mtimes are second-granular on most filesystems, so compare the span.
+  assert.ok(Math.abs(lag.lagMs - 2 * 60 * 60 * 1000) <= 1000, `lag ${lag.lagMs}`);
+  // A younger gap than the threshold is real but not yet worth reporting.
+  assert.equal(
+    detectOmpIndexLag(database, { nowMs, thresholdMs: 3 * 60 * 60 * 1000 }).stale,
+    false
+  );
+  // Nothing was written recently, so the index is quiet rather than behind.
+  fs.utimesSync(liveSession, (nowMs - 5 * 24 * 60 * 60 * 1000) / 1000, (nowMs - 5 * 24 * 60 * 60 * 1000) / 1000);
+  const quiet = detectOmpIndexLag(database, { nowMs });
+  assert.equal(quiet.active, false);
+  assert.equal(quiet.stale, false);
+  database.close();
+  databaseOpen = false;
+
+  // A database without the cursor table cannot answer, so it reports nothing
+  // rather than claiming health.
+  const barePath = path.join(root, 'bare.db');
+  const bare = new sqlite.DatabaseSync(barePath);
+  bare.exec('CREATE TABLE messages (session_file TEXT)');
+  assert.equal(detectOmpIndexLag(bare, { nowMs }), null);
+  bare.close();
 });
 
 test('OMP-only history is reported as successful without duplicate merge', async () => {

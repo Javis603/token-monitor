@@ -254,6 +254,7 @@ const CLIENT_HEALTH_DIAGNOSTIC_CODES = Object.freeze([
   'sync-exit-error',       // the self-sync subprocess exited non-zero
   'sync-lock-present',     // an existing Antigravity sync lock blocked the subprocess
   'no-usage-observed',     // sources are present, all-time usage is zero
+  'index-stale',           // the client's own usage index has stopped importing
   'wsl-detected-no-data'   // a WSL marker was found but the scan returned nothing
 ]);
 
@@ -371,6 +372,11 @@ function diagnosticAgreesWithEntry(code, entry) {
   // Both halves: "we can read this client and found nothing" is a different
   // statement from "there is nothing to read", and only the first is this code.
   if (code === 'no-usage-observed') return entry.source.state === 'detected' && entry.data.liveTokens === 0;
+  // A stale local index is orthogonal to the rest of the record: sources are
+  // present and usage was counted, only the newest imports are missing. It is
+  // therefore allowed alongside `healthy`, and still requires a detected source
+  // — an index with nothing to index is not stale.
+  if (code === 'index-stale') return entry.source.state === 'detected';
   return true;
 }
 
