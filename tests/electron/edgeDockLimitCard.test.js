@@ -33,6 +33,7 @@ const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../
 const { aggregateLimits, normalizeLimitProvider } = require('../../src/shared/limits/core');
 const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
 const { fetchMinimaxLimits } = require('../../src/shared/providers/minimax/limits');
+const { fetchAntigravityLimits } = require('../../src/shared/providers/antigravity/limits');
 
 const root = path.join(__dirname, '../..');
 
@@ -1858,6 +1859,123 @@ test('an Antigravity group whose rows are all unchecked goes with them', () => {
   assert.doesNotMatch(card.text, /Claude/);
 });
 
+for (const unavailable of [false, true]) for (const showLimitUsed of [false, true]) test(`Antigravity keeps the original quota pairs above Argon weekly with Claude 5-hour ${unavailable ? 'unavailable' : 'available'} in ${showLimitUsed ? 'used' : 'remaining'} mode`, () => {
+  const record = normalizeLimitProvider({
+    provider: 'antigravity',
+    windows: [
+      { kind: 'weekly', label: 'Gemini 4 Argon weekly', usedPercent: 63 },
+      { kind: 'session', label: 'Gemini 5-hour', usedPercent: 2 },
+      { kind: 'weekly', label: 'Gemini weekly', usedPercent: 1 },
+      { kind: 'session', label: 'Claude/GPT 5-hour', usedPercent: unavailable ? null : 0, showMeter: !unavailable },
+      { kind: 'weekly', label: 'Claude/GPT weekly', usedPercent: 100 }
+    ]
+  });
+  const before = structuredClone(record);
+  const card = dockView({ showLimitUsed }).renderProviderWindows(record, '#4285F4');
+  const groups = [...card.walk()].filter((node) => node.classNames.has('limit-window-group'));
+  assert.deepEqual(
+    groups.map((group) => [
+      group.find('limit-window-group-title')?.textContent,
+      [...group.walk()].filter((node) => node.classNames.has('limit-window')).map(rowTitle)
+    ]),
+    [
+      ['Gemini', ['5-hour', 'Weekly']],
+      ['Claude/GPT', ['5-hour', 'Weekly']],
+      ['Gemini 4 Argon', ['Weekly']]
+    ]
+  );
+  const items = dockView().limitProviderUsageItems([record]);
+  assert.deepEqual(items.map((item) => item.label), [
+    'Gemini · 5-hour',
+    'Gemini · Weekly',
+    'Claude/GPT · 5-hour',
+    'Claude/GPT · Weekly',
+    'Gemini 4 Argon · Weekly'
+  ]);
+  assert.equal([...card.walk()].filter((node) => node.classNames.has('limit-meter')).length, unavailable ? 4 : 5);
+  const expectedRemaining = [98, 99, unavailable ? null : 100, 0, 37];
+  const rows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  rows.forEach((row, index) => {
+    const remaining = expectedRemaining[index];
+    const fill = row.find('limit-meter-fill');
+    if (remaining === null) {
+      assert.equal(fill, null);
+      assert.doesNotMatch(row.text, /%/);
+    } else {
+      const percent = showLimitUsed ? 100 - remaining : remaining;
+      assert.ok(row.text.includes(`${percent}% ${showLimitUsed ? 'used' : 'left'}`), row.text);
+      assert.equal(Number(fill.style['--bar-scale']), percent / 100);
+    }
+  });
+  assert.deepEqual(record, before, 'display ordering does not mutate the normalized quota record');
+});
+
+test('Antigravity OAuth legacy fallback keeps unknown, exhausted and numeric quotas distinct in both display modes', async () => {
+  const resetTime = '2030-06-03T04:00:00Z';
+  const providers = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'legacy', accountEmail: 'legacy@example.com',
+      credentials: { accessToken: 'fixture-token', expiresAt: Date.now() + 3600_000,
+        clientId: 'client', clientSecret: 'secret', projectId: 'fixture-project' }
+    }]
+  }, {
+    antigravityProbe: async () => { throw new Error('local RPC unavailable'); },
+    fetch: async (url) => {
+      let payload;
+      if (url.endsWith(':loadCodeAssist')) payload = {};
+      else if (url.endsWith(':retrieveUserQuotaSummary')) payload = { groups: [] };
+      else if (url.endsWith(':fetchAvailableModels')) payload = { models: {
+        'gemini-4-argon-high': { displayName: 'Gemini 4 Argon', quotaInfo: { remainingFraction: null, resetTime } },
+        'gemini-flash': { displayName: 'Gemini Flash', quotaInfo: { remainingFraction: 0.8, resetTime } },
+        'claude-sonnet': { displayName: 'Claude', quotaInfo: { remainingFraction: 0, resetTime } }
+      } };
+      else throw new Error(`Unexpected URL ${url}`);
+      return { ok: true, status: 200, json: async () => payload };
+    }
+  });
+  assert.equal(providers.length, 1);
+  const provider = providers[0];
+  assert.equal(provider.source, 'oauth');
+  const unknown = provider.windows.find((window) => window.label === 'Gemini 4 Argon');
+  assert.equal(unknown.remainingPercent, null);
+  assert.equal(unknown.usedPercent, null);
+  assert.equal(unknown.showMeter, false);
+  assert.equal(unknown.resetsAt, new Date(resetTime).toISOString());
+  const before = structuredClone(provider);
+
+  for (const showLimitUsed of [false, true]) {
+    const card = dockView({ showLimitUsed }).renderProviderWindows(provider, '#4285F4');
+    const rows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+    const argon = rows.find((row) => row.text.includes('Gemini 4 Argon'));
+    assert.equal(argon, undefined, 'unknown legacy pools do not render their name or reset');
+    assert.equal(rows.length, 2);
+    for (const [label, remaining] of [['Gemini Flash', 80], ['Claude', 0]]) {
+      const row = rows.find((entry) => entry.text.includes(label));
+      const percent = showLimitUsed ? 100 - remaining : remaining;
+      assert.ok(row.text.includes(`${percent}% ${showLimitUsed ? 'used' : 'left'}`), row.text);
+      assert.equal(Number(row.find('limit-meter-fill').style['--bar-scale']), percent / 100);
+    }
+  }
+  assert.deepEqual(dockView().limitProviderUsageItems([provider]).map((item) => item.label), ['Gemini Flash', 'Claude']);
+  assert.deepEqual(limitPresentationApi.limitProviderCompactWindows('antigravity', provider.windows).map((window) => window.label), ['Gemini Flash', 'Claude']);
+  assert.deepEqual(provider, before, 'hidden legacy pools retain their source data');
+});
+
+test('Antigravity hides an all-unknown legacy pool without adding a placeholder quota', () => {
+  const provider = normalizeLimitProvider({ provider: 'antigravity', windows: [
+    { kind: 'weekly', label: 'Gemini 4 Argon', usedPercent: null, resetsAt: '2030-06-03T04:00:00Z' }
+  ] });
+  const before = structuredClone(provider);
+  for (const showLimitUsed of [false, true]) {
+    const card = dockView({ showLimitUsed }).renderProviderWindows(provider, '#4285F4');
+    assert.equal(card.children.length, 0);
+    assert.equal(card.text, '');
+  }
+  assert.deepEqual(dockView().limitProviderUsageItems([provider]), []);
+  assert.deepEqual(limitPresentationApi.limitProviderCompactWindows('antigravity', provider.windows), []);
+  assert.deepEqual(provider, before);
+});
+
 test('a MiMo plan drawn from the balance is the same item as the plan window', () => {
   const planKey = usageItems.limitWindowKey({ kind: 'billing', label: 'Token Plan' });
   const record = {
@@ -1993,218 +2111,41 @@ test('WorkBuddy groups count accounts and retain failures without repeating the 
 });
 
 
-function notchAdapter() {
-  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
-  const start = source.indexOf('function notchQuotaColor(');
-  const end = source.indexOf('function fitNotchTooltip(', start);
-  assert.ok(start >= 0 && end > start, 'notch adapter source boundaries should exist');
-  const context = {
-    el: (_tag, classes, text = '') => { const node = new FakeElement(_tag); node.className = classes; node.textContent = text; return node; },
-    limitResetMotionApi,
-    limitPresentationApi,
-    limitProviderColor: () => '#888888',
-    readableColor: (color) => color,
-    providerLabel: (id) => id,
-    t: (key) => key
-  };
-  vm.runInNewContext(source.slice(start, end), context);
-  return context;
-}
-
-test('notch Codex overview follows the shared current-account headline and preserves other account quotas in detail', () => {
-  const records = [
-    { provider: 'codex', accountKey: 'first', accountEmail: 'first@example.test', status: 'ok', windows: [{ kind: 'session', remainingPercent: 5 }, { kind: 'weekly', remainingPercent: 10 }] },
-    { provider: 'codex', accountKey: 'current', accountEmail: 'current@example.test', status: 'ok', windows: [{ kind: 'session', remainingPercent: 80 }, { kind: 'weekly', remainingPercent: 90 }] }
-  ];
-  const options = {
-    items: [{ type: 'limit', provider: 'codex' }],
-    codexManagedAccounts: [{ id: 'current-managed', accountKey: 'current' }],
-    activeCodexAccountId: 'current-managed'
-  };
-  const adapter = notchAdapter();
-  const view = dockView();
-  const cell = buildEdgeDockCells({ limits: { providers: records } }, options)[0];
-  const overview = adapter.notchOverviewCard(cell, view);
-  assert.equal(overview.querySelectorAll('.home-limit-account').length, 1);
-  assert.match(overview.text, /current@example.test/);
-  assert.doesNotMatch(overview.text, /first@example.test/);
-  assert.equal(cardRows(overview).length, 2);
-  const detail = view.renderLimitProviderGroup('codex', 'Codex', records, '#888888');
-  adapter.omitNotchQuotaRows(detail, cell);
-  const rows = detail.querySelectorAll('.limit-account-row');
-  assert.equal(adapter.notchQuotaRows(rows[0]).length, 2, 'other account keeps both meters');
-  assert.equal(adapter.notchQuotaRows(rows[1]).length, 0, 'only displayed account is deduplicated');
-  assert.match(detail.text, /first@example.test/);
-  assert.match(detail.text, /current@example.test/);
-  const lowest = buildEdgeDockCells({ limits: { providers: records } }, {
-    ...options, items: [{ type: 'limit', provider: 'codex', accountMode: 'lowest' }]
-  })[0];
-  assert.match(adapter.notchOverviewCard(lowest, view).text, /first@example.test/);
-});
-
-test('notch Codex overview finds a current headline outside the original detail account cap', () => {
-  const records = Array.from({ length: 51 }, (_, index) => ({
-    provider: 'codex', accountKey: `account-${index}`, accountEmail: `account-${index}@example.test`,
-    status: 'ok', windows: [{ kind: 'session', remainingPercent: 80 }]
-  }));
-  const cell = buildEdgeDockCells({ limits: { providers: records } }, {
-    items: [{ type: 'limit', provider: 'codex' }],
-    codexManagedAccounts: [{ id: 'managed-50', accountKey: 'account-50' }],
-    activeCodexAccountId: 'managed-50'
-  })[0];
-  assert.equal(cell.accounts.length, 50);
-  const overview = notchAdapter().notchOverviewCard(cell, dockView());
-  assert.equal(overview.querySelectorAll('.home-limit-account').length, 1);
-  assert.match(overview.text, /account-50@example.test/);
-});
-
-test('notch overview keeps every quota item including non-meter balances and unlimited plans', () => {
-  const adapter = notchAdapter();
-  const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
-  for (const provider of LIMIT_PROVIDER_IDS) {
-    for (const record of shapeRecords(provider)) {
-      const view = dockView();
-      const full = view.renderProviderWindows(record, '#888888');
-      const expected = cardRows(full).filter((row) => !row.classNames.has('limit-window-note')
-        || row.find('limit-meter') || (row.dataset.usageItem && !['resets', 'spend'].includes(row.dataset.usageItem)));
-      const overview = adapter.notchOverviewCard({ provider, accounts: [{ record }] }, view);
-      assert.deepEqual(cardRows(overview).map((row) => row.dataset.usageItem), expected.map((row) => row.dataset.usageItem), provider);
-      const detail = adapter.omitNotchQuotaRows(full);
-      assert.equal(adapter.notchQuotaRows(detail).length, 0, `${provider}: detail must not repeat quotas`);
-      const keyedDetail = new FakeElement('section');
-      keyedDetail.append(view.renderLimitProviderSolo(provider, provider, record, '#888888'));
-      adapter.omitNotchQuotaRows(keyedDetail, { provider, accounts: [{ record }] });
-      assert.equal(adapter.notchQuotaRows(keyedDetail).length, 0, `${provider}: keyed detail must not repeat quotas`);
-    }
-  }
-});
-
-test('notch moves credit detail info to the right without dropping its quota or changing ordinary dock cards', () => {
-  const adapter = notchAdapter();
-  const record = { provider: 'cline', status: 'ok', windows: [
-    { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 0.5, currency: 'CREDITS', showMeter: false },
-    { kind: 'billing', metric: 'spend', label: 'Usage credits', used: 0.13, currency: 'USD', showMeter: false }
-  ] };
-  const view = dockView();
-  const original = view.renderProviderWindows(record, '#888888');
-  const overview = adapter.notchOverviewCard({ provider: 'cline', accounts: [{ record }] }, view);
-  assert.match(overview.text, /0\.50/);
-  assert.equal(overview.querySelectorAll('.limit-detail-tooltip-wrap').length, 0);
-  const detail = adapter.omitNotchQuotaRows(view.renderProviderWindows(record, '#888888'));
-  assert.doesNotMatch(detail.text, /0\.50/);
-  assert.match(detail.text, /Month spent/);
-  assert.equal(detail.querySelectorAll('.limit-detail-tooltip-wrap').length, 1);
-  assert.match(original.text, /0\.50/);
-  assert.match(original.text, /Month spent/);
-});
 
 
-test('notch detail render hold retains the current provider but releases when the hovered provider changes', () => {
+
+
+
+
+
+test('EdgeDock render hold preserves account gestures and open tooltips', () => {
   const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
   const start = source.indexOf('function deferBubbleRender(');
   const end = source.indexOf('bridge.onRender(render);', start);
+  let accountHeld = false, tooltipHeld = false;
   const context = {
-    surface: 'bubble', state: { payload: { omitQuotaBars: true, cell: { id: 'cline' } } },
-    contentLayer: { querySelector: () => ({ dataset: { cellId: 'codex' } }) },
-    codexAccountControl: { deferRender: () => false },
-    limitTooltipShouldHoldRender: () => true,
-    limitTooltip: { pending: false }
+    contentLayer: {}, codexAccountControl: { deferRender: () => accountHeld },
+    limitTooltipShouldHoldRender: () => tooltipHeld, limitTooltip: { pending: false }
   };
   vm.runInNewContext(source.slice(start, end), context);
-  assert.equal(context.deferBubbleRender(), false, 'focused tooltip on old Codex card must not block Cline sizing');
-  context.state.payload.cell.id = 'codex';
-  assert.equal(context.deferBubbleRender(), true, 'same provider must keep the existing tooltip while data refreshes');
-  context.state.payload.omitQuotaBars = false;
-  context.state.payload.cell.id = 'cline';
-  assert.equal(context.deferBubbleRender(), true, 'ordinary EdgeDock keeps its existing behavior');
+  assert.equal(context.deferBubbleRender(), false);
+  accountHeld = true;
+  assert.equal(context.deferBubbleRender(), true, 'an in-progress account gesture keeps its DOM');
+  accountHeld = false; tooltipHeld = true;
+  assert.equal(context.deferBubbleRender(), true, 'an open tooltip holds the update');
+  assert.equal(context.limitTooltip.pending, true);
+  tooltipHeld = false;
+  assert.equal(context.deferBubbleRender(), false, 'closing the tooltip releases the update');
 });
 
 
-test('notch overview names each selected provider even when no account reports data', () => {
-  const adapter = notchAdapter();
-  const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
-  for (const provider of LIMIT_PROVIDER_IDS) {
-    const overview = adapter.notchOverviewCard({ provider, accounts: [] }, dockView());
-    assert.equal(overview.find('home-list-name')?.textContent, provider);
-    assert.match(overview.text, /edgeDock.unavailable/);
-    assert.equal(cardRows(overview).length, 0);
-  }
-});
 
 
-test('notch quota ink adapts low-contrast brands without recoloring readable brands', () => {
-  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
-  const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
-  const colors = dock.slice(dock.indexOf('function parseColor('), dock.indexOf('function limitProviderColor('));
-  const helper = source.slice(source.indexOf('function notchQuotaColor('), source.indexOf('function notchOverviewCard('));
-  let surface = '0, 0, 0', text = '#ffffff';
-  const context = {
-    document: { documentElement: {} },
-    getComputedStyle: () => ({ getPropertyValue: (key) => key === '--glass-rgb' ? surface : text })
-  };
-  vm.runInNewContext(colors + helper, context);
-  for (const color of ['#000000', '#000', '#16191e']) assert.equal(context.notchQuotaColor(color), text);
-  for (const color of ['#49a3b0', '#cc7c5e', '#4285f4']) assert.equal(context.notchQuotaColor(color), color);
-  surface = '255, 255, 255'; text = '#111111';
-  assert.equal(context.notchQuotaColor('#000000'), '#000000', 'black remains readable on a light surface');
-  assert.equal(context.notchQuotaColor('#ffffff'), text, 'white adapts on a light surface');
-});
 
 
-test('Notch shows the shared representative and deduplicates only its quotas for non-Codex accounts', () => {
-  const adapter = notchAdapter();
-  for (const provider of ['claude', 'mimo']) {
-    const records = [80, 10].map((remainingPercent, index) => ({
-      provider, status: 'ok', accountKey: `${provider}-${index}`, accountEmail: `${index}@example.test`,
-      ...(provider === 'mimo' ? { source: index ? 'local' : 'api', sourceDetail: index ? 'app' : '', accountLabel: index ? 'Desktop Membership' : 'Console' } : {}),
-      windows: [{ kind: 'weekly', remainingPercent }]
-    }));
-    const cell = buildEdgeDockCells({ limits: { providers: records } }, { items: [{ type: 'limit', provider }] })[0];
-    const view = dockView();
-    const overview = adapter.notchOverviewCard(cell, view);
-    assert.equal(overview.querySelectorAll('.home-limit-account').length, 1, provider);
-    assert.equal(overview.querySelector('.home-limit-account').dataset.limitMotionKey, cell.headlineAccount);
-    const detail = view.renderLimitProviderGroup(provider, provider, records, '#888888');
-    adapter.omitNotchQuotaRows(detail, cell);
-    const other = detail.querySelectorAll('.limit-row').find((row) => row.dataset.limitMotionKey === limitResetMotionApi.providerKey(records[0]));
-    const selected = detail.querySelectorAll('.limit-row').find((row) => row.dataset.limitMotionKey === cell.headlineAccount);
-    assert.equal(adapter.notchQuotaRows(other).length, 1, `${provider}: other account/product retains quotas`);
-    assert.equal(adapter.notchQuotaRows(selected).length, 0, `${provider}: selected quotas alone are deduplicated`);
-  }
-});
-
-test('Notch retained failures use shared status rows without adding a fake main quota', () => {
-  const adapter = notchAdapter();
-  for (const status of ['unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error', 'notConfigured']) {
-    const record = { provider: 'codex', status, accountKey: status, windows: [] };
-    const cell = buildEdgeDockCells({ limits: { providers: [record] } }, { items: [{ type: 'limit', provider: 'codex' }], includeUnavailableAccounts: true })[0];
-    const view = dockView();
-    const overview = adapter.notchOverviewCard(cell, view);
-    assert.equal(overview.querySelectorAll('.home-limit-account').length, 0, status);
-    assert.equal(adapter.notchQuotaRows(overview).length, 0, status);
-    const detail = view.renderLimitProviderSolo('codex', 'Codex', cell.accounts[0].record, '#888888');
-    const expected = view.limitAccountPlan(record);
-    assert.ok(expected && detail.text.includes(expected), status);
-    adapter.omitNotchQuotaRows(detail, cell);
-    assert.ok(detail.text.includes(expected), `${status}: deduplication must preserve status`);
-    assert.equal(adapter.notchQuotaRows(detail).length, 0, status);
-  }
-});
 
 
-test('Notch stale overview keeps its plan and quota with the shared status label', () => {
-  const adapter = notchAdapter();
-  const view = dockView();
-  const record = { provider: 'codex', status: 'ok', stale: true, planLabel: 'Pro', windows: [{ kind: 'session', remainingPercent: 64 }] };
-  const render = (provider) => adapter.notchOverviewCard({ provider: 'codex', accounts: [{ record: provider }] }, view);
-  const stale = render(record);
-  const fresh = render({ ...record, stale: false });
-  assert.ok(stale.querySelector('.home-limit-account').classNames.has('stale'));
-  assert.equal(stale.querySelector('.home-limit-plan').textContent, 'Pro · Stale');
-  assert.equal(fresh.querySelector('.home-limit-plan').textContent, 'Pro');
-  assert.equal(cardRows(stale).length, cardRows(fresh).length);
-  assert.equal(stale.querySelector('.home-limit-account-head').children.length, fresh.querySelector('.home-limit-account-head').children.length);
-});
+
 
 
 test('Notch ears preserve configured tray items and embedded fields across all styles', () => {
@@ -2221,7 +2162,7 @@ test('Notch ears preserve configured tray items and embedded fields across all s
     notchIcon: item => el('span', 'edge-dock-mark', item.provider),
     notchText: (_item, row) => el('span', 'notch-text-run', row.text)
   };
-  vm.runInNewContext(source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function notchStatOverviewCard(')), context);
+  vm.runInNewContext(source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function zoomForNotchText(')), context);
   const stats = {
     limits: { providers: [{ provider: 'codex', status: 'ok', accountKey: 'test', accountEmail: 'test@example.test', windows: [
       { kind: 'session', remainingPercent: 64, resetsAt: new Date(Date.now() + 3600000).toISOString() },
@@ -2235,14 +2176,14 @@ test('Notch ears preserve configured tray items and embedded fields across all s
     const separator = trayLayout.createTrayLayoutItem('separatorDot');
     const readings = !['icon', 'spacer'].includes(item.type);
     if (readings) {
-      const summary = buildNotchData(stats, [], { notchFollowTray: false,
+      const summary = buildNotchData(stats, [], { notchSummaryMode: 'custom',
         notchCustomLayout: { version: trayLayout.VERSION, items: [icon, item] } }).summary;
       const single = context.notchSummary({ summary, geometry: { gapWidth: 179 }, appearance: {} });
       assert.equal(single.find('notch-left').querySelectorAll('.notch-reading').length, 0, `${style} remains one field even with multiple rows`);
       assert.equal(single.find('notch-right').querySelectorAll('.notch-reading').length, 1);
     }
     for (const gapWidth of [179, 0]) {
-      const summary = buildNotchData(stats, [], { notchFollowTray: false,
+      const summary = buildNotchData(stats, [], { notchSummaryMode: 'custom',
         notchCustomLayout: { version: trayLayout.VERSION, items: [icon, item, separator, cost] }
       }).summary;
       const head = context.notchSummary({ summary, geometry: { gapWidth }, appearance: {} });
@@ -2314,7 +2255,7 @@ test('custom summary order never infers standalone icon ownership or removes sam
   const context = { el, trayTypographyApi: require('../../src/electron/renderer/trayTypography'), notchNumbers: new Map(),
     cancelAnimationFrame() {}, providerLabel: id => id, positionNotchSummary() {},
     notchIcon: item => el('span', 'edge-dock-mark', item.provider), notchText: (_item, row) => el('span', 'notch-text-run', row.text) };
-  vm.runInNewContext(source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function notchStatOverviewCard(')), context);
+  vm.runInNewContext(source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function zoomForNotchText(')), context);
   const icon = provider => ({ type: 'icon', provider });
   const text = value => ({ type: 'text', text: value });
   const dot = { type: 'spacer', variant: 'dot' };
@@ -2371,10 +2312,10 @@ test('switching camera clearance rebuilds the same summary without losing config
   const context = { el, contentLayer: layer, root: el('div', 'root'), state: { appearanceKey: 'unchanged' },
     notchHeaderKey: '', notchClock: 0, notchNumbers: new Map(), trayTypographyApi: require('../../src/electron/renderer/trayTypography'),
     refreshVisit: 0, refreshFeedbackTimer: null, refreshBusy: false, refreshResult: '',
-    clearTimeout() {}, cancelAnimationFrame() {}, settleNotchNumbers() {}, settleNotchStatNumbers() {}, resetRefreshVisit() {}, paintRefreshButton() {}, captureRingResetMotion() {}, animateRingResets() {},
+    clearTimeout() {}, cancelAnimationFrame() {}, settleNotchNumbers() {}, panel: { suspend() {} }, settleNotchStatNumbers() {}, resetRefreshVisit() {}, paintRefreshButton() {}, captureRingResetMotion() {}, animateRingResets() {},
     notchSummaryObserver: { disconnect() {}, observe() {} }, providerLabel: id => id, positionNotchSummary() {},
     notchIcon: item => el('span', 'edge-dock-mark', item.provider), notchText: (_item, row) => el('span', 'notch-text-run', row.text) };
-  const summarySource = source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function notchStatOverviewCard('));
+  const summarySource = source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function zoomForNotchText('));
   const renderSource = source.slice(source.indexOf('function renderNotch('), source.indexOf('  const summary = contentLayer.querySelector', source.indexOf('function renderNotch(')));
   vm.runInNewContext(`${summarySource}\n${renderSource}\n}`, context);
   const payload = { summary: { items: [{ type: 'icon', provider: 'codex' }, { type: 'text', text: '51M' },

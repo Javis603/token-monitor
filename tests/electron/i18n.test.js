@@ -335,9 +335,12 @@ test('Notch settings and shared labels are present in every bundled locale', () 
   const html = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/index.html'), 'utf8');
   const notch = html.split('id="notchFeature"')[1].split('id="tokscaleGroup"')[0];
   const keys = [...new Set(['settings.advanced.experimental', 'settings.notch.experimentalNote',
+    'settings.notch.accountTitle', 'settings.notch.summaryModeNote',
+    ...['sessions', 'tray', 'custom'].map(mode => `settings.notch.summaryMode.${mode}Note`),
     ...[...notch.matchAll(/data-i18n="([^"]+)"/g)].map(match => match[1])])];
   assert.ok(keys.includes('settings.notch.iconRings'));
-  assert.ok(keys.includes('settings.notch.followTrayNote'));
+  assert.ok(keys.includes('settings.notch.summaryModeNote'));
+  assert.ok(keys.includes('settings.notch.warnColors'));
   assert.ok(keys.includes('settings.appearance.macBackdropVibrancy'));
   for (const locale of LANGUAGE_OPTIONS.map(option => option.value).filter(value => value !== 'auto')) {
     for (const key of keys) {
@@ -348,5 +351,5 @@ test('Notch settings and shared labels are present in every bundled locale', () 
     }
   }
   assert.equal(translate('zh-CN', 'settings.notch.iconRings'), '显示额度与采集状态');
-  assert.equal(translate('zh-CN', 'settings.notch.followTrayNote'), '收起摘要与托盘一致。');
+  assert.equal(translate('zh-CN', 'settings.notch.summaryMode.tray'), '与菜单栏相同');
 });

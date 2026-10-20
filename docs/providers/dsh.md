@@ -14,7 +14,7 @@ DSH has three data planes, and they are deliberately separate:
 | Data plane | Read by | Source |
 | --- | --- | --- |
 | Token usage (periods, dashboard, history) | the shared usage collector, through `tokscale` | DSH session transcripts, parsed by tokscale's `dsh.rs` |
-| Local session metadata (timestamps, persisted title) | collector metadata enrichment in `collector.js`, through `providers/dsh/sessionFiles.js` | transcript header, file metadata and the latest `session/title`, parsed locally |
+| Local session metadata (timestamps, project, persisted title) | collector metadata enrichment in `collector.js`, through `providers/dsh/sessionFiles.js` | transcript header, file metadata and the latest `session/title`, parsed locally |
 | Session Detail (per-turn breakdown, prompts) | `providers/dsh/sessionDetail.js`, on demand | the same transcripts, parsed locally |
 
 ## Where the data lives
@@ -57,6 +57,13 @@ The collector enriches local session rows from the preferred transcript without 
 accounting. It takes the session start from the transcript header, last activity from the file
 mtime, and folds the latest durable `session/title` event as the conversation title. It never
 derives a title from `user/message` or `session/title-llm-request` content.
+
+Project attribution uses the preferred transcript header's `cwd`, retained with the
+header cache across ticks and transcript upgrades. When project tracking is enabled,
+the collector converts that path through the shared `projectIdentity()` helper so
+DSH tokens and models join the existing project rollup. A missing or unreadable
+workspace leaves usage unattributed; the opaque directory bucket is never used as
+a project path. This enrichment does not add or recalculate usage totals.
 
 Title reads retain complete plain-JSONL or zstd-frame boundaries for incremental refreshes. Before
 reusing an append offset, `sessionFiles.js` verifies the file identity and a bounded head/tail

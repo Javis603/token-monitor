@@ -386,6 +386,63 @@ test('_collapsePools omits pools that have no model in the response', () => {
   assert.deepEqual(pools.map((p) => p.name), ['Claude']);
 });
 
+test('_collapsePools keeps Gemini 4 Argon separate from Claude and preserves finite fractions over null', () => {
+  const models = [
+    { label: 'Gemini 3.8 Flash (High)', modelId: 'gemini-3.8-flash-high', remainingFraction: 0.99, resetTime: '2026-10-16T05:33:58Z' },
+    { label: 'Claude Opus 5.5 (Low)', modelId: 'claude-opus-5-5-low', remainingFraction: null, resetTime: '2026-10-17T10:01:00Z' },
+    { label: 'Claude Sonnet 5.5 (Low)', modelId: 'claude-sonnet-5-5-low', remainingFraction: 0.25, resetTime: '2026-10-17T10:01:00Z' },
+    { label: 'Gemini 4 Argon (High)', modelId: 'gemini-4-argon-high', remainingFraction: 0.8, resetTime: '2026-10-23T00:33:37Z' },
+    { label: 'Gemini 4 Argon (Medium)', modelId: 'gemini-4-argon-medium', remainingFraction: 0.68, resetTime: '2026-10-23T00:33:37Z' }
+  ];
+  const pools = probe._collapsePools(models);
+  assert.deepEqual(pools.map((p) => [p.name, p.remainingFraction]), [
+    ['Gemini Flash', 0.99],
+    ['Claude', 0.25],
+    ['Gemini 4 Argon', 0.68]
+  ]);
+});
+
+test('_quotaSummaryWindows keeps Gemini 4 Argon distinct from Gemini Models and orders it after Gemini', () => {
+  const windows = probe._quotaSummaryWindows({
+    groups: [
+      {
+        displayName: 'Gemini 4 Argon',
+        buckets: [
+          {
+            bucketId: 'gemini-argon-wtu-weekly',
+            displayName: 'Gemini 4 Argon Weekly Limit',
+            window: 'weekly',
+            remainingFraction: 0.74,
+            resetTime: '2026-10-23T00:33:37Z'
+          }
+        ]
+      },
+      {
+        displayName: 'Claude and GPT models',
+        buckets: [
+          { bucketId: '3p-weekly', displayName: 'Weekly Limit Remaining', window: 'weekly', remainingFraction: 0 },
+          { bucketId: '3p-5h', displayName: 'Five Hour Limit Remaining', window: '5h', remainingFraction: 1, disabled: true }
+        ]
+      },
+      {
+        displayName: 'Gemini Models',
+        buckets: [
+          { bucketId: 'gemini-weekly', displayName: 'Weekly Limit Remaining', window: 'weekly', remainingFraction: 0.99 },
+          { bucketId: 'gemini-5h', displayName: 'Five Hour Limit Remaining', window: '5h', remainingFraction: 0.98 }
+        ]
+      }
+    ]
+  });
+
+  assert.deepEqual(windows.map((window) => [window.name, window.kind, window.remainingFraction, window.showMeter]), [
+    ['Gemini 5-hour', 'session', 0.98, true],
+    ['Gemini weekly', 'weekly', 0.99, true],
+    ['Gemini 4 Argon weekly', 'weekly', 0.74, true],
+    ['Claude/GPT 5-hour', 'session', null, false],
+    ['Claude/GPT weekly', 'weekly', 0, true]
+  ]);
+});
+
 test('_quotaSummaryWindows maps two model groups to session and weekly windows', () => {
   const windows = probe._quotaSummaryWindows({
     response: {

@@ -13,6 +13,7 @@ const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { normalizeLimitProvider } = require('../../limits/core');
 const { abortError } = require('../../probeDeadline');
 const { hashKey } = require('../../hashKey');
+const { claudeProbeDir } = require('./probe');
 const {
   PLAN_LABEL_ALIASES,
   TOKEN_MONITOR_USER_AGENT,
@@ -1702,7 +1703,8 @@ function withClaudePathHints(env = process.env, platform = process.platform) {
   return {
     ...env,
     [pathKey]: uniqueStrings([...hints, ...currentPath.split(delimiter)]).join(delimiter),
-    DISABLE_AUTOUPDATER: '1'
+    DISABLE_AUTOUPDATER: '1',
+    CLAUDE_CODE_SKIP_PROMPT_HISTORY: '1'
   };
 }
 
@@ -1812,11 +1814,13 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
   const platform = deps.platform || process.platform;
   const command = existingClaudeCommandCandidates(claudeCommandCandidates(env, platform), deps)[0];
   if (!command) throw errorWithStatus('notConfigured', 'Claude CLI not found');
-  const probeDir = deps.claudeProbeDir || path.join(os.tmpdir(), 'token-monitor-claude-probe');
+  const probeDir = claudeProbeDir(deps);
   fs.mkdirSync(probeDir, { recursive: true });
   const runEnv = {
     ...env,
     DISABLE_AUTOUPDATER: '1',
+    // Interactive /usage and /status probes must not become saved conversations.
+    CLAUDE_CODE_SKIP_PROMPT_HISTORY: '1',
     TERM: env.TERM && env.TERM !== 'dumb' ? env.TERM : 'xterm-256color',
     COLORTERM: env.COLORTERM || 'truecolor',
     TOKEN_MONITOR_CLAUDE_COMMAND_PATH: command,
@@ -1902,9 +1906,11 @@ async function runClaudeUsageCli(deps = {}) {
 }
 
 function runClaudeDirectUsageCli(deps = {}) {
+  const probeDir = claudeProbeDir(deps);
+  fs.mkdirSync(probeDir, { recursive: true });
   return runClaudeDirectCommand(
     ['/usage'],
-    deps,
+    { ...deps, cwd: probeDir },
     Number(deps.claudeDirectCliTimeoutMs || 12000)
   );
 }

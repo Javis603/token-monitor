@@ -14,6 +14,14 @@
     ['monthly', 4]
   ]);
 
+  // Where a window sorts among an account's compact readings: the shortest
+  // cycle first. Antigravity keeps its model-group order. The Notch Panel's
+  // limit columns lead with the same pair Home shows.
+  function compactWindowRank(providerId, window) {
+    if (String(providerId || '').trim().toLowerCase() === 'antigravity') return 0;
+    return windowPriority.get(String(window?.kind || '').trim().toLowerCase()) ?? 10;
+  }
+
   function finiteNumber(value) {
     if (
       value === null
@@ -121,12 +129,7 @@
             || window.planStatus === 'expired'
             || window.value
             || (window.metric === 'credits' && (window.remaining != null || window.detail)))
-          .sort((a, b) => {
-            if (providerId === 'antigravity') return a.index - b.index;
-            const aPriority = windowPriority.get(a.kind) ?? 10;
-            const bPriority = windowPriority.get(b.kind) ?? 10;
-            return aPriority - bPriority || a.index - b.index;
-          })
+          .sort((a, b) => compactWindowRank(providerId, a) - compactWindowRank(providerId, b) || a.index - b.index)
           .slice(0, 2)
           .map(({ index: _index, ...window }) => window);
         if (windows.length === 0) return null;
@@ -513,6 +516,7 @@
   }
 
   return {
+    compactWindowRank,
     homeLimitAccounts,
     homeLimitAccountsForProviders,
     homeLimitsAwaitingFirstData,

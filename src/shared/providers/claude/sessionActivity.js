@@ -6,6 +6,7 @@ const path = require('node:path');
 const { processStarts } = require('../../processStarts');
 const { readLinuxPidDomain, readLinuxProcessStarts } = require('./linuxProcessIdentity');
 const { resolveClaudeConfigDir, claudeSessionRoots } = require('./paths');
+const { claudeProbeDir, isClaudeProbeCwd } = require('./probe');
 const { isSafeSessionId } = require('../../sessionFiles');
 const { readT3Activity } = require('../../t3SessionActivity');
 const { readT3SessionMeta } = require('../../t3SessionMetadata');
@@ -55,6 +56,7 @@ async function readSessionActivity(sessionIds, options = {}) {
     ? readLinuxPidDomain({ procRoot: options.linuxProcRoot, machineIdFile: options.linuxMachineIdFile })
     : platform;
   if (!pidDomain) return result;
+  const probeDir = claudeProbeDir(options);
   const candidates = [];
   for (const name of names) {
     if (!/^[1-9]\d*\.json$/.test(name)) continue;
@@ -63,7 +65,7 @@ async function readSessionActivity(sessionIds, options = {}) {
       const stat = fs.lstatSync(file);
       if (!stat.isFile() || stat.size > MAX_RECORD_BYTES) continue;
       const record = readRegistryRecord(file);
-      if (!record) continue;
+      if (!record || isClaudeProbeCwd(record.cwd, probeDir)) continue;
       const pid = record.pid;
       if (!Number.isSafeInteger(pid) || pid <= 0 || pid > 2147483647
         || `${pid}.json` !== name || !isSafeSessionId(record.sessionId)

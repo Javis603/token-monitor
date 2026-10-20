@@ -2,13 +2,13 @@
 
 const os = require('node:os');
 const path = require('node:path');
-const { NOTCH_METRICS, notchPeekBounds, notchCanvasBounds, notchGeometry, notchMaxHeight, notchBounds, notchSummaryMaxWidth, notchCommands, translateCommands, interpolateCommands, rectContains } = require('./geometry');
-const { toSvgPath, bubbleCommands } = require('../renderer/edgeDock/shapes');
+const { NOTCH_METRICS, notchPeekBounds, notchCanvasBounds, notchGeometry, notchBounds, notchCommands, translateCommands, interpolateCommands, rectContains } = require('./geometry');
+const { toSvgPath } = require('../renderer/edgeDock/shapes');
+const { notchGlassGeometry } = require('../renderer/notch/renderer');
 const { readMacNotchScreens } = require('./screen');
 const { notchBlurBounds } = require('./blur');
-const { readMacMenuWindows } = require('./menuBar');
 const { edgeDockBackdropMode, isLiquidGlassBackdrop, liquidGlassStyle, liquidGlassTint } = require('../macBackdropMode');
-const { EDGE_DOCK_TIMING, edgeDockCorridorBounds, edgeDockPollDelay, edgeDockScale, normalizeEdgeDockCustomScale, EDGE_DOCK_METRICS: M } = require('../edgeDock/geometry');
+const { edgeDockPollDelay, edgeDockScale, normalizeEdgeDockCustomScale, EDGE_DOCK_METRICS: M } = require('../edgeDock/geometry');
 
 const FULL_SCREEN_POLL_MS = 500;
 // Polling cadence while the pointer is near the top of the entry's display, so
@@ -18,6 +18,22 @@ const NEAR_TOP_DEPTH = 120;
 // The open panel follows the pointer out after a short grace.
 const NOTCH_HIDE_DELAY_MS = 100;
 const NOTCH_HOVER_DELAYS = [0, 100, 200, 300, 400, 500, 600];
+// A scroll gesture acts once after this much vertical travel in points. Page
+// wheel events carry no gesture phase, so trackpad momentum is told apart from
+// a new swipe the way inertia detectors such as Lethargy do: momentum keeps
+// its direction and only decays. After an action, a reversal, or a delta that
+// rises well above the decayed stream, starts the next gesture; a pause longer
+// than the gap always does.
+const SCROLL_GESTURE_GAP_MS = 250;
+const SCROLL_GESTURE_DISTANCE = 24;
+const SCROLL_REVERSAL_MIN = 4;
+const SCROLL_DECAY = 0.5;
+const SCROLL_RISE = 3;
+const SCROLL_RISE_MIN = 8;
+// The open panel's tab/status row, the only part without its own vertical
+// scrolling. Mirrors `place()` in renderer/notch/panel.js: an attached panel's
+// row is the camera band, a capsule's is this many CSS pixels at its zoom.
+const NOTCH_BAND_HEIGHT = 34;
 
 // SwiftUI-style springs: `response` is the undamped period in seconds and
 // `damping` the damping fraction. Opening overshoots slightly; closing settles
@@ -25,7 +41,7 @@ const NOTCH_HOVER_DELAYS = [0, 100, 200, 300, 400, 500, 600];
 const NOTCH_SPRINGS = Object.freeze({
   open: { response: 0.45, damping: 0.62 },
   close: { response: 0.42, damping: 1 },
-  peek: { response: 0.3, damping: 0.6 },
+  peek: { response: 0.32, damping: 0.68 },
   unpeek: { response: 0.3, damping: 1 }
 });
 
@@ -74,31 +90,39 @@ function normalizeNotchShape(value) {
   return ['auto', 'notch', 'pill'].includes(value) ? value : 'auto';
 }
 
-function normalizeNotchDetailSide(value) {
-  return value === 'left' ? 'left' : 'right';
-}
-
-// One persistent shell, plus the existing EdgeDock bubble renderer. Data is
-// shared with the side dock; window ownership, intent and IPC are independent.
+// One persistent panel shell shares data with the side dock; window ownership,
+// intent and IPC are independent.
 function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
-  rendererDir, preloadPath, platform = process.platform, readScreens = readMacNotchScreens, readMenuWindows = readMacMenuWindows,
+  rendererDir, preloadPath, platform = process.platform, readScreens = readMacNotchScreens,
   nativeGlass = () => false, liquidGlass = () => null, createGlass, applyShapeMask,
-  onSwitchCodexAccount, onOpenResetForecastSource, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, blurAvailable = () => false, applyBlurMask, primaryButtonDown = () => null, monitorPrimaryPress, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
+  onSwitchCodexAccount, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, blurAvailable = () => false, applyBlurMask, primaryButtonDown = () => null, naturalScrolling = () => true, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
   logger = () => {} }) {
-  const surfaces = ['notch', 'bubble'];
-  const windows = {}, windowIds = {}, ready = {}, shapes = {}, glass = {}, nativeMaterial = {}, lastSent = {};
+  const surfaces = ['notch'];
+  const windows = {}, ready = {}, shapes = {}, glass = {}, nativeMaterial = {}, lastSent = {};
   let materialKey = '', running = false, expanded = false, peeked = false, hoverTicked = false, locked = false;
   let capabilities = null;
   let appearance = {}, data = { cells: [], summary: null };
   let nativeScreens = { screens: [], mainDisplayId: null }, geometryReadAt = -Infinity, geometryDirty = true;
   let geometryConfigs = new Map(), displays = [], primaryDisplay = null;
   const ignoredMouse = {};
-  let menuWindows = null, menuReadAt = -Infinity;
-  let contentHeight = 180, slots = { left: 17, right: 42 }, rows = [];
-  let enterAt = null, leaveAt = null, rowAt = null, hoveredId = null, detailId = null;
-  let bubbleHeight = 180, bubblePlaced = null, bubbleBounds = null, detailVisible = false;
-  let pollTimer = null, motion = null, screenListeners = false, nearTop = false, buttonDown = false;
-  let removePressMonitor = null;
+  let contentHeight = 180, slots = { left: 17, right: 42 };
+  let enterAt = null, leaveAt = null;
+  let pollTimer = null, motion = null, screenListeners = false, nearTop = false;
+  // The pointer is on the entry or the open panel and the window takes input.
+  let pointerInside = false, capturing = false;
+  // A scrolled-away summary stays hidden until a scroll down or an open.
+  let summaryDismissed = false, scrollGesture = { at: -Infinity, travel: 0, done: false };
+
+  // After an action the stream must decay to half its peak before a rise can
+  // count, so one accelerating swipe never acts twice.
+  function scrollRearms(hand) {
+    const g = scrollGesture, size = Math.abs(hand);
+    if (Math.sign(hand) === -g.direction && size >= SCROLL_REVERSAL_MIN) return true;
+    g.peak = Math.max(g.peak, size);
+    if (!g.decayed) { g.decayed = size <= g.peak * SCROLL_DECAY; g.low = size; return false; }
+    g.low = Math.min(g.low, size);
+    return size >= Math.max(g.low * SCROLL_RISE, g.low + SCROLL_RISE_MIN);
+  }
   let blurWindow = null, blurMaskKey = '', blurOpacity = -1, blurAttempts = 0, blurFailed = false, blurRetry = null, blurCurrent = null;
   let motionGeneration = 0, refreshInFlight = null, refreshEpoch = 0;
   let fullScreen = false, fullScreenCheckedAt = -Infinity, fullScreenDisplayId = null;
@@ -150,7 +174,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   }
 
   function summaryVisible() {
-    return Boolean(data.summary && (!fullScreen || expanded));
+    return Boolean(data.summary && (!(fullScreen || summaryDismissed) || expanded));
   }
 
   // Reuse EdgeDock's 500ms full-screen cadence on this entry's selected display.
@@ -174,14 +198,6 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     return fullScreen !== previous;
   }
 
-  function refreshMenu(now = Date.now(), geometry) {
-    if (!running || locked || !summaryVisible() || settings().notchAvoidMenuBar === false || now - menuReadAt < 2000) return false;
-    if (!(geometry || layout()?.geometry)?.notched) return false;
-    try { menuWindows = readMenuWindows(); } catch { menuWindows = null; }
-    menuReadAt = now;
-    return true;
-  }
-
   function layout() {
     const id = settings().notchDisplayId ?? nativeScreens.mainDisplayId;
     const display = displays.find((d) => String(d.id) === String(id)) || primaryDisplay;
@@ -197,9 +213,9 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const compact = geometry.gapWidth === 0;
     const maxWidth = Math.floor(2 * Math.min(geometry.centerX - display.bounds.x,
       display.bounds.x + display.bounds.width - geometry.centerX));
-    const menuMaxWidth = activeSlots && geometry.notched && settings().notchAvoidMenuBar !== false
-      ? notchSummaryMaxWidth(display, geometry, menuWindows, Object.values(windowIds)) : null;
-    const closedMaxWidth = Math.min(maxWidth, menuMaxWidth ?? maxWidth);
+    // Wide tray or custom layouts may cover menu bar items; their owners
+    // choose those items, so only the display bounds the summary.
+    const closedMaxWidth = maxWidth;
     const summaryBudget = Math.max(0, Math.floor(compact ? closedMaxWidth - 2 * ((geometry.notched ? NOTCH_METRICS.restingFlare : 0) + 8)
       : (closedMaxWidth - geometry.gapWidth) / 2 - 16 - NOTCH_METRICS.restingFlare));
     const boundedSlots = activeSlots && !compact
@@ -212,9 +228,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
 
   function publishCapabilities(current) {
     const rings = current.geometry.gapWidth === 0;
-    const menuAvoidance = current.geometry.notched;
-    if (capabilities?.rings === rings && capabilities.menuAvoidance === menuAvoidance) return;
-    capabilities = { rings, menuAvoidance };
+    if (capabilities?.rings === rings) return;
+    capabilities = { rings };
     onCapabilitiesChanged(capabilities);
   }
 
@@ -248,20 +263,22 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   function glassOptions(surface) {
     const mode = backdropMode();
     // An attached panel joins a black camera housing, so its material keeps a
-    // dark appearance even when the widget uses a light palette. Detached
-    // capsules and detail cards retain the widget's appearance.
+    // dark appearance even when the widget uses a light palette. The hardware
+    // scrim owns its tint: applying the widget tint too would darken it twice.
+    // Detached capsules retain the widget's appearance/tint.
     const attached = surface === 'notch' && layout()?.geometry.notched;
-    return { dark: attached || liquidGlass()?.dark === true, style: liquidGlassStyle(mode), tintOpacity: liquidGlassTint(settings(), mode) };
+    return { dark: attached || liquidGlass()?.dark === true, style: liquidGlassStyle(mode),
+      tintOpacity: attached ? 0 : liquidGlassTint(settings(), mode) };
   }
 
-  function shape(surface, points, bounds, display) {
+  function shape(surface, points, bounds, display, hardwareShade) {
     const d = toSvgPath(points);
-    const key = `${display.id}:${display.scaleFactor}:${d}`;
+    const key = `${display.id}:${display.scaleFactor}:${d}:${JSON.stringify(hardwareShade ?? null)}`;
     if (shapes[surface]?.key === key && shapes[surface]?.width === bounds.width && shapes[surface]?.height === bounds.height) return;
     shapes[surface] = { key, width: bounds.width, height: bounds.height, d };
     const win = windows[surface];
     try {
-      if (glass[surface]) glass[surface].update({ ...glassOptions(surface), shape: { commands: points, width: bounds.width, height: bounds.height } });
+      if (glass[surface]) glass[surface].update({ ...glassOptions(surface), shape: { commands: points, width: bounds.width, height: bounds.height }, hardwareShade });
       else if (nativeMaterial[surface] && applyShapeMask?.(win, points, bounds.width, bounds.height, display) !== true) {
         nativeMaterial[surface] = false;
         win.setVibrancy(null);
@@ -275,25 +292,24 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const win = windows[surface];
     if (!alive(win) || !ready[surface] || !current) return;
     const base = { surface, notch: true, shape: shapes[surface], platform, osRelease: os.release(),
-      appearance: { ...appearance, zoomFactor: zoom(), edgeDockRunningIndicatorEnabled: settings().notchRunningIndicatorEnabled === true }, style: normalizeNotchStyle(settings().notchStyle), glass: nativeMaterial[surface] === true, liquidGlass: Boolean(glass[surface]) };
+      appearance: { ...appearance, zoomFactor: zoom(), notchWarnColors: settings().notchWarnColors === true,
+        edgeDockWarnColors: settings().notchWarnColors === true,
+        edgeDockRunningIndicatorEnabled: settings().notchRunningIndicatorEnabled === true }, style: normalizeNotchStyle(settings().notchStyle), glass: nativeMaterial[surface] === true, liquidGlass: Boolean(glass[surface]) };
     const hasSummary = summaryVisible();
-    if (surface === 'notch') {
-      // Measurement results must not invalidate the request that produced them.
-      const key = hasSummary ? JSON.stringify([data.summary, zoom(), current.display.id, current.geometry, settings().notchAvoidMenuBar !== false, menuWindows]) : null;
-      if (!hasSummary) summaryMeasurement = null;
-      else if (!summaryMeasured && summaryMeasurement?.key !== key) summaryMeasurement = { id: ++summaryGeneration, key, measuring: true };
-    }
-    const payload = surface === 'notch' ? { ...base, expanded, visible: expanded, quietFullScreen: fullScreen, motion: frame,
+    // Measurement results must not invalidate the request that produced them.
+    const measurementKey = hasSummary ? JSON.stringify([data.summary, zoom(), current.display.id, current.geometry]) : null;
+    if (!hasSummary) summaryMeasurement = null;
+    else if (!summaryMeasured && summaryMeasurement?.key !== measurementKey) summaryMeasurement = { id: ++summaryGeneration, key: measurementKey, measuring: true };
+    const payload = { ...base, expanded, visible: expanded, quietFullScreen: fullScreen, motion: frame,
+      nativeHardwareShade: glass.notch?.hardwareShade === true,
       geometry: { ...current.geometry, summaryBudget: current.summaryBudget, headerX: current.closed.x - (viewport || current.canvas).x, headerWidth: current.closed.width,
         flare: current.geometry.notched ? NOTCH_METRICS.openFlare : 0,
         gapOffset: current.geometry.centerX - current.geometry.gapWidth / 2 - current.closed.x,
         shoulder: current.geometry.notched && hasSummary ? NOTCH_METRICS.restingFlare : 0 },
-      cells: data.cells, summary: hasSummary ? data.summary : null,
+      cells: data.cells, summary: hasSummary ? data.summary : null, panel: data.panel || null,
       summaryMeasurement: summaryMeasurement && { id: summaryMeasurement.id, measuring: summaryMeasurement.measuring },
       refreshEnabled: settings().notchRefreshEnabled === true,
-      refreshable: expanded && settings().notchRefreshEnabled === true && canRefreshLimits() === true }
-      : { ...base, visible: Boolean(detailId) && !locked, side: settings().notchDetailSide === 'left' ? 'right' : 'left', cell: data.cells.find((c) => c.id === detailId) || null, placed: bubblePlaced,
-        omitQuotaBars: true, maxCardHeight: notchMaxHeight(current.display, current.geometry, true) / zoom() };
+      refreshable: expanded && settings().notchRefreshEnabled === true && canRefreshLimits() === true };
     const key = JSON.stringify(payload);
     if (lastSent[surface] === key) return;
     lastSent[surface] = key;
@@ -317,12 +333,14 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   }
 
   function summaryEdges(current) {
-    const shoulder = current.geometry.notched && summaryVisible() ? NOTCH_METRICS.restingFlare : 0;
-    const left = current.closed.x + shoulder + 8;
-    const right = current.closed.x + current.closed.width - shoulder - 8;
+    const bounds = peeked && !expanded ? current.peek : current.closed;
+    const scale = bounds.height / current.closed.height;
+    const shoulder = current.geometry.notched && summaryVisible() ? NOTCH_METRICS.restingFlare * scale : 0;
+    const left = bounds.x + shoulder + 8 * scale;
+    const right = bounds.x + bounds.width - shoulder - 8 * scale;
     const origin = (viewport || current.canvas).x;
-    // Summary elements remain one group during expansion; only a changed
-    // readout width moves their mirrored edges to a new resting position.
+    // The ears move outward with hover growth while their contents scale.
+    // The hardware camera gap itself stays fixed; opening fades the summary.
     return { left: left - origin, right: right - origin };
   }
 
@@ -335,10 +353,29 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const xs = points.flatMap(([, ...values]) => values.filter((_, i) => i % 2 === 0));
     const contentScale = current.open.width > 0 ? (Math.max(...xs) - Math.min(...xs)) / current.open.width : 1;
     frame = { shape: null, progress, contentScale, bodyHeight: Math.max(0, height - headerHeight), headerHeight,
-      summaryHeight: current.geometry.height, summaryIconInset: current.summaryIconInset,
+      summaryHeight: peeked && !expanded ? current.peek.height : current.geometry.height,
+      summaryScale: peeked && !expanded ? current.peek.height / current.closed.height : 1, summaryIconInset: current.summaryIconInset,
       summaryEdges: summaryEdges(current), bodyBox: { x: current.open.x - canvas.x, width: current.open.width }, ...extra };
-    shape('notch', points, canvas, current.display);
+    if (current.geometry.gapWidth > 0 && summaryVisible()) {
+      // Outer-edge scaling grows toward the fixed camera. Bound every frame,
+      // including spring overshoot, by the measured widths in screen points.
+      const gapLeft = current.geometry.centerX - current.geometry.gapWidth / 2 - canvas.x;
+      const gapRight = gapLeft + current.geometry.gapWidth;
+      const left = frame.summaryEdges.left + frame.summaryIconInset - current.summaryIconInset;
+      const leftScale = slots.left > 0 ? (gapLeft - 8 - left) / slots.left : Infinity;
+      const rightScale = slots.right > 0 ? (frame.summaryEdges.right - gapRight - 8) / slots.right : Infinity;
+      frame.summaryScale = Math.max(0, Math.min(frame.summaryScale, leftScale, rightScale));
+    }
+    // The camera cap must share the native material's compositor transaction.
+    // An SVG cap arrives later through Chromium, leaving a moving glass fringe.
+    const hardwareShade = current.geometry.notched && glass.notch?.hardwareShade === true
+      ? { ...notchGlassGeometry(current.geometry.height, frame.bodyHeight), progress: value } : undefined;
+    const hadMaterial = nativeMaterial.notch === true;
+    shape('notch', points, canvas, current.display, hardwareShade);
     frame.shape = shapes.notch;
+    // A failed native update removes the material immediately. Restore the
+    // renderer's SVG fallback with this completed frame, not at spring settle.
+    if (hadMaterial && nativeMaterial.notch !== true) send('notch', current);
     paintBlur(current, value);
     if (alive(windows.notch) && ready.notch) windows.notch.webContents.send('topNotch:motion', frame);
   }
@@ -393,7 +430,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       win.setOpacity(0);
       win.setBounds(bounds);
       win.showInactive();
-      // Keep both entry surfaces above the blur they sit on.
+      // Keep the panel shell above its blur.
       for (const s of surfaces) if (alive(windows[s])) windows[s].moveAbove?.(win.getMediaSourceId());
     }
     if (win.isVisible() && key !== blurMaskKey) {
@@ -418,47 +455,6 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     blurOpacity = opacity;
     win.setOpacity(opacity);
     if (opacity === 0) win.hide();
-  }
-
-  function hideDetail() {
-    detailId = hoveredId = null; rowAt = null; bubblePlaced = bubbleBounds = null; detailVisible = false;
-    if (alive(windows.bubble)) {
-      if (windows.bubble.getOpacity() !== 0) windows.bubble.setOpacity(0);
-      ignoreMouse('bubble', true); send('bubble');
-    }
-  }
-
-  function placeDetail(current) {
-    const row = rows.find((r) => r.id === detailId);
-    if (!current || !row || !alive(windows.bubble)) return;
-    const width = Math.round((M.bubbleWidth + M.bubbleTail) * zoom());
-    const height = Math.round(Math.min(bubbleHeight * zoom(), notchMaxHeight(current.display, current.geometry, true)));
-    const centerY = current.open.y + row.y + row.height / 2;
-    const area = current.display.workArea || current.display.bounds;
-    const top = Math.max(current.open.y + (current.geometry.gapWidth > 0 ? current.geometry.height : 0), area.y);
-    const bottom = Math.min(current.display.bounds.y + current.display.bounds.height, area.y + area.height);
-    const y = Math.round(Math.max(top, Math.min(centerY - height / 2, bottom - height - M.screenMargin)));
-    const left = settings().notchDetailSide === 'left';
-    // Only an attached notch has concave side shoulders. A capsule's full
-    // width is its visible body; subtracting shoulders overlaps both windows.
-    const shoulder = current.geometry.notched ? NOTCH_METRICS.openFlare * zoom() : 0;
-    const idealX = left ? current.open.x + shoulder - M.bubbleGap - width
-      : current.open.x + current.open.width - shoulder + M.bubbleGap;
-    const x = Math.round(Math.max(current.display.bounds.x + M.screenMargin,
-      Math.min(idealX, current.display.bounds.x + current.display.bounds.width - width - M.screenMargin)));
-    const changed = !bubbleBounds || bubbleBounds.x !== x || bubbleBounds.y !== y || bubbleBounds.width !== width || bubbleBounds.height !== height;
-    bubbleBounds = { x, y, width, height };
-    if (changed) windows.bubble.setBounds(bubbleBounds);
-    shape('bubble', bubbleCommands({ width, height, side: left ? 'right' : 'left', tail: M.bubbleTail * zoom(), tailY: centerY - y,
-      neck: M.bubbleNeck * zoom(), radius: M.bubbleRadius * zoom() }), bubbleBounds, current.display);
-    send('bubble', current);
-    if (ready.bubble && bubblePlaced && !locked) {
-      if (!windows.bubble.isVisible()) windows.bubble.showInactive();
-      if (windows.bubble.getOpacity() !== 1) windows.bubble.setOpacity(1);
-      ignoreMouse('bubble', false);
-      // One tick per visible visit, not per size report, repaint or provider switch.
-      if (!detailVisible) { detailVisible = true; hapticTick(); }
-    }
   }
 
   function refreshLayout() {
@@ -511,7 +507,6 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       }
     }
     send('notch', current);
-    if (detailId) placeDetail(current);
     visibility();
   }
 
@@ -520,21 +515,38 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (!alive(win)) return;
     if (ready.notch && !locked && (!summaryVisible() || summaryMeasured) && !win.isVisible()) win.showInactive();
     // Keep the transparent canvas alive for polling and frame acknowledgements.
+    const opacity = shellHidden() ? 0 : 1;
+    if (win.getOpacity() !== opacity) win.setOpacity(opacity);
+    syncCapture();
+  }
+
+  function shellHidden() {
     const geometry = layout()?.geometry;
     const emptySummary = summaryMeasured && slots.left === 0 && slots.right === 0;
-    const hidden = locked || ((!summaryVisible() || emptySummary) && !(geometry?.notched && geometry.gapWidth > 0) && !expanded && !peeked
+    return locked || ((!summaryVisible() || emptySummary) && !(geometry?.notched && geometry.gapWidth > 0) && !expanded && !peeked
       && !(motion && (motion.fromProgress > 0 || motion.target > 0 || motion.peek)));
-    const opacity = hidden ? 0 : 1;
-    if (win.getOpacity() !== opacity) win.setOpacity(opacity);
-    ignoreMouse('notch', locked || !expanded);
-    if (locked) hideDetail();
+  }
+
+  // The canvas is larger than the shell, and macOS hit-tests the whole window
+  // rectangle. It passes the pointer through, with moves forwarded so the page
+  // can report it, and takes input only while the pointer is on the visible
+  // entry or open panel. Clicks and wheel events then reach the page directly
+  // and never the app beneath. A drag arriving held from elsewhere is not taken,
+  // so only a poll that has just read the button may start taking input; other
+  // callers (motion, data pushes) may keep or release it. An unreadable button
+  // counts as up: refusing input would leave the entry unclickable.
+  function syncCapture(button) {
+    if (!alive(windows.notch)) return;
+    const mayStart = button !== undefined && button !== true;
+    capturing = !locked && pointerInside && !shellHidden() && (capturing || mayStart);
+    ignoreMouse('notch', !capturing);
   }
 
   function setExpanded(value) {
     if (expanded === value || locked) return;
     expanded = value; enterAt = leaveAt = null;
-    if (value) peeked = false;
-    else { refreshEpoch++; hideDetail(); }
+    if (value) peeked = summaryDismissed = false;
+    else refreshEpoch++;
     const current = layout();
     if (!current) return;
     // Full-screen reveal restores the summary and can change both ear widths.
@@ -573,12 +585,15 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     motion = { id, current, from: commands || endpoints(current)[0], to: targetCommands(current),
       fromProgress, target, fromHeight, toHeight, spring, velocity, rate: 0, peek: peeked,
       fromSummaryHeight: frame?.summaryHeight ?? current.geometry.height,
+      toSummaryHeight: peeked && !expanded ? current.peek.height : current.geometry.height,
+      fromSummaryScale: frame?.summaryScale ?? 1,
+      toSummaryScale: peeked && !expanded ? current.peek.height / current.closed.height : 1,
       fromEdges: { ...(frame?.summaryEdges || summaryEdges(current)),
         left: (frame?.summaryEdges?.left ?? summaryEdges(current).left) + (frame?.summaryIconInset || 0) - current.summaryIconInset }, toEdges: summaryEdges(current),
       fromBox: frame?.bodyBox || { x: current.open.x - viewport.x, width: current.open.width },
       toBox: { x: current.open.x - viewport.x, width: current.open.width },
       duration: springDuration(spring, velocity), elapsed: 0 };
-    paint(current, motion.from, fromProgress, motion.fromHeight, { summaryHeight: motion.fromSummaryHeight, summaryEdges: motion.fromEdges, bodyBox: motion.fromBox });
+    paint(current, motion.from, fromProgress, motion.fromHeight, { summaryHeight: motion.fromSummaryHeight, summaryScale: motion.fromSummaryScale, summaryEdges: motion.fromEdges, bodyBox: motion.fromBox });
     visibility();
     if (prefersReducedMotion()) {
       windows.notch.webContents.send('topNotch:animate', { id, duration: 0 });
@@ -598,7 +613,9 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const value = done ? held.target : held.fromProgress + (held.target - held.fromProgress) * eased;
     const mix = (from, to) => Object.fromEntries(Object.keys(to).map(key => [key, from[key] + (to[key] - from[key]) * eased]));
     paint(held.current, interpolateCommands(held.from, held.to, eased), value,
-      held.fromHeight + (held.toHeight - held.fromHeight) * eased, { motionId: held.id, done, summaryHeight: held.fromSummaryHeight + (held.current.geometry.height - held.fromSummaryHeight) * eased, summaryEdges: mix(held.fromEdges, held.toEdges), bodyBox: mix(held.fromBox, held.toBox) });
+      held.fromHeight + (held.toHeight - held.fromHeight) * eased, { motionId: held.id, done, summaryHeight: held.fromSummaryHeight + (held.toSummaryHeight - held.fromSummaryHeight) * eased,
+        summaryScale: held.fromSummaryScale + (held.toSummaryScale - held.fromSummaryScale) * eased,
+        summaryEdges: mix(held.fromEdges, held.toEdges), bodyBox: mix(held.fromBox, held.toBox) });
     if (done && motion === held) {
       motion = null;
       const target = held.current.canvas;
@@ -616,38 +633,57 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     return peeked ? notchPeekBounds(closed) : closed;
   }
 
-  function stopPressMonitor() {
-    const remove = removePressMonitor;
-    removePressMonitor = null;
-    try { remove?.(); }
-    catch (error) { logger(`[top-notch] click monitor cleanup failed: ${error.message}`); }
+  // Swipes belong to click-to-open: a hover that opens the panel would reopen
+  // it straight after a swipe closed it, and hide the summary it swiped away.
+  function swipesEnabled() {
+    return settings().notchSwipeGestures !== false && normalizeNotchHoverAction(settings().notchHoverAction) === 'peek';
   }
 
-  function startPressMonitor() {
-    if (!monitorPrimaryPress || removePressMonitor || !running || locked || !alive(windows.notch)) return;
-    const win = windows.notch;
-    let active = true;
-    try {
-      const remove = monitorPrimaryPress(point => {
-        if (!active || !running || locked || expanded || windows.notch !== win || !alive(win) || !ready.notch
-          || !Number.isFinite(point?.x) || !Number.isFinite(point?.y)) return;
-        const now = Date.now();
-        if (now - geometryReadAt >= 2000) readGeometry(now);
-        let current = layout();
-        if (!current) return;
-        if (refreshFullScreen(now, current.display)) { refreshLayout(); visibility(); current = layout(); }
-        // Use the delivered event's position, not the pointer at the next poll.
-        // Observing the press leaves the resting window click-through and does
-        // not activate the app or intercept the original event.
-        if (rectContains(entryBounds(current), point)) { setExpanded(true); schedulePoll(); }
-      });
-      if (typeof remove === 'function') {
-        removePressMonitor = () => { active = false; remove(); };
-      } else active = false;
-    } catch (error) {
-      active = false;
-      logger(`[top-notch] click monitoring unavailable: ${error.message}`);
+  function setSummaryDismissed(value) {
+    if (summaryDismissed === value) return;
+    summaryDismissed = value;
+    hapticTick();
+    refreshLayout();
+  }
+
+  // Down steps closed -> summary -> panel; up steps back. The open panel only
+  // takes the gesture on its band, so lists and the limits strip keep theirs.
+  // `deltaY` follows the page: positive scrolls content down, which is fingers
+  // or wheel moving up under natural scrolling.
+  function wheeled(event) {
+    if (!running || locked || !ready.notch || !alive(windows.notch) || !swipesEnabled()) return;
+    if (![event?.deltaX, event?.deltaY].every(Number.isFinite)) return;
+    const now = Date.now();
+    if (now - scrollGesture.at > SCROLL_GESTURE_GAP_MS) scrollGesture = { at: now, travel: 0, done: false, natural: naturalScrolling() !== false };
+    scrollGesture.at = now;
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    // Travel toward the user is positive whatever the scrolling preference.
+    const hand = scrollGesture.natural ? -event.deltaY : event.deltaY;
+    if (scrollGesture.done) {
+      if (!scrollRearms(hand)) return;
+      scrollGesture = { at: now, travel: 0, done: false, natural: scrollGesture.natural };
     }
+    const current = layout();
+    if (!current) return;
+    const band = { x: current.open.x, y: current.open.y, width: current.open.width,
+      height: current.geometry.notched && current.geometry.gapWidth > 0 ? current.geometry.height : NOTCH_BAND_HEIGHT * zoom() };
+    if (!rectContains(expanded ? band : entryBounds(current), screen.getCursorScreenPoint())) { scrollGesture.travel = 0; return; }
+    scrollGesture.travel += hand;
+    if (Math.abs(scrollGesture.travel) < SCROLL_GESTURE_DISTANCE) return;
+    const down = scrollGesture.travel > 0;
+    Object.assign(scrollGesture, { done: true, direction: down ? 1 : -1, peak: Math.abs(hand), decayed: false, low: Infinity });
+    if (expanded) { if (!down) setExpanded(false); }
+    else if (down && summaryDismissed && data.summary) setSummaryDismissed(false);
+    else if (down) { setExpanded(true); schedulePoll(); }
+    else if (data.summary && !summaryDismissed && !fullScreen) setSummaryDismissed(true);
+  }
+
+  function pressed() {
+    if (!running || locked || expanded || !ready.notch || !alive(windows.notch)) return;
+    const current = layout();
+    // The press reached the page, so the window was taking input; confirm it
+    // landed on the entry rather than a transparent part of the canvas.
+    if (current && rectContains(entryBounds(current), screen.getCursorScreenPoint())) { setExpanded(true); schedulePoll(); }
   }
 
   function poll(now = Date.now()) {
@@ -659,17 +695,11 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (!current) return;
     publishCapabilities(current);
     if (refreshFullScreen(now, current.display)) {
-      if (fullScreen) { setExpanded(false); enterAt = leaveAt = null; hideDetail(); }
+      if (fullScreen) { setExpanded(false); enterAt = leaveAt = null; }
       refreshLayout(); visibility();
       current = layout();
     }
-    if (refreshMenu(now, current.geometry)) { refreshLayout(); current = layout(); }
     const point = screen.getCursorScreenPoint();
-    const inDetail = detailId && bubbleBounds && rectContains(bubbleBounds, point);
-    // Bubble placement is anchored to the body, excluding concave shoulders.
-    const shoulder = current.geometry.notched ? NOTCH_METRICS.openFlare * zoom() : 0;
-    const body = { ...current.open, x: current.open.x + shoulder, width: current.open.width - 2 * shoulder };
-    const inCorridor = detailId && bubbleBounds && rectContains(edgeDockCorridorBounds(body, bubbleBounds), point);
     // A hidden full-screen summary leaves only the camera housing, so the
     // target reaches inward by half the side dock's physical wake depth. It
     // never widens across menu items.
@@ -681,41 +711,22 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     // null: the button state is unreadable (no native bridge).
     const button = primaryButtonDown();
     const nearEntry = approach && rectContains(trigger, point) && button !== true;
-    const inside = (expanded ? rectContains(current.open, point) : onEntry || nearEntry) || inDetail || inCorridor;
+    const inside = expanded ? rectContains(current.open, point) : onEntry || nearEntry;
     const depth = point.y - current.display.bounds.y;
     nearTop = depth >= 0 && depth < NEAR_TOP_DEPTH && Math.abs(point.x - current.geometry.centerX) < current.canvas.width;
-    // Transparent parts of the stable canvas must not swallow desktop clicks.
-    ignoreMouse('notch', !expanded || !rectContains(current.open, point));
-    // Native monitoring observes presses while the resting window stays
-    // click-through. Retain sampled presses only for injected legacy callers.
-    const pressed = button === true;
-    const pressedOnEntry = !removePressMonitor && pressed && !buttonDown && onEntry;
-    buttonDown = pressed;
     setPeeked(!expanded && (onEntry || nearEntry));
-    if (pressedOnEntry && !expanded) setExpanded(true);
+    // Transparent parts of the stable canvas must not swallow desktop clicks.
+    pointerInside = rectContains(expanded ? current.open : entryBounds(current), point);
+    syncCapture(button);
     if (inside) {
       leaveAt = null;
-      // An unavailable native click monitor or button reader keeps the entry
-      // reachable on hover instead of relying on sampled presses.
-      const action = button === null || (monitorPrimaryPress && !removePressMonitor) ? 'open' : normalizeNotchHoverAction(settings().notchHoverAction);
-      if (!expanded && action === 'open') {
+      if (!expanded && normalizeNotchHoverAction(settings().notchHoverAction) === 'open') {
         if (enterAt === null) enterAt = now;
         if (now - enterAt >= normalizeNotchHoverDelay(settings().notchHoverDelay)) setExpanded(true);
       }
     } else {
       enterAt = null;
       if (expanded) { if (leaveAt === null) leaveAt = now; if (now - leaveAt >= NOTCH_HIDE_DELAY_MS) setExpanded(false); }
-    }
-    if (!expanded || motion || progress < 1 || inDetail || inCorridor) return;
-    const row = rows.find((r) => rectContains({ x: (viewport || current.canvas).x + r.x, y: current.open.y + r.y, width: r.width, height: r.height }, point));
-    const rowId = row?.id || null;
-    if (rowId !== hoveredId) { hoveredId = rowId; rowAt = now; }
-    if (row && row.id !== detailId && now - rowAt >= (detailId ? 0 : EDGE_DOCK_TIMING.bubbleDelayMs)) {
-      detailId = row.id; bubblePlaced = null;
-      send('bubble', current);
-    }
-    if (!row && detailId && !inDetail) {
-      if (rowAt !== null && now - rowAt >= EDGE_DOCK_TIMING.hideDelayMs) hideDetail();
     }
   }
 
@@ -738,28 +749,29 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   }
 
   function destroyWindows() {
-    stopPressMonitor();
     destroyBlur();
     resetShellMotion(); refreshInFlight = null;
     summaryMeasured = false; summaryMeasurement = null; settleSummary = false;
-    hideDetail(); rows = [];
     for (const s of surfaces) {
       disposeGlass(s);
       const win = windows[s];
-      windows[s] = null; delete windowIds[s]; delete ignoredMouse[s]; ready[s] = false; shapes[s] = null; lastSent[s] = '';
+      windows[s] = null; delete ignoredMouse[s]; ready[s] = false; shapes[s] = null; lastSent[s] = '';
       if (alive(win)) win.destroy();
     }
   }
   function refreshGeometry() { geometryReadAt = -Infinity; poll(); }
   function invalidateGeometry(_event, _display, metrics) {
     if (!Array.isArray(metrics) || metrics.some(metric => metric !== 'workArea')) geometryDirty = true;
-    menuReadAt = fullScreenCheckedAt = -Infinity; refreshGeometry(); refreshLayout();
+    fullScreenCheckedAt = -Infinity; refreshGeometry(); refreshLayout();
   }
   function sync() {
     previewScale = null;
     if (settings().notchRefreshEnabled !== true) refreshEpoch++;
     if (platform !== 'darwin' || settings().notchEnabled !== true) { stop(); return; }
     running = true;
+    // Turning swipes off, or the mode they need, brings a hidden summary back.
+    const restoreSummary = summaryDismissed && !swipesEnabled();
+    if (restoreSummary) summaryDismissed = false;
     const style = normalizeNotchStyle(settings().notchStyle);
     // `inherit` follows only the widget, never the Edge Dock's own style.
     const backdrop = backdropMode();
@@ -775,13 +787,10 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
         windows[s] = win;
         win.on('closed', () => {
           if (windows[s] !== win) return;
-          windows[s] = null; delete windowIds[s]; delete ignoredMouse[s]; ready[s] = false; shapes[s] = null; lastSent[s] = '';
+          windows[s] = null; delete ignoredMouse[s]; ready[s] = false; shapes[s] = null; lastSent[s] = '';
           disposeGlass(s); nativeMaterial[s] = false;
-          if (s === 'notch') { motion = null; stopPressMonitor(); }
-          hideDetail();
+          if (s === 'notch') { motion = null; pointerInside = capturing = false; }
         });
-        const windowId = Number((win.getMediaSourceId?.() || '').split(':')[1]);
-        if (Number.isFinite(windowId) && windowId > 0) windowIds[s] = windowId;
         nativeMaterial[s] = key === 'vibrancy';
         if (key === 'liquid') {
           try { glass[s] = createGlass?.(win) || null; nativeMaterial[s] = Boolean(glass[s]); }
@@ -794,7 +803,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
         win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
         win.webContents.on('will-navigate', (event) => event.preventDefault());
         win.webContents.on('did-fail-load', (_event, code, message) => logger(`[top-notch] renderer failed: ${code} ${message}`));
-        win.loadFile(path.join(rendererDir, 'edgeDock', 'index.html'), { query: { surface: s, owner: 'notch' } })
+        win.loadFile(path.join(rendererDir, 'edgeDock', 'index.html'), { query: { surface: s } })
           .catch(error => logger(`[top-notch] ${s} load failed: ${error.message}`));
       }
     }
@@ -803,15 +812,13 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (settings().notchProgressiveBlur === false || blurAvailable() !== true) blurFailed = false;
     if (!blurEnabled()) destroyBlur();
     if (!screenListeners) { for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, invalidateGeometry); screenListeners = true; }
-    windows.bubble.webContents.setZoomFactor?.(zoom());
     updateGlassAppearance();
-    startPressMonitor();
     refreshGeometry(); visibility();
+    if (restoreSummary) refreshLayout();
     if (!pollTimer) schedulePoll();
   }
   function stop() {
-    menuWindows = null; menuReadAt = -Infinity;
-    running = expanded = peeked = hoverTicked = nearTop = fullScreen = false; fullScreenCheckedAt = -Infinity; fullScreenDisplayId = null; enterAt = leaveAt = null;
+    running = expanded = peeked = hoverTicked = nearTop = fullScreen = summaryDismissed = pointerInside = capturing = false; fullScreenCheckedAt = -Infinity; fullScreenDisplayId = null; enterAt = leaveAt = null;
     clearTimeout(pollTimer); pollTimer = null;
     if (screenListeners) { for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.removeListener(event, invalidateGeometry); screenListeners = false; }
     destroyWindows();
@@ -842,22 +849,18 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
         const width = name => Math.max(0, Math.min(10000, Number(payload.slots[name]) || 0));
         slots = { left: width('left'), right: width('right'), iconInset: width('iconInset') };
       }
-      if (Array.isArray(payload?.rows)) rows = payload.rows.filter((r) => data.cells.some((c) => c.id === r.id) && ['x', 'y', 'width', 'height'].every((key) => Number.isFinite(r[key]) && Math.abs(r[key]) < 10000));
       refreshLayout();
-    },
-    'topNotch:bubbleSize': (event, payload) => {
-      if (ownedSender(event.sender) !== 'bubble' || payload?.cellId !== detailId || !Number.isFinite(payload.height)) return;
-      const current = layout();
-      if (!current) return;
-      bubbleHeight = Math.min(notchMaxHeight(current.display, current.geometry, true) / zoom(), Math.max(40, payload.height));
-      bubblePlaced = { cellId: detailId, height: bubbleHeight }; placeDetail(layout());
     },
     'topNotch:toggleRateMode': (event) => {
       if (!ownedSender(event.sender)) return;
       try { onToggleRateMode?.(); } catch (error) { logger(`[top-notch] rate mode toggle failed: ${error.message}`); }
     },
     'topNotch:dismiss': (event) => { if (ownedSender(event.sender)) setExpanded(false); },
-    'topNotch:openResetForecastSource': (event) => { if (ownedSender(event.sender)) onOpenResetForecastSource?.(); }
+    // Forwarded moves arrive before the next cursor poll; the page sends no
+    // position, the cursor is read here.
+    'topNotch:pointer': (event) => { if (ownedSender(event.sender) === 'notch' && running && !locked) { poll(); schedulePoll(); } },
+    'topNotch:press': (event) => { if (ownedSender(event.sender) === 'notch') pressed(); },
+    'topNotch:wheel': (event, payload) => { if (ownedSender(event.sender) === 'notch') wheeled(payload); }
   };
   for (const [channel, handler] of Object.entries(handlers)) ipcMain.on(channel, handler);
   ipcMain.handle('topNotch:refreshLimits', (event) => {
@@ -884,7 +887,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   });
   return { sync, stop, poll, isRunning: () => running, getCapabilities: () => capabilities,
     owns: (win) => surfaces.some((s) => win === windows[s] && alive(win)),
-    previewScale(value) { previewScale = normalizeEdgeDockCustomScale(value); windows.bubble?.webContents.setZoomFactor?.(zoom()); refreshLayout(); },
+    previewScale(value) { previewScale = normalizeEdgeDockCustomScale(value); refreshLayout(); },
     setAppearance(value, { preview = false } = {}) {
       if (preview) {
         // Keep the canonical appearance; the native tint reads settings(),
@@ -895,17 +898,17 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
         }
       } else appearance = value || {};
       updateGlassAppearance();
-      windows.bubble?.webContents.setZoomFactor?.(zoom()); refreshLayout();
+      refreshLayout();
     },
-    setData(value) { data = value; if (detailId && !data.cells.some((c) => c.id === detailId)) hideDetail(); refreshMenu(); refreshLayout(); },
+    setData(value) { data = value; refreshLayout(); },
     setLocked(value) {
       locked = value === true;
       if (locked) {
         refreshEpoch++; expanded = peeked = hoverTicked = false; enterAt = leaveAt = null;
-        resetShellMotion(); destroyBlur(); stopPressMonitor();
+        pointerInside = capturing = false;
+        resetShellMotion(); destroyBlur();
         clearTimeout(pollTimer); pollTimer = null;
       } else if (running) {
-        startPressMonitor();
         invalidateGeometry();
         if (!pollTimer) schedulePoll();
       }
@@ -914,5 +917,5 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     dispose() { stop(); for (const [channel, handler] of Object.entries(handlers)) ipcMain.removeListener(channel, handler); ipcMain.removeHandler('topNotch:switchCodexAccount'); ipcMain.removeHandler('topNotch:refreshLimits'); }
   };
 }
-module.exports = { createNotchController, normalizeNotchStyle, normalizeNotchShape, normalizeNotchDetailSide, normalizeNotchHoverAction, normalizeNotchHoverDelay,
-  springState, springDuration, NOTCH_SPRINGS, NOTCH_HOVER_DELAYS };
+module.exports = { createNotchController, normalizeNotchStyle, normalizeNotchShape, normalizeNotchHoverAction, normalizeNotchHoverDelay,
+  springState, springDuration, NOTCH_SPRINGS, NOTCH_HOVER_DELAYS, SCROLL_GESTURE_GAP_MS, SCROLL_GESTURE_DISTANCE };
