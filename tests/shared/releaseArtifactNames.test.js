@@ -56,10 +56,9 @@ test('release artifact templates use GitHub-safe names', () => {
   for (const pattern of patterns) assert.doesNotMatch(pattern, /\s/);
 });
 
-test('updater metadata embeds every localized release-note section', () => {
-  assert.equal(rootPackage.build.releaseInfo?.releaseNotesFile, '.github/RELEASE_TEMPLATE.md');
+test('release body template carries every localized release-note section', () => {
   const releaseTemplate = fs.readFileSync(
-    path.join(__dirname, '..', '..', rootPackage.build.releaseInfo.releaseNotesFile),
+    path.join(__dirname, '..', '..', '.github', 'RELEASE_TEMPLATE.md'),
     'utf8'
   );
   const notes = extractReleaseNotes(releaseTemplate);

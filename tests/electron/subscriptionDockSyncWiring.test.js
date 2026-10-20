@@ -27,7 +27,7 @@ test('every successful subscription write re-syncs the dock', () => {
   for (const channel of ['subscriptions:save', 'subscriptions:adoptOrphans', 'subscriptions:discardOrphans']) {
     assert.match(
       handlerSource(channel),
-      /syncEdgeDock\(\);/,
+      /syncDockSurfaces\(\);/,
       `${channel} leaves the dock card on the list it wrote over`
     );
   }
@@ -44,16 +44,16 @@ test('the subscription write path re-syncs the dock alone, and only on success',
     // One call, on the success path between the write and its return: a refused
     // write left the list unchanged, and a rejected hub write changes nothing
     // this device can show.
-    assert.equal((source.match(/syncEdgeDock\(\);/g) || []).length, 1, channel);
-    assert.match(source, /try \{[\s\S]*?syncEdgeDock\(\);[\s\S]*?\} catch/);
+    assert.equal((source.match(/syncDockSurfaces\(\);/g) || []).length, 1, channel);
+    assert.match(source, /try \{[\s\S]*?syncDockSurfaces\(\);[\s\S]*?\} catch/);
   }
 });
 
 test('the dock is re-synced from the settings the write left behind', () => {
-  // syncEdgeDock() reads the current settings when given no payload, so the
+  // syncDockSurfaces() reads the current settings when given no payload, so the
   // call has to stand on its own — passing the pre-write list would refresh the
   // card with the list it was already showing.
-  const sync = main.slice(main.indexOf('function syncEdgeDock('));
+  const sync = main.slice(main.indexOf('function syncDockSurfaces('));
   assert.match(sync.slice(0, sync.indexOf('\n}')), /edgeDockAppearance\(rendererSettings\)/);
   const appearance = main.slice(main.indexOf('function edgeDockAppearance('));
   assert.match(appearance.slice(0, appearance.indexOf('\n}')), /= settingsForRenderer\(\)/);

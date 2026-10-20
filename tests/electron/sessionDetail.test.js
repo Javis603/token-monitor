@@ -129,7 +129,7 @@ test('session detail renders its heading before loading, errors and empty result
     assert.equal(heading.classList.contains('has-overflow-fade'), true);
     heading.mouseenter();
     timers.pop()();
-    frames.pop()(8000);
+    frames.pop()(4000);
     assert.equal(heading.children[0].style.transform, 'translate3d(-400px, 0, 0)', 'hover reveals the clipped title');
     assert.equal(heading.classList.contains('has-overflow-fade'), false, 'the end stays readable after scrolling');
     assert.equal(heading.classList.contains('is-hover-scrolling'), true);

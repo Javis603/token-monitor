@@ -107,7 +107,7 @@ test('global reviews stay excluded and Grok bots keep their global group outside
   stats.periods.month.sessions['codex:review'] = session('codex', 'review', {
     parentSessionId: 'same', sessionKind: 'background-review' });
   stats.periods.month.sessions['cursor:bot1'] = session('cursor', 'bot1', {
-    parentClient: 'codex', parentSessionId: 'same', models: { 'grok-bot-automation': 100 } });
+    parentClient: 'codex', parentSessionId: 'same', models: { 'grok-bot-automation': 100 }, turnEnded: false });
   stats.periods.month.sessions['cursor:bot2'] = session('cursor', 'bot2', {
     parentClient: 'codex', parentSessionId: 'same', models: { 'grok-bot-automation': 100 } });
   const rows = presentation.recentSessionRows(stats, 1, { includeRunningBeyondCap: true });
@@ -332,11 +332,11 @@ test('Dock family expansion keeps real member rows and requests the existing nat
   const resized = [];
   const build = Function('document', 'presentation', 'sessionKey', 'el', 't', 'stateMark', 'overflowText',
     'clientLabel', 'sessionRowsApi', 'relativeAgo', 'limitWindowsView', 'contextNode', 'sessionLive',
-    'formatBreakdownTokens', 'state', 'surface', 'renderBubble', 'markNode', `${source}; return sessionsContainer;`)(
-    { createTextNode: text => new Node('text', '', text) }, presentation, row => row.key,
+    'formatBreakdownTokens', 'state', 'surface', 'renderBubble', 'markNode', 'appearance', `${source}; return sessionsContainer;`)(
+    { createTextNode: text => new Node('text', '', text), createElement: tag => new Node(tag) }, presentation, row => row.key,
     (tag, className, text) => new Node(tag, className, text), translate, () => new Node('span'), { bind() {} },
     value => value, rowApi, () => '', { setDetailTooltip() {} }, () => null, sessionLive, String,
-    { payload }, 'bubble', value => resized.push(value), () => new Node('span')
+    { payload }, 'bubble', value => resized.push(value), () => new Node('span'), () => ({})
   );
   const list = build([group]);
   const family = list.children.at(-1).children[0];

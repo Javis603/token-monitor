@@ -45,6 +45,7 @@ test('sumTokens adds disjoint Tokscale reasoning only for opted-in clients', () 
   assert.equal(sumTokens(b, 'zcode'), 1134);
   assert.equal(sumTokens(b, 'opencode'), 1134);
   assert.equal(sumTokens(b, 'muse'), 1134);
+  assert.equal(sumTokens(b, 'grok'), 1134);
   assert.equal(sumTokens(b, 'hermes'), 1134);
   assert.equal(sumTokens(b, 'claude'), 135);
   assert.equal(sumTokens({}), 0);
@@ -58,6 +59,7 @@ test('sumOutputTokens folds disjoint reasoning into output only for opted-in cli
   for (const client of ['antigravity', 'antigravity-cli', 'antigravity-extension']) assert.equal(sumOutputTokens(b, client), 1019);
   assert.equal(sumOutputTokens(b, 'opencode'), 1019);
   assert.equal(sumOutputTokens(b, 'muse'), 1019);
+  assert.equal(sumOutputTokens(b, 'grok'), 1019);
   assert.equal(sumOutputTokens(b, 'hermes'), 1019);
   assert.equal(sumOutputTokens(b, 'claude'), 20);
 });
@@ -419,8 +421,8 @@ test('mergeHistories sums daily across devices and recomputes derived fields', (
   const d7 = m.daily.find((d) => d.date === '2026-06-07');
   assert.equal(d7.tokens, 25);                         // 20 + 5
   assert.equal(d7.activeTimeMs, 150000);                // 120000 + 30000
-  assert.deepEqual(d7.perClient.claude, { tokens: 20, cost: 2, messages: 1 });
-  assert.deepEqual(d7.perClient.codex, { tokens: 5, cost: 0.5, messages: 1 });
+  assert.deepEqual(d7.perClient.claude, { tokens: 20, cost: 2, messages: 1, unclassifiedTokens: 0 });
+  assert.deepEqual(d7.perClient.codex, { tokens: 5, cost: 0.5, messages: 1, unclassifiedTokens: 0 });
   assert.equal(d7.intensity, 4);                       // highest-cost merged day
   assert.equal(m.summary.totalTokens, 35);
   assert.equal(m.summary.currentStreak, 2);

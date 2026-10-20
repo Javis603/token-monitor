@@ -163,9 +163,11 @@
 
   function syncTrayComposerSurfaces(surfaces, composers, createComposer) {
     for (const surface of surfaces) {
-      surface.root?.classList.toggle('hidden', !surface.visible);
+      const visibilityRoot = surface.visibilityRoot || surface.root;
+      visibilityRoot?.classList.toggle('hidden', !surface.visible);
+      if (surface.visibilityRoot) visibilityRoot.inert = !surface.visible;
       if (!surface.visible && composers[surface.id]) {
-        composers[surface.id].destroy();
+        composers[surface.id].destroy({ preserveContent: Boolean(surface.visibilityRoot) });
         delete composers[surface.id];
       } else if (surface.visible && !composers[surface.id]) {
         composers[surface.id] = createComposer(surface.id);
@@ -1396,7 +1398,7 @@
       render();
     }
 
-    function destroy() {
+    function destroy({ preserveContent = false } = {}) {
       clearTimeout(textCommitTimer);
       textCommitTimer = null;
       endDrag(null, false);
@@ -1404,7 +1406,9 @@
       removePopover(addPopover);
       removePopover(itemPopover);
       window.removeEventListener('resize', repositionOpenPopovers);
-      root.replaceChildren();
+      // Animated disclosures retain their last frame while collapsing.
+      // The next render replaces it; listeners and popovers are released now.
+      if (!preserveContent) root.replaceChildren();
     }
 
     function repositionOpenPopovers() {

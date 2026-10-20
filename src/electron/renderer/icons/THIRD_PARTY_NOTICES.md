@@ -6,6 +6,10 @@ Sources:
   - actions/settings.svg: settings
   - actions/pencil-line.svg: pencil-line
   - actions/trash.svg: trash
+  - actions/download.svg: download
+  - actions/rotate-cw.svg: rotate-cw
+  - actions/external-link.svg: external-link
+  - actions/check.svg: check (stroke widened to 3 for legibility as a small badge)
   - settings/general.svg: sliders-horizontal
   - settings/main.svg: panels-top-left
   - settings/collection.svg: database

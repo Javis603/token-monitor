@@ -144,6 +144,103 @@ test('Antigravity joins conversation_summaries titles by conversation id and see
   assert.equal(periods.today.sessions['antigravity:session-1'].title, 'Renamed auth bug title');
 });
 
+test('Antigravity resolves parent_conversation_id and agent_name from conversation_summaries', { skip: !sqlite }, (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-subagents-'));
+  const dbDir = path.join(home, '.gemini', 'antigravity');
+  fs.mkdirSync(dbDir, { recursive: true });
+  const dbPath = path.join(dbDir, 'conversation_summaries.db');
+  const db = new sqlite.DatabaseSync(dbPath);
+
+  t.after(() => {
+    db.close();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec(`
+    CREATE TABLE conversation_summaries (
+      conversation_id TEXT PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT "",
+      preview TEXT NOT NULL DEFAULT "",
+      workspace_uris TEXT,
+      last_modified_time TEXT,
+      parent_conversation_id TEXT,
+      agent_name TEXT
+    )
+  `);
+
+  const put = db.prepare(`
+    INSERT INTO conversation_summaries
+    (conversation_id, title, preview, workspace_uris, last_modified_time, parent_conversation_id, agent_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  put.run('parent-1', 'Main Task', '', null, null, null, null);
+  put.run('child-1', '', '', null, null, 'parent-1', 'report-humanizer');
+  put.run('child-2', 'Child Task', '', null, null, 'parent-1', 'browser-inspector');
+  put.run('self-parent', 'Self', '', null, null, 'self-parent', null);
+
+  const deps = { sqlite, antigravityTitleCache: new Map() };
+  const context = { home, deps, resolveProjects: false };
+
+  const resolved = resolveSessionMetadata(new Set(['parent-1', 'child-1', 'child-2', 'self-parent']), context);
+  assert.equal(resolved.get('parent-1')?.parentSessionId, undefined);
+  assert.equal(resolved.get('child-1')?.parentSessionId, 'parent-1');
+  assert.equal(resolved.get('child-1')?.title, 'report-humanizer');
+  assert.equal(resolved.get('child-2')?.parentSessionId, 'parent-1');
+  assert.equal(resolved.get('self-parent')?.parentSessionId, undefined, 'self-parent link is ignored');
+
+  const periods = {
+    today: {
+      sessions: {
+        'antigravity:parent-1': { client: 'antigravity', sessionId: 'parent-1' },
+        'antigravity:child-1': { client: 'antigravity', sessionId: 'child-1' },
+        'antigravity:child-2': { client: 'antigravity', sessionId: 'child-2' }
+      }
+    }
+  };
+
+  applySessionMetadata(periods, home, { ...deps, metadataCache: new Map(), resolvedSessionKeys: new Set(), attemptedSessionKeys: new Set() });
+
+  assert.equal(periods.today.sessions['antigravity:parent-1'].parentSessionId, undefined);
+  assert.equal(periods.today.sessions['antigravity:child-1'].parentSessionId, 'parent-1');
+  assert.equal(periods.today.sessions['antigravity:child-1'].title, 'report-humanizer', 'agent_name falls back as session title when title/preview are missing');
+  assert.equal(periods.today.sessions['antigravity:child-2'].parentSessionId, 'parent-1');
+  assert.equal(periods.today.sessions['antigravity:child-2'].title, 'Child Task', 'explicit title takes precedence over agent_name');
+});
+
+test('Antigravity does not mistake a transient prepare failure for the legacy schema', (t) => {
+  const home = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'antigravity-schema-'));
+  const dir = path.join(home, '.gemini', 'antigravity');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'conversation_summaries.db'), 'stub');
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  let busy = true;
+  const deps = {
+    env: {}, antigravityTitleCache: new Map(),
+    sqlite: { DatabaseSync: class {
+      exec() {}
+      close() {}
+      prepare(sql) {
+        if (sql.includes('table_info')) {
+          return { all: () => ['conversation_id', 'title', 'preview', 'workspace_uris', 'parent_conversation_id', 'agent_name'].map(name => ({ name })) };
+        }
+        if (sql.includes('sqlite_master')) return { get: () => ({ 1: 1 }) };
+        if (sql.includes('parent_conversation_id') && busy) {
+          busy = false;
+          throw new Error('SQLITE_BUSY');
+        }
+        return { get: () => ({ title: 'Child', preview: '', workspace_uris: null, parent_conversation_id: 'parent-1', agent_name: 'research' }) };
+      }
+    } }
+  };
+  const context = { home, deps, resolveProjects: false };
+
+  assert.equal(resolveSessionMetadata(new Set(['child-1']), context).get('child-1')?.parentSessionId, undefined);
+  assert.equal(resolveSessionMetadata(new Set(['child-1']), context).get('child-1')?.parentSessionId, 'parent-1',
+    'the busy read is retried rather than cached without its parent link');
+});
+
 test('Antigravity returns empty when database or table is missing', { skip: !sqlite }, (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-empty-'));
   t.after(() => {
@@ -178,6 +275,7 @@ test('Antigravity does not reopen the database for sessions the fingerprint alre
       constructor() { opens += 1; }
       prepare(sql) {
         return {
+          all: () => [],
           get: () => {
             queries += 1;
             if (sql.includes('sqlite_master')) return { 1: 1 };
@@ -358,7 +456,7 @@ test('Antigravity retries failed rows without losing successful cached titles', 
       exec() {}
       close() {}
       prepare(sql) {
-        return { get(id) {
+        return { all: () => [], get(id) {
           if (sql.includes('sqlite_master')) return { 1: 1 };
           queried.push(id);
           if (id === 'retry' && fail) throw new Error('SQLITE_BUSY');
@@ -729,7 +827,7 @@ test('Antigravity revalidates changed fingerprints per row and retains failed ro
       exec() {}
       close() {}
       prepare(sql) {
-        return { get(id) {
+        return { all: () => [], get(id) {
           if (sql.includes('sqlite_master')) return { 1: 1 };
           queried.push(id);
           if (fail && id === 'retry') throw new Error('SQLITE_BUSY');

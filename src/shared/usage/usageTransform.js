@@ -34,7 +34,7 @@ function createUsageTransform(options = {}) {
   const store = options.store;
   const getSettings = options.getSettings || (() => ({}));
   const isExternalAgentActive = options.isExternalAgentActive || (() => false);
-  const readSnapshot = options.readSnapshot || readSessionUsageArchiveSnapshot;
+  const readSnapshot = options.readSnapshot || store?.snapshot || readSessionUsageArchiveSnapshot;
   const onCaptureFailure = options.onCaptureFailure || (() => {});
   const log = options.log || ((message) => console.log(message));
   let sessionArchive = null;
@@ -102,12 +102,14 @@ function createUsageTransform(options = {}) {
           canonicalSummary: true,
           mutate: true
         });
+    delete visibleSummary.sessionUsageArchiveFullScan;
     return settings.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
   }
 
-  function transform(summary) {
+  function transform(summary, _reason, meta = {}) {
     const now = sessionUsageArchiveDate(summary);
     if (getSettings()?.sessionUsageArchiveEnabled === false) return project(summary, null, now);
+    if (meta.preview === true) return project(summary, readSnapshot({ strict: true }), now);
     if (isExternalAgentActive()) {
       try {
         sessionArchive = store.refresh(now, { strict: true });

@@ -17,6 +17,7 @@
     : root?.TokenMonitorSessionLive;
   const sessionActivityState = sessionLive.sessionActivityState;
   const sessionContextForRow = sessionLive.sessionContextForRow;
+  const isGrokBotSession = sessionLive.isGrokBotSession;
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
 
   function setSessionTooltip(node, context, promptCache, translate, view) {
@@ -27,6 +28,46 @@
     }
     if (promptCache) entries.push({ full: translate('session.cacheEstimateTooltip', { minutes: promptCache.minutes }) });
     view.setDetailTooltip(node, entries);
+  }
+
+  // The compact status every glanceable session row shows (Home list, Edge Dock
+  // card, Notch Panel): a context gauge while the session is live, otherwise the
+  // prompt-cache estimate. The cache badge's tooltip still names the context
+  // size when the transcript reported one. Surfaces differ only in class names.
+  function sessionStatusNode(document, row, { prefix, translate, view, showUsed = true, now = Date.now() }) {
+    const statusRow = row?.groupRows?.[0] || row;
+    if (!statusRow) return null;
+    const context = sessionActivityState(statusRow, now) !== 'idle'
+      ? statusRow.context || sessionContextForRow(statusRow, now) || null : null;
+    const promptCache = sessionLive.sessionPromptCacheForRow(statusRow, now);
+    const span = (className, text) => {
+      const node = document.createElement('span');
+      node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    };
+    if (!context) {
+      if (!promptCache) return null;
+      const badge = span(`${prefix}-cache`, translate('session.cacheEstimate', { minutes: promptCache.minutes }));
+      setSessionTooltip(badge, statusRow, promptCache, translate, view);
+      return badge;
+    }
+    const percent = showUsed ? context.percentUsed : context.percentLeft;
+    const node = span(`${prefix}-context`);
+    node.dataset.tone = String(context.tone || '');
+    node.setAttribute('role', 'meter');
+    node.setAttribute('aria-valuemin', '0');
+    node.setAttribute('aria-valuemax', '100');
+    node.setAttribute('aria-valuenow', String(percent));
+    node.setAttribute('aria-label', translate(showUsed ? 'session.contextUsed' : 'session.contextLeft', { percent }));
+    const meter = span(`${prefix}-context-meter`);
+    meter.setAttribute('aria-hidden', 'true');
+    const fill = span(`${prefix}-context-fill`);
+    fill.style.setProperty('--bar-scale', String(percent / 100));
+    meter.append(fill);
+    node.append(meter, span(`${prefix}-context-value`, `${percent}%`));
+    setSessionTooltip(node, context, promptCache, translate, view);
+    return node;
   }
 
   function finiteNumber(value) {
@@ -159,6 +200,16 @@
     return typeof value === 'string' ? value.trim() : '';
   }
 
+  function sessionTitleForDisplay(session) {
+    const title = textValue(session?.title);
+    // OMP persists its title card as <icon> <CODE>: <title>, including /rename
+    // titles. Hide only a private-use icon in that prefix; retain the code,
+    // body and original record for archives/sync, and leave other clients alone.
+    return session?.client === 'omp'
+      ? title.replace(/^[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}] (?=[A-Z0-9]{1,6}: \S)/u, '')
+      : title;
+  }
+
   function clearButtonSemantics(element) {
     for (const attribute of ['tabindex', 'role', 'aria-expanded', 'aria-label']) {
       element.removeAttribute(attribute);
@@ -281,17 +332,6 @@
     return textValue(session?.sessionKind) === 'background-review';
   }
 
-  // Cursor's sandbox ids identify bot runs independently of the model. A
-  // positive grok-bot model also proves a bot conversation with a regular id;
-  // its other models belong to the same conversation, including Claude.
-  function isGrokBotSession(session, key) {
-    if (session?.client !== 'cursor') return false;
-    if (typeof session.grokBotSession === 'boolean') return session.grokBotSession;
-    const id = textValue(session?.sessionId) || String(key || '').replace(/^cursor:/, '');
-    return /^sand-subagent-.+/.test(id) || Object.entries(session?.models || {})
-      .some(([model, tokens]) => /^grok-bot-.+/.test(model) && finiteNumber(tokens) > 0);
-  }
-
   const botIdentityCache = new WeakMap();
   const botIdSets = new WeakMap();
 
@@ -340,7 +380,7 @@
   }
 
   function sessionRowDetailAvailable(row) {
-    return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy', 'pi'].includes(row?.client)
+    return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy', 'pi', 'omp'].includes(row?.client)
       || (row?.client === 'reasonix' && row?.sessionDetailAvailable === true);
   }
 
@@ -458,6 +498,9 @@
     const rows = Object.entries(period?.sessions || {})
       .map(([key, session]) => {
         session = sessionLive.sessionWithActivity(period, key, session);
+        const grokBot = isGrokBotSession(session, key) || (session?.client === 'cursor'
+          && botIds.has(textValue(session.sessionId) || key.replace(/^cursor:/, '')));
+        if (grokBot && session.grokBotSession !== true) session = { ...session, grokBotSession: true };
         const native = options.nativeSessions?.[key];
         // A resumed source can be active before accounting replaces its archive.
         // Join only presentation activity; the retained token/cost values stay put.
@@ -473,7 +516,7 @@
         const { client, titleParts, clientLabel, modelLabel } = sessionTitleParts(session, labels);
         const sessionId = session?.sessionId || key;
         const archived = session?.archived === true || session?.deleted === true || session?.sourceDeleted === true;
-        const sessionTitle = textValue(session?.title);
+        const sessionTitle = sessionTitleForDisplay(session);
         // One derivation, as above. An archived session is idle whatever its
         // timestamp says: the source it was read from is gone, so nothing can
         // still be appending, which is what `sessionActivityState` already
@@ -534,8 +577,7 @@
           subagent: subagent || undefined,
           subagentLabel: subagent ? subagentLabel : undefined,
           parentKey: subagent ? `session:${parentClient}:${parentSessionId}` : undefined,
-          grokBot: (isGrokBotSession(session, key) || (client === 'cursor'
-            && botIds.has(textValue(session?.sessionId) || key.replace(/^cursor:/, '')))) || undefined,
+          grokBot: grokBot || undefined,
           sortTime: sessionTimestampValue(session),
           title: `${clientLabel} session${sessionIdLabel(sessionId) ? ` ${sessionIdLabel(sessionId)}` : ''}`
         };
@@ -810,6 +852,7 @@
 
   return {
     setSessionTooltip,
+    sessionStatusNode,
     applyBreakdownRowSemantics,
     archivedSessionCount,
     compactSessionTime,
@@ -824,6 +867,7 @@
     sessionCacheHitPercent,
     sessionIdLabel,
     sessionDetailIdLabel,
+    sessionTitleForDisplay,
     // Exported for the edge dock's session rows: a card that shows the top
     // model reads a different name than the list's "N models" for the same
     // session, so both surfaces compose the label from this one helper.

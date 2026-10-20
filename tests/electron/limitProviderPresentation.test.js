@@ -198,9 +198,12 @@ test('compact Antigravity retains the two tightest groups when more than two are
     { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 70 },
     { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 5 },
     { kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: 20 },
-    { kind: 'session', label: 'Future Group 5-hour', remainingPercent: 10 }
+    { kind: 'weekly', label: 'Gemini 4 Argon weekly', remainingPercent: 10 }
   ];
-  assert.deepEqual(limitProviderCompactWindows('antigravity', windows), [windows[1], windows[3]]);
+  const selected = limitProviderCompactWindows('antigravity', windows);
+  assert.deepEqual(selected, [windows[1], windows[3]]);
+  assert.equal(limitProviderCompactWindowLabel('antigravity', selected[1], selected), 'Gemini 4 Argon');
+  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', selected[1], selected), 'Weekly');
 });
 
 test('compact Antigravity windows prefer 5-hour on ties and preserve legacy pools', () => {
@@ -246,8 +249,8 @@ test('compact Codex windows never backfill canonical lanes with additional quota
 
 test('compact Antigravity labels preserve legacy and mixed-payload fallbacks', () => {
   const legacy = [
-    { kind: 'session', label: 'Gemini Pro' },
-    { kind: 'session', label: 'Gemini Flash' }
+    { kind: 'session', label: 'Gemini Pro', usedPercent: 25 },
+    { kind: 'session', label: 'Gemini Flash', usedPercent: 25 }
   ];
 
   const mixed = [{ kind: 'session', label: 'Gemini 5-hour' }, legacy[0]];
@@ -961,6 +964,7 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.match(renderLimitSessionsIcon, /·/);
   assert.match(maybeUpdateBarsIcon, /TokenMonitorTrayText\.isGeneratedTrayIconMode\(mode\)/);
   assert.match(maybeUpdateBarsIcon, /edgeDockAvailable\(\) && state\.settings\?\.edgeDockEnabled === true\) edgeDockComposer\?\.render\(\)/);
+  assert.match(maybeUpdateBarsIcon, /state\.settings\?\.notchEnabled === true\) notchItemsComposer\?\.render\(\)/);
   assert.match(maybeUpdateBarsIcon, /trayDataUrlForMode\(mode, 44, colors, \{ trayInk: true \}\)/);
   // The tray ink must come from the platform-aware helper, not the app theme:
   // macOS needs the black its template inversion expects, while a dark Windows
@@ -1172,6 +1176,7 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
   const grouped = vm.runInNewContext(`${quotaGroups}\nantigravityQuotaGroups({ windows: [
     { kind: 'session', label: 'Gemini 5-hour' },
     { kind: 'weekly', label: 'Gemini weekly' },
+    { kind: 'weekly', label: 'Gemini 4 Argon weekly' },
     { kind: 'weekly', label: 'Future Group weekly' }
   ] });`, context);
   assert.deepEqual(JSON.parse(JSON.stringify(grouped)), [
@@ -1180,6 +1185,12 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
       windows: [
         { groupLabel: 'Gemini', windowLabel: '5-hour', window: { kind: 'session', label: 'Gemini 5-hour' } },
         { groupLabel: 'Gemini', windowLabel: 'Weekly', window: { kind: 'weekly', label: 'Gemini weekly' } }
+      ]
+    },
+    {
+      label: 'Gemini 4 Argon',
+      windows: [
+        { groupLabel: 'Gemini 4 Argon', windowLabel: 'Weekly', window: { kind: 'weekly', label: 'Gemini 4 Argon weekly' } }
       ]
     },
     {

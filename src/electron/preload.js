@@ -79,6 +79,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     ipcRenderer.on('settings:push', listener);
     return () => ipcRenderer.removeListener('settings:push', listener);
   },
+  onNotchCapabilitiesPush: (callback) => {
+    const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
+    ipcRenderer.on('topNotch:capabilities', listener);
+    return () => ipcRenderer.removeListener('topNotch:capabilities', listener);
+  },
   onSystemUiThemePush: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
     ipcRenderer.on('theme:systemUi', listener);

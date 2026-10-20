@@ -361,6 +361,7 @@ state.sessionSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', tokenNumberAnimation: 'roll', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+const nativeGlassTintSettings = [['macGlassTint', 'liquid-glass'], ['macClearGlassTint', 'liquid-glass-clear']];
 let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
 let nativeMaterialRevision = 0;
 let appearancePreview = {};
@@ -385,6 +386,9 @@ Object.assign(els, {
   toolDetailFooter: document.getElementById('toolDetailFooter'),
   toolDetailFooterTokens: document.getElementById('toolDetailFooterTokens'),
   toolDetailFooterModels: document.getElementById('toolDetailFooterModels'),
+  projectBreakdownFooter: document.getElementById('projectBreakdownFooter'),
+  projectBreakdownFooterTools: document.getElementById('projectBreakdownFooterTools'),
+  projectBreakdownFooterModels: document.getElementById('projectBreakdownFooterModels'),
   monthPeriodMenu: document.getElementById('monthPeriodMenu'),
   monthPeriodTab: document.getElementById('monthPeriodTab'),
   periodMonthModeInput: document.getElementById('periodMonthModeInput'),
@@ -396,6 +400,36 @@ Object.assign(els, {
   backHomeButton: document.getElementById('backHomeButton'),
   systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
+  experimentalFeaturesGroup: document.getElementById('experimentalFeaturesGroup'),
+  notchFeature: document.getElementById('notchFeature'),
+  notchInput: document.getElementById('notchInput'),
+  notchOptions: document.getElementById('notchOptions'),
+  notchStyleInput: document.getElementById('notchStyleInput'),
+  notchShapeInputs: Array.from(document.querySelectorAll('input[name="notchShape"]')),
+  notchSummaryModeInput: document.getElementById('notchSummaryModeInput'),
+  notchSummaryModeNote: document.getElementById('notchSummaryModeNote'),
+  notchSummaryInput: document.getElementById('notchSummaryInput'),
+  notchWarnColorsInput: document.getElementById('notchWarnColorsInput'),
+  notchComposer: document.getElementById('notchComposer'),
+  notchComposerDetails: document.getElementById('notchComposerDetails'),
+  notchItemsComposer: document.getElementById('notchItemsComposer'),
+  notchRunningIndicatorInput: document.getElementById('notchRunningIndicatorInput'),
+  notchRunningIndicatorRow: document.getElementById('notchRunningIndicatorRow'),
+  notchHapticInput: document.getElementById('notchHapticInput'),
+  notchHoverActionInputs: Array.from(document.querySelectorAll('input[name="notchHoverAction"]')),
+  notchHoverDelayInput: document.getElementById('notchHoverDelayInput'),
+  notchHoverDelayRow: document.getElementById('notchHoverDelayRow'),
+  notchSwipeGesturesInput: document.getElementById('notchSwipeGesturesInput'),
+  resetNotchHoverDelayButton: document.getElementById('resetNotchHoverDelayButton'),
+  notchProgressiveBlurInput: document.getElementById('notchProgressiveBlurInput'),
+  notchHideSummaryInFullScreenInput: document.getElementById('notchHideSummaryInFullScreenInput'),
+  notchSizeInputs: Array.from(document.querySelectorAll('input[name="notchSize"]')),
+  notchCustomScaleInput: document.getElementById('notchCustomScaleInput'),
+  notchCustomScaleRow: document.getElementById('notchCustomScaleRow'),
+  notchMoreOptionsGroup: document.getElementById('notchMoreOptionsGroup'),
+  notchMoreOptionsToggle: document.getElementById('notchMoreOptionsToggle'),
+  notchMoreOptionsDetails: document.getElementById('notchMoreOptionsDetails'),
+  edgeDockComposerRow: document.getElementById('edgeDockComposerRow'),
   edgeDockFeature: document.getElementById('edgeDockFeature'),
   edgeDockInput: document.getElementById('edgeDockInput'),
   edgeDockOptions: document.getElementById('edgeDockOptions'),
@@ -461,6 +495,13 @@ Object.assign(els, {
   windowsBackdropNote: document.getElementById('windowsBackdropNote'),
   macBackdropRow: document.getElementById('macBackdropRow'),
   macBackdropInput: document.getElementById('macBackdropInput'),
+  glassOpacityRow: document.getElementById('glassOpacityRow'),
+  macGlassTintRow: document.getElementById('macGlassTintRow'),
+  macGlassTintInput: document.getElementById('macGlassTintInput'),
+  macGlassTintReset: document.getElementById('macGlassTintReset'),
+  macClearGlassTintRow: document.getElementById('macClearGlassTintRow'),
+  macClearGlassTintInput: document.getElementById('macClearGlassTintInput'),
+  macClearGlassTintReset: document.getElementById('macClearGlassTintReset'),
   clearSessionUsageArchiveButton: document.getElementById('clearSessionUsageArchiveButton'),
   startupGroup: document.getElementById('startupGroup'),
   startAtLoginInput: document.getElementById('startAtLoginInput'),
@@ -479,16 +520,12 @@ Object.assign(els, {
   reportIssueButton: document.getElementById('reportIssueButton'),
   appUpdatePill: document.getElementById('appUpdatePill'),
   appUpdatePillAction: document.getElementById('appUpdatePillAction'),
-  appUpdatePillLabel: document.getElementById('appUpdatePillLabel'),
-  appUpdatePillRestart: document.getElementById('appUpdatePillRestart'),
-  appUpdatePillRestartLabel: document.getElementById('appUpdatePillRestartLabel'),
-  appUpdatePillDismiss: document.getElementById('appUpdatePillDismiss'),
+  appUpdatePillProgress: document.getElementById('appUpdatePillProgress'),
   appUpdatePopover: document.getElementById('appUpdatePopover'),
   appUpdatePopoverTitle: document.getElementById('appUpdatePopoverTitle'),
+  appUpdatePopoverSubtitle: document.getElementById('appUpdatePopoverSubtitle'),
   appUpdatePopoverBody: document.getElementById('appUpdatePopoverBody'),
-  appUpdatePopoverAction: document.getElementById('appUpdatePopoverAction'),
-  appUpdatePopoverRelease: document.getElementById('appUpdatePopoverRelease'),
-  appUpdatePopoverClose: document.getElementById('appUpdatePopoverClose'),
+  appUpdatePopoverDismiss: document.getElementById('appUpdatePopoverDismiss'),
   appUpdateInstalled: document.getElementById('appUpdateInstalled'),
   automaticAppUpdatesRow: document.getElementById('automaticAppUpdatesRow'),
   automaticAppUpdatesInput: document.getElementById('automaticAppUpdatesInput'),
@@ -501,7 +538,6 @@ Object.assign(els, {
   appUpdateNotesDetails: document.getElementById('appUpdateNotesDetails'),
   appUpdateNotesTitle: document.getElementById('appUpdateNotesTitle'),
   appUpdateNotesBody: document.getElementById('appUpdateNotesBody'),
-  appUpdateReleaseNotesButton: document.getElementById('appUpdateReleaseNotesButton'),
   appUpdateMessage: document.getElementById('appUpdateMessage'),
   titleIconInput: document.getElementById('titleIconInput'),
   tokenNumberAnimationInput: document.getElementById('tokenNumberAnimationInput'),
@@ -601,6 +637,7 @@ function toggleAccordionRow(row) {
     renderActiveToolDetail();
   }
   renderToolDetailFooter();
+  renderProjectBreakdownFooter();
 }
 
 document.addEventListener('click', (event) => {
@@ -618,6 +655,8 @@ document.addEventListener('keydown', (event) => {
 
 els.toolDetailFooterTokens.addEventListener('click', () => setActiveToolDetailMode('tokens'));
 els.toolDetailFooterModels.addEventListener('click', () => setActiveToolDetailMode('models'));
+els.projectBreakdownFooterTools.addEventListener('click', () => { void saveSettings({ projectBreakdownMode: 'tool' }).catch(() => {}); });
+els.projectBreakdownFooterModels.addEventListener('click', () => { void saveSettings({ projectBreakdownMode: 'model' }).catch(() => {}); });
 
 document.addEventListener('pointerdown', (event) => {
   if (state.viewSwitcherOpen && !event.target.closest('#viewSwitcher')) {
@@ -1003,6 +1042,11 @@ function displayLiveTokenRateItems() {
       enabled: state.settings?.floatingBubbleEnabled === true,
       content: state.settings?.floatingBubbleContent,
       layout: state.settings?.floatingBubbleCustomLayout
+    },
+    {
+      enabled: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchSummaryMode === 'custom',
+      content: 'custom',
+      layout: state.settings?.notchCustomLayout
     }
   ]);
 }
@@ -1209,6 +1253,7 @@ function syncLiveTokenRateFooterState() {
   if (!footer) return;
   const enabled = state.settings?.showLiveTokenRate === true;
   const obscured = !els.toolDetailFooter?.classList.contains('hidden')
+    || !els.projectBreakdownFooter?.classList.contains('hidden')
     || !els.appUpdatePill?.classList.contains('hidden');
   footer.classList.toggle('live-token-rate-enabled', enabled);
   footer.classList.toggle('live-token-rate-obscured', enabled && obscured);
@@ -1392,6 +1437,14 @@ function formatActiveDuration(ms) {
 function versionText(value) {
   return value ? `v${value}` : 'unknown';
 }
+// The release-note card under the footer update button. It opens on hover the
+// way a tooltip does, because the button's own press is the update action.
+const APP_UPDATE_CARD_OPEN_DELAY_MS = 250;
+const APP_UPDATE_CARD_CLOSE_DELAY_MS = 150;
+let appUpdateCardOpenTimer = 0;
+let appUpdateCardCloseTimer = 0;
+let suppressAppUpdateCardFocusOpen = false;
+
 function setAppUpdatePillDisclosure(available) {
   const action = els.appUpdatePillAction;
   if (available) {
@@ -1404,59 +1457,69 @@ function setAppUpdatePillDisclosure(available) {
   action.removeAttribute('aria-controls');
   action.removeAttribute('aria-expanded');
 }
+function appUpdatePillStatus(s, mode) {
+  if (s.installStarting) return 'installing';
+  // A download starts with a fresh provider check, reported as `checking`.
+  if (s.installPhase === 'downloading' || (s.installPhase === 'checking' && s.installBusy)) return 'downloading';
+  if (mode === 'install') return 'downloaded';
+  if (mode === 'release') return 'release';
+  return 'available';
+}
+function appUpdateDownloadPercent(s) {
+  return s?.installPhase === 'downloading' && Number.isFinite(s.installProgress)
+    ? Math.max(0, Math.min(100, Math.round(s.installProgress)))
+    : 0;
+}
+function appUpdatePillLabel(status, percent) {
+  if (status === 'downloading') return t('settings.appUpdate.downloading', { percent });
+  if (status === 'downloaded') return t('settings.appUpdate.restart');
+  if (status === 'installing') return t('settings.appUpdate.installStarting');
+  if (status === 'release') return t('settings.appUpdate.viewRelease');
+  return t('settings.appUpdate.download');
+}
 function renderAppUpdatePill() {
   const s = state.appUpdate;
   const pill = els.appUpdatePill;
   if (!pill) return;
+  const action = els.appUpdatePillAction;
   const mode = appUpdatePresentationApi.appUpdateActionMode(s);
   const version = s?.latest?.version || s?.installVersion || '';
   if (!s || !mode || !version || !s.showUpdateNotice) {
     pill.classList.add('hidden');
-    pill.classList.remove('is-ready');
-    pill.setAttribute('title', '');
-    els.appUpdatePillLabel.textContent = '';
-    els.appUpdatePillAction.removeAttribute('title');
-    els.appUpdatePillAction.removeAttribute('aria-label');
-    els.appUpdatePillAction.disabled = false;
-    els.appUpdatePillRestart.classList.add('hidden');
-    els.appUpdatePillRestartLabel.textContent = '';
-    els.appUpdatePillRestart.disabled = false;
-    els.appUpdatePillRestart.removeAttribute('title');
-    els.appUpdatePillRestart.removeAttribute('aria-label');
+    hideAppUpdatePopover();
+    action.removeAttribute('aria-label');
+    action.removeAttribute('aria-disabled');
     setAppUpdatePillDisclosure(false);
     syncLiveTokenRateFooterState();
     return;
   }
-  const hasReleaseNotes = releaseNoteGroupsForCurrentLocale(s.latest).length > 0;
-  setAppUpdatePillDisclosure(hasReleaseNotes);
+  const status = appUpdatePillStatus(s, mode);
+  const percent = appUpdateDownloadPercent(s);
   pill.classList.remove('hidden');
-  pill.classList.toggle('is-ready', mode === 'install');
-  els.appUpdatePillDismiss.classList.toggle('hidden', mode === 'install' || s.installBusy);
-  pill.setAttribute('title', '');
-  const releaseLabel = hasReleaseNotes
-    ? t('settings.appUpdate.whatsNew', { version })
-    : (s.latest?.name || `v${version}`);
-  els.appUpdatePillAction.setAttribute('title', releaseLabel);
-  els.appUpdatePillAction.setAttribute('aria-label', releaseLabel);
-  els.appUpdatePillAction.disabled = mode === 'install' && !hasReleaseNotes && !s.latest?.htmlUrl;
-  els.appUpdatePillRestart.classList.toggle('hidden', mode !== 'install');
-  els.appUpdatePillRestart.disabled = Boolean(s.installBusy);
-  els.appUpdatePillRestartLabel.textContent = mode === 'install'
-    ? t('settings.appUpdate.restartShort')
-    : '';
-  els.appUpdatePillRestart.setAttribute('title', t('settings.appUpdate.ready'));
-  els.appUpdatePillRestart.setAttribute('aria-label', t('settings.appUpdate.restart'));
-  if (s.installPhase === 'downloading' && Number.isFinite(s.installProgress)) {
-    els.appUpdatePillLabel.textContent = `${Math.round(s.installProgress)}%`;
-  } else {
-    els.appUpdatePillLabel.textContent = mode === 'install'
-      ? `v${version}`
-      : `↑ v${version}`;
-  }
+  action.dataset.status = status;
+  els.appUpdatePillProgress.style.strokeDashoffset = String(100 - percent);
+  action.setAttribute('aria-label', appUpdatePillLabel(status, percent));
+  // aria-disabled rather than disabled: a disabled button stops receiving the
+  // pointer events that open the card, which is where the progress is shown.
+  if (s.installBusy) action.setAttribute('aria-disabled', 'true');
+  else action.removeAttribute('aria-disabled');
+  setAppUpdatePillDisclosure(true);
   syncLiveTokenRateFooterState();
 }
-function releaseNoteGroupsForCurrentLocale(latest) {
-  return appUpdatePresentationApi.releaseNoteGroupsForLocale(latest?.releaseNotes, currentLocale());
+function releaseNoteHistoryForCurrentLocale(latest) {
+  return appUpdatePresentationApi.releaseNoteHistoryForLocale(latest, currentLocale());
+}
+function buildAppUpdateNoteItemNode(item) {
+  const row = document.createElement('li');
+  const { lead, body } = appUpdatePresentationApi.splitReleaseNoteLead(item);
+  if (!lead) {
+    row.textContent = body;
+    return row;
+  }
+  const strong = document.createElement('strong');
+  strong.textContent = lead;
+  row.append(strong, document.createTextNode(/[:]$/.test(lead) ? ` ${body}` : body));
+  return row;
 }
 function buildAppUpdateNoteGroupNodes(groups) {
   return groups.map((group) => {
@@ -1467,58 +1530,169 @@ function buildAppUpdateNoteGroupNodes(groups) {
     title.textContent = String(group?.title || '');
     const list = document.createElement('ul');
     for (const item of Array.isArray(group?.items) ? group.items : []) {
-      const row = document.createElement('li');
-      row.textContent = String(item || '');
-      list.append(row);
+      list.append(buildAppUpdateNoteItemNode(String(item || '')));
     }
     section.append(title, list);
     return section;
   });
 }
+function buildAppUpdateReleaseLink(className, label, url) {
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = `${className} app-update-release-link`;
+  link.dataset.releaseUrl = url;
+  link.textContent = label;
+  return link;
+}
+// One section per release, newest first. A single release is already named by the
+// heading above it, so it goes without its own version line.
+function buildAppUpdateReleaseNodes(entries) {
+  const showVersions = entries.length > 1;
+  return entries.map((entry) => {
+    const section = document.createElement('section');
+    section.className = 'app-update-release';
+    if (showVersions) {
+      const label = `v${entry.version}`;
+      const head = entry.htmlUrl
+        ? buildAppUpdateReleaseLink('app-update-release-version', label, entry.htmlUrl)
+        : Object.assign(document.createElement('div'), { className: 'app-update-release-version', textContent: label });
+      if (entry.htmlUrl) head.title = t('settings.appUpdate.viewFullRelease');
+      // A wrapper, because a stuck scroll-state container styles its descendants,
+      // not itself.
+      const wrapper = document.createElement('div');
+      wrapper.className = 'app-update-release-head';
+      wrapper.append(head);
+      section.append(wrapper);
+    }
+    // Every item: these are written summaries, so cutting them short hides whole
+    // groups (a release's fixes come last) rather than trimming noise.
+    section.append(...buildAppUpdateNoteGroupNodes(entry.groups));
+    return section;
+  });
+}
+function buildAppUpdateReleaseHistoryNodes(s) {
+  const history = releaseNoteHistoryForCurrentLocale(s?.latest);
+  const entries = history
+    .filter((entry, _index, all) => all.length > 1 || entry.groups.length > 0);
+  const nodes = buildAppUpdateReleaseNodes(entries);
+  // A single release has no version heading to open its page, so it gets an
+  // explicit link after its notes — even when the locale carries no groups and
+  // the link is the body's only node.
+  if (history.length === 1 && history[0]?.htmlUrl) {
+    nodes.push(buildAppUpdateReleaseLink('app-update-release-full', t('settings.appUpdate.viewFullRelease'), history[0].htmlUrl));
+  }
+  if (nodes.length > 0 && s?.latest?.releaseHistoryTruncated && s.releasesUrl) {
+    nodes.push(buildAppUpdateReleaseLink('app-update-release-older', t('settings.appUpdate.olderReleases'), s.releasesUrl));
+  }
+  return { entries, nodes };
+}
+// Download progress pushes many times a second. Rebuilding the notes on each one
+// would reset the reader's scroll position, so they are rebuilt only when what
+// they say changes.
+function appUpdateNotesContentKey(s) {
+  return JSON.stringify([currentLocale(), s?.currentVersion || '', s?.latest?.version || '', s?.latest?.releaseNoteHistory || null, s?.latest?.releaseNotes || null, Boolean(s?.latest?.releaseHistoryTruncated)]);
+}
+// The card explains; the button under it acts. A second action button in the
+// card only repeated the one the pointer had just passed over.
 function renderAppUpdatePopover(s) {
-  const version = s?.latest?.version || '';
-  const groups = releaseNoteGroupsForCurrentLocale(s?.latest);
   const mode = appUpdatePresentationApi.appUpdateActionMode(s);
-  if (!version || groups.length === 0 || !mode) {
-    if (els.appUpdatePopover.matches(':popover-open')) els.appUpdatePopover.hidePopover();
-    els.appUpdatePopoverTitle.textContent = '';
-    els.appUpdatePopoverBody.replaceChildren();
+  const version = s?.latest?.version || s?.installVersion || '';
+  if (!s || !mode || !version) {
+    hideAppUpdatePopover();
     return false;
   }
-  els.appUpdatePopoverTitle.textContent = t('settings.appUpdate.whatsNew', { version });
-  els.appUpdatePopoverBody.replaceChildren(...buildAppUpdateNoteGroupNodes(groups));
-  els.appUpdatePopoverAction.textContent = mode === 'install'
-    ? t('settings.appUpdate.restart')
-    : mode === 'download'
-      ? t('settings.appUpdate.download')
-      : t('settings.appUpdate.viewRelease');
-  els.appUpdatePopoverAction.disabled = Boolean(s.installBusy);
-  els.appUpdatePopoverRelease.classList.toggle('hidden', !s.latest?.htmlUrl);
+  const status = appUpdatePillStatus(s, mode);
+  const percent = appUpdateDownloadPercent(s);
+  const heading = {
+    available: [t('settings.appUpdate.availableTitle', { version }), t('settings.appUpdate.currentVersion', { version: s.currentVersion })],
+    release: [t('settings.appUpdate.availableTitle', { version }), t('settings.appUpdate.currentVersion', { version: s.currentVersion })],
+    downloading: [t('settings.appUpdate.downloading', { percent }), `v${version}`],
+    downloaded: [t('settings.appUpdate.readyTitle', { version }), t('settings.appUpdate.ready')],
+    installing: [t('settings.appUpdate.installStarting'), `v${version}`]
+  }[status];
+  els.appUpdatePopoverTitle.textContent = heading[0];
+  els.appUpdatePopoverSubtitle.textContent = heading[1];
+  const contentKey = appUpdateNotesContentKey(s);
+  if (els.appUpdatePopoverBody.dataset.contentKey !== contentKey) {
+    const { nodes } = buildAppUpdateReleaseHistoryNodes(s);
+    els.appUpdatePopoverBody.replaceChildren(...nodes);
+    els.appUpdatePopoverBody.dataset.contentKey = contentKey;
+    els.appUpdatePopoverBody.classList.toggle('hidden', nodes.length === 0);
+  }
+  els.appUpdatePopoverDismiss.classList.toggle('hidden', mode === 'install' || Boolean(s.installBusy));
   return true;
 }
 function positionAppUpdatePopover() {
   const rect = els.appUpdatePill.getBoundingClientRect();
   const width = Math.min(320, window.innerWidth - 24);
   const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.right - width));
+  const bottom = Math.max(12, window.innerHeight - rect.top + 8);
   els.appUpdatePopover.style.width = `${width}px`;
   els.appUpdatePopover.style.left = `${left}px`;
-  els.appUpdatePopover.style.bottom = `${Math.max(12, window.innerHeight - rect.top + 8)}px`;
+  els.appUpdatePopover.style.bottom = `${bottom}px`;
+  els.appUpdatePopover.style.maxHeight = `${appUpdatePresentationApi.appUpdatePopoverMaxHeight({ viewportHeight: window.innerHeight, bottom })}px`;
+}
+function clearAppUpdateCardTimers() {
+  clearTimeout(appUpdateCardOpenTimer);
+  clearTimeout(appUpdateCardCloseTimer);
+  appUpdateCardOpenTimer = 0;
+  appUpdateCardCloseTimer = 0;
+}
+function showAppUpdatePopover() {
+  clearAppUpdateCardTimers();
+  if (els.appUpdatePill.classList.contains('hidden') || typeof els.appUpdatePopover.showPopover !== 'function') return false;
+  if (!renderAppUpdatePopover(state.appUpdate)) return false;
+  positionAppUpdatePopover();
+  if (!els.appUpdatePopover.matches(':popover-open')) els.appUpdatePopover.showPopover();
+  return true;
+}
+function hideAppUpdatePopover() {
+  clearAppUpdateCardTimers();
+  if (!els.appUpdatePopover?.matches(':popover-open')) return;
+  // Only focus that was inside the card goes back to the button. A card that
+  // closes because the pointer left it must not pull focus to the button.
+  const focusWasInside = els.appUpdatePopover.contains(document.activeElement);
+  els.appUpdatePopover.hidePopover();
+  if (focusWasInside && !els.appUpdatePill.classList.contains('hidden')) {
+    suppressAppUpdateCardFocusOpen = true;
+    els.appUpdatePillAction.focus();
+  }
+}
+function scheduleAppUpdatePopoverOpen() {
+  clearAppUpdateCardTimers();
+  if (els.appUpdatePopover.matches(':popover-open')) return;
+  appUpdateCardOpenTimer = setTimeout(showAppUpdatePopover, APP_UPDATE_CARD_OPEN_DELAY_MS);
+}
+function scheduleAppUpdatePopoverClose() {
+  clearAppUpdateCardTimers();
+  appUpdateCardCloseTimer = setTimeout(() => {
+    appUpdateCardCloseTimer = 0;
+    // Keyboard focus inside the card holds it open until focus leaves.
+    if (els.appUpdatePopover.contains(document.activeElement)) return;
+    hideAppUpdatePopover();
+  }, APP_UPDATE_CARD_CLOSE_DELAY_MS);
 }
 function renderAppUpdateNotes(s) {
   const version = s?.latest?.version || '';
-  const groups = releaseNoteGroupsForCurrentLocale(s?.latest);
-  const visible = Boolean(version && groups.length > 0);
-  els.appUpdateNotes.classList.toggle('hidden', !visible);
-  if (!visible) {
-    setSettingsAccordionExpanded(els.appUpdateNotes, els.appUpdateNotesToggle, els.appUpdateNotesDetails, false);
-    els.appUpdateNotesTitle.textContent = '';
-    els.appUpdateNotesBody.replaceChildren();
-    return;
-  }
+  const contentKey = appUpdateNotesContentKey(s);
+  if (els.appUpdateNotesBody.dataset.contentKey !== contentKey) {
+    const { entries, nodes } = version ? buildAppUpdateReleaseHistoryNodes(s) : { entries: [], nodes: [] };
+    const visible = Boolean(version && nodes.length > 0);
+    els.appUpdateNotes.classList.toggle('hidden', !visible);
+    if (!visible) {
+      setSettingsAccordionExpanded(els.appUpdateNotes, els.appUpdateNotesToggle, els.appUpdateNotesDetails, false);
+      els.appUpdateNotesTitle.textContent = '';
+      els.appUpdateNotesBody.replaceChildren();
+      delete els.appUpdateNotesBody.dataset.contentKey;
+      return;
+    }
 
-  els.appUpdateNotesTitle.textContent = t('settings.appUpdate.whatsNew', { version });
-  els.appUpdateNotesBody.replaceChildren(...buildAppUpdateNoteGroupNodes(groups));
-  els.appUpdateReleaseNotesButton.classList.toggle('hidden', !s.latest?.htmlUrl);
+    els.appUpdateNotesTitle.textContent = entries.length > 1
+      ? t('settings.appUpdate.changesSince', { version: s.currentVersion })
+      : t('settings.appUpdate.whatsNew', { version });
+    els.appUpdateNotesBody.replaceChildren(...nodes);
+    els.appUpdateNotesBody.dataset.contentKey = contentKey;
+  }
   if (s.hasUpdate && state.appUpdateNotesPresentedVersion !== version) {
     // The disclosure may have just changed from display:none. Commit its
     // collapsed grid once so the first automatic reveal can transition too.
@@ -2397,6 +2571,22 @@ function setActiveToolDetailMode(mode) {
   renderToolDetailFooter();
 }
 
+function renderProjectBreakdownFooter() {
+  const active = visibleStatsSurface() === 'main'
+    && state.breakdown === 'project'
+    && !els.breakdown.classList.contains('hidden')
+    && Boolean(els.breakdown.querySelector('.row.expanded .row-accordion-inner'));
+  els.projectBreakdownFooter.classList.toggle('hidden', !active);
+  syncLiveTokenRateFooterState();
+  if (!active) return;
+  const mode = state.settings?.projectBreakdownMode === 'model' ? 'model' : 'tool';
+  els.projectBreakdownFooter.setAttribute('aria-label', t('views.project'));
+  els.projectBreakdownFooterTools.textContent = t('views.tool');
+  els.projectBreakdownFooterModels.textContent = t('views.model');
+  els.projectBreakdownFooterTools.setAttribute('aria-pressed', String(mode === 'tool'));
+  els.projectBreakdownFooterModels.setAttribute('aria-pressed', String(mode === 'model'));
+}
+
 // The live-session pair: a dot on the tool mark for "this is being written to
 // right now", and a fuel gauge for how much of its context window is left. The
 // dot is drawn only while the agent is working and the gauge only while the
@@ -2761,6 +2951,7 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     els.breakdown.replaceChildren();
     renderSessionPager(null);
     state.rowSignature = '';
+    renderProjectBreakdownFooter();
     return;
   }
   const page = breakdownPage(rows, { breakdown: state.breakdown, page: state.sessionPage });
@@ -2831,6 +3022,7 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     rowRenderFingerprints.set(row, fingerprint);
   }
   renderToolDetailFooter();
+  renderProjectBreakdownFooter();
   if (liveMotionSnapshot) animateBreakdownFrom(liveMotionSnapshot, { duration: 600 });
 }
 
@@ -3039,8 +3231,12 @@ function projectRowsForPeriod(period) {
     clientLabels,
     clientColors,
     stableColor,
+    shareBy: state.settings?.projectBreakdownMode,
+    modelColor,
     fallbackColors: fallbackModelColors,
     unknownClientLabel: t('projects.unknownTool'),
+    unknownModelLabel: t('projects.unknownModel'),
+    allowSessionModelAttribution: !projectRowsApi.projectBreakdownIncomplete(state.stats, state.period),
     nativeProjects: state.stats?.nativeProjects?.[state.period] || {},
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
@@ -5056,7 +5252,9 @@ function sessionDetailTitle() {
   const session = request?.client === 'reasonix'
     ? state.stats?.nativeSessions?.[period]?.[request.sessionId]
     : state.stats?.periods?.[period]?.sessions?.[`${request?.client}:${request?.sessionId}`];
-  return session?.title || request?.title || '';
+  return sessionRowsApi.sessionTitleForDisplay({
+    client: request?.client, title: session?.title || request?.title
+  });
 }
 
 function refreshSessionDetailHeading() {
@@ -6272,25 +6470,6 @@ function homeSessionAgo(value) {
   return t('edgeDock.agoDays', { count: Math.round(hours / 24) });
 }
 
-function homeSessionContext(context, promptCache) {
-  const showUsed = state.settings?.sessionContextMetric !== 'remaining';
-  const percent = showUsed ? context.percentUsed : context.percentLeft;
-  const node = document.createElement('span');
-  node.className = 'home-session-context';
-  node.dataset.tone = context.tone || '';
-  const meter = document.createElement('span');
-  meter.className = 'home-session-context-meter';
-  const fill = document.createElement('span');
-  fill.className = 'home-session-context-fill';
-  fill.style.setProperty('--bar-scale', String(percent / 100));
-  meter.append(fill);
-  const value = document.createElement('span');
-  value.textContent = `${percent}%`;
-  node.append(meter, value);
-  sessionRowsApi.setSessionTooltip(node, context, promptCache, t, limitWindowsView);
-  return node;
-}
-
 function stopHomeSessionRepaint() {
   clearTimeout(state.homeSessionRepaintTimer);
   state.homeSessionRepaintTimer = null;
@@ -6432,17 +6611,9 @@ function renderHomeSessionModule(rows) {
     }
     if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
     meta.append(description);
-    const statusRow = row.groupRows?.[0] || row;
-    const context = window.TokenMonitorSessionLive.sessionActivityState(statusRow) !== 'idle' ? statusRow.context : null;
-    const cache = window.TokenMonitorSessionLive.sessionPromptCacheForRow(statusRow);
-    if (cache && !context) {
-      const badge = document.createElement('span');
-      badge.className = 'home-session-cache';
-      badge.textContent = t('session.cacheEstimate', { minutes: cache.minutes });
-      sessionRowsApi.setSessionTooltip(badge, statusRow, cache, t, limitWindowsView);
-      meta.append(badge);
-    }
-    if (context) meta.append(homeSessionContext(context, cache));
+    const status = sessionRowsApi.sessionStatusNode(document, row, { prefix: 'home-session', translate: t,
+      view: limitWindowsView, showUsed: state.settings?.sessionContextMetric !== 'remaining' });
+    if (status) meta.append(status);
     item.append(mark, stateMark, name, value, meta);
     body.append(item);
   }
@@ -7015,6 +7186,7 @@ function render() {
   stopHomeSessionRepaint();
   stopSessionStatusRepaint();
   els.toolDetailFooter.classList.add('hidden');
+  els.projectBreakdownFooter.classList.add('hidden');
   syncLiveTokenRateFooterState();
   renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
@@ -7471,6 +7643,15 @@ function applyAppearanceSettings(settings) {
   document.documentElement.style.setProperty('--control-alpha', (0.03 + depth * 0.045).toFixed(3));
   document.documentElement.classList.toggle('system-glass-disabled', systemGlassDisabled);
   const nativeMaterial = glassRenderingApi.usesNativeMaterial(nativeMaterialState);
+  const nativeTint = nativeMaterialState.type === 'liquid-glass';
+  els.glassOpacityRow?.classList.toggle('hidden', nativeTint);
+  for (const [key, mode] of nativeGlassTintSettings) {
+    const active = nativeTint && macGlass.backdropMode === mode;
+    els[`${key}Row`]?.classList.toggle('hidden', !active);
+    for (const control of [els[`${key}Input`], els[`${key}Reset`]]) {
+      if (control) control.disabled = !active;
+    }
+  }
   for (const control of [els.glassInput, els.blurInput, els.resetGlassButton, els.resetDepthButton]) {
     if (control) control.disabled = nativeMaterial;
   }
@@ -7493,6 +7674,7 @@ function applyAppearanceSettings(settings) {
   els.macBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
   // Same terms as the widget's own selector; material pushes land here too.
   els.edgeDockMacBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
+  syncNotchStyleInput(settings);
   if (els.macBackdropInput) els.macBackdropInput.value = macGlass.backdropMode;
   applyReduceMotionPreference(settings?.reduceMotion);
   applyFontSettings(settings);
@@ -8262,6 +8444,9 @@ function appearancePatchFromControls() {
     settingsInTitlebar: Boolean(els.swapSettingsRefreshInput.checked),
     glassOpacity: Number(els.glassInput.value === '' ? defaultAppearance.glassOpacity : els.glassInput.value),
     glassBlur: Number(els.blurInput.value === '' ? defaultAppearance.glassBlur : els.blurInput.value),
+    ...Object.fromEntries(nativeGlassTintSettings.map(([key, mode]) => [key,
+      macBackdropApi.normalizeLiquidGlassTint(els[`${key}Input`]?.value, mode)
+    ])),
     backgroundImageOpacity: Number(els.backgroundImageOpacityInput?.value || defaultAppearance.backgroundImageOpacity),
     zoomFactor: Number(els.zoomInput.value === '' ? defaultAppearance.zoomFactor * 100 : els.zoomInput.value) / 100
   };
@@ -8364,6 +8549,7 @@ function syncSliderRow(input) {
 
 function syncSliderRows() {
   syncSliderRow(els.glassInput);
+  for (const [key] of nativeGlassTintSettings) syncSliderRow(els[`${key}Input`]);
   syncSliderRow(els.blurInput);
   syncSliderRow(els.backgroundImageOpacityInput);
   syncSliderRow(els.zoomInput);
@@ -9206,7 +9392,7 @@ function syncSettingsForm() {
   for (const input of els.floatingBubbleTriggerInputs || []) input.checked = input.value === floatingBubbleTrigger;
   if (els.floatingBubbleContentInput) els.floatingBubbleContentInput.value = normalizeTrayContentValue(state.settings.floatingBubbleContent);
   els.floatingBubbleOptions?.classList.toggle('hidden', state.settings.floatingBubbleEnabled !== true);
-  syncEdgeDockControls();
+  syncDockControls();
   const showTrayIcon = state.settings.showTrayIcon !== false;
   if (els.showTrayIconInput) els.showTrayIconInput.checked = showTrayIcon;
   els.trayModeInput.disabled = !showTrayIcon;
@@ -9232,6 +9418,9 @@ function syncSettingsForm() {
         : t('settings.startup.launchAtSignIn');
   }
   els.glassInput.value = String(state.settings.glassOpacity ?? 68);
+  for (const [key, mode] of nativeGlassTintSettings) {
+    if (els[`${key}Input`]) els[`${key}Input`].value = String(macBackdropApi.normalizeLiquidGlassTint(state.settings[key], mode));
+  }
   els.blurInput.value = String(state.settings.glassBlur ?? 32);
   if (els.backgroundImageOpacityInput) els.backgroundImageOpacityInput.value = String(state.settings.backgroundImageOpacity ?? defaultAppearance.backgroundImageOpacity);
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
@@ -12397,8 +12586,16 @@ async function init() {
     void maybeUpdateBarsIcon();
     void deliverTrayProviderIcons();
   };
+  let notchCapabilitiesSeeded = false;
+  window.tokenMonitor.onNotchCapabilitiesPush?.((value) => {
+    notchCapabilitiesSeeded = true;
+    state.notchCapabilities = value;
+    syncNotchCapabilities();
+  });
   window.tokenMonitor.onSystemUiThemePush?.((payload) => applySystemUiTheme(payload?.dark === true));
   try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
+  if (!notchCapabilitiesSeeded) state.notchCapabilities = state.appInfo?.notchCapabilities || null;
+  syncNotchCapabilities();
   // Seeding assigns directly: the rest of init delivers both icon sets anyway,
   // and settings have not loaded yet, so repainting from here would only churn.
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
@@ -12563,7 +12760,7 @@ els.breakdown.addEventListener('click', (event) => {
   }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi') return;
+  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp') return;
   if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
@@ -12931,6 +13128,16 @@ els.resetGlassButton.addEventListener('click', async () => {
   applyAppearanceFromControls();
   await saveSettings({ glassOpacity: defaultAppearance.glassOpacity });
 });
+for (const [key, mode] of nativeGlassTintSettings) {
+  els[`${key}Input`]?.addEventListener('input', applyAppearanceFromControls);
+  els[`${key}Input`]?.addEventListener('change', saveAppearanceFromControls);
+  els[`${key}Reset`]?.addEventListener('click', async () => {
+    const value = macBackdropApi.normalizeLiquidGlassTint(undefined, mode);
+    els[`${key}Input`].value = String(value);
+    applyAppearanceFromControls();
+    await saveSettings({ [key]: value });
+  });
+}
 els.resetDepthButton.addEventListener('click', async () => {
   els.blurInput.value = String(defaultAppearance.glassBlur);
   applyAppearanceFromControls();
@@ -12991,6 +13198,7 @@ setupSettingsAccordion(els.advancedSettingsGroup, els.advancedSettingsToggle, el
 setupSettingsAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails);
 setupSettingsAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails);
 setupSettingsAccordion(els.edgeDockMoreOptionsGroup, els.edgeDockMoreOptionsToggle, els.edgeDockMoreOptionsDetails);
+setupSettingsAccordion(els.notchMoreOptionsGroup, els.notchMoreOptionsToggle, els.notchMoreOptionsDetails);
 for (const input of els.systemGlassInputs || []) {
   input.addEventListener('change', () => {
     if (input.checked) saveAppearanceFromControls();
@@ -13062,7 +13270,65 @@ function edgeDockAvailable() {
   return platform === 'darwin' || platform === 'win32';
 }
 
-function syncEdgeDockControls() {
+function syncDockSizeControls(surface) {
+  const sizes = (els[`${surface}SizeInputs`] || []).map((input) => input.value);
+  const size = sizes.includes(state.settings?.[`${surface}Size`]) ? state.settings[`${surface}Size`] : 'medium';
+  for (const input of els[`${surface}SizeInputs`] || []) input.checked = input.value === size;
+  els[`${surface}CustomScaleRow`]?.classList.toggle('hidden', size !== 'custom');
+  if (els[`${surface}CustomScaleInput`] && document.activeElement !== els[`${surface}CustomScaleInput`]) {
+    els[`${surface}CustomScaleInput`].value = String(Math.round((Number(state.settings?.[`${surface}CustomScale`]) || 1) * 100));
+    syncSliderRow(els[`${surface}CustomScaleInput`]);
+  }
+}
+
+// Liquid Glass is offered on the same terms as the widget's own selector. A
+// saved choice the system cannot draw shows as the Frosted Glass it falls back to.
+// Appearance previews carry only the controls they own, so the notch style is
+// read from the saved settings underneath them.
+const NOTCH_HOVER_DELAY_DEFAULT_MS = 0;
+
+// Hover either grows the resting entry (a click opens it) or opens it after
+// the chosen duration; the duration only applies to the second, scroll
+// gestures only to the first.
+function syncNotchHoverControls() {
+  const action = state.settings?.notchHoverAction === 'open' ? 'open' : 'peek';
+  for (const input of els.notchHoverActionInputs) input.checked = input.value === action;
+  els.notchHoverDelayRow?.classList.toggle('hidden', action !== 'open');
+  if (els.notchSwipeGesturesInput) {
+    els.notchSwipeGesturesInput.closest('.settings-item')?.classList.toggle('hidden', action !== 'peek');
+    els.notchSwipeGesturesInput.checked = state.settings?.notchSwipeGestures !== false;
+  }
+  if (els.notchHoverDelayInput && document.activeElement !== els.notchHoverDelayInput) {
+    const delay = Number(state.settings?.notchHoverDelay);
+    els.notchHoverDelayInput.value = String(Number.isFinite(delay) ? delay : NOTCH_HOVER_DELAY_DEFAULT_MS);
+  }
+  syncNotchHoverDelayValue();
+}
+
+function syncNotchHoverDelayValue() {
+  const value = els.notchHoverDelayRow?.querySelector('.slider-value');
+  if (value && els.notchHoverDelayInput) value.textContent = `${(Number(els.notchHoverDelayInput.value) / 1000).toFixed(1)} s`;
+}
+
+function syncNotchStyleInput(preview) {
+  if (!els.notchStyleInput) return;
+  const settings = Object.assign({}, state.settings, ...pendingSettingsPatches, preview);
+  const { showBackdropControl } = macBackdropApi.appearanceState(settings, {
+    liquidGlassSupported: nativeMaterialState.liquidGlassSupported
+  });
+  for (const value of ['liquid-glass', 'liquid-glass-clear']) {
+    const option = els.notchStyleInput.querySelector(`option[value="${value}"]`);
+    if (option) option.hidden = option.disabled = !showBackdropControl;
+  }
+  const style = settings?.notchStyle || 'inherit';
+  els.notchStyleInput.value = macBackdropApi.isLiquidGlassBackdrop(style) && !showBackdropControl ? 'vibrancy' : style;
+}
+
+function syncNotchCapabilities() {
+  els.notchRunningIndicatorRow?.classList.toggle('hidden', state.notchCapabilities?.rings === false);
+}
+
+function syncDockControls() {
   if (!els.edgeDockInput) return;
   const available = edgeDockAvailable();
   els.edgeDockFeature?.classList.toggle('hidden', !available);
@@ -13074,14 +13340,8 @@ function syncEdgeDockControls() {
   const modes = (els.edgeDockModeInputs || []).map((input) => input.value);
   const mode = modes.includes(state.settings?.edgeDockMode) ? state.settings.edgeDockMode : 'autoHide';
   for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
-  const sizes = (els.edgeDockSizeInputs || []).map((input) => input.value);
-  const size = sizes.includes(state.settings?.edgeDockSize) ? state.settings.edgeDockSize : 'medium';
-  for (const input of els.edgeDockSizeInputs || []) input.checked = input.value === size;
-  els.edgeDockCustomScaleRow?.classList.toggle('hidden', size !== 'custom');
-  if (els.edgeDockCustomScaleInput && document.activeElement !== els.edgeDockCustomScaleInput) {
-    els.edgeDockCustomScaleInput.value = String(Math.round((Number(state.settings?.edgeDockCustomScale) || 1) * 100));
-    syncSliderRow(els.edgeDockCustomScaleInput);
-  }
+  syncDockSizeControls('edgeDock');
+  syncDockSizeControls('notch');
   els.edgeDockHapticRow?.classList.toggle('hidden', state.appInfo?.platform !== 'darwin');
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
   if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
@@ -13089,52 +13349,143 @@ function syncEdgeDockControls() {
   if (els.edgeDockMacBackdropInput) {
     els.edgeDockMacBackdropInput.value = macBackdropApi.normalizeEdgeDockBackdropMode(state.settings?.edgeDockMacBackdrop);
   }
+  const notchAvailable = state.appInfo?.platform === 'darwin';
+  const notchEnabled = notchAvailable && state.settings?.notchEnabled === true;
+  els.experimentalFeaturesGroup?.classList.toggle('hidden', !notchAvailable);
+  els.notchFeature?.classList.toggle('hidden', !notchAvailable);
+  if (els.notchInput) els.notchInput.checked = notchEnabled;
+  els.notchOptions?.classList.toggle('hidden', !notchEnabled);
+  syncNotchStyleInput();
+  for (const input of els.notchShapeInputs) input.checked = input.value === (state.settings?.notchShape || 'auto');
+  syncNotchSummaryMode();
+  if (els.notchSummaryInput) els.notchSummaryInput.checked = state.settings?.notchSummaryEnabled !== false;
+  if (els.notchWarnColorsInput) els.notchWarnColorsInput.checked = state.settings?.notchWarnColors === true;
+  if (els.notchRunningIndicatorInput) els.notchRunningIndicatorInput.checked = state.settings?.notchRunningIndicatorEnabled === true;
+  syncNotchCapabilities();
+  if (els.notchProgressiveBlurInput) els.notchProgressiveBlurInput.checked = state.settings?.notchProgressiveBlur !== false;
+  if (els.notchHapticInput) els.notchHapticInput.checked = state.settings?.notchHaptic !== false;
+  syncNotchHoverControls();
+  if (els.notchHideSummaryInFullScreenInput) els.notchHideSummaryInFullScreenInput.checked = state.settings?.notchHideSummaryInFullScreen !== false;
+  els.edgeDockComposerRow?.classList.toggle('hidden', !enabled);
   if (enabled) edgeDockComposer?.render();
+  if (notchEnabled) notchItemsComposer?.render();
 }
 
-const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComposer
-  ? window.TokenMonitorEdgeDockComposer.createEdgeDockComposer({
-    root: els.edgeDockComposer,
-    t,
-    itemsApi: window.TokenMonitorEdgeDockItems,
-    presentationApi: window.TokenMonitorEdgeDockPresentation,
-    getSettings: () => state.settings,
-    getStats: () => state.stats,
-    save: (patch) => saveSettings(patch),
-    providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
-    providerColor: (id) => limitProviderColor(id),
-    windowLabel: (record, quotaWindow) => record?.provider === 'codex' && quotaWindow.additional === true
-      ? limitWindowsView.codexAdditionalWindowLabel(
-        quotaWindow,
-        (record.windows || []).filter((entry) => entry?.additional === true)
-      )
-      : limitWindowsView.providerWindowLabel(record, quotaWindow, 'Quota'),
-    hasProviderMark: (id) => limitMarksWithIcon.has(id),
-    // Offer every enabled provider in the user's limits order, including those
-    // without quota data. Keep the ordering rule here rather than in the composer.
-    enabledLimitProviders: () => limitProviderOrderApi
-      .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
-      .filter(({ id }) => enabledLimitProviderSet().has(id))
-      .map(({ id }) => id),
-    isWindowHidden: (providerId, quotaWindow) => limitUsageItemsApi.isLimitWindowHidden(
-      state.settings?.limitProviderHiddenItems, providerId, quotaWindow
-    ),
-    maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
-      ? accountIdentityApi.maskEmailAddress(email)
-      : String(email || '')),
-    mimoProductLabel,
-    createRowDrag: (config) => rowDragControllerApi.createRowDragController({
-      dragSort: verticalDragSortApi,
-      getScrollPanel: () => els.settingsPanel,
-      preserveScroll: preserveSettingsPanelScroll,
-      ...config
+function syncNotchSummaryMode() {
+  const mode = state.settings?.notchSummaryMode || 'sessions';
+  if (els.notchSummaryModeInput) els.notchSummaryModeInput.value = mode;
+  if (els.notchSummaryModeNote) {
+    const key = mode === 'auto' ? 'settings.notch.summaryModeNote' : `settings.notch.summaryMode.${mode}Note`;
+    els.notchSummaryModeNote.dataset.i18n = key;
+    els.notchSummaryModeNote.textContent = t(key);
+  }
+}
+
+function createDockItemsComposer(root, itemsKey) {
+  return root && window.TokenMonitorEdgeDockComposer
+    ? window.TokenMonitorEdgeDockComposer.createEdgeDockComposer({
+      root, itemsKey,
+      t,
+      itemsApi: window.TokenMonitorEdgeDockItems,
+      presentationApi: window.TokenMonitorEdgeDockPresentation,
+      getSettings: () => state.settings,
+      getStats: () => state.stats,
+      save: (patch) => saveSettings(patch),
+      providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
+      providerColor: (id) => limitProviderColor(id),
+      windowLabel: (record, quotaWindow) => record?.provider === 'codex' && quotaWindow.additional === true
+        ? limitWindowsView.codexAdditionalWindowLabel(
+          quotaWindow,
+          (record.windows || []).filter((entry) => entry?.additional === true)
+        )
+        : limitWindowsView.providerWindowLabel(record, quotaWindow, 'Quota'),
+      hasProviderMark: (id) => limitMarksWithIcon.has(id),
+      // Offer every enabled provider in the user's limits order, including those
+      // without quota data. Keep the ordering rule here rather than in the composer.
+      enabledLimitProviders: () => limitProviderOrderApi
+        .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
+        .filter(({ id }) => enabledLimitProviderSet().has(id))
+        .map(({ id }) => id),
+      isWindowHidden: (providerId, quotaWindow) => limitUsageItemsApi.isLimitWindowHidden(
+        state.settings?.limitProviderHiddenItems, providerId, quotaWindow
+      ),
+      maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
+        ? accountIdentityApi.maskEmailAddress(email)
+        : String(email || '')),
+      mimoProductLabel,
+      createRowDrag: (config) => rowDragControllerApi.createRowDragController({
+        dragSort: verticalDragSortApi,
+        getScrollPanel: () => els.settingsPanel,
+        preserveScroll: preserveSettingsPanelScroll,
+        ...config
+      })
     })
-  })
-  : null;
+    : null;
+}
+const edgeDockComposer = createDockItemsComposer(els.edgeDockComposer, 'edgeDockItems');
+const notchItemsComposer = createDockItemsComposer(els.notchItemsComposer, 'notchItems');
+
+els.notchSummaryInput?.addEventListener('change', () => {
+  void saveSettings({ notchSummaryEnabled: els.notchSummaryInput.checked });
+});
+els.notchWarnColorsInput?.addEventListener('change', () => {
+  void saveSettings({ notchWarnColors: els.notchWarnColorsInput.checked });
+});
+els.notchHideSummaryInFullScreenInput?.addEventListener('change', () => {
+  void saveSettings({ notchHideSummaryInFullScreen: els.notchHideSummaryInFullScreenInput.checked });
+});
+for (const input of els.notchHoverActionInputs) {
+  input.addEventListener('change', () => {
+    if (!input.checked) return;
+    state.settings.notchHoverAction = input.value;
+    syncNotchHoverControls();
+    void saveSettings({ notchHoverAction: input.value });
+  });
+}
+els.notchProgressiveBlurInput?.addEventListener('change', () => {
+  void saveSettings({ notchProgressiveBlur: els.notchProgressiveBlurInput.checked });
+});
+els.notchHoverDelayInput?.addEventListener('input', () => syncNotchHoverDelayValue());
+els.resetNotchHoverDelayButton?.addEventListener('click', () => {
+  if (!els.notchHoverDelayInput) return;
+  els.notchHoverDelayInput.value = String(NOTCH_HOVER_DELAY_DEFAULT_MS);
+  syncNotchHoverDelayValue();
+  void saveSettings({ notchHoverDelay: NOTCH_HOVER_DELAY_DEFAULT_MS });
+});
+els.notchHoverDelayInput?.addEventListener('change', () => {
+  void saveSettings({ notchHoverDelay: Number(els.notchHoverDelayInput.value) });
+});
+els.notchSwipeGesturesInput?.addEventListener('change', () => {
+  void saveSettings({ notchSwipeGestures: els.notchSwipeGesturesInput.checked });
+});
+els.notchRunningIndicatorInput?.addEventListener('change', () => {
+  void saveSettings({ notchRunningIndicatorEnabled: els.notchRunningIndicatorInput.checked });
+});
+
+els.notchInput?.addEventListener('change', () => {
+  state.settings.notchEnabled = els.notchInput.checked;
+  syncDockControls();
+  refreshTrayComposers();
+  void saveSettings({ notchEnabled: els.notchInput.checked });
+});
+for (const input of els.notchShapeInputs) {
+  input.addEventListener('change', () => {
+    if (input.checked) void saveSettings({ notchShape: input.value });
+  });
+}
+els.notchStyleInput?.addEventListener('change', () => {
+  void saveSettings({ notchStyle: els.notchStyleInput.value });
+});
+els.notchSummaryModeInput?.addEventListener('change', () => {
+  state.settings.notchSummaryMode = els.notchSummaryModeInput.value;
+  syncNotchSummaryMode();
+  refreshTrayComposers();
+  void saveSettings({ notchSummaryMode: els.notchSummaryModeInput.value });
+});
 
 els.edgeDockInput?.addEventListener('change', () => {
   state.settings.edgeDockEnabled = els.edgeDockInput.checked;
-  els.edgeDockOptions?.classList.toggle('hidden', !els.edgeDockInput.checked);
+  syncDockControls();
   void saveSettings({ edgeDockEnabled: els.edgeDockInput.checked });
 });
 for (const input of els.edgeDockSideInputs || []) {
@@ -13151,6 +13502,9 @@ els.edgeDockRunningIndicatorInput?.addEventListener('change', () => {
 els.edgeDockMacBackdropInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockMacBackdrop: macBackdropApi.normalizeEdgeDockBackdropMode(els.edgeDockMacBackdropInput.value) });
 });
+els.notchHapticInput?.addEventListener('change', () => {
+  void saveSettings({ notchHaptic: els.notchHapticInput.checked });
+});
 els.edgeDockHapticInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockHaptic: els.edgeDockHapticInput.checked });
 });
@@ -13159,22 +13513,25 @@ for (const input of els.edgeDockModeInputs || []) {
     if (input.checked) void saveSettings({ edgeDockMode: input.value });
   });
 }
-for (const input of els.edgeDockSizeInputs || []) {
-  input.addEventListener('change', () => {
-    if (!input.checked) return;
-    els.edgeDockCustomScaleRow?.classList.toggle('hidden', input.value !== 'custom');
-    void saveSettings({ edgeDockSize: input.value });
+for (const surface of ['edgeDock', 'notch']) {
+  for (const input of els[`${surface}SizeInputs`] || []) {
+    input.addEventListener('change', () => {
+      if (!input.checked) return;
+      els[`${surface}CustomScaleRow`]?.classList.toggle('hidden', input.value !== 'custom');
+      void saveSettings({ [`${surface}Size`]: input.value });
+    });
+  }
+  // Like the Zoom slider: the dock previews each step while the slider is dragged
+  // and the size is saved on release, since a save redraws the settings form.
+  els[`${surface}CustomScaleInput`]?.addEventListener('input', () => {
+    syncSliderRow(els[`${surface}CustomScaleInput`]);
+    window.tokenMonitor.previewAppearance?.({ [`${surface}CustomScale`]: Number(els[`${surface}CustomScaleInput`].value) / 100 }).catch(() => {});
+  });
+  els[`${surface}CustomScaleInput`]?.addEventListener('change', () => {
+    void saveSettings({ [`${surface}CustomScale`]: Number(els[`${surface}CustomScaleInput`].value) / 100 });
   });
 }
-// Like the Zoom slider: the dock previews each step while the slider is dragged
-// and the size is saved on release, since a save redraws the settings form.
-els.edgeDockCustomScaleInput?.addEventListener('input', () => {
-  syncSliderRow(els.edgeDockCustomScaleInput);
-  window.tokenMonitor.previewAppearance?.({ edgeDockCustomScale: Number(els.edgeDockCustomScaleInput.value) / 100 }).catch(() => {});
-});
-els.edgeDockCustomScaleInput?.addEventListener('change', () => {
-  void saveSettings({ edgeDockCustomScale: Number(els.edgeDockCustomScaleInput.value) / 100 });
-});
+
 
 for (const input of els.floatingBubbleTriggerInputs || []) {
   input.addEventListener('change', () => {
@@ -13300,34 +13657,69 @@ async function runAppUpdateAction() {
 }
 
 els.appUpdatePillAction.addEventListener('click', async () => {
-  if (!renderAppUpdatePopover(state.appUpdate) || typeof els.appUpdatePopover.showPopover !== 'function') {
-    if (appUpdatePresentationApi.appUpdateActionMode(state.appUpdate) === 'install') {
-      const url = state.appUpdate?.latest?.htmlUrl;
-      if (url) await window.tokenMonitor.openExternal(url);
-      return;
-    }
-    await runAppUpdateAction();
+  // While a download or install is under way the press shows its progress.
+  if (els.appUpdatePillAction.getAttribute('aria-disabled') === 'true') {
+    showAppUpdatePopover();
     return;
   }
-  positionAppUpdatePopover();
-  els.appUpdatePopover.showPopover();
-  els.appUpdatePopoverAction.focus();
-});
-
-els.appUpdatePillRestart.addEventListener('click', async () => {
+  if (appUpdatePresentationApi.appUpdateActionMode(state.appUpdate) === 'release') hideAppUpdatePopover();
   await runAppUpdateAction();
 });
 
-els.appUpdatePillDismiss.addEventListener('click', async () => {
-  const version = state.appUpdate?.latest?.version;
-  if (!version) return;
-  state.appUpdate = await window.tokenMonitor.dismissAppUpdate(version);
-  if (els.appUpdatePopover.matches(':popover-open')) els.appUpdatePopover.hidePopover();
-  renderAppUpdatePill();
-});
+for (const target of [els.appUpdatePillAction, els.appUpdatePopover]) {
+  target.addEventListener('pointerenter', (event) => {
+    if (event.pointerType === 'touch') return;
+    if (target === els.appUpdatePopover || els.appUpdatePopover.matches(':popover-open')) clearAppUpdateCardTimers();
+    else scheduleAppUpdatePopoverOpen();
+  });
+  target.addEventListener('pointerleave', (event) => {
+    if (event.pointerType === 'touch') return;
+    scheduleAppUpdatePopoverClose();
+  });
+}
 
-els.appUpdatePopoverClose.addEventListener('click', () => {
-  els.appUpdatePopover.hidePopover();
+// Keyboard users get the card on focus, the same moment pointer users get it on
+// hover, and Tab then moves into it rather than past it.
+els.appUpdatePillAction.addEventListener('focus', () => {
+  if (suppressAppUpdateCardFocusOpen) {
+    suppressAppUpdateCardFocusOpen = false;
+    return;
+  }
+  if (els.appUpdatePillAction.matches(':focus-visible')) showAppUpdatePopover();
+});
+els.appUpdatePillAction.addEventListener('keydown', (event) => {
+  if (event.key !== 'Tab' || event.shiftKey || !els.appUpdatePopover.matches(':popover-open')) return;
+  // Dismiss while it is offered; otherwise the notes body, which is a focusable
+  // scroller. A generic button search lands on a release link deep in the notes,
+  // or finds nothing at all once Dismiss is hidden during an install.
+  const dismiss = els.appUpdatePopoverDismiss.classList.contains('hidden') || els.appUpdatePopoverDismiss.disabled
+    ? null
+    : els.appUpdatePopoverDismiss;
+  const target = dismiss || (els.appUpdatePopoverBody.classList.contains('hidden') ? null : els.appUpdatePopoverBody);
+  if (!target) return;
+  event.preventDefault();
+  target.focus();
+});
+for (const target of [els.appUpdatePillAction, els.appUpdatePopover]) {
+  target.addEventListener('focusout', (event) => {
+    const next = event.relatedTarget;
+    if (next && (els.appUpdatePopover.contains(next) || next === els.appUpdatePillAction)) return;
+    if (els.appUpdatePopover.matches(':hover') || els.appUpdatePillAction.matches(':hover')) return;
+    hideAppUpdatePopover();
+  });
+}
+
+// A manual popover, so a press on the button is not also a light dismiss: the
+// card stays up to show the download it just started. Outside presses and Escape
+// are handled here instead.
+document.addEventListener('pointerdown', (event) => {
+  if (!els.appUpdatePopover.matches(':popover-open')) return;
+  if (els.appUpdatePopover.contains(event.target) || els.appUpdatePill.contains(event.target)) return;
+  hideAppUpdatePopover();
+}, true);
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || !els.appUpdatePopover.matches(':popover-open')) return;
+  hideAppUpdatePopover();
 });
 
 els.appUpdatePopover.addEventListener('toggle', (event) => {
@@ -13335,23 +13727,24 @@ els.appUpdatePopover.addEventListener('toggle', (event) => {
   if (els.appUpdatePillAction.hasAttribute('aria-haspopup')) {
     els.appUpdatePillAction.setAttribute('aria-expanded', String(open));
   }
-  if (!open) {
-    const active = document.activeElement;
-    if (active === document.body || active === els.appUpdatePopover || els.appUpdatePopover.contains(active)) {
-      els.appUpdatePillAction.focus();
-    }
-  }
 });
 
-els.appUpdatePopoverAction.addEventListener('click', async () => {
-  els.appUpdatePopover.hidePopover();
-  await runAppUpdateAction();
+els.appUpdatePopoverDismiss.addEventListener('click', async () => {
+  const version = state.appUpdate?.latest?.version;
+  if (!version) return;
+  hideAppUpdatePopover();
+  state.appUpdate = await window.tokenMonitor.dismissAppUpdate(version);
+  renderAppUpdatePill();
+  renderSettingsAppUpdateRow();
 });
 
-els.appUpdatePopoverRelease.addEventListener('click', async () => {
-  const url = state.appUpdate?.latest?.htmlUrl;
-  if (url) await window.tokenMonitor.openExternal(url);
-});
+for (const container of [els.appUpdatePopoverBody, els.appUpdateNotesBody]) {
+  container.addEventListener('click', async (event) => {
+    const link = event.target.closest('[data-release-url]');
+    if (!link || !container.contains(link)) return;
+    await window.tokenMonitor.openExternal(link.dataset.releaseUrl);
+  });
+}
 
 window.addEventListener('resize', () => {
   if (els.appUpdatePopover.matches(':popover-open')) positionAppUpdatePopover();
@@ -13365,11 +13758,6 @@ els.appUpdateCheckButton.addEventListener('click', async () => {
 
 els.appUpdateViewReleaseButton.addEventListener('click', async () => {
   await runAppUpdateAction();
-});
-
-els.appUpdateReleaseNotesButton.addEventListener('click', async () => {
-  const url = state.appUpdate?.latest?.htmlUrl;
-  if (url) await window.tokenMonitor.openExternal(url);
 });
 
 window.tokenMonitor.onSettingsPush?.((next) => {
@@ -13952,22 +14340,15 @@ function drawTrayFallbackMark(ctx, value, x, y, size, color) {
 }
 
 function trayTextCanvasFont(item, fontSize, defaultWeight) {
-  const style = item?.fontStyle || 'normal';
-  const family = style === 'compactMono'
-    ? 'ui-monospace, ".AppleSystemUIFontMonospaced", "SFMono-Regular", "SF Mono", Menlo, monospace'
-    : '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif';
-  const weight = style === 'menubar' ? 700 : style === 'compactMono' ? 600 : defaultWeight;
-  return `${weight} ${fontSize}px ${family}`;
+  return window.TokenMonitorTrayTypography.font(item, fontSize, defaultWeight);
 }
 
 function trayTextHorizontalScale(item) {
-  if (item?.fontStyle === 'condensed') return 0.86;
-  if (item?.fontStyle === 'menubar') return 0.92;
-  return 1;
+  return window.TokenMonitorTrayTypography.horizontalScale(item);
 }
 
 function trayTextSpaceScale(item) {
-  return item?.fontStyle === 'compactMono' ? 0.55 : 1;
+  return window.TokenMonitorTrayTypography.spaceScale(item);
 }
 
 function trayTextRuns(ctx, text, item) {
@@ -14082,11 +14463,9 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
 
   if (item.type === 'spacer') {
     const isDot = item.variant === 'dot';
-    const ratios = isDot
-      ? { narrow: 0.18, regular: 0.24, wide: 0.34 }
-      : { narrow: 0.07, regular: 0.14, wide: 0.27 };
+
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(2, Math.round(h * (ratios[item.size] || ratios.regular)));
+    canvas.width = window.TokenMonitorTrayTypography.spacerWidth(item, h);
     canvas.height = h;
     if (isDot) {
       const ctx = canvas.getContext('2d');
@@ -14190,7 +14569,7 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
       ? 'app'
       : trayLayoutApi.preferredRowProvider(rows, preferredIndex);
     const iconSize = h;
-    const iconGap = Math.max(2, Math.round(h * 0.08));
+    const iconGap = window.TokenMonitorTrayTypography.iconGap(h);
     const fontSize = Math.max(8, Math.round(h * 0.43));
     const font = trayTextCanvasFont(item, fontSize, 600);
     const horizontalScale = trayTextHorizontalScale(item);
@@ -14347,6 +14726,7 @@ async function maybeUpdateBarsIcon(options = {}) {
   if (options.refreshComposers !== false && isSettingsSurfaceVisible()) {
     refreshTrayComposers();
     if (edgeDockAvailable() && state.settings?.edgeDockEnabled === true) edgeDockComposer?.render();
+    if (state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true) notchItemsComposer?.render();
   } else {
     syncCustomTrayClockTimer();
   }
@@ -14553,6 +14933,9 @@ function renderStandardTrayPreview(mode, stats) {
 }
 
 function trayComposerPreview(surface) {
+  if (surface === 'notch') {
+    return { src: renderCustomTrayLayout(statsForTrayComposer(), state.settings?.notchCustomLayout, currentFloatingBubbleBitmapHeight(), floatingBubbleGeneratedColors(), { showProviderBadge: false }) };
+  }
   const isTray = surface === 'tray';
   const contentKey = isTray ? 'trayContent' : 'floatingBubbleContent';
   const layoutKey = isTray ? 'trayCustomLayout' : 'floatingBubbleCustomLayout';
@@ -14598,8 +14981,9 @@ function activateTrayComposer(surface) {
 
 function createTrayComposer(surface) {
   const isTray = surface === 'tray';
-  const root = isTray ? els.trayComposer : els.floatingBubbleComposer;
-  const layoutKey = isTray ? 'trayCustomLayout' : 'floatingBubbleCustomLayout';
+  const isNotch = surface === 'notch';
+  const root = isNotch ? els.notchComposer : isTray ? els.trayComposer : els.floatingBubbleComposer;
+  const layoutKey = isNotch ? 'notchCustomLayout' : isTray ? 'trayCustomLayout' : 'floatingBubbleCustomLayout';
   const contentKey = isTray ? 'trayContent' : 'floatingBubbleContent';
   return window.TokenMonitorTrayComposer.createTrayComposer({
     root,
@@ -14620,7 +15004,7 @@ function createTrayComposer(surface) {
       showProviderBadge: isTray && state.settings?.showTrayProviderBadge === true
     }),
     getPreview: () => trayComposerPreview(surface),
-    isEditable: () => state.settings?.[contentKey] === 'custom',
+    isEditable: () => isNotch || state.settings?.[contentKey] === 'custom',
     onCustomize: () => activateTrayComposer(surface),
     providerChoices: trayComposerProviderChoices,
     accountChoices: trayComposerAccountChoices,
@@ -14630,6 +15014,7 @@ function createTrayComposer(surface) {
       state.settings[layoutKey] = trayLayoutApi.normalizeTrayLayout(nextLayout);
       observeDisplayLiveTokenRates(state.stats);
       if (isTray) void maybeUpdateBarsIcon({ refreshComposers: commit });
+      else if (isNotch) { if (commit) refreshTrayComposers(); }
       else {
         renderFloatingBubbleContent();
         if (commit) refreshTrayComposers();
@@ -14662,7 +15047,8 @@ function syncCustomTrayClockTimer() {
 function refreshTrayComposers() {
   const surfaces = [
     { id: 'tray', root: els.trayComposer, visible: state.settings?.showTrayIcon !== false },
-    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleEnabled === true }
+    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleEnabled === true },
+    { id: 'notch', root: els.notchComposer, visibilityRoot: els.notchComposerDetails, visible: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchSummaryMode === 'custom' }
   ];
   window.TokenMonitorTrayComposer.syncTrayComposerSurfaces(
     surfaces,

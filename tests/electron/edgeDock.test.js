@@ -104,6 +104,13 @@ test('a long detail total shrinks beside its compact reading instead of wrapping
   fitCardTotal({ querySelector: () => row });
   assert.equal(number.style.fontSize, '24px');
   number.style = {};
+  number.getBoundingClientRect = () => ({ width: 236 * 1.6 });
+  compact.getBoundingClientRect = () => ({ width: 47 * 1.6 });
+  fitCardTotal({ querySelector: () => row }, 1.6);
+  assert.equal(number.style.fontSize, '24px', 'text zoom must not change the logical fit');
+  number.getBoundingClientRect = () => ({ width: 236 });
+  compact.getBoundingClientRect = () => ({ width: 47 });
+  number.style = {};
   row.querySelector = (selector) => selector === 'strong' ? number : null;
   fitCardTotal({ querySelector: () => row });
   assert.equal(number.style.fontSize, undefined);
@@ -114,7 +121,7 @@ test('a long detail total shrinks beside its compact reading instead of wrapping
 
 test('a card commits after its reported height is clamped to the work area', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('// ---- Wiring'));
+  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const notchRenderer ='));
   for (const kind of ['provider', 'stat']) {
     for (const { measured, maxCardHeight, expected } of [
       // Chromium at 175% scaling can measure a max-height: 851px card this way.
@@ -127,16 +134,17 @@ test('a card commits after its reported height is clamped to the work area', () 
       const card = { dataset: {}, style: {}, getBoundingClientRect: () => ({ height: measured }) };
       const renderBubble = Function('deps', `
         const { root, stagingLayer, providerCard, statCard, fitCardTotal,
-          clampBreakdownList, bridge, commitCard } = deps;
+          clampBreakdownList, reserveAccountHeight, bridge, commitCard } = deps;
         ${source}
         return renderBubble;
       `)({
-        root: { dataset: {} },
+        root: { dataset: {}, classList: { toggle() {} } },
         stagingLayer: { replaceChildren() {} },
         providerCard: () => card,
         statCard: () => card,
         fitCardTotal() {},
         clampBreakdownList() {},
+        reserveAccountHeight() {},
         bridge: { reportBubbleSize: (cellId, height) => reports.push({ cellId, height }) },
         commitCard: (_card, cellId) => { visibleId = cellId; }
       });
@@ -324,7 +332,10 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   // The meta line must compose through the shared helper — a projection that
   // still handed the card a flattened top model would pass the map assertions.
   assert.match(sessions, /sessionRowsApi\.sessionModelLabel\(session\)/);
-  assert.match(sessions, /if \(context\) meta\.append\(context\)/);
+  // The context gauge or cache badge comes from the one builder every compact
+  // session row shares, so the card cannot drift from the Home list or Notch.
+  assert.match(sessions, /sessionRowsApi\.sessionStatusNode\(document, session, \{ prefix: 'edge-dock-session'/);
+  assert.match(sessions, /if \(status\) meta\.append\(status\)/);
   // Running is a dot beside the name, not a recoloured title.
   assert.match(sessions, /nameNode\.append\(stateMark\(session, key, activityState\)\)/);
   assert.match(sessions, /el\('span', 'edge-dock-session-title', name\)/);
@@ -1026,6 +1037,47 @@ test('the sessions rate line carries no unreachable tooltip', () => {
 // `.edge-dock-session-list` - and that is the one which overflows there, because running
 // rows are never capped. Reading only the first selector meant every clock repaint of
 // that card reset it to the top, mid-read.
+test('provider detail reserves natural account height without exceeding half the card', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const source = dock.slice(dock.indexOf('function reserveAccountHeight('), dock.indexOf('function fitCardTotal('));
+  const reserve = Function(`${source}; return reserveAccountHeight;`)();
+  for (const [natural, cap, expected] of [[75.15, 570, '76px'], [1200, 570, '285px'], [75.15, 228, '76px']]) {
+    const accounts = { style: { flexShrink: '' }, getBoundingClientRect: () => ({ height: accounts.style.flexShrink === '0' ? natural : 48 }) };
+    const card = { querySelector: selector => selector.endsWith('accounts') ? accounts : {} };
+    reserve(card, cap);
+    assert.equal(accounts.style.minHeight, expected);
+    assert.equal(accounts.style.flexShrink, '', 'keep the original shared scrolling/flex rule');
+  }
+  const accounts = { style: {}, getBoundingClientRect: () => { throw new Error('no need to measure without sessions'); } };
+  reserve({ querySelector: selector => selector.endsWith('accounts') ? accounts : null }, 570);
+  assert.equal(accounts.style.minHeight, undefined);
+});
+
+test('shared card repaint preserves both account and session scroll positions independently', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const source = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('// The period card'));
+  let previous;
+  const commit = Function('deps', `const {contentLayer, overflowText, document, cardResetAnimator, CARD_SCROLL_SELECTOR} = deps; ${source}; return commitCard;`)({
+    contentLayer: { querySelector: () => previous, replaceChildren() {} },
+    overflowText: { refresh() {}, preserveReading() {} },
+    cardResetAnimator: { capture() {}, animate() {} },
+    CARD_SCROLL_SELECTOR: '.edge-dock-accounts, .edge-dock-session-list', document: {}
+  });
+  const make = (id, positions) => {
+    const lists = Object.values(positions);
+    lists.forEach(list => { list.closest = () => null; });
+    return { dataset: { cellId: id }, querySelectorAll: () => lists };
+  };
+  previous = make('codex', { '.edge-dock-accounts': { scrollTop: 25 }, '.edge-dock-session-list': { scrollTop: 150 } });
+  const positions = { '.edge-dock-accounts': { scrollTop: 0 }, '.edge-dock-session-list': { scrollTop: 0 } };
+  commit(make('codex', positions), 'codex');
+  assert.equal(positions['.edge-dock-accounts'].scrollTop, 25);
+  assert.equal(positions['.edge-dock-session-list'].scrollTop, 150);
+  commit(make('claude', positions), 'claude');
+  assert.equal(positions['.edge-dock-accounts'].scrollTop, 0);
+  assert.equal(positions['.edge-dock-session-list'].scrollTop, 0);
+});
+
 test('a repainted card restores the scroll container it actually uses', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const css = readRendererFile(path.join('edgeDock', 'dock.css'));
@@ -1060,7 +1112,7 @@ test('the self-repaint cadence matches what each surface actually needs', () => 
   const period = dock.slice(dock.indexOf('const BUBBLE_REPAINT_MS'), dock.indexOf('function repaintSelf('));
   // The card keeps the 30s it always had.
   assert.match(period, /const BUBBLE_REPAINT_MS = 30_000;/);
-  assert.match(period, /const period = surface === 'bubble' \? BUBBLE_REPAINT_MS : 0;/);
+  assert.match(period, /notchRenderer\.needsClock\(\)/);
   // A rail only wakes for a sessions expiry, and reports 0 when there is none - which
   // is what leaves its timer unarmed rather than polling it.
   assert.match(period, /if \(!surfacesShowingSessions\(\)\) return 0;/);
@@ -2701,6 +2753,24 @@ test('a larger dock that would not fit shrinks to the largest size that keeps fu
 });
 
 
+test('Notch detail can retain aggregate failures without changing rail visibility or hidden accounts', () => {
+  const healthy = { provider: 'codex', status: 'ok', accountKey: 'healthy', windows: [{ kind: 'session', remainingPercent: 80 }] };
+  const failures = ['unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error', 'notConfigured']
+    .map((status) => ({ provider: 'codex', status, accountKey: status, windows: [] }));
+  const localOnly = { provider: 'codex', status: 'unauthorized', accountKey: 'local-only', windows: [] };
+  const stats = { limits: { providers: [healthy, ...failures] }, devices: [{ deviceId: 'here', limits: { providers: [localOnly] } }] };
+  const options = { items: [{ type: 'limit', provider: 'codex', hiddenAccounts: ['error'] }], localDeviceId: 'here' };
+  const rail = buildEdgeDockCells(stats, options)[0];
+  const top = buildEdgeDockCells(stats, { ...options, includeUnavailableAccounts: true })[0];
+  assert.deepEqual(rail.accounts.map((a) => a.accountKey), ['healthy']);
+  assert.equal(top.accountCount, 6);
+  assert.deepEqual(top.accounts.map((a) => a.accountKey), ['healthy', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'notConfigured']);
+  assert.equal(top.headlineAccount, rail.headlineAccount);
+  assert.equal(top.remainingPercent, 80);
+  assert.ok(top.accounts.slice(1).every((a) => a.headlineRemaining === null));
+  assert.ok(top.subscriptionAccounts.some((a) => a.accountKey === 'local-only'), 'identity-only records still cannot become display rows');
+});
+
 test('provider card repaint preserves both account and session scroll and ignores nested families', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const start = dock.indexOf('function commitCard(');
@@ -2765,7 +2835,7 @@ test('an active Grok Bot group survives recent caps and running-only selection a
   const sessions = {
     'codex:quiet': { client: 'codex', sessionId: 'quiet', totalTokens: 1, turnEnded: true,
       lastUsedAt: new Date(now - 1000).toISOString() },
-    'cursor:bot-a': { client: 'cursor', sessionId: 'bot-a', grokBotSession: true,
+    'cursor:bot-a': { client: 'cursor', sessionId: 'bot-a', grokBotSession: true, turnEnded: false,
       totalTokens: 10, costUsd: 1, models: { 'grok-bot-test': 10 },
       lastUsedAt: new Date(now - 8 * 60_000).toISOString() },
     'cursor:bot-b': { client: 'cursor', sessionId: 'bot-b', grokBotSession: true, turnEnded: true,
@@ -2782,6 +2852,7 @@ test('an active Grok Bot group survives recent caps and running-only selection a
   assert.equal(dock.sessions.length, 1);
   assert.equal(dock.sessions[0].sessionGroup, 'cursor-grok-bot');
   assert.equal(dock.sessions[0].totalTokens, 30);
+  assert.equal(edgeDockPresentation.sessionActivityState(dock.sessions[0], now + 1000), 'running');
 });
 
 for (const shape of ['independent', 'aliases', 'cross-client child', 'Grok Bot']) {
