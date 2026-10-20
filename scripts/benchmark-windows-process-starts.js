@@ -24,6 +24,7 @@ async function main() {
         cpuMs: cost ? Number(cost[1]) : null,
         peakWorkingSetMiB: cost ? +(Number(cost[2]) / 1048576).toFixed(1) : null,
         killed: Boolean(error?.killed), code: error?.code ?? null, signal: error?.signal ?? null,
+        succeeded: !error && Number.isFinite(Date.parse(reading?.trim().split(' ')[1])),
         reading: reading?.trim() ?? null, stderr: String(stderr || '').trim().slice(0, 400) };
       samples.push(sample);
       console.log('PowerShell probe: ' + JSON.stringify(sample));
@@ -51,9 +52,9 @@ async function main() {
     const instrumented = '$queryWatch = [Diagnostics.Stopwatch]::StartNew(); ' + query
       + "; $queryWatch.Stop(); Write-Output ('probe-query-ms ' + $queryWatch.Elapsed.TotalMilliseconds.ToString([Globalization.CultureInfo]::InvariantCulture))" + costScript;
     run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', instrumented],
-      { timeout, maxBuffer: 128 * 1024, windowsHide: true }, (_error, stdout) => {
+      { timeout, maxBuffer: 128 * 1024, windowsHide: true }, (error, stdout) => {
         const reading = String(stdout).split('\n').find(line => line.trim().startsWith(process.pid + ' '));
-        const time = reading ? Date.parse(reading.trim().split(' ')[1]) : NaN;
+        const time = !error && reading ? Date.parse(reading.trim().split(' ')[1]) : NaN;
         resolve(time);
       }, timeout === 2000 ? 'legacy-2s' : 'extended-measurement');
   }).then(time => {
@@ -69,7 +70,7 @@ async function main() {
     assert.ok(await legacyProbe(15_000), 'bounded CIM reference probe has a live PID reading; see diagnostics');
   }
   console.log('Legacy 2-second successes: ' + samples.filter(sample =>
-    sample.label === 'legacy-2s' && sample.reading && !sample.killed).length + '/5');
+    sample.label === 'legacy-2s' && sample.succeeded).length + '/5');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });
