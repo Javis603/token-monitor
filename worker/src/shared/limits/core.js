@@ -658,14 +658,6 @@ function providerWindowRank(provider) {
   const windowCount = Array.isArray(provider?.windows) ? provider.windows.length : 0;
   if (provider?.provider === 'codex') return windowCount > 0 ? 1 : 0;
   if (provider?.provider === 'opencode') return windowCount;
-  // Antigravity quota groups are gated by the client version a device sends
-  // (Gemini 4 Argon needs a newer Hub identity). While devices run mixed
-  // builds, the same account must not flip between a full and a partial set
-  // depending on which device refreshed last.
-  // A synthetic Balance (credits) window is not a quota group.
-  if (provider?.provider === 'antigravity') {
-    return (provider.windows || []).filter((window) => window?.metric !== 'credits').length;
-  }
   return 0;
 }
 
