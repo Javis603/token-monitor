@@ -695,6 +695,26 @@ test('an OpenRouter card carries the balance meter and its detail tooltip', () =
   assert.match(tooltip.text, /All time/);
 });
 
+test('a Sub2API card keeps Month and All time in the summary and its original usage tooltip', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'sub2api', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, currency: 'USD' }],
+    balance: { amount: 12.5, currency: 'USD', monthSpend: 2.5, allTimeSpend: 18.75 },
+    usageSummary: {
+      period: 'month', requests: 21, totalTokens: 1940, inputTokens: 1234,
+      outputTokens: 456, cacheReadTokens: 200, cacheCreationTokens: 50,
+      averageDurationMs: 850, standardCost: 3
+    }
+  }, '#888888');
+  assert.equal(card.find('limit-spend-summary').text, 'Month $2.50 · All time $18.75');
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.deepEqual(tooltip.children.map((row) => row.text), [
+    'Month requests 21', 'Month tokens 1,940', 'Input tokens 1,234',
+    'Output tokens 456', 'Cache tokens 250', 'Avg response 850 ms', 'Standard cost $3.00'
+  ]);
+  assert.equal(tooltip.find('is-separated'), null);
+});
+
 test('a third-party card summarizes Today and Month and details every period', () => {
   const card = dockView().renderProviderWindows({
     provider: 'thirdparty',

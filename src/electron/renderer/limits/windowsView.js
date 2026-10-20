@@ -678,20 +678,23 @@
       const standardCost = optionalFiniteNumber(usage.standardCost);
       if (standardCost !== null) entries.push([t('settings.thirdparty.standardCost'), formatMoney(standardCost, currency)]);
     }
-    // The upward-opening tooltip keeps account details above the period
-    // breakdown, with spend nearest its trigger. A summary-only spend value
-    // (for example All time on a compatible fork) need not repeat in the tooltip.
-    const spendValues = providerSpendEntries(balance);
+    // Only New API account dashboards add period details. Other adapters keep
+    // their existing Month/All time summary and account-only tooltip.
+    const isNewApiAccount = provider?.adapterId === 'newapi-account';
+    const spendValues = providerSpendEntries(balance)
+      .filter(([label]) => isNewApiAccount || label === 'Month' || label === 'All time');
     const spendRows = spendValues.map(([label, value]) => [label, formatMoney(value, currency)]);
     if (spendRows.length === 0 && entries.length === 0) return null;
     // Without a spend figure the row has nothing to summarize, so it retitles
     // itself and leans entirely on the tooltip.
-    const preferredSpend = spendValues.filter(([label]) => label === 'Today' || label === 'Month');
+    const preferredSpend = isNewApiAccount
+      ? spendValues.filter(([label]) => label === 'Today' || label === 'Month')
+      : spendValues;
     const summaryValues = preferredSpend.length > 0 ? preferredSpend : spendValues.slice(0, 2);
     const summary = summaryValues
       .map(([label, value]) => `${label} ${formatMoney(value, currency)}`)
       .join(' · ');
-    const periodDetails = spendRows.length > summaryValues.length ? spendRows : [];
+    const periodDetails = isNewApiAccount && spendRows.length > summaryValues.length ? spendRows : [];
     const detailEntries = [
       ...entries,
       ...(entries.length > 0 && periodDetails.length > 0 ? [{ full: '', separated: true }] : []),
