@@ -6421,8 +6421,16 @@ function renderHomeModelModule(period) {
   return module;
 }
 
+// Clients picked for the Home Tools module; empty means every tool with usage.
+function homeToolClientSet() {
+  return new Set(clientDisplayPreferencesApi.normalizePinnedClients(state.settings?.homeToolClients, KNOWN_CLIENTS).split(',').filter(Boolean));
+}
+
 function homeToolSourceRows(period) {
-  return periodAttributionRows(period, period?.clients, period?.clientCosts, period?.clientUnpricedTokens).map(({ key: client, value }) => ({
+  const selected = homeToolClientSet();
+  return periodAttributionRows(period, period?.clients, period?.clientCosts, period?.clientUnpricedTokens)
+    .filter(({ key }) => selected.size === 0 || selected.has(key))
+    .map(({ key: client, value }) => ({
     key: client,
     name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client,
     value: Number(value || 0),
@@ -6455,10 +6463,10 @@ function renderHomeToolModule(period) {
     share.className = 'home-list-aux';
     share.textContent = formatPercent(row.share * 100);
     item.append(mark, name, value, share);
+    const stats = state.settings?.homeToolDetails === false ? null : renderHomeToolStats(homeToolStats(period, row.key, row.value));
     const card = document.createElement('div');
-    card.className = 'home-tool-card';
+    card.className = stats ? 'home-tool-card' : 'home-tool-card is-plain';
     card.append(item);
-    const stats = renderHomeToolStats(homeToolStats(period, row.key, row.value));
     if (stats) card.append(stats);
     body.append(card);
   }
@@ -6476,11 +6484,15 @@ function homeToolStats(period, client, totalTokens) {
     outputTokens: attributionComponent(period, 'clientOutputs', client),
     unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client)
   });
+  // Missing component maps read as zero, which would pass the whole total off as
+  // uncached input; split only a tool that reports at least one component.
+  const hasComponents = ['clientCacheReads', 'clientOutputs', 'clientUnclassifiedTokens']
+    .some((field) => period?.[field] && Object.prototype.hasOwnProperty.call(period[field], client));
   const throughput = period?.clientThroughput?.[client];
   const durationMs = Math.max(0, Number(throughput?.timedDurationMs) || 0);
   const timedOutput = Math.max(0, Number(throughput?.timedOutputTokens) || 0);
   return {
-    parts: parts.unclassified < totalTokens ? parts : null,
+    parts: hasComponents && parts.unclassified < totalTokens ? parts : null,
     durationMs,
     tokensPerSecond: durationMs > 0 && timedOutput > 0 ? timedOutput / (durationMs / 1000) : null
   };
@@ -6543,6 +6555,8 @@ function renderHomeToolStats({ parts, durationMs, tokensPerSecond }) {
       homeToolStatCell('modelTime', formatHomeToolDuration(durationMs)),
       homeToolStatCell('speed', tokensPerSecond ? t('home.toolStats.tps', { value: formatNumber(tokensPerSecond) }) : '--')
     );
+    // The rate is an estimate over timed generation, not pure decoding; say so.
+    cells[cells.length - 1].title = t('home.toolStats.speedHint');
   }
   if (!cells.length) return null;
   const wrap = document.createElement('div');
@@ -10205,6 +10219,69 @@ function renderHomeModuleCountSettings(id) {
   return wrap;
 }
 
+function renderHomeToolSettings() {
+  const frag = document.createDocumentFragment();
+  frag.append(renderHomeModuleCountSettings('tool'));
+
+  const detailsLabel = document.createElement('label');
+  detailsLabel.className = 'checkbox-label home-limit-status-setting';
+  const detailsInput = document.createElement('input');
+  detailsInput.type = 'checkbox';
+  detailsInput.checked = state.settings?.homeToolDetails !== false;
+  const detailsText = document.createElement('span');
+  detailsText.textContent = t('settings.home.toolDetails');
+  detailsInput.addEventListener('change', async () => {
+    try {
+      await saveSettings({ homeToolDetails: detailsInput.checked });
+    } catch (_) {
+      return;
+    }
+    renderHomeIfVisible();
+  });
+  detailsLabel.append(detailsInput, detailsText);
+  frag.append(detailsLabel);
+
+  // Offer the tools that have usage in any period, plus any already picked.
+  const selected = homeToolClientSet();
+  const used = new Set(selected);
+  for (const period of Object.values(state.stats?.periods || {})) {
+    for (const [client, tokens] of Object.entries(period?.clients || {})) {
+      if (Number(tokens) > 0 && KNOWN_CLIENTS.some((known) => known.id === client)) used.add(client);
+    }
+  }
+  const pickerTitle = document.createElement('p');
+  pickerTitle.className = 'settings-note home-tool-picker-note';
+  pickerTitle.textContent = t('settings.home.toolPickerNote');
+  frag.append(pickerTitle);
+  const picker = document.createElement('div');
+  picker.className = 'home-tool-picker';
+  const ordered = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients)
+    .filter((client) => used.has(client.id));
+  for (const client of ordered) {
+    const label = document.createElement('label');
+    label.className = 'checkbox-label home-tool-picker-option';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = client.id;
+    input.checked = selected.has(client.id);
+    const text = document.createElement('span');
+    text.textContent = clientLabels[client.id] || client.label || client.id;
+    input.addEventListener('change', async () => {
+      const next = [...picker.querySelectorAll('input:checked')].map((node) => node.value);
+      try {
+        await saveSettings({ homeToolClients: next.join(',') });
+      } catch (_) {
+        return;
+      }
+      renderHomeIfVisible();
+    });
+    label.append(input, text);
+    picker.append(label);
+  }
+  frag.append(picker);
+  return frag;
+}
+
 function renderHomeSettingsList() {
   const wrap = document.createElement('div');
   wrap.id = 'homeSettingsList';
@@ -10291,7 +10368,8 @@ function renderHomeSettingsList() {
       const inner = document.createElement('div');
       inner.className = 'accordion-animation-inner';
       inner.appendChild(id === 'limits' ? renderHomeLimitProviderList()
-        : id === 'trends' ? renderHomeActivitySettings() : renderHomeModuleCountSettings(id));
+        : id === 'trends' ? renderHomeActivitySettings()
+          : id === 'tool' ? renderHomeToolSettings() : renderHomeModuleCountSettings(id));
       listContainer.appendChild(inner);
       wrap.append(listContainer);
     }

@@ -797,6 +797,11 @@ test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
   assert.equal(collectorAnchorTrust(anchor({ allTime: null }), options), null);
   assert.equal(collectorAnchorTrust(anchor(), { ...options, clients: 'claude,codex' }), null);
   assert.equal(collectorAnchorTrust(anchor(), { ...options, projectsEnabled: false }), null);
+  // An anchor from before per-client throughput would drop that map from the
+  // broad periods on the first anchored delta, so it forces a full scan.
+  const timed = { modelThroughput: {}, clientThroughput: {} };
+  assert.ok(collectorAnchorTrust(anchor({ today: timed, month: timed, allTime: timed }), options));
+  assert.equal(collectorAnchorTrust(anchor({ today: timed, month: { modelThroughput: {} }, allTime: timed }), options), null);
 
   // A custom scan path added after the anchor was written invalidates it; an
   // anchor whose fingerprint already covers that path stays trusted.

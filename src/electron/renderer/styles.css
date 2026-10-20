@@ -3544,6 +3544,13 @@ html.is-windows .settings-panel select option {
   scrollbar-width: none;
 }
 .home-panel::-webkit-scrollbar { width: 0; height: 0; }
+/* Taller Home modules (tool cards) can run past the footer edge: fade the cut so it
+   reads as scrollable, and leave room for the last module to scroll clear of it. */
+.home-panel {
+  padding-bottom: 14px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
+}
 .home-module {
   display: grid;
   width: 100%;
@@ -8390,3 +8397,14 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 [hidden] {
   display: none !important;
 }
+
+.home-tool-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 10px;
+  padding: 2px 0 6px;
+}
+.home-tool-picker-option { min-width: 0; }
+.home-tool-picker-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-tool-picker-note { margin: 6px 0 2px; }
+.home-tool-card.is-plain { padding-block: 6px; }
