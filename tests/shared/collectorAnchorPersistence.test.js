@@ -26,8 +26,16 @@ const { installInProcessWatchHost } = require('../helpers/watchHost');
 
 installInProcessWatchHost(test);
 
+// Collection only offers clients whose source exists on disk. Left to the
+// runner's own home — empty on every GitHub runner — every scan below is
+// skipped before spawn and the spawn counts read zero.
+const scanHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-anchor-home-'));
+fs.mkdirSync(path.join(scanHome, '.claude', 'projects'), { recursive: true });
+process.on('exit', () => { try { fs.rmSync(scanHome, { recursive: true, force: true }); } catch (_) {} });
+
 const baseOptions = {
   clients: 'claude',
+  homeDir: scanHome,
   allTimeSince: '2024-01-01',
   commandTimeoutMs: 1000,
   deviceId: 'test-device',
@@ -230,6 +238,9 @@ test('anchored tick replaces a stale anchor title with the freshly resolved rena
 
 test('restart restores local T3 title provenance and clears deleted titles on the first watch scan', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-t3-anchor-'));
+  // Doubles as the collector's home: a client with no source is filtered out
+  // before spawn, and these cases count spawns.
+  fs.mkdirSync(path.join(tmpShared, '.claude', 'projects'), { recursive: true });
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
   const updates = [];
@@ -366,6 +377,9 @@ for (const update of ['deleted', 'renamed']) {
 
 test('full anchors persist local-only Reasonix native views alongside aggregate periods', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-anchor-'));
+  // Doubles as the collector's home: a client with no source is filtered out
+  // before spawn, and these cases count spawns.
+  fs.mkdirSync(path.join(tmpShared, '.claude', 'projects'), { recursive: true });
   const nativeView = {
     sessions: { today: { 'reasonix:session': { client: 'reasonix', totalTokens: 12 } }, month: {}, allTime: {} },
     projects: { today: { 'token monitor': { label: 'token-monitor', tokens: 12, clients: { reasonix: 12 } } }, month: {}, allTime: {} }
@@ -415,6 +429,9 @@ function mkPeriod() {
 
 test('restart reuse: anchor file on disk enables todayOnly on first interval tick', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-restart-'));
+  // Doubles as the collector's home: a client with no source is filtered out
+  // before spawn, and these cases count spawns.
+  fs.mkdirSync(path.join(tmpShared, '.claude', 'projects'), { recursive: true });
   const dateKey = localTodayKey();
 
   // Write a valid anchor file to the isolated shared dir
@@ -477,6 +494,9 @@ test('restart reuse: anchor file on disk enables todayOnly on first interval tic
 
 test('future fullScanAt forces a full scan on first interval tick', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-future-ts-'));
+  // Doubles as the collector's home: a client with no source is filtered out
+  // before spawn, and these cases count spawns.
+  fs.mkdirSync(path.join(tmpShared, '.claude', 'projects'), { recursive: true });
   const dateKey = localTodayKey();
 
   fs.mkdirSync(path.join(tmpShared), { recursive: true });
@@ -536,6 +556,9 @@ test('future fullScanAt forces a full scan on first interval tick', async () => 
 
 test('missing fullScanAt forces a full scan on first interval tick', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-missing-ts-'));
+  // Doubles as the collector's home: a client with no source is filtered out
+  // before spawn, and these cases count spawns.
+  fs.mkdirSync(path.join(tmpShared, '.claude', 'projects'), { recursive: true });
   const dateKey = localTodayKey();
 
   fs.mkdirSync(path.join(tmpShared), { recursive: true });
@@ -596,6 +619,9 @@ test('missing fullScanAt forces a full scan on first interval tick', async () =>
 
 test('unparseable fullScanAt forces a full scan on first interval tick', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bad-ts-'));
+  // Doubles as the collector's home: a client with no source is filtered out
+  // before spawn, and these cases count spawns.
+  fs.mkdirSync(path.join(tmpShared, '.claude', 'projects'), { recursive: true });
   const dateKey = localTodayKey();
 
   fs.mkdirSync(path.join(tmpShared), { recursive: true });
@@ -657,6 +683,9 @@ test('unparseable fullScanAt forces a full scan on first interval tick', async (
 
 test('WSL toggle off: persisted wslAnchor is not merged into warm previews', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-wsl-off-'));
+  // Doubles as the collector's home: a client with no source is filtered out
+  // before spawn, and these cases count spawns.
+  fs.mkdirSync(path.join(tmpShared, '.claude', 'projects'), { recursive: true });
   const dateKey = localTodayKey();
 
   fs.mkdirSync(tmpShared, { recursive: true });

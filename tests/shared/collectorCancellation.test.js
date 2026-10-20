@@ -123,7 +123,9 @@ test('stopping superseded collectors aborts their physical scan before the next 
     wslScanEnabled: false,
     watchEnabled: false,
     anchorPersistenceEnabled: false,
-    homeDir: '/nonexistent-token-monitor-cancellation-test-home',
+    // A source must exist for the client to be scanned at all; the supersession
+    // assertions below only hold if every restart reaches runTokscale.
+    homeDir: createScanHome(),
     osInfo: {},
     runTokscale,
     onUpdate() {}
@@ -174,6 +176,7 @@ test('usage replacement waits for an aborted tokscale child to close before spaw
     const fresh = require(collectorPath);
     const usageOptions = {
       clients: 'claude',
+      homeDir: createScanHome(),
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 5000,
       deviceId: 'physical-close-barrier-test',
@@ -338,6 +341,7 @@ test('timed-out tokscale remains the replacement barrier through forced terminat
     const fresh = require(collectorPath);
     const usageOptions = {
       clients: 'claude',
+      homeDir: createScanHome(),
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1,
       deviceId: 'timeout-close-barrier-test',
@@ -400,6 +404,7 @@ test('unconfirmed forced termination releases the replacement barrier with a dia
     const fresh = require(collectorPath);
     const usageOptions = {
       clients: 'claude',
+      homeDir: createScanHome(),
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1,
       subprocessTerminationOptions: referencedTerminationOptions({ graceMs: 1, closeGraceMs: 1 }),

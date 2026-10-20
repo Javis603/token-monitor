@@ -49,19 +49,33 @@ function recordingSpawn(calls, tokens = 50, sessionMeta = {}) {
 
 function waitForUpdates(updates, count) {
   if (updates.length >= count) return Promise.resolve();
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
     const interval = setInterval(() => {
       if (updates.length >= count) {
         clearInterval(interval);
         resolve();
+      } else if (Date.now() - startedAt > 5000) {
+        // This used to poll forever. A scan that never starts then showed up as
+        // a job that hung until the six-hour limit instead of a failed case.
+        clearInterval(interval);
+        reject(new Error(`timed out waiting for ${count} update(s), saw ${updates.length}`));
       }
     }, 5);
   });
 }
 
+// Collection only scans clients that have a source on disk, so a test that
+// leaves HOME to the runner gets an empty scan list wherever the runner's home
+// holds no tool directories — which is every GitHub runner. Point the collector
+// at a home that contains the source it is asserting about.
+const scanHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-today-delta-home-'));
+fs.mkdirSync(path.join(scanHome, '.claude', 'projects'), { recursive: true });
+
 const baseOptions = {
   codexLocalUsageEnabled: false, // Synthetic scans must not import a real supplementary ledger.
   clients: 'claude',
+  homeDir: scanHome,
   allTimeSince: '2024-01-01',
   commandTimeoutMs: 1000,
   deviceId: 'test-device',

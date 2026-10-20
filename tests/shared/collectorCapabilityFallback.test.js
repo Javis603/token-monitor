@@ -183,6 +183,9 @@ test('an exit-2 failure unrelated to --client never triggers a probe', async () 
     await assert.rejects(
       collectUsageOnce({
         clients: 'claude',
+        // A source must exist or the scan is skipped before spawn, and the
+        // rejection these cases assert on never happens.
+        homeDir: createScanHome(),
         allTimeSince: '2024-01-01',
         commandTimeoutMs: 1000,
         deviceId: 'test-device',
@@ -212,6 +215,7 @@ test('a probe that itself fails surfaces the original tokscale error, not a sile
     await assert.rejects(
       collectUsageOnce({
         clients: 'claude,dsh',
+        homeDir: createScanHome(),
         allTimeSince: '2024-01-01',
         commandTimeoutMs: 1000,
         deviceId: 'test-device',
