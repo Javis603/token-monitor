@@ -69,10 +69,12 @@ test('Dock keeps omissions in the existing tooltip and never prints zero for an 
 
 test('Dashboard heat tooltip distinguishes known cost, missing price and a genuine zero rate', () => {
   const tooltip = {};
+  const charts = require('../../src/electron/renderer/usageCharts');
   const context = {
     state: { locale: 'en' }, els: { tooltip }, longDate: String, formatCompact: String,
     currencyApi: { normalizeCurrency: () => 'USD', formatCurrencyFromUsd: (cost) => `$${cost.toFixed(2)}` },
-    t: (_key, params) => `${params.tokens} excluded`, positionTooltip() {}
+    t: (_key, params) => `${params.tokens} excluded`, positionTooltip() {},
+    charts, modelColorFor: () => '#6ab4f0', escapeHtml: (value) => String(value), applySwatchColors() {}
   };
   vm.runInNewContext(functionSource('dashboard.js', 'formatCost', 'function formatCostCompact(')
     + functionSource('dashboard.js', 'showHeatTooltip', '\nlet refreshRunning'), context);
@@ -82,8 +84,12 @@ test('Dashboard heat tooltip distinguishes known cost, missing price and a genui
   assert.match(tooltip.innerHTML, /100 excluded/);
   assert.match(tooltip.innerHTML, /—/);
   assert.doesNotMatch(tooltip.innerHTML, /\$0\.00/);
+  // The day's model split is listed below the headline numbers.
+  assert.match(tooltip.innerHTML, /class="tt-sep"/);
+  assert.match(tooltip.innerHTML, /unknown<\/span><span class="tt-val">100<\/span><span class="tt-share">100%<\/span>/);
   context.showHeatTooltip('2026-10-07', { tokens: 200, cost: 1.2, unpricedTokens: 100 }, {});
   assert.match(tooltip.innerHTML, /\$1\.20/);
   assert.match(tooltip.innerHTML, /100 excluded/);
+  assert.doesNotMatch(tooltip.innerHTML, /class="tt-sep"/); // no perModel → no model section
   assert.equal(context.formatCost(0, 0), '$0.00');
 });

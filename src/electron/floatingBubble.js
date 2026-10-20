@@ -7,6 +7,22 @@ const FLOATING_BUBBLE_COLLAPSED_MARGIN = { x: 0, y: FLOATING_BUBBLE_MARGIN };
 const FLOATING_BUBBLE_WINDOWS_COLLAPSED_MARGIN = { x: 0, y: 0 };
 const INITIAL_RENDERER_PERIODS = new Set(['today', 'month', 'week', 'last7', 'last30', 'allTime']);
 const INITIAL_RENDERER_BREAKDOWNS = new Set(['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends']);
+// A specific day is the one period selection that is not a fixed keyword, so it
+// is validated by shape rather than by membership: `day:YYYY-MM-DD`, and only a
+// date that round-trips (rejecting 2026-02-31).
+const DAY_PERIOD_PATTERN = /^day:(\d{4})-(\d{2})-(\d{2})$/;
+
+function normalizedRendererPeriod(value, fallback) {
+  const raw = String(value || '').trim();
+  if (INITIAL_RENDERER_PERIODS.has(raw)) return raw;
+  const match = DAY_PERIOD_PATTERN.exec(raw);
+  if (match) {
+    const key = `${match[1]}-${match[2]}-${match[3]}`;
+    const parsed = new Date(`${key}T00:00:00Z`);
+    if (!Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === key) return raw;
+  }
+  return fallback;
+}
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value)));
@@ -48,10 +64,10 @@ function normalizedInitialRendererValue(value, allowed, fallback) {
 function normalizeInitialRendererViewState(value = {}, fallback = {}) {
   const source = value || {};
   const fallbackSource = fallback || {};
-  const fallbackPeriod = normalizedInitialRendererValue(fallbackSource.period, INITIAL_RENDERER_PERIODS, 'today');
+  const fallbackPeriod = normalizedRendererPeriod(fallbackSource.period, 'today');
   const fallbackBreakdown = normalizedInitialRendererValue(fallbackSource.breakdown, INITIAL_RENDERER_BREAKDOWNS, 'home');
   return {
-    period: normalizedInitialRendererValue(source.period, INITIAL_RENDERER_PERIODS, fallbackPeriod),
+    period: normalizedRendererPeriod(source.period, fallbackPeriod),
     breakdown: normalizedInitialRendererValue(source.breakdown, INITIAL_RENDERER_BREAKDOWNS, fallbackBreakdown)
   };
 }
@@ -246,6 +262,7 @@ module.exports = {
   floatingBubbleSide,
   floatingBubbleWindowChrome,
   normalizeInitialRendererViewState,
+  normalizedRendererPeriod,
   moveFloatingBubbleBounds,
   applyWindowSizeLimits,
   restoreFloatingBubbleWindow

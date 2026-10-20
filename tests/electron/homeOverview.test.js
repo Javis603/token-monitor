@@ -22,6 +22,7 @@ const {
   homeTrendSummary,
   pickHomeHistory,
   patchDailyToday,
+  periodPerModel,
   historyPreviewKey,
   homeHistorySignature,
   shouldFetchHomeHistory,
@@ -88,7 +89,7 @@ test('Home activity uses a custom spotlight hover instead of native SVG titles',
   const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const match = rendererSource.match(/function renderHomeTrendsModule\(\) \{([\s\S]*?)\n\}\n\nfunction renderHome/);
   assert.ok(match, 'renderHomeTrendsModule exists');
-  assert.match(match[1], /setupHomeActivityHover\(activityScroll\)/);
+  assert.match(match[1], /setupHomeActivityHover\(activityScroll, daysByDate\)/);
   assert.match(match[1], /spotlightId:\s*'homeActivitySpotlight'/);
   assert.doesNotMatch(match[1], /titleOf:/);
   assert.match(match[1], /tokenIntensity/);
@@ -741,6 +742,39 @@ test('patchDailyToday appends today with live cost so its heatmap cell is not em
   assert.equal(appended.date, '2026-07-07');
   assert.equal(appended.tokens, 61_700_000);
   assert.equal(appended.cost, 492.5); // intensity uses cost — a 0 here renders today as empty
+});
+
+test('periodPerModel converts a live period split into daily perModel buckets', () => {
+  assert.equal(periodPerModel(null), null);
+  assert.equal(periodPerModel({ models: {} }), null);
+  const perModel = periodPerModel({
+    models: { 'gpt-5': 120, 'claude-opus': 30, idle: 0 },
+    modelCosts: { 'gpt-5': 2.5 },
+    modelUnpricedTokens: { 'claude-opus': 30 }
+  });
+  assert.deepEqual(perModel, {
+    'gpt-5': { tokens: 120, cost: 2.5 },
+    'claude-opus': { tokens: 30, unpricedTokens: 30 }
+  });
+});
+
+test('patchDailyToday keeps the patched today row model split in step with its headline', () => {
+  const perModel = { 'gpt-5': { tokens: 900, cost: 3 } };
+  const appended = patchDailyToday([{ date: '2026-07-06', tokens: 200, cost: 2 }], '2026-07-07', 900, 3, perModel);
+  assert.deepEqual(appended[appended.length - 1], { date: '2026-07-07', tokens: 900, cost: 3, perModel });
+
+  // A stale snapshot's today bucket is overwritten, not merged, so the split cannot
+  // disagree with the headline numbers patched beside it.
+  const overwritten = patchDailyToday(
+    [{ date: '2026-07-07', tokens: 1, cost: 1, perModel: { stale: { tokens: 1 } } }],
+    '2026-07-07', 900, 3, perModel
+  );
+  assert.equal(overwritten.length, 1);
+  assert.deepEqual(overwritten[0], { date: '2026-07-07', tokens: 900, cost: 3, perModel });
+
+  // No split available: the row keeps whatever it had.
+  const untouched = patchDailyToday([{ date: '2026-07-07', tokens: 1, cost: 1, perModel }], '2026-07-07', 900, 3, null);
+  assert.deepEqual(untouched[0], { date: '2026-07-07', tokens: 900, cost: 3, perModel });
 });
 
 test('renderHomeTrendsModule preserves long-range Activity and peak', () => {

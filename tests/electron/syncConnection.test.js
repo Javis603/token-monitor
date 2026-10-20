@@ -49,7 +49,7 @@ test('adopted HTTP or iCloud cache reads preserve transport failure and retry fr
     const context = { state, window: { tokenMonitor: { onStatsPush: fn => { push = fn; } } },
       allTimeSessions: { invalidate() {}, attach: stats => stats }, sessionStatsForDisplay: stats => stats,
       observeLiveTokenRate() {}, observeDisplayLiveTokenRates() {}, applyCodexActiveAccountFromStats() {},
-      fixedPeriodRangesApi: { isDerived: () => false }, statsRenderScheduler: { request() {} },
+      fixedPeriodRangesApi: { isFixedRange: () => false }, statsRenderScheduler: { request() {} },
       warmFixedPeriodHistory() {}, maybeUpdateBarsIcon() {}, refreshHubBuildStatus() {}, syncContentForm: null,
       setInterval: (_fn, ms) => { interval = ms; return 1; }, clearInterval() {}, refreshStats() {}
     };

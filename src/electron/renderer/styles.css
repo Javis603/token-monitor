@@ -4091,6 +4091,40 @@ html.is-windows .settings-panel select option {
 .home-activity-tooltip-date {
   font-size: 0.5625rem;
 }
+.home-activity-tooltip-models {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  margin-top: 2px;
+  padding-top: 3px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.14);
+}
+.home-activity-tooltip-models[hidden] {
+  display: none;
+}
+.home-activity-tooltip-model {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.5625rem;
+}
+.home-activity-tooltip-model-name {
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+.home-activity-tooltip-model-share {
+  color: var(--number);
+  font-variant-numeric: tabular-nums;
+}
+.home-activity-tooltip-model-more {
+  font-size: 0.5625rem;
+  color: var(--muted);
+  opacity: 0.8;
+}
 .home-module-empty {
   display: flex;
   min-height: 36px;
@@ -6119,13 +6153,48 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   right: 42px;
   bottom: auto;
   left: auto;
-  width: 132px;
+  /* Wide enough for the date row's label plus its picker; the four mode rows
+     simply have more room than they need. Capped so a narrow window (down to
+     240px) still keeps the menu inside its titlebar. */
+  width: min(196px, calc(100% - 50px));
   pointer-events: auto;
   transform-origin: right top;
 }
 .period-menu.view-switcher-menu [data-fixed-period] {
   -webkit-app-region: no-drag;
   grid-template-columns: minmax(0, 1fr);
+}
+/* The date row is a menu item that happens to hold a native picker: it keeps
+   the label column and lets the input sit in the value position, so it reads as
+   one more choice rather than a form control dropped into the menu. */
+.period-menu-day {
+  -webkit-app-region: no-drag;
+  grid-template-columns: minmax(0, 1fr) auto;
+  cursor: default;
+}
+.period-menu-day-input {
+  width: 92px;
+  height: 20px;
+  min-width: 0;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
+  color: var(--text);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+}
+.period-menu-day-input:hover,
+.period-menu-day-input:focus-visible {
+  border-color: var(--line-strong);
+  outline: none;
+}
+.period-menu-day-input::-webkit-calendar-picker-indicator {
+  opacity: 0.7;
+  cursor: pointer;
+}
+.period-menu-day-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
 }
 .period-menu.hidden {
   /* Animates out rather than disappearing, so it must keep its box. Higher

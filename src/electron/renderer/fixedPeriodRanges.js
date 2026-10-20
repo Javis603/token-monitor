@@ -6,6 +6,7 @@
   const MONTH_MODES = Object.freeze(['month', 'week', 'last7', 'last30']);
   const LABELS = Object.freeze({
     today: 'DAY',
+    day: 'DAY',
     month: 'MONTH',
     allTime: 'TOTAL',
     week: 'WEEK',
@@ -89,17 +90,54 @@
     return value === 'week' || value === 'last7' || value === 'last30';
   }
 
+  // A specific calendar day. It is a fixed range like week/last7/last30 — it needs
+  // History, it cannot use session/project breakdowns — but unlike them it is
+  // parameterised, so the selection carries the date: `day:2026-10-07`.
+  const DAY_SELECTION_PREFIX = 'day:';
+
+  function daySelection(dateKey) {
+    const key = normalizeDateKey(dateKey);
+    return key ? `${DAY_SELECTION_PREFIX}${key}` : '';
+  }
+
+  function selectedDay(value) {
+    const raw = String(value || '');
+    return raw.startsWith(DAY_SELECTION_PREFIX) ? normalizeDateKey(raw.slice(DAY_SELECTION_PREFIX.length)) : '';
+  }
+
+  function isFixedRange(value) {
+    return isDerived(value) || Boolean(selectedDay(value));
+  }
+
   function slotForSelection(value) {
-    return isDerived(value) || value === 'month' ? 'month' : value;
+    return isDerived(value) || value === 'month' || selectedDay(value) ? 'month' : value;
+  }
+
+  // The tab shows the date for a day selection instead of a mode name: WEEK or
+  // 7D says nothing about which day is on screen. Built from local calendar
+  // parts rather than the ISO string so the label never shifts by a time zone.
+  function dayLabel(dateKey, locale) {
+    const day = normalizeDateKey(dateKey);
+    if (!day) return '';
+    const [year, month, date] = day.split('-').map(Number);
+    if (!locale) return `${month}/${date}`;
+    try {
+      return new Intl.DateTimeFormat(locale, { month: 'numeric', day: 'numeric' })
+        .format(new Date(year, month - 1, date));
+    } catch (_) {
+      return `${month}/${date}`;
+    }
   }
 
   function displayLabel(value) {
-    return LABELS[value] || LABELS.today;
+    return dayLabel(selectedDay(value)) || dayLabel(value) || LABELS[value] || LABELS.today;
   }
 
   function rangeForSelection(selection, options = {}) {
     const todayKey = normalizeDateKey(options.todayKey) || localDayKey(options.now);
     if (!todayKey) return null;
+    const day = selectedDay(selection);
+    if (day) return { start: day, end: day };
     if (selection === 'week') {
       const weekday = new Date(`${todayKey}T00:00:00Z`).getUTCDay();
       const offset = (weekday - weekStartsOn(options.locale) + 7) % 7;
@@ -510,7 +548,7 @@
   }
 
   function fixedPeriodSnapshotFromDevices(selection, sources, options = {}) {
-    if (!isDerived(selection)) return { status: 'native', period: null, range: null, devices: [] };
+    if (!isFixedRange(selection)) return { status: 'native', period: null, range: null, devices: [] };
     if (options.historyEnabled === false) {
       return { status: 'unavailable', reason: 'historyDisabled', period: null, range: null, devices: [] };
     }
@@ -666,12 +704,36 @@
     return period;
   }
 
+  function earliestDailyDate(daily) {
+    let earliest = '';
+    for (const row of Array.isArray(daily) ? daily : []) {
+      const key = normalizeDateKey(row?.date);
+      if (key && (!earliest || key < earliest)) earliest = key;
+    }
+    return earliest;
+  }
+
   function fixedPeriodSnapshot(selection, options = {}) {
-    if (!isDerived(selection)) return { status: 'native', selection, period: null, range: null };
+    if (!isFixedRange(selection)) return { status: 'native', selection, period: null, range: null };
     if (options.historyEnabled === false) return { status: 'unavailable', selection, reason: 'historyDisabled', period: null, range: null };
     if (options.historyAvailable !== true) return { status: 'unavailable', selection, reason: 'historyUnavailable', period: null, range: null };
     const range = rangeForSelection(selection, options);
     if (!range) return { status: 'unavailable', selection, reason: 'historyUnavailable', period: null, range: null };
+    const day = selectedDay(selection);
+    if (day) {
+      const todayKey = normalizeDateKey(options.todayKey) || localDayKey(options.now);
+      // A future day has no data by definition; the native picker caps at today,
+      // but a typed date can still reach here.
+      if (todayKey && day > todayKey) {
+        return { status: 'unavailable', selection, reason: 'futureDay', period: null, range };
+      }
+      // A day before the oldest retained row is not a zero-usage day, it is an
+      // unknown one: History only keeps a rolling window, so reporting zeros
+      // there would claim something the data cannot support.
+      if (earliestDailyDate(options.daily) > range.start) {
+        return { status: 'unavailable', selection, reason: 'beyondHistory', period: null, range };
+      }
+    }
     const daily = dailyForRange(options.daily, range, options);
     return {
       status: 'ready',
@@ -689,7 +751,7 @@
   }
 
   function supportsBreakdown(selection, breakdown, options = {}) {
-    if (!isDerived(selection)) return true;
+    if (!isFixedRange(selection)) return true;
     if (breakdown === 'session' || breakdown === 'project') return false;
     if (breakdown === 'device') return options.deviceHistoriesAvailable === true;
     return true;
@@ -703,11 +765,16 @@
     derivePeriod,
     deviceInventorySignature,
     devicesForReadySnapshot,
+    dayLabel,
     displayLabel,
+    earliestDailyDate,
     fixedPeriodDeviceSnapshots,
     fixedPeriodSnapshot,
     fixedPeriodSnapshotFromDevices,
     isDerived,
+    isFixedRange,
+    daySelection,
+    selectedDay,
     joinDeviceHistorySources,
     localDayKey,
     handlePeriodMenuNavigation,

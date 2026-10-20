@@ -30,7 +30,7 @@ function renderAccountShellError(id) {
     errorText: accountShellErrors[id] || ''
   });
 }
-const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
+const { clientColors, fallbackModelColors, modelVendorFor, modelColor, dailyModelBreakdown } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const tokenNumberAnimationApi = window.TokenMonitorTokenNumberAnimation;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
@@ -262,6 +262,17 @@ const VIEW_DISPLAY_OPTIONS = [
 ];
 const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', 'allTime']);
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
+// `day:YYYY-MM-DD` is the only period value that is not a fixed keyword, so it
+// is validated by shape. Must agree with floatingBubble.js's copy: that one
+// gates the persisted value, this one gates in-window selections.
+const DAY_PERIOD_RE = /^day:(\d{4})-(\d{2})-(\d{2})$/;
+function isDayPeriodValue(value) {
+  const match = DAY_PERIOD_RE.exec(String(value || ''));
+  if (!match) return false;
+  const key = `${match[1]}-${match[2]}-${match[3]}`;
+  const parsed = new Date(`${key}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === key;
+}
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
   { id: 'tool', labelKey: 'home.tools', viewId: 'tool' },
@@ -309,7 +320,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+const state = { period: normalizePeriodValue(initialViewState.period, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
@@ -383,6 +394,7 @@ Object.assign(els, {
   resetBackgroundImageOpacityButton: document.getElementById('resetBackgroundImageOpacityButton'),
   blurInputNote: document.getElementById('blurInputNote'),
   fixedPeriodMessage: document.getElementById('fixedPeriodMessage'),
+  periodDayInput: document.getElementById('periodDayInput'),
   toolDetailFooter: document.getElementById('toolDetailFooter'),
   toolDetailFooterTokens: document.getElementById('toolDetailFooterTokens'),
   toolDetailFooterModels: document.getElementById('toolDetailFooterModels'),
@@ -3060,7 +3072,7 @@ function stableColor(value, colors) {
 }
 
 function fixedPeriodDevices() {
-  if (!fixedPeriodRangesApi.isDerived(state.period)) return state.stats?.devices || [];
+  if (!fixedPeriodRangesApi.isFixedRange(state.period)) return state.stats?.devices || [];
   return fixedPeriodRangesApi.devicesForReadySnapshot(state.fixedPeriodSnapshot, state.period);
 }
 
@@ -3079,6 +3091,19 @@ function buildFixedPeriodSourcesSnapshot() {
     todayKey: fixedPeriodTodayKey(),
     locale: currentCalendarLocale()
   });
+}
+
+// A derived fixed range is cached under its own selection key because every
+// reader that resolves `stats.periods[state.period]` expects it there. WEEK/7D/30D
+// are three fixed keys, but `day:YYYY-MM-DD` is unbounded, so each write drops the
+// dates a previous selection left behind instead of growing the map forever.
+function cacheDerivedPeriod(selection, period) {
+  const periods = state.stats?.periods;
+  if (!periods || !period) return;
+  for (const key of Object.keys(periods)) {
+    if (key !== selection && key.startsWith('day:')) delete periods[key];
+  }
+  periods[selection] = period;
 }
 
 function deviceRowsForPeriod() {
@@ -5539,7 +5564,7 @@ function renderTrends() {
   const previousBars = captureTrendBarMotion();
   const preview = state.stats?.historyPreview || { daily: [], monthly: [], summary: {} };
   const todayTotal = Number(state.stats?.periods?.today?.totalTokens || 0);
-  const fixed = fixedPeriodRangesApi.isDerived(state.period) ? state.fixedPeriodSnapshot : null;
+  const fixed = fixedPeriodRangesApi.isFixedRange(state.period) ? state.fixedPeriodSnapshot : null;
   // Fixed headline ranges do not collapse the Trends context down to a handful
   // of bars. Keep the established long-range monthly view; the range-specific
   // active-time and peak cards below still describe the selected fixed period.
@@ -5779,7 +5804,7 @@ function fixedPeriodHistoryInventoriesMatch(history) {
 }
 
 function buildFixedPeriodSnapshot() {
-  if (!fixedPeriodRangesApi.isDerived(state.period)) return { status: 'native', period: null };
+  if (!fixedPeriodRangesApi.isFixedRange(state.period)) return { status: 'native', period: null };
   if (state.settings?.historyEnabled === false) {
     return { status: 'unavailable', reason: 'historyDisabled', period: null };
   }
@@ -5855,8 +5880,8 @@ async function performFixedPeriodHistoryLoad({ force = false, signature = fixedP
         }, FIXED_PERIOD_HISTORY_RETRY_MS);
       }
       state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
-      if (state.fixedPeriodSnapshot.status === 'ready' && state.stats?.periods) {
-        state.stats.periods[state.period] = state.fixedPeriodSnapshot.period;
+      if (state.fixedPeriodSnapshot.status === 'ready') {
+        cacheDerivedPeriod(state.period, state.fixedPeriodSnapshot.period);
       }
     }
   }
@@ -5869,7 +5894,7 @@ function fixedPeriodHistoryCoordinator() {
       signature: fixedPeriodHistorySignature,
       load: performFixedPeriodHistoryLoad,
       onSettled: ({ render: shouldRender }) => {
-        if (shouldRender && fixedPeriodRangesApi.isDerived(state.period)) {
+        if (shouldRender && fixedPeriodRangesApi.isFixedRange(state.period)) {
           statsRenderScheduler.request();
         }
       }
@@ -5927,6 +5952,8 @@ function fixedPeriodMessage(snapshot, breakdown = '') {
   if (breakdown === 'session') return t('periodRange.sessionUnavailable');
   if (breakdown === 'project') return t('periodRange.projectUnavailable');
   if (snapshot?.reason === 'historyDisabled') return t('periodRange.historyDisabled');
+  if (snapshot?.reason === 'beyondHistory') return t('periodRange.beyondHistory');
+  if (snapshot?.reason === 'futureDay') return t('periodRange.futureDay');
   if (snapshot?.reason === 'historyUnavailable') return t('periodRange.historyUnavailable');
   return t('periodRange.historyUnavailable');
 }
@@ -5961,9 +5988,7 @@ function setPeriodMenuOpen(open, { restoreFocus = false, focus = '' } = {}) {
   els.monthPeriodMenu?.closest('.titlebar')?.classList.toggle('period-menu-open', state.periodMenuOpen);
   els.monthPeriodMenu?.classList.toggle('hidden', !state.periodMenuOpen);
   els.monthPeriodTab?.setAttribute('aria-expanded', String(state.periodMenuOpen));
-  for (const button of periodMenuButtons()) {
-    button.tabIndex = state.periodMenuOpen && button.classList.contains('is-current') ? 0 : -1;
-  }
+  syncPeriodMenu();
   if (state.periodMenuOpen && focus) {
     const buttons = periodMenuButtons();
     const current = Math.max(0, buttons.findIndex((button) => button.classList.contains('is-current')));
@@ -5973,16 +5998,36 @@ function setPeriodMenuOpen(open, { restoreFocus = false, focus = '' } = {}) {
 }
 
 function syncPeriodMenu() {
+  const dayValue = fixedPeriodRangesApi.selectedDay(state.period);
   const mode = fixedPeriodRangesApi.slotForSelection(state.period) === 'month'
     ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
     : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
   for (const button of periodMenuButtons()) {
-    const active = button.dataset.fixedPeriod === mode;
+    const active = !dayValue && button.dataset.fixedPeriod === mode;
     button.classList.toggle('is-current', active);
     button.setAttribute('aria-checked', String(active));
     if (active) button.setAttribute('aria-current', 'true');
     else button.removeAttribute('aria-current');
-    button.tabIndex = state.periodMenuOpen && active ? 0 : -1;
+    // A day selection removes the mode highlight, and then no row would be the
+    // roving tab stop: the date input takes it.
+    button.tabIndex = state.periodMenuOpen && active && !dayValue ? 0 : -1;
+  }
+  // The date row is the fifth, parameterised choice: checked when a day is on
+  // screen, and pre-filled so opening the picker starts from the day being shown.
+  const dayRow = els.periodDayInput?.closest('.period-menu-day');
+  if (dayRow) {
+    dayRow.classList.toggle('is-current', Boolean(dayValue));
+    if (dayValue) dayRow.setAttribute('aria-current', 'true');
+    else dayRow.removeAttribute('aria-current');
+  }
+  if (els.periodDayInput) {
+    // Reassigning value would discard a half-typed date, and the input is only
+    // re-synced on render, which can happen while the picker is open.
+    if (document.activeElement !== els.periodDayInput) {
+      els.periodDayInput.value = dayValue || fixedPeriodRangesApi.localDayKey();
+    }
+    els.periodDayInput.max = fixedPeriodRangesApi.localDayKey();
+    els.periodDayInput.tabIndex = state.periodMenuOpen ? 0 : -1;
   }
 }
 
@@ -6790,10 +6835,17 @@ function homeActivityTooltipEl() {
   date.className = 'home-activity-tooltip-date';
   date.dataset.homeActivityTooltipDate = 'true';
 
+  // The model split is filled per hovered day and stays out of the layout until
+  // that day has any model buckets (older rows predate perModel).
+  const models = document.createElement('span');
+  models.className = 'home-activity-tooltip-models';
+  models.dataset.homeActivityTooltipModels = 'true';
+  models.hidden = true;
+
   const row = document.createElement('span');
   row.className = 'home-activity-tooltip-row';
   row.append(count, label);
-  tooltip.append(row, date);
+  tooltip.append(row, date, models);
   document.body.append(tooltip);
   return tooltip;
 }
@@ -6811,16 +6863,50 @@ function moveHomeActivityTooltip(tooltip, cell) {
   tooltip.style.transform = `translate(${x}px, ${y}px) translate(-50%, 0)`;
 }
 
-function setupHomeActivityHover(scroller) {
+function setupHomeActivityHover(scroller, daysByDate = null) {
   const canvas = scroller.querySelector('.home-activity-canvas');
   const svg = canvas?.querySelector('.dash-heatmap');
   const gradient = svg?.querySelector('#homeActivitySpotlightGradient');
   const tooltip = homeActivityTooltipEl();
+  const modelsBox = tooltip.querySelector('[data-home-activity-tooltip-models]');
   let activeCell = null;
   let spotlightFrame = 0;
   let spotlightVisible = false;
   const spotlightTarget = { x: -200, y: -200 };
   const spotlightCurrent = { x: -200, y: -200 };
+
+  // The widget tooltip is deliberately compact: the day's headline numbers stay
+  // on top, then the top models by that day's own token share. Hidden models are
+  // counted so a broad day never looks complete when it is not.
+  const renderModels = (date) => {
+    if (!modelsBox) return;
+    const breakdown = dailyModelBreakdown(daysByDate?.get(date), { limit: 3 });
+    if (breakdown.rows.length === 0) {
+      modelsBox.replaceChildren();
+      modelsBox.hidden = true;
+      return;
+    }
+    const lines = breakdown.rows.map((row) => {
+      const line = document.createElement('span');
+      line.className = 'home-activity-tooltip-model';
+      const name = document.createElement('span');
+      name.className = 'home-activity-tooltip-model-name';
+      name.textContent = row.model;
+      const share = document.createElement('span');
+      share.className = 'home-activity-tooltip-model-share';
+      share.textContent = `${Math.round(row.share * 100)}%`;
+      line.append(name, share);
+      return line;
+    });
+    if (breakdown.hidden > 0) {
+      const more = document.createElement('span');
+      more.className = 'home-activity-tooltip-model-more';
+      more.textContent = t('dashboard.tooltip.moreModels', { count: breakdown.hidden });
+      lines.push(more);
+    }
+    modelsBox.replaceChildren(...lines);
+    modelsBox.hidden = false;
+  };
 
   const setSpotlight = (point) => {
     gradient?.setAttribute('cx', String(Math.round(point.x * 10) / 10));
@@ -6906,6 +6992,7 @@ function setupHomeActivityHover(scroller) {
       tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatCompact(Number(cell.dataset.t || 0));
       tooltip.querySelector('[data-home-activity-tooltip-label]').textContent = 'tokens';
       tooltip.querySelector('[data-home-activity-tooltip-date]').textContent = cell.dataset.d || '';
+      renderModels(cell.dataset.d || '');
     }
     tooltip.dataset.visible = 'true';
     tooltip.setAttribute('aria-hidden', 'false');
@@ -7017,8 +7104,16 @@ function renderHomeTrendsModule() {
     rawDaily,
     today,
     Number(todayPeriod?.totalTokens || 0),
-    Number(todayPeriod?.costUsd || 0)
+    Number(todayPeriod?.costUsd || 0),
+    homeOverviewApi.periodPerModel(todayPeriod)
   );
+  // The heatmap tooltip resolves a hovered cell back to its day row, which is
+  // where the model split lives.
+  const daysByDate = new Map();
+  for (const row of points) {
+    const key = String(row?.date || '').slice(0, 10);
+    if (key) daysByDate.set(key, row);
+  }
   const activityLayout = homeOverviewApi.homeActivityHeatmapLayout();
   const heatMetric = state.settings?.heatmapMetric || 'cost';
   const intensityField = heatMetric === 'cost' ? 'costIntensity' : 'tokenIntensity';
@@ -7099,7 +7194,7 @@ function renderHomeTrendsModule() {
     state.homeActivityHoverRestore?.();
     animateHomeHistoryVisuals(activityScroll, activityCanvas, chart);
   });
-  setupHomeActivityHover(activityScroll);
+  setupHomeActivityHover(activityScroll, daysByDate);
   return module;
 }
 
@@ -7217,7 +7312,7 @@ function render() {
   renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
   renderViewSwitcher();
-  const derivedPeriod = fixedPeriodRangesApi.isDerived(state.period);
+  const derivedPeriod = fixedPeriodRangesApi.isFixedRange(state.period);
   if (derivedPeriod) {
     const signature = fixedPeriodHistorySignature();
     if (!state.fixedPeriodHistoryRequested
@@ -7229,7 +7324,7 @@ function render() {
     }
     state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
     if (state.fixedPeriodSnapshot.status === 'ready') {
-      state.stats.periods[state.period] = state.fixedPeriodSnapshot.period;
+      cacheDerivedPeriod(state.period, state.fixedPeriodSnapshot.period);
     }
   } else {
     state.fixedPeriodSnapshot = null;
@@ -7513,7 +7608,7 @@ async function refreshStats(options = {}) {
     }
     applyCodexActiveAccountFromStats();
     const forceFixedPeriodHistory = options.forceHistory === true;
-    if (fixedPeriodRangesApi.isDerived(state.period)) {
+    if (fixedPeriodRangesApi.isFixedRange(state.period)) {
       await warmFixedPeriodHistory({
         force: forceFixedPeriodHistory,
         retryFailed: forceFixedPeriodHistory,
@@ -7561,13 +7656,24 @@ async function refreshStatusViewManually() {
 }
 
 function publishViewState() {
-  window.tokenMonitor.setViewState?.({ period: state.period, breakdown: state.breakdown });
+  // A specific day is a momentary lookup, not a saved preference: persisting it
+  // would make the next cold start depend on a date that History may no longer
+  // retain. The middle slot keeps its configured default instead.
+  const period = fixedPeriodRangesApi.selectedDay(state.period)
+    ? fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode)
+    : state.period;
+  window.tokenMonitor.setViewState?.({ period, breakdown: state.breakdown });
+}
+
+function normalizePeriodValue(value, fallback) {
+  const raw = String(value || '').trim();
+  return viewPeriodValues.has(raw) || isDayPeriodValue(raw) ? raw : fallback;
 }
 
 function setPeriod(period) {
-  const next = normalizeInitialViewValue(period, viewPeriodValues, state.period);
+  const next = normalizePeriodValue(period, state.period);
   if (next === state.period) {
-    if (fixedPeriodRangesApi.isDerived(next) && state.fixedPeriodHistoryFailed) {
+    if (fixedPeriodRangesApi.isFixedRange(next) && state.fixedPeriodHistoryFailed) {
       void warmFixedPeriodHistory({ retryFailed: true, renderOnComplete: true });
     }
     publishViewState();
@@ -7575,7 +7681,7 @@ function setPeriod(period) {
   }
   state.period = next;
   state.sessionPage = 0;
-  if (fixedPeriodRangesApi.isDerived(next) && state.fixedPeriodHistoryFailed) {
+  if (fixedPeriodRangesApi.isFixedRange(next) && state.fixedPeriodHistoryFailed) {
     void warmFixedPeriodHistory({ retryFailed: true, renderOnComplete: true });
   }
   publishViewState();
@@ -9044,11 +9150,17 @@ function syncPeriodTabs() {
     tab.setAttribute('aria-pressed', String(active));
   }
   if (els.monthPeriodTab) {
-    const mode = activeSlot === 'month'
+    // A day selection owns the middle slot and shows its date; the mode name
+    // would say nothing about which day is on screen.
+    const dayValue = fixedPeriodRangesApi.selectedDay(state.period);
+    const mode = dayValue || (activeSlot === 'month'
       ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
-      : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
-    els.monthPeriodTab.textContent = fixedPeriodRangesApi.displayLabel(mode);
-    els.monthPeriodTab.dataset.period = mode;
+      : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode));
+    els.monthPeriodTab.textContent = dayValue
+      ? fixedPeriodRangesApi.dayLabel(dayValue, currentCalendarLocale())
+      : fixedPeriodRangesApi.displayLabel(mode);
+    els.monthPeriodTab.dataset.period = dayValue ? fixedPeriodRangesApi.daySelection(dayValue) : mode;
+    els.monthPeriodTab.title = dayValue ? t('periodRange.dayTitle', { date: dayValue }) : '';
   }
   syncPeriodMenu();
 }
@@ -12734,7 +12846,13 @@ els.monthPeriodTab?.addEventListener('keydown', (event) => {
 });
 
 els.monthPeriodMenu?.addEventListener('keydown', (event) => {
+  // The native date picker owns its own keys (arrows step the field, Tab leaves
+  // it); intercepting them here would make the picker unusable.
+  if (event.target === els.periodDayInput) return;
   if (event.key === 'Tab') {
+    // The mode rows share one roving tab stop and the date picker is the next
+    // stop, so forward Tab moves within the menu; only Shift+Tab leaves it.
+    if (!event.shiftKey) return;
     setPeriodMenuOpen(false);
     return;
   }
@@ -12756,11 +12874,40 @@ els.periodMonthModeInput?.addEventListener('change', async () => {
   await saveSettings({ periodMonthMode: selection });
 });
 
+// A day selection is not a saved default: it names one date, so it changes the
+// view without touching `periodMonthMode`. Picking a day closes the menu the same
+// way the other rows do.
+// The date picker is the menu's last item: forward Tab leaves the menu (so it
+// must close), while Shift+Tab returns to the mode rows and must not.
+els.periodDayInput?.addEventListener('keydown', (event) => {
+  if (event.key !== 'Tab' || event.shiftKey) return;
+  setPeriodMenuOpen(false);
+});
+
+els.periodDayInput?.addEventListener('change', () => {
+  const day = fixedPeriodRangesApi.selectedDay(els.periodDayInput.value)
+    || String(els.periodDayInput.value || '').slice(0, 10);
+  const selection = fixedPeriodRangesApi.daySelection(day);
+  if (!selection) return;
+  setPeriodMenuOpen(false, { restoreFocus: true });
+  const snapshot = captureBreakdownMotion();
+  if (!setPeriod(selection)) return;
+  syncPeriodTabs();
+  if (state.openSession) state.openSession = null;
+  state.rowSignature = '';
+  state.periodMotionActive = true;
+  render();
+  state.periodMotionActive = false;
+  animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
+});
+
 document.addEventListener('click', (event) => {
   if (!state.periodMenuOpen) return;
   if (els.monthPeriodMenu?.contains(event.target) || els.monthPeriodTab?.contains(event.target)) return;
   setPeriodMenuOpen(false);
 });
+
+
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && state.periodMenuOpen) {
@@ -13954,7 +14101,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     void syncContentForm?.refresh();
   }
   if (payload.data?.stats) {
-    if (fixedPeriodRangesApi.isDerived(state.period)) {
+    if (fixedPeriodRangesApi.isFixedRange(state.period)) {
       // Keep the currently rendered range stable while a new History revision is
       // fetched; repaint once with the coherent snapshot instead of flashing an
       // intermediate loading layout.

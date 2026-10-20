@@ -43,6 +43,15 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(app, /button\.classList\.toggle\('is-current', active\)/);
   assert.match(app, /handlePeriodMenuNavigation\(event/);
   assert.match(app, /setPeriodMenuOpen\(true, \{ focus: event\.key === 'ArrowUp' \? 'last' : 'first' \}\)/);
+  // The day picker is a fifth, parameterised row: it lives inside the same menu,
+  // is never one of the saved `data-fixed-period` defaults, and is wired to a
+  // `day:YYYY-MM-DD` selection rather than to `periodMonthMode`.
+  assert.match(html, /<input id="periodDayInput" class="period-menu-day-input" type="date" \/>/);
+  assert.match(html, /for="periodDayInput" data-i18n="periodRange\.pickDay"/);
+  assert.match(app, /fixedPeriodRangesApi\.daySelection\(day\)/);
+  assert.match(app, /els\.periodDayInput\?\.addEventListener\('change'/);
+  assert.match(app, /els\.periodDayInput\.max = fixedPeriodRangesApi\.localDayKey\(\)/);
+  assert.match(css, /\.period-menu-day-input\s*\{[^}]*font-variant-numeric:\s*tabular-nums;/s);
   assert.match(app, /deviceHistoriesAvailable: Array\.isArray\(state\.fixedPeriodHistory\?\.deviceHistories\)/);
   assert.match(app, /getDashboardHistory\(\{ includeDevices: true \}\)/);
   assert.match(app, /state\.stats\?\.deviceHistoryRevision \|\| state\.stats\?\.historyRevision/);
@@ -58,12 +67,12 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(refreshStats, /await warmFixedPeriodHistory\(\{[\s\S]*?force: forceFixedPeriodHistory,[\s\S]*?retryFailed: forceFixedPeriodHistory,[\s\S]*?renderOnComplete: false[\s\S]*?\}\);/);
   assert.match(refreshStats, /statsRenderScheduler\.request\(\);\s*void warmFixedPeriodHistory\(\{[\s\S]*?force: forceFixedPeriodHistory,[\s\S]*?retryFailed: forceFixedPeriodHistory,[\s\S]*?renderOnComplete: false[\s\S]*?\}\);/);
   const loader = app.slice(app.indexOf('async function performFixedPeriodHistoryLoad'), app.indexOf('function loadFixedPeriodHistory'));
-  assert.doesNotMatch(loader, /status: 'loading'[\s\S]*?if \(fixedPeriodRangesApi\.isDerived\(state\.period\)\) render\(\);/);
+  assert.doesNotMatch(loader, /status: 'loading'[\s\S]*?if \(fixedPeriodRangesApi\.isFixedRange\(state\.period\)\) render\(\);/);
   assert.match(app, /createLatestRequestCoordinator\(\{/);
   assert.match(app, /function currentCalendarLocale\(\)[\s\S]*?resolveRegionalLocale\(\[\.\.\.preferredLanguages\(\), state\.settings\?\.locale\]\)/);
   assert.match(app, /fixedPeriodSnapshotFromDevices\(state\.period, fixedPeriodSources\(\), \{[\s\S]*?locale: currentCalendarLocale\(\)/);
   assert.match(app, /force: forceFixedPeriodHistory,[\s\S]*?retryFailed: forceFixedPeriodHistory/);
-  assert.match(app, /isDerived\(next\) && state\.fixedPeriodHistoryFailed[\s\S]*?warmFixedPeriodHistory\(\{ retryFailed: true, renderOnComplete: true \}\)/);
+  assert.match(app, /isFixedRange\(next\) && state\.fixedPeriodHistoryFailed[\s\S]*?warmFixedPeriodHistory\(\{ retryFailed: true, renderOnComplete: true \}\)/);
   assert.match(app, /fixedPeriodHistorySignature !== signature[\s\S]*?\|\| state\.fixedPeriodHistoryBusy\) \{[\s\S]*?void loadFixedPeriodHistory\(\);/);
   assert.match(boot, /\['today', 'month', 'week', 'last7', 'last30', 'allTime'\]\.includes\(period\)/);
   assert.match(app, /function fixedPeriodDevices\(\)/);

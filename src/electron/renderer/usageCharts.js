@@ -126,6 +126,44 @@
     });
   }
 
+  // A day's model split for the heatmap tooltip. Daily rows carry `perModel`
+  // buckets with the same token/cost/unpriced components the chart stacks, so
+  // ranking happens on the day's own numbers and each row reports its share of
+  // that day rather than of the selected range. Buckets that priced nothing and
+  // counted nothing (older archives) are dropped instead of shown as 0%.
+  function dailyModelBreakdown(day, options) {
+    const o = Object.assign({ limit: 4 }, options || {});
+    const limit = Math.max(0, Math.round(n(o.limit)));
+    const buckets = day && typeof day === 'object' && day.perModel && typeof day.perModel === 'object'
+      ? Object.entries(day.perModel)
+      : [];
+    const rows = [];
+    for (const [model, value] of buckets) {
+      const tokens = Math.max(0, n(value && value.tokens));
+      const cost = Math.max(0, n(value && value.cost));
+      if (tokens <= 0 && cost <= 0) continue;
+      rows.push({
+        model: String(model),
+        tokens,
+        cost,
+        unpricedTokens: Math.max(0, n(value && value.unpricedTokens))
+      });
+    }
+    rows.sort((a, b) => b.tokens - a.tokens || b.cost - a.cost || a.model.localeCompare(b.model));
+    const totalTokens = rows.reduce((sum, row) => sum + row.tokens, 0);
+    const totalCost = rows.reduce((sum, row) => sum + row.cost, 0);
+    const visible = rows.slice(0, limit);
+    return {
+      totalTokens,
+      totalCost,
+      hidden: rows.length - visible.length,
+      rows: visible.map((row) => ({
+        ...row,
+        share: totalTokens > 0 ? row.tokens / totalTokens : 0
+      }))
+    };
+  }
+
   function dailyBarsChart(series, options) {
     const o = Object.assign(
       { width: 600, height: 180, padTop: 8, padRight: 8, padBottom: 20, padLeft: 40, gap: 0.2, stackBy: 'client', metric: 'tokens', labelKey: 'date' },
@@ -679,6 +717,7 @@
 
   return {
     localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
+    dailyModelBreakdown,
     areaLineChart, areaLineSvg,
     selectPreviewSeries, patchTodayBar, sparklineSvg,
     clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,

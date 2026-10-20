@@ -134,6 +134,9 @@ html.native-high-contrast .dash-cards { border-color: var(--line-strong); }
 .tt-dot { width: 9px; height: 9px; border-radius: 2px; flex: none; box-shadow: inset 0 0 0 1px rgba(var(--overlay-rgb), 0.18); }
 .tt-name { flex: 1; opacity: 0.85; white-space: nowrap; }
 .tt-val { font-variant-numeric: tabular-nums; opacity: 0.95; padding-left: 12px; }
+.tt-sep { margin: 6px 0 4px; border-top: 1px solid rgba(var(--overlay-rgb), 0.12); }
+.tt-share { flex: none; min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; opacity: 0.55; }
+.tt-more .tt-name { opacity: 0.55; }
 
 /* Spans the whole window (inset: 0); keep it click-through so the header buttons
    still work when there's no history. */

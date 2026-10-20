@@ -98,6 +98,20 @@ test('normalizeInitialRendererViewState restores a persisted last-used view', ()
     normalizeInitialRendererViewState(undefined),
     { period: 'today', breakdown: 'home' }
   );
+  // A specific day is the one persisted period that is not a keyword: it must
+  // round-trip, and an impossible or malformed date must not.
+  assert.deepEqual(
+    normalizeInitialRendererViewState({ period: 'day:2026-10-07', breakdown: 'model' }),
+    { period: 'day:2026-10-07', breakdown: 'model' }
+  );
+  assert.deepEqual(
+    normalizeInitialRendererViewState({ period: 'day:2026-02-31' }, { period: 'week' }),
+    { period: 'week', breakdown: 'home' }
+  );
+  assert.deepEqual(
+    normalizeInitialRendererViewState({ period: 'day:2026-1-7' }, { period: 'last30' }),
+    { period: 'last30', breakdown: 'home' }
+  );
 });
 
 test('floatingBubbleInitialRendererQuery primes the first collapsed mini-window paint', () => {
