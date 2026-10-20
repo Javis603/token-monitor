@@ -663,12 +663,6 @@ function emptySession(client, id) {
     projectLabel: '',
     title: '',
     sessionKind: '',
-    // OMP's stats database gives child-agent files their own transcript id and
-    // records the parent path in the session header. These fields preserve that
-    // relationship without folding child usage into the parent session.
-    parentSessionId: '',
-    sessionRole: '',
-    agentType: '',
     models: {},
     modelCosts: {},
     providers: {}
