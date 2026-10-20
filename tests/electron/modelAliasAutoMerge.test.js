@@ -173,6 +173,38 @@ test('strip-prefix grouping also shortens a name that stands alone', () => {
   assert.equal(createModelAliasResolver({}, models, 'prefix')('gpt-5.6-sol'), 'gpt-5.6-sol');
 });
 
+test('the vendor spelling wins over a separator-normalized copy of it', () => {
+  // Observed in an OMP stats database: `deepseek-v4.1-flash` carried 15.0e9
+  // tokens next to 1.8e8 under `deepseek-v4-1-flash`, and the ranking used to
+  // prefer the plain hyphenated form, which renamed the vendor's own id.
+  assert.deepEqual(inferModelAliases(['deepseek-v4.1-flash', 'deepseek-v4-1-flash'], 'duplicates'), {
+    'deepseek-v4-1-flash': 'deepseek-v4.1-flash'
+  });
+  for (const [dotted, hyphenated] of [
+    ['glm-5.3-flash', 'glm-5-3-flash'],
+    ['gpt-6.1-sol', 'gpt-6-1-sol'],
+    ['qwen3.8-flash', 'qwen3-8-flash']
+  ]) {
+    assert.deepEqual(inferModelAliases([dotted, hyphenated], 'duplicates'), { [hyphenated]: dotted });
+  }
+  // Case alone still folds onto the lowercase spelling, not the other way round.
+  assert.deepEqual(inferModelAliases(['deepseek-v4-flash', 'Deepseek-v4-flash'], 'duplicates'), {
+    'Deepseek-v4-flash': 'deepseek-v4-flash'
+  });
+});
+
+test('a spelling that dropped its separators still joins the one that kept them', () => {
+  // `gpt5.6sol` and `gpt-5.6-sol` are one id; the separators alone cannot
+  // recover a boundary that was never written, so the normalization has to
+  // treat a letter/digit boundary as one.
+  assert.deepEqual(inferModelAliases(['gpt-5.6-sol', 'gpt5.6sol'], 'duplicates'), {
+    'gpt5.6sol': 'gpt-5.6-sol'
+  });
+  // The winner is the spelling that kept the most boundaries, whatever its
+  // length, so a short unpunctuated form cannot claim to be canonical.
+  assert.equal(createModelAliasResolver({}, ['gpt-5.6-sol', 'gpt5.6sol'], 'duplicates')('gpt5.6sol'), 'gpt-5.6-sol');
+});
+
 test('an unknown or missing grouping mode collects nothing', () => {
   const stats = { periods: { today: { models: { 'anthropic/claude-opus-5': 10, 'claude-opus-5': 20 } } } };
   for (const grouping of [undefined, null, '', 'nonsense', 'off']) {
