@@ -1648,7 +1648,13 @@ for (const mode of ['autoHide', 'alwaysExceptFullScreen']) {
     const request = fixture.ipcMain.handlers.get('edgeDock:refreshLimits')({ sender: peek.webContents });
     await Promise.resolve();
     fixture.screen.point = { x: 100, y: 100 };
-    await new Promise((resolve) => setTimeout(resolve, 450));
+    // The retract lands about 400 ms after leaving, so a fixed 450 ms wait left
+    // too little room for timer jitter on loaded Windows runners. Wait for it
+    // with a bounded deadline instead.
+    const deadline = Date.now() + 2000;
+    while (rail.ignoreMouse !== true && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     assert.equal(rail.ignoreMouse, true, 'leaving still retracts the auto-hide rail while refreshing');
     assert.equal(sentPayload(peek, 'peek').peekMode, 'handle');
     finish({ ok: true });
