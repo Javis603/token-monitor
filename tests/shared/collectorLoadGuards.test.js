@@ -138,7 +138,10 @@ test('Command Code watches its transcript tree and prunes non-transcript events'
 });
 
 test('OMP watcher bounds custom stats DB files and honors the disabled mode', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-omp-watch-'));
+  // The matcher canonicalises its roots, and on Windows `os.tmpdir()` can be an
+  // 8.3 short name (`RUNNER~1`), so the fixture has to be built on the expanded
+  // path or the assertions compare two spellings of the same directory.
+  const root = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'token-monitor-omp-watch-'));
   const homeDir = path.join(root, 'home');
   const statsRoot = path.join(root, 'omp-data');
   const statsDbPath = path.join(statsRoot, 'stats.db');
