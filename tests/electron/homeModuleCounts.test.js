@@ -103,6 +103,48 @@ test('each Home count control saves only its own count and refreshes immediately
   }
 });
 
+test('failed Home count saves restore persisted controls without rejecting the change handler', async () => {
+  const saveStart = app.indexOf('async function saveSettings(');
+  const saveEnd = app.indexOf('// The resolved settings of a write', saveStart);
+  const saveSource = app.slice(saveStart, saveEnd);
+  for (const id of ['tool', 'model', 'session', 'device']) for (const code of ['EACCES', 'EIO']) {
+    const persisted = { homeModuleCounts: { tool: 10, model: 8, session: 7, device: 6 } };
+    const state = { settings: structuredClone(persisted) };
+    const error = Object.assign(new Error('Settings write failed'), { code });
+    const logged = [];
+    let recoveredRenders = 0;
+    let successRefreshes = 0;
+    let control;
+    const context = {
+      id, state, document: { createElement: () => new Element() }, homeModulePreferencesApi: preferences,
+      t: key => i18n.translate('en', key), appearancePreview: {}, pendingSettingsPatches: new Set(), syncContentForm: null,
+      window: { tokenMonitor: {
+        updateSettings: async () => { throw error; },
+        getSettings: async () => structuredClone(persisted)
+      } },
+      setSyncContentEditError() {}, applyEffectiveCurrencyRates() {}, restartTimer() {}, maybeUpdateBarsIcon() {},
+      preserveSettingsPanelScroll: callback => callback(),
+      syncSettingsForm: () => { control = context.renderHomeModuleCountSettings(id); },
+      isSettingsSurfaceVisible: () => true, render: () => { recoveredRenders += 1; },
+      applyPersistedSettings: () => assert.fail('failed writes must not apply a successful result'),
+      renderHomeIfVisible: () => { successRefreshes += 1; },
+      console: { error: (...args) => logged.push(args) }
+    };
+    vm.runInNewContext(`${saveSource}\n${source('renderHomeModuleCountSettings', 'renderHomeSettingsList')}`, context);
+    control = context.renderHomeModuleCountSettings(id);
+    const input = control.children[0].children[1];
+    input.value = '25';
+    await assert.doesNotReject(input.events.change(), `${id}: ${code}`);
+    assert.deepEqual(state.settings, persisted);
+    assert.equal(control.children[0].children[1].value, String(persisted.homeModuleCounts[id]));
+    assert.equal(context.pendingSettingsPatches.size, 0);
+    assert.equal(recoveredRenders, 1);
+    assert.equal(successRefreshes, 0);
+    assert.equal(logged.length, 1, 'saveSettings retains its error reporting');
+    assert.equal(logged[0][1], error);
+  }
+});
+
 test('every Home settings panel stays beside its module when reordered', () => {
   const definitions = app.slice(app.indexOf('const HOME_MODULE_SUBGROUPS ='), app.indexOf('function expandedPreferenceSubgroups('));
   const order = ['device', 'session', 'model', 'tool', 'limits', 'trends'];

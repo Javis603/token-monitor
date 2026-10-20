@@ -10089,7 +10089,12 @@ function renderHomeModuleCountSettings(id) {
   input.addEventListener('change', async () => {
     const counts = homeModulePreferencesApi.normalizeHomeModuleCounts({ [id]: input.value }, state.settings?.homeModuleCounts);
     input.value = String(counts[id]);
-    await saveSettings({ homeModuleCounts: { [id]: counts[id] } });
+    try {
+      await saveSettings({ homeModuleCounts: { [id]: counts[id] } });
+    } catch (_) {
+      // saveSettings reports the failure and restores persisted settings and UI.
+      return;
+    }
     renderHomeIfVisible();
   });
   label.append(text, input);
