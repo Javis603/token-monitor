@@ -82,3 +82,13 @@ test('unattributed remainder becomes an Unknown segment when totals exceed share
   assert.equal(unknown.value, 200);
   assert.equal(unknown.name, 'Unknown');
 });
+
+test('missing per-client attribution keeps the plain model bar (no Unknown segment)', () => {
+  const row = { key: 'claude-opus-5-5', name: 'claude-opus-5-5', value: 1000, cost: 10, color: '#aaa' };
+  const bare = { models: { 'claude-opus-5-5': 1000 } };
+  assert.equal(enrichModelRowWithClientBreakdown(row, bare, { clientLabels, clientColors }), row);
+  const fixed = { ...period, capabilities: { clientModels: false } };
+  assert.equal(enrichModelRowWithClientBreakdown(row, fixed, { clientLabels, clientColors }), row);
+  const other = { clientModels: { cursor: { 'gpt-5': 400 } } };
+  assert.equal(enrichModelRowWithClientBreakdown(row, other, { clientLabels, clientColors }), row);
+});

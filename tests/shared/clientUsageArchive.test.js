@@ -682,3 +682,33 @@ test('recapturing Pi carries the merged snapshot residue forward', () => {
   const applied = applyArchivedClientUsage(liveSummary(now, {}), recaptured, { activeClients: '', now });
   assert.equal(applied.periods.allTime.totalTokens, 100);
 });
+
+// With the Claude Desktop split turned off, a post-split `claude` snapshot is
+// a merged snapshot again: prune keeps it and apply nets live rows out of it.
+test('a disabled Claude Desktop split reaches both apply and prune', () => {
+  const now = localNoon(2026, 9, 1);
+  const period = { totalTokens: 100, costUsd: 0, models: { opus: 100 }, modelCosts: {}, sessions: {} };
+  const archive = {
+    version: 1,
+    clients: {
+      claude: {
+        client: 'claude',
+        capturedAt: now.toISOString(),
+        day: localDayKey(now),
+        month: localDayKey(now).slice(0, 7),
+        clientIdentityGeneration: 3,
+        periods: { today: period, month: period, allTime: period }
+      }
+    }
+  };
+  assert.equal(pruneArchivedClientUsage(archive, 'claude').clients.claude, undefined,
+    'split on: a post-split claude entry prunes as an ordinary client');
+  assert.ok(pruneArchivedClientUsage(archive, 'claude', { claudeDesktopSplitEnabled: false }).clients.claude,
+    'split off: the claude entry is merged again and survives pruning');
+
+  const live = { periods: { today: {}, month: {}, allTime: {} } };
+  const on = applyArchivedClientUsage(live, archive, { activeClients: 'claude', now });
+  assert.equal(Number(on.periods.allTime.totalTokens || 0), 0, 'split on: tracked claude skips its archived copy');
+  const off = applyArchivedClientUsage(live, archive, { activeClients: 'claude', now, claudeDesktopSplitEnabled: false });
+  assert.equal(off.periods.allTime.totalTokens, 100, 'split off: the merged remainder is replayed');
+});

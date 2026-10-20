@@ -51,8 +51,12 @@
 
   function enrichModelRowWithClientBreakdown(row, period, options = {}) {
     if (!row || !period) return row;
+    // Derived fixed-period snapshots carry no per-client model maps. Missing
+    // attribution is not an "Unknown" client, so keep the plain model bar.
+    if (period.capabilities?.clientModels === false) return row;
     const { clientTokens, clientCosts } = clientSharesForModel(period, row.key);
     const attributed = Object.values(clientTokens).reduce((sum, value) => sum + finiteNumber(value), 0);
+    if (attributed <= 0) return row;
     const total = Math.max(0, finiteNumber(row.value));
     const bounded = Object.assign(Object.create(null), clientTokens);
     if (total > attributed) bounded[''] = total - attributed;

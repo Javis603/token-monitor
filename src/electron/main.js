@@ -2911,7 +2911,9 @@ function localArchiveSourceDevice() {
 
 function updateArchivedClientUsage(previousClients, nextClients) {
   const removedClients = removedTrackedClients(previousClients, nextClients);
-  let archive = pruneArchivedClientUsage(settings.archivedClientUsage, nextClients);
+  let archive = pruneArchivedClientUsage(settings.archivedClientUsage, nextClients, {
+    claudeDesktopSplitEnabled: settings.claudeDesktopSplitEnabled !== false
+  });
   if (removedClients.length > 0) {
     archive = captureArchivedClientUsage(archive, localArchiveSourceDevice(), removedClients);
   }

@@ -133,3 +133,23 @@ test('aggregateLimits keeps stale Desktop local ok over a fresh empty failure fr
   assert.equal(claude[0].windows.length, 2);
   assert.equal(claude[0].stale, true);
 });
+
+test('a fresh same-device empty failure still eclipses stale keyed Codex quota', () => {
+  const summary = aggregateLimits([{
+    deviceId: 'mac-local',
+    limits: {
+      refreshMs: 300_000,
+      providers: [
+        {
+          provider: 'codex', accountKey: 'sha256:codex-a', status: 'ok', source: 'rpc',
+          updatedAt: '2026-10-19T09:00:00.000Z',
+          windows: [{ kind: 'session', usedPercent: 40, windowMinutes: 300 }]
+        },
+        { provider: 'codex', status: 'notConfigured', windows: [], updatedAt: new Date(NOW - 30_000).toISOString() }
+      ]
+    }
+  }], 600_000, NOW);
+  const codex = summary.providers.filter((p) => p.provider === 'codex');
+  assert.equal(codex.length, 1, JSON.stringify(codex.map((p) => [p.status, p.accountKey, p.stale])));
+  assert.equal(codex[0].status, 'notConfigured');
+});

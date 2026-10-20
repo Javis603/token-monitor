@@ -175,7 +175,7 @@ function iso(ms) {
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
-    process.stdout.write(fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 9).map((l) => l.replace(/^\/\/ ?/, '')).join('\n') + '\n');
+    process.stdout.write(fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 10).map((l) => l.replace(/^\/\/ ?/, '')).join('\n') + '\n');
     return;
   }
   const nowMs = Date.now();
@@ -233,7 +233,7 @@ function main() {
       estimatedSessionResetAt: iso(collected.selected?.sessionResetsAt),
       estimatedWeeklyResetAt: iso(collected.selected?.weeklyResetsAt),
       providerRow: provider,
-      recentSamples: series.slice(-args.samples).map((s) => ({ t: iso(s.t), org: s.org, u: s.usage }))
+      recentSamples: (args.samples > 0 ? series.slice(-args.samples) : []).map((s) => ({ t: iso(s.t), org: s.org, u: s.usage }))
     },
     sessions: {
       claudeConfig,

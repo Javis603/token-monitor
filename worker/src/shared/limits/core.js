@@ -1049,15 +1049,13 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
     const knownWorkbuddyAccount = candidate.provider === 'workbuddy' && candidate.accountKey
       && !isWorkbuddyPlaceholder(candidate);
     const freshPeers = freshCandidatesByProvider.get(candidate.provider) || [];
-    // A fresh empty failure on the SAME device as this stale useful row does
-    // not eclipse it — Claude Desktop local-only ages by sample timestamp while
-    // a leftover notConfigured placeholder stays "fresh". Fresh peers from
-    // another device still eclipse (signed-out Codex), except when this row is
-    // a Claude Desktop local sample: another machine without Desktop data is
-    // not a sign-out.
+    // A fresh empty failure (on any device) eclipses a stale row, so a
+    // signed-out Codex or Claude account does not keep showing old quota. The
+    // one exception is a Claude Desktop local sample: it ages by the Desktop
+    // sample timestamp, and an empty failure only means that lane or device has
+    // no Desktop data, not that the account signed out.
     const hasEclipsingFreshObservation = freshPeers.some((peer) => (
-      isUsefulLimitObservation(peer)
-      || (peer.sourceDeviceId !== candidate.sourceDeviceId && !isLocalSampleProvider(candidate))
+      isUsefulLimitObservation(peer) || !isLocalSampleProvider(candidate)
     ));
     const hasFreshObservation = providersWithFreshObservations.has(candidate.provider);
     // Fresh siblings cannot establish freshness for a different account. The

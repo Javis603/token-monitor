@@ -91,3 +91,15 @@ test('the verification script loads no network or networked-limits module', () =
   assert.match(probe.stdout, /blocked/);
   assert.match(probe.stdout, /no-fetch/);
 });
+
+test('--help lists every option and --samples 0 prints no samples', () => {
+  const help = spawnSync(process.execPath, [SCRIPT, '--help'], { encoding: 'utf8', env: childEnv(), timeout: 20_000 });
+  assert.equal(help.status, 0, help.stderr);
+  for (const flag of ['--dir', '--claude-config', '--org', '--samples', '--json']) assert.match(help.stdout, new RegExp(flag));
+  const { desktop, claudeConfig } = fixture();
+  const run = spawnSync(process.execPath, [SCRIPT, '--dir', desktop, '--claude-config', claudeConfig, '--json', '--samples', '0'], {
+    encoding: 'utf8', env: childEnv(), timeout: 20_000
+  });
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout).quota.recentSamples, []);
+});
