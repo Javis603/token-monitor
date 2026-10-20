@@ -384,9 +384,17 @@ test('WorkBuddy local auth rejects an app session switch during a billing reques
 test('WorkBuddy local auth accepts only the exact production billing host', () => {
   const personal = 'https://copilot.tencent.com/v2/billing/meter/get-user-resource';
   const enterprise = 'https://copilot.tencent.com/v2/billing/meter/get-enterprise-user-usage';
+  // The Spend ledger is served unversioned, so it needs its own allowlist entry.
+  const ledger = 'https://copilot.tencent.com/billing/meter/get-user-request-usage';
+  const aiLedger = 'https://www.workbuddy.ai/billing/meter/get-user-request-usage';
   assert.equal(isAllowedWorkbuddyApiUrl(personal, 'POST'), true);
   assert.equal(isAllowedWorkbuddyApiUrl(enterprise, 'post'), true);
+  assert.equal(isAllowedWorkbuddyApiUrl(ledger, 'POST'), true);
+  assert.equal(isAllowedWorkbuddyApiUrl(aiLedger, 'POST', 'ai'), true);
+  assert.equal(isAllowedWorkbuddyApiUrl(ledger, 'GET'), false);
   assert.equal(isAllowedWorkbuddyApiUrl(personal, 'GET'), false);
+  // The versioned form of the ledger is not a route the server serves.
+  assert.equal(isAllowedWorkbuddyApiUrl('https://copilot.tencent.com/v2/billing/meter/get-user-request-usage', 'POST'), false);
   assert.equal(isAllowedWorkbuddyApiUrl('https://copilot.tencent.com/v2/billing/meter/other', 'POST'), false);
   assert.equal(isAllowedWorkbuddyApiUrl(`${personal}?next=other`, 'POST'), false);
   assert.equal(isAllowedWorkbuddyApiUrl('https://staging-copilot.tencent.com/v2/billing/meter/get-user-resource', 'POST'), false);

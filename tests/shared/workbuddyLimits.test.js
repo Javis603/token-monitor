@@ -29,7 +29,8 @@ function fetchWorkbuddyLimits(options, deps = {}) {
   return workbuddyLimits.fetchWorkbuddyLimits(options, { ...deps, env });
 }
 
-const SPEND_PATH = '/v2/billing/meter/get-user-request-usage';
+// The ledger read is served unversioned; a `/v2` form answers 404.
+const SPEND_PATH = '/billing/meter/get-user-request-usage';
 
 const NOW = Date.parse('2026-08-09T10:00:00Z');
 const PERSONAL_REQUEST_NOW = new Date(2026, 7, 9, 10, 11, 12).getTime();
@@ -277,7 +278,7 @@ test('fetchWorkbuddyLimits sums Credits spend from the per-request billing ledge
   });
 
   assert.equal(requests.length, 2);
-  assert.equal(requests[1].url, `${WORKBUDDY_DEFAULT_ENDPOINT}/v2/billing/meter/get-user-request-usage`);
+  assert.equal(requests[1].url, `${WORKBUDDY_DEFAULT_ENDPOINT}${SPEND_PATH}`);
   // The ledger read carries the same credential and identity as the balance read.
   assert.equal(requests[1].init.headers.Authorization, 'Bearer fixture-access-token');
   assert.equal(requests[1].init.headers['X-User-Id'], 'user-123');
@@ -785,7 +786,7 @@ test('WorkBuddy combines distinct local/managed realms and retains encrypted loc
   assert.equal(rows[2].actionRequired, 'appSessionEncrypted');
   assert.equal(rows[2].accountKey, localCn.accountKey);
   assert.deepEqual(requests.map((request) => request.url).sort(), [
-    'https://copilot.tencent.com/v2/billing/meter/get-user-request-usage',
+    'https://copilot.tencent.com/billing/meter/get-user-request-usage',
     'https://copilot.tencent.com/v2/billing/meter/get-user-resource',
     'https://www.workbuddy.ai/billing/meter/get-user-request-usage',
     'https://www.workbuddy.ai/billing/meter/get-user-resource'
@@ -861,12 +862,10 @@ test('WorkBuddy AI billing falls back only on HTTP 404 and never crosses realms'
       } });
     assert.ok(requests.every((url) => url.startsWith('https://www.workbuddy.ai/')));
     if (status === 404) {
-      // The ledger reader mirrors the quota reader's own fallback: it tries the
-      // short AI form first, then the `/v2` form.
+      // Only the quota action has a `/v2` fallback; the ledger is unversioned.
       assert.deepEqual(requests, ['https://www.workbuddy.ai/billing/meter/get-user-resource',
         'https://www.workbuddy.ai/v2/billing/meter/get-user-resource',
-        'https://www.workbuddy.ai/billing/meter/get-user-request-usage',
-        'https://www.workbuddy.ai/v2/billing/meter/get-user-request-usage']);
+        'https://www.workbuddy.ai/billing/meter/get-user-request-usage']);
       assert.equal(rows[0].status, 'ok');
     } else assert.ok(requests.every((url) => url === 'https://www.workbuddy.ai/billing/meter/get-user-resource'));
   }
