@@ -720,6 +720,19 @@ test('a third-party card summarizes Today and Month and details every period', (
   assert.match(tooltip.text, /All time \$18\.58/);
 });
 
+test('a third-party card falls back to all-time when dashboard periods are unknown', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 39.45, currency: 'USD' }],
+    balance: {
+      amount: 39.45, currency: 'USD', todaySpend: null, weekSpend: null,
+      monthSpend: null, allTimeSpend: 140.57
+    }
+  }, '#888888');
+  assert.match(card.text, /Spend All time \$140\.57/);
+  assert.doesNotMatch(card.text, /Today|Week|Month|\$0\.00/);
+});
+
 test('a MiMo membership row meters like any percent quota, WorkBuddy included', () => {
   // The membership lane answers with a percentage and nothing else — the app's
   // own card prints "{{percent}}% remaining" from that field, and no endpoint

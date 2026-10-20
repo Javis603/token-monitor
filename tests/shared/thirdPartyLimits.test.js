@@ -28,6 +28,7 @@ const {
   newapiAccessToken,
   newapiApiKey,
   newapiBaseUrl,
+  newapiAccountQuota,
   newapiUserId,
   normalizeThirdPartyBaseUrl,
   normalizeCustomAuthMode,
@@ -49,6 +50,12 @@ function response(status, body) {
     json: async () => body,
     headers: { get: () => null }
   };
+}
+
+function fixtureTimezone(t, zone = 'UTC') {
+  const previousZone = process.env.TZ;
+  process.env.TZ = zone;
+  t.after(() => { if (previousZone === undefined) delete process.env.TZ; else process.env.TZ = previousZone; });
 }
 
 function apiFetch(accounts, defaultStatusBody = { quota_per_unit: DEFAULT_QUOTA_PER_UNIT }) {
@@ -217,7 +224,8 @@ test('quota conversion uses the instance setting and falls back to the default o
   assert.equal(quotaPerUnit({ data: { quota_per_unit: 0 } }), DEFAULT_QUOTA_PER_UNIT);
 });
 
-test('New API account adapter exposes whole-account balance and cumulative usage', async () => {
+test('New API account adapter exposes whole-account balance and cumulative usage', async (t) => {
+  fixtureTimezone(t);
   const [provider] = await fetchThirdPartyLimits({
     thirdPartyProfiles: {
       production: {
@@ -310,7 +318,8 @@ test('New API-compatible account adapter omits the user header when no ID is con
   assert.equal(provider.balance.allTimeSpend, 1);
 });
 
-test('New API account adapter reads Today and Month spend from the usage dashboard', async () => {
+test('New API account adapter reads Today and Month spend from the usage dashboard', async (t) => {
+  fixtureTimezone(t);
   const [provider] = await fetchThirdPartyLimits({
     thirdPartyProfiles: {
       production: {
@@ -372,6 +381,126 @@ test('New API account adapter keeps the all-time spend when the usage dashboard 
   assert.equal(provider.balance.weekSpend, null);
   assert.equal(provider.balance.monthSpend, null);
   assert.equal(provider.balance.allTimeSpend, 2);
+});
+
+test('New API spend rejects malformed periods without publishing zero or partial totals', () => {
+  const account = { quota: 2_500_000, used_quota: 1_000_000 };
+  const malformed = [
+    [{}], [null], [{ quota: null }], [{ quota: '' }], [{ quota: 'bad' }],
+    [{ quota: true }], [{ quota: -1 }], [{ quota: Infinity }],
+    [{ quota: 500_000 }, {}],
+    [{ quota: Number.MAX_VALUE }, { quota: Number.MAX_VALUE }],
+    // GPTNB returns a different dashboard schema; it is not a zero-quota row.
+    [{ date: '2026-10-20', sumQuota: 500_000, sumUsd: 1 }]
+  ];
+  for (const rows of malformed) {
+    const result = newapiAccountQuota(account, DEFAULT_QUOTA_PER_UNIT, {
+      today: { success: true, data: rows },
+      week: { success: true, data: [] },
+      month: { success: true, data: [{ quota: '500000' }, { quota: 0 }] }
+    });
+    assert.equal(result.balance.todaySpend ?? null, null, `malformed rows: ${JSON.stringify(rows)}`);
+    assert.equal(result.balance.weekSpend, 0);
+    assert.equal(result.balance.monthSpend, 1);
+    assert.equal(result.balance.amount, 5);
+    assert.equal(result.balance.allTimeSpend, 2);
+  }
+  assert.equal(newapiAccountQuota({ quota: 0, used_quota: 0 }, Number.MIN_VALUE, {
+    today: { data: [{ quota: 1 }] }
+  }).balance.todaySpend ?? null, null, 'a finite sum must not overflow during conversion');
+});
+
+const spendProfile = {
+  thirdPartyProfiles: { work: {
+    adapter: NEWAPI_ACCOUNT_ADAPTER, baseUrl: 'https://spend.example', accessToken: 'fixture'
+  } }
+};
+
+for (const zone of ['UTC', 'Asia/Kathmandu', 'Asia/Kolkata', 'America/New_York', 'Australia/Lord_Howe']) {
+  test(`New API hourly buckets preserve exact local periods in ${zone}`, async (t) => {
+    fixtureTimezone(t, zone);
+    const now = Date.parse(zone === 'America/New_York' ? '2026-11-02T08:00:00Z' : '2026-10-20T08:00:00Z');
+    const date = new Date(now);
+    const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const week = new Date(day); week.setDate(week.getDate() - 6);
+    const month = new Date(date.getFullYear(), date.getMonth(), 1);
+    const starts = [day, week, month].map(Number);
+    // Include transactions on BOTH sides of each midnight. The upstream stores
+    // floor(transaction timestamp / 3600), then filters those stored timestamps.
+    const transactions = starts.flatMap((start) => [start - 5 * 60_000, start + 5 * 60_000]);
+    const rows = transactions.map((at) => ({ created_at: Math.floor(at / 3_600_000) * 3600, quota: 500_000 }));
+    const requestedStarts = [];
+    const [provider] = await fetchThirdPartyLimits(spendProfile, {
+      env: {}, now: () => now,
+      fetch: async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === NEWAPI_STATUS_PATH) return response(200, { data: { quota_per_unit: 500_000 } });
+        if (parsed.pathname === NEWAPI_ACCOUNT_PATH) return response(200, { data: { quota: 5_000_000, used_quota: 3_000_000 } });
+        const start = Number(parsed.searchParams.get('start_timestamp'));
+        const end = Number(parsed.searchParams.get('end_timestamp'));
+        requestedStarts.push(start * 1000);
+        return response(200, { success: true, data: rows.filter((row) => row.created_at >= start && row.created_at <= end) });
+      }
+    });
+    for (const [index, key] of ['todaySpend', 'weekSpend', 'monthSpend'].entries()) {
+      const start = starts[index];
+      const aligned = start % 3_600_000 === 0;
+      assert.equal(provider.balance[key], aligned ? transactions.filter((at) => at >= start && at <= now).length : null, key);
+      assert.equal(requestedStarts.includes(start), aligned, 'do not query an ambiguous boundary or round it down');
+    }
+    assert.equal(provider.balance.amount, 10);
+    assert.equal(provider.balance.allTimeSpend, 6);
+  });
+}
+
+test('New API enrichment deadline preserves balance and completed periods when a transport ignores abort', async (t) => {
+  fixtureTimezone(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const signals = [];
+  const pending = fetchThirdPartyLimits(spendProfile, {
+    env: {}, now: () => Date.parse('2026-07-24T08:00:00Z'),
+    fetch: async (url, init) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === NEWAPI_STATUS_PATH) return response(200, { data: { quota_per_unit: 500_000 } });
+      if (parsed.pathname === NEWAPI_ACCOUNT_PATH) return response(200, { data: { quota: 5_000_000, used_quota: 3_000_000 } });
+      signals.push(init.signal);
+      // Keep one response body pending too: the deadline must cover JSON reads.
+      if (signals.length === 1) return { ok: true, json: () => new Promise(() => {}) };
+      if (signals.length === 2) return new Promise(() => {});
+      return response(200, { data: [{ quota: 500_000 }] });
+    }
+  });
+  await new Promise(setImmediate);
+  t.mock.timers.tick(3000);
+  const [provider] = await pending;
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.balance.amount, 10);
+  assert.equal(provider.balance.allTimeSpend, 6);
+  assert.equal(provider.balance.todaySpend, null);
+  assert.equal(provider.balance.weekSpend, null);
+  assert.equal(provider.balance.monthSpend, 1);
+  assert.equal(signals[0].aborted, true);
+  assert.equal(signals[1].aborted, true);
+});
+
+test('New API enrichment propagates external cancellation even when transport ignores abort', async (t) => {
+  fixtureTimezone(t);
+  const controller = new AbortController();
+  const signals = [];
+  const pending = fetchThirdPartyLimits(spendProfile, {
+    env: {}, signal: controller.signal,
+    fetch: async (url, init) => {
+      const pathname = new URL(url).pathname;
+      if (pathname === NEWAPI_STATUS_PATH) return response(200, { data: { quota_per_unit: 500_000 } });
+      if (pathname === NEWAPI_ACCOUNT_PATH) return response(200, { data: { quota: 5_000_000 } });
+      signals.push(init.signal);
+      return new Promise(() => {});
+    }
+  });
+  await new Promise(setImmediate);
+  controller.abort(new Error('cancelled by owner'));
+  await assert.rejects(pending, /cancelled by owner/);
+  assert.ok(signals.every((signal) => signal.aborted));
 });
 
 test('New API token adapter exposes only that token quota', async () => {
