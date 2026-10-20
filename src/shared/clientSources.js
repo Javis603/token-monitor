@@ -323,16 +323,19 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['zed-threads', path.join(home, 'Library', 'Application Support', 'Zed', 'threads')],
     ['zed-threads', path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Zed', 'threads')]
   );
-  // Kilo is one Token Monitor client backed by two Tokscale sources. `kilo`
-  // reads the CLI's XDG-data SQLite database, while `kilocode` reads the VS Code
-  // extension's Linux/local and remote task roots. Keep the native macOS and
-  // Windows VS Code roots out until Tokscale scans them; otherwise they would be
-  // dead watches and false presence signals.
+  // Kilo joins the CLI's XDG database with every extension task root the
+  // scanner reads. Native macOS/Windows roots are home-relative on all hosts;
+  // only Windows additionally follows an APPDATA override.
+  const kiloTaskSuffix = path.join('Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks');
   add(
     'kilo',
     ['kilo-db', path.join(xdgHome, 'kilo'), path.join(xdgHome, 'kilo', 'kilo.db')],
-    ['kilocode-tasks', path.join(home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')],
-    ['kilocode-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')]
+    ['kilocode-tasks', path.join(tokscaleHome, '.config', kiloTaskSuffix)],
+    ['kilocode-tasks', path.join(tokscaleHome, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')],
+    ['kilocode-tasks', path.join(tokscaleHome, 'Library', 'Application Support', kiloTaskSuffix)],
+    ['kilocode-tasks', path.join(tokscaleHome, 'AppData', 'Roaming', kiloTaskSuffix)],
+    ...(platform === 'win32' && env.APPDATA
+      ? [['kilocode-tasks', path.join(env.APPDATA, kiloTaskSuffix)]] : [])
   );
   add('commandcode', ...simpleHostSourceRoots('commandcode', home));
   // MiMo: tokscale 4.8.0 unions the XDG data dir with orca's hook-sandbox

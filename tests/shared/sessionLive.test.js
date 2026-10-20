@@ -37,6 +37,31 @@ test('an archived session is never running, whatever its timestamp says', () => 
   assert.equal(sessionLive.isRunningSession({ lastUsedAt: fresh }, now), true);
 });
 
+test('Grok Bot usage recency needs an explicit turn boundary to indicate running', () => {
+  const now = Date.parse('2026-10-18T12:00:00Z');
+  const fresh = new Date(now - 1000).toISOString();
+  const base = { client: 'cursor', lastUsedAt: fresh };
+  for (const identity of [
+    { sessionId: 'sand-subagent-run', models: { claude: 10 } },
+    { sessionId: 'uuid', models: { 'grok-bot-default': 10, claude: 20 } },
+    { sessionId: 'uuid', grokBotSession: true, models: { Alias: 10 } }
+  ]) {
+    const session = { ...base, ...identity };
+    assert.equal(sessionLive.sessionActivityState(session, now), 'idle');
+    assert.equal(sessionLive.isRunningSession(session, now), false);
+    assert.equal(sessionLive.sessionActivityState({ ...session, turnEnded: false }, now), 'running');
+    assert.equal(sessionLive.sessionActivityState({ ...session, turnEnded: true }, now), 'ended');
+    assert.equal(sessionLive.sessionActivityState({ ...session, turnEnded: false,
+      lastUsedAt: new Date(now - sessionLive.RUNNING_WINDOW_MS - 1).toISOString() }, now), 'idle');
+  }
+  for (const identity of [
+    { sessionId: 'ordinary', models: { 'cursor-grok-4.6-medium': 10 } },
+    { sessionId: 'ordinary', models: { 'grok-bot-default': 0, claude: 10 } },
+    { sessionId: 'sand-subagent-', models: {} },
+    { sessionId: 'grok-build', client: 'grok' }
+  ]) assert.equal(sessionLive.sessionActivityState({ ...base, ...identity }, now), 'running');
+});
+
 test('a context reading needs both halves, and both are published', () => {
   assert.deepEqual(
     sessionLive.sessionContextWindow({ contextTokens: 190_000, contextWindow: 200_000 }),
@@ -87,7 +112,10 @@ test('both renderers read the shared predicate rather than keeping their own cop
   // The dock recomputes running at paint time from the same predicate, because
   // it repaints from its last payload on a timer and a session that stopped in
   // between must stop reading as running.
-  assert.match(dock, /sessionLive\.sessionActivityState/);
+  // Grouped rows go through the presentation wrapper, which delegates to the
+  // shared predicate; status readings come from the shared session-row builder.
+  assert.match(dock, /presentation\.sessionActivityState\(session\)/);
+  assert.match(dock, /sessionRowsApi\.sessionStatusNode\(/);
   assert.match(dock, /edgeDock\.runningCount/);
   // Both surfaces must load the shared module before the file that uses it.
   for (const [htmlPath, moduleRef, consumerRef] of [

@@ -35,14 +35,18 @@ for (const focus of ['module', 'heading']) test(`Home sessions repaint once at s
   }
   current = node(2);
   (focus === 'module' ? current : current.querySelector()).focus();
-  const state = { stats: {}, breakdown: 'home', homeSessionRepaintTimer: null };
+  const state = { stats: {}, settings: { homeModuleCounts: { session: 9 } }, breakdown: 'home', homeSessionRepaintTimer: null };
   const { scheduleHomeSessionRepaint, stopHomeSessionRepaint } = Function(
-    'state', 'window', 'Date', 'setTimeout', 'clearTimeout', 'visibleStatsSurface', 'els', 'document', 'renderHomeSessionModule', 'sessionPresentationOptions',
+    'state', 'window', 'Date', 'setTimeout', 'clearTimeout', 'visibleStatsSurface', 'els', 'document', 'renderHomeSessionModule', 'sessionPresentationOptions', 'homeModulePreferencesApi',
     `${source}\nreturn { scheduleHomeSessionRepaint, stopHomeSessionRepaint };`
   )(
     state,
     { TokenMonitorEdgeDockPresentation: {
-      recentSessionRows: () => { projections += 1; return rows; },
+      recentSessionRows: (_stats, cap, options) => {
+        assert.equal(cap, 9, 'initial selection and every timer repaint use the saved count');
+        assert.equal(options.includeRunningBeyondCap, true);
+        projections += 1; return rows;
+      },
       nextRunningExpiryAt: presentation.nextRunningExpiryAt,
       sessionMembers: presentation.sessionMembers
     }, TokenMonitorSessionLive: sessionLive },
@@ -53,7 +57,8 @@ for (const focus of ['module', 'heading']) test(`Home sessions repaint once at s
     { homePanel: { querySelector: () => current } },
     document,
     () => node(rows.filter((row) => sessionLive.sessionActivityState(row, now) === 'running').length),
-    () => ({})
+    () => ({}),
+    require('../../src/electron/renderer/homeModulePreferences')
   );
 
   function fireNext() {

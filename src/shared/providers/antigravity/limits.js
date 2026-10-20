@@ -16,6 +16,27 @@ const {
   providerStatusFromError
 } = require('../../limits/providerHelpers');
 
+function groupedWindowGroupKey(window) {
+  if (typeof window?.windowMinutes !== 'number') return '';
+  const match = String(window?.label || '').trim().match(/^(.+?)\s+(?:5-hour|weekly)$/i);
+  return match ? match[1].trim().toLowerCase() : '';
+}
+
+function mergeMissingOAuthGroups(local, existing) {
+  const localWindows = Array.isArray(local?.windows) ? local.windows : [];
+  const localGroups = new Set(localWindows.map(groupedWindowGroupKey).filter(Boolean));
+  if (localGroups.size === 0) return local;
+  const missingWindows = (existing?.windows || []).filter((window) => {
+    const groupKey = groupedWindowGroupKey(window);
+    return groupKey && !localGroups.has(groupKey);
+  });
+  if (missingWindows.length === 0) return local;
+  return normalizeLimitProvider({
+    ...local,
+    windows: [...localWindows, ...missingWindows]
+  });
+}
+
 function antigravityPlanLabelFromParts(...parts) {
   const text = parts.map((part) => String(part || '').trim()).find(Boolean) || '';
   const raw = cleanPlanText(text, ['google', 'ai']);
@@ -47,7 +68,8 @@ function mapAntigravitySnapshot(snapshot, { nowMs, source = 'rpc', account = nul
           ? Math.max(0, Math.min(100, (1 - pool.remainingFraction) * 100))
           : null,
         resetsAt: pool.resetTime || null,
-        windowMinutes: null
+        windowMinutes: null,
+        showMeter: Number.isFinite(pool.remainingFraction)
       }));
   return normalizeLimitProvider({
     provider: 'antigravity',
@@ -143,7 +165,11 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
       const localHasGrouped = (local.windows || []).some((w) => typeof w.windowMinutes === 'number');
       const localIsHealthy = local.status === 'ok';
       if (localIsHealthy && (localHasGrouped || !existingHasGrouped)) {
-        providers.splice(duplicateIndex, 1, local);
+        providers.splice(
+          duplicateIndex,
+          1,
+          localHasGrouped && existingHasGrouped ? mergeMissingOAuthGroups(local, existing) : local
+        );
       }
     } else {
       providers.unshift(local);

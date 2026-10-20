@@ -160,7 +160,8 @@ test('title resolution matches between the limits panel and Home', () => {
   assert.match(app, /limitAccountTitle\(id, provider, index, providerEntries\)/);
   const detail = balancedBlock(dock, 'function providerCard(');
   assert.equal(detail.match(/limitAccountTitle/g), null, 'the detail card titles accounts through the view');
-  assert.match(readRendererFile('notch/renderer.js'), /view\.limitAccountTitle\(cell\.provider, record, accountIndex, accountPeers\)/, 'the quota overview delegates its compact account title to the same view');
+  assert.match(dock, /limitAccountTitle: \(\.\.\.args\) => limitWindowsView\.limitAccountTitle\(\.\.\.args\)/, 'the notch uses the shared account title resolver');
+  assert.match(readRendererFile('notch/panel.js'), /limitAccountTitle\(entry\.provider, record, records\.indexOf\(record\), records\)/);
   for (const name of ['codexAccountTitle', 'opencodeAccountTitle', 'namedApiAccountTitle', 'volcenginePlanAccountTitle']) {
     assert.doesNotMatch(app, new RegExp(`${name}\\(provider, index`), `${name} should not be called from the page`);
   }

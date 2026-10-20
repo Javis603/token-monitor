@@ -11,6 +11,10 @@ read_when:
 
 Codex combines a tokscale-backed usage client, local rollout enrichment, supplementary local-executor observations and a multi-account limits provider. Keep usage and limits separate even though they share the `codex` id.
 
+## OpenCodex model attribution
+
+Tokscale can resolve an OpenCodex Responses combo selector to the physical model using `~/.opencodex/usage.jsonl`, or `OPENCODEX_HOME/usage.jsonl` when configured. It requires matching successful attempt, token and timing evidence; ambiguous rows retain the selector. This relabels existing Codex usage without adding token rows. The ledger is consulted during normal Codex scans; ledger-only changes have no dedicated watcher and wait for the next scan, with older periods reconciled by a full scan.
+
 ## Dots local execution
 
 A class of Dots-created local Work/Codex tasks currently exposes live App Server counters without writing a local rollout. `localUsageSource.js` observes those counters through the hosted desktop App Server, using the live `CODEX_HOME/auth.json` login. A task qualifies only when its single execution environment matches a running **local** `codex exec-server --environment-id` process and its source is `codex_work_cca` / `aeon_child`; cwd alone never proves device ownership. Cloud coordinators, another computer's executors, ambiguous environments and tasks with native rollout paths are excluded. Normal rollout collection continues unchanged.

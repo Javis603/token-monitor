@@ -77,3 +77,36 @@ test('Hermes log-only settlements trigger refresh without watching runtime logs'
   const attribution = watchAttributionRootsForClients('hermes', null, options);
   assert.deepEqual(clientsForWatchPath(path.join(logs, 'agent.log'), attribution), ['hermes']);
 });
+
+test('Kilo extension roots mirror native VS Code and remote discovery', (t) => {
+  const home = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-kilo-roots-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const suffix = path.join('Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks');
+  const roots = [
+    path.join(home, '.config', suffix),
+    path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'),
+    path.join(home, 'Library', 'Application Support', suffix),
+    path.join(home, 'AppData', 'Roaming', suffix)
+  ];
+  const roaming = path.join(home, 'custom-roaming');
+  const custom = path.join(roaming, suffix);
+  for (const root of [...roots, custom]) fs.mkdirSync(root, { recursive: true });
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    const options = { homeDir: home, platform, env: { APPDATA: roaming } };
+    const expected = platform === 'win32' ? [...roots, custom] : roots;
+    const declared = clientSourceRoots('kilo', options).kilo
+      .filter(({ id }) => id === 'kilocode-tasks').map(({ dir }) => dir);
+    assert.deepEqual([...new Set(declared)].sort(), [...expected].sort());
+    const watched = watchPathsForClients('kilo', options);
+    const attribution = watchAttributionRootsForClients('kilo', null, options);
+    const ignored = watchIgnoreMatcher('kilo', options);
+    for (const root of expected) {
+      const file = path.join(root, 'task', 'ui_messages.json');
+      assert.ok(watched.includes(root), `${platform}: ${root}`);
+      assert.deepEqual(clientsForWatchPath(file, attribution), ['kilo']);
+      assert.equal(ignored ? ignored(file) : false, false);
+    }
+  }
+  assert.equal(MARKER_CLIENTS['Library/Application Support/Code/User/globalStorage/kilocode.kilo-code/tasks'], 'kilo');
+  assert.equal(MARKER_CLIENTS['AppData/Roaming/Code/User/globalStorage/kilocode.kilo-code/tasks'], 'kilo');
+});

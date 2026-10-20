@@ -93,6 +93,7 @@ function createEdgeDockController(deps) {
 
   const windows = { peek: null, rail: null, bubble: null };
   const ready = { peek: false, rail: false, bubble: false };
+  const visibleTargets = { peek: false, rail: false, bubble: false };
   const fades = new Map();
   const intent = createEdgeDockIntent();
   let running = false;
@@ -338,6 +339,8 @@ function createEdgeDockController(deps) {
   function setVisible(surface, visible, duration) {
     const win = windows[surface];
     if (!alive(win)) return;
+    const revealing = visible && !visibleTargets[surface];
+    visibleTargets[surface] = visible;
     const ignore = !(visible && (surface !== 'peek' || peekTakesPointer()));
     if (surface === 'peek') setPeekIgnoresMouse(win, ignore, visible);
     else win.setIgnoreMouseEvents(ignore);
@@ -352,6 +355,12 @@ function createEdgeDockController(deps) {
         win.setSkipTaskbar?.(true);
         win.setAlwaysOnTop(true, 'pop-up-menu');
       }
+    } else if (platform === 'win32' && revealing) {
+      // Opacity-only reveals never show the HWND again. After desktop restore,
+      // Windows can retain WS_EX_TOPMOST while stacking it behind ordinary
+      // windows. Reapply native ordering on each reveal, even if the flag is
+      // still true, without repeatedly raising it during a steady hover.
+      win.setAlwaysOnTop(true, 'pop-up-menu');
     }
     // The nested refresh circle overlaps the rail's transparent shoulder, but
     // macOS still hit-tests that rail rectangle. Keep the action above it,
@@ -557,7 +566,7 @@ function createEdgeDockController(deps) {
         zoomFactor: dockScale()
       }
     });
-    if (win32) installNonActivatingInput(win);
+    if (win32 || mac) installNonActivatingInput(win);
     if (mac) {
       win.setAlwaysOnTop(true, 'floating');
       win.setVisibleOnAllWorkspaces?.(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
@@ -608,7 +617,7 @@ function createEdgeDockController(deps) {
     const glass = glasses[surface];
     const wanted = liquidGlass();
     try {
-      glass.update({ dark: wanted?.dark !== false, shape: { commands, width, height } });
+      glass.update({ dark: wanted?.dark !== false, style: wanted?.style, tintOpacity: wanted?.tintOpacity, shape: { commands, width, height } });
       return true;
     } catch (error) {
       logger(`[edge-dock] ${surface} Liquid Glass shape failed: ${error.message}`);
@@ -623,6 +632,7 @@ function createEdgeDockController(deps) {
       const win = windows[surface];
       windows[surface] = null;
       ready[surface] = false;
+      visibleTargets[surface] = false;
       lastSent[surface] = '';
       if (alive(win)) {
         cancelFade(win);
@@ -789,14 +799,14 @@ function createEdgeDockController(deps) {
         nativeMaterial.peek = true;
         try {
           if (!glasses.peek) glasses.peek = createGlass(win);
-          glasses.peek.update({ dark: liquidGlass()?.dark !== false, visible: true });
+          glasses.peek.update({ dark: liquidGlass()?.dark !== false, style: liquidGlass()?.style, tintOpacity: liquidGlass()?.tintOpacity, visible: true });
         } catch (error) {
           logger(`[edge-dock] refresh Liquid Glass unavailable: ${error.message}`);
           disposeGlass('peek');
           win.setVibrancy?.('hud');
         }
       } else {
-        try { glasses.peek?.update({ dark: liquidGlass()?.dark !== false, visible: false }); }
+        try { glasses.peek?.update({ dark: liquidGlass()?.dark !== false, style: liquidGlass()?.style, tintOpacity: liquidGlass()?.tintOpacity, visible: false }); }
         catch { disposeGlass('peek'); }
         win.setVibrancy?.('hud');
         nativeMaterial.peek = true;
@@ -1228,6 +1238,7 @@ function createEdgeDockController(deps) {
     running = true;
     if (platform === 'win32') {
       powerMonitor?.on('resume', onWake);
+      powerMonitor?.on('unlock-screen', onWake);
     }
     registerIpc();
     attachDisplayListeners();
@@ -1235,8 +1246,9 @@ function createEdgeDockController(deps) {
     schedulePoll();
   }
 
-  // These windows stay shown at opacity zero between reveals. A wake can leave
-  // them behind ordinary windows, so the first-show repair never runs again.
+  // These windows stay shown at opacity zero between reveals. Desktop restore
+  // can leave them behind ordinary windows, including after resume has fired
+  // but before the user unlocks. Repair both events, including open surfaces.
   // Restore the native level and stacking without changing content or focus.
   function restoreWindowsTopmost() {
     if (!running) return;
@@ -1248,7 +1260,7 @@ function createEdgeDockController(deps) {
       try {
         win.setAlwaysOnTop(true, 'pop-up-menu');
       } catch (error) {
-        logger(`[edge-dock] ${surface} wake topmost restore failed: ${error.message}`);
+        logger(`[edge-dock] ${surface} topmost restore failed: ${error.message}`);
       }
     }
   }
@@ -1257,7 +1269,7 @@ function createEdgeDockController(deps) {
     clearTimeout(wakeTopmostTimer);
     restoreWindowsTopmost();
     // The shell can finish restoring windows after the power event. One bounded
-    // follow-up also coalesces repeated resume events; no permanent raise loop.
+    // follow-up also coalesces resume/unlock events; no permanent raise loop.
     wakeTopmostTimer = setTimeout(() => {
       wakeTopmostTimer = null;
       restoreWindowsTopmost();
@@ -1268,6 +1280,7 @@ function createEdgeDockController(deps) {
     running = false;
     if (platform === 'win32') {
       powerMonitor?.removeListener('resume', onWake);
+      powerMonitor?.removeListener('unlock-screen', onWake);
     }
     clearTimeout(wakeTopmostTimer);
     wakeTopmostTimer = null;
@@ -1352,13 +1365,20 @@ function createEdgeDockController(deps) {
       render('rail');
       if (bubbleCell !== null) render('bubble');
     },
-    setAppearance(nextAppearance) {
-      appearance = nextAppearance || {};
+    setAppearance(nextAppearance, { preview = false } = {}) {
+      if (preview) {
+        // Keep the canonical currency/subscription projection; slider previews
+        // replace only the CSS glass values. Native tints come from liquidGlass().
+        appearance = { ...appearance };
+        for (const key of ['glassOpacity', 'glassBlur']) {
+          if (nextAppearance?.[key] !== undefined) appearance[key] = nextAppearance[key];
+        }
+      } else appearance = nextAppearance || {};
       if (!running) return;
       const wanted = liquidGlass();
       for (const surface of SURFACES) {
         try {
-          glasses[surface]?.update({ dark: wanted?.dark !== false, visible: surface !== 'peek' || peekMode === 'refresh' });
+          glasses[surface]?.update({ dark: wanted?.dark !== false, style: wanted?.style, tintOpacity: wanted?.tintOpacity, visible: surface !== 'peek' || peekMode === 'refresh' });
         } catch (error) {
           logger(`[edge-dock] ${surface} Liquid Glass appearance failed: ${error.message}`);
         }

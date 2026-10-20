@@ -12,9 +12,10 @@ const API_BASE_URL = 'https://cloudcode-pa.googleapis.com';
 const API_DAILY_BASE_URL = 'https://daily-cloudcode-pa.googleapis.com';
 const API_DAILY_SANDBOX_BASE_URL = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
 // CLIProxyAPI follows Antigravity Hub's own client identity. Cloud Code rejects
-// newer model data for clients below 2.9.0, so keep the same safe floor when an
-// installed app is older or unavailable.
-const ANTIGRAVITY_CLIENT_VERSION = '2.9.1';
+// newer model data for clients below 2.9.0 and withholds Gemini 4 Argon quota
+// and model entries below 2.16.0, so keep the floor at the current Hub release
+// when an installed app is older or unavailable.
+const ANTIGRAVITY_CLIENT_VERSION = '2.23.1';
 const ANTIGRAVITY_USER_AGENT = `antigravity/hub/${ANTIGRAVITY_CLIENT_VERSION} darwin/arm64`;
 const ANTIGRAVITY_ONBOARD_USER_AGENT = `${ANTIGRAVITY_USER_AGENT} google-api-nodejs-client/10.3.0`;
 const ANTIGRAVITY_GOOG_API_CLIENT = 'gl-node/22.21.1';
@@ -421,6 +422,8 @@ async function fetchAvailableModels(accessToken, projectBody, deps = {}) {
 }
 
 function clampFraction(value) {
+  if (value === null || value === undefined || typeof value === 'boolean') return null;
+  if (typeof value === 'string' && !value.trim()) return null;
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : null;
 }
