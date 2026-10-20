@@ -1,12 +1,11 @@
 'use strict';
 
-const path = require('node:path');
 const { hashKey } = require('../../hashKey');
-const { sharedDataDir } = require('../../config');
 const { normalizeLimitProvider } = require('../../limits/core');
 const { cleanSecret, numberOrNull } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 const { recordWorkbuddyUsage } = require('./usageHistory');
+const { WORKBUDDY_USAGE_ACTION } = require('./usageRecords');
 
 const WORKBUDDY_FETCH_TIMEOUT_MS = 12_000;
 const WORKBUDDY_ACCOUNT_CONCURRENCY = 4;
@@ -447,7 +446,10 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
           { signal, deadlineMs });
       };
       let credential = managed ? await resolveCredential(false) : { accessToken: explicitToken, domain };
-      const requestQuota = async () => {
+      // The ledger read shares the quota request's credentials, host, realm
+      // paths and transport, so a Spend figure can never be fetched with a
+      // different account's token or from a different realm.
+      const billingPost = async (paths, requestBody) => {
         const token = cleanSecret(credential?.accessToken);
         const credentialDomain = cleanSecret(credential?.domain) || domain;
         if (managed && !token) throw Object.assign(new Error('WorkBuddy managed credential is missing'), { status: 'notConfigured' });
@@ -458,21 +460,29 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
           : requestHeaders(token, userId, enterpriseId, workbuddyLocale(env, options), credentialDomain, departmentInfo);
         const init = {
           method: 'POST', redirect: 'error', credentials: 'omit', headers,
-          body: enterpriseId ? '{}' : JSON.stringify({
-            PageNumber: 1, PageSize: 100, ProductCode: WORKBUDDY_PRODUCT_CODE, Status: [0, 3],
-            PackageEndTimeRangeBegin: formatWorkbuddyDateTime(now),
-            PackageEndTimeRangeEnd: formatWorkbuddyDateTime(now + WORKBUDDY_PERSONAL_RANGE_MS)
-          })
+          body: JSON.stringify(requestBody)
         };
         const endpoint = realm === 'ai' ? WORKBUDDY_AI_ENDPOINT : WORKBUDDY_DEFAULT_ENDPOINT;
-        const paths = workbuddyBillingPaths(realm, Boolean(enterpriseId));
-        for (let index = 0; index < paths.length; index += 1) {
+        const send = async (index) => {
           try { return await fetchJson(`${endpoint}${paths[index]}`, init, requestDeps); }
           catch (error) {
             if (error.httpStatus !== 404 || index === paths.length - 1) throw error;
+            return send(index + 1);
           }
-        }
+        };
+        return send(0);
       };
+      // The ledger action is a sibling of the quota action under the realm's
+      // billing prefix, so it inherits both the `/v2` form and the AI realm's
+      // shorter fallback without duplicating the prefix here.
+      const spendPaths = workbuddyBillingPaths(realm, Boolean(enterpriseId))
+        .map((billingPath) => `${billingPath.slice(0, billingPath.lastIndexOf('/') + 1)}${WORKBUDDY_USAGE_ACTION}`);
+      const requestQuota = () => billingPost(workbuddyBillingPaths(realm, Boolean(enterpriseId)),
+        enterpriseId ? {} : {
+          PageNumber: 1, PageSize: 100, ProductCode: WORKBUDDY_PRODUCT_CODE, Status: [0, 3],
+          PackageEndTimeRangeBegin: formatWorkbuddyDateTime(now),
+          PackageEndTimeRangeEnd: formatWorkbuddyDateTime(now + WORKBUDDY_PERSONAL_RANGE_MS)
+        });
       let body;
       try { body = await requestQuota(); }
       catch (error) {
@@ -487,19 +497,12 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
       const resolvedAccountKey = managed || userId
         ? accountKey
         : workbuddyAccountKey(explicitToken, userId, enterpriseId, usage.accountId, realm);
-      // What the account spent between two observations of its aggregate used
-      // Credits — the only way to state Today/Week/Month on a billing API with
-      // no period rollups. A probe does not write history: it is the user
-      // checking the credential they just saved, not the collector's cadence.
-      const tracked = usage.window && !deps.probe ? recordWorkbuddyUsage({
-        accountKey: resolvedAccountKey,
-        used: usage.used,
-        now,
-        storePath: deps.workbuddyUsageStorePath
-          || path.join(sharedDataDir({ env }), 'workbuddy-usage-v1.json'),
-        readJson: deps.readJson,
-        writeJsonAtomic: deps.writeJsonAtomic
-      }) : null;
+      // Today/Week/Month come from the per-request billing ledger, which carries
+      // its own timestamps. A probe is the user checking a credential they just
+      // saved, and the ledger read costs extra requests, so it is skipped there.
+      const tracked = usage.window && !deps.probe
+        ? await recordWorkbuddyUsage((requestBody) => billingPost(spendPaths, requestBody), now)
+        : null;
       return row('ok', {
         accountKey: resolvedAccountKey,
         windows: usage.window ? [usage.window] : [],

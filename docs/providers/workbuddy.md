@@ -41,7 +41,11 @@ The shared metadata scanner still skips records above 64 KiB, so oversized user 
 
 ### Credits spend history
 
-The billing API reports one current-cycle used total per account and no period rollups — the official client itself has no daily or monthly usage endpoint — so the Spend row's Today/Week/Month/All-time figures are tracked locally, the way DeepSeek, Z.ai and MiMo derive theirs. `providers/workbuddy/usageHistory.js` keeps one ledger per account key in `workbuddy-usage-v1.json` under the shared data directory: each successful observation records the positive delta of the aggregate used Credits into the local day's bucket, and a drop — a cycle reset, an expiring package, a changed package set — only moves the baseline without recording negative spend. Daily buckets are pruned after 40 days while `allTimeSpend` keeps accumulating; `trackingSince` and `monthSinceTracking` mark the local coverage so a row can state that its month figure is partial. The store path is overridable through `deps.workbuddyUsageStorePath`, and the save-time credential probe (`deps.probe`) never writes history. Because the figures are observations, spend that crosses a cycle reset while the collector is not running is not observable; the row states tracked spend, not a provider-certified total.
+Today/Week/Month/All-time Credits spend is read from the per-request billing ledger at `/v2/billing/meter/get-user-request-usage`, not derived from a locally diffed cumulative total. Each row carries its own `requestTime` and `credit`, so `providers/workbuddy/usageRecords.js` requests the window from the first day of the rolling week (seven days including today) through now, page by page, and sums the rows into the four periods: Today from local midnight, Week over that rolling window, Month from the first of the current month, and All time over every row the ledger returned.
+
+Because the provider answers with real timestamps, the figures do not depend on how often this machine observed the account: spend that happened while the collector was not running still counts, and a cycle reset or a changed package set cannot move a baseline. `docs/API.md` describes the same four fields.
+
+The ledger is a paged read bounded at `WORKBUDDY_USAGE_MAX_PAGES` (50) pages of 100 rows; a scan that hits that bound sets `spendTruncated` on the balance instead of presenting a silently short total. A failed or refused ledger read yields no Spend fields at all — the Credits balance still publishes, because Spend is enrichment rather than a quota fact. The save-time credential probe (`deps.probe`) skips the ledger read: it is the user checking a credential they just saved, not a collection tick. The ledger request reuses the quota request's resolved credential, realms, host and transport, so a Spend figure can never be fetched with a different account's token or from the wrong realm.
 
 ### Source selection
 
@@ -111,6 +115,7 @@ That distinction is the whole point: an encrypted credential is not a signed-out
 | App session reading, encryption detection, read reasons | `src/electron/providers/workbuddy/localAuth.js` |
 | Official login, refresh and managed credentials | `src/shared/providers/workbuddy/oauth.js`, `src/electron/providers/workbuddy/oauthLogin.js`, `src/electron/providers/workbuddy/managedAccounts.js`, shared `CredentialStore` |
 | Billing request and response mapping | `src/shared/providers/workbuddy/limits.js` |
+| Credits spend ledger read and period sums | `src/shared/providers/workbuddy/usageRecords.js`, `usageHistory.js` |
 | Widget lane configuration and reason plumbing | `src/electron/main.js`, `src/electron/runtimeConfig.js` |
 | Action hint bounds | `src/shared/limits/core.js`, generated `worker/src/shared/limits/core.js` |
 | Status label and localized strings | `src/electron/renderer/limits/providerPresentation.js`, `src/electron/renderer/i18n.js` |
