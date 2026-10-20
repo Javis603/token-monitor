@@ -15,6 +15,9 @@ concurrency:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    # A case that never settles otherwise burns GitHub's six-hour default and
+    # ships no log until it does, which reads as an unexplained hang.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -56,6 +59,9 @@ jobs:
     # a different subset of the suite (#481): +02 and +10 were green while +07
     # was not, and Kathmandu is here because +05:45 is not a whole hour.
     runs-on: ubuntu-latest
+    # Same reason as the test job above: seven sequential `npm test` runs leave
+    # a hang nowhere to surface.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
