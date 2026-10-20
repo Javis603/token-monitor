@@ -515,7 +515,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     return (lane.accountRevisions.get(identityKey) || 0) === (dispatch.accountRevisions.get(identityKey) || 0);
   }
 
-  function applyAttempt(lane, identityKey, row, status, at) {
+  function applyAttempt(lane, identityKey, row, status, at, invalidatedWindowLabels) {
     const existing = lane.identities.get(identityKey) || {
       identityKey,
       lastGood: null,
@@ -525,6 +525,11 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       existing.lastGood = row;
     } else if (!TRANSIENT_STATUSES.has(status)) {
       existing.lastGood = null;
+    } else if (existing.lastGood && invalidatedWindowLabels?.size) {
+      existing.lastGood = {
+        ...existing.lastGood,
+        windows: existing.lastGood.windows.filter((window) => !invalidatedWindowLabels.has(window.label))
+      };
     }
     if (lane.provider === 'workbuddy' && TRANSIENT_STATUSES.has(status) && !row.accountKey) {
       // A partial discovery can miss an encrypted identity which has never
@@ -567,9 +572,20 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     // data), so an explicit removal is the narrow way to delete that identity.
     // It is consumed here and never enters the normalized or synced wire shape.
     const removals = inputRows.filter((row) => row?.removed === true);
+    const cacheInvalidations = new Map();
     const normalizedRows = inputRows
       .filter((row) => row?.removed !== true)
-      .map((row) => normalizeLimitProvider({ ...row, provider: lane.provider }))
+      .map((input) => {
+        const row = normalizeLimitProvider({ ...input, provider: lane.provider });
+        // An explicit provider result can invalidate known-bad windows without
+        // disabling transient retention for its other windows or other accounts.
+        // Require an account key; a generic failure cannot invalidate a lane.
+        if (row?.accountKey && Array.isArray(input.invalidateCachedWindowLabels)) {
+          cacheInvalidations.set(rowIdentityKey(row), new Set(input.invalidateCachedWindowLabels
+            .filter((label) => typeof label === 'string' && label)));
+        }
+        return row;
+      })
       .filter(Boolean);
     const expected = new Set(dispatch.expectedIdentityKeys);
     const represented = new Set();
@@ -618,7 +634,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       }
 
       represented.add(identityKey);
-      applyAttempt(lane, identityKey, row, row.status, attemptAt);
+      applyAttempt(lane, identityKey, row, row.status, attemptAt, cacheInvalidations.get(rowIdentityKey(row)));
       // Marks the row as measurable by this runtime, so a persisted seed for a
       // provider that has not answered yet can never become a burn baseline.
       if (row.status === 'ok') markLimitsProbeSuccess(burnState, row);

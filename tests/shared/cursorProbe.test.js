@@ -5,6 +5,7 @@ const { EventEmitter, getEventListeners } = require('node:events');
 const https = require('node:https');
 const test = require('node:test');
 const { fetchCursorLimits } = require('../../src/shared/providers/cursor/limits');
+const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
 
 const {
   parseGrokBotUsage,
@@ -443,6 +444,91 @@ test('successful proto3 legacy identification keeps genuine zero model pools', a
     assert.deepEqual(result.windows.map((window) => [window.label, window.usedPercent]), [
       ['Cursor Models', 0], ['Other Models', 0]
     ]);
+  }
+});
+
+test('Cursor unknown-plan results invalidate only cached legacy seat quotas through the runtime', async (t) => {
+  const summary = { individualUsage: { plan: { autoPercentUsed: 0, apiPercentUsed: 0 } } };
+  const account = { id: 'fixture-account', sessionToken: 'tok' };
+  const seed = await fetchCursorLimits({}, {
+    readActiveAccount: () => account,
+    httpsLib: dashboardFakeHttps({ '/api/usage-summary': summary })
+  });
+  const other = { ...seed, accountKey: 'other-account' };
+  const team = { kind: 'billing', label: 'Team pool', usedPercent: 75 };
+  const spend = { kind: 'billing', label: 'On-demand spend', metric: 'spend', used: 3, limit: 10, currency: 'USD' };
+  const included = { kind: 'weekly', label: 'Included usage', usedPercent: 40 };
+  for (const scenario of [
+    { name: 'persisted full model pools', windows: seed.windows, expected: [] },
+    { name: 'persisted unavailable model pools', windows: seed.windows, seedStatus: 'unavailable', expected: [] },
+    {
+      name: 'request quota with independent data',
+      windows: [{ kind: 'billing', label: 'Requests', usedPercent: 0 }, team, spend],
+      expected: ['Team pool', 'On-demand spend']
+    },
+    {
+      name: 'overall quota with independent data',
+      windows: [{ kind: 'billing', label: 'Overall', usedPercent: 0 }, team],
+      expected: ['Team pool']
+    },
+    { name: 'previously confirmed unified quota', windows: [included], expected: ['Included usage'] },
+    { name: 'ordinary summary failure keeps last-good model pools', windows: seed.windows, summaryFails: true, expected: ['Cursor Models', 'Other Models'] }
+  ]) {
+    await t.test(scenario.name, async (t) => {
+      const payloads = {
+        '/api/usage-summary': scenario.summaryFails ? null : summary,
+        '/api/dashboard/get-plan-info': null,
+        '/api/dashboard/get-sand-usage-status': null
+      };
+      const runtime = createLimitsRuntime({
+        limitProviders: ['cursor'],
+        previousLimits: { providers: [{ ...seed, status: scenario.seedStatus || 'ok', windows: scenario.windows }, other] }
+      }, {
+        autoStart: false,
+        autoRetry: false,
+        probeProvider: async () => [await fetchCursorLimits({}, {
+          readActiveAccount: () => account,
+          httpsLib: dashboardFakeHttps(payloads)
+        })]
+      });
+      t.after(() => runtime.stop());
+      const scope = { provider: 'cursor', accountKey: seed.accountKey };
+      const before = runtime.getSnapshot();
+      assert.deepEqual(before.providers[0].windows.map((window) => window.label),
+        scenario.windows.map((window) => window.label));
+      await runtime.refresh(scope, 'credential-change');
+      const snapshot = runtime.getSnapshot();
+      const row = snapshot.providers.find((provider) => provider.accountKey === seed.accountKey);
+      assert.equal(row.status, 'unavailable');
+      assert.deepEqual(row.windows.map((window) => window.label), scenario.expected);
+      assert.deepEqual(snapshot.providers.find((provider) => provider.accountKey === other.accountKey),
+        before.providers.find((provider) => provider.accountKey === other.accountKey));
+      assert.equal(JSON.stringify(snapshot).includes('invalidateCachedWindowLabels'), false);
+
+      // Another transient failure must not bring the invalidated quotas back.
+      payloads['/api/usage-summary'] = null;
+      await runtime.refresh(scope, 'credential-change');
+      assert.deepEqual(runtime.getSnapshot().providers.find((provider) => provider.accountKey === seed.accountKey)
+        .windows.map((window) => window.label), scenario.expected);
+
+      if (scenario.name === 'persisted full model pools') {
+        const restarted = createLimitsRuntime({
+          limitProviders: ['cursor'], previousLimits: runtime.getSnapshot()
+        }, { autoStart: false, autoRetry: false });
+        t.after(() => restarted.stop());
+        assert.deepEqual(restarted.getSnapshot().providers.find((provider) => provider.accountKey === seed.accountKey).windows, []);
+
+        // A later successful legacy lookup can report genuine zero usage again.
+        payloads['/api/usage-summary'] = summary;
+        payloads['/api/dashboard/get-plan-info'] = {};
+        await runtime.refresh(scope, 'credential-change');
+        const recovered = runtime.getSnapshot().providers.find((provider) => provider.accountKey === seed.accountKey);
+        assert.equal(recovered.status, 'ok');
+        assert.deepEqual(recovered.windows.map((window) => [window.label, window.usedPercent]), [
+          ['Cursor Models', 0], ['Other Models', 0]
+        ]);
+      }
+    });
   }
 });
 

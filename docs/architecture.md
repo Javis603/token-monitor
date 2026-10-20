@@ -85,6 +85,7 @@ Failed usage reconfiguration restores the last-known-good runtime and retries th
 - `limits/collector.js` dispatches through `limits/registry.js`; require-free provider `account.js` leaves declare account/credential metadata. Main-process `electron/limits/accountSettings.js` binds normalization and redaction. Forms receive serializable display/action DTOs, never store paths, resolvers or secrets.
 - Only registry-declared forms may save credentials. Probes use the injected transport with write-backs disabled. Reject incomplete, invalid or unauthorized drafts; persist a probe-renewed credential instead of its stale input. Saves use `applySettingsPatch()` for ordinary invalidation/reconfiguration, and same-provider revisions discard superseded probes.
 - Missing identities in mixed results retain last-good data. Only explicit internal removal markers retire known accounts; consume those before normalization so they never enter the wire record.
+- Account-keyed probe results may supply internal `invalidateCachedWindowLabels` to discard specific last-good windows whose interpretation is no longer trustworthy. Consume it before normalization; it never enters snapshots or the wire record. Ordinary transient failures keep the remaining last-good windows, and generic failures cannot invalidate a provider lane.
 
 `limits/core.js` owns normalization. It has no directory index because the Worker imports it as ESM. `limits/providers.js` and `limits/balanceDisplay.js` also support renderer script loading; keep that portable boundary.
 

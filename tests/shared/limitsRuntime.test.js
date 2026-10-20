@@ -468,6 +468,26 @@ test('a transient failure retains matching lastGood windows with the latest stat
   runtime.stop();
 });
 
+test('a generic cache invalidation cannot clear known accounts in a provider lane', async (t) => {
+  const seed = providerRow('cursor', 'account', 'Cursor', {
+    windows: [{ kind: 'billing', label: 'Cursor Models', usedPercent: 0 }]
+  });
+  const runtime = createLimitsRuntime({
+    limitProviders: ['cursor'], previousLimits: { providers: [seed] }
+  }, runtimeDeps({
+    autoRetry: false,
+    probeProvider: async () => [{
+      provider: 'cursor', status: 'unavailable', windows: [],
+      invalidateCachedWindowLabels: ['Cursor Models']
+    }]
+  }));
+  t.after(() => runtime.stop());
+  const before = runtime.getSnapshot().providers[0];
+  await runtime.refresh({ provider: 'cursor' }, 'interval');
+  assert.equal(runtime.getSnapshot().providers[0].status, 'unavailable');
+  assert.deepEqual(runtime.getSnapshot().providers[0].windows, before.windows);
+});
+
 test('a Codex source-rate-limited response retains the last known quota windows', async () => {
   const results = [
     [providerRow('codex', 'account', 'Plus', { updatedAt: '2026-07-21T00:00:00.000Z' })],

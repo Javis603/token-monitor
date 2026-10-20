@@ -253,6 +253,10 @@ async function fetchCursorAccountLimits(account, deps = {}) {
     accountEmail: result.user?.email || '',
     planLabel: formatCursorMembership(usage.membershipType) || (unified ? usage.planInfo?.planName || '' : ''),
     status: planType === 'unknown' && windows.length === 0 ? 'unavailable' : 'ok',
+    // Runtime-only: these legacy seat quotas are untrusted even in lastGood.
+    ...(planType === 'unknown' ? {
+      invalidateCachedWindowLabels: ['Requests', 'Cursor Models', 'Other Models', 'Overall']
+    } : {}),
     source: 'web',
     updatedAt,
     windows
