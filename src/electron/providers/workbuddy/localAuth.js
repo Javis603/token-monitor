@@ -4,14 +4,18 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+const { runWithProbeDeadline } = require('../../../shared/probeDeadline');
 const { readRegularFileNoFollow } = require('../../../shared/credentialStore');
 const {
-  WORKBUDDY_ENTERPRISE_PATH,
-  WORKBUDDY_PERSONAL_PATH,
-  WORKBUDDY_SESSION_REASON_ENCRYPTED
+  WORKBUDDY_SESSION_REASON_ENCRYPTED,
+  WORKBUDDY_FETCH_TIMEOUT_MS,
+  workbuddyAccountKey,
+  workbuddyBillingPaths,
+  workbuddyDomainMatchesRealm
 } = require('../../../shared/providers/workbuddy/limits');
 
 const WORKBUDDY_AUTH_FILE_NAME = 'workbuddy-desktop.info';
+const WORKBUDDY_AI_AUTH_FILE_NAME = 'workbuddy-desktop-ai.info';
 const WORKBUDDY_LOGOUT_MARKER_SUFFIX = '.logged-out';
 const WORKBUDDY_AUTH_FILE_MAX_BYTES = 1024 * 1024;
 const WORKBUDDY_SESSION_EXPIRY_SKEW_MS = 30 * 1000;
@@ -35,14 +39,10 @@ const WORKBUDDY_SESSION_READ_REASONS = Object.freeze({
   // A usable session that is past its expiry.
   expired: 'expired'
 });
-const WORKBUDDY_API_HOSTS = new Set([
-  'copilot.tencent.com'
-]);
-const WORKBUDDY_API_PATHS = new Set([
-  WORKBUDDY_PERSONAL_PATH,
-  WORKBUDDY_ENTERPRISE_PATH
-]);
 const WORKBUDDY_PROTECTED_HEADERS = new Set([
+  'host',
+  'origin',
+  'referer',
   'authorization',
   'cookie',
   'x-refresh-token',
@@ -68,13 +68,14 @@ function numberOrNull(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function isAllowedWorkbuddyApiUrl(value, method = 'GET') {
+function isAllowedWorkbuddyApiUrl(value, method = 'GET', realm = 'cn') {
   try {
     const url = new URL(String(value || ''));
     return String(method || '').toUpperCase() === 'POST'
       && url.protocol === 'https:'
-      && WORKBUDDY_API_HOSTS.has(url.hostname.toLowerCase())
-      && WORKBUDDY_API_PATHS.has(url.pathname)
+      && ['cn', 'ai'].includes(realm)
+      && url.hostname === (realm === 'ai' ? 'www.workbuddy.ai' : 'copilot.tencent.com')
+      && [...workbuddyBillingPaths(realm), ...workbuddyBillingPaths(realm, true)].includes(url.pathname)
       && !url.username
       && !url.password
       && !url.port
@@ -98,6 +99,7 @@ function sanitizeRequestInit(init = {}) {
     // Authentication is injected only after the exact billing URL has been
     // allowlisted. Never let the transport carry it to a redirect target.
     redirect: 'error',
+    credentials: 'omit',
     ...(body === undefined ? {} : { body }),
     ...(init.signal ? { signal: init.signal } : {})
   };
@@ -124,9 +126,9 @@ function authDirectoryForPlatform(platform = process.platform, homeDir = os.home
   return authDirectoriesForPlatform(platform, homeDir, env)[0] || null;
 }
 
-function authPathCandidates(authDirectory) {
+function authPathCandidates(authDirectory, realm = 'cn') {
   if (!authDirectory) return [];
-  return [path.join(authDirectory, WORKBUDDY_AUTH_FILE_NAME)];
+  return [path.join(authDirectory, realm === 'ai' ? WORKBUDDY_AI_AUTH_FILE_NAME : WORKBUDDY_AUTH_FILE_NAME)];
 }
 
 function authError(status, message) {
@@ -160,7 +162,7 @@ function isEncryptedCredentialField(value) {
 // Separates "the app is not signed in" from "Token Monitor cannot read what the
 // app wrote". Only the read reason reaches the limits path; callers that just
 // need a session keep using normalizeStoredSession().
-function inspectStoredSession(value, now = Date.now()) {
+function inspectStoredSession(value, now = Date.now(), realm = 'cn') {
   if (!value || typeof value !== 'object') {
     return { session: null, reason: WORKBUDDY_SESSION_READ_REASONS.malformed };
   }
@@ -174,7 +176,7 @@ function inspectStoredSession(value, now = Date.now()) {
   }
   const accessToken = cleanText(auth.accessToken);
   const userId = cleanText(account.uid);
-  if (!accessToken || !userId) {
+  if (!accessToken || !userId || !workbuddyDomainMatchesRealm(auth.domain, realm)) {
     return { session: null, reason: WORKBUDDY_SESSION_READ_REASONS.incomplete };
   }
 
@@ -184,6 +186,9 @@ function inspectStoredSession(value, now = Date.now()) {
   return {
     session: {
       accessToken,
+      realm,
+      accountKey: workbuddyAccountKey({ realm, userId, enterpriseId }),
+      accountName: safeAccountName(account),
       userId,
       enterpriseId,
       departmentInfo,
@@ -200,7 +205,7 @@ function normalizeStoredSession(value, now = Date.now()) {
   return inspectStoredSession(value, now).session;
 }
 
-function readSessionFile(filePath, fsApi = fs, now = Date.now()) {
+function readSessionFile(filePath, fsApi = fs, now = Date.now(), realm = 'cn') {
   const absent = { session: null, reason: WORKBUDDY_SESSION_READ_REASONS.absent };
   if (!filePath) return absent;
   if (fsApi.existsSync(`${filePath}${WORKBUDDY_LOGOUT_MARKER_SUFFIX}`)) return absent;
@@ -211,7 +216,11 @@ function readSessionFile(filePath, fsApi = fs, now = Date.now()) {
       encoding: 'utf8',
       maxBytes: WORKBUDDY_AUTH_FILE_MAX_BYTES
     });
-    return inspectStoredSession(JSON.parse(raw), now);
+    const document = JSON.parse(raw);
+    const result = inspectStoredSession(document, now, realm);
+    // Unsealed account metadata can identify an encrypted/expired local row;
+    // no credential field is exposed by this projection.
+    return { ...result, metadata: storedSessionMetadata(document, realm) };
   } catch (_) {
     // The reader rejects missing, oversized, symlinked and unreadable paths
     // with one error shape. Only a path that is genuinely gone counts as
@@ -222,10 +231,33 @@ function readSessionFile(filePath, fsApi = fs, now = Date.now()) {
   }
 }
 
-function sessionInfo(session, reason = '') {
+function safeAccountName(account) {
+  return cleanText(account?.name || account?.nickname || account?.displayName)
+    .replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 160);
+}
+
+function storedSessionMetadata(document, realm) {
+  const account = document?.account || {};
+  const domain = cleanText(document?.auth?.domain);
+  if (!workbuddyDomainMatchesRealm(domain, realm)) return {};
+  const userId = cleanText(account.uid);
+  const enterpriseId = cleanText(account.enterpriseId);
+  return {
+    realm, userId, enterpriseId, domain,
+    departmentInfo: cleanText(account.departmentFullName),
+    accountType: cleanText(account.accountType || account.type) || 'personal',
+    accountName: safeAccountName(account),
+    accountKey: userId ? workbuddyAccountKey({ realm, userId, enterpriseId }) : ''
+  };
+}
+
+function sessionInfo(session, reason = '', realm = 'cn') {
   if (!session) {
     return {
       authenticated: false,
+      realm,
+      accountKey: '',
+      accountName: '',
       userId: '',
       enterpriseId: '',
       departmentInfo: '',
@@ -236,6 +268,9 @@ function sessionInfo(session, reason = '') {
   }
   return {
     authenticated: true,
+    realm: session.realm,
+    accountKey: session.accountKey,
+    accountName: session.accountName,
     userId: session.userId,
     enterpriseId: session.enterpriseId,
     departmentInfo: session.departmentInfo,
@@ -248,6 +283,8 @@ function matchesExpectedSession(expected, session) {
   if (!expected || typeof expected !== 'object') return true;
   const actual = sessionInfo(session);
   if (expected.authenticated !== true || actual.authenticated !== true) return false;
+  if ((expected.realm || 'cn') !== actual.realm) return false;
+  if (expected.accountKey && expected.accountKey !== actual.accountKey) return false;
   return ['userId', 'enterpriseId', 'departmentInfo', 'domain', 'accountType']
     .every((field) => cleanText(expected[field]) === cleanText(actual[field]));
 }
@@ -270,38 +307,56 @@ function createWorkbuddyLocalAuth(deps = {}) {
       : null;
   const now = typeof deps.now === 'function' ? deps.now : Date.now;
 
-  function locateSession() {
+  function locateSession(realm = 'cn') {
     const checkedAt = now();
     if (!supported) {
       return { session: null, reason: WORKBUDDY_SESSION_READ_REASONS.unsupported };
     }
     for (const authDirectory of authDirectories) {
-      for (const filePath of authPathCandidates(authDirectory)) {
+      for (const filePath of authPathCandidates(authDirectory, realm)) {
         const hasCanonicalState = fsApi.existsSync(filePath)
           || fsApi.existsSync(`${filePath}${WORKBUDDY_LOGOUT_MARKER_SUFFIX}`);
         if (!hasCanonicalState) continue;
         // Once the preferred location has a canonical file or logout marker,
         // do not revive a stale session from a legacy fallback directory.
-        return readSessionFile(filePath, fsApi, checkedAt);
+        return { ...readSessionFile(filePath, fsApi, checkedAt, realm), canonical: true };
       }
     }
     return { session: null, reason: WORKBUDDY_SESSION_READ_REASONS.absent };
   }
 
+  function infoForResult(result, realm, includeMetadata = false) {
+    const { session, reason } = result;
+    if (session && !session.expired) return sessionInfo(session);
+    return {
+      ...sessionInfo(null, session?.expired ? WORKBUDDY_SESSION_READ_REASONS.expired : reason, realm),
+      ...(includeMetadata ? result.metadata : {})
+    };
+  }
+
   function getSessionInfo() {
-    const { session, reason } = locateSession();
-    if (!session) return sessionInfo(null, reason);
-    return session.expired
-      ? sessionInfo(null, WORKBUDDY_SESSION_READ_REASONS.expired)
-      : sessionInfo(session);
+    // Keep the established CN single-session view when it is usable. Each
+    // realm's canonical state independently blocks only its own stale fallback.
+    const cn = locateSession('cn');
+    if (cn.session && !cn.session.expired) return infoForResult(cn, 'cn');
+    const ai = locateSession('ai');
+    return ai.canonical ? infoForResult(ai, 'ai') : infoForResult(cn, 'cn');
+  }
+
+  function getSessionInfos() {
+    const results = ['cn', 'ai'].map((realm) => ({ realm, result: locateSession(realm) }));
+    const present = results.filter(({ result }) => result.canonical);
+    return (present.length ? present : results.slice(0, 1))
+      .map(({ realm, result }) => infoForResult(result, realm, true));
   }
 
   async function request(url, init = {}, expectedSession = null) {
     const requestInit = sanitizeRequestInit(init);
-    if (!isAllowedWorkbuddyApiUrl(url, requestInit.method)) {
+    const realm = expectedSession?.realm || (String(url).startsWith('https://www.workbuddy.ai/') ? 'ai' : 'cn');
+    if (!isAllowedWorkbuddyApiUrl(url, requestInit.method, realm)) {
       throw authError('unavailable', 'WorkBuddy billing endpoint is not allowed');
     }
-    const { session, reason } = locateSession();
+    const { session, reason } = locateSession(realm);
     if (!session) throw authError('notConfigured', sessionUnavailableMessage(reason));
     if (session.expired) throw authError('unauthorized', 'WorkBuddy app session has expired');
     if (!matchesExpectedSession(expectedSession, session)) {
@@ -321,19 +376,24 @@ function createWorkbuddyLocalAuth(deps = {}) {
       headers['X-Tenant-Id'] = session.enterpriseId;
     }
     if (session.domain) headers['X-Domain'] = session.domain;
-    if (session.departmentInfo) headers['X-Department-Info'] = session.departmentInfo;
-    const response = await fetcher(url, { ...requestInit, headers });
-    if (expectedSession) {
-      const { session: latestSession } = locateSession();
-      if (!latestSession || latestSession.expired || !matchesExpectedSession(expectedSession, latestSession)) {
-        throw authError('unauthorized', 'WorkBuddy app session changed during the billing request');
-      }
+    if (session.departmentInfo && /^[\x20-\x7e]+$/.test(session.departmentInfo)) {
+      headers['X-Department-Info'] = session.departmentInfo;
+    }
+    const response = await runWithProbeDeadline(({ signal }) => fetcher(url, { ...requestInit, headers, signal }), {
+      signal: requestInit.signal,
+      deadlineMs: Number(deps.workbuddyFetchTimeoutMs || deps.fetchTimeoutMs || WORKBUDDY_FETCH_TIMEOUT_MS)
+    });
+    const expected = expectedSession || sessionInfo(session);
+    const { session: latestSession } = locateSession(realm);
+    if (!latestSession || latestSession.expired || !matchesExpectedSession(expected, latestSession)) {
+      throw authError('unauthorized', 'WorkBuddy app session changed during the billing request');
     }
     return response;
   }
 
   return {
     getSessionInfo,
+    getSessionInfos,
     request,
     dispose() {}
   };
@@ -341,6 +401,7 @@ function createWorkbuddyLocalAuth(deps = {}) {
 
 module.exports = {
   WORKBUDDY_AUTH_FILE_NAME,
+  WORKBUDDY_AI_AUTH_FILE_NAME,
   WORKBUDDY_AUTH_FILE_MAX_BYTES,
   WORKBUDDY_ENCRYPTED_FIELD_MARKER,
   WORKBUDDY_LOGOUT_MARKER_SUFFIX,

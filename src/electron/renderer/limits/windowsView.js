@@ -166,7 +166,15 @@
       if (!groups.has(entry.groupLabel)) groups.set(entry.groupLabel, []);
       groups.get(entry.groupLabel).push(entry);
     }
-    return [...groups].map(([label, windows]) => ({ label, windows }));
+    // Keep the original quota pairs in place even when normalization places
+    // Argon beside the other Gemini windows. This order belongs to the view.
+    const groupOrder = ['Gemini', 'Claude/GPT', 'Gemini 4 Argon'];
+    const rank = ({ label }) => {
+      const index = groupOrder.indexOf(label);
+      return index < 0 ? groupOrder.length : index;
+    };
+    return [...groups].map(([label, windows]) => ({ label, windows }))
+      .sort((a, b) => rank(a) - rank(b));
   }
 
   function formatLimitAmount(value) {
@@ -765,6 +773,34 @@
     return windows.find((window) => window?.metric === 'credits') || null;
   }
 
+  function workbuddyCombinedProvider(providers) {
+    if (settings()?.workbuddyQuotaTotalEnabled !== true) return null;
+    const windows = presentationApi.workbuddyCreditTotals(providers);
+    if (!windows || windows.length !== 1 || windows[0].currency !== 'CREDITS') return null;
+    const first = providers[0];
+    const remaining = windows[0].remaining;
+    return {
+      ...first, accountKey: '', accountName: '', accountEmail: '', accountLabel: '',
+      accountGroup: true, groupAccounts: providers,
+      updatedAt: providers.map((provider) => provider.updatedAt || '').sort()[0],
+      windows,
+      balance: { amount: remaining, currency: 'CREDITS' }
+    };
+  }
+
+  function collapseWorkbuddyAccounts(providers) {
+    const accounts = providers.filter((provider) => provider.provider === 'workbuddy');
+    const combined = workbuddyCombinedProvider(accounts);
+    if (!combined) return providers;
+    let inserted = false;
+    return providers.flatMap((provider) => {
+      if (provider.provider !== 'workbuddy') return [provider];
+      if (inserted) return [];
+      inserted = true;
+      return [combined];
+    });
+  }
+
   function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
     if (hasPercent) return `${formatPercent(fillPercent)} ${limitModeSuffix(showUsed)}`;
     if (!window) return '--';
@@ -980,7 +1016,9 @@
         }
       } else {
         const weeklyWindows = windowsForKind(provider, 'weekly');
-        const visibleWindows = weeklyWindows.length > 0 ? weeklyWindows : [null];
+        const visibleWindows = weeklyWindows.length > 0
+          ? weeklyWindows.filter(presentationApi.antigravityQuotaWindowVisible)
+          : [null];
         for (const quotaWindow of visibleWindows) {
           const node = limitWindowNode(providerWindowLabel(provider, quotaWindow, 'Weekly'), quotaWindow, color, 0.78);
           node.classList.add('limit-window-wide');
@@ -1718,6 +1756,13 @@
     return 'Error';
   }
 
+  function limitProviderFailureLabel(provider) {
+    if (provider?.provider === 'workbuddy' && provider.actionRequired === 'appSessionEncrypted') {
+      return t('settings.limits.status.appSessionEncrypted');
+    }
+    return limitStatusLabel(provider?.status);
+  }
+
   function limitProviderMeta(provider, provenance = null) {
     const sourceDevice = presentationApi.limitProviderMainDeviceLabel(provenance, { showSource: Boolean(settings()?.showLimitSource) });
     // The freshness wording is shared with the edge dock so a row cannot read as
@@ -1737,11 +1782,11 @@
       if (sourceDevice) parts.push(sourceDevice);
       return `${freshness.text}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
     }
-    return limitStatusLabel(provider?.status);
+    return limitProviderFailureLabel(provider);
   }
 
   function limitProviderPlan(provider) {
-    if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status);
+    if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitProviderFailureLabel(provider);
     const mimoProduct = provider?.provider === 'mimo' ? mimoProductLabel(provider) : '';
     if (mimoProduct) {
       const plan = String(provider?.planLabel || '').trim();
@@ -2121,6 +2166,9 @@
     claude: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
     }),
+    workbuddy: (provider, color, { grouped }) => ({
+      options: grouped ? { showIcon: false } : {}
+    }),
     mimo: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
     }),
@@ -2406,6 +2454,17 @@
     const { row, list: accountList } = renderLimitProviderGroupFrame(
       providerId, label, providers, color, { count: providers.length, markId }
     );
+    if (providerId === 'workbuddy') {
+      // Dock visibility/reporting filters may omit a failed or unlimited
+      // sibling. A total is eligible only when this group covers the complete
+      // known identity pool supplied beside the drawn rows.
+      const known = subscriptionAccounts().filter((account) => account?.provider === 'workbuddy'
+        && !presentationApi.isWorkbuddyPlaceholder(account));
+      const drawnKeys = new Set(providers.map((account) => account.accountKey));
+      const complete = known.every((account) => account.accountKey && drawnKeys.has(account.accountKey));
+      const combined = complete ? workbuddyCombinedProvider(providers) : null;
+      if (combined) row.insertBefore(renderProviderWindows(combined, color), accountList);
+    }
     providers.forEach((provider, index) => {
       const account = limitAccountRowPolicy(providerId, provider, color, { grouped: true, sharedFamily });
       // The row's own title is also the name the switch control offers, so the
@@ -2809,6 +2868,8 @@
     renderProviderWindows,
     limitProviderUsageItems,
     thirdPartyQuotaWindow,
+    workbuddyCombinedProvider,
+    collapseWorkbuddyAccounts,
     thirdPartySpendNode,
     windowForKind,
     windowsForKind

@@ -277,3 +277,46 @@
   -webkit-mask-image: url('../icons/actions/refresh.svg');
   mask-image: url('../icons/actions/refresh.svg');
 }
+
+/* The Notch panel is horizontal, so its provider editor follows that order.
+   Keep account choices below the strip rather than squeezing them beside it. */
+.notch-limits-composer {
+  grid-template-columns: minmax(0, 1fr);
+}
+.notch-limits-composer .edge-dock-composer-body {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+.notch-limits-composer .edge-dock-composer-rail {
+  flex-direction: row;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.notch-limits-composer .edge-dock-composer-item {
+  flex: 0 0 34px;
+  border-radius: 8px;
+  transform: translateX(calc(var(--drag-x, 0px) + var(--drag-shift, 0px)));
+}
+.notch-limits-composer .edge-dock-composer-add {
+  flex: 0 0 26px;
+  margin-top: 0;
+}
+.notch-limits-composer .edge-dock-composer-detail {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.notch-limits-composer .edge-dock-composer-choice {
+  flex-wrap: wrap;
+}
+.notch-limits-composer .edge-dock-composer-choice .inline-options {
+  min-width: 0;
+  max-width: 100%;
+  margin-left: auto;
+}

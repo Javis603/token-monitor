@@ -654,3 +654,85 @@ test('fetchAntigravityLimits returns unauthorized when probe throws unauthorized
   assert.equal(result.windows.length, 0);
 });
 
+test('fetchAntigravityLimits preserves Gemini 4 Argon from OAuth when local RPC reports only Gemini and Claude/GPT groups', async () => {
+  const result = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'same-account',
+      accountEmail: 'Same@Example.com',
+      enabled: true,
+      credentials: {
+        accessToken: 'token-same',
+        refreshToken: 'refresh-same',
+        expiresAt: Date.now() + 3600_000,
+        clientId: 'client',
+        clientSecret: 'secret',
+        projectId: 'project-same'
+      }
+    }]
+  }, {
+    antigravityProbe: async () => ({
+      accountPlan: 'Google AI Pro',
+      accountEmail: 'same@example.com',
+      sourceDetail: 'app',
+      windows: [
+        { name: 'Gemini 5-hour', kind: 'session', remainingFraction: 0.90 },
+        { name: 'Gemini weekly', kind: 'weekly', remainingFraction: 0.95 },
+        { name: 'Claude/GPT 5-hour', kind: 'session', remainingFraction: null, showMeter: false },
+        { name: 'Claude/GPT weekly', kind: 'weekly', remainingFraction: 0 }
+      ]
+    }),
+    fetch: async (url) => {
+      if (url.endsWith(':loadCodeAssist')) {
+        return { ok: true, status: 200, json: async () => ({ paidTier: { id: 'g1-pro-tier' } }) };
+      }
+      if (url.endsWith(':retrieveUserQuotaSummary')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            groups: [
+              {
+                displayName: 'Gemini Models',
+                buckets: [
+                  { bucketId: 'gemini-5h', displayName: 'Five Hour Limit Remaining', window: '5h', remainingFraction: 0.80 },
+                  { bucketId: 'gemini-weekly', displayName: 'Weekly Limit Remaining', window: 'weekly', remainingFraction: 0.85 }
+                ]
+              },
+              {
+                displayName: 'Claude and GPT models',
+                buckets: [
+                  { bucketId: '3p-5h', displayName: 'Five Hour Limit Remaining', window: '5h', remainingFraction: 1, disabled: true },
+                  { bucketId: '3p-weekly', displayName: 'Weekly Limit Remaining', window: 'weekly', remainingFraction: 0 }
+                ]
+              },
+              {
+                displayName: 'Gemini 4 Argon',
+                buckets: [
+                  {
+                    bucketId: 'gemini-argon-wtu-weekly',
+                    displayName: 'Gemini 4 Argon Weekly Limit',
+                    window: 'weekly',
+                    remainingFraction: 0.74,
+                    resetTime: '2026-10-23T00:33:37Z'
+                  }
+                ]
+              }
+            ]
+          })
+        };
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].source, 'rpc');
+  assert.deepEqual(result[0].windows.map((window) => [window.label, window.kind, window.remainingPercent, window.showMeter]), [
+    ['Gemini 5-hour', 'session', 90, true],
+    ['Gemini weekly', 'weekly', 95, true],
+    ['Gemini 4 Argon weekly', 'weekly', 74, true],
+    ['Claude/GPT 5-hour', 'session', null, false],
+    ['Claude/GPT weekly', 'weekly', 0, true]
+  ]);
+});
+

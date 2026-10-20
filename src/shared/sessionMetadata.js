@@ -472,6 +472,9 @@ function applySessionMetadata(periods, home, deps = {}) {
       if ((meta.t3Title || meta.catalogTitle) && !Object.prototype.hasOwnProperty.call(meta, 'titleFallback')) {
         meta.titleFallback = session.title;
       }
+      if (meta.parentSessionId && meta.parentSessionId !== session.sessionId && !session.parentSessionId) {
+        session.parentSessionId = meta.parentSessionId;
+      }
       if (meta.title) session.title = meta.title;
       if (session.client === 'codex' && meta.nativeSessionId) session.nativeSessionId = meta.nativeSessionId;
       // A catalog title is not evidence about transcript state or activity.

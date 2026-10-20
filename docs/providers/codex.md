@@ -11,6 +11,10 @@ read_when:
 
 Codex combines a tokscale-backed usage client, local rollout enrichment, supplementary local-executor observations and a multi-account limits provider. Keep usage and limits separate even though they share the `codex` id.
 
+## OpenCodex model attribution
+
+Tokscale can resolve an OpenCodex Responses combo selector to the physical model using `~/.opencodex/usage.jsonl`, or `OPENCODEX_HOME/usage.jsonl` when configured. It requires matching successful attempt, token and timing evidence; ambiguous rows retain the selector. This relabels existing Codex usage without adding token rows. The ledger is consulted during normal Codex scans; ledger-only changes have no dedicated watcher and wait for the next scan, with older periods reconciled by a full scan.
+
 ## Dots local execution
 
 A class of Dots-created local Work/Codex tasks currently exposes live App Server counters without writing a local rollout. `localUsageSource.js` observes those counters through the hosted desktop App Server, using the live `CODEX_HOME/auth.json` login. A task qualifies only when its single execution environment matches a running **local** `codex exec-server --environment-id` process and its source is `codex_work_cca` / `aeon_child`; cwd alone never proves device ownership. Cloud coordinators, another computer's executors, ambiguous environments and tasks with native rollout paths are excluded. Normal rollout collection continues unchanged.
@@ -58,6 +62,12 @@ Do not replace the transcript-reported window with a model table. User configura
 Rollout filenames are transcript lookup keys and can contain multiple UUIDs; do not treat every UUID as a resumable conversation or assume a fixed UUID position. Session Details takes its copyable identity from the first `session_meta.id` during the existing on-demand transcript parse, without an extra read or background preload. A multi-UUID key has no copyable ID until that metadata is available. This display identity never replaces the usage/grouping key.
 
 Cache warmth is an optional `promptCache: { observedAt, ttlSeconds }` estimate from that shared rollout index; it adds no separate file read or JSON parse. Valid cache read/write activity starts a fixed 30-minute display estimate regardless of the model name or route, including third-party and custom APIs. This is a product estimate, not a reported Codex or provider TTL; actual cache retention can differ. Cold responses, model changes and compaction clear it. Repeated unchanged `token_count` accounting never refreshes the anchor. The anchor is a response observation, so remaining time may be overstated; quota accounting and successful reuse are not implied. Home, Edge Dock and Sessions share one metrics slot: recent context takes priority, with the context token/window counts and cache countdown available in the shared detail tooltip by hovering its bar or percentage; then a still-valid cache estimate appears after 10 minutes of inactivity, with the last recorded context counts still available on hover. Turn completion alone clears neither reading; the cache countdown ends at the observed TTL.
+
+## Output-rate timing
+
+Codex can persist `token_count` after local tools finish. Its timestamp is therefore not always the response completion time. New scanner support must pair `token_usage_record.usage` with the same accepted response counters before using its timestamp as completion, and derive the start from request boundaries without moving it forward when an asynchronous tool result arrives during model output. Older records need a conservative event-based estimate; missing, mismatched or non-positive timing must preserve tokens while contributing no performance sample. Never subtract a sum of tool durations: parallel tool execution and model output can overlap.
+
+Keep rate timing independent from the existing session/activity span, including through incremental state serialization and cache migrations. The UI describes an estimated output rate, including first-output waiting, rather than pure model decoding. The vendored binary determines which timing behavior is available; app-side support alone does not update the scanner.
 
 ## Limits sources
 

@@ -126,6 +126,7 @@ test('Home holds a real overflowing title and only flushes deferred stats on lea
   const painted = [];
   const state = { breakdown: 'home', stats: { revision: 1 } };
   const context = {
+    homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
     state, prefersReducedMotion: () => false, visibleStatsSurface: () => 'main',
     requestAnimationFrame: callback => frames.push(callback),
     document,
@@ -171,7 +172,7 @@ test('Edge Dock title hover permits pushes and clock repaints while tooltip hold
   let tooltipHovered = false;
   const painted = [];
   const context = {
-    state: { payload: null }, surface: 'bubble', limitTooltip: { active: false, pending: false },
+    state: { payload: null }, surface: 'bubble', notchRenderer: null, limitTooltip: { active: false, pending: false },
     contentLayer: { querySelector: selector => {
       if (selector === '.fade-overflow:hover') return {};
       if (selector === '.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within') {

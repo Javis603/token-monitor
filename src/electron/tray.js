@@ -388,6 +388,10 @@ function buildTrayMenuTemplate(options = {}) {
       }))
     },
     ...(edgeDockItem ? [edgeDockItem] : []),
+    ...(platform === 'darwin' && state.notchSupported ? [{
+      label: t('settings.notch.title'), type: 'checkbox', checked: state.notchEnabled === true,
+      click: () => callback('onSetEdgeDock')({ notchEnabled: state.notchEnabled !== true })
+    }] : []),
     { type: 'separator' },
     { label: t('trayMenu.version', { version: state.appVersion || '' }), enabled: false },
     { label: t('trayMenu.settings'), click: callback('onOpenSettings') },

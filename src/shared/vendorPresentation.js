@@ -50,6 +50,7 @@
     { id: 'copilot', color: '#000000', widgetInk: true },
     { id: 'pi', color: '#000', widgetInk: true },
     { id: 'omp', color: '#ED4ABF' },
+    { id: 'goose', color: '#FFFFFF' },
     { id: 'zed', color: '#4173e7', widgetColor: '#5C8BFF' },
     { id: 'kilo', color: '#F8F676' },
     { id: 'commandcode', color: '#8C4EDD', widgetColor: '#9D66E7' },

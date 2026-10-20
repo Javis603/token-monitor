@@ -99,8 +99,8 @@ function normalizeTimeMetrics(value) {
 // junhoyeo/tokscale#1411, so this entry is only correct once the vendored pin
 // carries that fix. On an older pin, whose `output` is already
 // reasoning-inclusive, folding reasoning back in here counts it twice.
-// Tencent Buddy and Cherry Studio chat ledgers also emit independent reasoning.
-const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'antigravity', 'codex', 'droid', 'dsh', 'zcode', 'opencode', 'muse', 'codebuddy', 'workbuddy', 'cherrystudio', 'hermes']);
+// Grok, Tencent Buddy and Cherry Studio chat ledgers also emit independent reasoning.
+const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'antigravity', 'codex', 'droid', 'dsh', 'grok', 'zcode', 'opencode', 'muse', 'codebuddy', 'workbuddy', 'cherrystudio', 'hermes']);
 
 function hasDisjointReasoning(client) {
   return TOKSCALE_DISJOINT_REASONING_CLIENTS.has(normalizeTokscaleClientName(client));
@@ -349,7 +349,8 @@ function addPerClient(target, source, includeTokenComponents = false) {
       if (num(v.cacheWriteTokens) > 0) t.cacheWriteTokens = num(t.cacheWriteTokens) + num(v.cacheWriteTokens);
       if (num(v.outputTokens) > 0) t.outputTokens = num(t.outputTokens) + num(v.outputTokens);
       const unclassifiedTokens = unclassifiedTokensFor(v);
-      if (unclassifiedTokens > 0) t.unclassifiedTokens = num(t.unclassifiedTokens) + unclassifiedTokens;
+      // Keep explicit zero provenance through repeated merges, just as for models.
+      t.unclassifiedTokens = num(t.unclassifiedTokens) + unclassifiedTokens;
     }
   }
 }

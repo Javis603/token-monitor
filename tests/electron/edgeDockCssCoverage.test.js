@@ -21,8 +21,18 @@ function emittedClasses(dir) {
     if (!/\.(?:js|html)$/.test(entry.name)) continue;
     const source = fs.readFileSync(full, 'utf8');
     for (const match of source.matchAll(/edge-dock-[a-z0-9-]+/g)) found.add(match[0]);
+    // A shared builder composes `${prefix}-…` classes; a page that hands it an
+    // edge-dock prefix renders every suffix the builder emits.
+    for (const match of source.matchAll(/prefix: '(edge-dock-[a-z0-9-]+)'/g)) {
+      for (const suffix of composedSuffixes()) found.add(`${match[1]}${suffix}`);
+    }
   }
   return found;
+}
+
+function composedSuffixes() {
+  const rows = fs.readFileSync(path.join(rendererDir, 'sessionRows.js'), 'utf8');
+  return [...rows.matchAll(/\$\{prefix\}(-[a-z0-9-]+)/g)].map((match) => match[1]);
 }
 
 test('every class the dock stylesheet styles is still rendered somewhere', () => {

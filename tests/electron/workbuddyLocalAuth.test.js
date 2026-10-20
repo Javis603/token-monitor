@@ -47,6 +47,26 @@ function createFixture() {
   return { root, authPath };
 }
 
+test('Chinese department metadata remains an identity fence without an invalid Fetch header or session write', async (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  fs.writeFileSync(fixture.authPath, JSON.stringify(sessionDocument({
+    account: { enterpriseId: 'enterprise', departmentFullName: '研发部', type: 'ultimate' }
+  })));
+  const before = fs.readFileSync(fixture.authPath, 'utf8');
+  const auth = createWorkbuddyLocalAuth({ authDirectory: fixture.root, platform: 'darwin',
+    fetch: async (url, init) => {
+      const request = new Request(url, init);
+      assert.equal(request.headers.get('X-Enterprise-Id'), 'enterprise');
+      assert.equal(request.headers.get('X-Department-Info'), null);
+      return { status: 200, json: async () => ({}) };
+    } });
+  const expected = auth.getSessionInfo();
+  assert.equal(expected.departmentInfo, '研发部');
+  await auth.request('https://copilot.tencent.com/v2/billing/meter/get-enterprise-user-usage', { method: 'POST' }, expected);
+  assert.equal(fs.readFileSync(fixture.authPath, 'utf8'), before);
+});
+
 test('WorkBuddy local auth resolves only supported platform paths', () => {
   const homeDir = '/Users/fixture';
   assert.equal(
@@ -390,6 +410,7 @@ test('WorkBuddy request sanitization never forwards caller authentication materi
     method: 'POST',
     headers: { Accept: 'application/json' },
     redirect: 'error',
+    credentials: 'omit',
     body: '{}'
   });
 });
@@ -524,4 +545,158 @@ test('WorkBuddy billing requests name a sealed credential instead of a missing s
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
+});
+
+const { WORKBUDDY_AI_AUTH_FILE_NAME } = require('../../src/electron/providers/workbuddy/localAuth');
+const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
+
+test('WorkBuddy canonical AI discovery exposes safe identity and preserves independent CN login', async () => {
+  const fixture = createFixture();
+  const requests = [];
+  try {
+    const aiPath = path.join(fixture.root, WORKBUDDY_AI_AUTH_FILE_NAME);
+    fs.writeFileSync(aiPath, JSON.stringify(sessionDocument({
+      account: { uid: 'local-user', name: 'AI account', email: 'private@example.test' },
+      auth: { accessToken: 'ai-token', domain: 'www.workbuddy.ai' }
+    })));
+    const auth = createWorkbuddyLocalAuth({ authDirectory: fixture.root, platform: 'darwin',
+      fetch: async (url, init) => { requests.push({ url, init }); return { ok: true, status: 200 }; } });
+    const infos = auth.getSessionInfos();
+    assert.deepEqual(infos.map((info) => info.realm), ['cn', 'ai']);
+    assert.notEqual(infos[0].accountKey, infos[1].accountKey);
+    assert.equal(infos[1].accountKey, workbuddyAccountKey({ realm: 'ai', userId: 'local-user' }));
+    assert.equal(infos[1].accountName, 'AI account');
+    assert.doesNotMatch(JSON.stringify(infos), /fixture-access-token|ai-token|private@example|expiresAt|refreshToken/);
+    assert.equal(auth.getSessionInfo().realm, 'cn');
+    const url = 'https://www.workbuddy.ai/billing/meter/get-user-resource';
+    await auth.request(url, { method: 'POST', headers: { Host: 'evil.test', Referer: 'https://evil.test/path',
+      Origin: 'https://evil.test', Authorization: 'caller', Cookie: 'caller' }, credentials: 'include' }, infos[1]);
+    assert.equal(requests[0].init.headers.Authorization, 'Bearer ai-token');
+    assert.equal(requests[0].init.headers.Host, undefined);
+    assert.equal(requests[0].init.headers.Referer, undefined);
+    assert.equal(requests[0].init.headers.Origin, undefined);
+    assert.equal(requests[0].init.headers.Cookie, undefined);
+    assert.equal(requests[0].init.credentials, 'omit');
+    assert.equal(requests[0].init.redirect, 'error');
+    await assert.rejects(auth.request(url, { method: 'POST' }, infos[0]), /endpoint is not allowed/);
+    await assert.rejects(auth.request('https://copilot.tencent.com/v2/billing/meter/get-user-resource',
+      { method: 'POST' }, infos[1]), /endpoint is not allowed/);
+    fs.writeFileSync(`${aiPath}${WORKBUDDY_LOGOUT_MARKER_SUFFIX}`, 'logged-out');
+    assert.equal(auth.getSessionInfo().authenticated, true);
+    assert.equal(auth.getSessionInfo().realm, 'cn');
+    assert.equal(auth.getSessionInfos().find((info) => info.realm === 'ai').authenticated, false);
+    await assert.rejects(auth.request(url, { method: 'POST' }), (error) => error.status === 'notConfigured');
+    assert.equal(requests.length, 1);
+  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
+test('WorkBuddy AI request without an AI canonical file cannot borrow the CN token', async () => {
+  const fixture = createFixture();
+  try {
+    let calls = 0;
+    const auth = createWorkbuddyLocalAuth({ authDirectory: fixture.root, platform: 'darwin',
+      fetch: async () => { calls += 1; return { ok: true }; } });
+    await assert.rejects(auth.request('https://www.workbuddy.ai/billing/meter/get-user-resource', { method: 'POST' }),
+      (error) => error.status === 'notConfigured');
+    assert.equal(calls, 0);
+    const aiPath = path.join(fixture.root, WORKBUDDY_AI_AUTH_FILE_NAME);
+    fs.writeFileSync(aiPath, JSON.stringify(sessionDocument()));
+    assert.equal(auth.getSessionInfo().authenticated, true);
+    assert.equal(auth.getSessionInfos().find((info) => info.realm === 'ai').authenticated, false);
+    await assert.rejects(auth.request('https://www.workbuddy.ai/billing/meter/get-user-resource', { method: 'POST' }),
+      (error) => error.status === 'notConfigured');
+    assert.equal(calls, 0);
+  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
+test('WorkBuddy AI local billing rejects exact-host/path escape routes and wrong account key', async () => {
+  const fixture = createFixture();
+  try {
+    fs.writeFileSync(path.join(fixture.root, WORKBUDDY_AI_AUTH_FILE_NAME), JSON.stringify(sessionDocument({
+      auth: { accessToken: 'ai-token', domain: 'www.workbuddy.ai' }
+    })));
+    let calls = 0;
+    const auth = createWorkbuddyLocalAuth({ authDirectory: fixture.root, platform: 'darwin',
+      fetch: async () => { calls += 1; return { ok: true, status: 200 }; } });
+    const info = auth.getSessionInfos().find((info) => info.realm === 'ai');
+    for (const path of ['/billing/meter/get-user-resource', '/v2/billing/meter/get-user-resource',
+      '/billing/meter/get-enterprise-user-usage', '/v2/billing/meter/get-enterprise-user-usage']) {
+      assert.equal(isAllowedWorkbuddyApiUrl(`https://www.workbuddy.ai${path}`, 'POST', 'ai'), true);
+      assert.equal(isAllowedWorkbuddyApiUrl(`https://copilot.tencent.com${path}`, 'POST', 'ai'), false);
+    }
+    for (const url of ['https://www.workbuddy.ai.evil.test/billing/meter/get-user-resource',
+      'https://www.workbuddy.ai:444/billing/meter/get-user-resource',
+      'https://user:pass@www.workbuddy.ai/billing/meter/get-user-resource',
+      'http://www.workbuddy.ai/billing/meter/get-user-resource',
+      'https://www.workbuddy.ai/billing/meter/get-user-resource?q=1',
+      'https://www.workbuddy.ai/billing/meter/get-user-resource#fragment',
+      'https://www.workbuddy.ai/billing/meter/other']) {
+      await assert.rejects(auth.request(url, { method: 'POST' }, info), /endpoint is not allowed/);
+    }
+    await assert.rejects(auth.request('https://www.workbuddy.ai/billing/meter/get-user-resource',
+      { method: 'POST' }, { ...info, accountKey: 'wrong' }), /session changed/);
+    assert.equal(calls, 0);
+  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
+test('WorkBuddy encrypted local metadata deduplicates against managed identity without exposing envelopes', async () => {
+  const fixture = createFixture();
+  try {
+    writeSealedSession(fixture.authPath);
+    const local = createWorkbuddyLocalAuth({ authDirectory: fixture.root, platform: 'darwin' });
+    assert.equal(local.getSessionInfo().userId, '');
+    const sessions = local.getSessionInfos();
+    assert.equal(sessions[0].userId, 'local-user');
+    assert.equal(sessions[0].reason, 'encrypted');
+    assert.doesNotMatch(JSON.stringify(sessions), /envelope|eyJ|accessToken|refreshToken/);
+    const managed = { id: 'managed', realm: 'cn', userId: 'local-user',
+      accountKey: sessions[0].accountKey, domain: 'copilot.tencent.com', enabled: true };
+    const options = { workbuddyManagedAccounts: [managed], workbuddyDesktopSessionEnabled: true,
+      workbuddyLocalSessions: sessions };
+    const deps = { env: {}, resolveWorkbuddyManagedCredential: async () => ({ accessToken: 'managed-token' }),
+      workbuddyFetch: async () => { throw new Error('must not use encrypted local session'); },
+      fetch: async () => ({ ok: true, status: 200, json: async () => ({ data: { Accounts: [] } }) }) };
+    const rows = await fetchWorkbuddyLimits(options, deps);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].status, 'ok');
+    assert.equal(rows[0].sourceDetail, 'managed');
+    assert.deepEqual(await fetchWorkbuddyLimits({ ...options,
+      workbuddyManagedAccounts: [{ ...managed, enabled: false }] }, deps), []);
+  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
+test('WorkBuddy AI preferred logout marker cannot revive roaming AI credentials', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-workbuddy-ai-windows-'));
+  try {
+    const env = { LOCALAPPDATA: path.join(root, 'local'), APPDATA: path.join(root, 'roaming') };
+    const [local, roaming] = authDirectoriesForPlatform('win32', root, env);
+    fs.mkdirSync(local, { recursive: true });
+    fs.mkdirSync(roaming, { recursive: true });
+    fs.writeFileSync(path.join(roaming, WORKBUDDY_AI_AUTH_FILE_NAME), JSON.stringify(sessionDocument({
+      auth: { domain: 'www.workbuddy.ai', accessToken: 'roaming-ai-token' }
+    })));
+    const auth = createWorkbuddyLocalAuth({ platform: 'win32', homeDir: root, env });
+    assert.equal(auth.getSessionInfo().authenticated, true);
+    fs.writeFileSync(path.join(local, WORKBUDDY_AI_AUTH_FILE_NAME + WORKBUDDY_LOGOUT_MARKER_SUFFIX), 'logged-out');
+    assert.equal(auth.getSessionInfo().authenticated, false);
+    assert.deepEqual(auth.getSessionInfos().map((info) => [info.realm, info.reason]), [['ai', 'absent']]);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('WorkBuddy direct local requests enforce deadlines and reject switches without an explicit expected session', async () => {
+  const fixture = createFixture();
+  try {
+    let signal;
+    const stalled = createWorkbuddyLocalAuth({ authDirectory: fixture.root, platform: 'darwin', workbuddyFetchTimeoutMs: 10,
+      fetch: async (_, init) => { signal = init.signal; return new Promise(() => {}); } });
+    await assert.rejects(stalled.request('https://copilot.tencent.com/v2/billing/meter/get-user-resource',
+      { method: 'POST' }), (error) => error.status === 'timeout');
+    assert.equal(signal.aborted, true);
+    const switching = createWorkbuddyLocalAuth({ authDirectory: fixture.root, platform: 'darwin', fetch: async () => {
+      fs.writeFileSync(fixture.authPath, JSON.stringify(sessionDocument({ account: { uid: 'another-user' } })));
+      return { ok: true, status: 200 };
+    } });
+    await assert.rejects(switching.request('https://copilot.tencent.com/v2/billing/meter/get-user-resource',
+      { method: 'POST' }), /session changed/);
+  } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
 });

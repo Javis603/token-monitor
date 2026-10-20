@@ -150,6 +150,32 @@ test('applyCustomPricing keeps a manual entry and clears our removed one', () =>
   }
 });
 
+test('applyCustomPricing preserves manual provider rules when managed models change or clear', () => {
+  const dir = tmpDir();
+  try {
+    const pricingPath = path.join(dir, 'custom-pricing.json');
+    const sidecarPath = path.join(dir, 'sidecar.json');
+    const manual = {
+      $schema: './custom-pricing.schema.json',
+      provider_overrides: [{
+        provider_id: 'private-gateway', model_id: 'model',
+        pricing: { input_cost_per_million_tokens: 1, output_cost_per_million_tokens: 2 }
+      }]
+    };
+    fs.writeFileSync(pricingPath, JSON.stringify({ ...manual, models: {} }));
+
+    applyCustomPricing([{ modelId: 'managed', inputPerM: 3 }], { pricingPath, sidecarPath });
+    assert.deepEqual(JSON.parse(fs.readFileSync(pricingPath, 'utf8')), {
+      ...manual, models: { managed: { input_cost_per_million_tokens: 3 } }
+    });
+
+    applyCustomPricing([], { pricingPath, sidecarPath });
+    assert.deepEqual(JSON.parse(fs.readFileSync(pricingPath, 'utf8')), { ...manual, models: {} });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('applyCustomPricing is a no-op when no overrides and no prior state (no files created)', () => {
   const dir = tmpDir();
   try {

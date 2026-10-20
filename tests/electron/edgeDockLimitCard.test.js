@@ -30,8 +30,10 @@ const { createLimitWindowsView } = require('../../src/electron/renderer/limits/w
 const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
 const { parseStepfunUsage } = require('../../src/shared/providers/stepfun/limits');
 const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../src/shared/providers/factory/limits');
-const { normalizeLimitProvider } = require('../../src/shared/limits/core');
+const { aggregateLimits, normalizeLimitProvider } = require('../../src/shared/limits/core');
+const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
 const { fetchMinimaxLimits } = require('../../src/shared/providers/minimax/limits');
+const { fetchAntigravityLimits } = require('../../src/shared/providers/antigravity/limits');
 
 const root = path.join(__dirname, '../..');
 
@@ -62,6 +64,12 @@ class FakeElement {
       this.children.push(child);
     }
   }
+  insertBefore(child, reference) {
+    const index = this.children.indexOf(reference);
+    if (index < 0) throw new Error('Reference is not a child');
+    child.parent = this;
+    this.children.splice(index, 0, child);
+  }
   remove() {
     if (!this.parent) return;
     this.parent.children = this.parent.children.filter((child) => child !== this);
@@ -71,7 +79,20 @@ class FakeElement {
   setAttribute(name, value) { this.attributes[name] = value; }
   removeAttribute(name) { delete this.attributes[name]; }
   replaceChildren(...children) { this.children = [...children]; }
-  querySelector(selector) { return this.find(selector.replace('.', '')); }
+  querySelector(selector) {
+    if (selector === '.limit-window-text > span') return this.find('limit-window-text')?.children[0] || null;
+    return this.querySelectorAll(selector)[0] || null;
+  }
+  querySelectorAll(selector) {
+    const names = selector.split(',').map((part) => part.trim().replace('.', ''));
+    return [...this.walk()].slice(1).filter((node) => names.some((name) => node.classNames.has(name)));
+  }
+  replaceWith(node) {
+    const index = this.parent.children.indexOf(this);
+    this.parent.children.splice(index, 1, node);
+    node.parent = this.parent;
+    this.parent = null;
+  }
 
   // Depth-first walk, so an assertion can ask what the card actually drew
   // without knowing which provider branch nested it where.
@@ -183,6 +204,164 @@ function dockView(appearance = {}, overrides = {}) {
     ...overrides
   });
 }
+
+function limitsSubscriptionPool(localProviders, aggregateProviders) {
+  const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+  const state = { mode: 'sync', settings: { deviceId: 'local' }, stats: {
+    devices: [{ deviceId: 'local', limits: { providers: localProviders } }],
+    limits: { providers: aggregateProviders }
+  } };
+  const context = vm.createContext({ state, accountIdentityApi });
+  for (const name of ['localDeviceLimitsProviders', 'limitProvidersForSubscriptions']) {
+    vm.runInContext(balancedCall(app, `function ${name}() {`), context);
+  }
+  return vm.runInContext('limitProvidersForSubscriptions()', context);
+}
+
+for (const realm of ['cn', 'ai']) for (const reason of ['', 'encrypted']) {
+  test(`WorkBuddy ${realm} totals ignore ${reason || 'unsigned'} local placeholders without removing local hints`, async () => {
+    const now = Date.parse('2026-10-12T00:10:00Z');
+    const at = new Date(now).toISOString();
+    const healthy = ['remote-a', 'remote-b'].map((user) => normalizeLimitProvider({
+      provider: 'workbuddy', accountKey: workbuddyAccountKey('', user, '', '', realm),
+      status: 'ok', region: realm, updatedAt: at,
+      windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }]
+    }));
+    for (const localRealm of ['cn', 'ai']) {
+      const placeholder = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true,
+        workbuddyRealm: localRealm, workbuddyLocalSessionReason: reason }, { env: {}, now: () => now });
+      const summary = aggregateLimits([
+        { deviceId: 'remote', limits: { updatedAt: at, providers: healthy } },
+        { deviceId: 'local', limits: { updatedAt: at, providers: [placeholder] } }
+      ], 0, now);
+      assert.equal(summary.providers.length, 2);
+      const pool = limitsSubscriptionPool([placeholder], summary.providers);
+      assert.equal(pool.length, 3, 'the global pool still includes local discovery');
+      const view = dockView({ workbuddyQuotaTotalEnabled: true }, { subscriptionAccounts: () => pool });
+      assert.equal(view.workbuddyCombinedProvider(summary.providers).windows[0].remaining, 160);
+      const group = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', summary.providers, '#12B7F5');
+      assert.equal(group.children[1].className, 'limit-windows', localRealm);
+      assert.match(group.children[1].text, /160/);
+      assert.equal(group.find('limit-account-list').children.length, 2);
+      assert.equal(pool.length, 3, 'rendering does not mutate the observed pool');
+      const off = dockView({ workbuddyQuotaTotalEnabled: false }, { subscriptionAccounts: () => pool })
+        .renderLimitProviderGroup('workbuddy', 'WorkBuddy', summary.providers, '#12B7F5');
+      assert.equal(off.children[1].className, 'limit-account-list');
+      const hint = view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', placeholder, '#12B7F5');
+      assert.ok(hint.text.includes(reason ? 'Encrypted by app' : 'Not signed in'), hint.text);
+    }
+  });
+}
+
+test('WorkBuddy total completeness retains real failed, incomplete and hidden accounts beside a placeholder', async () => {
+  const healthy = ['a', 'b'].map((accountKey) => normalizeLimitProvider({
+    provider: 'workbuddy', accountKey, status: 'ok', region: 'cn',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }]
+  }));
+  const placeholder = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true }, { env: {} });
+  const failed = (extra = {}) => normalizeLimitProvider({
+    provider: 'workbuddy', accountKey: 'c', status: 'notConfigured', region: 'cn', windows: [], ...extra
+  });
+  const siblings = [
+    ['missing credentials', failed()],
+    ['unauthorized', failed({ status: 'unauthorized' })],
+    ['unavailable', failed({ status: 'unavailable' })],
+    ['known encrypted identity', failed({ actionRequired: 'appSessionEncrypted' })],
+    ['missing key', failed({ accountKey: '' })],
+    ['missing quota', failed({ status: 'ok' })],
+    ['stale', { ...healthy[0], accountKey: 'c', stale: true }],
+    ['unlimited', { ...healthy[0], accountKey: 'c', windows: [
+      { kind: 'billing', metric: 'credits', currency: 'CREDITS', detail: 'unlimited', used: 20 }
+    ] }],
+    ['healthy hidden', { ...healthy[0], accountKey: 'c' }]
+  ];
+  for (const [name, sibling] of siblings) {
+    assert.equal(limitPresentationApi.isWorkbuddyPlaceholder(sibling), false, name);
+    const pool = limitsSubscriptionPool([placeholder, sibling], healthy);
+    assert.equal(pool.length, 4, name);
+    const view = dockView({ workbuddyQuotaTotalEnabled: true }, { subscriptionAccounts: () => pool });
+    const hidden = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', healthy, '#12B7F5');
+    assert.equal(hidden.children[1].className, 'limit-account-list', name);
+    if (name !== 'healthy hidden') {
+      const drawn = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', [...healthy, sibling], '#12B7F5');
+      assert.equal(drawn.children[1].className, 'limit-account-list', `${name} drawn`);
+    }
+    assert.equal(pool.length, 4, 'real identities and local hints remain in the global pool');
+  }
+});
+
+test('Limits group counts only genuine accounts when both credentials are unavailable', async () => {
+  const now = Date.parse('2026-10-12T00:10:00Z');
+  const at = new Date(now).toISOString();
+  const known = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true, workbuddyLocalSessions: [
+    { realm: 'cn', userId: 'encrypted-user', reason: 'encrypted' },
+    { realm: 'cn', userId: 'missing-user', reason: 'incomplete' }
+  ] }, { env: {}, now: () => now });
+  const placeholder = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true }, { env: {}, now: () => now });
+  const summary = aggregateLimits([
+    { deviceId: 'known', limits: { updatedAt: at, providers: known } },
+    { deviceId: 'unsigned', limits: { updatedAt: at, providers: [placeholder] } }
+  ], 0, now);
+  const view = dockView({ workbuddyQuotaTotalEnabled: true });
+  const group = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', summary.providers, '#12B7F5');
+  assert.ok(group.text.includes('2 accounts'), group.text);
+  assert.equal(group.find('limit-account-list').children.length, 2);
+  assert.equal(group.text.includes('Account 3'), false);
+  assert.ok(group.text.includes('Encrypted by app'), group.text);
+  assert.ok(group.text.includes('Not signed in'), group.text);
+  assert.equal(view.workbuddyCombinedProvider(summary.providers), null);
+  const alone = aggregateLimits([{ deviceId: 'unsigned', limits: { updatedAt: at, providers: [placeholder] } }], 0, now);
+  const signIn = view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', alone.providers[0], '#12B7F5');
+  assert.ok(signIn.text.includes('Not signed in'), signIn.text);
+});
+
+test('WorkBuddy group draws a healthy total plus independent accounts and omits partial totals', () => {
+  const rows = ['one', 'two'].map((accountKey) => normalizeLimitProvider({
+    provider: 'workbuddy', accountKey, accountName: 'Same nickname', region: 'cn', status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, limit: 100, remaining: 80 }]
+  }));
+  const healthy = dockView({ workbuddyQuotaTotalEnabled: true }).renderLimitProviderGroup('workbuddy', 'WorkBuddy', rows, '#12B7F5');
+  assert.equal(healthy.children[1].className, 'limit-windows');
+  assert.equal(healthy.find('limit-account-list').children.length, 2);
+  for (const appearance of [{}, { workbuddyQuotaTotalEnabled: false }]) {
+    const off = dockView(appearance).renderLimitProviderGroup('workbuddy', 'WorkBuddy', rows, '#12B7F5');
+    assert.equal(off.children[1].className, 'limit-account-list');
+    assert.equal(off.children[1].children.length, 2);
+  }
+  const partial = dockView({ workbuddyQuotaTotalEnabled: true }).renderLimitProviderGroup('workbuddy', 'WorkBuddy',
+    [rows[0], { ...rows[1], status: 'unavailable' }], '#12B7F5');
+  assert.equal(partial.children[1].className, 'limit-account-list');
+  assert.equal(partial.children[1].children.length, 2);
+});
+
+test('Dock projection cannot total only visible WorkBuddy accounts while a known sibling is omitted', () => {
+  const wb = (accountKey, extra = {}) => normalizeLimitProvider({ provider: 'workbuddy', accountKey, region: 'cn', status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }], ...extra });
+  for (const scenario of ['nonreporting', 'hidden', 'unlimited-hidden', 'healthy-hidden']) {
+    const c = scenario === 'nonreporting' ? wb('c', { status: 'unauthorized', windows: [] })
+      : scenario === 'unlimited-hidden' ? wb('c', { windows: [{ kind: 'billing', metric: 'credits', detail: 'unlimited', used: 20 }] })
+        : wb('c', { status: scenario === 'hidden' ? 'unavailable' : 'ok' });
+    const [cell] = buildEdgeDockCells({ limits: { providers: [wb('a'), wb('b'), c] } }, {
+      items: [{ type: 'limit', provider: 'workbuddy', hiddenAccounts: scenario === 'nonreporting' ? [] : ['c'] }]
+    });
+    const drawn = cell.accounts.map((account) => account.record);
+    assert.equal(drawn.length, 2, scenario);
+    const card = dockView({ workbuddyQuotaTotalEnabled: true }, { subscriptionAccounts: () => cell.subscriptionAccounts })
+      .renderLimitProviderGroup('workbuddy', 'WorkBuddy', drawn, '#12B7F5');
+    assert.equal(card.children[1].className, 'limit-account-list', scenario);
+  }
+});
+
+test('saved-only WorkBuddy subscription card does not appear on the sole live sibling', () => {
+  const live = normalizeLimitProvider({ provider: 'workbuddy', accountKey: 'a', status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }] });
+  const saved = { id: 'saved-c', provider: 'workbuddy', kind: 'subscription', binding: { accountKey: 'c', profileName: 'Saved C' },
+    planName: 'C plan', amountMinor: 9900, currency: 'USD', interval: 'month', intervalCount: 1, startDate: '2026-01-01', autoRenew: true };
+  const [cell] = buildEdgeDockCells({ limits: { providers: [live] } }, { items: [{ type: 'limit', provider: 'workbuddy' }] });
+  const card = dockView({ subscriptions: [saved] }, { subscriptionAccounts: () => cell.subscriptionAccounts })
+    .renderLimitProviderSolo('workbuddy', 'WorkBuddy', live, '#12B7F5');
+  assert.equal(card.find('subscription-tooltip'), null);
+});
 
 test('Notion rolling and monthly allowances render in both display modes and hide independently', () => {
   const provider = normalizeLimitProvider({
@@ -972,6 +1151,7 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
   const view = dockView();
 
   for (const [id, label, color] of [
+    ['workbuddy', 'WorkBuddy', '#10B981'],
     ['claude', 'Claude', '#D97757'],
     ['openrouter', 'OpenRouter', '#6566F1'],
     ['antigravity', 'Antigravity', '#4285F4']
@@ -1341,7 +1521,7 @@ test('a subscription bound to a hidden account does not decorate the row that is
   );
 
   const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
-  assert.match(dock, /subscriptionAccounts: \(\) => state\.payload\?\.cell\?\.subscriptionAccounts \|\| \[\],/);
+  assert.match(dock, /subscriptionAccounts: \(\) => cell\(\)\?\.subscriptionAccounts \|\| \[\],/);
 });
 
 // Hiding is not the only display rule that narrows the universe. The rail lists
@@ -1557,7 +1737,7 @@ test('the dock hands the shared view the device context a cell carries', () => {
   const wiring = balancedCall(dock, 'createLimitWindowsView({');
   assert.match(
     wiring,
-    /provenanceContext: \(\) => state\.payload\?\.cell\?\.provenanceContext/,
+    /provenanceContext: \(\) => cell\(\)\?\.provenanceContext/,
     'the dock card must read the context off the cell it renders'
   );
 });
@@ -1679,6 +1859,123 @@ test('an Antigravity group whose rows are all unchecked goes with them', () => {
   assert.doesNotMatch(card.text, /Claude/);
 });
 
+for (const unavailable of [false, true]) for (const showLimitUsed of [false, true]) test(`Antigravity keeps the original quota pairs above Argon weekly with Claude 5-hour ${unavailable ? 'unavailable' : 'available'} in ${showLimitUsed ? 'used' : 'remaining'} mode`, () => {
+  const record = normalizeLimitProvider({
+    provider: 'antigravity',
+    windows: [
+      { kind: 'weekly', label: 'Gemini 4 Argon weekly', usedPercent: 63 },
+      { kind: 'session', label: 'Gemini 5-hour', usedPercent: 2 },
+      { kind: 'weekly', label: 'Gemini weekly', usedPercent: 1 },
+      { kind: 'session', label: 'Claude/GPT 5-hour', usedPercent: unavailable ? null : 0, showMeter: !unavailable },
+      { kind: 'weekly', label: 'Claude/GPT weekly', usedPercent: 100 }
+    ]
+  });
+  const before = structuredClone(record);
+  const card = dockView({ showLimitUsed }).renderProviderWindows(record, '#4285F4');
+  const groups = [...card.walk()].filter((node) => node.classNames.has('limit-window-group'));
+  assert.deepEqual(
+    groups.map((group) => [
+      group.find('limit-window-group-title')?.textContent,
+      [...group.walk()].filter((node) => node.classNames.has('limit-window')).map(rowTitle)
+    ]),
+    [
+      ['Gemini', ['5-hour', 'Weekly']],
+      ['Claude/GPT', ['5-hour', 'Weekly']],
+      ['Gemini 4 Argon', ['Weekly']]
+    ]
+  );
+  const items = dockView().limitProviderUsageItems([record]);
+  assert.deepEqual(items.map((item) => item.label), [
+    'Gemini · 5-hour',
+    'Gemini · Weekly',
+    'Claude/GPT · 5-hour',
+    'Claude/GPT · Weekly',
+    'Gemini 4 Argon · Weekly'
+  ]);
+  assert.equal([...card.walk()].filter((node) => node.classNames.has('limit-meter')).length, unavailable ? 4 : 5);
+  const expectedRemaining = [98, 99, unavailable ? null : 100, 0, 37];
+  const rows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  rows.forEach((row, index) => {
+    const remaining = expectedRemaining[index];
+    const fill = row.find('limit-meter-fill');
+    if (remaining === null) {
+      assert.equal(fill, null);
+      assert.doesNotMatch(row.text, /%/);
+    } else {
+      const percent = showLimitUsed ? 100 - remaining : remaining;
+      assert.ok(row.text.includes(`${percent}% ${showLimitUsed ? 'used' : 'left'}`), row.text);
+      assert.equal(Number(fill.style['--bar-scale']), percent / 100);
+    }
+  });
+  assert.deepEqual(record, before, 'display ordering does not mutate the normalized quota record');
+});
+
+test('Antigravity OAuth legacy fallback keeps unknown, exhausted and numeric quotas distinct in both display modes', async () => {
+  const resetTime = '2030-06-03T04:00:00Z';
+  const providers = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'legacy', accountEmail: 'legacy@example.com',
+      credentials: { accessToken: 'fixture-token', expiresAt: Date.now() + 3600_000,
+        clientId: 'client', clientSecret: 'secret', projectId: 'fixture-project' }
+    }]
+  }, {
+    antigravityProbe: async () => { throw new Error('local RPC unavailable'); },
+    fetch: async (url) => {
+      let payload;
+      if (url.endsWith(':loadCodeAssist')) payload = {};
+      else if (url.endsWith(':retrieveUserQuotaSummary')) payload = { groups: [] };
+      else if (url.endsWith(':fetchAvailableModels')) payload = { models: {
+        'gemini-4-argon-high': { displayName: 'Gemini 4 Argon', quotaInfo: { remainingFraction: null, resetTime } },
+        'gemini-flash': { displayName: 'Gemini Flash', quotaInfo: { remainingFraction: 0.8, resetTime } },
+        'claude-sonnet': { displayName: 'Claude', quotaInfo: { remainingFraction: 0, resetTime } }
+      } };
+      else throw new Error(`Unexpected URL ${url}`);
+      return { ok: true, status: 200, json: async () => payload };
+    }
+  });
+  assert.equal(providers.length, 1);
+  const provider = providers[0];
+  assert.equal(provider.source, 'oauth');
+  const unknown = provider.windows.find((window) => window.label === 'Gemini 4 Argon');
+  assert.equal(unknown.remainingPercent, null);
+  assert.equal(unknown.usedPercent, null);
+  assert.equal(unknown.showMeter, false);
+  assert.equal(unknown.resetsAt, new Date(resetTime).toISOString());
+  const before = structuredClone(provider);
+
+  for (const showLimitUsed of [false, true]) {
+    const card = dockView({ showLimitUsed }).renderProviderWindows(provider, '#4285F4');
+    const rows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+    const argon = rows.find((row) => row.text.includes('Gemini 4 Argon'));
+    assert.equal(argon, undefined, 'unknown legacy pools do not render their name or reset');
+    assert.equal(rows.length, 2);
+    for (const [label, remaining] of [['Gemini Flash', 80], ['Claude', 0]]) {
+      const row = rows.find((entry) => entry.text.includes(label));
+      const percent = showLimitUsed ? 100 - remaining : remaining;
+      assert.ok(row.text.includes(`${percent}% ${showLimitUsed ? 'used' : 'left'}`), row.text);
+      assert.equal(Number(row.find('limit-meter-fill').style['--bar-scale']), percent / 100);
+    }
+  }
+  assert.deepEqual(dockView().limitProviderUsageItems([provider]).map((item) => item.label), ['Gemini Flash', 'Claude']);
+  assert.deepEqual(limitPresentationApi.limitProviderCompactWindows('antigravity', provider.windows).map((window) => window.label), ['Gemini Flash', 'Claude']);
+  assert.deepEqual(provider, before, 'hidden legacy pools retain their source data');
+});
+
+test('Antigravity hides an all-unknown legacy pool without adding a placeholder quota', () => {
+  const provider = normalizeLimitProvider({ provider: 'antigravity', windows: [
+    { kind: 'weekly', label: 'Gemini 4 Argon', usedPercent: null, resetsAt: '2030-06-03T04:00:00Z' }
+  ] });
+  const before = structuredClone(provider);
+  for (const showLimitUsed of [false, true]) {
+    const card = dockView({ showLimitUsed }).renderProviderWindows(provider, '#4285F4');
+    assert.equal(card.children.length, 0);
+    assert.equal(card.text, '');
+  }
+  assert.deepEqual(dockView().limitProviderUsageItems([provider]), []);
+  assert.deepEqual(limitPresentationApi.limitProviderCompactWindows('antigravity', provider.windows), []);
+  assert.deepEqual(provider, before);
+});
+
 test('a MiMo plan drawn from the balance is the same item as the plan window', () => {
   const planKey = usageItems.limitWindowKey({ kind: 'billing', label: 'Token Plan' });
   const record = {
@@ -1786,4 +2083,348 @@ test('with every item unchecked, Home and the picker keep no window the card dre
     }
   }
   assert.deepEqual(problems, []);
+});
+
+
+test('WorkBuddy sealed credentials show their cause instead of signed-out instructions on shared rows', () => {
+  const view = dockView();
+  const provider = { provider: 'workbuddy', status: 'notConfigured', accountKey: 'encrypted-account', actionRequired: 'appSessionEncrypted', windows: [] };
+  const row = view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', provider, '#10A37F');
+  assert.equal(row.find('limit-plan').textContent, 'Encrypted by app');
+  assert.equal(view.limitProviderMeta(provider), 'Encrypted by app');
+  assert.equal(view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', { ...provider, actionRequired: undefined }, '#10A37F').find('limit-plan').textContent, 'Not signed in');
+});
+
+
+test('WorkBuddy groups count accounts and retain failures without repeating the provider mark', () => {
+  const view = dockView();
+  const accounts = [
+    { provider: 'workbuddy', status: 'ok', accountKey: 'a', accountName: 'Personal', region: 'cn', windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', remaining: 80, limit: 100 }] },
+    { provider: 'workbuddy', status: 'unavailable', accountKey: 'b', accountName: 'Work', region: 'cn', windows: [] }
+  ];
+  const group = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', accounts, '#10B981');
+  assert.equal(group.find('limit-plan').textContent, '2 accounts');
+  assert.equal([...group.walk()].filter((node) => node.classNames.has('limit-icon')).length, 1);
+  const rows = group.find('limit-account-list').children;
+  assert.deepEqual(rows.map((row) => row.find('limit-name-title').textContent), ['Personal', 'Work']);
+  assert.equal(rows[1].find('limit-plan').textContent, 'Unavailable');
+});
+
+
+
+
+
+
+
+
+
+test('EdgeDock render hold preserves account gestures and open tooltips', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const start = source.indexOf('function deferBubbleRender(');
+  const end = source.indexOf('bridge.onRender(render);', start);
+  let accountHeld = false, tooltipHeld = false;
+  const context = {
+    contentLayer: {}, codexAccountControl: { deferRender: () => accountHeld },
+    limitTooltipShouldHoldRender: () => tooltipHeld, limitTooltip: { pending: false }
+  };
+  vm.runInNewContext(source.slice(start, end), context);
+  assert.equal(context.deferBubbleRender(), false);
+  accountHeld = true;
+  assert.equal(context.deferBubbleRender(), true, 'an in-progress account gesture keeps its DOM');
+  accountHeld = false; tooltipHeld = true;
+  assert.equal(context.deferBubbleRender(), true, 'an open tooltip holds the update');
+  assert.equal(context.limitTooltip.pending, true);
+  tooltipHeld = false;
+  assert.equal(context.deferBubbleRender(), false, 'closing the tooltip releases the update');
+});
+
+
+
+
+
+
+
+
+
+
+
+test('Notch ears preserve configured tray items and embedded fields across all styles', () => {
+  const trayLayout = require('../../src/shared/trayLayout');
+  const typography = require('../../src/electron/renderer/trayTypography');
+  const { buildNotchData } = require('../../src/electron/notch/data');
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const el = (tag, classes, text = '') => {
+    const node = new FakeElement(tag); node.className = classes; node.textContent = text; return node;
+  };
+  const context = {
+    el, trayTypographyApi: typography, trayBarsApi: require('../../src/electron/renderer/trayBars'), notchNumbers: new Map(), cancelAnimationFrame() {},
+    providerLabel: id => id, positionNotchSummary() {},
+    notchIcon: item => el('span', 'edge-dock-mark', item.provider),
+    notchText: (_item, row) => el('span', 'notch-text-run', row.text)
+  };
+  vm.runInNewContext(source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function zoomForNotchText(')), context);
+  const stats = {
+    limits: { providers: [{ provider: 'codex', status: 'ok', accountKey: 'test', accountEmail: 'test@example.test', windows: [
+      { kind: 'session', remainingPercent: 64, resetsAt: new Date(Date.now() + 3600000).toISOString() },
+      { kind: 'weekly', remainingPercent: 74 }
+    ] }] }, periods: { today: { totalTokens: 9500, costUsd: 0 } }
+  };
+  for (const style of trayLayout.STYLE_IDS) {
+    const item = trayLayout.createTrayLayoutItem(style);
+    const icon = trayLayout.createTrayLayoutItem('providerIcon'); icon.source.provider = 'codex';
+    const cost = trayLayout.createTrayLayoutItem('cost');
+    const separator = trayLayout.createTrayLayoutItem('separatorDot');
+    const readings = !['icon', 'spacer'].includes(item.type);
+    if (readings) {
+      const summary = buildNotchData(stats, [], { notchSummaryMode: 'custom',
+        notchCustomLayout: { version: trayLayout.VERSION, items: [icon, item] } }).summary;
+      const single = context.notchSummary({ summary, geometry: { gapWidth: 179 }, appearance: {} });
+      assert.equal(single.find('notch-left').querySelectorAll('.notch-reading').length, 0, `${style} remains one field even with multiple rows`);
+      assert.equal(single.find('notch-right').querySelectorAll('.notch-reading').length, 1);
+    }
+    for (const gapWidth of [179, 0]) {
+      const summary = buildNotchData(stats, [], { notchSummaryMode: 'custom',
+        notchCustomLayout: { version: trayLayout.VERSION, items: [icon, item, separator, cost] }
+      }).summary;
+      const head = context.notchSummary({ summary, geometry: { gapWidth }, appearance: {} });
+      const left = head.find('notch-left').children[0], right = head.find('notch-right').children[0];
+      if (gapWidth && readings) {
+        assert.equal(left.children.length, 2, style);
+        assert.equal(right.children.length, 1, style);
+        assert.equal(right.dataset.notchOptional, 'true');
+        assert.equal(left.children[0].textContent, 'codex');
+        assert.equal(left.children[1].dataset.notchPrimary, 'true');
+        assert.equal(right.children[0].dataset.notchSpacer, 'false', 'no separator starts the right ear');
+        if (item.type === 'stack' || item.type === 'bars') {
+          const block = left.find(item.type === 'stack' ? 'notch-stack' : 'notch-bars');
+          assert.equal(block.children.length, item.rows?.length || item.lines.length, `${style} rows stay together`);
+          if (item.type === 'bars') {
+            assert.equal(block.style.gap, '3px');
+            for (const track of block.children) {
+              assert.equal(track.style.width, '18px', 'bars retain the compact tray width');
+              assert.equal(track.style.height, '5px');
+            }
+          }
+          if (summary.items[1].iconProvider) {
+            const field = left.find('notch-summary-field');
+            assert.equal(field.children.length, 2, 'only the embedded mark stays with its field');
+            assert.equal(field.style.gap, item.type === 'bars' ? '3px' : '2px');
+          }
+        }
+        assert.match(right.text, /0/, 'zero cost remains a displayed field');
+      } else {
+        assert.equal(left.querySelectorAll('.notch-reading').filter(node => node.dataset.notchSpacer !== 'true').length, 0, `${style} keeps readings together on the right`);
+      }
+    }
+  }
+});
+
+test('ear fitting keeps graphics whole within the hard budget', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const el = (tag, classes, text = '') => {
+    const node = new FakeElement(tag); node.className = classes; node.textContent = text;
+    node.getBoundingClientRect = () => ({ width: node.width ?? node.children.filter(child => !child.hidden)
+      .reduce((total, child, index) => total + child.getBoundingClientRect().width + (index ? 6 : 0), 0) });
+    return node;
+  };
+  const context = { el, fitNotchTypeface() {}, getComputedStyle: () => ({ zoom: 1, gap: '6px' }) };
+  vm.runInNewContext(source.slice(source.indexOf('function zoomForNotchText('), source.indexOf('function reportNotchSlots(')), context);
+  const content = el('div', 'notch-slot-content');
+  const field = el('span', 'notch-summary-field');
+  const mark = el('span', 'edge-dock-mark'); mark.width = 17;
+  const reading = el('span', 'notch-reading'); reading.width = 40;
+  field.append(mark, reading); content.append(field);
+  const primary = context.fitNotchSlot(content, 20);
+  assert.equal(primary.minimum, 63, 'the icon and primary number are both reserved');
+  assert.equal(field.hidden, true, 'an indivisible group cannot exceed the budget');
+  const optional = el('div', 'notch-slot-content'); optional.dataset.notchOptional = 'true';
+  optional.append(field);
+  const overflow = el('span', 'notch-reading notch-overflow', '⋯'); overflow.width = 8;
+  optional.append(overflow);
+  const result = context.fitNotchSlot(optional, 20);
+  assert.equal(result.minimum, 0);
+  assert.equal(field.hidden, true, 'the whole group disappears, not just its reading');
+  assert.equal(mark.hidden, undefined);
+  assert.equal(overflow.hidden, false);
+});
+
+
+test('custom summary order never infers standalone icon ownership or removes same-ear separators', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const el = (tag, classes, text = '') => { const node = new FakeElement(tag); node.className = classes; node.textContent = text; return node; };
+  const context = { el, trayTypographyApi: require('../../src/electron/renderer/trayTypography'), notchNumbers: new Map(),
+    cancelAnimationFrame() {}, providerLabel: id => id, positionNotchSummary() {},
+    notchIcon: item => el('span', 'edge-dock-mark', item.provider), notchText: (_item, row) => el('span', 'notch-text-run', row.text) };
+  vm.runInNewContext(source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function zoomForNotchText(')), context);
+  const icon = provider => ({ type: 'icon', provider });
+  const text = value => ({ type: 'text', text: value });
+  const dot = { type: 'spacer', variant: 'dot' };
+  const cases = [
+    { items: [icon('codex'), icon('claude'), text('89%'), text('62%')], left: ['codex', 'claude', '89%'], right: ['62%'] },
+    { items: [icon('codex'), text('89%'), icon('claude'), text('62%')], left: ['codex', '89%'], right: ['claude', '62%'] },
+    { items: [text('51M'), dot, text('$1'), dot, text('62%')], left: ['51M'], right: ['$1', '·', '62%'] },
+    { items: [text('89%'), icon('claude'), text('62%'), icon('codex')], left: ['89%'], right: ['claude', '62%', 'codex'] }
+  ];
+  for (const row of cases) for (const gapWidth of [179, 0]) {
+    const head = context.notchSummary({ summary: { items: row.items }, geometry: { gapWidth }, appearance: {} });
+    const left = head.find('notch-left').children[0], right = head.find('notch-right').children[0];
+    const texts = node => [...node.walk()].map(n => n.textContent).filter(Boolean);
+    const actual = [...texts(left), ...texts(right)];
+    const expected = gapWidth ? [...row.left, ...row.right] : row.items.map(item => item.provider || item.text || '·');
+    assert.deepEqual(actual, expected);
+    assert.equal(left.find('notch-summary-field'), null, 'standalone icons do not become part of another field');
+    if (gapWidth) { assert.deepEqual(texts(left), row.left); assert.deepEqual(texts(right), row.right); }
+  }
+});
+
+test('primary reading survives extra standalone icons without inflating the minimum budget', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const el = (tag, classes, text = '') => {
+    const node = new FakeElement(tag); node.className = classes; node.textContent = text;
+    node.getBoundingClientRect = () => ({ width: node.width ?? node.children.filter(child => !child.hidden).reduce((sum, child, i) => sum + child.getBoundingClientRect().width + (i ? 6 : 0), 0) });
+    return node;
+  };
+  const context = { el, fitNotchTypeface() {}, getComputedStyle: () => ({ zoom: 1, gap: '6px' }) };
+  vm.runInNewContext(source.slice(source.indexOf('function zoomForNotchText('), source.indexOf('function reportNotchSlots(')), context);
+  const content = el('div', 'notch-slot-content');
+  const icons = Array.from({ length: 10 }, () => { const node = el('span', 'edge-dock-mark'); node.width = 17; return node; });
+  const reading = el('span', 'notch-reading'); reading.width = 40; reading.dataset.notchPrimary = 'true';
+  content.append(...icons, reading);
+  const overflow = el('span', 'notch-reading notch-overflow', '⋯'); overflow.width = 8; content.append(overflow);
+  const result = context.fitNotchSlot(content, 80);
+  assert.equal(result.minimum, 40, 'only the primary reading sets the minimum');
+  assert.equal(reading.hidden, false);
+  assert.equal(icons.filter(node => !node.hidden).length, 1);
+  assert.equal(overflow.hidden, false);
+  assert.ok(result.width <= 80);
+  context.fitNotchSlot(content, 40);
+  assert.ok(icons.every(node => node.hidden));
+  assert.equal(reading.hidden, false);
+  assert.equal(overflow.hidden, true);
+});
+
+
+test('switching camera clearance rebuilds the same summary without losing configured separators', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const el = (tag, classes, text = '') => { const node = new FakeElement(tag); node.className = classes; node.textContent = text; return node; };
+  const layer = el('div', 'content');
+  layer.prepend = node => { node.parent = layer; layer.children.unshift(node); };
+  const context = { el, contentLayer: layer, root: el('div', 'root'), state: { appearanceKey: 'unchanged' },
+    notchHeaderKey: '', notchClock: 0, notchNumbers: new Map(), trayTypographyApi: require('../../src/electron/renderer/trayTypography'),
+    refreshVisit: 0, refreshFeedbackTimer: null, refreshBusy: false, refreshResult: '',
+    clearTimeout() {}, cancelAnimationFrame() {}, settleNotchNumbers() {}, panel: { suspend() {} }, settleNotchStatNumbers() {}, resetRefreshVisit() {}, paintRefreshButton() {}, captureRingResetMotion() {}, animateRingResets() {},
+    notchSummaryObserver: { disconnect() {}, observe() {} }, providerLabel: id => id, positionNotchSummary() {},
+    notchIcon: item => el('span', 'edge-dock-mark', item.provider), notchText: (_item, row) => el('span', 'notch-text-run', row.text) };
+  const summarySource = source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function zoomForNotchText('));
+  const renderSource = source.slice(source.indexOf('function renderNotch('), source.indexOf('  const summary = contentLayer.querySelector', source.indexOf('function renderNotch(')));
+  vm.runInNewContext(`${summarySource}\n${renderSource}\n}`, context);
+  const payload = { summary: { items: [{ type: 'icon', provider: 'codex' }, { type: 'text', text: '51M' },
+    { type: 'spacer', variant: 'dot' }, { type: 'text', text: '$1' }] }, appearance: {}, geometry: { notched: true, gapWidth: 179 } };
+  context.renderNotch(payload);
+  const attached = layer.find('notch-summary');
+  assert.equal(attached.find('notch-left').text, 'codex 51M');
+  assert.equal(attached.find('notch-right').text, '$1');
+  context.renderNotch({ ...payload, geometry: { notched: false, gapWidth: 0 } });
+  const pill = layer.find('notch-summary');
+  assert.notEqual(pill, attached);
+  assert.equal(pill.find('notch-left').text, 'codex');
+  assert.equal(pill.find('notch-right').text, '51M · $1');
+  context.renderNotch({ ...payload, geometry: { notched: true, gapWidth: 0 } });
+  assert.equal(layer.find('notch-summary'), pill, 'camera-free outlines share the compact grouping');
+  context.renderNotch(payload);
+  assert.notEqual(layer.find('notch-summary'), pill);
+  assert.equal(layer.find('notch-right').text, '$1');
+});
+
+
+test('summary text ellipsis preserves the full value and restores within a larger budget', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  for (const zoom of [1, 1.25]) {
+    const el = (tag, classes, text = '') => {
+      const node = new FakeElement(tag); node.className = classes; node.textContent = text;
+      node.getBoundingClientRect = () => {
+        const width = node.width ?? (node.classList.contains('notch-overflow') ? (node.textContent === '…' && /12px/.test(node.style.font || '') ? 12 : 8) : node.children.filter(child => !child.hidden)
+          .reduce((total, child, index) => total + child.getBoundingClientRect().width + (index ? 6 : 0), 0));
+        const maximum = parseFloat(node.style.maxWidth);
+        return { width: Number.isFinite(maximum) ? Math.min(width, maximum * zoom) : width };
+      };
+      return node;
+    };
+    const context = { el, fitNotchTypeface() {}, getComputedStyle: () => ({ zoom, gap: '6px', font: '', fontStyle: 'normal', fontWeight: '500', fontSize: '12px', fontFamily: 'sans-serif' }) };
+    vm.runInNewContext(source.slice(source.indexOf('function zoomForNotchText('), source.indexOf('function reportNotchSlots(')), context);
+    const content = el('div', 'notch-slot-content');
+    const reading = el('span', 'notch-reading');
+    const run = el('span', 'notch-text-run', 'HK$7557194.97'); run.width = 100;
+    run.dataset.horizontalScale = '1'; run.closest = () => content;
+    reading.append(run); content.append(reading);
+    const fitted = context.fitNotchSlot(content, 40);
+    assert.equal(fitted.width, 40);
+    assert.equal(run.style.maxWidth, `${40 / zoom}px`);
+    assert.equal(run.textContent, 'HK$7557194.97');
+    assert.equal(content.querySelector('.notch-overflow').hidden, true, 'native text ellipsis needs no second marker');
+    context.fitNotchSlot(content, 8);
+    assert.equal(reading.hidden, true, 'too little space for the text ellipsis cannot leave a partial glyph');
+    assert.equal(content.querySelector('.notch-overflow').hidden, false);
+    context.fitNotchSlot(content, 0);
+    assert.equal(reading.hidden, true);
+    const restored = context.fitNotchSlot(content, 200);
+    assert.equal(restored.width, 100);
+    assert.equal(run.style.maxWidth, 'none');
+    assert.equal(reading.hidden, false);
+    assert.equal(run.textContent, 'HK$7557194.97');
+  }
+});
+
+test('summary overflow marks omitted content, not removed spacing', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const context = {};
+  vm.runInNewContext(source.slice(source.indexOf('function fitNotchSummaryItems('), source.indexOf('function fitNotchSlot(')), context);
+  const reading = { width: 35, minimum: 35, spacer: false };
+  const spacer = { width: 4, minimum: 4, spacer: true };
+  const cases = [
+    { name: 'trailing decoration', items: [reading, spacer], budget: Infinity, visible: [0], overflow: false },
+    { name: 'spacing only', items: [spacer, spacer], budget: Infinity, visible: [], overflow: false },
+    { name: 'decoration exceeds clearance', items: [reading, spacer], budget: 40, visible: [0], overflow: false },
+    { name: 'optional trailing decoration', items: [reading, spacer], budget: 80, optional: true, visible: [0], overflow: false },
+    { name: 'optional spacing only', items: [spacer], budget: 80, optional: true, visible: [], overflow: false },
+    { name: 'internal separator remains', items: [reading, spacer, reading], budget: 100, visible: [0, 1, 2], overflow: false },
+    { name: 'omitted reading', items: [reading, spacer, reading], budget: 60, visible: [0], overflow: true },
+    { name: 'omitted icon beside primary', items: [{ width: 17, minimum: 17, spacer: false }, reading], budget: 50, primary: 1, visible: [1], overflow: true }
+  ];
+  for (const row of cases) {
+    const fitted = context.fitNotchSummaryItems(row.items, { budget: row.budget, gap: 6, overflowWidth: 8, primary: row.primary ?? -1, optional: row.optional === true });
+    assert.deepEqual(Array.from(fitted.visible), row.visible, row.name);
+    assert.equal(fitted.overflow, row.overflow, row.name);
+  }
+});
+
+test('summary allocation and width fitting need only ordered items and measured widths', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const context = {};
+  vm.runInNewContext(source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function notchSummary(')), context);
+  vm.runInNewContext(source.slice(source.indexOf('function fitNotchSummaryItems('), source.indexOf('function fitNotchSlot(')), context);
+  const types = ['icon', 'text', 'spacer', 'icon', 'stack', 'spacer', 'text'];
+  const items = Object.freeze(types.map(type => Object.freeze({ type })));
+  const plan = context.allocateNotchSummary(items, true);
+  assert.deepEqual(Array.from(plan.left), [0, 1]);
+  assert.deepEqual(Array.from(plan.right), [3, 4, 5, 6], 'only the camera split loses its separator');
+  assert.equal(plan.primary, 1);
+  const compact = context.allocateNotchSummary(items, false);
+  assert.deepEqual([...compact.left, ...compact.right], items.map((_item, index) => index));
+  assert.equal(compact.primary, null);
+  const widths = Object.freeze([
+    Object.freeze({ width: 17, minimum: 17, spacer: false }),
+    Object.freeze({ width: 40, minimum: 40, spacer: false })
+  ]);
+  const fitted = context.fitNotchSummaryItems(widths, { budget: 40, gap: 6, overflowWidth: 8, primary: 1 });
+  assert.deepEqual(Array.from(fitted.visible), [1], 'the reading survives when its independent icon does not fit');
+  assert.equal(fitted.minimum, 40);
+  assert.equal(fitted.overflow, false);
+  const embedded = context.fitNotchSummaryItems([{ width: 63, minimum: 63, spacer: false }],
+    { budget: 40, gap: 6, overflowWidth: 8, primary: 0 });
+  assert.deepEqual(Array.from(embedded.visible), [], 'an indivisible item cannot exceed the budget');
+  assert.equal(embedded.minimum, 63);
+  const hidden = context.fitNotchSummaryItems(widths, { budget: 0, gap: 6, overflowWidth: 8, optional: true });
+  assert.deepEqual(Array.from(hidden.visible), []);
+  assert.equal(hidden.overflow, false, 'unknown or occupied clearance admits no optional overflow');
 });

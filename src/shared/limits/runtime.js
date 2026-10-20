@@ -526,6 +526,17 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     } else if (!TRANSIENT_STATUSES.has(status)) {
       existing.lastGood = null;
     }
+    if (lane.provider === 'workbuddy' && TRANSIENT_STATUSES.has(status) && !row.accountKey) {
+      // A partial discovery can miss an encrypted identity which has never
+      // produced lastGood quota. Preserve its last known metadata as well as
+      // identities with successful readings until explicit removal confirms
+      // absence; the failed attempt must not erase the subscription key.
+      const previous = existing.lastAttempt?.row || existing.lastGood;
+      row = { ...row };
+      for (const field of ['accountKey', 'accountName', 'accountEmail', 'accountLabel', 'region', 'source', 'sourceDetail']) {
+        if (!row[field] && previous?.[field]) row[field] = previous[field];
+      }
+    }
     existing.lastAttempt = { status, at, row };
     lane.identities.set(identityKey, existing);
   }

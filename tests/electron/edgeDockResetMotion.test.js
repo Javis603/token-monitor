@@ -254,3 +254,16 @@ test('the renderer wires the ring driver and the shared card animator', () => {
   const rendererAt = dockHtml.indexOf('<script src="dock.js"></script>');
   assert.ok(motionAt > -1 && motionAt < animatorAt && animatorAt < rendererAt);
 });
+
+
+test('the same reset driver accepts a compact header scope without moving the rail timeline', () => {
+  const h = ringHarness();
+  const before = h.cell(5, { resetsAt: '2026-09-30T12:00:00.000Z' });
+  const after = h.cell(100, { resetsAt: '2026-10-01T12:00:00.000Z' });
+  const snapshot = h.context.captureRingResetMotion({ querySelectorAll: () => [before] });
+  h.context.animateRingResets(snapshot, { querySelectorAll: () => [after] });
+  h.frame(100);
+  assert.equal(after.circle.animations.length, 1);
+  assert.equal(after.circle.animations[0].options.duration, 1565);
+  assert.equal(before.circle.animations.length, 0);
+});

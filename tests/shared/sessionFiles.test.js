@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { findPiSessionFiles, findSessionFiles, isSafeSessionId, resolveSessionFile } = require('../../src/shared/sessionFiles');
+const { findTimestampedSessionFiles, findSessionFiles, isSafeSessionId, resolveSessionFile } = require('../../src/shared/sessionFiles');
 
 function tmpHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'tm-home-'));
@@ -269,7 +269,7 @@ test('an explicit scoped home ignores the host PI_CODING_AGENT_DIR', () => {
   } finally { cleanup(home); }
 });
 
-test('findPiSessionFiles matches the id as a filename suffix', () => {
+test('findTimestampedSessionFiles matches the id as a filename suffix', () => {
   const home = tmpHome();
   try {
     const root = path.join(home, 'sessions');
@@ -277,7 +277,7 @@ test('findPiSessionFiles matches the id as a filename suffix', () => {
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, '2026-01-01T00-00-00-000Z_abc-123.jsonl');
     fs.writeFileSync(file, '{}\n');
-    const found = findPiSessionFiles(root, ['abc-123', '../secret', 'missing']);
+    const found = findTimestampedSessionFiles(root, ['abc-123', '../secret', 'missing']);
     assert.deepEqual([...found.keys()], ['abc-123']);
     assert.equal(found.get('abc-123'), file);
   } finally { cleanup(home); }

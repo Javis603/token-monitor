@@ -41,6 +41,7 @@ const {
   createSubprocessTermination,
   terminationUnconfirmedError
 } = require('./subprocessTermination');
+const { lowerSubprocessPriority } = require('./subprocessPriority');
 const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
 const { antigravityConversationSummaryCandidates } = require('./providers/antigravity/sessionMetadata');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
@@ -245,6 +246,7 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
   if (signal?.aborted) return Promise.reject(abortReason(signal));
   return new Promise((resolve, reject) => {
     const child = spawn(bin, [...prefixArgs, ...userArgs], { env, windowsHide: true });
+    lowerSubprocessPriority(child);
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -1270,6 +1272,8 @@ async function collectUsageOnce(options) {
     wslStatus,
     periodWindows: computePeriodWindows(collectedAt),
     historyAvailable: options.historyEnabled !== false,
+    // Private archive hint: these three report requests finished this tick.
+    sessionUsageArchiveFullScan: !anchorUsed,
     today,
     month,
     allTime
@@ -1561,15 +1565,10 @@ function clientsForWatchPath(filePath, rootsByClient) {
   return matched;
 }
 
-// Inside a Hermes home dir tokscale only reads the SQLite db; the rest is the
-// Desktop App runtime (hermes-agent/node_modules/venv, logs, cache — 150k+ files
-// for some users). A plain recursive watch of ~/.hermes pegged CPU at 100%+
-// (issue #38). Watching the db files directly instead would miss the WAL/SHM
-// sidecars Hermes creates after startup (no seconds-level refresh on a cold
-// start), so we keep watching the dir but hand chokidar an `ignored` matcher
-// that prunes everything under a Hermes home except the db family. chokidar
-// never recurses into an ignored dir (so the runaway poll is gone), yet a
-// newly created state.db-wal is still seen on the next top-level readdir.
+// Hermes database totals also use direct logs/agent.log* siblings as per-call
+// date evidence. Keep those narrow lanes and dynamically created WAL/SHM files
+// under each home/profile watch root, while pruning the Desktop runtime and
+// unrelated logs/cache (issue #38's unbounded polling regression).
 const HERMES_DB_FILES = new Set(['state.db', 'state.db-wal', 'state.db-shm']);
 // OpenClaw keeps each agent's usage sources in a small set of lanes under
 // ~/.openclaw/agents/<agentId>: legacy/published JSONL under sessions/, doctor
@@ -1623,6 +1622,7 @@ const UNSLOTH_DB_WATCH_PATTERN = /^studio\.db(?:-(?:wal|shm))?$/;
 // get a watcher or a health check, which matches where the product actually
 // installs. The acp-events roots stay recursive event trees.
 const DEVIN_CLI_DB_WATCH_PATTERN = /^sessions\.db(?:-(?:wal|shm))?$/;
+const GOOSE_DB_WATCH_PATTERN = /^sessions\.db(?:-(?:wal|shm))?$/;
 const GROK_UNIFIED_LOG_FILE = 'unified.jsonl';
 // Tokscale scans only these two CodeBuddy extension log subtrees. Keep their
 // recursive layout intact, but prune unrelated siblings under Logs before
@@ -1679,6 +1679,46 @@ const CUSTOM_ROOT_PRUNED_DIRS = new Set([
 ]);
 const pruneDependencyTrees = (parts) => parts.some((part) => CUSTOM_ROOT_PRUNED_DIRS.has(part));
 
+function ignoreDesktopTranscriptPath(parts, resolved) {
+  const marker = parts.indexOf('.claude');
+  const discovery = marker < 0 ? parts : parts.slice(0, marker);
+  if (pruneDependencyTrees(discovery)) return true;
+  if (marker >= 0 && parts.length > marker + 1
+    && !['projects', 'transcripts'].includes(parts[marker + 1])) return true;
+
+  const root = parts.reduce((parent) => path.dirname(parent), resolved);
+  let current = root;
+  for (let index = 0; index < parts.length; index += 1) {
+    current = path.join(current, parts[index]);
+    let stat;
+    try { stat = fs.lstatSync(current); } catch (_) {
+      // A removed directory or transcript must still invalidate the scan.
+      // Missing entries cannot cause chokidar to descend into a new tree.
+      return marker < 0 || parts.length <= marker + 2 ? false : !resolved.endsWith('.jsonl');
+    }
+    const laneRoot = marker >= 0 && index === marker + 1;
+    const transcriptFile = marker >= 0 && index === parts.length - 1 && index > marker + 1;
+    if (stat.isSymbolicLink()) {
+      // WalkDir does not follow discovery/.claude or interior directory links.
+      // Its explicitly discovered scan root and individual file links do work.
+      if (!laneRoot && !transcriptFile) return true;
+      try { stat = fs.statSync(current); } catch (error) {
+        // A previously admitted link can outlive its target. Keep its removal
+        // signal; a missing target cannot cause traversal outside the source.
+        const missing = error.code === 'ENOENT' || error.code === 'ENOTDIR';
+        return !missing || (!laneRoot && !resolved.endsWith('.jsonl'));
+      }
+      if (laneRoot ? !stat.isDirectory() : !stat.isFile()) return true;
+    }
+    if (index < parts.length - 1 || !transcriptFile) {
+      if (!stat.isDirectory()) return true;
+    } else if (!stat.isDirectory() && (!stat.isFile() || !resolved.endsWith('.jsonl'))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Tokscale opens one exact database directly under this root instead of walking
 // it. Keep the direct children it names — including the WAL/SHM sidecars, which
 // are the live-write signal even though tokscale never parses them as databases
@@ -1730,10 +1770,24 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   const withBasename = (client, basename) =>
     (candidates[client] || []).filter((dir) => path.basename(dir) === basename);
 
-  // Hermes: the SQLite trio is the only source, at any depth. Each explicit
+  // Hermes: SQLite totals and per-call logs provide usage and date evidence. Each explicit
   // watch root — the home AND every profile dir under it — is kept by the
   // matcher itself, so a profile's own database still reports.
-  bound('hermes', candidates.hermes || [], (parts) => !HERMES_DB_FILES.has(parts[parts.length - 1]));
+  bound('hermes', candidates.hermes || [], (parts) => {
+    if (HERMES_DB_FILES.has(parts[parts.length - 1])) return false;
+    // Cross-day allocation reads direct logs/agent.log* siblings of state.db.
+    // Keep rotation/create/remove events, but never recurse into runtime logs.
+    return !(parts[0] === 'logs' && (parts.length === 1
+      || (parts.length === 2 && parts[1].startsWith('agent.log'))));
+  });
+
+  // Desktop contains VM/runtime files beside its retained `.claude` trees.
+  // Keep dynamic discovery ancestors, pruning dependency/VCS trees. Link
+  // handling differs between discovery, scan roots and individual JSONL files.
+  // IndexedDB roots and external blob trees are separate.
+  const desktopRoots = clientSourceRoots(clientsCsv, options).claude || [];
+  bound('claude', desktopRoots.filter(({ id, dir }) => id === 'claude-desktop-transcripts' && dirExists(dir)).map(({ dir }) => dir),
+    ignoreDesktopTranscriptPath);
 
   bound('openclaw', candidates.openclaw || [], (parts) => {
     // The first level is the dynamic agent id. Keep it so newly created agents
@@ -1857,6 +1911,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // Tokscale reads only direct children of each MiMo root, so log/* and every
   // other recursive subtree is pruned before chokidar descends into it.
   bound('mimo', candidates.mimo || [], directChildOnly((name) => MIMO_DB_WATCH_PATTERN.test(name)));
+  bound('goose', candidates.goose || [], directChildOnly((name) => GOOSE_DB_WATCH_PATTERN.test(name)));
   bound('cherrystudio', withBasename('cherrystudio', 'Data'), directChildOnly((name) => CHERRY_STUDIO_DB_WATCH_PATTERN.test(name)));
   bound('catpaw', candidates.catpaw || [], directChildOnly((name) => catpawDatabaseName(name.replace(/-(?:wal|shm)$/, ''))));
   bound('unsloth', candidates.unsloth || [], directChildOnly((name) => UNSLOTH_DB_WATCH_PATTERN.test(name)));
@@ -2439,9 +2494,9 @@ function watcherOptions(usePolling, ignored) {
 // its -wal, so a genuine change still produces an event; a client whose scan was
 // measured NOT to rewrite its sidecar (mimo) is deliberately absent here, and
 // adding a client to this list asserts a measurement rather than a hunch.
-// Cherry Studio and CatPaw also rewrite their wal-index on repeated read-only WAL scans.
+// Cherry Studio, CatPaw and Goose also rewrite their wal-index on repeated read-only WAL scans.
 // Cursor's read-only desktop credential/title queries change state.vscdb-shm too.
-const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'catpaw', 'cherrystudio', 'cursor', 'qodercn', 'zcode']);
+const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'catpaw', 'cherrystudio', 'cursor', 'goose', 'qodercn', 'zcode']);
 
 function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
   // Match SQLite's wal-index suffix, not one client's database basename: ZCode's

@@ -14,10 +14,11 @@ const codebuddyExtension = require('./providers/codebuddy/extension');
 const opencodeSession = require('./providers/opencode/session');
 const { readReasonixSessionEvents } = require('./providers/reasonix/sessionDetail');
 const { createLocalUsageStore } = require('./providers/codex/localUsageStore');
+const PI_FORMAT_CLIENTS = new Set(['pi', 'omp']);
 
-function* readTranscriptLines(filePath) {
-  const decoded = isCompressedCodexTranscript(filePath) ? readCompressedCodexTranscript(filePath) : null;
-  const fd = decoded ? undefined : fs.openSync(filePath, 'r');
+function* readTranscriptLines(filePath, transcriptFs = fs) {
+  const decoded = isCompressedCodexTranscript(filePath) ? readCompressedCodexTranscript(filePath, { fs: transcriptFs }) : null;
+  const fd = decoded ? undefined : transcriptFs.openSync(filePath, 'r');
   let position = 0;
   let parts = [];
   let lineBytes = 0;
@@ -25,7 +26,7 @@ function* readTranscriptLines(filePath) {
     for (;;) {
       const buffer = Buffer.allocUnsafe(64 * 1024);
       const bytesRead = decoded ? decoded.copy(buffer, 0, position, position + buffer.length)
-        : fs.readSync(fd, buffer, 0, buffer.length, null);
+        : transcriptFs.readSync(fd, buffer, 0, buffer.length, null);
       position += bytesRead;
       if (bytesRead === 0) break;
       const chunk = buffer.subarray(0, bytesRead);
@@ -48,7 +49,7 @@ function* readTranscriptLines(filePath) {
     }
     if (lineBytes) yield Buffer.concat(parts, lineBytes).toString('utf8');
   } finally {
-    if (fd !== undefined) fs.closeSync(fd);
+    if (fd !== undefined) transcriptFs.closeSync(fd);
   }
 }
 
@@ -385,11 +386,12 @@ function parseCodebuddyTranscriptLines(lines) {
   return events;
 }
 
-// Pi (pi.dev) writes conversation and billed operations as separate entries.
-// Only user messages create prompt boundaries; summary, tool and standalone
-// usage contributes to totals without counting as assistant replies. Pi
-// follows OpenAI's convention: `totalTokens` is input + output + cacheRead +
-// cacheWrite, and `reasoning` is an informational subset of output.
+// Pi (pi.dev) and OMP write the same conversation format, with billed
+// operations as separate entries. OMP's title slot is naturally ignored
+// because only user messages create prompt boundaries; summary, tool and
+// standalone usage contributes to totals without counting as assistant replies.
+// Both follow OpenAI's convention: totalTokens is input + output + cacheRead +
+// cacheWrite, and reasoning is an informational subset of output.
 function piPromptText(content) {
   if (typeof content === 'string') return cleanPromptText(content) || null;
   if (!Array.isArray(content)) return null;
@@ -443,9 +445,9 @@ function parsePiTranscriptLines(lines) {
           output: u.output,
           cacheRead: u.cacheRead,
           cacheWrite: u.cacheWrite,
-          reasoning: u.reasoning
+          reasoning: u.reasoning ?? u.reasoningTokens
         }),
-        // Pi prices each operation itself; `readSessionDetail` prefers this over the
+        // Pi and OMP report each operation's cost; prefer it over the
         // proportional split of the session subtotal.
         cost: num(u.cost && u.cost.total),
         tools: uniqueTools(tools)
@@ -674,7 +676,7 @@ function readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, h
 function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, env, useEnvRoots, deps = {} }) {
   if (client === 'opencode') return readOpenCodeSessionDetail({ sessionId, period, deps });
   if (client === 'reasonix') return readReasonixSessionDetail({ sessionId, period, home, deps });
-  const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots });
+  const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots, fs: deps.fs });
   if (!filePath && client === 'codebuddy') {
     return readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, home, env, deps });
   }
@@ -703,16 +705,16 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
   let parsed;
   let events;
   try {
-    const lines = readTranscriptLines(filePath);
+    const lines = readTranscriptLines(filePath, deps.fs || fs);
     // The filename is a lookup key, not necessarily Codex's conversation identity.
     parsed = client === 'codex' ? parseCodexTranscriptData(lines) : null;
     // WorkBuddy writes the same transcript family as CodeBuddy Code.
     events = parsed ? parsed.events
       : (client === 'codebuddy' || client === 'workbuddy')
         ? parseCodebuddyTranscriptLines(lines)
-        : client === 'pi'
-          ? parsePiTranscriptLines(lines)
-          : parseClaudeTranscriptLines(lines);
+      : PI_FORMAT_CLIENTS.has(client)
+        ? parsePiTranscriptLines(lines)
+        : parseClaudeTranscriptLines(lines);
   } catch (error) {
     if (error.code === 'ENOENT') return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
     return {
@@ -722,10 +724,10 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
   }
   const now = new Date((deps.now || Date.now)());
   const grouped = filterExchangesByPeriod(groupEvents(events), period, now);
-  // Pi prices every reply in `usage.cost.total`, so use the reported per-turn
-  // cost instead of splitting the session subtotal the way Claude/Codex do. A
-  // provider that reports no price (all zeros) falls back to that split.
-  const reportedCost = client === 'pi'
+  // Pi and OMP price replies with `usage.cost.total`, so use the reported
+  // per-turn costs instead of splitting the session subtotal. A provider that
+  // reports no price (all zeros) falls back to that split.
+  const reportedCost = PI_FORMAT_CLIENTS.has(client)
     ? grouped.reduce((sum, ex) => sum + ex.turns.reduce((turnSum, t) => turnSum + num(t.costEstimate), 0), 0)
     : 0;
   let costUsd = num(sessionCost);

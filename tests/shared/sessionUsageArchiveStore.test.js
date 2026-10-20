@@ -151,6 +151,169 @@ function migrationMarker(options) {
   }
 }
 
+test('strict snapshots distinguish absent and genuinely empty archives from read failures', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-strict-'));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir }, strict: true };
+  const writer = createSessionUsageArchiveStore(options);
+  const reader = createSessionUsageArchiveStore(options);
+  t.after(() => { writer.close(); reader.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  assert.deepEqual(readSessionUsageArchiveSnapshot(options).sessions, {});
+  assert.deepEqual(reader.refresh(undefined, { strict: true }).sessions, {});
+  assert.equal(fs.existsSync(reader.databasePath), false, 'read-only absent refresh does not create a DB');
+  writer.read();
+  writer.close();
+  assert.deepEqual(readSessionUsageArchiveSnapshot(options).sessions, {});
+  class UnreadableDatabase extends DatabaseSync {
+    constructor() { throw new Error('temporary EIO'); }
+  }
+  assert.throws(() => readSessionUsageArchiveSnapshot({ ...options, DatabaseSync: UnreadableDatabase }), /temporary EIO/);
+  assert.deepEqual(readSessionUsageArchiveSnapshot({ ...options, strict: false, DatabaseSync: UnreadableDatabase }).sessions, {}, 'legacy best-effort API is unchanged');
+});
+
+test('strict legacy reads reject I/O, malformed JSON and invalid shapes without migration', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-strict-'));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir }, strict: true };
+  const reader = createSessionUsageArchiveStore(options);
+  t.after(() => { reader.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  for (const content of ['{', 'null', '[]', '{"version":2,"sessions":{}}', '{"version":1,"sessions":null}']) {
+    fs.writeFileSync(reader.legacyPath, content);
+    assert.throws(() => reader.refresh(undefined, { strict: true }));
+    assert.equal(fs.readFileSync(reader.legacyPath, 'utf8'), content);
+    assert.equal(fs.existsSync(reader.databasePath), false);
+  }
+  fs.writeFileSync(reader.legacyPath, '{"version":1,"sessions":{}}');
+  assert.throws(() => readSessionUsageArchiveSnapshot({ ...options, readFileSync() { throw new Error('temporary EIO'); } }), /temporary EIO/);
+  assert.deepEqual(reader.refresh(undefined, { strict: true }).sessions, {});
+});
+
+test('strict snapshots refuse an uncommitted migration without a legacy fallback', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-strict-'));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir }, strict: true };
+  const reader = createSessionUsageArchiveStore(options);
+  const database = new DatabaseSync(reader.databasePath);
+  database.exec('CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  t.after(() => { reader.close(); database.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  assert.throws(() => reader.refresh(undefined, { strict: true }), /not ready/);
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM metadata').get().count, 0);
+});
+
+test('strict read-only snapshots close failed cursors, reject partial rows and recover', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-strict-'));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const writer = createSessionUsageArchiveStore(options);
+  const now = new Date();
+  writer.capture(summary(100, 'one'), now);
+  writer.capture(summary(200, 'two'), now);
+  writer.close();
+  let fail = true;
+  const cursors = [];
+  const strict = { ...options, strict: true, DatabaseSync: databaseWithIterationHook((cursor) => {
+    if (fail && cursor.steps === 2) throw new Error('temporary EIO');
+  }, cursors) };
+  t.after(() => { writer.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  assert.throws(() => readSessionUsageArchiveSnapshot(strict), /temporary EIO/);
+  assert.ok(cursors.at(-1).returned);
+  fail = false;
+  assert.deepEqual(Object.keys(readSessionUsageArchiveSnapshot(strict).sessions).sort(), ['codex:one', 'codex:two']);
+});
+
+test('release drops the archive identity and fallback reloads worker writes and prune frontiers', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-release-'));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const main = createSessionUsageArchiveStore(options);
+  const worker = createSessionUsageArchiveStore(options);
+  t.after(() => { main.close(); worker.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const before = new Date(2026, 8, 30, 23, 59);
+  const after = new Date(2026, 9, 1, 0, 1);
+  const prime = main.capture(summary(), before).archive;
+  main.close();
+  assert.equal(main.refresh(), prime, 'close alone retains the complete archive');
+  main.release();
+  main.release();
+  assert.ok(fs.existsSync(main.databasePath));
+  worker.capture(summary(200), after);
+  worker.capture(summary(300, 'two'), after);
+  worker.close();
+
+  const fallback = main.read(after);
+  assert.notEqual(fallback, prime, 'the released object must not be reused');
+  assert.equal(fallback.sessions['codex:one'].periods.allTime.totalTokens, 200);
+  assert.equal(fallback.sessions['codex:two'].periods.allTime.totalTokens, 300);
+  assert.equal(fallback.prunedDay, '2026-10-01');
+  assert.equal(fallback.prunedMonth, '2026-10');
+  assert.equal(main.capture(summary(400, 'three'), after).error, null);
+  main.release();
+  const persisted = readSessionUsageArchiveSnapshot(options);
+  assert.equal(persisted.sessions['codex:one'].periods.allTime.totalTokens, 200);
+  assert.equal(persisted.sessions['codex:three'].periods.allTime.totalTokens, 400);
+});
+
+test('release of a read-only legacy snapshot neither migrates nor deletes it', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-release-'));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const store = createSessionUsageArchiveStore(options);
+  t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  writeSessionUsageArchive(captureSessionUsageArchive({}, summary()), options);
+  const bytes = fs.readFileSync(store.legacyPath);
+  const prime = store.refresh();
+  store.release();
+  assert.deepEqual(fs.readFileSync(store.legacyPath), bytes);
+  assert.equal(fs.existsSync(store.databasePath), false);
+  const reloaded = store.refresh();
+  assert.notEqual(reloaded, prime);
+  assert.deepEqual(reloaded, prime);
+});
+
+test('a close failure during release still invalidates materialized rows for fallback', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-release-'));
+  let failClose = true;
+  class CloseFailureDatabase extends DatabaseSync {
+    close() {
+      if (failClose) throw new Error('close failed');
+      return super.close();
+    }
+  }
+  const store = createSessionUsageArchiveStore({
+    env: { TOKEN_MONITOR_SHARED_DIR: dir },
+    DatabaseSync: CloseFailureDatabase
+  });
+  t.after(() => { failClose = false; store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const now = new Date('2026-10-15T08:00:00Z');
+  const prime = store.capture(summary(), now).archive;
+  const persisted = readSessionUsageArchiveSnapshot({ env: { TOKEN_MONITOR_SHARED_DIR: dir } });
+  assert.throws(() => store.release(), /close failed/);
+  const reloaded = store.read(now);
+  assert.notEqual(reloaded, prime);
+  assert.deepEqual(reloaded, persisted);
+});
+
+test('fallback after release rejects interrupted reloads and retries the complete revision', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-release-'));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const writer = createSessionUsageArchiveStore(options);
+  const now = new Date('2026-10-15T08:00:00Z');
+  writer.capture(summary(), now);
+  let fail = false;
+  const cursors = [];
+  const reader = createSessionUsageArchiveStore({
+    ...options,
+    DatabaseSync: databaseWithIterationHook((cursor) => {
+      if (fail && cursor.steps === 2) throw new Error('interrupted reload');
+    }, cursors)
+  });
+  t.after(() => { reader.close(); writer.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  reader.read(now);
+  reader.release();
+  writer.capture(summary(200, 'two'), now);
+  fail = true;
+  assert.match(reader.capture(summary(300, 'three'), now).error.message, /interrupted reload/);
+  assert.ok(cursors.at(-1).returned);
+  fail = false;
+  const result = reader.capture(summary(300, 'three'), now);
+  assert.equal(result.error, null);
+  assert.deepEqual(Object.keys(result.archive.sessions).sort(), ['codex:one', 'codex:three', 'codex:two']);
+});
+
 test('migrates the legacy JSON only after verified row storage', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-archive-store-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

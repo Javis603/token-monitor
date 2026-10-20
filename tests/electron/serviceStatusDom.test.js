@@ -250,8 +250,8 @@ test('Home limit provider settings expand with the shared accordion transition',
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
   const renderHomeSettingsList = functionBody(app, 'renderHomeSettingsList', 'renderTrendSettingsList');
-  assert.match(renderHomeSettingsList, /homeLimitProviderContainer/);
-  assert.match(renderHomeSettingsList, /accordion-animated-container\$\{state\.homeLimitSettingsExpanded \? '' : ' hidden'\}/);
+  assert.match(app, /limits: \['homeLimitSettingsExpanded', 'homeLimitProviderContainer'\]/);
+  assert.match(renderHomeSettingsList, /accordion-animated-container\$\{state\[subgroup\[0\]\] \? '' : ' hidden'\}/);
   assert.match(renderHomeSettingsList, /accordion-animation-inner/);
   assert.match(renderHomeSettingsList, /togglePreferenceSubgroup\(HOME_MODULE_SUBGROUPS, '\.home-module-preference-row', id\)/);
   const sharedExpansion = functionBody(app, 'setPreferenceSubgroupsExpanded', 'togglePreferenceSubgroup');
@@ -299,7 +299,7 @@ test('view switcher preserves click-to-cycle and direct selection without crowdi
   assert.match(cssRule(css, '.view-switcher-menu'), /transition:[\s\S]*opacity 190ms/);
   assert.match(cssRule(css, '.view-switcher-menu'), /visibility 0s linear 0s/);
   assert.doesNotMatch(cssRule(css, '.view-switcher-menu'), /width:\s*154px/);
-  const menuSurface = cssRule(css, '.view-switcher-menu,\n.select-control-popup,\n.sync-content-dialog,\n.settings-help-popover');
+  const menuSurface = cssRule(css, '.view-switcher-menu,\n.select-control-popup,\n.sync-content-dialog,\n.settings-help-popover,\n.app-update-popover');
   assert.match(menuSurface, /background:[\s\S]*var\(--glass-rgb\)/);
   assert.doesNotMatch(menuSurface, /var\(--panel-rgb\)/);
   assert.doesNotMatch(cssRule(css, '.view-switcher-menu.hidden'), /display:\s*none/);
@@ -308,7 +308,7 @@ test('view switcher preserves click-to-cycle and direct selection without crowdi
   assert.doesNotMatch(css, /@keyframes viewSwitcherMenuIn/);
   assert.doesNotMatch(css, /@keyframes viewSwitcherMenuOut/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.view-switcher-menu/);
-  assert.match(cssRule(css, '.view-switcher-menu-item'), /grid-template-columns:\s*16px minmax\(0, 1fr\)/);
+  assert.match(cssRule(css, '.view-switcher-menu-item'), /grid-template-columns:\s*15px minmax\(0, 1fr\)/);
   assert.doesNotMatch(css, /\.view-switcher-menu-item\.is-current::after/);
   assert.match(cssRule(css, '.utility-actions'), /flex:\s*0 0 34px/);
   assert.match(cssRule(css, '.utility-actions .refresh-button'), /position:\s*absolute/);

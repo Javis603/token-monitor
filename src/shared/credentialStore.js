@@ -370,6 +370,31 @@ class CredentialStore {
     return !this.readAntigravityCredential(accountId);
   }
 
+  readWorkbuddyCredential(id, document = this.readDocument()) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId) return null;
+    const value = valueAt(document.credentials, ['providers', 'workbuddy', 'accounts', accountId, 'credentials']);
+    return isObject(value) ? cloneJson(value) : null;
+  }
+
+  writeWorkbuddyCredential(id, credentials) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId || !isObject(credentials) || !credentialValuePresent(credentials)) return false;
+    const document = this.readDocument();
+    setValueAt(document.credentials, ['providers', 'workbuddy', 'accounts', accountId, 'credentials'], credentials);
+    this.writeDocument(document);
+    return true;
+  }
+
+  removeWorkbuddyCredential(id) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId) return false;
+    const document = this.readDocument();
+    deleteValueAt(document.credentials, ['providers', 'workbuddy', 'accounts', accountId]);
+    this.writeDocument(document);
+    return !this.readWorkbuddyCredential(accountId);
+  }
+
   migrateLegacyMimoCredentials(entries) {
     const document = this.readDocument();
     if (Number(document.migrations.mimoFiles || 0) >= MIMO_MIGRATION_VERSION) {

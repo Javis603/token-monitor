@@ -5,6 +5,9 @@ const path = require('node:path');
 const { claudeSessionRoots } = require('./providers/claude/paths');
 const { codebuddyProjectsRoot } = require('./providers/codebuddy/paths');
 const { resolvePiSessionsDir } = require('./providers/pi/paths');
+const { resolveOmpSessionsDir } = require('./providers/omp/paths');
+const { findOmpSubagentSessionFile } = require('./providers/omp/subagents');
+const { findSubagentSessionFile } = require('./providers/codebuddy/subagents');
 
 // 5.5 moved the WorkBuddy home to ~/.workbuddy-ai and tokscale still scans
 // both, so a session reported from either root resolves from either.
@@ -56,10 +59,9 @@ function findSessionFiles(root, sessionIds) {
   return found;
 }
 
-// Pi names each transcript `<ISO-timestamp>_<sessionId>.jsonl`, so the session
-// id is a suffix of the filename rather than the whole basename (which is what
-// `findSessionFiles` matches on for every other client here).
-function findPiSessionFiles(root, sessionIds) {
+// Pi and OMP name transcripts `<ISO-timestamp>_<sessionId>.jsonl`, so the id
+// is a filename suffix rather than the whole basename matched by findSessionFiles.
+function findTimestampedSessionFiles(root, sessionIds) {
   const wanted = new Map();
   for (const sessionId of sessionIds) {
     if (isSafeSessionId(sessionId)) wanted.set(`${sessionId}.jsonl`, sessionId);
@@ -175,7 +177,17 @@ function resolveSessionFile(client, sessionId, home, options = {}) {
     return findSessionFiles(transcripts, [id]).get(id) || '';
   }
   if (client === 'codebuddy') {
-    return findSessionFiles(codebuddyProjectsRoot({ homeDir: home }), [id]).get(id) || '';
+    const projectsRoot = codebuddyProjectsRoot({ homeDir: home });
+    // A sub-agent conversation is the scan's own reported session, but its file
+    // is named after the agent id, so the name-based lookup cannot find it. The
+    // fallback reads the first record of each sub-agent transcript and runs only
+    // when the session's own file is absent — a parent session always resolves
+    // to its own transcript, and the collector's per-tick path, which calls
+    // findSessionFiles directly, is untouched. Sub-agent usage stays the scan's
+    // separate sessions; nothing here merges it into the parent.
+    return findSessionFiles(projectsRoot, [id]).get(id)
+      || findSubagentSessionFile(projectsRoot, id, { fs: options.fs })
+      || '';
   }
   if (client === 'workbuddy') {
     for (const root of workbuddyProjectsRoots(home)) {
@@ -192,9 +204,15 @@ function resolveSessionFile(client, sessionId, home, options = {}) {
   }
   if (client === 'pi') {
     const sessionsDir = resolvePiSessionsDir({ homeDir: home });
-    return findPiSessionFiles(sessionsDir, [id]).get(id) || '';
+    return findTimestampedSessionFiles(sessionsDir, [id]).get(id) || '';
+  }
+  if (client === 'omp') {
+    const sessionsDir = resolveOmpSessionsDir({ homeDir: home });
+    return findTimestampedSessionFiles(sessionsDir, [id]).get(id)
+      || findOmpSubagentSessionFile(sessionsDir, id, { fs: options.fs })
+      || '';
   }
   return '';
 }
 
-module.exports = { findSessionFiles, findPiSessionFiles, findCodexSessionFiles, preferredCodexSessionFile, codexSessionFile, resolveSessionFile, isSafeSessionId };
+module.exports = { findSessionFiles, findTimestampedSessionFiles, findCodexSessionFiles, preferredCodexSessionFile, codexSessionFile, resolveSessionFile, isSafeSessionId };
