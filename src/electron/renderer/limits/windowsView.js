@@ -637,11 +637,19 @@
     }), 'spend', 'Spend');
   }
 
-  function thirdPartySpendNode(provider, _quotaWindow) {
+  function thirdPartySpendNode(provider, quotaWindow) {
     const balance = provider?.balance || null;
     const usage = provider?.usageSummary || null;
     const currency = balance?.currency || 'USD';
     const entries = [];
+    const total = optionalFiniteNumber(quotaWindow?.limit);
+    const requestCount = optionalFiniteNumber(balance?.requestCount);
+    const quotaGroup = String(balance?.quotaGroup || '').trim();
+    if (total !== null) entries.push([t('settings.thirdparty.totalQuota'), formatMoney(total, currency)]);
+    if (requestCount !== null) {
+      entries.push([t('settings.thirdparty.requests'), Math.max(0, Math.trunc(requestCount)).toLocaleString()]);
+    }
+    if (quotaGroup) entries.push([t('settings.thirdparty.group'), quotaGroup]);
     const expiresAt = balance?.expiresAt ? new Date(balance.expiresAt) : null;
     if (expiresAt && !Number.isNaN(expiresAt.getTime())) {
       entries.push([t('settings.thirdparty.expires'), expiresAt.toLocaleDateString()]);
@@ -670,10 +678,9 @@
       const standardCost = optionalFiniteNumber(usage.standardCost);
       if (standardCost !== null) entries.push([t('settings.thirdparty.standardCost'), formatMoney(standardCost, currency)]);
     }
-    // Every balance provider draws the same Spend row: Today · Month up front,
-    // the full Today/Week/Month/All-time breakdown in the tooltip. New API
-    // reports those periods itself, so third-party cards no longer need their
-    // own Month-and-all-time summary.
+    // The upward-opening tooltip keeps account details above the period
+    // breakdown, with spend nearest its trigger. A summary-only spend value
+    // (for example All time on a compatible fork) need not repeat in the tooltip.
     const spendValues = providerSpendEntries(balance);
     const spendRows = spendValues.map(([label, value]) => [label, formatMoney(value, currency)]);
     if (spendRows.length === 0 && entries.length === 0) return null;
@@ -684,18 +691,19 @@
     const summary = summaryValues
       .map(([label, value]) => `${label} ${formatMoney(value, currency)}`)
       .join(' · ');
+    const periodDetails = spendRows.length > summaryValues.length ? spendRows : [];
     const detailEntries = [
-      ...(spendRows.length > summaryValues.length ? spendRows : []),
-      ...entries
+      ...entries,
+      ...(entries.length > 0 && periodDetails.length > 0 ? [{ full: '', separated: true }] : []),
+      ...periodDetails
     ];
     const node = limitNoteRowNode({
       label: summary ? 'Spend' : 'Details',
       summary,
       detailEntries: detailEntries.length > 0 ? detailEntries : null,
       ariaParts: [
-        ...(summary ? [summary] : []),
-        ...spendRows.map(([entryLabel, value]) => `${entryLabel} ${value}`),
-        ...entries.map(([entryLabel, value]) => `${entryLabel} ${value}`)
+        ...entries.map(([entryLabel, value]) => `${entryLabel} ${value}`),
+        ...spendRows.map(([entryLabel, value]) => `${entryLabel} ${value}`)
       ]
     });
     return tagUsageItem(node, 'spend', summary ? 'Spend' : 'Details');
