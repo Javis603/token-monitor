@@ -3751,6 +3751,8 @@ html.is-windows .settings-panel select option {
 .home-tool-swatch-miss { background: var(--orange); }
 .home-tool-split-output,
 .home-tool-swatch-output { background: var(--purple); }
+.home-tool-split-unclassified,
+.home-tool-swatch-unclassified { background: var(--muted); }
 .home-tool-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -6485,9 +6485,11 @@ function homeToolStats(period, client, totalTokens) {
     unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client)
   });
   // Missing component maps read as zero, which would pass the whole total off as
-  // uncached input; split only a tool that reports at least one component.
-  const hasComponents = ['clientCacheReads', 'clientOutputs', 'clientUnclassifiedTokens']
-    .some((field) => period?.[field] && Object.prototype.hasOwnProperty.call(period[field], client));
+  // uncached input. That is exact only when the period says its components are;
+  // otherwise split a tool that reports at least one component of its own.
+  const hasComponents = period?.capabilities?.tokenComponents === true
+    || ['clientCacheReads', 'clientCacheWrites', 'clientOutputs', 'clientUnclassifiedTokens']
+      .some((field) => period?.[field] && Object.prototype.hasOwnProperty.call(period[field], client));
   const throughput = period?.clientThroughput?.[client];
   const durationMs = Math.max(0, Number(throughput?.timedDurationMs) || 0);
   const timedOutput = Math.max(0, Number(throughput?.timedOutputTokens) || 0);
@@ -6530,18 +6532,20 @@ function renderHomeToolStats({ parts, durationMs, tokensPerSecond }) {
   let bar = null;
   if (parts) {
     const input = parts.cacheRead + parts.cacheMiss;
-    const classified = input + parts.output;
+    // The bar spans the whole tool total, so a partial split keeps its remainder.
+    const classified = input + parts.output + parts.unclassified;
     cells.push(
       homeToolStatCell('cacheHit', input > 0 ? formatPercent(toolDetailsApi.tokenInputPercentages(parts).hit) : '--'),
       homeToolStatCell('cacheRead', formatCompact(parts.cacheRead), 'read'),
       homeToolStatCell('uncachedInput', formatCompact(parts.cacheMiss), 'miss'),
       homeToolStatCell('output', formatCompact(parts.output), 'output')
     );
+    if (parts.unclassified > 0) cells.push(homeToolStatCell('unclassified', formatCompact(parts.unclassified), 'unclassified'));
     if (classified > 0) {
       bar = document.createElement('div');
       bar.className = 'home-tool-split';
       bar.setAttribute('aria-hidden', 'true');
-      for (const [kind, amount] of [['read', parts.cacheRead], ['miss', parts.cacheMiss], ['output', parts.output]]) {
+      for (const [kind, amount] of [['read', parts.cacheRead], ['miss', parts.cacheMiss], ['output', parts.output], ['unclassified', parts.unclassified]]) {
         if (amount <= 0) continue;
         const segment = document.createElement('span');
         segment.className = `home-tool-split-${kind}`;

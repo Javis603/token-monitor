@@ -1521,6 +1521,22 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
       if (output > 0) target.clientOutputs[client] = output;
       if (unclassified > 0) target.clientUnclassifiedTokens[client] = unclassified;
       if (unclassified > 0) target.capabilities.tokenComponents = false;
+      // Restore the retained client's timing with the period totals it counts
+      // toward. A source without the map cannot vouch for it: fail closed.
+      if (!source.clientThroughput) {
+        delete target.clientThroughput;
+      } else if (target.clientThroughput && source.clientThroughput[client]?.timedDurationMs > 0) {
+        const timing = source.clientThroughput[client];
+        const restored = {
+          timedTokens: Math.min(tokens, asNumber(timing.timedTokens)),
+          timedOutputTokens: Math.min(output, asNumber(timing.timedOutputTokens)),
+          timedDurationMs: asNumber(timing.timedDurationMs)
+        };
+        target.clientThroughput[client] = restored;
+        target.timedTokens += restored.timedTokens;
+        target.timedOutputTokens += restored.timedOutputTokens;
+        target.timedDurationMs += restored.timedDurationMs;
+      }
       addClientModelUsage(target, source, client);
       addClientSessionUsage(target, client, source.sessions, restoredSessions, projectsEnabled);
     }

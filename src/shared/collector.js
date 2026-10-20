@@ -2277,10 +2277,17 @@ function collectorAnchorTrust(saved, options = {}) {
   // Old Cursor anchors preserve `default` in their broad-period model maps;
   // applying a new `cursor-auto` Today delta to them would split one mode.
   if (normalizeClientsCsv(clients).split(',').includes('cursor') && saved.cursorAutoModelVersion !== 1) return null;
-  // Anchors written before per-client throughput carry model throughput only; an
-  // anchored delta would then drop the client map from month/allTime until the
-  // next full scan, so rescan instead.
-  if (['today', 'month', 'allTime'].some((period) => saved[period].modelThroughput && !saved[period].clientThroughput)) return null;
+  // An anchored delta drops clientThroughput from month/allTime when the anchor
+  // lacks it, so rescan anchors that predate it: periods with no throughput
+  // capability marker at all, or a throughput-capable period without the client
+  // map. A recorded `throughput: false` (aggregate-only output) stays trusted.
+  if (['today', 'month', 'allTime'].some((period) => {
+    const snapshot = saved[period];
+    const throughput = snapshot.capabilities?.throughput;
+    return throughput === undefined
+      || (throughput === true && !snapshot.clientThroughput)
+      || (snapshot.modelThroughput && !snapshot.clientThroughput);
+  })) return null;
   const pricingRevision = options.pricingRevision ?? pricingFingerprint(options);
   if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, pricingRevision, options)) return null;
   const parsed = Date.parse(saved.fullScanAt || '');

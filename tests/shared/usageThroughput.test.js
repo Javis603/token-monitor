@@ -19,6 +19,7 @@ const {
   emptyPeriod,
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,
+  mergeDeviceRecord,
   mergePeriods,
   normalizeDeviceRecord,
   normalizePeriod
@@ -554,6 +555,37 @@ test('client throughput survives extraction, normalization, merge, sync and exac
   delete legacy.clientThroughput;
   assert.equal(mergePeriods(legacy, first).clientThroughput, undefined);
   assert.equal(applyPeriodDelta(merged, fresh, legacy).clientThroughput, undefined);
+});
+
+test('a retained untracked client keeps its throughput, or the map fails closed', () => {
+  const timing = (timedOutputTokens, timedDurationMs) => ({ timedTokens: timedOutputTokens * 10, timedOutputTokens, timedDurationMs });
+  const today = (clients, throughput) => ({
+    capabilities: { tokenComponents: true, throughput: true },
+    totalTokens: Object.values(clients).reduce((sum, value) => sum + value, 0),
+    outputTokens: 120,
+    timedTokens: 1200,
+    timedOutputTokens: 120,
+    timedDurationMs: 3000,
+    clients,
+    clientOutputs: Object.fromEntries(Object.keys(clients).map((client) => [client, 60])),
+    ...(throughput ? { clientThroughput: throughput } : {})
+  });
+  const existing = {
+    deviceId: 'mac', trackedClients: ['claude', 'codex'], updatedAt: '2026-05-30T12:00:00.000Z',
+    today: today({ claude: 1000, codex: 1000 }, { claude: timing(60, 2000), codex: timing(60, 1000) })
+  };
+  const incoming = {
+    deviceId: 'mac', trackedClients: ['codex'], updatedAt: '2026-05-30T12:01:00.000Z',
+    today: { ...today({ codex: 1000 }, { codex: timing(60, 1000) }), outputTokens: 60, timedTokens: 600, timedOutputTokens: 60, timedDurationMs: 1000 }
+  };
+  const merged = mergeDeviceRecord(existing, incoming).periods.today;
+  assert.deepEqual(merged.clientThroughput.claude, timing(60, 2000));
+  assert.deepEqual(merged.clientThroughput.codex, timing(60, 1000));
+  assert.equal(merged.timedDurationMs, 3000, 'period totals include the retained client');
+  assert.equal(merged.timedOutputTokens, 120);
+
+  const legacy = { ...existing, today: today({ claude: 1000, codex: 1000 }) };
+  assert.equal(mergeDeviceRecord(legacy, incoming).periods.today.clientThroughput, undefined);
 });
 
 test('unknown model attribution survives partition merges, aggregation and anchored deltas', () => {
