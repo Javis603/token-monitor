@@ -361,20 +361,35 @@ async function collectWithFallback(clients, acceptsForkOnly, rejectedForkClients
   // conversation needs a home where every id it talks about actually exists.
   // CatPaw has no Linux root at all, which leaves it with no checks to fail.
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tokscale-fallback-'));
-  // CatPaw registers roots only on macOS and Windows; on Linux it has none, so
-  // leaving it out here is invisible until the macOS job runs the case.
-  const catpawRoot = process.platform === 'darwin'
-    ? path.join(homeDir, 'Library', 'Application Support', 'catpaw-moon')
-    : process.platform === 'win32' ? path.join(homeDir, 'AppData', 'Roaming', 'catpaw-moon') : null;
+  // Each reader resolves its root through its own platform rule, and two of
+  // them read an environment variable in preference to the injected home:
+  // CatPaw and Qoder CN take APPDATA on Windows, and tokscale's effective home
+  // becomes a native $HOME when one is set. Redirect all of it, or the
+  // directories below land somewhere the reader never looks.
+  const catpawSupport = process.platform === 'darwin'
+    ? path.join(homeDir, 'Library', 'Application Support')
+    : process.platform === 'win32' ? path.join(homeDir, 'AppData', 'Roaming') : null;
   for (const dir of [
     path.join(homeDir, '.claude', 'projects'),
     path.join(homeDir, '.local', 'share', 'amp', 'threads'),
     path.join(homeDir, '.proma', 'agent-sessions'),
     path.join(homeDir, '.qoder-cn', 'projects'),
-    ...(catpawRoot ? [catpawRoot] : [])
+    ...(catpawSupport
+      ? [path.join(catpawSupport, 'catpaw-moon'), path.join(catpawSupport, 'QoderCN')]
+      : [path.join(homeDir, '.config', 'QoderCN')])
   ]) fs.mkdirSync(dir, { recursive: true });
-  const previousDataHome = process.env.XDG_DATA_HOME;
+  const previous = {
+    XDG_DATA_HOME: process.env.XDG_DATA_HOME,
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+    APPDATA: process.env.APPDATA,
+    HOME: process.env.HOME
+  };
   process.env.XDG_DATA_HOME = path.join(homeDir, '.local', 'share');
+  process.env.XDG_CONFIG_HOME = path.join(homeDir, '.config');
+  if (process.platform === 'win32') {
+    process.env.APPDATA = path.join(homeDir, 'AppData', 'Roaming');
+    process.env.HOME = homeDir;
+  }
   childProcess.spawn = (_bin, args) => {
     if (args.includes('--help')) return helpChild(['claude', 'dsh']);
     const requested = args[args.indexOf('--client') + 1].split(',');
@@ -399,8 +414,10 @@ async function collectWithFallback(clients, acceptsForkOnly, rejectedForkClients
     return calls;
   } finally {
     childProcess.spawn = originalSpawn;
-    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
-    else process.env.XDG_DATA_HOME = previousDataHome;
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     delete require.cache[collectorPath];
     fs.rmSync(homeDir, { recursive: true, force: true });
   }
