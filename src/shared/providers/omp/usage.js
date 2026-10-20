@@ -36,9 +36,33 @@ const OMP_INDEX_LAG_THRESHOLD_MS = 60 * 60 * 1000;
 // user stops using OMP the index stays behind forever, and a note about a
 // yesterday-only gap would outlive the problem it describes.
 const OMP_INDEX_LAG_ACTIVE_MS = 24 * 60 * 60 * 1000;
-// Bounded so a machine with thousands of live sessions pays a few stats, not a
-// full-tree walk. Sessions are considered newest-first.
-const OMP_INDEX_LAG_SESSION_LIMIT = 200;
+// An hour is the honest bound for a cursor that merely fell behind, but it is a
+// slow way to notice the failure that actually costs data: a large transcript
+// accumulating unread bytes while the cursor inches forward a line at a time.
+// A megabyte of backlog that has survived ten minutes has no import burst to
+// explain it (a healthy database sampled repeatedly on a busy machine never
+// held more than ~26 KB), so both bounds are reported. The ten-minute floor is
+// what keeps a single large record being written right now from firing the byte
+// test before OMP's debounce has had a chance to pick it up.
+const OMP_INDEX_LAG_BACKLOG_GRACE_MS = 10 * 60 * 1000;
+const OMP_INDEX_LAG_BACKLOG_BYTES = 4 * 1024 * 1024;
+// Reading every cursor row and stat'ing the transcript it points at costs a few
+// hundred milliseconds - more than a usage tick should spend on a diagnostic,
+// and the default five-minute tick would otherwise pay it every time. A healthy
+// sweep is therefore reused for one grace window: onset cannot be reported
+// before that window has elapsed anyway, so a cached sweep never delays a real
+// finding by more than the window that finding already waits for. A *stale*
+// sweep is reused only briefly, so opening OMP's dashboard clears the note
+// within a tick or two instead of lingering for ten minutes. Thresholds are
+// still applied per call, so a cached sweep answers the caller's own question.
+const OMP_INDEX_LAG_CACHE_MS = 10 * 60 * 1000;
+const OMP_INDEX_LAG_CACHE_STALE_MS = 60 * 1000;
+const OMP_INDEX_LAG_CACHE_LIMIT = 8;
+const OMP_INDEX_LAG_CACHE_MAX_FILES = 5_000;
+// A cursor table this large means something other than the observed install is
+// on disk; reporting nothing is better than spending seconds on a stat sweep.
+const OMP_MAX_OFFSET_ROWS = 200_000;
+const indexLagCache = new Map();
 
 const REQUIRED_MESSAGE_COLUMNS = Object.freeze([
   'session_file', 'model', 'provider', 'timestamp',
@@ -306,45 +330,51 @@ function normalizeMessageRow(row, identities, options = {}) {
 // another that is hours behind; requiring unread bytes (`size > offset`) keeps a
 // touch without new content out of the signal.
 //
-// Returns null when the schema carries no cursor table, which is the same
-// "cannot tell" answer a missing column produces elsewhere in this adapter.
+// Every cursor row is read, never a newest-first window: a stalled file is
+// defined by a cursor that stopped advancing, so ordering by cursor recency
+// pushes exactly the files worth reporting outside any bounded window while
+// healthy files fill it.
+//
+// Returns null when the schema carries no cursor table (or the table is too
+// large to be this installation's), which is the same "cannot tell" answer a
+// missing column produces elsewhere in this adapter.
 //
 // The same transcript can have more than one cursor row: OMP's session tree is
 // reachable through both `~/.omp/agent/sessions` and a profile directory that
 // symlinks to it, and a row left behind under the abandoned spelling keeps its
-// old offset forever. Grouping by the file's device+inode before comparing means
-// a superseded row cannot claim a lag the live row does not have.
-function detectOmpIndexLag(database, options = {}) {
-  const nowMs = finiteNumber(options.nowMs) || Date.now();
-  const activeMs = positiveInteger(options.activeMs, OMP_INDEX_LAG_ACTIVE_MS);
-  const thresholdMs = positiveInteger(options.thresholdMs, OMP_INDEX_LAG_THRESHOLD_MS);
-  const limit = positiveInteger(options.limit, OMP_INDEX_LAG_SESSION_LIMIT);
-  let rows;
-  try {
-    // Ordered by the cursor's own clock, not rowid: OMP upserts with
-    // INSERT OR REPLACE, so a row's rowid changes on every re-import and row
-    // order says nothing about which session was ingested last.
-    rows = boundedStatementRows(
-      database,
-      'SELECT session_file, offset, last_modified FROM file_offsets ORDER BY last_modified DESC LIMIT ?',
-      [limit],
-      limit,
-      'file offset'
-    );
-  } catch (_) {
-    return null;
-  }
-  // One entry per physical transcript: `offset` is the furthest byte any cursor
-  // has consumed, `cursorMs` the newest import time, `mtimeMs` the file's own.
+// old offset forever. Grouping by the file's device+inode *before* any
+// comparison means a superseded row cannot claim a lag the live row does not
+// have - filtering by cursor age first would resurrect precisely that artifact.
+function readFileOffsetRows(database) {
+  return boundedStatementRows(
+    database,
+    'SELECT session_file, offset, last_modified FROM file_offsets',
+    [],
+    OMP_MAX_OFFSET_ROWS,
+    'file offset'
+  );
+}
+
+// One entry per physical transcript: `offset` is the furthest byte any cursor
+// has consumed, `cursorMs` the newest import time, `mtimeMs` the file's own.
+function unreadTranscripts(rows) {
   const files = new Map();
   for (const row of rows) {
     const sessionFile = String(row.session_file || '');
     const cursorMs = finiteNumber(row.last_modified);
-    const offset = finiteNumber(row.offset);
+    // A row that recorded no import time cannot describe a lag; treating the
+    // epoch as the cursor would report a fifty-year gap.
     if (!sessionFile || cursorMs <= 0) continue;
     let stat;
-    try { stat = fs.statSync(sessionFile); } catch (_) { continue; }
-    const key = `${stat.dev}:${stat.ino}`;
+    try { stat = fs.statSync(sessionFile, { throwIfNoEntry: false }); } catch (_) { stat = null; }
+    // A transcript OMP has already deleted cannot be behind anything.
+    if (!stat || !stat.isFile()) continue;
+    // Some filesystems (network shares, and some Windows volumes) report no
+    // inode. Merging every such row onto a single `0:0` key would fold unrelated
+    // transcripts into one and hide the backlog, so those fall back to the path,
+    // which at worst misses an alias rather than inventing a healthy file.
+    const key = stat.ino ? `${stat.dev}:${stat.ino}` : `path:${sessionFile}`;
+    const offset = finiteNumber(row.offset);
     const seen = files.get(key);
     if (!seen) {
       files.set(key, { offset, cursorMs, mtimeMs: stat.mtimeMs, size: stat.size });
@@ -353,23 +383,91 @@ function detectOmpIndexLag(database, options = {}) {
     seen.offset = Math.max(seen.offset, offset);
     seen.cursorMs = Math.max(seen.cursorMs, cursorMs);
   }
+  const candidates = [];
+  for (const file of files.values()) {
+    if (file.size > file.offset) candidates.push(file);
+  }
+  return candidates;
+}
+
+function evaluateIndexLag(candidates, options = {}) {
+  const nowMs = finiteNumber(options.nowMs) || Date.now();
+  const activeMs = positiveInteger(options.activeMs, OMP_INDEX_LAG_ACTIVE_MS);
+  const thresholdMs = positiveInteger(options.thresholdMs, OMP_INDEX_LAG_THRESHOLD_MS);
+  const graceMs = positiveInteger(options.backlogGraceMs, OMP_INDEX_LAG_BACKLOG_GRACE_MS);
+  const backlogBytes = positiveInteger(options.backlogBytes, OMP_INDEX_LAG_BACKLOG_BYTES);
   let lagMs = 0;
   let stalledSessions = 0;
-  for (const file of files.values()) {
+  let unreadBytes = 0;
+  let maxUnreadBytes = 0;
+  let backlogStale = false;
+  for (const file of candidates) {
     // Only a transcript still being written can make the index stale. Once this
     // client stops being used its files stop growing and the gap stops mattering.
     if (nowMs - file.mtimeMs > activeMs) continue;
-    if (file.size <= file.offset) continue;
+    const unread = file.size - file.offset;
     stalledSessions += 1;
-    lagMs = Math.max(lagMs, file.mtimeMs - file.cursorMs);
+    unreadBytes += unread;
+    maxUnreadBytes = Math.max(maxUnreadBytes, unread);
+    // Negative when a file was rewritten shorter than its cursor; that is a
+    // separate oddity, not a lag.
+    const lag = Math.max(0, file.mtimeMs - file.cursorMs);
+    lagMs = Math.max(lagMs, lag);
+    if (unread >= backlogBytes && lag >= graceMs) backlogStale = true;
   }
   return {
     active: stalledSessions > 0,
     lagMs,
-    stale: stalledSessions > 0 && lagMs >= thresholdMs,
+    stale: stalledSessions > 0 && (lagMs >= thresholdMs || backlogStale),
     stalledSessions,
-    checked: rows.length
+    unreadBytes,
+    maxUnreadBytes
   };
+}
+
+function detectOmpIndexLag(database, options = {}) {
+  const nowMs = finiteNumber(options.nowMs) || Date.now();
+  const explicitCacheMs = Number(options.cacheMs);
+  const baseCacheMs = Number.isFinite(explicitCacheMs) ? explicitCacheMs : OMP_INDEX_LAG_CACHE_MS;
+  const dbPath = String(options.dbPath || '').trim();
+  let cacheKey = '';
+  if (dbPath && baseCacheMs > 0) {
+    let stat;
+    try { stat = fs.statSync(dbPath, { throwIfNoEntry: false }); } catch (_) { stat = null; }
+    // Keyed on the database's identity, not just its path: replacing the file
+    // must invalidate observations of the old one.
+    if (stat) cacheKey = `${dbPath}\0${stat.dev}:${stat.ino}`;
+  }
+  if (cacheKey) {
+    const cached = indexLagCache.get(cacheKey);
+    // A caller-supplied `nowMs` that moves backwards must not extend the entry's
+    // life, so a negative age is treated as a miss.
+    const ageMs = cached ? nowMs - cached.at : -1;
+    const ttlMs = cached?.stale ? Math.min(baseCacheMs, OMP_INDEX_LAG_CACHE_STALE_MS) : baseCacheMs;
+    if (cached && ageMs >= 0 && ageMs < ttlMs) {
+      indexLagCache.delete(cacheKey);
+      indexLagCache.set(cacheKey, cached);
+      return { ...evaluateIndexLag(cached.candidates, options), checked: cached.checked };
+    }
+  }
+  let rows;
+  try {
+    rows = readFileOffsetRows(database);
+  } catch (_) {
+    return null;
+  }
+  const candidates = unreadTranscripts(rows);
+  const result = { ...evaluateIndexLag(candidates, options), checked: rows.length };
+  // Only a pathological database has thousands of genuinely unread transcripts;
+  // caching that would trade a bounded read for unbounded memory, so such a
+  // result is computed but not retained.
+  if (cacheKey && candidates.length <= OMP_INDEX_LAG_CACHE_MAX_FILES) {
+    indexLagCache.set(cacheKey, { at: nowMs, candidates, checked: rows.length, stale: result.stale });
+    while (indexLagCache.size > OMP_INDEX_LAG_CACHE_LIMIT) {
+      indexLagCache.delete(indexLagCache.keys().next().value);
+    }
+  }
+  return result;
 }
 
 function readOmpStatsRows(options = {}) {
@@ -383,6 +481,7 @@ function readOmpStatsRows(options = {}) {
   const maxSessions = positiveInteger(options.maxSessionRows, OMP_MAX_SESSION_ROWS);
   const database = openDatabase(dbPath, options);
   const identities = new Map();
+  let read;
   try {
     const schema = assertSchema(database);
     database.exec('BEGIN');
@@ -441,16 +540,27 @@ function readOmpStatsRows(options = {}) {
         const sessionFile = String(row.session_file || '');
         if (sessionFile) sessionIdentityForRow(sessionFile, identities, options);
       }
-      return {
+      read = {
         dbPath,
         schema,
         rows: rows.map((row) => normalizeMessageRow(row, identities, options)),
-        sessionCount,
-        indexLag: detectOmpIndexLag(database, options)
+        sessionCount
       };
     } finally {
       database.exec('ROLLBACK');
     }
+    // The cursor sweep runs after the snapshot is released: it only stats the
+    // filesystem, and holding the WAL read transaction across a 39k-file stat
+    // pass would pin pages for a diagnostic that every usage row already waits
+    // on. A diagnostic that fails must not fail the read - the rows are already
+    // in hand, and reporting a parse failure here would switch the whole client
+    // to Tokscale over a health note.
+    try {
+      read.indexLag = detectOmpIndexLag(database, { ...options, dbPath });
+    } catch (_) {
+      read.indexLag = null;
+    }
+    return read;
   } finally {
     database.close();
   }

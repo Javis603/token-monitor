@@ -347,6 +347,165 @@ const { emptyPeriod } = require('../../src/shared/usage');
   bare.close();
 });
 
+(sqlite ? test : test.skip)('OMP index lag reports backlog, aliases, and settled writes', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'omp-stats-lag-backlog-'));
+  const databasePath = path.join(root, 'stats.db');
+  const nowMs = new Date(2026, 9, 18, 12, 0, 0, 0).getTime();
+  const minuteAgo = nowMs - 60 * 1000;
+  const hugeSession = path.join(root, 'huge.jsonl');
+  const trickleSession = path.join(root, 'trickle.jsonl');
+  // A single record written moments ago: OMP's debounce has not run yet, so
+  // bytes on disk are not backlog.
+  fs.writeFileSync(hugeSession, 'x'.repeat(8 * 1024 * 1024));
+  fs.utimesSync(hugeSession, nowMs / 1000, nowMs / 1000);
+  // Bytes that are already older than one debounce but inside the grace
+  // window: 6 MB behind a cursor that moved 5 minutes ago.
+  fs.writeFileSync(trickleSession, 'x'.repeat(6 * 1024 * 1024));
+  fs.utimesSync(trickleSession, minuteAgo / 1000, minuteAgo / 1000);
+
+  const database = new sqlite.DatabaseSync(databasePath);
+  let databaseOpen = true;
+  t.after(() => {
+    if (databaseOpen) database.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  database.exec(`
+    CREATE TABLE session_rollup (session_file TEXT, started_at INTEGER, ended_at INTEGER, total_tokens INTEGER, cost_total REAL);
+    CREATE TABLE messages (
+      session_file TEXT, model TEXT, provider TEXT, timestamp INTEGER,
+      input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER,
+      total_tokens INTEGER, cost_total REAL, agent_type TEXT
+    );
+    CREATE TABLE file_offsets (session_file TEXT PRIMARY KEY, offset INTEGER, last_modified REAL, parser_state TEXT);
+  `);
+  const insertCursor = database.prepare('INSERT INTO file_offsets VALUES (?, ?, ?, NULL)');
+  insertCursor.run(hugeSession, 0, nowMs);
+
+  // Eight megabytes written moments ago, cursor already at the file's start:
+  // OMP's debounce has not run yet, so unread bytes alone are not backlog.
+  const fresh = detectOmpIndexLag(database, { nowMs });
+  assert.equal(fresh.stalledSessions, 1);
+  assert.equal(fresh.stale, false);
+  assert.ok(fresh.maxUnreadBytes >= 8 * 1024 * 1024);
+
+  // The slow-trickle case the time-only rule misses: the cursor moved twenty
+  // minutes ago, so the wall-clock gap is well under an hour, but six megabytes
+  // of already-written transcript are still unread.
+  insertCursor.run(trickleSession, 1024, nowMs - 21 * 60 * 1000);
+  const trickled = detectOmpIndexLag(database, { nowMs });
+  assert.equal(trickled.stalledSessions, 2);
+  assert.ok(trickled.lagMs < 60 * 60 * 1000, `lag ${trickled.lagMs} is under the time threshold`);
+  assert.equal(trickled.stale, true);
+  assert.ok(trickled.unreadBytes >= 14 * 1024 * 1024 - 4096);
+  assert.ok(trickled.maxUnreadBytes >= 8 * 1024 * 1024);
+
+  // Thresholds are per call, so the same rows stay quiet under a wider window.
+  assert.equal(detectOmpIndexLag(database, { nowMs, backlogBytes: 64 * 1024 * 1024 }).stale, false);
+  assert.equal(detectOmpIndexLag(database, { nowMs, backlogGraceMs: 30 * 60 * 1000 }).stale, false);
+
+  // Every row is considered, however many newer cursors exist: with 400 fresh
+  // rows a newest-first window would never look at the files that are behind.
+  const bulk = database.prepare('INSERT INTO file_offsets VALUES (?, ?, ?, NULL)');
+  for (let index = 0; index < 400; index += 1) {
+    const filler = path.join(root, `fresh-${index}.jsonl`);
+    fs.writeFileSync(filler, 'x'.repeat(10));
+    fs.utimesSync(filler, nowMs / 1000, nowMs / 1000);
+    bulk.run(filler, 10, nowMs - index);
+  }
+  const wide = detectOmpIndexLag(database, { nowMs });
+  assert.equal(wide.checked, 402);
+  assert.equal(wide.stalledSessions, 2);
+  assert.equal(wide.stale, true);
+
+  // A second spelling of one transcript: OMP's session tree is reachable
+  // through a symlinked profile directory, so two cursor rows can name the same
+  // inode. The furthest offset wins, and a superseded row at offset 0 cannot
+  // invent a backlog the file does not have.
+  const twinA = path.join(root, 'twin-a.jsonl');
+  const twinB = path.join(root, 'twin-b.jsonl');
+  fs.writeFileSync(twinA, 'x'.repeat(500));
+  fs.utimesSync(twinA, minuteAgo / 1000, minuteAgo / 1000);
+  let aliasSupported = true;
+  try {
+    fs.symlinkSync(twinA, twinB, 'file');
+  } catch (_) {
+    try {
+      fs.linkSync(twinA, twinB);
+    } catch (_) {
+      // Some Windows volumes and container mounts allow neither; the merge is
+      // still exercised by the split-offset rows below.
+      aliasSupported = false;
+    }
+  }
+  database.exec('DELETE FROM file_offsets');
+  insertCursor.run(twinA, 500, nowMs - 5 * 60 * 60 * 1000);
+  if (aliasSupported) insertCursor.run(twinB, 0, nowMs - 3 * 24 * 60 * 60 * 1000);
+  const aliased = detectOmpIndexLag(database, { nowMs, activeMs: 24 * 60 * 60 * 1000 });
+  assert.equal(aliased.stalledSessions, 0);
+  assert.equal(aliased.stale, false);
+  assert.equal(aliased.unreadBytes, 0);
+  if (!aliasSupported) t.diagnostic('hardlink/symlink unavailable; alias row not written');
+  database.close();
+  databaseOpen = false;
+
+  // A cursor pointing at a transcript that no longer exists is not a lag.
+  const deletedPath = path.join(root, 'gone.jsonl');
+  fs.writeFileSync(deletedPath, 'x'.repeat(500));
+  const reopened = new sqlite.DatabaseSync(databasePath);
+  reopened.prepare('INSERT INTO file_offsets VALUES (?, ?, ?, NULL)').run(deletedPath, 100, nowMs - 5 * 60 * 60 * 1000);
+  fs.rmSync(deletedPath);
+  assert.equal(detectOmpIndexLag(reopened, { nowMs }).stalledSessions, 0);
+  reopened.close();
+});
+
+(sqlite ? test : test.skip)('OMP index lag reuses a healthy sweep but not a stale one', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'omp-stats-lag-cache-'));
+  const databasePath = path.join(root, 'stats.db');
+  const session = path.join(root, 'session.jsonl');
+  const nowMs = new Date(2026, 9, 18, 12, 0, 0, 0).getTime();
+  fs.writeFileSync(session, 'x'.repeat(200));
+  fs.utimesSync(session, nowMs / 1000, nowMs / 1000);
+  const database = new sqlite.DatabaseSync(databasePath);
+  let databaseOpen = true;
+  t.after(() => {
+    if (databaseOpen) database.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  database.exec('CREATE TABLE file_offsets (session_file TEXT PRIMARY KEY, offset INTEGER, last_modified REAL, parser_state TEXT)');
+  const insertCursor = database.prepare('INSERT OR REPLACE INTO file_offsets VALUES (?, ?, ?, NULL)');
+  insertCursor.run(session, 200, nowMs);
+
+  // Healthy: the sweep is reused, so a later cursor change is invisible until
+  // the reuse window ends. This is what keeps the five-minute tick from paying
+  // a full stat pass every time.
+  const healthy = detectOmpIndexLag(database, { nowMs, dbPath: databasePath });
+  assert.equal(healthy.stale, false);
+  insertCursor.run(session, 0, nowMs - 2 * 60 * 60 * 1000);
+  const reused = detectOmpIndexLag(database, { nowMs: nowMs + 60 * 1000, dbPath: databasePath });
+  assert.equal(reused.stale, false, 'a healthy sweep is reused inside its window');
+  assert.equal(reused.checked, 1);
+
+  // Past the window the sweep is redone and sees the stalled cursor.
+  const refreshed = detectOmpIndexLag(database, { nowMs: nowMs + 11 * 60 * 1000, dbPath: databasePath });
+  assert.equal(refreshed.stale, true);
+
+  // A stale result is only reused briefly, so opening OMP's dashboard clears
+  // the note within a tick or two rather than ten minutes.
+  insertCursor.run(session, 200, nowMs + 11 * 60 * 1000);
+  const stillStale = detectOmpIndexLag(database, { nowMs: nowMs + 11 * 60 * 1000 + 30 * 1000, dbPath: databasePath });
+  assert.equal(stillStale.stale, true, 'a stale sweep survives one short window');
+  const cleared = detectOmpIndexLag(database, { nowMs: nowMs + 11 * 60 * 1000 + 61 * 1000, dbPath: databasePath });
+  assert.equal(cleared.stale, false, 'a stale sweep expires ahead of the healthy window');
+
+  // Without a database path there is nothing to key the cache on, and an
+  // explicit zero must always observe the current filesystem.
+  insertCursor.run(session, 0, nowMs - 2 * 60 * 60 * 1000);
+  assert.equal(detectOmpIndexLag(database, { nowMs }).stale, true);
+  assert.equal(detectOmpIndexLag(database, { nowMs, dbPath: databasePath, cacheMs: 0 }).stale, true);
+  database.close();
+  databaseOpen = false;
+});
+
 test('OMP-only history is reported as successful without duplicate merge', async () => {
   const statuses = [];
   const history = await collectHistoryOnce({
