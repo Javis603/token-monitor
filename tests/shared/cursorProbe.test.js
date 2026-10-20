@@ -377,6 +377,75 @@ function dashboardFakeHttps(payloads, calls = []) {
   };
 }
 
+test('unknown Cursor plans do not turn legacy summary zeros into full model pools', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 'tok' }),
+    httpsLib: dashboardFakeHttps({
+      '/api/usage-summary': { individualUsage: { plan: { autoPercentUsed: 0, apiPercentUsed: 0 } } },
+      '/api/dashboard/get-plan-info': null,
+      '/api/dashboard/get-sand-usage-status': null
+    })
+  });
+  assert.deepEqual(result.windows, []);
+  assert.equal(result.status, 'unavailable');
+});
+
+test('unknown Cursor plans preserve independent team and spend data without legacy seat quotas', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 'tok' }),
+    httpsLib: dashboardFakeHttps({
+      '/api/usage-summary': {
+        individualUsage: {
+          plan: { autoPercentUsed: 0, apiPercentUsed: 0 },
+          overall: { used: 1000, limit: 2000 },
+          onDemand: { used: 300, limit: 1000 }
+        },
+        teamUsage: { pooled: { used: 7500, limit: 10000 } }
+      },
+      '/api/dashboard/get-plan-info': null,
+      '/api/dashboard/get-sand-usage-status': null
+    })
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.windows.map((window) => window.label), ['Team pool', 'On-demand spend']);
+  assert.equal(result.windows[0].usedPercent, 75);
+  assert.equal(result.windows[1].used, 3);
+});
+
+test('unknown Cursor plans do not expose legacy Requests or Overall fallback rows', async () => {
+  for (const requestUsage of [{ 'gpt-4': { numRequests: 0, maxRequestUsage: 500 } }, {}]) {
+    const result = await fetchCursorLimits({}, {
+      readActiveAccount: () => ({ id: 'acct-1', sessionToken: 'tok' }),
+      httpsLib: dashboardFakeHttps({
+        '/api/auth/me': { sub: 'fixture-user' },
+        '/api/usage?user=fixture-user': requestUsage,
+        '/api/usage-summary': { individualUsage: { overall: { used: 1000, limit: 2000 } } },
+        '/api/dashboard/get-plan-info': null,
+        '/api/dashboard/get-sand-usage-status': null
+      })
+    });
+    assert.deepEqual(result.windows, []);
+    assert.equal(result.status, 'unavailable');
+  }
+});
+
+test('successful proto3 legacy identification keeps genuine zero model pools', async () => {
+  for (const [planInfo, sand] of [[{}, null], [null, {}], [{}, { isUnified: true, usagePercent: 40 }]]) {
+    const result = await fetchCursorLimits({}, {
+      readActiveAccount: () => ({ id: 'acct-1', sessionToken: 'tok' }),
+      httpsLib: dashboardFakeHttps({
+        '/api/usage-summary': { individualUsage: { plan: { autoPercentUsed: 0, apiPercentUsed: 0 } } },
+        '/api/dashboard/get-plan-info': planInfo,
+        '/api/dashboard/get-sand-usage-status': sand
+      })
+    });
+    assert.equal(result.status, 'ok');
+    assert.deepEqual(result.windows.map((window) => [window.label, window.usedPercent]), [
+      ['Cursor Models', 0], ['Other Models', 0]
+    ]);
+  }
+});
+
 test('unified limits use summary fallback only for an explicitly monthly period', async () => {
   for (const [summary, expected] of [
     [{}, null],
