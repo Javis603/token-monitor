@@ -56,6 +56,25 @@ test('daily quota wins over a successful but different production Gemini quota',
   assert.deepEqual(urls, ['https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary']);
 });
 
+// Sanitized retrieveUserQuotaSummary responses captured from a Google AI Pro
+// account on 2026-10-20. The daily service reports the separate weekly-only
+// Gemini 4 Argon group; production omits it for the same credential.
+const capturedArgonSummary = require('../fixtures/antigravityQuotaSummaryArgon.json');
+
+test('captured daily quota summary surfaces Gemini 4 Argon as its own weekly window', async () => {
+  assert.ok(!JSON.stringify(capturedArgonSummary.production).includes('Argon'));
+  const snapshot = await quotaEndpointSnapshot(async (url) => response(200, (
+    url.includes('daily-cloudcode') ? capturedArgonSummary.daily : capturedArgonSummary.production
+  )));
+  assert.deepEqual(snapshot.windows.map((window) => [window.name, window.kind, window.remainingFraction, window.resetTime]), [
+    ['Gemini 5-hour', 'session', 1, '2026-10-20T16:40:42.000Z'],
+    ['Gemini weekly', 'weekly', 0.99242824, '2026-10-25T04:15:26.000Z'],
+    ['Gemini 4 Argon weekly', 'weekly', 1, '2026-10-27T11:40:42.000Z'],
+    ['Claude/GPT 5-hour', 'session', 1, '2026-10-20T16:40:42.000Z'],
+    ['Claude/GPT weekly', 'weekly', 1, '2026-10-27T11:40:42.000Z']
+  ]);
+});
+
 for (const [name, status, payload] of [
   ['missing endpoint', 404, {}],
   ['permission denied', 403, {}],
