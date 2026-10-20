@@ -15,6 +15,8 @@ concurrency:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    # Bound stalled test runs instead of waiting for GitHub's six-hour default.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -56,6 +58,8 @@ jobs:
     # a different subset of the suite (#481): +02 and +10 were green while +07
     # was not, and Kathmandu is here because +05:45 is not a whole hour.
     runs-on: ubuntu-latest
+    # Allow for seven sequential suite runs while still bounding stalls.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
