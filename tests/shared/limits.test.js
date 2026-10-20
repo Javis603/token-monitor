@@ -988,6 +988,13 @@ test('aggregateLimits keeps the Antigravity snapshot that carries Gemini 4 Argon
   assert.equal(forward.providers[0].sourceDeviceId, 'new-build');
   assert.ok(forward.providers[0].windows.some((window) => window.label === 'Gemini 4 Argon weekly'));
   assert.deepEqual(reverse, forward);
+
+  // A Balance credits window on the partial snapshot does not count as a quota group.
+  const partialWithBalance = device('old-build', '2026-10-20T11:44:00.000Z', groups);
+  partialWithBalance.limits.providers[0].balance = { amount: 5, currency: 'USD' };
+  const withBalance = aggregateLimits([partialWithBalance, withArgon], 600_000, now);
+  assert.equal(withBalance.providers[0].sourceDeviceId, 'new-build');
+  assert.ok(withBalance.providers[0].windows.some((window) => window.label === 'Gemini 4 Argon weekly'));
 });
 
 test('aggregateLimits preserves Go authority within one legacy OpenCode observation', () => {

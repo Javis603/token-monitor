@@ -662,7 +662,10 @@ function providerWindowRank(provider) {
   // (Gemini 4 Argon needs a newer Hub identity). While devices run mixed
   // builds, the same account must not flip between a full and a partial set
   // depending on which device refreshed last.
-  if (provider?.provider === 'antigravity') return windowCount;
+  // A synthetic Balance (credits) window is not a quota group.
+  if (provider?.provider === 'antigravity') {
+    return (provider.windows || []).filter((window) => window?.metric !== 'credits').length;
+  }
   return 0;
 }
 
