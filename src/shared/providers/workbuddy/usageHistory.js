@@ -36,11 +36,16 @@ async function recordWorkbuddyUsage(post, now) {
       todaySpend: spend.todaySpend,
       weekSpend: spend.weekSpend,
       monthSpend: spend.monthSpend,
-      allTimeSpend: spend.allTimeSpend,
-      // No partial-coverage marker: every period is summed from the provider's
-      // own timestamped rows, so a gap in this machine's uptime cannot qualify
-      // it the way a locally diffed baseline did.
-      monthSinceTracking: false,
+      // No allTimeSpend: the ledger API caps a request at 31 days and answers an
+      // empty ledger beyond that, so any "all time" figure would be the window
+      // total wearing a lifetime label. Omitting the field is what removes the
+      // row entirely — the shared Spend renderer only draws entries a provider
+      // actually reports.
+      //
+      // A month whose first day falls outside the window is a floor, not a
+      // total; `monthSinceTracking` marks it, the same partial-coverage signal
+      // DeepSeek and Z.ai emit.
+      monthSinceTracking: !spend.monthFullyCovered,
       ...(spend.truncated ? { spendTruncated: true } : {})
     };
   } catch (_) {

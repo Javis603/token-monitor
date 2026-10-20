@@ -7,10 +7,16 @@
 // the figures do not depend on how often this machine observed the account, and
 // a cycle reset or a change of package set cannot move them.
 //
-// The endpoint is a paged read; the window is the first day of the current
-// local week (rolling seven days including today, matching the Spend row's Week
-// definition elsewhere) through now. Month and All-time are summed from the
-// same rows, so one request serves every period.
+// The endpoint is a paged read over an explicit window. The window is what
+// bounds every period, so it must outgrow the widest one (Month), otherwise
+// Week, Month and All time collapse onto the same rows — which is exactly what a
+// week-sized window produced.
+//
+// The server refuses long windows outright: a window of 31 days still answers,
+// 32 days and beyond answer an empty ledger. The request therefore spans the
+// maximum the API accepts, and a month whose first day falls outside that span
+// is reported as partial instead of silently short.
+const WORKBUDDY_USAGE_WINDOW_DAYS = 31;
 
 // The ledger is a bounded read: a generous page count still terminates, and a
 // truncated scan reports itself instead of silently understating spend.
@@ -131,8 +137,9 @@ function summarizeUsageRecords(rows, now) {
 }
 
 function usageRequestBody(now) {
+  const windowStart = new Date(now - WORKBUDDY_USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   return {
-    startTime: formatUsageDateTime(new Date(startOfLocalWeek(now))),
+    startTime: formatUsageDateTime(new Date(startOfLocalDay(windowStart.getTime()))),
     endTime: formatUsageDateTime(new Date(now)),
     pageNum: 1,
     pageSize: WORKBUDDY_USAGE_PAGE_SIZE
@@ -163,13 +170,18 @@ async function fetchWorkbuddyUsageSpend(post, now) {
     truncated = rows.length >= WORKBUDDY_USAGE_PAGE_SIZE;
     break;
   }
-  return { ...summarizeUsageRecords(records, now), truncated };
+  // The window covers 31 days, so a calendar month is complete only while its
+  // first day is inside that window; near the start of a long month the Month
+  // figure is a floor, not a total.
+  const monthFullyCovered = startOfLocalMonth(now) >= startOfLocalDay(now - WORKBUDDY_USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  return { ...summarizeUsageRecords(records, now), truncated, monthFullyCovered };
 }
 
 module.exports = {
   WORKBUDDY_USAGE_MAX_PAGES,
   WORKBUDDY_USAGE_PAGE_SIZE,
   WORKBUDDY_USAGE_PATH,
+  WORKBUDDY_USAGE_WINDOW_DAYS,
   fetchWorkbuddyUsageSpend,
   formatUsageDateTime,
   localDayKey,

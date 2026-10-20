@@ -230,7 +230,7 @@ test('fetchWorkbuddyLimits sends the private personal billing request without ex
   assert.equal(provider.balance.todaySpend, 0);
   assert.equal(provider.balance.weekSpend, 0);
   assert.equal(provider.balance.monthSpend, 0);
-  assert.equal(provider.balance.allTimeSpend, 0);
+  assert.equal(provider.balance.allTimeSpend, null);
   assert.equal(provider.balance.trackingSince, null);
   assert.equal(provider.balance.monthSinceTracking, false);
   assert.doesNotMatch(
@@ -288,7 +288,8 @@ test('fetchWorkbuddyLimits sums Credits spend from the per-request billing ledge
   assert.match(spendBody.startTime, /^\d{4}-\d{2}-\d{2} 00:00:00$/);
   assert.equal(provider.balance.todaySpend, 115.17);
   assert.equal(provider.balance.weekSpend, 117.17);
-  assert.equal(provider.balance.allTimeSpend, 117.17);
+  // No All-time: the ledger window is capped at 31 days by the API.
+  assert.equal(provider.balance.allTimeSpend, null);
 });
 
 test('fetchWorkbuddyLimits probe checks a credential without reading the spend ledger', async () => {

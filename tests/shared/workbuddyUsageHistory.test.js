@@ -70,13 +70,32 @@ test('summarizeUsageRecords: an empty or absent ledger reads zero everywhere', (
   }
 });
 
-test('usageRequestBody: the window starts at the oldest day of the rolling week', () => {
+test('usageRequestBody: the window spans the maximum the API accepts', () => {
   const now = at(2026, 10, 21, 16);
   const body = usageRequestBody(now);
-  assert.equal(body.startTime, '2026-10-15 00:00:00');
+  // 31 days back, floored to local midnight: longer windows answer an empty
+  // ledger, and a week-sized one collapses Month onto Week.
+  assert.equal(body.startTime, '2026-09-20 00:00:00');
   assert.equal(body.endTime, '2026-10-21 16:00:00');
   assert.equal(body.pageNum, 1);
   assert.equal(body.pageSize, 100);
+});
+
+test('fetchWorkbuddyUsageSpend: Month keeps rows the week window dropped', async () => {
+  const now = at(2026, 10, 21, 16);
+  const spend = await fetchWorkbuddyUsageSpend(async () => ({
+    data: {
+      total: 2,
+      data: [
+        { requestTime: at(2026, 10, 20, 9), credit: 10 },
+        { requestTime: at(2026, 10, 2, 9), credit: 25 }
+      ]
+    }
+  }), now);
+  assert.equal(spend.todaySpend, 0);
+  assert.equal(spend.weekSpend, 10);
+  assert.equal(spend.monthSpend, 35);
+  assert.equal(spend.allTimeSpend, 35);
 });
 
 test('parseRecordTime: distinguishes seconds from milliseconds and rejects junk', () => {
@@ -121,7 +140,7 @@ test('fetchWorkbuddyUsageSpend: hitting the page bound reports truncation instea
   assert.equal(spend.allTimeSpend, WORKBUDDY_USAGE_MAX_PAGES * 50);
 });
 
-test('recordWorkbuddyUsage: publishes the four periods with no partial-coverage marker', async () => {
+test('recordWorkbuddyUsage: publishes Today/Week/Month and no All-time figure', async () => {
   const now = at(2026, 10, 21);
   const tracked = await recordWorkbuddyUsage(async () => ({
     data: { data: [{ requestTime: now - 1_000, credit: 115.17 }] }
@@ -129,7 +148,9 @@ test('recordWorkbuddyUsage: publishes the four periods with no partial-coverage 
   assert.equal(tracked.todaySpend, 115.17);
   assert.equal(tracked.weekSpend, 115.17);
   assert.equal(tracked.monthSpend, 115.17);
-  assert.equal(tracked.allTimeSpend, 115.17);
+  // The API caps a window at 31 days, so a lifetime figure cannot be stated;
+  // the field is absent rather than mislabelled, which drops the row entirely.
+  assert.equal('allTimeSpend' in tracked, false);
   assert.equal(tracked.monthSinceTracking, false);
   assert.equal(tracked.spendTruncated, undefined);
 });
