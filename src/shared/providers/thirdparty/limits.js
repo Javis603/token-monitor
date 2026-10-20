@@ -21,6 +21,7 @@ const THIRD_PARTY_ADAPTER_IDS = Object.freeze([
 ]);
 const NEWAPI_STATUS_PATH = '/api/status';
 const NEWAPI_ACCOUNT_PATH = '/api/user/self';
+const NEWAPI_DATA_PATH = '/api/data/self';
 const NEWAPI_TOKEN_USAGE_PATH = '/api/usage/token/';
 const SUB2API_ME_PATH = '/api/v1/auth/me';
 const SUB2API_REFRESH_PATH = '/api/v1/auth/refresh';
@@ -205,6 +206,50 @@ function quotaAmount(value, unit) {
   return number === null ? null : Math.max(0, number) / unit;
 }
 
+// New API's per-user dashboard aggregates billing logs into day-sized buckets.
+// Summing `quota` over a requested range therefore yields real Today/Month
+// spend, so the account adapter asks the server instead of remembering
+// yesterday's balance the way the local-delta providers have to.
+function newapiUsagePath(startMs, endMs) {
+  const start = Math.floor(startMs / 1000);
+  const end = Math.max(start, Math.floor(endMs / 1000));
+  return `${NEWAPI_DATA_PATH}?start_timestamp=${start}&end_timestamp=${end}&default_time=day`;
+}
+
+function startOfLocalDay(nowMs) {
+  const date = new Date(nowMs);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+// A rolling week (today plus the six days before it), matching the window the
+// DeepSeek and Z.ai buffers report, so the Spend tooltip reads the same in
+// every balance provider.
+function startOfLocalWeek(nowMs) {
+  const date = new Date(nowMs);
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - 6);
+  return date.getTime();
+}
+
+function startOfLocalMonth(nowMs) {
+  const date = new Date(nowMs);
+  return new Date(date.getFullYear(), date.getMonth(), 1).getTime();
+}
+
+// An empty `data` array is a real answer ("nothing billed in this range") and
+// becomes 0, while a missing or malformed payload stays null so the Spend row
+// falls back to all-time spend on forks without the dashboard endpoint.
+function newapiUsageSpend(payload, unit) {
+  const rows = responseData(payload);
+  if (!Array.isArray(rows)) return null;
+  let quota = 0;
+  for (const row of rows) {
+    const value = finiteNumber(row?.quota);
+    if (value !== null && value > 0) quota += value;
+  }
+  return quota / unit;
+}
+
 function unixTimestampIso(value) {
   const seconds = finiteNumber(value);
   if (seconds === null || seconds <= 0) return null;
@@ -276,10 +321,10 @@ function quotaResult({
   };
 }
 
-function newapiAccountQuota(accountData, unit) {
+function newapiAccountQuota(accountData, unit, enrichmentPayloads) {
   const rawQuota = finiteNumber(accountData?.quota);
   const unlimited = accountData?.unlimited_quota === true || rawQuota === -1;
-  return quotaResult({
+  const quota = quotaResult({
     label: 'Balance',
     remaining: unlimited ? null : quotaAmount(rawQuota, unit),
     used: quotaAmount(accountData?.used_quota, unit),
@@ -287,6 +332,15 @@ function newapiAccountQuota(accountData, unit) {
     requestCount: accountData?.request_count,
     quotaGroup: accountData?.group
   });
+  if (quota) {
+    const todaySpend = newapiUsageSpend(enrichmentPayloads?.today, unit);
+    const weekSpend = newapiUsageSpend(enrichmentPayloads?.week, unit);
+    const monthSpend = newapiUsageSpend(enrichmentPayloads?.month, unit);
+    if (todaySpend !== null) quota.balance.todaySpend = todaySpend;
+    if (weekSpend !== null) quota.balance.weekSpend = weekSpend;
+    if (monthSpend !== null) quota.balance.monthSpend = monthSpend;
+  }
+  return quota;
 }
 
 function newapiTokenQuota(tokenData, unit) {
@@ -393,12 +447,29 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
     statusRequest() {
       return { path: NEWAPI_STATUS_PATH, headers: {} };
     },
+    // The dashboard endpoint is New API's own billing aggregation, so the
+    // Today/Week/Month figures are the instance's numbers rather than a local
+    // balance delta. Forks without it fail here and the collector simply
+    // drops the enrichment, leaving the all-time spend the account row
+    // already had.
+    enrichmentRequests(account, deps) {
+      const nowMs = (deps.now || Date.now)();
+      const headers = {
+        Authorization: `Bearer ${account.accessToken}`,
+        ...(account.userId ? { 'New-Api-User': account.userId } : {})
+      };
+      return {
+        today: { path: newapiUsagePath(startOfLocalDay(nowMs), nowMs), headers },
+        week: { path: newapiUsagePath(startOfLocalWeek(nowMs), nowMs), headers },
+        month: { path: newapiUsagePath(startOfLocalMonth(nowMs), nowMs), headers }
+      };
+    },
     unit(statusPayload) {
       return quotaPerUnit(statusPayload);
     },
-    quota(payload, unit) {
+    quota(payload, unit, _account, _statusPayload, enrichmentPayloads) {
       const data = responseData(payload);
-      return data ? newapiAccountQuota(data, unit) : null;
+      return data ? newapiAccountQuota(data, unit, enrichmentPayloads) : null;
     },
     planLabel() {
       return 'Account';
@@ -910,6 +981,7 @@ module.exports = {
   DEFAULT_CUSTOM_ENDPOINT_PATH,
   NEWAPI_ACCOUNT_ADAPTER,
   NEWAPI_ACCOUNT_PATH,
+  NEWAPI_DATA_PATH,
   NEWAPI_STATUS_PATH,
   NEWAPI_TOKEN_ADAPTER,
   NEWAPI_TOKEN_USAGE_PATH,

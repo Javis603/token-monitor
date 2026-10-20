@@ -695,6 +695,31 @@ test('an OpenRouter card carries the balance meter and its detail tooltip', () =
   assert.match(tooltip.text, /All time/);
 });
 
+test('a third-party card summarizes Today and Month and details every period', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty',
+    adapterId: 'newapi-account',
+    status: 'ok',
+    planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 11.42, currency: 'USD' }],
+    balance: {
+      amount: 11.42,
+      currency: 'USD',
+      todaySpend: 0,
+      weekSpend: 1.44,
+      monthSpend: 1.44,
+      allTimeSpend: 18.58
+    }
+  }, '#888888');
+
+  assert.match(card.text, /Spend Today \$0\.00 · Month \$1\.44/);
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.ok(tooltip, 'the card should carry the ⓘ tooltip, not only the summary');
+  assert.match(tooltip.text, /Today \$0\.00/);
+  assert.match(tooltip.text, /Week \$1\.44/);
+  assert.match(tooltip.text, /All time \$18\.58/);
+});
+
 test('a MiMo membership row meters like any percent quota, WorkBuddy included', () => {
   // The membership lane answers with a percentage and nothing else — the app's
   // own card prints "{{percent}}% remaining" from that field, and no endpoint

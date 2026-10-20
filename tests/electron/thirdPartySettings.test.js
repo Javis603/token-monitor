@@ -151,17 +151,22 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(presentation, /if \(planLabel === 'custom'\) return 'Custom'/);
   assert.doesNotMatch(presentation, /planLabel\.includes\('token'\) \|\| quotaLabel\.includes\('token'\)/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /function thirdPartySpendNode/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /balance\?\.requestCount/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /settings\.thirdparty\.requests/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /if \(allTimeSpend === null && monthSpend === null && entries\.length === 0\) return null/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /monthSpend !== null[\s\S]*?`Month \$\{formatMoney\(monthSpend, currency\)\}`/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /allTimeSpend !== null[\s\S]*?`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /\]\.join\(' · '\)/);
+  // The row is periods only: total quota, request count and group are gone
+  // even though the collector still carries them for other surfaces.
+  const spendNode = read('src/electron/renderer/limits/windowsView.js')
+    .split('function thirdPartySpendNode')[1]
+    .split('function claudePrepaidGrantRows')[0];
+  assert.doesNotMatch(spendNode, /settings\.thirdparty\.(?:totalQuota|requests|group)/);
+  assert.doesNotMatch(spendNode, /requestCount/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /if \(spendRows\.length === 0 && entries\.length === 0\) return null/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /const spendValues = providerSpendEntries\(balance\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /preferredSpend\.length > 0 \? preferredSpend : spendValues\.slice\(0, 2\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /\.join\(' · '\)/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /settings\.thirdparty\.monthTokens/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /settings\.thirdparty\.avgResponse/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /label: summary \? 'Spend' : 'Details'/);
   assert.match(balanceDisplay, /return symbol \? `\$\{symbol\}\$\{number\.toFixed\(2\)\}` : `\$\{code\} \$\{number\.toFixed\(2\)\}`/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /spendRows\.length > summaryValues\.length \? spendRows : \[\]/);
   // The group builder is the shared view's, and it now derives the adapter
   // decorations itself: a host that passes nothing — the dock card — still gets
   // each row's own mark, colour and adapter name, and a header that wears the

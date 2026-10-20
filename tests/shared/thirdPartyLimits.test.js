@@ -10,6 +10,7 @@ const {
   CUSTOM_BALANCE_ADAPTER,
   NEWAPI_ACCOUNT_ADAPTER,
   NEWAPI_ACCOUNT_PATH,
+  NEWAPI_DATA_PATH,
   NEWAPI_STATUS_PATH,
   NEWAPI_TOKEN_ADAPTER,
   NEWAPI_TOKEN_USAGE_PATH,
@@ -55,8 +56,12 @@ function apiFetch(accounts, defaultStatusBody = { quota_per_unit: DEFAULT_QUOTA_
     assert.equal(init.method, 'GET');
     assert.equal(init.redirect, 'error');
     const parsed = new URL(url);
-    const matchedPath = [NEWAPI_STATUS_PATH, NEWAPI_ACCOUNT_PATH, NEWAPI_TOKEN_USAGE_PATH]
-      .find((path) => parsed.pathname.endsWith(path));
+    const matchedPath = [
+      NEWAPI_STATUS_PATH,
+      NEWAPI_ACCOUNT_PATH,
+      NEWAPI_DATA_PATH,
+      NEWAPI_TOKEN_USAGE_PATH
+    ].find((path) => parsed.pathname.endsWith(path));
     assert.ok(matchedPath, `unexpected third-party API path: ${parsed.pathname}`);
     const originAndPrefix = `${parsed.origin}${parsed.pathname.slice(0, -matchedPath.length)}`;
     const account = accounts[originAndPrefix];
@@ -75,6 +80,26 @@ function apiFetch(accounts, defaultStatusBody = { quota_per_unit: DEFAULT_QUOTA_
       return response(account.quotaStatus || 200, {
         success: account.quotaSuccess ?? true,
         data: account.accountBody
+      });
+    }
+    if (matchedPath === NEWAPI_DATA_PATH) {
+      assert.equal(init.headers.Authorization, `Bearer ${account.accessToken}`);
+      assert.equal(init.headers['New-Api-User'], account.userId);
+      assert.equal(parsed.searchParams.get('default_time'), 'day');
+      const start = Number(parsed.searchParams.get('start_timestamp'));
+      const end = Number(parsed.searchParams.get('end_timestamp'));
+      assert.ok(Number.isInteger(start) && Number.isInteger(end) && end >= start);
+      // The fixture date keeps the three windows disjoint: today spans under
+      // a day, the rolling week seven, the month the rest.
+      const span = end - start;
+      const rows = span < 2 * 86_400
+        ? account.usageTodayRows
+        : span < 8 * 86_400
+          ? account.usageWeekRows
+          : account.usageMonthRows;
+      return response(account.usageStatus || 200, {
+        success: (account.usageStatus || 200) < 300,
+        data: rows || []
       });
     }
     assert.equal(init.headers.Authorization, `Bearer ${account.apiKey}`);
@@ -226,9 +251,10 @@ test('New API account adapter exposes whole-account balance and cumulative usage
   assert.equal(provider.status, 'ok');
   assert.equal(provider.balance.amount, 50);
   assert.equal(provider.balance.currency, 'USD');
-  assert.equal(provider.balance.todaySpend, null);
-  assert.equal(provider.balance.weekSpend, null);
-  assert.equal(provider.balance.monthSpend, null);
+  // An empty dashboard range is a real zero: the account spent nothing yet.
+  assert.equal(provider.balance.todaySpend, 0);
+  assert.equal(provider.balance.weekSpend, 0);
+  assert.equal(provider.balance.monthSpend, 0);
   assert.equal(provider.balance.allTimeSpend, 10);
   assert.equal(provider.balance.requestCount, 12_345);
   assert.equal(provider.balance.quotaGroup, 'default');
@@ -282,6 +308,70 @@ test('New API-compatible account adapter omits the user header when no ID is con
   assert.equal(provider.planLabel, 'Account');
   assert.equal(provider.balance.amount, 5);
   assert.equal(provider.balance.allTimeSpend, 1);
+});
+
+test('New API account adapter reads Today and Month spend from the usage dashboard', async () => {
+  const [provider] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      production: {
+        adapter: NEWAPI_ACCOUNT_ADAPTER,
+        baseUrl: 'https://dashboard.example',
+        accessToken: 'system-access',
+        userId: '42'
+      }
+    }
+  }, {
+    env: {},
+    now: () => Date.parse('2026-07-24T08:00:00Z'),
+    fetch: apiFetch({
+      'https://dashboard.example': {
+        accessToken: 'system-access',
+        userId: '42',
+        accountBody: { group: 'default', quota: 25_000_000, used_quota: 5_000_000 },
+        usageTodayRows: [{ quota: 250_000 }, { quota: 250_000 }],
+        usageWeekRows: [{ quota: 500_000 }, { quota: 250_000 }],
+        usageMonthRows: [{ quota: 1_000_000 }, { quota: 500_000 }, { quota: 500_000 }]
+      }
+    }, { quota_per_unit: 1_000_000 })
+  });
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.balance.amount, 25);
+  assert.equal(provider.balance.todaySpend, 0.5);
+  assert.equal(provider.balance.weekSpend, 0.75);
+  assert.equal(provider.balance.monthSpend, 2);
+  assert.equal(provider.balance.allTimeSpend, 5);
+});
+
+test('New API account adapter keeps the all-time spend when the usage dashboard is missing', async () => {
+  const [provider] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      fork: {
+        adapter: NEWAPI_ACCOUNT_ADAPTER,
+        baseUrl: 'https://fork.example',
+        accessToken: 'fork-access',
+        userId: '9'
+      }
+    }
+  }, {
+    env: {},
+    now: () => Date.parse('2026-07-24T08:00:00Z'),
+    fetch: apiFetch({
+      'https://fork.example': {
+        accessToken: 'fork-access',
+        userId: '9',
+        accountBody: { quota: 2_500_000, used_quota: 1_000_000 },
+        usageStatus: 404
+      }
+    })
+  });
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.balance.amount, 5);
+  assert.equal(provider.balance.todaySpend, null);
+  assert.equal(provider.balance.weekSpend, null);
+  assert.equal(provider.balance.monthSpend, null);
+  assert.equal(provider.balance.allTimeSpend, 2);
 });
 
 test('New API token adapter exposes only that token quota', async () => {

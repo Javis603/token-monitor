@@ -637,22 +637,12 @@
     }), 'spend', 'Spend');
   }
 
-  function thirdPartySpendNode(provider, quotaWindow) {
+  function thirdPartySpendNode(provider, _quotaWindow) {
     const balance = provider?.balance || null;
     const usage = provider?.usageSummary || null;
     const currency = balance?.currency || 'USD';
-    const allTimeSpend = optionalFiniteNumber(balance?.allTimeSpend);
-    const monthSpend = optionalFiniteNumber(balance?.monthSpend);
     const entries = [];
-    const total = optionalFiniteNumber(quotaWindow?.limit);
-    const requestCount = optionalFiniteNumber(balance?.requestCount);
-    const quotaGroup = String(balance?.quotaGroup || '').trim();
     const expiresAt = balance?.expiresAt ? new Date(balance.expiresAt) : null;
-    if (total !== null) entries.push([t('settings.thirdparty.totalQuota'), formatMoney(total, currency)]);
-    if (requestCount !== null) {
-      entries.push([t('settings.thirdparty.requests'), Math.max(0, Math.trunc(requestCount)).toLocaleString()]);
-    }
-    if (quotaGroup) entries.push([t('settings.thirdparty.group'), quotaGroup]);
     if (expiresAt && !Number.isNaN(expiresAt.getTime())) {
       entries.push([t('settings.thirdparty.expires'), expiresAt.toLocaleDateString()]);
     }
@@ -680,19 +670,31 @@
       const standardCost = optionalFiniteNumber(usage.standardCost);
       if (standardCost !== null) entries.push([t('settings.thirdparty.standardCost'), formatMoney(standardCost, currency)]);
     }
-    if (allTimeSpend === null && monthSpend === null && entries.length === 0) return null;
+    // Every balance provider draws the same Spend row: Today · Month up front,
+    // the full Today/Week/Month/All-time breakdown in the tooltip. New API
+    // reports those periods itself, so third-party cards no longer need their
+    // own Month-and-all-time summary.
+    const spendValues = providerSpendEntries(balance);
+    const spendRows = spendValues.map(([label, value]) => [label, formatMoney(value, currency)]);
+    if (spendRows.length === 0 && entries.length === 0) return null;
     // Without a spend figure the row has nothing to summarize, so it retitles
     // itself and leans entirely on the tooltip.
-    const summary = [
-      ...(monthSpend !== null ? [`Month ${formatMoney(monthSpend, currency)}`] : []),
-      ...(allTimeSpend !== null ? [`All time ${formatMoney(allTimeSpend, currency)}`] : [])
-    ].join(' · ');
+    const preferredSpend = spendValues.filter(([label]) => label === 'Today' || label === 'Month');
+    const summaryValues = preferredSpend.length > 0 ? preferredSpend : spendValues.slice(0, 2);
+    const summary = summaryValues
+      .map(([label, value]) => `${label} ${formatMoney(value, currency)}`)
+      .join(' · ');
+    const detailEntries = [
+      ...(spendRows.length > summaryValues.length ? spendRows : []),
+      ...entries
+    ];
     const node = limitNoteRowNode({
       label: summary ? 'Spend' : 'Details',
       summary,
-      detailEntries: entries,
+      detailEntries: detailEntries.length > 0 ? detailEntries : null,
       ariaParts: [
         ...(summary ? [summary] : []),
+        ...spendRows.map(([entryLabel, value]) => `${entryLabel} ${value}`),
         ...entries.map(([entryLabel, value]) => `${entryLabel} ${value}`)
       ]
     });
