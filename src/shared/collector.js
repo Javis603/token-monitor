@@ -2147,7 +2147,11 @@ function watchIgnoreMatcher(clientsCsv, options = {}) {
   const { entries, boundedCount } = watchPolicyEntries(clientsCsv, options);
   if (boundedCount === 0) return undefined;
   return (target) => {
-    const resolved = path.resolve(target);
+    // The roots were canonicalised in watchPolicyEntries (Windows 8.3 short
+    // names must be expanded before chokidar is handed them). Applying the same
+    // step here keeps a caller-supplied short path comparable to them, which is
+    // the difference between "ignored" and "under no root at all".
+    const resolved = path.resolve(canonicalWatchPath(target));
     let contained = false;
     for (const { root, prefix, policy } of entries) {
       // A watch root is a source in its own right — a Hermes profile dir inside

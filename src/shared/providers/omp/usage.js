@@ -91,7 +91,13 @@ function integerNumber(value) {
 function ompStatsDbPath(options = {}) {
   const homeDir = options.homeDir || os.homedir();
   const explicit = String(options.statsDbPath || options.ompStatsDbPath || '').trim();
-  return path.resolve(explicit || path.join(homeDir, '.omp', 'stats.db'));
+  // Only an explicit override needs resolving: it may be relative to the
+  // process cwd. The default is derived from homeDir and must keep the shape
+  // every other source root has, or `resolve` on Windows prefixes a drive
+  // letter that `path.join(homeDir, …)` never produced and the diagnostics
+  // stop matching the roots they are compared against.
+  if (explicit) return path.resolve(explicit);
+  return path.join(homeDir, '.omp', 'stats.db');
 }
 
 function ompStatsDbPathForClients(clientsCsv, options = {}) {

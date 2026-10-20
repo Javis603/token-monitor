@@ -646,17 +646,21 @@ test('Tokscale only scans configured clients with an existing source root', () =
   const customPiPath = path.join(homeDir, 'custom', 'pi');
   fs.mkdirSync(claudeProjects, { recursive: true });
   fs.mkdirSync(customPiPath, { recursive: true });
+  // Paths are built with the host's separator, so the platform the resolver is
+  // told about has to be the host's too. Passing 'linux' on Windows asked it to
+  // judge `C:\…\custom\pi` with POSIX rules and the custom root disappeared.
+  const platform = process.platform;
   try {
     assert.equal(
       clientsWithExistingSources('claude,codex,pi', {
         homeDir,
-        platform: 'linux',
+        platform,
         env: {},
         customScanPaths: { pi: [customPiPath] }
       }),
       'claude,pi'
     );
-    assert.equal(clientsWithExistingSources('codex', { homeDir, platform: 'linux', env: {} }), '');
+    assert.equal(clientsWithExistingSources('codex', { homeDir, platform, env: {} }), '');
   } finally {
     fs.rmSync(homeDir, { recursive: true, force: true });
   }
