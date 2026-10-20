@@ -17,6 +17,7 @@
     : root?.TokenMonitorSessionLive;
   const sessionActivityState = sessionLive.sessionActivityState;
   const sessionContextForRow = sessionLive.sessionContextForRow;
+  const isGrokBotSession = sessionLive.isGrokBotSession;
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
 
   function setSessionTooltip(node, context, promptCache, translate, view) {
@@ -27,6 +28,46 @@
     }
     if (promptCache) entries.push({ full: translate('session.cacheEstimateTooltip', { minutes: promptCache.minutes }) });
     view.setDetailTooltip(node, entries);
+  }
+
+  // The compact status every glanceable session row shows (Home list, Edge Dock
+  // card, Notch Panel): a context gauge while the session is live, otherwise the
+  // prompt-cache estimate. The cache badge's tooltip still names the context
+  // size when the transcript reported one. Surfaces differ only in class names.
+  function sessionStatusNode(document, row, { prefix, translate, view, showUsed = true, now = Date.now() }) {
+    const statusRow = row?.groupRows?.[0] || row;
+    if (!statusRow) return null;
+    const context = sessionActivityState(statusRow, now) !== 'idle'
+      ? statusRow.context || sessionContextForRow(statusRow, now) || null : null;
+    const promptCache = sessionLive.sessionPromptCacheForRow(statusRow, now);
+    const span = (className, text) => {
+      const node = document.createElement('span');
+      node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    };
+    if (!context) {
+      if (!promptCache) return null;
+      const badge = span(`${prefix}-cache`, translate('session.cacheEstimate', { minutes: promptCache.minutes }));
+      setSessionTooltip(badge, statusRow, promptCache, translate, view);
+      return badge;
+    }
+    const percent = showUsed ? context.percentUsed : context.percentLeft;
+    const node = span(`${prefix}-context`);
+    node.dataset.tone = String(context.tone || '');
+    node.setAttribute('role', 'meter');
+    node.setAttribute('aria-valuemin', '0');
+    node.setAttribute('aria-valuemax', '100');
+    node.setAttribute('aria-valuenow', String(percent));
+    node.setAttribute('aria-label', translate(showUsed ? 'session.contextUsed' : 'session.contextLeft', { percent }));
+    const meter = span(`${prefix}-context-meter`);
+    meter.setAttribute('aria-hidden', 'true');
+    const fill = span(`${prefix}-context-fill`);
+    fill.style.setProperty('--bar-scale', String(percent / 100));
+    meter.append(fill);
+    node.append(meter, span(`${prefix}-context-value`, `${percent}%`));
+    setSessionTooltip(node, context, promptCache, translate, view);
+    return node;
   }
 
   function finiteNumber(value) {
@@ -291,17 +332,6 @@
     return textValue(session?.sessionKind) === 'background-review';
   }
 
-  // Cursor's sandbox ids identify bot runs independently of the model. A
-  // positive grok-bot model also proves a bot conversation with a regular id;
-  // its other models belong to the same conversation, including Claude.
-  function isGrokBotSession(session, key) {
-    if (session?.client !== 'cursor') return false;
-    if (typeof session.grokBotSession === 'boolean') return session.grokBotSession;
-    const id = textValue(session?.sessionId) || String(key || '').replace(/^cursor:/, '');
-    return /^sand-subagent-.+/.test(id) || Object.entries(session?.models || {})
-      .some(([model, tokens]) => /^grok-bot-.+/.test(model) && finiteNumber(tokens) > 0);
-  }
-
   const botIdentityCache = new WeakMap();
   const botIdSets = new WeakMap();
 
@@ -468,6 +498,9 @@
     const rows = Object.entries(period?.sessions || {})
       .map(([key, session]) => {
         session = sessionLive.sessionWithActivity(period, key, session);
+        const grokBot = isGrokBotSession(session, key) || (session?.client === 'cursor'
+          && botIds.has(textValue(session.sessionId) || key.replace(/^cursor:/, '')));
+        if (grokBot && session.grokBotSession !== true) session = { ...session, grokBotSession: true };
         const native = options.nativeSessions?.[key];
         // A resumed source can be active before accounting replaces its archive.
         // Join only presentation activity; the retained token/cost values stay put.
@@ -544,8 +577,7 @@
           subagent: subagent || undefined,
           subagentLabel: subagent ? subagentLabel : undefined,
           parentKey: subagent ? `session:${parentClient}:${parentSessionId}` : undefined,
-          grokBot: (isGrokBotSession(session, key) || (client === 'cursor'
-            && botIds.has(textValue(session?.sessionId) || key.replace(/^cursor:/, '')))) || undefined,
+          grokBot: grokBot || undefined,
           sortTime: sessionTimestampValue(session),
           title: `${clientLabel} session${sessionIdLabel(sessionId) ? ` ${sessionIdLabel(sessionId)}` : ''}`
         };
@@ -820,6 +852,7 @@
 
   return {
     setSessionTooltip,
+    sessionStatusNode,
     applyBreakdownRowSemantics,
     archivedSessionCount,
     compactSessionTime,

@@ -53,6 +53,13 @@ test('glass proportions adapt to short, tall and screen-limited bodies without s
   assert.deepEqual(notchGlassGeometry(32, 0), { capEnd: 32, fadeEnd: 32, rimTop: 32, rimBottom: 32 });
 });
 
+test('a normal panel reveals glass before the lower content instead of only at its bottom edge', () => {
+  const profile = notchGlassGeometry(32, 200);
+  assert.equal(profile.capEnd, 80);
+  assert.equal(profile.fadeEnd, 180);
+  assert.ok(profile.rimBottom - profile.fadeEnd >= 50, 'the final quarter of the body retains the clear material');
+});
+
 test('shade proportions use the current frame once, independently of the configured zoom', () => {
   const f = shadeFixture();
   for (const height of [20, 143, 480, 40]) {
@@ -101,7 +108,7 @@ test('light widget palettes get readable ink only on the attached glass surface'
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
   const classes = new Map();
   const create = vm.runInNewContext(`${source};module.exports.createNotchRenderer`, { module: { exports: {} }, ResizeObserver: class { observe() {} disconnect() {} } });
-  const window = { addEventListener() {}, TokenMonitorPressActivation: {}, TokenMonitorEdgeDockPresentation: {}, TokenMonitorThemePresets: require('../../src/electron/renderer/themePresets') };
+  const window = { addEventListener() {}, TokenMonitorNotchPanel: { createNotchPanel: () => ({}) }, TokenMonitorUsageCharts: { clientColors: {} }, TokenMonitorPressActivation: {}, TokenMonitorEdgeDockPresentation: {}, TokenMonitorThemePresets: require('../../src/electron/renderer/themePresets') };
   const deps = { document: { documentElement: { classList: { toggle: (key, value) => classes.set(key, value) } } },
     window, state: {}, root: { classList: { toggle() {} }, addEventListener() {} }, shared: {}, bridge: { onAnimate() {}, onMotion() {} } };
   const renderer = create({ ...deps, surface: 'notch' });
@@ -112,7 +119,24 @@ test('light widget palettes get readable ink only on the attached glass surface'
   assert.equal(classes.get('notch-hardware-light'), false, 'pure black keeps its own palette');
   renderer.applyAppearance({ ...payload, geometry: { notched: false } });
   assert.equal(classes.get('notch-hardware-light'), false, 'capsules keep the selected theme');
-  const detail = create({ ...deps, surface: 'bubble' });
-  detail.applyAppearance(payload);
-  assert.equal(classes.get('notch-hardware-light'), false, 'detail cards do not get the camera palette');
+});
+
+test('native shade ownership changes before any deferred panel render', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/notch/renderer.js'), 'utf8');
+  const createNotchRenderer = vm.runInNewContext(`${source}; module.exports.createNotchRenderer`, {
+    module: { exports: {} }, ResizeObserver: class { observe() {} disconnect() {} }
+  });
+  const classes = new Map();
+  const renderer = createNotchRenderer({
+    document: { documentElement: { classList: { toggle() {} } } },
+    window: { addEventListener() {}, TokenMonitorNotchPanel: { createNotchPanel: () => ({}) },
+      TokenMonitorUsageCharts: { clientColors: {} }, TokenMonitorEdgeDockPresentation: {} },
+    state: {}, root: { classList: { toggle: (key, value) => classes.set(key, value) } },
+    bridge: { onAnimate() {}, onMotion() {} }, shared: {}
+  });
+  const payload = { nativeHardwareShade: true, style: 'liquid-glass-clear', geometry: { notched: true }, appearance: {} };
+  renderer.applyAppearance(payload);
+  assert.equal(classes.get('has-native-hardware-shade'), true);
+  renderer.applyAppearance({ ...payload, nativeHardwareShade: false, glass: false, liquidGlass: false });
+  assert.equal(classes.get('has-native-hardware-shade'), false, 'SVG fallback is restored even while panel content is held');
 });

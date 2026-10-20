@@ -468,6 +468,26 @@ test('a transient failure retains matching lastGood windows with the latest stat
   runtime.stop();
 });
 
+test('a generic cache invalidation cannot clear known accounts in a provider lane', async (t) => {
+  const seed = providerRow('cursor', 'account', 'Cursor', {
+    windows: [{ kind: 'billing', label: 'Cursor Models', usedPercent: 0 }]
+  });
+  const runtime = createLimitsRuntime({
+    limitProviders: ['cursor'], previousLimits: { providers: [seed] }
+  }, runtimeDeps({
+    autoRetry: false,
+    probeProvider: async () => [{
+      provider: 'cursor', status: 'unavailable', windows: [],
+      invalidateCachedWindowLabels: ['Cursor Models']
+    }]
+  }));
+  t.after(() => runtime.stop());
+  const before = runtime.getSnapshot().providers[0];
+  await runtime.refresh({ provider: 'cursor' }, 'interval');
+  assert.equal(runtime.getSnapshot().providers[0].status, 'unavailable');
+  assert.deepEqual(runtime.getSnapshot().providers[0].windows, before.windows);
+});
+
 test('a Codex source-rate-limited response retains the last known quota windows', async () => {
   const results = [
     [providerRow('codex', 'account', 'Plus', { updatedAt: '2026-07-21T00:00:00.000Z' })],
@@ -851,6 +871,51 @@ test('a retained row from a failed probe never becomes the burn-rate baseline', 
     // so the successful row is the first baseline and no rate exists yet. Only
     // the base interval stays armed.
     assert.deepEqual(clock.delays(), [240_000]);
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('partial cached quotas retry without becoming a burn-rate baseline', async () => {
+  const clock = fakeClock(1_000);
+  const calls = [];
+  const events = [];
+  const included = (usedPercent) => ({ kind: 'weekly', label: 'Included usage', usedPercent });
+  const team = (usedPercent) => ({ kind: 'billing', label: 'Team pool', usedPercent });
+  const previous = providerRow('cursor', 'acct', 'Account', { windows: [included(30), team(10)] });
+  const runtime = createLimitsRuntime({
+    limitProviders: ['cursor'], limitsRefreshMode: 'adaptive', previousLimits: { providers: [previous] }
+  }, runtimeDeps({
+    autoStart: true,
+    now: clock.now, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
+    retryBaseMs: 60_000, random: () => 0.5,
+    onEvent: (event) => events.push(event),
+    probeProvider: async (provider, _config, context) => {
+      calls.push(context.reason);
+      const partial = calls.length === 1;
+      return [{
+        ...providerRow(provider, 'acct', 'Account', {
+          updatedAt: new Date(clock.now()).toISOString(),
+          windows: partial ? [team(75)] : [included(88), team(90)]
+        }),
+        ...(partial ? { invalidateCachedWindowLabels: ['Cursor Models', 'Other Models'] } : {})
+      }];
+    }
+  }));
+  try {
+    await waitFor(() => events.some((event) => event.type === 'retry-scheduled'), 'partial-result retry');
+    const partial = runtime.getSnapshot().providers[0];
+    assert.equal(partial.status, 'unavailable');
+    assert.equal(partial.updatedAt, previous.updatedAt);
+    assert.deepEqual(partial.windows.map((window) => [window.label, window.usedPercent]), [['Included usage', 30], ['Team pool', 75]]);
+    clock.advance(60_000);
+    await waitFor(() => runtime.getSnapshot().providers[0]?.status === 'ok', 'retry recovery');
+    assert.deepEqual(calls, ['startup', 'retry']);
+    // Neither the persisted included quota nor the partially refreshed team
+    // quota is a fresh baseline. Recovery starts sampling, without an early
+    // urgency refresh inferred from the gap before it.
+    assert.deepEqual(clock.delays(), [240_000]);
+    assert.equal(runtime.getSnapshot().providers[0].updatedAt, new Date(clock.now()).toISOString());
   } finally {
     runtime.stop();
   }

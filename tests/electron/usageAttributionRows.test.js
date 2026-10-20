@@ -234,7 +234,7 @@ test('Model rows use the selected ranking metric for order and bar scale', () =>
   assert.match(app, /unattributed/);
   assert.match(app, /const width = rowWidth\(barValue, max\)/);
   assert.match(app, /const max = barScaleMax\(rows\)/);
-  assert.match(app, /homeModelRows\(modelRowsForPeriod\(period, 'tokens'\), period\?\.totalTokens, 5\)/);
+  assert.match(app, /homeModelRows\(modelRowsForPeriod\(period, 'tokens'\), period\?\.totalTokens, homeModulePreferencesApi\.homeModuleCount\(state\.settings, 'model'\)\)/);
 });
 
 

@@ -10,6 +10,7 @@ function loadApi() {
   cachedApi = null;
   const koffi = require('koffi');
   const appkit = koffi.load('/System/Library/Frameworks/AppKit.framework/AppKit');
+  const quartz = koffi.load('/System/Library/Frameworks/QuartzCore.framework/QuartzCore');
   const objc = koffi.load('/usr/lib/libobjc.A.dylib');
   const cls = objc.func('objc_getClass', 'uintptr_t', ['str']);
   const sel = objc.func('sel_registerName', 'uintptr_t', ['str']);
@@ -23,6 +24,8 @@ function loadApi() {
   const number = objc.func('objc_msgSend', 'void', ['uintptr_t', 'uintptr_t', 'double']);
   const addSubview = objc.func('objc_msgSend', 'void', ['uintptr_t', 'uintptr_t', 'uintptr_t', 'intptr_t', 'uintptr_t']);
   const setRect = objc.func('objc_msgSend', 'void', ['uintptr_t', 'uintptr_t', rect]);
+  const setPoint = objc.func('objc_msgSend', 'void', ['uintptr_t', 'uintptr_t', point]);
+  const doubleObject = objc.func('objc_msgSend', 'uintptr_t', ['uintptr_t', 'uintptr_t', 'double']);
   const string = objc.func('objc_msgSend', 'uintptr_t', ['uintptr_t', 'uintptr_t', 'str']);
   const object = objc.func('objc_msgSend', 'uintptr_t', ['uintptr_t', 'uintptr_t', 'uintptr_t']);
   const color = objc.func('objc_msgSend', 'uintptr_t', ['uintptr_t', 'uintptr_t', 'double', 'double', 'double', 'double']);
@@ -56,7 +59,7 @@ function loadApi() {
     return pathApi;
   }
   cachedApi = {
-    appkit, objc, glassClass, getBounds,
+    appkit, quartz, objc, glassClass, getBounds,
     // AppKit exposes only a corner radius publicly. The shape setter is the one
     // the system's own glass uses for arbitrary outlines; probe it rather than
     // assume it, so a macOS that drops it falls back instead of crashing.
@@ -64,7 +67,7 @@ function loadApi() {
     supportsSubdued: responds(glassClass, sel('instancesRespondToSelector:'), sel('set_subduedState:')),
     supportsForceMainAppearance: responds(cls('NSWindow'), sel('instancesRespondToSelector:'), sel('_setForceMainAppearance:'))
       && responds(cls('NSWindow'), sel('instancesRespondToSelector:'), sel('_forceMainAppearance')),
-    setPath(target, commands, height) {
+    setPath(target, commands, height, mask = 0, refreshShadow = true) {
       const cg = loadPathApi();
       const path = cg.create();
       try {
@@ -76,12 +79,14 @@ function loadApi() {
           else if (op === 'Z') cg.close(path);
         }
         put(target, sel('_setPath:'), path);
+        if (mask) put(mask, sel('setPath:'), path);
       } finally {
         cg.release(path); // the view retains its own reference
       }
-      // The window shadow is computed from content alpha and cached.
+      // The window shadow is computed from content alpha and cached. A window
+      // without one has nothing to invalidate.
       const window = get(target, sel('window'));
-      if (window) release(window, sel('invalidateShadow'));
+      if (window && refreshShadow) release(window, sel('invalidateShadow'));
     },
     get: (target, name) => get(target, sel(name)),
     flag: (target, name) => boolean(target, sel(name)),
@@ -91,6 +96,20 @@ function loadApi() {
     number: (target, name, value) => number(target, sel(name), value),
     setFrame: (target, value) => setRect(target, sel('setFrame:'), value),
     tintColor: (opacity) => color(cls('NSColor'), sel('colorWithSRGBRed:green:blue:alpha:'), 0, 0, 0, opacity),
+    layer: (name) => get(cls(name), sel('layer')),
+    setPoint: (target, name, value) => setPoint(target, sel(name), value),
+    array(values) {
+      const array = get(cls('NSMutableArray'), sel('array'));
+      for (const value of values) put(array, sel('addObject:'), value);
+      return array;
+    },
+    scalar: (value) => doubleObject(cls('NSNumber'), sel('numberWithDouble:'), value),
+    withoutAnimation(callback) {
+      const transaction = cls('CATransaction');
+      release(transaction, sel('begin'));
+      try { put(transaction, sel('setDisableActions:'), 1); callback(); }
+      finally { release(transaction, sel('commit')); }
+    },
     appearance(dark) {
       const name = string(cls('NSString'), sel('stringWithUTF8String:'), dark ? 'NSAppearanceNameDarkAqua' : 'NSAppearanceNameAqua');
       return object(cls('NSAppearance'), sel('appearanceNamed:'), name);
@@ -112,6 +131,7 @@ function createMacLiquidGlass(win, { shaped = false } = {}) {
   if (!original) throw new Error('Window content view unavailable');
   const bounds = api.getBounds(original);
   let glass = 0;
+  let shade = 0, shadeMask = 0, lastShade, shadeActive = false;
   let disposed = false;
   const originalForceMainAppearance = api.supportsForceMainAppearance && api.flag(window, '_forceMainAppearance');
   let forcedMainAppearance = false;
@@ -131,17 +151,21 @@ function createMacLiquidGlass(win, { shaped = false } = {}) {
     if (glass) {
       try {
         if (!windowClosed && !win.isDestroyed()) {
-          try { syncGlassAppearance(false); }
+          try { syncGlassAppearance(false); if (shade) api.call(shade, 'removeFromSuperlayer'); }
           finally { api.call(glass, 'removeFromSuperview'); }
         }
       }
-      finally { api.call(glass, 'release'); }
+      finally {
+        try { if (shade) api.call(shade, 'release'); }
+        finally { api.call(glass, 'release'); }
+      }
     }
   }
 
   try {
     glass = api.get(api.get(api.glassClass, 'alloc'), 'init');
     if (!glass) throw new Error('NSGlassEffectView initialization failed');
+    if (shaped) api.put(glass, 'setWantsLayer:', 1);
     api.setFrame(glass, bounds);
     api.put(glass, 'setAutoresizingMask:', 2 | 16); // width + height
     api.put(glass, 'setStyle:', 0); // NSGlassEffectViewStyleRegular
@@ -159,7 +183,8 @@ function createMacLiquidGlass(win, { shaped = false } = {}) {
     let lastShape;
     let lastVisible;
     return {
-      update({ dark, radius, shape, visible = true, style = 'regular', tintOpacity }) {
+      hardwareShade: shaped,
+      update({ dark, radius, shape, hardwareShade, visible = true, style = 'regular', tintOpacity }) {
         if (disposed) return;
         const nextStyle = style === 'clear' ? 'clear' : 'regular';
         if (nextStyle !== lastStyle) {
@@ -186,6 +211,7 @@ function createMacLiquidGlass(win, { shaped = false } = {}) {
         }
         if (visible !== lastVisible) {
           api.put(glass, 'setHidden:', visible ? 0 : 1);
+          if (shade) api.put(shade, 'setHidden:', visible && shadeActive ? 0 : 1);
           lastVisible = visible;
         }
         if (dark !== lastDark) {
@@ -194,10 +220,47 @@ function createMacLiquidGlass(win, { shaped = false } = {}) {
         }
         if (shape) {
           const key = JSON.stringify(shape);
-          if (key !== lastShape) {
-            api.setPath(glass, shape.commands, shape.height);
-            lastShape = key;
-          }
+          const shadeKey = JSON.stringify([hardwareShade ?? null, shape.height]);
+          api.withoutAnimation(() => {
+            if (hardwareShade && !shade) {
+              // A layer of the glass, below Chromium: never reparent or mask
+              // Electron's content view. The native path and camera scrim then
+              // commit together instead of straddling two compositor frames.
+              const backing = api.get(glass, 'layer');
+              if (!backing) throw new Error('Native camera shade backing unavailable');
+              shade = api.layer('CAGradientLayer');
+              api.get(shade, 'retain');
+              shadeMask = api.layer('CAShapeLayer');
+              if (!shade || !shadeMask) throw new Error('Native camera shade unavailable');
+              api.put(shade, 'setMask:', shadeMask);
+              api.setPoint(shade, 'setStartPoint:', { x: 0, y: 1 });
+              api.setPoint(shade, 'setEndPoint:', { x: 0, y: 0 });
+              api.put(backing, 'addSublayer:', shade);
+              // AppKit owns the material's backing layers; the camera cap sits
+              // above those layers and the whole glass view stays below text.
+              api.number(shade, 'setZPosition:', 1);
+              lastShape = undefined;
+            }
+            if (shade) {
+              api.put(shade, 'setHidden:', hardwareShade && visible ? 0 : 1);
+              api.setFrame(shade, { origin: { x: 0, y: 0 }, size: { width: shape.width, height: shape.height } });
+              if (hardwareShade && shadeKey !== lastShade) {
+                const { capEnd: cap, fadeEnd: fade, progress } = hardwareShade;
+                const p = Math.max(0, Math.min(1, progress));
+                api.put(shade, 'setColors:', api.array([1, 1 - p * 0.36, 1 - p * 0.68, 1 - p * 0.77]
+                  .map(alpha => api.get(api.tintColor(alpha), 'CGColor'))));
+                api.put(shade, 'setLocations:', api.array([0, 0.35, 0.72, 1]
+                  .map(stop => api.scalar(Math.max(0, Math.min(1, (cap + (fade - cap) * stop) / shape.height))))));
+              }
+            }
+            if (key !== lastShape) {
+              // A window can change its shadow flag after creation, so read the
+              // current value when a new path is actually committed.
+              const refreshShadow = typeof win.hasShadow === 'function' ? win.hasShadow() !== false : true;
+              api.setPath(glass, shape.commands, shape.height, shadeMask, refreshShadow);
+            }
+          });
+          lastShape = key; lastShade = shadeKey; shadeActive = Boolean(hardwareShade);
         } else if (radius !== lastRadius) {
           api.number(glass, 'setCornerRadius:', radius);
           lastRadius = radius;

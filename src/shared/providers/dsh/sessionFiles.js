@@ -563,7 +563,7 @@ function indexDshSessionHeaders(options = {}) {
     const header = readDshSessionHeader(filePath);
     // First wins: dshSessionFiles() lists a session's live transcript first, and a
     // v3 upgrade leaves an older re-encode of the same id right beside it.
-    if (header && !index.has(header.id)) index.set(header.id, { filePath, createdAt: header.createdAt });
+    if (header && !index.has(header.id)) index.set(header.id, { filePath, createdAt: header.createdAt, cwd: header.cwd });
   }
   return index;
 }

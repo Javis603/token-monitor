@@ -1162,6 +1162,8 @@ span.settings-note.settings-item-desc {
 .settings-section-icon-window { --settings-section-icon-url: url("icons/settings/window.svg"); }
 .settings-section-icon-tools { --settings-section-icon-url: url("icons/settings/collection.svg"); }
 .settings-section-icon-limits { --settings-section-icon-url: url("icons/settings/limits.svg"); }
+/* The limits glyph is drawn smaller in its box than the other section icons; scale it up here rather than editing the artwork. */
+.settings-section-icon-limits { -webkit-mask-size: 113%; mask-size: 113%; }
 .settings-section-icon-sync { --settings-section-icon-url: url("icons/settings/sync.svg"); }
 .settings-section-icon-subscriptions { --settings-section-icon-url: url("icons/settings/subscriptions.svg"); }
 .settings-section-icon-appearance { --settings-section-icon-url: url("icons/settings/appearance.svg"); }
@@ -3631,9 +3633,6 @@ html.is-windows .settings-panel select option {
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
 }
-.home-module-jump.view-icon-limits {
-  transform: translateY(0);
-}
 .home-module-body {
   display: grid;
   min-width: 0;
@@ -5982,8 +5981,8 @@ html.is-windows .limit-live-badge {
 }
 .view-switcher-icon {
   display: inline-block;
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   flex: 0 0 auto;
   background: currentColor;
   -webkit-mask-position: center;
@@ -6040,9 +6039,9 @@ html.is-windows .limit-live-badge {
   width: 100%;
   min-width: 0;
   height: 28px;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: 15px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   padding: 0 7px;
   border: 0;
   border-radius: 5px;
@@ -6707,6 +6706,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .home-module-preference-row:has(.view-subgroup-toggle) {
   grid-template-columns: minmax(0, 1fr) repeat(3, 22px);
 }
+.settings-panel .home-module-count-setting > input[type="number"],
 .settings-panel .home-limit-account-count-setting > input[type="number"] {
   height: 20px;
   min-height: 20px;
