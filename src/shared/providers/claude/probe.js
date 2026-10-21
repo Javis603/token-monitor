@@ -82,8 +82,20 @@ function isClaudeProbeCwd(cwd, probeDir = claudeProbeDir()) {
   if (typeof cwd !== 'string' || !cwd) return false;
   // The legacy shared name may now be a hostile link to a real project.
   const legacy = path.join(os.tmpdir(), 'token-monitor-claude-probe');
-  return macAlias(path.resolve(cwd)) === macAlias(path.resolve(legacy))
-    || (typeof probeDir === 'string' && canonicalPath(cwd) === canonicalPath(probeDir));
+  const lexicalCwd = macAlias(path.resolve(cwd));
+  if (lexicalCwd === macAlias(path.resolve(legacy))) return true;
+  if (typeof probeDir !== 'string' || !probeDir) return false;
+  const requested = path.resolve(probeDir);
+  try {
+    const stat = fs.lstatSync(requested);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return false;
+    // Resolve parent aliases, never a replacement leaf's target: even a link
+    // swapped in after lstat must not turn an unrelated project into the probe.
+    const current = path.join(canonicalPath(path.dirname(requested)), path.basename(requested));
+    return path.relative(current, canonicalPath(cwd)) === '';
+  } catch (error) {
+    return error.code === 'ENOENT' && lexicalCwd === macAlias(requested);
+  }
 }
 
 module.exports = { CLAUDE_PROBE_ARGS, claudeProbeDir, prepareClaudeProbeDir, isClaudeProbeCwd };

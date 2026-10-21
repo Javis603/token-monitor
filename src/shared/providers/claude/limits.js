@@ -1825,7 +1825,10 @@ finally:
     except subprocess.TimeoutExpired:
         os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
-sys.exit(early_exit_code if early_exit_code is not None and early_exit_code > 0 else 0)
+# A signal observed before our cleanup is a failure, not an intentional stop.
+if early_exit_code is not None and early_exit_code < 0:
+    early_exit_code = 128 - early_exit_code
+sys.exit(early_exit_code if early_exit_code is not None else 0)
 `.trim();
 }
 

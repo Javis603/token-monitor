@@ -63,6 +63,15 @@ test('Windows probe path ignores data and home overrides in favour of the OS pro
   assert.deepEqual(env, original);
 });
 
+test('Windows probe filtering retains filesystem case aliases', t => {
+  const api = windowsProbeModule('C:\\Users\\fixture', {}, path.win32);
+  const probe = api.claudeProbeDir();
+  const parent = path.win32.dirname(probe);
+  t.mock.method(fs, 'lstatSync', () => ({ isDirectory: () => true, isSymbolicLink: () => false }));
+  t.mock.method(fs, 'realpathSync', file => file === parent ? parent : probe.toUpperCase());
+  assert.equal(api.isClaudeProbeCwd(probe, probe), true);
+});
+
 test('Windows prepares a fixed profile leaf without a shell or touching shared overrides', async t => {
   const f = fixture(t);
   const shared = path.join(f.root, 'shared');
@@ -247,6 +256,27 @@ test('a legacy symlink cannot hide a real project through canonical filtering', 
   assert.equal(isClaudeProbeCwd(legacy, path.join(f.root, 'new-probe')), true);
 });
 
+test('a probe leaf swapped after inspection cannot hide its link target', t => {
+  const f = fixture(t);
+  const probe = path.join(f.root, 'probe');
+  const project = path.join(f.root, 'project');
+  fs.mkdirSync(probe, { mode: 0o700 });
+  fs.mkdirSync(project, { mode: 0o700 });
+  const lstat = fs.lstatSync;
+  let swapped = false;
+  t.mock.method(fs, 'lstatSync', (file, ...args) => {
+    const stat = lstat(file, ...args);
+    if (file === probe && !swapped) {
+      swapped = true;
+      fs.rmdirSync(probe);
+      fs.symlinkSync(project, probe, 'junction');
+    }
+    return stat;
+  });
+  assert.equal(isClaudeProbeCwd(project, probe), false);
+  assert.equal(swapped, true);
+});
+
 test('real PTY keeps concurrent usage/status restricted and accepts intentional SIGTERM exit 143', { skip: !hasPython }, async t => {
   const f = fixture(t);
   const dir = path.join(f.root, 'probe');
@@ -316,27 +346,37 @@ sys.exit(1)
   assert.equal(fs.readFileSync(receipt, 'utf8'), 'called\n');
 });
 
-test('PTY EIO waits for an early nonzero child exit before shutdown', { skip: !hasPython }, async t => {
-  const f = fixture(t);
-  const fake = path.join(f.root, 'early-close.py');
-  fs.writeFileSync(fake, `#!/usr/bin/python3
-import os, sys, time
-print('Account: fixture', flush=True)
+test('PTY EIO preserves early nonzero and signal exits before shutdown', { skip: !hasPython }, async t => {
+  for (const [command, exit, code] of [
+    ['status', 'sys.exit(7)', 7],
+    ['status', 'os.kill(os.getpid(), signal.SIGTERM)', 143],
+    ['status', 'os.kill(os.getpid(), signal.SIGKILL)', 137],
+    ['usage', 'os.kill(os.getpid(), signal.SIGKILL)', 137]
+  ]) await t.test(`${command}: ${exit}`, async t => {
+    const f = fixture(t);
+    const fake = path.join(f.root, 'early-close.py');
+    fs.writeFileSync(fake, `#!/usr/bin/python3
+import os, signal, sys, time
+print('Current session 12% left', flush=True)
 for fd in (0, 1, 2):
     os.close(fd)
 time.sleep(0.3)
-sys.exit(7)
+${exit}
 `, { mode: 0o700 });
-  let pythonExit;
-  await assert.rejects(touchClaudeAuthPath({
-    env: { ...f.env, TOKEN_MONITOR_CLAUDE_COMMAND: fake },
-    claudeProbeDir: path.join(f.root, 'probe'), pythonCommand: python,
-    spawn: (command, args, options) => {
-      assert.equal(command, python);
-      // Darwin returns EOF where Linux returns EIO after the PTY slave closes.
-      // Translate only that EOF to exercise Linux's exit/poll race on this host.
-      assert.deepEqual(args.slice(0, 2), ['-I', '-c']);
-      const script = args[2].replace('buf = b""', `
+    let pythonExit;
+    const deps = {
+      env: { ...f.env, TOKEN_MONITOR_CLAUDE_COMMAND: fake },
+      claudeProbeDir: path.join(f.root, 'probe'), pythonCommand: python,
+      readMacKeychain: false, readWindowsCredential: false,
+      stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
+      isClaudeCliAuthenticated: async () => true,
+      fetch: async () => { throw new Error('network forbidden'); },
+      spawn: (command, args, options) => {
+        assert.equal(command, python);
+        // Darwin returns EOF where Linux returns EIO after the PTY slave closes.
+        // Translate only that EOF to exercise Linux's exit/poll race on this host.
+        assert.deepEqual(args.slice(0, 2), ['-I', '-c']);
+        const script = args[2].replace('buf = b""', `
 real_read = os.read
 def linux_pty_read(fd, size):
     chunk = real_read(fd, size)
@@ -345,12 +385,15 @@ def linux_pty_read(fd, size):
     return chunk
 os.read = linux_pty_read
 buf = b""`);
-      const child = spawn(command, [...args.slice(0, 2), script], options);
-      child.once('close', code => { pythonExit = code; });
-      return child;
-    }
-  }), error => error.status === 'unavailable');
-  assert.equal(pythonExit, 7);
+        const child = spawn(command, [...args.slice(0, 2), script], options);
+        child.once('close', code => { pythonExit = code; });
+        return child;
+      }
+    };
+    await assert.rejects(command === 'usage' ? fetchClaudeLimits({}, deps) : touchClaudeAuthPath(deps),
+      error => error.status === (command === 'usage' ? 'notConfigured' : 'unavailable'));
+    assert.equal(pythonExit, code);
+  });
 });
 
 test('isolated Python refuses a replaced cwd without importing its planted module or starting CLI', { skip: !hasPython }, async t => {
@@ -394,6 +437,8 @@ test('Windows fixed leaf refuses files and junctions without repairing or deleti
   for (const destination of [target, path.join(f.root, 'absent')]) {
     fs.symlinkSync(destination, dir, 'junction');
     await assert.rejects(api.prepareClaudeProbeDir(), error => error.status === 'unavailable');
+    assert.equal(api.isClaudeProbeCwd(target, dir), false);
+    assert.equal(api.isClaudeProbeCwd(target, `${dir}${path.sep}`), false);
     assert.equal(fs.lstatSync(dir).isSymbolicLink(), true);
     fs.unlinkSync(dir);
   }

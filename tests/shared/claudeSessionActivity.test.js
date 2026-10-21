@@ -117,7 +117,7 @@ test('registry excludes Token Monitor probe cwd from readings and pre-token rows
     ];
     if (platform !== 'win32') cases.push(
       [probe, path.join(os.tmpdir(), 'token-monitor-claude-probe')],
-      [probe, probe], [alias, canonical], [canonical, alias], [missing, missing]
+      [probe, probe], [canonical, alias], [missing, missing]
     );
     for (const [claudeProbeDir, cwd] of cases) {
       const options = { ...f.options, platform, claudeProbeDir };
@@ -133,6 +133,26 @@ test('registry excludes Token Monitor probe cwd from readings and pre-token rows
       assert.equal(observed.sessions['claude:real-session'].tokenDataUnavailable, true);
     }
   }
+});
+
+test('a linked current probe cannot hide real project activity or pre-token rows', async t => {
+  for (const platform of ['darwin', 'win32']) await t.test(platform, async t => {
+    const f = fixture(t);
+    t.mock.method(os, 'userInfo', () => ({ homedir: f.home }));
+    const options = { ...f.options, platform };
+    const probe = defaultProbeDir(options);
+    const project = path.join(f.home, 'real-project');
+    fs.mkdirSync(probe, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(project, { mode: 0o700 });
+    f.write({ sessionId: 'real-session', pidDomain: platform, cwd: project });
+    assert.equal((await activity.readSessionActivity(null, options)).get('real-session').state, 'waiting');
+    fs.rmdirSync(probe);
+    fs.symlinkSync(project, probe, 'junction');
+    const observed = await activity.readSummaryActivity({}, options);
+    assert.equal(observed.readings.get('real-session')?.state, 'waiting');
+    assert.equal(observed.sessions['claude:real-session']?.tokenDataUnavailable, true);
+    assert.equal(fs.lstatSync(probe).isSymbolicLink(), true);
+  });
 });
 
 test('Windows registry filtering follows the fixed profile cwd and tolerates a missing profile', async t => {
