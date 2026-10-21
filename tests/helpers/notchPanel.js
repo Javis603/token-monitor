@@ -80,7 +80,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
   const pageHide = () => pageEvents.dispatchEvent(new Event('pagehide'));
   const window = {
     addEventListener: (...args) => pageEvents.addEventListener(...args),
-    getComputedStyle: () => ({ columnGap: '40px' }),
+    getComputedStyle: () => ({ width: '600px', columnGap: '40px', getPropertyValue: name => name === '--notch-page-gap' ? '40px' : '' }),
     ResizeObserver: class {
       constructor(callback) { this.callback = callback; resizeObservers.push(this); }
       observe(node) { this.node = node; }

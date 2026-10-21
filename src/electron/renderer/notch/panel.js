@@ -231,14 +231,17 @@
 
     let gesture = null;
     let shown = true;
-    const PAGE_SHIFT = 12;
-    const PAGE_BLUR = 5;
     function clearPageMotion() {
-      pages.classList.remove('is-handoff');
       for (const pageNode of pageNodes.values()) {
         pageNode.style.opacity = '';
         pageNode.style.transform = '';
         pageNode.style.filter = '';
+      }
+      if (pages.classList.contains('is-handoff')) {
+        // Commit the resting page before CSS transitions can take over again.
+        void pages.offsetWidth;
+        pages.classList.remove('is-handoff');
+        tabPill.style.transition = '';
       }
     }
     function dropGesture() {
@@ -278,11 +281,10 @@
       pages.classList.add('is-handoff');
       PAGES.forEach((page, index) => {
         const pageNode = pageNodes.get(page);
-        const opacity = index === origin ? 1 - travel : index === target ? travel : 0;
-        const shift = index === origin ? -amount : Math.sign(amount) * (1 - travel);
-        pageNode.style.opacity = opacity.toFixed(3);
-        pageNode.style.transform = `translateX(${(shift * PAGE_SHIFT).toFixed(2)}px)`;
-        pageNode.style.filter = `blur(${((1 - opacity) * PAGE_BLUR).toFixed(2)}px)`;
+        const shift = index === origin ? -amount : Math.sign(target - origin) * (1 - travel);
+        pageNode.style.opacity = index === origin || index === target ? '1' : '0';
+        pageNode.style.transform = `translateX(${shift * gesture.pageStep}px)`;
+        pageNode.style.filter = 'none';
       });
       placeTabs(origin + (target - origin) * travel, { track: true });
     }
@@ -292,7 +294,7 @@
       const clamped = Math.max(0, Math.min(PAGES.length - 1, position));
       const nearest = Math.round(clamped);
       if (track) tabPill.style.transition = 'none';
-      else if (tabPill.style.transition === 'none') {
+      else if (tabPill.style.transition === 'none' && !pages.classList.contains('is-handoff')) {
         tabPill.style.transition = '';
         void tabPill.offsetWidth;
       }
@@ -1103,9 +1105,9 @@
         if (strip) strip.scrollLeft = view.limitPage * gesture.strip.pageWidth;
       }
       dropGesture();
-      clearPageMotion();
       if (page !== view.page) commitPage(page);
       else paintTabs();
+      clearPageMotion();
     }
     function paintSwipe() {
       const { destination, amount } = gesture;
@@ -1124,7 +1126,9 @@
       if (record.phase === 'began') {
         finishSwipe();
         const env = scrollEnv(hitFromPoint(record));
-        gesture = { id: record.id, ...env };
+        const style = window.getComputedStyle(pages);
+        gesture = { id: record.id, ...env,
+          pageStep: parseFloat(style.width) + parseFloat(style.getPropertyValue('--notch-page-gap')) };
       }
       if (!gesture || gesture.id !== record.id) return;
       const amount = Math.max(-1, Math.min(1, record.amount));
@@ -1137,6 +1141,7 @@
       }
       if (record.phase === 'ended' || record.phase === 'cancelled') {
         gesture.decision = record.phase === 'ended' ? Math.sign(amount) : 0;
+        if (prefersReducedMotion()) { finishSwipe(); return; }
       }
       gesture.amount = amount;
       paintSwipe();
