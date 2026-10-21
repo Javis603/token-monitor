@@ -281,26 +281,12 @@ function addClientUsage(period, client, usage) {
     addSessionBreakdown(period, client, session);
   }
   // The archive stores totals, costs, models and sessions but never the
-  // per-client throughput counters, so a retained client comes back without
-  // them. What its sessions still carry — timed output and duration — goes back
-  // into the period rate; the client's own attribution fails closed, because the
-  // token count that timing covered cannot be rebuilt from a session record.
-  let archivedTimedOutput = 0;
-  let archivedTimedDuration = 0;
-  for (const session of Object.values(normalizedSessions)) {
-    archivedTimedDuration += Math.max(0, Math.round(numberValue(session.timedDurationMs)));
-    archivedTimedOutput += Math.min(
-      Math.max(0, Math.round(numberValue(session.outputTokens))),
-      Math.max(0, Math.round(numberValue(session.timedOutputTokens)))
-    );
-  }
-  if (archivedTimedDuration > 0) {
-    period.timedOutputTokens = Math.min(
-      period.outputTokens,
-      Math.max(0, Math.round(numberValue(period.timedOutputTokens))) + archivedTimedOutput
-    );
-    period.timedDurationMs = Math.max(0, Math.round(numberValue(period.timedDurationMs))) + archivedTimedDuration;
-  }
+  // per-client throughput counters, and its sessions carry timed output and
+  // duration without the token count that timing covered. Replaying a subset
+  // would leave burn mode dividing an unmatched numerator by denominator, so the
+  // period counters stay with the live scan and this client's attribution is
+  // closed instead — the same fail-closed rule as every other incomplete
+  // provenance field (docs/API.md).
   if (tokens > 0 && period.clientThroughput) delete period.clientThroughput[client];
   const known = Math.min(tokens,
     period.cacheReadTokens - beforeComponents.cacheRead

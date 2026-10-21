@@ -701,8 +701,9 @@ test('a retained client carries its session timing and fails the tool rate close
     now: new Date('2026-05-30T13:00:00.000Z')
   });
 
-  assert.equal(summary.today.timedOutputTokens, 50, 'the retained session still contributes its timed output');
-  assert.equal(summary.today.timedDurationMs, 3500);
+  assert.equal(summary.today.timedTokens, 50, 'the archive replays no partial timing into the period counters');
+  assert.equal(summary.today.timedOutputTokens, 30);
+  assert.equal(summary.today.timedDurationMs, 1500);
   assert.deepEqual(summary.today.clientThroughput.codex, {
     timedTokens: 50,
     timedOutputTokens: 30,

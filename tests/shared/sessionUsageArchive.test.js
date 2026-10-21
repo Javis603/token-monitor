@@ -971,8 +971,9 @@ test('a replayed session carries its timing into the period and fails the tool r
     now: new Date('2026-07-09T08:20:00.000Z')
   });
 
-  assert.equal(visible.today.timedOutputTokens, 50, 'the archived session still contributes its timed output');
-  assert.equal(visible.today.timedDurationMs, 3500);
+  assert.equal(visible.today.timedTokens, 50, 'the archive replays no partial timing into the period counters');
+  assert.equal(visible.today.timedOutputTokens, 30);
+  assert.equal(visible.today.timedDurationMs, 1500);
   assert.deepEqual(visible.today.clientThroughput.codex, {
     timedTokens: 50,
     timedOutputTokens: 30,
