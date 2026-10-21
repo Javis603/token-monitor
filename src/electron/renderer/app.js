@@ -406,21 +406,22 @@ Object.assign(els, {
   notchOptions: document.getElementById('notchOptions'),
   notchStyleInput: document.getElementById('notchStyleInput'),
   notchShapeInputs: Array.from(document.querySelectorAll('input[name="notchShape"]')),
-  notchFollowTrayInput: document.getElementById('notchFollowTrayInput'),
+  notchSummaryModeInput: document.getElementById('notchSummaryModeInput'),
+  notchSummaryModeNote: document.getElementById('notchSummaryModeNote'),
   notchSummaryInput: document.getElementById('notchSummaryInput'),
+  notchWarnColorsInput: document.getElementById('notchWarnColorsInput'),
   notchComposer: document.getElementById('notchComposer'),
   notchComposerDetails: document.getElementById('notchComposerDetails'),
   notchItemsComposer: document.getElementById('notchItemsComposer'),
-  notchDetailSideInput: document.getElementById('notchDetailSideInput'),
   notchRunningIndicatorInput: document.getElementById('notchRunningIndicatorInput'),
   notchRunningIndicatorRow: document.getElementById('notchRunningIndicatorRow'),
   notchHapticInput: document.getElementById('notchHapticInput'),
   notchHoverActionInputs: Array.from(document.querySelectorAll('input[name="notchHoverAction"]')),
   notchHoverDelayInput: document.getElementById('notchHoverDelayInput'),
   notchHoverDelayRow: document.getElementById('notchHoverDelayRow'),
+  notchSwipeGesturesInput: document.getElementById('notchSwipeGesturesInput'),
   resetNotchHoverDelayButton: document.getElementById('resetNotchHoverDelayButton'),
   notchProgressiveBlurInput: document.getElementById('notchProgressiveBlurInput'),
-  notchAvoidMenuBarInput: document.getElementById('notchAvoidMenuBarInput'),
   notchHideSummaryInFullScreenInput: document.getElementById('notchHideSummaryInFullScreenInput'),
   notchSizeInputs: Array.from(document.querySelectorAll('input[name="notchSize"]')),
   notchCustomScaleInput: document.getElementById('notchCustomScaleInput'),
@@ -1043,7 +1044,7 @@ function displayLiveTokenRateItems() {
       layout: state.settings?.floatingBubbleCustomLayout
     },
     {
-      enabled: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchFollowTray === false,
+      enabled: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchSummaryMode === 'custom',
       content: 'custom',
       layout: state.settings?.notchCustomLayout
     }
@@ -6392,7 +6393,7 @@ function renderHomeLimitModule() {
 
 function renderHomeModelModule(period) {
   const { module, body } = homeModuleShell('model', t('home.models'), 'model');
-  const rows = homeOverviewApi.homeModelRows(modelRowsForPeriod(period, 'tokens'), period?.totalTokens, 5);
+  const rows = homeOverviewApi.homeModelRows(modelRowsForPeriod(period, 'tokens'), period?.totalTokens, homeModulePreferencesApi.homeModuleCount(state.settings, 'model'));
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -6431,7 +6432,7 @@ function homeToolSourceRows(period) {
 
 function renderHomeToolModule(period) {
   const { module, body } = homeModuleShell('tool', t('home.tools'), 'tool');
-  const rows = homeOverviewApi.homeToolRows(homeToolSourceRows(period), period?.totalTokens, 5);
+  const rows = homeOverviewApi.homeToolRows(homeToolSourceRows(period), period?.totalTokens, homeModulePreferencesApi.homeModuleCount(state.settings, 'tool'));
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -6469,25 +6470,6 @@ function homeSessionAgo(value) {
   return t('edgeDock.agoDays', { count: Math.round(hours / 24) });
 }
 
-function homeSessionContext(context, promptCache) {
-  const showUsed = state.settings?.sessionContextMetric !== 'remaining';
-  const percent = showUsed ? context.percentUsed : context.percentLeft;
-  const node = document.createElement('span');
-  node.className = 'home-session-context';
-  node.dataset.tone = context.tone || '';
-  const meter = document.createElement('span');
-  meter.className = 'home-session-context-meter';
-  const fill = document.createElement('span');
-  fill.className = 'home-session-context-fill';
-  fill.style.setProperty('--bar-scale', String(percent / 100));
-  meter.append(fill);
-  const value = document.createElement('span');
-  value.textContent = `${percent}%`;
-  node.append(meter, value);
-  sessionRowsApi.setSessionTooltip(node, context, promptCache, t, limitWindowsView);
-  return node;
-}
-
 function stopHomeSessionRepaint() {
   clearTimeout(state.homeSessionRepaintTimer);
   state.homeSessionRepaintTimer = null;
@@ -6495,7 +6477,7 @@ function stopHomeSessionRepaint() {
 
 function scheduleHomeSessionRepaint(rows) {
   stopHomeSessionRepaint();
-  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
   if (!rows.length) return;
   const now = Date.now();
   const expiry = window.TokenMonitorEdgeDockPresentation.nextRunningExpiryAt(rows, now);
@@ -6511,7 +6493,7 @@ function scheduleHomeSessionRepaint(rows) {
     const hadFocus = document.activeElement === current;
     const hadHeadFocus = document.activeElement === current.querySelector?.('.home-module-head');
     const focusedKey = document.activeElement?.closest?.('.home-session-row')?.dataset?.key;
-    const nextRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+    const nextRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
     const next = renderHomeSessionModule(nextRows);
     current.replaceWith(next);
     if (hadFocus) next.focus();
@@ -6554,7 +6536,7 @@ function renderHomeSessionModule(rows) {
     homeSessionRenderPending = true;
     return current;
   }
-  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+  rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
   const runningCount = window.TokenMonitorEdgeDockPresentation.runningSessionSummary(rows).count;
   const meta = runningCount > 0 ? t('home.runningSessions', { count: runningCount }) : '';
   const { module, body } = homeModuleShell('session', t('home.sessions'), 'session', meta);
@@ -6629,17 +6611,9 @@ function renderHomeSessionModule(rows) {
     }
     if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
     meta.append(description);
-    const statusRow = row.groupRows?.[0] || row;
-    const context = window.TokenMonitorSessionLive.sessionActivityState(statusRow) !== 'idle' ? statusRow.context : null;
-    const cache = window.TokenMonitorSessionLive.sessionPromptCacheForRow(statusRow);
-    if (cache && !context) {
-      const badge = document.createElement('span');
-      badge.className = 'home-session-cache';
-      badge.textContent = t('session.cacheEstimate', { minutes: cache.minutes });
-      sessionRowsApi.setSessionTooltip(badge, statusRow, cache, t, limitWindowsView);
-      meta.append(badge);
-    }
-    if (context) meta.append(homeSessionContext(context, cache));
+    const status = sessionRowsApi.sessionStatusNode(document, row, { prefix: 'home-session', translate: t,
+      view: limitWindowsView, showUsed: state.settings?.sessionContextMetric !== 'remaining' });
+    if (status) meta.append(status);
     item.append(mark, stateMark, name, value, meta);
     body.append(item);
   }
@@ -6651,7 +6625,7 @@ function renderHomeDeviceModule() {
   const rows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
     localDeviceId: state.settings?.deviceId || '',
     period: state.period,
-    limit: 4
+    limit: homeModulePreferencesApi.homeModuleCount(state.settings, 'device')
   });
   if (rows.length === 0) {
     const empty = document.createElement('div');
@@ -7145,7 +7119,7 @@ function renderHome() {
     if (id === 'device') return renderHomeDeviceModule();
     if (id === 'model') return renderHomeModelModule(period);
     if (id === 'session') {
-      sessionRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+      sessionRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
       return renderHomeSessionModule(sessionRows);
     }
     return renderHomeTrendsModule();
@@ -9598,7 +9572,7 @@ function applyPreferenceOrder(kind, order) {
     const companionId = kind === 'view'
       ? ({ home: 'homeSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', session: 'sessionSettingsContainer', status: 'serviceProvidersContainer' })[id]
       : kind === 'homeModule'
-        ? ({ limits: 'homeLimitProviderContainer', trends: 'homeActivitySettingsContainer' })[id]
+        ? HOME_MODULE_SUBGROUPS[id]?.[1]
         : '';
     const companion = companionId ? document.getElementById(companionId) : null;
     if (companion) list.appendChild(companion);
@@ -9638,7 +9612,11 @@ const VIEW_PREFERENCE_SUBGROUPS = {
 
 const HOME_MODULE_SUBGROUPS = {
   limits: ['homeLimitSettingsExpanded', 'homeLimitProviderContainer'],
-  trends: ['homeActivitySettingsExpanded', 'homeActivitySettingsContainer']
+  trends: ['homeActivitySettingsExpanded', 'homeActivitySettingsContainer'],
+  tool: ['homeToolSettingsExpanded', 'homeToolSettingsContainer'],
+  model: ['homeModelSettingsExpanded', 'homeModelSettingsContainer'],
+  session: ['homeSessionSettingsExpanded', 'homeSessionSettingsContainer'],
+  device: ['homeDeviceSettingsExpanded', 'homeDeviceSettingsContainer']
 };
 
 function expandedPreferenceSubgroups(definitions) {
@@ -10090,6 +10068,48 @@ function renderHomeLimitProviderList() {
   return wrap;
 }
 
+function renderHomeModuleCountSettings(id) {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-nested-list';
+  const label = document.createElement('label');
+  label.className = 'settings-item home-module-count-setting';
+  const text = document.createElement('span');
+  text.className = 'settings-item-text';
+  const title = document.createElement('span');
+  title.className = 'settings-item-title';
+  title.textContent = t('settings.home.itemCount');
+  text.append(title);
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '1';
+  input.max = String(homeModulePreferencesApi.HOME_MODULE_COUNT_MAX);
+  input.step = '1';
+  input.inputMode = 'numeric';
+  input.value = String(homeModulePreferencesApi.homeModuleCount(state.settings, id));
+  input.addEventListener('change', async () => {
+    const counts = homeModulePreferencesApi.normalizeHomeModuleCounts({ [id]: input.value }, state.settings?.homeModuleCounts);
+    input.value = String(counts[id]);
+    try {
+      await saveSettings({ homeModuleCounts: { [id]: counts[id] } });
+    } catch (_) {
+      // saveSettings reports the failure and restores persisted settings and UI.
+      return;
+    }
+    renderHomeIfVisible();
+  });
+  label.append(text, input);
+  wrap.append(label);
+  if (id === 'session') {
+    const note = document.createElement('p');
+    note.id = 'homeSessionCountNote';
+    note.className = 'settings-note';
+    note.textContent = t('settings.home.sessionCountNote');
+    input.setAttribute('aria-describedby', note.id);
+    wrap.append(note);
+  }
+  return wrap;
+}
+
 function renderHomeSettingsList() {
   const wrap = document.createElement('div');
   wrap.id = 'homeSettingsList';
@@ -10139,12 +10159,13 @@ function renderHomeSettingsList() {
     name.textContent = label;
     const actions = document.createElement('div');
     actions.className = 'tool-preference-actions';
-    if (id === 'limits' || id === 'trends') {
+    if (HOME_MODULE_SUBGROUPS[id]) {
       const configure = document.createElement('button');
       configure.type = 'button';
-      const expanded = id === 'limits' ? state.homeLimitSettingsExpanded : state.homeActivitySettingsExpanded;
+      const expanded = state[HOME_MODULE_SUBGROUPS[id][0]];
       configure.className = `view-subgroup-toggle${expanded ? ' is-expanded' : ''}`;
-      configure.title = t(id === 'limits' ? 'settings.home.configureLimits' : 'settings.home.configureActivity');
+      configure.title = t(id === 'limits' ? 'settings.home.configureLimits'
+        : id === 'trends' ? 'settings.home.configureActivity' : 'settings.home.configureModule', { name: label });
       configure.setAttribute('aria-label', configure.title);
       configure.setAttribute('aria-expanded', String(Boolean(expanded)));
       const toggleIcon = document.createElement('span');
@@ -10167,23 +10188,15 @@ function renderHomeSettingsList() {
     row.append(name, actions);
     row.addEventListener('pointerdown', (event) => homeModulePreferenceRowDrag.startRowDrag(event, id));
     wrap.append(row);
-    if (id === 'limits') {
+    const subgroup = HOME_MODULE_SUBGROUPS[id];
+    if (subgroup) {
       const listContainer = document.createElement('div');
-      listContainer.id = 'homeLimitProviderContainer';
-      listContainer.className = `accordion-animated-container${state.homeLimitSettingsExpanded ? '' : ' hidden'}`;
+      listContainer.id = subgroup[1];
+      listContainer.className = `accordion-animated-container${state[subgroup[0]] ? '' : ' hidden'}`;
       const inner = document.createElement('div');
       inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderHomeLimitProviderList());
-      listContainer.appendChild(inner);
-      wrap.append(listContainer);
-    }
-    if (id === 'trends') {
-      const listContainer = document.createElement('div');
-      listContainer.id = 'homeActivitySettingsContainer';
-      listContainer.className = `accordion-animated-container${state.homeActivitySettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderHomeActivitySettings());
+      inner.appendChild(id === 'limits' ? renderHomeLimitProviderList()
+        : id === 'trends' ? renderHomeActivitySettings() : renderHomeModuleCountSettings(id));
       listContainer.appendChild(inner);
       wrap.append(listContainer);
     }
@@ -13314,11 +13327,16 @@ function syncDockSizeControls(surface) {
 const NOTCH_HOVER_DELAY_DEFAULT_MS = 0;
 
 // Hover either grows the resting entry (a click opens it) or opens it after
-// the chosen duration; the duration only applies to the second.
+// the chosen duration; the duration only applies to the second, scroll
+// gestures only to the first.
 function syncNotchHoverControls() {
   const action = state.settings?.notchHoverAction === 'open' ? 'open' : 'peek';
   for (const input of els.notchHoverActionInputs) input.checked = input.value === action;
   els.notchHoverDelayRow?.classList.toggle('hidden', action !== 'open');
+  if (els.notchSwipeGesturesInput) {
+    els.notchSwipeGesturesInput.closest('.settings-item')?.classList.toggle('hidden', action !== 'peek');
+    els.notchSwipeGesturesInput.checked = state.settings?.notchSwipeGestures !== false;
+  }
   if (els.notchHoverDelayInput && document.activeElement !== els.notchHoverDelayInput) {
     const delay = Number(state.settings?.notchHoverDelay);
     els.notchHoverDelayInput.value = String(Number.isFinite(delay) ? delay : NOTCH_HOVER_DELAY_DEFAULT_MS);
@@ -13347,7 +13365,6 @@ function syncNotchStyleInput(preview) {
 
 function syncNotchCapabilities() {
   els.notchRunningIndicatorRow?.classList.toggle('hidden', state.notchCapabilities?.rings === false);
-  if (els.notchAvoidMenuBarInput) els.notchAvoidMenuBarInput.disabled = state.notchCapabilities?.menuAvoidance === false;
 }
 
 function syncDockControls() {
@@ -13379,19 +13396,28 @@ function syncDockControls() {
   els.notchOptions?.classList.toggle('hidden', !notchEnabled);
   syncNotchStyleInput();
   for (const input of els.notchShapeInputs) input.checked = input.value === (state.settings?.notchShape || 'auto');
-  if (els.notchFollowTrayInput) els.notchFollowTrayInput.checked = state.settings?.notchFollowTray !== false;
+  syncNotchSummaryMode();
   if (els.notchSummaryInput) els.notchSummaryInput.checked = state.settings?.notchSummaryEnabled !== false;
-  if (els.notchDetailSideInput) els.notchDetailSideInput.value = state.settings?.notchDetailSide || 'right';
+  if (els.notchWarnColorsInput) els.notchWarnColorsInput.checked = state.settings?.notchWarnColors === true;
   if (els.notchRunningIndicatorInput) els.notchRunningIndicatorInput.checked = state.settings?.notchRunningIndicatorEnabled === true;
   syncNotchCapabilities();
   if (els.notchProgressiveBlurInput) els.notchProgressiveBlurInput.checked = state.settings?.notchProgressiveBlur !== false;
   if (els.notchHapticInput) els.notchHapticInput.checked = state.settings?.notchHaptic !== false;
   syncNotchHoverControls();
-  if (els.notchAvoidMenuBarInput) els.notchAvoidMenuBarInput.checked = state.settings?.notchAvoidMenuBar !== false;
   if (els.notchHideSummaryInFullScreenInput) els.notchHideSummaryInFullScreenInput.checked = state.settings?.notchHideSummaryInFullScreen !== false;
   els.edgeDockComposerRow?.classList.toggle('hidden', !enabled);
   if (enabled) edgeDockComposer?.render();
   if (notchEnabled) notchItemsComposer?.render();
+}
+
+function syncNotchSummaryMode() {
+  const mode = state.settings?.notchSummaryMode || 'sessions';
+  if (els.notchSummaryModeInput) els.notchSummaryModeInput.value = mode;
+  if (els.notchSummaryModeNote) {
+    const key = mode === 'auto' ? 'settings.notch.summaryModeNote' : `settings.notch.summaryMode.${mode}Note`;
+    els.notchSummaryModeNote.dataset.i18n = key;
+    els.notchSummaryModeNote.textContent = t(key);
+  }
 }
 
 function createDockItemsComposer(root, itemsKey) {
@@ -13441,6 +13467,9 @@ const notchItemsComposer = createDockItemsComposer(els.notchItemsComposer, 'notc
 els.notchSummaryInput?.addEventListener('change', () => {
   void saveSettings({ notchSummaryEnabled: els.notchSummaryInput.checked });
 });
+els.notchWarnColorsInput?.addEventListener('change', () => {
+  void saveSettings({ notchWarnColors: els.notchWarnColorsInput.checked });
+});
 els.notchHideSummaryInFullScreenInput?.addEventListener('change', () => {
   void saveSettings({ notchHideSummaryInFullScreen: els.notchHideSummaryInFullScreenInput.checked });
 });
@@ -13465,15 +13494,13 @@ els.resetNotchHoverDelayButton?.addEventListener('click', () => {
 els.notchHoverDelayInput?.addEventListener('change', () => {
   void saveSettings({ notchHoverDelay: Number(els.notchHoverDelayInput.value) });
 });
-els.notchAvoidMenuBarInput?.addEventListener('change', () => {
-  void saveSettings({ notchAvoidMenuBar: els.notchAvoidMenuBarInput.checked });
+els.notchSwipeGesturesInput?.addEventListener('change', () => {
+  void saveSettings({ notchSwipeGestures: els.notchSwipeGesturesInput.checked });
 });
 els.notchRunningIndicatorInput?.addEventListener('change', () => {
   void saveSettings({ notchRunningIndicatorEnabled: els.notchRunningIndicatorInput.checked });
 });
-els.notchDetailSideInput?.addEventListener('change', () => {
-  void saveSettings({ notchDetailSide: els.notchDetailSideInput.value });
-});
+
 els.notchInput?.addEventListener('change', () => {
   state.settings.notchEnabled = els.notchInput.checked;
   syncDockControls();
@@ -13488,10 +13515,11 @@ for (const input of els.notchShapeInputs) {
 els.notchStyleInput?.addEventListener('change', () => {
   void saveSettings({ notchStyle: els.notchStyleInput.value });
 });
-els.notchFollowTrayInput?.addEventListener('change', () => {
-  state.settings.notchFollowTray = els.notchFollowTrayInput.checked;
+els.notchSummaryModeInput?.addEventListener('change', () => {
+  state.settings.notchSummaryMode = els.notchSummaryModeInput.value;
+  syncNotchSummaryMode();
   refreshTrayComposers();
-  void saveSettings({ notchFollowTray: els.notchFollowTrayInput.checked });
+  void saveSettings({ notchSummaryMode: els.notchSummaryModeInput.value });
 });
 
 els.edgeDockInput?.addEventListener('change', () => {
@@ -15059,7 +15087,7 @@ function refreshTrayComposers() {
   const surfaces = [
     { id: 'tray', root: els.trayComposer, visible: state.settings?.showTrayIcon !== false },
     { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleEnabled === true },
-    { id: 'notch', root: els.notchComposer, visibilityRoot: els.notchComposerDetails, visible: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchFollowTray === false }
+    { id: 'notch', root: els.notchComposer, visibilityRoot: els.notchComposerDetails, visible: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchSummaryMode === 'custom' }
   ];
   window.TokenMonitorTrayComposer.syncTrayComposerSurfaces(
     surfaces,

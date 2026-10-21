@@ -64,6 +64,14 @@ function bridge(arch, { failAt, mainThread = true, available = true, pathSupport
             case '_setForceMainAppearance:': assert.equal(target, 20); forceAppearance = parameters[0] === 1; return;
             case 'colorWithSRGBRed:green:blue:alpha:': assert.equal(target, 'NSColor'); return 60;
             case 'contentView': assert.equal(target, 20); return 30;
+            case 'layer':
+              if (target === 'CAGradientLayer') return 70;
+              if (target === 'CAShapeLayer') return 80;
+              if (target === 40) return 41;
+              throw new Error(`unexpected layer ${target}`);
+            case 'CGColor': assert.equal(target, 60); return 61;
+            case 'array': assert.equal(target, 'NSMutableArray'); return 90;
+            case 'numberWithDouble:': assert.equal(target, 'NSNumber'); return 91;
             case 'bounds':
               assert.equal(arch, 'arm64');
               assert.equal(result, structs.TokenMonitorGlassRect);
@@ -239,6 +247,80 @@ const railShape = {
   width: 64,
   height: 100
 };
+
+for (const arch of ['arm64', 'x64']) {
+  test(`${arch}: the camera cap and material use one native path and transaction through overshoot and reversal`, () => {
+    const native = bridge(arch);
+    const glass = native.create({ shaped: true });
+    assert.equal(glass.hardwareShade, true);
+    for (const [height, progress] of [[100, 0], [180, 0.6], [240, 1.08], [140, 0.3], [100, 0]]) {
+      const start = native.calls().length;
+      glass.update({ dark: true, tintOpacity: 0, shape: { ...railShape, height },
+        hardwareShade: { capEnd: 32 + (height - 32) * 0.24, fadeEnd: 32 + (height - 32) * 0.74, progress } });
+      const calls = native.calls().slice(start);
+      const selectors = calls.map(call => call.selector);
+      const begin = selectors.indexOf('begin'), commit = selectors.indexOf('commit');
+      for (const operation of ['setDisableActions:', '_setPath:', 'setPath:', 'setColors:', 'setLocations:']) {
+        assert.ok(selectors.indexOf(operation) > begin && selectors.indexOf(operation) < commit, operation);
+      }
+      assert.deepEqual(calls.filter(call => ['_setPath:', 'setPath:'].includes(call.selector)).map(call => [call.target, ...call.parameters]), [[40, 99], [80, 99]]);
+      const p = Math.max(0, Math.min(1, progress));
+      assert.deepEqual(calls.filter(call => call.selector === 'colorWithSRGBRed:green:blue:alpha:').map(call => call.parameters.at(-1)), [1, 1 - p * 0.36, 1 - p * 0.68, 1 - p * 0.77]);
+    }
+    assert.equal(native.calls().filter(call => call.target === 'CAGradientLayer' && call.selector === 'layer').length, 1);
+    assert.deepEqual(native.calls().find(call => call.selector === 'addSublayer:'), { target: 41, selector: 'addSublayer:', parameters: [70] });
+    assert.deepEqual(native.calls().find(call => call.selector === 'setZPosition:'), { target: 70, selector: 'setZPosition:', parameters: [1] });
+    assert.equal(native.calls().some(call => /setContentView|setSubviews/.test(call.selector)), false);
+    glass.dispose(); glass.dispose();
+    assert.deepEqual(native.calls().filter(call => call.selector === 'release').map(call => call.target), [70, 40]);
+  });
+}
+
+test('the native cap hides for capsules and role changes, and renormalizes after canvas resizing', () => {
+  const native = bridge('arm64'), glass = native.create({ shaped: true });
+  const hardwareShade = { capEnd: 40, fadeEnd: 80, progress: 1 };
+  glass.update({ shape: railShape, hardwareShade });
+  const start = native.calls().length;
+  glass.update({ shape: { ...railShape, height: 200 }, hardwareShade });
+  assert.deepEqual(native.calls().slice(start).filter(call => call.selector === 'numberWithDouble:').map(call => call.parameters[0]), [0.2, 0.27, 0.344, 0.4]);
+  glass.update({ visible: false });
+  glass.update({ visible: true });
+  glass.update({ shape: railShape });
+  assert.deepEqual(native.calls().filter(call => call.target === 70 && call.selector === 'setHidden:').map(call => call.parameters[0]), [0, 0, 1, 0, 1]);
+});
+
+test('a failed camera mask update closes the transaction and still releases native resources', () => {
+  const native = bridge('arm64', { failAt: 'setPath:' });
+  const glass = native.create({ shaped: true });
+  assert.throws(() => glass.update({ shape: railShape, hardwareShade: { capEnd: 40, fadeEnd: 80, progress: 0.5 } }), /injected native failure/);
+  const calls = native.calls();
+  assert.equal(calls.filter(call => call.symbol === 'CGPathRelease').length, 1);
+  assert.equal(calls.at(-1).selector, 'commit');
+  glass.dispose();
+  assert.deepEqual(native.calls().filter(call => call.selector === 'release').map(call => call.target), [70, 40]);
+});
+
+test('a window without a system shadow skips shadow invalidation', () => {
+  const native = bridge('arm64');
+  native.win.hasShadow = () => false;
+  const glass = native.create({ shaped: true });
+  glass.update({ dark: true, shape: railShape });
+  glass.update({ dark: true, shape: { ...railShape, height: 120 } });
+  const calls = native.calls();
+  assert.deepEqual(calls.filter((call) => call.selector === '_setPath:').map((call) => call.parameters), [[99], [99]]);
+  assert.equal(calls.some((call) => call.selector === 'invalidateShadow'), false);
+});
+
+test('enabling a shadow after creation refreshes the next committed shape', () => {
+  const native = bridge('arm64');
+  native.win.hasShadow = () => false;
+  const glass = native.create({ shaped: true });
+  glass.update({ dark: true, shape: railShape });
+  assert.equal(native.calls().some((call) => call.selector === 'invalidateShadow'), false);
+  native.win.hasShadow = () => true;
+  glass.update({ dark: true, shape: { ...railShape, height: 120 } });
+  assert.equal(native.calls().filter((call) => call.selector === 'invalidateShadow').length, 1);
+});
 
 test('a shaped glass takes a bottom-up path, releases it and refreshes the shadow', () => {
   const native = bridge('arm64');

@@ -635,6 +635,10 @@ function providerCollapseKey(provider) {
       || provider.provider === 'thirdparty'
       || provider.provider === 'mimo'
       || provider.provider === 'cursor'
+      // Cline keys identify the API key or sign-in account id within each lane.
+      // Keep distinct credential identities from synced devices separate;
+      // matching display emails do not establish a shared identity.
+      || provider.provider === 'cline'
       // Notion allowances are per user AND workspace. Its verified composite
       // key is portable; neither a provider-only nor an email collapse is safe.
       || provider.provider === 'notion'

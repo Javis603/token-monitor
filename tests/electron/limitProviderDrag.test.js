@@ -66,7 +66,7 @@ function createDragHarness(config = {}) {
         removeProperty: (key) => styles.delete(key)
       },
       classList: { add: (value) => classes.add(value), remove: (value) => classes.delete(value) },
-      getBoundingClientRect: () => ({ top, height: 40, bottom: top + 40 }),
+      getBoundingClientRect: () => ({ top, left: top, width: 40, right: top + 40, height: 40, bottom: top + 40 }),
       contains: () => true,
       addEventListener: (type, listener) => rowListeners.push({ type, listener }),
       removeEventListener: (type, listener) => {
@@ -79,7 +79,7 @@ function createDragHarness(config = {}) {
     };
   };
   const rows = [makeRow('a', 0), makeRow('b', 40), makeRow('c', 80)];
-  const panel = { scrollTop: 0, getBoundingClientRect: () => ({ top: 0, bottom: 500 }) };
+  const panel = { scrollTop: 0, scrollLeft: 0, getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 500 }) };
   const listClasses = new Set();
   const list = {
     classes: listClasses,
@@ -105,6 +105,7 @@ function createDragHarness(config = {}) {
     frames,
     timers,
     rows,
+    panel,
     list,
     captured,
     expandedNow: () => expanded,
@@ -112,6 +113,7 @@ function createDragHarness(config = {}) {
       button: 0,
       pointerId: 1,
       clientY,
+      clientX: clientY,
       currentTarget: rows[0],
       target
     }, 'a'),
@@ -132,6 +134,28 @@ function createDragHarness(config = {}) {
     }
   };
 }
+
+test('horizontal provider strips reorder on X and release their transforms on drop or cancellation', () => {
+  const orders = [];
+  const f = createDragHarness({ axis: 'x', applyOrder: order => orders.push([...order]) });
+  f.press(20);
+  f.dispatch('pointermove', { clientX: 22, clientY: 200 });
+  assert.equal(f.captured.size, 0, 'vertical movement does not start a horizontal drag');
+  f.dispatch('pointermove', { clientX: 110, clientY: 20 });
+  assert.equal(f.rows[0].styles.get('--drag-x'), '90px');
+  assert.equal(f.rows[0].styles.has('--drag-y'), false);
+  assert.equal(f.rows[1].styles.get('--drag-shift'), '-40px');
+  f.dispatch('pointerup');
+  assert.deepEqual(orders, [['b', 'c', 'a']]);
+  assert.equal(f.rows[0].styles.has('--drag-x'), false);
+  assert.equal(f.captured.size, 0);
+  f.press(20);
+  f.dispatch('pointermove', { clientX: 110 });
+  f.dispatch('pointercancel');
+  assert.equal(orders.length, 1, 'cancellation does not commit');
+  assert.equal(f.rows[0].styles.has('--drag-x'), false);
+  assert.equal(f.rows[1].styles.has('--drag-shift'), false);
+});
 
 test('limit provider expansion goes through one shared helper', () => {
   const app = readRendererFile('app.js');

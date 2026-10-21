@@ -19,6 +19,10 @@ async function runManualDeviceRefresh(runtime, options = {}) {
   if (!runtime) return;
   const limitsTask = Promise.resolve(runtime.refreshLimits({ all: true }, 'manual'));
   limitsTask.catch((error) => options.onLimitsError?.(error));
+  if (options.refreshUsage === false) {
+    await limitsTask.catch(() => {});
+    return;
+  }
   await runtime.tick('manual', {
     forceHistory: options.forceHistory === true,
     // Cursor and Antigravity only move when their sync subprocess runs, and that

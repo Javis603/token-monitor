@@ -21,6 +21,7 @@ const {
   createSubprocessTermination,
   terminationUnconfirmedError
 } = require('../../subprocessTermination');
+const { lowerSubprocessPriority } = require('../../subprocessPriority');
 const { tokscaleConfigDir } = require('../../tokscaleConfig');
 
 // tokscale's antigravity sync reads the IDE's native session roots under
@@ -193,6 +194,7 @@ function createAntigravitySelfSync({ selfSyncThrottle, tokscaleCommand }) {
     await new Promise((resolve) => {
       const childStartedAt = Date.now();
       const child = childProcess.spawn(bin, [...prefixArgs, 'antigravity', 'sync'], { env, windowsHide: true });
+      lowerSubprocessPriority(child);
       const termination = createSubprocessTermination(child, {
         ...(options.terminationOptions || {}),
         onUnconfirmed() {

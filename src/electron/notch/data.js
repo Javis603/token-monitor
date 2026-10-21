@@ -5,11 +5,20 @@ const trayText = require('../../shared/trayText');
 const balance = require('../../shared/limits/balanceDisplay');
 const { limitProviderForClient } = require('../../shared/limits/providers');
 const presentation = require('../renderer/edgeDock/presentation');
+const { notchWeek } = require('./panel');
+
+const NOTCH_SUMMARY_MODES = Object.freeze(['auto', 'sessions', 'tray', 'custom']);
+
+// `auto` adapts to what is happening; `sessions` stays quiet between sessions;
+// `tray` mirrors the menu-bar preset; `custom` reads the notch's own layout.
+function notchSummaryMode(settings = {}) {
+  return NOTCH_SUMMARY_MODES.includes(settings.notchSummaryMode) ? settings.notchSummaryMode : 'sessions';
+}
 
 // Ordinary tray presets select canonical provider/account pairs before layout.
 // Custom layouts continue to use their own source selectors unchanged.
 function trayQuotaPicks(stats, settings) {
-  if (settings.notchFollowTray === false) return null;
+  if (notchSummaryMode(settings) === 'custom') return null;
   const mode = settings.trayContent;
   if (mode === 'limitsAllSessions' || mode === 'barsAllSessions') return trayText.pickConfiguredLimitProviders(stats, settings);
   const pick = mode === 'barsSession' ? trayText.pickLimitProviderByKindPriority(stats, ['session', 'weekly'])
@@ -19,7 +28,7 @@ function trayQuotaPicks(stats, settings) {
 }
 
 function summaryLayout(settings, stats, picks = trayQuotaPicks(stats, settings)) {
-  if (settings.notchFollowTray === false) return trayLayout.normalizeTrayLayout(settings.notchCustomLayout);
+  if (notchSummaryMode(settings) === 'custom') return trayLayout.normalizeTrayLayout(settings.notchCustomLayout);
   const mode = settings.trayContent || 'tokens';
   if (mode === 'custom') return trayLayout.normalizeTrayLayout(settings.trayCustomLayout);
   const make = (style, id) => trayLayout.createTrayLayoutItem(style, { idFactory: () => id });
@@ -93,10 +102,80 @@ function attachSummaryClock(row, metric, nowMs) {
   row.clock = { resetsAt, headline: metric === 'percentReset' ? (suffix && row.text.endsWith(suffix) ? row.text.slice(0, -suffix.length) : row.text) : '' };
 }
 
+// The shared projection's severity covers the selected account's tightest
+// metered pool, which can differ from its headline. Keep ranking and readout
+// tied to that same value without rescanning hidden or unselected accounts.
+function notchAlert(cells, settings) {
+  if (settings.limitsEnabled === false) return null;
+  let worst = null;
+  for (const cell of cells) {
+    const remainingPercent = cell.severityPercent;
+    if (cell.kind !== 'provider' || cell.status !== 'ok' || !Number.isFinite(remainingPercent)) continue;
+    if (presentation.remainingSeverity(remainingPercent) !== 'critical') continue;
+    if (!worst || remainingPercent < worst.remainingPercent) worst = { provider: cell.provider, remainingPercent };
+  }
+  return worst;
+}
+
+function notchActivity(cells, nowMs = Date.now()) {
+  const sessions = cells.find((cell) => cell.metric === presentation.SESSIONS_METRIC)?.sessions || [];
+  const running = presentation.runningSessionSummary(sessions, nowMs);
+  const waiting = presentation.waitingSessionSummary(sessions, nowMs);
+  if (!running.count && !waiting.count) return null;
+  // A grouped session is drawn with the tool that is actually active, not its parent's.
+  const waitingClients = presentation.sessionMembers(waiting.rows)
+    .filter((row) => presentation.sessionActivityState(row, nowMs) === 'waiting')
+    .map((row) => String(row.client || '').toLowerCase());
+  const clients = [...new Set([...waitingClients, ...running.clients].filter(Boolean))];
+  return { running: running.count, waiting: waiting.count, clients };
+}
+
+function activitySummary(cells, options) {
+  const activity = notchActivity(cells, options.nowMs);
+  if (activity) {
+    const providers = activity.clients.slice(0, 3);
+    return { version: trayLayout.VERSION, needsClock: false, automatic: 'activity', items: [
+      ...providers.map((client, index) => ({ type: 'icon', id: `notch-activity-icon-${index}`, provider: client, available: true, selection: null })),
+      { type: 'activity', id: 'notch-activity', available: true, running: activity.running, waiting: activity.waiting,
+        provider: activity.clients[0] || '' }
+    ] };
+  }
+  return null;
+}
+
+// Live work takes priority; a known low quota must not hide session activity.
+function automaticSummary(stats, cells, settings, options) {
+  const activity = activitySummary(cells, options);
+  if (activity) return activity;
+  const alert = notchAlert(cells, settings);
+  if (alert) {
+    const used = settings.showLimitUsed === true;
+    const value = Math.round(used ? 100 - alert.remainingPercent : alert.remainingPercent);
+    return { version: trayLayout.VERSION, needsClock: false, automatic: 'alert', items: [
+      { type: 'icon', id: 'notch-alert-icon', provider: alert.provider, available: true, selection: null },
+      { type: 'text', id: 'notch-alert', metric: 'percent', available: true, text: `${value}%`, unit: used ? 'used' : 'left',
+        ...(settings.notchWarnColors === true ? { tone: 'alert' } : {}), measure: { metric: 'percent', value } }
+    ] };
+  }
+  return null;
+}
+
+function automaticIdleLayout() {
+  const make = (style, id) => trayLayout.createTrayLayoutItem(style, { idFactory: () => id });
+  return { version: trayLayout.VERSION, items: [make('appIcon', 'notch-icon'), { ...make('tokens', 'notch-tokens'), period: 'today' }] };
+}
+
 function buildNotchData(stats, cells, settings, options = {}) {
-  if (settings.notchSummaryEnabled === false) return { cells, summary: null };
-  const picks = trayQuotaPicks(stats, settings);
-  const layout = summaryLayout(settings, stats, picks);
+  const panel = { week: notchWeek(stats, new Date(options.nowMs ?? Date.now()), settings.historyEnabled === false ? null : stats?.historyPreview) };
+  if (settings.notchSummaryEnabled === false) return { cells, summary: null, panel };
+  const mode = notchSummaryMode(settings);
+  if (mode === 'sessions') return { cells, summary: activitySummary(cells, options), panel };
+  if (mode === 'auto') {
+    const automatic = automaticSummary(stats, cells, settings, options);
+    if (automatic) return { cells, summary: automatic, panel };
+  }
+  const picks = mode === 'auto' ? null : trayQuotaPicks(stats, settings);
+  const layout = mode === 'auto' ? automaticIdleLayout() : summaryLayout(settings, stats, picks);
   // Preserve the selected record even for legacy accounts without accountKey:
   // reselecting all records can borrow a secondary window from another account.
   const summaryStats = picks ? { ...stats, limits: { ...stats?.limits, providers: picks.map(pick => pick.providerRecord) } } : stats;
@@ -140,7 +219,8 @@ function buildNotchData(stats, cells, settings, options = {}) {
   return {
     cells,
     // An explicitly empty custom layout reuses the idle shell and hover target.
-    summary: resolved.items.length ? resolved : null
+    summary: resolved.items.length ? resolved : null,
+    panel
   };
 }
-module.exports = { buildNotchData, summaryLayout };
+module.exports = { NOTCH_SUMMARY_MODES, buildNotchData, notchSummaryMode, summaryLayout };

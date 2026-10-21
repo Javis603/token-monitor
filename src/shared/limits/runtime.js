@@ -515,16 +515,31 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     return (lane.accountRevisions.get(identityKey) || 0) === (dispatch.accountRevisions.get(identityKey) || 0);
   }
 
-  function applyAttempt(lane, identityKey, row, status, at) {
+  function applyAttempt(lane, identityKey, row, status, at, invalidatedWindowLabels) {
     const existing = lane.identities.get(identityKey) || {
       identityKey,
       lastGood: null,
       lastAttempt: null
     };
     if (status === 'ok') {
+      const retainedWindows = existing.lastGood && invalidatedWindowLabels?.size
+        ? existing.lastGood.windows.filter((window) => !invalidatedWindowLabels.has(window.label)
+          && !row.windows.some((current) => current.label === window.label))
+        : [];
+      if (retainedWindows.length) {
+        // The wire has row-level freshness only. Update independently reported
+        // windows, but keep cached windows visibly stale and eligible for retry.
+        status = 'unavailable';
+        row = { ...row, status, updatedAt: existing.lastGood.updatedAt, windows: [...retainedWindows, ...row.windows] };
+      }
       existing.lastGood = row;
     } else if (!TRANSIENT_STATUSES.has(status)) {
       existing.lastGood = null;
+    } else if (existing.lastGood && invalidatedWindowLabels?.size) {
+      existing.lastGood = {
+        ...existing.lastGood,
+        windows: existing.lastGood.windows.filter((window) => !invalidatedWindowLabels.has(window.label))
+      };
     }
     if (lane.provider === 'workbuddy' && TRANSIENT_STATUSES.has(status) && !row.accountKey) {
       // A partial discovery can miss an encrypted identity which has never
@@ -539,6 +554,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     }
     existing.lastAttempt = { status, at, row };
     lane.identities.set(identityKey, existing);
+    return row;
   }
 
   function matchingIdentityKeys(lane, scope) {
@@ -567,12 +583,24 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     // data), so an explicit removal is the narrow way to delete that identity.
     // It is consumed here and never enters the normalized or synced wire shape.
     const removals = inputRows.filter((row) => row?.removed === true);
+    const cacheInvalidations = new Map();
     const normalizedRows = inputRows
       .filter((row) => row?.removed !== true)
-      .map((row) => normalizeLimitProvider({ ...row, provider: lane.provider }))
+      .map((input) => {
+        const row = normalizeLimitProvider({ ...input, provider: lane.provider });
+        // An explicit provider result can invalidate known-bad windows without
+        // disabling transient retention for its other windows or other accounts.
+        // Require an account key; a generic failure cannot invalidate a lane.
+        if (row?.accountKey && Array.isArray(input.invalidateCachedWindowLabels)) {
+          cacheInvalidations.set(rowIdentityKey(row), new Set(input.invalidateCachedWindowLabels
+            .filter((label) => typeof label === 'string' && label)));
+        }
+        return row;
+      })
       .filter(Boolean);
     const expected = new Set(dispatch.expectedIdentityKeys);
     const represented = new Set();
+    const committedRows = [];
 
     if (attemptError) {
       const status = attemptError.status || (attemptError.code === 'PROBE_TIMEOUT' ? 'timeout' : 'unavailable');
@@ -584,7 +612,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         applyAttempt(lane, identityKey, { provider: lane.provider }, status, attemptAt);
       }
       rebuildSnapshot();
-      return true;
+      return [];
     }
 
     const genericTerminal = normalizedRows.length === 1
@@ -612,16 +640,17 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         for (const expectedKey of expected) {
           if (!accountRevisionStillCurrent(lane, expectedKey, dispatch)) continue;
           represented.add(expectedKey);
-          applyAttempt(lane, expectedKey, row, row.status, attemptAt);
+          committedRows.push(applyAttempt(lane, expectedKey, row, row.status, attemptAt));
         }
         continue;
       }
 
       represented.add(identityKey);
-      applyAttempt(lane, identityKey, row, row.status, attemptAt);
+      const committedRow = applyAttempt(lane, identityKey, row, row.status, attemptAt, cacheInvalidations.get(rowIdentityKey(row)));
+      committedRows.push(committedRow);
       // Marks the row as measurable by this runtime, so a persisted seed for a
       // provider that has not answered yet can never become a burn baseline.
-      if (row.status === 'ok') markLimitsProbeSuccess(burnState, row);
+      if (committedRow.status === 'ok') markLimitsProbeSuccess(burnState, committedRow);
     }
 
     if (!dispatch.accountScoped && !genericTerminal) {
@@ -631,7 +660,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       }
     }
     rebuildSnapshot();
-    return true;
+    // Retry decisions must follow the published status, including partial
+    // successes that still retain stale windows, rather than the raw probe.
+    return committedRows;
   }
 
   async function dispatchIntent(lane, intent) {
@@ -677,7 +708,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         { deadlineMs }
       );
       const committed = commitRows(lane, dispatch, rows);
-      if (committed) applyRetryPolicy(lane, intent, rows, null, reportedRetryAfterMs);
+      if (committed) applyRetryPolicy(lane, intent, committed, null, reportedRetryAfterMs);
       finishIntent(intent, { superseded: !committed, snapshot: getSnapshot() });
     } catch (error) {
       const committed = commitRows(lane, dispatch, [], error);

@@ -59,10 +59,10 @@ function readJson(filePath, fallback = null) {
   }
 }
 
-function writeJsonAtomic(filePath, value) {
+function writeJsonAtomic(filePath, value, space = 2) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.tmp`;
-  fs.writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(tempPath, `${JSON.stringify(value, null, space)}\n`, 'utf8');
   fs.renameSync(tempPath, filePath);
 }
 
