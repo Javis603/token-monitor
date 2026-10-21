@@ -4,7 +4,7 @@ const os = require('node:os');
 const { Worker } = require('node:worker_threads');
 
 const { readSessionDetail } = require('./sessionDetail');
-const { priceLocalSessionDetail } = require('./providers/codex/localUsage');
+const { priceLocalSessionDetail, pricePiSessionDetail } = require('./providers/codex/localUsage');
 const { readDshSessionDetail } = require('./providers/dsh/sessionDetail');
 const { wslUsageHomes } = require('./wslUsage');
 
@@ -118,6 +118,12 @@ function runSessionDetailWorker(args = {}, deps = {}) {
 
 async function readSessionDetailForPlatform(args = {}, deps = {}) {
   const detail = await runSessionDetailWorker(args, deps);
+  if (detail?.client === 'pi') {
+    return pricePiSessionDetail(detail, {
+      lookupModelPricing: deps.lookupModelPricing,
+      pricingRevision: deps.pricingRevision ?? deps.getPricingRevision?.()
+    });
+  }
   if (detail?.usageSource !== 'codex-dots-local') return detail;
   return priceLocalSessionDetail(detail, {
     lookupModelPricing: deps.lookupModelPricing,

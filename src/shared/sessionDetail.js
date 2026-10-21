@@ -409,11 +409,13 @@ function piPromptText(content) {
 
 function parsePiTranscriptLines(lines) {
   const events = [];
+  let currentModel = '';
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     let obj;
     try { obj = JSON.parse(trimmed); } catch (_) { continue; }
+    if (obj.type === 'model_change' && obj.modelId) currentModel = String(obj.modelId);
     const message = obj.type === 'message' ? obj.message || {} : {};
     const timestamp = obj.timestamp || '';
     if (message.role === 'user') {
@@ -450,6 +452,7 @@ function parsePiTranscriptLines(lines) {
         // Pi and OMP report each operation's cost; prefer it over the
         // proportional split of the session subtotal.
         cost: num(u.cost && u.cost.total),
+        model: message.model || currentModel || undefined,
         tools: uniqueTools(tools)
       });
     }
