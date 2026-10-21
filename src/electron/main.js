@@ -6192,7 +6192,7 @@ async function refreshFromTray() {
     refreshContextMenu: refreshTrayContextMenu,
     action: async () => {
       try {
-        const stats = await fetchStats({ force: true });
+        const stats = await fetchStats({ force: true, forceUsage: true });
         // Collector ticks normally publish their own final snapshot. Only bridge the
         // result when fetchStats returned a different object (for example, a remote hub
         // fetch while an external headless agent owns collection).
@@ -6745,7 +6745,7 @@ function refreshManualStats() {
   }
   const revision = statsPushRevision;
   const request = { runtime, generation, promise: null };
-  request.promise = fetchStats({ force: true, forceUsage: true, todayOnly: true, forceSelfSync: true }).then((stats) => {
+  request.promise = fetchStats({ force: true, forceHistory: true, forceSelfSync: true }).then((stats) => {
     // Both buttons update the dock once. A push received while this read was
     // pending has already taken over, so a late read must not replace it.
     if (runtime === deviceRuntimeHandle && generation === hubModeGeneration && revision === statsPushRevision) {
@@ -6767,15 +6767,14 @@ async function fetchStats(options = {}) {
   // Generic `{ force: true }` calls from settings and account forms only need
   // fresh limits. A full usage tick reads every tracked source and can take
   // seconds, so only an explicit usage request may start it. The refresh button
-  // opts in through forceUsage/todayOnly and keeps its explicit self-sync; the
-  // History graph remains reserved for operations that explicitly need that pass.
+  // keeps its full usage/History rescan and self-sync so imported or corrected
+  // older usage updates Month/All Time as well as the History graph.
   if (force && ownsUsageRuntime()) {
     const refreshUsage = options?.forceUsage === true
       || options?.forceHistory === true
       || options?.forceSelfSync === true;
     await runManualDeviceRefresh(deviceRuntimeHandle, {
       refreshUsage,
-      todayOnly: options?.todayOnly === true,
       forceHistory: Boolean(options?.forceHistory),
       forceSelfSync: Boolean(options?.forceSelfSync),
       onLimitsError: (error) => console.log(`[limits-runtime] manual refresh failed: ${error.message}`)
