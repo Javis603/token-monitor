@@ -176,6 +176,7 @@ function createFixture(options = {}) {
     nativeGlass: () => options.nativeGlass === true,
     liquidGlass: () => (typeof options.liquidGlass === 'function' ? options.liquidGlass() : options.liquidGlass || null),
     createGlass: options.createGlass,
+    windowsBackdrop: options.windowsBackdrop,
     canRefreshLimits: options.canRefreshLimits,
     onRefreshLimits: options.onRefreshLimits,
     prefersReducedMotion: options.prefersReducedMotion || (() => true),
@@ -710,7 +711,7 @@ test('a drag on a larger dock keeps the grab point under the pointer', async (t)
   assert.equal(fixture.placements.at(-1).offset, expected.offset);
 });
 
-test('Windows Edge Dock keeps every glass setting on the shaped renderer surface', (t) => {
+test('Windows Edge Dock falls back to the shaped renderer when native hosting is unavailable', (t) => {
   const fixture = createFixture({ nativeGlass: true });
   t.after(() => fixture.controller.stop());
   const acrylicWindows = FakeBrowserWindow.instances.slice();
@@ -727,6 +728,88 @@ test('Windows Edge Dock keeps every glass setting on the shaped renderer surface
   assert.deepEqual(accentWindows, acrylicWindows);
   assert.ok(accentWindows.every((win) => win.options.transparent === true));
   assert.ok(accentWindows.every((win) => win.options.backgroundMaterial === undefined));
+});
+
+test('Windows HostBackdrop follows shape, fade, resume and cleanup without using HWND-wide materials', (t) => {
+  const adapters = [];
+  const options = { nativeGlass: true, windowsBackdrop: {
+    attach(win, onMaterial) {
+      const adapter = { win, onMaterial, shapes: [], opacities: [], raises: 0,
+        update(shape) { this.shapes.push(shape); },
+        setOpacity(value) { this.opacities.push(value); },
+        reorder() { this.raises++; },
+        dispose() { this.disposed = true; }
+      };
+      adapters.push(adapter); return adapter;
+    }
+  } };
+  const fixture = createFixture(options);
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const native = adapters.find((entry) => entry.win === rail);
+  assert.equal(adapters.length, 3);
+  assert.ok(native.shapes.at(-1).commands.some(([op]) => op === 'C'));
+  assert.equal(sentPayload(rail, 'rail').glass, false);
+  native.onMaterial(true);
+  assert.equal(sentPayload(rail, 'rail').glass, true);
+  assert.equal(sentPayload(rail, 'rail').liquidGlass, false);
+  assert.equal(native.opacities.at(-1), rail.opacity);
+  const before = native.shapes.at(-1).key;
+  fixture.settings.edgeDockSide = 'left'; fixture.controller.sync();
+  assert.notEqual(native.shapes.at(-1).key, before);
+  const raises = native.raises;
+  fixture.powerMonitor.emit('resume');
+  assert.ok(native.raises > raises);
+  fixture.settings.windowsBackdrop = 'accent'; fixture.controller.sync();
+  assert.equal(adapters.length, 3, 'main-window material choice does not rebuild HostBackdrop');
+  native.onMaterial(false);
+  assert.equal(sentPayload(rail, 'rail').glass, false);
+  assert.equal(rail.backgroundMaterials.length, 0);
+  options.nativeGlass = false; fixture.controller.sync();
+  assert.ok(adapters.every((entry) => entry.disposed));
+  fixture.windowFor('rail').webContents.emit('did-finish-load');
+  native.onMaterial(true);
+  assert.equal(sentPayload(fixture.windowFor('rail'), 'rail').glass, false, 'ignore obsolete helper callbacks');
+});
+
+test('Windows dock material switches independently and rebuilds native underlays only when needed', (t) => {
+  const adapters = [];
+  const options = { nativeGlass: true, windowsBackdrop: {
+    attach(win, onMaterial) {
+      const adapter = { win, onMaterial, update() {}, setOpacity() {}, reorder() {},
+        dispose() { this.disposed = true; } };
+      adapters.push(adapter);
+      return adapter;
+    }
+  } };
+  const fixture = createFixture(options);
+  t.after(() => fixture.controller.stop());
+  assert.equal(adapters.length, 3, 'existing settings keep native glass');
+  const inheritedRail = fixture.windowFor('rail');
+  fixture.settings.edgeDockWindowsBackdrop = 'inherit';
+  fixture.controller.sync();
+  assert.equal(fixture.windowFor('rail'), inheritedRail, 'explicit inherit preserves the default material');
+  fixture.settings.edgeDockWindowsBackdrop = 'transparent';
+  fixture.controller.sync();
+  assert.ok(adapters.every((adapter) => adapter.disposed));
+  const plain = fixture.windowFor('rail');
+  plain.webContents.emit('did-finish-load');
+  assert.equal(sentPayload(plain, 'rail').glass, false);
+  assert.ok(plain.shapeCalls.at(-1).length > 0, 'transparent mode keeps curved hit regions');
+  fixture.controller.sync();
+  assert.equal(fixture.windowFor('rail'), plain, 'unchanged settings keep the same window');
+  assert.equal(fixture.settings.windowsBackdrop, 'acrylic', 'main-window choice is independent');
+  fixture.settings.edgeDockWindowsBackdrop = 'host-backdrop';
+  fixture.controller.sync();
+  assert.equal(adapters.length, 6, 'native glass can be restored without restarting the app');
+  const rail = fixture.windowFor('rail');
+  const native = adapters.find((adapter) => adapter.win === rail);
+  rail.webContents.emit('did-finish-load');
+  native.onMaterial(true);
+  assert.equal(sentPayload(rail, 'rail').glass, true);
+  options.nativeGlass = false;
+  fixture.controller.sync();
+  assert.ok(adapters.every((adapter) => adapter.disposed), 'global native-glass switch still takes precedence');
 });
 
 test('Windows keeps shaped click-through regions without native glass', (t) => {
