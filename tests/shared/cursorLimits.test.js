@@ -69,6 +69,7 @@ test('fetchCursorLimits uses Requests for a legacy request-based plan', async ()
     probe: async () => ({
       ok: true,
       usage: {
+        planInfo: { isMerged: false },
         planPercent: 42,
         autoPercent: 20,
         apiPercent: 64,
@@ -143,7 +144,7 @@ test('fetchCursorLimits prefers account identity over the plan for the account l
     readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
     probe: async () => ({
       ok: true,
-      usage: { planPercent: 10, membershipType: 'pro_student' },
+      usage: { planPercent: 10, membershipType: 'pro_student', planInfo: { isMerged: false } },
       user: { email: 'a@b.com', name: 'Alice', sub: 'u1' }
     })
   });

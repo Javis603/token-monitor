@@ -288,13 +288,13 @@ test('Home keeps family membership below the title and routes mouse and keyboard
     const renderHomeSessionModule = Function('document', 'window', 'state', 'els', 'sessionTooltipShouldHoldRender',
       'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
       'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView', 'homeSessionContext',
-      'sessionPresentationOptions', `${shellSource}; ${source}; return renderHomeSessionModule;`)(
+      'sessionPresentationOptions', 'homeModulePreferencesApi', `${shellSource}; ${source}; return renderHomeSessionModule;`)(
       { createElement: tag => new Node(tag), createTextNode: text => new Node('text', '', text) },
       { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
       state, { homePanel: { querySelector: () => null } }, () => false,
       (view, options) => { routes.push([view, options]); state.breakdown = view; }, {}, translate,
       () => {}, () => '', {}, () => '', [], node => readingTargets.push(node), String, () => 'just now',
-      rowApi, { setDetailTooltip() {} }, () => assert.fail('group context must be absent'), () => opts
+      rowApi, { setDetailTooltip() {} }, () => assert.fail('group context must be absent'), () => opts, require('../../src/electron/renderer/homeModulePreferences')
     );
     const module = renderHomeSessionModule();
     const row = module.children[1].children[0];
@@ -332,11 +332,11 @@ test('Dock family expansion keeps real member rows and requests the existing nat
   const resized = [];
   const build = Function('document', 'presentation', 'sessionKey', 'el', 't', 'stateMark', 'overflowText',
     'clientLabel', 'sessionRowsApi', 'relativeAgo', 'limitWindowsView', 'contextNode', 'sessionLive',
-    'formatBreakdownTokens', 'state', 'surface', 'renderBubble', 'markNode', `${source}; return sessionsContainer;`)(
-    { createTextNode: text => new Node('text', '', text) }, presentation, row => row.key,
+    'formatBreakdownTokens', 'state', 'surface', 'renderBubble', 'markNode', 'appearance', `${source}; return sessionsContainer;`)(
+    { createTextNode: text => new Node('text', '', text), createElement: tag => new Node(tag) }, presentation, row => row.key,
     (tag, className, text) => new Node(tag, className, text), translate, () => new Node('span'), { bind() {} },
     value => value, rowApi, () => '', { setDetailTooltip() {} }, () => null, sessionLive, String,
-    { payload }, 'bubble', value => resized.push(value), () => new Node('span')
+    { payload }, 'bubble', value => resized.push(value), () => new Node('span'), () => ({})
   );
   const list = build([group]);
   const family = list.children.at(-1).children[0];

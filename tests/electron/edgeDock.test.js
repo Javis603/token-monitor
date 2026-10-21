@@ -332,7 +332,10 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   // The meta line must compose through the shared helper — a projection that
   // still handed the card a flattened top model would pass the map assertions.
   assert.match(sessions, /sessionRowsApi\.sessionModelLabel\(session\)/);
-  assert.match(sessions, /if \(context\) meta\.append\(context\)/);
+  // The context gauge or cache badge comes from the one builder every compact
+  // session row shares, so the card cannot drift from the Home list or Notch.
+  assert.match(sessions, /sessionRowsApi\.sessionStatusNode\(document, session, \{ prefix: 'edge-dock-session'/);
+  assert.match(sessions, /if \(status\) meta\.append\(status\)/);
   // Running is a dot beside the name, not a recoloured title.
   assert.match(sessions, /nameNode\.append\(stateMark\(session, key, activityState\)\)/);
   assert.match(sessions, /el\('span', 'edge-dock-session-title', name\)/);

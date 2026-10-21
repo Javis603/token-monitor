@@ -593,6 +593,27 @@ if (surface === 'peek') {
   document.documentElement.addEventListener('mouseleave', reportPointer);
 }
 
+// The notch window passes the pointer through, with its moves forwarded, until
+// the main process sees the pointer on the shell. Moves are reported once a
+// frame so the shell takes input as the pointer arrives; presses and wheel
+// events only reach the page while it does, and the main process decides what
+// they mean from the cursor position.
+if (surface === 'notch') {
+  let pointerFrame = 0;
+  const reportPointer = () => {
+    if (pointerFrame) return;
+    pointerFrame = requestAnimationFrame(() => { pointerFrame = 0; bridge.pointer(); });
+  };
+  document.addEventListener('mousemove', reportPointer);
+  document.documentElement.addEventListener('mouseleave', () => bridge.pointer());
+  document.addEventListener('mousedown', (event) => { if (event.button === 0) bridge.press(); });
+  // Line-based deltas are rare on macOS; scale them to points like Chromium.
+  window.addEventListener('wheel', (event) => {
+    const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
+    bridge.wheel(event.deltaX * scale, event.deltaY * scale);
+  }, { passive: true });
+}
+
 // ---- Rail ----------------------------------------------------------------
 
 function waitingRingStart(cellId, isWaiting) {
@@ -1243,25 +1264,6 @@ function relativeAgo(value) {
 // colour rule as the Sessions list - neutral while healthy, a colour only as it
 // runs out. Absent for a session whose transcript states no window, which is the
 // normal case rather than an error.
-function contextNode(session) {
-  session = session.groupRows?.[0] || session;
-  const context = sessionLive.sessionActivityState(session) !== 'idle' ? session?.context : null;
-  if (!context) return null;
-  const showUsed = appearance().sessionContextMetric !== 'remaining';
-  const percent = showUsed ? context.percentUsed : context.percentLeft;
-  const node = el('span', 'edge-dock-session-context');
-  node.dataset.tone = String(context.tone || '');
-  // The full phrase lives in the tooltip; the line itself stays a bar and a
-  // number so it reads at a glance in the meta row.
-  const meter = el('span', 'edge-dock-session-context-meter');
-  const fill = el('span', 'edge-dock-session-context-fill');
-  fill.style.setProperty('--bar-scale', String(percent / 100));
-  meter.append(fill);
-  node.append(meter, el('span', 'edge-dock-session-context-value', `${percent}%`));
-  sessionRowsApi.setSessionTooltip(node, context, sessionLive.sessionPromptCacheForRow(session), t, limitWindowsView);
-  return node;
-}
-
 // Last activity seen for each session, so the running dot can flare on an
 // actual transcript write instead of pulsing forever. Module state on purpose:
 // the comparison is against the previous payload.
@@ -1424,15 +1426,9 @@ function sessionsContainer(sessions, options = {}) {
     }
     if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
     meta.append(description);
-    const statusRow = session.groupRows?.[0] || session;
-    const context = contextNode(statusRow);
-    const cache = context ? null : sessionLive.sessionPromptCacheForRow(statusRow);
-    if (cache) {
-      const badge = el('span', 'edge-dock-session-cache', t('session.cacheEstimate', { minutes: cache.minutes }));
-      sessionRowsApi.setSessionTooltip(badge, statusRow, cache, t, limitWindowsView);
-      meta.append(badge);
-    }
-    if (context) meta.append(context);
+    const status = sessionRowsApi.sessionStatusNode(document, session, { prefix: 'edge-dock-session', translate: t,
+      view: limitWindowsView, showUsed: appearance().sessionContextMetric !== 'remaining' });
+    if (status) meta.append(status);
     row.append(
       nameNode,
       el('span', 'edge-dock-session-tokens', formatBreakdownTokens(session.totalTokens)),
@@ -1817,7 +1813,6 @@ function renderBubble(payload) {
     return;
   }
   const card = cell.kind === 'stat' ? statCard(cell) : providerCard(cell);
-  if (payload.omitQuotaBars && cell.kind !== 'stat') notchRenderer.omitQuotaRows(card, cell);
   card.dataset.cellId = cell.id;
   if (payload.maxCardHeight) card.style.maxHeight = `${payload.maxCardHeight}px`;
   stagingLayer.replaceChildren(card);
@@ -1828,22 +1823,19 @@ function renderBubble(payload) {
   if (payload.placed?.cellId === cell.id && payload.placed.height === height) {
     commitCard(card, cell.id);
   } else {
-    // The native top-entry detail reveals after this size acknowledgement.
-    // Its retained card must already contain fresh data before that reveal.
-    if (payload.visible === true && notchRenderer) commitCard(card, cell.id);
     bridge.reportBubbleSize(cell.id, height);
   }
 }
 
 
-const notchRenderer = surface === 'notch' || query.get('owner') === 'notch'
+const notchRenderer = surface === 'notch'
   ? window.TokenMonitorNotchRenderer.createNotchRenderer({
-    document, window, bridge, surface, state, root, shapeLayer, contentLayer,
+    document, window, bridge, state, root, shapeLayer, contentLayer,
     shared: {
       el, t, appearance, prefersReducedMotion, readableColor, providerLabel, limitProviderColor,
-      markNode, providerCellNode, statCellNode, statLabel, statShortLabel, formatTokens, formatCardTokens,
-      createCardWindowsView, fitCardTotal, captureRingResetMotion, animateRingResets, cardResetAnimator,
-      overflowText, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit
+      markNode, hasMask, providerCellNode, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate, overflowText, limitWindowsView,
+      limitAccountTitle: (...args) => limitWindowsView.limitAccountTitle(...args),
+      captureRingResetMotion, animateRingResets, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit
     }
   }) : null;
 
@@ -1854,10 +1846,6 @@ function render(payload) {
   state.payload = payload;
   applyAppearance(payload);
   notchRenderer?.applyAppearance(payload);
-  if (surface === 'bubble' && notchRenderer && payload.visible === false) {
-    scheduleSelfRepaint();
-    return;
-  }
   if (surface === 'notch') notchRenderer.applyMotion(payload.motion);
   else updateShape(payload);
   if (surface === 'peek') renderPeek(payload);
@@ -1872,10 +1860,6 @@ function render(payload) {
 // A repaint replaces the whole card, so it waits for whatever the pointer is
 // currently inside: an account control mid-gesture, or an open detail tooltip.
 function deferBubbleRender() {
-  // A focused tooltip belongs to its provider, not to every subsequent card.
-  // The new top-entry detail must be measured before its native window appears.
-  if (surface === 'bubble' && state.payload?.omitQuotaBars
-    && contentLayer.querySelector('.edge-dock-card')?.dataset.cellId !== state.payload.cell?.id) return false;
   if (codexAccountControl.deferRender(contentLayer)) return true;
   if (!limitTooltipShouldHoldRender()) return false;
   limitTooltip.pending = true;
@@ -1952,7 +1936,6 @@ function sessionsExpiryDelayMs() {
 // would rebuild its children for nothing. Both are re-armed after every repaint, so a
 // shortened wait does not lower the period that follows it.
 function selfRepaintDelayMs() {
-  if (surface === 'bubble' && notchRenderer && state.payload?.visible === false) return 0;
   const expiry = sessionsExpiryDelayMs();
   const period = surface === 'bubble' || surface === 'notch' && notchRenderer.needsClock() ? BUBBLE_REPAINT_MS : 0;
   const waits = [period, expiry].filter((value) => value > 0);

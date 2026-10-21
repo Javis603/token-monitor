@@ -1,20 +1,20 @@
 'use strict';
 
-const { EDGE_DOCK_METRICS, rectContains } = require('../edgeDock/geometry');
+const { rectContains } = require('../edgeDock/geometry');
 const { bubbleCommands } = require('../renderer/edgeDock/shapes');
 
 // Logical points for a 179×32pt camera housing. The open panel is a wide, short
 // slab that hangs from the menu bar; the resting outline hugs the housing.
 const NOTCH_METRICS = Object.freeze({
-  openWidth: 345,
-  // Including the camera band. Taller content scrolls inside the panel.
-  openHeight: 175,
+  openWidth: 640,
+  // Including the camera band. The panel reports a fixed content height.
+  openHeight: 240,
   openRadius: 40.5,
   openFlare: 18,
-  restingRadius: 10,
-  restingFlare: 3,
+  restingRadius: 12,
+  restingFlare: 8,
   // Hover feedback without opening: the resting outline grows a little.
-  peekGrow: 7,
+  peekGrow: 10,
   peekDrop: 5,
   // Room for the open spring's overshoot, as a share of each axis' travel.
   overshoot: 0.12,
@@ -57,16 +57,15 @@ function notchGeometry(display, native, shape = 'auto') {
 }
 
 // Logical screen points, independent of content zoom or Retina pixel scale.
-// These are caps only: short cards keep their measured natural height.
-function notchMaxHeight(display, geometry, detail = false) {
+// Cap the panel without stretching its fixed content height.
+function notchMaxHeight(display, geometry) {
   const area = display.workArea || display.bounds;
   const top = Math.max(display.bounds.y, area.y);
   const bottom = Math.min(display.bounds.y + display.bounds.height, area.y + area.height);
   const usableHeight = Math.max(0, bottom - top);
-  const origin = detail ? Math.max(top, geometry.y + geometry.height) : geometry.y;
-  return Math.max(geometry.height, Math.min(detail ? 640 : 480,
-    Math.round(usableHeight * (detail ? 0.618 : 0.382)),
-    Math.floor(bottom - origin - (detail ? EDGE_DOCK_METRICS.screenMargin : 12))));
+  return Math.max(geometry.height, Math.min(480,
+    Math.round(usableHeight * 0.382),
+    Math.floor(bottom - geometry.y - 12)));
 }
 
 function notchBounds(display, geometry, expanded, contentHeight = 180, slots = { left: 17, right: 42 }, zoom = 1, maxWidth = display.bounds.width) {
@@ -101,25 +100,6 @@ function notchBounds(display, geometry, expanded, contentHeight = 180, slots = {
   return { x, y: Math.round(geometry.y), width, height };
 }
 
-// Measure notch clearance from right-hand status windows. Left-hand
-// app-menu titles have no verified permission-free geometry contract.
-function notchSummaryMaxWidth(display, geometry, windows, ownWindowIds = []) {
-  if (!geometry.notched || !Array.isArray(windows)) return null;
-  const gapRight = geometry.centerX + geometry.gapWidth / 2;
-  const screenRight = display.bounds.x + display.bounds.width;
-  let right = screenRight;
-  for (const rect of windows) {
-    if (ownWindowIds.includes(rect.id) || !['x', 'y', 'width', 'height'].every(key => Number.isFinite(rect[key]))
-      || rect.width <= 0 || rect.height <= 0) continue;
-    // Full vertical containment rejects tall status-level panels. Menu height
-    // can differ from the safe top by one physical point.
-    if (Math.abs(rect.y - geometry.y) > 1 || rect.y + rect.height > geometry.y + geometry.height + 1
-      || rect.x >= screenRight || rect.x + rect.width <= gapRight) continue;
-    right = Math.min(right, Math.max(gapRight, rect.x));
-  }
-  return Math.max(0, Math.floor(2 * (right - geometry.centerX - EDGE_DOCK_METRICS.screenMargin)));
-}
-
 // The hover outline: the resting shell grown outward and downward.
 function notchPeekBounds(closed) {
   return { x: closed.x - NOTCH_METRICS.peekGrow, y: closed.y, width: closed.width + 2 * NOTCH_METRICS.peekGrow,
@@ -136,13 +116,14 @@ function notchCanvasBounds(open, closed, zoom = 1) {
   return { x: left, y: open.y, width: Math.ceil(open.x + open.width + x) - left, height: open.height + y };
 }
 
-function notchCommands(width, height, notched, expanded, _notchHeight = 32, zoom = 1) {
+function notchCommands(width, height, notched, expanded, notchHeight = 32, zoom = 1) {
   if (!notched) return bubbleCommands({ width, height, tail: 0, tailY: 0, neck: 0, radius: expanded ? NOTCH_METRICS.openRadius * zoom : height / 2 });
   // One path topology at every endpoint, so each control point moves
   // continuously: concave flares into the menu bar, straight sides and round
   // lower corners. Endpoints past the open state extrapolate the same path.
-  const f = Math.max(0, Math.min(expanded ? NOTCH_METRICS.openFlare * zoom : NOTCH_METRICS.restingFlare, width / 4, height / 3));
-  const r = Math.max(0, Math.min(expanded ? NOTCH_METRICS.openRadius * zoom : NOTCH_METRICS.restingRadius, height - f, (width - 2 * f) / 2));
+  const hoverScale = notchHeight > 0 ? height / notchHeight : 1;
+  const f = Math.max(0, Math.min(expanded ? NOTCH_METRICS.openFlare * zoom : NOTCH_METRICS.restingFlare * hoverScale, width / 4, height / 3));
+  const r = Math.max(0, Math.min(expanded ? NOTCH_METRICS.openRadius * zoom : NOTCH_METRICS.restingRadius * hoverScale, height - f, (width - 2 * f) / 2));
   // Resting corners stay circular like the hardware notch; open corners use
   // longer handles, a continuous-curvature corner that eases out of the side.
   const k = expanded ? 0.32 : 0.448;
@@ -166,4 +147,4 @@ function translateCommands(commands, x, y = 0) {
 function interpolateCommands(from, to, progress) {
   return to.map(([op, ...points], index) => [op, ...points.map((value, i) => from[index][i + 1] + (value - from[index][i + 1]) * progress)]);
 }
-module.exports = { NOTCH_METRICS, notchPeekBounds, notchCanvasBounds, notchGeometry, notchMaxHeight, notchBounds, notchSummaryMaxWidth, notchCommands, translateCommands, interpolateCommands, rectContains };
+module.exports = { NOTCH_METRICS, notchPeekBounds, notchCanvasBounds, notchGeometry, notchMaxHeight, notchBounds, notchCommands, translateCommands, interpolateCommands, rectContains };

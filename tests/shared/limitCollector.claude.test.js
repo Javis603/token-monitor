@@ -18,6 +18,7 @@ function fakeSpawnForClaudeUsage(expectedCommand = 'cmd.exe') {
     assert.equal(options.shell, false);
     assert.equal(options.windowsVerbatimArguments, true);
     assert.equal(options.env.DISABLE_AUTOUPDATER, '1');
+    assert.equal(options.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY, '1');
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -819,10 +820,15 @@ test('Claude Web authentication failure does not silently fall back to another l
   assert.equal(spawned, false);
 });
 
-test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is unavailable', async () => {
+test('Claude limits fall back to direct CLI usage in the probe directory on Windows', async t => {
+  const fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-direct-probe-'));
+  t.after(() => fs.rm(fixtureDir, { recursive: true, force: true }));
+  const probeDir = path.join(fixtureDir, 'probe');
+  const spawnUsage = fakeSpawnForClaudeUsage();
+  let spawnedCwd;
   const provider = await fetchClaudeLimits({}, {
     platform: 'win32',
-    env: {},
+    env: { CLAUDE_CODE_SKIP_PROMPT_HISTORY: '0' },
     now: () => Date.parse('2026-06-11T00:00:00Z'),
     claudeCredentialPath: 'C:\\Users\\Javis\\.claude\\.credentials.json',
     stat: async () => ({ mtimeMs: 1 }),
@@ -839,9 +845,15 @@ test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is
     }),
     existsSync: () => false,
     isClaudeCliAuthenticated: async () => true,
-    spawn: fakeSpawnForClaudeUsage()
+    claudeProbeDir: probeDir,
+    spawn: (command, args, options) => {
+      spawnedCwd = options.cwd;
+      return spawnUsage(command, args, options);
+    }
   });
 
+  assert.equal(spawnedCwd, probeDir);
+  assert.equal((await fs.stat(probeDir)).isDirectory(), true);
   assert.equal(provider.provider, 'claude');
   assert.equal(provider.status, 'ok');
   assert.equal(provider.source, 'cli');
@@ -979,13 +991,14 @@ test('Claude PTY probing preserves the first executable Python failure', async (
   await assert.rejects(
     touchClaudeAuthPath({
       platform: 'darwin',
-      env: { TERM: 'dumb' },
+      env: { TERM: 'dumb', CLAUDE_CODE_SKIP_PROMPT_HISTORY: '0' },
       claudeProbeDir: probeDir,
       existsSync: () => false,
       spawn: (command, args, options) => {
         calls.push(command);
         assert.equal(options.env.TERM, 'xterm-256color');
         assert.equal(options.env.DISABLE_AUTOUPDATER, '1');
+        assert.equal(options.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY, '1');
         const script = args[1];
         assert.match(script, /matched_at = None/);
         assert.match(script, /matched_at is not None and now - matched_at >= 2/);
@@ -1018,10 +1031,11 @@ test('Claude PTY prompt matching handles overlapping tokens with one carriage re
   await assert.rejects(
     touchClaudeAuthPath({
       platform: 'darwin',
-      env: {},
+      env: { CLAUDE_CODE_SKIP_PROMPT_HISTORY: '0' },
       claudeProbeDir: probeDir,
       existsSync: () => false,
-      spawn: (_command, args) => {
+      spawn: (_command, args, options) => {
+        assert.equal(options.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY, '1');
         script = args[1];
         const child = new EventEmitter();
         child.stdout = new EventEmitter();
@@ -1044,6 +1058,40 @@ test('Claude PTY prompt matching handles overlapping tokens with one carriage re
   assert.equal(promptBlock.match(/write_master\(b"\\r"\)/g)?.length, 1);
 });
 
+test('Claude PTY usage probes suppress history without changing the parent environment', async (t) => {
+  const probeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'token-monitor-claude-history-'));
+  t.after(() => fs.rm(probeDir, { recursive: true, force: true }));
+  for (const platform of ['darwin', 'linux']) {
+    const env = { CLAUDE_CODE_SKIP_PROMPT_HISTORY: '0' };
+    const provider = await fetchClaudeLimits({}, {
+      platform,
+      env,
+      claudeProbeDir: probeDir,
+      stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
+      readMacKeychain: false,
+      isClaudeCliAuthenticated: async () => true,
+      existsSync: () => false,
+      spawn: (command, _args, options) => {
+        assert.equal(command, 'python3');
+        assert.equal(options.env.TOKEN_MONITOR_CLAUDE_SLASH_COMMAND, '/usage');
+        assert.equal(options.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY, '1');
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = () => {};
+        process.nextTick(() => {
+          child.stdout.emit('data', 'Current session\n95% left\nResets 6pm\nCurrent week\n80% left\nResets Jun 18');
+          child.emit('close', 0);
+        });
+        return child;
+      }
+    });
+    assert.equal(provider.source, 'cli');
+    assert.equal(provider.windows[0].usedPercent, 5);
+    assert.equal(env.CLAUDE_CODE_SKIP_PROMPT_HISTORY, '0');
+  }
+});
+
 test('Claude CLI commands execute from a Windows path containing spaces', {
   skip: process.platform !== 'win32'
 }, async (t) => {
@@ -1052,6 +1100,7 @@ test('Claude CLI commands execute from a Windows path containing spaces', {
   t.after(() => fs.rm(fixtureDir, { recursive: true, force: true }));
   await fs.writeFile(command, [
     '@echo off',
+    'if not "%CLAUDE_CODE_SKIP_PROMPT_HISTORY%"=="1" exit /b 2',
     'if /I "%~1"=="auth" goto auth',
     'if /I "%~1"=="/usage" goto usage',
     'exit /b 1',

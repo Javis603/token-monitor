@@ -431,6 +431,7 @@ const CC_MODEL_BLACKLIST = new Set([
 
 function poolForModel(label, modelId) {
   const lc = `${label || ''} ${modelId || ''}`.toLowerCase();
+  if (lc.includes('argon')) return 'Gemini 4 Argon';
   if (lc.includes('gemini') && lc.includes('pro')) return 'Gemini Pro';
   if (lc.includes('gemini') && lc.includes('flash')) return 'Gemini Flash';
   return 'Claude';
@@ -458,7 +459,7 @@ function quotaRemainingFraction(bucket) {
 function quotaGroupName(displayName) {
   const name = String(displayName || '').trim();
   const lower = name.toLowerCase();
-  if (lower.includes('gemini')) return 'Gemini';
+  if (/^gemini(?:\s+models)?$/.test(lower)) return 'Gemini';
   if (lower.includes('claude') || lower.includes('gpt')) return 'Claude/GPT';
   return name || 'Quota';
 }
@@ -500,7 +501,13 @@ function quotaSummaryWindows(payload) {
       });
     }
   }
-  const groupRank = (name) => name.startsWith('Gemini ') ? 0 : name.startsWith('Claude/GPT ') ? 1 : 2;
+  const groupRank = (name) => {
+    const lower = name.toLowerCase();
+    if (lower.includes('argon')) return 1;
+    if (lower.startsWith('gemini ')) return 0;
+    if (lower.startsWith('claude/gpt ')) return 2;
+    return 3;
+  };
   const kindRank = (kind) => kind === 'session' ? 0 : 1;
   return windows.sort((a, b) => groupRank(a.name) - groupRank(b.name) || kindRank(a.kind) - kindRank(b.kind));
 }
@@ -528,14 +535,16 @@ function collapsePools(models) {
   for (const m of models) {
     const name = poolForModel(m.label, m.modelId);
     const existing = pools.get(name);
-    if (!existing || m.remainingFraction < existing.remainingFraction) {
+    const mFinite = typeof m.remainingFraction === 'number' && Number.isFinite(m.remainingFraction);
+    const existingFinite = typeof existing?.remainingFraction === 'number' && Number.isFinite(existing.remainingFraction);
+    if (!existing || (mFinite && (!existingFinite || m.remainingFraction < existing.remainingFraction))) {
       pools.set(name, { name, remainingFraction: m.remainingFraction, resetTime: m.resetTime });
     } else if (m.remainingFraction === existing.remainingFraction && m.resetTime && existing.resetTime && m.resetTime < existing.resetTime) {
       // tie-break: earlier reset wins
       pools.set(name, { name, remainingFraction: m.remainingFraction, resetTime: m.resetTime });
     }
   }
-  const order = ['Gemini Pro', 'Gemini Flash', 'Claude'];
+  const order = ['Gemini Pro', 'Gemini Flash', 'Claude', 'Gemini 4 Argon'];
   return order.flatMap((name) => (pools.has(name) ? [pools.get(name)] : []));
 }
 

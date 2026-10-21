@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const test = require('node:test');
+const { notchSummaryMode } = require('../../src/electron/notch/data');
 
 const rendererDir = path.join(__dirname, '../../src/electron/renderer');
 const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
@@ -12,10 +13,12 @@ const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
 function controls(platform, enabled) {
   const node = () => ({ checked: false, hidden: false, classList: { toggle(_key, hidden) { this.hidden = hidden; } } });
   const els = { edgeDockInput: node(), experimentalFeaturesGroup: node(), notchFeature: node(), notchOptions: node(), notchInput: node(),
+    notchWarnColorsInput: node(), edgeDockWarnColorsInput: node(),
     notchShapeInputs: [], edgeDockModeInputs: [], edgeDockSideInputs: [] };
   const state = { appInfo: { platform }, settings: { notchEnabled: enabled } };
   const patches = [];
   const context = { els, state, edgeDockAvailable: () => platform !== 'linux',
+    t: key => key,
     syncDockSizeControls() {}, syncNotchStyleInput() {}, syncNotchCapabilities() {}, syncNotchHoverControls() {},
     saveSettings: patch => patches.push(JSON.parse(JSON.stringify(patch))), refreshTrayComposers() {}, notchItemsComposer: null, edgeDockComposer: null };
   const source = app.slice(app.indexOf('function syncDockControls()'), app.indexOf('function createDockItemsComposer('));
@@ -64,4 +67,67 @@ test('the Advanced switch uses the existing preference and immediately shows or 
     assert.equal(f.els.notchOptions.classList.hidden, !enabled);
     assert.deepEqual(f.patches.at(-1), { notchEnabled: enabled });
   }
+});
+
+test('Notch warning colour control defaults off and saves independently of the side dock', () => {
+  const f = controls('darwin', true);
+  f.state.settings.edgeDockWarnColors = true;
+  f.syncDockControls();
+  assert.equal(f.els.notchWarnColorsInput.checked, false);
+  assert.equal(f.els.edgeDockWarnColorsInput.checked, true);
+  let change;
+  f.els.notchWarnColorsInput.addEventListener = (_event, handler) => { change = handler; };
+  const start = app.indexOf("els.notchWarnColorsInput?.addEventListener('change'");
+  vm.runInNewContext(app.slice(start, app.indexOf('els.notchHideSummaryInFullScreenInput?', start)), f);
+  for (const enabled of [true, false]) {
+    f.els.notchWarnColorsInput.checked = enabled; change();
+    assert.deepEqual(f.patches.at(-1), { notchWarnColors: enabled });
+    Object.assign(f.state.settings, f.patches.at(-1));
+    f.els.notchWarnColorsInput.checked = !enabled;
+    f.syncDockControls();
+    assert.equal(f.els.notchWarnColorsInput.checked, enabled, 'a settings push restores the saved value');
+    assert.equal(f.els.edgeDockWarnColorsInput.checked, true);
+  }
+});
+
+test('collapsed content choices save sessions-only mode and describe only the selected behaviour', () => {
+  const f = controls('darwin', true);
+  let change;
+  f.els.notchSummaryModeInput = { value: '', addEventListener: (_event, handler) => { change = handler; } };
+  f.els.notchSummaryModeNote = { dataset: {} };
+  const start = app.indexOf("els.notchSummaryModeInput?.addEventListener('change'");
+  vm.runInNewContext(app.slice(start, app.indexOf('els.edgeDockInput?', start)), f);
+  for (const mode of ['sessions', 'tray', 'custom', 'auto']) {
+    f.els.notchSummaryModeInput.value = mode;
+    change();
+    assert.deepEqual(f.patches.at(-1), { notchSummaryMode: mode });
+    f.syncDockControls();
+    const key = mode === 'auto' ? 'settings.notch.summaryModeNote' : `settings.notch.summaryMode.${mode}Note`;
+    assert.equal(f.els.notchSummaryModeNote.dataset.i18n, key);
+    assert.equal(f.els.notchSummaryModeNote.textContent, key);
+  }
+});
+
+test('sessions is the default in settings loading, patching and the collapsed-content control', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '../main.js'), 'utf8');
+  const defaults = main.slice(main.indexOf('function defaultSettings()'), main.indexOf('function readSettings()'));
+  assert.match(defaults, /notchSummaryMode: 'sessions'/);
+  const readStart = main.indexOf('    merged.notchSummaryMode =');
+  const read = main.slice(readStart, main.indexOf('    merged.notchSummaryEnabled =', readStart));
+  const patchStart = main.indexOf('      notchSummaryMode:', main.indexOf('function applySettingsPatch('));
+  const patchSource = main.slice(patchStart, main.indexOf('      notchSummaryEnabled:', patchStart));
+  for (const saved of [{}, { notchFollowTray: false }, { notchFollowTray: true },
+    { notchSummaryMode: 'unknown' }, ...['auto', 'sessions', 'tray', 'custom'].map(notchSummaryMode => ({ notchSummaryMode }))]) {
+    const expected = ['auto', 'sessions', 'tray', 'custom'].includes(saved.notchSummaryMode) ? saved.notchSummaryMode : 'sessions';
+    const context = { merged: { notchSummaryMode: 'sessions', ...saved }, notchSummaryMode };
+    vm.runInNewContext(read, context);
+    assert.equal(context.merged.notchSummaryMode, expected);
+    const next = vm.runInNewContext(`({${patchSource}})`, { settings: context.merged,
+      patch: { notchFollowTray: false }, notchSummaryMode });
+    assert.equal(next.notchSummaryMode, expected, 'an old flag does not rewrite the current choice');
+  }
+  const f = controls('darwin', true);
+  f.els.notchSummaryModeInput = { value: '' };
+  f.syncDockControls();
+  assert.equal(f.els.notchSummaryModeInput.value, 'sessions');
 });

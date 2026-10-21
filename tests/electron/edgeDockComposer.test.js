@@ -356,17 +356,19 @@ test('independent Notch composer writes its item key without changing the side c
   const previous = global.document;
   global.document = { createElement: (tag) => new Element(tag), activeElement: null };
   try {
-    const settings = { edgeDockRefreshEnabled: true, edgeDockItems: [{ type: 'stat', metric: 'today' }], notchItems: [{ type: 'limit', provider: 'claude' }] };
+    const settings = { edgeDockRefreshEnabled: true, edgeDockItems: [{ type: 'stat', metric: 'today' }], notchItems: [{ type: 'limit', provider: 'codex' }] };
     const root = new Element('div');
     let saved;
     const composer = createEdgeDockComposer({ root, itemsApi, itemsKey: 'notchItems', t: (key) => key, presentationApi: {}, getSettings: () => settings, getStats: () => ({}), save: (patch) => { saved = patch;Object.assign(settings, patch); }, providerLabel: (id) => id, providerColor: () => '#fff', windowLabel: () => '', hasProviderMark: () => false, maskEmail: (s) => s, createRowDrag: () => ({ deferRender: () => false }) });
     const descendants = (node) => [node, ...node.children.flatMap(descendants)];
     composer.render();
-    descendants(root).find((n) => n.dataset.itemId === 'limit:claude').listeners.click();
+    descendants(root).find((n) => n.dataset.itemId === 'limit:codex').listeners.click();
     const control = descendants(root).find((n) => n.tagName === 'INPUT');
-    control.checked = false;control.listeners.change();
+    control.checked = true;control.listeners.change();
     assert.deepEqual(Object.keys(saved), ['notchItems']);
-    assert.equal(settings.notchItems[0].showUsage, false);
+    assert.equal(settings.notchItems[0].accountMode, 'active');
+    assert.equal(descendants(root).some((n) => n.textContent === 'settings.edgeDock.showUsage'), false);
+    assert.equal(descendants(root).some((n) => n.textContent === 'settings.edgeDock.showSessions'), false);
     assert.equal(settings.edgeDockItems[0].metric, 'today');
     composer.render();
     assert.equal(descendants(root).some((n) => n.dataset.itemId === 'action:refresh'), false);

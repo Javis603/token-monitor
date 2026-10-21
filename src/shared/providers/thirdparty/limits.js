@@ -5,6 +5,7 @@ const { hashKey } = require('../../hashKey');
 const { normalizeLimitProvider } = require('../../limits/core');
 const { statusForHttp } = require('../../limits/providerHelpers');
 const { normalizeNamedProfileName } = require('../../namedProfile');
+const { runWithProbeDeadline } = require('../../probeDeadline');
 
 const DEFAULT_QUOTA_PER_UNIT = 500_000;
 const THIRD_PARTY_PROVIDER_ID = 'thirdparty';
@@ -21,6 +22,8 @@ const THIRD_PARTY_ADAPTER_IDS = Object.freeze([
 ]);
 const NEWAPI_STATUS_PATH = '/api/status';
 const NEWAPI_ACCOUNT_PATH = '/api/user/self';
+const NEWAPI_DATA_PATH = '/api/data/self';
+const NEWAPI_ENRICHMENT_DEADLINE_MS = 3000;
 const NEWAPI_TOKEN_USAGE_PATH = '/api/usage/token/';
 const SUB2API_ME_PATH = '/api/v1/auth/me';
 const SUB2API_REFRESH_PATH = '/api/v1/auth/refresh';
@@ -205,6 +208,52 @@ function quotaAmount(value, unit) {
   return number === null ? null : Math.max(0, number) / unit;
 }
 
+// New API stores UTC-hour buckets and filters their timestamps, even with
+// default_time=day. A local midnight inside a bucket cannot be reconstructed:
+// rounding down would include the previous day, while rounding up loses spend.
+function newapiUsagePath(startMs, endMs) {
+  const start = Math.floor(startMs / 1000);
+  const end = Math.max(start, Math.floor(endMs / 1000));
+  return `${NEWAPI_DATA_PATH}?start_timestamp=${start}&end_timestamp=${end}&default_time=day`;
+}
+
+function startOfLocalDay(nowMs) {
+  const date = new Date(nowMs);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+// A rolling week (today plus the six days before it), matching the window the
+// DeepSeek and Z.ai buffers report, so the Spend tooltip reads the same in
+// every balance provider.
+function startOfLocalWeek(nowMs) {
+  const date = new Date(nowMs);
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - 6);
+  return date.getTime();
+}
+
+function startOfLocalMonth(nowMs) {
+  const date = new Date(nowMs);
+  return new Date(date.getFullYear(), date.getMonth(), 1).getTime();
+}
+
+// An empty `data` array is a real answer ("nothing billed in this range") and
+// becomes 0, while a missing or malformed payload stays null so the Spend row
+// falls back to all-time spend on forks without the dashboard endpoint.
+function newapiUsageSpend(payload, unit) {
+  const rows = responseData(payload);
+  if (!Array.isArray(rows)) return null;
+  let quota = 0;
+  for (const row of rows) {
+    const value = finiteNumber(row?.quota);
+    if (value === null || value < 0) return null;
+    quota += value;
+    if (!Number.isFinite(quota)) return null;
+  }
+  const spend = quota / unit;
+  return Number.isFinite(spend) ? spend : null;
+}
+
 function unixTimestampIso(value) {
   const seconds = finiteNumber(value);
   if (seconds === null || seconds <= 0) return null;
@@ -276,10 +325,10 @@ function quotaResult({
   };
 }
 
-function newapiAccountQuota(accountData, unit) {
+function newapiAccountQuota(accountData, unit, enrichmentPayloads) {
   const rawQuota = finiteNumber(accountData?.quota);
   const unlimited = accountData?.unlimited_quota === true || rawQuota === -1;
-  return quotaResult({
+  const quota = quotaResult({
     label: 'Balance',
     remaining: unlimited ? null : quotaAmount(rawQuota, unit),
     used: quotaAmount(accountData?.used_quota, unit),
@@ -287,6 +336,15 @@ function newapiAccountQuota(accountData, unit) {
     requestCount: accountData?.request_count,
     quotaGroup: accountData?.group
   });
+  if (quota) {
+    const todaySpend = newapiUsageSpend(enrichmentPayloads?.today, unit);
+    const weekSpend = newapiUsageSpend(enrichmentPayloads?.week, unit);
+    const monthSpend = newapiUsageSpend(enrichmentPayloads?.month, unit);
+    if (todaySpend !== null) quota.balance.todaySpend = todaySpend;
+    if (weekSpend !== null) quota.balance.weekSpend = weekSpend;
+    if (monthSpend !== null) quota.balance.monthSpend = monthSpend;
+  }
+  return quota;
 }
 
 function newapiTokenQuota(tokenData, unit) {
@@ -393,12 +451,34 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
     statusRequest() {
       return { path: NEWAPI_STATUS_PATH, headers: {} };
     },
+    // The dashboard endpoint is New API's own billing aggregation, so the
+    // Today/Week/Month figures are the instance's numbers rather than a local
+    // balance delta. Forks without it fail here and the collector simply
+    // drops the enrichment, leaving the all-time spend the account row
+    // already had.
+    enrichmentRequests(account, deps) {
+      const nowMs = (deps.now || Date.now)();
+      const headers = {
+        Authorization: `Bearer ${account.accessToken}`,
+        ...(account.userId ? { 'New-Api-User': account.userId } : {})
+      };
+      return Object.fromEntries([
+        ['today', startOfLocalDay(nowMs)],
+        ['week', startOfLocalWeek(nowMs)],
+        ['month', startOfLocalMonth(nowMs)]
+      ].filter(([, startMs]) => startMs % 3_600_000 === 0)
+        .map(([key, startMs]) => [key, { path: newapiUsagePath(startMs, nowMs), headers }]));
+    },
+    enrichmentDeadlineMs: NEWAPI_ENRICHMENT_DEADLINE_MS,
     unit(statusPayload) {
       return quotaPerUnit(statusPayload);
     },
-    quota(payload, unit) {
+    quota(payload, unit, _account, statusPayload, enrichmentPayloads) {
       const data = responseData(payload);
-      return data ? newapiAccountQuota(data, unit) : null;
+      // Disabled exports leave the endpoint readable but its rows may be empty
+      // or stale. Only an explicit false disables spend on compatible forks.
+      const usage = responseData(statusPayload)?.enable_data_export === false ? null : enrichmentPayloads;
+      return data ? newapiAccountQuota(data, unit, usage) : null;
     },
     planLabel() {
       return 'Account';
@@ -667,11 +747,20 @@ async function fetchOptionalEnrichments(account, adapter, deps) {
   const requests = Object.entries(adapter.enrichmentRequests?.(account, deps) || {});
   const results = await Promise.all(requests.map(async ([key, request]) => {
     try {
-      const value = await requestJson(
+      const fetchValue = (requestDeps) => requestJson(
         endpoint(account.baseUrl, request.path),
         { headers: request.headers },
-        deps
+        requestDeps
       );
+      // Bound the JSON body as well as fetch, including transports that ignore
+      // abort. Each optional result settles independently so a slow period
+      // cannot discard a successful balance or another completed period.
+      const value = adapter.enrichmentDeadlineMs
+        ? await runWithProbeDeadline(
+          ({ signal }) => fetchValue({ ...deps, signal }),
+          { deadlineMs: adapter.enrichmentDeadlineMs, signal: deps.signal }
+        )
+        : await fetchValue(deps);
       return [key, value];
     } catch (_) {
       return null;
@@ -910,6 +999,7 @@ module.exports = {
   DEFAULT_CUSTOM_ENDPOINT_PATH,
   NEWAPI_ACCOUNT_ADAPTER,
   NEWAPI_ACCOUNT_PATH,
+  NEWAPI_DATA_PATH,
   NEWAPI_STATUS_PATH,
   NEWAPI_TOKEN_ADAPTER,
   NEWAPI_TOKEN_USAGE_PATH,
