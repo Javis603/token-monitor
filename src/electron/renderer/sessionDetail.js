@@ -106,6 +106,14 @@
         turns: turnRows(ex.turns) // usage entries stay chronological; summaries do not consume reply numbers
       };
     });
+    // Personal patch: the three costliest exchanges in the session get a medal,
+    // independent of the display order chosen below.
+    const ranked = rows
+      .map((row, index) => ({ index, cost: row.cost }))
+      .filter((row) => row.cost > 0)
+      .sort((a, b) => b.cost - a.cost)
+      .slice(0, 3);
+    for (const [rank, row] of ranked.entries()) rows[row.index].rank = rank;
     if (sortBy === 'tokens') rows.sort((a, b) => b.value - a.value || b.startTime - a.startTime);
     else rows.sort((a, b) => b.startTime - a.startTime || b.value - a.value);
     return rows;

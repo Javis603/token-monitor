@@ -538,6 +538,26 @@ test('exchangeRows medals the three costliest turns inside each exchange', () =>
   assert.deepEqual(rows[0].turns.map((turn) => turn.rank), [0]);
 });
 
+test('exchangeRows medals the three costliest exchanges across the session', () => {
+  const exchange = (promptPreview, cost, second) => ({
+    promptPreview,
+    startedAt: `2026-05-30T06:00:0${second}.000Z`,
+    tools: [],
+    tokens: { total: 100 },
+    costEstimate: cost,
+    turns: [{ tokens: { total: 100 }, costEstimate: cost }]
+  });
+  const rows = exchangeRows({ exchanges: [
+    exchange('a', 0.5, 1),
+    exchange('b', 0.1, 2),
+    exchange('c', 0.3, 3),
+    exchange('d', 0, 4)
+  ] }, { now: new Date(2026, 4, 30, 12, 0) });
+
+  const byTitle = Object.fromEntries(rows.map((row) => [row.title, row.rank]));
+  assert.deepEqual(byTitle, { a: 0, b: 2, c: 1, d: undefined });
+});
+
 test('exchangeRows labels compaction usage without consuming a reply number', () => {
   const rows = exchangeRows({
     exchanges: [{

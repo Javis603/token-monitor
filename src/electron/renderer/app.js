@@ -5500,7 +5500,11 @@ function exchangeNode(row, max, expanded = false) {
   limitWindowsView.setDetailTooltip(exValue, tokensAvailable
     ? sessionRowsApi.tokenBreakdownEntries(row.tokens, { total: row.value })
     : null);
-  wrap.querySelector('.detail-ex-cost').textContent = tokensAvailable ? formatCost(row.cost, row.unpricedTokens) : '';
+  const exchangeMedals = ['🥇', '🥈', '🥉'];
+  const exchangeMedal = row.rank === undefined ? '' : exchangeMedals[row.rank];
+  wrap.querySelector('.detail-ex-cost').textContent = tokensAvailable
+    ? `${exchangeMedal ? `${exchangeMedal} ` : ''}${formatCost(row.cost, row.unpricedTokens)}`
+    : '';
   applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
 
   const turnsEl = wrap.querySelector('.detail-turns');
