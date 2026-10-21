@@ -35,13 +35,14 @@
     return Array.from(new Set((tools || []).filter(Boolean))).join(' · ');
   }
 
-  function turnRow(turn, index, replyIndex) {
+  function turnRow(turn, index, replyIndex, rank) {
     return {
       key: `turn:${index}`,
       label: Object.hasOwn(nonReplyLabels, turn.type) ? nonReplyLabels[turn.type] : `Reply #${replyIndex + 1}`,
       value: finiteNumber(turn.tokens && turn.tokens.total),
       tokensAvailable: turn.tokensAvailable !== false,
       cost: finiteNumber(turn.costEstimate),
+      ...(rank === undefined ? {} : { rank }),
       ...(turn.unpricedTokens > 0 ? { unpricedTokens: finiteNumber(turn.unpricedTokens) } : {}),
       tokens: turn.tokens || {},
       tools: formatToolList(turn.tools)
@@ -49,9 +50,17 @@
   }
 
   function turnRows(turns) {
+    // Personal patch: medal the three costliest turns inside this exchange so
+    // the expensive ones stand out without re-sorting the chronological list.
+    const ranked = (turns || [])
+      .map((turn, index) => ({ index, cost: finiteNumber(turn.costEstimate) }))
+      .filter((turn) => turn.cost > 0)
+      .sort((a, b) => b.cost - a.cost)
+      .slice(0, 3);
+    const ranks = new Map(ranked.map((turn, rank) => [turn.index, rank]));
     let replyIndex = 0;
     return (turns || []).map((turn, index) => {
-      const row = turnRow(turn, index, replyIndex);
+      const row = turnRow(turn, index, replyIndex, ranks.get(index));
       if (!Object.hasOwn(nonReplyLabels, turn.type)) replyIndex += 1;
       return row;
     });

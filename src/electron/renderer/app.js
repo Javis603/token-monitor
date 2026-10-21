@@ -5525,6 +5525,8 @@ function turnNode(turn) {
   const el = document.createElement('div');
   el.className = 'detail-turn';
   el.dataset.key = turn.key;
+  const medals = ['🥇', '🥈', '🥉'];
+  const medal = turn.rank === undefined ? '' : medals[turn.rank];
   const tk = turn.tokens || {};
   // "cache" folds cache reads + cache writes (Claude's cache_creation) into one bucket so the
   // in/out/cache breakdown sums to the turn total; reason is an informational subset of out.
@@ -5542,7 +5544,9 @@ function turnNode(turn) {
   el.querySelector('.detail-turn-value').textContent = tokensAvailable
     ? formatNumber(turn.value)
     : (t('detailTokenUnavailable') || 'Unavailable');
-  el.querySelector('.detail-turn-cost').textContent = tokensAvailable ? formatCost(turn.cost, turn.unpricedTokens) : '';
+  el.querySelector('.detail-turn-cost').textContent = tokensAvailable
+    ? `${medal ? `${medal} ` : ''}${formatCost(turn.cost, turn.unpricedTokens)}`
+    : '';
   return el;
 }
 

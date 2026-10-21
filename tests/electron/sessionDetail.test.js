@@ -509,6 +509,35 @@ test('exchangeRows sorts by tokens when sortBy=tokens', () => {
   assert.equal(rows[1].value, 20);
 });
 
+test('exchangeRows medals the three costliest turns inside each exchange', () => {
+  const rows = exchangeRows({
+    exchanges: [
+      {
+        promptPreview: 'first',
+        startedAt: '2026-05-30T06:00:01.000Z',
+        tools: [],
+        tokens: { total: 400 },
+        turns: [
+          { tokens: { total: 100 }, costEstimate: 0.01 },
+          { tokens: { total: 100 }, costEstimate: 0.3 },
+          { tokens: { total: 100 }, costEstimate: 0.02 },
+          { tokens: { total: 100 }, costEstimate: 0.2 }
+        ]
+      },
+      {
+        promptPreview: 'second',
+        startedAt: '2026-05-30T06:00:02.000Z',
+        tools: [],
+        tokens: { total: 100 },
+        turns: [{ tokens: { total: 100 }, costEstimate: 0.5 }]
+      }
+    ]
+  }, { now: new Date(2026, 4, 30, 12, 0) });
+
+  assert.deepEqual(rows[1].turns.map((turn) => turn.rank), [undefined, 0, 2, 1]);
+  assert.deepEqual(rows[0].turns.map((turn) => turn.rank), [0]);
+});
+
 test('exchangeRows labels compaction usage without consuming a reply number', () => {
   const rows = exchangeRows({
     exchanges: [{
