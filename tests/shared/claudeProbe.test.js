@@ -7,6 +7,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { createRequire } = require('node:module');
+const vm = require('node:vm');
 const { sharedDataDir, writeJsonAtomic } = require('../../src/shared/config');
 const { claudeProbeDir, prepareClaudeProbeDir, isClaudeProbeCwd } = require('../../src/shared/providers/claude/probe');
 const { fetchClaudeLimits, touchClaudeAuthPath } = require('../../src/shared/providers/claude/limits');
@@ -29,6 +31,57 @@ function fakeChild(output = 'Account: fixture', code = 0) {
   process.nextTick(() => { child.stdout.emit('data', output); child.emit('close', code); });
   return child;
 }
+
+function windowsProbeModule(env, execFile) {
+  const filename = require.resolve('../../src/shared/providers/claude/probe');
+  const localRequire = createRequire(filename);
+  const module = { exports: {} };
+  vm.runInNewContext(fs.readFileSync(filename, 'utf8'), {
+    module, Buffer, process: { platform: 'win32', env },
+    require: id => id === 'node:child_process' ? { execFile } : localRequire(id)
+  }, { filename });
+  return module.exports;
+}
+
+test('Windows ACL subprocess rebuilds module paths without changing the caller environment', async t => {
+  const f = fixture(t);
+  const dir = path.join(f.root, 'probe');
+  const env = { PSModulePath: 'incompatible PS7 modules', pSmOdUlEpAtH: 'mixed-case modules',
+    PATH: 'fixture path', TOKEN_MONITOR_PRIVATE_PROBE_DIR: 'caller value' };
+  const original = { ...env };
+  let calls = 0;
+  const api = windowsProbeModule(env, (command, args, options, callback) => {
+    calls++;
+    assert.equal(command, 'powershell.exe');
+    assert.equal(args[0], '-NoLogo');
+    assert.equal(options.env.PATH, env.PATH);
+    assert.equal(options.env.TOKEN_MONITOR_PRIVATE_PROBE_DIR, dir);
+    // Models the documented pwsh -> Node -> powershell.exe autoload failure.
+    if (Object.keys(options.env).some(key => key.toLowerCase() === 'psmodulepath')) {
+      callback(new Error('incompatible inherited module path'));
+      return;
+    }
+    fs.mkdirSync(dir, { mode: 0o700 });
+    callback(null, '', '');
+  });
+  assert.equal((await api.prepareClaudeProbeDir({ claudeProbeDir: dir })).dir, dir);
+  assert.equal(calls, 1);
+  assert.deepEqual(env, original);
+});
+
+test('Windows ACL failure retains the underlying diagnostics without serializing them publicly', async t => {
+  const f = fixture(t);
+  const failure = Object.assign(new Error('PowerShell fixture failure'), { code: 1, stderr: 'module autoload failed' });
+  const api = windowsProbeModule({}, (_command, _args, _options, callback) => callback(failure));
+  await assert.rejects(api.prepareClaudeProbeDir({ claudeProbeDir: path.join(f.root, 'probe') }), error => {
+    assert.equal(error.status, 'unavailable');
+    assert.match(error.message, /not private/);
+    assert.equal(error.cause, failure);
+    assert.equal(error.cause.stderr, 'module autoload failed');
+    assert.deepEqual(JSON.parse(JSON.stringify(error)), { status: 'unavailable' });
+    return true;
+  });
+});
 
 test('probe cwd uses private app data and retains legacy and canonical alias filtering', async t => {
   const f = fixture(t);
@@ -287,6 +340,31 @@ print('Yes, I trust this folder', flush=True)
   }), /changed before launch/);
   assert.equal(fs.existsSync(receipt), false);
   assert.equal(fs.existsSync(imported), false);
+});
+
+test('Windows ACL preparation ignores inherited incompatible PowerShell modules', { skip: process.platform !== 'win32' }, async t => {
+  const f = fixture(t);
+  const modules = path.join(f.root, 'modules');
+  const receipt = path.join(f.root, 'module-imported');
+  for (const [name, command] of [['Utility', 'New-Object'], ['Management', 'Get-Item'], ['Security', 'Get-Acl']]) {
+    const moduleName = `Microsoft.PowerShell.${name}`;
+    const dir = path.join(modules, moduleName);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${moduleName}.psd1`),
+      `@{ RootModule = '${moduleName}.psm1'; ModuleVersion = '99.0'; FunctionsToExport = @('${command}') }`);
+    fs.writeFileSync(path.join(dir, `${moduleName}.psm1`),
+      `[IO.File]::WriteAllText('${receipt.replace(/'/g, "''")}', 'imported'); throw 'fixture incompatible module'`);
+  }
+  const original = process.env.PSModulePath;
+  t.after(() => {
+    if (original === undefined) delete process.env.PSModulePath;
+    else process.env.PSModulePath = original;
+  });
+  process.env.PSModulePath = modules;
+  const { dir } = await prepareClaudeProbeDir({ claudeProbeDir: path.join(f.root, 'probe') });
+  assert.equal(fs.statSync(dir).isDirectory(), true);
+  assert.equal(fs.existsSync(receipt), false);
+  assert.equal(process.env.PSModulePath, modules);
 });
 
 test('Windows checks the leaf DACL and permits redirected parents without following a linked leaf', { skip: process.platform !== 'win32' }, async t => {

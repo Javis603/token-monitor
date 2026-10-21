@@ -989,8 +989,9 @@ test('Claude auth status uses cmd.exe without shell mode on Windows', async () =
 });
 
 test('Claude PTY probing preserves the first executable Python failure', async (t) => {
-  const probeDir = await fs.mkdtemp(path.join(probeTempRoot, 'token-monitor-claude-python-'));
-  t.after(() => fs.rm(probeDir, { recursive: true, force: true }));
+  const fixtureDir = await fs.mkdtemp(path.join(probeTempRoot, 'token-monitor-claude-python-'));
+  t.after(() => fs.rm(fixtureDir, { recursive: true, force: true }));
+  const probeDir = path.join(fixtureDir, 'probe');
   const calls = [];
 
   await assert.rejects(
@@ -1030,8 +1031,9 @@ test('Claude PTY probing preserves the first executable Python failure', async (
 });
 
 test('Claude PTY prompt matching handles overlapping tokens with one carriage return', async (t) => {
-  const probeDir = await fs.mkdtemp(path.join(probeTempRoot, 'token-monitor-claude-prompt-'));
-  t.after(() => fs.rm(probeDir, { recursive: true, force: true }));
+  const fixtureDir = await fs.mkdtemp(path.join(probeTempRoot, 'token-monitor-claude-prompt-'));
+  t.after(() => fs.rm(fixtureDir, { recursive: true, force: true }));
+  const probeDir = path.join(fixtureDir, 'probe');
   let script = '';
 
   await assert.rejects(
@@ -1066,8 +1068,9 @@ test('Claude PTY prompt matching handles overlapping tokens with one carriage re
 });
 
 test('Claude PTY usage probes suppress history without changing the parent environment', async (t) => {
-  const probeDir = await fs.mkdtemp(path.join(probeTempRoot, 'token-monitor-claude-history-'));
-  t.after(() => fs.rm(probeDir, { recursive: true, force: true }));
+  const fixtureDir = await fs.mkdtemp(path.join(probeTempRoot, 'token-monitor-claude-history-'));
+  t.after(() => fs.rm(fixtureDir, { recursive: true, force: true }));
+  const probeDir = path.join(fixtureDir, 'probe');
   for (const platform of ['darwin', 'linux']) {
     const env = { CLAUDE_CODE_SKIP_PROMPT_HISTORY: '0' };
     const provider = await fetchClaudeLimits({}, {

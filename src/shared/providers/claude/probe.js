@@ -21,8 +21,8 @@ function claudeProbeDir(deps = {}) {
   return deps.claudeProbeDir || path.join(sharedDataDir(deps), 'claude-probe');
 }
 
-function unsafeProbeDir() {
-  const error = new Error('Claude probe directory is not private; it must be owned and not a link');
+function unsafeProbeDir(cause) {
+  const error = new Error('Claude probe directory is not private; it must be owned and not a link', { cause });
   error.status = 'unavailable';
   return error;
 }
@@ -59,8 +59,14 @@ foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.Security
   if ($rule.AccessControlType -eq 'Allow' -and !($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -and $trusted -notcontains $rule.IdentityReference.Value) { throw 'Shared probe directory' }
 }
 `;
+  // pwsh 7 -> Node -> Windows PowerShell bypasses pwsh's module-path cleanup.
+  // Let 5.1 rebuild its own paths instead of autoloading incompatible PS7 modules.
+  const env = { ...process.env, TOKEN_MONITOR_PRIVATE_PROBE_DIR: dir };
+  for (const key of Object.keys(env)) {
+    if (key.toLowerCase() === 'psmodulepath') delete env[key];
+  }
   await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
-    env: { ...process.env, TOKEN_MONITOR_PRIVATE_PROBE_DIR: dir }, windowsHide: true, timeout: 10000
+    env, windowsHide: true, timeout: 10000
   });
 }
 
@@ -94,7 +100,7 @@ async function prepareClaudeProbeDir(deps = {}) {
     // Capture identity with the privacy check, before any subsequent await or
     // caller stat. The PTY reopens without following links and compares it.
     return { dir, identity: { dev: String(stat.dev), ino: String(stat.ino) } };
-  } catch (_) { throw unsafeProbeDir(); }
+  } catch (error) { throw unsafeProbeDir(error); }
 }
 
 function canonicalPath(dir) {
