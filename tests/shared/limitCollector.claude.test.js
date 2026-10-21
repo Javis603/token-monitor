@@ -10,6 +10,7 @@ const test = require('node:test');
 const { aggregateLimits } = require('../../src/shared/limits/core');
 const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider, normalizeClaudeWebCookieInput } = require('../../src/shared/limits/collector');
 const { listClaudeWebOrganizations, runClaudeAuthStatus, touchClaudeAuthPath } = require('../../src/shared/providers/claude/limits');
+const { claudeProbeDir } = require('../../src/shared/providers/claude/probe');
 const probeTempRoot = process.platform === 'win32' ? os.homedir() : os.tmpdir();
 
 function fakeSpawnForClaudeUsage(expectedCommand = 'cmd.exe') {
@@ -828,12 +829,15 @@ test('Claude Web authentication failure does not silently fall back to another l
 test('Claude limits fall back to direct CLI usage in the probe directory on Windows', async t => {
   const fixtureDir = await fs.mkdtemp(path.join(probeTempRoot, 'claude-direct-probe-'));
   t.after(() => fs.rm(fixtureDir, { recursive: true, force: true }));
-  const probeDir = path.join(fixtureDir, 'probe');
+  t.mock.method(os, 'userInfo', () => ({ homedir: fixtureDir }));
+  const probeDir = claudeProbeDir({ platform: 'win32' });
   const spawnUsage = fakeSpawnForClaudeUsage();
   let spawnedCwd;
-  const provider = await fetchClaudeLimits({}, {
+  let starts = 0;
+  const deps = {
     platform: 'win32',
-    env: { CLAUDE_CODE_SKIP_PROMPT_HISTORY: '0' },
+    env: { CLAUDE_CODE_SKIP_PROMPT_HISTORY: '0', TOKEN_MONITOR_SHARED_DIR: path.join(fixtureDir, 'shared'),
+      APPDATA: path.join(fixtureDir, 'redirected'), LOCALAPPDATA: path.join(fixtureDir, 'redirected-local') },
     now: () => Date.parse('2026-06-11T00:00:00Z'),
     claudeCredentialPath: 'C:\\Users\\Javis\\.claude\\.credentials.json',
     stat: async () => ({ mtimeMs: 1 }),
@@ -850,12 +854,14 @@ test('Claude limits fall back to direct CLI usage in the probe directory on Wind
     }),
     existsSync: () => false,
     isClaudeCliAuthenticated: async () => true,
-    claudeProbeDir: probeDir,
+    claudeProbeDir: path.join(fixtureDir, 'ignored-probe'),
     spawn: (command, args, options) => {
+      starts++;
       spawnedCwd = options.cwd;
       return spawnUsage(command, args, options);
     }
-  });
+  };
+  const provider = await fetchClaudeLimits({}, deps);
 
   assert.equal(spawnedCwd, await fs.realpath(probeDir));
   assert.equal((await fs.stat(probeDir)).isDirectory(), true);
@@ -866,6 +872,13 @@ test('Claude limits fall back to direct CLI usage in the probe directory on Wind
   assert.equal(provider.windows[0].usedPercent, 5);
   assert.equal(provider.windows[1].kind, 'weekly');
   assert.equal(provider.windows[1].usedPercent, 20);
+  assert.equal(await fs.stat(path.join(fixtureDir, 'shared')).catch(() => null), null);
+  assert.equal(await fs.stat(deps.claudeProbeDir).catch(() => null), null);
+
+  await fs.rename(probeDir, probeDir + '-saved');
+  await fs.symlink(probeDir + '-saved', probeDir, 'junction');
+  await assert.rejects(fetchClaudeLimits({}, deps));
+  assert.equal(starts, 1, 'a linked fixed leaf must fail before the direct CLI starts');
 });
 
 test('Claude limits fall back to CLI usage when OAuth credentials are not discoverable', async () => {
@@ -1106,6 +1119,8 @@ test('Claude CLI commands execute from a Windows path containing spaces', {
   skip: process.platform !== 'win32'
 }, async (t) => {
   const fixtureDir = await fs.mkdtemp(path.join(probeTempRoot, 'token monitor claude '));
+  t.mock.method(os, 'userInfo', () => ({ homedir: fixtureDir }));
+  const expectedProbeDir = claudeProbeDir({ platform: 'win32' });
   const command = path.join(fixtureDir, 'claude.cmd');
   const handler = path.join(fixtureDir, 'fake-claude.cjs');
   t.after(() => fs.rm(fixtureDir, { recursive: true, force: true }));
@@ -1116,6 +1131,8 @@ const args = process.argv.slice(2);
 assert.equal(process.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY, '1');
 if (args[0] === 'auth') console.log('{"loggedIn":true}');
 else {
+  const fs = require('node:fs');
+  assert.equal(fs.realpathSync(process.cwd()), fs.realpathSync(process.env.EXPECTED_PROBE_CWD));
   assert.equal(args.at(-1), '/usage');
   assert.equal(args.at(-2), '--');
   assert.equal(args[args.indexOf('--setting-sources') + 1], 'user');
@@ -1130,6 +1147,7 @@ else {
     platform: 'win32',
     env: { SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec,
       HOME: fixtureDir, USERPROFILE: fixtureDir, CLAUDE_CONFIG_DIR: path.join(fixtureDir, 'config'),
+      EXPECTED_PROBE_CWD: expectedProbeDir,
       TOKEN_MONITOR_CLAUDE_COMMAND: command },
     claudeProbeDir: path.join(fixtureDir, 'probe'),
     now: () => Date.parse('2026-06-13T07:00:00Z'),

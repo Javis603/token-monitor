@@ -103,6 +103,7 @@ test('registry recognizes explicit states and publishes only a sanitized observa
 
 test('registry excludes Token Monitor probe cwd from readings and pre-token rows', async t => {
   const f = fixture(t);
+  t.mock.method(os, 'userInfo', () => ({ homedir: f.home }));
   const probe = path.join(f.home, 'probe');
   const alias = path.join(f.home, 'probe-alias');
   fs.mkdirSync(probe);
@@ -110,12 +111,15 @@ test('registry excludes Token Monitor probe cwd from readings and pre-token rows
   const canonical = fs.realpathSync(probe);
   const missing = path.join(f.home, 'missing-probe');
   for (const platform of ['darwin', 'win32']) {
-    for (const [claudeProbeDir, cwd] of [
+    const cases = [
       [undefined, path.join(os.tmpdir(), 'token-monitor-claude-probe')],
-      [undefined, defaultProbeDir({ ...f.options, platform })],
+      [undefined, defaultProbeDir({ ...f.options, platform })]
+    ];
+    if (platform !== 'win32') cases.push(
       [probe, path.join(os.tmpdir(), 'token-monitor-claude-probe')],
       [probe, probe], [alias, canonical], [canonical, alias], [missing, missing]
-    ]) {
+    );
+    for (const [claudeProbeDir, cwd] of cases) {
       const options = { ...f.options, platform, claudeProbeDir };
       f.write({ sessionId: 'probe-session', pidDomain: platform, cwd });
       // The registry name is deliberately identical; only cwd identifies ours.
@@ -129,6 +133,27 @@ test('registry excludes Token Monitor probe cwd from readings and pre-token rows
       assert.equal(observed.sessions['claude:real-session'].tokenDataUnavailable, true);
     }
   }
+});
+
+test('Windows registry filtering follows the fixed profile cwd and tolerates a missing profile', async t => {
+  const f = fixture(t);
+  let available = true;
+  t.mock.method(os, 'userInfo', () => {
+    if (!available) throw new Error('fixture profile unavailable');
+    return { homedir: f.home };
+  });
+  const ignored = path.join(f.home, 'shared-probe');
+  const options = { ...f.options, platform: 'win32', claudeProbeDir: ignored,
+    env: { TOKEN_MONITOR_SHARED_DIR: path.join(f.home, 'shared-data') } };
+  const fixed = defaultProbeDir(options);
+  f.write({ sessionId: 'probe-session', pidDomain: 'win32', cwd: fixed });
+  f.write({ sessionId: 'real-session', pidDomain: 'win32', cwd: ignored }, 2345);
+  let readings = await activity.readSessionActivity(null, options);
+  assert.equal(readings.has('probe-session'), false);
+  assert.equal(readings.get('real-session').state, 'waiting');
+  available = false;
+  readings = await activity.readSessionActivity(null, options);
+  assert.equal(readings.get('real-session').state, 'waiting');
 });
 
 test('same-day archived Claude resumes across the patch lane without losing usage or duplicating Sessions', async t => {

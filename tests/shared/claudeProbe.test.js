@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { spawn, spawnSync, execFile, execFileSync } = require('node:child_process');
+const { spawn, spawnSync, execFileSync } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -14,13 +14,13 @@ const { claudeProbeDir, prepareClaudeProbeDir, isClaudeProbeCwd } = require('../
 const { fetchClaudeLimits, touchClaudeAuthPath } = require('../../src/shared/providers/claude/limits');
 
 function fixture(t) {
-  // Keep Windows fixtures under the profile; production still checks the leaf
-  // DACL rather than assuming the profile or its primary group is private.
+  // Tests replace the OS profile lookup; never prepare a real user's probe.
   const temp = process.platform === 'win32' ? os.homedir() : os.tmpdir();
   const root = fs.realpathSync(fs.mkdtempSync(path.join(temp, 'claude-probe-test-')));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const home = path.join(root, 'home');
   fs.mkdirSync(home, { mode: 0o700 });
+  if (process.platform === 'win32') t.mock.method(os, 'userInfo', () => ({ homedir: home }));
   return { root, env: { HOME: home, CLAUDE_CONFIG_DIR: path.join(home, '.claude'), PATH: '/usr/bin:/bin' } };
 }
 
@@ -32,88 +32,99 @@ function fakeChild(output = 'Account: fixture', code = 0) {
   return child;
 }
 
-function windowsProbeModule(env, execFile) {
+function windowsProbeModule(profile, env = {}, pathApi = path) {
   const filename = require.resolve('../../src/shared/providers/claude/probe');
   const localRequire = createRequire(filename);
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(filename, 'utf8'), {
     module, Buffer, process: { platform: 'win32', env },
-    require: id => id === 'node:child_process' ? { execFile } : localRequire(id)
+    require: id => {
+      if (id === 'node:os') return { ...os, userInfo: () => {
+        if (profile instanceof Error) throw profile;
+        return { homedir: profile };
+      } };
+      if (id === 'node:path') return pathApi;
+      if (id === 'node:child_process') return { execFile() { throw new Error('probe must not launch an ACL helper'); } };
+      return localRequire(id);
+    }
   }, { filename });
   return module.exports;
 }
 
-test('Windows ACL subprocess rebuilds module paths without changing the caller environment', async t => {
-  const f = fixture(t);
-  const dir = path.join(f.root, 'probe');
-  const env = { PSModulePath: 'incompatible PS7 modules', pSmOdUlEpAtH: 'mixed-case modules',
-    PATH: 'fixture path', TOKEN_MONITOR_PRIVATE_PROBE_DIR: 'caller value' };
+test('Windows probe path ignores data and home overrides in favour of the OS profile', () => {
+  const profile = 'C:\\Users\\fixture';
+  const env = { TOKEN_MONITOR_SHARED_DIR: '\\server\\shared', APPDATA: 'D:\\shared-appdata',
+    LOCALAPPDATA: 'D:\\shared-local', USERPROFILE: 'D:\\shared-profile', HOME: 'D:\\shared-home' };
   const original = { ...env };
-  let calls = 0;
-  const api = windowsProbeModule(env, (command, args, options, callback) => {
-    calls++;
-    assert.equal(command, 'powershell.exe');
-    assert.equal(args[0], '-NoLogo');
-    assert.equal(options.env.PATH, env.PATH);
-    assert.equal(options.env.TOKEN_MONITOR_PRIVATE_PROBE_DIR, dir);
-    // Models the documented pwsh -> Node -> powershell.exe autoload failure.
-    if (Object.keys(options.env).some(key => key.toLowerCase() === 'psmodulepath')) {
-      callback(new Error('incompatible inherited module path'));
-      return;
-    }
-    fs.mkdirSync(dir, { mode: 0o700 });
-    callback(null, '', '');
-  });
-  assert.equal((await api.prepareClaudeProbeDir({ claudeProbeDir: dir })).dir, dir);
-  assert.equal(calls, 1);
+  const api = windowsProbeModule(profile, env, path.win32);
+  const options = { platform: 'win32', env, homeDir: 'D:\\override-home', claudeProbeDir: 'D:\\override-probe' };
+  assert.equal(api.claudeProbeDir(options), path.win32.join(profile, 'AppData', 'Local', 'Token Monitor', 'claude-probe'));
+  assert.equal(sharedDataDir(options), env.TOKEN_MONITOR_SHARED_DIR, 'only the probe cwd stops using the override');
   assert.deepEqual(env, original);
 });
 
-test('Windows ACL failure retains the underlying diagnostics without serializing them publicly', async t => {
+test('Windows prepares a fixed profile leaf without a shell or touching shared overrides', async t => {
   const f = fixture(t);
-  const failure = Object.assign(new Error('PowerShell fixture failure'), { code: 1, stderr: 'module autoload failed' });
-  const api = windowsProbeModule({}, (_command, _args, _options, callback) => callback(failure));
-  await assert.rejects(api.prepareClaudeProbeDir({ claudeProbeDir: path.join(f.root, 'probe') }), error => {
+  const shared = path.join(f.root, 'shared');
+  fs.mkdirSync(shared);
+  fs.writeFileSync(path.join(shared, 'keep'), 'untouched');
+  const env = { ...f.env, TOKEN_MONITOR_SHARED_DIR: shared, APPDATA: shared, LOCALAPPDATA: shared,
+    PSModulePath: 'incompatible modules', pSmOdUlEpAtH: 'mixed-case modules' };
+  const original = { ...env };
+  const api = windowsProbeModule(f.env.HOME, env);
+  const options = { env, claudeProbeDir: path.join(shared, 'probe') };
+  const expected = path.join(f.env.HOME, 'AppData', 'Local', 'Token Monitor', 'claude-probe');
+  const { dir } = await api.prepareClaudeProbeDir(options);
+  assert.equal(dir, expected);
+  assert.equal(fs.statSync(dir).isDirectory(), true);
+  const settings = path.join(dir, '.claude', 'settings.local.json');
+  fs.mkdirSync(path.dirname(settings));
+  fs.writeFileSync(settings, '{"fixture":"untouched"}');
+  assert.equal((await api.prepareClaudeProbeDir(options)).dir, expected);
+  assert.equal(fs.readFileSync(settings, 'utf8'), '{"fixture":"untouched"}');
+  assert.deepEqual(fs.readdirSync(shared), ['keep']);
+  assert.deepEqual(env, original);
+});
+
+test('Windows missing or nonlocal OS profiles disable the probe without a fallback', async t => {
+  const f = fixture(t);
+  for (const profile of ['', 'relative-profile', '\\\\server\\profiles\\fixture', '//server/share/fixture', new Error('profile lookup failed')]) {
+    const api = windowsProbeModule(profile, {}, path.win32);
+    const options = { env: { TOKEN_MONITOR_SHARED_DIR: f.root }, homeDir: f.env.HOME,
+      claudeProbeDir: path.join(f.root, 'fallback') };
+    assert.equal(api.claudeProbeDir(options), null);
+    await assert.rejects(api.prepareClaudeProbeDir(options), error => error.status === 'unavailable');
+    assert.equal(api.isClaudeProbeCwd(path.join(os.tmpdir(), 'token-monitor-claude-probe'), null), true);
+    assert.equal(api.isClaudeProbeCwd(path.join(f.root, 'project'), null), false);
+  }
+  assert.equal(fs.existsSync(path.join(f.root, 'fallback')), false);
+});
+
+test('Windows filesystem failure retains diagnostics without serializing them publicly', async t => {
+  const f = fixture(t);
+  const api = windowsProbeModule(f.env.HOME);
+  const dir = api.claudeProbeDir();
+  const lstat = fs.lstatSync;
+  const failure = Object.assign(new Error('fixture access denied'), { code: 'EACCES' });
+  t.mock.method(fs, 'lstatSync', (file, ...args) => {
+    if (file === dir) throw failure;
+    return lstat(file, ...args);
+  });
+  await assert.rejects(api.prepareClaudeProbeDir(), error => {
     assert.equal(error.status, 'unavailable');
-    assert.match(error.message, /not private/);
     assert.equal(error.cause, failure);
-    assert.equal(error.cause.stderr, 'module autoload failed');
     assert.deepEqual(JSON.parse(JSON.stringify(error)), { status: 'unavailable' });
     return true;
   });
-});
-
-test('Windows ACL preparation waits for a slow helper to verify the leaf', async t => {
-  const f = fixture(t);
-  const dir = path.join(f.root, 'probe');
-  let verified = false;
-  const env = { ...f.env };
-  if (process.platform === 'win32') env.SystemRoot = process.env.SystemRoot;
-  const api = windowsProbeModule(env, (_command, _args, options, callback) => {
-    assert.ok(Number.isFinite(options.timeout) && options.timeout > 0, 'helper must stay bounded');
-    // Exercise the real execFile timeout with a harmless child taking longer
-    // than the old 10 s limit. No PowerShell or Claude runs in this fixture.
-    const child = execFile(process.execPath, ['-e', 'setTimeout(() => {}, 11000)'], options, (error, stdout, stderr) => {
-      if (!error) {
-        fs.mkdirSync(dir, { mode: 0o700 });
-        verified = true;
-      }
-      callback(error, stdout, stderr);
-    });
-    t.after(() => child.kill());
-  });
-  const pending = api.prepareClaudeProbeDir({ claudeProbeDir: dir });
-  assert.equal(verified, false);
-  assert.equal(fs.existsSync(dir), false);
-  assert.equal((await pending).dir, dir);
-  assert.equal(verified, true);
 });
 
 test('probe cwd uses private app data and retains legacy and canonical alias filtering', async t => {
   const f = fixture(t);
   const options = { env: { TOKEN_MONITOR_SHARED_DIR: path.join(f.root, 'app') } };
   const current = claudeProbeDir(options);
-  assert.equal(current, path.join(f.root, 'app', 'claude-probe'));
+  assert.equal(current, process.platform === 'win32'
+    ? path.join(f.env.HOME, 'AppData', 'Local', 'Token Monitor', 'claude-probe')
+    : path.join(f.root, 'app', 'claude-probe'));
   const { dir: prepared } = await prepareClaudeProbeDir(options);
   assert.equal(isClaudeProbeCwd(prepared, current), true);
   assert.equal(isClaudeProbeCwd(path.join(os.tmpdir(), 'token-monitor-claude-probe'), current), true);
@@ -162,9 +173,9 @@ test('unsafe probe leaves fail before either PTY or direct CLI starts without de
     const deps = { env: f.env, claudeProbeDir, existsSync: () => false,
       spawn: () => { starts++; return fakeChild(); } };
     await assert.rejects(touchClaudeAuthPath(deps), error => error.status === 'unavailable', claudeProbeDir);
-    await assert.rejects(fetchClaudeLimits({}, { ...deps, platform: 'win32',
+    await assert.rejects(fetchClaudeLimits({}, { ...deps, platform: process.platform,
       stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
-      readWindowsCredential: false, isClaudeCliAuthenticated: async () => true }), /Claude credentials not found/);
+      readWindowsCredential: false, readMacKeychain: false, isClaudeCliAuthenticated: async () => true }), /Claude credentials not found/);
     assert.equal(starts, 0, claudeProbeDir);
   }
   assert.equal(fs.readFileSync(path.join(target, 'keep'), 'utf8'), 'untouched');
@@ -181,7 +192,7 @@ test('unowned directory fails without changing permissions', { skip: process.pla
     if (p === dir) stat.uid = process.getuid() + 1;
     return stat;
   });
-  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: dir }), /not private/);
+  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: dir }), /unavailable or unsafe/);
   assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
 });
 
@@ -196,7 +207,7 @@ test('shared parent permissions do not relax private leaf checks or change exist
     assert.equal(fs.statSync(parent).mode & 0o777, mode);
     assert.equal(fs.readFileSync(path.join(parent, 'keep'), 'utf8'), 'untouched');
     fs.chmodSync(dir, 0o775);
-    await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: dir }), /not private/);
+    await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: dir }), /unavailable or unsafe/);
   }
 });
 
@@ -205,7 +216,7 @@ test('macOS extended ACL grants fail closed at the leaf despite mode 0700', { sk
   const dir = path.join(f.root, 'acl');
   fs.mkdirSync(dir, { mode: 0o700 });
   execFileSync('/bin/chmod', ['+a', 'everyone allow read,write,add_file,add_subdirectory,delete_child', dir]);
-  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: dir }), /not private/);
+  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: dir }), /unavailable or unsafe/);
 });
 
 const python = process.platform === 'win32' ? null : '/usr/bin/python3';
@@ -222,7 +233,7 @@ test('redirected and shared parents resolve while linked leaves still fail', { s
   fs.chmodSync(target, 0o777);
   assert.equal((await prepareClaudeProbeDir({ claudeProbeDir: path.join(alias, 'probe') })).dir, actual);
   fs.chmodSync(target, 0o700);
-  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: alias }), /not private/);
+  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: alias }), /unavailable or unsafe/);
 });
 
 test('a legacy symlink cannot hide a real project through canonical filtering', t => {
@@ -368,44 +379,24 @@ print('Yes, I trust this folder', flush=True)
   assert.equal(fs.existsSync(imported), false);
 });
 
-test('Windows ACL preparation ignores inherited incompatible PowerShell modules', { skip: process.platform !== 'win32' }, async t => {
+test('Windows fixed leaf refuses files and junctions without repairing or deleting data', async t => {
   const f = fixture(t);
-  const modules = path.join(f.root, 'modules');
-  const receipt = path.join(f.root, 'module-imported');
-  for (const [name, command] of [['Utility', 'New-Object'], ['Management', 'Get-Item'], ['Security', 'Get-Acl']]) {
-    const moduleName = `Microsoft.PowerShell.${name}`;
-    const dir = path.join(modules, moduleName);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, `${moduleName}.psd1`),
-      `@{ RootModule = '${moduleName}.psm1'; ModuleVersion = '99.0'; FunctionsToExport = @('${command}') }`);
-    fs.writeFileSync(path.join(dir, `${moduleName}.psm1`),
-      `[IO.File]::WriteAllText('${receipt.replace(/'/g, "''")}', 'imported'); throw 'fixture incompatible module'`);
+  const api = windowsProbeModule(f.env.HOME);
+  const dir = api.claudeProbeDir();
+  fs.mkdirSync(path.dirname(dir), { recursive: true });
+  const target = path.join(f.root, 'target');
+  fs.mkdirSync(target);
+  fs.writeFileSync(path.join(target, 'keep'), 'untouched');
+  fs.writeFileSync(dir, 'untouched file');
+  await assert.rejects(api.prepareClaudeProbeDir(), error => error.status === 'unavailable');
+  assert.equal(fs.readFileSync(dir, 'utf8'), 'untouched file');
+  fs.unlinkSync(dir);
+  for (const destination of [target, path.join(f.root, 'absent')]) {
+    fs.symlinkSync(destination, dir, 'junction');
+    await assert.rejects(api.prepareClaudeProbeDir(), error => error.status === 'unavailable');
+    assert.equal(fs.lstatSync(dir).isSymbolicLink(), true);
+    fs.unlinkSync(dir);
   }
-  const original = process.env.PSModulePath;
-  t.after(() => {
-    if (original === undefined) delete process.env.PSModulePath;
-    else process.env.PSModulePath = original;
-  });
-  process.env.PSModulePath = modules;
-  const { dir } = await prepareClaudeProbeDir({ claudeProbeDir: path.join(f.root, 'probe') });
-  assert.equal(fs.statSync(dir).isDirectory(), true);
-  assert.equal(fs.existsSync(receipt), false);
-  assert.equal(process.env.PSModulePath, modules);
-});
-
-test('Windows checks the leaf DACL and permits redirected parents without following a linked leaf', { skip: process.platform !== 'win32' }, async t => {
-  const f = fixture(t);
-  const { dir } = await prepareClaudeProbeDir({ claudeProbeDir: path.join(f.root, 'probe') });
-  execFileSync('icacls.exe', [dir, '/grant', '*S-1-1-0:(OI)(CI)F'], { windowsHide: true });
-  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: dir }), /not private/);
-  const alias = path.join(f.root, 'alias');
-  fs.symlinkSync(dir, alias, 'junction');
-  const { dir: child } = await prepareClaudeProbeDir({ claudeProbeDir: path.join(alias, 'child') });
-  assert.equal(child, path.join(fs.realpathSync(dir), 'child'));
-  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: alias }), /not private/);
-  const missing = path.join(f.root, 'absent');
-  const dangling = path.join(f.root, 'dangling');
-  fs.symlinkSync(missing, dangling, 'junction');
-  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: dangling }), /not private/);
-  assert.equal(fs.existsSync(missing), false);
+  assert.equal(fs.readFileSync(path.join(target, 'keep'), 'utf8'), 'untouched');
+  assert.equal(fs.existsSync(path.join(f.root, 'absent')), false);
 });
