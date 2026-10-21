@@ -683,3 +683,201 @@ test('the stats stream coalesces bursts and negotiates timestamp-only freshness 
     fs.rmSync(dataFile, { force: true });
   }
 });
+
+test('SSE fan-out serializes the stats payload once for every subscriber', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: 'shh',
+    broadcastDelayMs: 20,
+    dataFile,
+    logger: { error() {} }
+  });
+  await hub.start();
+  const clients = [];
+  const original = JSON.stringify;
+  const ingestPayloads = [];
+  try {
+    const initialAt = utcTodayAt('10:00:00.000');
+    const changedAt = utcTodayAt('10:03:00.000');
+    const base = {
+      deviceId: 'dev-a',
+      updatedAt: initialAt,
+      today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } }
+    };
+    hub.ingest(base);
+    const { port } = hub.server.address();
+    const streamUrl = `http://127.0.0.1:${port}/api/stats/stream`;
+    for (let index = 0; index < 3; index += 1) {
+      clients.push(await openSse(streamUrl, { authorization: 'Bearer shh' }));
+    }
+    await waitFor(() => clients.every((client) => client.events.length === 1));
+    for (const client of clients) client.events.length = 0;
+
+    JSON.stringify = (value, replacer, space) => {
+      if (value && value.type === 'stats' && value.reason === 'ingest') ingestPayloads.push(value);
+      return original(value, replacer, space);
+    };
+    hub.ingest({
+      ...base,
+      updatedAt: changedAt,
+      today: { ...base.today, totalTokens: 4 }
+    });
+    await waitFor(() => clients.every((client) => client.events.length === 1));
+    assert.equal(ingestPayloads.length, 1);
+    assert.equal(clients[0].events[0].data.stats.periods.today.totalTokens, 4);
+    assert.equal(clients[2].events[0].data.stats.periods.today.totalTokens, 4);
+  } finally {
+    JSON.stringify = original;
+    for (const client of clients) client.close();
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+function spyTypedStringify() {
+  const original = JSON.stringify;
+  const typed = [];
+  JSON.stringify = (value, replacer, space) => {
+    if (value && typeof value === 'object' && value.type) {
+      typed.push({ type: value.type, reason: value.reason });
+    }
+    return original(value, replacer, space);
+  };
+  return {
+    typed,
+    restore() { JSON.stringify = original; }
+  };
+}
+
+test('SSE subscribers receive identical frames and delete/subscription writes stay full stats', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: 'shh',
+    broadcastDelayMs: 20,
+    dataFile,
+    logger: { error() {} }
+  });
+  await hub.start();
+  let modernA;
+  let modernB;
+  let legacy;
+  try {
+    const initialAt = utcTodayAt('10:00:00.000');
+    const refreshedAt = utcTodayAt('10:01:00.000');
+    const base = {
+      deviceId: 'dev-a',
+      updatedAt: initialAt,
+      today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } }
+    };
+    hub.ingest(base);
+    const { port } = hub.server.address();
+    const streamUrl = `http://127.0.0.1:${port}/api/stats/stream`;
+    modernA = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' });
+    modernB = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' });
+    legacy = await openSse(streamUrl, { authorization: 'Bearer shh' });
+    await waitFor(() => modernA.events.length === 1 && modernB.events.length === 1 && legacy.events.length === 1);
+    assert.deepEqual(modernA.events[0].data.stats.periods, modernB.events[0].data.stats.periods);
+    assert.deepEqual(modernA.events[0].data.stats.periods, legacy.events[0].data.stats.periods);
+    for (const client of [modernA, modernB, legacy]) client.events.length = 0;
+
+    hub.ingest({ ...base, updatedAt: refreshedAt });
+    await waitFor(() => modernA.events.length === 1 && modernB.events.length === 1 && legacy.events.length === 1);
+    assert.equal(modernA.events[0].event, 'freshness');
+    assert.equal(modernB.events[0].event, 'freshness');
+    assert.deepEqual(modernA.events[0].data, modernB.events[0].data);
+    assert.equal(legacy.events[0].event, 'stats');
+    for (const client of [modernA, modernB, legacy]) client.events.length = 0;
+
+    const deleteSpy = spyTypedStringify();
+    try {
+      hub.deleteDevice('dev-a');
+      await waitFor(() => modernA.events.length === 1 && modernB.events.length === 1 && legacy.events.length === 1);
+      assert.deepEqual(deleteSpy.typed.filter((entry) => entry.reason === 'delete'), [
+        { type: 'stats', reason: 'delete' }
+      ]);
+    } finally {
+      deleteSpy.restore();
+    }
+    assert.equal(modernA.events[0].event, 'stats');
+    assert.equal(modernB.events[0].event, 'stats');
+    assert.equal(legacy.events[0].event, 'stats');
+    assert.equal(modernA.events[0].data.reason, 'delete');
+    assert.deepEqual(modernA.events[0].data.stats.devices, []);
+    assert.deepEqual(modernA.events[0].data, modernB.events[0].data);
+    assert.deepEqual(modernA.events[0].data.stats.devices, legacy.events[0].data.stats.devices);
+    for (const client of [modernA, modernB, legacy]) client.events.length = 0;
+
+    const record = { id: 'sub_1', provider: 'codex', planName: 'Plus', amountMinor: 9000, currency: 'HKD', startDate: '2026-05-31' };
+    const subSpy = spyTypedStringify();
+    let written;
+    try {
+      written = hub.setSubscriptions([record], '');
+      await waitFor(() => modernA.events.length === 1 && modernB.events.length === 1 && legacy.events.length === 1);
+      assert.deepEqual(subSpy.typed.filter((entry) => entry.reason === 'subscriptions'), [
+        { type: 'stats', reason: 'subscriptions' }
+      ]);
+    } finally {
+      subSpy.restore();
+    }
+    assert.equal(modernA.events[0].event, 'stats');
+    assert.equal(legacy.events[0].event, 'stats');
+    assert.equal(modernA.events[0].data.reason, 'subscriptions');
+    assert.equal(modernA.events[0].data.stats.subscriptionsUpdatedAt, written.updatedAt);
+    assert.equal('subscriptions' in modernA.events[0].data.stats, false);
+    assert.deepEqual(modernA.events[0].data, modernB.events[0].data);
+  } finally {
+    modernA?.close();
+    modernB?.close();
+    legacy?.close();
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('SSE skips empty fan-out and isolates a throwing response from later clients', async () => {
+  const { EventEmitter } = require('node:events');
+  const dataFile = tempDataFile();
+  const hub = createHub({ dataFile, logger: { error() {} } });
+  const responses = [];
+  const spy = spyTypedStringify();
+  try {
+    hub.ingest({ deviceId: 'dev-a', today: { totalTokens: 1 } });
+    hub.deleteDevice('missing');
+    assert.deepEqual(spy.typed, []);
+
+    for (const freshnessEvents of [true, true, false]) {
+      const res = new EventEmitter();
+      res.frames = [];
+      res.writeHead = () => {};
+      res.write = (frame) => { res.frames.push(frame); return true; };
+      res.end = () => res.emit('close');
+      responses.push(res);
+      hub.server.emit('request', {
+        method: 'GET', url: '/api/stats/stream',
+        headers: freshnessEvents ? { 'x-token-monitor-stream': '2' } : {}
+      }, res);
+      assert.equal(res.frames.length, 1);
+      res.frames.length = 0;
+    }
+    let failedWrites = 0;
+    responses[0].write = () => { failedWrites += 1; throw new Error('closed response'); };
+    for (let count = 1; count <= 2; count += 1) {
+      hub.deleteDevice('missing');
+      assert.equal(failedWrites, 1);
+      for (const res of responses.slice(1)) {
+        assert.equal(res.frames.length, count);
+        assert.match(res.frames[count - 1], /^event: stats\n/);
+      }
+      assert.equal(responses[1].frames[count - 1], responses[2].frames[count - 1]);
+    }
+  } finally {
+    spy.restore();
+    for (const res of responses) res.emit('close');
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});

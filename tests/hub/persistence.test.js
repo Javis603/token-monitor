@@ -114,6 +114,46 @@ for (const recovery of ['next upload', 'shutdown']) {
   });
 }
 
+for (const mutation of ['subscription', 'deletion']) {
+  for (const recovery of ['timer', 'shutdown']) {
+    test(`failed ${mutation} rolls back while accepted uploads survive ${recovery}`, async (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const { hub, dataFile } = fixture(t);
+      const subscription = (id) => ({ id, provider: 'codex', startDate: '2026-05-31', currency: 'USD' });
+      hub.ingest({ deviceId: 'existing', today: { totalTokens: 1 } });
+      hub.setSubscriptions([subscription('original')], '');
+      const before = readStore(dataFile);
+      const previousSubscriptions = hub.getSubscriptions();
+      hub.ingest({ deviceId: 'existing', today: { totalTokens: 9 } });
+      hub.ingest({ deviceId: 'pending', today: { totalTokens: 4 } });
+      const blockedTempFile = `${dataFile}.tmp`;
+      fs.mkdirSync(blockedTempFile);
+      try {
+        assert.throws(() => {
+          if (mutation === 'subscription') {
+            hub.setSubscriptions([subscription('replacement')], previousSubscriptions.updatedAt);
+          } else {
+            hub.deleteDevice('existing');
+          }
+        });
+        assert.deepEqual(hub.getSubscriptions(), previousSubscriptions);
+        assert.equal(hub.getDevices().find((device) => device.deviceId === 'existing').periods.today.totalTokens, 9);
+        assert.equal(hub.getStats().periods.today.totalTokens, 13);
+        assert.deepEqual(readStore(dataFile), before);
+      } finally {
+        fs.rmdirSync(blockedTempFile);
+      }
+      if (recovery === 'timer') t.mock.timers.tick(300000);
+      else await hub.stop();
+      const saved = readStore(dataFile);
+      assert.equal(saved.devices.existing.periods.today.totalTokens, 9);
+      assert.equal(saved.devices.pending.periods.today.totalTokens, 4);
+      assert.deepEqual(saved.subscriptions, before.subscriptions);
+      assert.deepEqual(saved.syncTitlePolicies, before.syncTitlePolicies);
+    });
+  }
+}
+
 test('createHub rejects intervals that Node would coerce to a one-millisecond timer', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-invalid-interval-'));
   t.after(() => fs.rmSync(dir, { recursive: true }));

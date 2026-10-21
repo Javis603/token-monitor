@@ -42,8 +42,10 @@ function ensureScratch(pixelWidth, edgeCount) {
 
 // Keeps the previous implementation's scanline math, sample order and
 // rounding, so the alpha mask stays byte-identical. The fast path only accepts
-// rows whose eight samples each describe one span; rows with no span, several
-// spans or non-finite crossings take the reference path below.
+// rows whose eight samples each describe one span. Rows outside the polygon's
+// y range, or with no crossings at all, are skipped: the buffer is zeroed, so
+// their output is already correct. Rows with several spans or non-finite
+// crossings take the reference path below.
 function rasterizeMask(polygons, width, height, scale = 1) {
   const pixelWidth = Math.max(1, Math.round(width * scale));
   const pixelHeight = Math.max(1, Math.round(height * scale));
@@ -53,22 +55,34 @@ function rasterizeMask(polygons, width, height, scale = 1) {
   ensureScratch(pixelWidth, edgeCount);
 
   let edgeEnd = 0;
+  let minY = Infinity;
+  let maxY = -Infinity;
   for (const polygon of polygons) {
     for (let index = 0; index < polygon.length; index += 1) {
       const [x1, y1] = polygon[index];
       const [x2, y2] = polygon[(index + 1) % polygon.length];
       if (y1 === y2) continue; // horizontal edges never cross a scanline
+      const scaledY1 = y1 * scale, scaledY2 = y2 * scale;
+      if (scaledY1 < minY) minY = scaledY1;
+      if (scaledY2 < minY) minY = scaledY2;
+      if (scaledY1 > maxY) maxY = scaledY1;
+      if (scaledY2 > maxY) maxY = scaledY2;
       edges[edgeEnd] = x1 * scale;
-      edges[edgeEnd + 1] = y1 * scale;
+      edges[edgeEnd + 1] = scaledY1;
       edges[edgeEnd + 2] = x2 * scale;
-      edges[edgeEnd + 3] = y2 * scale;
+      edges[edgeEnd + 3] = scaledY2;
       edgeEnd += 4;
     }
   }
+  if (edgeEnd === 0) return { buffer, pixelWidth, pixelHeight };
 
   for (let row = 0; row < pixelHeight; row += 1) {
+    // Rows outside the polygon's device-pixel y range cannot contribute.
+    if (row + 1 <= minY || row >= maxY) continue;
     coverage.fill(0);
     let oneSpan = true;
+    let sawZero = false;
+    let empty = true;
     for (let sample = 0; sample < SUBSAMPLES; sample += 1) {
       const y = row + (sample + 0.5) / SUBSAMPLES;
       let count = 0;
@@ -79,6 +93,8 @@ function rasterizeMask(polygons, width, height, scale = 1) {
           count += 1;
         }
       }
+      if (count === 0) { sawZero = true; continue; }
+      empty = false;
       if (count !== 2) { oneSpan = false; break; }
       const start = Math.max(0, Math.min(crossings[0], crossings[1]));
       const end = Math.min(pixelWidth, Math.max(crossings[0], crossings[1]));
@@ -88,6 +104,8 @@ function rasterizeMask(polygons, width, height, scale = 1) {
       starts[sample] = start;
       ends[sample] = end;
     }
+    if (empty) continue;
+    if (sawZero) oneSpan = false;
 
     if (!oneSpan) {
       // Reference path: every span, in sample order.
