@@ -982,3 +982,24 @@ test('a replayed session carries its timing into the period and fails the tool r
   assert.equal(visible.today.clientThroughput.opencode, undefined,
     'no per-tool rate without the token count the timing covered');
 });
+
+test('an untimed replay keeps the live attribution it cannot contradict', () => {
+  const source = liveSummary();
+  source.today.sessions['opencode:o1'].outputTokens = 30;
+  const archive = captureSessionUsageArchive({}, source, new Date('2026-07-09T08:15:00.000Z'));
+
+  const live = summaryAfterOpenCodeDelete();
+  live.today.timedTokens = 90;
+  live.today.timedOutputTokens = 55;
+  live.today.timedDurationMs = 2700;
+  const codex = { timedTokens: 50, timedOutputTokens: 30, timedDurationMs: 1500 };
+  const opencode = { timedTokens: 40, timedOutputTokens: 25, timedDurationMs: 1200 };
+  live.today.clientThroughput = { codex, opencode };
+  const visible = applySessionUsageArchive(live, archive, {
+    now: new Date('2026-07-09T08:20:00.000Z')
+  });
+
+  assert.deepEqual(visible.today.clientThroughput.opencode, opencode,
+    'a session with no timed sample leaves the live attribution in place');
+  assert.deepEqual(visible.today.clientThroughput.codex, codex);
+});

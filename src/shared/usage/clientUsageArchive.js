@@ -282,12 +282,16 @@ function addClientUsage(period, client, usage) {
   }
   // The archive stores totals, costs, models and sessions but never the
   // per-client throughput counters, and its sessions carry timed output and
-  // duration without the token count that timing covered. Replaying a subset
-  // would leave burn mode dividing an unmatched numerator by denominator, so the
-  // period counters stay with the live scan and this client's attribution is
-  // closed instead — the same fail-closed rule as every other incomplete
-  // provenance field (docs/API.md).
-  if (tokens > 0 && period.clientThroughput) delete period.clientThroughput[client];
+  // duration without the token count that timing covered. A replayed sample with
+  // a duration therefore leaves the live counters describing a different set of
+  // entries than the period duration, so the counters stay with the live scan and
+  // this client's attribution is closed instead — the same fail-closed rule as
+  // every other incomplete provenance field (docs/API.md). A client whose
+  // archived sessions were never timed contributed no sample and keeps whatever
+  // the live scan reported.
+  const archivedTimedDuration = Object.values(normalizedSessions)
+    .reduce((total, session) => total + Math.max(0, Math.round(numberValue(session.timedDurationMs))), 0);
+  if (archivedTimedDuration > 0 && period.clientThroughput) delete period.clientThroughput[client];
   const known = Math.min(tokens,
     period.cacheReadTokens - beforeComponents.cacheRead
     + period.cacheWriteTokens - beforeComponents.cacheWrite

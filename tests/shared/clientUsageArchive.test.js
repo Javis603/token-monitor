@@ -712,3 +712,21 @@ test('a retained client carries its session timing and fails the tool rate close
   assert.equal(summary.today.clientThroughput.hermes, undefined,
     'no per-tool rate without the token count the timing covered');
 });
+
+test('an untimed retained client keeps the attribution the live scan still owns', () => {
+  const archive = captureArchivedClientUsage({}, deviceRecord(), ['hermes'], new Date('2026-05-30T13:00:00.000Z'));
+
+  const live = liveSummaryWithoutHermes();
+  live.today.timedTokens = 50;
+  live.today.timedOutputTokens = 30;
+  live.today.timedDurationMs = 1500;
+  const hermes = { timedTokens: 20, timedOutputTokens: 10, timedDurationMs: 800 };
+  live.today.clientThroughput = { hermes };
+  const summary = applyArchivedClientUsage(live, archive, {
+    activeClients: 'codex',
+    now: new Date('2026-05-30T13:00:00.000Z')
+  });
+
+  assert.deepEqual(summary.today.clientThroughput.hermes, hermes,
+    'a retained client with no timed sample leaves the live attribution in place');
+});
