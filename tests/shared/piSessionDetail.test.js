@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { parsePiTranscript, readSessionDetail } = require('../../src/shared/sessionDetail');
+const { pricePiSessionDetail } = require('../../src/shared/providers/codex/localUsage');
 const { exchangeRows } = require('../../src/electron/renderer/sessionDetail');
 
 function tmpHome() {
@@ -152,6 +153,7 @@ test('parsePiTranscript yields prompts and turns with exact tokens, tools and co
   assert.equal(events[1].tokens.reasoning, 28);
   assert.deepEqual(events[1].tools, ['bash']);
   assert.equal(events[1].cost, 0.0007509);
+  assert.equal(events[1].model, 'deepseek-v4-pro');
   assert.equal(events[2].tokens.total, 360);
   assert.equal(events[2].tokens.cacheWrite, 10);
 });
@@ -215,6 +217,59 @@ test('readSessionDetail splits the session cost when Pi reports no price', () =>
     assert.equal(detail.exchanges[0].turns[0].costEstimate, 2);
     assert.equal(detail.exchanges[0].turns[1].costEstimate, 4);
   } finally { cleanup(home); }
+});
+
+test('pricePiSessionDetail prices only the turns pi could not price', async () => {
+  const home = tmpHome();
+  try {
+    writePiSession(home, 'mixed-pricing', [
+      user('switch model'),
+      assistant({ input: 100, output: 100, totalTokens: 200, cost: { total: 0.01 } }, [], '2026-10-12T02:28:42.000Z'),
+      JSON.stringify({ type: 'model_change', timestamp: '2026-10-12T02:28:43.000Z', provider: 'deepseek', modelId: 'deepseek-v4-pro' }),
+      assistant({ input: 300, output: 100, totalTokens: 400, cost: { total: 0 } }, [], '2026-10-12T02:28:43.000Z')
+    ]);
+
+    const detail = readSessionDetail({ client: 'pi', sessionId: 'mixed-pricing', sessionCost: 0.5, home });
+    assert.deepEqual(detail.exchanges[0].turns.map((turn) => turn.costEstimate), [0.01, 0]);
+
+    await pricePiSessionDetail(detail, {
+      pricingRevision: 'pi-mixed-price-test',
+      lookupModelPricing: async (model) => model === 'deepseek-v4-pro' ? {
+        pricing: { inputCostPerToken: 0.000001, outputCostPerToken: 0.000002, cacheReadInputTokenCost: 0, cacheCreationInputTokenCost: 0 }
+      } : null
+    });
+
+    // Reported price stays; only the zero-cost turn is priced from the catalog.
+    assert.equal(detail.exchanges[0].turns[0].costEstimate, 0.01);
+    assert.ok(Math.abs(detail.exchanges[0].turns[1].costEstimate - 0.0005) < 1e-12);
+    assert.ok(Math.abs(detail.exchanges[0].costEstimate - 0.0105) < 1e-12);
+    assert.ok(Math.abs(detail.totals.costUsd - 0.0105) < 1e-12);
+    assert.equal(detail.totals.unpricedTokens, undefined);
+  } finally { cleanup(home); }
+});
+
+test('pricePiSessionDetail marks tokens unpriced when the catalog has no rate', async () => {
+  const detail = {
+    client: 'pi',
+    exchanges: [{
+      costEstimate: 0,
+      turns: [{
+        model: 'unknown-model',
+        costEstimate: 0,
+        tokens: { input: 300, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 400 }
+      }]
+    }],
+    totals: { totalTokens: 400, costUsd: 0, exchangeCount: 1, turnCount: 1 }
+  };
+
+  await pricePiSessionDetail(detail, {
+    pricingRevision: 'pi-unpriced-test',
+    lookupModelPricing: async () => null
+  });
+
+  assert.equal(detail.exchanges[0].turns[0].costEstimate, 0);
+  assert.equal(detail.exchanges[0].turns[0].unpricedTokens, 400);
+  assert.equal(detail.totals.unpricedTokens, 400);
 });
 
 test('readSessionDetail filters pi exchanges by period', () => {

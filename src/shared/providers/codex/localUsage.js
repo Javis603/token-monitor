@@ -150,14 +150,18 @@ async function resolveLocalUsagePricing(rows, options = {}) {
 
 // Details carry request buckets through the worker, then resolve prices in main
 // with the same injected catalog lookup. No session-wide proportional split.
-async function priceLocalSessionDetail(detail, options = {}) {
-  if (detail?.usageSource !== 'codex-dots-local') return detail;
-  const models = [...new Set((detail.exchanges || []).flatMap((ex) => ex.turns || [])
-    .map((turn) => String(turn.model || 'unknown').toLowerCase()))];
+async function priceSessionTurns(detail, options = {}) {
+  const onlyMissing = options.onlyMissing === true;
+  const turnsOf = () => (detail.exchanges || []).flatMap((ex) => ex.turns || []);
+  const needsPrice = (turn) => !onlyMissing
+    || (Number(turn.costEstimate) <= 0 && Number(turn.tokens?.total) > 0);
+  if (onlyMissing && !turnsOf().some(needsPrice)) return detail;
+  const models = [...new Set(turnsOf().filter(needsPrice)
+    .map((turn) => String(turn.model || '').trim().toLowerCase()).filter((id) => id && id !== 'unknown'))];
   const prices = new Map();
   // Bound the work when opening unusually large multi-model sessions. Omitted
   // models remain unpriced rather than blocking or borrowing another rate.
-  for (const model of models.filter((id) => id !== 'unknown').slice(0, 16)) {
+  for (const model of models.slice(0, 16)) {
     prices.set(model, await refreshModelPricing(model, options));
   }
   let knownCost = 0;
@@ -166,7 +170,11 @@ async function priceLocalSessionDetail(detail, options = {}) {
     ex.costEstimate = 0;
     delete ex.unpricedTokens;
     for (const turn of ex.turns || []) {
-      const estimate = estimatedCost(turn.tokens || {}, prices.get(String(turn.model || 'unknown').toLowerCase()));
+      if (!needsPrice(turn)) {
+        ex.costEstimate += Number(turn.costEstimate) || 0;
+        continue;
+      }
+      const estimate = estimatedCost(turn.tokens || {}, prices.get(String(turn.model || '').trim().toLowerCase()));
       turn.costEstimate = estimate.cost;
       delete turn.unpricedTokens;
       if (estimate.unpricedTokens > 0) {
@@ -184,4 +192,17 @@ async function priceLocalSessionDetail(detail, options = {}) {
   return detail;
 }
 
-module.exports = { buildLocalUsageView, readLocalUsageView, resolveLocalUsagePricing, priceLocalSessionDetail };
+async function priceLocalSessionDetail(detail, options = {}) {
+  if (detail?.usageSource !== 'codex-dots-local') return detail;
+  return priceSessionTurns(detail, options);
+}
+
+// Pi reports a price per operation, except for a model its catalog cannot
+// price. Keep every reported number and resolve only those zero-cost turns
+// against the catalog the collector already uses.
+async function pricePiSessionDetail(detail, options = {}) {
+  if (detail?.client !== 'pi') return detail;
+  return priceSessionTurns(detail, { ...options, onlyMissing: true });
+}
+
+module.exports = { buildLocalUsageView, readLocalUsageView, resolveLocalUsagePricing, priceLocalSessionDetail, pricePiSessionDetail };
