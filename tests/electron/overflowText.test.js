@@ -526,6 +526,7 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
     rowNumberAnimations: new Map(), cancelRowNumberAnimation() {},
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {},
+    limitWindowsView: { setDetailTooltip() {} },
     sessionRowsApi: { ...require('../../src/electron/renderer/sessionRows'), applyBreakdownRowSemantics(_row, _head, options) { interactive = options.interactive; } },
     t: key => key
   };
@@ -594,6 +595,7 @@ test('a token and cost update through updateRow keeps the hovered title moving',
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
     rowNumberAnimations: new Map(), cancelRowNumberAnimation() {},
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {},
+    limitWindowsView: { setDetailTooltip() {} },
     sessionRowsApi: { ...require('../../src/electron/renderer/sessionRows'), applyBreakdownRowSemantics() {} }, t: key => key
   };
   vm.runInNewContext(`${body}\nglobalThis.update = updateRow;`, context);
@@ -647,6 +649,9 @@ test('actual shared row rendering keeps group availability and binds Auto Review
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {}, cancelRowNumberAnimation() {},
     document: { createElement: makeNode, createTextNode: text => ({ textContent: text }) },
     limitWindowsView: { setDetailTooltip(node, entries) {
+      // The token-split popover hangs off `.row-value`'s parent, which this
+      // synthetic row does not model.
+      if (!node) return;
       node.classList.toggle('limit-detail-tooltip-wrap', Boolean(entries));
       if (entries) bindings.push({ node, entries });
     } },

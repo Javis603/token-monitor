@@ -87,6 +87,9 @@
         subtitle: subtitleParts.join(' · '),
         value: finiteNumber(ex.tokens && ex.tokens.total),
         tokensAvailable: ex.tokensAvailable !== false,
+        // The exchange's own sum of its turns' tokens, kept whole so the head's
+        // hover can split the same number it prints.
+        tokens: ex.tokens || {},
         cost: finiteNumber(ex.costEstimate),
         ...(ex.unpricedTokens > 0 ? { unpricedTokens: finiteNumber(ex.unpricedTokens) } : {}),
         startTime: timeValue(ex.startedAt),
