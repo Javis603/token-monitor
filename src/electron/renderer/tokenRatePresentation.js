@@ -162,7 +162,18 @@
         clearSamples();
         return null;
       }
-      if (!(stepDelta.timedDurationMs > 0)) return sample;
+      if (!(stepDelta.timedDurationMs > 0)) {
+        const sameModels = models === previousModels || (models && previousModels
+          && Object.keys(models).length === Object.keys(previousModels).length
+          && Object.entries(models).every(([model, counters]) => previousModels[model]
+            && Object.keys(counters).every((field) => counters[field] === previousModels[model][field])));
+        if (!sameModels && unattributedSample) {
+          // Metadata-only attribution can claim previously unattributed usage.
+          // Keep its display age, but do not merge it with the next model delta.
+          unattributedSample = { ...unattributedSample, independent: false };
+        }
+        return sample;
+      }
 
       const sampledAt = Number(now()) || 0;
       const nextModels = new Map();
