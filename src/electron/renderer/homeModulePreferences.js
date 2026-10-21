@@ -99,7 +99,7 @@
   function defaultHomeModulePreferences() {
     return {
       homeModuleOrder: DEFAULT_HOME_MODULE_ORDER,
-      hiddenHomeModules: 'device'
+      hiddenHomeModules: 'tool,device'
     };
   }
 
