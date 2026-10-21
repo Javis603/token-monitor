@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { spawn, spawnSync, execFileSync } = require('node:child_process');
+const { spawn, spawnSync, execFile, execFileSync } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -81,6 +81,32 @@ test('Windows ACL failure retains the underlying diagnostics without serializing
     assert.deepEqual(JSON.parse(JSON.stringify(error)), { status: 'unavailable' });
     return true;
   });
+});
+
+test('Windows ACL preparation waits for a slow helper to verify the leaf', async t => {
+  const f = fixture(t);
+  const dir = path.join(f.root, 'probe');
+  let verified = false;
+  const env = { ...f.env };
+  if (process.platform === 'win32') env.SystemRoot = process.env.SystemRoot;
+  const api = windowsProbeModule(env, (_command, _args, options, callback) => {
+    assert.ok(Number.isFinite(options.timeout) && options.timeout > 0, 'helper must stay bounded');
+    // Exercise the real execFile timeout with a harmless child taking longer
+    // than the old 10 s limit. No PowerShell or Claude runs in this fixture.
+    const child = execFile(process.execPath, ['-e', 'setTimeout(() => {}, 11000)'], options, (error, stdout, stderr) => {
+      if (!error) {
+        fs.mkdirSync(dir, { mode: 0o700 });
+        verified = true;
+      }
+      callback(error, stdout, stderr);
+    });
+    t.after(() => child.kill());
+  });
+  const pending = api.prepareClaudeProbeDir({ claudeProbeDir: dir });
+  assert.equal(verified, false);
+  assert.equal(fs.existsSync(dir), false);
+  assert.equal((await pending).dir, dir);
+  assert.equal(verified, true);
 });
 
 test('probe cwd uses private app data and retains legacy and canonical alias filtering', async t => {

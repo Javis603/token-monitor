@@ -65,8 +65,10 @@ foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.Security
   for (const key of Object.keys(env)) {
     if (key.toLowerCase() === 'psmodulepath') delete env[key];
   }
+  // Cold Windows PowerShell startup can exceed 10 s under load. Keep a finite
+  // budget for startup plus ACL validation; failure still prevents CLI launch.
   await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
-    env, windowsHide: true, timeout: 10000
+    env, windowsHide: true, timeout: 30000
   });
 }
 
