@@ -32,6 +32,13 @@ function hash(file) {
   return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+function entriesByIdentity(entries) {
+  // The CLI sorts by cost, so these equally unpriced rows have no stable order.
+  // Preserve every row and field; only normalize their order for equality.
+  const key = row => JSON.stringify([row.client, row.sessionId, row.model, row.provider]);
+  return [...entries].sort((left, right) => key(left).localeCompare(key(right)));
+}
+
 test('built DeepTutor parser preserves precision and disjoint token buckets through the collector', binaryOptions, t => {
   const { dbPath, read } = fixture(t);
   const before = hash(dbPath);
@@ -78,7 +85,7 @@ test('source failure retains the last complete result but a valid empty ledger c
   const complete = read();
   const offline = `${dbPath}.offline`;
   fs.renameSync(dbPath, offline);
-  assert.deepEqual(read().entries, complete.entries);
+  assert.deepEqual(entriesByIdentity(read().entries), entriesByIdentity(complete.entries));
   fs.renameSync(offline, dbPath);
   const writer = new DatabaseSync(dbPath);
   try { writer.exec('DELETE FROM llm_calls;'); } finally { writer.close(); }
