@@ -13,7 +13,7 @@ const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { normalizeLimitProvider } = require('../../limits/core');
 const { abortError } = require('../../probeDeadline');
 const { hashKey } = require('../../hashKey');
-const { claudeProbeDir } = require('./probe');
+const { CLAUDE_PROBE_ARGS, prepareClaudeProbeDir } = require('./probe');
 const {
   PLAN_LABEL_ALIASES,
   TOKEN_MONITOR_USER_AGENT,
@@ -1710,20 +1710,25 @@ function withClaudePathHints(env = process.env, platform = process.platform) {
 
 function claudePtyPythonScript() {
   return `
-import fcntl, os, pty, re, select, signal, struct, subprocess, sys, termios, time
+import errno, fcntl, json, os, pty, re, select, signal, stat, struct, subprocess, sys, termios, time
 cmd = os.environ.get("TOKEN_MONITOR_CLAUDE_COMMAND_PATH", "claude")
 cwd = os.environ.get("TOKEN_MONITOR_CLAUDE_PROBE_DIR") or os.getcwd()
 timeout = float(os.environ.get("TOKEN_MONITOR_CLAUDE_CLI_TIMEOUT", "35"))
 slash_command = os.environ.get("TOKEN_MONITOR_CLAUDE_SLASH_COMMAND", "/usage")
 exit_marker = os.environ.get("TOKEN_MONITOR_CLAUDE_EXIT_MARKER_REGEX", "currentsession.*?[0-9]{1,3}(?:\\\\.[0-9]+)?%")
 exit_pattern = re.compile(exit_marker) if exit_marker else None
-os.makedirs(os.path.join(cwd, ".claude"), exist_ok=True)
-settings_path = os.path.join(cwd, ".claude", "settings.local.json")
-if not os.path.exists(settings_path):
-    open(settings_path, "w").write('{"disableDeepLinkRegistration":"disable"}\\n')
+# Check and pin the prepared cwd before allowing any workspace trust response.
+directory = os.open(cwd, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+info = os.fstat(directory)
+if (info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700
+        or str(info.st_dev) != os.environ["TOKEN_MONITOR_CLAUDE_PROBE_DEV"]
+        or str(info.st_ino) != os.environ["TOKEN_MONITOR_CLAUDE_PROBE_INO"]):
+    raise RuntimeError("Claude probe directory changed before launch")
+os.fchdir(directory)
+os.close(directory)
 master, slave = pty.openpty()
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 160, 0, 0))
-proc = subprocess.Popen([cmd, "--allowed-tools", ""], stdin=slave, stdout=slave, stderr=slave, cwd=cwd, close_fds=True, start_new_session=True)
+proc = subprocess.Popen([cmd] + json.loads(os.environ["TOKEN_MONITOR_CLAUDE_PROBE_ARGS"]), stdin=slave, stdout=slave, stderr=slave, cwd=".", close_fds=True, start_new_session=True)
 os.close(slave)
 fcntl.fcntl(master, fcntl.F_SETFL, os.O_NONBLOCK)
 ansi = re.compile(rb"\\x1b\\[[0-9;?]*[ -/]*[@-~]|\\x1b[()][A-Za-z0-9]|\\x1b[78=>][^\\x1b]*")
@@ -1747,6 +1752,7 @@ prompt_tokens = [
     "readytocodehere", "showplanusage", "showplan"
 ]
 slash_bytes = (slash_command + "\\r").encode("utf-8")
+pty_eio = False
 try:
     while time.time() - start < timeout:
         io_closed = False
@@ -1760,7 +1766,8 @@ try:
                         io_closed = True
             except BlockingIOError:
                 pass
-            except OSError:
+            except OSError as error:
+                pty_eio = error.errno == errno.EIO
                 break
         if io_closed:
             break
@@ -1798,11 +1805,27 @@ try:
             break
     sys.stdout.buffer.write(buf)
 finally:
+    # Only propagate a failure that happened before our intentional shutdown.
+    # Claude handles SIGTERM by exiting 143 even after a successful /usage.
+    early_exit_code = proc.poll()
+    # Linux may report slave closure before the child becomes waitable. Collect
+    # that exit before sending SIGTERM; marker/timeout shutdown keeps using poll.
+    if pty_eio and early_exit_code is None:
+        try:
+            early_exit_code = proc.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
     write_master(b"/exit\\r")
     try:
         os.killpg(proc.pid, signal.SIGTERM)
     except Exception:
         pass
+    try:
+        proc.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+sys.exit(early_exit_code if early_exit_code is not None and early_exit_code > 0 else 0)
 `.trim();
 }
 
@@ -1814,8 +1837,7 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
   const platform = deps.platform || process.platform;
   const command = existingClaudeCommandCandidates(claudeCommandCandidates(env, platform), deps)[0];
   if (!command) throw errorWithStatus('notConfigured', 'Claude CLI not found');
-  const probeDir = claudeProbeDir(deps);
-  fs.mkdirSync(probeDir, { recursive: true });
+  const { dir: probeDir, identity } = await prepareClaudeProbeDir(deps);
   const runEnv = {
     ...env,
     DISABLE_AUTOUPDATER: '1',
@@ -1825,6 +1847,9 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
     COLORTERM: env.COLORTERM || 'truecolor',
     TOKEN_MONITOR_CLAUDE_COMMAND_PATH: command,
     TOKEN_MONITOR_CLAUDE_PROBE_DIR: probeDir,
+    TOKEN_MONITOR_CLAUDE_PROBE_DEV: identity.dev,
+    TOKEN_MONITOR_CLAUDE_PROBE_INO: identity.ino,
+    TOKEN_MONITOR_CLAUDE_PROBE_ARGS: JSON.stringify(CLAUDE_PROBE_ARGS),
     TOKEN_MONITOR_CLAUDE_CLI_TIMEOUT: String(deps.claudeCliTimeoutSeconds || 35),
     TOKEN_MONITOR_CLAUDE_SLASH_COMMAND: slashCommand,
     TOKEN_MONITOR_CLAUDE_EXIT_MARKER_REGEX: exitMarkerRegex || ''
@@ -1833,7 +1858,8 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
   let lastError = null;
   for (const python of pythonCandidates) {
     try {
-      return await runProcessText(python, ['-c', claudePtyPythonScript()], {
+      // Imports must not read cwd/PYTHONPATH before the directory identity check.
+      return await runProcessText(python, ['-I', '-c', claudePtyPythonScript()], {
         ...deps,
         env: runEnv,
         cwd: probeDir,
@@ -1851,7 +1877,12 @@ function claudeDirectInvocation(command, args, platform, env) {
   if (platform !== 'win32' || /\.exe$/i.test(command)) return { command, args };
   const commandShell = envValue(env, 'ComSpec') || 'cmd.exe';
   const quotedCommand = `"${String(command).replace(/"/g, '""')}"`;
-  const commandLine = `"${[quotedCommand, ...args].join(' ')}"`;
+  // cmd shims forward to a native executable via %*: retain empty arguments and
+  // escape embedded JSON quotes for its Windows argv parser. Probe args are
+  // fixed literals, never user-provided shell fragments.
+  const quotedArgs = args.map((arg) => arg && !/[\s"]/u.test(arg)
+    ? arg : `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1')}"`);
+  const commandLine = `"${[quotedCommand, ...quotedArgs].join(' ')}"`;
   return {
     command: commandShell,
     args: ['/d', '/s', '/c', commandLine],
@@ -1905,11 +1936,11 @@ async function runClaudeUsageCli(deps = {}) {
   return runClaudePtyProbe('/usage', 'currentsession.*?[0-9]{1,3}(?:\\.[0-9]+)?%', deps);
 }
 
-function runClaudeDirectUsageCli(deps = {}) {
-  const probeDir = claudeProbeDir(deps);
-  fs.mkdirSync(probeDir, { recursive: true });
+async function runClaudeDirectUsageCli(deps = {}) {
+  const { dir: probeDir } = await prepareClaudeProbeDir(deps);
   return runClaudeDirectCommand(
-    ['/usage'],
+    // Keep /usage positional even alongside variadic --allowed-tools.
+    [...CLAUDE_PROBE_ARGS, '--', '/usage'],
     { ...deps, cwd: probeDir },
     Number(deps.claudeDirectCliTimeoutMs || 12000)
   );

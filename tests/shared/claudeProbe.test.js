@@ -1,0 +1,307 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { spawn, spawnSync, execFileSync } = require('node:child_process');
+const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+const { sharedDataDir, writeJsonAtomic } = require('../../src/shared/config');
+const { claudeProbeDir, prepareClaudeProbeDir, isClaudeProbeCwd } = require('../../src/shared/providers/claude/probe');
+const { fetchClaudeLimits, touchClaudeAuthPath } = require('../../src/shared/providers/claude/limits');
+
+function fixture(t) {
+  // Keep Windows fixtures under the profile; production still checks the leaf
+  // DACL rather than assuming the profile or its primary group is private.
+  const temp = process.platform === 'win32' ? os.homedir() : os.tmpdir();
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(temp, 'claude-probe-test-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const home = path.join(root, 'home');
+  fs.mkdirSync(home, { mode: 0o700 });
+  return { root, env: { HOME: home, CLAUDE_CONFIG_DIR: path.join(home, '.claude'), PATH: '/usr/bin:/bin' } };
+}
+
+function fakeChild(output = 'Account: fixture', code = 0) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+  child.stdin = { end() {} }; child.kill = () => {};
+  process.nextTick(() => { child.stdout.emit('data', output); child.emit('close', code); });
+  return child;
+}
+
+test('probe cwd uses private app data and retains legacy and canonical alias filtering', async t => {
+  const f = fixture(t);
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: path.join(f.root, 'app') } };
+  const current = claudeProbeDir(options);
+  assert.equal(current, path.join(f.root, 'app', 'claude-probe'));
+  const { dir: prepared } = await prepareClaudeProbeDir(options);
+  assert.equal(isClaudeProbeCwd(prepared, current), true);
+  assert.equal(isClaudeProbeCwd(path.join(os.tmpdir(), 'token-monitor-claude-probe'), current), true);
+  assert.equal(isClaudeProbeCwd(`${current}-project`, current), false);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(prepared).mode & 0o777, 0o700);
+  if (process.platform === 'darwin') {
+    assert.equal(isClaudeProbeCwd('/private/var/not-yet-created-probe', '/var/not-yet-created-probe'), true);
+  }
+});
+
+test('agent-first app data created under umask 002 permits a private probe without repair', { skip: process.platform === 'win32' }, async t => {
+  const f = fixture(t);
+  const options = { platform: 'linux', homeDir: f.env.HOME, env: f.env };
+  const dataDir = sharedDataDir(options);
+  const stateFile = path.join(dataDir, 'fixture-state.json');
+  const previousUmask = process.umask(0o002);
+  try { writeJsonAtomic(stateFile, { fixture: true }); }
+  finally { process.umask(previousUmask); }
+  const parents = [path.dirname(dataDir), dataDir];
+  for (const dir of parents) assert.equal(fs.statSync(dir).mode & 0o777, 0o775);
+
+  const { dir: prepared } = await prepareClaudeProbeDir(options);
+  assert.equal(prepared, path.join(dataDir, 'claude-probe'));
+  assert.equal(fs.statSync(prepared).mode & 0o777, 0o700);
+  for (const dir of parents) assert.equal(fs.statSync(dir).mode & 0o777, 0o775);
+  assert.deepEqual(JSON.parse(fs.readFileSync(stateFile, 'utf8')), { fixture: true });
+});
+
+test('unsafe probe leaves fail before either PTY or direct CLI starts without deleting data', { skip: process.platform === 'win32' }, async t => {
+  const f = fixture(t);
+  const cases = [];
+  const target = path.join(f.root, 'target');
+  fs.mkdirSync(target, { mode: 0o700 });
+  fs.writeFileSync(path.join(target, 'keep'), 'untouched');
+  const link = path.join(f.root, 'link');
+  fs.symlinkSync(target, link);
+  cases.push(link);
+  const file = path.join(f.root, 'file');
+  fs.writeFileSync(file, 'untouched'); cases.push(file);
+  for (const mode of [0o755, 0o770, 0o775, 0o777]) {
+    const dir = path.join(f.root, `mode-${mode}`);
+    fs.mkdirSync(dir); fs.chmodSync(dir, mode); cases.push(dir);
+  }
+  for (const claudeProbeDir of cases) {
+    let starts = 0;
+    const deps = { env: f.env, claudeProbeDir, existsSync: () => false,
+      spawn: () => { starts++; return fakeChild(); } };
+    await assert.rejects(touchClaudeAuthPath(deps), error => error.status === 'unavailable', claudeProbeDir);
+    await assert.rejects(fetchClaudeLimits({}, { ...deps, platform: 'win32',
+      stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
+      readWindowsCredential: false, isClaudeCliAuthenticated: async () => true }), /Claude credentials not found/);
+    assert.equal(starts, 0, claudeProbeDir);
+  }
+  assert.equal(fs.readFileSync(path.join(target, 'keep'), 'utf8'), 'untouched');
+  assert.equal(fs.readFileSync(file, 'utf8'), 'untouched');
+});
+
+test('unowned directory fails without changing permissions', { skip: process.platform === 'win32' }, async t => {
+  const f = fixture(t);
+  const dir = path.join(f.root, 'unowned');
+  fs.mkdirSync(dir, { mode: 0o700 });
+  const lstat = fs.lstatSync;
+  t.mock.method(fs, 'lstatSync', (p, ...args) => {
+    const stat = lstat(p, ...args);
+    if (p === dir) stat.uid = process.getuid() + 1;
+    return stat;
+  });
+  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: dir }), /not private/);
+  assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
+});
+
+test('shared parent permissions do not relax private leaf checks or change existing data', { skip: process.platform === 'win32' }, async t => {
+  const f = fixture(t);
+  for (const mode of [0o775, 0o777]) {
+    const parent = path.join(f.root, `shared-${mode}`);
+    fs.mkdirSync(parent); fs.chmodSync(parent, mode);
+    fs.writeFileSync(path.join(parent, 'keep'), 'untouched');
+    const { dir } = await prepareClaudeProbeDir({ claudeProbeDir: path.join(parent, 'probe') });
+    assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(parent).mode & 0o777, mode);
+    assert.equal(fs.readFileSync(path.join(parent, 'keep'), 'utf8'), 'untouched');
+    fs.chmodSync(dir, 0o775);
+    await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: dir }), /not private/);
+  }
+});
+
+test('macOS extended ACL grants fail closed at the leaf despite mode 0700', { skip: process.platform !== 'darwin' }, async t => {
+  const f = fixture(t);
+  const dir = path.join(f.root, 'acl');
+  fs.mkdirSync(dir, { mode: 0o700 });
+  execFileSync('/bin/chmod', ['+a', 'everyone allow read,write,add_file,add_subdirectory,delete_child', dir]);
+  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: dir }), /not private/);
+});
+
+const python = process.platform === 'win32' ? null : '/usr/bin/python3';
+const hasPython = python && spawnSync(python, ['--version'], { env: { PATH: '/usr/bin:/bin' } }).status === 0;
+
+test('redirected and shared parents resolve while linked leaves still fail', { skip: process.platform === 'win32' }, async t => {
+  const f = fixture(t);
+  const target = path.join(f.root, 'target');
+  fs.mkdirSync(target, { mode: 0o700 });
+  const alias = path.join(f.root, 'alias');
+  fs.symlinkSync(target, alias);
+  const { dir: actual } = await prepareClaudeProbeDir({ claudeProbeDir: path.join(alias, 'probe') });
+  assert.equal(actual, path.join(target, 'probe'));
+  fs.chmodSync(target, 0o777);
+  assert.equal((await prepareClaudeProbeDir({ claudeProbeDir: path.join(alias, 'probe') })).dir, actual);
+  fs.chmodSync(target, 0o700);
+  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: alias }), /not private/);
+});
+
+test('a legacy symlink cannot hide a real project through canonical filtering', t => {
+  const f = fixture(t);
+  const project = path.join(f.root, 'project');
+  fs.mkdirSync(project);
+  const legacy = path.join(os.tmpdir(), 'token-monitor-claude-probe');
+  const realpath = fs.realpathSync;
+  t.mock.method(fs, 'realpathSync', (dir, ...args) => dir === legacy ? project : realpath(dir, ...args));
+  assert.equal(isClaudeProbeCwd(project, path.join(f.root, 'new-probe')), false);
+  assert.equal(isClaudeProbeCwd(legacy, path.join(f.root, 'new-probe')), true);
+});
+
+test('real PTY keeps concurrent usage/status restricted and accepts intentional SIGTERM exit 143', { skip: !hasPython }, async t => {
+  const f = fixture(t);
+  const dir = path.join(f.root, 'probe');
+  fs.mkdirSync(dir, { mode: 0o700 });
+  fs.mkdirSync(path.join(dir, '.claude'));
+  const planted = '{"disableAllHooks":false,"auditSentinel":"retained","hooks":{"SessionStart":[]}}';
+  fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), planted);
+  fs.writeFileSync(path.join(dir, '.mcp.json'), '{"mcpServers":{"inert":{"command":"never-run"}}}');
+  const fake = path.join(f.root, 'claude.py');
+  fs.writeFileSync(fake, `#!/usr/bin/python3
+import json, os, signal, sys, time
+signal.signal(signal.SIGTERM, lambda *args: sys.exit(143))
+args = sys.argv[1:]
+print('Yes, I trust this folder', flush=True)
+first = sys.stdin.readline()
+while True:
+    command = sys.stdin.readline().strip()
+    if command.startswith('/'):
+        break
+receipt = {'args': args, 'first': first, 'command': command, 'cwd': os.getcwd(), 'history': os.environ.get('CLAUDE_CODE_SKIP_PROMPT_HISTORY')}
+with open(os.path.join(os.environ['RECEIPTS'], command[1:] + '.json'), 'w') as out:
+    json.dump(receipt, out)
+print('Current session 12% left' if command == '/usage' else 'Account: fixture', flush=True)
+time.sleep(10)
+`, { mode: 0o700 });
+  const deps = { env: { ...f.env, TOKEN_MONITOR_CLAUDE_COMMAND: fake, RECEIPTS: f.root },
+    claudeProbeDir: dir, platform: process.platform, pythonCommand: python,
+    readMacKeychain: false, readWindowsCredential: false,
+    stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
+    isClaudeCliAuthenticated: async () => true,
+    fetch: async () => { throw new Error('network forbidden'); },
+    spawn: (command, args, options) => { assert.equal(command, python); assert.equal(options.env.HOME, f.env.HOME); return spawn(command, args, options); } };
+  const [usage] = await Promise.all([fetchClaudeLimits({}, deps), touchClaudeAuthPath(deps)]);
+  assert.equal(usage.source, 'cli');
+  assert.equal(usage.windows[0].usedPercent, 88);
+  for (const command of ['usage', 'status']) {
+    const receipt = JSON.parse(fs.readFileSync(path.join(f.root, `${command}.json`)));
+    const args = receipt.args;
+    assert.equal(args[args.indexOf('--setting-sources') + 1], 'user');
+    assert.equal(JSON.parse(args[args.indexOf('--settings') + 1]).disableAllHooks, true);
+    assert.ok(args.includes('--strict-mcp-config'));
+    assert.equal(args[args.indexOf('--allowed-tools') + 1], '');
+    assert.equal(receipt.first, '\n');
+    assert.equal(receipt.command, `/${command}`);
+    assert.equal(receipt.history, '1');
+    assert.equal(receipt.cwd, dir);
+  }
+  assert.equal(fs.readFileSync(path.join(dir, '.claude', 'settings.local.json'), 'utf8'), planted);
+});
+
+test('unsupported probe flags fail once without an unsafe retry', { skip: !hasPython }, async t => {
+  const f = fixture(t);
+  const fake = path.join(f.root, 'old-claude.py');
+  const receipt = path.join(f.root, 'calls');
+  fs.writeFileSync(fake, `#!/usr/bin/python3
+import os, sys
+with open(os.environ['RECEIPT'], 'a') as out:
+    out.write('called\\n')
+print('unsupported --setting-sources', flush=True)
+sys.exit(1)
+`, { mode: 0o700 });
+  await assert.rejects(touchClaudeAuthPath({ platform: process.platform,
+    env: { ...f.env, TOKEN_MONITOR_CLAUDE_COMMAND: fake, RECEIPT: receipt },
+    claudeProbeDir: path.join(f.root, 'probe'), pythonCommand: python,
+    spawn: (command, args, options) => { assert.equal(command, python); return spawn(command, args, options); }
+  }), error => error.status === 'unavailable');
+  assert.equal(fs.readFileSync(receipt, 'utf8'), 'called\n');
+});
+
+test('PTY EIO waits for an early nonzero child exit before shutdown', { skip: !hasPython }, async t => {
+  const f = fixture(t);
+  const fake = path.join(f.root, 'early-close.py');
+  fs.writeFileSync(fake, `#!/usr/bin/python3
+import os, sys, time
+print('Account: fixture', flush=True)
+for fd in (0, 1, 2):
+    os.close(fd)
+time.sleep(0.3)
+sys.exit(7)
+`, { mode: 0o700 });
+  let pythonExit;
+  await assert.rejects(touchClaudeAuthPath({
+    env: { ...f.env, TOKEN_MONITOR_CLAUDE_COMMAND: fake },
+    claudeProbeDir: path.join(f.root, 'probe'), pythonCommand: python,
+    spawn: (command, args, options) => {
+      assert.equal(command, python);
+      // Darwin returns EOF where Linux returns EIO after the PTY slave closes.
+      // Translate only that EOF to exercise Linux's exit/poll race on this host.
+      assert.deepEqual(args.slice(0, 2), ['-I', '-c']);
+      const script = args[2].replace('buf = b""', `
+real_read = os.read
+def linux_pty_read(fd, size):
+    chunk = real_read(fd, size)
+    if fd == master and not chunk:
+        raise OSError(5, "fixture PTY EIO")
+    return chunk
+os.read = linux_pty_read
+buf = b""`);
+      const child = spawn(command, [...args.slice(0, 2), script], options);
+      child.once('close', code => { pythonExit = code; });
+      return child;
+    }
+  }), error => error.status === 'unavailable');
+  assert.equal(pythonExit, 7);
+});
+
+test('isolated Python refuses a replaced cwd without importing its planted module or starting CLI', { skip: !hasPython }, async t => {
+  const f = fixture(t);
+  const dir = path.join(f.root, 'probe');
+  const fake = path.join(f.root, 'never-start.py');
+  const receipt = path.join(f.root, 'started');
+  const imported = path.join(f.root, 'module-imported');
+  fs.writeFileSync(fake, `#!/usr/bin/python3
+import os
+with open(os.environ['RECEIPT'], 'w') as out:
+    out.write('started')
+print('Yes, I trust this folder', flush=True)
+`, { mode: 0o700 });
+  await assert.rejects(touchClaudeAuthPath({ env: { ...f.env, TOKEN_MONITOR_CLAUDE_COMMAND: fake, RECEIPT: receipt },
+    claudeProbeDir: dir, pythonCommand: python,
+    spawn: (command, args, options) => {
+      assert.equal(command, python);
+      fs.renameSync(dir, `${dir}-old`);
+      fs.mkdirSync(dir, { mode: 0o700 });
+      fs.writeFileSync(path.join(dir, 'json.py'), `open(${JSON.stringify(imported)}, 'w').write('imported')\n`);
+      return spawn(command, args, options);
+    }
+  }), /changed before launch/);
+  assert.equal(fs.existsSync(receipt), false);
+  assert.equal(fs.existsSync(imported), false);
+});
+
+test('Windows checks the leaf DACL and permits redirected parents without following a linked leaf', { skip: process.platform !== 'win32' }, async t => {
+  const f = fixture(t);
+  const { dir } = await prepareClaudeProbeDir({ claudeProbeDir: path.join(f.root, 'probe') });
+  execFileSync('icacls.exe', [dir, '/grant', '*S-1-1-0:(OI)(CI)F'], { windowsHide: true });
+  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: dir }), /not private/);
+  const alias = path.join(f.root, 'alias');
+  fs.symlinkSync(dir, alias, 'junction');
+  const { dir: child } = await prepareClaudeProbeDir({ claudeProbeDir: path.join(alias, 'child') });
+  assert.equal(child, path.join(fs.realpathSync(dir), 'child'));
+  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: alias }), /not private/);
+  const missing = path.join(f.root, 'absent');
+  const dangling = path.join(f.root, 'dangling');
+  fs.symlinkSync(missing, dangling, 'junction');
+  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: dangling }), /not private/);
+  assert.equal(fs.existsSync(missing), false);
+});

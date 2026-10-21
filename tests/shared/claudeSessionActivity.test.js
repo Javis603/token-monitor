@@ -12,6 +12,7 @@ const usage = require('../../src/shared/usage');
 const archive = require('../../src/shared/usage/sessionUsageArchive');
 const presentation = require('../../src/electron/renderer/edgeDock/presentation');
 const sessionRows = require('../../src/electron/renderer/sessionRows');
+const { claudeProbeDir: defaultProbeDir } = require('../../src/shared/providers/claude/probe');
 
 const now = Date.parse('2026-10-08T12:00:00Z');
 const start = now - 60_000;
@@ -111,6 +112,8 @@ test('registry excludes Token Monitor probe cwd from readings and pre-token rows
   for (const platform of ['darwin', 'win32']) {
     for (const [claudeProbeDir, cwd] of [
       [undefined, path.join(os.tmpdir(), 'token-monitor-claude-probe')],
+      [undefined, defaultProbeDir({ ...f.options, platform })],
+      [probe, path.join(os.tmpdir(), 'token-monitor-claude-probe')],
       [probe, probe], [alias, canonical], [canonical, alias], [missing, missing]
     ]) {
       const options = { ...f.options, platform, claudeProbeDir };
