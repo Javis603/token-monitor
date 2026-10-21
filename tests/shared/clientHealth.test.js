@@ -816,7 +816,17 @@ test('deriveClientHealth reports a stale local index without changing overall', 
     staleIndexClients: ['omp']
   }).clients.omp;
   assert.equal(stale.overall, 'healthy');
-  assert.deepEqual(stale.diagnostics, [{ code: 'index-stale' }]);
+  // A caller that only knows the fact leaves the measurement at zero rather than
+  // omitting the keys, so the renderer can read them unconditionally.
+  assert.deepEqual(stale.diagnostics, [{ code: 'index-stale', lagMs: 0, unreadBytes: 0 }]);
+
+  // A caller that measured the gap passes it through, which is what lets the
+  // floating window say how far behind the index is.
+  const measured = deriveClientHealth('omp', { clients: { omp: 500 } }, {
+    sourceChecks,
+    staleIndexClients: new Map([['omp', { lagMs: 6.4e7, unreadBytes: 66377273 }]])
+  }).clients.omp;
+  assert.deepEqual(measured.diagnostics, [{ code: 'index-stale', lagMs: 64000000, unreadBytes: 66377273 }]);
 
   // A client whose sources are absent cannot have a stale index; the note would
   // be describing a different problem.

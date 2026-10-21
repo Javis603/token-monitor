@@ -1514,10 +1514,14 @@ async function collectUsageOnce(options) {
   }
   // After history, so `lastActivityDay` can come from the daily buckets this
   // scan already produced rather than from a second source of truth.
+  // The banner on the floating window needs the size of the gap, not just the
+  // fact of it, so the observation rides along with the client id.
+  const staleIndexClients = new Map();
+  if (ompUsage?.indexLag?.stale) staleIndexClients.set('omp', ompUsage.indexLag);
   const clientHealth = deriveClientHealth(normalizedClients, allTime, {
     sourceChecks,
     collectionFailures: ompReadFailed ? ['omp'] : [],
-    staleIndexClients: ompUsage?.indexLag?.stale ? ['omp'] : [],
+    staleIndexClients,
     wslStatus,
     observedAt: collectedAt,
     lastActivityDays: mergeClientActivityDays(
@@ -2268,7 +2272,12 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
   // diagnostic rather than an `attention` overall state: the numbers shown are
   // correct for what was imported, so nothing is failing — they are just not
   // current, and the fix belongs to the client's own indexer.
-  const staleIndexClients = new Set(options.staleIndexClients || []);
+  // Accepts either the ids alone or a map of id → observation, so a caller that
+  // only knows staleness keeps working and one that measured it can pass the
+  // numbers through to the renderer.
+  const staleIndexClients = options.staleIndexClients instanceof Map
+    ? options.staleIndexClients
+    : new Set(options.staleIndexClients || []);
   const throttle = options.selfSyncThrottle || selfSyncThrottle;
   const result = {};
   for (const client of clients) {
@@ -2322,14 +2331,21 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
       // tool is installed in that distro and simply unused.
       if (wslDetected.has(client) && !wslWithData.has(client)) codes.push('wsl-detected-no-data');
     }
-    // An object per diagnostic even though `code` is the only field today: the
+    // An object per diagnostic even though most carry only `code`: the
     // extension point is inside the entry, and every diagnostics format worth
     // copying (LSP, ESLint, SARIF, RFC 9457) is shaped this way. Growing an
     // object stays compatible; turning `string[]` into `object[]` would not.
     // Severity is deliberately absent — it depends on which client the code
     // lands on, which only the renderer knows.
     if (codes.length > 0) {
-      entry.diagnostics = codes.slice(0, MAX_DIAGNOSTICS_PER_CLIENT).map((code) => ({ code }));
+      // `staleIndexClients` is a Set of ids when the caller only knows the fact
+      // and a Map of id → observation when it also measured the gap.
+      const lag = codes.includes('index-stale') ? (staleIndexClients.get?.(client) || null) : null;
+      entry.diagnostics = codes.slice(0, MAX_DIAGNOSTICS_PER_CLIENT).map((code) => (code === 'index-stale'
+        // The renderer states how far behind the index is, because "stale" alone
+        // does not tell a user whether to reopen the dashboard now or later.
+        ? { code, lagMs: Math.max(0, Number(lag?.lagMs) || 0), unreadBytes: Math.max(0, Number(lag?.unreadBytes) || 0) }
+        : { code }));
     }
     // `source-checks` on a healthy entry would be detail the fixed core does not
     // need; the diagnostics above are the one exception because they state

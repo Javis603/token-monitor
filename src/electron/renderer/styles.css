@@ -419,6 +419,30 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .status { display: none; margin-top: 4px; color: var(--muted); font-size: 0.6875rem; }
 .status.error { display: block; }
+/* A client's own indexer stopped importing, so the numbers on screen are real
+   but not current. Sits under the title bar and is the only place a user can
+   learn that without opening Settings → Tools. */
+.index-stale-banner {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 8px;
+  border: 1px solid rgba(244, 160, 115, 0.4);
+  border-radius: 6px;
+  background: rgba(244, 160, 115, 0.12);
+  color: var(--orange);
+  font: inherit;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+.index-stale-banner:hover { background: rgba(244, 160, 115, 0.2); }
+.index-stale-banner-text { min-width: 0; }
+.index-stale-banner-action { flex: 0 0 auto; color: var(--muted); text-decoration: underline; }
 .title-controls {
   -webkit-app-region: no-drag;
   position: relative;

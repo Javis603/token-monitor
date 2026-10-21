@@ -388,6 +388,7 @@ const els = {
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
+  indexStaleBanner: document.getElementById('indexStaleBanner'),
   glassInputNote: document.getElementById('glassInputNote'),
   backgroundImageOpacityRow: document.getElementById('backgroundImageOpacityRow'),
   backgroundImageOpacityInput: document.getElementById('backgroundImageOpacityInput'),
@@ -666,6 +667,9 @@ document.addEventListener('keydown', (event) => {
 });
 
 els.toolDetailFooterTokens.addEventListener('click', () => setActiveToolDetailMode('tokens'));
+// Opens the panel that carries the full explanation and the repair action; the
+// banner only has room to say which client and how far behind it is.
+els.indexStaleBanner?.addEventListener('click', () => openSettingsPanel());
 els.toolDetailFooterModels.addEventListener('click', () => setActiveToolDetailMode('models'));
 els.projectBreakdownFooterTools.addEventListener('click', () => { void saveSettings({ projectBreakdownMode: 'tool' }).catch(() => {}); });
 els.projectBreakdownFooterModels.addEventListener('click', () => { void saveSettings({ projectBreakdownMode: 'model' }).catch(() => {}); });
@@ -7283,6 +7287,7 @@ function render() {
   els.toolDetailFooter.classList.add('hidden');
   els.projectBreakdownFooter.classList.add('hidden');
   syncLiveTokenRateFooterState();
+  renderIndexStaleBanner();
   renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
   renderViewSwitcher();
@@ -9151,6 +9156,44 @@ function applyInitialBreakdownPreference() {
     preferFirst: true
   });
   if (next !== state.breakdown) setBreakdown(next);
+}
+
+// A client's own indexer stopped importing recent sessions. Every number on
+// this window is correct for what was imported, so nothing here is broken —
+// but it is not current, and no surface outside the Settings tool panel says so.
+function indexStaleDiagnostic() {
+  const device = clientHealthPresentationApi.exactDevice(state.stats, state.settings?.deviceId);
+  const clients = device?.clientHealth?.clients;
+  if (!clients || typeof clients !== 'object') return null;
+  for (const [clientId, entry] of Object.entries(clients)) {
+    const diagnostic = (entry?.diagnostics || []).find((item) => item?.code === 'index-stale');
+    if (diagnostic) return { clientId, lagMs: Number(diagnostic.lagMs) || 0 };
+  }
+  return null;
+}
+
+function formatIndexLag(lagMs) {
+  if (!(lagMs > 0)) return '';
+  const hours = Math.floor(lagMs / 3600000);
+  if (hours >= 1) return t('home.indexStale.lagHours', { hours });
+  const minutes = Math.max(1, Math.round(lagMs / 60000));
+  return t('home.indexStale.lagMinutes', { minutes });
+}
+
+function renderIndexStaleBanner() {
+  const banner = els.indexStaleBanner;
+  if (!banner) return;
+  const stale = indexStaleDiagnostic();
+  banner.classList.toggle('hidden', !stale);
+  if (!stale) return;
+  const text = banner.querySelector('.index-stale-banner-text');
+  if (!text) return;
+  const lag = formatIndexLag(stale.lagMs);
+  // The client id is interpolated rather than looked up: it is the tool's own
+  // name in every locale, and a missing catalogue entry would render the key.
+  text.textContent = lag
+    ? t('home.indexStale.withLag', { client: stale.clientId, lag })
+    : t('home.indexStale.noLag', { client: stale.clientId });
 }
 
 function renderSessionUsageArchiveStatus() {
