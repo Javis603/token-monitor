@@ -116,6 +116,8 @@ Sessions, Home and Edge Dock group the complete member set before applying displ
 
 ## Windows Edge Dock material
 
+A helper failure keeps the current surface generation on tinted fallback. Once every surface is disposed, the next generation may retry native startup; ordinary updates never create a retry loop.
+
 `edgeDock/windowsBackdrop.js` owns a single native helper for the dock's content windows. On Windows 11 it uses the OS HostBackdrop brush clipped to the same Bézier commands as the renderer. Acrylic and Accent remain main-window choices: their HWND-wide backgrounds ignore the dock's concave clipping, so neither API belongs on a dock window. The renderer keeps the theme tint and outline, and lowers its opaque fallback only after the helper acknowledges that surface. Disabling native glass, an unsupported OS, a missing helper, timeout or a helper failure retains the tinted silhouette.
 
 Electron owns input and the content-window regions. Native underlays are disabled, nonactivating tool windows, ordered directly below their respective content HWNDs. Curves cross the private stdin pipe at the monitor's physical scale; opacity follows the controller's fade. The helper positions against the actual content HWND's `GetWindowRect`: converting Electron's rounded `getBounds()` back to pixels can add 1–2 pixels and incorrectly hide a small card or scaled rail. Pending updates coalesce under pipe backpressure. EOF, parent exit or destroyed content HWNDs remove native windows; the helper also hides an underlay if its owner has moved without a matching update.

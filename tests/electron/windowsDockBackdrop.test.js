@@ -159,6 +159,36 @@ test('startup timeout shuts down the helper and restores the tinted fallback', (
   assert.equal(f.children[0].killed, true);
 });
 
+for (const failure of ['startup timeout', 'helper exit']) {
+  test(`a new surface generation retries after ${failure}, without retrying a live failed generation`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const f = fixture(); const a = f.attach(); const b = f.attach(); const child = f.children[0];
+    t.after(() => { a.adapter.dispose(); b.adapter.dispose(); });
+    if (failure === 'startup timeout') t.mock.timers.tick(5000);
+    else { child.report({ type: 'ready', protocol: 1 }); child.emit('exit', 1); }
+    assert.deepEqual(a.material, [false]);
+    assert.deepEqual(b.material, [false]);
+    a.adapter.dispose();
+    const remaining = f.attach();
+    t.after(() => remaining.adapter.dispose());
+    remaining.adapter.update(shape); remaining.adapter.setOpacity(1); await settle();
+    assert.equal(f.children.length, 1, 'no retry while failed surfaces still exist');
+    b.adapter.dispose(); remaining.adapter.dispose();
+
+    const fresh = f.attach();
+    t.after(() => fresh.adapter.dispose());
+    assert.equal(f.children.length, 2, 'all surfaces stopping allows a new helper');
+    const next = f.children[1];
+    fresh.adapter.update(shape); fresh.adapter.setOpacity(1); await settle();
+    child.report({ type: 'ready', protocol: 1 }); child.report({ type: 'error', message: 'stale helper' });
+    next.report({ type: 'ready', protocol: 1 });
+    assert.equal(next.messages.length, 1, 'new generation updates reach the helper');
+    next.report({ type: 'attached', id: next.messages[0].id });
+    assert.deepEqual(fresh.material, [true], 'new generation restores glass');
+    assert.equal(f.logs.length, 1, 'late responses from the old helper cannot fail the new generation');
+  });
+}
+
 test('closing all surfaces ends stdin, bounds shutdown and isolates the next helper generation', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = fixture(); const a = f.attach(); const child = f.children[0];

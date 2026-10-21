@@ -109,6 +109,8 @@ function createWindowsDockBackdrop({
     child = null;
     ready = false;
     blocked = false;
+    // Retry only after every old surface is gone, never on live failed updates.
+    failed = false;
     pending.clear();
     // EOF requests graceful native cleanup; kill is bounded if its UI thread
     // stopped responding. The helper also watches its parent independently.
