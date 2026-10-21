@@ -952,3 +952,32 @@ test('still preserves Cursor conversation sessions after the live source drops t
   assert.equal(visible.allTime.clients.cursor, 1000);
   assert.equal(visible.allTime.sessions[`cursor:${CURSOR_UUID}`].archived, true);
 });
+
+test('a replayed session carries its timing into the period and fails the tool rate closed', () => {
+  const source = liveSummary();
+  Object.assign(source.today.sessions['opencode:o1'], {
+    outputTokens: 30,
+    timedOutputTokens: 20,
+    timedDurationMs: 2000
+  });
+  const archive = captureSessionUsageArchive({}, source, new Date('2026-07-09T08:15:00.000Z'));
+
+  const live = summaryAfterOpenCodeDelete();
+  live.today.timedTokens = 50;
+  live.today.timedOutputTokens = 30;
+  live.today.timedDurationMs = 1500;
+  live.today.clientThroughput = { codex: { timedTokens: 50, timedOutputTokens: 30, timedDurationMs: 1500 } };
+  const visible = applySessionUsageArchive(live, archive, {
+    now: new Date('2026-07-09T08:20:00.000Z')
+  });
+
+  assert.equal(visible.today.timedOutputTokens, 50, 'the archived session still contributes its timed output');
+  assert.equal(visible.today.timedDurationMs, 3500);
+  assert.deepEqual(visible.today.clientThroughput.codex, {
+    timedTokens: 50,
+    timedOutputTokens: 30,
+    timedDurationMs: 1500
+  });
+  assert.equal(visible.today.clientThroughput.opencode, undefined,
+    'no per-tool rate without the token count the timing covered');
+});

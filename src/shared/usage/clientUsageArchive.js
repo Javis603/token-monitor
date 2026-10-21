@@ -280,6 +280,28 @@ function addClientUsage(period, client, usage) {
     period.sessions[key] = session;
     addSessionBreakdown(period, client, session);
   }
+  // The archive stores totals, costs, models and sessions but never the
+  // per-client throughput counters, so a retained client comes back without
+  // them. What its sessions still carry — timed output and duration — goes back
+  // into the period rate; the client's own attribution fails closed, because the
+  // token count that timing covered cannot be rebuilt from a session record.
+  let archivedTimedOutput = 0;
+  let archivedTimedDuration = 0;
+  for (const session of Object.values(normalizedSessions)) {
+    archivedTimedDuration += Math.max(0, Math.round(numberValue(session.timedDurationMs)));
+    archivedTimedOutput += Math.min(
+      Math.max(0, Math.round(numberValue(session.outputTokens))),
+      Math.max(0, Math.round(numberValue(session.timedOutputTokens)))
+    );
+  }
+  if (archivedTimedDuration > 0) {
+    period.timedOutputTokens = Math.min(
+      period.outputTokens,
+      Math.max(0, Math.round(numberValue(period.timedOutputTokens))) + archivedTimedOutput
+    );
+    period.timedDurationMs = Math.max(0, Math.round(numberValue(period.timedDurationMs))) + archivedTimedDuration;
+  }
+  if (tokens > 0 && period.clientThroughput) delete period.clientThroughput[client];
   const known = Math.min(tokens,
     period.cacheReadTokens - beforeComponents.cacheRead
     + period.cacheWriteTokens - beforeComponents.cacheWrite

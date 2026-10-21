@@ -372,6 +372,24 @@ function addArchivedSession(period, session, archiveKey = null) {
   if (tokens > 0) period.clients[archived.client] = (period.clients[archived.client] || 0) + tokens;
   if (cost > 0) period.clientCosts[archived.client] = (period.clientCosts[archived.client] || 0) + cost;
 
+  // A replayed session keeps the output and duration it was captured with, so
+  // both halves of the period rate can go straight back in. The third counter is
+  // the token count the timing covered, which a session never records: with the
+  // numerator and denominator intact but that coverage unknown, the client's own
+  // attribution fails closed rather than reporting a rate built from the live
+  // half of a mixed tool. Same rule the other incomplete-provenance fields
+  // follow in docs/API.md.
+  const timedDurationMs = Math.max(0, Math.round(numberValue(archived.timedDurationMs)));
+  const timedOutput = Math.min(output, Math.max(0, Math.round(numberValue(archived.timedOutputTokens))));
+  if (timedDurationMs > 0) {
+    period.timedOutputTokens = Math.min(
+      period.outputTokens,
+      Math.max(0, Math.round(numberValue(period.timedOutputTokens))) + timedOutput
+    );
+    period.timedDurationMs = Math.max(0, Math.round(numberValue(period.timedDurationMs))) + timedDurationMs;
+  }
+  if (output > 0 && period.clientThroughput) delete period.clientThroughput[archived.client];
+
   for (const [model, modelTokens] of Object.entries(archived.models || {})) {
     const next = Math.max(0, Math.round(numberValue(modelTokens)));
     if (next <= 0) continue;

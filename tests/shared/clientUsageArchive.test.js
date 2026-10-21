@@ -681,3 +681,33 @@ test('recapturing Pi carries the merged snapshot residue forward', () => {
   const applied = applyArchivedClientUsage(liveSummary(now, {}), recaptured, { activeClients: '', now });
   assert.equal(applied.periods.allTime.totalTokens, 100);
 });
+
+test('a retained client carries its session timing and fails the tool rate closed', () => {
+  const record = deviceRecord();
+  Object.assign(record.today.sessions['hermes:h1'], {
+    outputTokens: 30,
+    timedOutputTokens: 20,
+    timedDurationMs: 2000
+  });
+  const archive = captureArchivedClientUsage({}, record, ['hermes'], new Date('2026-05-30T13:00:00.000Z'));
+
+  const live = liveSummaryWithoutHermes();
+  live.today.timedTokens = 50;
+  live.today.timedOutputTokens = 30;
+  live.today.timedDurationMs = 1500;
+  live.today.clientThroughput = { codex: { timedTokens: 50, timedOutputTokens: 30, timedDurationMs: 1500 } };
+  const summary = applyArchivedClientUsage(live, archive, {
+    activeClients: 'codex',
+    now: new Date('2026-05-30T13:00:00.000Z')
+  });
+
+  assert.equal(summary.today.timedOutputTokens, 50, 'the retained session still contributes its timed output');
+  assert.equal(summary.today.timedDurationMs, 3500);
+  assert.deepEqual(summary.today.clientThroughput.codex, {
+    timedTokens: 50,
+    timedOutputTokens: 30,
+    timedDurationMs: 1500
+  });
+  assert.equal(summary.today.clientThroughput.hermes, undefined,
+    'no per-tool rate without the token count the timing covered');
+});
