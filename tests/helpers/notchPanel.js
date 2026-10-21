@@ -38,6 +38,12 @@ class Element {
   scrollTo({ left }) { this.scrollLeft = left; this.fire('scroll'); }
   // Every child is laid out 40 units after the previous one.
   get parentNode() { return this.parent || null; }
+  closest(selector) {
+    for (let node = this; node; node = node.parentNode) {
+      if (node.classList.contains(selector.slice(1))) return node;
+    }
+    return null;
+  }
   get offsetLeft() { return this.parent ? this.parent.children.indexOf(this) * 40 : 0; }
   contains(node) { return this === node || this.children.some(child => child.contains(node)); }
   focus() {
@@ -69,8 +75,11 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
   };
   const rolls = [], settled = [];
   const resizeObservers = [];
+  const pageEvents = new EventTarget();
+  let scrollListener = null;
+  const pageHide = () => pageEvents.dispatchEvent(new Event('pagehide'));
   const window = {
-    addEventListener() {},
+    addEventListener: (...args) => pageEvents.addEventListener(...args),
     getComputedStyle: () => ({ columnGap: '40px' }),
     ResizeObserver: class {
       constructor(callback) { this.callback = callback; resizeObservers.push(this); }
@@ -147,7 +156,9 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
     el, shared.formatCost, (key, params) => i18n.translate(state.locale, key, params), shared.formatCardTokens, shared.limitWindowsView
   );
   const deps = { document, window, el, t: (key, params) => i18n.translate(state.locale, key, params), state,
-    bridge: { toggleRateMode() {}, onAnimate() {}, onMotion() {} }, shared };
+    bridge: { toggleRateMode() {}, onAnimate() {}, onMotion() {},
+      onScroll(callback) { scrollListener = callback; return () => { scrollListener = null; }; }
+    }, shared };
   let panel;
   if (viaRenderer) {
     // Exercise the real dependency handoff instead of giving the panel helpers
@@ -161,8 +172,10 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
         shared: { ...shared, el, t: deps.t } });
     } finally { global.ResizeObserver = previousObserver; }
   } else panel = createNotchPanel(deps);
-  t.after(() => panel.suspend());
-  return { panel, document, state, settings, rolls, settled, el, overflowText,
+  t.after(pageHide);
+  return { panel, document, state, settings, rolls, settled, el, overflowText, pageHide,
+    scroll: record => scrollListener?.(record),
+    get scrollSubscribed() { return scrollListener !== null; },
     resize: () => resizeObservers.forEach(observer => { if (observer.node) observer.callback(); }),
     find: className => panel.node.querySelector(`.${className}`),
     all: className => panel.node.querySelectorAll(`.${className}`) };

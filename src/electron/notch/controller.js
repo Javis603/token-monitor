@@ -95,12 +95,12 @@ function normalizeNotchShape(value) {
 function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   rendererDir, preloadPath, platform = process.platform, readScreens = readMacNotchScreens,
   nativeGlass = () => false, liquidGlass = () => null, createGlass, applyShapeMask,
-  onSwitchCodexAccount, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, blurAvailable = () => false, applyBlurMask, primaryButtonDown = () => null, naturalScrolling = () => true, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
+  onSwitchCodexAccount, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, blurAvailable = () => false, applyBlurMask, primaryButtonDown = () => null, naturalScrolling = () => true, monitorScrollGesture, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
   logger = () => {} }) {
   const surfaces = ['notch'];
   const windows = {}, ready = {}, shapes = {}, glass = {}, nativeMaterial = {}, lastSent = {};
   let materialKey = '', running = false, expanded = false, peeked = false, hoverTicked = false, locked = false;
-  let capabilities = null;
+  let capabilities = null, scrollBinding = null;
   let appearance = {}, data = { cells: [], summary: null };
   let nativeScreens = { screens: [], mainDisplayId: null }, geometryReadAt = -Infinity, geometryDirty = true;
   let geometryConfigs = new Map(), displays = [], primaryDisplay = null;
@@ -545,6 +545,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   function setExpanded(value) {
     if (expanded === value || locked) return;
     expanded = value; enterAt = leaveAt = null;
+    if (!value) scrollBinding?.cancel();
     if (value) peeked = summaryDismissed = false;
     else refreshEpoch++;
     const current = layout();
@@ -633,9 +634,32 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     return peeked ? notchPeekBounds(closed) : closed;
   }
 
-  // Swipes belong to click-to-open: a hover that opens the panel would reopen
+  function startScrollMonitor() {
+    if (!monitorScrollGesture || scrollBinding || locked) return;
+    const win = windows.notch;
+    const handle = win?.getNativeWindowHandle?.();
+    if (!handle) return;
+    try {
+      const binding = monitorScrollGesture(record => {
+        if (scrollBinding !== binding || !running || locked || !expanded || !ready.notch || windows.notch !== win || !alive(win)) return;
+        const bounds = win.getContentBounds?.() || win.getBounds();
+        win.webContents.send('topNotch:scroll', { ...record, x: record.x - bounds.x, y: record.y - bounds.y });
+      }, { view: handle.length >= 8 ? handle.readBigUInt64LE(0) : BigInt(handle.readUInt32LE(0)),
+        shouldTrack: () => settings().notchSwipeGestures !== false && running && !locked && expanded && ready.notch && windows.notch === win && alive(win) });
+      scrollBinding = binding;
+    } catch (error) { logger(`[top-notch] swipe tracking unavailable: ${error.message}`); }
+  }
+
+  function stopScrollMonitor() {
+    const binding = scrollBinding;
+    scrollBinding = null;
+    try { binding?.dispose(); }
+    catch (error) { logger(`[top-notch] swipe cleanup failed: ${error.message}`); }
+  }
+
+  // Vertical swipes belong to click-to-open: a hover that opens the panel would reopen
   // it straight after a swipe closed it, and hide the summary it swiped away.
-  function swipesEnabled() {
+  function verticalSwipesEnabled() {
     return settings().notchSwipeGestures !== false && normalizeNotchHoverAction(settings().notchHoverAction) === 'peek';
   }
 
@@ -651,7 +675,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   // `deltaY` follows the page: positive scrolls content down, which is fingers
   // or wheel moving up under natural scrolling.
   function wheeled(event) {
-    if (!running || locked || !ready.notch || !alive(windows.notch) || !swipesEnabled()) return;
+    if (!running || locked || !ready.notch || !alive(windows.notch) || !verticalSwipesEnabled()) return;
     if (![event?.deltaX, event?.deltaY].every(Number.isFinite)) return;
     const now = Date.now();
     if (now - scrollGesture.at > SCROLL_GESTURE_GAP_MS) scrollGesture = { at: now, travel: 0, done: false, natural: naturalScrolling() !== false };
@@ -749,6 +773,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   }
 
   function destroyWindows() {
+    stopScrollMonitor();
     destroyBlur();
     resetShellMotion(); refreshInFlight = null;
     summaryMeasured = false; summaryMeasurement = null; settleSummary = false;
@@ -770,7 +795,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (platform !== 'darwin' || settings().notchEnabled !== true) { stop(); return; }
     running = true;
     // Turning swipes off, or the mode they need, brings a hidden summary back.
-    const restoreSummary = summaryDismissed && !swipesEnabled();
+    const restoreSummary = summaryDismissed && !verticalSwipesEnabled();
     if (restoreSummary) summaryDismissed = false;
     const style = normalizeNotchStyle(settings().notchStyle);
     // `inherit` follows only the widget, never the Edge Dock's own style.
@@ -789,7 +814,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
           if (windows[s] !== win) return;
           windows[s] = null; delete ignoredMouse[s]; ready[s] = false; shapes[s] = null; lastSent[s] = '';
           disposeGlass(s); nativeMaterial[s] = false;
-          if (s === 'notch') { motion = null; pointerInside = capturing = false; }
+          if (s === 'notch') { motion = null; pointerInside = capturing = false; stopScrollMonitor(); }
         });
         nativeMaterial[s] = key === 'vibrancy';
         if (key === 'liquid') {
@@ -813,6 +838,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (!blurEnabled()) destroyBlur();
     if (!screenListeners) { for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, invalidateGeometry); screenListeners = true; }
     updateGlassAppearance();
+    startScrollMonitor();
     refreshGeometry(); visibility();
     if (restoreSummary) refreshLayout();
     if (!pollTimer) schedulePoll();
@@ -906,9 +932,10 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       if (locked) {
         refreshEpoch++; expanded = peeked = hoverTicked = false; enterAt = leaveAt = null;
         pointerInside = capturing = false;
-        resetShellMotion(); destroyBlur();
+        resetShellMotion(); destroyBlur(); stopScrollMonitor();
         clearTimeout(pollTimer); pollTimer = null;
       } else if (running) {
+        startScrollMonitor();
         invalidateGeometry();
         if (!pollTimer) schedulePoll();
       }

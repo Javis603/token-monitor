@@ -71,7 +71,7 @@ function fixture(t, settings = {}, options = {}) {
   // Most cases exercise opening on hover; the default grow-only mode has its own cases.
   const preferences = { notchEnabled: true, edgeDockEnabled: false, notchHoverAction: 'open', ...settings };
   const deps = { BrowserWindow: RecordingWindow, ipcMain, screen, rendererDir: '/renderer', preloadPath: '/preload', getSettings: () => preferences, nativeGlass: options.nativeGlass || (() => false), liquidGlass: options.liquidGlass, createGlass: options.createGlass, prefersReducedMotion: () => options.reducedMotion !== false, platform: options.platform || 'darwin' };
-  const controller = createNotchController({ ...deps, readScreens: options.readScreens || (() => ({ screens: [native], mainDisplayId: 1 })), onSwitchCodexAccount: (id) => ({ ok: true, id }), onToggleRateMode: options.onToggleRateMode, onCapabilitiesChanged: options.onCapabilitiesChanged, installNonActivatingInput: options.installNonActivatingInput, primaryButtonDown: options.primaryButtonDown || (() => false), naturalScrolling: options.naturalScrolling, isFullScreen: options.isFullScreen || (() => false), logger: options.logger, performHaptic: options.performHaptic, canRefreshLimits: options.canRefreshLimits, onRefreshLimits: options.onRefreshLimits, blurAvailable: options.blurAvailable, applyBlurMask: options.applyBlurMask });
+  const controller = createNotchController({ ...deps, readScreens: options.readScreens || (() => ({ screens: [native], mainDisplayId: 1 })), onSwitchCodexAccount: (id) => ({ ok: true, id }), onToggleRateMode: options.onToggleRateMode, onCapabilitiesChanged: options.onCapabilitiesChanged, installNonActivatingInput: options.installNonActivatingInput, primaryButtonDown: options.primaryButtonDown || (() => false), naturalScrolling: options.naturalScrolling, monitorScrollGesture: options.monitorScrollGesture, isFullScreen: options.isFullScreen || (() => false), logger: options.logger, performHaptic: options.performHaptic, canRefreshLimits: options.canRefreshLimits, onRefreshLimits: options.onRefreshLimits, blurAvailable: options.blurAvailable, applyBlurMask: options.applyBlurMask });
   t.after(() => controller.dispose());
   const setData = controller.setData;
   controller.setData = (value) => {
@@ -2778,6 +2778,27 @@ test('Notch hover, haptic and blur settings default and normalize in both settin
   }
 });
 
+test('the swipe switch stays visible and follows its saved value in both hover modes', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const source = app.slice(app.indexOf('function syncNotchHoverControls()'), app.indexOf('function syncNotchSummaryMode()'));
+  const row = { hidden: false, classList: { toggle(_name, value) { row.hidden = value; } } };
+  const input = { closest: () => row };
+  const state = { appInfo: { platform: 'darwin' }, settings: { notchEnabled: true } };
+  const context = vm.createContext({
+    state, els: { edgeDockInput: {}, notchShapeInputs: [], notchHoverActionInputs: [], notchSwipeGesturesInput: input },
+    NOTCH_HOVER_DELAY_DEFAULT_MS: 0, edgeDockAvailable: () => false,
+    syncDockSizeControls() {}, syncNotchSummaryMode() {}, notchItemsComposer: null
+  });
+  for (const mode of ['peek', 'open']) {
+    for (const enabled of [true, false]) {
+      Object.assign(state.settings, { notchHoverAction: mode, notchSwipeGestures: enabled });
+      vm.runInContext(`${source}; syncDockControls()`, context);
+      assert.equal(row.hidden, false, `${mode} keeps the gesture switch available`);
+      assert.equal(input.checked, enabled);
+    }
+  }
+});
+
 test('the hover duration reset restores the instant default', () => {
   const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const constant = app.slice(app.indexOf('const NOTCH_HOVER_DELAY_DEFAULT_MS'), app.indexOf(';', app.indexOf('const NOTCH_HOVER_DELAY_DEFAULT_MS')) + 1);
@@ -3153,4 +3174,41 @@ test('attached glass stays dark with a light widget while capsules retain their 
   f.preferences.notchShape = 'auto'; f.controller.sync();
   assert.equal(updates.get(f.windows[0]).tintOpacity, 0, 'reattaching removes the duplicate native tint');
   assert.equal(f.preferences.macClearGlassTint, 64, 'the saved preference is never rewritten');
+});
+
+
+test('horizontal input belongs to the live open window and follows its lifecycle', t => {
+  const bindings = [];
+  let removed = 0, cancelled = 0;
+  const f = fixture(t, {}, {
+    installNonActivatingInput(win) { win.getNativeWindowHandle = () => { const b = Buffer.alloc(8); b.writeBigUInt64LE(123n); return b; }; },
+    monitorScrollGesture(onEvent, options) {
+      bindings.push({ onEvent, options });
+      return { dispose() { removed++; }, cancel() { cancelled++; } };
+    }
+  });
+  const win = notchWindow(f), binding = bindings[0];
+  assert.equal(binding.options.view, 123n);
+  assert.equal(binding.options.shouldTrack(), false);
+  f.screen.point = { x: 735, y: 10 };
+  f.controller.poll(Date.now());
+  assert.equal(binding.options.shouldTrack(), true);
+  binding.onEvent({ id: 1, phase: 'began', amount: 0.1, complete: false, x: 735, y: 10 });
+  const sent = win.messages.filter(message => message.channel === 'topNotch:scroll');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].payload.x, 735 - win.getBounds().x);
+  f.preferences.notchSwipeGestures = false;
+  assert.equal(binding.options.shouldTrack(), false);
+  f.preferences.notchSwipeGestures = true;
+  f.ipcMain.emit('topNotch:dismiss', { sender: win.webContents });
+  assert.equal(cancelled, 1);
+  f.controller.setLocked(true);
+  assert.equal(removed, 1);
+  f.controller.setLocked(false);
+  assert.equal(bindings.length, 2);
+  const prior = win.messages.length;
+  binding.onEvent({ id: 1, phase: 'none', amount: 1, complete: true, x: 735, y: 10 });
+  assert.equal(win.messages.length, prior);
+  f.preferences.notchEnabled = false; f.controller.sync();
+  assert.equal(removed, 2);
 });

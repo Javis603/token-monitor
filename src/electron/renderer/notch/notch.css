@@ -139,8 +139,10 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-status-rule { width: 1px; height: 12px; background: var(--notch-rule); }
 .notch-status .edge-dock-refresh { width: 24px; height: 24px; }
 
-/* Pages share one fixed slot and cross-fade sideways. */
+/* Pages share one slot and cross-fade sideways. is-handoff turns the fade off
+   while the finger is down so the same blur and offset track the swipe. */
 .notch-pages { position: relative; height: 176px; margin-top: 6px; }
+.notch-pages.is-handoff .notch-page { transition: none; }
 .notch-page { position: absolute; inset: 0; opacity: 0; transform: translateX(12px); filter: blur(5px); pointer-events: none;
   transition: opacity .22s ease, transform .38s var(--notch-spring), filter .28s ease; }
 .notch-page.is-before { transform: translateX(-12px); }
@@ -221,10 +223,11 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-week-cost-value { color: var(--notch-dim); white-space: nowrap; }
 
 /* Limits */
-/* Three columns per page; past one page the strip scrolls sideways, snapping a
-   page at a time, and the next column peeks in under a fade. */
+/* Three columns per page. A trackpad swipe follows the finger, and snap stays
+   off until the page settles. Past one page the next column peeks in under a fade. */
 .notch-limits { --notch-limit-gap: 40px; --notch-limit-peek: 0px; display: flex; column-gap: var(--notch-limit-gap); height: 160px;
   overflow: auto hidden; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: none; }
+.notch-limits.is-handoff { scroll-snap-type: none; }
 .notch-limits::-webkit-scrollbar { display: none; }
 .notch-limits.is-paged { --notch-limit-peek: 64px; }
 .notch-limits.has-after { mask-image: linear-gradient(to right, #000 calc(100% - var(--notch-limit-peek)), transparent); }
