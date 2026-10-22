@@ -1872,3 +1872,19 @@ test('stored Qoder model renames preserve exclusive throughput and discard ambig
   assert.equal(shared.unpricedTokens, 100);
   assert.deepEqual(normalizePeriod(shared), shared);
 });
+
+test('ambiguous Qoder model renames keep throughput for unrelated models', () => {
+  const sonnet = { timedTokens: 40, timedOutputTokens: 4, timedDurationMs: 500 };
+  const shared = normalizePeriod({
+    totalTokens: 190, clients: { qodercn: 100, other: 90 }, models: { qfmodel: 150, sonnet: 40 },
+    clientModels: { qodercn: { qfmodel: 100 }, other: { qfmodel: 50, sonnet: 40 } },
+    outputTokens: 22, modelOutputs: { qfmodel: 18, sonnet: 4 },
+    timedTokens: 190, timedOutputTokens: 22, timedDurationMs: 1500,
+    modelThroughput: {
+      qfmodel: { timedTokens: 150, timedOutputTokens: 18, timedDurationMs: 1000 },
+      sonnet
+    }
+  });
+  assert.deepEqual({ ...shared.modelThroughput }, { sonnet });
+  assert.deepEqual(normalizePeriod(shared), shared);
+});

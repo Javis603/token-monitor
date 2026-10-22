@@ -950,7 +950,10 @@ function reconcileClientRenamedGlobalModels(period, input) {
         delete period.modelUnpricedTokens[raw];
         if (Object.keys(period.modelUnpricedTokens).length === 0) delete period.modelUnpricedTokens;
       }
-      if (period.modelThroughput?.[raw]) delete period.modelThroughput;
+      if (period.modelThroughput) {
+        delete period.modelThroughput[raw];
+        if (Object.keys(period.modelThroughput).length === 0) delete period.modelThroughput;
+      }
       // The source period has one global component bucket for multiple
       // clients. Keep the token split, but do not invent a cache/output split.
       for (const key of ['modelCacheReads', 'modelCacheWrites', 'modelOutputs']) delete period[key][raw];
