@@ -80,15 +80,15 @@ function fixture(points = [
 
 test('Trends hover shows exact date and token count, including zero days and chart gaps', () => {
   const { spark, tooltip } = fixture();
-  spark.fire('pointerenter', { clientX: 15 });
+  spark.fire('pointerenter', { clientX: 15, clientY: 200 });
   assert.equal(tooltip.dataset.visible, 'true');
   assert.equal(tooltip.textContent, '12.3Mtokens2026-10-21');
   assert.equal(tooltip.getAttribute('role'), 'tooltip');
   assert.ok(tooltip.classList.contains('home-activity-tooltip'));
   assert.equal(spark.getAttribute('title'), null);
-  spark.fire('pointermove', { clientX: 110 }); // gap at the start of the zero day's column
+  spark.fire('pointermove', { clientX: 110, clientY: 200 }); // gap at the start of the zero day's column
   assert.equal(tooltip.textContent, '0tokens2026-10-22');
-  spark.fire('pointermove', { clientX: 500 }); // clamp at the chart edge
+  spark.fire('pointermove', { clientX: 500, clientY: 200 }); // clamp at the chart edge
   assert.equal(tooltip.textContent, '42tokens2026-10-23');
   spark.fire('pointerleave');
   assert.equal(tooltip.dataset.visible, 'false');
@@ -122,22 +122,31 @@ test('Trends focus and arrow keys expose each day while Escape and blur dismiss 
 
 test('Trends monthly and single-column views retain their own labels and positions', () => {
   const { spark, tooltip } = fixture([{ month: '2026-10', tokens: 987_654_321 }], 'month');
-  spark.fire('pointerenter', { clientX: 10 });
+  spark.fire('focusin');
   assert.equal(tooltip.textContent, '987.7Mtokens2026-10');
   assert.equal(tooltip.style.transform, 'translate(160px, 101px) translate(-50%, 0)');
 });
 
-test('Trends tooltip follows bar height, flips below the top edge, and clamps to the window', () => {
-  const { spark, svg, tooltip } = fixture();
-  spark.fire('pointerenter', { clientX: 15 });
+test('Trends tooltip follows the pointer in both axes and flips at window edges', () => {
+  const { spark, tooltip } = fixture();
+  spark.fire('pointerenter', { clientX: 30, clientY: 200 });
+  assert.equal(tooltip.style.transform, 'translate(44px, 146px)');
+  spark.fire('pointermove', { clientX: 60, clientY: 250 });
+  assert.equal(tooltip.style.transform, 'translate(74px, 196px)');
+  assert.equal(tooltip.textContent, '12.3Mtokens2026-10-21');
+  spark.fire('pointermove', { clientX: 0, clientY: 1 });
+  assert.equal(tooltip.style.transform, 'translate(14px, 15px)');
+  spark.fire('pointermove', { clientX: 339, clientY: 599 });
+  assert.equal(tooltip.style.transform, 'translate(205px, 545px)');
+  spark.fire('pointermove', { clientX: 500, clientY: 700 });
+  assert.equal(tooltip.style.transform, 'translate(214px, 554px)');
+});
+
+test('Trends keyboard interaction returns from pointer placement to the selected bar', () => {
+  const { spark, tooltip } = fixture();
+  spark.fire('pointerenter', { clientX: 30, clientY: 250 });
+  spark.fire('keydown', { key: 'Home', preventDefault() {} });
   assert.equal(tooltip.style.transform, 'translate(66px, 101px) translate(-50%, 0)');
-  spark.fire('pointermove', { clientX: 150 });
-  assert.equal(tooltip.style.transform, 'translate(160px, 401px) translate(-50%, 0)');
-  svg.bounds = { left: 0, top: 2, width: 300, height: 300 };
-  spark.fire('pointermove', { clientX: 0 });
-  assert.equal(tooltip.style.transform, 'translate(66px, 11px) translate(-50%, 0)');
-  spark.fire('pointermove', { clientX: 500 });
-  assert.match(tooltip.style.transform, /^translate\(250px,/);
 });
 
 test('Trends and Home reuse the same tooltip layout with separate instances and cleanup', () => {

@@ -5541,6 +5541,7 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
   tooltip.setAttribute('aria-atomic', 'true');
   let hovered = false;
   let focused = false;
+  let pointerPoint = null;
   let selected = -1;
   const bars = Array.from(spark.querySelectorAll('.spark-bar'));
   const hide = () => {
@@ -5550,6 +5551,20 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
     bars[selected]?.removeAttribute('data-active');
   };
   const position = () => {
+    if (pointerPoint) {
+      const rect = tooltip.getBoundingClientRect();
+      const gap = 14;
+      const pad = 6;
+      const rightX = pointerPoint.x + gap;
+      const desiredX = rightX + rect.width <= window.innerWidth - pad
+        ? rightX : pointerPoint.x - gap - rect.width;
+      const aboveY = pointerPoint.y - gap - rect.height;
+      const desiredY = aboveY >= pad ? aboveY : pointerPoint.y + gap;
+      const x = Math.max(pad, Math.min(window.innerWidth - pad - rect.width, desiredX));
+      const y = Math.max(pad, Math.min(window.innerHeight - pad - rect.height, desiredY));
+      tooltip.style.transform = `translate(${x}px, ${y}px)`;
+      return;
+    }
     const rect = spark.querySelector('.sparkline').getBoundingClientRect();
     const bar = model.bars[selected];
     // Anchor to the selected bar's top, rather than the whole chart's top edge.
@@ -5581,6 +5596,7 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
   const pointAtPointer = (event) => {
     const rect = spark.querySelector('.sparkline').getBoundingClientRect();
     if (!(rect.width > 0)) return;
+    pointerPoint = { x: event.clientX, y: event.clientY };
     // Use each day's full column, including gaps and zero-height bars.
     select(Math.max(0, Math.min(points.length - 1,
       Math.floor((event.clientX - rect.left) / rect.width * points.length))));
@@ -5588,7 +5604,7 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
   };
   spark.addEventListener('pointerenter', (event) => { hovered = true; pointAtPointer(event); });
   spark.addEventListener('pointermove', pointAtPointer);
-  spark.addEventListener('focusin', () => { focused = true; show(); });
+  spark.addEventListener('focusin', () => { focused = true; pointerPoint = null; show(); });
   spark.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') { hide(); return; }
     const index = event.key === 'ArrowLeft' ? Math.max(0, selected - 1)
@@ -5596,6 +5612,7 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
         : event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1 : null;
     if (index === null) return;
     event.preventDefault();
+    pointerPoint = null;
     select(index);
     show();
   });
@@ -5605,7 +5622,12 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
     requestAnimationFrame(renderTrends);
   };
   // Keep a live refresh from replacing the focused/hovered chart mid-read.
-  spark.addEventListener('pointerleave', () => { hovered = false; if (!focused) hide(); flush(); });
+  spark.addEventListener('pointerleave', () => {
+    hovered = false;
+    pointerPoint = null;
+    if (focused) position(); else hide();
+    flush();
+  });
   spark.addEventListener('focusout', () => { focused = false; if (!hovered) hide(); flush(); });
   select(points.length - 1);
 }
