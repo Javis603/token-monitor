@@ -2792,12 +2792,6 @@
       line.append(label, value);
       card.append(line);
     }
-    for (const text of notes) {
-      const note = document.createElement('span');
-      note.className = 'limit-detail-tooltip-full subscription-tooltip-note';
-      note.textContent = text;
-      card.append(note);
-    }
     if (notes.size) card.setAttribute('aria-description', [...notes].join(' '));
     return card;
   }

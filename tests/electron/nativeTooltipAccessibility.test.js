@@ -146,16 +146,14 @@ test('named Dock session states are exposed while quiet decorations stay hidden'
   assert.equal(quiet.getAttribute('aria-label'), null);
 });
 
-test('subscription cost disclaimers are visible in the custom card and described by its trigger', () => {
+test('subscription cost descriptions stay accessible without adding visible disclaimer text', () => {
   const view = fs.readFileSync(path.join(renderer, 'limits/windowsView.js'), 'utf8');
   const note = t('subscription.tooltip.monthUsageNote');
   const context = { document, tooltipHost: { hasOpened: () => false }, attachLimitDetailTooltip() {} };
   vm.runInNewContext(section(view, 'subscriptionCardNode', 'subscriptionCardForRow'), context);
   const card = context.subscriptionCardNode([{ label: 'Month usage', value: '$12.00', title: note }]);
-  const notes = card.querySelectorAll('.subscription-tooltip-note');
-  assert.equal(notes.length, 1);
-  assert.equal(notes[0].textContent, note);
-  assert.ok(notes[0].className.includes('limit-detail-tooltip-full'));
+  assert.equal(card.textContent, 'Month usage$12.00');
+  assert.equal(card.getAttribute('aria-description'), note);
   context.subscriptionCardForRow = () => card;
   vm.runInNewContext(section(view, 'decoratePlanWithSubscription'), context);
   const plan = Object.assign(new Element(), { textContent: 'Pro' });
