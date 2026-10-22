@@ -457,13 +457,101 @@ function applyBarScale(fill, scale) {
 const limitTooltip = {
   opened: false,
   active: false,
-  pending: false
+  pending: false,
+  // Counted from each trigger's own enter/leave. Deciding this from `:hover`
+  // misses a hover the window does not report, and the repaint that follows
+  // replaces the card — and with it the trigger — under the pointer.
+  hovering: 0
 };
 
 function limitTooltipShouldHoldRender() {
   if (!limitTooltip.active) return false;
+  // Two sources, because neither is reliable alone: the dock window does not
+  // always report a hover it clearly has, and a repaint decided on that gap
+  // replaces the card — and with it the trigger under the pointer. The counter
+  // is fed by each trigger's own enter/leave; `:hover` still covers a host that
+  // reports nothing.
+  if (limitTooltip.hovering > 0) return true;
   return Boolean(contentLayer.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
 }
+
+// Room for a tooltip the card's own window cannot hold. The card is measured by
+// the main process to size the window, so growing it here and reporting the new
+// height is the same handshake a session group's expansion uses; `holdTop` keeps
+// the window's top edge where it is while the height changes, which is what
+// stops the card jumping under the pointer.
+const cardTooltipSpace = {
+  // Only the third-party API card's tooltip is taller than the card it belongs
+  // to: the account block, a rule and every spend period. Every other card's
+  // tooltip fits the room the card already has, so opening one leaves the
+  // window exactly the size the card reports.
+  request(height) {
+    const cell = state.payload?.cell;
+    const card = contentLayer.querySelector('.edge-dock-card');
+    if (!cell || !card || !(height > 0)) return;
+    if (cell.provider !== 'thirdparty') return;
+    this.cancelRelease();
+    const wanted = Math.ceil(height);
+    // Already holding this much. Re-reporting the same height would only ask
+    // the main process to place the window again under a pointer that has not
+    // moved, and every placement is a chance to fire enter/leave.
+    if (this.held && card.style.minHeight === `${wanted}px`) return true;
+    this.held = true;
+    this.wanted = wanted;
+    card.style.minHeight = `${wanted}px`;
+    bridge.reportBubbleSize(cell.id, wanted, true);
+    // True means the card now has room below the trigger: the caller can open
+    // the box downward and stop asking the window for the space twice.
+    return true;
+  },
+  // A repaint rebuilds the card, and the new element starts at its natural
+  // height. While the room is still held the rebuilt card has to carry the same
+  // min-height, or the tooltip is clipped until the hold ends.
+  restore(card) {
+    if (!this.held || !card || !(this.wanted > 0)) return;
+    card.style.minHeight = `${this.wanted}px`;
+  },
+
+  release() {
+    // Nothing was grown, so there is nothing to give back.
+    if (!this.held) return;
+    this.scheduleRelease();
+  },
+  // Giving the room back moves the window, and a window that moves under the
+  // pointer is exactly what makes enter/leave fire over and over: the card
+  // grows, the trigger slides out from under the pointer, the pointer leaves,
+  // the card shrinks, the trigger slides back, and so on. So the height is only
+  // given back after the pointer has actually left the trigger, and the window
+  // keeps its top edge while it shrinks so nothing under the pointer moves.
+  scheduleRelease() {
+    this.cancelRelease();
+    this.releaseTimer = setTimeout(() => {
+      this.releaseTimer = null;
+      if (!this.held) return;
+      if (contentLayer.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within')) {
+        this.scheduleRelease();
+        return;
+      }
+      const cell = state.payload?.cell;
+      const card = contentLayer.querySelector('.edge-dock-card');
+      if (!cell || !card) {
+        this.held = false;
+        return;
+      }
+      this.held = false;
+      card.style.minHeight = '';
+      bridge.reportBubbleSize(cell.id, Math.ceil(card.getBoundingClientRect().height), true);
+    }, 320);
+  },
+  cancelRelease() {
+    if (this.releaseTimer) {
+      clearTimeout(this.releaseTimer);
+      this.releaseTimer = null;
+    }
+  },
+  held: false,
+  releaseTimer: null
+};
 
 function createCardWindowsView(cell = () => state.payload?.cell, forecast = () => cardForecast) {
   return limitWindowsViewApi.createLimitWindowsView({
@@ -483,8 +571,10 @@ function createCardWindowsView(cell = () => state.payload?.cell, forecast = () =
       markOpened() {
         limitTooltip.opened = true;
         limitTooltip.active = true;
+        limitTooltip.hovering += 1;
       },
       release() {
+        limitTooltip.hovering = Math.max(0, limitTooltip.hovering - 1);
         requestAnimationFrame(() => {
           if (limitTooltipShouldHoldRender()) return;
           limitTooltip.active = false;
@@ -505,6 +595,12 @@ function createCardWindowsView(cell = () => state.payload?.cell, forecast = () =
       value, currency, appearance().compactTokenUnits, state.locale
     ),
     formatPercent: (value) => (Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'),
+    // The bubble is sized to the card it draws, so a popover cannot open past
+    // the window. A tooltip that needs more room grows the card instead, and the
+    // main process holds the card's top edge while the window grows downward, so
+    // neither the card nor the pointer under it moves. Only the bubble needs
+    // this: the notch panel and the Limits page have the whole window.
+    tooltipSpace: surface === 'bubble' ? cardTooltipSpace : null,
     formatDuration: presentation.formatResetDuration,
     formatLimitBoundary: limitPresentationApi.limitBoundaryText,
     limitFillPercent,
@@ -2122,6 +2218,12 @@ const bubbleLayout = window.TokenMonitorCardLayout.createCardLayout({
   measure: ({ card, payload }) => Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity),
   report(height, { card, payload, commit = false }) {
     if (!(height > 0)) return;
+    // While a tooltip holds extra room, the window's height is not the card's
+    // height: measuring the card here would report the un-grown height right
+    // back and shrink the window, which moves the trigger out from under the
+    // pointer and reopens the tooltip. Only the tooltip's own release ends the
+    // hold, and that release reports the height itself.
+    if (typeof cardTooltipSpace !== 'undefined' && cardTooltipSpace.held) return;
     const cellId = payload.cell.id;
     if (commit && payload.placed?.cellId === cellId && payload.placed.height === height) commitCard(card, cellId);
     else if (payload.placed?.cellId !== cellId || payload.placed.height !== height) bridge.reportBubbleSize(cellId, height);
@@ -2183,6 +2285,7 @@ function renderBubble(payload) {
   if (observedPluginCard) bubbleSizeObserver?.observe(observedPluginCard);
   if (cell.kind === 'provider') reserveAccountHeight(card, payload.maxCardHeight);
   bubbleLayout.prepare({ card, payload, commit: true });
+  if (typeof cardTooltipSpace !== 'undefined') cardTooltipSpace.restore(card);
 }
 
 
