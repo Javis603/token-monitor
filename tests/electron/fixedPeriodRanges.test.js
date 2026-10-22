@@ -476,6 +476,34 @@ test('per-device V1 histories retain device identity for fixed ranges', () => {
   assert.equal(snapshots.reduce((sum, entry) => sum + entry.period.totalTokens, 0), 100);
 });
 
+test('multi-device fixed ranges use the oldest retained History row globally', () => {
+  const result = ranges.fixedPeriodSnapshotFromDevices('day:2026-07-15', [
+    deviceSource({
+      deviceId: 'old',
+      history: [day('2026-07-01', 1), day('2026-07-15', 10)],
+      todayTokens: 10
+    }),
+    deviceSource({
+      deviceId: 'new',
+      history: [day('2026-08-01', 20)],
+      todayTokens: 20
+    })
+  ], {
+    historyEnabled: true,
+    historyAvailable: true,
+    now: Date.parse('2026-08-12T12:00:00.000Z')
+  });
+
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.devices.map(({ deviceId, period }) => ({
+    deviceId,
+    tokens: period.totalTokens
+  })), [
+    { deviceId: 'old', tokens: 10 },
+    { deviceId: 'new', tokens: 0 }
+  ]);
+});
+
 test('mixed devices fail closed when a contributing device has no History', () => {
   const result = ranges.fixedPeriodSnapshotFromDevices('last7', [
     deviceSource({ deviceId: 'new', history: [day('2026-08-12', 100)], todayTokens: 100 }),

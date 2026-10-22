@@ -185,6 +185,43 @@ test('anchored tick with valid anchor runs todayOnly scan and derives month/allT
   assert.equal(summary.allTime.totalTokens, 5030, 'allTime should be derived via applyPeriodDelta');
 });
 
+test('a Tokscale fallback anchor skips repeated stats-db reads on warm ticks', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-omp-fallback-'));
+  const statsDbPath = path.join(dir, 'stats.db');
+  fs.writeFileSync(statsDbPath, 'not a sqlite database');
+  const calls = [];
+  try {
+    const summary = await collectUsageOnce({
+      clients: 'omp',
+      homeDir: scanHome,
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'omp-fallback',
+      projectsEnabled: false,
+      limitsEnabled: false,
+      historyEnabled: false,
+      wslScanEnabled: false,
+      anchorPersistenceEnabled: false,
+      ompStatsDbPath: statsDbPath,
+      todayOnlyAnchor: {
+        dateKey: localTodayKey(),
+        today: emptyPeriod(),
+        month: emptyPeriod(),
+        allTime: emptyPeriod(),
+        ompUsageMode: 'tokscale'
+      },
+      runTokscale: async ({ flags }) => {
+        calls.push(flags);
+        return { entries: [{ client: 'omp', sessionId: 'warm', model: 'test', input: 12, output: 0, cost: 0 }] };
+      }
+    });
+    assert.deepEqual(calls, [['--today']]);
+    assert.equal(summary.today.totalTokens, 12);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('anchored tick replaces a stale anchor title with the freshly resolved rename', async () => {
   const dateKey = localTodayKey();
   const sessionKey = 'cursor:conv-1';
@@ -842,6 +879,48 @@ test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
   assert.equal(collectorAnchorTrust(anchor({ fullScanAt: 'nope' }), options).capturedAtMs, null);
   const future = new Date(now.getTime() + 60_000).toISOString();
   assert.equal(collectorAnchorTrust(anchor({ fullScanAt: future }), options).capturedAtMs, null);
+});
+
+test('a Tokscale fallback anchor remains trusted while the stats database exists', () => {
+  const { collectorAnchorTrust, configFingerprint } = freshCollector();
+  const now = new Date(2026, 7, 8, 10, 0, 0);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-omp-anchor-'));
+  const statsDbPath = path.join(dir, 'stats.db');
+  fs.writeFileSync(statsDbPath, 'not a sqlite database');
+  try {
+    const sourceOptions = { ompStatsDbPath: statsDbPath };
+    const options = {
+      clients: 'omp',
+      allTimeSince: '2024-01-01',
+      projectsEnabled: true,
+      ompStatsDbPath: statsDbPath,
+      now
+    };
+    const anchor = {
+      dateKey: '2026-08-08',
+      today: {},
+      month: {},
+      allTime: {},
+      ompUsageMode: 'tokscale',
+      configFingerprint: configFingerprint(
+        'omp',
+        '2024-01-01',
+        true,
+        '',
+        '',
+        null,
+        undefined,
+        sourceOptions
+      ),
+      fullScanAt: new Date(now.getTime() - 60_000).toISOString()
+    };
+    assert.equal(
+      collectorAnchorTrust(anchor, options).capturedAtMs,
+      now.getTime() - 60_000
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('Cursor anchors from before the Auto model rename require a full scan', () => {

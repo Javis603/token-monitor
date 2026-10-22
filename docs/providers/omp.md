@@ -1,5 +1,5 @@
 ---
-summary: "Oh My Pi provider notes: Tokscale supplies usage totals while Session Detail reads OMP's local Pi-format transcripts."
+summary: "Oh My Pi provider notes: stats.db supplies usage totals when available; Tokscale is the fallback, while Session Detail reads OMP's local Pi-format transcripts."
 ids: [omp]
 read_when:
   - Changing or debugging OMP Session Detail
@@ -8,16 +8,16 @@ read_when:
 
 # Oh My Pi provider
 
-OMP usage totals come from tokscale. Session Detail reads the local transcript on demand; these data planes stay separate, and each OMP session—including a sub-agent session—remains its own row.
+OMP usage totals come from OMP's local `stats.db` when it is available and enabled. If that database is missing, unreadable, or disabled, the collector falls back to Tokscale's transcript scan. Session Detail reads the local transcript on demand; these data planes stay separate, and each OMP session—including a sub-agent session—remains its own row.
 
 | Data plane | Read by | Source |
 | --- | --- | --- |
-| Token usage (periods, dashboard, history) | the shared usage collector, through `tokscale` | OMP session transcripts, parsed by tokscale |
+| Token usage (periods, dashboard, history) | the shared usage collector | OMP's local `stats.db`; Tokscale transcript parsing is the fallback |
 | Session Detail (per-turn breakdown, prompts) | `sessionDetail.js` with `providers/omp/paths.js`, on demand | the same transcripts, parsed locally |
 
 ## Where the data lives
 
-Tokscale scans the fixed home-relative `~/.omp/agent/sessions` root. Main sessions are stored under a bucket directory:
+OMP's indexed usage totals live in `~/.omp/stats.db` (or the configured OMP stats path). Token Monitor opens it read-only and uses it first. When it is unavailable, unreadable, or disabled, Tokscale scans the fixed home-relative `~/.omp/agent/sessions` root.
 
 ```
 ~/.omp/agent/sessions/<bucket>/<ISO-timestamp>_<sessionId>.jsonl
@@ -51,4 +51,5 @@ OMP forks, including `/tan`, can copy assistant history with token usage intact;
 ```bash
 node --test tests/shared/ompSessionDetail.test.js tests/shared/sessionFiles.test.js tests/shared/sessionDetailResolver.test.js tests/shared/piSessionDetail.test.js
 node --test tests/electron/ompSessionTitle.test.js
+node --test tests/shared/ompUsage.test.js
 ```

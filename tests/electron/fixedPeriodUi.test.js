@@ -50,7 +50,7 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(html, /for="periodDayInput" data-i18n="periodRange\.pickDay"/);
   assert.match(app, /fixedPeriodRangesApi\.daySelection\(day\)/);
   assert.match(app, /els\.periodDayInput\?\.addEventListener\('change'/);
-  assert.match(app, /els\.periodDayInput\.max = fixedPeriodRangesApi\.localDayKey\(\)/);
+  assert.match(app, /const maxDay = fixedPeriodRangesApi\.localDayKey\(\);\s*if \(els\.periodDayInput\.max !== maxDay\) els\.periodDayInput\.max = maxDay;/);
   assert.match(css, /\.period-menu-day-input\s*\{[^}]*font-variant-numeric:\s*tabular-nums;/s);
   assert.match(app, /deviceHistoriesAvailable: Array\.isArray\(state\.fixedPeriodHistory\?\.deviceHistories\)/);
   assert.match(app, /getDashboardHistory\(\{ includeDevices: true \}\)/);

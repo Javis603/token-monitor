@@ -108,11 +108,19 @@ test('OMP stats path and enablement stay in the local usage runtime fingerprint'
     ompStatsDbPath: ' /tmp/omp/stats.db ',
     ompStatsEnabled: false
   });
+  const enabled = usageConfigFromSettings({}, {
+    ...context,
+    ompStatsDbPath: ' /tmp/omp/stats.db ',
+    ompStatsEnabled: true
+  });
 
   assert.equal(defaults.ompStatsEnabled, true);
   assert.equal(configured.ompStatsDbPath, '/tmp/omp/stats.db');
   assert.equal(configured.ompStatsEnabled, false);
+  assert.equal(enabled.ompStatsDbPath, '/tmp/omp/stats.db');
+  assert.equal(enabled.ompStatsEnabled, true);
   assert.notEqual(usageConfigFingerprint(defaults), usageConfigFingerprint(configured));
+  assert.notEqual(usageConfigFingerprint(enabled), usageConfigFingerprint(configured));
 });
 
 test('usage config fingerprint dedupes raw settings with the same effective runtime', () => {

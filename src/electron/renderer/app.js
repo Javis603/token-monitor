@@ -667,9 +667,14 @@ document.addEventListener('keydown', (event) => {
 });
 
 els.toolDetailFooterTokens.addEventListener('click', () => setActiveToolDetailMode('tokens'));
-// Opens the panel that carries the full explanation and the repair action; the
+// Opens the Collection panel and the affected client's health details; the
 // banner only has room to say which client and how far behind it is.
-els.indexStaleBanner?.addEventListener('click', () => openSettingsPanel());
+els.indexStaleBanner?.addEventListener('click', () => {
+  const stale = indexStaleDiagnostic();
+  openSettingsPanel();
+  setSettingsSectionExpanded('tools', true);
+  setClientHealthExpanded(stale?.clientId || '', { refreshPlaceholder: Boolean(stale?.clientId) });
+});
 els.toolDetailFooterModels.addEventListener('click', () => setActiveToolDetailMode('models'));
 els.projectBreakdownFooterTools.addEventListener('click', () => { void saveSettings({ projectBreakdownMode: 'tool' }).catch(() => {}); });
 els.projectBreakdownFooterModels.addEventListener('click', () => { void saveSettings({ projectBreakdownMode: 'model' }).catch(() => {}); });
@@ -6031,7 +6036,8 @@ function syncPeriodMenu() {
     if (document.activeElement !== els.periodDayInput) {
       els.periodDayInput.value = dayValue || fixedPeriodRangesApi.localDayKey();
     }
-    els.periodDayInput.max = fixedPeriodRangesApi.localDayKey();
+    const maxDay = fixedPeriodRangesApi.localDayKey();
+    if (els.periodDayInput.max !== maxDay) els.periodDayInput.max = maxDay;
     els.periodDayInput.tabIndex = state.periodMenuOpen ? 0 : -1;
   }
 }

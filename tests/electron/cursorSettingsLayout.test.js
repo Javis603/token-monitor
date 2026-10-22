@@ -1970,6 +1970,19 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   assert.match(listenerSlice, /value === 'smart'/);
   assert.match(listenerSlice, /600000/);
 });
+test('stale index banner opens the affected Collection health row', () => {
+  const html = readRendererFile('index.html');
+  const app = readRendererFile('app.js');
+  assert.match(html, /<button id="indexStaleBanner" class="index-stale-banner hidden" type="button">\s*<span class="index-stale-banner-text" role="status" aria-live="polite" aria-atomic="true">/);
+  const start = app.indexOf("els.indexStaleBanner?.addEventListener('click'");
+  const end = app.indexOf("els.toolDetailFooterModels", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const handler = app.slice(start, end);
+  assert.match(handler, /const stale = indexStaleDiagnostic\(\)/);
+  assert.match(handler, /setSettingsSectionExpanded\('tools', true\)/);
+  assert.match(handler, /setClientHealthExpanded\(stale\?\.clientId \|\| '', \{ refreshPlaceholder: Boolean\(stale\?\.clientId\) \}\)/);
+});
 
 test('sync upload interval setting is exposed in the Multi-device Sync panel', () => {
   const html = readRendererFile('index.html');

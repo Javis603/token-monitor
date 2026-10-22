@@ -574,6 +574,10 @@
       });
       return { ...empty, devices: [] };
     }
+    const historyStart = participating.reduce((earliest, source) => {
+      const candidate = earliestDailyDate(source.history?.daily);
+      return candidate && (!earliest || candidate < earliest) ? candidate : earliest;
+    }, '');
     const snapshots = [];
     for (const source of participating) {
       const dayState = deviceDayState(source, options);
@@ -584,6 +588,7 @@
         ...options,
         historyAvailable: true,
         daily: source.history?.daily || [],
+        historyStart,
         todayKey: dayState.currentKey,
         liveTodayKey: dayState.snapshotKey,
         todayPeriod: sourcePeriod(source, 'today')
@@ -727,10 +732,8 @@
       if (todayKey && day > todayKey) {
         return { status: 'unavailable', selection, reason: 'futureDay', period: null, range };
       }
-      // A day before the oldest retained row is not a zero-usage day, it is an
-      // unknown one: History only keeps a rolling window, so reporting zeros
-      // there would claim something the data cannot support.
-      if (earliestDailyDate(options.daily) > range.start) {
+      const historyStart = normalizeDateKey(options.historyStart) || earliestDailyDate(options.daily);
+      if (historyStart && historyStart > range.start) {
         return { status: 'unavailable', selection, reason: 'beyondHistory', period: null, range };
       }
     }

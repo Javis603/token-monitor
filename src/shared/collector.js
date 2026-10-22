@@ -1032,11 +1032,16 @@ async function collectUsageOnce(options) {
   let dailyHistoryLiveDays = options.dailyHistoryLiveDays;
   let todayPartitions = null;
   const anchor = options.todayOnlyAnchor;
+  const ompFallbackAnchor = (
+    includesOmp
+    && ompExpectedMode === 'stats-db'
+    && anchor?.ompUsageMode === 'tokscale'
+  );
   let anchorUsed = Boolean(
     anchor
     && anchor.dateKey === localTodayKey(collectedAt)
     && canTargetTodayPartitions(anchor, targetClients)
-    && (!includesOmp || anchor.ompUsageMode === ompExpectedMode)
+    && (!includesOmp || anchor.ompUsageMode === ompExpectedMode || ompFallbackAnchor)
   );
   // Full-scan rows are native, even when their title matches an old override.
   // Retain their fallback through the progressive metadata passes this tick.
@@ -1058,10 +1063,6 @@ async function collectUsageOnce(options) {
   let ompHistoryGraph = null;
   let ompReadFailed = false;
   let ompFallbackUsed = false;
-  const shouldReadOmp = includesOmp
-    && ompStatsAvailable
-    && options.ompStatsEnabled !== false
-    && (!targetRequested || targetClients.includes('omp') || !anchorUsed);
   const enableOmpTokscaleFallback = () => {
     if (!includesOmp) return;
     localClients.delete('omp');
@@ -1072,6 +1073,13 @@ async function collectUsageOnce(options) {
     targetTokscaleClients = targetTokscaleClientList.join(',');
     ompFallbackUsed = true;
   };
+  const reuseOmpTokscaleFallback = anchorUsed && ompFallbackAnchor;
+  if (reuseOmpTokscaleFallback) enableOmpTokscaleFallback();
+  const shouldReadOmp = includesOmp
+    && ompStatsAvailable
+    && options.ompStatsEnabled !== false
+    && !reuseOmpTokscaleFallback
+    && (!targetRequested || targetClients.includes('omp') || !anchorUsed || Boolean(options.includeHistory));
   if (shouldReadOmp) {
     try {
       ompUsage = collectOmpUsage({
@@ -2514,7 +2522,8 @@ function collectorAnchorTrust(saved, options = {}) {
     ompStatsDbPath: ompStatsDbPathOption,
     ompStatsEnabled
   });
-  if (expectedOmpMode && saved.ompUsageMode !== expectedOmpMode) return null;
+  const ompFallbackAnchor = expectedOmpMode === 'stats-db' && saved.ompUsageMode === 'tokscale';
+  if (expectedOmpMode && saved.ompUsageMode !== expectedOmpMode && !ompFallbackAnchor) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
   // A flat provenance ledger cannot prove each period's project source.
   if (Object.keys(saved.catalogProjects || {}).length && !saved.catalogProjects.today) return null;
