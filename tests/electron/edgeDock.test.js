@@ -659,6 +659,16 @@ test('a running CodeBuddy session reaches the shared WorkBuddy cell', () => {
   assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions).count, 1);
 });
 
+// A provider card normally repeats no per-row mark: every row belongs to the
+// card's own client. A shared quota cell breaks that premise - two tools write
+// one pool - so the card has to say which tool each row came from.
+test('a shared provider card marks its rows only when two clients share the cell', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const body = dock.slice(dock.indexOf('function sessionsNode('), dock.indexOf('const expandedSessionGroups'));
+  assert.match(body, /new Set\(sessions\.map\(\(session\) => session\.client\)/);
+  assert.match(body, /showClientMark: clients\.size > 1/);
+});
+
 // The Sessions item exists for the clients no quota card can show. A cell whose
 // rows all came from providers would be the same per-provider list again, one
 // level up, and would leave those clients with no surface at all.
