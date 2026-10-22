@@ -35,6 +35,9 @@
 })(typeof window !== 'undefined' ? window : globalThis, function createVendorPresentationApi(clientCatalog) {
   const VENDOR_PRESENTATION = Object.freeze([
     { id: 'claude', color: '#cc7c5e', trayIcon: 'tray-claude' },
+    // Derived from Claude Code's scan: same mark, a lighter shade so the two
+    // rows stay apart in charts.
+    { id: 'claude-desktop', color: '#e3a587', icon: 'claude', trayIcon: 'tray-claude' },
     { id: 'codex', color: '#49a3b0', trayIcon: 'tray-codex' },
     { id: 'opencode', color: '#000000', widgetInk: true },
     { id: 'hermes', color: '#d4af37', icon: 'hermes-agent' },

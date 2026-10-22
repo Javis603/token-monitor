@@ -30,7 +30,7 @@
 
 ## Token Monitor とは
 
-Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 46+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップウィジェットです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。
+Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 47+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップウィジェットです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。
 
 ## 対応ツール
 
@@ -39,6 +39,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | Logo | ツール | データパス | トークン使用量 | AI ツール制限 | セッション詳細 |
 |:---:|------|-----------|:---:|:---:|:---:|
 | <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" /> | Claude Code | `~/.claude/projects/`, `~/.claude/transcripts/` | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/claude-desktop.png" width="28" alt="Claude Desktop" /> | Claude Desktop | `~/.claude/projects/` のうち Desktop で開始したセッション、`<Claude userData>/local-agent-mode-sessions/`、`claude-code-sessions/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" /> | Codex | `~/.codex/`（`sessions/`、`archived_sessions/`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/`（`opencode*.db`、`storage/message/`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `~/.hermes/state.db` | ✅ | — | — |
@@ -141,7 +142,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカルデ
 
 ### 使用量の追跡
 
-- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 37+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
+- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 38+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
 - **リアルタイムトークンレート** — 生成速度を `tok/s`、総消費を `tok/min` で表示する任意のライブ表示
 - **セッション別詳細** — セッションを開くとプロンプトごとのトークン、各応答のトークン分割・使用ツールまで展開（ローカル transcript/DB を必要時のみ読み込み、同期しない）
 - **キャッシュヒット統計** — ツール・モデルをクリックすると入力トークン（キャッシュ hit/miss）、出力トークン、ヒット率の詳細

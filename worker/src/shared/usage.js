@@ -287,6 +287,10 @@ function emptyPeriod() {
 function normalizeClientName(value) {
   const raw = normalizeTokscaleClientName(value);
   if (!raw) return null;
+  // Claude Desktop is a Token Monitor-derived row (claudeDesktopSessions.js);
+  // tokscale itself never emits it, but the relabelled rows and every stored
+  // record must keep it as a fixed point rather than folding back to claude.
+  if (/^claude[\s_-]*desktop$/.test(raw)) return 'claude-desktop';
   if (raw.includes('claude')) return 'claude';
   if (raw.includes('codex')) return 'codex';
   if (raw.includes('hermes')) return 'hermes';

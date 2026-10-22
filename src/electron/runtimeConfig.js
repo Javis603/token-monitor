@@ -36,6 +36,7 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'historyIntervalMs',
   'sessionUsageArchiveEnabled',
   'projectsEnabled',
+  'claudeDesktopSplitEnabled',
   'wslScanEnabled'
 ]);
 // Functions and identity fields deliberately stay out: this key answers only
@@ -50,6 +51,7 @@ const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
   'historyEnabled',
   'dailyHistoryArchiveEnabled',
   'projectsEnabled',
+  'claudeDesktopSplitEnabled',
   'historyIntervalMs',
   'watchEnabled',
   'watchUsePolling',
@@ -64,7 +66,12 @@ const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsRefreshMode',
   'limitsRefreshMs',
   'cursorDisabledAccountIds',
-  'opencodeLocalLimitsEnabled'
+  'opencodeLocalLimitsEnabled',
+  // Must reconfigure so the runtime's options carry the flag; relying only on
+  // resolveConfigSnapshot is not enough when a probe is already in flight with
+  // a cloned pre-toggle snapshot, and clears the previous notConfigured row.
+  'claudeDesktopLocalOnly',
+  'claudeDesktopOrgId'
 ]);
 const SINK_STRUCTURAL_KEYS = Object.freeze(['syncUploadIntervalMs']);
 // Derived from the account declarations: every watched field plus a
@@ -109,6 +116,7 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
     dailyHistoryArchiveWriteEnabled: context.dailyHistoryArchiveWriteEnabled,
     projectsEnabled: settings.projectsEnabled !== false,
+    claudeDesktopSplitEnabled: settings.claudeDesktopSplitEnabled !== false,
     reasonixNativeSessionsEnabled: context.reasonixNativeSessionsEnabled === true,
     historyIntervalMs: context.historyIntervalMs ?? settings.historyIntervalMs,
     watchEnabled: context.watchEnabled,
