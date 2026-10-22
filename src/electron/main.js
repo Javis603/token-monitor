@@ -6217,7 +6217,7 @@ async function refreshFromTray() {
     refreshContextMenu: refreshTrayContextMenu,
     action: async () => {
       try {
-        const stats = await fetchStats({ force: true });
+        const stats = await fetchStats({ force: true, forceUsage: true });
         // Collector ticks normally publish their own final snapshot. Only bridge the
         // result when fetchStats returned a different object (for example, a remote hub
         // fetch while an external headless agent owns collection).
@@ -6789,13 +6789,17 @@ async function fetchStats(options = {}) {
   const requestGeneration = hubModeGeneration;
   const requestHubIdentity = currentHubStatsIdentity(settings?.hubMode === 'icloud' ? 'icloud' : 'client');
   const force = Boolean(options?.force);
-  // forceHistory and forceSelfSync stay independent of `force` on purpose: tool
-  // settings, account sign-ins and limits actions all refresh with { force: true },
-  // so folding them in would spawn the expensive `tokscale graph` — and the Cursor
-  // and Antigravity sync subprocesses — on every one of them. Only the manual
-  // refresh button opts in.
+  // Generic `{ force: true }` calls from settings and account forms only need
+  // fresh limits. A full usage tick reads every tracked source and can take
+  // seconds, so only an explicit usage request may start it. The refresh button
+  // keeps its full usage/History rescan and self-sync so imported or corrected
+  // older usage updates Month/All Time as well as the History graph.
   if (force && ownsUsageRuntime()) {
+    const refreshUsage = options?.forceUsage === true
+      || options?.forceHistory === true
+      || options?.forceSelfSync === true;
     await runManualDeviceRefresh(deviceRuntimeHandle, {
+      refreshUsage,
       forceHistory: Boolean(options?.forceHistory),
       forceSelfSync: Boolean(options?.forceSelfSync),
       onLimitsError: (error) => console.log(`[limits-runtime] manual refresh failed: ${error.message}`)

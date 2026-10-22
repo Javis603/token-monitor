@@ -380,3 +380,82 @@ test('manual App refresh feeds an independently enabled Notch through the same s
   assert.equal(topStats, context.localStats);
   limits.resolve();
 });
+
+test('generic settings/account refresh waits for new limits without dispatching usage', async () => {
+  const { context, limits, calls } = fixture();
+  let completed = false;
+  const request = context.fetchStats({ force: true }).then((stats) => { completed = true; return stats; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(completed, false, 'do not return the previous limits snapshot');
+  assert.equal(JSON.stringify(calls), JSON.stringify([['limits', { all: true }, 'manual']]));
+  context.localStats = { limits: 'fresh' };
+  limits.resolve();
+  assert.equal(await request, context.localStats);
+});
+
+test('manual refresh reconciles older-only usage in Month, All Time and History', async () => {
+  const { startCollector, localTodayKey } = require('../../src/shared/collector');
+  const { context } = fixture();
+  const calls = [];
+  let imported = false;
+  let graphs = 0;
+  const runtime = startCollector({
+    clients: 'claude', allTimeSince: '2024-01-01', deviceId: 'manual-history-test',
+    intervalMs: 3600000, watchEnabled: false, wslScanEnabled: false,
+    historyEnabled: true, historyIntervalMs: 3600000,
+    dailyHistoryArchiveEnabled: false, anchorPersistenceEnabled: false,
+    sessionUsageArchiveEnabled: false, sessionActivityPolling: false,
+    codexLocalUsageEnabled: false, projectsEnabled: false, limitsEnabled: false,
+    runTokscale: async ({ flags }) => {
+      calls.push(flags);
+      const input = flags.includes('--today') ? 10 : imported ? 150 : 100;
+      return { entries: [{ client: 'claude', sessionId: 's1', model: 'test', input, output: 0, cost: 0 }] };
+    },
+    runGraph: async () => {
+      graphs += 1;
+      return { contributions: [{ date: localTodayKey(new Date(Date.now() - 86400000)), clients: [
+        { client: 'claude', modelId: 'test', tokens: { input: imported ? 140 : 90 }, cost: 0 }
+      ] }] };
+    },
+    onUpdate: (summary) => { context.localStats = summary; }
+  });
+  try {
+    await runtime.whenIdle();
+    assert.equal(context.localStats.month.totalTokens, 100);
+    imported = true;
+    context.deviceRuntimeHandle = { refreshLimits: async () => {}, tick: (...args) => runtime.tick(...args) };
+    calls.length = 0;
+    const beforeGraphs = graphs;
+    const stats = await context.refreshManualStats();
+    assert.equal(stats.today.totalTokens, 10);
+    assert.equal(stats.month.totalTokens, 150);
+    assert.equal(stats.allTime.totalTokens, 150);
+    assert.equal(stats.history.daily[0].tokens, 140);
+    assert.equal(JSON.stringify(calls), JSON.stringify([['--today'], ['--month'], ['--since', '2024-01-01']]));
+    assert.equal(graphs, beforeGraphs + 1, 'manual refresh bypasses the History interval');
+  } finally {
+    await runtime.stop();
+  }
+});
+
+test('Tray-menu refresh retains its existing full usage request', async () => {
+  const { context, usage, limits, calls } = fixture();
+  Object.assign(context, {
+    trayRefreshInFlight: false,
+    captureMacWidgetProducerOwner: () => null,
+    runTrayMenuAction: ({ action }) => action(),
+    refreshTrayContextMenu() {},
+    latestStats: context.localStats,
+    showTrayRefreshError: (error) => { throw new Error(error); }
+  });
+  const trayRefresh = main.slice(main.indexOf('async function refreshFromTray'), main.indexOf('function setTrayContentFromMenu'));
+  vm.runInNewContext(trayRefresh, context);
+  const request = context.refreshFromTray();
+  assert.equal(JSON.stringify(calls), JSON.stringify([
+    ['limits', { all: true }, 'manual'],
+    ['usage', 'manual', { forceHistory: false, forceSelfSync: false }]
+  ]));
+  usage.resolve();
+  limits.resolve();
+  await request;
+});
