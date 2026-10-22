@@ -77,4 +77,4 @@ node --test tests/shared/collectorPricing.test.js tests/shared/collectorAnchorPe
 cargo test --locked -p tokscale-core token_monitor::qodercn
 ```
 
-The app integration requires the corresponding native Qoder CN credits parser build. The previous vendor pin alone does not collect credit-only records; update the official vendor release/pin before releasing this change.
+The vendor manifest pins the native Qoder CN credits parser build. Keep its published source and platform checksums aligned; a green JavaScript test suite alone does not verify bundled native credits support.
