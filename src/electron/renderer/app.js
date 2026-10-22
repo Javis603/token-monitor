@@ -5555,9 +5555,7 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
       const rect = tooltip.getBoundingClientRect();
       const gap = 14;
       const pad = 6;
-      const rightX = pointerPoint.x + gap;
-      const desiredX = rightX + rect.width <= window.innerWidth - pad
-        ? rightX : pointerPoint.x - gap - rect.width;
+      const desiredX = pointerPoint.x - rect.width / 2;
       const aboveY = pointerPoint.y - gap - rect.height;
       const desiredY = aboveY >= pad ? aboveY : pointerPoint.y + gap;
       const x = Math.max(pad, Math.min(window.innerWidth - pad - rect.width, desiredX));

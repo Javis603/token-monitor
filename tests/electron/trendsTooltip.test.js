@@ -127,17 +127,17 @@ test('Trends monthly and single-column views retain their own labels and positio
   assert.equal(tooltip.style.transform, 'translate(160px, 101px) translate(-50%, 0)');
 });
 
-test('Trends tooltip follows the pointer in both axes and flips at window edges', () => {
+test('Trends tooltip stays centered above the pointer and avoids window edges', () => {
   const { spark, tooltip } = fixture();
-  spark.fire('pointerenter', { clientX: 30, clientY: 200 });
-  assert.equal(tooltip.style.transform, 'translate(44px, 146px)');
-  spark.fire('pointermove', { clientX: 60, clientY: 250 });
-  assert.equal(tooltip.style.transform, 'translate(74px, 196px)');
-  assert.equal(tooltip.textContent, '12.3Mtokens2026-10-21');
+  spark.fire('pointerenter', { clientX: 130, clientY: 200 });
+  assert.equal(tooltip.style.transform, 'translate(70px, 146px)');
+  spark.fire('pointermove', { clientX: 160, clientY: 250 });
+  assert.equal(tooltip.style.transform, 'translate(100px, 196px)');
+  assert.equal(tooltip.textContent, '0tokens2026-10-22');
   spark.fire('pointermove', { clientX: 0, clientY: 1 });
-  assert.equal(tooltip.style.transform, 'translate(14px, 15px)');
+  assert.equal(tooltip.style.transform, 'translate(6px, 15px)');
   spark.fire('pointermove', { clientX: 339, clientY: 599 });
-  assert.equal(tooltip.style.transform, 'translate(205px, 545px)');
+  assert.equal(tooltip.style.transform, 'translate(214px, 545px)');
   spark.fire('pointermove', { clientX: 500, clientY: 700 });
   assert.equal(tooltip.style.transform, 'translate(214px, 554px)');
 });
