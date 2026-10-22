@@ -300,6 +300,28 @@ test('a failed camera mask update closes the transaction and still releases nati
   assert.deepEqual(native.calls().filter(call => call.selector === 'release').map(call => call.target), [70, 40]);
 });
 
+test('a window without a system shadow skips shadow invalidation', () => {
+  const native = bridge('arm64');
+  native.win.hasShadow = () => false;
+  const glass = native.create({ shaped: true });
+  glass.update({ dark: true, shape: railShape });
+  glass.update({ dark: true, shape: { ...railShape, height: 120 } });
+  const calls = native.calls();
+  assert.deepEqual(calls.filter((call) => call.selector === '_setPath:').map((call) => call.parameters), [[99], [99]]);
+  assert.equal(calls.some((call) => call.selector === 'invalidateShadow'), false);
+});
+
+test('enabling a shadow after creation refreshes the next committed shape', () => {
+  const native = bridge('arm64');
+  native.win.hasShadow = () => false;
+  const glass = native.create({ shaped: true });
+  glass.update({ dark: true, shape: railShape });
+  assert.equal(native.calls().some((call) => call.selector === 'invalidateShadow'), false);
+  native.win.hasShadow = () => true;
+  glass.update({ dark: true, shape: { ...railShape, height: 120 } });
+  assert.equal(native.calls().filter((call) => call.selector === 'invalidateShadow').length, 1);
+});
+
 test('a shaped glass takes a bottom-up path, releases it and refreshes the shadow', () => {
   const native = bridge('arm64');
   const glass = native.create({ shaped: true });

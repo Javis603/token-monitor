@@ -67,7 +67,7 @@ function loadApi() {
     supportsSubdued: responds(glassClass, sel('instancesRespondToSelector:'), sel('set_subduedState:')),
     supportsForceMainAppearance: responds(cls('NSWindow'), sel('instancesRespondToSelector:'), sel('_setForceMainAppearance:'))
       && responds(cls('NSWindow'), sel('instancesRespondToSelector:'), sel('_forceMainAppearance')),
-    setPath(target, commands, height, mask = 0) {
+    setPath(target, commands, height, mask = 0, refreshShadow = true) {
       const cg = loadPathApi();
       const path = cg.create();
       try {
@@ -83,9 +83,10 @@ function loadApi() {
       } finally {
         cg.release(path); // the view retains its own reference
       }
-      // The window shadow is computed from content alpha and cached.
+      // The window shadow is computed from content alpha and cached. A window
+      // without one has nothing to invalidate.
       const window = get(target, sel('window'));
-      if (window) release(window, sel('invalidateShadow'));
+      if (window && refreshShadow) release(window, sel('invalidateShadow'));
     },
     get: (target, name) => get(target, sel(name)),
     flag: (target, name) => boolean(target, sel(name)),
@@ -252,7 +253,12 @@ function createMacLiquidGlass(win, { shaped = false } = {}) {
                   .map(stop => api.scalar(Math.max(0, Math.min(1, (cap + (fade - cap) * stop) / shape.height))))));
               }
             }
-            if (key !== lastShape) api.setPath(glass, shape.commands, shape.height, shadeMask);
+            if (key !== lastShape) {
+              // A window can change its shadow flag after creation, so read the
+              // current value when a new path is actually committed.
+              const refreshShadow = typeof win.hasShadow === 'function' ? win.hasShadow() !== false : true;
+              api.setPath(glass, shape.commands, shape.height, shadeMask, refreshShadow);
+            }
           });
           lastShape = key; lastShade = shadeKey; shadeActive = Boolean(hardwareShade);
         } else if (radius !== lastRadius) {

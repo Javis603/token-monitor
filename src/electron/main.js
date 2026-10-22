@@ -186,6 +186,7 @@ const {
   defaultHomeModulePreferences,
   normalizeHiddenHomeModules,
   normalizeHomeLimitDisplayMode,
+  normalizeHomeModuleCounts,
   normalizeHomeModuleOrder
 } = require('./renderer/homeModulePreferences');
 const {
@@ -442,7 +443,6 @@ const { toPolygons } = require('./renderer/edgeDock/shapes');
 const { rasterizeMask } = require('./edgeDock/mask');
 const { NOTCH_BLUR_ALPHA, NOTCH_BLUR_RADIUS, NOTCH_BLUR_STRENGTH, notchBlurMask } = require('./notch/blur');
 const { applyProgressiveBlur } = require('./notch/macProgressiveBlur');
-const { monitorMacPrimaryPress } = require('./notch/macPrimaryPress');
 const { applyVibrancyMask } = require('./edgeDock/macVibrancyMask');
 const { performMacHaptic } = require('./edgeDock/macHaptics');
 const { primaryButtonDown } = require('./edgeDock/pointerButtons');
@@ -641,7 +641,7 @@ function defaultSettings() {
     notchWarnColors: false,
     notchHoverAction: 'peek',
     notchHoverDelay: 0,
-    notchAvoidMenuBar: true,
+    notchSwipeGestures: true,
     notchHaptic: true,
     notchProgressiveBlur: true,
     notchHideSummaryInFullScreen: true,
@@ -677,6 +677,7 @@ function defaultSettings() {
     hiddenViews: defaultViewDisplayPreferences().hiddenViews,
     homeModuleOrder: defaultHomeModulePreferences().homeModuleOrder,
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
+    homeModuleCounts: normalizeHomeModuleCounts(),
     showHomeLimitBars: false,
     homeLimitDisplayMode: 'text',
     showHomeLimitProviderNames: false,
@@ -2660,6 +2661,7 @@ function readSettings() {
       merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
+    merged.homeModuleCounts = normalizeHomeModuleCounts(merged.homeModuleCounts);
     merged.homeLimitDisplayMode = normalizeHomeLimitDisplayMode(merged.homeLimitDisplayMode);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
     merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
@@ -2770,7 +2772,7 @@ function readSettings() {
     merged.notchWarnColors = parseBoolean(merged.notchWarnColors, false);
     merged.notchHoverAction = normalizeNotchHoverAction(merged.notchHoverAction);
     merged.notchHoverDelay = normalizeNotchHoverDelay(merged.notchHoverDelay);
-    merged.notchAvoidMenuBar = parseBoolean(merged.notchAvoidMenuBar, true);
+    merged.notchSwipeGestures = parseBoolean(merged.notchSwipeGestures, true);
     merged.notchHaptic = parseBoolean(merged.notchHaptic, true);
     merged.notchProgressiveBlur = parseBoolean(merged.notchProgressiveBlur, true);
     merged.notchHideSummaryInFullScreen = parseBoolean(merged.notchHideSummaryInFullScreen, true);
@@ -5682,7 +5684,7 @@ function ensureNotchController() {
     createGlass: (win) => createMacLiquidGlass(win, { shaped: true }),
     applyShapeMask: (win, commands, width, height, display) => {
       const { buffer, pixelWidth, pixelHeight } = rasterizeMask(toPolygons(commands), width, height, display?.scaleFactor || 2);
-      return applyVibrancyMask(win, nativeImage.createFromBitmap(buffer, { width: pixelWidth, height: pixelHeight }).toPNG(), width, height);
+      return applyVibrancyMask(win, { buffer, pixelWidth, pixelHeight }, width, height);
     },
     prefersReducedMotion: () => motionPreferenceApi.shouldReduceMotion(settings?.reduceMotion, systemPreferences.getAnimationSettings?.().prefersReducedMotion === true),
     onToggleRateMode: toggleDockRateMode,
@@ -5705,7 +5707,8 @@ function ensureNotchController() {
         width: mask.width, height: mask.height, radius: NOTCH_BLUR_RADIUS });
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
-    monitorPrimaryPress: (onPress) => monitorMacPrimaryPress(onPress, { logger: (message) => console.log(message) }),
+    // An absent key is the system default, natural scrolling on.
+    naturalScrolling: () => systemPreferences.getUserDefault?.('com.apple.swipescrolldirection', 'string') !== '0',
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
     isFullScreen: createFullScreenProbe({ platform: process.platform, screen, logger: (message) => console.log(message) }),
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
@@ -6095,8 +6098,7 @@ function ensureEdgeDockController() {
     applyShapeMask: (win, commands, width, height, currentDisplay) => {
       const scale = currentDisplay?.scaleFactor || screen.getDisplayMatching?.(win.getBounds())?.scaleFactor || 2;
       const { buffer, pixelWidth, pixelHeight } = rasterizeMask(toPolygons(commands), width, height, scale);
-      const png = nativeImage.createFromBitmap(buffer, { width: pixelWidth, height: pixelHeight }).toPNG();
-      return applyVibrancyMask(win, png, width, height);
+      return applyVibrancyMask(win, { buffer, pixelWidth, pixelHeight }, width, height);
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
     installNonActivatingInput: (win) => process.platform === 'darwin' ? preventAppActivation(win)
@@ -6230,7 +6232,7 @@ async function refreshFromTray() {
     refreshContextMenu: refreshTrayContextMenu,
     action: async () => {
       try {
-        const stats = await fetchStats({ force: true });
+        const stats = await fetchStats({ force: true, forceUsage: true });
         // Collector ticks normally publish their own final snapshot. Only bridge the
         // result when fetchStats returned a different object (for example, a remote hub
         // fetch while an external headless agent owns collection).
@@ -6802,13 +6804,17 @@ async function fetchStats(options = {}) {
   const requestGeneration = hubModeGeneration;
   const requestHubIdentity = currentHubStatsIdentity(settings?.hubMode === 'icloud' ? 'icloud' : 'client');
   const force = Boolean(options?.force);
-  // forceHistory and forceSelfSync stay independent of `force` on purpose: tool
-  // settings, account sign-ins and limits actions all refresh with { force: true },
-  // so folding them in would spawn the expensive `tokscale graph` — and the Cursor
-  // and Antigravity sync subprocesses — on every one of them. Only the manual
-  // refresh button opts in.
+  // Generic `{ force: true }` calls from settings and account forms only need
+  // fresh limits. A full usage tick reads every tracked source and can take
+  // seconds, so only an explicit usage request may start it. The refresh button
+  // keeps its full usage/History rescan and self-sync so imported or corrected
+  // older usage updates Month/All Time as well as the History graph.
   if (force && ownsUsageRuntime()) {
+    const refreshUsage = options?.forceUsage === true
+      || options?.forceHistory === true
+      || options?.forceSelfSync === true;
     await runManualDeviceRefresh(deviceRuntimeHandle, {
+      refreshUsage,
       forceHistory: Boolean(options?.forceHistory),
       forceSelfSync: Boolean(options?.forceSelfSync),
       onLimitsError: (error) => console.log(`[limits-runtime] manual refresh failed: ${error.message}`)
@@ -8009,7 +8015,7 @@ app.whenReady().then(() => {
       notchWarnColors: parseBoolean(patch.notchWarnColors ?? settings.notchWarnColors, false),
       notchHoverAction: normalizeNotchHoverAction(patch.notchHoverAction ?? settings.notchHoverAction),
       notchHoverDelay: normalizeNotchHoverDelay(patch.notchHoverDelay ?? settings.notchHoverDelay),
-      notchAvoidMenuBar: parseBoolean(patch.notchAvoidMenuBar ?? settings.notchAvoidMenuBar, true),
+      notchSwipeGestures: parseBoolean(patch.notchSwipeGestures ?? settings.notchSwipeGestures, true),
       notchHaptic: parseBoolean(patch.notchHaptic ?? settings.notchHaptic, true),
       notchProgressiveBlur: parseBoolean(patch.notchProgressiveBlur ?? settings.notchProgressiveBlur, true),
       notchHideSummaryInFullScreen: parseBoolean(patch.notchHideSummaryInFullScreen ?? settings.notchHideSummaryInFullScreen, true),
@@ -8061,6 +8067,7 @@ app.whenReady().then(() => {
       hiddenViews: patch.hiddenViews !== undefined ? normalizeHiddenViews(patch.hiddenViews, DEFAULT_VIEW_LIST) : normalizeHiddenViews(settings.hiddenViews, DEFAULT_VIEW_LIST),
       homeModuleOrder: patch.homeModuleOrder !== undefined ? normalizeHomeModuleOrder(patch.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',') : normalizeHomeModuleOrder(settings.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(','),
       hiddenHomeModules: patch.hiddenHomeModules !== undefined ? normalizeHiddenHomeModules(patch.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST) : normalizeHiddenHomeModules(settings.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST),
+      homeModuleCounts: normalizeHomeModuleCounts(patch.homeModuleCounts, settings.homeModuleCounts),
       showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
       homeLimitDisplayMode: normalizeHomeLimitDisplayMode(patch.homeLimitDisplayMode ?? settings.homeLimitDisplayMode),
       showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),

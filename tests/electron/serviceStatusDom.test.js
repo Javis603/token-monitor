@@ -250,8 +250,8 @@ test('Home limit provider settings expand with the shared accordion transition',
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
   const renderHomeSettingsList = functionBody(app, 'renderHomeSettingsList', 'renderTrendSettingsList');
-  assert.match(renderHomeSettingsList, /homeLimitProviderContainer/);
-  assert.match(renderHomeSettingsList, /accordion-animated-container\$\{state\.homeLimitSettingsExpanded \? '' : ' hidden'\}/);
+  assert.match(app, /limits: \['homeLimitSettingsExpanded', 'homeLimitProviderContainer'\]/);
+  assert.match(renderHomeSettingsList, /accordion-animated-container\$\{state\[subgroup\[0\]\] \? '' : ' hidden'\}/);
   assert.match(renderHomeSettingsList, /accordion-animation-inner/);
   assert.match(renderHomeSettingsList, /togglePreferenceSubgroup\(HOME_MODULE_SUBGROUPS, '\.home-module-preference-row', id\)/);
   const sharedExpansion = functionBody(app, 'setPreferenceSubgroupsExpanded', 'togglePreferenceSubgroup');
@@ -308,7 +308,7 @@ test('view switcher preserves click-to-cycle and direct selection without crowdi
   assert.doesNotMatch(css, /@keyframes viewSwitcherMenuIn/);
   assert.doesNotMatch(css, /@keyframes viewSwitcherMenuOut/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.view-switcher-menu/);
-  assert.match(cssRule(css, '.view-switcher-menu-item'), /grid-template-columns:\s*16px minmax\(0, 1fr\)/);
+  assert.match(cssRule(css, '.view-switcher-menu-item'), /grid-template-columns:\s*15px minmax\(0, 1fr\)/);
   assert.doesNotMatch(css, /\.view-switcher-menu-item\.is-current::after/);
   assert.match(cssRule(css, '.utility-actions'), /flex:\s*0 0 34px/);
   assert.match(cssRule(css, '.utility-actions .refresh-button'), /position:\s*absolute/);

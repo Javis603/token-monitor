@@ -84,7 +84,6 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
 .notch-wave i:nth-child(4) { height: 15px; animation-delay: -.35s; }
 .notch-wave i:nth-child(5) { height: 6px; animation-delay: -.7s; }
 @keyframes notch-wave { 50% { transform: scaleY(.4); } }
-@keyframes notch-breathe { 50% { opacity: .35; } }
 
 /* ---- Open panel ------------------------------------------------------------ */
 /* The body spans the whole open outline: the band shares the camera row on an
@@ -133,8 +132,10 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-rate { display: inline-flex; align-items: center; gap: 6px; }
 .notch-rate-value { color: var(--notch-ink); }
 .notch-rate.is-idle .notch-rate-value { color: var(--notch-dim); }
-.notch-rate.is-idle .notch-live-dot { background: var(--notch-faint); box-shadow: none; animation: none; }
-.notch-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 8px var(--blue); animation: notch-breathe 1.6s ease-in-out infinite; }
+.notch-rate.is-idle .notch-rate-icon { color: var(--notch-faint); }
+.notch-rate-icon { width: 12px; height: 12px; flex: 0 0 auto; color: var(--notch-ink); background: currentColor;
+  -webkit-mask: url("../icons/actions/zap.svg") center / contain no-repeat;
+  mask: url("../icons/actions/zap.svg") center / contain no-repeat; }
 .notch-status-rule { width: 1px; height: 12px; background: var(--notch-rule); }
 .notch-status .edge-dock-refresh { width: 24px; height: 24px; }
 

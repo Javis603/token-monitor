@@ -593,6 +593,27 @@ if (surface === 'peek') {
   document.documentElement.addEventListener('mouseleave', reportPointer);
 }
 
+// The notch window passes the pointer through, with its moves forwarded, until
+// the main process sees the pointer on the shell. Moves are reported once a
+// frame so the shell takes input as the pointer arrives; presses and wheel
+// events only reach the page while it does, and the main process decides what
+// they mean from the cursor position.
+if (surface === 'notch') {
+  let pointerFrame = 0;
+  const reportPointer = () => {
+    if (pointerFrame) return;
+    pointerFrame = requestAnimationFrame(() => { pointerFrame = 0; bridge.pointer(); });
+  };
+  document.addEventListener('mousemove', reportPointer);
+  document.documentElement.addEventListener('mouseleave', () => bridge.pointer());
+  document.addEventListener('mousedown', (event) => { if (event.button === 0) bridge.press(); });
+  // Line-based deltas are rare on macOS; scale them to points like Chromium.
+  window.addEventListener('wheel', (event) => {
+    const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
+    bridge.wheel(event.deltaX * scale, event.deltaY * scale);
+  }, { passive: true });
+}
+
 // ---- Rail ----------------------------------------------------------------
 
 function waitingRingStart(cellId, isWaiting) {

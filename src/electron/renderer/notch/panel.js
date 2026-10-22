@@ -258,7 +258,9 @@
         if (rate) {
           const reading = el('button', 'notch-rate');
           reading.type = 'button';
-          reading.append(el('span', 'notch-live-dot'), text('notch-rate-value', ''), text('notch-rate-unit', ''));
+          const icon = el('span', 'notch-rate-icon');
+          icon.setAttribute('aria-hidden', 'true');
+          reading.append(icon, text('notch-rate-value', ''), text('notch-rate-unit', ''));
           activateOnPress(reading, () => bridge.toggleRateMode());
           status.append(reading);
         }

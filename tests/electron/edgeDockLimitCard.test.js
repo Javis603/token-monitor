@@ -33,6 +33,7 @@ const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../
 const { aggregateLimits, normalizeLimitProvider } = require('../../src/shared/limits/core');
 const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
 const { fetchMinimaxLimits } = require('../../src/shared/providers/minimax/limits');
+const { fetchAntigravityLimits } = require('../../src/shared/providers/antigravity/limits');
 
 const root = path.join(__dirname, '../..');
 
@@ -692,6 +693,115 @@ test('an OpenRouter card carries the balance meter and its detail tooltip', () =
   assert.ok(tooltip, 'the card should carry the ⓘ tooltip, not only the page');
   assert.match(card.find('limit-detail-tooltip-trigger').textContent, /i/);
   assert.match(tooltip.text, /All time/);
+});
+
+test('a Sub2API card keeps Month and All time in the summary and its original usage tooltip', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'sub2api', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, currency: 'USD' }],
+    balance: { amount: 12.5, currency: 'USD', monthSpend: 2.5, allTimeSpend: 18.75 },
+    usageSummary: {
+      period: 'month', requests: 21, totalTokens: 1940, inputTokens: 1234,
+      outputTokens: 456, cacheReadTokens: 200, cacheCreationTokens: 50,
+      averageDurationMs: 850, standardCost: 3
+    }
+  }, '#888888');
+  assert.equal(card.find('limit-spend-summary').text, 'Month $2.50 · All time $18.75');
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.deepEqual(tooltip.children.map((row) => row.text), [
+    'Month requests 21', 'Month tokens 1,940', 'Input tokens 1,234',
+    'Output tokens 456', 'Cache tokens 250', 'Avg response 850 ms', 'Standard cost $3.00'
+  ]);
+  assert.equal(tooltip.find('is-separated'), null);
+});
+
+test('a third-party card summarizes Today and Month and details every period', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty',
+    adapterId: 'newapi-account',
+    status: 'ok',
+    planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 11.42, currency: 'USD' }],
+    balance: {
+      amount: 11.42,
+      currency: 'USD',
+      todaySpend: 0,
+      weekSpend: 1.44,
+      monthSpend: 1.44,
+      allTimeSpend: 18.58
+    }
+  }, '#888888');
+
+  assert.match(card.text, /Spend Today \$0\.00 · Month \$1\.44/);
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.ok(tooltip, 'the card should carry the ⓘ tooltip, not only the summary');
+  assert.match(tooltip.text, /Today \$0\.00/);
+  assert.match(tooltip.text, /Week \$1\.44/);
+  assert.match(tooltip.text, /All time \$18\.58/);
+});
+
+test('a third-party tooltip keeps account details above spend without duplicate spoken periods', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 11.42, limit: 30, currency: 'USD' }],
+    balance: {
+      amount: 11.42, currency: 'USD', todaySpend: 0, weekSpend: 1.44,
+      monthSpend: 1.44, allTimeSpend: 18.58, requestCount: 12345, quotaGroup: 'default'
+    }
+  }, '#888888');
+  const tooltip = card.find('limit-detail-tooltip');
+  const rows = tooltip.children.map((row) => row.text);
+  assert.deepEqual(rows, [
+    'Total quota $30.00', 'Requests 12,345', 'Group default', '',
+    'Today $0.00', 'Week $1.44', 'Month $1.44', 'All time $18.58'
+  ]);
+  assert.ok(tooltip.children[3].classList.contains('is-separated'));
+  const spoken = card.find('limit-spend').attributes['aria-label'];
+  assert.equal(spoken.match(/Today/g)?.length, 1);
+  assert.equal(spoken.match(/Month/g)?.length, 1);
+});
+
+test('a third-party card falls back to all-time when dashboard periods are unknown', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 39.45, currency: 'USD' }],
+    balance: {
+      amount: 39.45, currency: 'USD', todaySpend: null, weekSpend: null,
+      monthSpend: null, allTimeSpend: 140.57
+    }
+  }, '#888888');
+  assert.match(card.text, /Spend All time \$140\.57/);
+  assert.doesNotMatch(card.text, /Today|Week|Month|\$0\.00/);
+});
+
+test('a third-party tooltip keeps the original account format when all-time is the summary', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 39.45, limit: 180.02, currency: 'USD' }],
+    balance: {
+      amount: 39.45, currency: 'USD', todaySpend: null, weekSpend: null,
+      monthSpend: null, allTimeSpend: 140.57, requestCount: 30836, quotaGroup: 'default'
+    }
+  }, '#888888');
+  assert.match(card.find('limit-spend-summary').text, /All time \$140\.57/);
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.deepEqual(tooltip.children.map((row) => row.text), [
+    'Total quota $180.02', 'Requests 30,836', 'Group default'
+  ]);
+  assert.doesNotMatch(tooltip.text, /Today|Week|Month|All time/);
+  assert.equal(tooltip.find('is-separated'), null);
+});
+
+test('a third-party card retains zero account details when spend is unavailable', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 0, limit: 0, currency: 'USD' }],
+    balance: { amount: 0, currency: 'USD', requestCount: 0, quotaGroup: 'default' }
+  }, '#888888');
+  assert.match(card.find('limit-spend').text, /Details/);
+  assert.deepEqual(card.find('limit-detail-tooltip').children.map((row) => row.text), [
+    'Total quota $0.00', 'Requests 0', 'Group default'
+  ]);
 });
 
 test('a MiMo membership row meters like any percent quota, WorkBuddy included', () => {
@@ -1856,6 +1966,123 @@ test('an Antigravity group whose rows are all unchecked goes with them', () => {
   const groups = [...card.walk()].filter((node) => node.classNames.has('limit-window-group'));
   assert.equal(groups.length, 1);
   assert.doesNotMatch(card.text, /Claude/);
+});
+
+for (const unavailable of [false, true]) for (const showLimitUsed of [false, true]) test(`Antigravity keeps the original quota pairs above Argon weekly with Claude 5-hour ${unavailable ? 'unavailable' : 'available'} in ${showLimitUsed ? 'used' : 'remaining'} mode`, () => {
+  const record = normalizeLimitProvider({
+    provider: 'antigravity',
+    windows: [
+      { kind: 'weekly', label: 'Gemini 4 Argon weekly', usedPercent: 63 },
+      { kind: 'session', label: 'Gemini 5-hour', usedPercent: 2 },
+      { kind: 'weekly', label: 'Gemini weekly', usedPercent: 1 },
+      { kind: 'session', label: 'Claude/GPT 5-hour', usedPercent: unavailable ? null : 0, showMeter: !unavailable },
+      { kind: 'weekly', label: 'Claude/GPT weekly', usedPercent: 100 }
+    ]
+  });
+  const before = structuredClone(record);
+  const card = dockView({ showLimitUsed }).renderProviderWindows(record, '#4285F4');
+  const groups = [...card.walk()].filter((node) => node.classNames.has('limit-window-group'));
+  assert.deepEqual(
+    groups.map((group) => [
+      group.find('limit-window-group-title')?.textContent,
+      [...group.walk()].filter((node) => node.classNames.has('limit-window')).map(rowTitle)
+    ]),
+    [
+      ['Gemini', ['5-hour', 'Weekly']],
+      ['Claude/GPT', ['5-hour', 'Weekly']],
+      ['Gemini 4 Argon', ['Weekly']]
+    ]
+  );
+  const items = dockView().limitProviderUsageItems([record]);
+  assert.deepEqual(items.map((item) => item.label), [
+    'Gemini · 5-hour',
+    'Gemini · Weekly',
+    'Claude/GPT · 5-hour',
+    'Claude/GPT · Weekly',
+    'Gemini 4 Argon · Weekly'
+  ]);
+  assert.equal([...card.walk()].filter((node) => node.classNames.has('limit-meter')).length, unavailable ? 4 : 5);
+  const expectedRemaining = [98, 99, unavailable ? null : 100, 0, 37];
+  const rows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  rows.forEach((row, index) => {
+    const remaining = expectedRemaining[index];
+    const fill = row.find('limit-meter-fill');
+    if (remaining === null) {
+      assert.equal(fill, null);
+      assert.doesNotMatch(row.text, /%/);
+    } else {
+      const percent = showLimitUsed ? 100 - remaining : remaining;
+      assert.ok(row.text.includes(`${percent}% ${showLimitUsed ? 'used' : 'left'}`), row.text);
+      assert.equal(Number(fill.style['--bar-scale']), percent / 100);
+    }
+  });
+  assert.deepEqual(record, before, 'display ordering does not mutate the normalized quota record');
+});
+
+test('Antigravity OAuth legacy fallback keeps unknown, exhausted and numeric quotas distinct in both display modes', async () => {
+  const resetTime = '2030-06-03T04:00:00Z';
+  const providers = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'legacy', accountEmail: 'legacy@example.com',
+      credentials: { accessToken: 'fixture-token', expiresAt: Date.now() + 3600_000,
+        clientId: 'client', clientSecret: 'secret', projectId: 'fixture-project' }
+    }]
+  }, {
+    antigravityProbe: async () => { throw new Error('local RPC unavailable'); },
+    fetch: async (url) => {
+      let payload;
+      if (url.endsWith(':loadCodeAssist')) payload = {};
+      else if (url.endsWith(':retrieveUserQuotaSummary')) payload = { groups: [] };
+      else if (url.endsWith(':fetchAvailableModels')) payload = { models: {
+        'gemini-4-argon-high': { displayName: 'Gemini 4 Argon', quotaInfo: { remainingFraction: null, resetTime } },
+        'gemini-flash': { displayName: 'Gemini Flash', quotaInfo: { remainingFraction: 0.8, resetTime } },
+        'claude-sonnet': { displayName: 'Claude', quotaInfo: { remainingFraction: 0, resetTime } }
+      } };
+      else throw new Error(`Unexpected URL ${url}`);
+      return { ok: true, status: 200, json: async () => payload };
+    }
+  });
+  assert.equal(providers.length, 1);
+  const provider = providers[0];
+  assert.equal(provider.source, 'oauth');
+  const unknown = provider.windows.find((window) => window.label === 'Gemini 4 Argon');
+  assert.equal(unknown.remainingPercent, null);
+  assert.equal(unknown.usedPercent, null);
+  assert.equal(unknown.showMeter, false);
+  assert.equal(unknown.resetsAt, new Date(resetTime).toISOString());
+  const before = structuredClone(provider);
+
+  for (const showLimitUsed of [false, true]) {
+    const card = dockView({ showLimitUsed }).renderProviderWindows(provider, '#4285F4');
+    const rows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+    const argon = rows.find((row) => row.text.includes('Gemini 4 Argon'));
+    assert.equal(argon, undefined, 'unknown legacy pools do not render their name or reset');
+    assert.equal(rows.length, 2);
+    for (const [label, remaining] of [['Gemini Flash', 80], ['Claude', 0]]) {
+      const row = rows.find((entry) => entry.text.includes(label));
+      const percent = showLimitUsed ? 100 - remaining : remaining;
+      assert.ok(row.text.includes(`${percent}% ${showLimitUsed ? 'used' : 'left'}`), row.text);
+      assert.equal(Number(row.find('limit-meter-fill').style['--bar-scale']), percent / 100);
+    }
+  }
+  assert.deepEqual(dockView().limitProviderUsageItems([provider]).map((item) => item.label), ['Gemini Flash', 'Claude']);
+  assert.deepEqual(limitPresentationApi.limitProviderCompactWindows('antigravity', provider.windows).map((window) => window.label), ['Gemini Flash', 'Claude']);
+  assert.deepEqual(provider, before, 'hidden legacy pools retain their source data');
+});
+
+test('Antigravity hides an all-unknown legacy pool without adding a placeholder quota', () => {
+  const provider = normalizeLimitProvider({ provider: 'antigravity', windows: [
+    { kind: 'weekly', label: 'Gemini 4 Argon', usedPercent: null, resetsAt: '2030-06-03T04:00:00Z' }
+  ] });
+  const before = structuredClone(provider);
+  for (const showLimitUsed of [false, true]) {
+    const card = dockView({ showLimitUsed }).renderProviderWindows(provider, '#4285F4');
+    assert.equal(card.children.length, 0);
+    assert.equal(card.text, '');
+  }
+  assert.deepEqual(dockView().limitProviderUsageItems([provider]), []);
+  assert.deepEqual(limitPresentationApi.limitProviderCompactWindows('antigravity', provider.windows), []);
+  assert.deepEqual(provider, before);
 });
 
 test('a MiMo plan drawn from the balance is the same item as the plan window', () => {

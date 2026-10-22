@@ -1,6 +1,6 @@
 'use strict';
 
-const { EDGE_DOCK_METRICS, rectContains } = require('../edgeDock/geometry');
+const { rectContains } = require('../edgeDock/geometry');
 const { bubbleCommands } = require('../renderer/edgeDock/shapes');
 
 // Logical points for a 179×32pt camera housing. The open panel is a wide, short
@@ -100,25 +100,6 @@ function notchBounds(display, geometry, expanded, contentHeight = 180, slots = {
   return { x, y: Math.round(geometry.y), width, height };
 }
 
-// Measure notch clearance from right-hand status windows. Left-hand
-// app-menu titles have no verified permission-free geometry contract.
-function notchSummaryMaxWidth(display, geometry, windows, ownWindowIds = []) {
-  if (!geometry.notched || !Array.isArray(windows)) return null;
-  const gapRight = geometry.centerX + geometry.gapWidth / 2;
-  const screenRight = display.bounds.x + display.bounds.width;
-  let right = screenRight;
-  for (const rect of windows) {
-    if (ownWindowIds.includes(rect.id) || !['x', 'y', 'width', 'height'].every(key => Number.isFinite(rect[key]))
-      || rect.width <= 0 || rect.height <= 0) continue;
-    // Full vertical containment rejects tall status-level panels. Menu height
-    // can differ from the safe top by one physical point.
-    if (Math.abs(rect.y - geometry.y) > 1 || rect.y + rect.height > geometry.y + geometry.height + 1
-      || rect.x >= screenRight || rect.x + rect.width <= gapRight) continue;
-    right = Math.min(right, Math.max(gapRight, rect.x));
-  }
-  return Math.max(0, Math.floor(2 * (right - geometry.centerX - EDGE_DOCK_METRICS.screenMargin)));
-}
-
 // The hover outline: the resting shell grown outward and downward.
 function notchPeekBounds(closed) {
   return { x: closed.x - NOTCH_METRICS.peekGrow, y: closed.y, width: closed.width + 2 * NOTCH_METRICS.peekGrow,
@@ -166,4 +147,4 @@ function translateCommands(commands, x, y = 0) {
 function interpolateCommands(from, to, progress) {
   return to.map(([op, ...points], index) => [op, ...points.map((value, i) => from[index][i + 1] + (value - from[index][i + 1]) * progress)]);
 }
-module.exports = { NOTCH_METRICS, notchPeekBounds, notchCanvasBounds, notchGeometry, notchMaxHeight, notchBounds, notchSummaryMaxWidth, notchCommands, translateCommands, interpolateCommands, rectContains };
+module.exports = { NOTCH_METRICS, notchPeekBounds, notchCanvasBounds, notchGeometry, notchMaxHeight, notchBounds, notchCommands, translateCommands, interpolateCommands, rectContains };

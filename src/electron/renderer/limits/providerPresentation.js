@@ -250,6 +250,13 @@
       : Number.POSITIVE_INFINITY;
   }
 
+  function antigravityQuotaWindowVisible(window) {
+    // Grouped quotas keep their established layout, including disabled lanes.
+    // Legacy model pools need a measured percentage to offer a useful row.
+    return Boolean(antigravityQuotaWindow(window))
+      || [window?.remainingPercent, window?.usedPercent].some(Number.isFinite);
+  }
+
   function limitProviderCompactWindows(providerOrId, windows = []) {
     const provider = providerId(providerOrId);
     if (provider === 'codex') return (windows || []).filter(isCanonicalCodexWindow);
@@ -262,12 +269,16 @@
       ));
     }
     if (provider !== 'antigravity') return windows;
-    const entries = (windows || []).map((window, index) => ({
+    if (!windows) return windows;
+    const visibleWindows = windows.every(antigravityQuotaWindowVisible)
+      ? windows
+      : windows.filter(antigravityQuotaWindowVisible);
+    const entries = visibleWindows.map((window, index) => ({
       window,
       index,
       groupLabel: antigravityQuotaWindow(window)?.groupLabel || ''
     }));
-    if (entries.length === 0 || entries.some((entry) => !entry.groupLabel)) return windows;
+    if (entries.length === 0 || entries.some((entry) => !entry.groupLabel)) return visibleWindows;
     const groups = new Map();
     for (const entry of entries) {
       if (!groups.has(entry.groupLabel)) groups.set(entry.groupLabel, []);
@@ -668,6 +679,7 @@
 
   return {
     antigravityQuotaWindow,
+    antigravityQuotaWindowVisible,
     apiKeyAccountStatus,
     codexAdditionalQuotaDisplayName,
     isCodexLiveAccount,

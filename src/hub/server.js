@@ -23,7 +23,10 @@ const {
 const { CURRENCY_CODES, normalizeCurrency } = require('../shared/currency');
 const { currentHubBuild } = require('../shared/hubBuildIdentity');
 const {
-  freshnessEvent,
+  encodeSseEvent,
+  prepareSseFanout,
+  sseClientKinds,
+  sseFrameForClient,
   hubStatsContentKey,
   wantsFreshnessEvents,
   wantsMinimalResponse
@@ -32,6 +35,7 @@ const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/ht
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+const SHUTDOWN_DRAIN_TIMEOUT_MS = 5000;
 
 // Without a secret the hub cannot tell its own widget from any other caller, so it
 // must not expose account identity (email/plan/key) to the network. Binding to
@@ -50,9 +54,13 @@ function createHub({
   syncSessionTitles = false,
   staleAfterMs = DEFAULT_STALE_AFTER_MS,
   broadcastDelayMs = 100,
+  persistIntervalMs = 0,
   dataFile = path.join(projectRoot(), 'data', 'devices.json'),
   logger = console
 } = {}) {
+  if (!Number.isFinite(persistIntervalMs) || persistIntervalMs < 0 || persistIntervalMs > 2147483647) {
+    throw new RangeError('persistIntervalMs must be a finite number between 0 and 2147483647 milliseconds');
+  }
   const store = readJson(dataFile, { version: 1, devices: {} }) || { version: 1, devices: {} };
   if (!store.devices || typeof store.devices !== 'object') store.devices = {};
   // Subscriptions are shared by every device on this hub rather than owned by one
@@ -65,6 +73,10 @@ function createHub({
   store.syncTitlePolicies = Object.assign(Object.create(null), store.syncTitlePolicies || {});
   store.syncSettings = Object.assign(Object.create(null), store.syncSettings || {});
   const bindHost = resolveBindHost(host, secret);
+  let persistTimer = null;
+  let persistPending = false;
+  let stopping = false;
+  let stopPromise = null;
 
   // Apply the permission at startup, including records from offline devices.
   // Keep disabled policies as tombstones so re-enabling cannot reuse old tokens.
@@ -82,7 +94,26 @@ function createHub({
   function persist() {
     store.version = 1;
     store.savedAt = new Date().toISOString();
-    writeJsonAtomic(dataFile, store);
+    writeJsonAtomic(dataFile, store, 0);
+    clearTimeout(persistTimer);
+    persistTimer = null;
+    persistPending = false;
+  }
+
+  function queuePersist() {
+    if (persistIntervalMs === 0) return persist();
+    persistPending = true;
+    // Admitted HTTP uploads can finish during stop; its final flush owns them.
+    if (stopping) return;
+    // Keep the first deadline: continuous uploads must not postpone saving.
+    if (persistTimer) return;
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      try { persist(); } catch (error) {
+        (logger.error || console.error)('Hub failed to save pending device records:', error);
+      }
+    }, persistIntervalMs);
+    persistTimer.unref();
   }
 
   function getStats() {
@@ -114,18 +145,19 @@ function createHub({
   let broadcastTimer = null;
   let lastSseContentKey = '';
 
-  function sseFormat(event, data) {
-    return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  }
-
-  function writeSse(client, event, data) {
+  function writeSseFrame(client, frame) {
+    if (!frame) return false;
     try {
-      client.res.write(sseFormat(event, data));
+      client.res.write(frame);
       return true;
     } catch (_) {
       sseClients.delete(client);
       return false;
     }
+  }
+
+  function fanoutSseFrames(frames) {
+    for (const client of sseClients) writeSseFrame(client, sseFrameForClient(frames, client));
   }
 
   function notifyStatsListeners(reason, stats = getStats(), at = new Date().toISOString()) {
@@ -143,8 +175,16 @@ function createHub({
     const stats = getStats();
     const at = new Date().toISOString();
     if (sseClients.size > 0) {
-      lastSseContentKey = hubStatsContentKey(stats);
-      for (const client of sseClients) writeSse(client, 'stats', { type: 'stats', reason, stats, at });
+      const frames = prepareSseFanout({
+        reason,
+        stats,
+        at,
+        lastContentKey: lastSseContentKey,
+        ...sseClientKinds(sseClients),
+        allowFreshness: false
+      });
+      lastSseContentKey = frames.contentKey;
+      fanoutSseFrames(frames);
     }
     notifyStatsListeners(reason, stats, at);
   }
@@ -153,21 +193,16 @@ function createHub({
     broadcastTimer = null;
     if (sseClients.size === 0) return;
     const stats = getStats();
-    const nextContentKey = hubStatsContentKey(stats);
     const at = new Date().toISOString();
-    if (!lastSseContentKey || nextContentKey !== lastSseContentKey) {
-      lastSseContentKey = nextContentKey;
-      for (const client of sseClients) writeSse(client, 'stats', { type: 'stats', reason: 'ingest', stats, at });
-      return;
-    }
-    const event = freshnessEvent(stats, 'ingest', at);
-    for (const client of sseClients) {
-      if (client.freshnessEvents) {
-        writeSse(client, 'freshness', event);
-      } else {
-        writeSse(client, 'stats', { type: 'stats', reason: 'ingest', stats, at });
-      }
-    }
+    const frames = prepareSseFanout({
+      reason: 'ingest',
+      stats,
+      at,
+      lastContentKey: lastSseContentKey,
+      ...sseClientKinds(sseClients)
+    });
+    lastSseContentKey = frames.contentKey;
+    fanoutSseFrames(frames);
   }
 
   function queueStatsBroadcast() {
@@ -178,6 +213,11 @@ function createHub({
   // Transport-agnostic core: both the HTTP POST handler and the same-process
   // widget call these, so a host-mode widget never has to loopback to itself.
   function ingest(payload) {
+    if (stopping) throw Object.assign(new Error('Hub is stopping'), { code: 'hub_stopping' });
+    return ingestRecord(payload);
+  }
+
+  function ingestRecord(payload) {
     if (!payload || (!payload.deviceId && !payload.id)) {
       throw new Error('deviceId_required');
     }
@@ -186,7 +226,7 @@ function createHub({
       preserveSessionTitles: acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[deviceId], payload.sessionTitleSyncGeneration)
     });
     store.devices[record.deviceId] = record;
-    persist();
+    queuePersist();
     if (statsListeners.size > 0) notifyStatsListeners('ingest');
     queueStatsBroadcast();
     return record;
@@ -323,6 +363,12 @@ function createHub({
   }
 
   async function handleRequest(req, res) {
+    // Existing sockets can finish their headers after server.close(). In
+    // particular, do not admit a new SSE stream after ending the old streams.
+    if (stopping) {
+      res.shouldKeepAlive = false;
+      return sendJson(res, 503, { error: 'hub_stopping' }, { connection: 'close' });
+    }
     if (req.method === 'OPTIONS') return sendText(res, 204, '');
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
@@ -379,7 +425,7 @@ function createHub({
         'connection': 'keep-alive',
         'x-accel-buffering': 'no'
       });
-      res.write(sseFormat('snapshot', { type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString() }));
+      res.write(encodeSseEvent('snapshot', { type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString() }));
       const client = { res, freshnessEvents: wantsFreshnessEvents(req) };
       if (sseClients.size === 0) lastSseContentKey = hubStatsContentKey(stats);
       sseClients.add(client);
@@ -393,15 +439,15 @@ function createHub({
           broadcastTimer = null;
         }
       };
-      req.on('close', cleanup);
-      req.on('error', cleanup);
+      res.on('close', cleanup);
+      res.on('error', cleanup);
       return;
     }
 
     if (req.method === 'POST' && url.pathname === '/api/ingest') {
       try {
         const payload = await readJsonBody(req);
-        const record = ingest(payload);
+        const record = ingestRecord(payload);
         const response = { ok: true, deviceId: record.deviceId };
         return sendJson(res, 200, wantsMinimalResponse(req) ? response : { ...response, stats: getStats() });
       } catch (error) {
@@ -450,6 +496,10 @@ function createHub({
   }
 
   const server = http.createServer((req, res) => {
+    res.once('finish', () => {
+      // A request can become idle after close() has already swept idle sockets.
+      if (stopping) server.closeIdleConnections();
+    });
     handleRequest(req, res).catch((error) => {
       (logger.error || console.error)(error);
       sendJson(res, 500, { error: 'internal_error', message: error.message });
@@ -457,9 +507,15 @@ function createHub({
   });
 
   function start() {
+    if (stopPromise) return Promise.reject(new Error('Hub is stopping'));
+    stopping = false;
     return new Promise((resolve, reject) => {
       const onError = (err) => { server.off('listening', onListening); reject(err); };
-      const onListening = () => { server.off('error', onError); resolve(); };
+      const onListening = () => {
+        server.off('error', onError);
+        if (persistPending) queuePersist();
+        resolve();
+      };
       server.once('error', onError);
       server.once('listening', onListening);
       server.listen(port, bindHost);
@@ -467,13 +523,36 @@ function createHub({
   }
 
   function stop() {
-    return new Promise((resolve) => {
+    if (stopPromise) return stopPromise;
+    stopping = true;
+    const operation = new Promise((resolve, reject) => {
+      clearTimeout(persistTimer);
+      persistTimer = null;
       if (broadcastTimer) clearTimeout(broadcastTimer);
       broadcastTimer = null;
       for (const client of sseClients) { try { client.res.end(); } catch (_) {} }
       sseClients.clear();
-      server.close(() => resolve());
+      // Save acknowledged uploads even if another request never finishes.
+      // A transient failure still gets a second attempt after draining.
+      try { if (persistPending) persist(); } catch (error) {
+        (logger.error || console.error)('Hub failed to save before draining requests:', error);
+      }
+      const deadline = setTimeout(() => server.closeAllConnections(), SHUTDOWN_DRAIN_TIMEOUT_MS);
+      deadline.unref();
+      server.close((error) => {
+        clearTimeout(deadline);
+        try {
+          // Include uploads whose bodies completed while connections drained.
+          if (persistPending) persist();
+          if (error && error.code !== 'ERR_SERVER_NOT_RUNNING') throw error;
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      });
     });
+    stopPromise = operation.finally(() => { stopPromise = null; });
+    return stopPromise;
   }
 
   return {
@@ -485,17 +564,31 @@ function createHub({
 if (require.main === module) {
   loadDotEnv();
   const args = parseArgs(process.argv.slice(2));
+  if (args.persistIntervalMs === true || (typeof args.persistIntervalMs === 'string' && !args.persistIntervalMs.trim())) {
+    console.error('Hub failed to start: --persistIntervalMs requires a numeric value');
+    process.exit(1);
+  }
   const port = Number(args.port || process.env.TOKEN_MONITOR_PORT || 17321);
   const host = String(args.host || process.env.TOKEN_MONITOR_HOST || '0.0.0.0');
   const secret = String(args.secret || process.env.TOKEN_MONITOR_SECRET || '').trim();
   const staleAfterMs = Number(args.staleAfterMs || process.env.TOKEN_MONITOR_STALE_AFTER_MS || DEFAULT_STALE_AFTER_MS);
+  const persistIntervalMs = Number(args.persistIntervalMs ?? process.env.TOKEN_MONITOR_PERSIST_INTERVAL_MS ?? 0);
   const dataFile = String(args.dataFile || process.env.TOKEN_MONITOR_DATA_FILE || path.join(projectRoot(), 'data', 'devices.json'));
 
   const syncSessionTitles = syncSessionTitlesEnabled(args.syncSessionTitles ?? args['sync-session-titles'] ?? process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES);
-  const hub = createHub({ port, host, secret, staleAfterMs, dataFile, syncSessionTitles });
+  const hub = createHub({ port, host, secret, staleAfterMs, dataFile, syncSessionTitles, persistIntervalMs });
+  for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.once(signal, () => {
+      hub.stop().catch((error) => {
+        console.error(`Hub failed to stop: ${error.message}`);
+        process.exitCode = 1;
+      });
+    });
+  }
   hub.start().then(() => {
     console.log(`Token Monitor hub listening on http://${hub.bindHost}:${port}`);
     console.log(`Data file: ${dataFile}`);
+    console.log(`Persistence interval: ${persistIntervalMs}ms`);
     if (!secret) {
       console.warn(`Warning: TOKEN_MONITOR_SECRET is not set, so the hub is bound to ${hub.bindHost} (localhost only) to keep account identity off the network. Set a secret to accept connections from other devices.`);
     }
