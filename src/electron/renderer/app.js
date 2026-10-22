@@ -5535,6 +5535,14 @@ function hideTrendTooltip() {
   state.trendTooltipTeardown = null;
 }
 
+function handleTrendsWindowBlur() {
+  hideTrendTooltip();
+  const spark = els.trendsPanel.querySelector('.trends-spark');
+  if (!spark?.dataset.renderPending) return;
+  delete spark.dataset.renderPending;
+  if (state.breakdown === 'trends') renderTrends();
+}
+
 function bindTrendTooltip(spark, model, points, labelKey, metric) {
   const tooltip = homeActivityTooltipEl('trends-tooltip');
   tooltip.setAttribute('aria-live', 'polite');
@@ -5631,7 +5639,8 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
 }
 
 function renderTrends() {
-  const reading = els.trendsPanel.querySelector('.trends-spark:hover, .trends-spark:focus-within');
+  const reading = document.hasFocus()
+    && els.trendsPanel.querySelector('.trends-spark:hover, .trends-spark:focus-within');
   if (reading) {
     reading.dataset.renderPending = 'true';
     return;
@@ -6657,11 +6666,11 @@ function renderHomeSessionModule(rows) {
     const stateMark = document.createElement('span');
     stateMark.className = 'home-session-state';
     stateMark.dataset.state = activityState;
-    stateMark.setAttribute('aria-hidden', 'true');
-    if (activityState === 'waiting') {
-      stateMark.setAttribute('aria-hidden', 'false');
+    const stateLabelKey = { running: 'session.running', waiting: 'session.waiting', ended: 'session.finished' }[activityState];
+    stateMark.setAttribute('aria-hidden', stateLabelKey ? 'false' : 'true');
+    if (stateLabelKey) {
       stateMark.setAttribute('role', 'img');
-      stateMark.setAttribute('aria-label', t('session.waiting'));
+      stateMark.setAttribute('aria-label', t(stateLabelKey));
     }
     stateMark.innerHTML = window.TokenMonitorSessionLive.sessionStateMarkup({
       spin: 'home-session-spin',
@@ -6669,8 +6678,6 @@ function renderHomeSessionModule(rows) {
       idle: 'home-session-idle',
       waiting: 'home-session-waiting'
     });
-    stateMark.setAttribute('aria-label', t(activityState === 'waiting' ? 'session.waiting' : activityState === 'running' ? 'session.running'
-      : activityState === 'ended' ? 'session.finished' : 'session.idle'));
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.title || row.projectLabel || String(row.sessionId || '').slice(0, 12) || '—';
@@ -13747,7 +13754,7 @@ els.floatingBubbleTab.addEventListener('mouseenter', handleFloatingBubbleHoverEn
 els.floatingBubbleTab.addEventListener('mouseleave', handleFloatingBubbleHoverLeave);
 document.documentElement.addEventListener('mouseleave', handleDocumentHoverLeave);
 document.documentElement.addEventListener('mouseleave', hideTrendTooltip);
-window.addEventListener('blur', hideTrendTooltip);
+window.addEventListener('blur', handleTrendsWindowBlur);
 document.documentElement.addEventListener('mouseenter', clearHoverCollapseTimer);
 els.floatingBubbleTab.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' && event.key !== ' ') return;

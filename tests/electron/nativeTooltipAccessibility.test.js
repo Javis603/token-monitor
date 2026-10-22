@@ -146,6 +146,40 @@ test('named Dock session states are exposed while quiet decorations stay hidden'
   assert.equal(quiet.getAttribute('aria-label'), null);
 });
 
+test('Home session rows expose named states and keep idle marks decorative', () => {
+  const body = new Element();
+  const module = new Element();
+  module.append(body);
+  const context = {
+    document, t, els: { homePanel: { querySelector: () => null } }, state: { settings: {} },
+    homeModuleShell: () => ({ module, body }), applyHomeListMark() {}, iconKindFor: () => 'codex',
+    clientColors: { codex: 'blue' }, bindHoverMarquee() {}, formatCompact: String, homeSessionAgo: () => '',
+    limitWindowsView: {}, sessionRowsApi: {
+      sessionModelLabel: () => '', sessionModelTooltipEntries: () => [], sessionStatusNode: () => null
+    },
+    window: {
+      TokenMonitorSessionLive: require('../../src/shared/sessionLive'),
+      TokenMonitorEdgeDockPresentation: {
+        sessionActivityState: row => row.activityState, runningSessionSummary: () => ({ count: 1 })
+      }
+    }
+  };
+  vm.runInNewContext(section(app, 'renderHomeSessionModule', 'renderHomeDeviceModule'), context);
+  const states = ['running', 'waiting', 'ended', 'idle'];
+  context.renderHomeSessionModule(states.map(activityState => ({ key: activityState, client: 'codex', activityState })));
+  const marks = module.querySelectorAll('.home-session-state');
+  assert.equal(marks.length, states.length);
+  for (const [index, key] of ['running', 'waiting', 'finished'].entries()) {
+    assert.equal(marks[index].getAttribute('aria-hidden'), 'false');
+    assert.equal(marks[index].getAttribute('role'), 'img');
+    assert.equal(marks[index].getAttribute('aria-label'), t(`session.${key}`));
+    assert.equal(marks[index].getAttribute('title'), null);
+  }
+  assert.equal(marks[3].getAttribute('aria-hidden'), 'true');
+  assert.equal(marks[3].getAttribute('role'), null);
+  assert.equal(marks[3].getAttribute('aria-label'), null);
+});
+
 test('subscription cost descriptions stay accessible without adding visible disclaimer text', () => {
   const view = fs.readFileSync(path.join(renderer, 'limits/windowsView.js'), 'utf8');
   const note = t('subscription.tooltip.monthUsageNote');
