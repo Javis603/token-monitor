@@ -30,6 +30,10 @@
 //   format*, limitFillPercent, …       the page's own number formatting
 //   tooltip                            { hasOpened(), markOpened(), release() },
 //                                      the host's render-hold bookkeeping
+//   tooltipSpace                       { request(height), release() } or null:
+//                                      this host's window is only as tall as the
+//                                      card it draws, so it grows the card while
+//                                      a tooltip is open
 //
 // The one exception to "everything arrives through deps" is the provider
 // catalog: which client a provider's tokens are recorded under is the same
@@ -101,7 +105,13 @@
       // `{ enabled, busy, forecast }` — the Codex reset forecast as this host
       // currently holds it, read at paint time because the widget refreshes it
       // on its own timer.
-      resetForecast = () => ({ busy: false, forecast: null })
+      resetForecast = () => ({ busy: false, forecast: null }),
+      // `{ request(height), release() }` or null. A host whose window is only as
+      // tall as the card it draws — the edge dock's bubble — cannot open a
+      // popover past the window, so it grows the card instead and holds the
+      // card's top edge while it does. No default: the page has the whole window
+      // to open into and does not need it.
+      tooltipSpace = null
     } = deps;
     const document = deps.document || globalThis.document;
 
@@ -464,9 +474,18 @@
       // Measured after opening: a closed popover has no box to measure.
       tooltip.classList.toggle('is-below', wrap.getBoundingClientRect().top < tooltip.offsetHeight + 8);
       positionCenteredDetailTooltip(tooltip);
+      // The card is as tall as the window here, so there is no space to open
+      // into above and none below either: ask for exactly the height the box
+      // needs under its trigger. Its width is the page's — max-content, capped
+      // by the caller's max-width — so the dock shows the same bubble the
+      // Limits page does, only in a card that grew to hold it.
+      if (tooltipSpace) {
+        tooltipSpace.request(Math.ceil(tooltip.offsetHeight + wrap.getBoundingClientRect().bottom + 14));
+      }
     };
     const close = () => {
       tooltip.hidePopover?.();
+      tooltipSpace?.release();
       tooltipHost.release();
     };
     wrap.addEventListener('pointerenter', open);
