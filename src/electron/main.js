@@ -5062,9 +5062,7 @@ function updateTrayDisplay() {
   const customImageMode = mode === 'custom' && providerTrayIcons.custom;
   const text = trayImageMode || customImageMode ? '' : limitText;
   if (trayShowsTitle(process.platform)) tray.setTitle(text);
-  // Tooltip always shows a useful summary, even in icon-only mode where setTitle is blank.
-  const tip = formatTrayText(visibleStats, 'both', currency, compactOptions);
-  tray.setToolTip(`Token Monitor - ${tip}`);
+  tray.setToolTip('');
   // Icon: rendered bars image in bar modes, otherwise the app icon.
   let icon = null;
   if (barsImageMode || trayImageMode || customImageMode) {

@@ -28,6 +28,7 @@ function harness(distance = 7, options = {}) {
         toggle: (value, enabled) => enabled ? classes.add(value) : classes.delete(value)
       },
       addEventListener(type, handler) { this[type] = handler; },
+      setAttribute(name, value) { this[name] = value; },
       hasAttribute(name) { return Object.hasOwn(this, name); },
       removeAttribute(name) { delete this[name]; }
     };
@@ -102,15 +103,17 @@ test('sync endpoint reuses hover reading and preserves its wrapper across settin
   reduced = true;
   context.syncHubConnectionUi();
   h.frame(0);
-  assert.equal(endpoint.title, 'long-host.example:8443', 'the reduced-motion tooltip contains only the safe host');
+  assert.equal(endpoint.hasAttribute('title'), false);
+  assert.equal(endpoint.classList.contains('is-overflow-static'), true);
   state.settings.hubUrl = 'https://next.example/secret';
   context.syncHubConnectionUi();
   assert.equal(endpoint.children[0], content);
-  assert.equal(endpoint.title, 'next.example');
+  assert.equal(endpoint.textContent, 'next.example');
+  assert.equal(endpoint.hasAttribute('title'), false);
   state.settings.hubUrl = 'invalid credential text';
   context.syncHubConnectionUi();
   assert.equal(endpoint.textContent, 'Saved Hub URL');
-  assert.equal(endpoint.title, 'Saved Hub URL');
+  assert.equal(endpoint.hasAttribute('title'), false);
 });
 
 for (const className of ['detail-ex-title', 'detail-heading']) {
@@ -288,7 +291,7 @@ test('unchanged text preserves pending, active and completed hover motion', () =
   assert.equal(h.element.classList.contains('is-hover-reading'), false);
 });
 
-test('leaving before the delay cancels motion, and reduced motion keeps the full tooltip', () => {
+test('leaving before the delay cancels motion, and reduced motion keeps static overflow reading', () => {
   let reduced = false;
   let releases = 0;
   const h = harness(100, { prefersReducedMotion: () => reduced, onLeave: () => { releases++; } });
@@ -304,7 +307,8 @@ test('leaving before the delay cancels motion, and reduced motion keeps the full
   assert.equal(h.timers.size, 0);
   assert.equal(releases, 1, 'reduced-motion hover exits do not notify a reading release');
   assert.equal(h.element.classList.contains('is-hover-reading'), false);
-  assert.equal(h.element.title, h.element.textContent);
+  assert.equal(h.element.hasAttribute('title'), false);
+  assert.equal(h.element.classList.contains('is-overflow-static'), true);
 });
 
 test('fitting titles do not notify a reading release on ordinary hover exits', () => {
@@ -456,7 +460,7 @@ for (const phase of ['pending', 'active', 'completed']) {
   }
 }
 
-test('native text tooltips follow reduced motion for binding, updates and preference changes', () => {
+test('static overflow reading follows reduced motion without native tooltips', () => {
   let reduced = false;
   const h = harness(100, { prefersReducedMotion: () => reduced });
   assert.equal(h.element.hasAttribute('title'), false);
@@ -465,19 +469,37 @@ test('native text tooltips follow reduced motion for binding, updates and prefer
   reduced = true;
   h.api.refresh();
   h.frame(0);
-  assert.equal(h.element.title, 'Renamed title');
+  assert.equal(h.element.hasAttribute('title'), false);
+  assert.equal(h.element.classList.contains('is-overflow-static'), true);
   h.api.setText(h.element, 'Another title');
-  assert.equal(h.element.title, 'Another title');
+  assert.equal(h.element.textContent, 'Another title');
+  assert.equal(h.element.hasAttribute('title'), false);
   const reducedTitle = h.node();
   reducedTitle.textContent = 'Bound with reduced motion';
   h.api.bind(reducedTitle);
-  assert.equal(reducedTitle.title, reducedTitle.textContent);
+  assert.equal(reducedTitle.hasAttribute('title'), false);
+  assert.equal(reducedTitle.classList.contains('is-overflow-static'), true);
   reduced = false;
   h.api.setText(h.element, h.element.textContent);
   h.frame(0);
   assert.equal(h.element.hasAttribute('title'), false, 'unchanged text also observes the latest preference');
+  assert.equal(h.element.classList.contains('is-overflow-static'), false);
   const fitting = harness(0);
   assert.equal(fitting.element.hasAttribute('title'), false, 'fitting text has no tooltip in normal mode');
+});
+
+test('manual reduced-motion scrolling exposes the tail and updates its fade without animation', () => {
+  const h = harness(100, { prefersReducedMotion: () => true });
+  const text = h.element.textContent;
+  assert.equal(h.element.classList.contains('has-overflow-fade'), true);
+  h.element.scrollLeft = 100;
+  h.element.scroll();
+  assert.equal(h.element.classList.contains('has-overflow-fade'), false);
+  assert.equal(h.element.textContent, text);
+  assert.equal(h.element.children[0].style.transform, 'translate3d(0px, 0, 0)');
+  assert.equal(h.timers.size, 0);
+  assert.equal(h.frames.size, 0);
+  assert.equal(h.element.hasAttribute('title'), false);
 });
 
 test('failed handoff cancels a pending delay immediately', () => {

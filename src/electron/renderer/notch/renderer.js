@@ -193,7 +193,7 @@
       if (trayTypographyApi.spaceScale(item) !== 1) run.style.wordSpacing = '-.45ch';
       run.classList.toggle('is-unavailable', row.available === false);
       run.append(notchNumber(key, row, used));
-      if (['custom', 'account'].includes(row.metric || item.metric)) run.title = row.text || '';
+      if (['custom', 'account'].includes(row.metric || item.metric)) run.setAttribute('aria-label', row.text || '');
       wrapper.append(run);
       return wrapper;
     }
@@ -227,7 +227,7 @@
       for (const item of payload.summary?.items || []) {
         const iconProvider = item.type === 'icon' ? item.provider : item.iconProvider;
         const mark = iconProvider ? notchIcon({ ...item, provider: iconProvider }) : null;
-        if (mark) mark.title = iconProvider === 'app' ? 'Token Monitor' : providerLabel(iconProvider);
+        if (mark) mark.setAttribute('aria-label', iconProvider === 'app' ? 'Token Monitor' : providerLabel(iconProvider));
         if (item.type === 'icon') { parts.push(mark); continue; }
         const block = el('span', 'notch-reading');
         let iconGap;
@@ -249,7 +249,7 @@
             track.style.width = `${layout.barsWidth}px`;
             track.style.height = `${layout.barHeight}px`;
             track.style.borderRadius = `${layout.radius}px`;
-            track.title = row.selection ? providerLabel(row.selection.provider) : '—';
+            track.setAttribute('aria-label', row.selection ? providerLabel(row.selection.provider) : '—');
             const fill = el('span', 'notch-bar-fill');
             fill.style.width = `${Math.max(0, Math.min(100, row.percent || 0))}%`;
             track.append(fill); block.append(track);
@@ -266,12 +266,12 @@
             const wave = el('span', 'notch-wave');
             for (let index = 0; index < 5; index += 1) wave.append(el('i'));
             block.append(wave);
-            block.title = t('notch.runningCount', { count: 1 });
+            block.setAttribute('aria-label', t('notch.runningCount', { count: 1 }));
           } else {
             if (item.waiting) block.append(el('span', 'notch-waiting-dot'));
             if (item.running) {
               block.append(el('span', 'notch-activity-count', String(item.running)), el('span', 'notch-reading-unit', t('notch.runningUnit')));
-              block.title = t('notch.runningCount', { count: item.running });
+              block.setAttribute('aria-label', t('notch.runningCount', { count: item.running }));
             } else {
               block.append(el('span', 'notch-activity-waiting', t('notch.waiting')));
             }

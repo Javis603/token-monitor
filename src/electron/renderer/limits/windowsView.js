@@ -2116,7 +2116,7 @@
 
     head.append(title, value);
     item.append(openButton, head, detail);
-    openButton.title = t('limits.codexResetForecast.openSource');
+    openButton.setAttribute('aria-label', t('limits.codexResetForecast.openSource'));
     openButton.setAttribute('aria-label', [label.textContent, value.textContent, detail.textContent, t('limits.codexResetForecast.openSource')].filter(Boolean).join(', '));
     return item;
   }
@@ -2787,8 +2787,8 @@
       if (row.warn) value.className = 'subscription-tooltip-warn';
       value.textContent = row.value;
       if (row.title) {
-        label.title = row.title;
-        value.title = row.title;
+        label.setAttribute('aria-description', row.title);
+        value.setAttribute('aria-description', row.title);
       }
       line.append(label, value);
       card.append(line);

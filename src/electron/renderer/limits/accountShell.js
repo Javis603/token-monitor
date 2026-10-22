@@ -10,7 +10,7 @@
   function render({ status, statusText, error, errorText = '', progress, progressText = '' }) {
     if (status && statusText !== undefined) {
       if (status.textContent !== statusText) status.textContent = statusText;
-      status.title = statusText;
+      status.setAttribute('aria-label', statusText);
     }
     if (error) {
       if (error.textContent !== errorText) error.textContent = errorText;

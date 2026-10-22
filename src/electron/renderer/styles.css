@@ -6587,6 +6587,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .detail-back-arrow { flex: 0 0 auto; font: inherit; }
 .detail-heading { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; color: var(--muted, #8a8a90); }
 .fade-overflow.is-overflow-enabled { text-overflow: clip; scrollbar-width: none; }
+.fade-overflow.is-overflow-enabled.is-overflow-static { overflow-x: auto; }
 .is-overflow-enabled > .overflow-text-content { display: inline-block; width: max-content; }
 .is-hover-scrolling > .overflow-text-content { will-change: transform; }
 .fade-overflow::-webkit-scrollbar { display: none; }
