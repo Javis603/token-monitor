@@ -365,10 +365,10 @@ function buildModels(period) {
   const values = period?.models && typeof period.models === 'object' ? period.models : {};
   const costs = period?.modelCosts && typeof period.modelCosts === 'object' ? period.modelCosts : {};
   const rowsByName = new Map();
-  for (const [rawName, rawTokens] of Object.entries(values)) {
+  for (const rawName of new Set([...Object.keys(values), ...Object.keys(costs)])) {
     const displayName = safeDisplayName(rawName);
-    const totalTokens = Math.round(nonNegativeNumber(rawTokens));
-    if (!displayName || totalTokens <= 0) continue;
+    const totalTokens = Math.round(nonNegativeNumber(values[rawName]));
+    if (!displayName || (totalTokens <= 0 && nonNegativeNumber(costs[rawName]) <= 0)) continue;
     const key = displayName.normalize('NFKC').toLocaleLowerCase('en-US');
     const existing = rowsByName.get(key);
     if (existing) {

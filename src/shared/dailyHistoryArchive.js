@@ -332,8 +332,8 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
     // owns its price (including explicit zero). Keep archive-only usage and
     // richer live metadata, but do not let an older live cost undo repricing.
     const liveDay = archive.liveDays?.[date];
-    if (liveDay && (reprice || typeof options.pricingRevision === 'string')) {
-      archive.liveDays[date] = withReconciledGraphCosts(liveDay, incoming, liveDay, reprice, options.pricingRevision);
+    if (liveDay) {
+      archive.liveDays[date] = withReconciledGraphCosts(liveDay, incoming, liveDay, reprice, options.pricingRevision, true);
     }
   }
 
@@ -351,13 +351,13 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
 function periodLiveDay(period, date) {
   if (!period || typeof period !== 'object' || !DAY_KEY_RE.test(date)) return null;
   const observations = new Map();
-  const addObservation = (client, modelId, tokens, cost) => {
+  const addObservation = (client, modelId, tokens, cost, messages = 0) => {
     const observation = {
       client,
       modelId,
       tokens: Math.max(0, Math.round(num(tokens))),
       cost: Math.max(0, num(cost)),
-      messages: 0
+      messages
     };
     const key = observationKey(observation);
     const previous = observations.get(key);
@@ -367,6 +367,7 @@ function periodLiveDay(period, date) {
     }
     previous.tokens += observation.tokens;
     previous.cost += observation.cost;
+    previous.messages = Math.max(previous.messages, observation.messages);
   };
   const clientModels = period.clientModels && typeof period.clientModels === 'object'
     ? period.clientModels
@@ -376,13 +377,16 @@ function periodLiveDay(period, date) {
     : {};
   const clients = period.clients && typeof period.clients === 'object' ? period.clients : {};
   const clientCosts = period.clientCosts && typeof period.clientCosts === 'object' ? period.clientCosts : {};
-  const clientIds = new Set([...Object.keys(clientModels), ...Object.keys(clients), ...Object.keys(clientCosts)]);
+  const clientIds = new Set([
+    ...Object.keys(clientModels), ...Object.keys(clientModelCosts),
+    ...Object.keys(clients), ...Object.keys(clientCosts)
+  ]);
 
   for (const client of clientIds) {
     const models = clientModels[client] && typeof clientModels[client] === 'object'
       ? clientModels[client]
       : {};
-    const modelIds = Object.keys(models);
+    const modelIds = [...new Set([...Object.keys(models), ...Object.keys(clientModelCosts[client] || {})])];
     let modeledTokens = 0;
     let modeledCost = 0;
     for (const modelId of modelIds) {
@@ -398,6 +402,19 @@ function periodLiveDay(period, date) {
     const remainderCost = Math.max(0, clientCost - modeledCost);
     if (modelIds.length === 0 || remainderTokens > 0 || remainderCost > 0) {
       addObservation(client, 'unknown', remainderTokens, remainderCost);
+    }
+  }
+
+  // A retained zero model price on a Qoder session proves at least one source
+  // message still exists. Preserve that lower bound, without assigning the
+  // session's whole message count to each model. An empty scan has no such
+  // evidence and must keep the previous live snapshot.
+  for (const session of Object.values(period.sessions || {})) {
+    if (normalizeTokscaleClientName(session?.client) !== 'qodercn' || num(session.messageCount) <= 0) continue;
+    for (const [modelId, cost] of Object.entries(session.modelCosts || {})) {
+      if (cost === 0 && num(session.models?.[modelId]) === 0) {
+        addObservation('qodercn', modelId, 0, 0, 1);
+      }
     }
   }
 
@@ -483,16 +500,28 @@ function liveDayIsGreater(incoming, previous) {
 // A changed pricing revision makes matching graph usage authoritative, even
 // when its new cost is zero. Otherwise preserve live prices, with Cursor's
 // existing positive-graph-price preference and live fallback for missing cost.
-function withReconciledGraphCosts(day, graphDay, liveDay, reprice = false, pricingRevision) {
+function withReconciledGraphCosts(day, graphDay, liveDay, reprice = false, pricingRevision, sourceRefresh = false) {
   let changed = false;
   const observations = Object.fromEntries(Object.entries(day.observations).map(([key, observation]) => {
     const graphObservation = graphDay.observations[key];
     const liveObservation = liveDay.observations[key];
     const revisionChanged = typeof pricingRevision === 'string'
       && liveObservation?.pricingRevision !== pricingRevision;
-    const useGraphPrice = reprice || revisionChanged;
+    // A cost-only Qoder observation can change price without changing tokens
+    // or FX. A fresh source graph owns that correction; between graph scans,
+    // a known live observation owns it even beside larger archive-only usage.
+    const qoderCredits = normalizeTokscaleClientName(observation.client) === 'qodercn'
+      && graphObservation?.tokens === 0 && liveObservation?.tokens === 0
+      && num(graphObservation.messages) > 0
+      && (num(liveObservation.messages) > 0 || num(liveObservation.cost) > 0);
+    // Without a pricing revision, source capture previously left other
+    // clients' retained live prices untouched. Keep that boundary.
+    if (sourceRefresh && !reprice && typeof pricingRevision !== 'string' && !qoderCredits) {
+      return [key, observation];
+    }
+    const useGraphPrice = reprice || revisionChanged || (sourceRefresh && qoderCredits);
     const isCursor = normalizeTokscaleClientName(observation.client) === 'cursor';
-    if ((!useGraphPrice && typeof pricingRevision !== 'string' && !isCursor)
+    if ((!useGraphPrice && typeof pricingRevision !== 'string' && !isCursor && !qoderCredits)
       || !graphObservation
       || !liveObservation
       || num(graphObservation.tokens) !== num(liveObservation.tokens)) {
@@ -594,6 +623,23 @@ function captureLiveDailyHistory(existingArchive, period, options = {}) {
       }
     }
     archive.liveDays = { ...(archive.liveDays || {}), [date]: selected };
+  } else if (previous) {
+    // A partial scan must not discard the larger retained day. It can still
+    // correct a matching cost-only Qoder model without changing any tokens.
+    const observations = { ...previous.observations };
+    let changed = false;
+    for (const [key, observation] of Object.entries(incoming.observations)) {
+      const retained = observations[key];
+      if (observation.client !== 'qodercn' || observation.tokens !== 0 || retained?.tokens !== 0
+        || (observation.cost === 0 && observation.messages === 0)) continue;
+      observations[key] = {
+        ...retained, cost: observation.cost,
+        messages: Math.max(retained.messages, observation.messages),
+        ...(typeof observation.pricingRevision === 'string' ? { pricingRevision: observation.pricingRevision } : {})
+      };
+      changed = true;
+    }
+    if (changed) archive.liveDays[date] = { ...previous, observations };
   }
   return archive;
 }

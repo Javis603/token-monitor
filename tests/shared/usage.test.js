@@ -1888,3 +1888,23 @@ test('ambiguous Qoder model renames keep throughput for unrelated models', () =>
   assert.deepEqual({ ...shared.modelThroughput }, { sonnet });
   assert.deepEqual(normalizePeriod(shared), shared);
 });
+
+
+test('Qoder zero-cost request identity survives extraction and wire normalization', () => {
+  const row = { client: 'qodercn', sessionId: 'qodercn:jsonl:session:zero', model: 'qfmodel',
+    input: 0, output: 0, cost: 0, messageCount: 1 };
+  const bundle = extractUsageBundleFromTokscale({ entries: [row] });
+  for (const period of [bundle.period, bundle.byClient.qodercn, normalizePeriod(JSON.parse(JSON.stringify(bundle.period)))]) {
+    assert.equal(period.totalTokens, 0);
+    assert.equal(period.costUsd, 0);
+    assert.deepEqual(period.models, {});
+    assert.deepEqual(Object.values(period.sessions)[0].modelCosts, { 'qwen3.8-flash': 0 });
+    assert.equal(Object.values(period.sessions)[0].messageCount, 1);
+  }
+  for (const unproven of [
+    { ...row, client: 'claude' }, { ...row, cost: undefined },
+    { ...row, messageCount: 0 }, { ...row, sessionId: '' }, { ...row, model: '' }
+  ]) {
+    assert.deepEqual(extractUsageFromTokscale({ entries: [unproven] }).sessions, {});
+  }
+});

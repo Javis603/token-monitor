@@ -590,8 +590,15 @@ function sessionKey(client, sessionId) {
   return `${client}:${sessionId}`;
 }
 
+function isQoderZeroCostObservation(row, client = detectClient(row)) {
+  return client === 'qodercn' && firstPresent(row, COST_KEYS) === 0
+    && tokenValueForClient(row, client) === 0 && firstNumber(row, MESSAGE_COUNT_KEYS) > 0
+    && Boolean(detectSessionId(row)) && Boolean(detectModel(row, client));
+}
+
 function looksLikeUsageRow(obj) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+  if (isQoderZeroCostObservation(obj)) return true;
   if (tokenValueForClient(obj, detectClient(obj)) === 0 && costValue(obj) === 0) return false;
   return Boolean(obj.client || obj.clients || obj.source || obj.platform || obj.agent || obj.tool || obj.model || obj.provider || obj.date || obj.name || detectSessionId(obj));
 }
@@ -808,7 +815,13 @@ function sessionFromRow(row) {
   applyParentLink(session, row);
   const model = detectModel(row, client);
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
-  if (model && session.costUsd > 0) session.modelCosts[model] = (session.modelCosts[model] || 0) + session.costUsd;
+  // Native Qoder credit-only rows retain an explicit zero price and message
+  // identity. Keep that model key so live History can distinguish a correction
+  // from a scan in which the source is absent.
+  const zeroCreditObservation = isQoderZeroCostObservation(row, client);
+  if (model && (session.costUsd > 0 || zeroCreditObservation)) {
+    session.modelCosts[model] = (session.modelCosts[model] || 0) + session.costUsd;
+  }
   const provider = normalizeProviderName(row.provider);
   if (provider && session.totalTokens > 0) session.providers[provider] = (session.providers[provider] || 0) + session.totalTokens;
   return session;
