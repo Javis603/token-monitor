@@ -1972,6 +1972,18 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   assert.match(listenerSlice, /value === 'smart'/);
   assert.match(listenerSlice, /600000/);
 });
+
+test('collection cadence quick options keep HTML and renderer selectors aligned', () => {
+  const html = readRendererFile('index.html');
+  const app = readRendererFile('app.js');
+  const controls = html.match(/<div class="inline-options collection-cadence-quick-options"[\s\S]*?<\/div>/)?.[0] || '';
+  const quickOptionName = 'collectionCadenceQuickInterval';
+
+  for (const value of ['15000', '300000']) {
+    assert.match(controls, new RegExp(`<input type="radio" name="${quickOptionName}" value="${value}"`));
+  }
+  assert.match(app, /collectionCadenceQuickOptions: Array\.from\(document\.querySelectorAll\('input\[name="collectionCadenceQuickInterval"\]'\)\)/);
+});
 test('collection cadence quick options sync persisted values and save exact interval patches', async () => {
   const harness = loadCollectionCadenceWiring();
   for (const value of [15000, 300000]) {
