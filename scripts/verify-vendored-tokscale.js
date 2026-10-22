@@ -65,6 +65,16 @@ const DSH_MODEL_CONTRACT_CASES = Object.freeze([
 // makes a new catalog id fail locally until its real binary output and Token
 // Monitor normalization are both exercised by this release gate.
 const TOKEN_CONTRACT_CASES = Object.freeze([
+  ...['deeptutor', 'deeptutor-estimated'].map((client) => ({
+    client,
+    expectedRow: { model: 'fixture-model', input: 70, output: 25, cacheRead: 40, cacheWrite: 10, reasoning: 5 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 150, clientTokens: 150, clientOutputTokens: 30 },
+    expectedSession: { id: new RegExp(`^${client}:dt-fixture-session@[0-9a-f]{12}$`), totalTokens: 150, outputTokens: 30, reasoningTokens: 5 },
+    writeFixture(home) {
+      require('../tests/fixtures/deeptutor').writeDeepTutorLedger(home);
+    }
+  })),
   {
     client: 'goose',
     // The total gap is inferred reasoning, not measured additive output.
@@ -485,10 +495,12 @@ function hermeticEnv(home) {
   for (const key of [
     'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'DSH_HOME', 'HERMES_HOME', 'GOOSE_PATH_ROOT',
     'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
-    'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR'
+    'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR',
+    'TOKEN_MONITOR_DEEPTUTOR_DB_PATH', 'DEEPTUTOR_HOME'
   ]) {
     delete env[key];
   }
+  env.DEEPTUTOR_HOME = path.join(home, 'deeptutor-fixture');
   return env;
 }
 
@@ -748,4 +760,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, TOKEN_CONTRACT_CASES, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected, verifyGooseScannerContract };
+module.exports = { main, TOKEN_CONTRACT_CASES, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected, verifyGooseScannerContract, runAgainstFixture, assertTokenContract };

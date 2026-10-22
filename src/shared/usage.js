@@ -284,6 +284,8 @@ function emptyPeriod() {
 function normalizeClientName(value) {
   const raw = normalizeTokscaleClientName(value);
   if (!raw) return null;
+  if (raw === 'deeptutor (reported)') return 'deeptutor';
+  if (raw === 'deeptutor (estimated)') return 'deeptutor-estimated';
   if (raw.includes('claude')) return 'claude';
   if (raw.includes('codex')) return 'codex';
   if (raw.includes('hermes')) return 'hermes';

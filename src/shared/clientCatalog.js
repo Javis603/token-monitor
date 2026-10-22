@@ -88,7 +88,9 @@
     { id: 'unsloth', label: 'Unsloth' },
     { id: 'devin', label: 'Devin' },
     { id: 'fx', label: 'fx' },
-    { id: 'mcode', label: 'MiniMax Code' }
+    { id: 'mcode', label: 'MiniMax Code' },
+    { id: 'deeptutor', label: 'DeepTutor (reported)', defaultTracked: false, forkOnly: true },
+    { id: 'deeptutor-estimated', label: 'DeepTutor (estimated)', defaultTracked: false, forkOnly: true }
   ].map((client) => Object.freeze({
     defaultTracked: true,
     forkOnly: false,

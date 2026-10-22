@@ -62,3 +62,11 @@ test('vendored CI keeps the complete Release asset verifier wired in', () => {
   assert.match(workflow, /node scripts\/verify-vendored-tokscale-release\.js/);
   assert.match(workflow, /'scripts\/verify-vendored-tokscale-release\.js'/);
 });
+
+test('vendored CI runs DeepTutor binary regressions against its selected release', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'vendor-tokscale.yml'), 'utf8');
+  assert.match(workflow, /TOKEN_MONITOR_TEST_TOKSCALE="\$binary" node --test tests\/shared\/deeptutorBinary\.test\.js/);
+  assert.match(workflow, /resolveTargetBinPath\(v\.resolveManifestEntry\(v\.loadManifest\(\)\)\.entry\)/);
+  assert.match(workflow, /'tests\/shared\/deeptutorBinary\.test\.js'/);
+  assert.match(workflow, /'tests\/fixtures\/deeptutor\.js'/);
+});

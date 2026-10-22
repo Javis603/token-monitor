@@ -71,6 +71,8 @@
     { id: 'devin', color: '#000000', widgetInk: true },
     { id: 'fx', color: '#000000', widgetInk: true },
     { id: 'mcode', color: '#f23f5d', icon: 'minimax' },
+    { id: 'deeptutor', color: '#247BA0' },
+    { id: 'deeptutor-estimated', color: '#8471A3', icon: 'deeptutor' },
     // Not tracked clients: model vendors and limits providers. A vendor shares
     // the colour of the client it names (moonshot/kimi, zai/zaiteam, xai/grok).
     { id: 'openrouter', label: 'OpenRouter', color: '#6566F1' },

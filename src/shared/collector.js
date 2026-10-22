@@ -63,6 +63,7 @@ const { readT3Activities } = require('./t3SessionActivity');
 const { createProcessStartBatch } = require('./processStarts');
 const { catpawDatabaseName, catpawSourcesFingerprint } = require('./providers/catpaw/paths');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
+const { DEEPTUTOR_CLIENTS, deeptutorDatabasePath, deeptutorSourceFingerprint } = require('./providers/deeptutor/paths');
 const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
 const { createLocalUsageSource } = require('./providers/codex/localUsageSource');
 const {
@@ -1770,6 +1771,19 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   const withBasename = (client, basename) =>
     (candidates[client] || []).filter((dir) => path.basename(dir) === basename);
 
+  const deeptutorDb = deeptutorDatabasePath(options);
+  if (deeptutorDb) {
+    const filenameKey = name => (options.platform || process.platform) === 'win32' ? name.toLowerCase() : name;
+    const basename = filenameKey(path.basename(deeptutorDb));
+    for (const client of DEEPTUTOR_CLIENTS) {
+      bound(client, candidates[client] || [], (parts) => {
+        if (parts.length !== 1) return true;
+        const name = filenameKey(parts[0]);
+        return name !== basename && name !== `${basename}-wal`;
+      });
+    }
+  }
+
   // Hermes: SQLite totals and per-call logs provide usage and date evidence. Each explicit
   // watch root — the home AND every profile dir under it — is kept by the
   // matcher itself, so a profile's own database still reports.
@@ -2238,7 +2252,9 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qod
   const scanKey = customScanPathsFingerprint(customScanPaths);
   const scanPart = scanKey ? `|scan:${scanKey}` : '';
   const catpawPart = catpawRevision ? `|catpaw:${catpawRevision}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}${catpawPart}|pricing:${pricingRevision}`;
+  const deeptutorPath = deeptutorSourceFingerprint(normalizeClientsCsv(clientsCsv), sourceOptions);
+  const deeptutorPart = deeptutorPath ? `|deeptutor:${deeptutorPath}` : '';
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}${catpawPart}${deeptutorPart}|pricing:${pricingRevision}`;
 }
 
 function qoderCnSourcesForClients(clientsCsv, options = {}) {

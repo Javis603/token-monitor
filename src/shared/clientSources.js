@@ -11,6 +11,7 @@ const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/herme
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { catpawDataSources, nativeWindowsFolders } = require('./providers/catpaw/paths');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
+const { DEEPTUTOR_CLIENTS, deeptutorDatabasePath } = require('./providers/deeptutor/paths');
 const { MCODE_SOURCE_CHECK_ID, mcodeSessionDirs } = require('./providers/mcode/paths');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
@@ -200,6 +201,13 @@ function clientSourceRoots(clientsCsv, options = {}) {
     }
   };
   const claudeRoots = claudeSessionRoots({ homeDir: home });
+  const deeptutorDb = deeptutorDatabasePath({ env, platform });
+  if (deeptutorDb) {
+    const paths = platform === 'win32' ? path.win32 : path.posix;
+    for (const client of DEEPTUTOR_CLIENTS) {
+      add(client, ['deeptutor-ledger', paths.dirname(deeptutorDb), deeptutorDb]);
+    }
+  }
   add('claude', ['claude-projects', claudeRoots.projects], ['claude-transcripts', claudeRoots.transcripts],
     ...simpleHostSourceRoots('claude', tokscaleHomeDir({ env, platform, homeDir: home }))
       .map(([id, dir]) => [id, dir, null, true]));
