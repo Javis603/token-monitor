@@ -1,0 +1,11 @@
+{
+  "_comment": "Shape of a GetAvailableCredits response from the Manus desktop session. Values are invented; field names and types match a live response.",
+  "totalCredits": 1180,
+  "freeCredits": 1000,
+  "refreshCredits": 180,
+  "maxRefreshCredits": 300,
+  "nextRefreshTime": "2026-05-02T16:00:00Z",
+  "refreshInterval": "daily",
+  "qualityTrial": 1,
+  "userFlag": { "fixtureFlag": true }
+}
