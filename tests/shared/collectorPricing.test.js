@@ -257,3 +257,70 @@ test('invalid Qoder CN environment rates preserve valid worker FX before using t
   assert.equal(Number(tokscaleCommand(options).env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.02);
   assert.notEqual(pricingFingerprint(options), revision, 'a valid override takes precedence');
 });
+
+test('Qoder FX pricing fingerprints follow the tracked client scope', t => {
+  const f = fixture(t);
+  const previous = process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  t.after(() => {
+    if (previous === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+    else process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = previous;
+  });
+  for (const clients of ['claude', 'codex', 'claude,codex', 'qodercn', 'claude,qodercn', undefined, '']) {
+    const options = { clients, pricingPath: f.pricingPath, binaryRevision: 'test-build', qoderCnUsdPerCredit: 0.007 };
+    const before = pricingFingerprint(options);
+    const after = pricingFingerprint({ ...options, qoderCnUsdPerCredit: 0.008 });
+    if (!clients || clients.includes('qodercn')) assert.notEqual(after, before, String(clients));
+    else assert.equal(after, before, `${clients} excludes Qoder CN pricing`);
+  }
+});
+
+for (const clients of ['claude', 'qodercn']) {
+  test(`Qoder FX changes preserve the correct watch and History scope for ${clients}`, async t => {
+    const { configureRates } = require('../../src/shared/currency');
+    const f = fixture(t);
+    const previous = process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+    delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+    configureRates({ CNY: 8 });
+    t.after(() => {
+      configureRates({});
+      if (previous === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+      else process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = previous;
+    });
+    let scans = 0;
+    let graphs = 0;
+    const handle = startCollector({
+      clients, allTimeSince: '2024-01-01', deviceId: 'test-device', homeDir: f.dir,
+      pricingPath: f.pricingPath, binaryRevision: 'test-build', intervalMs: 3600000,
+      anchorPersistenceEnabled: false, watchEnabled: false, wslScanEnabled: false,
+      projectsEnabled: false, historyEnabled: true, historyIntervalMs: 3600000,
+      dailyHistoryArchiveEnabled: false, dailyHistoryArchiveWriteEnabled: false,
+      runTokscale: async () => {
+        scans += 1;
+        return { entries: [{ client: clients, sessionId: 's', model: 'test', input: 100, output: 0, cost: 1 }] };
+      },
+      runGraph: async () => {
+        graphs += 1;
+        return { contributions: [{ date: localTodayKey(), clients: [{ client: clients, modelId: 'test', tokens: { input: 100 }, cost: 1 }] }] };
+      },
+      onUpdate() {}
+    });
+    t.after(() => handle.stop());
+    await handle.whenIdle();
+    assert.equal(scans, 3);
+    assert.equal(graphs, 1);
+    const configBefore = configFingerprint(clients, '2024-01-01');
+    configureRates({ CNY: 4 });
+    const configAfter = configFingerprint(clients, '2024-01-01');
+    await handle.tick('watch:test', { todayOnly: true });
+    if (clients === 'qodercn') {
+      assert.equal(scans, 6, 'Qoder FX still reprices all three periods');
+      assert.equal(graphs, 2, 'Qoder FX still bypasses the History interval');
+      assert.notEqual(configAfter, configBefore);
+    } else {
+      assert.equal(scans, 4, 'non-Qoder usage keeps its single Today delta');
+      assert.equal(graphs, 1, 'non-Qoder History is not rescanned');
+      assert.equal(configAfter, configBefore);
+    }
+  });
+}

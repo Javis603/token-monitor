@@ -2229,7 +2229,10 @@ function pricingFingerprint(options = {}) {
   });
   const hash = createHash('sha256');
   hash.update(pricingPath);
-  hash.update(`|qoderCnCreditUsdRate:${qoderCnCreditUsdRate(options)}`);
+  const clients = normalizeClientsCsv(options.clients);
+  if (!clients || clients.split(',').includes('qodercn')) {
+    hash.update(`|qoderCnCreditUsdRate:${qoderCnCreditUsdRate(options)}`);
+  }
   try { hash.update(fs.readFileSync(pricingPath)); }
   catch (error) { hash.update(`|file:${error.code || 'unreadable'}`); }
   if (options.binaryRevision !== undefined) {
@@ -2245,7 +2248,7 @@ function pricingFingerprint(options = {}) {
   return hash.digest('hex');
 }
 
-function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, pricingRevision = pricingFingerprint(), sourceOptions = {}, catpawRevision = catpawSourcesFingerprint(normalizeClientsCsv(clientsCsv), sourceOptions)) {
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, pricingRevision = pricingFingerprint({ clients: clientsCsv }), sourceOptions = {}, catpawRevision = catpawSourcesFingerprint(normalizeClientsCsv(clientsCsv), sourceOptions)) {
   // Deterministic string that captures the config inputs anchor correctness
   // depends on. When this changes, the persisted anchor is invalidated.
   const qoderCn = String(qoderCnDbPath || '').trim();

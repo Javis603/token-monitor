@@ -37,7 +37,7 @@ The reference resource-pack price is **¥40 / 1,000 credits**, or **¥0.04 per c
 costUsd = reportedCredits × 0.04 / CNY-per-USD
 ```
 
-The desktop passes its effective CNY exchange rate (manual override, fetched rate, then built-in 6.8). Standalone collectors use the built-in rate unless `TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT` supplies a positive USD-per-credit rate. FX changes invalidate the existing pricing anchor and reprice all periods/history. The source cache retains raw credits, not a frozen USD amount.
+The desktop passes its effective CNY exchange rate (manual override, fetched rate, then built-in 6.8). Standalone collectors use the built-in rate unless `TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT` supplies a positive USD-per-credit rate. FX changes invalidate the pricing anchor and reprice all periods/history when Qoder CN is tracked or the client filter is unrestricted. Collectors that explicitly exclude Qoder CN retain their anchors and History schedule. The source cache retains raw credits, not a frozen USD amount.
 
 This is an estimated resource value, like other model-cost estimates, not the user's cash invoice: subscription discounts and free promotions can differ. `billable: false` does not change the resource unit. The CN price is different from global Qoder and Kiro pricing.
 
