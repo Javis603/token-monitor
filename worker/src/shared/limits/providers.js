@@ -80,7 +80,13 @@
     zcode: 'zai',
     qodercn: 'qoder',
     dsh: 'deepseek',
-    mcode: 'minimax'
+    mcode: 'minimax',
+    // CodeBuddy Code draws on the same Tencent copilot credit pool as
+    // WorkBuddy, so both clients belong to one cell: a single quota rail entry
+    // that two tools write into. Without this the client had no Limits side at
+    // all, and a running CodeBuddy session never reached a provider cell - it
+    // could only spin the standalone Sessions card.
+    codebuddy: 'workbuddy'
   });
 
   const LIMIT_PROVIDER_ID_SET = new Set(LIMIT_PROVIDER_IDS);
