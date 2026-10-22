@@ -379,6 +379,63 @@ sys.exit(1)
   assert.equal(fs.readFileSync(receipt, 'utf8'), 'called\n');
 });
 
+test('native macOS PTY EOF stops reading and collects delayed early exits', { skip: process.platform !== 'darwin' || !hasPython }, async t => {
+  for (const [command, exit, code] of [
+    ['status', 'sys.exit(7)', 7],
+    ['usage', 'sys.exit(7)', 7],
+    ['status', 'os.kill(os.getpid(), signal.SIGKILL)', 137]
+  ]) await t.test(`${command}: ${exit}`, async t => {
+    const f = fixture(t);
+    const fake = path.join(f.root, 'native-eof.py');
+    const receipt = path.join(f.root, 'reads.json');
+    fs.writeFileSync(fake, `#!/usr/bin/python3
+import os, signal, sys, time
+print('Current session 12% left', flush=True)
+for fd in (0, 1, 2):
+    os.close(fd)
+time.sleep(0.3)
+${exit}
+`, { mode: 0o700 });
+    let pythonExit;
+    const deps = {
+      env: { ...f.env, TOKEN_MONITOR_CLAUDE_COMMAND: fake, EOF_RECEIPT: receipt },
+      claudeProbeDir: path.join(f.root, 'probe'), pythonCommand: python,
+      claudeStatusTimeoutSeconds: 5, claudeCliTimeoutSeconds: 5,
+      readMacKeychain: false, readWindowsCredential: false,
+      stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
+      isClaudeCliAuthenticated: async () => true,
+      fetch: async () => { throw new Error('network forbidden'); },
+      spawn: (command, args, options) => {
+        assert.equal(command, python);
+        assert.deepEqual(args.slice(0, 2), ['-I', '-c']);
+        // Observe the native bytes without changing EOF into EIO or vice versa.
+        const script = args[2].replace('buf = b""', `
+import atexit
+read_counts = {"eof": 0}
+real_read = os.read
+def observed_read(fd, size):
+    chunk = real_read(fd, size)
+    if fd == master and chunk == b"":
+        read_counts["eof"] += 1
+    return chunk
+os.read = observed_read
+def save_reads():
+    with open(os.environ["EOF_RECEIPT"], "w") as out:
+        json.dump(read_counts, out)
+atexit.register(save_reads)
+buf = b""`);
+        const child = spawn(command, [...args.slice(0, 2), script], options);
+        child.once('close', code => { pythonExit = code; });
+        return child;
+      }
+    };
+    await assert.rejects(command === 'usage' ? fetchClaudeLimits({}, deps) : touchClaudeAuthPath(deps),
+      error => error.status === (command === 'usage' ? 'notConfigured' : 'unavailable'));
+    assert.equal(pythonExit, code, 'collect the child exit after its PTY descriptors close');
+    assert.equal(JSON.parse(fs.readFileSync(receipt)).eof, 1, 'stop at the first native EOF');
+  });
+});
+
 test('PTY EIO preserves early nonzero and signal exits before shutdown', { skip: !hasPython }, async t => {
   for (const [command, exit, code] of [
     ['status', 'sys.exit(7)', 7],

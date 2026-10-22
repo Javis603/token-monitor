@@ -1752,7 +1752,7 @@ prompt_tokens = [
     "readytocodehere", "showplanusage", "showplan"
 ]
 slash_bytes = (slash_command + "\\r").encode("utf-8")
-pty_eio = False
+pty_closed = False
 try:
     while time.time() - start < timeout:
         io_closed = False
@@ -1760,14 +1760,16 @@ try:
         if readable:
             try:
                 chunk = os.read(master, 8192)
-                if chunk:
-                    buf += chunk
-                    if b"\\x1b[6n" in buf[-32:] and not write_master(b"\\x1b[1;1R"):
-                        io_closed = True
+                if not chunk:
+                    pty_closed = True
+                    break
+                buf += chunk
+                if b"\\x1b[6n" in buf[-32:] and not write_master(b"\\x1b[1;1R"):
+                    io_closed = True
             except BlockingIOError:
                 pass
             except OSError as error:
-                pty_eio = error.errno == errno.EIO
+                pty_closed = error.errno == errno.EIO
                 break
         if io_closed:
             break
@@ -1808,9 +1810,9 @@ finally:
     # Only propagate a failure that happened before our intentional shutdown.
     # Claude handles SIGTERM by exiting 143 even after a successful /usage.
     early_exit_code = proc.poll()
-    # Linux may report slave closure before the child becomes waitable. Collect
+    # PTY EOF or EIO may precede a waitable child exit. Collect
     # that exit before sending SIGTERM; marker/timeout shutdown keeps using poll.
-    if pty_eio and early_exit_code is None:
+    if pty_closed and early_exit_code is None:
         try:
             early_exit_code = proc.wait(timeout=1)
         except subprocess.TimeoutExpired:
