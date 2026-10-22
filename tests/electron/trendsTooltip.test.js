@@ -6,9 +6,9 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const charts = require('../../src/electron/renderer/usageCharts');
-const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
 const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-const binding = source.slice(source.indexOf('function bindTrendTooltip('), source.indexOf('function renderTrends('));
+const binding = source.slice(source.indexOf('function hideTrendTooltip('), source.indexOf('function renderTrends('));
+const heatmapTooltip = source.slice(source.indexOf('function homeActivityTooltipEl('), source.indexOf('function setupHomeActivityHover('));
 
 class Element {
   constructor() {
@@ -33,8 +33,18 @@ class Element {
   setAttribute(name, value) { this.attributes[name] = String(value); }
   getAttribute(name) { return this.attributes[name] ?? null; }
   removeAttribute(name) { delete this.attributes[name]; }
-  querySelector(selector) { return this.children.find(child => child.classList.contains(selector.slice(1))) || null; }
-  getBoundingClientRect() { return { left: 10, top: 150, width: 300, right: 310 }; }
+  querySelectorAll(selector) {
+    return this.children.flatMap(child => {
+      const matches = selector.startsWith('.') ? child.classList.contains(selector.slice(1))
+        : Object.hasOwn(child.dataset, selector.slice(6, -1).replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase()));
+      return [...(matches ? [child] : []), ...child.querySelectorAll(selector)];
+    });
+  }
+  querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+  getBoundingClientRect() {
+    return this.bounds || (this.classList.contains('home-activity-tooltip')
+      ? { width: 120, height: 40 } : { left: 10, top: 150, width: 300, height: 300, right: 310 });
+  }
   addEventListener(name, callback) { (this.handlers[name] ||= []).push(callback); }
   fire(name, event = {}) { for (const callback of this.handlers[name] || []) callback(event); }
   showPopover() { this.open = true; }
@@ -47,43 +57,48 @@ function fixture(points = [
   { date: '2026-10-22', tokens: 0 },
   { date: '2026-10-23', tokens: 42 }
 ], labelKey = 'date') {
-  const document = { createElement: () => new Element(), documentElement: { clientWidth: 340 } };
-  const limitWindowsView = createLimitWindowsView({ document, tooltip: { markOpened() {}, release() {} } });
+  const body = new Element();
+  const document = { createElement: () => new Element(), body, querySelector: selector => body.querySelector(selector) };
   const spark = new Element();
   spark.className = 'trends-spark';
   spark.setAttribute('role', 'button');
+  spark.tabIndex = 0;
   const svg = new Element(); svg.className = 'sparkline'; spark.append(svg);
+  for (const _point of points) { const bar = new Element(); bar.className = 'spark-bar'; svg.append(bar); }
   let renders = 0;
   const context = {
-    limitWindowsView, t: () => 'Open dashboard', formatNumber: n => Number(n).toLocaleString('en-US'),
+    t: () => 'Open dashboard', formatNumber: n => Number(n).toLocaleString('en-US'),
+    formatCompact: n => Number(n).toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 }),
+    state: {}, window: { innerWidth: 340, innerHeight: 600 },
     document, renderTrends: () => { renders += 1; }, requestAnimationFrame: callback => callback()
   };
   assert.ok(binding, 'the renderer binds custom Trends details');
-  vm.runInNewContext(binding, context);
+  vm.runInNewContext(`${heatmapTooltip}\n${binding}`, context);
   context.bindTrendTooltip(spark, charts.sparklinePreview(points, { width: 300, gap: 0.3 }), points, labelKey, 'tokens');
-  return { spark, tooltip: spark.querySelector('.limit-detail-tooltip'), renders: () => renders };
+  return { spark, svg, context, tooltip: body.querySelector('.trends-tooltip'), renders: () => renders };
 }
 
 test('Trends hover shows exact date and token count, including zero days and chart gaps', () => {
   const { spark, tooltip } = fixture();
   spark.fire('pointerenter', { clientX: 15 });
-  assert.equal(tooltip.open, true);
-  assert.equal(tooltip.textContent, '2026-10-2112,345,678 tokens');
+  assert.equal(tooltip.dataset.visible, 'true');
+  assert.equal(tooltip.textContent, '12.3Mtokens2026-10-21');
   assert.equal(tooltip.getAttribute('role'), 'tooltip');
-  assert.equal(tooltip.getAttribute('popover'), 'manual');
+  assert.ok(tooltip.classList.contains('home-activity-tooltip'));
   assert.equal(spark.getAttribute('title'), null);
   spark.fire('pointermove', { clientX: 110 }); // gap at the start of the zero day's column
-  assert.equal(tooltip.textContent, '2026-10-220 tokens');
+  assert.equal(tooltip.textContent, '0tokens2026-10-22');
   spark.fire('pointermove', { clientX: 500 }); // clamp at the chart edge
-  assert.equal(tooltip.textContent, '2026-10-2342 tokens');
+  assert.equal(tooltip.textContent, '42tokens2026-10-23');
   spark.fire('pointerleave');
-  assert.equal(tooltip.open, false);
+  assert.equal(tooltip.dataset.visible, 'false');
+  assert.equal(tooltip.getAttribute('aria-hidden'), 'true');
 });
 
 test('Trends focus and arrow keys expose each day while Escape and blur dismiss details', () => {
   const { spark, tooltip } = fixture();
   spark.fire('focusin');
-  assert.equal(tooltip.open, true);
+  assert.equal(tooltip.dataset.visible, 'true');
   let prevented = 0;
   const press = key => spark.fire('keydown', { key, preventDefault: () => { prevented += 1; } });
   press('ArrowLeft');
@@ -91,16 +106,16 @@ test('Trends focus and arrow keys expose each day while Escape and blur dismiss 
   press('Home');
   assert.match(spark.getAttribute('aria-label'), /2026-10-21.*12,345,678 tokens/);
   press('ArrowLeft');
-  assert.match(tooltip.textContent, /^2026-10-21/);
+  assert.match(tooltip.textContent, /2026-10-21$/);
   press('End'); press('ArrowRight');
-  assert.match(tooltip.textContent, /^2026-10-23/);
+  assert.match(tooltip.textContent, /2026-10-23$/);
   assert.equal(prevented, 5);
   press('Enter'); press(' '); // existing dashboard activation keeps these keys
   assert.equal(prevented, 5);
   press('Escape');
-  assert.equal(tooltip.open, false);
+  assert.equal(tooltip.dataset.visible, 'false');
   spark.fire('focusin'); spark.fire('focusout');
-  assert.equal(tooltip.open, false);
+  assert.equal(tooltip.dataset.visible, 'false');
   assert.equal(spark.tabIndex, 0);
   assert.equal(spark.getAttribute('role'), 'button');
 });
@@ -108,8 +123,34 @@ test('Trends focus and arrow keys expose each day while Escape and blur dismiss 
 test('Trends monthly and single-column views retain their own labels and positions', () => {
   const { spark, tooltip } = fixture([{ month: '2026-10', tokens: 987_654_321 }], 'month');
   spark.fire('pointerenter', { clientX: 10 });
-  assert.equal(tooltip.textContent, '2026-10987,654,321 tokens');
-  assert.equal(spark.properties['--trend-tooltip-x'], '150px');
+  assert.equal(tooltip.textContent, '987.7Mtokens2026-10');
+  assert.equal(tooltip.style.transform, 'translate(160px, 101px) translate(-50%, 0)');
+});
+
+test('Trends tooltip follows bar height, flips below the top edge, and clamps to the window', () => {
+  const { spark, svg, tooltip } = fixture();
+  spark.fire('pointerenter', { clientX: 15 });
+  assert.equal(tooltip.style.transform, 'translate(66px, 101px) translate(-50%, 0)');
+  spark.fire('pointermove', { clientX: 150 });
+  assert.equal(tooltip.style.transform, 'translate(160px, 401px) translate(-50%, 0)');
+  svg.bounds = { left: 0, top: 2, width: 300, height: 300 };
+  spark.fire('pointermove', { clientX: 0 });
+  assert.equal(tooltip.style.transform, 'translate(66px, 11px) translate(-50%, 0)');
+  spark.fire('pointermove', { clientX: 500 });
+  assert.match(tooltip.style.transform, /^translate\(250px,/);
+});
+
+test('Trends and Home reuse the same tooltip layout with separate instances and cleanup', () => {
+  const { spark, context, tooltip } = fixture();
+  const home = context.homeActivityTooltipEl();
+  assert.notEqual(home, tooltip);
+  assert.ok(home.classList.contains('home-activity-tooltip'));
+  spark.fire('focusin');
+  context.hideTrendTooltip();
+  assert.equal(tooltip.dataset.visible, 'false');
+  assert.equal(context.state.trendTooltipTeardown, null);
+  assert.equal(spark.querySelectorAll('.spark-bar').some(bar => bar.getAttribute('data-active')), false);
+  assert.equal(home.getAttribute('aria-hidden'), 'true');
 });
 
 test('Trends defers live replacement while reading and flushes on pointer leave or blur', () => {

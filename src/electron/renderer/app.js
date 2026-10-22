@@ -5530,24 +5530,52 @@ function signalContentReady() {
   window.tokenMonitor.signalContentReady?.();
 }
 
+function hideTrendTooltip() {
+  state.trendTooltipTeardown?.();
+  state.trendTooltipTeardown = null;
+}
+
 function bindTrendTooltip(spark, model, points, labelKey, metric) {
+  const tooltip = homeActivityTooltipEl('trends-tooltip');
+  tooltip.setAttribute('aria-live', 'polite');
+  tooltip.setAttribute('aria-atomic', 'true');
+  let hovered = false;
+  let focused = false;
   let selected = -1;
+  const bars = Array.from(spark.querySelectorAll('.spark-bar'));
+  const hide = () => {
+    tooltip.dataset.visible = 'false';
+    tooltip.setAttribute('aria-hidden', 'true');
+    tooltip.style.transform = 'translate(-9999px, -9999px)';
+    bars[selected]?.removeAttribute('data-active');
+  };
+  const position = () => {
+    const rect = spark.querySelector('.sparkline').getBoundingClientRect();
+    const bar = model.bars[selected];
+    // Anchor to the selected bar's top, rather than the whole chart's top edge.
+    const x = rect.left + (bar.x + bar.width / 2) / model.width * rect.width;
+    const y = rect.top + bar.y / model.height * rect.height;
+    moveHomeActivityTooltip(tooltip, {
+      getBoundingClientRect: () => ({ left: x, width: 0, top: y, bottom: y })
+    });
+  };
+  const show = () => {
+    state.trendTooltipTeardown = hide;
+    bars[selected]?.setAttribute('data-active', 'true');
+    tooltip.dataset.visible = 'true';
+    tooltip.setAttribute('aria-hidden', 'false');
+    position();
+  };
   const select = (index) => {
-    const svgRect = spark.querySelector('.sparkline').getBoundingClientRect();
-    const bar = model.bars[index];
-    const x = svgRect.left - spark.getBoundingClientRect().left
-      + (bar.x + bar.width / 2) / model.width * svgRect.width;
-    spark.style.setProperty('--trend-tooltip-x', `${x}px`);
     if (index !== selected) {
+      bars[selected]?.removeAttribute('data-active');
       selected = index;
       const point = points[index];
       const date = String(point[labelKey] || '');
       const value = `${formatNumber(point[metric])} tokens`;
-      limitWindowsView.setDetailTooltip(spark, [[date, value]], { centered: true });
       spark.setAttribute('aria-label', `${t('trends.open')} · ${date} · ${value}`);
-      const tooltip = spark.querySelector('.limit-detail-tooltip');
-      tooltip.setAttribute('aria-live', 'polite');
-      tooltip.setAttribute('aria-atomic', 'true');
+      tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatCompact(point[metric]);
+      tooltip.querySelector('[data-home-activity-tooltip-date]').textContent = date;
     }
   };
   const pointAtPointer = (event) => {
@@ -5556,16 +5584,20 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
     // Use each day's full column, including gaps and zero-height bars.
     select(Math.max(0, Math.min(points.length - 1,
       Math.floor((event.clientX - rect.left) / rect.width * points.length))));
+    show();
   };
-  spark.addEventListener('pointerenter', pointAtPointer);
+  spark.addEventListener('pointerenter', (event) => { hovered = true; pointAtPointer(event); });
   spark.addEventListener('pointermove', pointAtPointer);
+  spark.addEventListener('focusin', () => { focused = true; show(); });
   spark.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { hide(); return; }
     const index = event.key === 'ArrowLeft' ? Math.max(0, selected - 1)
       : event.key === 'ArrowRight' ? Math.min(points.length - 1, selected + 1)
         : event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1 : null;
     if (index === null) return;
     event.preventDefault();
     select(index);
+    show();
   });
   const flush = () => {
     if (!spark.dataset.renderPending) return;
@@ -5573,8 +5605,8 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
     requestAnimationFrame(renderTrends);
   };
   // Keep a live refresh from replacing the focused/hovered chart mid-read.
-  spark.addEventListener('pointerleave', flush);
-  spark.addEventListener('focusout', flush);
+  spark.addEventListener('pointerleave', () => { hovered = false; if (!focused) hide(); flush(); });
+  spark.addEventListener('focusout', () => { focused = false; if (!hovered) hide(); flush(); });
   select(points.length - 1);
 }
 
@@ -5584,6 +5616,7 @@ function renderTrends() {
     reading.dataset.renderPending = 'true';
     return;
   }
+  hideTrendTooltip();
   const charts = window.TokenMonitorUsageCharts;
   const previousBars = captureTrendBarMotion();
   const preview = state.stats?.historyPreview || { daily: [], monthly: [], summary: {} };
@@ -6790,11 +6823,12 @@ function setupHomeActivityScroller(scroller, onReady = null) {
   applyHomeActivityScroll(scroller);
 }
 
-function homeActivityTooltipEl() {
-  let tooltip = document.querySelector('.home-activity-tooltip');
+function homeActivityTooltipEl(instanceClass = 'home-heatmap-tooltip') {
+  let tooltip = document.querySelector(`.${instanceClass}`);
   if (tooltip) return tooltip;
   tooltip = document.createElement('div');
-  tooltip.className = 'home-activity-tooltip';
+  // Trends shares the heatmap's layout and positioning, with its own instance.
+  tooltip.className = `home-activity-tooltip ${instanceClass}`;
   tooltip.setAttribute('role', 'tooltip');
   tooltip.setAttribute('aria-hidden', 'true');
 
@@ -6990,7 +7024,7 @@ function hideHomeActivityTooltip({ preserveHover = false } = {}) {
     state.homeActivityHoverPoint = null;
     state.homeActivityHoverDate = '';
     if (!teardown) {
-      const tooltip = document.querySelector('.home-activity-tooltip');
+      const tooltip = document.querySelector('.home-heatmap-tooltip');
       if (tooltip) {
         tooltip.dataset.visible = 'false';
         tooltip.setAttribute('aria-hidden', 'true');
@@ -7313,6 +7347,7 @@ function render() {
   // Leaving Home only CSS-hides the panel, so its heatmap scroller never sees a
   // pointerleave — dismiss the body-level tooltip here (renderHome covers rerenders).
   if (state.breakdown !== 'home') hideHomeActivityTooltip();
+  if (state.breakdown !== 'trends') hideTrendTooltip();
   if (state.breakdown === 'status') ensureServiceStatusTicker(); else stopServiceStatusTicker();
   if (state.breakdown === 'home') {
     els.breakdown.classList.add('hidden');
@@ -13691,6 +13726,8 @@ els.floatingBubbleTab.addEventListener('pointercancel', (event) => { finishFloat
 els.floatingBubbleTab.addEventListener('mouseenter', handleFloatingBubbleHoverEnter);
 els.floatingBubbleTab.addEventListener('mouseleave', handleFloatingBubbleHoverLeave);
 document.documentElement.addEventListener('mouseleave', handleDocumentHoverLeave);
+document.documentElement.addEventListener('mouseleave', hideTrendTooltip);
+window.addEventListener('blur', hideTrendTooltip);
 document.documentElement.addEventListener('mouseenter', clearHoverCollapseTimer);
 els.floatingBubbleTab.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -13952,7 +13989,9 @@ function handleWindowVisibilityChange() {
   ensureServiceStatusTicker();
 }
 document.addEventListener('visibilitychange', handleWindowVisibilityChange);
+document.addEventListener('visibilitychange', hideTrendTooltip);
 window.tokenMonitor.onWindowVisibilityPush?.((visible) => {
+  if (!visible) hideTrendTooltip();
   state.windowVisible = visible;
   handleWindowVisibilityChange();
 });
