@@ -1317,13 +1317,10 @@ function sessionsNode(sessions) {
   pruneActivity(sessions);
   pruneSessionGroupExpansion(sessions);
   if (!sessions.length) return null;
-  // A provider card's rows are normally one client, so their marks would only
-  // repeat the card's own header; the standalone Sessions card lists every
-  // client and names each row's tool (see sessionsCard). A shared cell is the
-  // exception: CodeBuddy writes into WorkBuddy's pool, so one card carries two
-  // clients and an unlabelled row cannot say which tool it came from.
-  const clients = new Set(sessions.map((session) => session.client).filter(Boolean));
-  const node = sessionsContainer(sessions, { title: t('edgeDock.sessions'), showClientMark: clients.size > 1 });
+  // A provider card's rows are all one client, so their marks would only repeat
+  // the card's own header; the standalone Sessions card lists every client and
+  // names each row's tool (see sessionsCard).
+  const node = sessionsContainer(sessions, { title: t('edgeDock.sessions'), showClientMark: false });
   return node;
 }
 
