@@ -1972,6 +1972,30 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   assert.match(listenerSlice, /value === 'smart'/);
   assert.match(listenerSlice, /600000/);
 });
+test('collection cadence quick options sync persisted values and save exact interval patches', async () => {
+  const harness = loadCollectionCadenceWiring();
+  for (const value of [15000, 300000]) {
+    harness.state.settings.collectionMode = 'interval';
+    harness.state.settings.collectionIntervalMs = value;
+    harness.syncSettingsForm();
+
+    assert.equal(harness.els.collectionCadenceInput.value, String(value));
+    assert.deepEqual(
+      harness.els.collectionCadenceQuickOptions.map(input => input.checked),
+      [value === 15000, value === 300000]
+    );
+  }
+
+  for (const input of harness.els.collectionCadenceQuickOptions) {
+    for (const option of harness.els.collectionCadenceQuickOptions) option.checked = option === input;
+    await input.dispatch('change');
+    assert.deepEqual(harness.patches.pop(), {
+      collectionMode: 'interval',
+      collectionIntervalMs: Number(input.value)
+    });
+  }
+});
+
 
 test('sync upload interval setting is exposed in the Multi-device Sync panel', () => {
   const html = readRendererFile('index.html');
@@ -2027,6 +2051,145 @@ function fakeHubControl(value = '') {
     }
   };
 }
+function fakeCollectionControl(value = '') {
+  const listeners = new Map();
+  return {
+    value,
+    checked: false,
+    disabled: false,
+    hidden: false,
+    options: [],
+    classList: { toggle() {}, add() {}, remove() {} },
+    addEventListener(type, listener) {
+      const current = listeners.get(type) || [];
+      current.push(listener);
+      listeners.set(type, current);
+    },
+    async dispatch(type) {
+      for (const listener of listeners.get(type) || []) await listener({ target: this });
+    }
+  };
+}
+
+function loadCollectionCadenceWiring(settings = {}) {
+  const app = readRendererFile('app.js');
+  const listenerStart = app.indexOf("els.collectionCadenceInput?.addEventListener('change'");
+  const listenerEnd = app.indexOf("els.sessionUsageArchiveInput?.addEventListener('change'", listenerStart);
+  assert.notEqual(listenerStart, -1, 'collection cadence listener should exist');
+  assert.notEqual(listenerEnd, -1, 'collection cadence listener should end before archive wiring');
+
+  const quickOptions = [fakeCollectionControl('15000'), fakeCollectionControl('300000')];
+  const els = new Proxy({
+    collectionCadenceInput: fakeCollectionControl(),
+    collectionCadenceNote: fakeCollectionControl(),
+    collectionCadenceQuickOptions: quickOptions,
+    syncUploadIntervalInput: Object.assign(fakeCollectionControl('0'), {
+      options: [{ value: '0' }, { value: '600000' }]
+    }),
+    modelAliasForm: { syncSettings() {} }
+  }, {
+    get(target, property) {
+      if (property in target) return target[property];
+      const name = String(property);
+      if (name.endsWith('Inputs')) return [];
+      const control = fakeCollectionControl();
+      target[property] = control;
+      return control;
+    }
+  });
+  const state = {
+    settings: {
+      hubMode: 'local',
+      collectionMode: 'interval',
+      collectionIntervalMs: 15000,
+      syncUploadIntervalMs: 0,
+      limitAccountForms: [],
+      ...settings
+    },
+    appInfo: { loginItemSupported: false }
+  };
+  const patches = [];
+  const vmContext = {
+    els,
+    state,
+    document: { querySelectorAll: () => [] },
+    isRendererWindowHidden: () => false,
+    isSettingsSurfaceVisible: () => true,
+    setupLimitAccountPanels: () => {},
+    applySettingsTranslations: () => {},
+    applyInitialBreakdownPreference: () => {},
+    syncPeriodTabs: () => {},
+    applyVendorColorOverrides: () => {},
+    applyAppearanceSettings: () => {},
+    syncWindowBehaviorControls: () => {},
+    syncHubModeUi: () => {},
+    currentLanguage: () => 'en',
+    currentLocale: () => 'en',
+    fixedPeriodRangesApi: { normalizeMonthMode: value => value },
+    currentCurrency: () => 'USD',
+    usageAttributionRowsApi: { normalizeRankingMetric: value => value || 'cost' },
+    syncCurrencyRateControls: () => {},
+    syncHubDraftFields: () => {},
+    LIMIT_REFRESH_OPTIONS: [300000],
+    renderSubscriptionSettings: () => {},
+    renderExternalProviderStatus: () => {},
+    limitProviderAccountGroup: () => false,
+    renderAntigravityStatus: () => {},
+    renderWorkbuddyStatus: () => {},
+    renderMimoStatus: () => {},
+    renderCopilotStatus: () => {},
+    renderViewPreferences: () => {},
+    renderToolPreferences: () => {},
+    renderLimitProviderCheckboxes: () => {},
+    renderSettingsSummaries: () => {},
+    renderOpenCodeProfiles: () => {},
+    renderOpenRouterProfiles: () => {},
+    renderThirdPartyProfiles: () => {},
+    buildAppearanceColorControls: () => {},
+    renderTokscaleStatus: () => {},
+    renderSettingsAppUpdateRow: () => {},
+    renderCodexAccounts: () => {},
+    renderCustomPricing: () => {},
+    renderCursorStatus: () => {},
+    renderAutomaticAppUpdateControl: () => {},
+    allTimeSessions: { ensure() {} },
+    renderSessionUsageArchiveStatus: () => {},
+    renderWslPanel: () => {},
+    syncFontSettingsControls: () => {},
+    syncSliderRows: () => {},
+    syncDockControls: () => {},
+    syncHideAppIconControl: () => {},
+    refreshTrayComposers: () => {},
+    syncWindowShortcutStatus: () => {},
+    normalizeTrayContentValue: value => value || 'tokens',
+    supportsLocalizedCompactTokenUnits: () => true,
+    themePresetsApi: { normalizeOverrides: () => ({}), INTERFACE_COLOR_KEYS: [] },
+    fontSettingsApi: { normalizeTextSize: value => value || 'medium' },
+    windowsGlassApi: { normalizeWindowsBackdropMode: value => value || 'system' },
+    macBackdropApi: {
+      normalizeMacBackdropMode: value => value || 'system',
+      normalizeLiquidGlassTint: () => 0
+    },
+    motionPreferenceApi: { normalize: value => value || 'system' },
+    tokenNumberAnimationApi: { normalize: value => value || 'none' },
+    tokenRateApi: { isSharedSyncMode: () => false },
+    nativeGlassTintSettings: [],
+    modelAliasForm: { syncSettings() {} },
+    defaultAppearance: { backgroundImageOpacity: 0.8 },
+    t: key => key,
+    saveSettings: async patch => {
+      patches.push({ ...patch });
+      Object.assign(state.settings, patch);
+    }
+  };
+  vm.runInNewContext(
+    `${functionBody(app, 'syncSettingsForm', 'enabledClientSet')}
+${app.slice(listenerStart, listenerEnd)}`,
+    vmContext
+  );
+  return { els, state, patches, syncSettingsForm: vmContext.syncSettingsForm };
+}
+
 
 function loadHubSettingsWiring(els, context) {
   for (const id of ['syncConnectionEditor', 'syncConnectionIdentity', 'syncConnectionEndpoint', 'syncConnectionEdit', 'syncConnectionCancel', 'syncConnectionSaveError', 'syncDeviceSettings', 'syncUploadIntervalRow']) {
