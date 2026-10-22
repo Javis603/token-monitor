@@ -178,6 +178,7 @@ test('unsafe probe leaves fail before either PTY or direct CLI starts without de
     fs.mkdirSync(dir); fs.chmodSync(dir, mode); cases.push(dir);
   }
   for (const claudeProbeDir of cases) {
+    assert.equal(isClaudeProbeCwd(claudeProbeDir, claudeProbeDir), false);
     let starts = 0;
     const deps = { env: f.env, claudeProbeDir, existsSync: () => false,
       spawn: () => { starts++; return fakeChild(); } };
@@ -202,6 +203,7 @@ test('unowned directory fails without changing permissions', { skip: process.pla
     return stat;
   });
   await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: dir }), /unavailable or unsafe/);
+  assert.equal(isClaudeProbeCwd(dir, dir), false);
   assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
 });
 
@@ -230,6 +232,37 @@ test('macOS extended ACL grants fail closed at the leaf despite mode 0700', { sk
 
 const python = process.platform === 'win32' ? null : '/usr/bin/python3';
 const hasPython = python && spawnSync(python, ['--version'], { env: { PATH: '/usr/bin:/bin' } }).status === 0;
+
+test('real Python accepts a private setgid leaf without changing its permissions', { skip: !hasPython }, async t => {
+  const f = fixture(t);
+  const parent = path.join(f.root, 'setgid-parent');
+  fs.mkdirSync(parent); fs.chmodSync(parent, 0o2775);
+  const { dir } = await prepareClaudeProbeDir({ claudeProbeDir: path.join(parent, 'probe') });
+  // Linux inherits this bit on mkdir; emulate only the resulting leaf on macOS.
+  if (process.platform !== 'linux') fs.chmodSync(dir, 0o2700);
+  assert.equal(fs.statSync(dir).mode & 0o7777, 0o2700);
+  const fake = path.join(f.root, 'setgid-cli.py');
+  const receipt = path.join(f.root, 'started');
+  fs.writeFileSync(fake, `#!/usr/bin/python3
+import os
+with open(os.environ['RECEIPT'], 'w') as out:
+    out.write(os.getcwd())
+print('Account: fixture', flush=True)
+`, { mode: 0o700 });
+  const output = await touchClaudeAuthPath({
+    env: { ...f.env, TOKEN_MONITOR_CLAUDE_COMMAND: fake, RECEIPT: receipt },
+    claudeProbeDir: dir, pythonCommand: python, claudeStatusTimeoutSeconds: 1,
+    spawn: (command, args, options) => {
+      assert.equal(command, python);
+      return spawn(command, args, options);
+    }
+  });
+  assert.match(output, /Account: fixture/);
+  assert.equal(fs.readFileSync(receipt, 'utf8'), dir);
+  assert.equal(isClaudeProbeCwd(dir, dir), true);
+  assert.equal(fs.statSync(dir).mode & 0o7777, 0o2700);
+  assert.equal(fs.statSync(parent).mode & 0o7777, 0o2775);
+});
 
 test('redirected and shared parents resolve while linked leaves still fail', { skip: process.platform === 'win32' }, async t => {
   const f = fixture(t);

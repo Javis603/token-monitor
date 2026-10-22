@@ -12,7 +12,7 @@ const usage = require('../../src/shared/usage');
 const archive = require('../../src/shared/usage/sessionUsageArchive');
 const presentation = require('../../src/electron/renderer/edgeDock/presentation');
 const sessionRows = require('../../src/electron/renderer/sessionRows');
-const { claudeProbeDir: defaultProbeDir } = require('../../src/shared/providers/claude/probe');
+const { claudeProbeDir: defaultProbeDir, prepareClaudeProbeDir } = require('../../src/shared/providers/claude/probe');
 
 const now = Date.parse('2026-10-08T12:00:00Z');
 const start = now - 60_000;
@@ -106,7 +106,7 @@ test('registry excludes Token Monitor probe cwd from readings and pre-token rows
   t.mock.method(os, 'userInfo', () => ({ homedir: f.home }));
   const probe = path.join(f.home, 'probe');
   const alias = path.join(f.home, 'probe-alias');
-  fs.mkdirSync(probe);
+  fs.mkdirSync(probe, { mode: 0o700 });
   fs.symlinkSync(probe, alias, 'junction');
   const canonical = fs.realpathSync(probe);
   const missing = path.join(f.home, 'missing-probe');
@@ -153,6 +153,24 @@ test('a linked current probe cannot hide real project activity or pre-token rows
     assert.equal(observed.sessions['claude:real-session']?.tokenDataUnavailable, true);
     assert.equal(fs.lstatSync(probe).isSymbolicLink(), true);
   });
+});
+
+test('a redirected POSIX parent cannot hide a nonprivate real probe-named project', { skip: process.platform === 'win32' }, async t => {
+  const f = fixture(t);
+  const projects = path.join(f.home, 'projects');
+  const project = path.join(projects, 'claude-probe');
+  fs.mkdirSync(project, { recursive: true }); fs.chmodSync(project, 0o755);
+  fs.writeFileSync(path.join(project, 'keep'), 'untouched');
+  const alias = path.join(f.home, 'redirected');
+  fs.symlinkSync(projects, alias);
+  const probe = path.join(alias, 'claude-probe');
+  await assert.rejects(prepareClaudeProbeDir({ claudeProbeDir: probe }), /unavailable or unsafe/);
+  f.write({ sessionId: 'real-session', cwd: project });
+  const observed = await activity.readSummaryActivity({}, { ...f.options, claudeProbeDir: probe });
+  assert.equal(observed.readings.get('real-session')?.state, 'waiting');
+  assert.equal(observed.sessions['claude:real-session']?.tokenDataUnavailable, true);
+  assert.equal(fs.statSync(project).mode & 0o7777, 0o755);
+  assert.equal(fs.readFileSync(path.join(project, 'keep'), 'utf8'), 'untouched');
 });
 
 test('Windows registry filtering follows the fixed profile cwd and tolerates a missing profile', async t => {

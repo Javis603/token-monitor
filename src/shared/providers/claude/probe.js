@@ -41,6 +41,11 @@ function macAlias(dir) {
   return dir.replace(/^\/(var|tmp)(?=\/|$)/, '/private/$1');
 }
 
+function hasPrivatePosixPermissions(stat) {
+  // Inherited setgid does not grant group/other access; compare rwx bits only.
+  return Number(stat.uid) === process.getuid() && (Number(stat.mode) & 0o777) === 0o700;
+}
+
 async function prepareClaudeProbeDir(deps = {}) {
   try {
     const selected = claudeProbeDir(deps);
@@ -59,8 +64,7 @@ async function prepareClaudeProbeDir(deps = {}) {
     }
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw unsafeProbeDir();
     if (process.platform !== 'win32') {
-      if (Number(stat.uid) !== process.getuid()
-        || Number(stat.mode & 0o777n) !== 0o700) throw unsafeProbeDir();
+      if (!hasPrivatePosixPermissions(stat)) throw unsafeProbeDir();
       if (process.platform === 'darwin') {
         // A leaf ACL can grant access despite 0700; no ancestor ACL walk is needed.
         const { stdout } = await execFileAsync('/bin/ls', ['-lde', dir], { encoding: 'utf8', timeout: 3000 });
@@ -89,6 +93,7 @@ function isClaudeProbeCwd(cwd, probeDir = claudeProbeDir()) {
   try {
     const stat = fs.lstatSync(requested);
     if (!stat.isDirectory() || stat.isSymbolicLink()) return false;
+    if (process.platform !== 'win32' && !hasPrivatePosixPermissions(stat)) return false;
     // Resolve parent aliases, never a replacement leaf's target: even a link
     // swapped in after lstat must not turn an unrelated project into the probe.
     const current = path.join(canonicalPath(path.dirname(requested)), path.basename(requested));

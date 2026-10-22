@@ -1720,7 +1720,7 @@ exit_pattern = re.compile(exit_marker) if exit_marker else None
 # Check and pin the prepared cwd before allowing any workspace trust response.
 directory = os.open(cwd, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 info = os.fstat(directory)
-if (info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700
+if (info.st_uid != os.getuid() or (stat.S_IMODE(info.st_mode) & 0o777) != 0o700
         or str(info.st_dev) != os.environ["TOKEN_MONITOR_CLAUDE_PROBE_DEV"]
         or str(info.st_ino) != os.environ["TOKEN_MONITOR_CLAUDE_PROBE_INO"]):
     raise RuntimeError("Claude probe directory changed before launch")
