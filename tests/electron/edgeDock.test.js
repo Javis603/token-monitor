@@ -635,6 +635,30 @@ test('the running count is stated once per layout, and the group header centers 
 });
 
 
+// One credit pool, one cell. CodeBuddy has no Limits provider of its own, so its
+// running session can only reach the rail through WorkBuddy's cell - and that
+// shared cell is what the user sees spin. Without the client mapping the row was
+// filtered out and the rail stayed still while CodeBuddy worked.
+test('a running CodeBuddy session reaches the shared WorkBuddy cell', () => {
+  const nowIso = new Date().toISOString();
+  const stats = {
+    periods: {
+      month: { sessions: {
+        'codebuddy:run': {
+          client: 'codebuddy', sessionId: 'run', lastUsedAt: nowIso,
+          totalTokens: 10, models: { 'hunyuan-t1': 10 }
+        }
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [provider('workbuddy')] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { limitProviders: 'workbuddy' });
+  assert.equal(cell.provider, 'workbuddy');
+  assert.deepEqual(cell.sessions.map((row) => row.client), ['codebuddy']);
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions).count, 1);
+});
+
 // The Sessions item exists for the clients no quota card can show. A cell whose
 // rows all came from providers would be the same per-provider list again, one
 // level up, and would leave those clients with no surface at all.

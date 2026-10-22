@@ -29,6 +29,9 @@ test('a client resolves to the provider its tokens belong to', () => {
   assert.equal(limitProviderForClient('CODEX'), 'codex');
   assert.equal(limitProviderForClient(' zcode '), 'zai');
   assert.equal(limitProviderForClient('mcode'), 'minimax');
+  // One credit pool, one cell: CodeBuddy's sessions and tokens are WorkBuddy's.
+  assert.equal(limitProviderForClient('codebuddy'), 'workbuddy');
+  assert.equal(limitProviderForClient(' CodeBuddy '), 'workbuddy');
   assert.equal(limitProviderForClient('qwen'), null);
   assert.equal(limitProviderForClient('nonesuch'), null);
   assert.equal(limitProviderForClient(''), null);
