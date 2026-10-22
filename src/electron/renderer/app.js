@@ -13408,8 +13408,7 @@ function syncDockSizeControls(surface) {
 // read from the saved settings underneath them.
 const NOTCH_HOVER_DELAY_DEFAULT_MS = 0;
 
-// Hover either grows the resting entry (a click opens it) or opens it after
-// the chosen duration; the duration only applies to the second.
+// Hover duration applies only to hover-to-open.
 function syncNotchHoverControls() {
   const action = state.settings?.notchHoverAction === 'open' ? 'open' : 'peek';
   for (const input of els.notchHoverActionInputs) input.checked = input.value === action;

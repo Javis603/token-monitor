@@ -134,7 +134,7 @@ test('a rightward hand moves Home to Limits under either scroll preference', asy
   for (const natural of [true, false]) {
     const f = fixture();
     f.wheel({ isDirectionInvertedFromDevice: natural });
-    // Calibrated against real AppKit input: rightward is negative when natural.
+    // Rightward AppKit progress is negative under natural scrolling.
     const amount = natural ? -0.2 : 0.2;
     f.frame(0, amount, 1); f.frame(0, amount, 8);
     assert.equal(f.seen.at(-1).amount, 0.2);

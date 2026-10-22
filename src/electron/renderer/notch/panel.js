@@ -238,7 +238,7 @@
         pageNode.style.filter = '';
       }
       if (pages.classList.contains('is-handoff')) {
-        // Commit the resting page before CSS transitions can take over again.
+        // CSS transitions resume only after resting styles are committed.
         void pages.offsetWidth;
         pages.classList.remove('is-handoff');
         tabPill.style.transition = '';
@@ -249,14 +249,13 @@
       const strip = node.querySelector('.notch-limits');
       strip?.classList.remove('is-handoff');
     }
-    // Tabs and the keyboard change pages in place.
     function selectPage(page) {
       if (!PAGES.includes(page) || view.page === page) return;
       dropGesture();
       clearPageMotion();
       commitPage(page);
     }
-    // List positions survive releasing the hidden page's DOM.
+    // An empty page must not overwrite the last scroll positions.
     function captureSessionScroll(pageNode) {
       if (pageNode.childElementCount) {
         sessionScroll = {
@@ -266,7 +265,6 @@
       }
       return sessionScroll;
     }
-    // The shell blurs its body while opening; discard hidden pages on collapse.
     function dropHiddenPages() {
       for (const [page, pageNode] of pageNodes) {
         if (page === view.page) continue;
@@ -288,8 +286,7 @@
       });
       placeTabs(origin + (target - origin) * travel, { track: true });
     }
-    // The pill follows the finger. Tab clicks keep the spring; a swipe clears
-    // it so the highlight is not still easing after the page has settled.
+    // Tab springs are disabled during native tracking.
     function placeTabs(position, { track = false } = {}) {
       const clamped = Math.max(0, Math.min(PAGES.length - 1, position));
       const nearest = Math.round(clamped);
@@ -750,7 +747,6 @@
       return column;
     }
 
-    // Vertical wheel paging stays shared with the original limits strip.
     const limitWheel = { sum: 0, stepped: false, timer: null };
 
     function limitPageWidth(strip) {
@@ -1163,7 +1159,7 @@
       }
       paintTabs();
       paintStatus();
-      // Prepare only the preview; the visible page stays last to retain its hover reading.
+      // The visible page owns the hover reading.
       const preview = gesture?.destination;
       if (preview?.lane === 'outer' && preview.target !== preview.origin) renderPage(PAGES[preview.target]);
       renderPage(view.page);

@@ -1,7 +1,7 @@
 'use strict';
 
-// Local input only: horizontal fluid swipes are consumed before Chromium can
-// scroll them too. Vertical scrolling, zoom and other windows keep their events.
+// Native tracking is limited to precise horizontal gestures in the Notch window.
+// Vertical scrolling, zoom and other windows retain their events.
 let api = null;
 const SCROLL_MASK = 1n << 22n;
 const PHASES = [[16, 'cancelled'], [8, 'ended'], [4, 'changed'], [1, 'began']];
@@ -28,8 +28,7 @@ function createMacScrollGestureMonitor(koffi) {
   const trackSelector = names['trackSwipeEventWithOptions:dampenAmountThresholdMin:max:usingHandler:'];
   const descriptorType = koffi.struct({ reserved: 'uintptr_t', size: 'uintptr_t' });
   const blockType = koffi.struct({ isa: 'void *', flags: 'int', reserved: 'int', invoke: 'void *', descriptor: 'void *' });
-  // Global-block ABI: AppKit retains this address, not a copy of its buffers.
-  // Keep both buffers and the registered callback until native ownership ends.
+  // Global-block buffers and callbacks remain valid throughout native ownership.
   const held = new Set();
   function block(fn, result, args) {
     const entry = { callback: koffi.register(fn, koffi.pointer(koffi.proto(result, ['void *', ...args]))),
@@ -41,7 +40,7 @@ function createMacScrollGestureMonitor(koffi) {
     return entry;
   }
   function release(entry) {
-    // Never unregister while AppKit is still returning through the callback.
+    // Unregister callbacks only after returning to AppKit.
     setImmediate(() => { if (held.delete(entry)) koffi.unregister(entry.callback); });
   }
 
@@ -90,8 +89,7 @@ function createMacScrollGestureMonitor(koffi) {
               release(entry);
             }
           }, 'void', ['double', 'uint64_t', 'bool', 'void *']);
-          // Apple’s fluid-swipe pattern: a new gesture cancels the old animation;
-          // it does not wait for momentum or a guessed idle gap.
+          // A new finger gesture supersedes any settling animation.
           track(event, trackSelector, 2n, -1, 1, entry.bytes);
           return 0n;
         } catch { return event; }

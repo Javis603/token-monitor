@@ -657,8 +657,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     catch (error) { logger(`[top-notch] swipe cleanup failed: ${error.message}`); }
   }
 
-  // Vertical swipes belong to click-to-open: a hover that opens the panel would reopen
-  // it straight after a swipe closed it, and hide the summary it swiped away.
+  // Vertical open/close gestures apply only to click-to-open mode.
   function verticalSwipesEnabled() {
     return settings().notchSwipeGestures !== false && normalizeNotchHoverAction(settings().notchHoverAction) === 'peek';
   }
