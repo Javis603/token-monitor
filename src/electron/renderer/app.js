@@ -5530,7 +5530,60 @@ function signalContentReady() {
   window.tokenMonitor.signalContentReady?.();
 }
 
+function bindTrendTooltip(spark, model, points, labelKey, metric) {
+  let selected = -1;
+  const select = (index) => {
+    const svgRect = spark.querySelector('.sparkline').getBoundingClientRect();
+    const bar = model.bars[index];
+    const x = svgRect.left - spark.getBoundingClientRect().left
+      + (bar.x + bar.width / 2) / model.width * svgRect.width;
+    spark.style.setProperty('--trend-tooltip-x', `${x}px`);
+    if (index !== selected) {
+      selected = index;
+      const point = points[index];
+      const date = String(point[labelKey] || '');
+      const value = `${formatNumber(point[metric])} tokens`;
+      limitWindowsView.setDetailTooltip(spark, [[date, value]], { centered: true });
+      spark.setAttribute('aria-label', `${t('trends.open')} · ${date} · ${value}`);
+      const tooltip = spark.querySelector('.limit-detail-tooltip');
+      tooltip.setAttribute('aria-live', 'polite');
+      tooltip.setAttribute('aria-atomic', 'true');
+    }
+  };
+  const pointAtPointer = (event) => {
+    const rect = spark.querySelector('.sparkline').getBoundingClientRect();
+    if (!(rect.width > 0)) return;
+    // Use each day's full column, including gaps and zero-height bars.
+    select(Math.max(0, Math.min(points.length - 1,
+      Math.floor((event.clientX - rect.left) / rect.width * points.length))));
+  };
+  spark.addEventListener('pointerenter', pointAtPointer);
+  spark.addEventListener('pointermove', pointAtPointer);
+  spark.addEventListener('keydown', (event) => {
+    const index = event.key === 'ArrowLeft' ? Math.max(0, selected - 1)
+      : event.key === 'ArrowRight' ? Math.min(points.length - 1, selected + 1)
+        : event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1 : null;
+    if (index === null) return;
+    event.preventDefault();
+    select(index);
+  });
+  const flush = () => {
+    if (!spark.dataset.renderPending) return;
+    delete spark.dataset.renderPending;
+    requestAnimationFrame(renderTrends);
+  };
+  // Keep a live refresh from replacing the focused/hovered chart mid-read.
+  spark.addEventListener('pointerleave', flush);
+  spark.addEventListener('focusout', flush);
+  select(points.length - 1);
+}
+
 function renderTrends() {
+  const reading = els.trendsPanel.querySelector('.trends-spark:hover, .trends-spark:focus-within');
+  if (reading) {
+    reading.dataset.renderPending = 'true';
+    return;
+  }
   const charts = window.TokenMonitorUsageCharts;
   const previousBars = captureTrendBarMotion();
   const preview = state.stats?.historyPreview || { daily: [], monthly: [], summary: {} };
@@ -5579,6 +5632,7 @@ function renderTrends() {
     + `<div class="trends-spark" role="button" tabindex="0" aria-label="${t('trends.open')}">${svg}</div>`
     + `<div class="trends-axis"><span>${first}</span><span>${last}</span></div>`
     + `<div class="trends-stats">${statsHtml}</div>`;
+  bindTrendTooltip(els.trendsPanel.querySelector('.trends-spark'), model, finalPoints, labelKey, metric);
   const bars = Array.from(els.trendsPanel.querySelectorAll('.spark-bar'));
   bars.forEach((bar, index) => {
     bar.dataset.motionKey = String(finalPoints[index]?.[labelKey] || index);
