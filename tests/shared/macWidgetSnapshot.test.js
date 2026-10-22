@@ -930,21 +930,22 @@ test('MiMo widget rows of several accounts keep the account and product distingu
 });
 
 
-test('Widget models retain cost-only identities without manufacturing token shares', () => {
+test('Widget models rank measured tokens while overview retains cost-only USD', () => {
   const stats = { periods: { today: {
     totalTokens: 100, costUsd: 1.25,
     models: { sonnet: 100 }, modelCosts: { sonnet: 1, 'Qwen3.8-Flash': 0.25, empty: 0 }
   } } };
-  const models = buildSnapshot(stats, { now: NOW }).periods.day.models;
+  const snapshot = buildSnapshot(stats, { now: NOW });
+  const models = snapshot.periods.day.models;
   assert.deepEqual(models.map(({ displayName, totalTokens, costUsd, sharePercent }) => (
     { displayName, totalTokens, costUsd, sharePercent }
   )), [
-    { displayName: 'sonnet', totalTokens: 100, costUsd: 1, sharePercent: 100 },
-    { displayName: 'Qwen3.8-Flash', totalTokens: 0, costUsd: 0.25, sharePercent: 0 }
+    { displayName: 'sonnet', totalTokens: 100, costUsd: 1, sharePercent: 100 }
   ]);
+  assert.equal(snapshot.periods.day.overview.costUsd, 1.25);
   stats.periods.today = { totalTokens: 0, costUsd: 0.25, modelCosts: { 'Qwen3.8-Flash': 0.25 } };
-  const [only] = buildSnapshot(stats, { now: NOW }).periods.day.models;
-  assert.equal(only.totalTokens, 0);
-  assert.equal(only.costUsd, 0.25);
-  assert.equal(only.sharePercent, 0);
+  const costOnly = buildSnapshot(stats, { now: NOW }).periods.day;
+  assert.deepEqual(costOnly.models, []);
+  assert.equal(costOnly.overview.totalTokens, 0);
+  assert.equal(costOnly.overview.costUsd, 0.25);
 });
