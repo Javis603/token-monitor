@@ -77,6 +77,7 @@ class FakeElement {
   }
   addEventListener() {}
   setAttribute(name, value) { this.attributes[name] = value; }
+  getAttribute(name) { return this.attributes[name] ?? null; }
   removeAttribute(name) { delete this.attributes[name]; }
   replaceChildren(...children) { this.children = [...children]; }
   querySelector(selector) {

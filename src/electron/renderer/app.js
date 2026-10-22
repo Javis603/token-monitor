@@ -4895,7 +4895,6 @@ function renderServiceStatus() {
     row.type = 'button';
     row.className = `service-status-row service-status-${provider.status || 'unknown'}`;
     row.dataset.provider = provider.id;
-    row.setAttribute('aria-description', t('serviceStatus.openPage', { name: provider.label }));
     row.addEventListener('click', () => window.tokenMonitor.openExternal?.(provider.pageUrl));
     const head = document.createElement('div');
     head.className = 'service-status-head';
@@ -4929,7 +4928,10 @@ function renderServiceStatus() {
       meta.append(checkedSpan);
     }
     const affected = serviceStatusPresentationApi.affectedComponentNames(provider.componentIssues).all;
-    if (affected.length) meta.setAttribute('aria-description', affected.join(t('serviceStatus.listSeparator')));
+    row.setAttribute('aria-description', [
+      t('serviceStatus.openPage', { name: provider.label }),
+      affected.join(t('serviceStatus.listSeparator'))
+    ].filter(Boolean).join(' · '));
     row.append(head, description, meta);
     return row;
   });
@@ -7407,8 +7409,10 @@ function pulseLiveDot() {
 }
 
 function refreshButtonIdleTitle() {
-  if (state.stats?.updatedAt) return t('refreshButton.refreshedAt', { time: formatTime(state.stats.updatedAt) });
-  return t('refreshButton.label');
+  const action = t('refreshButton.label');
+  return state.stats?.updatedAt
+    ? `${action} · ${t('refreshButton.refreshedAt', { time: formatTime(state.stats.updatedAt) })}`
+    : action;
 }
 
 function clearRefreshButtonFeedbackTimer() {
@@ -7434,7 +7438,6 @@ function setRefreshButtonState(status = 'idle') {
     els.refreshButton.setAttribute('aria-busy', 'false');
   } else {
     els.refreshButton.setAttribute('aria-label', refreshButtonIdleTitle());
-    els.refreshButton.setAttribute('aria-label', t('refreshButton.label'));
     els.refreshButton.removeAttribute('aria-busy');
   }
 }
@@ -8102,6 +8105,7 @@ function syncWindowShortcutStatus() {
   const status = state.settings?.windowToggleShortcutStatus?.state || (shortcut ? 'unregistered' : 'off');
   value.classList.toggle('recording', state.recordingWindowShortcut);
   value.textContent = state.recordingWindowShortcut ? t('settings.shortcut.recording') : display;
+  value.setAttribute('aria-description', t('settings.shortcut.record'));
   if (clearButton) clearButton.disabled = !shortcut && !state.recordingWindowShortcut;
   note.classList.toggle('error', state.windowShortcutInvalid || (Boolean(shortcut) && status !== 'registered'));
   if (state.recordingWindowShortcut) {
@@ -11394,7 +11398,7 @@ function renderToolPreferencesNow() {
       main.type = 'button';
       main.id = `toolHealthDisclosure-${id}`;
       main.className = 'tool-preference-main';
-      main.setAttribute('aria-description', t('settings.tools.health.open', { name: label }));
+      main.setAttribute('aria-label', t('settings.tools.health.open', { name: label }));
       main.setAttribute('aria-expanded', String(expanded));
       const disclosureIcon = document.createElement('span');
       disclosureIcon.className = 'cursor-disclosure-icon';
@@ -15684,7 +15688,6 @@ function renderWorkbuddyStatus() {
     remove.className = 'managed-account-remove';
     remove.textContent = '✕';
     remove.setAttribute('aria-label', t('settings.workbuddy.remove'));
-    remove.setAttribute('aria-label', t('settings.workbuddy.removeConfirm', { account: name }));
     remove.disabled = busy;
     let armed = false;
     remove.addEventListener('click', () => {
@@ -16305,7 +16308,7 @@ function renderOpenCodeProfiles() {
 
     // The auto-detected key counts as an account: it is what the limits card is
     // reading, so leaving it out of the total reports "not set up" next to live
-    // quota. It has no toggle or delete because Token Monitor does not own that
+    // quota. It has no delete because Token Monitor does not own that
     // credential — OpenCode does — but naming it does belong here: a name is
     // what lets it join an account, and typing an existing account's name is
     // how a user says the two are the same OpenCode account.
@@ -16320,6 +16323,7 @@ function renderOpenCodeProfiles() {
       ambientToggle.className = 'profile-toggle';
       ambientToggle.type = 'checkbox';
       ambientToggle.checked = ambientEnabled;
+      ambientToggle.setAttribute('aria-label', t('settings.opencode.ambientName'));
       ambientToggle.setAttribute('aria-description', t('settings.opencode.ambientDetail'));
       ambientToggle.addEventListener('change', async () => {
         await window.tokenMonitor.opencode.setAmbientEnabled(ambientToggle.checked);

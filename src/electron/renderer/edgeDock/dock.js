@@ -1292,14 +1292,16 @@ function sessionKey(session) {
 // session that has simply gone quiet.
 function stateMark(session, key, state) {
   const dot = el('span', 'edge-dock-session-dot');
-  dot.setAttribute('aria-hidden', 'true');
   // The glyphs come from the shared builder, so this card and the Sessions list
   // cannot drift into different spinner or check shapes.
   dot.innerHTML = SESSION_STATE_GLYPHS;
   dot.dataset.state = state;
-  if (state === 'running') dot.setAttribute('aria-label', t('session.running'));
-  else if (state === 'waiting') dot.setAttribute('aria-label', t('session.waiting'));
-  else if (state === 'ended') dot.setAttribute('aria-label', t('session.finished'));
+  const labelKey = { running: 'session.running', waiting: 'session.waiting', ended: 'session.finished' }[state];
+  dot.setAttribute('aria-hidden', labelKey ? 'false' : 'true');
+  if (labelKey) {
+    dot.setAttribute('role', 'img');
+    dot.setAttribute('aria-label', t(labelKey));
+  }
   const previous = lastActivityBySession.get(key) || 0;
   const next = Date.parse(session.lastUsedAt || '') || 0;
   if (next > 0) lastActivityBySession.set(key, next);
