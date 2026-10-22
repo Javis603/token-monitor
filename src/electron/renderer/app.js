@@ -109,6 +109,7 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
   kiro: 'settings.limits.connection.kiro',
+  manus: 'settings.limits.connection.manus',
   workbuddy: 'settings.limits.connection.workbuddy'
 };
 const TRAY_ICON_VARIANTS = [
