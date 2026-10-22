@@ -111,6 +111,7 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   grok: 'settings.limits.connection.grok',
   muse: 'settings.limits.connection.muse',
   kiro: 'settings.limits.connection.kiro',
+  manus: 'settings.limits.connection.manus',
   workbuddy: 'settings.limits.connection.workbuddy'
 };
 const TRAY_ICON_VARIANTS = [
