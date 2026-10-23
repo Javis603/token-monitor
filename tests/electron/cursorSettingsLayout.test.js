@@ -153,7 +153,7 @@ test('Hub secret input stays masked and exposes an accessible paste button', () 
   assert.match(secretLabel, /<label for="secretInput" data-i18n="settings\.sync\.secret">Secret<\/label>/);
   assert.doesNotMatch(secretLabel, /secretPasteButton/);
   assert.match(secretRow, /<input id="secretInput" type="password"[\s\S]*data-i18n-placeholder="settings\.sync\.secretPlaceholder"/);
-  assert.match(secretRow, /<button id="secretPasteButton" type="button" class="icon-button" title="Paste secret" data-i18n-title="settings\.sync\.pasteSecret" aria-label="Paste secret" data-i18n-aria-label="settings\.sync\.pasteSecret">/);
+  assert.match(secretRow, /<button id="secretPasteButton" type="button" class="icon-button" aria-label="Paste secret" data-i18n-aria-label="settings\.sync\.pasteSecret">/);
 
   const css = readRendererFile('styles.css');
   // No standalone .hub-secret-field layout rule — settings-field handles it
@@ -3316,7 +3316,7 @@ test('MiMo settings reuses the shared sign-in status for rejected accounts', () 
     append(...children) { this.children.push(...children); }
     replaceChildren(...children) { this.children = children; }
     addEventListener() {}
-    setAttribute() {}
+    setAttribute(name, value) { (this.attributes ||= {})[name] = value; }
     *walk() { yield this; for (const child of this.children) yield* child.walk(); }
   }
   const list = new Node();
@@ -3356,9 +3356,9 @@ test('MiMo settings reuses the shared sign-in status for rejected accounts', () 
   assert.equal(list.children[2].children[2].children.length, 1, 'the detected account has no remove control');
   const info = list.children.map((row) => [...row.walk()].find((node) => node.className === 'managed-account-info'));
   assert.deepEqual(info.map((node) => node.textContent), ['Sign in again', 'Console', 'Sign in again']);
-  assert.equal(info[0].title, 'Sign in again');
-  assert.equal(info[1].title, 'Console');
-  assert.equal(info[2].title, 'Sign in again');
+  assert.equal(info[0].attributes['aria-label'], 'Sign in again');
+  assert.equal(info[1].attributes['aria-label'], 'Console');
+  assert.equal(info[2].attributes['aria-label'], 'Sign in again');
   providers = [{ provider: 'mimo', accountKey: 'a', sourceDetail: 'managed', status: 'ok' }];
   render();
   assert.equal([...list.children[0].walk()].find((node) => node.className === 'managed-account-info').textContent, 'Console');

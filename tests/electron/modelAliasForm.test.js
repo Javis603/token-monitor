@@ -71,6 +71,21 @@ test('alias editor adds, edits and removes a persisted mapping', async () => {
   assert.deepEqual(f.aliases(), {});
 });
 
+test('alias edit buttons keep distinct alias and target names with a localized action description', () => {
+  const f = fixture(null, { aliases: { first: 'model-a', second: 'model-b' }, locale: 'zh-TW' });
+  f.form.syncSettings();
+  const buttons = f.get('List').children.map(row => row.children[0]);
+  assert.equal(buttons.length, 2);
+  for (const button of buttons) {
+    assert.equal(button['aria-label'], undefined);
+    assert.equal(button['aria-description'], i18n.translate('zh-TW', 'settings.modelAliases.edit'));
+    assert.equal(button.title, undefined);
+  }
+  assert.deepEqual(buttons.map(button => button.children.map(child => child.textContent).join(' ')), [
+    'first → model-a', 'second → model-b'
+  ]);
+});
+
 test('invalid form and failed persistence keep the existing mapping and expose an error', async () => {
   const f = fixture(async () => { throw new Error('disk full'); });
   f.get('AddButton').click();

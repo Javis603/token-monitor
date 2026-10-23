@@ -200,7 +200,7 @@
     }
     function text(className, value, title) {
       const node = el('span', className, value);
-      if (title) node.title = title;
+      if (title) node.setAttribute('aria-label', title);
       return node;
     }
     function fitTokenFigure(number, size) {
@@ -234,8 +234,7 @@
         button.classList.toggle('is-selected', selected);
         button.setAttribute('aria-selected', String(selected));
         button.tabIndex = selected ? 0 : -1;
-        button.title = t(`notch.tab.${page}`);
-        button.setAttribute('aria-label', button.title);
+        button.setAttribute('aria-label', t(`notch.tab.${page}`));
       }
       tabPill.style.transform = `translateX(${PAGES.indexOf(view.page) * 36}px)`;
       for (const [page, pageNode] of pageNodes) {
@@ -278,8 +277,8 @@
       reading.classList.toggle('is-idle', idle);
       reading.querySelector('.notch-rate-value').textContent = value;
       reading.querySelector('.notch-rate-unit').textContent = unit;
-      reading.title = `${t(!hasSample ? 'edgeDock.rate.noSample' : idle ? 'edgeDock.rate.idle' : 'edgeDock.rate.live')} · ${t('notch.rateToggle')}`;
-      reading.setAttribute('aria-label', `${value} ${unit} · ${reading.title}`);
+      const description = `${t(!hasSample ? 'edgeDock.rate.noSample' : idle ? 'edgeDock.rate.idle' : 'edgeDock.rate.live')} · ${t('notch.rateToggle')}`;
+      reading.setAttribute('aria-label', `${value} ${unit} · ${description}`);
     }
 
     // ---- Home -----------------------------------------------------------------
@@ -360,8 +359,7 @@
       body.append(meta);
       const value = el('div', 'notch-now-value');
       const tokens = sessionTokens(row, 'notch-now-tokens', false);
-      tokens.title = `${t(live ? 'notch.thisSession' : 'notch.lastSession')} · ${formatCardTokens(row.totalTokens)}`;
-      tokens.setAttribute('aria-label', tokens.title);
+      tokens.setAttribute('aria-label', `${t(live ? 'notch.thisSession' : 'notch.lastSession')} · ${formatCardTokens(row.totalTokens)}`);
       value.append(tokens);
       const status = sessionStatus(row, nowMs);
       if (status) value.append(status);
@@ -380,7 +378,7 @@
         const readings = quotaReadings(entry, nowMs).slice(0, 2);
         if (!readings.length) continue;
         const item = el('span', 'notch-fuel-item');
-        item.title = `${providerLabel(entry.provider)} · ${label}`;
+        item.setAttribute('aria-label', `${providerLabel(entry.provider)} · ${label}`);
         item.append(mark(entry.provider));
         readings.forEach((reading, index) => {
           if (index) item.append(text('notch-fuel-dot', '·'));
@@ -395,8 +393,7 @@
       }
       const more = el('button', 'notch-fuel-more');
       more.type = 'button';
-      more.title = t('notch.tab.limits');
-      more.setAttribute('aria-label', more.title);
+      more.setAttribute('aria-label', t('notch.tab.limits'));
       more.dataset.focusKey = 'home:limits';
       activateOnPress(more, () => selectPage('limits'));
       function show(count) {
@@ -473,8 +470,7 @@
         column.append(bar);
         // A day without data keeps a small baseline mark, so it does not read as a quiet day.
         if (day.tokens === null) column.classList.add('is-unknown');
-        column.title = `${day.date} · ${day.tokens === null ? '—' : formatTokens(day.tokens)}`;
-        column.setAttribute('aria-label', column.title);
+        column.setAttribute('aria-label', `${day.date} · ${day.tokens === null ? '—' : formatTokens(day.tokens)}`);
         column.addEventListener('pointerenter', () => {
           if (day.today || day.tokens === null) { scrub(null); return; }
           scrub({ day, label: weekday.format(new Date(`${day.date}T00:00:00Z`)) });
@@ -641,7 +637,7 @@
         // Money leads only where the Limits view leads with it: a balance with
         // no allowance. A grant measured against one reads as its percentage,
         // with the amounts on hover, as the Limits view prints them.
-        if (description.detail) value.title = description.detail;
+        if (description.detail) value.setAttribute('aria-label', description.detail);
         if (reading.credits && !description.percentLeads) {
           const amount = balance.creditsAmount(reading.record, reading.window);
           value.append(text('notch-limit-money', balance.formatCompactMoney(amount, balance.creditsCurrency(reading.record, reading.window),
