@@ -30,7 +30,7 @@
 
 ## O que é o Token Monitor?
 
-Um widget de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 46+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto.
+Um app de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 46+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto. Ele aparece onde você estiver olhando: a janela principal, o notch do MacBook, a barra de menus ou a bandeja do sistema, a borda da tela, uma bolha flutuante e widgets nativos do macOS.
 
 ## Ferramentas suportadas
 
@@ -108,23 +108,46 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 
 ## Vitrine
 
-<table>
-<tr>
-<td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="Home View"><br><sub>Painel personalizável — escolha quais módulos aparecem e em que ordem</sub></td>
-<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="Limits View"><br><sub>Várias contas lado a lado e troca da conta ativa do Codex com um clique</sub></td>
-<td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="Tools View"><br><sub>Clique em qualquer ferramenta para expandir os detalhes de entrada / saída e acertos de cache</sub></td>
-</tr>
-<tr>
-<td width="290" align="center"><img src=".github/assets/sessions-view.png" width="250" alt="Session View"><br><sub>Abra uma sessão para decompor cada prompt em tokens e ferramentas usadas</sub></td>
-<td width="290" align="center"><img src=".github/assets/models-view.png" width="250" alt="Models View"><br><sub>Uso e custo de cada modelo, agregados entre todas as ferramentas</sub></td>
-<td width="290" align="center"><img src=".github/assets/devices-view.png" width="250" alt="Devices View"><br><sub>Uso, custo e status de sincronização de cada dispositivo — expanda para ver os detalhes por máquina</sub></td>
-</tr>
-</table>
+### Na sua área de trabalho
 
 <table>
 <tr>
-<td width="435" align="center"><img src=".github/assets/dashboard-overview.png" width="400" alt="Usage Dashboard Overview"><br><sub>Um ano de mapa de calor de atividade e sequências, agregado entre todos os dispositivos</sub></td>
-<td width="435" align="center"><img src=".github/assets/dashboard-trends.png" width="400" alt="Usage Dashboard Trends"><br><sub>Um ano de tendências diárias, empilhadas por ferramenta / modelo, com linha K</sub></td>
+<td colspan="2" width="870" align="center"><img src=".github/assets/showcase/notch-panel.gif" width="800" alt="Notch Panel"><br><sub><b>Painel do notch</b> — sessões em andamento ao lado do notch; deslize para baixo para ver o uso de hoje, os limites de cada conta, sessões e detalhamentos</sub></td>
+</tr>
+<tr>
+<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="540" alt="Edge Dock"><br><sub><b>Edge Dock</b> — cotas e uso fixados na borda da tela; passe o mouse para ver limites, sessões recentes e tokens</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="540" alt="Menu bar and popover"><br><sub><b>Barra de menus e bandeja</b> — escolha uma predefinição ou monte a sua: ícones de ferramentas, barras de cota, horários de reset, custo ou tok/s ao vivo</sub></td>
+</tr>
+</table>
+
+### Dentro do app
+
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/showcase/limits-view.png" width="250" alt="Limits View"><br><sub>Várias contas lado a lado e troca da conta ativa do Codex com um clique</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/tools-view.png" width="250" alt="Tools View"><br><sub>Clique em qualquer ferramenta para expandir os detalhes de entrada / saída e acertos de cache</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/sessions-view.png" width="250" alt="Session View"><br><sub>Abra uma sessão para decompor cada prompt em tokens e ferramentas usadas</sub></td>
+</tr>
+</table>
+
+<details>
+<summary>Mais visualizações — projetos, modelos e dispositivos</summary>
+
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/showcase/projects-view.png" width="250" alt="Projects View"><br><sub>Uso e custo por projeto, agregados entre ferramentas e dispositivos</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/models-view.png" width="250" alt="Models View"><br><sub>Uso e custo de cada modelo, agregados entre todas as ferramentas</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/devices-view.png" width="250" alt="Devices View"><br><sub>Uso, custo e status de sincronização de cada dispositivo — expanda para ver os detalhes por máquina</sub></td>
+</tr>
+</table>
+</details>
+
+### Painel de uso
+
+<table>
+<tr>
+<td width="435" align="center"><img src=".github/assets/showcase/dashboard-overview.png" width="400" alt="Usage Dashboard Overview"><br><sub>Um ano de mapa de calor de atividade e sequências, agregado entre todos os dispositivos</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/dashboard-trends.png" width="400" alt="Usage Dashboard Trends"><br><sub>Um ano de tendências diárias, empilhadas por ferramenta / modelo, com linha K</sub></td>
 </tr>
 </table>
 
@@ -167,13 +190,14 @@ A maioria dos monitores de uso só é útil na máquina em que roda. O Token Mon
 
 ### Interface e superfícies
 
-- **Telas de detalhamento** — agrupadas por ferramenta, dispositivo, modelo, sessão, projeto ou limites da conta
-- **Popover da barra de menus (macOS) e da bandeja do sistema (Windows)** — custo ao vivo, tokens ou o limite do provedor mais perto de acabar em %, ao lado do ícone
-- **Modo Bolha Flutuante** — reduz o widget a uma mini-janela arrastável com prévia ao clicar ou passar o mouse e conteúdo no estilo da bandeja
+- **Painel do notch (macOS)** — sessões em andamento e aguardando ficam ao lado do notch (ou em uma pílula em telas sem notch); passe o mouse ou deslize para baixo para abrir páginas com o uso de hoje e dos últimos sete dias, os limites de cada conta lado a lado, sessões ativas e recentes, e detalhamentos por ferramenta / modelo
 - **Edge Dock (macOS e Windows)** — mantém cotas e uso na borda da tela, com modos de ocultar automaticamente, sempre visível ou ocultar em tela cheia. Os cartões ao passar o mouse mostram limites da conta, sessões recentes e uso de tokens. Escolha, reordene e configure itens nas Configurações e ative/desative pela barra de menus ou bandeja do sistema
+- **Popover da barra de menus (macOS) e da bandeja do sistema (Windows)** — custo ao vivo, tokens ou o limite do provedor mais perto de acabar em %, ao lado do ícone
 - **Compositor de layout da barra de menus** — a barra de menus e a bolha flutuante podem usar uma predefinição embutida ou um layout montado por você: escolha "Personalizado…" para adicionar ícones de ferramentas de IA, barras de cota, porcentagens, horários de reset, custo, taxa de tokens ao vivo ou texto personalizado, arraste para reordenar com uma prévia ao vivo e dê a cada item sua própria ferramenta de IA, conta, janela de cota e fonte
-- **Controles de aparência** — troca do tema da interface (inclusive um modo claro), cores por fornecedor de ferramenta, opacidade do vidro, desfoque, modo de janela transparente e fontes personalizadas
+- **Modo Bolha Flutuante** — reduz o widget a uma mini-janela arrastável com prévia ao clicar ou passar o mouse e conteúdo no estilo da bandeja
 - **Widgets nativos do macOS** — veja uso de tokens e custo, tendências, cota restante das ferramentas de IA e horários de reset, mapas de calor de atividade e detalhamentos por ferramenta ou modelo nos layouts Pequeno, Médio e Grande no macOS 14+
+- **Telas de detalhamento** — agrupadas por ferramenta, dispositivo, modelo, sessão, projeto ou limites da conta
+- **Controles de aparência** — troca do tema da interface (inclusive um modo claro), cores por fornecedor de ferramenta, opacidade do vidro, desfoque, modo de janela transparente e fontes personalizadas
 - **Lista de ferramentas personalizável** — oculte, fixe e reordene ferramentas no painel principal sem alterar o que é acompanhado
 - **Atalho global gravável** — mostre ou oculte a janela de qualquer lugar
 - **Discord Rich Presence** — transmita os tokens de hoje, o custo e o cliente principal (opcional)

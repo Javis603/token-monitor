@@ -30,7 +30,7 @@
 
 ## Token Monitor란?
 
-Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 46개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 위젯입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다.
+Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 46개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 앱입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다. 메인 창, MacBook 노치, 메뉴 막대나 시스템 트레이, 화면 가장자리, 플로팅 버블, 네이티브 macOS 위젯 등 시선이 닿는 곳 어디서나 확인할 수 있습니다.
 
 ## 지원 도구
 
@@ -113,23 +113,46 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 
 ## 쇼케이스
 
-<table>
-<tr>
-<td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="홈 보기"><br><sub>커스터마이즈 가능한 대시보드 — 표시할 모듈과 순서를 선택</sub></td>
-<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="한도 보기"><br><sub>여러 계정을 나란히, Codex는 로컬 계정을 원클릭 전환</sub></td>
-<td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="도구 보기"><br><sub>도구를 클릭해 입력／출력과 캐시 히트 상세를 펼치기</sub></td>
-</tr>
-<tr>
-<td width="290" align="center"><img src=".github/assets/sessions-view.png" width="250" alt="세션 보기"><br><sub>단일 세션을 열어 프롬프트별 토큰과 사용 도구로 분해</sub></td>
-<td width="290" align="center"><img src=".github/assets/models-view.png" width="250" alt="모델 보기"><br><sub>도구 전반에서 각 모델의 사용량과 비용을 집계</sub></td>
-<td width="290" align="center"><img src=".github/assets/devices-view.png" width="250" alt="기기 보기"><br><sub>각 기기의 사용량·비용·동기화 상태, 펼치면 기기별 상세</sub></td>
-</tr>
-</table>
+### 데스크톱에서
 
 <table>
 <tr>
-<td width="435" align="center"><img src=".github/assets/dashboard-overview.png" width="400" alt="사용 대시보드 개요"><br><sub>모든 기기를 아우른 1년치 활동 히트맵과 연속 일수</sub></td>
-<td width="435" align="center"><img src=".github/assets/dashboard-trends.png" width="400" alt="사용 대시보드 추세"><br><sub>1년치 일별 추세, 도구／모델별 누적, K선 지원</sub></td>
+<td colspan="2" width="870" align="center"><img src=".github/assets/showcase/notch-panel.gif" width="800" alt="노치 패널"><br><sub><b>노치 패널</b> — 실행 중인 세션을 노치 옆에 표시. 아래로 스와이프하면 오늘 사용량, 모든 계정의 한도, 세션, 분류를 확인</sub></td>
+</tr>
+<tr>
+<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="540" alt="가장자리 도크"><br><sub><b>가장자리 도크</b> — 화면 가장자리에 한도와 사용량을 고정. 호버하면 한도, 최근 세션, 토큰을 표시</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="540" alt="메뉴 막대와 팝오버"><br><sub><b>메뉴 막대와 트레이</b> — 프리셋을 고르거나 직접 구성: 도구 아이콘, 한도 바, 초기화 시간, 비용, 실시간 tok/s</sub></td>
+</tr>
+</table>
+
+### 앱 내부
+
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/showcase/limits-view.png" width="250" alt="한도 보기"><br><sub>여러 계정을 나란히, Codex는 로컬 계정을 원클릭 전환</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/tools-view.png" width="250" alt="도구 보기"><br><sub>도구를 클릭해 입력／출력과 캐시 히트 상세를 펼치기</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/sessions-view.png" width="250" alt="세션 보기"><br><sub>단일 세션을 열어 프롬프트별 토큰과 사용 도구로 분해</sub></td>
+</tr>
+</table>
+
+<details>
+<summary>더 많은 보기 — 프로젝트, 모델, 기기</summary>
+
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/showcase/projects-view.png" width="250" alt="프로젝트 보기"><br><sub>프로젝트별 사용량과 비용, 도구·기기 전체 합산</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/models-view.png" width="250" alt="모델 보기"><br><sub>도구 전반에서 각 모델의 사용량과 비용을 집계</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/devices-view.png" width="250" alt="기기 보기"><br><sub>각 기기의 사용량·비용·동기화 상태, 펼치면 기기별 상세</sub></td>
+</tr>
+</table>
+</details>
+
+### 사용 대시보드
+
+<table>
+<tr>
+<td width="435" align="center"><img src=".github/assets/showcase/dashboard-overview.png" width="400" alt="사용 대시보드 개요"><br><sub>모든 기기를 아우른 1년치 활동 히트맵과 연속 일수</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/dashboard-trends.png" width="400" alt="사용 대시보드 추세"><br><sub>1년치 일별 추세, 도구／모델별 누적, K선 지원</sub></td>
 </tr>
 </table>
 
@@ -172,13 +195,14 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 
 ### 인터페이스와 표시
 
-- **분류 보기** — 도구, 기기, 모델, 세션, 프로젝트, 계정 한도별
-- **메뉴 막대(macOS) / 시스템 트레이(Windows)** — 비용, 토큰, 또는 소진에 가장 가까운 공급자 한도 %를 아이콘 옆에 표시
-- **플로팅 버블** — 드래그 가능한 미니 창, 클릭/호버 미리보기
+- **노치 패널(macOS)** — 실행 중·대기 중인 세션을 노치 옆에 표시(노치가 없는 화면에서는 알약 모양으로 표시). 호버하거나 아래로 스와이프하면 오늘과 최근 7일 사용량, 모든 계정의 한도 나란히 보기, 진행 중·최근 세션, 도구/모델별 분석 페이지를 열 수 있습니다
 - **가장자리 도크 (macOS·Windows)** — 화면 가장자리에서 한도와 사용량을 확인할 수 있으며 자동 숨김, 항상 표시, 전체 화면 자동 숨김 모드를 선택할 수 있습니다. 항목에 마우스를 올리면 계정별 한도, 최근 세션, 토큰 사용량을 카드로 보여 줍니다. 설정에서 항목을 선택하고 정렬·구성할 수 있으며 메뉴 막대나 시스템 트레이에서도 켜고 끌 수 있습니다
+- **메뉴 막대(macOS) / 시스템 트레이(Windows)** — 비용, 토큰, 또는 소진에 가장 가까운 공급자 한도 %를 아이콘 옆에 표시
 - **메뉴 막대 레이아웃 편집** — 메뉴 막대와 플로팅 버블은 내장 프리셋을 쓰거나 '사용자 지정…'으로 직접 배치. AI 도구 아이콘, 한도 바, 백분율, 초기화 시간, 비용, 토큰 속도, 사용자 텍스트를 추가하고 실시간 미리보기와 함께 드래그로 정렬, 항목마다 AI 도구·계정·한도 기간·글꼴 지정
-- **외관** — 테마(라이트 포함), 도구별 색, 글래스 투명도·블러, 투명 창, 글꼴 사용자 지정
+- **플로팅 버블** — 드래그 가능한 미니 창, 클릭/호버 미리보기
 - **네이티브 macOS 위젯** — macOS 14 이상에서 소형·중형·대형 레이아웃으로 토큰 사용량과 비용, 추세, AI 도구별 잔여 할당량과 재설정 시간, 활동 히트맵, 도구·모델별 분석을 확인할 수 있습니다
+- **분류 보기** — 도구, 기기, 모델, 세션, 프로젝트, 계정 한도별
+- **외관** — 테마(라이트 포함), 도구별 색, 글래스 투명도·블러, 투명 창, 글꼴 사용자 지정
 - **도구 목록 커스터마이즈** — 추적은 유지한 채 숨기기, 고정, 순서 변경
 - **전역 단축키** — 어디서든 창 표시/숨김
 - **Discord Rich Presence** — 오늘 토큰·비용·주요 클라이언트 (옵트인)

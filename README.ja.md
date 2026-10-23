@@ -30,7 +30,7 @@
 
 ## Token Monitor とは
 
-Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 46+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップウィジェットです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。
+Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 46+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップアプリです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。メインウィンドウ、MacBook のノッチ、メニューバーやシステムトレイ、画面の端、フローティングバブル、ネイティブ macOS ウィジェットなど、目に入るあらゆる場所で確認できます。
 
 ## 対応ツール
 
@@ -113,23 +113,46 @@ Qoder CN のトークン使用量は API ではなくアプリのローカルデ
 
 ## ショーケース
 
-<table>
-<tr>
-<td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="ホームビュー"><br><sub>カスタマイズ可能なダッシュボード — 表示するモジュールと順序を選択</sub></td>
-<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="制限ビュー"><br><sub>複数アカウントを並べて表示、Codex はローカルアカウントをワンクリック切り替え</sub></td>
-<td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="ツールビュー"><br><sub>任意のツールをクリックして入力／出力とキャッシュヒットの内訳を展開</sub></td>
-</tr>
-<tr>
-<td width="290" align="center"><img src=".github/assets/sessions-view.png" width="250" alt="セッションビュー"><br><sub>単一セッションを開いて、プロンプトごとにトークンと使用ツールを分解</sub></td>
-<td width="290" align="center"><img src=".github/assets/models-view.png" width="250" alt="モデルビュー"><br><sub>ツール横断で各モデルの使用量とコストを集計</sub></td>
-<td width="290" align="center"><img src=".github/assets/devices-view.png" width="250" alt="デバイスビュー"><br><sub>各デバイスの使用量・コスト・同期状態、展開でマシン別詳細</sub></td>
-</tr>
-</table>
+### デスクトップ上で
 
 <table>
 <tr>
-<td width="435" align="center"><img src=".github/assets/dashboard-overview.png" width="400" alt="使用ダッシュボード概要"><br><sub>全デバイス横断の 1 年分アクティビティヒートマップと連続日数</sub></td>
-<td width="435" align="center"><img src=".github/assets/dashboard-trends.png" width="400" alt="使用ダッシュボードトレンド"><br><sub>1 年分の日次トレンド、ツール／モデル別に積み上げ、K 線対応</sub></td>
+<td colspan="2" width="870" align="center"><img src=".github/assets/showcase/notch-panel.gif" width="800" alt="ノッチパネル"><br><sub><b>ノッチパネル</b> — 実行中のセッションをノッチの横に表示。下にスワイプすると今日の使用量、全アカウントの制限、セッション、内訳を確認</sub></td>
+</tr>
+<tr>
+<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="540" alt="エッジドック"><br><sub><b>エッジドック</b> — 画面の端に制限と使用量を常駐。ホバーで制限、最近のセッション、トークンを表示</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="540" alt="メニューバーとポップオーバー"><br><sub><b>メニューバーとトレイ</b> — プリセットを選ぶか自分で組み立て：ツールアイコン、制限バー、リセット時間、コスト、リアルタイム tok/s</sub></td>
+</tr>
+</table>
+
+### アプリ内
+
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/showcase/limits-view.png" width="250" alt="制限ビュー"><br><sub>複数アカウントを並べて表示、Codex はローカルアカウントをワンクリック切り替え</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/tools-view.png" width="250" alt="ツールビュー"><br><sub>任意のツールをクリックして入力／出力とキャッシュヒットの内訳を展開</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/sessions-view.png" width="250" alt="セッションビュー"><br><sub>単一セッションを開いて、プロンプトごとにトークンと使用ツールを分解</sub></td>
+</tr>
+</table>
+
+<details>
+<summary>その他のビュー — プロジェクト、モデル、デバイス</summary>
+
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/showcase/projects-view.png" width="250" alt="プロジェクトビュー"><br><sub>プロジェクトごとの使用量とコスト、ツール・デバイスをまたいで集計</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/models-view.png" width="250" alt="モデルビュー"><br><sub>ツール横断で各モデルの使用量とコストを集計</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/devices-view.png" width="250" alt="デバイスビュー"><br><sub>各デバイスの使用量・コスト・同期状態、展開でマシン別詳細</sub></td>
+</tr>
+</table>
+</details>
+
+### 使用ダッシュボード
+
+<table>
+<tr>
+<td width="435" align="center"><img src=".github/assets/showcase/dashboard-overview.png" width="400" alt="使用ダッシュボード概要"><br><sub>全デバイス横断の 1 年分アクティビティヒートマップと連続日数</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/dashboard-trends.png" width="400" alt="使用ダッシュボードトレンド"><br><sub>1 年分の日次トレンド、ツール／モデル別に積み上げ、K 線対応</sub></td>
 </tr>
 </table>
 
@@ -172,13 +195,14 @@ Qoder CN のトークン使用量は API ではなくアプリのローカルデ
 
 ### インターフェースと表示
 
-- **内訳ビュー** — ツール、デバイス、モデル、セッション、プロジェクト、アカウント制限別
-- **メニューバー (macOS) / システムトレイ (Windows)** — コスト、トークン、または残量が最も少ないプロバイダー制限 % をアイコン横に表示
-- **フローティングバブル** — ドラッグ可能なミニウィンドウ、クリック/ホバープレビュー
+- **ノッチパネル（macOS）** — 実行中・待機中のセッションをノッチの横に表示（ノッチのない画面ではピル型で表示）。ホバーまたは下にスワイプすると、今日と過去 7 日間の使用量、全アカウントの制限の並列表示、進行中と最近のセッション、ツール／モデル別の内訳のページを開けます
 - **エッジドック（macOS・Windows）** — 画面の端で上限と使用量を確認でき、自動非表示、常時表示、「全画面時に自動非表示」の各モードを選べます。項目にホバーすると、各アカウントの上限、最近のセッション、トークン使用量をカードで表示します。設定で項目の選択、並べ替え、調整ができ、メニューバーまたはシステムトレイからオン／オフも切り替えられます
+- **メニューバー (macOS) / システムトレイ (Windows)** — コスト、トークン、または残量が最も少ないプロバイダー制限 % をアイコン横に表示
 - **メニューバーのレイアウト編集** — メニューバーとフローティングバブルは内蔵プリセットのほか、「カスタム…」で自分で組み立て可能。AIツールアイコン、制限バー、パーセント、リセット時間、コスト、トークンレート、カスタムテキストを追加し、ライブプレビューを見ながらドラッグで並べ替え、項目ごとに AIツール・アカウント・制限期間・フォントを指定
-- **外観** — テーマ（ライトモード含む）、ツール別カラー、ガラス透明度・ぼかし、透明ウィンドウ、フォントのカスタマイズ
+- **フローティングバブル** — ドラッグ可能なミニウィンドウ、クリック/ホバープレビュー
 - **ネイティブ macOS ウィジェット** — macOS 14 以降で、小・中・大サイズのレイアウトにトークン使用量とコスト、推移、AI ツールごとのクォータ残量とリセット時刻、アクティビティヒートマップ、ツール・モデル別の内訳を表示します
+- **内訳ビュー** — ツール、デバイス、モデル、セッション、プロジェクト、アカウント制限別
+- **外観** — テーマ（ライトモード含む）、ツール別カラー、ガラス透明度・ぼかし、透明ウィンドウ、フォントのカスタマイズ
 - **ツールリストのカスタマイズ** — 追跡は維持したまま非表示、ピン留め、順序変更
 - **グローバルショートカット** — どこからでもウィンドウの表示/非表示
 - **Discord Rich Presence** — 本日のトークン・コスト・主要クライアント（オプトイン）
