@@ -14,11 +14,13 @@ const OLLAMA_BALANCE_URL = 'https://ollama.com/api/balance';
 const OLLAMA_ME_URL = 'https://ollama.com/api/me';
 const VALIDATION_CACHE_MS = 30 * 1000;
 const ACCOUNT_CACHE_MS = 6 * 60 * 60 * 1000;
+const ACCOUNT_FAILURE_TTL_MS = 5 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 4;
 const SESSION_WINDOW_MINUTES = 5 * 60;
 const WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
 let validationCache = null;
 const accountCache = new Map();
+const accountFailures = new Map();
 const fallbackIdentities = new Map();
 const OLLAMA_SESSION_COOKIE_NAMES = new Set([
   'session',
@@ -367,18 +369,50 @@ function cachedAccount(keyHash, nowMs) {
   return cached;
 }
 
+// A failed lookup says nothing about the credential, so it must not be retried
+// on every poll: a short negative cache keeps the extra request to once per
+// failure window while the quota reading stays on the key-derived identity.
+function rememberAccountFailure(keyHash, nowMs) {
+  accountFailures.delete(keyHash);
+  accountFailures.set(keyHash, nowMs + ACCOUNT_FAILURE_TTL_MS);
+  while (accountFailures.size > MAX_CACHE_ENTRIES) {
+    accountFailures.delete(accountFailures.keys().next().value);
+  }
+}
+
+function accountFailureFresh(keyHash, nowMs) {
+  const until = accountFailures.get(keyHash);
+  if (!until) return false;
+  if (until <= nowMs) {
+    accountFailures.delete(keyHash);
+    return false;
+  }
+  return true;
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
 /**
  * The balance payload carries no identity, so a first-seen key asks the web
  * app's own session endpoint for the account email and plan. That endpoint is
- * undocumented; resolve once per process and cache, and fall back to a
- * key-derived identity when it is unavailable (the quota reading never depends
- * on it). The email hash matches the cookie lane's identity, so switching
- * credential lanes or devices does not split one account into two rows.
+ * undocumented: its fields are read case-insensitively, the answer is cached
+ * for six hours, and a failure is not retried for five minutes. The email hash
+ * matches the cookie lane's identity, so switching credential lanes or devices
+ * does not split one account into two rows. A save probe passes `allowCache`
+ * false so it can neither read nor seed this bookkeeping.
  */
-async function resolveApiIdentity(apiKey, deps, nowMs) {
+async function resolveApiIdentity(apiKey, deps, nowMs, allowCache = true) {
   const keyHash = apiKeyCacheKey(apiKey);
-  const cached = cachedAccount(keyHash, nowMs);
-  if (cached) return cached;
+  if (allowCache) {
+    const cached = cachedAccount(keyHash, nowMs);
+    if (cached) return cached;
+    if (accountFailureFresh(keyHash, nowMs)) return null;
+  }
   let data;
   try {
     data = await requestOllamaJson(OLLAMA_ME_URL, {
@@ -391,18 +425,27 @@ async function resolveApiIdentity(apiKey, deps, nowMs) {
       body: '{}'
     }, deps);
   } catch (error) {
-    if (error?.status === 'unauthorized') accountCache.delete(keyHash);
+    if (allowCache) {
+      if (error?.status === 'unauthorized') accountCache.delete(keyHash);
+      rememberAccountFailure(keyHash, nowMs);
+    }
     return null;
   }
-  const email = data && typeof data.Email === 'string' ? data.Email.trim().toLowerCase() : '';
-  if (!email || !email.includes('@')) return null;
-  const plan = data && typeof data.Plan === 'string' ? data.Plan.trim() : '';
+  const email = firstText(data?.Email, data?.email).toLowerCase();
+  if (!email || !email.includes('@')) {
+    if (allowCache) rememberAccountFailure(keyHash, nowMs);
+    return null;
+  }
+  const plan = firstText(data?.Plan, data?.plan);
   const identity = {
     accountKey: hashKey('ollama', email),
     accountEmail: email,
     accountLabel: plan
   };
-  rememberAccount(keyHash, identity, nowMs);
+  if (allowCache) {
+    accountFailures.delete(keyHash);
+    rememberAccount(keyHash, identity, nowMs);
+  }
   return identity;
 }
 
@@ -431,21 +474,24 @@ async function fetchOllamaApiLimits(apiKey, deps, nowMs, updatedAt) {
       windows: []
     });
   }
+  const allowCache = deps.probe !== true;
   const keyHash = apiKeyCacheKey(apiKey);
-  const identity = await resolveApiIdentity(apiKey, deps, nowMs);
+  const identity = await resolveApiIdentity(apiKey, deps, nowMs, allowCache);
   const accountKey = identity ? identity.accountKey : fallbackAccountKey(apiKey);
   const removals = [];
-  if (identity) {
-    const previous = fallbackIdentities.get(keyHash);
-    if (previous && previous !== accountKey && !deps.probe) {
-      removals.push({ provider: 'ollama', accountKey: previous, removed: true });
-    }
-    fallbackIdentities.delete(keyHash);
-  } else {
-    fallbackIdentities.delete(keyHash);
-    fallbackIdentities.set(keyHash, accountKey);
-    while (fallbackIdentities.size > MAX_CACHE_ENTRIES) {
-      fallbackIdentities.delete(fallbackIdentities.keys().next().value);
+  if (allowCache) {
+    if (identity) {
+      const previous = fallbackIdentities.get(keyHash);
+      if (previous && previous !== accountKey) {
+        removals.push({ provider: 'ollama', accountKey: previous, removed: true });
+      }
+      fallbackIdentities.delete(keyHash);
+    } else {
+      fallbackIdentities.delete(keyHash);
+      fallbackIdentities.set(keyHash, accountKey);
+      while (fallbackIdentities.size > MAX_CACHE_ENTRIES) {
+        fallbackIdentities.delete(fallbackIdentities.keys().next().value);
+      }
     }
   }
   const row = normalizeLimitProvider({
@@ -496,7 +542,7 @@ async function fetchOllamaLimits(options = {}, deps = {}) {
     }
     const identity = parsed.accountEmail || cookiePairs(cookieHeader)
       .filter((pair) => isRecognizedSessionCookieName(pair.name))
-      .map((pair) => `${pair.name}=${pair.value}`).join('; ');
+      .map((pair) => `${pair.name}=${pair.value}`).join(';');
     return normalizeLimitProvider({
       provider: 'ollama',
       accountKey: hashKey('ollama', identity),

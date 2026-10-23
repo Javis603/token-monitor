@@ -22,11 +22,11 @@ The API-key lane calls `https://ollama.com/api/balance` with `Authorization: Bea
 
 ### New plans
 
-`included.balance_usd`, `included.allowance_usd`, and `included.period` describe monthly included credits. They map to one `billing` window with `metric: "credits"` and `currency: "USD"`, using `period.until` as the reset; new plans report no 5-hour or weekly windows.
+`included.balance_usd`, `included.allowance_usd`, and `included.period` describe monthly included credits. They map to one `billing` window with `metric: "credits"` and `currency: "USD"`, using `period.until` as the reset; new plans report no 5-hour or weekly windows. Only the included allowance is displayed: `purchased.balance_usd` is not shown.
 
 ## Account identity
 
-`/api/balance` carries no identity, so API mode calls `POST https://ollama.com/api/me` (undocumented) for the account email and plan. The email is hashed like the cookie lane's identity, so an account keeps the same `accountKey` across lanes and devices; the lookup is resolved once per process and cached. If `/api/me` is unavailable, a key-derived identity keeps the reading usable. When the real identity is resolved later, the provider emits a `{ provider: "ollama", accountKey: <fallback>, removed: true }` control row so the fallback row is retired.
+`/api/balance` carries no identity, so API mode calls `POST https://ollama.com/api/me` (undocumented) for the account email and plan. Its fields are read case-insensitively (`Email`/`email`, `Plan`/`plan`). The email is hashed like the cookie lane's identity, so an account keeps the same `accountKey` across lanes and devices; a successful lookup is cached for six hours. If `/api/me` is unavailable, a key-derived identity keeps the reading usable and the failure is not retried for five minutes. When the real identity is resolved later, the provider emits a `{ provider: "ollama", accountKey: <fallback>, removed: true }` control row so the fallback row is retired. A save probe uses no cache and leaves none behind.
 
 ## Rate limit
 

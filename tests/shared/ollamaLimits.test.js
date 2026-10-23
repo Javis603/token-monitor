@@ -401,10 +401,88 @@ test('falls back to a key identity and removes it once the identity resolves', a
   assert.equal(first.accountKey, fallbackKey);
   assert.equal(first.accountEmail, '');
   meBroken = false;
-  const second = await fetchOllamaLimits({ ollamaApiKey: key }, { env: {}, now: () => 20_000, fetch: fetchFn });
+  const second = await fetchOllamaLimits({ ollamaApiKey: key }, { env: {}, now: () => 10_000 + 5 * 60 * 1000 + 1, fetch: fetchFn });
   assert.ok(Array.isArray(second));
   assert.equal(second[0].accountKey, hashKey('ollama', 'late@example.com'));
   assert.deepEqual(second[1], { provider: 'ollama', accountKey: fallbackKey, removed: true });
+});
+
+test('reads lowercase identity fields from the identity endpoint', async () => {
+  const provider = await fetchOllamaLimits({ ollamaApiKey: 'ollama-key-lowercase' }, {
+    env: {},
+    fetch: async (url) => String(url).endsWith('/api/balance')
+      ? jsonResponse(200, LEGACY_BALANCE)
+      : jsonResponse(200, { email: 'lower@example.com', plan: 'max' })
+  });
+  assert.equal(provider.accountKey, hashKey('ollama', 'lower@example.com'));
+  assert.equal(provider.accountEmail, 'lower@example.com');
+  assert.equal(provider.accountLabel, 'max');
+});
+
+test('a failed identity lookup is not retried on every poll', async () => {
+  const key = 'ollama-key-negative-cache';
+  let identityRequests = 0;
+  const requests = [];
+  const fetchFn = async (url) => {
+    requests.push(String(url));
+    if (String(url).endsWith('/api/balance')) return jsonResponse(200, LEGACY_BALANCE);
+    identityRequests += 1;
+    return jsonResponse(500, { error: 'boom' });
+  };
+  const first = await fetchOllamaLimits({ ollamaApiKey: key }, { env: {}, now: () => 1_000, fetch: fetchFn });
+  assert.equal(first.accountKey, hashKey('ollama', `api-key:${key}`));
+  assert.equal(identityRequests, 1);
+
+  requests.length = 0;
+  const second = await fetchOllamaLimits({ ollamaApiKey: key }, { env: {}, now: () => 2_000, fetch: fetchFn });
+  assert.equal(identityRequests, 1, 'the failure cache must suppress the repeat lookup');
+  assert.deepEqual(requests, ['https://ollama.com/api/balance']);
+  assert.equal(second.accountKey, first.accountKey);
+
+  const retried = await fetchOllamaLimits({ ollamaApiKey: key }, {
+    env: {},
+    now: () => 2_000 + 5 * 60 * 1000,
+    fetch: fetchFn
+  });
+  assert.equal(identityRequests, 2, 'the lookup is retried once the failure window lapses');
+  assert.equal(retried.accountKey, first.accountKey);
+});
+
+test('a save probe neither reads nor seeds the identity caches', async () => {
+  const key = 'ollama-key-probe-isolation';
+  const probeFetch = async (url) => String(url).endsWith('/api/balance')
+    ? jsonResponse(200, LEGACY_BALANCE)
+    : jsonResponse(200, { Email: 'probe@example.com', Plan: 'pro' });
+  const probe = await fetchOllamaLimits({ ollamaApiKey: key }, { env: {}, probe: true, fetch: probeFetch });
+  assert.equal(probe.accountKey, hashKey('ollama', 'probe@example.com'));
+
+  const failingFetch = async (url) => String(url).endsWith('/api/balance')
+    ? jsonResponse(200, LEGACY_BALANCE)
+    : jsonResponse(500, { error: 'boom' });
+  const fallback = await fetchOllamaLimits({ ollamaApiKey: key }, { env: {}, now: () => 10_000, fetch: failingFetch });
+  assert.equal(fallback.accountKey, hashKey('ollama', `api-key:${key}`), 'probe result must not be cached');
+
+  const resolvingFetch = async (url) => String(url).endsWith('/api/balance')
+    ? jsonResponse(200, LEGACY_BALANCE)
+    : jsonResponse(200, { Email: 'probe@example.com', Plan: 'pro' });
+  const resolved = await fetchOllamaLimits({ ollamaApiKey: key }, {
+    env: {},
+    now: () => 10_000 + 5 * 60 * 1000 + 1,
+    fetch: resolvingFetch
+  });
+  assert.ok(Array.isArray(resolved));
+  assert.equal(resolved[0].accountKey, hashKey('ollama', 'probe@example.com'));
+  assert.deepEqual(resolved[1], { provider: 'ollama', accountKey: hashKey('ollama', `api-key:${key}`), removed: true });
+});
+
+test('keeps the historical cookie-pair identity when the page has no email', async () => {
+  const html = '<section aria-label="Session usage 10% used"><div style="width: 10%"></div></section>';
+  const provider = await fetchOllamaLimits({ ollamaCookie: 'wos-session=a; __Secure-session=b' }, {
+    env: {},
+    fetch: async () => response(200, { html })
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.accountKey, hashKey('ollama', 'wos-session=a;__Secure-session=b'));
 });
 
 test('an API-lane probe never seeds the cookie validation cache', async () => {

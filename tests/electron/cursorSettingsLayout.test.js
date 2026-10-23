@@ -1116,6 +1116,7 @@ test('Kimi account panel makes the Code API primary and keeps Web access as a fa
   }
   for (const host of ['ollama.com', 'www.ollama.com']) {
     assert.equal(limitProviderUrlAllowed(host, '/settings'), true);
+    assert.equal(limitProviderUrlAllowed(host, '/settings/keys'), true);
     assert.equal(limitProviderUrlAllowed(host, '/'), false);
   }
 });
