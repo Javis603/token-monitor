@@ -8430,7 +8430,7 @@ app.whenReady().then(() => {
   ipcMain.handle('session:getDetail', (_event, args) => {
     const { client, sessionId, period, sessionCost } = args || {};
     return readSessionDetailForPlatform({ client, sessionId, period, sessionCost }, {
-      lookupModelPricing, getPricingRevision: () => pricingFingerprint({ pricingPath: customPricingPath() })
+      lookupModelPricing, getPricingRevision: () => pricingFingerprint({ clients: client, pricingPath: customPricingPath() })
     });
   });
   ipcMain.handle('stream:status', () => ({ connected: streamConnected, mode, ...(streamFailure || {}) }));

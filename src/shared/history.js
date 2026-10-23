@@ -72,12 +72,12 @@ function normalizeTokscaleModelNameForClient(value, client) {
 // A graph/day component summary is keyed by the source model labels. Its
 // per-model buckets can follow a Cursor rename only if no other client shares
 // the old label; otherwise the aggregate has no client split to recover.
-function normalizeTokscaleModelComponentSummary(summary, rows) {
+function normalizeTokscaleModelComponentSummary(summary, rows, normalizeModel = normalizeTokscaleModelNameForClient) {
   if (!summary?.perModel) return summary;
   const renames = new Map();
   for (const row of rows || []) {
     const model = String(row?.modelId || row?.model || row?.model_id || 'unknown');
-    const canonical = normalizeTokscaleModelNameForClient(model, row?.client);
+    const canonical = normalizeModel(model, row?.client);
     if (renames.has(model) && renames.get(model) !== canonical) return null;
     renames.set(model, canonical);
   }
