@@ -6097,6 +6097,12 @@ function ensureEdgeDockController() {
       saveSettings();
       pushSettingsToRenderer();
     },
+    // The dock has its own topmost keeper, separate from the widget's: that one
+    // is scoped to the main window and opt-in behind keepAboveTaskbar, so it does
+    // nothing for a dock parked on a screen edge. Reuses the same system-wide
+    // foreground hook, which is what turns "something else just came up" into an
+    // event instead of a poll.
+    subscribeForegroundChange,
     logger: (message) => console.log(message)
   });
   return edgeDockController;

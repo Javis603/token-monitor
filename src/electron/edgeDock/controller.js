@@ -29,6 +29,7 @@ const {
 } = require('./geometry');
 const { shapeRectsFromPolygons } = require('./mask');
 const { bubbleCommands, peekCommands, railCommands, refreshCommands, toPolygons, toSvgPath } = require('../renderer/edgeDock/shapes');
+const { createEdgeDockZOrderKeeper } = require('./zOrderKeeper');
 
 const SURFACES = Object.freeze(['peek', 'rail', 'bubble']);
 // How often `alwaysExceptFullScreen` re-checks for a full-screen app. The macOS
@@ -88,6 +89,12 @@ function createEdgeDockController(deps) {
     performHaptic = () => false,
     // (display) => whether another app is full screen on that display.
     isFullScreen = () => false,
+    // Windows-only. The dock's own z-order keeper re-asserts the topmost band,
+    // which setAlwaysOnTop alone cannot: a band has an order inside it and every
+    // later topmost window moves to the front of it. Both are injected so a
+    // test can drive the controller without a desktop.
+    createZOrderKeeper = createEdgeDockZOrderKeeper,
+    subscribeForegroundChange = null,
     logger = () => {}
   } = deps;
 
@@ -99,6 +106,7 @@ function createEdgeDockController(deps) {
   let running = false;
   let pollTimer = null;
   let wakeTopmostTimer = null;
+  let zOrderKeeper = null;
   let cells = [];
   let appearance = {};
   let builtGlass = null;
@@ -370,6 +378,10 @@ function createEdgeDockController(deps) {
       windows.peek?.moveTop?.();
     }
     fade(win, visible ? 1 : 0, duration);
+    // A reveal is the moment the dock is expected to be seen, so it is also the
+    // moment the keeper has to start watching — it only claims windows that are
+    // actually visible, and this is the call that makes one visible.
+    syncZOrder();
   }
 
   // The handle's own visibility, kept beside the fade it drives: the page plays the
@@ -758,6 +770,8 @@ function createEdgeDockController(deps) {
     // window picks this up when its page finishes loading.
     railVisible = intent.snapshot().revealed;
     showPeek();
+    // Fresh HWNDs, so the keeper's remembered window set is stale.
+    syncZOrder();
   }
 
   function showPeek() {
@@ -1244,6 +1258,7 @@ function createEdgeDockController(deps) {
     attachDisplayListeners();
     buildWindows();
     schedulePoll();
+    syncZOrder();
   }
 
   // These windows stay shown at opacity zero between reveals. Desktop restore
@@ -1265,9 +1280,43 @@ function createEdgeDockController(deps) {
     }
   }
 
+  // restoreWindowsTopmost above re-applies the *level*, which only puts the dock
+  // back in the topmost band; it does not put it back at the front of that band,
+  // so it cannot undo an overtake. The keeper handles the ordering separately and
+  // needs the same window list refreshed whenever those windows come or go —
+  // built, destroyed, revealed or retracted.
+  function syncZOrder() {
+    // Windows-only, and not merely "the keeper ignores it elsewhere": a macOS
+    // dock must not so much as build the object that would install a system-wide
+    // hook.
+    if (!running || platform !== 'win32') {
+      if (zOrderKeeper) zOrderKeeper.stop();
+      return;
+    }
+    const surfaces = refreshVisible && !peekPaintPending ? ['rail', 'bubble', 'peek'] : SURFACES;
+    const targets = surfaces.map((surface) => windows[surface]).filter(Boolean);
+    if (!targets.length) {
+      if (zOrderKeeper) zOrderKeeper.stop();
+      return;
+    }
+    if (!zOrderKeeper) {
+      zOrderKeeper = createZOrderKeeper({
+        platform,
+        subscribeForeground: subscribeForegroundChange,
+        log: process.env.TOKEN_MONITOR_DOCK_ZORDER_DEBUG === '1'
+          ? (message) => logger(`[edge-dock-zorder] ${message}`)
+          : null
+      });
+    }
+    zOrderKeeper.sync(targets);
+  }
+
   function onWake() {
     clearTimeout(wakeTopmostTimer);
     restoreWindowsTopmost();
+    // A resume is one of the few moments the shell itself reshuffles the stack,
+    // so it is the moment worth both a level repair and an order repair.
+    syncZOrder();
     // The shell can finish restoring windows after the power event. One bounded
     // follow-up also coalesces resume/unlock events; no permanent raise loop.
     wakeTopmostTimer = setTimeout(() => {
@@ -1284,6 +1333,9 @@ function createEdgeDockController(deps) {
     }
     clearTimeout(wakeTopmostTimer);
     wakeTopmostTimer = null;
+    // The timer and the system-wide hook are released with the dock. Leaving a
+    // hook installed for a dock that is off is not a thing to do.
+    if (zOrderKeeper) zOrderKeeper.stop();
     refreshFeedbackUntil = 0;
     refreshFeedbackWindow = null;
     clearTimeout(pollTimer);

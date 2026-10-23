@@ -195,7 +195,9 @@ function createFixture(options = {}) {
       settings.edgeDockSide = placement.side;
       settings.edgeDockOffset = placement.offset;
       settings.edgeDockDisplayId = placement.displayId;
-    }
+    },
+    createZOrderKeeper: options.createZOrderKeeper,
+    subscribeForegroundChange: options.subscribeForegroundChange
   });
   controller.setCells([
     { id: 'claude', kind: 'provider', label: 'Claude' },
@@ -1665,3 +1667,76 @@ for (const mode of ['autoHide', 'alwaysExceptFullScreen']) {
     assert.deepEqual(await request, { ok: true });
   });
 }
+
+// The keeper unit tests cover the decision; these cover the wiring. Without them
+// a controller that simply never called syncZOrder would keep every keeper test
+// green while the dock stayed exactly as broken in the field.
+
+function fakeZOrderKeeper() {
+  const state = { created: 0, syncs: [], stops: 0, options: null };
+  const factory = (options) => {
+    state.created += 1;
+    state.options = options;
+    return {
+      sync: (targets) => { state.syncs.push(targets.slice()); },
+      stop: () => { state.stops += 1; }
+    };
+  };
+  factory.state = state;
+  return factory;
+}
+
+test('Windows Edge Dock hands its live surfaces to a z-order keeper', (t) => {
+  const keeper = fakeZOrderKeeper();
+  const fixture = createFixture({ createZOrderKeeper: keeper });
+  t.after(() => fixture.controller.stop());
+
+  assert.equal(keeper.state.created, 1,
+    'setAlwaysOnTop only puts the dock in the topmost band; somebody has to hold its place in it');
+  assert.ok(keeper.state.syncs.length > 0, 'the keeper is built and then never told anything');
+  const last = keeper.state.syncs.at(-1);
+  assert.equal(last.length, 3, 'peek, rail and bubble are the three surfaces that can be on screen');
+  for (const surface of ['peek', 'rail', 'bubble']) {
+    assert.ok(last.includes(fixture.windowFor(surface)), `${surface} is missing from the keeper's window list`);
+  }
+  assert.equal(keeper.state.stops, 0, 'a running dock must not have released its keeper');
+});
+
+test('the Edge Dock releases its z-order keeper when it stops', () => {
+  const keeper = fakeZOrderKeeper();
+  const fixture = createFixture({ createZOrderKeeper: keeper });
+  assert.ok(keeper.state.syncs.length > 0);
+  fixture.controller.stop();
+  assert.ok(keeper.state.stops > 0,
+    'a timer and a system-wide hook outliving the dock is not something to leave behind');
+});
+
+test('a macOS Edge Dock never builds a z-order keeper', (t) => {
+  const keeper = fakeZOrderKeeper();
+  const fixture = createFixture({ platform: 'darwin', createZOrderKeeper: keeper });
+  t.after(() => fixture.controller.stop());
+  assert.equal(keeper.state.created, 0,
+    'there is no topmost band to fight on macOS, and the hook is Windows-only anyway');
+});
+
+test('rebuilt Edge Dock windows are handed to the keeper in place of the destroyed ones', (t) => {
+  const keeper = fakeZOrderKeeper();
+  const fixture = createFixture({ createZOrderKeeper: keeper });
+  t.after(() => fixture.controller.stop());
+  const before = keeper.state.syncs.at(-1).slice();
+
+  fixture.settings.edgeDockEnabled = false;
+  fixture.controller.sync();
+  fixture.settings.edgeDockEnabled = true;
+  fixture.controller.sync();
+  for (const win of FakeBrowserWindow.instances) {
+    if (!win.destroyed) win.webContents.emit('did-finish-load');
+  }
+
+  const after = keeper.state.syncs.at(-1);
+  assert.equal(after.length, 3);
+  for (const win of before) {
+    assert.ok(!after.includes(win),
+      'a rebuilt dock has fresh HWNDs, and the keeper must not keep watching the destroyed ones');
+  }
+});
