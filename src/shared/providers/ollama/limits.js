@@ -21,7 +21,7 @@ const WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
 let validationCache = null;
 const accountCache = new Map();
 const accountFailures = new Map();
-const fallbackIdentities = new Map();
+const emittedIdentities = new Map();
 const OLLAMA_SESSION_COOKIE_NAMES = new Set([
   'session',
   '__Secure-session',
@@ -488,18 +488,18 @@ async function fetchOllamaApiLimits(apiKey, deps, nowMs, updatedAt) {
   const accountKey = identity ? identity.accountKey : fallbackAccountKey(apiKey);
   const removals = [];
   if (allowCache) {
-    if (identity) {
-      const previous = fallbackIdentities.get(keyHash);
-      if (previous && previous !== accountKey) {
-        removals.push({ provider: 'ollama', accountKey: previous, removed: true });
-      }
-      fallbackIdentities.delete(keyHash);
-    } else {
-      fallbackIdentities.delete(keyHash);
-      fallbackIdentities.set(keyHash, accountKey);
-      while (fallbackIdentities.size > MAX_CACHE_ENTRIES) {
-        fallbackIdentities.delete(fallbackIdentities.keys().next().value);
-      }
+    // Track the identity this key last emitted, resolved or fallback. The
+    // runtime keeps a row per identity, so a change in either direction must
+    // retire the previous row — otherwise an expired identity cache plus a
+    // failed lookup leaves the old account and the fallback side by side.
+    const previous = emittedIdentities.get(keyHash);
+    if (previous && previous !== accountKey) {
+      removals.push({ provider: 'ollama', accountKey: previous, removed: true });
+    }
+    emittedIdentities.delete(keyHash);
+    emittedIdentities.set(keyHash, accountKey);
+    while (emittedIdentities.size > MAX_CACHE_ENTRIES) {
+      emittedIdentities.delete(emittedIdentities.keys().next().value);
     }
   }
   const row = normalizeLimitProvider({

@@ -483,6 +483,33 @@ test('a save probe checks only the key and leaves identity to the next poll', as
   assert.deepEqual(resolved[1], { provider: 'ollama', accountKey: hashKey('ollama', `api-key:${key}`), removed: true });
 });
 
+test('retires the resolved identity when a later lookup falls back to the key', async () => {
+  const key = 'ollama-key-identity-fallback';
+  let lookupWorks = true;
+  const fetchFn = async (url) => {
+    if (String(url).endsWith('/api/balance')) return jsonResponse(200, LEGACY_BALANCE);
+    return lookupWorks
+      ? jsonResponse(200, { Email: 'flip@example.com', Plan: 'pro' })
+      : jsonResponse(500, { error: 'boom' });
+  };
+  const first = await fetchOllamaLimits({ ollamaApiKey: key }, { env: {}, now: () => 1_000, fetch: fetchFn });
+  assert.equal(first.accountKey, hashKey('ollama', 'flip@example.com'));
+
+  lookupWorks = false;
+  const second = await fetchOllamaLimits({ ollamaApiKey: key }, {
+    env: {},
+    now: () => 1_000 + 6 * 60 * 60 * 1000 + 1,
+    fetch: fetchFn
+  });
+  assert.ok(Array.isArray(second), 'the identity change must carry a removal row');
+  assert.equal(second[0].accountKey, hashKey('ollama', `api-key:${key}`));
+  assert.deepEqual(second[1], {
+    provider: 'ollama',
+    accountKey: hashKey('ollama', 'flip@example.com'),
+    removed: true
+  });
+});
+
 test('keeps the historical cookie-pair identity when the page has no email', async () => {
   const html = '<section aria-label="Session usage 10% used"><div style="width: 10%"></div></section>';
   const provider = await fetchOllamaLimits({ ollamaCookie: 'wos-session=a; __Secure-session=b' }, {
