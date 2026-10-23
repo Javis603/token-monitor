@@ -240,6 +240,12 @@ async function requestSettings(fetchFn, cookieHeader, controller) {
   throw errorWithStatus('unavailable', 'Ollama returned too many redirects');
 }
 
+function finiteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function usagePercentFromRemaining(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
@@ -286,9 +292,9 @@ function parseOllamaBalance(json) {
     if (windows.length) return { windows };
     return null;
   }
-  const allowance = Number(included.allowance_usd);
-  const balance = Number(included.balance_usd);
-  if (!Number.isFinite(allowance) || allowance <= 0 || !Number.isFinite(balance)) return null;
+  const allowance = finiteNumber(included.allowance_usd);
+  const balance = finiteNumber(included.balance_usd);
+  if (allowance === null || allowance <= 0 || balance === null) return null;
   const remaining = Math.max(0, balance);
   const used = Math.max(0, Math.min(allowance, allowance - remaining));
   const period = included.period && typeof included.period === 'object' ? included.period : null;

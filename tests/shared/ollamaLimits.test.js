@@ -295,6 +295,10 @@ test('parses new-plan included credits as one money window', () => {
   assert.equal(parseOllamaBalance({}), null);
   assert.equal(parseOllamaBalance({ included: { balance_usd: 1 } }), null);
   assert.equal(parseOllamaBalance({ included: { session: { remaining_percent: 'n/a' } } }), null);
+  // Number(null) is 0, which must not read as an exhausted allowance.
+  assert.equal(parseOllamaBalance({ included: { balance_usd: null, allowance_usd: 60 } }), null);
+  assert.equal(parseOllamaBalance({ included: { balance_usd: '', allowance_usd: 60 } }), null);
+  assert.equal(parseOllamaBalance({ included: { balance_usd: 45, allowance_usd: null } }), null);
 });
 
 test('fetches the API lane with a Bearer key and uses the account email for identity', async () => {

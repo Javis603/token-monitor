@@ -1259,6 +1259,13 @@ test('DeepSeek and MiniMax key changes invalidate stale provider status before r
   assert.match(providerBody, /updatedAt < pendingSince/);
   assert.match(providerBody, /state\[config\.pendingKey\] = 0;/);
 
+  const settleBody = functionBody(app, 'scheduleExternalProviderCheckSettle', 'markExternalProviderCheckPending');
+  assert.match(settleBody, /externalProviderCheckSettled\.add\(providerName\)/);
+  assert.doesNotMatch(settleBody, /clearExternalProviderCheckPending\(providerName\)/, 'the save cutoff must survive the settle timeout');
+  const renderBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
+  assert.match(renderBody, /const settled = externalProviderCheckSettled\.has\(providerName\)/);
+  assert.match(renderBody, /pending = enabled &&[^;]*!settled/);
+  assert.match(renderBody, /settled && configured && enabled \? \{ status: 'noSyncedData' \}/);
   const linkedBody = functionBody(app, 'externalProviderAccountLinked', 'markExternalProviderCheckPending');
   assert.match(linkedBody, /state\.settings\?\.\[config\.configuredKey\]/);
   assert.match(linkedBody, /provider\?\.status === 'ok'/);
@@ -1282,7 +1289,7 @@ test('disabled credential providers settle account status instead of checking fo
   assert.match(clearBody, /clearExternalProviderCheckPending\(providerName\)/);
   assert.match(externalRenderBody, /const enabled = limitProviderEnabled\(providerName\);/);
   assert.match(externalRenderBody, /const pending = enabled &&/);
-  assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, provider, configured, source, enabled\)/);
+  assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, statusProvider, configured, source, enabled\)/);
   assert.match(copilotRenderBody, /copilotAccountStatusText\(provider, configured, source, enabled\)/);
 });
 
@@ -1639,6 +1646,7 @@ test('Factory keeps a saved-key Clear action available after validation fails', 
       document: { getElementById: id => elements.get(id) || null },
       externalProviderForAccount: () => ({ provider: 'factory', status }),
       externalProviderAccountLinked: () => false,
+      externalProviderCheckSettled: new Set(),
       limitProviderEnabled: () => true,
       setCursorStatusText: () => {},
       apiKeyAccountStatusText: () => '',
@@ -1690,6 +1698,7 @@ test('an account message survives the stats re-renders until its own condition r
     document: { getElementById: id => elements.get(id) || null },
     externalProviderForAccount: () => provider,
     externalProviderAccountLinked: () => false,
+    externalProviderCheckSettled: new Set(),
     limitProviderEnabled: () => true,
     setCursorStatusText: () => {},
     apiKeyAccountStatusText: () => '',
