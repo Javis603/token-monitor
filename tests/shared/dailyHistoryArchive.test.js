@@ -1623,3 +1623,55 @@ for (const route of ['live', 'collector-snapshot']) for (const tokens of [0, 150
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 }
+
+for (const route of ['live', 'collector-snapshot']) for (const sample of [
+  { name: 'measured token and cost growth', initialTokens: 100, tokens: 200, cost: 0.50 },
+  { name: 'cost growth beside unchanged tokens', initialTokens: 100, tokens: 100, cost: 0.50 },
+  { name: 'token growth beside unchanged cost', initialTokens: 100, tokens: 200, cost: 0.25 },
+  { name: 'masked cost growth', initialTokens: 0, tokens: 0, cost: 0.50 },
+  { name: 'fewer tokens despite a larger cost', initialTokens: 100, tokens: 50, cost: 0.50, partial: true },
+  { name: 'lower cost despite more tokens', initialTokens: 100, tokens: 200, cost: 0.10, partial: true },
+  { name: 'lower cost beside unchanged tokens', initialTokens: 100, tokens: 100, cost: 0.10, partial: true }
+]) {
+  test(`single-model to multi-model ${route} handles ${sample.name} without guessing request counts`, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-model-growth-'));
+    const options = { path: path.join(root, 'archive.json'), todayKey: '2026-10-23' };
+    try {
+      retainLiveDailyHistory(qoderLivePeriod([
+        { model: 'model-a', tokens: sample.initialTokens, cost: 0.25, messages: 1 }
+      ]), options);
+      const incoming = qoderLivePeriod([
+        { model: 'model-a', tokens: sample.tokens, cost: sample.cost, messages: 2 },
+        { model: 'model-b', tokens: 100, cost: 0.25, messages: 1 }
+      ]);
+      if (route === 'live') retainLiveDailyHistory(incoming, options);
+      else {
+        const liveDays = captureLiveDailyHistory({}, incoming, options).liveDays;
+        retainDailyHistory({ contributions: [] }, { ...options, liveDays });
+      }
+      const expectedTokens = sample.partial ? sample.initialTokens : sample.tokens;
+      const expectedCost = sample.partial ? 0.25 : sample.cost;
+      // Reload the persisted archive through the public History entry point.
+      const rows = retainDailyHistory({ contributions: [] }, options).contributions[0].clients;
+      assert.equal(rows.length, 2);
+      const a = rows.find(row => row.modelId === 'model-a');
+      const b = rows.find(row => row.modelId === 'model-b');
+      assert.equal(a.tokens.input, expectedTokens);
+      assert.equal(a.cost, expectedCost);
+      assert.equal(b.tokens.input, 100);
+      assert.equal(b.cost, 0.25);
+      // A complete graph still owns an explicit correction to zero.
+      const corrected = retainDailyHistory(graph(options.todayKey, [
+        client('qodercn', 'model-a', expectedTokens, 0, 2),
+        client('qodercn', 'model-b', 100, 0, 1)
+      ]), options).contributions[0].clients;
+      assert.equal(corrected.find(row => row.modelId === 'model-a').cost, 0);
+      assert.equal(corrected.find(row => row.modelId === 'model-b').cost, 0);
+      assert.equal(corrected.find(row => row.modelId === 'model-a').messages, 2);
+      assert.equal(corrected.find(row => row.modelId === 'model-b').messages, 1);
+      const saved = JSON.parse(fs.readFileSync(options.path, 'utf8'));
+      assert.ok(Object.values(saved.liveDays[options.todayKey].observations)
+        .every(row => row.creditMessagesIncomplete !== true));
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+}

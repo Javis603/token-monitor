@@ -517,12 +517,12 @@ function liveDayIsGreater(incoming, previous) {
 }
 
 function isPartialCreditObservation(incoming, previous) {
-  return incoming?.client === 'qodercn' && previous
-    && (num(incoming.tokens) < num(previous.tokens)
-      || num(incoming.messages) < num(previous.messages)
-      || (incoming.creditMessagesIncomplete === true
-        && ((previous.creditMessagesIncomplete !== true && num(previous.messages) > 0)
-          || num(incoming.cost) < num(previous.cost))));
+  if (incoming?.client !== 'qodercn' || !previous) return false;
+  if (num(incoming.tokens) < num(previous.tokens)) return true;
+  // Multi-model live counts are unknown, not zero. Accept nondecreasing
+  // tokens and cost, but leave downward price corrections to complete data.
+  if (incoming.creditMessagesIncomplete === true) return num(incoming.cost) < num(previous.cost);
+  return num(incoming.messages) < num(previous.messages);
 }
 
 // A changed pricing revision makes matching graph usage authoritative, even
@@ -548,6 +548,11 @@ function withReconciledGraphCosts(day, graphDay, liveDay, reprice = false, prici
       return [key, observation];
     }
     const useGraphPrice = reprice || revisionChanged || (sourceRefresh && qoderCredits);
+    // A fresh graph supplies the per-model counts a multi-model live report
+    // lacks. Confirm them together with its price, without lowering coverage.
+    const confirmsCounts = sourceRefresh && qoderCredits
+      && liveObservation.creditMessagesIncomplete === true
+      && !isPartialCreditObservation(graphObservation, liveObservation);
     const isCursor = normalizeTokscaleClientName(observation.client) === 'cursor';
     if ((!useGraphPrice && typeof pricingRevision !== 'string' && !isCursor && !qoderCredits)
       || !graphObservation
@@ -555,18 +560,19 @@ function withReconciledGraphCosts(day, graphDay, liveDay, reprice = false, prici
       || num(graphObservation.tokens) !== num(liveObservation.tokens)
       // Equal tokens cannot prove equal usage when some requests are masked.
       // A partial request set must not reprice a more complete retained row.
-      || (observation.client === 'qodercn' && (num(graphObservation.messages) !== num(liveObservation.messages)
+      || (observation.client === 'qodercn' && !confirmsCounts && (num(graphObservation.messages) !== num(liveObservation.messages)
         || num(graphObservation.messages) !== num(observation.messages)
         || (!useGraphPrice && liveObservation.creditMessagesIncomplete === true)))) {
       return [key, observation];
     }
     const cost = useGraphPrice || (isCursor && num(graphObservation.cost) > 0)
       ? graphObservation.cost : liveObservation.cost;
-    if (num(cost) === num(observation.cost)
+    if (!confirmsCounts && num(cost) === num(observation.cost)
       && (typeof pricingRevision !== 'string' || observation.pricingRevision === pricingRevision)) return [key, observation];
     changed = true;
     return [key, {
       ...observation, cost,
+      ...(confirmsCounts ? { messages: graphObservation.messages, creditMessagesIncomplete: false } : {}),
       ...(typeof pricingRevision === 'string' ? { pricingRevision } : {})
     }];
   }));
