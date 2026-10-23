@@ -4289,6 +4289,27 @@ html.is-windows .settings-panel select option {
   text-align: right;
 }
 .row-value { color: var(--text); white-space: nowrap; }
+/* The generic wrap rule sizes a 14px icon trigger. Both token columns are
+   metrics, so they keep their own width and alignment when the popover
+   attaches. The popover follows the cost line's smaller type and a tighter
+   row gap, since it only ever holds three one-line cells here. */
+.row-value-wrap.limit-detail-tooltip-wrap,
+.detail-ex-value.limit-detail-tooltip-wrap {
+  display: block;
+  width: auto;
+  height: auto;
+  flex: 0 0 auto;
+  /* The icon rule also centers its child; a block container that keeps it
+     shrink-wraps the number and leaves a glyph-wide gap at the right edge. */
+  place-items: normal;
+  text-align: right;
+}
+.row-value-wrap .limit-detail-tooltip,
+.detail-ex-value .limit-detail-tooltip {
+  font-size: 0.625rem;
+  line-height: 1.15;
+  row-gap: 2px;
+}
 .row-cost { color: var(--muted); font-size: 0.625rem; white-space: nowrap; }
 .bar { width: 100%; height: 6px; overflow: hidden; border-radius: 3px; background: rgba(var(--sunken-rgb), 0.46); box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.04); }
 .bar-fill {
