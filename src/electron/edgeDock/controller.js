@@ -111,6 +111,7 @@ function createEdgeDockController(deps) {
   let bubblePlaced = null;
   let bubbleVisible = false;
   let railVisible = false;
+  let pointerOnRail = false;
   const refreshHapticTarget = Symbol('refresh');
   let hapticTarget = null;
   // How many times the rail has been revealed, as an event the page can key the
@@ -356,11 +357,10 @@ function createEdgeDockController(deps) {
         win.setAlwaysOnTop(true, 'pop-up-menu');
       }
     } else if (platform === 'win32' && revealing) {
-      // Opacity-only reveals never show the HWND again. After desktop restore,
-      // Windows can retain WS_EX_TOPMOST while stacking it behind ordinary
-      // windows. Reapply native ordering on each reveal, even if the flag is
-      // still true, without repeatedly raising it during a steady hover.
-      win.setAlwaysOnTop(true, 'pop-up-menu');
+      // Restoring only the newly revealed card leaves an already-visible rail
+      // behind other windows. Repair the visible Dock together, even when its
+      // HWNDs still report topmost, preserving the card/refresh stacking.
+      restoreWindowsTopmost(true);
     }
     // The nested refresh circle overlaps the rail's transparent shoulder, but
     // macOS still hit-tests that rail rectangle. Keep the action above it,
@@ -641,6 +641,7 @@ function createEdgeDockController(deps) {
       }
     }
     railVisible = false;
+    pointerOnRail = false;
     peeking = false;
     peekNear = false;
     pointerOnHandle = false;
@@ -1003,6 +1004,8 @@ function createEdgeDockController(deps) {
           inCorridor: Boolean(bubbleRect && rectContains(edgeDockCorridorBounds(current.rail, bubbleRect), point)),
           cellIndex: revealed ? edgeDockCellAt(point, current.rail, cells.length, metrics()) : null
         };
+        const enteredRail = input.inRail && !pointerOnRail;
+        pointerOnRail = input.inRail;
         // The refresh action shares the readouts' enter-once hover feedback.
         const hoveredTarget = inRefresh
           ? (!peekPaintPending && settings().edgeDockRefreshEnabled === true && canRefreshLimits() === true
@@ -1016,6 +1019,9 @@ function createEdgeDockController(deps) {
         applyEffects(intent.tick(input, Date.now()), { hapticReveal: !alwaysVisible() });
         refreshHovered = input.inRail || input.inBubble || input.inCorridor;
         syncRefresh(current);
+        // An always-visible rail has no reveal transition of its own. Recover
+        // on entry (including a return from its card), never on every poll.
+        if (platform === 'win32' && revealed && enteredRail) restoreWindowsTopmost(true);
       }
     } catch (error) {
       logger(`[edge-dock] poll failed: ${error.message}`);
@@ -1246,15 +1252,15 @@ function createEdgeDockController(deps) {
     schedulePoll();
   }
 
-  // These windows stay shown at opacity zero between reveals. Desktop restore
-  // can leave them behind ordinary windows, including after resume has fired
-  // but before the user unlocks. Repair both events, including open surfaces.
-  // Restore the native level and stacking without changing content or focus.
-  function restoreWindowsTopmost() {
+  // Opacity-only surfaces can retain their topmost flags while their ordering
+  // is stale. Power events repair all HWNDs; reveals and rail entry repair the
+  // visible group without changing content, visibility or focus.
+  function restoreWindowsTopmost(visibleOnly = false) {
     if (!running) return;
     // The refresh button uses peek and must stay above the rail's shoulder.
     const surfaces = refreshVisible && !peekPaintPending ? ['rail', 'bubble', 'peek'] : SURFACES;
     for (const surface of surfaces) {
+      if (visibleOnly && !visibleTargets[surface]) continue;
       const win = windows[surface];
       if (!alive(win)) continue;
       try {
