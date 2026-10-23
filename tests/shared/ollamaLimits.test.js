@@ -6,8 +6,10 @@ const test = require('node:test');
 const {
   normalizeOllamaCookieHeader,
   ollamaSessionCookie,
+  ollamaApiKey,
   rememberOllamaValidation,
   parseOllamaUsageHtml,
+  parseOllamaBalance,
   fetchOllamaLimits
 } = require('../../src/shared/providers/ollama/limits');
 const { hashKey } = require('../../src/shared/hashKey');
@@ -223,4 +225,221 @@ test('classifies signed-out HTML, auth failures, throttling, and network errors'
     env: {}, fetch: async () => { throw new TypeError('network down'); }
   });
   assert.equal(failed.status, 'unavailable');
+});
+
+
+function jsonResponse(status, body) {
+  return {
+    ok: status >= 200 && status < 300,
+    status: Number(status),
+    headers: { get: () => null },
+    json: async () => body,
+    text: async () => JSON.stringify(body)
+  };
+}
+
+const LEGACY_BALANCE = {
+  included: {
+    session: { remaining_percent: 85.61, resets_at: '2026-10-23T14:00:00Z' },
+    weekly: { remaining_percent: 33.37, resets_at: '2026-10-26T00:00:00Z' }
+  },
+  purchased: { balance_usd: 0 }
+};
+
+const CREDITS_BALANCE = {
+  included: {
+    balance_usd: 45,
+    allowance_usd: 60,
+    period: { from: '2026-10-08T08:00:00Z', until: '2026-11-08T08:00:00Z' }
+  },
+  purchased: { balance_usd: 12.5 }
+};
+
+test('ollamaApiKey prefers settings and supports env aliases', () => {
+  assert.equal(ollamaApiKey({ OLLAMA_API_KEY: 'env-key' }, { ollamaApiKey: 'settings-key' }), 'settings-key');
+  assert.equal(ollamaApiKey({ TOKEN_MONITOR_OLLAMA_API_KEY: 'tm-key' }), 'tm-key');
+  assert.equal(ollamaApiKey({ OLLAMA_API_KEY: 'legacy-key' }), 'legacy-key');
+  assert.equal(ollamaApiKey({}), '');
+});
+
+test('parses the legacy balance into used session and weekly windows', () => {
+  const parsed = parseOllamaBalance(LEGACY_BALANCE);
+  assert.deepEqual(parsed.windows.map((window) => [window.kind, window.usedPercent, window.windowMinutes]), [
+    ['session', 14.39, 300],
+    ['weekly', 66.63, 10080]
+  ]);
+  assert.equal(parsed.windows[0].resetsAt, '2026-10-23T14:00:00.000Z');
+  assert.equal(parsed.windows[1].resetsAt, '2026-10-26T00:00:00.000Z');
+});
+
+test('parses new-plan included credits as one money window', () => {
+  const parsed = parseOllamaBalance(CREDITS_BALANCE);
+  assert.equal(parsed.windows.length, 1);
+  assert.deepEqual({
+    kind: parsed.windows[0].kind,
+    metric: parsed.windows[0].metric,
+    used: parsed.windows[0].used,
+    limit: parsed.windows[0].limit,
+    remaining: parsed.windows[0].remaining,
+    currency: parsed.windows[0].currency,
+    resetsAt: parsed.windows[0].resetsAt
+  }, {
+    kind: 'billing',
+    metric: 'credits',
+    used: 15,
+    limit: 60,
+    remaining: 45,
+    currency: 'USD',
+    resetsAt: '2026-11-08T08:00:00.000Z'
+  });
+  assert.equal(parseOllamaBalance({}), null);
+  assert.equal(parseOllamaBalance({ included: { balance_usd: 1 } }), null);
+  assert.equal(parseOllamaBalance({ included: { session: { remaining_percent: 'n/a' } } }), null);
+});
+
+test('fetches the API lane with a Bearer key and uses the account email for identity', async () => {
+  const requests = [];
+  const provider = await fetchOllamaLimits({ ollamaApiKey: 'ollama-key-identity' }, {
+    env: {},
+    now: () => Date.parse('2026-10-23T12:00:00Z'),
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/balance')) return jsonResponse(200, LEGACY_BALANCE);
+      if (String(url).endsWith('/api/me')) return jsonResponse(200, { Email: 'User@Example.com', Plan: 'pro' });
+      throw new Error(`unexpected url ${url}`);
+    }
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'api');
+  assert.equal(provider.accountEmail, 'user@example.com');
+  assert.equal(provider.accountLabel, 'pro');
+  assert.equal(provider.accountKey, hashKey('ollama', 'user@example.com'));
+  assert.deepEqual(provider.windows.map((window) => [window.kind, window.usedPercent]), [['session', 14.39], ['weekly', 66.63]]);
+  assert.equal(requests[0].url, 'https://ollama.com/api/balance');
+  assert.equal(requests[0].init.headers.Authorization, 'Bearer ollama-key-identity');
+  assert.equal(requests[1].url, 'https://ollama.com/api/me');
+  assert.equal(requests[1].init.method, 'POST');
+  assert.equal(requests[1].init.headers.Authorization, 'Bearer ollama-key-identity');
+});
+
+test('the API lane wins when both credentials are configured', async () => {
+  const requests = [];
+  const provider = await fetchOllamaLimits({
+    ollamaApiKey: 'ollama-key-precedence',
+    ollamaCookie: 'wos-session=cookie-lane'
+  }, {
+    env: {},
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/balance')) return jsonResponse(200, LEGACY_BALANCE);
+      return jsonResponse(200, { Email: 'both@example.com', Plan: 'max' });
+    }
+  });
+  assert.equal(provider.source, 'api');
+  assert.ok(requests.every((request) => !request.url.includes('/settings')), 'cookie lane must not be polled');
+  assert.equal(requests.some((request) => request.init.headers && request.init.headers.Cookie), false);
+});
+
+test('maps API failures to provider statuses without falling back to the cookie lane', async () => {
+  const cases = [
+    [jsonResponse(401, { error: 'invalid credentials' }), 'unauthorized'],
+    [jsonResponse(429, { error: 'too many requests' }), 'sourceRateLimited'],
+    [jsonResponse(404, { error: 'not found' }), 'unavailable'],
+    [jsonResponse(500, { error: 'boom' }), 'unavailable']
+  ];
+  for (const [result, expected] of cases) {
+    const provider = await fetchOllamaLimits({ ollamaApiKey: `fail-${expected}`, ollamaCookie: 'wos-session=x' }, {
+      env: {},
+      fetch: async () => result
+    });
+    assert.equal(provider.status, expected);
+    assert.equal(provider.source, 'api');
+    assert.equal(provider.provider, 'ollama');
+  }
+  const malformed = await fetchOllamaLimits({ ollamaApiKey: 'fail-json' }, {
+    env: {},
+    fetch: async (url) => String(url).endsWith('/api/me')
+      ? jsonResponse(200, {})
+      : { ok: true, status: 200, headers: { get: () => null }, json: async () => { throw new SyntaxError('bad'); } }
+  });
+  assert.equal(malformed.status, 'unavailable');
+  const network = await fetchOllamaLimits({ ollamaApiKey: 'fail-network' }, {
+    env: {},
+    fetch: async () => { throw new TypeError('network down'); }
+  });
+  assert.equal(network.status, 'unavailable');
+  assert.equal(network.source, 'api');
+});
+
+test('caches the account identity instead of asking /api/me on every poll', async () => {
+  const requests = [];
+  const fetchFn = async (url) => {
+    requests.push(String(url));
+    return String(url).endsWith('/api/balance')
+      ? jsonResponse(200, LEGACY_BALANCE)
+      : jsonResponse(200, { Email: 'cached@example.com', Plan: 'pro' });
+  };
+  const first = await fetchOllamaLimits({ ollamaApiKey: 'ollama-key-cache' }, { env: {}, now: () => 1_000, fetch: fetchFn });
+  assert.equal(first.accountKey, hashKey('ollama', 'cached@example.com'));
+  assert.deepEqual(requests, ['https://ollama.com/api/balance', 'https://ollama.com/api/me']);
+  requests.length = 0;
+  const second = await fetchOllamaLimits({ ollamaApiKey: 'ollama-key-cache' }, { env: {}, now: () => 2_000, fetch: fetchFn });
+  assert.equal(second.accountKey, first.accountKey);
+  assert.deepEqual(requests, ['https://ollama.com/api/balance']);
+});
+
+test('falls back to a key identity and removes it once the identity resolves', async () => {
+  const key = 'ollama-key-fallback';
+  const fallbackKey = hashKey('ollama', `api-key:${key}`);
+  let meBroken = true;
+  const fetchFn = async (url) => {
+    if (String(url).endsWith('/api/balance')) return jsonResponse(200, LEGACY_BALANCE);
+    if (meBroken) return jsonResponse(500, { error: 'boom' });
+    return jsonResponse(200, { Email: 'late@example.com', Plan: 'pro' });
+  };
+  const first = await fetchOllamaLimits({ ollamaApiKey: key }, { env: {}, now: () => 10_000, fetch: fetchFn });
+  assert.equal(first.accountKey, fallbackKey);
+  assert.equal(first.accountEmail, '');
+  meBroken = false;
+  const second = await fetchOllamaLimits({ ollamaApiKey: key }, { env: {}, now: () => 20_000, fetch: fetchFn });
+  assert.ok(Array.isArray(second));
+  assert.equal(second[0].accountKey, hashKey('ollama', 'late@example.com'));
+  assert.deepEqual(second[1], { provider: 'ollama', accountKey: fallbackKey, removed: true });
+});
+
+test('an API-lane probe never seeds the cookie validation cache', async () => {
+  const provider = await fetchOllamaLimits({ ollamaApiKey: 'ollama-key-probe' }, {
+    env: {},
+    bypassValidationCache: true,
+    fetch: async (url) => String(url).endsWith('/api/balance')
+      ? jsonResponse(200, LEGACY_BALANCE)
+      : jsonResponse(200, { Email: 'probe@example.com', Plan: 'pro' })
+  });
+  assert.equal(provider.status, 'ok');
+  rememberOllamaValidation('wos-session=must-not-cache', provider, 1_000);
+  let requests = 0;
+  const after = await fetchOllamaLimits({ ollamaCookie: 'wos-session=must-not-cache' }, {
+    env: {},
+    now: () => 1_001,
+    fetch: async () => { requests += 1; return response(500); }
+  });
+  assert.equal(after.status, 'unavailable');
+  assert.equal(requests, 1);
+});
+
+test('maps the new-plan balance to a credits window on the wire', async () => {
+  const provider = await fetchOllamaLimits({ ollamaApiKey: 'ollama-key-credits' }, {
+    env: {},
+    fetch: async (url) => String(url).endsWith('/api/balance')
+      ? jsonResponse(200, CREDITS_BALANCE)
+      : jsonResponse(200, { Email: 'credits@example.com', Plan: 'pro' })
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.windows.length, 1);
+  assert.equal(provider.windows[0].kind, 'billing');
+  assert.equal(provider.windows[0].metric, 'credits');
+  assert.equal(provider.windows[0].remaining, 45);
+  assert.equal(provider.windows[0].limit, 60);
+  assert.equal(provider.windows[0].usedPercent, 25);
+  assert.equal(provider.windows[0].resetsAt, '2026-11-08T08:00:00.000Z');
 });

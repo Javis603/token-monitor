@@ -48,7 +48,7 @@
     minimax: { api: 'API' },
     openrouter: { api: 'API' },
     volcengine: { api: 'API', cli: 'arkcli' },
-    ollama: { web: 'Web' },
+    ollama: { web: 'Web', api: 'API' },
     trae: { api: 'Web' },
     alibaba: { web: 'Web' },
     stepfun: { web: 'Web' },
@@ -87,7 +87,7 @@
     typesafe: ['Manual login', 'Web'],
     openrouter: ['Pay-as-you-go', 'API key'],
     volcengine: ['Auto', 'API key', 'CLI'],
-    ollama: ['Manual login', 'Web'],
+    ollama: ['Manual login', 'Web/API'],
     trae: ['Manual login', 'Web'],
     alibaba: ['Token Plan', 'Web'],
     stepfun: ['Coding/Token Plan', 'Web'],
@@ -470,15 +470,22 @@
       // settings field, while a stale sign-in only opening Cline fixes. The shared
       // vocabulary carries one `unauthorized` for both, so the label reads the lane
       // off the row: providers/cline/limits.js reports `api` for a configured key
-      // and `oauth` for the discovered sign-in. This is the one provider whose
-      // status branches on source, and it does so because both causes are reachable
-      // with neither of them rarer than the other — the file lane is the discovery
+      // and `oauth` for the discovered sign-in. Its status branches on source
+      // because both causes are reachable with neither of them rarer than the
+      // other — the file lane is the discovery
       // default and its access token expires hourly. Grok and kiro name the vendor's
       // own action here for the same reason, without needing the split.
       if (providerName === 'cline') {
         return sourceId(provider) === 'api'
           ? { label: 'Update API key', tone: 'setup' }
           : { label: 'Open Cline', tone: 'setup' };
+      }
+      // Ollama accepts an API key or a web session cookie; both causes land on
+      // `unauthorized`, so the label follows the lane the row was read from.
+      if (providerName === 'ollama') {
+        return sourceId(provider) === 'api'
+          ? { label: 'Update API key', tone: 'setup' }
+          : { label: 'Sign in again', tone: 'setup' };
       }
       return providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
         ? { label: 'Update API key', tone: 'setup' }
@@ -493,9 +500,9 @@
     if (status === 'unavailable') return { label: 'Unavailable', tone: 'warn' };
     if (providerName === 'mimo' && status === 'error') return { label: 'Unavailable', tone: 'warn' };
     if (status === 'notConfigured') {
-      if (providerName === 'kimi') return { label: 'Add credential', tone: 'setup' };
+      if (providerName === 'kimi' || providerName === 'ollama') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'antigravity') return { label: 'Not set up', tone: 'setup' };
-      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'typesafe' || providerName === 'stepfun' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama' || providerName === 'alibaba') return { label: 'Sign in', tone: 'setup' };
+      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'typesafe' || providerName === 'stepfun' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'alibaba') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       // Cline joins the key-configured family: with neither a key nor a stored
       // sign-in, the one thing this application can be told is a key (the sign-in

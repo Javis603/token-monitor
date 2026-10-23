@@ -3092,7 +3092,7 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
   assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Auto', 'Desktop app', 'Web']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'Web']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'Web/API']);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'factory', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zai', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'api' }), 'API');
@@ -3101,6 +3101,7 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'trae', source: 'api' }), 'Web');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'workbuddy', source: 'local' }), 'Local');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'ollama', source: 'web' }), 'Web');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'ollama', source: 'api' }), 'API');
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'factory', status: 'notConfigured' }),
     { label: 'Add API key', tone: 'setup' }
@@ -3143,11 +3144,15 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'ollama', status: 'notConfigured' }),
-    { label: 'Sign in', tone: 'setup' }
+    { label: 'Add credential', tone: 'setup' }
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'ollama', status: 'unauthorized' }),
     { label: 'Sign in again', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'ollama', status: 'unauthorized', source: 'api' }),
+    { label: 'Update API key', tone: 'setup' }
   );
 });
 
