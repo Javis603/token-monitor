@@ -1735,6 +1735,13 @@ ansi = re.compile(rb"\\x1b\\[[0-9;?]*[ -/]*[@-~]|\\x1b[()][A-Za-z0-9]|\\x1b[78=>
 def compact(data):
     text = ansi.sub(b"", data).decode("utf-8", "ignore").lower()
     return re.sub(r"[^a-z0-9%]+", "", text)
+def menu_text(data):
+    # Ink can position words by column rather than outputting literal spaces.
+    return ansi.sub(b"", re.sub(rb"\\x1b\\[[0-9]+[GC]", b" ", data)).decode("utf-8", "ignore")
+def input_prompt(data):
+    text = menu_text(data)
+    return (re.search(r"Claude\\s+Code\\s+v[0-9]", text)
+            and re.search(r"(?:^|[\\r\\n])\\s*[❯›>][ \\t\\u00a0]*(?:[\\r\\n]|$)", text))
 def write_master(data):
     try:
         os.write(master, data)
@@ -1748,9 +1755,14 @@ sent_cmd = False
 matched_at = None
 handled_prompts = set()
 prompt_tokens = [
-    "quicksafetycheck", "yesitrustthisfolder", "pressentertocontinue",
-    "readytocodehere", "showplanusage", "showplan"
+    "pressentertocontinue", "showplanusage", "showplan"
 ]
+# Trust is a menu, not a press-Enter prompt. Wait for its complete rendering,
+# observe the affirmative selection, then wait for the normal input prompt.
+trust_state = "unseen"
+trust_ready_at = None
+trust_selection_end = 0
+trust_confirm_end = 0
 slash_bytes = (slash_command + "\\r").encode("utf-8")
 pty_closed = False
 try:
@@ -1775,6 +1787,38 @@ try:
             break
         scan = compact(buf[-20000:])
         now = time.time()
+        if trust_state == "unseen" and any(token in scan for token in ("quicksafetycheck", "readytocodehere", "yesitrustthisfolder")):
+            trust_state = "menu"
+        if trust_state in ("menu", "selection", "confirmed"):
+            text = menu_text(buf)
+            if trust_state == "confirmed":
+                if input_prompt(buf[trust_confirm_end:]):
+                    trust_state = "done"
+            elif ("yesitrustthisfolder" in scan and ("noexit" in scan or "nocontinuewithoutthesepermissions" in scan)
+                    and ("entertoconfirm" in scan or "entertoselect" in scan)):
+                # Claude 2.1.309 refuses confirmation for 150 ms after mount.
+                # Allow the complete menu to settle without blocking PTY reads.
+                if trust_ready_at is None:
+                    trust_ready_at = now
+                if now - trust_ready_at < 0.25:
+                    continue
+                choices = list(re.finditer(r"[❯›>] *(?:[0-9]+\\. *)?(Yes, I trust this folder|No, exit|No, continue without these permissions)", text))
+                if choices:
+                    choice = choices[-1]
+                    if choice.group(1) == "Yes, I trust this folder" and (trust_state == "menu" or choice.end() > trust_selection_end):
+                        if not write_master(b"\\r"):
+                            break
+                        trust_state = "confirmed"
+                        trust_confirm_end = len(buf)
+                    elif trust_state == "menu":
+                        # Use the displayed order, never assume Yes is the default.
+                        direction = b"\\x1b[B" if text.rfind("Yes, I trust this folder") > choice.start() else b"\\x1b[A"
+                        if not write_master(direction):
+                            break
+                        trust_state = "selection"
+                        trust_selection_end = choice.end()
+            if trust_state != "done":
+                continue
         prompt_token = next(
             (
                 token for token in sorted(prompt_tokens, key=len, reverse=True)
@@ -1793,10 +1837,11 @@ try:
                 last_enter = now
         if io_closed:
             break
-        if not sent_cmd and now - start > 5:
+        if not sent_cmd and now - start > 5 and input_prompt(buf):
             if not write_master(slash_bytes):
                 break
             sent_cmd = True
+            last_enter = now
         if sent_cmd and now - last_enter > 0.8:
             if not write_master(b"\\r"):
                 break
@@ -1830,6 +1875,10 @@ finally:
 # A signal observed before our cleanup is a failure, not an intentional stop.
 if early_exit_code is not None and early_exit_code < 0:
     early_exit_code = 128 - early_exit_code
+if trust_state in ("menu", "selection", "confirmed") and not early_exit_code:
+    raise RuntimeError("Claude workspace trust did not complete")
+if not sent_cmd and early_exit_code is None:
+    raise RuntimeError("Claude input prompt did not become ready")
 sys.exit(early_exit_code if early_exit_code is not None else 0)
 `.trim();
 }

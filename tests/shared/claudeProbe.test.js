@@ -323,8 +323,9 @@ test('real PTY keeps concurrent usage/status restricted and accepts intentional 
 import json, os, signal, sys, time
 signal.signal(signal.SIGTERM, lambda *args: sys.exit(143))
 args = sys.argv[1:]
-print('Yes, I trust this folder', flush=True)
+print('Press Enter to continue', flush=True)
 first = sys.stdin.readline()
+print('Claude Code v2.1.309\\r\\n❯ ', flush=True)
 while True:
     command = sys.stdin.readline().strip()
     if command.startswith('/'):
@@ -358,6 +359,114 @@ time.sleep(10)
     assert.equal(receipt.cwd, dir);
   }
   assert.equal(fs.readFileSync(path.join(dir, '.claude', 'settings.local.json'), 'utf8'), planted);
+});
+
+test('PTY trust selection waits for a complete menu and selected Yes before confirming', { skip: !hasPython }, async t => {
+  for (const mode of ['default-no', 'default-yes', 'fragmented', 'slow-start', 'trusted']) {
+    for (const command of mode === 'slow-start' ? ['status'] : ['usage', 'status']) await t.test(`${mode}: /${command}`, async t => {
+      const f = fixture(t);
+      const fake = path.join(f.root, 'trust-menu.py');
+      const receipt = path.join(f.root, 'trust.json');
+      fs.writeFileSync(fake, `#!/usr/bin/python3
+import json, os, select, signal, sys, time, tty
+tty.setraw(0)
+signal.signal(signal.SIGTERM, lambda *args: sys.exit(143))
+mode = os.environ['TRUST_MODE']
+keys = []
+def read_key():
+    if not select.select([0], [], [], 12)[0]:
+        sys.exit(8)
+    key = os.read(0, 128)
+    keys.append(key.decode())
+    return key
+def quiet(delay):
+    if select.select([0], [], [], delay)[0]:
+        sys.exit(9)
+def menu(yes):
+    print('\\x1b[2J\\x1b[HQuick safety check: Is this a project you created or one you trust?\\r', flush=True)
+    print(('  ' if yes else '❯ ') + 'No,\\x1b[8Gexit\\r', flush=True)
+    print(('❯ ' if yes else '  ') + 'Yes,\\x1b[9GI\\x1b[11Gtrust\\x1b[17Gthis\\x1b[22Gfolder\\r', flush=True)
+    print('Enter\\x1b[8Gto\\x1b[11Gconfirm · Esc to cancel\\r', flush=True)
+if mode != 'trusted':
+    if mode == 'slow-start':
+        quiet(5.2)
+    if mode == 'fragmented':
+        print('Ready to code here?\\r', flush=True)
+        quiet(0.2)
+        print('❯ No, exit\\r', flush=True)
+        quiet(0.2)
+        print('  Yes, I trust this folder\\r', flush=True)
+        quiet(0.2)
+    menu(mode == 'default-yes')
+    quiet(0.15)
+    if mode != 'default-yes':
+        if read_key() != b'\\x1b[B':
+            sys.exit(1)
+        # The keypress and selection render are separate events, as in the real UI.
+        quiet(0.2)
+        menu(True)
+    if read_key() != b'\\r':
+        sys.exit(2)
+    # Confirmation alone is not evidence that the dialog has gone away.
+    quiet(0.2)
+print('\\x1b[2J\\x1b[HWelcome to Claude Code v2.1.309\\r\\n\\x1b[1B❯\\u00a0 \\r', flush=True)
+raw = b''
+while not raw.endswith(b'\\r'):
+    raw += read_key()
+slash = raw.decode().strip()
+with open(os.environ['TRUST_RECEIPT'], 'w') as out:
+    json.dump({'keys': keys, 'command': slash}, out)
+if slash not in ('/usage', '/status'):
+    sys.exit(3)
+print('Current session 12% left' if slash == '/usage' else 'Account: fixture', flush=True)
+time.sleep(10)
+`, { mode: 0o700 });
+      const deps = {
+        env: { ...f.env, TOKEN_MONITOR_CLAUDE_COMMAND: fake, TRUST_MODE: mode, TRUST_RECEIPT: receipt },
+        claudeProbeDir: path.join(f.root, 'probe'), pythonCommand: python,
+        readMacKeychain: false, readWindowsCredential: false,
+        stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
+        isClaudeCliAuthenticated: async () => true,
+        fetch: async () => { throw new Error('network forbidden'); },
+        spawn: (cmd, args, options) => { assert.equal(cmd, python); return spawn(cmd, args, options); }
+      };
+      if (command === 'usage') {
+        const usage = await fetchClaudeLimits({}, deps);
+        assert.equal(usage.source, 'cli');
+        assert.equal(usage.windows[0].usedPercent, 88);
+      } else assert.match(await touchClaudeAuthPath(deps), /Account: fixture/);
+      const observed = JSON.parse(fs.readFileSync(receipt));
+      assert.equal(observed.command, `/${command}`);
+      const trustKeys = mode === 'trusted' ? [] : mode === 'default-yes' ? ['\r'] : ['\x1b[B', '\r'];
+      assert.deepEqual(observed.keys.slice(0, trustKeys.length), trustKeys);
+      assert.equal(observed.keys.slice(trustKeys.length).join('').trim(), `/${command}`);
+    });
+  }
+});
+
+test('an incomplete trust menu times out without receiving Enter or a slash command', { skip: !hasPython }, async t => {
+  const f = fixture(t);
+  const fake = path.join(f.root, 'partial-menu.py');
+  const receipt = path.join(f.root, 'input');
+  fs.writeFileSync(receipt, '');
+  fs.writeFileSync(fake, `#!/usr/bin/python3
+import os, select, time, tty
+tty.setraw(0)
+print('Quick safety check: Is this a project you created or one you trust?\\r\\n❯ No, exit', flush=True)
+while True:
+    if select.select([0], [], [], 0.1)[0]:
+        with open(os.environ['RECEIPT'], 'ab') as out:
+            out.write(os.read(0, 128))
+`, { mode: 0o700 });
+  await assert.rejects(touchClaudeAuthPath({
+    env: { ...f.env, TOKEN_MONITOR_CLAUDE_COMMAND: fake, RECEIPT: receipt },
+    claudeProbeDir: path.join(f.root, 'probe'), pythonCommand: python,
+    claudeStatusTimeoutSeconds: 6,
+    spawn: (cmd, args, options) => { assert.equal(cmd, python); return spawn(cmd, args, options); }
+  }), /workspace trust did not complete/);
+  // Cleanup's /exit is allowed after the timeout; nothing should approve trust
+  // or run /status while the menu is incomplete.
+  assert.ok(['', '/exit\r'].includes(fs.readFileSync(receipt, 'utf8')));
 });
 
 test('unsupported probe flags fail once without an unsafe retry', { skip: !hasPython }, async t => {
