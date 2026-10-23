@@ -1058,8 +1058,10 @@
       const key = pageKey(page, nowMs);
       if (!force && pageKeys.get(page) === key) return;
       // Hover readings belong to the DOM they were made on; a rebuild under
-      // the pointer would otherwise drop the scrubbed day mid-gesture.
+      // the pointer would otherwise drop the scrubbed day mid-gesture; a swipe
+      // likewise owns the limits strip it measured.
       if (page === 'home' && view.scrub && !force) return;
+      if (page === 'limits' && gesture?.strip && !force) return;
       if (pageKeys.has(page)) node.classList.remove('is-entering');
       pageKeys.set(page, key);
       const pageNode = pageNodes.get(page);
