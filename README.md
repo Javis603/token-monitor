@@ -30,7 +30,7 @@
 
 ## What is Token Monitor?
 
-A desktop widget that shows live token usage and AI Tool Limits across 46+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
+A desktop app that shows live token usage and AI Tool Limits across 46+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project. It lives wherever you look: the main window, the MacBook notch, the menu bar or system tray, the edge of the screen, a floating bubble, and native macOS widgets.
 
 ## Supported Tools
 
@@ -108,23 +108,46 @@ Token Monitor supports token usage, account-limit checks, and session details se
 
 ## Showcase
 
-<table>
-<tr>
-<td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="Home View"><br><sub>Customizable dashboard — choose which modules show and their order</sub></td>
-<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="Limits View"><br><sub>Multiple accounts side by side, one-click switch of the active Codex account</sub></td>
-<td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="Tools View"><br><sub>Click any tool to expand input / output and cache-hit detail</sub></td>
-</tr>
-<tr>
-<td width="290" align="center"><img src=".github/assets/sessions-view.png" width="250" alt="Session View"><br><sub>Open a single session to break each prompt into tokens and tools used</sub></td>
-<td width="290" align="center"><img src=".github/assets/models-view.png" width="250" alt="Models View"><br><sub>Every model's usage and cost, aggregated across tools</sub></td>
-<td width="290" align="center"><img src=".github/assets/devices-view.png" width="250" alt="Devices View"><br><sub>Each device's usage, cost, and sync status — expand for per-machine detail</sub></td>
-</tr>
-</table>
+### On your desktop
 
 <table>
 <tr>
-<td width="435" align="center"><img src=".github/assets/dashboard-overview.png" width="400" alt="Usage Dashboard Overview"><br><sub>A year of activity heatmap and streaks, aggregated across all devices</sub></td>
-<td width="435" align="center"><img src=".github/assets/dashboard-trends.png" width="400" alt="Usage Dashboard Trends"><br><sub>A year of daily trends, stacked by tool / model, with K-line</sub></td>
+<td colspan="2" width="870" align="center"><img src=".github/assets/showcase/notch-panel.gif" width="800" alt="Notch Panel"><br><sub><b>Notch Panel</b> — running sessions beside the notch; swipe down for today's usage, every account's limits, sessions and breakdowns</sub></td>
+</tr>
+<tr>
+<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="400" alt="Edge Dock"><br><sub><b>Edge Dock</b> — quotas and usage parked at the screen edge; hover for limits, recent sessions and tokens</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="400" alt="Menu bar and popover"><br><sub><b>Menu bar &amp; tray</b> — pick a preset or compose your own: tool icons, quota bars, reset times, cost or live tok/s</sub></td>
+</tr>
+</table>
+
+### Inside the app
+
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/showcase/limits-view.png" width="250" alt="Limits View"><br><sub>Multiple accounts side by side, one-click switch of the active Codex account</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/tools-view.png" width="250" alt="Tools View"><br><sub>Click any tool to expand input / output and cache-hit detail</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/sessions-view.png" width="250" alt="Session View"><br><sub>Open a single session to break each prompt into tokens and tools used</sub></td>
+</tr>
+</table>
+
+<details>
+<summary>More views — projects, models and devices</summary>
+
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/showcase/projects-view.png" width="250" alt="Projects View"><br><sub>Usage and cost per project, aggregated across tools and devices</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/models-view.png" width="250" alt="Models View"><br><sub>Every model's usage and cost, aggregated across tools</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/devices-view.png" width="250" alt="Devices View"><br><sub>Each device's usage, cost, and sync status — expand for per-machine detail</sub></td>
+</tr>
+</table>
+</details>
+
+### Usage Dashboard
+
+<table>
+<tr>
+<td width="435" align="center"><img src=".github/assets/showcase/dashboard-overview.png" width="400" alt="Usage Dashboard Overview"><br><sub>A year of activity heatmap and streaks, aggregated across all devices</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/dashboard-trends.png" width="400" alt="Usage Dashboard Trends"><br><sub>A year of daily trends, stacked by tool / model, with K-line</sub></td>
 </tr>
 </table>
 
@@ -167,13 +190,14 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Interface & surfaces
 
-- **Breakdown views** — grouped by tool, device, model, session, project, or account limits
-- **Menu bar (macOS) and system tray (Windows) popover** — live cost, tokens, or the closest-to-empty provider limit % next to the icon
-- **Floating Bubble mode** — collapses the widget into a draggable mini-window with click or hover preview and tray-style content
+- **Notch Panel (macOS)** — running and waiting sessions sit beside the notch (or in a pill on screens without one); hover or swipe down to open pages for today's usage and the last seven days, every account's limits side by side, active and recent sessions, and tool / model breakdowns
 - **Edge Dock (macOS & Windows)** — keeps quotas and usage at the screen edge, with auto-hide, always-visible, or fullscreen auto-hide modes. Hover cards show account limits, recent sessions, and token usage. Choose, reorder, and configure items in Settings, and toggle it from the menu bar or system tray
+- **Menu bar (macOS) and system tray (Windows) popover** — live cost, tokens, or the closest-to-empty provider limit % next to the icon
 - **Menu bar layout composer** — the menu bar and the floating bubble can use a built-in preset or a layout you build yourself: pick "Custom…" to add AI tool icons, quota bars, percentages, reset times, cost, the live token rate, or custom text, drag to reorder against a live preview, and give each item its own AI tool, account, quota window, and typeface
-- **Appearance controls** — interface theme switching (incl. a light mode), per-tool vendor colours, glass opacity, blur, transparent window mode, and custom fonts
+- **Floating Bubble mode** — collapses the widget into a draggable mini-window with click or hover preview and tray-style content
 - **Native macOS Widgets** — View token usage and cost, trends, AI tool quota remaining and reset times, activity heatmaps, and breakdowns by tool or model in Small, Medium, and Large layouts on macOS 14+
+- **Breakdown views** — grouped by tool, device, model, session, project, or account limits
+- **Appearance controls** — interface theme switching (incl. a light mode), per-tool vendor colours, glass opacity, blur, transparent window mode, and custom fonts
 - **Customizable tool list** — hide, pin, and reorder tools in the main dashboard without changing what gets tracked
 - **Recordable global shortcut** — show or hide the window from anywhere
 - **Discord Rich Presence** — broadcast today's tokens, cost, and top client (opt-in)
