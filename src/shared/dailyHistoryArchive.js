@@ -63,6 +63,7 @@ function normalizeObservation(value) {
     tokens,
     cost,
     messages,
+    ...(value.creditMessagesIncomplete === true ? { creditMessagesIncomplete: true } : {}),
     ...(typeof value.pricingRevision === 'string' ? { pricingRevision: value.pricingRevision } : {}),
     ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {}),
     ...(tokenComponentsAvailable ? {
@@ -83,6 +84,8 @@ function addObservation(previous, candidate) {
     tokens: previous.tokens + candidate.tokens,
     cost: previous.cost + candidate.cost,
     messages: previous.messages + candidate.messages,
+    ...(previous.creditMessagesIncomplete === true || candidate.creditMessagesIncomplete === true
+      ? { creditMessagesIncomplete: true } : {}),
     reasoningTokens: num(previous.reasoningTokens) + num(candidate.reasoningTokens),
     tokenComponentsAvailable: previous.tokenComponentsAvailable === true
       && candidate.tokenComponentsAvailable === true,
@@ -405,17 +408,25 @@ function periodLiveDay(period, date) {
     }
   }
 
-  // A retained zero model price on a Qoder session proves at least one source
-  // message still exists. Preserve that lower bound, without assigning the
-  // session's whole message count to each model. An empty scan has no such
-  // evidence and must keep the previous live snapshot.
+  // Single-model sessions provide an exact request count for that model.
+  // Multi-model sessions only prove a lower bound for an explicit zero price;
+  // never assign the whole session count to each of its models.
+  const creditMessages = new Map();
+  const incompleteCreditModels = new Set();
   for (const session of Object.values(period.sessions || {})) {
     if (normalizeTokscaleClientName(session?.client) !== 'qodercn' || num(session.messageCount) <= 0) continue;
+    const modelIds = new Set([...Object.keys(session.models || {}), ...Object.keys(session.modelCosts || {})]);
     for (const [modelId, cost] of Object.entries(session.modelCosts || {})) {
-      if (cost === 0 && num(session.models?.[modelId]) === 0) {
-        addObservation('qodercn', modelId, 0, 0, 1);
-      }
+      if (num(session.models?.[modelId]) > 0) continue;
+      if (modelIds.size > 1) incompleteCreditModels.add(modelId);
+      const count = modelIds.size === 1 ? num(session.messageCount) : cost === 0 ? 1 : 0;
+      if (count > 0) creditMessages.set(modelId, (creditMessages.get(modelId) || 0) + count);
     }
+  }
+  for (const [modelId, messages] of creditMessages) addObservation('qodercn', modelId, 0, 0, messages);
+  for (const modelId of incompleteCreditModels) {
+    const observation = observations.get(observationKey({ client: 'qodercn', modelId }));
+    if (observation) observation.creditMessagesIncomplete = true;
   }
 
   const totalTokens = Math.max(0, Math.round(num(period.totalTokens)));
@@ -497,6 +508,14 @@ function liveDayIsGreater(incoming, previous) {
   return dayCost(incoming) !== dayCost(previous);
 }
 
+function isPartialCreditObservation(incoming, previous) {
+  return incoming?.client === 'qodercn' && incoming.tokens === 0 && previous?.tokens === 0
+    && (num(incoming.messages) < num(previous.messages)
+      || (incoming.creditMessagesIncomplete === true
+        && ((previous.creditMessagesIncomplete !== true && num(previous.messages) > 0)
+          || num(incoming.cost) < num(previous.cost))));
+}
+
 // A changed pricing revision makes matching graph usage authoritative, even
 // when its new cost is zero. Otherwise preserve live prices, with Cursor's
 // existing positive-graph-price preference and live fallback for missing cost.
@@ -524,7 +543,12 @@ function withReconciledGraphCosts(day, graphDay, liveDay, reprice = false, prici
     if ((!useGraphPrice && typeof pricingRevision !== 'string' && !isCursor && !qoderCredits)
       || !graphObservation
       || !liveObservation
-      || num(graphObservation.tokens) !== num(liveObservation.tokens)) {
+      || num(graphObservation.tokens) !== num(liveObservation.tokens)
+      // Zero tokens cannot prove equal usage when counters are masked. A
+      // partial request set must not reprice a more complete retained row.
+      || (qoderCredits && (num(graphObservation.messages) !== num(liveObservation.messages)
+        || num(graphObservation.messages) !== num(observation.messages)
+        || (!useGraphPrice && liveObservation.creditMessagesIncomplete === true)))) {
       return [key, observation];
     }
     const cost = useGraphPrice || (isCursor && num(graphObservation.cost) > 0)
@@ -545,6 +569,7 @@ function mergeLiveDayMetadata(liveDay, previousDay) {
   const observations = Object.fromEntries(Object.entries(liveDay.observations).map(([key, observation]) => {
     const previous = previousDay.observations[key];
     if (!previous) return [key, observation];
+    if (isPartialCreditObservation(observation, previous)) return [key, previous];
     if (liveDay.componentSummary) {
       return [key, {
         ...observation,
@@ -599,6 +624,14 @@ function captureLiveDailyHistory(existingArchive, period, options = {}) {
     }
   }
   const previous = archive.liveDays?.[date];
+  // Keep the most complete same-model credit observation before whole-day
+  // selection. Live prices win ties, while unrelated clients can still grow.
+  for (const retainedDay of [previous, archive.days[date]]) {
+    for (const [key, observation] of Object.entries(incoming.observations)) {
+      const retained = retainedDay?.observations[key];
+      if (isPartialCreditObservation(observation, retained)) incoming.observations[key] = retained;
+    }
+  }
   const equalUsage = previous && dayTokens(incoming) === dayTokens(previous);
   // Revision provenance comes from the retained rows, not a missing model key.
   // Equal totals can also be reattributed by a parser correction independently
@@ -631,6 +664,7 @@ function captureLiveDailyHistory(existingArchive, period, options = {}) {
     for (const [key, observation] of Object.entries(incoming.observations)) {
       const retained = observations[key];
       if (observation.client !== 'qodercn' || observation.tokens !== 0 || retained?.tokens !== 0
+        || isPartialCreditObservation(observation, retained)
         || (observation.cost === 0 && observation.messages === 0)) continue;
       observations[key] = {
         ...retained, cost: observation.cost,
