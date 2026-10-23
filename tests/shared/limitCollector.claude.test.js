@@ -854,6 +854,7 @@ test('Claude limits fall back to direct CLI usage in the probe directory on Wind
     }),
     existsSync: () => false,
     isClaudeCliAuthenticated: async () => true,
+    runClaudeVersion: async () => '',
     claudeProbeDir: path.join(fixtureDir, 'ignored-probe'),
     spawn: (command, args, options) => {
       starts++;
@@ -1093,6 +1094,7 @@ test('Claude PTY usage probes suppress history without changing the parent envir
       stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
       readMacKeychain: false,
       isClaudeCliAuthenticated: async () => true,
+      runClaudeVersion: async () => '',
       existsSync: () => false,
       spawn: (command, _args, options) => {
         assert.equal(command, 'python3');
@@ -1130,6 +1132,7 @@ const assert = require('node:assert/strict');
 const args = process.argv.slice(2);
 assert.equal(process.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY, '1');
 if (args[0] === 'auth') console.log('{"loggedIn":true}');
+else if (args.includes('--version')) console.log('2.1.177 (Claude Code)');
 else {
   const fs = require('node:fs');
   assert.equal(fs.realpathSync(process.cwd()), fs.realpathSync(process.env.EXPECTED_PROBE_CWD));

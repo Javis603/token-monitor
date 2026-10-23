@@ -340,7 +340,7 @@ time.sleep(10)
     claudeProbeDir: dir, platform: process.platform, pythonCommand: python,
     readMacKeychain: false, readWindowsCredential: false,
     stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
-    isClaudeCliAuthenticated: async () => true,
+    isClaudeCliAuthenticated: async () => true, runClaudeVersion: async () => '',
     fetch: async () => { throw new Error('network forbidden'); },
     spawn: (command, args, options) => { assert.equal(command, python); assert.equal(options.env.HOME, f.env.HOME); return spawn(command, args, options); } };
   const [usage] = await Promise.all([fetchClaudeLimits({}, deps), touchClaudeAuthPath(deps)]);
@@ -430,7 +430,7 @@ time.sleep(10)
         claudeProbeDir: path.join(f.root, 'probe'), pythonCommand: python,
         readMacKeychain: false, readWindowsCredential: false,
         stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
-        isClaudeCliAuthenticated: async () => true,
+        isClaudeCliAuthenticated: async () => true, runClaudeVersion: async () => '',
         fetch: async () => { throw new Error('network forbidden'); },
         spawn: (cmd, args, options) => { assert.equal(cmd, python); return spawn(cmd, args, options); }
       };
@@ -527,7 +527,7 @@ ${exit}
       claudeStatusTimeoutSeconds: 5, claudeCliTimeoutSeconds: 5,
       readMacKeychain: false, readWindowsCredential: false,
       stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
-      isClaudeCliAuthenticated: async () => true,
+      isClaudeCliAuthenticated: async () => true, runClaudeVersion: async () => '',
       fetch: async () => { throw new Error('network forbidden'); },
       spawn: (command, args, options) => {
         assert.equal(command, python);
@@ -583,7 +583,7 @@ ${exit}
       claudeProbeDir: path.join(f.root, 'probe'), pythonCommand: python,
       readMacKeychain: false, readWindowsCredential: false,
       stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
-      isClaudeCliAuthenticated: async () => true,
+      isClaudeCliAuthenticated: async () => true, runClaudeVersion: async () => '',
       fetch: async () => { throw new Error('network forbidden'); },
       spawn: (command, args, options) => {
         assert.equal(command, python);

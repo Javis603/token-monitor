@@ -5,7 +5,7 @@
 // through providerFetchers() in src/shared/limits/collector.js, which re-exports
 // the handful of names the widget and the tests use.
 
-const { spawn } = require('node:child_process');
+const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -1718,14 +1718,24 @@ slash_command = os.environ.get("TOKEN_MONITOR_CLAUDE_SLASH_COMMAND", "/usage")
 exit_marker = os.environ.get("TOKEN_MONITOR_CLAUDE_EXIT_MARKER_REGEX", "currentsession.*?[0-9]{1,3}(?:\\\\.[0-9]+)?%")
 exit_pattern = re.compile(exit_marker) if exit_marker else None
 # Check and pin the prepared cwd before allowing any workspace trust response.
-directory = os.open(cwd, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-info = os.fstat(directory)
-if (info.st_uid != os.getuid() or (stat.S_IMODE(info.st_mode) & 0o777) != 0o700
-        or str(info.st_dev) != os.environ["TOKEN_MONITOR_CLAUDE_PROBE_DEV"]
-        or str(info.st_ino) != os.environ["TOKEN_MONITOR_CLAUDE_PROBE_INO"]):
-    raise RuntimeError("Claude probe directory changed before launch")
-os.fchdir(directory)
-os.close(directory)
+try:
+    directory = os.open(cwd, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    info = os.fstat(directory)
+    if (info.st_uid != os.getuid() or (stat.S_IMODE(info.st_mode) & 0o777) != 0o700
+            or str(info.st_dev) != os.environ["TOKEN_MONITOR_CLAUDE_PROBE_DEV"]
+            or str(info.st_ino) != os.environ["TOKEN_MONITOR_CLAUDE_PROBE_INO"]):
+        raise RuntimeError("Claude probe directory changed before launch")
+    os.fchdir(directory)
+    os.close(directory)
+except (OSError, RuntimeError):
+    sys.stderr.write("TOKEN_MONITOR_UNSAFE_PROBE: Claude probe directory changed before launch")
+    sys.exit(78)
+# Version and printed usage share the same isolated interpreter and cwd pin.
+# exec preserves the CLI exit status and pipes, without opening a terminal.
+if os.environ.get("TOKEN_MONITOR_CLAUDE_NONINTERACTIVE") == "1":
+    # execFile has no detached option: isolate ordinary wrapper descendants here.
+    os.setsid()
+    os.execvp(cmd, [cmd] + json.loads(os.environ["TOKEN_MONITOR_CLAUDE_PROBE_ARGS"]))
 master, slave = pty.openpty()
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 160, 0, 0))
 proc = subprocess.Popen([cmd] + json.loads(os.environ["TOKEN_MONITOR_CLAUDE_PROBE_ARGS"]), stdin=slave, stdout=slave, stderr=slave, cwd=".", close_fds=True, start_new_session=True)
@@ -1883,7 +1893,7 @@ sys.exit(early_exit_code if early_exit_code is not None else 0)
 `.trim();
 }
 
-async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
+async function runClaudePosixProbe(slashCommand, exitMarkerRegex, deps = {}, directArgs = null) {
   if ((deps.platform || process.platform) === 'win32') {
     throw errorWithStatus('unavailable', 'Claude CLI PTY probe is not available on Windows yet');
   }
@@ -1899,28 +1909,31 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
     CLAUDE_CODE_SKIP_PROMPT_HISTORY: '1',
     TERM: env.TERM && env.TERM !== 'dumb' ? env.TERM : 'xterm-256color',
     COLORTERM: env.COLORTERM || 'truecolor',
-    FORCE_COLOR: '1',
+    ...(!directArgs ? { FORCE_COLOR: '1' } : {}),
     TOKEN_MONITOR_CLAUDE_COMMAND_PATH: command,
     TOKEN_MONITOR_CLAUDE_PROBE_DIR: probeDir,
     TOKEN_MONITOR_CLAUDE_PROBE_DEV: identity.dev,
     TOKEN_MONITOR_CLAUDE_PROBE_INO: identity.ino,
-    TOKEN_MONITOR_CLAUDE_PROBE_ARGS: JSON.stringify(CLAUDE_PROBE_ARGS),
+    TOKEN_MONITOR_CLAUDE_PROBE_ARGS: JSON.stringify(directArgs || CLAUDE_PROBE_ARGS),
+    TOKEN_MONITOR_CLAUDE_NONINTERACTIVE: directArgs ? '1' : '0',
     TOKEN_MONITOR_CLAUDE_CLI_TIMEOUT: String(deps.claudeCliTimeoutSeconds || 35),
     TOKEN_MONITOR_CLAUDE_SLASH_COMMAND: slashCommand,
     TOKEN_MONITOR_CLAUDE_EXIT_MARKER_REGEX: exitMarkerRegex || ''
   };
   // Unstyled Ink redraws only the marker; styled output also redraws the
   // selected label required by the trust handshake. This PTY is not user UI.
-  delete runEnv.NO_COLOR;
+  if (!directArgs) delete runEnv.NO_COLOR;
   const pythonCandidates = deps.pythonCommand ? [deps.pythonCommand] : ['python3', 'python'];
   let lastError = null;
   for (const python of pythonCandidates) {
     try {
       // Imports must not read cwd/PYTHONPATH before the directory identity check.
-      return await runProcessText(python, ['-I', '-c', claudePtyPythonScript()], {
+      const run = directArgs ? runClaudeCapturedCommand : runProcessText;
+      return await run(python, ['-I', '-c', claudePtyPythonScript()], {
         ...deps,
         env: runEnv,
         cwd: probeDir,
+        closeStdin: Boolean(directArgs),
         timeoutMs: Number(deps.claudeCliTimeoutMs || 45000)
       });
     } catch (error) {
@@ -1948,19 +1961,118 @@ function claudeDirectInvocation(command, args, platform, env) {
   };
 }
 
-function runClaudeDirectCommand(args, deps = {}, timeoutMs = 12000) {
+function runClaudeDirectCommand(args, deps = {}, timeoutMs = 12000, captured = false) {
   const platform = deps.platform || process.platform;
   const env = deps.env || process.env;
   const command = existingClaudeCommandCandidates(claudeCommandCandidates(env, platform), deps)[0];
   if (!command) throw errorWithStatus('notConfigured', 'Claude CLI not found');
   const invocation = claudeDirectInvocation(command, args, platform, env);
-  return runProcessText(invocation.command, invocation.args, {
+  const run = captured ? runClaudeCapturedCommand : runProcessText;
+  return run(invocation.command, invocation.args, {
     ...deps,
     env: withClaudePathHints(env, platform),
     closeStdin: true,
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     timeoutMs
   });
+}
+
+// execFile bounds capture and waits for close after its timeout kill. A timed-out
+// print must be gone before fallback; SIGTERM can be ignored by the child.
+function runClaudeCapturedCommand(command, args, options) {
+  if (options.signal?.aborted) return Promise.reject(abortError(options.signal));
+  return new Promise((resolve, reject) => {
+    const execute = options.execFile || execFile;
+    const platform = options.platform || process.platform;
+    let cleanup = Promise.resolve(null);
+    // Node's execFile abort callback can precede exit and uses SIGTERM. Own the
+    // cancellation so the same hard/tree kill runs, and settle only on close.
+    const onAbort = () => child.kill('SIGKILL');
+    const child = execute(command, args, {
+      cwd: options.cwd, env: options.env, encoding: 'utf8', windowsHide: true,
+      windowsVerbatimArguments: options.windowsVerbatimArguments,
+      timeout: options.timeoutMs, killSignal: 'SIGKILL', maxBuffer: 256 * 1024
+    }, async (error, stdout = '', stderr = '') => {
+      options.signal?.removeEventListener('abort', onAbort);
+      // cmd.exe may close while taskkill is still working. Both must finish
+      // before allowing fallback, including when cleanup eventually fails.
+      const cleanupError = await cleanup;
+      if (cleanupError) { reject(cleanupError); return; }
+      if (options.signal?.aborted) { reject(abortError(options.signal)); return; }
+      // Preserve stdout too: some CLI builds report rejected flags there.
+      const failure = errorWithStatus('unavailable', [stderr, stdout].filter(Boolean).join('\n') || 'Claude printed no output');
+      if (error?.code) failure.code = error.code;
+      if (claudeProbeMustStop(failure, options)) reject(failure);
+      else if (error) reject(failure);
+      else if (stdout.trim()) resolve(stdout);
+      else reject(failure);
+    });
+    if (child.pid) {
+      const kill = child.kill.bind(child);
+      if (platform !== 'win32') {
+        child.kill = signal => {
+          // The isolated group includes ordinary shell-wrapper descendants.
+          try { process.kill(-child.pid, signal); }
+          catch (error) {
+            if (error.code !== 'ESRCH') {
+              const failure = errorWithStatus('unavailable', 'Claude probe process group could not be stopped');
+              failure.code = 'CLAUDE_PROBE_CLEANUP_FAILED';
+              cleanup = Promise.resolve(failure);
+            }
+          }
+          return kill(signal);
+        };
+      } else if (options.windowsVerbatimArguments) {
+        // A .cmd shim owns another process: terminating cmd.exe alone leaves it alive.
+        let stopping = false;
+        child.kill = signal => {
+          if (stopping) return true;
+          stopping = true;
+          let complete;
+          cleanup = new Promise(resolve => { complete = resolve; });
+          const root = envValue(options.env, 'SystemRoot') || 'C:\\Windows';
+          const finished = error => {
+            const failure = error && errorWithStatus('unavailable', 'Claude probe process tree could not be stopped');
+            if (failure) failure.code = 'CLAUDE_PROBE_CLEANUP_FAILED';
+            complete(failure || null);
+            kill(signal);
+          };
+          try {
+            execute(path.win32.join(root, 'System32', 'taskkill.exe'), ['/pid', String(child.pid), '/t', '/f'],
+              { windowsHide: true, timeout: 2000, killSignal: 'SIGKILL' }, finished);
+          } catch (error) { finished(error); }
+          return true;
+        };
+      }
+    }
+    child.stdin?.end();
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
+  });
+}
+
+function claudeProbeMustStop(error, deps) {
+  return deps.signal?.aborted || error?.name === 'AbortError'
+    || ['CLAUDE_UNSAFE_PROBE_DIR', 'CLAUDE_PROBE_CLEANUP_FAILED', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'].includes(error?.code)
+    || /TOKEN_MONITOR_UNSAFE_PROBE|(?:unknown option|unrecognized arguments?|unsupported|invalid option)[^\n]*(?:--allowed-tools|--allowedTools|--setting-sources|--settings|--strict-mcp-config|--tools|--no-session-persistence)/i.test(error?.message || '');
+}
+
+async function runClaudeNoninteractive(args, deps, timeoutMs) {
+  const restricted = [...CLAUDE_PROBE_ARGS, ...args];
+  if ((deps.platform || process.platform) !== 'win32') {
+    return runClaudePosixProbe('', '', { ...deps, claudeCliTimeoutMs: timeoutMs }, restricted);
+  }
+  const { dir } = await prepareClaudeProbeDir(deps);
+  return runClaudeDirectCommand(restricted, { ...deps, cwd: dir }, timeoutMs, true);
+}
+
+function supportsClaudePrintedUsage(text) {
+  // 2.1.178 is a conservative application gate, not the first implementation.
+  // Unknown or prerelease builds retain the established interactive path.
+  const match = String(text).trim().match(/^(\d+)\.(\d+)\.(\d+)(?: \(Claude Code\))?$/);
+  if (!match) return false;
+  const [, major, minor, patch] = match.map(Number);
+  return major > 2 || (major === 2 && (minor > 1 || (minor === 1 && patch >= 178)));
 }
 
 function runClaudeAuthStatus(deps = {}) {
@@ -1990,8 +2102,26 @@ async function isClaudeCliAuthenticated(deps = {}) {
 
 async function runClaudeUsageCli(deps = {}) {
   if (deps.runClaudeUsageCli) return deps.runClaudeUsageCli();
+  try {
+    const version = deps.runClaudeVersion
+      ? await deps.runClaudeVersion()
+      : await runClaudeNoninteractive(['--version'], deps, 5000);
+    if (supportsClaudePrintedUsage(version)) {
+      const text = await runClaudeNoninteractive(
+        ['--tools', '', '--no-session-persistence', '-p', '--', '/usage'], deps,
+        Number(deps.claudePrintedCliTimeoutMs || 30000)
+      );
+      // Cost/token accounting, subscription notices and exit zero alone are not quota.
+      parseClaudeCliUsageText(text);
+      return text;
+    }
+  } catch (error) {
+    if (claudeProbeMustStop(error, deps)) throw error;
+    // Old/unknown CLI or no usable printed quota: one original-path attempt.
+    // Preparation and cwd pinning run again, never with weaker security flags.
+  }
   if ((deps.platform || process.platform) === 'win32') return runClaudeDirectUsageCli(deps);
-  return runClaudePtyProbe('/usage', 'currentsession.*?[0-9]{1,3}(?:\\.[0-9]+)?%', deps);
+  return runClaudePosixProbe('/usage', 'currentsession.*?[0-9]{1,3}(?:\\.[0-9]+)?%', deps);
 }
 
 async function runClaudeDirectUsageCli(deps = {}) {
@@ -2010,7 +2140,7 @@ async function touchClaudeAuthPath(deps = {}) {
   // and refresh the OAuth token if needed. We don't parse output — the side-effect
   // (mutated credentials file / Keychain entry) is the signal. Permissive exit
   // marker matches common /status output tokens so we exit promptly on success.
-  return runClaudePtyProbe('/status', '(?:loggedin|subscription|account|model|version|email|organization)', {
+  return runClaudePosixProbe('/status', '(?:loggedin|subscription|account|model|version|email|organization)', {
     ...deps,
     claudeCliTimeoutSeconds: deps.claudeStatusTimeoutSeconds || 20,
     claudeCliTimeoutMs: deps.claudeStatusTimeoutMs || 25000

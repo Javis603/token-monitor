@@ -33,6 +33,7 @@ function claudeProbeDir(deps = {}) {
 function unsafeProbeDir(cause) {
   const error = new Error('Claude probe directory is unavailable or unsafe', { cause });
   error.status = 'unavailable';
+  Object.defineProperty(error, 'code', { value: 'CLAUDE_UNSAFE_PROBE_DIR' });
   return error;
 }
 
