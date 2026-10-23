@@ -74,7 +74,8 @@ test('supported CLI print usage wins without a PTY and keeps launch restrictions
       assert.equal(options.env.USER, 'fixture');
       assert.equal(options.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY, '1');
       assert.equal(fs.statSync(options.cwd).isDirectory(), true);
-      if (platform !== 'win32') assert.equal(fs.statSync(options.cwd).mode & 0o777, 0o700);
+      // CLI selection is simulated; permission bits belong to the host filesystem.
+      if (process.platform !== 'win32') assert.equal(fs.statSync(options.cwd).mode & 0o777, 0o700);
     }
     assert.deepEqual(calls[1].argv.slice(CLAUDE_PROBE_ARGS.length), ['--tools', '', '--no-session-persistence', '-p', '--', '/usage']);
     assert.deepEqual(deps.env, originalEnv);
