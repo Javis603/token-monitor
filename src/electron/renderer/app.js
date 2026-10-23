@@ -11858,6 +11858,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   // Marked only once the credential is stored: marking drops the provider's
   // current record, and a rejected key must leave the linked status on screen.
   markExternalProviderCheckPending(id);
+  await refreshLimitProviderQuota(id);
   if (result.verdict === 'indeterminate') {
     const throttled = result.status === 'rateLimited' || result.status === 'sourceRateLimited';
     setAccountPanelMessage(id, {
@@ -11889,6 +11890,14 @@ async function submitAccountCredential(button, id, values, options) {
   }
 }
 
+async function refreshLimitProviderQuota(providerName) {
+  try {
+    await window.tokenMonitor.limits?.refresh?.(providerName);
+  } catch (_) {
+    // The next scheduled poll still settles the record.
+  }
+}
+
 async function clearAccountCredential(id) {
   if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   setAccountPanelMessage(id, null);
@@ -11899,6 +11908,7 @@ async function clearAccountCredential(id) {
   }
   clearExternalProviderCheckPending(id);
   clearExternalProviderPendingStatus(id);
+  await refreshLimitProviderQuota(id);
   renderExternalProviderStatus(id);
   await refreshStats({ force: true });
 }
@@ -11992,6 +12002,7 @@ function setupLimitAccountPanels() {
       })),
       onRefresh: async () => {
         if (form.id === 'claude') await loadClaudeOrganizationChoices();
+        await refreshLimitProviderQuota(form.id);
         await refreshStats({ force: true });
       },
       onClear: ({ id }) => clearAccountCredential(id),
@@ -16175,6 +16186,8 @@ function externalProviderForAccount(providerName) {
   const updatedAt = Date.parse(provider.updatedAt || '');
   if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
   state[config.pendingKey] = 0;
+  cancelExternalProviderCheckSettle(providerName);
+  externalProviderCheckSettled.delete(providerName);
   return provider;
 }
 
@@ -16189,14 +16202,43 @@ function setAccountPanelMessage(providerName, message) {
   else delete state.accountPanelMessages[providerName];
 }
 
+const externalProviderCheckSettleTimers = new Map();
+const externalProviderCheckSettled = new Set();
+const EXTERNAL_PROVIDER_CHECK_SETTLE_MS = 15_000;
+
+function cancelExternalProviderCheckSettle(providerName) {
+  const timer = externalProviderCheckSettleTimers.get(providerName);
+  if (timer === undefined) return;
+  clearTimeout(timer);
+  externalProviderCheckSettleTimers.delete(providerName);
+}
+
+function scheduleExternalProviderCheckSettle(providerName) {
+  cancelExternalProviderCheckSettle(providerName);
+  const timer = setTimeout(() => {
+    externalProviderCheckSettleTimers.delete(providerName);
+    const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+    if (!config || Number(state[config.pendingKey] || 0) <= 0) return;
+    // Stop the spinner, but keep the save-time cutoff: a record dated before
+    // this save must never be able to confirm the new credential.
+    externalProviderCheckSettled.add(providerName);
+    renderExternalProviderStatus(providerName);
+  }, EXTERNAL_PROVIDER_CHECK_SETTLE_MS);
+  externalProviderCheckSettleTimers.set(providerName, timer);
+}
+
 function markExternalProviderCheckPending(providerName) {
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   if (!config) return;
   state[config.pendingKey] = Date.now();
+  externalProviderCheckSettled.delete(providerName);
   clearExternalProviderPendingStatus(providerName);
+  scheduleExternalProviderCheckSettle(providerName);
 }
 
 function clearExternalProviderCheckPending(providerName) {
+  cancelExternalProviderCheckSettle(providerName);
+  externalProviderCheckSettled.delete(providerName);
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   if (config) state[config.pendingKey] = 0;
 }
@@ -16327,7 +16369,8 @@ function renderExternalProviderStatus(providerName) {
   errorEl.classList.toggle('error', message?.tone !== 'notice');
   const configured = Boolean(state.settings?.[config.configuredKey]);
   const enabled = limitProviderEnabled(providerName);
-  const pending = enabled && Number(state[config.pendingKey] || 0) > 0;
+  const settled = externalProviderCheckSettled.has(providerName);
+  const pending = enabled && Number(state[config.pendingKey] || 0) > 0 && !settled;
   const linked = externalProviderAccountLinked(providerName);
   // A pending check that comes back linked folds the panel: the refresh that
   // followed the save may have returned before the new record did.
@@ -16335,9 +16378,13 @@ function renderExternalProviderStatus(providerName) {
   const form = limitAccountForm(providerName);
   if (form) limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
   if (providerName === 'volcengine') renderVolcengineAgentOverrideState();
+  // Once the settle window lapses without a fresh record, show "not checked"
+  // instead of a permanent spinner; the cutoff above still blocks the old
+  // record from being read as a confirmed link.
+  const statusProvider = provider || (settled && configured && enabled ? { status: 'noSyncedData' } : null);
   setCursorStatusText(
     statusEl,
-    pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
+    pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, statusProvider, configured, source, enabled)
   );
   // A local ZCode install keeps the Z.ai row honest when unchecked: the
   // auto-discovered plans still exist, so the pill shows auto-detect instead

@@ -254,6 +254,7 @@ function accountFormSave({ result, reject } = {}) {
     applyPersistedSettings: (settings) => calls.push(['applyPersistedSettings', settings]),
     renderExternalProviderStatus: () => calls.push(['render', { ...state.accountPanelMessages }]),
     markExternalProviderCheckPending: (id) => calls.push(['markPending', id]),
+    refreshLimitProviderQuota: async (id) => calls.push(['refreshLimitQuota', id]),
     refreshStats: async () => calls.push(['refreshStats']),
     setExternalAccountExpanded: (id, expanded) => calls.push(['expanded', id, expanded]),
     externalProviderAccountLinked: () => false

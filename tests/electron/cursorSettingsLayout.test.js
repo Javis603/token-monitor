@@ -987,10 +987,15 @@ test('Z.ai, Qoder, Trae and Ollama panels are generated from their declared form
   assert.doesNotMatch(JSON.stringify(forms.trae), /settings\.trae\.note/);
   assert.match(readRendererFile('i18n.js'), /'settings\.trae\.deviceIdNote': '[^']*ide_user_ent_usage[^']*X-Device-Id/);
 
-  // Ollama: numbered steps, the cookie textarea, and a validated save.
-  assert.equal(forms.ollama.manual[0].steps.length, 4);
-  assert.deepEqual(forms.ollama.fields.map(({ key, input }) => [key, input]), [['ollamaCookie', 'textarea']]);
+  // Ollama: the API-key lane is preferred and comes first, then the cookie lane;
+  // either one is optional because a draft only needs one secret filled in.
+  assert.deepEqual(forms.ollama.manual[0], { note: 'settings.ollama.modeNote' });
+  assert.equal(forms.ollama.manual[1].steps.length, 3);
+  assert.deepEqual(forms.ollama.fields.map(({ key, input }) => [key, input]), [['ollamaApiKey', 'password'], ['ollamaCookie', 'textarea']]);
+  assert.equal(forms.ollama.fields[0].required, false);
+  assert.equal(forms.ollama.fields[1].required, false);
   assert.equal(forms.ollama.messages.rejected, 'settings.ollama.validationInvalid');
+  assert.equal(forms.ollama.messages.required, 'settings.ollama.required');
   assert.match(readRendererFile('i18n.js'), /'settings\.ollama\.cookiePlaceholder': 'wos-session=\.\.\.'/);
 
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
@@ -1254,6 +1259,13 @@ test('DeepSeek and MiniMax key changes invalidate stale provider status before r
   assert.match(providerBody, /updatedAt < pendingSince/);
   assert.match(providerBody, /state\[config\.pendingKey\] = 0;/);
 
+  const settleBody = functionBody(app, 'scheduleExternalProviderCheckSettle', 'markExternalProviderCheckPending');
+  assert.match(settleBody, /externalProviderCheckSettled\.add\(providerName\)/);
+  assert.doesNotMatch(settleBody, /clearExternalProviderCheckPending\(providerName\)/, 'the save cutoff must survive the settle timeout');
+  const renderBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
+  assert.match(renderBody, /const settled = externalProviderCheckSettled\.has\(providerName\)/);
+  assert.match(renderBody, /pending = enabled &&[^;]*!settled/);
+  assert.match(renderBody, /settled && configured && enabled \? \{ status: 'noSyncedData' \}/);
   const linkedBody = functionBody(app, 'externalProviderAccountLinked', 'markExternalProviderCheckPending');
   assert.match(linkedBody, /state\.settings\?\.\[config\.configuredKey\]/);
   assert.match(linkedBody, /provider\?\.status === 'ok'/);
@@ -1277,7 +1289,7 @@ test('disabled credential providers settle account status instead of checking fo
   assert.match(clearBody, /clearExternalProviderCheckPending\(providerName\)/);
   assert.match(externalRenderBody, /const enabled = limitProviderEnabled\(providerName\);/);
   assert.match(externalRenderBody, /const pending = enabled &&/);
-  assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, provider, configured, source, enabled\)/);
+  assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, statusProvider, configured, source, enabled\)/);
   assert.match(copilotRenderBody, /copilotAccountStatusText\(provider, configured, source, enabled\)/);
 });
 
@@ -1634,6 +1646,7 @@ test('Factory keeps a saved-key Clear action available after validation fails', 
       document: { getElementById: id => elements.get(id) || null },
       externalProviderForAccount: () => ({ provider: 'factory', status }),
       externalProviderAccountLinked: () => false,
+      externalProviderCheckSettled: new Set(),
       limitProviderEnabled: () => true,
       setCursorStatusText: () => {},
       apiKeyAccountStatusText: () => '',
@@ -1685,6 +1698,7 @@ test('an account message survives the stats re-renders until its own condition r
     document: { getElementById: id => elements.get(id) || null },
     externalProviderForAccount: () => provider,
     externalProviderAccountLinked: () => false,
+    externalProviderCheckSettled: new Set(),
     limitProviderEnabled: () => true,
     setCursorStatusText: () => {},
     apiKeyAccountStatusText: () => '',

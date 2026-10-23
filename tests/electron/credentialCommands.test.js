@@ -382,6 +382,42 @@ test('a confirmed Ollama cookie answers the next poll from the probe', async () 
   assert.equal(requests, 1);
 });
 
+test('an Ollama API key probes the balance endpoint and replaces the cookie lane', async () => {
+  const balance = {
+    included: {
+      session: { remaining_percent: 75, resets_at: '2026-10-23T14:00:00Z' },
+      weekly: { remaining_percent: 40, resets_at: '2026-10-26T00:00:00Z' }
+    },
+    purchased: { balance_usd: 0 }
+  };
+  const requested = [];
+  const saved = commands({
+    settings: { ollamaCookie: 'wos-session=stored' },
+    answer: (url) => {
+      requested.push(String(url));
+      return String(url).endsWith('/api/balance')
+        ? response(200, balance)
+        : response(200, { Email: 'user@example.com', Plan: 'pro' });
+    }
+  });
+  const result = await saved.api.saveCredential('ollama', { ollamaApiKey: 'ollama-key-live', ollamaCookie: '' });
+  assert.equal(result.verdict, 'valid');
+  assert.equal(saved.patches[0].ollamaApiKey, 'ollama-key-live');
+  assert.equal(saved.patches[0].ollamaCookie, '');
+  assert.equal(requested.some((url) => url.includes('/settings')), false, 'the cookie lane must not be probed');
+
+  const rejected = commands({ answer: (url) => (String(url).endsWith('/api/balance') ? response(401) : response(200, {})) });
+  const bad = await rejected.api.saveCredential('ollama', { ollamaApiKey: 'ollama-key-bad', ollamaCookie: '' });
+  assert.equal(bad.verdict, 'invalid');
+  assert.equal(bad.status, 'unauthorized');
+  assert.deepEqual(rejected.patches, []);
+
+  const unconfirmed = commands({ answer: () => response(500) });
+  const maybe = await unconfirmed.api.saveCredential('ollama', { ollamaApiKey: 'ollama-key-maybe', ollamaCookie: '' });
+  assert.equal(maybe.verdict, 'indeterminate');
+  assert.equal(unconfirmed.patches.length, 1);
+});
+
 test('MiniMax credential save keeps an implicit region and probes the effective env region', async () => {
   const urls = [];
   const { api, patches } = commands({
