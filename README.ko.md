@@ -120,8 +120,8 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 <td colspan="2" width="870" align="center"><img src=".github/assets/showcase/notch-panel.gif" width="800" alt="노치 패널"><br><sub><b>노치 패널</b> — 실행 중인 세션을 노치 옆에 표시. 아래로 스와이프하면 오늘 사용량, 모든 계정의 한도, 세션, 분류를 확인</sub></td>
 </tr>
 <tr>
-<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="400" alt="가장자리 도크"><br><sub><b>가장자리 도크</b> — 화면 가장자리에 한도와 사용량을 고정. 호버하면 한도, 최근 세션, 토큰을 표시</sub></td>
-<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="400" alt="메뉴 막대와 팝오버"><br><sub><b>메뉴 막대와 트레이</b> — 프리셋을 고르거나 직접 구성: 도구 아이콘, 한도 바, 초기화 시간, 비용, 실시간 tok/s</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="540" alt="가장자리 도크"><br><sub><b>가장자리 도크</b> — 화면 가장자리에 한도와 사용량을 고정. 호버하면 한도, 최근 세션, 토큰을 표시</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="540" alt="메뉴 막대와 팝오버"><br><sub><b>메뉴 막대와 트레이</b> — 프리셋을 고르거나 직접 구성: 도구 아이콘, 한도 바, 초기화 시간, 비용, 실시간 tok/s</sub></td>
 </tr>
 </table>
 

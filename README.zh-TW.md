@@ -120,8 +120,8 @@ Qoder CN 的 Token 用量來自應用程式本機資料，而非 API —— 在 
 <td colspan="2" width="870" align="center"><img src=".github/assets/showcase/notch-panel.gif" width="800" alt="瀏海面板"><br><sub><b>瀏海面板</b>：瀏海旁顯示執行中的 session；向下滑動即可查看今日用量、各帳號額度、session 與用量分布</sub></td>
 </tr>
 <tr>
-<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="400" alt="側邊欄"><br><sub><b>側邊欄</b>：額度與用量停靠在螢幕邊緣；懸停即可查看額度、最近的 session 與 token</sub></td>
-<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="400" alt="選單列與彈出視窗"><br><sub><b>選單列與系統匣</b>：選用內建版型或自己排：AI 工具圖示、額度條、重設時間、成本或即時 tok/s</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="540" alt="側邊欄"><br><sub><b>側邊欄</b>：額度與用量停靠在螢幕邊緣；懸停即可查看額度、最近的 session 與 token</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="540" alt="選單列與彈出視窗"><br><sub><b>選單列與系統匣</b>：選用內建版型或自己排：AI 工具圖示、額度條、重設時間、成本或即時 tok/s</sub></td>
 </tr>
 </table>
 

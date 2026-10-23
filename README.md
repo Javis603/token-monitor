@@ -115,8 +115,8 @@ Token Monitor supports token usage, account-limit checks, and session details se
 <td colspan="2" width="870" align="center"><img src=".github/assets/showcase/notch-panel.gif" width="800" alt="Notch Panel"><br><sub><b>Notch Panel</b> — running sessions beside the notch; swipe down for today's usage, every account's limits, sessions and breakdowns</sub></td>
 </tr>
 <tr>
-<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="400" alt="Edge Dock"><br><sub><b>Edge Dock</b> — quotas and usage parked at the screen edge; hover for limits, recent sessions and tokens</sub></td>
-<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="400" alt="Menu bar and popover"><br><sub><b>Menu bar &amp; tray</b> — pick a preset or compose your own: tool icons, quota bars, reset times, cost or live tok/s</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="540" alt="Edge Dock"><br><sub><b>Edge Dock</b> — quotas and usage parked at the screen edge; hover for limits, recent sessions and tokens</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="540" alt="Menu bar and popover"><br><sub><b>Menu bar &amp; tray</b> — pick a preset or compose your own: tool icons, quota bars, reset times, cost or live tok/s</sub></td>
 </tr>
 </table>
 

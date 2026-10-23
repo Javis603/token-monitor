@@ -120,8 +120,8 @@ Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settin
 <td colspan="2" width="870" align="center"><img src=".github/assets/showcase/notch-panel.gif" width="800" alt="刘海面板"><br><sub><b>刘海面板</b>：刘海旁显示运行中的 session；向下滑动即可查看今日用量、各账号额度、session 与用量分布</sub></td>
 </tr>
 <tr>
-<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="400" alt="侧边栏"><br><sub><b>侧边栏</b>：额度与用量停靠在屏幕边缘；悬停即可查看额度、最近的 session 与 token</sub></td>
-<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="400" alt="菜单栏与弹出窗口"><br><sub><b>菜单栏与系统托盘</b>：选用内置版式或自己排：AI 工具图标、额度条、重置时间、成本或实时 tok/s</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="540" alt="侧边栏"><br><sub><b>侧边栏</b>：额度与用量停靠在屏幕边缘；悬停即可查看额度、最近的 session 与 token</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="540" alt="菜单栏与弹出窗口"><br><sub><b>菜单栏与系统托盘</b>：选用内置版式或自己排：AI 工具图标、额度条、重置时间、成本或实时 tok/s</sub></td>
 </tr>
 </table>
 

@@ -120,8 +120,8 @@ Qoder CN のトークン使用量は API ではなくアプリのローカルデ
 <td colspan="2" width="870" align="center"><img src=".github/assets/showcase/notch-panel.gif" width="800" alt="ノッチパネル"><br><sub><b>ノッチパネル</b> — 実行中のセッションをノッチの横に表示。下にスワイプすると今日の使用量、全アカウントの制限、セッション、内訳を確認</sub></td>
 </tr>
 <tr>
-<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="400" alt="エッジドック"><br><sub><b>エッジドック</b> — 画面の端に制限と使用量を常駐。ホバーで制限、最近のセッション、トークンを表示</sub></td>
-<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="400" alt="メニューバーとポップオーバー"><br><sub><b>メニューバーとトレイ</b> — プリセットを選ぶか自分で組み立て：ツールアイコン、制限バー、リセット時間、コスト、リアルタイム tok/s</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="540" alt="エッジドック"><br><sub><b>エッジドック</b> — 画面の端に制限と使用量を常駐。ホバーで制限、最近のセッション、トークンを表示</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="540" alt="メニューバーとポップオーバー"><br><sub><b>メニューバーとトレイ</b> — プリセットを選ぶか自分で組み立て：ツールアイコン、制限バー、リセット時間、コスト、リアルタイム tok/s</sub></td>
 </tr>
 </table>
 

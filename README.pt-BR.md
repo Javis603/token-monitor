@@ -115,8 +115,8 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 <td colspan="2" width="870" align="center"><img src=".github/assets/showcase/notch-panel.gif" width="800" alt="Notch Panel"><br><sub><b>Painel do notch</b> — sessões em andamento ao lado do notch; deslize para baixo para ver o uso de hoje, os limites de cada conta, sessões e detalhamentos</sub></td>
 </tr>
 <tr>
-<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="400" alt="Edge Dock"><br><sub><b>Edge Dock</b> — cotas e uso fixados na borda da tela; passe o mouse para ver limites, sessões recentes e tokens</sub></td>
-<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="400" alt="Menu bar and popover"><br><sub><b>Barra de menus e bandeja</b> — escolha uma predefinição ou monte a sua: ícones de ferramentas, barras de cota, horários de reset, custo ou tok/s ao vivo</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="540" alt="Edge Dock"><br><sub><b>Edge Dock</b> — cotas e uso fixados na borda da tela; passe o mouse para ver limites, sessões recentes e tokens</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="540" alt="Menu bar and popover"><br><sub><b>Barra de menus e bandeja</b> — escolha uma predefinição ou monte a sua: ícones de ferramentas, barras de cota, horários de reset, custo ou tok/s ao vivo</sub></td>
 </tr>
 </table>
 
