@@ -305,7 +305,7 @@ test('Home shows the plan on the account heading in both modes and omits unknown
     const known = renderHomeWindow({ remainingPercent: 88 }, { homeLimitDisplayMode }, 'Pro More');
     assert.equal(known.accountHead.children[2].className, 'home-limit-plan');
     assert.equal(known.accountHead.children[2].textContent, 'Pro More');
-    assert.equal(known.accountHead.children[2].title, 'Pro More');
+    assert.equal(known.accountHead.children[2].attributes['aria-label'], 'Pro More');
     const unknown = renderHomeWindow({ remainingPercent: 88 }, { homeLimitDisplayMode });
     assert.equal(unknown.accountHead.children.length, 2);
   }

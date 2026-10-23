@@ -12082,11 +12082,6 @@
     for (const el of scope.querySelectorAll('[data-i18n]')) {
       el.textContent = translated(resolved, el.dataset.i18n);
     }
-    for (const el of scope.querySelectorAll('[data-i18n-title]')) {
-      const text = translated(resolved, el.dataset.i18nTitle);
-      el.title = text;
-      if (el.setAttribute) el.setAttribute('title', text);
-    }
     for (const el of scope.querySelectorAll('[data-i18n-aria-label]')) {
       const text = translated(resolved, el.dataset.i18nAriaLabel);
       if (el.setAttribute) el.setAttribute('aria-label', text);

@@ -1233,7 +1233,6 @@ function renderLiveTokenRate() {
     cell.classList.add('live-token-rate-model-name');
     cell.replaceChildren(icon, name);
   }
-  if (!detailEntries.length) els.liveTokenRate.title = label;
   els.liveTokenRate.setAttribute('aria-label', [label, ...detailEntries.map((entry) =>
     Array.isArray(entry) ? entry.join(': ') : entry.full)].join(', '));
   syncLiveTokenRateFooterState();
@@ -1559,7 +1558,7 @@ function buildAppUpdateReleaseNodes(entries) {
       const head = entry.htmlUrl
         ? buildAppUpdateReleaseLink('app-update-release-version', label, entry.htmlUrl)
         : Object.assign(document.createElement('div'), { className: 'app-update-release-version', textContent: label });
-      if (entry.htmlUrl) head.title = t('settings.appUpdate.viewFullRelease');
+      if (entry.htmlUrl) head.setAttribute('aria-description', t('settings.appUpdate.viewFullRelease'));
       // A wrapper, because a stuck scroll-state container styles its descendants,
       // not itself.
       const wrapper = document.createElement('div');
@@ -2647,10 +2646,9 @@ function updateRowLive(row, activityState, activityAt) {
   const active = activityState === 'running';
   dot.classList.toggle('is-active', active);
   dot.classList.toggle('is-waiting', activityState === 'waiting');
-  dot.title = activityState === 'waiting' ? t('session.waiting') : active ? (t('session.running') || 'Running') : '';
-  dot.setAttribute('aria-label', dot.title);
+  dot.setAttribute('aria-label', activityState === 'waiting' ? t('session.waiting') : active ? (t('session.running') || 'Running') : '');
   dot.setAttribute('role', 'img');
-  dot.setAttribute('aria-hidden', dot.title ? 'false' : 'true');
+  dot.setAttribute('aria-hidden', activityState === 'waiting' || active ? 'false' : 'true');
   const previous = Number(row.dataset.activityAt || 0);
   const next = Number(activityAt) || 0;
   if (next > 0) row.dataset.activityAt = String(next);
@@ -2669,7 +2667,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   // comes from `activityState`, which is what reads the transcript's turn-end
   // boundary rather than only the recency window.
   row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}${running ? ' running' : ''}`;
-  row.title = local ? 'This device' : '';
+  row.setAttribute('aria-description', local ? 'This device' : '');
   
   if (cacheReadTokens !== undefined || outputTokens !== undefined || unclassifiedTokens !== undefined) {
     row.dataset.cacheRead = cacheReadTokens || 0;
@@ -2790,7 +2788,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   const costLabelText = formatCost(cost || 0, unpricedTokens);
   costEl.textContent = tokenDataUnavailable === true ? ''
     : unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText;
-  costEl.title = tokenDataUnavailable === true ? '' : costLabelText;
+  costEl.setAttribute('aria-label', tokenDataUnavailable === true ? '' : costLabelText);
   // The row builder already applied the shared gate (recent enough to have a
   // reading), so this draws whatever arrived rather than re-deciding from
   // `running` - that second gate is exactly what made the dock card and this
@@ -2941,7 +2939,6 @@ function renderSessionPager(page) {
     [next, 'sessions.pageNext']
   ]) {
     button.setAttribute('aria-label', t(labelKey));
-    button.title = t(labelKey);
   }
   previous.disabled = page.page === 0;
   next.disabled = page.page >= page.pageCount - 1;
@@ -3578,7 +3575,6 @@ function syncSubscriptionEditControls() {
     const editOpen = editorOpen && row.dataset.subscriptionId === editingId;
     const editLabel = editOpen ? t('settings.subscriptions.cancelEdit') : t('settings.subscriptions.edit');
     edit.textContent = editOpen ? '×' : '✎';
-    edit.title = editLabel;
     edit.setAttribute('aria-label', editLabel);
     edit.setAttribute('aria-expanded', editOpen ? 'true' : 'false');
   }
@@ -3651,7 +3647,6 @@ function renderSubscriptionRows() {
     const editOpen = editing && Boolean(els.subscriptionAddDetails && !els.subscriptionAddDetails.classList.contains('hidden'));
     const editLabel = editOpen ? t('settings.subscriptions.cancelEdit') : t('settings.subscriptions.edit');
     edit.textContent = editOpen ? '×' : '✎';
-    edit.title = editLabel;
     edit.setAttribute('aria-label', editLabel);
     edit.setAttribute('aria-expanded', editOpen ? 'true' : 'false');
     edit.setAttribute('aria-controls', 'subscriptionAddDetails');
@@ -3666,18 +3661,18 @@ function renderSubscriptionRows() {
     remove.type = 'button';
     remove.className = 'subscription-row-delete';
     remove.textContent = '✕';
-    remove.title = t('settings.subscriptions.delete');
+    remove.setAttribute('aria-label', t('settings.subscriptions.delete'));
     let armed = false;
     remove.addEventListener('click', async () => {
       if (!armed) {
         armed = true;
         remove.textContent = '✓';
-        remove.title = t('settings.subscriptions.deleteConfirm');
+        remove.setAttribute('aria-label', t('settings.subscriptions.deleteConfirm'));
         remove.classList.add('is-armed');
         setTimeout(() => {
           armed = false;
           remove.textContent = '✕';
-          remove.title = t('settings.subscriptions.delete');
+          remove.setAttribute('aria-label', t('settings.subscriptions.delete'));
           remove.classList.remove('is-armed');
         }, 4000);
         return;
@@ -4127,18 +4122,18 @@ function renderSubscriptionTopUpEntries() {
     remove.type = 'button';
     remove.className = 'subscription-topup-remove';
     remove.textContent = '✕';
-    remove.title = t('settings.subscriptions.topUpRemove');
+    remove.setAttribute('aria-label', t('settings.subscriptions.topUpRemove'));
     let armed = false;
     remove.addEventListener('click', () => {
       if (!armed) {
         armed = true;
         remove.textContent = '✓';
-        remove.title = t('settings.subscriptions.topUpRemoveConfirm');
+        remove.setAttribute('aria-label', t('settings.subscriptions.topUpRemoveConfirm'));
         remove.classList.add('is-armed');
         setTimeout(() => {
           armed = false;
           remove.textContent = '✕';
-          remove.title = t('settings.subscriptions.topUpRemove');
+          remove.setAttribute('aria-label', t('settings.subscriptions.topUpRemove'));
           remove.classList.remove('is-armed');
         }, 4000);
         return;
@@ -4903,7 +4898,6 @@ function renderServiceStatus() {
     row.type = 'button';
     row.className = `service-status-row service-status-${provider.status || 'unknown'}`;
     row.dataset.provider = provider.id;
-    row.title = t('serviceStatus.openPage', { name: provider.label });
     row.addEventListener('click', () => window.tokenMonitor.openExternal?.(provider.pageUrl));
     const head = document.createElement('div');
     head.className = 'service-status-head';
@@ -4937,7 +4931,10 @@ function renderServiceStatus() {
       meta.append(checkedSpan);
     }
     const affected = serviceStatusPresentationApi.affectedComponentNames(provider.componentIssues).all;
-    if (affected.length) meta.title = affected.join(t('serviceStatus.listSeparator'));
+    row.setAttribute('aria-description', [
+      t('serviceStatus.openPage', { name: provider.label }),
+      affected.join(t('serviceStatus.listSeparator'))
+    ].filter(Boolean).join(' · '));
     row.append(head, description, meta);
     return row;
   });
@@ -5315,7 +5312,6 @@ function sessionDetailBackButton() {
   back.setAttribute('aria-label', title
     ? t('sessions.backToWithTitle', { title, destination: backLabel })
     : t('sessions.backTo', { destination: backLabel }));
-  if (!title) back.title = backLabel;
   back.addEventListener('click', sessionDetailBack);
 
   if (title) {
@@ -5326,7 +5322,7 @@ function sessionDetailBackButton() {
     const heading = document.createElement('span');
     heading.className = 'detail-heading';
     heading.textContent = title;
-    heading.title = title;
+    heading.setAttribute('aria-label', title);
     bindHoverMarquee(heading);
     back.append(arrow, heading);
   }
@@ -5341,12 +5337,11 @@ function sessionIdLine(idLabel) {
   const text = document.createElement('span');
   text.className = 'detail-session-id-text';
   text.textContent = idLabel;
-  text.title = idLabel;
+  text.setAttribute('aria-label', idLabel);
   const copy = document.createElement('button');
   copy.type = 'button';
   copy.className = 'detail-session-id-copy';
   copy.textContent = '⧉';
-  copy.title = t('session.copyId');
   copy.setAttribute('aria-label', t('session.copyId'));
   copy.addEventListener('click', () => copyToClipboard(idLabel, copy));
   line.append(text, copy);
@@ -5538,7 +5533,122 @@ function signalContentReady() {
   window.tokenMonitor.signalContentReady?.();
 }
 
+function hideTrendTooltip() {
+  state.trendTooltipTeardown?.();
+  state.trendTooltipTeardown = null;
+}
+
+function handleTrendsWindowBlur() {
+  hideTrendTooltip();
+  const spark = els.trendsPanel.querySelector('.trends-spark');
+  if (!spark?.dataset.renderPending) return;
+  delete spark.dataset.renderPending;
+  if (state.breakdown === 'trends') renderTrends();
+}
+
+function bindTrendTooltip(spark, model, points, labelKey, metric) {
+  const tooltip = homeActivityTooltipEl('trends-tooltip');
+  tooltip.setAttribute('aria-live', 'polite');
+  tooltip.setAttribute('aria-atomic', 'true');
+  let hovered = false;
+  let focused = false;
+  let pointerPoint = null;
+  let selected = -1;
+  const bars = Array.from(spark.querySelectorAll('.spark-bar'));
+  const hide = () => {
+    tooltip.dataset.visible = 'false';
+    tooltip.setAttribute('aria-hidden', 'true');
+    tooltip.style.transform = 'translate(-9999px, -9999px)';
+    bars[selected]?.removeAttribute('data-active');
+  };
+  const position = () => {
+    if (pointerPoint) {
+      const rect = tooltip.getBoundingClientRect();
+      const gap = 14;
+      const pad = 6;
+      const desiredX = pointerPoint.x - rect.width / 2;
+      const aboveY = pointerPoint.y - gap - rect.height;
+      const desiredY = aboveY >= pad ? aboveY : pointerPoint.y + gap;
+      const x = Math.max(pad, Math.min(window.innerWidth - pad - rect.width, desiredX));
+      const y = Math.max(pad, Math.min(window.innerHeight - pad - rect.height, desiredY));
+      tooltip.style.transform = `translate(${x}px, ${y}px)`;
+      return;
+    }
+    const rect = spark.querySelector('.sparkline').getBoundingClientRect();
+    const bar = model.bars[selected];
+    // Anchor to the selected bar's top, rather than the whole chart's top edge.
+    const x = rect.left + (bar.x + bar.width / 2) / model.width * rect.width;
+    const y = rect.top + bar.y / model.height * rect.height;
+    moveHomeActivityTooltip(tooltip, {
+      getBoundingClientRect: () => ({ left: x, width: 0, top: y, bottom: y })
+    });
+  };
+  const show = () => {
+    state.trendTooltipTeardown = hide;
+    bars[selected]?.setAttribute('data-active', 'true');
+    tooltip.dataset.visible = 'true';
+    tooltip.setAttribute('aria-hidden', 'false');
+    position();
+  };
+  const select = (index) => {
+    if (index !== selected) {
+      bars[selected]?.removeAttribute('data-active');
+      selected = index;
+      const point = points[index];
+      const date = String(point[labelKey] || '');
+      const value = `${formatNumber(point[metric])} tokens`;
+      spark.setAttribute('aria-label', `${t('trends.open')} · ${date} · ${value}`);
+      tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatCompact(point[metric]);
+      tooltip.querySelector('[data-home-activity-tooltip-date]').textContent = date;
+    }
+  };
+  const pointAtPointer = (event) => {
+    const rect = spark.querySelector('.sparkline').getBoundingClientRect();
+    if (!(rect.width > 0)) return;
+    pointerPoint = { x: event.clientX, y: event.clientY };
+    // Use each day's full column, including gaps and zero-height bars.
+    select(Math.max(0, Math.min(points.length - 1,
+      Math.floor((event.clientX - rect.left) / rect.width * points.length))));
+    show();
+  };
+  spark.addEventListener('pointerenter', (event) => { hovered = true; pointAtPointer(event); });
+  spark.addEventListener('pointermove', pointAtPointer);
+  spark.addEventListener('focusin', () => { focused = true; pointerPoint = null; show(); });
+  spark.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { hide(); return; }
+    const index = event.key === 'ArrowLeft' ? Math.max(0, selected - 1)
+      : event.key === 'ArrowRight' ? Math.min(points.length - 1, selected + 1)
+        : event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1 : null;
+    if (index === null) return;
+    event.preventDefault();
+    pointerPoint = null;
+    select(index);
+    show();
+  });
+  const flush = () => {
+    if (!spark.dataset.renderPending) return;
+    delete spark.dataset.renderPending;
+    requestAnimationFrame(renderTrends);
+  };
+  // Keep a live refresh from replacing the focused/hovered chart mid-read.
+  spark.addEventListener('pointerleave', () => {
+    hovered = false;
+    pointerPoint = null;
+    if (focused) position(); else hide();
+    flush();
+  });
+  spark.addEventListener('focusout', () => { focused = false; if (!hovered) hide(); flush(); });
+  select(points.length - 1);
+}
+
 function renderTrends() {
+  const reading = document.hasFocus()
+    && els.trendsPanel.querySelector('.trends-spark:hover, .trends-spark:focus-within');
+  if (reading) {
+    reading.dataset.renderPending = 'true';
+    return;
+  }
+  hideTrendTooltip();
   const charts = window.TokenMonitorUsageCharts;
   const previousBars = captureTrendBarMotion();
   const preview = state.stats?.historyPreview || { daily: [], monthly: [], summary: {} };
@@ -5583,10 +5693,11 @@ function renderTrends() {
     .join('');
 
   els.trendsPanel.innerHTML =
-    `<div class="trends-cap"><span>${rangeLabel}</span><span class="trends-open-hint" title="${t('trends.open')}">↗</span></div>`
-    + `<div class="trends-spark" role="button" tabindex="0" title="${t('trends.open')}">${svg}</div>`
+    `<div class="trends-cap"><span>${rangeLabel}</span><span class="trends-open-hint" aria-label="${t('trends.open')}">↗</span></div>`
+    + `<div class="trends-spark" role="button" tabindex="0" aria-label="${t('trends.open')}">${svg}</div>`
     + `<div class="trends-axis"><span>${first}</span><span>${last}</span></div>`
     + `<div class="trends-stats">${statsHtml}</div>`;
+  bindTrendTooltip(els.trendsPanel.querySelector('.trends-spark'), model, finalPoints, labelKey, metric);
   const bars = Array.from(els.trendsPanel.querySelectorAll('.spark-bar'));
   bars.forEach((bar, index) => {
     bar.dataset.motionKey = String(finalPoints[index]?.[labelKey] || index);
@@ -6069,8 +6180,7 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
   const current = document.createElement('button');
   current.type = 'button';
   current.className = 'view-switcher-current';
-  current.title = t('views.switcher.next', { view: nextLabel });
-  current.setAttribute('aria-label', current.title);
+  current.setAttribute('aria-label', t('views.switcher.next', { view: nextLabel }));
   current.append(viewSwitcherIcon(currentId));
   const label = document.createElement('span');
   label.className = 'view-switcher-label';
@@ -6105,8 +6215,7 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
   const disclosure = document.createElement('button');
   disclosure.type = 'button';
   disclosure.className = 'view-switcher-disclosure';
-  disclosure.title = t('views.switcher.choose');
-  disclosure.setAttribute('aria-label', disclosure.title);
+  disclosure.setAttribute('aria-label', t('views.switcher.choose'));
   disclosure.setAttribute('aria-haspopup', 'menu');
   disclosure.setAttribute('aria-controls', 'viewSwitcherMenu');
   disclosure.setAttribute('aria-expanded', String(state.viewSwitcherOpen));
@@ -6334,7 +6443,7 @@ function renderHomeLimitModule() {
       const plan = document.createElement('span');
       plan.className = 'home-limit-plan';
       plan.textContent = row.plan;
-      plan.title = row.plan;
+      plan.setAttribute('aria-label', row.plan);
       account.append(plan);
     }
     const windows = document.createElement('div');
@@ -6560,11 +6669,11 @@ function renderHomeSessionModule(rows) {
     const stateMark = document.createElement('span');
     stateMark.className = 'home-session-state';
     stateMark.dataset.state = activityState;
-    stateMark.setAttribute('aria-hidden', 'true');
-    if (activityState === 'waiting') {
-      stateMark.setAttribute('aria-hidden', 'false');
+    const stateLabelKey = { running: 'session.running', waiting: 'session.waiting', ended: 'session.finished' }[activityState];
+    stateMark.setAttribute('aria-hidden', stateLabelKey ? 'false' : 'true');
+    if (stateLabelKey) {
       stateMark.setAttribute('role', 'img');
-      stateMark.setAttribute('aria-label', t('session.waiting'));
+      stateMark.setAttribute('aria-label', t(stateLabelKey));
     }
     stateMark.innerHTML = window.TokenMonitorSessionLive.sessionStateMarkup({
       spin: 'home-session-spin',
@@ -6572,8 +6681,6 @@ function renderHomeSessionModule(rows) {
       idle: 'home-session-idle',
       waiting: 'home-session-waiting'
     });
-    stateMark.title = t(activityState === 'waiting' ? 'session.waiting' : activityState === 'running' ? 'session.running'
-      : activityState === 'ended' ? 'session.finished' : 'session.idle');
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.title || row.projectLabel || String(row.sessionId || '').slice(0, 12) || '—';
@@ -6642,7 +6749,7 @@ function renderHomeDeviceModule() {
     item.className = 'home-list-row home-device-row';
     if (row.isStale) {
       item.classList.add('is-stale');
-      item.title = t('home.staleDevice');
+      item.setAttribute('aria-description', t('home.staleDevice'));
     }
     const mark = document.createElement('span');
     applyHomeListMark(mark, iconKindFor({ platform: row.platform }, 'device'), row.isStale ? deviceStaleColor : deviceAccent);
@@ -6746,11 +6853,12 @@ function setupHomeActivityScroller(scroller, onReady = null) {
   applyHomeActivityScroll(scroller);
 }
 
-function homeActivityTooltipEl() {
-  let tooltip = document.querySelector('.home-activity-tooltip');
+function homeActivityTooltipEl(instanceClass = 'home-heatmap-tooltip') {
+  let tooltip = document.querySelector(`.${instanceClass}`);
   if (tooltip) return tooltip;
   tooltip = document.createElement('div');
-  tooltip.className = 'home-activity-tooltip';
+  // Trends shares the heatmap's layout and positioning, with its own instance.
+  tooltip.className = `home-activity-tooltip ${instanceClass}`;
   tooltip.setAttribute('role', 'tooltip');
   tooltip.setAttribute('aria-hidden', 'true');
 
@@ -6946,7 +7054,7 @@ function hideHomeActivityTooltip({ preserveHover = false } = {}) {
     state.homeActivityHoverPoint = null;
     state.homeActivityHoverDate = '';
     if (!teardown) {
-      const tooltip = document.querySelector('.home-activity-tooltip');
+      const tooltip = document.querySelector('.home-heatmap-tooltip');
       if (tooltip) {
         tooltip.dataset.visible = 'false';
         tooltip.setAttribute('aria-hidden', 'true');
@@ -7269,6 +7377,7 @@ function render() {
   // Leaving Home only CSS-hides the panel, so its heatmap scroller never sees a
   // pointerleave — dismiss the body-level tooltip here (renderHome covers rerenders).
   if (state.breakdown !== 'home') hideHomeActivityTooltip();
+  if (state.breakdown !== 'trends') hideTrendTooltip();
   if (state.breakdown === 'status') ensureServiceStatusTicker(); else stopServiceStatusTicker();
   if (state.breakdown === 'home') {
     els.breakdown.classList.add('hidden');
@@ -7402,7 +7511,7 @@ function liveDotTitle(mode, connected) {
 
 function setLiveDot(connected) {
   els.liveDot.classList.toggle('live', Boolean(connected));
-  els.liveDot.title = liveDotTitle(state.mode, connected);
+  els.liveDot.setAttribute('aria-label', liveDotTitle(state.mode, connected));
   if (!connected) for (const animation of els.liveDot.getAnimations()) animation.cancel();
 }
 
@@ -7419,8 +7528,10 @@ function pulseLiveDot() {
 }
 
 function refreshButtonIdleTitle() {
-  if (state.stats?.updatedAt) return t('refreshButton.refreshedAt', { time: formatTime(state.stats.updatedAt) });
-  return t('refreshButton.label');
+  const action = t('refreshButton.label');
+  return state.stats?.updatedAt
+    ? `${action} · ${t('refreshButton.refreshedAt', { time: formatTime(state.stats.updatedAt) })}`
+    : action;
 }
 
 function clearRefreshButtonFeedbackTimer() {
@@ -7436,20 +7547,16 @@ function setRefreshButtonState(status = 'idle') {
   els.refreshButton.classList.toggle('is-refresh-error', status === 'error');
   els.refreshButton.disabled = status === 'refreshing';
   if (status === 'refreshing') {
-    els.refreshButton.title = t('refreshButton.refreshing');
     els.refreshButton.setAttribute('aria-label', t('refreshButton.refreshing'));
     els.refreshButton.setAttribute('aria-busy', 'true');
   } else if (status === 'refreshed') {
-    els.refreshButton.title = t('refreshButton.refreshed');
     els.refreshButton.setAttribute('aria-label', t('refreshButton.refreshed'));
     els.refreshButton.setAttribute('aria-busy', 'false');
   } else if (status === 'error') {
-    els.refreshButton.title = t('refreshButton.failed');
     els.refreshButton.setAttribute('aria-label', t('refreshButton.failed'));
     els.refreshButton.setAttribute('aria-busy', 'false');
   } else {
-    els.refreshButton.title = refreshButtonIdleTitle();
-    els.refreshButton.setAttribute('aria-label', t('refreshButton.label'));
+    els.refreshButton.setAttribute('aria-label', refreshButtonIdleTitle());
     els.refreshButton.removeAttribute('aria-busy');
   }
 }
@@ -7899,7 +8006,7 @@ function renderThemeColorGrid() {
     reset.type = 'button';
     reset.className = 'reset-appearance-button reset-inline';
     reset.textContent = '↺';
-    reset.title = t('settings.appearance.resetColor');
+    reset.setAttribute('aria-label', t('settings.appearance.resetColor'));
     reset.addEventListener('click', () => resetThemeColor(key));
     row.append(name, input, reset);
     els.themeColorGrid.appendChild(row);
@@ -7927,7 +8034,7 @@ function renderVendorColorList() {
     reset.type = 'button';
     reset.className = 'reset-appearance-button reset-inline';
     reset.textContent = '↺';
-    reset.title = t('settings.appearance.resetBrand');
+    reset.setAttribute('aria-label', t('settings.appearance.resetBrand'));
     reset.addEventListener('click', () => resetVendorColor(id));
     row.append(name, input, reset);
     els.vendorColorList.appendChild(row);
@@ -8099,7 +8206,6 @@ function syncWindowBehaviorControls() {
     current: t(`settings.windowBehavior.${mode}`),
     next: t(`settings.windowBehavior.${next}`)
   });
-  els.pinButton.title = title;
   els.pinButton.setAttribute('aria-label', title);
   // Windows-only, and only meaningful while the widget is pinned above apps:
   // the other modes never sit over the taskbar in the first place.
@@ -8119,6 +8225,7 @@ function syncWindowShortcutStatus() {
   const status = state.settings?.windowToggleShortcutStatus?.state || (shortcut ? 'unregistered' : 'off');
   value.classList.toggle('recording', state.recordingWindowShortcut);
   value.textContent = state.recordingWindowShortcut ? t('settings.shortcut.recording') : display;
+  value.setAttribute('aria-description', t('settings.shortcut.record'));
   if (clearButton) clearButton.disabled = !shortcut && !state.recordingWindowShortcut;
   note.classList.toggle('error', state.windowShortcutInvalid || (Boolean(shortcut) && status !== 'registered'));
   if (state.recordingWindowShortcut) {
@@ -8191,7 +8298,6 @@ function applyFloatingBubbleState(payload = {}, options = {}) {
   document.body.classList.toggle('floating-bubble-collapsed-right', side === 'right');
   const title = t('floatingBubble.expand');
   if (els.floatingBubbleTab) {
-    els.floatingBubbleTab.title = title;
     els.floatingBubbleTab.setAttribute('aria-label', title);
   }
   if (options.renderContent === false) return;
@@ -8743,7 +8849,7 @@ function updateSyncPanelAges() {
     if (!row) continue;
     element.textContent = syncPanelPresenceText(row);
     const date = row.syncedAt ? new Date(row.syncedAt) : null;
-    element.title = date && !Number.isNaN(date.getTime()) ? date.toLocaleString(currentLocale()) : '';
+    element.setAttribute('aria-description', date && !Number.isNaN(date.getTime()) ? date.toLocaleString(currentLocale()) : '');
   }
 }
 
@@ -8858,7 +8964,7 @@ function updateSyncDeviceRow(item, row) {
   mark.className = os ? `sync-device-mark row-icon row-icon-os-${os}` : 'sync-device-mark sync-device-mark-generic';
   const name = item.querySelector('.sync-device-name');
   name.textContent = row.name;
-  name.title = row.hostname && row.hostname !== row.name ? `${row.name} · ${row.hostname}` : row.name;
+  name.setAttribute('aria-label', row.hostname && row.hostname !== row.name ? `${row.name} · ${row.hostname}` : row.name);
   const title = item.querySelector('.sync-device-title');
   let badge = title.querySelector('.sync-device-badge');
   if (row.isLocal) {
@@ -8944,7 +9050,7 @@ function renderHubAddresses(addresses, port) {
     const copy = document.createElement('button');
     copy.type = 'button';
     copy.className = 'icon-button';
-    copy.title = t('settings.sync.copyUrl', { url });
+    copy.setAttribute('aria-label', t('settings.sync.copyUrl', { url }));
     copy.textContent = '⧉';
     copy.addEventListener('click', () => copyToClipboard(url, copy));
     row.append(code, ifaceLabel, copy);
@@ -9595,8 +9701,7 @@ function createPreferenceOrderHandle({ kind, id, label, count }) {
       : kind === 'homeModule'
         ? 'settings.home.reorderModule'
         : 'settings.home.reorderProvider';
-  handle.title = t(titleKey, { name: label });
-  handle.setAttribute('aria-label', handle.title);
+  handle.setAttribute('aria-label', t(titleKey, { name: label }));
   handle.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Home End');
   handle.disabled = count <= 1;
   // Main-screen lists keep the handle as both the visible reorder affordance
@@ -9788,8 +9893,7 @@ function renderViewPreferences() {
     visibility.type = 'button';
     visibility.className = `tool-visibility-button${isEffectivelyHidden ? ' is-hidden' : ''}`;
     visibility.dataset.view = id;
-    visibility.title = t(isEffectivelyHidden ? 'settings.views.showView' : 'settings.views.hideView', { name: label });
-    visibility.setAttribute('aria-label', visibility.title);
+    visibility.setAttribute('aria-label', t(isEffectivelyHidden ? 'settings.views.showView' : 'settings.views.hideView', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isEffectivelyHidden));
     visibility.disabled = !isEffectivelyHidden && visibleCount <= 1;
     visibility.append(visibilityIcon(isEffectivelyHidden));
@@ -9810,8 +9914,7 @@ function renderViewPreferences() {
       const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = `view-subgroup-toggle${state.homeSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.title = t('settings.views.configureHome', { name: label });
-      toggle.setAttribute('aria-label', toggle.title);
+      toggle.setAttribute('aria-label', t('settings.views.configureHome', { name: label }));
       toggle.setAttribute('aria-expanded', String(Boolean(state.homeSettingsExpanded)));
       const toggleIcon = document.createElement('span');
       toggleIcon.className = 'view-subgroup-icon';
@@ -9834,8 +9937,7 @@ function renderViewPreferences() {
       const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = `view-subgroup-toggle${state.trendSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.title = t('settings.views.configureTrend', { name: label });
-      toggle.setAttribute('aria-label', toggle.title);
+      toggle.setAttribute('aria-label', t('settings.views.configureTrend', { name: label }));
       toggle.setAttribute('aria-expanded', String(Boolean(state.trendSettingsExpanded)));
       const toggleIcon = document.createElement('span');
       toggleIcon.className = 'view-subgroup-icon';
@@ -9858,8 +9960,7 @@ function renderViewPreferences() {
       const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = `view-subgroup-toggle${state.projectSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.title = t('settings.views.configureProject', { name: label });
-      toggle.setAttribute('aria-label', toggle.title);
+      toggle.setAttribute('aria-label', t('settings.views.configureProject', { name: label }));
       toggle.setAttribute('aria-expanded', String(Boolean(state.projectSettingsExpanded)));
       const toggleIcon = document.createElement('span');
       toggleIcon.className = 'view-subgroup-icon';
@@ -9882,8 +9983,7 @@ function renderViewPreferences() {
       const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = `view-subgroup-toggle${state.sessionSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.title = t('settings.views.configureSession', { name: label });
-      toggle.setAttribute('aria-label', toggle.title);
+      toggle.setAttribute('aria-label', t('settings.views.configureSession', { name: label }));
       toggle.setAttribute('aria-expanded', String(Boolean(state.sessionSettingsExpanded)));
       const toggleIcon = document.createElement('span');
       toggleIcon.className = 'view-subgroup-icon';
@@ -9906,8 +10006,7 @@ function renderViewPreferences() {
       const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = `view-subgroup-toggle${state.serviceProvidersExpanded ? ' is-expanded' : ''}`;
-      toggle.title = t('serviceStatus.configureProviders', { name: label });
-      toggle.setAttribute('aria-label', toggle.title);
+      toggle.setAttribute('aria-label', t('serviceStatus.configureProviders', { name: label }));
       toggle.setAttribute('aria-expanded', String(Boolean(state.serviceProvidersExpanded)));
       const toggleIcon = document.createElement('span');
       toggleIcon.className = 'view-subgroup-icon';
@@ -9984,7 +10083,7 @@ function renderHomeLimitProviderList() {
     requiredReasonText.className = 'home-limit-provider-names-reason';
     requiredReasonText.textContent = requiredReason;
     providerNamesCopy.append(requiredReasonText);
-    providerNamesLabel.title = requiredReason;
+    providerNamesLabel.setAttribute('aria-description', requiredReason);
     providerNamesInput.setAttribute('aria-describedby', requiredReasonText.id);
   }
   providerNamesInput.addEventListener('change', async () => {
@@ -10023,8 +10122,7 @@ function renderHomeLimitProviderList() {
   reset.type = 'button';
   reset.className = 'tool-header-action';
   reset.textContent = '↺';
-  reset.title = t('settings.views.resetOrder');
-  reset.setAttribute('aria-label', reset.title);
+  reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetHomeLimitProviderOrder());
   const showAll = document.createElement('button');
@@ -10034,8 +10132,7 @@ function renderHomeLimitProviderList() {
   showAllEye.className = 'tool-header-eye';
   showAllEye.setAttribute('aria-hidden', 'true');
   showAll.append(showAllEye);
-  showAll.title = t('settings.views.showAll');
-  showAll.setAttribute('aria-label', showAll.title);
+  showAll.setAttribute('aria-label', t('settings.views.showAll'));
   showAll.disabled = providers.every(({ id }) => !hidden.has(id));
   showAll.addEventListener('click', () => void showAllHomeLimitProviders());
   headerActions.append(reset, showAll);
@@ -10056,8 +10153,7 @@ function renderHomeLimitProviderList() {
     const visibility = document.createElement('button');
     visibility.type = 'button';
     visibility.className = `tool-visibility-button${isHidden ? ' is-hidden' : ''}`;
-    visibility.title = t(isHidden ? 'settings.home.showProvider' : 'settings.home.hideProvider', { name: settingsLabel || label });
-    visibility.setAttribute('aria-label', visibility.title);
+    visibility.setAttribute('aria-label', t(isHidden ? 'settings.home.showProvider' : 'settings.home.hideProvider', { name: settingsLabel || label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
     visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => onHomeLimitProviderVisibilityToggle(id));
@@ -10132,8 +10228,7 @@ function renderHomeSettingsList() {
   reset.type = 'button';
   reset.className = 'tool-header-action';
   reset.textContent = '↺';
-  reset.title = t('settings.views.resetOrder');
-  reset.setAttribute('aria-label', reset.title);
+  reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetHomeModuleOrder());
   const showAll = document.createElement('button');
@@ -10143,8 +10238,7 @@ function renderHomeSettingsList() {
   showAllEye.className = 'tool-header-eye';
   showAllEye.setAttribute('aria-hidden', 'true');
   showAll.append(showAllEye);
-  showAll.title = t('settings.views.showAll');
-  showAll.setAttribute('aria-label', showAll.title);
+  showAll.setAttribute('aria-label', t('settings.views.showAll'));
   showAll.disabled = hidden.size === 0;
   showAll.addEventListener('click', () => void showAllHomeModules());
   headerActions.append(reset, showAll);
@@ -10168,9 +10262,8 @@ function renderHomeSettingsList() {
       configure.type = 'button';
       const expanded = state[HOME_MODULE_SUBGROUPS[id][0]];
       configure.className = `view-subgroup-toggle${expanded ? ' is-expanded' : ''}`;
-      configure.title = t(id === 'limits' ? 'settings.home.configureLimits'
-        : id === 'trends' ? 'settings.home.configureActivity' : 'settings.home.configureModule', { name: label });
-      configure.setAttribute('aria-label', configure.title);
+      configure.setAttribute('aria-label', t(id === 'limits' ? 'settings.home.configureLimits'
+        : id === 'trends' ? 'settings.home.configureActivity' : 'settings.home.configureModule', { name: label }));
       configure.setAttribute('aria-expanded', String(Boolean(expanded)));
       const toggleIcon = document.createElement('span');
       toggleIcon.className = 'view-subgroup-icon';
@@ -10182,8 +10275,7 @@ function renderHomeSettingsList() {
     const visibility = document.createElement('button');
     visibility.type = 'button';
     visibility.className = `tool-visibility-button${isHidden ? ' is-hidden' : ''}`;
-    visibility.title = t(isHidden ? 'settings.home.showModule' : 'settings.home.hideModule', { name: label });
-    visibility.setAttribute('aria-label', visibility.title);
+    visibility.setAttribute('aria-label', t(isHidden ? 'settings.home.showModule' : 'settings.home.hideModule', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
     visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => onHomeModuleVisibilityToggle(id));
@@ -10442,8 +10534,7 @@ function renderServiceProviderList() {
   reset.type = 'button';
   reset.className = 'tool-header-action';
   reset.textContent = '↺';
-  reset.title = t('settings.views.resetOrder');
-  reset.setAttribute('aria-label', reset.title);
+  reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetServiceProviderOrder());
   const showAll = document.createElement('button');
@@ -10453,8 +10544,7 @@ function renderServiceProviderList() {
   showAllEye.className = 'tool-header-eye';
   showAllEye.setAttribute('aria-hidden', 'true');
   showAll.append(showAllEye);
-  showAll.title = t('settings.views.showAll');
-  showAll.setAttribute('aria-label', showAll.title);
+  showAll.setAttribute('aria-label', t('settings.views.showAll'));
   showAll.disabled = hidden.size === 0;
   showAll.addEventListener('click', () => void showAllServiceProviders());
   headerActions.append(reset, showAll);
@@ -10491,8 +10581,7 @@ function renderServiceProviderList() {
     visibility.type = 'button';
     visibility.className = `tool-visibility-button${isHidden ? ' is-hidden' : ''}`;
     visibility.dataset.statusProvider = id;
-    visibility.title = t(isHidden ? 'serviceStatus.showProvider' : 'serviceStatus.hideProvider', { name: label });
-    visibility.setAttribute('aria-label', visibility.title);
+    visibility.setAttribute('aria-label', t(isHidden ? 'serviceStatus.showProvider' : 'serviceStatus.hideProvider', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
     visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => onServiceProviderVisibilityToggle(id));
@@ -10839,11 +10928,10 @@ function clientHealthGroup(group, notes, clientId) {
       const addSource = document.createElement('button');
       addSource.type = 'button';
       addSource.className = 'tool-health-source-control tool-health-source-add';
-      addSource.title = t('settings.tools.health.addCustomSource');
-      addSource.setAttribute('aria-label', addSource.title);
+      addSource.setAttribute('aria-label', t('settings.tools.health.addCustomSource'));
       addSource.append(customSourceIcon('add'));
       const label = document.createElement('span');
-      label.textContent = addSource.title;
+      label.textContent = addSource.getAttribute('aria-label');
       addSource.append(label);
       addSource.addEventListener('click', () => { void addCustomScanPath(clientId); });
       summaryRow.append(addSource);
@@ -10868,14 +10956,14 @@ function clientHealthGroup(group, notes, clientId) {
           const chip = document.createElement('code');
           chip.className = `tool-health-check${pathInfo.exists ? ' found' : pathInfo.pending ? ' pending' : ''}`;
           chip.textContent = pathInfo.dir ? friendlyPath(pathInfo.dir) : check.id;
-          if (pathInfo.dir) chip.title = pathInfo.dir;
+          if (pathInfo.dir) chip.setAttribute('aria-label', pathInfo.dir);
           row.append(chip);
           if (pathInfo.custom) {
             const remove = document.createElement('button');
             remove.type = 'button';
             remove.className = 'tool-health-source-control tool-health-source-remove';
-            remove.title = t('settings.tools.health.removeCustomSource');
-            remove.setAttribute('aria-label', `${remove.title}: ${friendlyPath(pathInfo.dir)}`);
+            remove.setAttribute('aria-label', t('settings.tools.health.removeCustomSource'));
+            remove.setAttribute('aria-label', `${remove.getAttribute('aria-label')}: ${friendlyPath(pathInfo.dir)}`);
             remove.append(customSourceIcon('remove'));
             remove.addEventListener('click', () => { void removeCustomScanPath(clientId, pathInfo.dir); });
             row.append(remove);
@@ -11404,8 +11492,7 @@ function renderToolPreferencesNow() {
     visibility.id = `toolVisibility-${id}`;
     visibility.className = `tool-visibility-button${isHidden ? ' is-hidden' : ''}`;
     visibility.dataset.client = id;
-    visibility.title = t(isHidden ? 'settings.tools.showClient' : 'settings.tools.hideClient', { name: label });
-    visibility.setAttribute('aria-label', visibility.title);
+    visibility.setAttribute('aria-label', t(isHidden ? 'settings.tools.showClient' : 'settings.tools.hideClient', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
     visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => onClientVisibilityToggle(id));
@@ -11414,8 +11501,7 @@ function renderToolPreferencesNow() {
     pin.id = `toolPin-${id}`;
     pin.className = `tool-pin-button${isPinned ? ' is-pinned' : ''}`;
     pin.dataset.client = id;
-    pin.title = t(isPinned ? 'settings.tools.unpinClient' : 'settings.tools.pinClient', { name: label });
-    pin.setAttribute('aria-label', pin.title);
+    pin.setAttribute('aria-label', t(isPinned ? 'settings.tools.unpinClient' : 'settings.tools.pinClient', { name: label }));
     pin.setAttribute('aria-pressed', String(isPinned));
     pin.append(pinIcon());
     pin.addEventListener('click', () => onClientPinnedToggle(id));
@@ -11432,8 +11518,7 @@ function renderToolPreferencesNow() {
       main.type = 'button';
       main.id = `toolHealthDisclosure-${id}`;
       main.className = 'tool-preference-main';
-      main.title = t('settings.tools.health.open', { name: label });
-      main.setAttribute('aria-label', main.title);
+      main.setAttribute('aria-label', t('settings.tools.health.open', { name: label }));
       main.setAttribute('aria-expanded', String(expanded));
       const disclosureIcon = document.createElement('span');
       disclosureIcon.className = 'cursor-disclosure-icon';
@@ -11582,9 +11667,8 @@ function renderLimitProviderCheckboxesNow() {
       const statusTag = tagInfos.find((tagInfo) => tagInfo.kind === 'status');
       const dot = document.createElement('span');
       dot.className = 'limit-provider-status-dot';
-      dot.title = translatedLimitProviderTag(statusTag);
+      dot.setAttribute('aria-label', translatedLimitProviderTag(statusTag));
       dot.setAttribute('role', 'img');
-      dot.setAttribute('aria-label', dot.title);
       nameLine.append(dot);
     }
     for (const tagInfo of tagInfos) {
@@ -11629,8 +11713,7 @@ function renderLimitProviderCheckboxesNow() {
       main.type = 'button';
       main.id = `limitProviderDisclosure-${id}`;
       main.className = 'limit-provider-main';
-      main.title = t('settings.limits.providerOptions', { provider: settingsLabel || label });
-      main.setAttribute('aria-label', main.title);
+      main.setAttribute('aria-description', t('settings.limits.providerOptions', { provider: settingsLabel || label }));
       main.setAttribute('aria-expanded', String(expanded));
       disclosureIcon = document.createElement('span');
       disclosureIcon.className = 'cursor-disclosure-icon';
@@ -12140,8 +12223,7 @@ function limitProviderUsageItemsList(providerId, items, reusableInputs = null) {
     restore.type = 'button';
     restore.className = 'reset-appearance-button reset-inline';
     restore.textContent = '↺';
-    restore.title = t('settings.limits.usageItemsRestore');
-    restore.setAttribute('aria-label', restore.title);
+    restore.setAttribute('aria-label', t('settings.limits.usageItemsRestore'));
     restore.addEventListener('click', () => commitLimitProviderHiddenItems(
       limitUsageItemsApi.restoreUsageItemDefaults(state.settings?.limitProviderHiddenItems, providerId)
     ));
@@ -12165,7 +12247,7 @@ function limitProviderUsageItemsList(providerId, items, reusableInputs = null) {
     }
     const text = document.createElement('span');
     text.textContent = entry.available ? entry.label : t('settings.limits.usageItemUnavailable', { item: entry.label });
-    item.title = text.textContent;
+    item.setAttribute('aria-label', text.textContent);
     item.append(input, text);
     list.append(item);
   }
@@ -13681,6 +13763,8 @@ els.floatingBubbleTab.addEventListener('pointercancel', (event) => { finishFloat
 els.floatingBubbleTab.addEventListener('mouseenter', handleFloatingBubbleHoverEnter);
 els.floatingBubbleTab.addEventListener('mouseleave', handleFloatingBubbleHoverLeave);
 document.documentElement.addEventListener('mouseleave', handleDocumentHoverLeave);
+document.documentElement.addEventListener('mouseleave', hideTrendTooltip);
+window.addEventListener('blur', handleTrendsWindowBlur);
 document.documentElement.addEventListener('mouseenter', clearHoverCollapseTimer);
 els.floatingBubbleTab.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -13942,7 +14026,9 @@ function handleWindowVisibilityChange() {
   ensureServiceStatusTicker();
 }
 document.addEventListener('visibilitychange', handleWindowVisibilityChange);
+document.addEventListener('visibilitychange', hideTrendTooltip);
 window.tokenMonitor.onWindowVisibilityPush?.((visible) => {
+  if (!visible) hideTrendTooltip();
   state.windowVisible = visible;
   handleWindowVisibilityChange();
 });
@@ -15354,7 +15440,7 @@ function setCopilotManualExpanded(expanded) {
 
 function setCursorStatusText(el, text) {
   el.textContent = text;
-  el.title = text;
+  el.setAttribute('aria-label', text);
 }
 
 function renderCodexLoginStatus() {
@@ -15459,21 +15545,21 @@ function renderCodexAccounts() {
           : t('settings.codex.disabled')
       ].filter((value, index, values) => value && values.indexOf(value) === index);
       info.textContent = accountMetadata.join(' · ');
-      info.title = accountMetadata.join(' · ');
+      info.setAttribute('aria-label', accountMetadata.join(' · '));
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.className = 'managed-account-remove';
       remove.textContent = '✕';
-      remove.title = t('settings.codex.remove');
+      remove.setAttribute('aria-label', t('settings.codex.remove'));
       let confirmingRemove = false;
       remove.addEventListener('click', async () => {
         if (!confirmingRemove) {
           confirmingRemove = true;
           remove.classList.add('confirming');
           remove.textContent = '✓';
-          remove.title = t('settings.codex.removeConfirm', {
+          remove.setAttribute('aria-label', t('settings.codex.removeConfirm', {
             account: account.email || t('settings.codex.unnamedAccount')
-          });
+          }));
           return;
         }
         const result = await window.tokenMonitor.codex.removeAccount(account.id);
@@ -15710,7 +15796,7 @@ function renderWorkbuddyStatus() {
     const title = document.createElement('div');
     title.className = 'managed-account-email';
     title.textContent = name;
-    title.title = name;
+    title.setAttribute('aria-label', name);
     const meta = document.createElement('div');
     meta.className = 'workbuddy-account-meta';
     meta.textContent = t(account.realm === 'ai' ? 'settings.workbuddy.realmAi' : 'settings.workbuddy.realmCn');
@@ -15726,13 +15812,12 @@ function renderWorkbuddyStatus() {
     info.textContent = account.enabled === false ? t('settings.workbuddy.disabled')
       : provider ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
         : t('settings.workbuddy.notChecked');
-    info.title = info.textContent;
+    info.setAttribute('aria-label', info.textContent);
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'managed-account-remove';
     remove.textContent = '✕';
-    remove.title = t('settings.workbuddy.remove');
-    remove.setAttribute('aria-label', t('settings.workbuddy.removeConfirm', { account: name }));
+    remove.setAttribute('aria-label', t('settings.workbuddy.remove'));
     remove.disabled = busy;
     let armed = false;
     remove.addEventListener('click', () => {
@@ -15741,7 +15826,7 @@ function renderWorkbuddyStatus() {
         armed = true;
         remove.classList.add('confirming');
         remove.textContent = '✓';
-        remove.title = t('settings.workbuddy.removeConfirm', { account: name });
+        remove.setAttribute('aria-label', t('settings.workbuddy.removeConfirm', { account: name }));
         return;
       }
       return mutateWorkbuddyAccount(account.id, 'remove');
@@ -15858,14 +15943,13 @@ function renderAntigravityStatus() {
       ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
       : '';
     info.textContent = enabled ? (planLabel || statusLabel) : t('settings.antigravity.disabled');
-    info.title = provider?.actionRequired === 'accountVerification'
+    info.setAttribute('aria-label', provider?.actionRequired === 'accountVerification'
       ? t('settings.antigravity.verificationRequiredDetail')
-      : info.textContent;
+      : info.textContent);
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'managed-account-remove';
     remove.textContent = '✕';
-    remove.title = t('settings.antigravity.remove');
     remove.setAttribute('aria-label', t('settings.antigravity.remove'));
     remove.disabled = state.antigravitySignInBusy;
     let confirmingRemove = false;
@@ -15874,8 +15958,7 @@ function renderAntigravityStatus() {
         confirmingRemove = true;
         remove.classList.add('confirming');
         remove.textContent = '✓';
-        remove.title = t('settings.antigravity.removeConfirm', { account: accountName });
-        remove.setAttribute('aria-label', remove.title);
+        remove.setAttribute('aria-label', t('settings.antigravity.removeConfirm', { account: accountName }));
         return;
       }
       remove.disabled = true;
@@ -15976,23 +16059,23 @@ function renderMimoStatus() {
         : '';
       info.textContent = !enabled ? t('settings.mimo.disabled')
         : statusLabel || limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel);
-      info.title = info.textContent;
+      info.setAttribute('aria-label', info.textContent);
 
       const remove = detected ? null : document.createElement('button');
       if (remove) {
         remove.type = 'button';
         remove.className = 'managed-account-remove';
         remove.textContent = '✕';
-        remove.title = t('settings.mimo.remove');
+        remove.setAttribute('aria-label', t('settings.mimo.remove'));
         let confirmingRemove = false;
         remove.addEventListener('click', async () => {
           if (!confirmingRemove) {
             confirmingRemove = true;
             remove.classList.add('confirming');
             remove.textContent = '✓';
-            remove.title = t('settings.mimo.removeConfirm', {
+            remove.setAttribute('aria-label', t('settings.mimo.removeConfirm', {
               account: accountName
-            });
+            }));
             return;
           }
           const result = await window.tokenMonitor.mimo.removeAccount(account.id);
@@ -16355,7 +16438,7 @@ function renderOpenCodeProfiles() {
 
     // The auto-detected key counts as an account: it is what the limits card is
     // reading, so leaving it out of the total reports "not set up" next to live
-    // quota. It has no toggle or delete because Token Monitor does not own that
+    // quota. It has no delete because Token Monitor does not own that
     // credential — OpenCode does — but naming it does belong here: a name is
     // what lets it join an account, and typing an existing account's name is
     // how a user says the two are the same OpenCode account.
@@ -16370,7 +16453,8 @@ function renderOpenCodeProfiles() {
       ambientToggle.className = 'profile-toggle';
       ambientToggle.type = 'checkbox';
       ambientToggle.checked = ambientEnabled;
-      ambientToggle.title = t('settings.opencode.ambientDetail');
+      ambientToggle.setAttribute('aria-label', t('settings.opencode.ambientName'));
+      ambientToggle.setAttribute('aria-description', t('settings.opencode.ambientDetail'));
       ambientToggle.addEventListener('change', async () => {
         await window.tokenMonitor.opencode.setAmbientEnabled(ambientToggle.checked);
         renderOpenCodeProfiles();
@@ -16387,7 +16471,7 @@ function renderOpenCodeProfiles() {
       nameInput.className = 'profile-name-input is-placeholder';
       nameInput.type = 'text';
       nameInput.placeholder = t('settings.opencode.ambientName');
-      nameInput.title = t('settings.opencode.nameAmbient');
+      nameInput.setAttribute('aria-label', t('settings.opencode.nameAmbient'));
 
       // Typing an existing account's name binds the auto-detected key into that
       // account. That claim is confirmed, never inferred: the main process
@@ -16486,8 +16570,7 @@ function renderOpenCodeProfiles() {
       const renameBtn = document.createElement('button');
       renameBtn.type = 'button';
       renameBtn.className = 'profile-rename-btn';
-      renameBtn.title = t('settings.opencode.rename');
-      renameBtn.setAttribute('aria-label', renameBtn.title);
+      renameBtn.setAttribute('aria-label', t('settings.opencode.rename'));
 
       let editing = false;
       function beginRename() {
@@ -16571,7 +16654,7 @@ function renderOpenCodeProfiles() {
         detail.type = 'button';
         detail.classList.add('is-expandable');
         detail.setAttribute('aria-expanded', 'false');
-        detail.title = t('settings.opencode.showCredentials');
+        detail.setAttribute('aria-label', t('settings.opencode.showCredentials'));
         // The same disclosure chevron every other group uses, so it animates and
         // reads the same; only the direction differs, pointing right when closed.
         chevron = document.createElement('span');
@@ -16594,14 +16677,14 @@ function renderOpenCodeProfiles() {
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'profile-delete';
       deleteBtn.textContent = '✕';
-      deleteBtn.title = t('settings.opencode.delete');
+      deleteBtn.setAttribute('aria-label', t('settings.opencode.delete'));
       let confirmingDelete = false;
       deleteBtn.addEventListener('click', async () => {
         if (!confirmingDelete) {
           confirmingDelete = true;
           deleteBtn.classList.add('confirming');
           deleteBtn.textContent = '✓';
-          deleteBtn.title = t('settings.opencode.deleteConfirm', { name });
+          deleteBtn.setAttribute('aria-label', t('settings.opencode.deleteConfirm', { name }));
           return;
         }
         await api.deleteProfile(name);
@@ -16744,7 +16827,7 @@ function opencodeCredentialRow(accountName, kind, label) {
   nameInput.className = 'credential-name-input';
   nameInput.type = 'text';
   nameInput.value = accountName;
-  nameInput.title = t('settings.opencode.moveCredential', { kind: label });
+  nameInput.setAttribute('aria-label', t('settings.opencode.moveCredential', { kind: label }));
   nameInput.placeholder = t('settings.opencode.profileNamePlaceholder');
 
   const actions = document.createElement('span');
@@ -16795,7 +16878,7 @@ function opencodeCredentialRow(accountName, kind, label) {
   const removeBtn = document.createElement('button');
   removeBtn.className = 'profile-delete';
   removeBtn.textContent = '✕';
-  removeBtn.title = t('settings.opencode.removeCredential', { kind: label });
+  removeBtn.setAttribute('aria-label', t('settings.opencode.removeCredential', { kind: label }));
   // Two-step, like deleting an account: unbinding is not undoable from here.
   let confirming = false;
   removeBtn.addEventListener('click', async () => {
@@ -17056,7 +17139,7 @@ function appendNamedApiProfileRow(listEl, config) {
     const detailSpan = document.createElement('span');
     detailSpan.className = 'profile-detail';
     detailSpan.textContent = detail;
-    detailSpan.title = detail;
+    detailSpan.setAttribute('aria-label', detail);
     nameBox.append(detailSpan);
   }
 
@@ -17068,8 +17151,7 @@ function appendNamedApiProfileRow(listEl, config) {
     const renameBtn = document.createElement('button');
     renameBtn.type = 'button';
     renameBtn.className = 'profile-rename-btn';
-    renameBtn.title = t('settings.profiles.rename');
-    renameBtn.setAttribute('aria-label', renameBtn.title);
+    renameBtn.setAttribute('aria-label', t('settings.profiles.rename'));
     let editing = false;
     const finishRename = async (save) => {
       if (!editing) return;
@@ -17117,14 +17199,14 @@ function appendNamedApiProfileRow(listEl, config) {
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'profile-delete';
     deleteBtn.textContent = '✕';
-    deleteBtn.title = t('settings.profiles.delete');
+    deleteBtn.setAttribute('aria-label', t('settings.profiles.delete'));
     let confirming = false;
     deleteBtn.addEventListener('click', async () => {
       if (!confirming) {
         confirming = true;
         deleteBtn.classList.add('confirming');
         deleteBtn.textContent = '✓';
-        deleteBtn.title = t('settings.profiles.deleteConfirm', { name });
+        deleteBtn.setAttribute('aria-label', t('settings.profiles.deleteConfirm', { name }));
         return;
       }
       const result = await api.deleteProfile(name);
@@ -17331,14 +17413,13 @@ function renderCursorStatus() {
           : account.error
             ? t('settings.common.error')
             : planLabel;
-      info.title = info.textContent;
+      info.setAttribute('aria-label', info.textContent);
       right.append(info);
       if (account.removable === true && !managementBlocked) {
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'managed-account-remove';
         remove.textContent = '✕';
-        remove.title = t('settings.cursor.remove');
         remove.setAttribute('aria-label', t('settings.cursor.remove'));
         let confirmingRemove = false;
         remove.addEventListener('click', async () => {
@@ -17346,8 +17427,7 @@ function renderCursorStatus() {
             confirmingRemove = true;
             remove.classList.add('confirming');
             remove.textContent = '✓';
-            remove.title = t('settings.cursor.removeConfirm', { account: accountName });
-            remove.setAttribute('aria-label', remove.title);
+            remove.setAttribute('aria-label', t('settings.cursor.removeConfirm', { account: accountName }));
             return;
           }
           remove.disabled = true;
@@ -17391,7 +17471,7 @@ function setCursorCheckboxesEnabled(enabled) {
   row?.classList.toggle('disabled', !enabled);
   if (input) {
     input.disabled = !enabled;
-    input.title = enabled ? '' : t('settings.cursor.loginRequired');
+    input.setAttribute('aria-description', enabled ? '' : t('settings.cursor.loginRequired'));
   }
 }
 
@@ -17468,7 +17548,7 @@ function renderCustomPricing() {
     const main = document.createElement('button');
     main.type = 'button';
     main.className = 'managed-account-main custom-pricing-edit';
-    main.title = t('settings.customPricing.edit');
+    main.setAttribute('aria-description', t('settings.customPricing.edit'));
     main.addEventListener('click', () => { if (openCustomPricingForm) openCustomPricingForm(ov); });
     const name = document.createElement('div');
     name.className = 'managed-account-email';

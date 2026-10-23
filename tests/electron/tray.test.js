@@ -88,6 +88,16 @@ function trayCalls() {
   };
 }
 
+test('system tray has no native tooltip on any platform', () => {
+  for (const platform of ['darwin', 'win32', 'linux']) {
+    const calls = trayCalls();
+    const electron = fakeTrayElectron(calls);
+    electron.nativeImage.createFromPath = () => ({ resize: () => ({ setTemplateImage() {} }) });
+    createTray({ electron, platform });
+    assert.deepEqual(calls.tooltips, [''], platform);
+  }
+});
+
 test('recent usage provider follows the newest valid session timestamp', () => {
   const recentStats = {
     periods: {
@@ -1380,7 +1390,7 @@ test('live rate is a generated tray mode with no legacy token title', () => {
 
 test('only macOS draws a tray title beside the icon', () => {
   // main.js gates tray.setTitle() on darwin; Windows and Linux show the icon
-  // alone and put the text in the tooltip. The settings Live preview reads the
+  // alone. The settings Live preview reads the
   // same helper so it cannot promise text the platform will never render.
   assert.equal(trayShowsTitle('darwin'), true);
   assert.equal(trayShowsTitle('win32'), false);

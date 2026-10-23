@@ -417,6 +417,93 @@ for (const platform of ['win32', 'darwin']) {
   });
 }
 
+for (const mode of ['always', 'alwaysExceptFullScreen']) {
+  test(`Windows card reveal restores the already-visible ${mode} rail as well`, (t) => {
+    const fixture = createFixture({ settings: { edgeDockMode: mode, edgeDockRefreshEnabled: false } });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const bubble = fixture.windowFor('bubble');
+    const peek = fixture.windowFor('peek');
+    const ordinary = new FakeBrowserWindow({ width: 1200, height: 900 });
+    ordinary.showInactive();
+    const peekCount = peek.zOrderCalls.length;
+    assert.equal(rail.opacity, 1);
+    assert.equal(rail.alwaysOnTop, true);
+
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 180 });
+
+    assert.equal(bubble.opacity, 1);
+    assert.ok(FakeBrowserWindow.zOrder.indexOf(bubble) > FakeBrowserWindow.zOrder.indexOf(ordinary));
+    assert.ok(FakeBrowserWindow.zOrder.indexOf(rail) > FakeBrowserWindow.zOrder.indexOf(ordinary), 'opening a card also restores its rail');
+    assert.ok(FakeBrowserWindow.zOrder.indexOf(bubble) > FakeBrowserWindow.zOrder.indexOf(rail), 'the card stays above the rail');
+    assert.equal(peek.zOrderCalls.length, peekCount, 'the concealed handle is not raised');
+    assert.equal(peek.opacity, 0);
+  });
+}
+
+test('Windows group recovery keeps the painted refresh action above the rail and card', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+  const fixture = createFixture({ canRefreshLimits: () => true });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const bubble = fixture.windowFor('bubble');
+  const peek = fixture.windowFor('peek');
+  fixture.screen.point = { x: rail.bounds.x + 30, y: rail.bounds.y + 45 };
+  t.mock.timers.tick(100);
+  fixture.paintPeek();
+  const ordinary = new FakeBrowserWindow({ width: 1200, height: 900 });
+  ordinary.showInactive();
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'claude', height: 180 });
+  const above = (front, back) => FakeBrowserWindow.zOrder.indexOf(front) > FakeBrowserWindow.zOrder.indexOf(back);
+  assert.ok(above(rail, ordinary));
+  assert.ok(above(bubble, rail));
+  assert.ok(above(peek, bubble));
+  assert.equal(FakeBrowserWindow.atPoint({ x: peek.bounds.x + 16, y: peek.bounds.y + 3 }), peek);
+});
+
+for (const platform of ['win32', 'darwin']) {
+  test(`${platform} entering a visible rail recovers ordering once without a power event`, (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+    const fixture = createFixture({ platform, settings: { edgeDockMode: 'alwaysExceptFullScreen', edgeDockRefreshEnabled: false } });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const bubble = fixture.windowFor('bubble');
+    const ordinary = new FakeBrowserWindow({ width: 1200, height: 900 });
+    const point = { x: rail.bounds.x + 30, y: rail.bounds.y + 45 };
+    const open = () => {
+      fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
+      fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'claude', height: 180 });
+    };
+    open();
+    fixture.screen.point = { x: 600, y: 400 };
+    t.mock.timers.tick(100);
+    ordinary.showInactive();
+    bubble.moveTop();
+    const counts = [rail, bubble].map((win) => win.zOrderCalls.length);
+    fixture.screen.point = point;
+    t.mock.timers.tick(100);
+    if (platform === 'win32') {
+      assert.ok(FakeBrowserWindow.zOrder.indexOf(rail) > FakeBrowserWindow.zOrder.indexOf(ordinary));
+      assert.ok(FakeBrowserWindow.zOrder.indexOf(bubble) > FakeBrowserWindow.zOrder.indexOf(rail));
+    }
+    const after = [rail, bubble].map((win) => win.zOrderCalls.length);
+    assert.deepEqual(after, counts.map((count) => count + (platform === 'win32' ? 1 : 0)));
+    t.mock.timers.tick(1000);
+    assert.deepEqual([rail, bubble].map((win) => win.zOrderCalls.length), after, 'steady hover does not keep raising windows');
+
+    fixture.screen.point = { x: bubble.bounds.x + 30, y: bubble.bounds.y + 30 };
+    t.mock.timers.tick(100);
+    ordinary.moveTop();
+    bubble.moveTop();
+    const beforeReturn = rail.zOrderCalls.length;
+    fixture.screen.point = point;
+    t.mock.timers.tick(100);
+    assert.equal(rail.zOrderCalls.length, beforeReturn + (platform === 'win32' ? 1 : 0), 'returning from the card repairs the rail again');
+  });
+}
+
 test('auto-hide haptics distinguish the handle reveal from the first hovered item', async (t) => {
   const fixture = createFixture({ platform: 'darwin', settings: { edgeDockMode: 'autoHide' } });
   t.after(() => fixture.controller.stop());

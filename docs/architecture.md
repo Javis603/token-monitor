@@ -122,6 +122,10 @@ Share renderer curves at physical display scale and position against `GetWindowR
 
 Local Windows development requires `npm run build:windows-dock`. Packaging builds the helper with the OS .NET compiler/WinRT metadata and includes it outside ASAR, so Windows artifacts require a Windows build host. User-facing material settings are covered in [configuration](configuration.md#widget-gui).
 
+## Native tooltips
+
+Electron surfaces and the system tray do not show OS-native tooltips on any platform. Use accessible labels for controls and descriptions for supplemental metadata rather than HTML `title` attributes; SVG chart descriptions use `<desc>`. Keep app-rendered detail tooltips for quota and chart information. Reduced-motion overflow text remains manually scrollable instead of falling back to a native tooltip. This also avoids native tooltip windows remaining over other apps when a floating surface hides or changes input handling.
+
 ## Notch presentation
 
 The experimental macOS Notch owns its fixed pages under `renderer/notch/` and shares data projection, formatting, account-title and plan semantics, and Home's compact window order (`homeOverview.compactWindowRank`) with the other surfaces. Stored `notchItems` now selects only limit providers, their order, hidden accounts and the Codex account policy; old usage items and pinned windows are ignored. `notchSummaryMode` defaults to `sessions` and deliberately does not convert the old follow-tray flag. The panel uses one shell renderer; details live in its fixed pages rather than a separate hover window. Attached glass uses the camera scrim as its only tint layer instead of adding the native tint again. Automatic quota alerts rank and display the tightest metered pool of the shared headline account; hidden or unselected accounts do not supply alerts.

@@ -30,7 +30,7 @@
 
 ## Token Monitor 是什么？
 
-一款桌面小部件，实时显示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 46+ 种 AI 编程工具的 Token 用量与 AI 工具额度，具备实时多设备同步与历史使用趋势功能，并支持按工具、设备、模型、session 或项目分项显示。
+一款桌面应用，实时显示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 46+ 种 AI 编程工具的 Token 用量与 AI 工具额度，具备实时多设备同步与历史使用趋势功能，并支持按工具、设备、模型、session 或项目分项显示。它出现在你目光所及之处：主窗口、MacBook 刘海、菜单栏或系统托盘、屏幕边缘、悬浮小窗，以及原生 macOS 小部件。
 
 ## 支持的工具
 
@@ -113,23 +113,46 @@ Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settin
 
 ## 界面展示
 
-<table>
-<tr>
-<td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="主页视图"><br><sub>可自定义仪表板：自选要显示的模块与排序</sub></td>
-<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="额度视图"><br><sub>多账号并列，Codex 可一键切换本机账号</sub></td>
-<td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="工具视图"><br><sub>点任一工具展开输入／输出与缓存命中明细</sub></td>
-</tr>
-<tr>
-<td width="290" align="center"><img src=".github/assets/sessions-view.png" width="250" alt="Session 视图"><br><sub>点进单个 session，逐条提问拆解 token 与用到的工具</sub></td>
-<td width="290" align="center"><img src=".github/assets/models-view.png" width="250" alt="模型视图"><br><sub>跨工具汇总每个模型的用量与成本</sub></td>
-<td width="290" align="center"><img src=".github/assets/devices-view.png" width="250" alt="设备视图"><br><sub>每台设备的用量、成本与同步状态，可展开看单机明细</sub></td>
-</tr>
-</table>
+### 桌面呈现
 
 <table>
 <tr>
-<td width="435" align="center"><img src=".github/assets/dashboard-overview.png" width="400" alt="使用仪表板 总览"><br><sub>跨所有设备汇总的一年活跃热力图与连续天数</sub></td>
-<td width="435" align="center"><img src=".github/assets/dashboard-trends.png" width="400" alt="使用仪表板 趋势"><br><sub>一年的每日趋势，按工具／模型堆叠，含 K 线</sub></td>
+<td colspan="2" width="870" align="center"><img src=".github/assets/showcase/notch-panel.gif" width="800" alt="刘海面板"><br><sub><b>刘海面板</b>：刘海旁显示运行中的 session；向下滑动即可查看今日用量、各账号额度、session 与用量分布</sub></td>
+</tr>
+<tr>
+<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="540" alt="侧边栏"><br><sub><b>侧边栏</b>：额度与用量停靠在屏幕边缘；悬停即可查看额度、最近的 session 与 token</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="540" alt="菜单栏与弹出窗口"><br><sub><b>菜单栏与系统托盘</b>：选用内置版式或自己排：AI 工具图标、额度条、重置时间、成本或实时 tok/s</sub></td>
+</tr>
+</table>
+
+### App 界面
+
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/showcase/limits-view.png" width="250" alt="额度视图"><br><sub>多账号并列，Codex 可一键切换本机账号</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/tools-view.png" width="250" alt="工具视图"><br><sub>点任一工具展开输入／输出与缓存命中明细</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/sessions-view.png" width="250" alt="Session 视图"><br><sub>点进单个 session，逐条提问拆解 token 与用到的工具</sub></td>
+</tr>
+</table>
+
+<details>
+<summary>更多视图：项目、模型与设备</summary>
+
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/showcase/projects-view.png" width="250" alt="项目视图"><br><sub>每个项目的用量与成本，跨工具与设备汇总</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/models-view.png" width="250" alt="模型视图"><br><sub>跨工具汇总每个模型的用量与成本</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/devices-view.png" width="250" alt="设备视图"><br><sub>每台设备的用量、成本与同步状态，可展开看单机明细</sub></td>
+</tr>
+</table>
+</details>
+
+### 使用仪表板
+
+<table>
+<tr>
+<td width="435" align="center"><img src=".github/assets/showcase/dashboard-overview.png" width="400" alt="使用仪表板 总览"><br><sub>跨所有设备汇总的一年活跃热力图与连续天数</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/dashboard-trends.png" width="400" alt="使用仪表板 趋势"><br><sub>一年的每日趋势，按工具／模型堆叠，含 K 线</sub></td>
 </tr>
 </table>
 
@@ -172,13 +195,14 @@ Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settin
 
 ### 界面与呈现
 
-- **分组视图**：可按工具、设备、模型、session、项目或账户额度分组查看用量
-- **菜单栏（macOS）与系统托盘（Windows）弹出窗口**：图标旁可显示成本、token 数，或最接近用完的提供方剩余额度百分比
-- **悬浮小窗模式**：可将组件收成可拖动的紧凑小窗，支持点击或悬停预览展开，并可显示托盘同款内容
+- **刘海面板（macOS）**：运行中与等待中的 session 会显示在刘海旁（没有刘海的屏幕则以胶囊形式显示）；悬停或向下滑动即可打开分页，查看今日与最近七天的用量、并列的各账号额度、进行中与最近的 session，以及按工具／模型分类的明细
 - **侧边栏（macOS 与 Windows）**：在屏幕边缘显示额度与用量，可选择自动隐藏、始终显示或全屏自动隐藏模式。通过悬停卡片查看各账号额度、最近会话及 token 用量。可在设置中选择、排序及配置项目，也可从菜单栏或系统托盘开关
+- **菜单栏（macOS）与系统托盘（Windows）弹出窗口**：图标旁可显示成本、token 数，或最接近用完的提供方剩余额度百分比
 - **菜单栏排版自定义**：菜单栏与悬浮小窗的显示内容可以直接挑内置版式，也可以选“自定义…”自己排——加入 AI 工具图标、额度条、百分比、重置时间、成本、Token 速率或自定义文字等项目，拖动排序并实时预览，每个项目还能各自指定 AI 工具、账号、额度周期与字体
-- **外观控制**：界面主题切换（含浅色模式）、各工具厂商色、玻璃透明度、模糊度、完全透明窗口、自定义字体
+- **悬浮小窗模式**：可将组件收成可拖动的紧凑小窗，支持点击或悬停预览展开，并可显示托盘同款内容
 - **原生 macOS 小部件**：在 macOS 14+ 上通过小号、中号和大号布局查看 Token 用量与成本、趋势、各 AI 工具的剩余额度与重置时间、活动热力图，以及按工具或模型分类的明细
+- **分组视图**：可按工具、设备、模型、session、项目或账户额度分组查看用量
+- **外观控制**：界面主题切换（含浅色模式）、各工具厂商色、玻璃透明度、模糊度、完全透明窗口、自定义字体
 - **工具列表自定义**：可隐藏、置顶和拖曳排序主列表中的工具，不影响实际追踪
 - **可录制全局快捷键**：可从任何地方快速显示或隐藏窗口
 - **Discord Rich Presence**：将今日 Token、花费与主要工具广播到你的 Discord 个人资料（需手动开启）

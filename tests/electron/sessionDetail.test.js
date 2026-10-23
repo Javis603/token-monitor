@@ -140,7 +140,9 @@ test('session detail renders its heading before loading, errors and empty result
     reducedMotion = true;
     heading.mouseenter();
     assert.equal(heading.scrollLeft, 0);
-    assert.equal(heading.title, title, 'full title remains available without motion');
+    assert.equal(heading.textContent, title, 'full text remains available for manual scrolling');
+    assert.equal(heading.title, undefined);
+    assert.equal(heading.classList.contains('is-overflow-static'), true);
     reducedMotion = false;
     heading.children[0].getBoundingClientRect = () => ({ width: heading.clientWidth });
     overflowText.update(heading);
