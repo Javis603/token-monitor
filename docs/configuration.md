@@ -11,10 +11,6 @@ The widget reads `.env` values as *first-run defaults*; once you change a settin
 
 ## Widget (GUI)
 
-On Windows 11, Edge Dock uses Windows' native HostBackdrop blur while keeping its curved outline. The main window's Acrylic/Accent selection does not change this dock material. The dock still follows the selected theme and glass opacity; turning off native glass, an unsupported Windows version or an unavailable native helper uses the solid tint fallback. For local development, run `npm run build:windows-dock` once before starting the widget; Windows packaging builds and includes the helper automatically.
-
-On Windows, the first item under Edge Dock → More options is Glass style. Same as widget is the default and follows the main window's System/Transparent backdrop choice. System selects native dock glass, while Transparent uses the theme tint without native blur. Native dock glass uses the curved HostBackdrop rather than the main window's Acrylic/Accent style. The global Glass Backdrop switch still applies to both windows.
-
 Click the `⚙` button in the bottom-right corner of the widget to open the settings panel. Sections appear in this order:
 
 | Section | What it controls |
