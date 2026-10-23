@@ -1095,7 +1095,7 @@
     }
     function finishSwipe() {
       if (!gesture) return;
-      const { destination, decision = 0 } = gesture;
+      const { destination, decision = 0, strip: held } = gesture;
       const page = destination?.lane === 'outer' && decision ? PAGES[destination.target] : view.page;
       if (gesture.strip) {
         const strip = node.querySelector('.notch-limits');
@@ -1104,7 +1104,10 @@
       }
       dropGesture();
       if (page !== view.page) commitPage(page);
-      else paintTabs();
+      else {
+        paintTabs();
+        if (held) renderPage('limits');
+      }
       clearPageMotion();
     }
     function paintSwipe() {
