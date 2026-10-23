@@ -5657,7 +5657,7 @@ function ensureNotchController() {
     nativeGlass: () => nativeBlurEnabled(),
     liquidGlass: () => {
       const options = nativeMaterialOptions();
-      return options.enabled && !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25
+      return !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25
         ? { dark: options.dark } : null;
     },
     createGlass: (win) => createMacLiquidGlass(win, { shaped: true }),
@@ -6055,13 +6055,13 @@ function ensureEdgeDockController() {
     preloadPath: path.join(__dirname, 'edgeDock', 'preload.js'),
     getSettings: () => settings,
     nativeGlass: () => nativeBlurEnabled(),
-    // The dock follows the widget's glass style unless it has its own, on the
-    // same terms as the main window: Reduce Transparency hands the surface back
-    // to the HUD material.
+    // The dock follows the widget's glass style unless it has its own; the
+    // controller decides whether there is material at all. Reduce Transparency
+    // still hands the surface back to the HUD material.
     liquidGlass: () => {
       const source = dockAppearanceSettings();
       const options = nativeMaterialOptions(source);
-      const wanted = process.platform === 'darwin' && options.enabled
+      const wanted = process.platform === 'darwin'
         && isLiquidGlassBackdrop(edgeDockBackdropMode(source))
         && !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25;
       const mode = edgeDockBackdropMode(source);

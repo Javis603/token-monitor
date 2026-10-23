@@ -29,6 +29,7 @@ const {
 } = require('./geometry');
 const { shapeRectsFromPolygons } = require('./mask');
 const { normalizeWindowsDockBackdropMode } = require('../windowsBackdropMode');
+const { normalizeEdgeDockBackdropMode } = require('../macBackdropMode');
 const { bubbleCommands, peekCommands, railCommands, refreshCommands, toPolygons, toSvgPath } = require('../renderer/edgeDock/shapes');
 
 const SURFACES = Object.freeze(['peek', 'rail', 'bubble']);
@@ -775,8 +776,10 @@ function createEdgeDockController(deps) {
   }
 
   function buildWindows() {
-    const glass = Boolean(nativeGlass()) && (platform !== 'win32'
-      || normalizeWindowsDockBackdropMode(settings().edgeDockWindowsBackdrop) !== 'transparent');
+    const ownStyle = platform === 'win32' ? normalizeWindowsDockBackdropMode(settings().edgeDockWindowsBackdrop)
+      : platform === 'darwin' ? normalizeEdgeDockBackdropMode(settings().edgeDockMacBackdrop) : 'inherit';
+    // An explicit dock style overrides System Glass either way; inherit follows it.
+    const glass = ownStyle === 'inherit' ? Boolean(nativeGlass()) : ownStyle !== 'transparent';
     const materialKey = !glass ? 'none'
       : platform === 'win32' ? (windowsBackdrop ? 'win-host' : 'none')
         : platform === 'darwin' ? (liquidGlass() && createGlass ? 'mac-glass' : 'mac') : 'none';

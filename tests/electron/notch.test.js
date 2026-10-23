@@ -184,6 +184,11 @@ test('inherited notch material follows the widget without changing saved indepen
   assert.equal(f.windows.findLast(win => win.query?.surface === 'notch' && !win.destroyed).options.vibrancy, 'hud');
   f.preferences.notchStyle = 'inherit'; enabled = false; f.controller.sync();
   assert.equal(f.windows.findLast(win => win.query?.surface === 'notch' && !win.destroyed).options.vibrancy, undefined);
+  // An explicit style overrides System Glass; Pure black never has material.
+  f.preferences.notchStyle = 'vibrancy'; f.controller.sync();
+  assert.equal(f.windows.findLast(win => win.query?.surface === 'notch' && !win.destroyed).options.vibrancy, 'hud');
+  f.preferences.notchStyle = 'black'; enabled = true; f.controller.sync();
+  assert.equal(f.windows.findLast(win => win.query?.surface === 'notch' && !win.destroyed).options.vibrancy, undefined);
 });
 
 test('physical notch geometry uses AppKit gap and safe top, not menu-bar workArea or pixel scale', () => {

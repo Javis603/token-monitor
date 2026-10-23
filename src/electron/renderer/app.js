@@ -7741,6 +7741,7 @@ function applyAppearanceSettings(settings) {
   const depth = (glassRenderingApi.usesNativeMaterial(nativeMaterialState) ? 32 : clamp(settings?.glassBlur ?? 32, 0, 100)) / 100;
   const systemGlassDisabled = settings?.systemGlass === false;
   const isWindows = navigator.userAgent.toLowerCase().includes('windows');
+  const isMac = navigator.userAgent.includes('Macintosh');
   const windowsGlass = windowsGlassApi.appearanceState(settings, { isWindows });
   const macGlass = macBackdropApi.appearanceState(settings, {
     liquidGlassSupported: nativeMaterialState.liquidGlassSupported
@@ -7782,10 +7783,12 @@ function applyAppearanceSettings(settings) {
     els.windowsBackdropNote.classList.toggle('hidden', !windowsGlass.showAccentNote);
   }
   els.macBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
-  // Same terms as the widget's own selector; material pushes land here too.
-  els.edgeDockMacBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
+  // The dock's own style overrides System Glass either way, so its selectors
+  // stay available on every macOS and Windows; material pushes land here too.
+  els.edgeDockMacBackdropRow?.classList.toggle('hidden', !isMac);
+  syncEdgeDockMacBackdropInput(settings);
   syncNotchStyleInput(settings);
-  els.edgeDockWindowsBackdropRow?.classList.toggle('hidden', !windowsGlass.showBackdropControl);
+  els.edgeDockWindowsBackdropRow?.classList.toggle('hidden', !isWindows);
   if (els.macBackdropInput) els.macBackdropInput.value = macGlass.backdropMode;
   applyReduceMotionPreference(settings?.reduceMotion);
   applyFontSettings(settings);
@@ -13438,15 +13441,25 @@ function syncNotchHoverDelayValue() {
 function syncNotchStyleInput(preview) {
   if (!els.notchStyleInput) return;
   const settings = Object.assign({}, state.settings, ...pendingSettingsPatches, preview);
-  const { showBackdropControl } = macBackdropApi.appearanceState(settings, {
-    liquidGlassSupported: nativeMaterialState.liquidGlassSupported
-  });
+  syncMacStyleSelect(els.notchStyleInput, settings?.notchStyle || 'inherit', nativeMaterialState.liquidGlassSupported === true);
+}
+
+// Liquid Glass options hide where it cannot be drawn, and a saved Liquid Glass
+// choice shows the Frosted Glass the surface falls back to.
+function syncMacStyleSelect(select, style, liquidGlassAvailable) {
   for (const value of ['liquid-glass', 'liquid-glass-clear']) {
-    const option = els.notchStyleInput.querySelector(`option[value="${value}"]`);
-    if (option) option.hidden = option.disabled = !showBackdropControl;
+    const option = select.querySelector(`option[value="${value}"]`);
+    if (option) option.hidden = option.disabled = !liquidGlassAvailable;
   }
-  const style = settings?.notchStyle || 'inherit';
-  els.notchStyleInput.value = macBackdropApi.isLiquidGlassBackdrop(style) && !showBackdropControl ? 'vibrancy' : style;
+  select.value = macBackdropApi.isLiquidGlassBackdrop(style) && !liquidGlassAvailable ? 'vibrancy' : style;
+}
+
+function syncEdgeDockMacBackdropInput(preview) {
+  if (!els.edgeDockMacBackdropInput) return;
+  const settings = Object.assign({}, state.settings, ...pendingSettingsPatches, preview);
+  syncMacStyleSelect(els.edgeDockMacBackdropInput,
+    macBackdropApi.normalizeEdgeDockBackdropMode(settings?.edgeDockMacBackdrop),
+    nativeMaterialState.liquidGlassSupported === true);
 }
 
 function syncNotchCapabilities() {
@@ -13471,9 +13484,7 @@ function syncDockControls() {
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
   if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
   if (els.edgeDockRunningIndicatorInput) els.edgeDockRunningIndicatorInput.checked = state.settings?.edgeDockRunningIndicatorEnabled !== false;
-  if (els.edgeDockMacBackdropInput) {
-    els.edgeDockMacBackdropInput.value = macBackdropApi.normalizeEdgeDockBackdropMode(state.settings?.edgeDockMacBackdrop);
-  }
+  syncEdgeDockMacBackdropInput();
   if (els.edgeDockWindowsBackdropInput) {
     els.edgeDockWindowsBackdropInput.value = windowsBackdropApi.normalizeWindowsDockBackdropMode(state.settings?.edgeDockWindowsBackdrop);
   }

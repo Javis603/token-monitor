@@ -775,7 +775,9 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const style = normalizeNotchStyle(settings().notchStyle);
     // `inherit` follows only the widget, never the Edge Dock's own style.
     const backdrop = backdropMode();
-    const key = style === 'black' || !nativeGlass() ? 'none' : isLiquidGlassBackdrop(backdrop) && liquidGlass() ? 'liquid' : 'vibrancy';
+    // An explicit style overrides System Glass either way; inherit follows it.
+    const material = style === 'inherit' ? nativeGlass() : style !== 'black';
+    const key = !material ? 'none' : isLiquidGlassBackdrop(backdrop) && liquidGlass() ? 'liquid' : 'vibrancy';
     if (materialKey !== key || !surfaces.every((s) => alive(windows[s]))) {
       destroyWindows(); materialKey = key; expanded = peeked = hoverTicked = false; enterAt = leaveAt = null;
       for (const s of surfaces) {

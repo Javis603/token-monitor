@@ -896,7 +896,10 @@ test('Windows dock material switches independently and rebuilds native underlays
   assert.equal(sentPayload(rail, 'rail').glass, true);
   options.nativeGlass = false;
   fixture.controller.sync();
-  assert.ok(adapters.every((adapter) => adapter.disposed), 'global native-glass switch still takes precedence');
+  assert.equal(fixture.windowFor('rail'), rail, 'an explicit dock style overrides System Glass');
+  fixture.settings.edgeDockWindowsBackdrop = 'inherit';
+  fixture.controller.sync();
+  assert.ok(adapters.every((adapter) => adapter.disposed), 'inherit follows System Glass off');
 });
 
 test('Windows keeps shaped click-through regions without native glass', (t) => {
@@ -991,6 +994,47 @@ test('switching the glass style rebuilds the dock and releases its Liquid Glass'
   assert.equal(rebuilt.options.vibrancy, 'hud');
   assert.equal(factory.glasses.length, 2);
   assert.ok(factory.glasses.every((glass) => glass.disposed?.windowClosed !== true));
+  assert.ok(factory.glasses.every((glass) => glass.disposed !== null));
+});
+
+test('macOS Transparent drops the dock material while the widget keeps its glass', (t) => {
+  const factory = fakeGlassFactory();
+  const fixture = createFixture({ platform: 'darwin', nativeGlass: true, liquidGlass: { dark: true }, createGlass: factory.create });
+  t.after(() => fixture.controller.stop());
+  const glassy = fixture.windowFor('rail');
+  assert.equal(factory.glasses.length, 2);
+
+  fixture.settings.edgeDockMacBackdrop = 'transparent';
+  fixture.controller.sync();
+  const plain = fixture.windowFor('rail');
+  assert.notEqual(plain, glassy);
+  assert.ok(factory.glasses.every((glass) => glass.disposed !== null));
+  assert.equal(factory.glasses.length, 2, 'no Liquid Glass is built for a transparent dock');
+  assert.ok(['peek', 'rail', 'bubble'].every((surface) => fixture.windowFor(surface).options.vibrancy === undefined));
+  plain.webContents.emit('did-finish-load');
+  assert.equal(sentPayload(plain, 'rail').glass, false);
+
+  fixture.settings.edgeDockMacBackdrop = 'inherit';
+  fixture.controller.sync();
+  assert.equal(factory.glasses.length, 4, 'glass returns without restarting the app');
+});
+
+test('macOS dock styles override System Glass while inherit follows it', (t) => {
+  const factory = fakeGlassFactory();
+  const options = { platform: 'darwin', nativeGlass: false, liquidGlass: { dark: true }, createGlass: factory.create };
+  const fixture = createFixture(options);
+  t.after(() => fixture.controller.stop());
+  assert.equal(factory.glasses.length, 0, 'inherit follows System Glass off');
+
+  fixture.settings.edgeDockMacBackdrop = 'liquid-glass';
+  fixture.controller.sync();
+  assert.equal(factory.glasses.length, 2, 'an explicit style brings its own glass');
+  const rail = fixture.windowFor('rail');
+  rail.webContents.emit('did-finish-load');
+  assert.equal(sentPayload(rail, 'rail').glass, true);
+
+  fixture.settings.edgeDockMacBackdrop = 'inherit';
+  fixture.controller.sync();
   assert.ok(factory.glasses.every((glass) => glass.disposed !== null));
 });
 
