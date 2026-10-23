@@ -448,13 +448,17 @@ test('a failed identity lookup is not retried on every poll', async () => {
   assert.equal(retried.accountKey, first.accountKey);
 });
 
-test('a save probe neither reads nor seeds the identity caches', async () => {
+test('a save probe checks only the key and leaves identity to the next poll', async () => {
   const key = 'ollama-key-probe-isolation';
-  const probeFetch = async (url) => String(url).endsWith('/api/balance')
-    ? jsonResponse(200, LEGACY_BALANCE)
-    : jsonResponse(200, { Email: 'probe@example.com', Plan: 'pro' });
+  const probeRequests = [];
+  const probeFetch = async (url) => {
+    probeRequests.push(String(url));
+    return jsonResponse(200, LEGACY_BALANCE);
+  };
   const probe = await fetchOllamaLimits({ ollamaApiKey: key }, { env: {}, probe: true, fetch: probeFetch });
-  assert.equal(probe.accountKey, hashKey('ollama', 'probe@example.com'));
+  assert.equal(probe.status, 'ok');
+  assert.deepEqual(probeRequests, ['https://ollama.com/api/balance']);
+  assert.equal(probe.accountKey, hashKey('ollama', `api-key:${key}`));
 
   const failingFetch = async (url) => String(url).endsWith('/api/balance')
     ? jsonResponse(200, LEGACY_BALANCE)

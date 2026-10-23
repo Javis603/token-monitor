@@ -8594,6 +8594,21 @@ app.whenReady().then(() => {
   ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
+  // The account panels ask for a provider-scoped re-read after a save, a clear
+  // or their refresh button, so the record can confirm the change immediately
+  // instead of waiting for the next scheduled limits poll.
+  ipcMain.handle('limits:refresh', async (_event, providerId) => {
+    const provider = String(providerId || '').trim();
+    const parsed = parseLimitProviders(provider);
+    if (parsed.length !== 1 || parsed[0] !== provider) return { ok: false, error: 'unknown provider' };
+    if (!deviceRuntimeHandle) return { ok: false, error: 'limits runtime is not ready' };
+    try {
+      await runLimitInvalidation(deviceRuntimeHandle, { provider }, 'account-panel', { clear: false });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error) };
+    }
+  });
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
     const cookie = opencodeWeb.sanitizeCookieHeader(raw);
     if (!cookie) {

@@ -69,7 +69,7 @@ module.exports = {
       { steps: ['settings.ollama.step1', 'settings.ollama.step2', 'settings.ollama.step3', 'settings.ollama.step4'] },
       { field: 'ollamaCookie' }
     ],
-    openUrl: { url: 'https://ollama.com/settings/keys' },
+    openUrl: { url: 'https://ollama.com/settings' },
     messages: {
       rejected: 'settings.ollama.validationInvalid',
       required: 'settings.ollama.required'
@@ -79,6 +79,6 @@ module.exports = {
     rememberProbe: { fn: 'rememberOllamaValidation', field: 'ollamaCookie' }
   },
   urlPolicy: [
-    { hosts: ['ollama.com', 'www.ollama.com'], exactPaths: ['/settings', '/settings/keys', '/signin'] }
+    { hosts: ['ollama.com', 'www.ollama.com'], exactPaths: ['/settings', '/signin'] }
   ]
 };

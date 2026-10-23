@@ -361,7 +361,6 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://console.typesafe.ai/settings/billing',
     'https://platform.stepfun.com/plan-usage',
     'https://ollama.com/settings',
-    'https://ollama.com/settings/keys',
     'https://www.ollama.com/signin',
     'https://kimi.com/code',
     'https://www.kimi.com/code/console',

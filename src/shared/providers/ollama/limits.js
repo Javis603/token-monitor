@@ -476,7 +476,9 @@ async function fetchOllamaApiLimits(apiKey, deps, nowMs, updatedAt) {
   }
   const allowCache = deps.probe !== true;
   const keyHash = apiKeyCacheKey(apiKey);
-  const identity = await resolveApiIdentity(apiKey, deps, nowMs, allowCache);
+  // A save-time check only proves the key, so it stays one request: identity
+  // resolution belongs to the poll that follows it.
+  const identity = allowCache ? await resolveApiIdentity(apiKey, deps, nowMs, true) : null;
   const accountKey = identity ? identity.accountKey : fallbackAccountKey(apiKey);
   const removals = [];
   if (allowCache) {
