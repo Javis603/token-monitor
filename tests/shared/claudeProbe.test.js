@@ -362,8 +362,8 @@ time.sleep(10)
 });
 
 test('PTY trust selection waits for a complete menu and selected Yes before confirming', { skip: !hasPython }, async t => {
-  for (const mode of ['default-no', 'default-yes', 'fragmented', 'slow-start', 'trusted']) {
-    for (const command of mode === 'slow-start' ? ['status'] : ['usage', 'status']) await t.test(`${mode}: /${command}`, async t => {
+  for (const mode of ['default-no', 'default-yes', 'fragmented', 'slow-start', 'no-color-env', 'trusted']) {
+    for (const command of ['slow-start', 'no-color-env'].includes(mode) ? ['status'] : ['usage', 'status']) await t.test(`${mode}: /${command}`, async t => {
       const f = fixture(t);
       const fake = path.join(f.root, 'trust-menu.py');
       const receipt = path.join(f.root, 'trust.json');
@@ -383,6 +383,10 @@ def quiet(delay):
     if select.select([0], [], [], delay)[0]:
         sys.exit(9)
 def menu(yes):
+    if yes and mode == 'no-color-env' and ('NO_COLOR' in os.environ or os.environ.get('FORCE_COLOR') != '1'):
+        # An unstyled Ink selection changes only the marker, not its label.
+        print('\\x1b[4A \\r\\x1b[1B❯\\r', flush=True)
+        return
     print('\\x1b[2J\\x1b[HQuick safety check: Is this a project you created or one you trust?\\r', flush=True)
     print(('  ' if yes else '❯ ') + 'No,\\x1b[8Gexit\\r', flush=True)
     print(('❯ ' if yes else '  ') + 'Yes,\\x1b[9GI\\x1b[11Gtrust\\x1b[17Gthis\\x1b[22Gfolder\\r', flush=True)
@@ -415,7 +419,7 @@ while not raw.endswith(b'\\r'):
     raw += read_key()
 slash = raw.decode().strip()
 with open(os.environ['TRUST_RECEIPT'], 'w') as out:
-    json.dump({'keys': keys, 'command': slash}, out)
+    json.dump({'keys': keys, 'command': slash, 'forceColor': os.environ.get('FORCE_COLOR'), 'noColor': 'NO_COLOR' in os.environ, 'user': os.environ.get('USER')}, out)
 if slash not in ('/usage', '/status'):
     sys.exit(3)
 print('Current session 12% left' if slash == '/usage' else 'Account: fixture', flush=True)
@@ -430,12 +434,23 @@ time.sleep(10)
         fetch: async () => { throw new Error('network forbidden'); },
         spawn: (cmd, args, options) => { assert.equal(cmd, python); return spawn(cmd, args, options); }
       };
+      if (mode === 'no-color-env') {
+        Object.assign(deps.env, { NO_COLOR: '1', FORCE_COLOR: '0', USER: 'fixture-user' });
+        deps.claudeStatusTimeoutSeconds = 6;
+      }
+      const parentEnv = { ...deps.env };
       if (command === 'usage') {
         const usage = await fetchClaudeLimits({}, deps);
         assert.equal(usage.source, 'cli');
         assert.equal(usage.windows[0].usedPercent, 88);
       } else assert.match(await touchClaudeAuthPath(deps), /Account: fixture/);
       const observed = JSON.parse(fs.readFileSync(receipt));
+      assert.deepEqual(deps.env, parentEnv, 'terminal negotiation is child-only');
+      if (mode === 'no-color-env') {
+        assert.equal(observed.forceColor, '1');
+        assert.equal(observed.noColor, false);
+        assert.equal(observed.user, 'fixture-user');
+      }
       assert.equal(observed.command, `/${command}`);
       const trustKeys = mode === 'trusted' ? [] : mode === 'default-yes' ? ['\r'] : ['\x1b[B', '\r'];
       assert.deepEqual(observed.keys.slice(0, trustKeys.length), trustKeys);

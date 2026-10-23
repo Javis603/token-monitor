@@ -1899,6 +1899,7 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
     CLAUDE_CODE_SKIP_PROMPT_HISTORY: '1',
     TERM: env.TERM && env.TERM !== 'dumb' ? env.TERM : 'xterm-256color',
     COLORTERM: env.COLORTERM || 'truecolor',
+    FORCE_COLOR: '1',
     TOKEN_MONITOR_CLAUDE_COMMAND_PATH: command,
     TOKEN_MONITOR_CLAUDE_PROBE_DIR: probeDir,
     TOKEN_MONITOR_CLAUDE_PROBE_DEV: identity.dev,
@@ -1908,6 +1909,9 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
     TOKEN_MONITOR_CLAUDE_SLASH_COMMAND: slashCommand,
     TOKEN_MONITOR_CLAUDE_EXIT_MARKER_REGEX: exitMarkerRegex || ''
   };
+  // Unstyled Ink redraws only the marker; styled output also redraws the
+  // selected label required by the trust handshake. This PTY is not user UI.
+  delete runEnv.NO_COLOR;
   const pythonCandidates = deps.pythonCommand ? [deps.pythonCommand] : ['python3', 'python'];
   let lastError = null;
   for (const python of pythonCandidates) {
