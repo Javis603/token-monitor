@@ -261,7 +261,7 @@ const SESSION_METADATA_RESOLVERS = new Map([
   ['grok', { resolve: grokSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['workbuddy', { resolve: workbuddySession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   // ZCode keeps titles in its own CLI SQLite database, which tokscale's JSONL
-  // scan never reads; the session ids align by construction, and the retry
+  // scan never reads; the resolver shares the scan's home, and the retry
   // covers the tick where the database row lands after the usage does.
   ['zcode', { resolve: zcodeSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }]
 ]);

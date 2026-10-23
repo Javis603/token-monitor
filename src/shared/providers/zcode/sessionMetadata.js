@@ -4,25 +4,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { openDb } = require('../../sqliteReadOnly');
-const { zcodeDataBaseDir } = require('../zai/zcodeDiscovery');
 
-// ZCode keeps session titles only in its own CLI database (<base>/.zcode/cli/db/
-// db.sqlite, table session): tokscale scans the JSONL files under
-// ~/.zcode/projects for usage without reading that table, so the scan's
-// sessions metadata carries only client/sessionId and activity bounds — no
-// title — and the row falls back to the session id. This resolver queries the
-// database by the session id tokscale already emits, the same way cursor and
-// antigravity read titles from a local store. The table also records
-// parentage (session.parent_id), which tokscale likewise omits, leaving
-// subagent and workflow sessions flat; reading it here folds those children
-// under the interactive session that started them, matching Codex and Claude.
-//
-// The data base follows the same resolution chain limits discovery uses
-// (env ZCODE_DATA_BASE_DIR → HOME → homedir, see zcodeDataBaseDir): a
-// redirected install reads the store ZCode itself writes to, and tokscale
-// scans the same path, so the two sides' session ids align by construction.
-// Under a scoped (WSL) home the env is cleared, as in antigravity — a host
-// variable must never redirect this lookup away from that distro.
+// Tokscale reads usage from <home>/.zcode/projects but omits session titles
+// and parentage. Join those by session id from the CLI database under the
+// same collector home, including a scoped WSL home. Limits discovery's env
+// overrides do not redirect Tokscale's home-relative source, so they must
+// not select a different metadata store either.
 
 // Deferred like the other SQLite readers: importing this module must not emit
 // Node's experimental node:sqlite warning for collectors that never see a
@@ -46,7 +33,7 @@ const SUBAGENT_TASK_TYPES = new Set(['subagent_child', 'workflow_child']);
 
 // Module-level on purpose: it outlives one collection tick, so an idle
 // session does not reopen the database every pass.
-const titleCache = new Map();
+const sessionRowCache = new Map();
 
 function cleanTitle(value) {
   if (typeof value !== 'string') return '';
@@ -58,8 +45,7 @@ function cleanTitle(value) {
 
 function zcodeDatabasePath(context = {}) {
   const home = context.home || os.homedir();
-  const env = context.deps?.scopedHome ? {} : (context.deps?.env || process.env);
-  return path.join(zcodeDataBaseDir(env, home), '.zcode', 'cli', 'db', 'db.sqlite');
+  return path.join(home, '.zcode', 'cli', 'db', 'db.sqlite');
 }
 
 function fileStamp(filePath) {
@@ -84,7 +70,7 @@ function databaseStamp(dbPath) {
 // Three outcomes are distinguished — supported:false means this table has no
 // title column (definite), null means the open or the query failed
 // (transient, the whole batch retries next tick).
-function readTitles(dbPath, sqlite, wantedIds) {
+function readSessionRows(dbPath, sqlite, wantedIds) {
   let db;
   try {
     db = openDb(dbPath, sqlite);
@@ -130,7 +116,7 @@ function resolveSessionMetadata(sessionIds, context = {}) {
   const dbPath = zcodeDatabasePath(context);
   const stamp = databaseStamp(dbPath);
   if (!stamp) return result;
-  const cache = context.deps?.zcodeTitleCache || titleCache;
+  const cache = context.deps?.zcodeSessionRowCache || sessionRowCache;
   let cached = cache.get(dbPath);
   // A new fingerprint re-queries everything: a title is a mutable fact (the
   // user can rename a session), and keeping the cached value would freeze the
@@ -145,7 +131,7 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     // transient read failure leave the id for the next pass.
     const wanted = [...sessionIds].filter((id) => !cached.rows.has(id) && !cached.misses.has(id));
     if (wanted.length > 0) {
-      const read = readTitles(dbPath, sqlite, wanted);
+      const read = readSessionRows(dbPath, sqlite, wanted);
       if (read) {
         cached.supported = read.supported;
         for (const [id, row] of read.rows) cached.rows.set(id, row);
@@ -165,4 +151,4 @@ function resolveSessionMetadata(sessionIds, context = {}) {
   return result;
 }
 
-module.exports = { cleanTitle, readTitles, resolveSessionMetadata, zcodeDatabasePath };
+module.exports = { cleanTitle, readSessionRows, resolveSessionMetadata, zcodeDatabasePath };

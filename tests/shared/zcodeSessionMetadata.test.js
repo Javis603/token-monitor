@@ -8,7 +8,7 @@ const test = require('node:test');
 const { applySessionMetadata } = require('../../src/shared/sessionMetadata');
 const {
   cleanTitle,
-  readTitles,
+  readSessionRows,
   resolveSessionMetadata,
   zcodeDatabasePath
 } = require('../../src/shared/providers/zcode/sessionMetadata');
@@ -27,15 +27,15 @@ test('cleanTitle strips whitespace and truncates with an ellipsis', () => {
   assert.ok(truncated.endsWith('…'));
 });
 
-test('zcodeDatabasePath follows the ZCode data-base chain', () => {
+test('zcodeDatabasePath follows the collector home rather than limits discovery', () => {
   const home = '/fake/home';
   assert.equal(
     zcodeDatabasePath({ home, deps: { env: {} } }),
     path.join(home, '.zcode', 'cli', 'db', 'db.sqlite')
   );
   assert.equal(
-    zcodeDatabasePath({ home, deps: { env: { ZCODE_DATA_BASE_DIR: '/custom/base' } } }),
-    path.join('/custom/base', '.zcode', 'cli', 'db', 'db.sqlite')
+    zcodeDatabasePath({ home, deps: { env: { ZCODE_DATA_BASE_DIR: '/custom/base', HOME: '/host/home' } } }),
+    path.join(home, '.zcode', 'cli', 'db', 'db.sqlite')
   );
   // A scoped (WSL) home ignores host env, matching the other resolvers
   assert.equal(
@@ -44,7 +44,37 @@ test('zcodeDatabasePath follows the ZCode data-base chain', () => {
   );
 });
 
-test('readTitles answers per id and reports a missing title column', { skip: !sqlite }, (t) => {
+test('ZCode metadata stays with the scanned home when host paths contain matching ids', { skip: !sqlite }, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zcode-home-scope-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const home = path.join(root, 'scanned-home');
+  const hostHome = path.join(root, 'host-home');
+  const customBase = path.join(root, 'custom-base');
+  for (const [base, title] of [[home, 'Scanned session'], [hostHome, 'Host session'], [customBase, 'Redirected session']]) {
+    const dbDir = path.join(base, '.zcode', 'cli', 'db');
+    fs.mkdirSync(dbDir, { recursive: true });
+    const db = new sqlite.DatabaseSync(path.join(dbDir, 'db.sqlite'));
+    try {
+      db.exec('CREATE TABLE session (id text primary key, title text not null, task_type text, parent_id text)');
+      db.prepare('INSERT INTO session VALUES (?, ?, ?, ?)').run('sess_shared', title, 'subagent_child', `${title} parent`);
+    } finally { db.close(); }
+  }
+
+  for (const [name, env, scopedHome] of [
+    ['HOME override', { HOME: hostHome }, false],
+    ['ZCODE_DATA_BASE_DIR override', { HOME: hostHome, ZCODE_DATA_BASE_DIR: customBase }, false],
+    ['scoped WSL home', { HOME: hostHome, ZCODE_DATA_BASE_DIR: customBase }, true]
+  ]) {
+    await t.test(name, () => {
+      const periods = { today: { sessions: { 'zcode:sess_shared': { client: 'zcode', sessionId: 'sess_shared' } } } };
+      applySessionMetadata(periods, home, { sqlite, env, scopedHome, zcodeSessionRowCache: new Map() });
+      assert.equal(periods.today.sessions['zcode:sess_shared'].title, 'Scanned session');
+      assert.equal(periods.today.sessions['zcode:sess_shared'].parentSessionId, 'Scanned session parent');
+    });
+  }
+});
+
+test('readSessionRows answers per id and reports a missing title column', { skip: !sqlite }, (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'zcode-titles-'));
   const dbDir = path.join(home, '.zcode', 'cli', 'db');
   fs.mkdirSync(dbDir, { recursive: true });
@@ -63,7 +93,7 @@ test('readTitles answers per id and reports a missing title column', { skip: !sq
   put.run('sess_a', 'p', 's', '/repo', '  增加  Kyan  生图适配器  ', '1', 1, 2);
   put.run('sess_b', 'p', 's', '/repo', '', '1', 1, 2);
 
-  const read = readTitles(dbPath, sqlite, ['sess_a', 'sess_b', 'sess_missing']);
+  const read = readSessionRows(dbPath, sqlite, ['sess_a', 'sess_b', 'sess_missing']);
   assert.equal(read.supported, true);
   assert.equal(read.rows.get('sess_a')?.title, '增加 Kyan 生图适配器');
   assert.equal(read.misses.has('sess_b'), false, 'an empty title is still a definitive row');
@@ -75,7 +105,7 @@ test('readTitles answers per id and reports a missing title column', { skip: !sq
   const legacyDb = new sqlite.DatabaseSync(legacyPath);
   legacyDb.exec('CREATE TABLE session (id text primary key, name text not null)');
   legacyDb.close();
-  const legacyRead = readTitles(legacyPath, sqlite, ['sess_a']);
+  const legacyRead = readSessionRows(legacyPath, sqlite, ['sess_a']);
   assert.equal(legacyRead.supported, false);
   assert.equal(legacyRead.rows.size, 0);
 });
@@ -107,7 +137,7 @@ test('ZCode titles join by session id and see later updates', { skip: !sqlite },
   put.run('sess_fork', 'p', 's', '/repo', 'Fork of 帮我分析下这个项目', '1', 1, 2, 'fork', 'sess_1');
   put.run('sess_side', 'p', 's', '/repo', '侧聊标题', '1', 1, 2, 'selection_side_chat', 'sess_1');
 
-  const deps = { sqlite, env: {}, zcodeTitleCache: new Map() };
+  const deps = { sqlite, env: {}, zcodeSessionRowCache: new Map() };
   const context = { home, deps };
 
   const first = resolveSessionMetadata(new Set(['sess_1', 'sess_dwf-dwfrun-5d819c2c-actor_13_1', 'sess_sub', 'sess_fork', 'sess_side', 'sess_gone']), context);
@@ -121,7 +151,8 @@ test('ZCode titles join by session id and see later updates', { skip: !sqlite },
 
   // A rename lands in WAL; the next tick's fingerprint picks it up
   const rename = db.prepare('UPDATE session SET title = ? WHERE id = ?');
-  rename.run('重命名后的标题', 'sess_1');  const second = resolveSessionMetadata(new Set(['sess_1']), context);
+  rename.run('重命名后的标题', 'sess_1');
+  const second = resolveSessionMetadata(new Set(['sess_1']), context);
   assert.equal(second.get('sess_1')?.title, '重命名后的标题');
 
   const periods = {
