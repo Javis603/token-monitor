@@ -766,6 +766,7 @@
       modelTooltipEntries: options.includeModelTooltip === false ? []
         : sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel }),
       modelTokens: models,
+      modelCosts,
       // Keep the tool/model reading order; the renderer reserves space for the
       // count while the preceding text can shrink in a narrow window.
       subtitle: [display.titled ? titleParts : activity, countLabel].filter(Boolean).join(' · '),

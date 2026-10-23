@@ -77,6 +77,7 @@ test('grouped cost-only sessions retain every member model and the ordinary cost
   assert.equal(others.length, 0);
   assert.equal(row.value, 0);
   assert.ok(Math.abs(row.cost - 0.3) < 1e-12);
+  assert.deepEqual(row.modelCosts, { first: 0.1, second: 0.2 });
   assert.equal(row.modelLabel, '2 models');
   assert.deepEqual(row.modelTooltipEntries, [['first', '', ''], ['second', '', '']]);
 });
