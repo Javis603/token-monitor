@@ -77,6 +77,7 @@ class FakeElement {
   }
   addEventListener() {}
   setAttribute(name, value) { this.attributes[name] = value; }
+  getAttribute(name) { return this.attributes[name] ?? null; }
   removeAttribute(name) { delete this.attributes[name]; }
   replaceChildren(...children) { this.children = [...children]; }
   querySelector(selector) {
@@ -524,7 +525,7 @@ test('Home text and bars use the plan text rendered by Limits account rows', () 
         assert.deepEqual(body.children.map((row) => row.find('home-limit-plan')?.textContent || ''), limitsPlans);
         for (const row of body.children) {
           const plan = row.find('home-limit-plan');
-          if (plan) assert.equal(plan.title, plan.textContent);
+          if (plan) assert.equal(plan.attributes['aria-label'], plan.textContent);
           assert.equal(Boolean(row.find('limit-meter')), homeLimitDisplayMode === 'bars');
         }
       }

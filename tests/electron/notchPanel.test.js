@@ -49,7 +49,7 @@ test('Notch renderer forwards the TPS formatter through live, retained-idle and 
   t.mock.timers.tick(8001);
   assert.equal(renderRate().classList.contains('is-idle'), true, 'idle retains the last useful reading');
   assert.equal(f.find('notch-rate-value').textContent, '50');
-  assert.match(f.find('notch-rate').title, /Idle/);
+  assert.match(f.find('notch-rate').attributes['aria-label'], /Idle/);
   renderRate('burn');
   assert.equal(f.find('notch-rate-value').textContent, '6.0K');
   assert.equal(f.find('notch-rate-unit').textContent, 'TPM');
@@ -581,7 +581,7 @@ test('a grant measured against an allowance reads as a percentage while a bare b
   const cells = buildEdgeDockCells({ limits: { providers: records } }, { items: records.map(record => ({ type: 'limit', provider: record.provider })) });
   f.panel.render({ ...payload(), cells }); f.panel.selectPage('limits');
   assert.deepEqual(f.all('notch-limit-number').map(node => node.textContent), ['48']);
-  assert.equal(f.all('notch-limit-value')[0].title, '$4.79 / $10.00');
+  assert.equal(f.all('notch-limit-value')[0].attributes['aria-label'], '$4.79 / $10.00');
   assert.equal(f.all('notch-limit-money').length, 1);
   assert.match(f.find('notch-limit-money').textContent, /6\.86/);
 });
@@ -697,7 +697,7 @@ test('a cached offline reading says Stale with the Limits view wording and dims 
   assert.equal(codexA.dataset.tone, undefined);
   assert.equal(codexA.querySelector('.notch-limit-stale'), null);
   assert.equal(codexB.querySelector('.notch-limit-stale').textContent, 'Stale');
-  assert.equal(codexB.querySelector('.notch-limit-stale').title, 'Stale · 55m ago');
+  assert.equal(codexB.querySelector('.notch-limit-stale').attributes['aria-label'], 'Stale · 55m ago');
   f.state.locale = 'zh-TW'; f.state.appearanceKey = 'zh'; f.panel.render({ ...payload(), cells });
   assert.equal(f.all('notch-limit')[2].querySelector('.notch-limit-stale').textContent, 'Stale', 'matches the Limits view on every locale');
 });

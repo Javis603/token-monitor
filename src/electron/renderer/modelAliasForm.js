@@ -176,7 +176,7 @@
         const edit = document.createElement('button');
         edit.type = 'button';
         edit.className = 'managed-account-main custom-pricing-edit';
-        edit.title = t('settings.modelAliases.edit');
+        edit.setAttribute('aria-description', t('settings.modelAliases.edit'));
         edit.disabled = busy;
         const name = document.createElement('div');
         name.className = 'managed-account-email';

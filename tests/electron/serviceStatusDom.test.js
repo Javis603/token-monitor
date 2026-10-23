@@ -57,7 +57,7 @@ test('the status description line leads with the active incident headline', () =
 test('the meta line shows an affected-component count, not the verbose name list', () => {
   const app = readRendererFile('app.js');
   // The component names made the meta line overflow; the full list now lives only
-  // in the row tooltip (meta.title), so the dedicated name-joining helper is gone.
+  // in the accessible row metadata, so the dedicated name-joining helper is gone.
   assert.doesNotMatch(app, /function serviceStatusComponentText/);
   const metaBody = functionBody(app, 'serviceStatusMeta', 'visibleServiceProviderIds');
   // A short count keeps the real scope visible (an incident title can understate
@@ -326,7 +326,7 @@ test('Home-launched secondary views expose an accessible return action', () => {
   const setBreakdownBody = functionBody(app, 'setBreakdown', 'renderBreakdownChange');
 
   assert.match(html, /id="viewBackRow" class="view-back-row hidden"/);
-  assert.match(html, /id="backHomeButton"[^>]*data-i18n-title="views\.backHome"[^>]*data-i18n-aria-label="views\.backHome"/);
+  assert.match(html, /id="backHomeButton"[^>]*data-i18n-aria-label="views\.backHome"/);
   assert.match(html, /class="back-home-icon" aria-hidden="true"><\/span>/);
   assert.doesNotMatch(html, /class="back-home-icon"[^>]*>←<\/span>/);
   assert.match(app, /state\.homeReturnVisible = false/);

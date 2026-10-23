@@ -2486,7 +2486,7 @@ test('empty OpenCode profiles render a localized summary before returning', () =
   const app = readRendererFile('app.js');
   const renderProfiles = functionBody(app, 'renderOpenCodeProfiles', 'updateOpenCodeProfilesStatus');
   const renderSummary = functionBody(app, 'renderOpenCodeProfilesStatusSummary', 'openrouterProfileStatusText');
-  const totalEl = { textContent: 'Not configured' };
+  const totalEl = { textContent: 'Not configured', setAttribute(name, value) { this[name] = value; } };
   const context = {
     document: {
       getElementById(id) {

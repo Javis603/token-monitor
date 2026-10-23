@@ -24,15 +24,15 @@ test('Tint Reset buttons have localized accessible names without changing their 
     assert.match(attributes, /data-i18n-aria-label="settings.appearance.resetTint"/);
     assert.equal(glyph, '↺');
     return { textContent: glyph, attributes: {}, dataset: {
-      i18nTitle: 'settings.appearance.resetTint', i18nAriaLabel: 'settings.appearance.resetTint'
+      i18nAriaLabel: 'settings.appearance.resetTint'
     }, setAttribute(name, value) { this.attributes[name] = value; } };
   });
-  const scope = { querySelectorAll: (selector) => ['[data-i18n-title]', '[data-i18n-aria-label]'].includes(selector) ? buttons : [] };
+  const scope = { querySelectorAll: (selector) => selector === '[data-i18n-aria-label]' ? buttons : [] };
   for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt']) {
     applyTranslations(scope, locale);
     for (const button of buttons) {
       assert.equal(button.attributes['aria-label'], translate(locale, 'settings.appearance.resetTint'));
-      assert.equal(button.attributes.title, button.attributes['aria-label']);
+      assert.equal(button.attributes.title, undefined);
       assert.equal(button.textContent, '↺');
     }
   }
