@@ -90,6 +90,7 @@ function createPluginPages({ BrowserWindow, ipcMain, manager, getSettings, getLo
       win.on('closed', () => { if (windows.get(record.id) === record) windows.delete(record.id); syncDemand(); });
       win.loadFile(path.join(__dirname, '../renderer/plugins/page.html')).catch(() => { if (!win.isDestroyed()) win.close(); });
     },
+    refreshVisibility: syncDemand,
     refresh() { for (const record of windows.values()) sendMeta(record); },
     dispose() {
       if (disposed) return;

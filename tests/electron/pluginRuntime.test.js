@@ -10,7 +10,7 @@ const { EventEmitter } = require('node:events');
 function fixture({ rich = false, businessAdapters = {} } = {}) {
   const publications = [];
   let webOptions;
-  const released = [];
+  const released = [], visibilityRefreshes = [];
   const win = { isDestroyed: () => false, isVisible: () => native.visible, isMinimized: () => false };
   const file = path.resolve(__dirname, '../../src/electron/plugins/runtime.js');
   const nativeRequire = createRequire(file), handlers = new Map(), events = new Map(), calls = [], messages = [], demands = new Map();
@@ -25,8 +25,8 @@ function fixture({ rich = false, businessAdapters = {} } = {}) {
   const mocks = {
     '../../shared/plugins/dataBus': { createDataBus: () => ({ defineSource() {}, defineAlias() {}, dispose() {} }) },
     './businessData': { createBusinessDataService: options => { const api = nativeRequire('./businessData').createBusinessDataService(options); return { ...api, publish: (stats, extras) => { publications.push({stats,extras}); api.publish(stats,extras); } }; } },
-    './webUi': { createWebUi: options => { webOptions = options; return { refreshPresentations() {}, refreshSurfaces() {}, dispose() {}, releasePresentationHost: sender => released.push(sender.id) }; } },
-    './pages': { createPluginPages: () => ({presentationContext: () => null, refresh() {}, dispose() {}}) },
+    './webUi': { createWebUi: options => { webOptions = options; return { refreshWindowVisibility(win) { visibilityRefreshes.push(win); }, refreshPresentations() { visibilityRefreshes.push('presentations'); }, refreshSurfaces() { visibilityRefreshes.push('surfaces'); }, dispose() {}, releasePresentationHost: sender => released.push(sender.id) }; } },
+    './pages': { createPluginPages: () => ({presentationContext: () => null, refreshVisibility() { visibilityRefreshes.push('pages'); }, refresh() {}, dispose() {}}) },
     './appSources': { createAppSources: () => ({ publish() {} }) },
     './manager': { createPluginManager: () => manager },
     './appearance': { createPluginAppearance: () => ({ get: () => ({}) }) },
@@ -42,7 +42,7 @@ function fixture({ rich = false, businessAdapters = {} } = {}) {
   } }, userDataDir: '/unused-plugin-runtime-fixture', getSettings: () => settings, getLocale: () => 'en',
   businessAdapters, isSurfaceSender: event => event.sender === sender, surfaceContext: () => native, isMainSender: event => event.sender === sender, env: { TOKEN_MONITOR_PLUGINS_SAFE_MODE: '1' } });
   runtime.start();
-  return { publications, webOptions, released, manager, native, runtime, handlers, events, sender, settings, calls, demands, messages, event: { sender, senderFrame: sender.mainFrame } };
+  return { visibilityRefreshes, publications, webOptions, released, manager, native, runtime, handlers, events, sender, settings, calls, demands, messages, event: { sender, senderFrame: sender.mainFrame } };
 }
 test('main page IPC requires its main frame, declared surface, opted-in placement and active demand', () => {
   const f = fixture();
@@ -194,4 +194,16 @@ test('business extras revisions follow the published snapshot, including source 
   assert.equal(captured.at(-1), null);
   assert.equal(f.publications.at(-1).extras.historyRevision, 'empty');
   f.runtime.dispose();
+});
+
+test('explicit host actions use runtime refresh for Rich and detached demand', () => {
+  const { createWindowVisibilityActions } = require('../../src/electron/plugins/windowVisibility');
+  const f = fixture({ rich: true });
+  const actions = createWindowVisibilityActions(win => f.runtime.refreshWindowVisibility(win));
+  const win = { isDestroyed: () => false, hide() { f.native.visible = false; } };
+  actions.hide(win);
+  assert.deepEqual(f.visibilityRefreshes, [win, 'pages']);
+  f.runtime.dispose(); f.visibilityRefreshes.length = 0;
+  actions.hide(win);
+  assert.deepEqual(f.visibilityRefreshes, [], 'disposed runtime ignores late host callbacks');
 });

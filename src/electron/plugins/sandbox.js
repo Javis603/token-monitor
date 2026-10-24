@@ -42,10 +42,9 @@ const HOST_CSP = [
 // Must run before app 'ready'. `standard` gives each plugin id its own origin
 // (and with site isolation its own process); `secure` keeps Worker and crypto
 // APIs available without granting any network privilege.
+const PLUGIN_SCHEME = Object.freeze({ scheme: SCHEME, privileges: Object.freeze({ standard: true, secure: true, supportFetchAPI: false, corsEnabled: false, stream: false }) });
 function registerPluginScheme(protocol) {
-  protocol.registerSchemesAsPrivileged([
-    { scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false, stream: false } }
-  ]);
+  protocol.registerSchemesAsPrivileged([PLUGIN_SCHEME]);
 }
 
 function hostUrl(pluginId) {
@@ -247,6 +246,7 @@ function createPluginSandbox({ electron, onMessage, onExit, log = () => {} }) {
 
 module.exports = {
   HOST_CSP,
+  PLUGIN_SCHEME,
   PARTITION,
   SCHEME,
   createPluginSandbox,

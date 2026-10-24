@@ -522,13 +522,13 @@ function createEdgeDockController(deps) {
   // Stats arrive every few seconds and mostly change nothing a surface shows;
   // re-rendering on each one rebuilt the card and made it flicker.
   function render(surface) {
-    onWebSurfaceChanged();
     if (!ready[surface]) return;
     const payload = renderPayload(surface);
     const serialized = JSON.stringify(payload);
     if (serialized === lastSent[surface]) return;
     lastSent[surface] = serialized;
     send(surface, 'edgeDock:render', payload);
+    onWebSurfaceChanged();
   }
 
   function createSurface(surface, materialKey) {
@@ -625,6 +625,7 @@ function createEdgeDockController(deps) {
       if (windows[surface] === win) {
         windows[surface] = null;
         ready[surface] = false;
+        onWebSurfaceChanged();
       }
     });
     win.loadFile(path.join(rendererDir, 'edgeDock', 'index.html'), { query: { surface, platform } })
@@ -695,6 +696,7 @@ function createEdgeDockController(deps) {
       shapes[surface] = null;
       nativeMaterial[surface] = false;
     }
+    onWebSurfaceChanged();
   }
 
   function commandsFor(surface, bounds, side) {

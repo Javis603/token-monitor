@@ -34,7 +34,7 @@
   function create({ document, window, bridge, surface, stateFor, active = () => true, reducedMotion = () => false }) {
     if (!bridge?.syncWebPresentation) return null;
     const mounts = new Map(), removers = [];
-    let serial = 0, disposed = false, pending = false, queued = false, timer = null, settle = null, blocked = false, last = '', generation = 0;
+    let serial = 0, disposed = false, pending = false, queued = false, timer = null, settle = null, blocked = false, last = '', generation = 0, advertised = false;
     const resize = new window.ResizeObserver(() => invalidate());
     const show = (node, value) => {
       if (node.classList.contains('pv-web-mounted') !== value) node.classList.toggle('pv-web-mounted', value);
@@ -42,13 +42,30 @@
       for (const child of node.children) child.style.visibility = value ? 'hidden' : '';
     };
     function schedule() { if (!disposed && timer === null) timer = setTimeout(() => { timer = null; void sync(); }, 16); }
-    function invalidate() { generation++; last = ''; schedule(); }
-    function suspend() {
-      blocked = true; generation++; last = '';
-      for (const node of mounts.keys()) show(node, false);
-      // Send hiding immediately, including while a previous sync is in flight.
+    function eligible() {
+      return [...mounts].some(([node, mount]) => {
+        const state = stateFor(mount.ref);
+        return node.isConnected && (!mount.failed || mount.revision !== state?.revision) && state?.status === 'ok' && state.webDocuments?.some(doc => !doc.variant || doc.variant === 'full');
+      });
+    }
+    function refresh() { generation++; if (mounts.size || advertised) schedule(); }
+    function invalidate() { if (advertised || eligible()) refresh(); }
+    function retry() { last = ''; invalidate(); }
+    function hide() {
+      if (!advertised) return;
+      advertised = false; last = '';
       void bridge.syncWebPresentation({ surface, visible: false }).catch(() => {});
-      clearTimeout(settle); settle = setTimeout(() => { blocked = false; invalidate(); }, 120);
+    }
+    function suspend() {
+      if (disposed || (!advertised && !eligible())) return;
+      generation++;
+      if (!blocked) for (const node of mounts.keys()) show(node, false);
+      blocked = true;
+      // Fence a pending visible response and park once per visible transition.
+      hide();
+      clearTimeout(settle); settle = null;
+      if (!document.hidden && eligible()) settle = setTimeout(() => { blocked = false; invalidate(); }, 120);
+      else blocked = false;
     }
     function theme() {
       const css = window.getComputedStyle(document.documentElement);
@@ -61,7 +78,7 @@
       for (const [node, mount] of mounts) {
         if (!node.isConnected) { resize.unobserve(node); mounts.delete(node); continue; }
         const state = stateFor(mount.ref), doc = state?.status === 'ok' && state.webDocuments?.find(doc => !doc.variant || doc.variant === 'full');
-        if (mount.revision !== state?.revision || mount.document !== doc?.ref) { mount.failed = false; mount.revision = state?.revision; mount.document = doc?.ref; mount.started = 0; }
+        if (mount.revision !== state?.revision || mount.document !== doc?.ref) { last = ''; mount.failed = false; mount.revision = state?.revision; mount.document = doc?.ref; mount.started = 0; }
         const height = doc ? `${doc.height}px` : '';
         if (node.style.height !== height) node.style.height = height;
         // Temporarily remove the fallback-hiding class for DOM hit testing.
@@ -75,9 +92,10 @@
           else entries.push({ instance: mount.instance, viewRef: mount.ref, ref: doc.ref, rect });
         } else { mount.started = 0; show(node, false); }
       }
+      if (!entries.length) { hide(); return; }
       const input = { surface, visible, entries, theme: theme() }, key = JSON.stringify(input);
       if (key === last) return;
-      pending = true;
+      pending = true; advertised = true;
       try {
         const result = await bridge.syncWebPresentation(input);
         if (disposed || version !== generation) { queued = true; return; }
@@ -88,17 +106,18 @@
           mount.rect = mounted ? entry.rect : null;
           show(node, mounted);
         }
-        if (entries.some(entry => !result.mounted.includes(entry.instance))) { clearTimeout(settle); settle = setTimeout(invalidate, 100); }
-      } catch { for (const [node, mount] of mounts) { mount.failed = true; show(node, false); } }
+        if (entries.some(entry => !result.mounted.includes(entry.instance))) { clearTimeout(settle); settle = setTimeout(retry, 100); }
+      } catch { if (!disposed && version === generation) for (const [node, mount] of mounts) { mount.failed = true; show(node, false); } }
       finally { pending = false; if (queued) { queued = false; schedule(); } }
     }
     function listen(target, name, fn, options) { target.addEventListener(name, fn, options); removers.push(() => target.removeEventListener(name, fn, options)); }
-    removers.push(bridge.onWebPresentationReady?.(invalidate), bridge.onWebPresentationFailed?.(({ instance }) => { for (const mount of mounts.values()) if (mount.instance === instance) mount.failed = true; invalidate(); }));
+    removers.push(bridge.onWebPresentationReady?.(retry), bridge.onWebPresentationFailed?.(({ instance }) => { for (const mount of mounts.values()) if (mount.instance === instance) mount.failed = true; invalidate(); }));
     listen(document, 'scroll', suspend, true); listen(window, 'resize', suspend);
     listen(document, 'visibilitychange', suspend); listen(document, 'toggle', suspend, true);
     listen(document, 'transitionrun', suspend, true); listen(document, 'transitionend', invalidate, true);
     listen(document, 'animationend', invalidate, true);
     const mutation = new window.MutationObserver(records => {
+      if (!advertised && !eligible()) return;
       // Ignore our own class/height writes; they would create an idle loop.
       if (!records.some(record => !mounts.has(record.target) && ![...mounts.keys()].some(node => node.contains(record.target)))) return;
       // Host counters and sibling controls can repaint without moving a native
@@ -116,10 +135,10 @@
       if (disposed) return; disposed = true; generation++;
       clearTimeout(timer); clearTimeout(settle); resize.disconnect(); mutation.disconnect(); removers.forEach(off => off?.());
       for (const node of mounts.keys()) show(node, false);
-      mounts.clear(); void bridge.syncWebPresentation({ surface, visible: false }).catch(() => {});
+      mounts.clear(); hide();
     }
     listen(window, 'pagehide', dispose, { once: true });
-    return { track(mount) { mounts.set(mount.container, { ...mount, instance: `presentation-${++serial}` }); resize.observe(mount.container); invalidate(); }, refresh: invalidate, suspend, dispose };
+    return { track(mount) { mounts.set(mount.container, { ...mount, instance: `presentation-${++serial}` }); resize.observe(mount.container); refresh(); }, refresh, suspend, dispose };
   }
   return { create, rectangle };
 });

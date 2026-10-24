@@ -7370,7 +7370,9 @@ function render() {
     const supported = ['model', 'tool', 'device'].includes(state.breakdown);
     const period = state.stats?.periods?.[state.period] || {};
     const visible = supported && visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed && !state.openSession;
-    const rows = visible ? rowsForPeriod(period) : [];
+    const hasDesign = (state.pluginCatalog?.plugins || []).some(plugin => plugin.status === 'active'
+      && (plugin.webDocuments || []).some(doc => doc.target === state.breakdown));
+    const rows = visible && hasDesign ? rowsForPeriod(period) : [];
     pluginPageDesigns.render({ visible, catalog: state.pluginCatalog, reducedMotion: prefersReducedMotion(), snapshot: { target: state.breakdown, period: state.period, totalTokens: period.totalTokens, costUsd: period.costUsd, rows: rows.map(row => ({ label: row.name, tokens: row.value, costUsd: row.cost })) } });
   }
 }
@@ -12856,8 +12858,8 @@ function applyPluginCatalog(list) {
   state.pluginCatalog = list;
   // Home and the theme chips depend only on which plugins and views are
   // active; process metrics refresh every few seconds and must not re-render.
-  const key = JSON.stringify((list.plugins || []).map((plugin) => [plugin.id, plugin.status,
-    (plugin.views || []).map((view) => [view.ref, view.title, view.surfaces, view.placements?.page, view.placements?.notch]), (plugin.skins || []).map((skin) => skin.id), plugin.webDocuments]));
+  const key = JSON.stringify((list.plugins || []).map((plugin) => [plugin.id, plugin.name, plugin.status, plugin.webRevision,
+    (plugin.views || []).map((view) => [view.ref, view.title, view.surfaces, view.placements?.page, view.placements?.notch]), plugin.skins, plugin.webDocuments]));
   if (key !== pluginCatalogKey) {
     pluginCatalogKey = key;
     render();
@@ -12865,12 +12867,22 @@ function applyPluginCatalog(list) {
     renderThemePresetChips();
     renderNotchPageChoices();
     if (isSettingsSurfaceVisible()) preserveSettingsPanelScroll(renderViewPreferences);
-  } else if (pluginPageDesigns) render();
+  }
   return list;
 }
 
+async function loadPluginCatalog() {
+  try { return applyPluginCatalog(await pluginBridge.list()); }
+  catch (error) {
+    // Initial failure must resolve the pending restored page. Later transient
+    // failures retain the last known catalog until a successful refresh.
+    if (!state.pluginCatalog) applyPluginCatalog({ enabled: false, plugins: [] });
+    throw error;
+  }
+}
+
 pluginApi = pluginBridge ? {
-  list: async () => applyPluginCatalog(await pluginBridge.list()),
+  list: loadPluginCatalog,
   setEnabled: async (id, enabled) => applyPluginCatalog(await pluginBridge.setEnabled(id, enabled)),
   setBackground: async (id, enabled) => applyPluginCatalog(await pluginBridge.setBackground(id, enabled)),
   restart: async (id) => applyPluginCatalog(await pluginBridge.restart(id)),
@@ -12950,13 +12962,16 @@ function pluginTrayViews() {
 }
 
 async function applyPluginSkin(skin) {
-  if (skin.appearance) await pluginBridge.setAppearance(skin.appearance);
-  const patch = { themeColors: { ...themePresetsApi.mergeThemeColors({ ...state.settings?.themeColors, ...skin.colors }) } };
-  if (skin.vendorColors && Object.keys(skin.vendorColors).length) patch.vendorColors = { ...state.settings?.vendorColors, ...skin.vendorColors };
-  applyThemeColors(patch.themeColors);
-  if (patch.vendorColors) applyVendorColorOverrides(patch.vendorColors);
-  await saveSettings(patch);
-  buildAppearanceColorControls();
+  try {
+    // Main resolves the active author manifest and commits palette + tokens
+    // together. Never send the renderer's copy of the skin as trusted settings.
+    await saveSettings({ pluginSkinRef: skin.ref });
+    buildAppearanceColorControls();
+    renderSettingsSummaries();
+  } catch (error) {
+    const message = String(error?.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
+    setStatus(t('settings.plugins.actionFailed', { error: message }), true);
+  }
 }
 
 if (pluginBridge) {

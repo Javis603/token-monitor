@@ -13,11 +13,12 @@ const { createAppSources } = require('./appSources');
 const { createBusinessDataService } = require('./businessData');
 const { createPluginCapabilities } = require('./capabilities');
 const { createPluginSettingsStore } = require('./settings');
-const { createPluginSandbox, registerPluginScheme } = require('./sandbox');
-const { createWebUi, registerWebUiScheme } = require('./webUi');
+const { createPluginSandbox, PLUGIN_SCHEME } = require('./sandbox');
+const { createWebUi, WEB_UI_SCHEME } = require('./webUi');
 const { createPluginPages } = require('./pages');
 const { createManagedPlugins } = require('./managed');
 const { createPluginAppearance } = require('./appearance');
+const { normalizeAppearance } = require('../../shared/plugins/appearance');
 const { createPluginCatalog } = require('./catalog');
 const { createPluginManager } = require('./manager');
 const { placementPatch, placementsFor } = require('./placementSettings');
@@ -31,6 +32,16 @@ const { createSurfaceDemand } = require('./surfaceDemand');
 
 function safeModeRequested(argv = process.argv, env = process.env) {
   return argv.includes('--plugins-safe-mode') || env.TOKEN_MONITOR_PLUGINS_SAFE_MODE === '1';
+}
+
+// Applied author presets are snapshots, independent of package lifetime. This
+// schema is also used at settings load; no arbitrary CSS or renderer DTO survives.
+function normalizePluginAuthorSkin(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || typeof value.ref !== 'string' || !/^[a-z0-9][a-z0-9-]{1,39}\/[a-z][a-z0-9-]{0,31}$/.test(value.ref)
+    || !value.appearance || typeof value.appearance !== 'object' || Array.isArray(value.appearance)) return null;
+  try { return { ref: value.ref, appearance: normalizeAppearance(value.appearance) }; }
+  catch { return null; }
 }
 
 function createPluginRuntime({
@@ -114,7 +125,7 @@ function createPluginRuntime({
     getSettings,
     saveStates: persistPluginStates,
     getLocale,
-    getAppearance: appearance.get,
+    getAppearance: () => normalizePluginAuthorSkin(getSettings()?.pluginAuthorSkin)?.appearance || appearance.get(),
     safeMode,
     log
   });
@@ -157,7 +168,8 @@ function createPluginRuntime({
     file: path.join(userDataDir, 'plugin-page-designs.json') }) : null;
   const managed = createManagedPlugins({ root: path.join(userDataDir, 'plugin-manager'), userDir,
     dataDir: path.join(userDataDir, 'plugin-data'), settingsDir: path.join(userDataDir, 'plugin-settings'), manager, getSettings, saveSettings: persistManagementSettings, getLocale });
-  managed.recover();
+  try { managed.recover(); }
+  catch (error) { log(`[plugins] Plugin management unavailable: ${error.message}`); }
   const catalog = createPluginCatalog({ manager, managed, getLocale, root: path.join(userDataDir, 'plugin-catalogs'), fetchImpl: netFetch });
   const demand = createSurfaceDemand((surface, refs) => manager.setSurfaceDemand(surface, refs));
   const detachedPageOwner = Symbol('detached-pages');
@@ -218,6 +230,7 @@ function createPluginRuntime({
 
   function listWithPlacements() {
     const list = manager.list();
+    list.management = managed.status?.() || { available: true, error: null };
     const settings = getSettings() || {};
     for (const plugin of list.plugins) {
       plugin.installation = managed.describe(plugin.id);
@@ -278,13 +291,20 @@ function createPluginRuntime({
       manager.reload();
       return listWithPlacements();
     });
-    handle('plugins:addSource', (event, input) => { requireMain(event); return catalog.addSource(input); });
-    handle('plugins:refreshSource', (event, id) => { requireMain(event); return catalog.refreshSource(id); });
-    handle('plugins:removeSource', (event, id) => { requireMain(event); return catalog.removeSource(id); });
-    handle('plugins:catalog', event => { requireMain(event); return catalog.list(); });
-    handle('plugins:catalogPreview', (event, source, id, version) => { requireMain(event); return catalog.preview(source, id, version); });
+    handle('plugins:addSource', (event, input) => { requireMain(event); managed.assertAvailable(); return catalog.addSource(input); });
+    handle('plugins:refreshSource', (event, id) => { requireMain(event); managed.assertAvailable(); return catalog.refreshSource(id); });
+    handle('plugins:removeSource', (event, id) => { requireMain(event); managed.assertAvailable(); return catalog.removeSource(id); });
+    handle('plugins:catalog', event => {
+      requireMain(event);
+      const result = catalog.list();
+      const status = managed.status?.();
+      if (status?.error) result.error = status.error.message;
+      return result;
+    });
+    handle('plugins:catalogPreview', (event, source, id, version) => { requireMain(event); managed.assertAvailable(); return catalog.preview(source, id, version); });
     handle('plugins:import', async (event, kind) => {
       requireMain(event);
+      managed.assertAvailable();
       const selection = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
         properties: kind === 'directory' ? ['openDirectory'] : ['openFile'],
         ...(kind === 'directory' ? {} : { filters: [{ name: 'Token Monitor plugin', extensions: ['tmplugin'] }] })
@@ -345,9 +365,20 @@ function createPluginRuntime({
   }
 
   return {
+    resolveSkin(ref) {
+      if (disposed || typeof ref !== 'string' || ref.length > 73) throw new Error('plugin skin is unavailable');
+      const skin = manager.skins().find(entry => entry.ref === ref);
+      if (!skin) throw new Error('plugin skin is unavailable');
+      return structuredClone(skin);
+    },
     manager,
     bus,
     refreshBusinessData,
+    refreshWindowVisibility(win) {
+      if (disposed) return;
+      webUi?.refreshWindowVisibility(win);
+      pages.refreshVisibility();
+    },
     refreshWebSurfaces() {
       if (disposed) return;
       webUi?.refreshSurfaces();
@@ -406,4 +437,9 @@ function createPluginRuntime({
   };
 }
 
-module.exports = { createPluginRuntime, registerPluginScheme: protocol => { registerPluginScheme(protocol); registerWebUiScheme(protocol); }, safeModeRequested };
+// Electron accepts privilege declarations only once, before app ready.
+function registerPluginScheme(protocol) {
+  protocol.registerSchemesAsPrivileged([PLUGIN_SCHEME, WEB_UI_SCHEME]);
+}
+
+module.exports = { createPluginRuntime, registerPluginScheme, safeModeRequested, normalizePluginAuthorSkin };

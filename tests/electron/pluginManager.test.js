@@ -36,6 +36,10 @@ function writePlugin(root, manifest, code) {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest));
   if (code !== undefined) fs.writeFileSync(path.join(dir, 'main.js'), code);
+  for (const asset of manifest.webUi?.assets || []) {
+    fs.mkdirSync(path.dirname(path.join(dir, asset)), { recursive: true });
+    fs.writeFileSync(path.join(dir, asset), '<html>fixture</html>');
+  }
 }
 
 const SYSTEM = {
@@ -744,4 +748,98 @@ test('Worker concurrent capability flood is bounded and cancels queued queries o
   assert.equal(starts, 1); assert.equal(env.events.filter(e => e[0] === 'kill').length, 1);
   finish({ rows: ['late'] }); await new Promise(resolve => setImmediate(resolve));
   assert.equal(starts, 1); assert.equal(env.sent.some(([, m]) => m.type === 'result' && m.ok), false);
+});
+
+
+test('metrics sampling notifies only changed readings and preserves budget kills', async (t) => {
+  const env = setup();
+  t.after(() => env.manager.dispose());
+  env.manager.setEnabled('pulse', true);
+  env.manager.setSurfaceDemand('home', ['pulse/pulse']);
+  env.manager.handleMessage('pulse', { type: 'ready' });
+  let changes = 0;
+  env.manager.onChanged(() => { changes += 1; });
+  const sample = async () => {
+    const tick = env.sent.filter(([, message]) => message.type === 'tick').at(-1)?.[1];
+    if (tick) env.manager.handleMessage('pulse', { type: 'tick-done', seq: tick.seq });
+    env.manager.handleMessage('pulse', { type: 'heartbeat' });
+    await env.clock.advance(5_000);
+  };
+  await sample();
+  assert.equal(changes, 0, 'missing metrics remain a no-op');
+  env.sandbox.metrics = () => ({ pulse: { cpuPercent: 2, memoryMB: 10 } });
+  await sample();
+  assert.equal(changes, 1, 'first actual readings notify');
+  await sample();
+  assert.equal(changes, 1, 'equal fresh objects do not notify');
+  env.sandbox.metrics = () => ({ pulse: { cpuPercent: 3, memoryMB: 10 } });
+  await sample();
+  assert.equal(changes, 2, 'CPU changes notify');
+  env.sandbox.metrics = () => ({});
+  await sample();
+  assert.equal(changes, 3, 'loss of readings notifies');
+  env.sandbox.metrics = () => ({ pulse: { cpuPercent: 3, memoryMB: 300 } });
+  await sample();
+  assert.ok(env.events.some(([kind, , reason]) => kind === 'kill' && reason === 'over-memory-budget'));
+  assert.ok(changes > 3, 'kill/status transition remains observable');
+});
+
+
+test('unchanged CPU samples still enforce sustained budgets and notify the kill', async (t) => {
+  const env = setup();
+  t.after(() => env.manager.dispose());
+  env.manager.setEnabled('pulse', true);
+  env.manager.setSurfaceDemand('home', ['pulse/pulse']);
+  env.manager.handleMessage('pulse', { type: 'ready' });
+  env.sandbox.metrics = () => ({ pulse: { cpuPercent: 30, memoryMB: 10 } });
+  let changes = 0;
+  env.manager.onChanged(() => { changes += 1; });
+  for (let i = 0; i < 2; i += 1) {
+    env.manager.handleMessage('pulse', { type: 'heartbeat' });
+    await env.clock.advance(5_000);
+  }
+  assert.equal(changes, 1);
+  env.manager.handleMessage('pulse', { type: 'heartbeat' });
+  await env.clock.advance(5_000);
+  assert.ok(env.events.some(([kind, , reason]) => kind === 'kill' && reason === 'over-cpu-budget'));
+  assert.ok(changes > 1);
+});
+
+test('absent metrics still enforce heartbeats and notify status changes', async (t) => {
+  const env = setup();
+  t.after(() => env.manager.dispose());
+  env.manager.setEnabled('pulse', true);
+  env.manager.setSurfaceDemand('home', ['pulse/pulse']);
+  env.manager.handleMessage('pulse', { type: 'ready' });
+  let changes = 0;
+  env.manager.onChanged(() => { changes += 1; });
+  await env.clock.advance(10_000);
+  assert.equal(changes, 0);
+  await env.clock.advance(5_000);
+  assert.ok(env.events.some(([kind, , reason]) => kind === 'kill' && reason === 'no-heartbeat'));
+  assert.ok(changes > 0);
+  assert.equal(env.plugin('pulse').runtime.state, 'backoff');
+});
+
+test('surface catalog tracks authoritative availability without building the settings catalog', (t) => {
+  const env = setup();
+  t.after(() => env.manager.dispose());
+  assert.deepEqual(env.manager.surfaceCatalog('edgeDock'), []);
+  env.manager.setEnabled('sys-view', true);
+  assert.deepEqual(env.manager.surfaceCatalog('edgeDock'), [{ ref: 'sys-view/cpu', title: 'CPU', icon: 'dot' }]);
+  const refs = env.manager.surfaceCatalog('edgeDock');
+  refs.length = 0;
+  assert.deepEqual(env.manager.surfaceCatalog('edgeDock'), [{ ref: 'sys-view/cpu', title: 'CPU', icon: 'dot' }]);
+  assert.deepEqual(env.manager.surfaceCatalog('notch'), []);
+  env.setSettings({ pluginsEnabled: false });
+  assert.deepEqual(env.manager.surfaceCatalog('edgeDock'), []);
+  env.setSettings({ pluginsEnabled: true });
+  env.manager.beginMutation();
+  assert.deepEqual(env.manager.surfaceCatalog('edgeDock'), []);
+  env.manager.endMutation();
+  assert.deepEqual(env.manager.surfaceCatalog('edgeDock'), [{ ref: 'sys-view/cpu', title: 'CPU', icon: 'dot' }]);
+  env.manager.setEnabled('sys-view', false);
+  assert.deepEqual(env.manager.surfaceCatalog('edgeDock'), []);
+  env.manager.dispose();
+  assert.deepEqual(env.manager.surfaceCatalog('edgeDock'), []);
 });

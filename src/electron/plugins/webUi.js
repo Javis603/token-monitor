@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { TYPES, TARGETS, pageSnapshot } = require('../../shared/plugins/webUi');
-const { packageDirectory, readBounded } = require('./package');
+const { readBounded } = require('./package');
 const { createRateLimiter } = require('./supervisor');
 const { capabilityError, createCapabilityLane, isCapabilityRequest } = require('./capabilities');
 const { publicSettings } = require('./settings');
@@ -11,8 +11,9 @@ const { publicSettings } = require('./settings');
 const WARM_TTL_MS = 30_000, WARM_LIMIT = 3, WARM_MEMORY_KB = 256 * 1024, LIFECYCLE_TIMEOUT_MS = 750;
 const SCHEME = 'tm-plugin-ui';
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; worker-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts";
+const WEB_UI_SCHEME = Object.freeze({ scheme: SCHEME, privileges: Object.freeze({ standard: true, secure: true }) });
 function registerWebUiScheme(protocol) {
-  protocol.registerSchemesAsPrivileged([{ scheme: SCHEME, privileges: { standard: true, secure: true } }]);
+  protocol.registerSchemesAsPrivileged([WEB_UI_SCHEME]);
 }
 function boundsFor(raw, size, zoom = 1, minimum = 40) {
   if (!raw || !['x', 'y', 'width', 'height'].every(key => Number.isFinite(raw[key]))) return null;
@@ -245,8 +246,9 @@ function createWebUi({ electron, manager, bus, isMainSender, surfaceContext = ()
       }
     }
     if (!current) {
-      const pkg = packageDirectory(info.dir);
-      const assets = pkg.assets;
+      // Discovery owns validated bytes for this revision; mounting never rereads a package.
+      const assets = info.assets;
+      if (!assets || !Object.hasOwn(assets, info.document.entry)) throw new Error('document assets unavailable');
       const origin = `${SCHEME}://${crypto.randomBytes(12).toString('hex')}`;
       const url = `${origin}/${info.document.entry}`;
       let ses = sessions.get(info.pluginId);
@@ -439,6 +441,13 @@ function createWebUi({ electron, manager, bus, isMainSender, surfaceContext = ()
     releasePresentationHost(host) {
       for (const item of allItems()) if (item.presentation && item.host === host) destroy(item);
     },
+    refreshWindowVisibility(win) {
+      // Covers original model/tool/device documents as well as presentations.
+      // A host notification reconciles native state; it never revokes ownership.
+      if (!win || win.isDestroyed()) return;
+      if (win.isVisible() && !win.isMinimized()) return;
+      for (const item of [...mounted.values()]) if (item.window === win) park(item.key);
+    },
     refreshPresentations() {
       for (const item of allItems()) if (item.presentation) {
         try {
@@ -459,4 +468,4 @@ function createWebUi({ electron, manager, bus, isMainSender, surfaceContext = ()
     dispose() { disposed = true; for (const item of allItems()) destroy(item); changed(); offSettings?.(); for (const channel of ['plugins:web:call', 'plugins:web:select', 'plugins:web:sync', 'plugins:surface:sync', 'plugins:presentation:sync']) ipcMain.removeHandler(channel); for (const ses of sessions.values()) { ses.protocol.unhandle(SCHEME); void ses.clearStorageData(); } }
   };
 }
-module.exports = { SCHEME, CSP, registerWebUiScheme, boundsFor, themeContext, createWebUi };
+module.exports = { SCHEME, CSP, WEB_UI_SCHEME, registerWebUiScheme, boundsFor, themeContext, createWebUi };

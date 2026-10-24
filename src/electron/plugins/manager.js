@@ -17,6 +17,7 @@ const { evaluateAlert, alertMessage } = require('../../shared/plugins/alerts');
 const placements = require('../../shared/plugins/placements');
 const { createSupervisor, createRateLimiter } = require('./supervisor');
 const broker = require('./broker');
+const { packageDirectory } = require('./package');
 const { publicSettings } = require('./settings');
 const { capabilityError, createCapabilityLane, isCapabilityRequest } = require('./capabilities');
 const { validMessage } = require('./host/message');
@@ -160,8 +161,14 @@ function createPluginManager({
             }
           }
         }
+        if (record.manifest?.webUi) {
+          // Host-owned bytes survive source edits until the next discovery.
+          record.assets = Object.freeze(packageDirectory(dir).assets);
+        }
       } catch (error) {
-        record.errors = [`manifest.json: ${error.message}`];
+        record.manifest = null;
+        record.assets = null;
+        record.errors = [`manifest.json/package: ${error.message}`];
       }
       found.push(record);
     }
@@ -511,21 +518,31 @@ function createPluginManager({
       const running = sandbox.running();
       if (!running.length) return;
       const metrics = sandbox.metrics();
+      let changed = false;
       for (const pluginId of running) {
         const plugin = plugins.get(pluginId);
         if (!plugin) continue;
-        if ([...plugin.runtime.pendingInteractions.values()].some(at => now() - at > 30_000)) { sandbox.kill(pluginId, 'interaction-timeout'); continue; }
-        plugin.runtime.metrics = metrics[pluginId] || null;
+        if ([...plugin.runtime.pendingInteractions.values()].some(at => now() - at > 30_000)) { changed = true; sandbox.kill(pluginId, 'interaction-timeout'); continue; }
+        const previous = plugin.runtime.metrics;
+        const next = metrics[pluginId] || null;
+        if (!Object.is(previous?.cpuPercent ?? null, next?.cpuPercent ?? null)
+          || !Object.is(previous?.memoryMB ?? null, next?.memoryMB ?? null)) changed = true;
+        // Copy the readings so a mutable sandbox sample cannot erase the delta.
+        plugin.runtime.metrics = next ? { cpuPercent: next.cpuPercent, memoryMB: next.memoryMB } : null;
         const reason = supervisor.checkMetrics(pluginId, plugin.runtime.metrics || {});
         if (reason) {
+          changed = true;
           addLog(plugin, 'error', `${reason}: ${JSON.stringify(plugin.runtime.metrics)}`);
           sandbox.kill(pluginId, reason);
         }
       }
       for (const pluginId of supervisor.staleHeartbeats(sandbox.running())) {
-        if (plugins.get(pluginId)?.runtime.state === 'running') sandbox.kill(pluginId, 'no-heartbeat');
+        if (plugins.get(pluginId)?.runtime.state === 'running') {
+          changed = true;
+          sandbox.kill(pluginId, 'no-heartbeat');
+        }
       }
-      emitChanged();
+      if (changed) emitChanged();
       ensureMetricsTimer();
     }, METRICS_INTERVAL_MS);
     metricsTimer?.unref?.();
@@ -872,7 +889,7 @@ function createPluginManager({
         icon: view.icon,
         surfaces: [...view.surfaces]
       })),
-      skins: manifest.skins.map((skin) => ({ id: skin.id, name: localize(skin.name, locale), colors: { ...skin.colors }, vendorColors: { ...skin.vendorColors }, ...(skin.appearance ? { appearance: structuredClone(skin.appearance) } : {}) })),
+      skins: manifest.skins.map((skin) => ({ id: skin.id, ref: `${plugin.id}/${skin.id}`, name: localize(skin.name, locale), colors: { ...skin.colors }, vendorColors: { ...skin.vendorColors }, ...(skin.appearance ? { appearance: structuredClone(skin.appearance) } : {}) })),
       alerts: manifest.alerts.map((alert) => ({ id: alert.id, title: localize(alert.title, locale) })),
       runtime: manifest.main ? {
         state: runtime.state,
@@ -923,7 +940,7 @@ function createPluginManager({
       const plugin = plugins.get(id);
       const document = plugin?.manifest?.webUi?.documents.find(doc => doc.id === docId);
       if (extra || !document || !isActive(plugin) || !permissionsApi.hasPermission(grantOf(plugin), 'ui.web') || (['model', 'tool', 'device'].includes(document.target) && !permissionsApi.hasPermission(grantOf(plugin), 'tm.pages')) || mutating || disposed) throw new Error('web document is unavailable');
-      return { pluginId: id, document, manifest: plugin.manifest, dir: plugin.dir, revision: plugin.runtime.webRevision, locale: getLocale() };
+      return { pluginId: id, document, manifest: plugin.manifest, dir: plugin.dir, assets: plugin.assets, revision: plugin.runtime.webRevision, locale: getLocale() };
     },
     getAuthorSettings(id) { return authorSettingsAccess(plugins.get(String(id))).get(); },
     getPublicAuthorSettings(id) { return authorSettingsAccess(plugins.get(String(id)), true).get(); },
@@ -959,6 +976,15 @@ function createPluginManager({
       for (const plugin of plugins.values()) stopWorker(plugin, { immediate: true });
     },
     endMutation() { mutating = false; reconcile(); pushAll(); emitChanged(); },
+    // Availability only: hot surface composition must not build Settings DTOs.
+    surfaceCatalog(surface) {
+      if (!SURFACES.includes(surface) || disposed || mutating) return [];
+      const locale = getLocale();
+      return [...plugins.values()].filter(isActive).flatMap(plugin => plugin.manifest.views
+        .filter(view => view.surfaces.includes(surface)).map(view => ({
+          ref: placements.pluginRef(plugin.id, view.id), title: localize(view.title, locale), icon: view.icon
+        })));
+    },
     list() {
       return {
         safeMode,
@@ -1043,6 +1069,7 @@ function createPluginManager({
       return [...plugins.values()].filter((plugin) => isActive(plugin) && plugin.manifest.skins.length)
         .flatMap((plugin) => plugin.manifest.skins.map((skin) => ({
           id: `${plugin.id}/${skin.id}`,
+          ref: `${plugin.id}/${skin.id}`,
           pluginId: plugin.id,
           name: localize(skin.name, locale),
           pluginName: localize(plugin.manifest.name, locale),

@@ -7,14 +7,15 @@ const { createPluginManager } = require('../../src/electron/plugins/manager');
 const { createDataBus } = require('../../src/shared/plugins/dataBus');
 const { createWebUi } = require('../../src/electron/plugins/webUi');
 const { createPluginPages } = require('../../src/electron/plugins/pages');
+const { createWindowVisibilityActions } = require('../../src/electron/plugins/windowVisibility');
 function fixture(options = {}) {
   const handlers = new Map(), windows = [], demands = [], messages = [];
   class Window extends EventEmitter {
     constructor() { super(); windows.push(this); this.visible = false; this.minimized = false; this.webContents = new EventEmitter();
       Object.assign(this.webContents, { id: windows.length, mainFrame: {}, getZoomFactor: () => 1, isDestroyed: () => this.isDestroyed(), setWindowOpenHandler() {}, send: (channel, payload) => messages.push({ channel, payload }) }); }
     isDestroyed() { return Boolean(this.dead); } isVisible() { return this.visible; } isMinimized() { return this.minimized; }
-    show() { this.visible = true; this.emit('show'); } hide() { this.visible = false; this.emit('hide'); }
-    minimize() { this.minimized = true; this.emit('minimize'); } restore() { this.minimized = false; this.emit('restore'); }
+    show() { this.visible = true; this.emit('show'); } hide() { this.visible = false; if (!this.silentVisibility) this.emit('hide'); }
+    minimize() { this.minimized = true; if (!this.silentVisibility) this.emit('minimize'); } restore() { this.minimized = false; this.emit('restore'); }
     getContentSize() { return [880, 640]; }
     contentView = { addChildView() {}, removeChildView() {} };
     static fromWebContents(sender) { return windows.find(win => win.webContents === sender); }
@@ -62,7 +63,7 @@ test('page action IPC rejects other views, foreign frames and hidden windows', (
 
 // Real normalized manifests and manager DTOs: placements belong to the runtime's
 // main-menu list, and must never be fabricated on manager.list() in this test.
-function realFixture(t) {
+function realFixture(t, { legacy = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-detached-pages-'));
   const userDir = path.join(root, 'plugins');
   const manifest = {
@@ -72,6 +73,10 @@ function realFixture(t) {
       id: `${view}-rich`, view, target: 'page', slot: 'replace', entry: 'body.html', retainMs: 'until-evicted'
     })) }
   };
+  if (legacy) {
+    manifest.permissions.push('tm.pages');
+    manifest.webUi.documents.push({ id: 'model-rich', target: 'model', slot: 'replace', entry: 'body.html', retainMs: 'until-evicted' });
+  }
   const dir = path.join(userDir, manifest.id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest));
@@ -135,7 +140,7 @@ function richController(f, documentCapabilities = {}) {
     webRequest: { onBeforeRequest() {} }, protocol: { handle() {}, unhandle() {} }, clearStorageData: async () => {} });
   return createWebUi({ electron: { BrowserWindow: f.Window, WebContentsView: View, ipcMain: f.ipcMain,
     session: { fromPartition: () => session }, app: { getAppMetrics: () => [{ pid: 1, memory: { workingSetSize: 1 } }] } },
-  manager: f.manager, bus: f.bus, documentCapabilities, isMainSender: () => false,
+  manager: f.manager, bus: f.bus, documentCapabilities, isMainSender: () => Boolean(f.mainSender),
   presentationContext: f.pages.presentationContext, file: path.join(f.root, 'selections.json') });
 }
 
@@ -270,4 +275,118 @@ test('Rich admits all sixteen subscription registrations plus settings in one st
   pending.push(f.call('settings.get', {}));
   assert.ok((await Promise.all(pending)).every(reply => reply.ok));
   assert.equal(f.item.dead, false);
+});
+
+test('cold Rich mounts share revision assets and ignore development edits until reload', t => {
+  const f = realFixture(t), webUi = richController(f);
+  t.after(() => webUi.dispose());
+  f.pages.open('demo/first'); const win = f.windows[0]; win.emit('ready-to-show');
+  const event = { sender: win.webContents, senderFrame: win.webContents.mainFrame };
+  const input = { surface: 'page', visible: true, entries: [{ instance: 'body', viewRef: 'demo/first', ref: 'demo/first-rich', rect: { x: 10, y: 10, width: 400, height: 300 } }] };
+  const sync = () => f.handlers.get('plugins:presentation:sync')(event, input);
+  sync(); const original = webUi.presentations()[0]; assert.ok(original);
+  const originalAssets = original.assets;
+  const file = path.join(f.root, 'plugins/demo/body.html');
+  fs.writeFileSync(file, '<p>New revision</p>');
+  webUi.releasePresentationHost(win.webContents);
+  sync(); const second = webUi.presentations()[0]; assert.ok(second);
+  assert.equal(second.assets, originalAssets, 'new documents reuse the exact validated asset snapshot');
+  assert.equal(second.assets['body.html'].toString(), '<!doctype html><p>Rich page</p>');
+  fs.unlinkSync(file);
+  webUi.releasePresentationHost(win.webContents);
+  sync(); assert.ok(webUi.presentations()[0], 'no file IO on cold mount after external deletion');
+  fs.writeFileSync(file, '<p>New revision</p>');
+  f.manager.reload();
+  sync(); const updated = webUi.presentations()[0]; assert.ok(updated);
+  assert.notEqual(updated.assets, originalAssets);
+  assert.equal(updated.assets['body.html'].toString(), '<p>New revision</p>');
+  fs.unlinkSync(file); f.manager.reload();
+  assert.equal(f.manager.list().plugins[0].status, 'invalid', 'invalid reload cannot mount missing assets');
+  assert.equal(webUi.presentations().length, 0);
+});
+
+for (const action of ['hide', 'minimize']) test(`host ${action} parks Rich immediately without native or renderer events`, async t => {
+  const f = realFixture(t), releases = [], webUi = richController(f, { release: owner => releases.push(owner) });
+  t.after(() => webUi.dispose());
+  f.pages.open('demo/first'); const win = f.windows[0]; win.emit('ready-to-show');
+  const event = { sender: win.webContents, senderFrame: win.webContents.mainFrame };
+  const input = { surface: 'page', visible: true, entries: [{ instance: 'body', viewRef: 'demo/first', ref: 'demo/first-rich', rect: { x: 10, y: 10, width: 400, height: 300 } }] };
+  const sync = () => f.handlers.get('plugins:presentation:sync')(event, input);
+  const call = (item, op, args) => f.handlers.get('plugins:web:call')({ sender: item.view.webContents, senderFrame: item.view.webContents.mainFrame }, op, args);
+  sync(); const item = webUi.presentations()[0];
+  item.view.webContents.emit('did-finish-load'); call(item, 'present'); sync();
+  assert.equal(item.view.visible, true);
+  win.silentVisibility = true;
+  let nativeEvents = 0;
+  win.on(action, () => nativeEvents++);
+  const actions = createWindowVisibilityActions(win => {
+    webUi.refreshWindowVisibility(win);
+    f.pages.refreshVisibility();
+  });
+  actions[action](win);
+  // No sync(), emitted event, timer, or await may rescue the release assertion.
+  assert.equal(webUi.presentations().length, 0);
+  assert.equal(nativeEvents, 0);
+  assert.equal(releases.includes(item.owner), true);
+  assert.equal(item.view.visible, false);
+  assert.deepEqual(webUi.cached(), [item]);
+  assert.throws(() => call(item, 'context'), /revoked/);
+  await item.lifecycle;
+  win.restore(); win.show(); sync(); await item.lifecycle;
+  call(item, 'resumed', item.epoch); sync();
+  assert.equal(webUi.presentations()[0], item);
+  assert.equal(item.view.visible, true);
+  // A delivered native event still works without an explicit host action.
+  win.silentVisibility = false; win.hide();
+  assert.equal(webUi.presentations().length, 0);
+});
+
+for (const action of ['hide', 'minimize']) test(`host ${action} reconciles detached page worker demand without native events`, () => {
+  const f = fixture();
+  try {
+    f.pages.open('demo/first'); const win = f.windows[0]; win.emit('ready-to-show');
+    assert.deepEqual(f.demands.at(-1), ['page', ['demo/first']]);
+    win.silentVisibility = true;
+    createWindowVisibilityActions(() => f.pages.refreshVisibility())[action](win);
+    assert.deepEqual(f.demands.at(-1), ['page', []]);
+    f.pages.open('demo/first');
+    assert.deepEqual(f.demands.at(-1), ['page', ['demo/first']]);
+  } finally { f.pages.dispose(); }
+});
+
+test('window visibility actions ignore missing and destroyed windows', () => {
+  let calls = 0;
+  const actions = createWindowVisibilityActions(() => calls++);
+  actions.hide(null); actions.minimize(undefined);
+  actions.hide({ isDestroyed: () => true, hide() { throw Error('destroyed'); } });
+  assert.equal(calls, 0);
+});
+
+for (const action of ['hide', 'minimize']) test(`host ${action} also parks original main authored targets without native events`, async t => {
+  const f = realFixture(t, { legacy: true }); f.mainSender = true;
+  const webUi = richController(f); t.after(() => webUi.dispose());
+  f.pages.open('demo/first'); const win = f.windows[0]; win.emit('ready-to-show');
+  const event = { sender: win.webContents, senderFrame: win.webContents.mainFrame };
+  f.handlers.get('plugins:web:select')(event, 'model', 'demo/model-rich');
+  const input = { visible: true, snapshot: { target: 'model' }, rect: { x: 10, y: 10, width: 400, height: 300 } };
+  const sync = () => f.handlers.get('plugins:web:sync')(event, input);
+  sync(); const item = webUi.current();
+  item.view.webContents.emit('did-finish-load');
+  const childEvent = { sender: item.view.webContents, senderFrame: item.view.webContents.mainFrame };
+  f.handlers.get('plugins:web:call')(childEvent, 'present'); sync();
+  assert.equal(item.view.visible, true);
+  assert.equal(item.presentation, undefined);
+  win.silentVisibility = true;
+  const actions = createWindowVisibilityActions(win => webUi.refreshWindowVisibility(win));
+  actions[action](win);
+  assert.equal(webUi.current(), null);
+  assert.deepEqual(webUi.cached(), [item]);
+  assert.equal(item.view.visible, false);
+  // Stale renderer visibility cannot remount a natively hidden window.
+  sync(); assert.equal(webUi.current(), null);
+  await item.lifecycle;
+  win.restore(); win.show(); sync(); await item.lifecycle;
+  f.handlers.get('plugins:web:call')(childEvent, 'resumed', item.epoch); sync();
+  assert.equal(webUi.current(), item);
+  assert.equal(item.view.visible, true);
 });

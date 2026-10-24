@@ -73,6 +73,15 @@ function validateAssets(raw, manifest) {
   if (raw !== undefined && (!raw || Array.isArray(raw) || typeof raw !== 'object')) throw new Error('invalid assets');
   const entries = Object.entries(raw || {});
   if (entries.length !== expected.length) throw new Error('asset list mismatch');
+  // A package must unpack identically on case-sensitive and insensitive hosts.
+  // Include files outside assets and file/directory prefixes in the same check.
+  const paths = ['manifest.json', ...(manifest.main ? [manifest.main] : []), ...entries.map(([name]) => name)]
+    .map(name => name.toLowerCase());
+  for (let i = 0; i < paths.length; i++) for (let j = i + 1; j < paths.length; j++) {
+    if (paths[i] === paths[j] || paths[i].startsWith(paths[j] + '/') || paths[j].startsWith(paths[i] + '/')) {
+      throw new Error('conflicting package paths');
+    }
+  }
   let total = 0;
   const result = {};
   for (const [name, encoded] of entries) {

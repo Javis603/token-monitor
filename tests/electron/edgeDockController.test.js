@@ -179,6 +179,7 @@ function createFixture(options = {}) {
     windowsBackdrop: options.windowsBackdrop,
     canRefreshLimits: options.canRefreshLimits,
     onRefreshLimits: options.onRefreshLimits,
+    onWebSurfaceChanged: options.onWebSurfaceChanged,
     prefersReducedMotion: options.prefersReducedMotion || (() => true),
     isFullScreen: options.isFullScreen,
     primaryButtonDown: options.primaryButtonDown,
@@ -204,7 +205,7 @@ function createFixture(options = {}) {
     { id: 'cursor', kind: 'provider', label: 'Cursor' }
   ]);
   controller.sync();
-  for (const win of FakeBrowserWindow.instances) win.webContents.emit('did-finish-load');
+  if (options.load !== false) for (const win of FakeBrowserWindow.instances) win.webContents.emit('did-finish-load');
   const windowFor = (surface) => FakeBrowserWindow.instances.filter((win) => !win.destroyed && win.surface === surface).at(-1);
   const paintPeek = () => {
     const win = windowFor('peek');
@@ -1879,3 +1880,27 @@ for (const mode of ['autoHide', 'alwaysExceptFullScreen']) {
     assert.deepEqual(await request, { ok: true });
   });
 }
+
+
+test('web surface callbacks skip unready and unchanged renders but preserve lifecycle changes', (t) => {
+  let changes = 0;
+  const fixture = createFixture({ load: false, onWebSurfaceChanged: () => { changes += 1; } });
+  t.after(() => fixture.controller.stop());
+  changes = 0;
+  fixture.controller.setAppearance({ dark: true });
+  assert.equal(changes, 0, 'unready renders do not reconcile web surfaces');
+  for (const win of FakeBrowserWindow.instances) win.webContents.emit('did-finish-load');
+  assert.ok(changes > 0, 'loading reconciles surfaces');
+  changes = 0;
+  fixture.controller.setAppearance({ dark: true });
+  assert.equal(changes, 0, 'identical payload does not reconcile');
+  fixture.controller.setAppearance({ dark: false });
+  assert.ok(changes > 0, 'changed payload reconciles');
+  changes = 0;
+  fixture.settings.edgeDockMode = 'hover';
+  fixture.controller.sync();
+  assert.ok(changes > 0, 'hiding reconciles even without a changed payload');
+  changes = 0;
+  fixture.controller.stop();
+  assert.ok(changes > 0, 'teardown reconciles detached hosts');
+});

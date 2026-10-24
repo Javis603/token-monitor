@@ -3,7 +3,7 @@
 // This is plugin-owned presentation, not a host animation API. Only received
 // samples enter history. A one-sample presentation buffer scrolls measured
 // segments continuously without predicting values or increasing collection.
-const WINDOW_MS = 120000, PLAYBACK_DELAY_MS = 2250;
+const WINDOW_MS = 120000, PLAYBACK_DELAY_MS = 2250, PERSIST_INTERVAL_MS = 10000;
 let clockEpoch = Date.now(), clockStart = performance.now();
 function clock() {
   const monotonic = performance.now(), wall = Date.now();
@@ -20,7 +20,7 @@ function clock() {
   return wall;
 }
 const charts = [...document.querySelectorAll('.metric')].map(element => ({
-  element, metric: element.dataset.metric, points: [], at: 0, end: 0, dirty: true,
+  element, metric: element.dataset.metric, points: [], at: 0, end: 0, dirty: true, persistedAt: -Infinity,
   line: element.querySelector('.line'), area: element.querySelector('.area')
 }));
 const labels = {
@@ -101,8 +101,14 @@ function accept(chart, reading) {
   chart.memory = chart.metric === 'memory' ? reading.value : null;
   chart.dirty = true;
   updateLabel(chart);
-  // Cosmetic history only. No timers, collection or subscription live here.
-  void tm.storage.set(historyKey(chart), JSON.stringify(chart.points)).catch(() => {});
+  // Checkpoint cosmetic history on received samples, never on animation frames.
+  // Park revokes the bridge before freezing, so pagehide cannot guarantee a flush.
+  // Retained documents keep every point; eviction can lose the trailing interval.
+  const now = performance.now();
+  if (now - chart.persistedAt >= PERSIST_INTERVAL_MS) {
+    chart.persistedAt = now; // Failed writes retry on a later checkpoint, not every sample.
+    void tm.storage.set(historyKey(chart), JSON.stringify(chart.points)).catch(() => {});
+  }
 }
 function data(values) { clock(); for (const chart of charts) accept(chart, values[sourceFor(chart)]); render(); }
 async function start() {

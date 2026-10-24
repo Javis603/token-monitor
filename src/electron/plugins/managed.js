@@ -23,20 +23,28 @@ function atomicJson(file, value, limit = Infinity) {
 // One synchronous transaction at a time. A prepared journal always rolls back;
 // only a persisted committed journal permits removal of the recovery copies.
 function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, manager, getSettings, saveSettings, getLocale = () => 'en', now = Date.now, fault = () => {} }) {
-  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-  fs.mkdirSync(userDir, { recursive: true, mode: 0o700 });
   const registryFile = path.join(root, 'installed.json');
   const journalFile = path.join(root, 'transaction.json');
   const txDir = path.join(root, 'transaction');
   const historyDir = path.join(root, 'previous');
-  fs.mkdirSync(historyDir, { recursive: true, mode: 0o700 });
-  let registry = Object.create(null), busy = false;
+  let registry = Object.create(null), busy = false, available = false;
+  const unavailableMessage = 'Plugin management unavailable: installed metadata or transaction recovery could not be read safely. Package changes are blocked; existing files are preserved.';
+  function assertAvailable() {
+    if (!available) throw Object.assign(new Error(unavailableMessage), { code: 'management-unavailable' });
+  }
+  const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  function validateRegistry(data) {
+    if (!isRecord(data) || Object.entries(data).some(([id, item]) => !ID_RE.test(id) || !isRecord(item)
+      || !semver.valid(item.version) || typeof item.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.sha256)
+      || !isRecord(item.origin) || typeof item.origin.id !== 'string' || !item.origin.id
+      || !Number.isFinite(item.installedAt))) throw new Error('invalid installed plugin registry');
+    return Object.assign(Object.create(null), data);
+  }
   const previews = new Map();
   function readRegistry() {
     if (!fs.existsSync(registryFile)) return Object.create(null);
     const data = JSON.parse(readBounded(registryFile, MAX_REGISTRY_BYTES));
-    if (!data || Array.isArray(data) || Object.keys(data).some(id => !ID_RE.test(id))) throw new Error('invalid installed plugin registry');
-    return Object.assign(Object.create(null), data);
+    return validateRegistry(data);
   }
   function settingsSnapshot() {
     const settings = getSettings();
@@ -48,9 +56,30 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     fs.rmSync(journalFile, { force: true });
   }
   function recover() {
+    available = false;
+    previews.clear();
+    try {
+      fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(userDir, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(historyDir, { recursive: true, mode: 0o700 });
+      recoverTransaction();
+      available = true;
+    } catch (error) {
+      registry = Object.create(null);
+      throw error;
+    }
+  }
+  function recoverTransaction() {
     if (!fs.existsSync(journalFile)) { registry = readRegistry(); return; }
     const j = JSON.parse(readBounded(journalFile, MAX_JOURNAL_BYTES));
-    if (!ID_RE.test(j.id) || !['prepared', 'committed'].includes(j.phase)) throw new Error('invalid plugin recovery journal');
+    if (!isRecord(j) || typeof j.id !== 'string' || !ID_RE.test(j.id) || !['prepared', 'committed'].includes(j.phase)
+      || !['install', 'update', 'rollback', 'uninstall'].includes(j.operation)
+      || typeof j.hadTarget !== 'boolean' || typeof j.hadPrevious !== 'boolean'
+      || !isRecord(j.settings) || Object.keys(j.settings).some(key => !SETTING_KEYS.includes(key))) throw new Error('invalid plugin recovery journal');
+    validateRegistry(j.registry);
+    // Validate all metadata before recovery can delete or replace any files.
+    // A prepared journal owns the rollback baseline; a committed one uses disk.
+    if (j.phase === 'committed') readRegistry();
     if (j.phase === 'prepared') {
       const target = path.join(userDir, j.id), old = path.join(txDir, 'old'), stage = path.join(txDir, 'stage');
       if (fs.existsSync(old)) {
@@ -70,6 +99,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     cleanup(); registry = readRegistry();
   }
   function managed(id) {
+    assertAvailable();
     if (typeof id !== 'string' || !ID_RE.test(id) || !registry[id]) throw new Error('plugin is not a managed installation');
     const target = path.join(userDir, id);
     if (!fs.existsSync(target) || fs.lstatSync(target).isSymbolicLink()) throw new Error('managed plugin directory is missing or replaced');
@@ -77,6 +107,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
   }
   function describe(id) { const item = registry[id]; return item ? { ...item, previousVersion: item.previousVersion || null } : null; }
   function assertInstallable(pkg, origin) {
+    assertAvailable();
     const id = pkg.manifest.id, installed = manager.list().plugins.find(p => p.id === id);
     if (installed?.source === 'builtin') throw new Error('built-in plugins are updated with the application');
     if (!registry[id] && (installed || fs.existsSync(path.join(userDir, id)))) throw new Error('a development plugin already uses this id; remove or rename that folder first');
@@ -97,6 +128,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       operation: registry[pkg.manifest.id] ? 'update' : 'install', installedVersion: registry[pkg.manifest.id]?.version || null, origin };
   }
   function transact(id, operation, pkg, origin, options = {}) {
+    assertAvailable();
     if (busy) throw new Error('another plugin operation is in progress');
     if (fs.existsSync(journalFile)) throw new Error('plugin recovery is pending; restart the application before changing plugins');
     busy = true;
@@ -164,13 +196,15 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     }
   }
   return {
-    recover, describe,
+    recover, describe, assertAvailable,
+    status: () => ({ available, error: available ? null : { code: 'management-unavailable', message: unavailableMessage } }),
     preview,
-    previewFile: file => preview(parsePackage(readBounded(file, MAX_PACKAGE_BYTES))),
-    previewDirectory: dir => preview(packageDirectory(dir)),
+    previewFile(file) { assertAvailable(); return preview(parsePackage(readBounded(file, MAX_PACKAGE_BYTES))); },
+    previewDirectory(dir) { assertAvailable(); return preview(packageDirectory(dir)); },
     cancel(token) { previews.delete(token); },
     cancelSource(id) { for (const [token, preview] of previews) if (preview.origin.id === id) previews.delete(token); },
     install(token) {
+      assertAvailable();
       const item = previews.get(token); previews.delete(token);
       if (!item || item.expires < now()) throw new Error('package preview expired; select the package again');
       if (item.baseline !== JSON.stringify(registry[item.pkg.manifest.id] || null)) throw new Error('installed version changed; preview again');

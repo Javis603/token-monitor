@@ -437,11 +437,13 @@ const {
 } = require('./edgeDock/geometry');
 const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
 const edgeDockPresentationApi = require('./renderer/edgeDock/presentation');
-const { createPluginRuntime, registerPluginScheme } = require('./plugins/runtime');
+const { createPluginRuntime, registerPluginScheme, normalizePluginAuthorSkin } = require('./plugins/runtime');
 const { normalizePluginStates } = require('./plugins/manager');
 const pluginPlacements = require('../shared/plugins/placements');
 // Created after 'ready' by startPluginRuntime(); null in safe paths and tests.
 let pluginRuntime = null;
+const { createWindowVisibilityActions } = require('./plugins/windowVisibility');
+const pluginWindowActions = createWindowVisibilityActions(win => pluginRuntime?.refreshWindowVisibility(win));
 const { DERIVED_PERIODS: EDGE_DOCK_DERIVED_PERIODS, normalizeEdgeDockItems } = require('./renderer/edgeDock/items');
 const fixedPeriodRangesApi = require('./renderer/fixedPeriodRanges');
 const { normalizeBackgroundImageOpacity } = require('./renderer/glassRendering');
@@ -672,6 +674,7 @@ function defaultSettings() {
     edgeDockItems: null,
     pluginsEnabled: true,
     pluginStates: {},
+    pluginAuthorSkin: null,
     notchPluginPages: [],
     notchPageOrder: [],
     notchBuiltinPages: [...pluginPlacements.NOTCH_BUILTIN_PAGES],
@@ -2792,6 +2795,8 @@ function readSettings() {
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
     merged.pluginsEnabled = parseBoolean(merged.pluginsEnabled, true);
     merged.pluginStates = normalizePluginStates(merged.pluginStates);
+    merged.pluginAuthorSkin = normalizePluginAuthorSkin(merged.pluginAuthorSkin);
+    delete merged.pluginSkinRef;
     merged.pluginMainPages = pluginPlacements.normalizeRefList(merged.pluginMainPages, 32);
     merged.notchPageOrder = pluginPlacements.normalizeNotchPageOrder(merged.notchPageOrder);
     merged.notchBuiltinPages = pluginPlacements.normalizeNotchBuiltinPages(merged.notchBuiltinPages);
@@ -5340,7 +5345,7 @@ function showPopover(clickPoint = null) {
 function hidePopover() {
   recentPopoverBlur = null;
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isVisible()) mainWindow.hide();
+  if (mainWindow.isVisible()) pluginWindowActions.hide(mainWindow);
 }
 
 function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false) {
@@ -5469,6 +5474,33 @@ function thirdPartyProfileWithCanonicalIdentity(profile, provider) {
   });
 }
 
+// The command carries identity only. Resolve at commit time, after any IPC
+// awaits, and persist the host-declared palette and finite tokens together.
+function preparePluginSkinSettings(patch, current, runtime) {
+  if (Object.hasOwn(patch, 'pluginAuthorSkin')) throw new Error('author skin snapshots are host-owned');
+  if (!Object.hasOwn(patch, 'pluginSkinRef')) return { patch, authorSkin: normalizePluginAuthorSkin(current.pluginAuthorSkin) };
+  if (Object.keys(patch).length !== 1) throw new Error('plugin skin selection must be a standalone command');
+  const skin = runtime?.resolveSkin(patch.pluginSkinRef);
+  if (!skin) throw new Error('plugin skin is unavailable');
+  const authorSkin = normalizePluginAuthorSkin({ ref: skin.ref, appearance: skin.appearance || {} });
+  if (!authorSkin) throw new Error('invalid author skin');
+  return {
+    authorSkin,
+    patch: {
+      themeColors: { ...current.themeColors, ...skin.colors },
+      vendorColors: { ...current.vendorColors, ...skin.vendorColors }
+    }
+  };
+}
+
+function assertPluginSkinRequest(event, patch) {
+  if (Object.hasOwn(patch, 'pluginAuthorSkin')) throw new Error('author skin snapshots are host-owned');
+  if (!Object.hasOwn(patch, 'pluginSkinRef')) return;
+  if (Object.keys(patch).length !== 1) throw new Error('plugin skin selection must be a standalone command');
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
+    || !event.senderFrame || event.senderFrame !== event.sender.mainFrame) throw new Error('plugin skin selection requires the main window');
+}
+
 function settingsForRenderer() {
   // Default-deny every credential field added to the canonical store. The two
   // hub secrets remain explicit exceptions because the existing sync UI must
@@ -5480,6 +5512,8 @@ function settingsForRenderer() {
   delete rendererSettings.icloudRetiredDeviceIds;
   delete rendererSettings.icloudWriterId;
   delete rendererSettings.syncContentState;
+  delete rendererSettings.pluginSkinRef;
+  rendererSettings.pluginAuthorSkin = normalizePluginAuthorSkin(settings.pluginAuthorSkin);
   for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
   return {
     ...rendererSettings,
@@ -5971,8 +6005,7 @@ function edgeDockCellsFor(visibleStats, items = settings?.edgeDockItems, options
   syncCodexPresentationActiveAccount();
   return buildEdgeDockCells(visibleStats, {
     includeUnavailableAccounts: options.includeUnavailableAccounts === true,
-    availablePluginRefs: (pluginRuntime?.manager.list().plugins || []).filter(plugin => plugin.status === 'active')
-      .flatMap(plugin => (plugin.views || []).filter(view => view.surfaces.includes('edgeDock')).map(view => view.ref)),
+    availablePluginRefs: (pluginRuntime?.manager.surfaceCatalog('edgeDock') || []).map(view => view.ref),
     derivedPeriods: edgeDockDerivedPeriods,
     codexResetForecast: edgeDockForecastWanted() ? edgeDockForecast : null,
     localDeviceId: settings?.deviceId,
@@ -6037,10 +6070,8 @@ function pushNotchCells(visibleStats) {
   notchLastCells = edgeDockCellsFor(visibleStats, notchPanelItems(visibleStats, settings), { includeUnavailableAccounts: true });
   const data = notchDataFor(visibleStats, notchLastCells);
   // Tab names and icons are metadata; opening a page alone requests its data.
-  if (pluginRuntime) data.panel.pluginCatalog = Object.fromEntries(pluginRuntime.manager.list().plugins
-    .filter(plugin => plugin.status === 'active')
-    .flatMap((plugin) => (plugin.views || []).filter((view) => view.surfaces.includes('notch'))
-      .map((view) => [view.ref, { title: view.title, icon: view.icon }])));
+  if (pluginRuntime) data.panel.pluginCatalog = Object.fromEntries(pluginRuntime.manager.surfaceCatalog('notch')
+    .map(view => [view.ref, { title: view.title, icon: view.icon }]));
   data.panel.pluginPages = data.panel.pluginPages.filter(ref => Object.hasOwn(data.panel.pluginCatalog || {}, ref));
   const history = notchHistory.read(visibleStats, { enabled: settings.historyEnabled !== false, generation: hubModeGeneration });
   if (history) data.panel.week = notchWeek(visibleStats, new Date(), history);
@@ -6221,7 +6252,7 @@ function handleWindowToggleShortcut() {
   });
   if (action === 'togglePopover') togglePopover();
   else if (action === 'expandFloatingBubble') expandFloatingBubble();
-  else if (action === 'hideWindow') mainWindow.hide();
+  else if (action === 'hideWindow') pluginWindowActions.hide(mainWindow);
   else focusExistingWindow();
 }
 
@@ -6491,7 +6522,7 @@ function enterTrayMode() {
     suspendWindowMaximized(mainWindow);
     setWindowMaximizable(mainWindow, false);
     applyMacSpaceBehavior(true);
-    mainWindow.hide();
+    pluginWindowActions.hide(mainWindow);
   }
 }
 
@@ -7522,7 +7553,7 @@ function createWindow(boundsOverride, options = {}) {
       hidePopover();
     } else if (action === 'hideWindow') {
       event.preventDefault();
-      win.hide();
+      pluginWindowActions.hide(win);
       applyMacActivationPolicy({ mainWindowVisible: false });
     }
   });
@@ -7907,13 +7938,15 @@ app.whenReady().then(() => {
   // Resolves only once a worker-hosted transform runs with the saved settings:
   // pausing the session archive must not be reported done while the worker can
   // still capture under the old value.
-  ipcMain.handle('settings:update', async (_event, patch) => {
+  ipcMain.handle('settings:update', async (event, patch) => {
+    assertPluginSkinRequest(event, patch);
     const contentRuntime = getSyncContentRuntime();
     const sharedEdit = patch.modelAliases !== undefined || patch.modelAliasGrouping !== undefined
       || patch.customModelPricing !== undefined;
     const settingsIdentity = contentRuntime.status().identity;
     await contentRuntime.publishPatch(patch, patch?.syncContentBase);
     if (sharedEdit && settingsIdentity !== contentRuntime.status().identity) throw new Error('hub_changed');
+    assertPluginSkinRequest(event, patch);
     let dotsVisibilityApplied = Promise.resolve();
     applySettingsPatch(patch, (refresh) => { dotsVisibilityApplied = refresh; });
     await latestUsageHost?.transformSettingsApplied?.();
@@ -7925,6 +7958,8 @@ app.whenReady().then(() => {
   // The settings:update body, named so a credential save persists through the
   // exact same normalization, runtime reconfigure and limit invalidation.
   function applySettingsPatch(patch, onDotsVisibilityRefresh = () => {}) {
+    const skinSelection = preparePluginSkinSettings(patch, settings, pluginRuntime);
+    patch = skinSelection.patch;
     const contentRuntime = getSyncContentRuntime();
     credentialCommands.noteSettingsPatch(patch);
     const previousSettingsState = settings;
@@ -8046,6 +8081,7 @@ app.whenReady().then(() => {
       // Consent is written only by the plugin manager (plugins:setEnabled),
       // never by a generic settings patch from a renderer.
       pluginStates: normalizePluginStates(settings.pluginStates),
+      pluginAuthorSkin: skinSelection.authorSkin,
       notchRunningIndicatorEnabled: parseBoolean(patch.notchRunningIndicatorEnabled ?? settings.notchRunningIndicatorEnabled, false),
       notchWarnColors: parseBoolean(patch.notchWarnColors ?? settings.notchWarnColors, false),
       notchHoverAction: normalizeNotchHoverAction(patch.notchHoverAction ?? settings.notchHoverAction),
@@ -9535,7 +9571,7 @@ app.whenReady().then(() => {
       hidePopover();
       return;
     }
-    actionWindowForEvent(BrowserWindow, event, mainWindow)?.minimize();
+    pluginWindowActions.minimize(actionWindowForEvent(BrowserWindow, event, mainWindow));
   });
   ipcMain.on('window:close', (event) => {
     if (settings?.trayMode) {

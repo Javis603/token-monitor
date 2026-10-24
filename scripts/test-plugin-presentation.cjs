@@ -5,6 +5,7 @@ const electron = require('electron');
 const { app, BrowserWindow } = electron;
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), assert = require('node:assert/strict');
 const { createWebUi, registerWebUiScheme } = require('../src/electron/plugins/webUi');
+const { createWindowVisibilityActions } = require('../src/electron/plugins/windowVisibility');
 const { createDataBus } = require('../src/shared/plugins/dataBus');
 const root = path.resolve(__dirname, '..'), scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-presentation-'));
 app.setPath('userData', path.join(scratch, 'profile')); registerWebUiScheme(electron.protocol); app.on('window-all-closed', () => {});
@@ -22,15 +23,16 @@ async function main() {
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest));
   fs.writeFileSync(path.join(dir, 'body.html'), '<!doctype html><html><body style="background:#213b35;color:white;margin:8px"><p>Authored synthetic canvas</p><input id="draft" aria-label="Draft"><script src="body.js"></script></body></html>');
   fs.writeFileSync(path.join(dir, 'body.js'), "window.ticks=0;setInterval(()=>ticks++,20);tm.context().then(c=>{if(c.surface!=='settings')return tm.subscribe(['sys.cpu']);});");
+  const assets = Object.fromEntries(manifest.webUi.assets.map(name => [name, fs.readFileSync(path.join(dir, name))]));
   bus = createDataBus(); bus.defineSource('sys.cpu', { minIntervalMs: 1000, sample: () => { samples++; return { percent: 42 }; } });
   const manager = {
-    webDocument(ref) { const document = documents.find(doc => ref === `rich-probe/${doc.id}`); if (!grant || !document) throw Error('revoked'); return { pluginId: 'rich-probe', ref, document, dir, revision, locale: 'en', manifest: { visible: { intervalMs: 1000 } } }; },
+    webDocument(ref) { const document = documents.find(doc => ref === `rich-probe/${doc.id}`); if (!grant || !document) throw Error('revoked'); return { pluginId: 'rich-probe', ref, document, dir, assets, revision, locale: 'en', manifest: { visible: { intervalMs: 1000 } } }; },
     setWebVisible(owner, ref) { if (ref) demands.set(owner, ref); else demands.delete(owner); },
     webSource: (_ref, source) => source, webReadAllowed: (_ref, source) => source === 'sys.cpu',
     webStorage: () => null, onAuthorSettings: callback => { manager.settingsChanged = callback; return () => {}; }, onChanged: callback => { manager.changed = callback; return () => {}; }
   };
   service = createWebUi({ electron, manager, bus, isMainSender: () => false,
-    presentationContext(event, surface, ref) { const host = hosts.get(event.sender.id); if (!host || host.revoked || host.surface !== surface) return null; return { visible: host.active && (ref === null || ref === (surface === 'settings' ? 'rich-probe' : 'rich-probe/canvas')) }; },
+    presentationContext(event, surface, ref) { const host = hosts.get(event.sender.id); if (!host || host.revoked || host.surface !== surface) return null; return { visible: host.active && host.win.isVisible() && !host.win.isMinimized() && (ref === null || ref === (surface === 'settings' ? 'rich-probe' : 'rich-probe/canvas')) }; },
     documentCapabilities: { call: (item, op) => ({ owner: item.owner, op }), release: owner => released.push(owner) }, file: path.join(scratch, 'selection.json') });
   const preload = path.join(scratch, 'host.cjs');
   fs.writeFileSync(preload, "const {contextBridge,ipcRenderer}=require('electron');const on=(c,f)=>{const l=(_e,v)=>f(v);ipcRenderer.on(c,l);return()=>ipcRenderer.removeListener(c,l)};contextBridge.exposeInMainWorld('bridge',{syncWebPresentation:x=>ipcRenderer.invoke('plugins:presentation:sync',x),onWebPresentationReady:f=>on('plugins:presentation:ready',f),onWebPresentationFailed:f=>on('plugins:presentation:failed',f)});");
@@ -71,7 +73,12 @@ async function main() {
   const main = await host('page'), detached = await host('page');
   await until(() => children(main)[0]?.view.getVisible() && children(detached)[0]?.view.getVisible());
   check('main and detached instances have independent identity and WebContents', children(main)[0].owner !== children(detached)[0].owner && children(main)[0].view.webContents !== children(detached)[0].view.webContents);
-  const mainChild = children(main)[0]; main.win.hide(); await until(() => !children(main).length);
+  // Same explicit host-action adapter as main.js; settle startup sync so a
+  // late renderer message cannot accidentally supply the hide notification.
+  await delay(500);
+  const mainChild = children(main)[0];
+  const windowActions = createWindowVisibilityActions(win => service.refreshWindowVisibility(win));
+  windowActions.hide(main.win); await until(() => !children(main).length);
   check('hiding one page preserves another owner demand', children(detached)[0].view.getVisible() && demands.has(children(detached)[0].owner) && !demands.has(mainChild.owner));
   const settings = await host('settings'); await until(() => children(settings)[0]?.view.getVisible());
   const editor = children(settings)[0];
