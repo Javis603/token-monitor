@@ -326,7 +326,12 @@ function normalizeClientName(value) {
   if (raw === 'mcode' || /^minimax[\s_-]*code$/.test(raw)) return 'mcode';
   if (raw.includes('opencode')) return 'opencode';
   if (raw.includes('openclaw') || raw.includes('clawd') || raw.includes('moltbot') || raw.includes('moldbot')) return 'openclaw';
-  return raw.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || null;
+  const slug = raw.replace(/[^a-z0-9_-]+/g, '-');
+  let lo = 0;
+  while (slug[lo] === '-') lo += 1;
+  let hi = slug.length;
+  while (hi > lo && slug[hi - 1] === '-') hi -= 1;
+  return slug.slice(lo, hi) || null;
 }
 
 function detectClient(obj) {

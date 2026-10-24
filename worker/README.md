@@ -41,6 +41,23 @@ https://token-monitor-hub.<your-subdomain>.workers.dev
 
 Point each agent and widget at that URL.
 
+### Enable remote Live Activity updates
+
+The iOS app can update its Live Activity and Dynamic Island through APNs while
+it is suspended. Configure the optional ActivityKit provider credentials on
+the Hub (the APNs key must belong to the app's signing team):
+
+```bash
+npx wrangler secret put TOKEN_MONITOR_APNS_KEY_ID
+npx wrangler secret put TOKEN_MONITOR_APNS_TEAM_ID
+npx wrangler secret put TOKEN_MONITOR_APNS_PRIVATE_KEY  # paste the .p8 contents
+```
+
+`TOKEN_MONITOR_APNS_BUNDLE_ID`, `TOKEN_MONITOR_APNS_ENVIRONMENT`, and
+`TOKEN_MONITOR_APNS_MIN_INTERVAL_MS` are set in `wrangler.toml`. The Hub
+coalesces pushes at 15 seconds by default; the iOS app keeps background refresh
+as a fallback. The Durable Object passes the complete delay, delivery and invalid-token cleanup promise to `waitUntil`, and each APNs request times out after 10 seconds. APNs delivery remains best-effort and subject to ActivityKit's system budget. `/api/health` reports `liveActivityPushEnabled`, and registration returns `pushEnabled`; these report configuration rather than confirmed delivery. Use `sandbox` for development-signed apps and `production` for distribution-signed apps.
+
 ### Troubleshooting the one-click deploy
 
 Cloudflare's **Deploy to Cloudflare** button is convenient but has been
@@ -266,6 +283,8 @@ endpoint includes account hashes for de-duplication. When enabled,
 | GET    | `/api/public/stats`        | none   | Public aggregate stats without devices/account ids when `PUBLIC_STATS_ENABLED=1` |
 | GET    | `/api/stats`               | secret | Aggregated stats (today / month / allTime) |
 | GET    | `/api/stats/stream`        | secret | SSE snapshot plus coalesced live changes   |
+| POST   | `/api/live-activities/register` | secret | Register an iOS ActivityKit push token     |
+| DELETE | `/api/live-activities/{activityID}` | secret | Remove an ActivityKit push token         |
 | GET    | `/api/devices`             | secret | Raw per-device records                     |
 | POST   | `/api/ingest`              | secret | Upsert a device's usage summary            |
 | DELETE | `/api/devices/{deviceId}`  | secret | Remove a device record                     |

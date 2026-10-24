@@ -1,0 +1,100 @@
+import Foundation
+import Testing
+@testable import TokenMonitor
+
+struct HeatmapModelTests {
+    @Test func includesTodaysReadingAtLocalMidnight() {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        let components = calendar.dateComponents([.year, .month, .day], from: today)
+        let dayKey = String(format: "%04d-%02d-%02d", components.year!, components.month!, components.day!)
+        let day = HistoryDay(date: dayKey, tokens: 42, cost: 1, messages: nil, activeTimeMs: nil)
+        let model = HeatmapModel.make(days: [day], metric: .tokens, weekCount: 1, referenceDate: today)
+        let cell = model.weeks.flatMap(\.cells).first { calendar.isDate($0.date, inSameDayAs: today) }
+        #expect(cell?.tokens == 42)
+        #expect(model.activeDays == 1)
+    }
+
+    @Test
+    func usesDesktopHeatmapIntensityThresholds() throws {
+        let referenceDate = try #require(
+            ISO8601DateFormatter().date(from: "2026-07-31T12:00:00Z")
+        )
+        let days = [
+            HistoryDay(
+                date: "2026-07-26",
+                tokens: 100,
+                cost: 10,
+                messages: nil,
+                activeTimeMs: nil
+            ),
+            HistoryDay(
+                date: "2026-07-27",
+                tokens: 75,
+                cost: 7.5,
+                messages: nil,
+                activeTimeMs: nil
+            ),
+            HistoryDay(
+                date: "2026-07-28",
+                tokens: 50,
+                cost: 5,
+                messages: nil,
+                activeTimeMs: nil
+            ),
+            HistoryDay(
+                date: "2026-07-29",
+                tokens: 25,
+                cost: 2.5,
+                messages: nil,
+                activeTimeMs: nil
+            ),
+            HistoryDay(
+                date: "2026-07-30",
+                tokens: 1,
+                cost: 0.1,
+                messages: nil,
+                activeTimeMs: nil
+            )
+        ]
+
+        let model = HeatmapModel.make(
+            days: days,
+            metric: .tokens,
+            weekCount: 1,
+            referenceDate: referenceDate
+        )
+        let intensities = Dictionary(
+            uniqueKeysWithValues: model.weeks
+                .flatMap(\.cells)
+                .filter { $0.tokens > 0 }
+                .map { ($0.tokens, $0.intensity) }
+        )
+
+        #expect(intensities[100] == 4)
+        #expect(intensities[75] == 4)
+        #expect(intensities[50] == 3)
+        #expect(intensities[25] == 2)
+        #expect(intensities[1] == 1)
+        #expect(model.activeDays == 5)
+        #expect(model.peakValue == 100)
+    }
+    @Test func distinguishesMissingHistoryFromReportedZeroAndExcludesFutureDays() throws {
+        let referenceDate = try #require(ISO8601DateFormatter().date(from: "2026-07-31T12:00:00Z"))
+        let days = [
+            HistoryDay(date: "2026-07-30", tokens: 0, cost: nil, messages: nil, activeTimeMs: nil),
+            HistoryDay(date: "2026-08-01", tokens: 999, cost: 10, messages: nil, activeTimeMs: nil)
+        ]
+        let model = HeatmapModel.make(days: days, metric: .tokens, weekCount: 1, referenceDate: referenceDate)
+        let cells = model.weeks.flatMap(\.cells)
+        #expect(cells.filter { $0.tokens == 0 }.count == 1)
+        #expect(cells.filter { !$0.tokens.isFinite }.count == 6)
+        #expect(cells.filter(\.isFuture).count == 1)
+        #expect(model.peakValue == 0)
+        #expect(model.activeDays == 0)
+        let empty = HeatmapModel.make(days: [], metric: .cost, weekCount: 1, referenceDate: referenceDate)
+        #expect(empty.weeks.flatMap(\.cells).allSatisfy { !$0.cost.isFinite })
+        #expect(!empty.peakValue.isFinite)
+    }
+
+}

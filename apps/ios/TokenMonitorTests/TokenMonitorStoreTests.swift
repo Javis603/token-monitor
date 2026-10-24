@@ -1,0 +1,308 @@
+import Foundation
+import Testing
+@testable import TokenMonitor
+
+@MainActor
+private final class RecordingSurfaces: SystemSurfacePublishing {
+    var destination: HubConfiguration?
+    var published: [(HubConfiguration, HubStats)] = []
+    func configure(_ configuration: HubConfiguration?) { destination = configuration }
+    func publish(stats: HubStats, history: UsageHistory, configuration: HubConfiguration) async {
+        published.append((configuration, stats))
+    }
+}
+
+private actor ControlledHubClient: HubDataClient {
+    private var requests: [CheckedContinuation<HubStats, any Error>] = []
+    private var streams: [String: AsyncThrowingStream<HubStats, any Error>.Continuation] = [:]
+    private var historyRequests: [CheckedContinuation<UsageHistory, any Error>] = []
+    let holdHistory: Bool
+    let holdAliases: Bool
+    private var aliasRequests: [CheckedContinuation<ModelAliasDocument?, any Error>] = []
+    var aliasCount: Int { aliasRequests.count }
+    init(holdHistory: Bool = false, holdAliases: Bool = false) {
+        self.holdHistory = holdHistory
+        self.holdAliases = holdAliases
+    }
+    func fetchModelAliases(configuration: HubConfiguration) async throws -> ModelAliasDocument? {
+        guard holdAliases else { return nil }
+        return try await withCheckedThrowingContinuation { aliasRequests.append($0) }
+    }
+    func completeAliases(_ index: Int, _ value: ModelAliasDocument?) { aliasRequests[index].resume(returning: value) }
+    var requestCount: Int { requests.count }
+    var historyCount: Int { historyRequests.count }
+    var streamCount: Int { streams.count }
+    func fetchStats(configuration: HubConfiguration) async throws -> HubStats {
+        // Deliberately ignore cancellation to reproduce a completed old request.
+        try await withCheckedThrowingContinuation { requests.append($0) }
+    }
+    func fetchHistory(configuration: HubConfiguration) async throws -> UsageHistory {
+        if !holdHistory { return .empty }
+        return try await withCheckedThrowingContinuation { historyRequests.append($0) }
+    }
+    func statsStream(configuration: HubConfiguration) async -> AsyncThrowingStream<HubStats, any Error> {
+        let stream = AsyncThrowingStream<HubStats, any Error>.makeStream()
+        streams[configuration.baseURL.absoluteString] = stream.continuation
+        return stream.stream
+    }
+    func complete(_ index: Int, _ stats: HubStats) { requests[index].resume(returning: stats) }
+    func completeHistory(_ index: Int, _ history: UsageHistory) { historyRequests[index].resume(returning: history) }
+    func send(_ stats: HubStats, to configuration: HubConfiguration) {
+        streams[configuration.baseURL.absoluteString]?.yield(stats)
+    }
+}
+
+@MainActor
+struct TokenMonitorStoreTests {
+    @Test func connectionNoticeSuppressesTransientRetriesAndStaysVisibleUntilRecovery() async throws {
+        let store = TokenMonitorStore(systemSurfaces: RecordingSurfaces(), connectionNoticeDelay: .milliseconds(30))
+        store.stats = try stats(10)
+        store.phase = .live
+        store.phase = .failed("offline")
+        store.phase = .connecting
+        #expect(store.connectionNoticePhase == .live)
+        store.phase = .live
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(store.connectionNoticePhase == .live)
+
+        store.phase = .failed("offline")
+        store.phase = .connecting
+        try #require(await coreEventually { store.connectionNoticePhase == .failed("offline") })
+        store.phase = .failed("another retry")
+        #expect(store.connectionNoticePhase == .failed("offline"))
+        store.phase = .connecting
+        #expect(store.connectionNoticePhase == .failed("offline"))
+        #expect(store.currentPeriod.totalTokens == 10)
+        store.phase = .live
+        #expect(store.connectionNoticePhase == .live)
+    }
+
+    @Test func connectionNoticeResetsWhenDestinationChangesAndDoesNotDelayInitialFailure() async throws {
+        let store = TokenMonitorStore(systemSurfaces: RecordingSurfaces(), connectionNoticeDelay: .milliseconds(30))
+        store.phase = .failed("initial failure")
+        #expect(store.phase == .failed("initial failure"))
+        #expect(store.connectionNoticePhase == .live)
+        store.stats = try stats(10)
+        store.phase = .failed("old Hub")
+        store.configure(nil)
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(store.stats == nil)
+        #expect(store.connectionNoticePhase == .live)
+    }
+
+    @Test func liveRateUsesPerDeviceDeltasAndExpiresWithoutInventingAnAverage() throws {
+        func snapshot(_ aOutput: Int, _ aDuration: Int, _ bOutput: Int, _ bDuration: Int) throws -> HubStats {
+            try JSONDecoder().decode(HubStats.self, from: Data("""
+            {"devices":[
+              {"deviceId":"a","stale":false,"periods":{"today":{"timedOutputTokens":\(aOutput),"timedDurationMs":\(aDuration)}}},
+              {"deviceId":"b","stale":false,"periods":{"today":{"timedOutputTokens":\(bOutput),"timedDurationMs":\(bDuration)}}}
+            ]}
+            """.utf8))
+        }
+        var tracker = LiveTokenRateTracker()
+        let start = Date(timeIntervalSince1970: 1_000)
+        tracker.observe(try snapshot(1_000, 10_000, 2_000, 20_000), at: start)
+        #expect(tracker.reading(at: start) == nil)
+
+        tracker.observe(try snapshot(1_200, 11_000, 2_000, 20_000), at: start.addingTimeInterval(1))
+        #expect(tracker.reading(at: start.addingTimeInterval(1))?.tokensPerSecond == 200)
+        tracker.observe(try snapshot(1_200, 11_000, 2_300, 22_000), at: start.addingTimeInterval(2))
+        #expect(tracker.reading(at: start.addingTimeInterval(2))?.tokensPerSecond == 350)
+        #expect(tracker.reading(at: start.addingTimeInterval(9.5))?.tokensPerSecond == 150)
+        #expect(tracker.reading(at: start.addingTimeInterval(11))?.isIdle == true)
+        #expect(tracker.reading(at: start.addingTimeInterval(183)) == nil)
+
+        tracker.observe(try snapshot(10, 100, 2_300, 22_000), at: start.addingTimeInterval(184))
+        #expect(tracker.reading(at: start.addingTimeInterval(184)) == nil)
+    }
+
+    private func configuration(_ host: String) -> HubConfiguration {
+        HubConfiguration(baseURL: URL(string: "https://\(host).example")!, secret: host)
+    }
+    private func stats(_ tokens: Int, revision: String = "r1") throws -> HubStats {
+        try JSONDecoder().decode(HubStats.self,
+            from: Data("{\"historyRevision\":\"\(revision)\",\"periods\":{\"today\":{\"totalTokens\":\(tokens)}}}".utf8))
+    }
+
+    @Test func sourceBotIdentitySurvivesCrossPeriodProjectionAndModelAliases() async throws {
+        let client = ControlledHubClient(holdAliases: true)
+        let store = TokenMonitorStore(client: client, systemSurfaces: RecordingSurfaces())
+        defer { store.configure(nil) }
+        let destination = configuration("bot-alias")
+        let snapshot = try JSONDecoder().decode(HubStats.self, from: Data(#"{"periods":{"today":{"sessions":{"cursor:room":{"client":"cursor","sessionId":"room","totalTokens":5,"models":{"claude":5}}}},"allTime":{"sessions":{"cursor:room":{"client":"cursor","sessionId":"room","totalTokens":99,"models":{"grok-bot-default":99}}}}}}"#.utf8))
+        store.configure(destination)
+        try #require(await coreEventually { await client.requestCount == 1 })
+        await client.complete(0, snapshot)
+        try #require(await coreEventually { await client.aliasCount == 1 })
+        await client.completeAliases(0, ModelAliasDocument(revision: 1,
+            value: ModelAliasSettings(modelAliases: ["grok-bot-default": "Bot alias", "claude": "Chat alias"])))
+        try #require(await coreEventually { store.displayPeriod(.today).sessions?["cursor:room"]?.models?["Chat alias"] == 5 })
+        #expect(SessionListEntry.rows(store.displayPeriod(.today).sessions ?? [:]).first?.group == .grokBot)
+        #expect(SessionListEntry.rows(store.displayPeriod(.allTime).sessions ?? [:]).first?.group == .grokBot)
+        #expect(store.stats?.period(.allTime).sessions?["cursor:room"]?.models?["grok-bot-default"] == 99)
+        #expect(store.displayPeriod(.today).sessions?["cursor:room"]?.measuredTokens == 5)
+    }
+
+    @Test func aliasRevisionChangesReprojectLatestStatsAndRejectOldDestinations() async throws {
+        let client = ControlledHubClient(holdAliases: true)
+        let store = TokenMonitorStore(client: client, systemSurfaces: RecordingSurfaces())
+        let a = configuration("a"), b = configuration("b")
+        func snapshot(_ tokens: Int, _ revision: Int) throws -> HubStats {
+            try JSONDecoder().decode(HubStats.self, from: Data("""
+            {"syncSettingsRevisions":{"modelAliases":\(revision)},"periods":{"today":{"totalTokens":\(tokens),"models":{"vendor/model":\(tokens)},"modelCosts":{"vendor/model":0.00123},"modelUnpricedTokens":{"vendor/model":\(tokens / 2)},"sessions":{"one":{"models":{"vendor/model":\(tokens)},"totalTokens":\(tokens)}}}}}
+            """.utf8))
+        }
+        store.configure(a)
+        try #require(await coreEventually { await client.requestCount == 1 })
+        await client.complete(0, try snapshot(10, 1))
+        try #require(await coreEventually { await client.aliasCount == 1 })
+        try #require(await coreEventually { await client.streamCount == 1 })
+        await client.send(try snapshot(20, 1), to: a)
+        try #require(await coreEventually { store.currentPeriod.totalTokens == 20 })
+        await client.completeAliases(0, ModelAliasDocument(revision: 1, value: ModelAliasSettings(modelAliases: ["vendor/model": "Alias"])))
+        try #require(await coreEventually { store.currentPeriod.models?["Alias"] == 20 })
+        #expect(store.currentPeriod.modelCosts?["Alias"] == 0.00123)
+        #expect(store.currentPeriod.modelEntries.first?.unpricedTokens == 10)
+        #expect(store.stats?.period(.today).modelUnpricedTokens?["vendor/model"] == 10)
+        #expect(store.currentPeriod.sessions?["one"]?.models?["Alias"] == 20)
+        #expect(store.stats?.period(.today).models?["vendor/model"] == 20)
+        await client.send(try snapshot(30, 2), to: a)
+        try #require(await coreEventually { await client.aliasCount == 2 })
+        store.configure(b)
+        try #require(await coreEventually { await client.requestCount == 2 })
+        await client.complete(1, try snapshot(40, 1))
+        try #require(await coreEventually { await client.aliasCount == 3 })
+        await client.completeAliases(1, ModelAliasDocument(revision: 2, value: ModelAliasSettings(modelAliases: ["vendor/model": "Wrong destination"])))
+        await client.completeAliases(2, ModelAliasDocument(revision: 1, value: ModelAliasSettings(modelAliases: ["vendor/model": "B alias"])))
+        try #require(await coreEventually { store.currentPeriod.models?["B alias"] == 40 })
+        #expect(store.currentPeriod.models?["Wrong destination"] == nil)
+        await client.send(try snapshot(50, 2), to: b)
+        try #require(await coreEventually { await client.aliasCount == 4 })
+        await client.completeAliases(3, ModelAliasDocument(revision: 2, value: ModelAliasSettings()))
+        try #require(await coreEventually { store.currentPeriod.models?["vendor/model"] == 50 })
+        #expect(store.currentPeriod.models?["B alias"] == nil)
+        store.configure(nil)
+    }
+
+    @Test func destinationSwitchAndDisconnectRejectLateRequests() async throws {
+        let client = ControlledHubClient()
+        let surfaces = RecordingSurfaces()
+        let store = TokenMonitorStore(client: client, systemSurfaces: surfaces)
+        let a = configuration("a"), b = configuration("b")
+        store.configure(a)
+        try #require(await coreEventually { await client.requestCount == 1 })
+        store.configure(b)
+        try #require(await coreEventually { await client.requestCount == 2 })
+        await client.complete(1, try stats(20))
+        try #require(await coreEventually { store.stats?.period(.today).totalTokens == 20 })
+        await client.complete(0, try stats(10))
+        await Task.yield()
+        #expect(store.stats?.period(.today).totalTokens == 20)
+        #expect(surfaces.published.allSatisfy { $0.0 == b })
+        let refresh = Task { await store.refresh() }
+        try #require(await coreEventually { await client.requestCount == 3 })
+        store.configure(nil)
+        await client.complete(2, try stats(99))
+        await refresh.value
+        #expect(store.stats == nil)
+        #expect(store.history == nil)
+        #expect(!store.isRefreshing)
+        #expect(store.phase == .idle)
+    }
+
+    @Test func streamWinsOverOlderManualRefresh() async throws {
+        let client = ControlledHubClient()
+        let store = TokenMonitorStore(client: client, systemSurfaces: RecordingSurfaces())
+        let destination = configuration("a")
+        defer { store.configure(nil) }
+        store.configure(destination)
+        try #require(await coreEventually { await client.requestCount == 1 })
+        await client.complete(0, try stats(1))
+        try #require(await coreEventually { await client.streamCount == 1 })
+        let refresh = Task { await store.refresh() }
+        try #require(await coreEventually { await client.requestCount == 2 })
+        await client.send(try stats(2), to: destination)
+        try #require(await coreEventually { store.stats?.period(.today).totalTokens == 2 })
+        await client.complete(1, try stats(0))
+        await refresh.value
+        #expect(store.stats?.period(.today).totalTokens == 2)
+        #expect(!store.isRefreshing)
+    }
+
+    @Test func historyDoesNotBlockFreshFramesAndPublishesLatestUsage() async throws {
+        let client = ControlledHubClient(holdHistory: true)
+        let surfaces = RecordingSurfaces()
+        let store = TokenMonitorStore(client: client, systemSurfaces: surfaces)
+        let destination = configuration("a")
+        defer { store.configure(nil) }
+        store.configure(destination)
+        try #require(await coreEventually { await client.requestCount == 1 })
+        await client.complete(0, try stats(1))
+        try #require(await coreEventually {
+            let streams = await client.streamCount
+            let histories = await client.historyCount
+            return streams == 1 && histories == 1
+        })
+        await client.send(try stats(2), to: destination)
+        try #require(await coreEventually { store.stats?.period(.today).totalTokens == 2 })
+        #expect(await client.historyCount == 1)
+        let history = try JSONDecoder().decode(UsageHistory.self, from: Data(#"{"daily":[{"date":"2026-10-05","tokens":5}]}"#.utf8))
+        await client.completeHistory(0, history)
+        try #require(await coreEventually { store.history?.daily?.first?.tokens == 5 })
+        #expect(surfaces.published.last?.1.period(.today).totalTokens == 2)
+    }
+}
+
+@MainActor
+func coreEventually(_ predicate: @MainActor () async -> Bool) async -> Bool {
+    let deadline = Date.now.addingTimeInterval(3)
+    while Date.now < deadline {
+        if await predicate() { return true }
+        do { try await Task.sleep(for: .milliseconds(1)) } catch { return false }
+    }
+    return false
+}
+
+
+extension TokenMonitorStoreTests {
+    @Test func previewDataWithoutAConfiguredDestinationCannotBecomeOperational() async {
+        let store = TokenMonitorStore(client: ControlledHubClient(), systemSurfaces: RecordingSurfaces())
+        store.stats = .sample
+        #expect(store.systemSurfaceSnapshot(limitProviderOrder: [], hiddenLimitProviders: []) == nil)
+        let controller = LiveActivityController()
+        var preferences = TokenMonitorSharedPayload.Preferences.default
+        preferences.liveActivityEnabled = true
+        await controller.setEnabled(true, snapshot: .make(stats: .sample, history: .sample), preferences: preferences)
+        #expect(controller.errorMessage == String(localized: "Connect to a Hub before starting Live Activity."))
+    }
+}
+
+extension TokenMonitorStoreTests {
+    @Test func liveModelAliasesFoldMatchedCountersWithoutMutatingWireData() async throws {
+        let client = ControlledHubClient(holdAliases: true)
+        let store = TokenMonitorStore(client: client, systemSurfaces: RecordingSurfaces())
+        let destination = configuration("model-rate-alias")
+        defer { store.configure(nil) }
+        func snapshot(_ multiplier: Int) throws -> HubStats {
+            try JSONDecoder().decode(HubStats.self, from: Data("""
+            {"periods":{"today":{"models":{"vendor/a":100,"vendor/b":300},"timedTokens":\(400 * multiplier),"timedOutputTokens":\(400 * multiplier),"timedDurationMs":\(3000 * multiplier),"modelThroughput":{"vendor/a":{"timedTokens":\(100 * multiplier),"timedOutputTokens":\(100 * multiplier),"timedDurationMs":\(1000 * multiplier)},"vendor/b":{"timedTokens":\(300 * multiplier),"timedOutputTokens":\(300 * multiplier),"timedDurationMs":\(2000 * multiplier)}}}}}
+            """.utf8))
+        }
+        store.configure(destination)
+        try #require(await coreEventually { await client.requestCount == 1 })
+        await client.complete(0, try snapshot(1))
+        try #require(await coreEventually {
+            let aliases = await client.aliasCount
+            let streams = await client.streamCount
+            return aliases == 1 && streams == 1
+        })
+        await client.completeAliases(0, .init(revision: 1, value: .init(modelAliases: ["vendor/a": "Shared", "vendor/b": "Shared"])))
+        try #require(await coreEventually { store.currentPeriod.models?["Shared"] == 400 })
+        await client.send(try snapshot(2), to: destination)
+        try #require(await coreEventually { store.liveModelOutputRate()?.devices.first?.models.count == 1 })
+        let model = try #require(store.liveModelOutputRate()?.devices.first?.models.first)
+        #expect(model.id == "Shared")
+        #expect(abs(model.tokensPerSecond - 400.0 / 3) < 0.0001)
+        #expect(store.stats?.period(.today).modelThroughput?["vendor/a"]?.timedOutputTokens == 200)
+    }
+}
