@@ -56,7 +56,8 @@ module.exports = {
         labelKey: 'settings.minimax.billingMode',
         options: [
           { value: 'token-plan', labelKey: 'settings.minimax.billingTokenPlan' },
-          { value: 'api', labelKey: 'settings.minimax.billingApi' }
+          { value: 'api', labelKey: 'settings.minimax.billingApi' },
+          { value: 'code', labelKey: 'settings.minimax.billingCode' }
         ],
         saveOnChange: true,
         submitWithCredential: false
@@ -77,7 +78,14 @@ module.exports = {
     ],
     // Both selections stay reachable after linking, without exposing the key.
     top: [{ field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' }],
-    manual: [{ note: 'settings.minimax.note' }, { field: 'minimaxApiKey' }],
+    // The code tier needs no key: its credential is the local MiniMax Code
+    // login, discovered and refreshed by the collector. The note says so
+    // exactly when that tier is selected; the paste field stays for the rest.
+    manual: [
+      { note: 'settings.minimax.note' },
+      { note: 'settings.minimax.codeNote', when: { field: 'minimaxBillingMode', values: ['code'] } },
+      { field: 'minimaxApiKey' }
+    ],
     // Explicit choices follow the select even before the first probe. Auto
     // follows the last successful probe, with the historical CN fallback.
     openUrl: {

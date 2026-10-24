@@ -8,9 +8,15 @@
 // therefore read whatever percent is present, and only suppress the
 // status==3 placeholder lane that cc-switch / CodexBar both guard against.
 
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+
 const { normalizeLimitProvider } = require('../../limits/core');
 const { cleanSecret } = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
+const { mcodeDataDirs } = require('../mcode/paths');
 
 const MINIMAX_KEY_NAMES = ['MINIMAX_CODING_API_KEY'];
 
@@ -20,6 +26,23 @@ const MINIMAX_TOKEN_PLAN_REMAINS_URL_CN = 'https://api.minimaxi.com/v1/token_pla
 const MINIMAX_TOKEN_PLAN_REMAINS_URL_EN = 'https://api.minimax.io/v1/token_plan/remains';
 const MINIMAX_BALANCE_URL_CN = 'https://api.minimaxi.com/account/query_balance';
 const MINIMAX_BALANCE_URL_EN = 'https://api.minimax.io/account/query_balance';
+
+// MiniMax Code OAuth lane (billingMode 'code'). Hosts verified live on
+// 2026-10-24 against the CN account; the intl membership host follows the
+// account/platform naming but is not live-verified (see docs/providers/minimax.md).
+const MINIMAX_CODE_OAUTH_URL_CN = 'https://account.minimaxi.com/oauth2/token';
+const MINIMAX_CODE_OAUTH_URL_INTL = 'https://account.minimax.io/oauth2/token';
+const MINIMAX_CODE_MEMBERSHIP_URL_CN = 'https://agent.minimaxi.com/matrix/api/v1/commerce/get_membership_info';
+const MINIMAX_CODE_MEMBERSHIP_URL_INTL = 'https://agent.minimax.io/matrix/api/v1/commerce/get_membership_info';
+const MINIMAX_CODE_PLAN_REMAINS_URL_CN = 'https://www.minimaxi.com/v1/api/openplatform/coding_plan/remains';
+const MINIMAX_CODE_PLAN_REMAINS_URL_INTL = 'https://platform.minimax.io/v1/api/openplatform/coding_plan/remains';
+
+// Refresh well before expiry; MiniMax Code's own client uses 5 minutes, but a
+// widget tick cadence is slower, so ask earlier. Set when a rotation succeeded
+// but its write-back failed, so the next tick re-reads and re-refreshes rather
+// than trusting a lease that may only exist in memory.
+const MINIMAX_CODE_REFRESH_LEEWAY_MS = 10 * 60 * 1000;
+const MINIMAX_CODE_FORCE_REFRESH_STATE_KEY = 'minimax.code.force-refresh';
 
 const MINIMAX_WINDOW_MINUTES_5H = 5 * 60;
 const MINIMAX_WINDOW_MINUTES_WEEKLY = 7 * 24 * 60;
@@ -225,7 +248,8 @@ function normalizeMinimaxRegionSetting(value) {
 }
 
 function normalizeMinimaxBillingMode(value) {
-  return String(value || '').trim().toLowerCase() === 'api' ? 'api' : 'token-plan';
+  const raw = String(value || '').trim().toLowerCase();
+  return raw === 'api' ? 'api' : raw === 'code' ? 'code' : 'token-plan';
 }
 
 // available_amount is the spendable balance, not cash_balance alone. Missing
@@ -306,10 +330,330 @@ function shouldTryNextMinimaxRegion(error) {
   return code === 401 || code === 403;
 }
 
+// --- MiniMax Code OAuth lane -------------------------------------------------
+//
+// The desktop app stores its OAuth lease in `<mcode data dir>/auth/prod/<region
+// dir>/<record dir>/auth.json` as a nested `records` map whose keys contain
+// spaces. The refresh token is strictly single-use: every accepted refresh
+// rotates it, so a rotation whose write-back is lost kills the lease. All
+// protocol facts here were measured live on 2026-10-24; see
+// docs/providers/minimax.md for the contract.
+
+// The target record is the desktop app's own (`clientId` `mcode-public`, key
+// `com.minimax.mcode.oauth.<env>.<region> <hash>`). Record directory names and
+// the intl storage spelling are not verified, so everything is enumerated.
+function isMinimaxCodeRecord(key, record) {
+  if (!record || typeof record !== 'object') return false;
+  if (typeof record.refreshToken !== 'string' || !record.refreshToken) return false;
+  if (typeof record.clientId === 'string' && record.clientId) return record.clientId === 'mcode-public';
+  return String(key).startsWith('com.minimax.mcode.oauth');
+}
+
+function minimaxCodeAuthFiles(options = {}, deps = {}) {
+  const env = deps.env || process.env;
+  const readdirSync = deps.readdirSync || fs.readdirSync;
+  const readFileSync = deps.readFileSync || fs.readFileSync;
+  const regionSetting = minimaxRegion(options, env);
+  for (const base of mcodeDataDirs({ env, homeDir: deps.homeDir || os.homedir() })) {
+    const prodDir = path.join(base, 'auth', 'prod');
+    let regionDirs;
+    try {
+      regionDirs = readdirSync(prodDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    } catch (_) { continue; }
+    // `cn` is the verified spelling; a pinned region filters, Auto prefers cn.
+    regionDirs.sort((a, b) => Number(b === 'cn') - Number(a === 'cn'));
+    for (const regionDir of regionDirs) {
+      if (regionSetting === 'cn' && regionDir !== 'cn') continue;
+      if (regionSetting === 'intl' && regionDir === 'cn') continue;
+      let recordDirs;
+      try {
+        recordDirs = readdirSync(path.join(prodDir, regionDir), { withFileTypes: true }).filter((entry) => entry.isDirectory());
+      } catch (_) { continue; }
+      for (const recordDir of recordDirs) {
+        const authPath = path.join(prodDir, regionDir, recordDir.name, 'auth.json');
+        let auth;
+        try { auth = JSON.parse(readFileSync(authPath, 'utf8')); } catch (_) { continue; }
+        const records = auth && typeof auth === 'object' && auth.records && typeof auth.records === 'object' ? auth.records : null;
+        if (!records) continue;
+        const keys = Object.keys(records).filter((key) => isMinimaxCodeRecord(key, records[key]));
+        if (!keys.length) continue;
+        return {
+          authPath,
+          statePath: path.join(prodDir, regionDir, recordDir.name, 'auth-state.json'),
+          regionDir,
+          recordKey: keys[0],
+          record: records[keys[0]]
+        };
+      }
+    }
+  }
+  return null;
+}
+
+// Refresh only while the desktop app is quit: its in-memory lease goes stale
+// the moment we rotate, so the file protocol (and the red line) is "read-only
+// while it runs". Detection is best effort — pgrep/tasklist with a short
+// timeout; a missing tool reads as "not running" and the sync write-back keeps
+// the lost-lease window minimal either way.
+function minimaxCodeClientRunning(deps = {}) {
+  if (typeof deps.clientRunning === 'function') return Boolean(deps.clientRunning());
+  const platform = deps.platform || process.platform;
+  try {
+    if (platform === 'win32') {
+      const out = execFileSync('tasklist', ['/FI', 'IMAGENAME eq MiniMax Code.exe', '/FO', 'CSV', 'NH'],
+        { timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+      return out.includes('MiniMax Code');
+    }
+    execFileSync('pgrep', ['-f', 'MiniMax Code'], { timeout: 2000, stdio: ['ignore', 'ignore', 'ignore'] });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// scope and audience MUST ride along (from the record itself): a refresh
+// without them still returns 200, but every resource server then rejects the
+// minted token — the trap that derailed the first live experiment.
+async function refreshMinimaxCodeToken(session, record, deps = {}) {
+  const url = session.regionDir === 'cn' ? MINIMAX_CODE_OAUTH_URL_CN : MINIMAX_CODE_OAUTH_URL_INTL;
+  const form = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: record.refreshToken,
+    client_id: typeof record.clientId === 'string' && record.clientId ? record.clientId : 'mcode-public',
+    scope: Array.isArray(record.scopes) && record.scopes.length ? String(record.scopes[0]) : 'agent.default',
+    audience: typeof record.audience === 'string' && record.audience ? record.audience : 'agent-backend'
+  }).toString();
+  const fetchFn = deps.fetch || fetch;
+  const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      const response = await fetchFn(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+        body: form,
+        ...(controller ? { signal: controller.signal } : {})
+      });
+      const json = await response.json().catch(() => null);
+      if (response.ok) {
+        const accessToken = typeof json?.access_token === 'string' ? json.access_token : '';
+        const refreshToken = typeof json?.refresh_token === 'string' ? json.refresh_token : '';
+        // A missing rotation is a protocol break: writing the old refresh
+        // token back would be fine, but assuming it is still valid is not.
+        if (!accessToken || !refreshToken) {
+          throw Object.assign(new Error('oauth2/token response missing tokens'), { status: 'unavailable' });
+        }
+        const lifetimeSec = Math.max(60, Number(json.expires_in) || 3600);
+        return {
+          accessToken,
+          refreshToken,
+          expiresAtMs: (deps.now || Date.now)() + lifetimeSec * 1000,
+          generation: (Number(record.generation) || 0) + 1
+        };
+      }
+      const errorCode = typeof json?.error === 'string' ? json.error : '';
+      if ((response.status === 400 || response.status === 401)
+        && (errorCode === 'invalid_grant' || errorCode === 'unauthorized_client')) {
+        // Terminal: the lease is dead. The next tick re-reads auth.json, so a
+        // re-login inside MiniMax Code heals this lane without any settings change.
+        throw Object.assign(new Error(`oauth2/token rejected: ${errorCode}`), { status: 'unauthorized', statusCode: response.status });
+      }
+      lastError = Object.assign(new Error(`oauth2/token returned ${response.status}`), {
+        status: response.status === 429 ? 'sourceRateLimited' : 'unavailable',
+        statusCode: response.status
+      });
+      if (response.status === 429 || (response.status < 500 && response.status !== 400)) throw lastError;
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        lastError = Object.assign(new Error('oauth2/token timed out'), { status: 'unavailable' });
+      } else if (error?.status) {
+        throw error;
+      } else {
+        // No HTTP answer at all: transport failure, worth one more attempt.
+        lastError = Object.assign(new Error(`oauth2/token transport failure: ${error?.message || error}`), { status: 'unavailable' });
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  throw lastError || Object.assign(new Error('oauth2/token failed'), { status: 'unavailable' });
+}
+
+// Fully synchronous on purpose: the rotation has already happened server-side,
+// so nothing may be awaited between reading the response and the rename. Only
+// the refreshed record's own fields move, merged into a fresh read so another
+// writer's records survive; auth-state.json mirrors generation/expiresAtMs.
+function writeMinimaxCodeAuth(session, updated, deps = {}) {
+  const readFileSync = deps.readFileSync || fs.readFileSync;
+  const writeFileSync = deps.writeFileSync || fs.writeFileSync;
+  const renameSync = deps.renameSync || fs.renameSync;
+  const unlinkSync = deps.unlinkSync || fs.unlinkSync;
+  let fresh;
+  try { fresh = JSON.parse(readFileSync(session.authPath, 'utf8')); } catch (_) { return false; }
+  if (!fresh || typeof fresh !== 'object' || !fresh.records || typeof fresh.records !== 'object'
+    || !fresh.records[session.recordKey] || typeof fresh.records[session.recordKey] !== 'object') return false;
+  fresh.records[session.recordKey] = { ...fresh.records[session.recordKey], ...updated };
+  const tmpPath = `${session.authPath}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    writeFileSync(tmpPath, `${JSON.stringify(fresh, null, 2)}\n`, { mode: 0o600 });
+    renameSync(tmpPath, session.authPath);
+  } catch (_) {
+    try { unlinkSync(tmpPath); } catch (__) {}
+    return false;
+  }
+  try {
+    const state = JSON.parse(readFileSync(session.statePath, 'utf8'));
+    if (state && typeof state === 'object') {
+      state.generation = updated.generation;
+      state.expiresAtMs = updated.expiresAtMs;
+      const tmpState = `${session.statePath}.tmp-${process.pid}-${Date.now()}`;
+      writeFileSync(tmpState, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+      renameSync(tmpState, session.statePath);
+    }
+  } catch (_) { /* auth.json is the source of truth; the mirror is best effort */ }
+  return true;
+}
+
+async function minimaxCodeRequest(url, init, deps = {}) {
+  const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const response = await (deps.fetch || fetch)(url, {
+      method: init.method || 'GET',
+      headers: { accept: 'application/json', ...(init.headers || {}) },
+      ...(init.body ? { body: init.body } : {}),
+      ...(controller ? { signal: controller.signal } : {})
+    });
+    if (!response.ok) {
+      const status = (response.status === 401 || response.status === 403) ? 'unauthorized'
+        : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
+      const error = new Error(`${new URL(url).host} returned ${response.status}`);
+      error.status = status;
+      error.statusCode = response.status;
+      throw error;
+    }
+    return await response.json();
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw Object.assign(new Error(`${new URL(url).host} timed out`), { status: 'unavailable' });
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function minimaxCodeIsAuthError(error) {
+  const code = Number(error && error.statusCode);
+  return code === 401 || code === 403 || (error && error.status) === 'unauthorized';
+}
+
+// The two books never mix: check-in credits are a money-shaped `credits`
+// window in the record's own region currency, the M Plan rides the same
+// model_remains shape the Token Plan lane parses. `2062` (no subscription) is
+// a healthy lane without plan windows, not an error.
+async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
+  const { now, updatedAt } = context;
+  const codeRow = (status, extra = {}) => normalizeLimitProvider({
+    provider: 'minimax',
+    accountKey: extra.accountKey,
+    accountLabel: 'MiniMax Code',
+    source: 'oauth',
+    status,
+    updatedAt,
+    windows: extra.windows || []
+  });
+  const session = minimaxCodeAuthFiles(options, deps);
+  if (!session) return codeRow('notConfigured');
+  const accountKey = hashKey('minimax', `code:${session.recordKey}`);
+  const runtimeState = deps.providerRuntimeState instanceof Map ? deps.providerRuntimeState : null;
+  const setForceRefresh = (value) => {
+    if (!runtimeState) return;
+    if (value) runtimeState.set(MINIMAX_CODE_FORCE_REFRESH_STATE_KEY, true);
+    else runtimeState.delete(MINIMAX_CODE_FORCE_REFRESH_STATE_KEY);
+  };
+  // A credential probe must never mutate the lease (the registry's
+  // persistent-bookkeeping rule): it reads whatever is on disk, the same way
+  // the lane behaves while the desktop app is running.
+  const clientRunning = deps.probe === true ? true : minimaxCodeClientRunning(deps);
+  let accessToken = typeof session.record.accessToken === 'string' ? session.record.accessToken : '';
+  const expiresAtMs = Number(session.record.expiresAtMs);
+  let refreshAttempted = false;
+  if (!clientRunning
+    && (runtimeState?.get(MINIMAX_CODE_FORCE_REFRESH_STATE_KEY) === true
+      || !accessToken || !Number.isFinite(expiresAtMs) || expiresAtMs - now < MINIMAX_CODE_REFRESH_LEEWAY_MS)) {
+    refreshAttempted = true;
+    try {
+      const refreshed = await refreshMinimaxCodeToken(session, session.record, deps);
+      accessToken = refreshed.accessToken;
+      // Rotation consumed the old refresh token: write back before anything else.
+      const written = writeMinimaxCodeAuth(session, refreshed, deps);
+      setForceRefresh(!written);
+    } catch (error) {
+      setForceRefresh(false);
+      if (error?.status === 'unauthorized') return codeRow('unauthorized', { accountKey });
+      // Transient: fall through with the on-disk access token, which may still
+      // answer; a 401 below is then reported as unavailable, not unauthorized.
+    }
+  }
+  const membershipUrl = session.regionDir === 'cn' ? MINIMAX_CODE_MEMBERSHIP_URL_CN : MINIMAX_CODE_MEMBERSHIP_URL_INTL;
+  const planRemainsUrl = session.regionDir === 'cn' ? MINIMAX_CODE_PLAN_REMAINS_URL_CN : MINIMAX_CODE_PLAN_REMAINS_URL_INTL;
+  const bearerHeaders = () => ({ authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' });
+  let membership;
+  try {
+    membership = await minimaxCodeRequest(membershipUrl, { method: 'POST', headers: bearerHeaders(), body: '{}' }, deps);
+  } catch (error) {
+    if (minimaxCodeIsAuthError(error)) {
+      if (clientRunning || refreshAttempted) {
+        // While the app runs, its own rotation can outrun the file mid-tick;
+        // an unauthorized verdict here would be a false terminal.
+        return codeRow('unavailable', { accountKey });
+      }
+      try {
+        const refreshed = await refreshMinimaxCodeToken(session, session.record, deps);
+        accessToken = refreshed.accessToken;
+        setForceRefresh(!writeMinimaxCodeAuth(session, refreshed, deps));
+        membership = await minimaxCodeRequest(membershipUrl, { method: 'POST', headers: bearerHeaders(), body: '{}' }, deps);
+      } catch (retryError) {
+        return codeRow(retryError?.status === 'unauthorized' ? 'unauthorized' : 'unavailable', { accountKey });
+      }
+    } else {
+      return codeRow(error?.status === 'sourceRateLimited' ? 'sourceRateLimited' : 'unavailable', { accountKey });
+    }
+  }
+  const credits = parseNumberOrNull(membership?.op_credit_summary?.total_remaining_amount);
+  if (credits === null) return codeRow('unavailable', { accountKey });
+  const windows = [{
+    kind: 'billing',
+    metric: 'credits',
+    label: 'Check-in',
+    remaining: credits,
+    currency: session.regionDir === 'cn' ? 'CNY' : 'USD',
+    showMeter: false
+  }];
+  const groupId = typeof membership?.op_group_id === 'string' && membership.op_group_id ? membership.op_group_id : '';
+  if (groupId) {
+    try {
+      // GroupId is a query parameter; the header form is ignored by the server.
+      const remains = await minimaxCodeRequest(`${planRemainsUrl}?GroupId=${encodeURIComponent(groupId)}`, { headers: bearerHeaders() }, deps);
+      const statusCode = parseNumberOrNull(remains?.base_resp?.status_code);
+      if (statusCode === null || statusCode === 0) windows.push(...parseMinimaxTiers(remains));
+    } catch (_) { /* the plan lane is supplementary; check-in credits stand alone */ }
+  }
+  return codeRow('ok', { accountKey, windows });
+}
+
+
 async function fetchMinimaxLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
+  if (normalizeMinimaxBillingMode(options.minimaxBillingMode) === 'code') {
+    return fetchMinimaxCodeLimits(options, deps, { now, updatedAt });
+  }
   const key = minimaxToken(env, options.minimaxApiKey);
   if (!key) {
     return normalizeLimitProvider({
@@ -457,6 +801,13 @@ function mapMinimaxErrorStatus(error) {
 module.exports = {
   MINIMAX_KEY_NAMES,
   MINIMAX_REGION_MEMORY_STATE_KEY,
+  MINIMAX_CODE_FORCE_REFRESH_STATE_KEY,
+  MINIMAX_CODE_OAUTH_URL_CN,
+  MINIMAX_CODE_OAUTH_URL_INTL,
+  MINIMAX_CODE_MEMBERSHIP_URL_CN,
+  MINIMAX_CODE_MEMBERSHIP_URL_INTL,
+  MINIMAX_CODE_PLAN_REMAINS_URL_CN,
+  MINIMAX_CODE_PLAN_REMAINS_URL_INTL,
   MINIMAX_REMAINS_URL_CN,
   MINIMAX_REMAINS_URL_EN,
   MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
