@@ -1933,3 +1933,16 @@ test('a hidden Windows rail stays in place', (t) => {
   assert.equal(rail.opacity, 0);
   assert.equal(onAnyDisplay(rail, fixture.screen.getAllDisplays()), true);
 });
+
+test('a display added past the parked surfaces moves them beyond it', (t) => {
+  const fixture = createFixture({ platform: 'darwin', settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const bubble = fixture.windowFor('bubble');
+  assert.equal(bubble.opacity, 0);
+  fixture.screen.displays.push({ id: 2, scaleFactor: 1, bounds: { x: 1200, y: 0, width: 3000, height: 900 }, workArea: { x: 1200, y: 0, width: 3000, height: 860 } });
+  fixture.screen.emit('display-added');
+  const displays = fixture.screen.getAllDisplays();
+  assert.equal(onAnyDisplay(rail, displays), false);
+  assert.equal(onAnyDisplay(bubble, displays), false, 'the hidden card has no cell to place, yet it moves too');
+});

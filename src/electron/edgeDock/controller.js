@@ -411,6 +411,15 @@ function createEdgeDockController(deps) {
     win.setBounds(parkedBounds(placed[surface] || win.getBounds()));
   }
 
+  // A display added or moved past the parked spot would put a parked window on
+  // screen again; a hidden card has no cell left to place it, so move both here.
+  function repark() {
+    for (const surface of Object.keys(parked)) {
+      const win = windows[surface];
+      if (parked[surface] && alive(win)) win.setBounds(parkedBounds(placed[surface] || win.getBounds()));
+    }
+  }
+
   function unpark(surface) {
     if (!parked[surface]) return;
     parked[surface] = false;
@@ -1288,6 +1297,7 @@ function createEdgeDockController(deps) {
 
   function onDisplayChange() {
     if (!running) return;
+    repark();
     if (bubbleCell !== null) invalidateBubblePlacement();
     positionRail();
     if (bubbleCell !== null) render('bubble');
