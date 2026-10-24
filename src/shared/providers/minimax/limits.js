@@ -348,10 +348,21 @@ function isMinimaxCodeRecord(key, record) {
   return String(key).startsWith('com.minimax.mcode.oauth');
 }
 
+// Sync fs entry points, injectable as a set so tests drive discovery and the
+// write-back with one object.
+function minimaxCodeFs(deps = {}) {
+  return {
+    readdirSync: deps.readdirSync || fs.readdirSync,
+    readFileSync: deps.readFileSync || fs.readFileSync,
+    writeFileSync: deps.writeFileSync || fs.writeFileSync,
+    renameSync: deps.renameSync || fs.renameSync,
+    unlinkSync: deps.unlinkSync || fs.unlinkSync
+  };
+}
+
 function minimaxCodeAuthFiles(options = {}, deps = {}) {
   const env = deps.env || process.env;
-  const readdirSync = deps.readdirSync || fs.readdirSync;
-  const readFileSync = deps.readFileSync || fs.readFileSync;
+  const { readdirSync, readFileSync } = minimaxCodeFs(deps);
   const regionSetting = minimaxRegion(options, env);
   for (const base of mcodeDataDirs({ env, homeDir: deps.homeDir || os.homedir() })) {
     const prodDir = path.join(base, 'auth', 'prod');
@@ -494,10 +505,7 @@ async function refreshMinimaxCodeToken(session, record, deps = {}) {
 // the refreshed record's own fields move, merged into a fresh read so another
 // writer's records survive; auth-state.json mirrors generation/expiresAtMs.
 function writeMinimaxCodeAuth(session, updated, deps = {}) {
-  const readFileSync = deps.readFileSync || fs.readFileSync;
-  const writeFileSync = deps.writeFileSync || fs.writeFileSync;
-  const renameSync = deps.renameSync || fs.renameSync;
-  const unlinkSync = deps.unlinkSync || fs.unlinkSync;
+  const { readFileSync, writeFileSync, renameSync, unlinkSync } = minimaxCodeFs(deps);
   let fresh;
   try { fresh = JSON.parse(readFileSync(session.authPath, 'utf8')); } catch (_) { return false; }
   if (!fresh || typeof fresh !== 'object' || !fresh.records || typeof fresh.records !== 'object'
@@ -524,39 +532,35 @@ function writeMinimaxCodeAuth(session, updated, deps = {}) {
   return true;
 }
 
-async function minimaxCodeRequest(url, init, deps = {}) {
-  const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
+// One fetch-JSON core for both billing lanes: a per-request timeout and the
+// shared classification (401/403 → unauthorized, 429 → sourceRateLimited,
+// else unavailable). An abort propagates untouched — the API lanes read it as
+// a transport failure to jump regions with, the code lane maps it at its own
+// catch sites.
+async function minimaxJsonFetch(fetchFn, url, init, timeoutMs) {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    const response = await (deps.fetch || fetch)(url, {
-      method: init.method || 'GET',
-      headers: { accept: 'application/json', ...(init.headers || {}) },
-      ...(init.body ? { body: init.body } : {}),
-      ...(controller ? { signal: controller.signal } : {})
-    });
+    const response = await fetchFn(url, { ...init, ...(controller ? { signal: controller.signal } : {}) });
     if (!response.ok) {
-      const status = (response.status === 401 || response.status === 403) ? 'unauthorized'
-        : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
-      const error = new Error(`${new URL(url).host} returned ${response.status}`);
+      const status = (response.status === 401 || response.status === 403) ? 'unauthorized' : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
+      const error = new Error(`${url} returned ${response.status}`);
       error.status = status;
       error.statusCode = response.status;
       throw error;
     }
     return await response.json();
-  } catch (error) {
-    if (error?.name === 'AbortError') {
-      throw Object.assign(new Error(`${new URL(url).host} timed out`), { status: 'unavailable' });
-    }
-    throw error;
   } finally {
     if (timer) clearTimeout(timer);
   }
 }
 
-function minimaxCodeIsAuthError(error) {
-  const code = Number(error && error.statusCode);
-  return code === 401 || code === 403 || (error && error.status) === 'unauthorized';
+function minimaxCodeRequest(url, init, deps = {}) {
+  return minimaxJsonFetch(deps.fetch || fetch, url, {
+    method: init.method || 'GET',
+    headers: { accept: 'application/json', ...(init.headers || {}) },
+    ...(init.body ? { body: init.body } : {})
+  }, Number(deps.fetchTimeoutMs || 12000));
 }
 
 // The two books never mix: check-in credits are a money-shaped `credits`
@@ -620,7 +624,7 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
   try {
     membership = await minimaxCodeRequest(membershipUrl, { method: 'POST', headers: bearerHeaders(), body: '{}' }, deps);
   } catch (error) {
-    if (minimaxCodeIsAuthError(error)) {
+    if (isMinimaxAuthError(error)) {
       if (!(await canRefresh()) || refreshAttempted) {
         // While the app runs (or under a probe), its own rotation can outrun
         // the file mid-tick; an unauthorized verdict here would be a false terminal.
@@ -678,24 +682,8 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
       windows: []
     });
   }
-  const fetchJson = deps.fetchJson || (async (u, headers) => {
-    const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
-    try {
-      const response = await (deps.fetch || fetch)(u, { headers, ...(controller ? { signal: controller.signal } : {}) });
-      if (!response.ok) {
-        const status = (response.status === 401 || response.status === 403) ? 'unauthorized' : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
-        const error = new Error(`${u} returned ${response.status}`);
-        error.status = status;
-        error.statusCode = response.status;
-        throw error;
-      }
-      return await response.json();
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  });
+  const fetchJson = deps.fetchJson
+    || ((u, headers) => minimaxJsonFetch(deps.fetch || fetch, u, { headers }, Number(deps.fetchTimeoutMs || 12000)));
   const headers = {
     Authorization: `Bearer ${key}`,
     Accept: 'application/json',
@@ -817,11 +805,8 @@ module.exports = {
   MINIMAX_REGION_MEMORY_STATE_KEY,
   MINIMAX_CODE_FORCE_REFRESH_STATE_KEY,
   MINIMAX_CODE_OAUTH_URL_CN,
-  MINIMAX_CODE_OAUTH_URL_INTL,
   MINIMAX_CODE_MEMBERSHIP_URL_CN,
-  MINIMAX_CODE_MEMBERSHIP_URL_INTL,
   MINIMAX_CODE_PLAN_REMAINS_URL_CN,
-  MINIMAX_CODE_PLAN_REMAINS_URL_INTL,
   MINIMAX_REMAINS_URL_CN,
   MINIMAX_REMAINS_URL_EN,
   MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
