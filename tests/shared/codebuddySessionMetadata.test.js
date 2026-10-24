@@ -80,6 +80,21 @@ test('reports the turn boundary from the newest response status', () => {
   assert.equal(readSessionMetadata(answered, { cache: new Map() }).turnEnded, true);
 });
 
+test('a tool call after the completed response keeps the turn open', () => {
+  // Non-interactive runs (`-p`) write no fresh user prompt for the turn they
+  // start, so the completion above still described the current turn and a
+  // working session read as ended for its whole run: the Edge Dock never spun
+  // for it even though the transcript was being written seconds ago.
+  const call = JSON.stringify({ type: 'function_call', providerData: { messageId: 'msg-2' } });
+  const result = JSON.stringify({ type: 'function_call_result', status: 'completed' });
+  const working = fixture([assistant('completed'), call, result, call]);
+  assert.equal(readSessionMetadata(working, { cache: new Map() }).turnEnded, false);
+
+  // The reply that follows the tools closes the turn again.
+  const answered = fixture([assistant('completed'), call, result, assistant('completed', 'msg-2')]);
+  assert.equal(readSessionMetadata(answered, { cache: new Map() }).turnEnded, true);
+});
+
 test('does not count harness user records as prompts', () => {
   // Slash commands, local command echo, compaction digests and teammate input
   // all arrive as `role: 'user'`. Counting one as a prompt would retire a real
