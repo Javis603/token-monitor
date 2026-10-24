@@ -83,7 +83,7 @@
     qoder: ['Manual login', 'Web'],
     deepseek: ['Pay-as-you-go', 'API key'],
     devin: ['Manual login', 'Web'],
-    minimax: ['Token Plan', 'Pay-as-you-go', 'API key'],
+    minimax: ['Auto', 'Token Plan', 'Pay-as-you-go', 'OAuth/API'],
     typesafe: ['Manual login', 'Web'],
     openrouter: ['Pay-as-you-go', 'API key'],
     volcengine: ['Auto', 'API key', 'CLI'],
@@ -460,6 +460,13 @@
     if (status === 'ok') return { label: isLinkedStatus(provider) ? 'Linked' : 'Live', tone: 'ok' };
     if (status === 'disabled') return { label: 'Disabled', tone: 'muted' };
     if (status === 'noSyncedData') return { label: 'No synced data', tone: 'sync' };
+    // Code mode has no key field. Reuse the shared sign-in labels; the code note
+    // is the only MiniMax-specific sentence.
+    if (providerName === 'minimax' && sourceId(provider) === 'oauth' && ['unauthorized', 'notConfigured'].includes(status)) {
+      return status === 'unauthorized'
+        ? { label: 'Sign in again', tone: 'setup' }
+        : { label: 'Sign in', tone: 'setup' };
+    }
     if (status === 'unauthorized') {
       if (providerName === 'kimi') return { label: 'Update credential', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Update credential', tone: 'setup' };

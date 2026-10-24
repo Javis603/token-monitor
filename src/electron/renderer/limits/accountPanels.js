@@ -56,7 +56,16 @@ function syncCredentialFields(form, { document, settings }) {
   refreshFieldDependents(form, { document });
 }
 
+function credentialFormEnabled(form, { document }) {
+  const when = form.credentialWhen;
+  const value = when && (fieldValue(document, when.field) || form.fields.find(field => field.key === when.field)?.options?.[0]?.value);
+  return !when || when.values.includes(value);
+}
+
 function refreshFieldDependents(form, { document }) {
+  const enabled = credentialFormEnabled(form, { document });
+  if (form.credentialWhen) document.getElementById(`${form.id}ManualPanel`)?.classList.toggle('hidden', !enabled);
+
   for (const hint of document.querySelectorAll?.(`[data-credential-form="${form.id}"][data-by-field]`) || []) {
     const spec = JSON.parse(hint.dataset.byField);
     if (hint.dataset.dependent === 'note') {
@@ -210,7 +219,7 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
   refresh.addEventListener('click', () => onRefresh(form));
   let saving = false;
   submit.addEventListener('click', async () => {
-    if (saving) return;
+    if (saving || !credentialFormEnabled(form, { document })) return;
     saving = true;
     submit.disabled = true;
     submit.textContent = translate('settings.common.checking');
@@ -224,6 +233,7 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
       } catch (_) {
         return;
       }
+      if (!credentialFormEnabled(form, { document })) return;
       const values = Object.fromEntries([...inputs]
         .filter(([field]) => field.submitWithCredential !== false)
         .map(([field, input]) => [field.key, input.value]));
@@ -239,6 +249,6 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
   return group;
 }
 
-const api = { createCredentialPanel, refreshFieldDependents, resolveOpenUrl, syncCredentialFields };
+const api = { credentialFormEnabled, createCredentialPanel, refreshFieldDependents, resolveOpenUrl, syncCredentialFields };
 if (typeof module !== 'undefined') module.exports = api;
 if (typeof window !== 'undefined') window.TokenMonitorLimitAccountPanels = api;

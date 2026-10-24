@@ -180,6 +180,13 @@
     // as `detail` and is the only other provider that shows one.
     if (id === 'kimi') return billing ? result(null, window.detail || '') : EMPTY;
 
+    // MiniMax video is a count on a weekly window. The percentage stays the
+    // headline; the count uses the same raw detail slot as Kiro's pools.
+    if (id === 'minimax') {
+      if (kind === 'weekly' && window.label === 'Video') return result(null, rawCount(window, showUsed));
+      return EMPTY;
+    }
+
     // Everything else has no second line. `detail` is deliberately NOT surfaced
     // by default: several providers carry one for a different purpose — Zed and
     // third-party presets read "unlimited" out of it, OpenRouter promotes it to

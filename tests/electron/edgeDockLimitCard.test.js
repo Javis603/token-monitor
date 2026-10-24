@@ -422,6 +422,45 @@ test('MiniMax API balances reach the shared Limits and dock renderer in both cur
   }
 });
 
+test('MiniMax Code follows the shared quota, count and credits rows', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'minimax',
+    status: 'ok',
+    windows: [
+      { kind: 'session', label: '5h', usedPercent: 30 },
+      { kind: 'weekly', label: 'Weekly', usedPercent: 10 },
+      { kind: 'weekly', label: 'Video', used: 3, limit: 20, remaining: 17 },
+      { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false },
+      { kind: 'billing', metric: 'credits', label: 'API Balance', remaining: 15, currency: 'CNY' }
+    ]
+  });
+  const card = dockView().renderProviderWindows(provider, '#888888');
+  assert.deepEqual(card.children.map((row) => row.children[0].children[0].textContent), [
+    '5h', 'Weekly', 'Video', 'Credits', 'API Balance'
+  ]);
+  assert.equal(card.children[0].classNames.has('limit-window-wide'), false);
+  assert.equal(card.children[2].classNames.has('limit-window-wide'), true);
+  assert.equal(card.children[2].find('limit-detail').textContent, '17/20');
+  const points = card.children[3];
+  const wallet = card.children[4];
+  assert.equal(points.classNames.has('limit-window-note'), true);
+  assert.equal(points.find('limit-meter'), null);
+  assert.match(points.text, /4624\.00/);
+  assert.equal(points.text.includes('¥'), false);
+  assert.equal(wallet.find('limit-meter-fill').style['--bar-scale'], '1');
+  assert.match(wallet.text, /¥15\.00/);
+  assert.equal(points.dataset.usageItem, 'credits');
+  assert.equal(wallet.dataset.usageItem, 'credits');
+  const items = dockView().limitProviderUsageItems([provider]);
+  assert.equal(items.filter((item) => item.id === 'credits').length, 1);
+  assert.equal(items.length, 4);
+  const hidden = dockView({ limitProviderHiddenItems: { minimax: ['credits'] } });
+  assert.deepEqual(
+    hidden.renderProviderWindows(provider, '#888888').children.map((row) => row.children[0].children[0].textContent),
+    ['5h', 'Weekly', 'Video']
+  );
+});
+
 test('MiniMax Balance is listed and can be hidden without disappearing from its checklist', () => {
   const provider = normalizeLimitProvider({
     provider: 'minimax', status: 'ok',

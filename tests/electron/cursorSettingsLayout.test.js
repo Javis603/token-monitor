@@ -808,7 +808,7 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   for (const { labelKey } of region.options) {
     assert.match(labelKey, /^settings\.minimax\./, labelKey);
   }
-  assert.deepEqual(minimax.top, [{ field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' }]);
+  assert.deepEqual(minimax.top.filter(block => block.field), [{ field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' }]);
 
   // The region never becomes a credential: no store path, so it stays in
   // settings.json only after a selection; an implicit default stays empty.
@@ -1197,8 +1197,8 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
 
   const app = readRendererFile('app.js');
   const statusBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
-  assert.match(statusBody, /const canClearConfiguredCredential = source === 'settings' && configured;/);
-  assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked\)/);
+  assert.match(statusBody, /const canClearConfiguredCredential = !codeLogin && source === 'settings' && configured;/);
+  assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked \|\| !credentialEnabled\)/);
   assert.match(statusBody, /logoutBtn\.classList\.toggle\('hidden', !canClearConfiguredCredential\)/);
 
   // The cookie is checked in main before it can replace a working one: a paste

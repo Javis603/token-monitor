@@ -1659,9 +1659,18 @@
       // the real one. Credits windows carry money rather than quota percentages;
       // their display meter is derived without changing the provider reading.
       const session = windowForKind(provider, 'session');
-      const weekly = windowForKind(provider, 'weekly');
       if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
-      if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
+      for (const weekly of (provider.windows || []).filter(window => window.kind === 'weekly')) {
+        windows.append(limitWindowNode(
+          providerWindowLabel(provider, weekly),
+          weekly,
+          color,
+          0.68,
+          null,
+          providerWindowText(provider, weekly).detail
+        ));
+      }
+      if (windows.children.length % 2 === 1) windows.children[windows.children.length - 1].classList.add('limit-window-wide');
       for (const creditsWindow of (provider.windows || []).filter(isCreditsWindow)) {
         const amount = creditsAmount(provider, creditsWindow);
         if (amount === null) continue;

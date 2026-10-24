@@ -102,6 +102,8 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
   async function saveCredential(providerId, values) {
     const entry = formEntry(providerId);
     if (!entry || !values || typeof values !== 'object') return invalid('notConfigured');
+    const when = accountForm(entry).credentialWhen;
+    if (when && !when.values.includes(normalizeAccountField(when.field, getSettings()[when.field]))) return invalid('notConfigured');
     const revision = nextRevision(entry.id);
     const { candidate, rejected } = draftFor(entry, values);
     if (rejected) return rejected;

@@ -16185,6 +16185,7 @@ function externalProviderForAccount(providerName) {
 function externalProviderAccountLinked(providerName) {
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const provider = externalProviderForAccount(providerName);
+  if (providerName === 'minimax' && state.settings?.minimaxBillingMode === 'code') return provider?.source === 'oauth' && provider?.status === 'ok';
   return Boolean(config && state.settings?.[config.configuredKey]) && provider?.status === 'ok';
 }
 
@@ -16250,6 +16251,14 @@ function copilotAccountStatusText(provider, configured, source, enabled = true) 
 }
 
 function apiKeyAccountStatusText(providerName, provider, configured, source, enabled = true) {
+  if (providerName === 'minimax' && state.settings?.minimaxBillingMode === 'code') {
+    if (provider?.source !== 'oauth') provider = null;
+    if (enabled && provider?.status === 'ok') return t('settings.limits.status.linked');
+    if (enabled && provider?.status === 'unauthorized') return t('settings.limits.status.signInAgain');
+    if (enabled && provider?.status === 'notConfigured') return t('settings.limits.status.signIn');
+    if (enabled && !provider) return t('settings.limits.connection.autoDetect');
+    configured = true;
+  }
   const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
   if (accountStatus === 'linked') {
     // A ZCode-discovered login is an OAuth-style link, not a pasted API key,
@@ -16329,7 +16338,8 @@ function renderExternalProviderStatus(providerName) {
   errorEl.textContent = message ? t(message.key, message.params) : '';
   errorEl.classList.toggle('hidden', !message);
   errorEl.classList.toggle('error', message?.tone !== 'notice');
-  const configured = Boolean(state.settings?.[config.configuredKey]);
+  const codeLogin = providerName === 'minimax' && state.settings?.minimaxBillingMode === 'code';
+  const configured = codeLogin || Boolean(state.settings?.[config.configuredKey]);
   const enabled = limitProviderEnabled(providerName);
   const pending = enabled && Number(state[config.pendingKey] || 0) > 0;
   const linked = externalProviderAccountLinked(providerName);
@@ -16349,8 +16359,9 @@ function renderExternalProviderStatus(providerName) {
   if (providerName === 'zai' && !enabled && state.settings?.zcodeLoginDetected === true) {
     setCursorStatusText(statusEl, t('settings.limits.connection.autoDetect'));
   }
-  manualPanel.classList.toggle('hidden', linked);
-  openBtn.classList.toggle('hidden', linked);
+  const credentialEnabled = !form?.credentialWhen || limitAccountPanelsApi.credentialFormEnabled(form, { document });
+  manualPanel.classList.toggle('hidden', linked || !credentialEnabled);
+  openBtn.classList.toggle('hidden', linked || !credentialEnabled);
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
     || (providerName === 'cline' && source === 'cline-signin');
   if (discoveredLogin) {
@@ -16360,7 +16371,7 @@ function renderExternalProviderStatus(providerName) {
     manualPanel.classList.remove('hidden');
     openBtn.classList.remove('hidden');
   }
-  const canClearConfiguredCredential = source === 'settings' && configured;
+  const canClearConfiguredCredential = !codeLogin && source === 'settings' && configured;
   logoutBtn.classList.toggle('hidden', !canClearConfiguredCredential);
   refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();

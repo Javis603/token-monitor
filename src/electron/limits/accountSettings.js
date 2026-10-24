@@ -336,6 +336,7 @@ function limitAccountFormsForRenderer() {
       fields: form.fields,
       top: form.top,
       manual: form.manual,
+      ...(form.credentialWhen ? { credentialWhen: form.credentialWhen } : {}),
       openUrl: form.openUrl,
       ...(form.messages ? { messages: form.messages } : {}),
       status: { configuredKey, sourceKey, pendingKey }

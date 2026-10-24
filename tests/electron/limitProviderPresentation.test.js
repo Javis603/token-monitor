@@ -16,7 +16,7 @@ const settingsListFilterApi = require('../../src/electron/renderer/settingsListF
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
 const { limitWindowLabel } = require('../../src/shared/limits/windowLabels');
 const { limitWindowText } = require('../../src/shared/limits/windowText');
-const { creditsAmount, creditsCurrency, creditsMeterPercent, isCreditsWindow, formatMoney } = require('../../src/shared/limits/balanceDisplay');
+const { creditsAmount, creditsCurrency, creditsMeterPercent, isCreditsWindow, formatCompactMoney, formatMoney } = require('../../src/shared/limits/balanceDisplay');
 const limitWindowLabels = require('../../src/shared/limits/windowLabels');
 
 const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
@@ -505,7 +505,7 @@ test('capability tags explain how each provider is collected in settings', () =>
   assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Auto', 'Web']);
   assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['Auto', 'OAuth/App/CLI']);
   assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Auto', 'API/Web']);
-  assert.deepEqual(limitProviderCapabilityTags('minimax'), ['Token Plan', 'Pay-as-you-go', 'API key']);
+  assert.deepEqual(limitProviderCapabilityTags('minimax'), ['Auto', 'Token Plan', 'Pay-as-you-go', 'OAuth/API']);
   assert.deepEqual(limitProviderCapabilityTags('grok'), ['Auto', 'CLI/Web']);
   assert.deepEqual(limitProviderCapabilityTags('copilot'), ['Manual login', 'API']);
   assert.deepEqual(limitProviderCapabilityTags('unknown'), []);
@@ -1165,6 +1165,66 @@ test('WorkBuddy renders unlimited enterprise credits without requiring a numeric
     renderProviderWindows,
     /if \(!displayWindow\.resetsAt && !displayWindow\.resetDescription\) \{\s*node\.classList\.add\('limit-window-no-reset'\);\s*\}/
   );
+});
+
+test('MiniMax Code OAuth credits keep their point amount out of currency formatting', () => {
+  const renderProviderWindows = viewBody('renderProviderWindows');
+  const makeNode = () => {
+    const node = {
+      children: [], classes: [],
+      classList: { add(...classes) { node.classes.push(...classes); } },
+      append(...children) { this.children.push(...children); }
+    };
+    return node;
+  };
+  const provider = {
+    provider: 'minimax',
+    source: 'oauth',
+    windows: [
+      { kind: 'session', label: '5h', detail: 'unlimited', showMeter: false },
+      { kind: 'weekly', label: 'Weekly', usedPercent: 10 },
+      { kind: 'weekly', label: 'Video', used: 3, limit: 20, remaining: 17, usedPercent: 15, remainingPercent: 85 },
+      { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false },
+      { kind: 'billing', metric: 'credits', label: 'API Balance', remaining: 15, currency: 'CNY' }
+    ]
+  };
+  const context = {
+    document: { createElement: makeNode },
+    windowForKind: (record, kind) => record.windows.find((window) => window.kind === kind) || null,
+    limitWindowNode: (label, window, _color, _tone, value, detail) => Object.assign(makeNode(), { label, window, value, detail }),
+    providerWindowLabel: (_record, window, fallback = '') => window.label || fallback,
+    providerWindowText: (record, window) => limitWindowText(record, window, { showLimitUsed: false }),
+    isCreditsWindow,
+    creditsAmount,
+    creditsCurrency,
+    creditsMeterPercent,
+    formatMoney,
+    tagUsageItem: (node) => node,
+    settings: () => ({})
+  };
+  const rendered = vm.runInNewContext(
+    `${renderProviderWindows}\nrenderProviderWindows(provider, '#000000', { showAllUsageItems: true });`,
+    { ...context, provider }
+  );
+  assert.deepEqual(Array.from(rendered.children, node => node.label), ['5h', 'Weekly', 'Video', 'Credits', 'API Balance']);
+  const video = rendered.children.find(node => node.label === 'Video');
+  assert.equal(video.classes.includes('limit-window-wide'), true);
+  assert.equal(video.detail, '17/20');
+  assert.equal(video.window.remainingPercent, 85);
+  const row = rendered.children.find(node => node.label === 'Credits');
+  const wallet = rendered.children.find(node => node.label === 'API Balance');
+  const points = provider.windows.find(window => window.label === 'Credits');
+  const compact = formatCompactMoney(creditsAmount(provider, points), creditsCurrency(provider, points));
+
+  assert.equal(row.window.showMeter, false);
+  assert.equal(row.value, '4624.00');
+  assert.equal(row.classes.includes('limit-window-no-reset'), true);
+  assert.equal(wallet.value, '¥15.00');
+  assert.equal(wallet.window.remainingPercent, 100);
+  assert.notEqual(wallet.window.showMeter, false);
+  assert.equal(compact, '4624.00');
+  assert.equal(Number(row.value), 4624);
+  assert.doesNotMatch(`${row.value} ${compact}`, /[¥$]|CNY|USD/);
 });
 
 test('Antigravity groups returned quota windows under dynamic model-family headings', () => {
@@ -2930,6 +2990,18 @@ test('minimax status copy uses the same API key wording as CodexBar', () => {
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'minimax', status: 'unauthorized' }),
     { label: 'Update API key', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'minimax', status: 'notConfigured', source: 'oauth' }),
+    { label: 'Sign in', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'minimax', status: 'unauthorized', source: 'oauth' }),
+    { label: 'Sign in again', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'minimax', status: 'unavailable', source: 'oauth' }),
+    { label: 'Unavailable', tone: 'warn' }
   );
 });
 
