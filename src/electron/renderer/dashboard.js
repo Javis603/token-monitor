@@ -327,6 +327,18 @@ function colorFor(key) {
   const base = state.stackBy === 'model' ? charts.modelColor(key) : (charts.clientColors[key] || charts.clientColors.default);
   return displayColor(base);
 }
+// The heatmap tooltip always ranks models, so it must not follow the chart's
+// client/model stack toggle.
+function modelColorFor(model) {
+  return displayColor(charts.modelColor(model));
+}
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
 // The app's CSP (style-src 'self') blocks inline style="" attributes, so swatch/dot
 // colors are carried in data-c and applied via the CSSOM (.style, which CSP allows).
@@ -420,7 +432,7 @@ function renderBreakdown() {
       const color = displayColor(colorFn(key));
       const motionKey = `${titleKey}:${encodeURIComponent(key)}`;
       return `<div class="dash-bd-row">
-        <span class="dash-bd-name"><span class="dash-bd-swatch" data-c="${color}"></span>${String(key).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}</span>
+        <span class="dash-bd-name"><span class="dash-bd-swatch" data-c="${color}"></span>${escapeHtml(key)}</span>
         <div class="dash-bd-bar-bg"><div class="dash-bd-bar-fill" data-motion-key="${motionKey}" data-w="${Number(pctMax) / 100}" data-c="${color}"></div></div>
         <span class="dash-bd-val">${formatCompact(val)}</span>
         <span class="dash-bd-pct">${pctGrand}%</span>
@@ -632,7 +644,21 @@ function showHeatTooltip(date, day, ev) {
   const missing = Number(day?.unpricedTokens || 0);
   if (cost > 0 || missing > 0) html += `<div class="tt-row"><span class="tt-name">${costLabel}</span><span class="tt-val">${formatCost(cost, missing)}</span></div>`;
   if (missing > 0) html += `<div class="tt-row">${t('usage.excludedFromCost', { tokens: Math.round(missing).toLocaleString('en-US') })}</div>`;
+  // The day's own model split, ranked by that day's tokens. Capped so a broad day
+  // cannot push the tooltip past the window; the remainder is reported, not dropped
+  // silently.
+  const breakdown = charts.dailyModelBreakdown(day, { limit: 4 });
+  if (breakdown.rows.length > 0) {
+    html += '<div class="tt-sep"></div>';
+    for (const row of breakdown.rows) {
+      html += `<div class="tt-row"><span class="tt-dot" data-c="${modelColorFor(row.model)}"></span><span class="tt-name">${escapeHtml(row.model)}</span><span class="tt-val">${formatCompact(row.tokens)}</span><span class="tt-share">${Math.round(row.share * 100)}%</span></div>`;
+    }
+    if (breakdown.hidden > 0) {
+      html += `<div class="tt-row tt-more"><span class="tt-name">${escapeHtml(t('dashboard.tooltip.moreModels', { count: breakdown.hidden }))}</span></div>`;
+    }
+  }
   els.tooltip.innerHTML = html;
+  applySwatchColors(els.tooltip);
   positionTooltip(ev);
 }
 

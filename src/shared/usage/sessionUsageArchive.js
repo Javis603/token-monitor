@@ -431,6 +431,26 @@ function applySessionUsageArchive(summary, archive, options = {}) {
     }
     return targetPeriods.get(periodName);
   };
+  // Authoritative clients suppress only matching current session keys. Missing
+  // keys still replay from the archive, preserving history absent from a local
+  // adapter snapshot such as a retained Windows or older-machine session.
+  const authoritativeClients = new Set(
+    (Array.isArray(options.authoritativeSessionClients) ? options.authoritativeSessionClients : [])
+      .map((client) => String(client || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const authoritativeKeysByPeriod = new Map();
+  const authoritativeKeysFor = (periodName) => {
+    if (authoritativeKeysByPeriod.has(periodName)) return authoritativeKeysByPeriod.get(periodName);
+    const period = targetFor(periodName);
+    const keys = new Set();
+    for (const [key, session] of Object.entries(period?.sessions || {})) {
+      const client = String(session?.client || '').trim().toLowerCase();
+      if (authoritativeClients.has(client)) keys.add(key);
+    }
+    authoritativeKeysByPeriod.set(periodName, keys);
+    return keys;
+  };
 
   // SQLite may still hold a released literal alias beside its canonical peer.
   // Pick one whole latest observation per period; never add the same ID twice.
@@ -445,6 +465,7 @@ function applySessionUsageArchive(summary, archive, options = {}) {
       // omits, and a partial that looks complete loses the attribution fields
       // deviceState would otherwise carry forward.
       if (!hasSummaryPeriod(next, periodName)) continue;
+      if (authoritativeKeysFor(periodName).has(archiveKey)) continue;
       const period = targetFor(periodName);
       const key = sessionKey(session.client || entry.client, session.sessionId || entry.sessionId) || archiveKey;
       if (period.sessions[key]) continue;

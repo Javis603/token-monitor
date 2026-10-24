@@ -56,7 +56,9 @@ const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
   'watchTriggersCollection',
   'intervalRequiresActivity',
   'watchDebounceMs',
-  'wslScanEnabled'
+  'wslScanEnabled',
+  'ompStatsDbPath',
+  'ompStatsEnabled'
 ]);
 const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsEnabled',
@@ -120,6 +122,8 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     intervalRequiresActivity: Boolean(context.intervalRequiresActivity),
     watchDebounceMs: Number(context.watchDebounceMs || 1500),
     wslScanEnabled: settings.wslScanEnabled !== false,
+    ompStatsDbPath: String(context.ompStatsDbPath || '').trim() || undefined,
+    ompStatsEnabled: context.ompStatsEnabled !== false,
     onError: context.onError,
     logger: context.logger
   };

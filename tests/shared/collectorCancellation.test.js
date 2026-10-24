@@ -32,6 +32,13 @@ async function waitFor(predicate, timeoutMs = 2000) {
   }
 }
 
+function createScanHome() {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'collector-cancel-'));
+  fs.mkdirSync(path.join(homeDir, '.claude', 'projects'), { recursive: true });
+  fs.mkdirSync(path.join(homeDir, '.dsh', 'sessions'), { recursive: true });
+  return homeDir;
+}
+
 test('whenIdle observes the startup tick registered ahead of its start barrier continuation', async () => {
   let releaseBarrier;
   const startBarrier = new Promise((resolve) => { releaseBarrier = resolve; });
@@ -116,7 +123,9 @@ test('stopping superseded collectors aborts their physical scan before the next 
     wslScanEnabled: false,
     watchEnabled: false,
     anchorPersistenceEnabled: false,
-    homeDir: '/nonexistent-token-monitor-cancellation-test-home',
+    // A source must exist for the client to be scanned at all; the supersession
+    // assertions below only hold if every restart reaches runTokscale.
+    homeDir: createScanHome(),
     osInfo: {},
     runTokscale,
     onUpdate() {}
@@ -167,6 +176,7 @@ test('usage replacement waits for an aborted tokscale child to close before spaw
     const fresh = require(collectorPath);
     const usageOptions = {
       clients: 'claude',
+      homeDir: createScanHome(),
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 5000,
       deviceId: 'physical-close-barrier-test',
@@ -239,6 +249,7 @@ test('usage replacement abandons its wait for a shared capability probe without 
   };
   delete require.cache[collectorPath];
 
+  const homeDir = createScanHome();
   let runtime = null;
   try {
     const fresh = require(collectorPath);
@@ -253,7 +264,8 @@ test('usage replacement abandons its wait for a shared capability probe without 
       projectsEnabled: false,
       wslScanEnabled: false,
       watchEnabled: false,
-      anchorPersistenceEnabled: false
+      anchorPersistenceEnabled: false,
+      homeDir
     };
     runtime = createDeviceRuntime({ usageOptions }, {
       createUsageRuntime: (next) => fresh.startCollector(next),
@@ -285,7 +297,8 @@ test('usage replacement abandons its wait for a shared capability probe without 
       commandTimeoutMs: 5000,
       deviceId: 'shared-capability-probe-cache-test',
       agentVersion: 'test',
-      limitsEnabled: false
+      limitsEnabled: false,
+      homeDir
     });
     const cacheCheckCalls = calls.slice(callsBeforeCacheCheck);
     assert.equal(calls.filter((args) => args.includes('--help')).length, helpProbesBeforeClose, 'detached probe still populates the shared cache');
@@ -295,6 +308,7 @@ test('usage replacement abandons its wait for a shared capability probe without 
     runtime?.stop();
     if (helpChild && !helpClosed) helpChild.emit('close', 0);
     childProcess.spawn = originalSpawn;
+    fs.rmSync(homeDir, { recursive: true, force: true });
     delete require.cache[collectorPath];
   }
 });
@@ -327,6 +341,7 @@ test('timed-out tokscale remains the replacement barrier through forced terminat
     const fresh = require(collectorPath);
     const usageOptions = {
       clients: 'claude',
+      homeDir: createScanHome(),
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1,
       deviceId: 'timeout-close-barrier-test',
@@ -389,6 +404,7 @@ test('unconfirmed forced termination releases the replacement barrier with a dia
     const fresh = require(collectorPath);
     const usageOptions = {
       clients: 'claude',
+      homeDir: createScanHome(),
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1,
       subprocessTerminationOptions: referencedTerminationOptions({ graceMs: 1, closeGraceMs: 1 }),

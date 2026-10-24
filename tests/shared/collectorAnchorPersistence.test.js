@@ -26,8 +26,16 @@ const { installInProcessWatchHost } = require('../helpers/watchHost');
 
 installInProcessWatchHost(test);
 
+// Collection only offers clients whose source exists on disk. Left to the
+// runner's own home — empty on every GitHub runner — every scan below is
+// skipped before spawn and the spawn counts read zero.
+const scanHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-anchor-home-'));
+fs.mkdirSync(path.join(scanHome, '.claude', 'projects'), { recursive: true });
+process.on('exit', () => { try { fs.rmSync(scanHome, { recursive: true, force: true }); } catch (_) {} });
+
 const baseOptions = {
   clients: 'claude',
+  homeDir: scanHome,
   allTimeSince: '2024-01-01',
   commandTimeoutMs: 1000,
   deviceId: 'test-device',
@@ -177,6 +185,43 @@ test('anchored tick with valid anchor runs todayOnly scan and derives month/allT
   assert.equal(summary.allTime.totalTokens, 5030, 'allTime should be derived via applyPeriodDelta');
 });
 
+test('a Tokscale fallback anchor skips repeated stats-db reads on warm ticks', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-omp-fallback-'));
+  const statsDbPath = path.join(dir, 'stats.db');
+  fs.writeFileSync(statsDbPath, 'not a sqlite database');
+  const calls = [];
+  try {
+    const summary = await collectUsageOnce({
+      clients: 'omp',
+      homeDir: scanHome,
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'omp-fallback',
+      projectsEnabled: false,
+      limitsEnabled: false,
+      historyEnabled: false,
+      wslScanEnabled: false,
+      anchorPersistenceEnabled: false,
+      ompStatsDbPath: statsDbPath,
+      todayOnlyAnchor: {
+        dateKey: localTodayKey(),
+        today: emptyPeriod(),
+        month: emptyPeriod(),
+        allTime: emptyPeriod(),
+        ompUsageMode: 'tokscale'
+      },
+      runTokscale: async ({ flags }) => {
+        calls.push(flags);
+        return { entries: [{ client: 'omp', sessionId: 'warm', model: 'test', input: 12, output: 0, cost: 0 }] };
+      }
+    });
+    assert.deepEqual(calls, [['--today']]);
+    assert.equal(summary.today.totalTokens, 12);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('anchored tick replaces a stale anchor title with the freshly resolved rename', async () => {
   const dateKey = localTodayKey();
   const sessionKey = 'cursor:conv-1';
@@ -230,6 +275,9 @@ test('anchored tick replaces a stale anchor title with the freshly resolved rena
 
 test('restart restores local T3 title provenance and clears deleted titles on the first watch scan', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-t3-anchor-'));
+  // Doubles as the collector's home: a client with no source is filtered out
+  // before spawn, and these cases count spawns.
+  fs.mkdirSync(path.join(tmpShared, '.claude', 'projects'), { recursive: true });
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
   const updates = [];
@@ -366,6 +414,9 @@ for (const update of ['deleted', 'renamed']) {
 
 test('full anchors persist local-only Reasonix native views alongside aggregate periods', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-anchor-'));
+  // Doubles as the collector's home: a client with no source is filtered out
+  // before spawn, and these cases count spawns.
+  fs.mkdirSync(path.join(tmpShared, '.claude', 'projects'), { recursive: true });
   const nativeView = {
     sessions: { today: { 'reasonix:session': { client: 'reasonix', totalTokens: 12 } }, month: {}, allTime: {} },
     projects: { today: { 'token monitor': { label: 'token-monitor', tokens: 12, clients: { reasonix: 12 } } }, month: {}, allTime: {} }
@@ -415,6 +466,9 @@ function mkPeriod() {
 
 test('restart reuse: anchor file on disk enables todayOnly on first interval tick', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-restart-'));
+  // Doubles as the collector's home: a client with no source is filtered out
+  // before spawn, and these cases count spawns.
+  fs.mkdirSync(path.join(tmpShared, '.claude', 'projects'), { recursive: true });
   const dateKey = localTodayKey();
 
   // Write a valid anchor file to the isolated shared dir
@@ -477,6 +531,9 @@ test('restart reuse: anchor file on disk enables todayOnly on first interval tic
 
 test('future fullScanAt forces a full scan on first interval tick', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-future-ts-'));
+  // Doubles as the collector's home: a client with no source is filtered out
+  // before spawn, and these cases count spawns.
+  fs.mkdirSync(path.join(tmpShared, '.claude', 'projects'), { recursive: true });
   const dateKey = localTodayKey();
 
   fs.mkdirSync(path.join(tmpShared), { recursive: true });
@@ -536,6 +593,9 @@ test('future fullScanAt forces a full scan on first interval tick', async () => 
 
 test('missing fullScanAt forces a full scan on first interval tick', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-missing-ts-'));
+  // Doubles as the collector's home: a client with no source is filtered out
+  // before spawn, and these cases count spawns.
+  fs.mkdirSync(path.join(tmpShared, '.claude', 'projects'), { recursive: true });
   const dateKey = localTodayKey();
 
   fs.mkdirSync(path.join(tmpShared), { recursive: true });
@@ -596,6 +656,9 @@ test('missing fullScanAt forces a full scan on first interval tick', async () =>
 
 test('unparseable fullScanAt forces a full scan on first interval tick', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bad-ts-'));
+  // Doubles as the collector's home: a client with no source is filtered out
+  // before spawn, and these cases count spawns.
+  fs.mkdirSync(path.join(tmpShared, '.claude', 'projects'), { recursive: true });
   const dateKey = localTodayKey();
 
   fs.mkdirSync(path.join(tmpShared), { recursive: true });
@@ -657,6 +720,9 @@ test('unparseable fullScanAt forces a full scan on first interval tick', async (
 
 test('WSL toggle off: persisted wslAnchor is not merged into warm previews', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-wsl-off-'));
+  // Doubles as the collector's home: a client with no source is filtered out
+  // before spawn, and these cases count spawns.
+  fs.mkdirSync(path.join(tmpShared, '.claude', 'projects'), { recursive: true });
   const dateKey = localTodayKey();
 
   fs.mkdirSync(tmpShared, { recursive: true });
@@ -813,6 +879,48 @@ test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
   assert.equal(collectorAnchorTrust(anchor({ fullScanAt: 'nope' }), options).capturedAtMs, null);
   const future = new Date(now.getTime() + 60_000).toISOString();
   assert.equal(collectorAnchorTrust(anchor({ fullScanAt: future }), options).capturedAtMs, null);
+});
+
+test('a Tokscale fallback anchor remains trusted while the stats database exists', () => {
+  const { collectorAnchorTrust, configFingerprint } = freshCollector();
+  const now = new Date(2026, 7, 8, 10, 0, 0);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-omp-anchor-'));
+  const statsDbPath = path.join(dir, 'stats.db');
+  fs.writeFileSync(statsDbPath, 'not a sqlite database');
+  try {
+    const sourceOptions = { ompStatsDbPath: statsDbPath };
+    const options = {
+      clients: 'omp',
+      allTimeSince: '2024-01-01',
+      projectsEnabled: true,
+      ompStatsDbPath: statsDbPath,
+      now
+    };
+    const anchor = {
+      dateKey: '2026-08-08',
+      today: {},
+      month: {},
+      allTime: {},
+      ompUsageMode: 'tokscale',
+      configFingerprint: configFingerprint(
+        'omp',
+        '2024-01-01',
+        true,
+        '',
+        '',
+        null,
+        undefined,
+        sourceOptions
+      ),
+      fullScanAt: new Date(now.getTime() - 60_000).toISOString()
+    };
+    assert.equal(
+      collectorAnchorTrust(anchor, options).capturedAtMs,
+      now.getTime() - 60_000
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('Cursor anchors from before the Auto model rename require a full scan', () => {

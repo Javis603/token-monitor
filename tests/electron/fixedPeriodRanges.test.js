@@ -476,6 +476,34 @@ test('per-device V1 histories retain device identity for fixed ranges', () => {
   assert.equal(snapshots.reduce((sum, entry) => sum + entry.period.totalTokens, 0), 100);
 });
 
+test('multi-device fixed ranges use the oldest retained History row globally', () => {
+  const result = ranges.fixedPeriodSnapshotFromDevices('day:2026-07-15', [
+    deviceSource({
+      deviceId: 'old',
+      history: [day('2026-07-01', 1), day('2026-07-15', 10)],
+      todayTokens: 10
+    }),
+    deviceSource({
+      deviceId: 'new',
+      history: [day('2026-08-01', 20)],
+      todayTokens: 20
+    })
+  ], {
+    historyEnabled: true,
+    historyAvailable: true,
+    now: Date.parse('2026-08-12T12:00:00.000Z')
+  });
+
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.devices.map(({ deviceId, period }) => ({
+    deviceId,
+    tokens: period.totalTokens
+  })), [
+    { deviceId: 'old', tokens: 10 },
+    { deviceId: 'new', tokens: 0 }
+  ]);
+});
+
 test('mixed devices fail closed when a contributing device has no History', () => {
   const result = ranges.fixedPeriodSnapshotFromDevices('last7', [
     deviceSource({ deviceId: 'new', history: [day('2026-08-12', 100)], todayTokens: 100 }),
@@ -682,6 +710,105 @@ test('fixed periods fail closed without History and for unsupported detail views
   assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceHistoriesAvailable: true }), true);
   assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceHistoriesAvailable: false }), false);
   assert.equal(ranges.supportsBreakdown('last7', 'model'), true);
+});
+
+test('a specific day is a fixed range covering exactly that date', () => {
+  const selection = ranges.daySelection('2026-08-11');
+  assert.equal(selection, 'day:2026-08-11');
+  assert.equal(ranges.selectedDay('day:2026-08-11'), '2026-08-11');
+  assert.equal(ranges.selectedDay('last7'), '');
+  // An impossible calendar date must not become a range.
+  assert.equal(ranges.daySelection('2026-02-31'), '');
+  assert.equal(ranges.daySelection('11/08/2026'), '');
+
+  const result = ranges.fixedPeriodSnapshot(selection, {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-08-12',
+    daily: [day('2026-08-11', 100), day('2026-08-12', 40)]
+  });
+
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.range, { start: '2026-08-11', end: '2026-08-11' });
+  assert.equal(result.period.totalTokens, 100);
+  assert.equal(result.daily.length, 1);
+});
+
+test('a past day reuses its own snapshot and keeps today out of it', () => {
+  const options = {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-08-12',
+    daily: [day('2026-08-11', 100), day('2026-08-12', 40)]
+  };
+  const todaySnapshot = ranges.fixedPeriodSnapshot('day:2026-08-12', options);
+  const pastSnapshot = ranges.fixedPeriodSnapshot('day:2026-08-11', options);
+
+  // Today's live figures are the authoritative reading for today; a past day is
+  // pure History, so the two selections must not share a snapshot.
+  assert.notEqual(ranges.readySnapshotForSelection(pastSnapshot, 'day:2026-08-12'), pastSnapshot);
+  assert.equal(ranges.readySnapshotForSelection(pastSnapshot, 'day:2026-08-11'), pastSnapshot);
+  assert.equal(pastSnapshot.period.totalTokens, 100);
+  assert.equal(todaySnapshot.period.totalTokens, 40);
+});
+
+test('selecting today as a day merges the live period over the archived row', () => {
+  const options = {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-08-12',
+    daily: [day('2026-08-11', 100), day('2026-08-12', 40)],
+    todayPeriod: { totalTokens: 900, costUsd: 9, clients: { claude: 900 } }
+  };
+
+  // History archives today at its last flush; the live reading is the
+  // authoritative figure for a day that has not finished yet, so picking today
+  // must show the live number rather than the stale archived one.
+  const today = ranges.fixedPeriodSnapshot('day:2026-08-12', options);
+  assert.equal(today.status, 'ready');
+  assert.equal(today.period.totalTokens, 900);
+  assert.equal(today.daily.length, 1);
+  assert.equal(today.daily[0].date, '2026-08-12');
+
+  // The same live period must not leak into a neighbouring past day.
+  const past = ranges.fixedPeriodSnapshot('day:2026-08-11', options);
+  assert.equal(past.period.totalTokens, 100);
+});
+
+test('a day outside the retained History window fails closed instead of reporting zero', () => {
+  const options = {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-08-12',
+    daily: [day('2026-07-01', 10), day('2026-08-11', 100)]
+  };
+
+  // The oldest retained row is 2026-07-01, so June is unknown, not empty.
+  const tooOld = ranges.fixedPeriodSnapshot('day:2026-06-15', options);
+  assert.equal(tooOld.status, 'unavailable');
+  assert.equal(tooOld.reason, 'beyondHistory');
+  assert.equal(tooOld.period, null);
+  // A gap inside the window is a genuine zero day.
+  const inWindow = ranges.fixedPeriodSnapshot('day:2026-08-01', options);
+  assert.equal(inWindow.status, 'ready');
+  assert.equal(inWindow.period.totalTokens, 0);
+  const future = ranges.fixedPeriodSnapshot('day:2026-09-01', options);
+  assert.equal(future.status, 'unavailable');
+  assert.equal(future.reason, 'futureDay');
+});
+
+test('a day selection uses the middle tab slot and shows its date', () => {
+  assert.equal(ranges.slotForSelection('day:2026-08-11'), 'month');
+  assert.equal(ranges.isFixedRange('day:2026-08-11'), true);
+  assert.equal(ranges.isFixedRange('today'), false);
+  assert.equal(ranges.isDerived('day:2026-08-11'), false);
+  assert.equal(ranges.displayLabel('day:2026-08-11'), '8/11');
+  assert.equal(ranges.displayLabel('last7'), '7D');
+  // A fixed day cannot offer session or project detail views, exactly like the
+  // other fixed ranges.
+  assert.equal(ranges.supportsBreakdown('day:2026-08-11', 'session'), false);
+  assert.equal(ranges.supportsBreakdown('day:2026-08-11', 'project'), false);
+  assert.equal(ranges.supportsBreakdown('day:2026-08-11', 'model'), true);
 });
 
 test('period menu keyboard navigation moves focus with standard menu keys', () => {

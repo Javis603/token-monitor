@@ -334,19 +334,47 @@
   // so an appended today with cost 0 would render as an empty cell. Append a today row
   // when the frozen snapshot predates today (app opened before midnight). Returns a new
   // array; the input is never mutated.
-  function patchDailyToday(daily, todayDate, todayTotal, todayCost) {
+  //
+  // `todayPerModel` (see periodPerModel) keeps the row's model split in step with the
+  // patched headline; without it a day opened before midnight would show no models all
+  // day, because the frozen snapshot has no row for it.
+  function patchDailyToday(daily, todayDate, todayTotal, todayCost, todayPerModel) {
     const rows = Array.isArray(daily) ? daily.slice() : [];
     const date = String(todayDate || '').slice(0, 10);
     if (!date) return rows;
     const tokens = finiteNumber(todayTotal) || 0;
     const cost = finiteNumber(todayCost) || 0;
+    const models = todayPerModel && typeof todayPerModel === 'object' && Object.keys(todayPerModel).length > 0
+      ? todayPerModel
+      : null;
+    const modelPatch = models ? { perModel: models } : {};
     const idx = rows.findIndex((row) => String(row?.date).slice(0, 10) === date);
     if (idx === -1) {
-      rows.push({ date, tokens, cost });
+      rows.push({ date, tokens, cost, ...modelPatch });
       return rows;
     }
-    rows[idx] = Object.assign({}, rows[idx], { tokens, cost });
+    rows[idx] = Object.assign({}, rows[idx], { tokens, cost }, modelPatch);
     return rows;
+  }
+
+  // A live period keeps its split as `models`/`modelCosts`/`modelUnpricedTokens`,
+  // while daily history rows keep the same information as `perModel`. Convert so a
+  // patched today row carries a model breakdown that matches its patched headline.
+  function periodPerModel(period) {
+    const models = period?.models;
+    if (!models || typeof models !== 'object') return null;
+    const result = {};
+    for (const [model, value] of Object.entries(models)) {
+      const tokens = finiteNumber(value);
+      if (!model || tokens == null || tokens <= 0) continue;
+      const bucket = { tokens };
+      const cost = finiteNumber(period?.modelCosts?.[model]);
+      if (cost != null && cost > 0) bucket.cost = cost;
+      const unpriced = finiteNumber(period?.modelUnpricedTokens?.[model]);
+      if (unpriced != null && unpriced > 0) bucket.unpricedTokens = unpriced;
+      result[model] = bucket;
+    }
+    return Object.keys(result).length > 0 ? result : null;
   }
 
   // The standalone Trends page keeps active time and peak aligned with the selected
@@ -500,6 +528,7 @@
     activityStatsForPeriod,
     pickHomeHistory,
     patchDailyToday,
+    periodPerModel,
     historyPreviewKey,
     historyHasDays,
     homeHistorySignature,

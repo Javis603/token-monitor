@@ -176,6 +176,14 @@ test('diagnostics are assigned to semantic groups and unavailable noise stays qu
     diagnostics: [{ code: 'source-missing' }, { code: 'no-usage-observed' }],
     overall: 'unavailable'
   })), []);
+  // A stale index is reported under collection, and — unlike the noise above —
+  // it is not suppressed for a client that is otherwise available, because it
+  // is the only signal that the newest usage is missing.
+  assert.deepEqual(clientHealthNotes(entry({
+    collection: { state: 'direct' },
+    diagnostics: [{ code: 'index-stale' }],
+    overall: 'healthy'
+  })), [{ code: 'index-stale', group: 'collection', tone: 'neutral' }]);
 });
 
 test('diagnostics select only the exact local device and its own usage', () => {

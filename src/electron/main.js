@@ -858,6 +858,8 @@ function electronUsageConfig(errorPrefix) {
     watchTriggersCollection: collectorWatchTriggersCollection(),
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
+    ompStatsDbPath: String(process.env.TOKEN_MONITOR_OMP_STATS_DB_PATH || '').trim() || undefined,
+    ompStatsEnabled: parseBoolean(process.env.TOKEN_MONITOR_OMP_STATS_ENABLED, true),
     dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
     logger: (message) => console.log(`[${errorPrefix}] ${message}`)
@@ -5135,9 +5137,13 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
       allTimeSince: usageOptions.allTimeSince,
       projectsEnabled: usageOptions.projectsEnabled,
       customScanPaths: usageOptions.customScanPaths,
+      ompStatsDbPath: usageOptions.ompStatsDbPath,
+      ompStatsEnabled: usageOptions.ompStatsEnabled,
+      env: usageOptions.env,
       wslScanEnabled: usageOptions.wslScanEnabled,
       wslSupported: process.platform === 'win32',
       hostname: os.hostname(),
+      sourcePlatform: process.platform,
       platform: `${process.platform}-${process.arch}`
     }
   );

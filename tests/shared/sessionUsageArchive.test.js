@@ -688,6 +688,44 @@ test('an archived split-id session suppresses its merged-era row whatever the ar
   assert.deepEqual(Object.keys(visible.allTime.sessions).sort(), ['omp:ompSes1', 'pi:piSes1']);
 });
 
+test('a newer zero-usage alias suppresses an older archived observation', () => {
+  const session = (totalTokens, costUsd) => ({
+    client: 'omp',
+    sessionId: 'same-session',
+    totalTokens,
+    costUsd,
+    models: totalTokens ? { model: totalTokens } : {},
+    modelCosts: costUsd ? { model: costUsd } : {}
+  });
+  const archive = {
+    version: 1,
+    sessions: {
+      'omp:same-session': {
+        client: 'omp',
+        sessionId: 'same-session',
+        capturedAt: '2026-09-05T10:00:00.000Z',
+        periodWindows: { allTime: { capturedAt: '2026-09-05T10:00:00.000Z' } },
+        periods: { allTime: session(5, 0.5) }
+      },
+      'legacy-omp:same-session': {
+        client: 'omp',
+        sessionId: 'same-session',
+        capturedAt: '2026-09-05T11:00:00.000Z',
+        periodWindows: { allTime: { capturedAt: '2026-09-05T11:00:00.000Z' } },
+        periods: { allTime: session(0, 0) }
+      }
+    }
+  };
+  const empty = {
+    allTime: { totalTokens: 0, costUsd: 0, sessions: {} }
+  };
+  const visible = applySessionUsageArchive(empty, archive, {
+    now: new Date('2026-09-05T12:00:00.000Z')
+  });
+  assert.equal(visible.allTime.totalTokens, 0);
+  assert.deepEqual(visible.allTime.sessions, {});
+});
+
 const CURSOR_MODEL = 'cursor-grok-4.6-high';
 const CURSOR_UUID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const NOW = new Date('2026-09-12T12:00:00.000Z');

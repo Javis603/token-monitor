@@ -1,5 +1,5 @@
 ---
-summary: "Oh My Pi provider notes: Tokscale supplies usage totals while Session Detail reads OMP's local Pi-format transcripts."
+summary: "Oh My Pi provider notes: stats.db supplies usage totals when available; Tokscale is the fallback, while Session Detail reads OMP's local Pi-format transcripts."
 ids: [omp]
 read_when:
   - Changing or debugging OMP Session Detail
@@ -8,16 +8,16 @@ read_when:
 
 # Oh My Pi provider
 
-OMP usage totals come from tokscale. Session Detail reads the local transcript on demand; these data planes stay separate, and each OMP session—including a sub-agent session—remains its own row.
+OMP usage totals come from OMP's local `stats.db` when it is available and enabled. If that database is missing, unreadable, or disabled, the collector falls back to Tokscale's transcript scan. Session Detail reads the local transcript on demand; these data planes stay separate, and each OMP session—including a sub-agent session—remains its own row.
 
 | Data plane | Read by | Source |
 | --- | --- | --- |
-| Token usage (periods, dashboard, history) | the shared usage collector, through `tokscale` | OMP session transcripts, parsed by tokscale |
+| Token usage (periods, dashboard, history) | the shared usage collector | OMP's local `stats.db`; Tokscale transcript parsing is the fallback |
 | Session Detail (per-turn breakdown, prompts) | `sessionDetail.js` with `providers/omp/paths.js`, on demand | the same transcripts, parsed locally |
 
 ## Where the data lives
 
-Tokscale scans the fixed home-relative `~/.omp/agent/sessions` root. Main sessions are stored under a bucket directory:
+OMP's indexed usage totals live in `~/.omp/stats.db` (or the configured OMP stats path). Token Monitor opens it read-only and uses it first. When it is unavailable, unreadable, or disabled, Tokscale scans the fixed home-relative `~/.omp/agent/sessions` root.
 
 ```
 ~/.omp/agent/sessions/<bucket>/<ISO-timestamp>_<sessionId>.jsonl
@@ -41,6 +41,7 @@ OMP forks, including `/tan`, can copy assistant history with token usage intact;
 
 ## Invariants and known gaps
 
+- **The index ingests only while OMP's dashboard runs.** `stats.db` is written by OMP's own stats server (`omp stats`, the TUI's `/usage` heatmap, or the `/stats` slash command), which imports changed transcripts on a debounce and full-scans every five minutes. Nothing closes that loop on its own: leave the dashboard closed and `today` stays frozen at the last import while the transcripts keep growing. Token Monitor reads the database read-only and cannot trigger the ingest — deliberately, since spawning OMP's indexer from a usage tick would couple two products' scheduling. A one-off `omp stats --summary` forces the ingest and is the practical repair; opening the dashboard is not always enough, so treat a still-frozen `today` as an indexing gap rather than a collection fault. The window states the gap in a banner above the fold and `index-stale` in the client health panel carries the same measurement: it appears when a transcript written in the last day still has unread bytes and either its `file_offsets` cursor is over an hour old or more than 4 MiB is unread behind a cursor that has not moved for ten minutes. The second test exists because a cursor can keep advancing while staying far behind a fast writer, and because a healthy database here never held more than ~26 KB unread; the ten-minute floor keeps a record being written right now from firing before the debounce runs. The check reads every cursor row and stats the transcript it names (a few hundred milliseconds on a 39k-file tree), so a healthy result is reused for ten minutes per database identity and a stale one only for a minute. Opening OMP's usage dashboard once clears it.
 - OMP's [title cards](https://github.com/can1357/oh-my-pi/blob/a536558dc21634462c1b2647676953204569779c/packages/coding-agent/src/utils/title-card.ts) store `<icon> <CODE>: <title>` directly in the title, for both generated and `/rename` titles. Electron's shared session-row formatter hides a private-use icon only at that card prefix, retaining the code, body and ordinary emoji. Raw collection, archives, Hub records and title sync retain the original text; do not strip private-use characters in the shared usage normalizer to solve a font-dependent display issue.
 - Detail reads one transcript at a time and never folds child transcripts into a parent. Copied history already inside a transcript remains visible; do not sum related Detail views as deduplicated usage.
 - Only records understood by the shared Pi-format parser contribute to detail totals; adding other OMP-specific records requires confirming tokscale's accounting first.
@@ -50,4 +51,5 @@ OMP forks, including `/tan`, can copy assistant history with token usage intact;
 ```bash
 node --test tests/shared/ompSessionDetail.test.js tests/shared/sessionFiles.test.js tests/shared/sessionDetailResolver.test.js tests/shared/piSessionDetail.test.js
 node --test tests/electron/ompSessionTitle.test.js
+node --test tests/shared/ompUsage.test.js
 ```

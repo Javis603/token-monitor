@@ -13,7 +13,10 @@
   const period = query.get('period');
   const breakdown = query.get('breakdown');
   const viewState = {};
-  if (['today', 'month', 'week', 'last7', 'last30', 'allTime'].includes(period)) {
+  // `day:YYYY-MM-DD` is the only non-keyword period, so it is checked by shape
+  // here rather than by membership; anything else unknown simply stays absent.
+  if (['today', 'month', 'week', 'last7', 'last30', 'allTime'].includes(period)
+    || /^day:\d{4}-\d{2}-\d{2}$/.test(period || '')) {
     viewState.period = period;
   }
   if (['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'].includes(breakdown)) viewState.breakdown = breakdown;

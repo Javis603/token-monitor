@@ -215,6 +215,8 @@ function buildSyncPayload(summary, {
   // a hub concern. Tokscale remains the only aggregate/session authority.
   delete payload.nativeSessions;
   delete payload.nativeProjects;
+  delete payload.authoritativeSessionClients;
+  delete payload.ompUsageMode;
   const projectsEnabled = summary.projectsEnabled !== false;
   delete payload.allTimeProjectsOmitted;
   delete payload.allTimeProjectsIncomplete;

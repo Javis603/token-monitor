@@ -105,6 +105,67 @@ test('an external agent owns capture, so the transform only refreshes', () => {
   assert.deepEqual(store.calls, ['refresh']);
 });
 
+test('authoritative OMP sessions do not replay matching archive rows', () => {
+  const archivedSession = (tokens) => normalizePeriod({
+    sessions: {
+      'omp:match': { client: 'omp', sessionId: 'match', totalTokens: tokens, costUsd: tokens / 10 }
+    }
+  }).sessions['omp:match'];
+  const archive = {
+    version: 1,
+    sessions: {
+      'omp:match': {
+        client: 'omp',
+        sessionId: 'match',
+        capturedAt: AT,
+        day: '2026-07-09',
+        month: '2026-07',
+        periodWindows: {
+          today: { capturedAt: AT, day: '2026-07-09' },
+          month: { capturedAt: AT, month: '2026-07' },
+          allTime: { capturedAt: AT }
+        },
+        periods: {
+          today: archivedSession(8),
+          month: archivedSession(8),
+          allTime: archivedSession(8)
+        }
+      }
+    }
+  };
+  const livePeriod = () => normalizePeriod({
+    totalTokens: 10,
+    costUsd: 1,
+    clients: { omp: 10 },
+    clientCosts: { omp: 1 },
+    sessions: {
+      'omp:match': { client: 'omp', sessionId: 'match', totalTokens: 10, costUsd: 1 }
+    }
+  });
+  const live = {
+    deviceId: 'mac',
+    updatedAt: AT,
+    authoritativeSessionClients: ['omp'],
+    today: livePeriod(),
+    month: livePeriod(),
+    allTime: livePeriod()
+  };
+  const store = fakeStore({
+    read: () => archive,
+    capture: () => ({ archive })
+  });
+  const transform = createUsageTransform({
+    store,
+    getSettings: () => ({ sessionUsageArchiveEnabled: true, clients: 'omp' })
+  });
+
+  const visible = transform.transform(live);
+
+  assert.equal(visible.allTime.totalTokens, 10);
+  assert.equal(visible.allTime.costUsd, 1);
+  assert.deepEqual(Object.keys(visible.allTime.sessions), ['omp:match']);
+});
+
 test('a disabled session archive is neither captured nor read', () => {
   const store = fakeStore();
   const transform = createUsageTransform({ store, getSettings: () => ({ sessionUsageArchiveEnabled: false }) });

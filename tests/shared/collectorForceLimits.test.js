@@ -17,6 +17,13 @@ const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-force-limits-'));
 process.env.TOKEN_MONITOR_SHARED_DIR = sharedDir;
 process.on('exit', () => { try { fs.rmSync(sharedDir, { recursive: true, force: true }); } catch (_) {} });
 
+// Collection only offers clients that have a source on disk. A runner whose home
+// holds no tool directories — every GitHub runner — otherwise turns the spawn
+// assertions below into zero calls.
+const scanHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-force-limits-home-'));
+fs.mkdirSync(path.join(scanHome, '.claude', 'projects'), { recursive: true });
+process.on('exit', () => { try { fs.rmSync(scanHome, { recursive: true, force: true }); } catch (_) {} });
+
 function fakeTokscaleSpawn() {
   return () => {
     const child = new EventEmitter();
@@ -235,6 +242,7 @@ test('collectUsageOnce requests the workspace-joined session grouping', async ()
     const { collectUsageOnce } = require(collectorPath);
     await collectUsageOnce({
       clients: 'claude',
+      homeDir: scanHome,
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1000,
       deviceId: 'test-device',
@@ -347,6 +355,7 @@ test('collectUsageOnce falls back to plain session grouping when the binary reje
     const { collectUsageOnce } = require(collectorPath);
     await collectUsageOnce({
       clients: 'claude',
+      homeDir: scanHome,
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1000,
       deviceId: 'test-device',
@@ -400,6 +409,7 @@ test('resetting the capability cache lets the workspace grouping be tried again'
     const { collectUsageOnce, resetTokscaleCapabilityCache } = require(collectorPath);
     const options = {
       clients: 'claude',
+      homeDir: scanHome,
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1000,
       deviceId: 'test-device',
@@ -450,6 +460,7 @@ test('turning Projects off stops asking the scan to resolve workspaces', async (
     const { collectUsageOnce } = require(collectorPath);
     await collectUsageOnce({
       clients: 'claude',
+      homeDir: scanHome,
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1000,
       deviceId: 'test-device',

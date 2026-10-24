@@ -14,6 +14,7 @@
   const DIAGNOSTIC_TONES = {
     'source-missing': 'muted',
     'no-usage-observed': 'muted',
+    'index-stale': 'neutral',
     'wsl-detected-no-data': 'neutral',
     'sync-failed': 'warn',
     'sync-timeout': 'warn',
@@ -29,6 +30,7 @@
     'sync-exit-error': 'collection',
     'sync-lock-present': 'collection',
     'no-usage-observed': 'data',
+    'index-stale': 'collection',
     'wsl-detected-no-data': 'data'
   };
   const QUIET_WHEN_UNAVAILABLE = new Set(['source-missing', 'no-usage-observed']);

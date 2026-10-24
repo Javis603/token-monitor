@@ -137,6 +137,53 @@ test('Command Code watches its transcript tree and prunes non-transcript events'
   }
 });
 
+test('OMP watcher bounds custom stats DB files and honors the disabled mode', () => {
+  // The matcher canonicalises its roots, and on Windows `os.tmpdir()` can be an
+  // 8.3 short name (`RUNNER~1`), so the fixture has to be built on the expanded
+  // path or the assertions compare two spellings of the same directory.
+  const root = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'token-monitor-omp-watch-'));
+  const homeDir = path.join(root, 'home');
+  const statsRoot = path.join(root, 'omp-data');
+  const statsDbPath = path.join(statsRoot, 'stats.db');
+  fs.mkdirSync(statsRoot, { recursive: true });
+  fs.writeFileSync(statsDbPath, 'fixture');
+  try {
+    const { openWatch, watchIgnoreMatcher, watchPathsForClients } = freshCollector();
+    const options = { homeDir, ompStatsDbPath: statsDbPath };
+    assert.deepEqual(watchPathsForClients('omp', options), [statsRoot]);
+    const ignored = watchIgnoreMatcher('omp', options);
+    assert.equal(ignored(statsRoot), false);
+    for (const name of ['stats.db', 'stats.db-wal', 'stats.db-shm']) {
+      assert.equal(ignored(path.join(statsRoot, name)), false);
+    }
+    assert.equal(ignored(path.join(statsRoot, 'runtime.log')), true);
+    assert.equal(ignored(path.join(statsRoot, 'stats', 'nested.db')), true);
+
+    let opened;
+    openWatch({
+      watch(dirs, config) {
+        opened = { dirs, config };
+        return {};
+      }
+    }, {
+      dirs: [statsRoot],
+      clients: 'omp',
+      homeDir,
+      ompStatsDbPath: statsDbPath
+    });
+    assert.deepEqual(opened.dirs, [statsRoot]);
+    assert.equal(opened.config.ignored(path.join(statsRoot, 'stats.db')), false);
+    assert.equal(opened.config.ignored(path.join(statsRoot, 'runtime.log')), true);
+
+    const disabled = { ...options, ompStatsEnabled: false };
+    assert.deepEqual(watchPathsForClients('omp', disabled), []);
+    assert.equal(watchIgnoreMatcher('omp', disabled), undefined);
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('watchIgnoreMatcher keeps every direct Tokscale MiMo database variant but prunes logs', () => {
   const orcaRoot = path.join('Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data');
   const tmp = withTmpHome([path.join('.local', 'share', 'mimocode'), orcaRoot]);
@@ -2994,6 +3041,9 @@ test('collectUsageOnce runs the three tokscale scans serially, not concurrently'
     const { collectUsageOnce } = freshCollector();
     await collectUsageOnce({
       clients: 'claude',
+      // With no source on disk the client is filtered out and no scan starts,
+      // which would leave maxActive at 0 and assert against the wrong thing.
+      homeDir: withTmpHome(['.claude/projects']),
       allTimeSince: '2024-01-01',
       commandTimeoutMs: 1000,
       deviceId: 'test-device',
@@ -3343,7 +3393,8 @@ test('self-watch db-shm events are ignored for every client whose scan recreates
   const antigravityRoot = path.join(os.tmpdir(), '.gemini', 'antigravity');
   const antigravityConversation = path.join(antigravityRoot, 'conversations');
   const cherryRoot = path.join(os.tmpdir(), 'CherryStudio', 'Data');
-  const roots = { antigravity: [antigravityRoot], cherrystudio: [cherryRoot], qodercn: [qoderRoot], zcode: [zcodeRoot] };
+  const ompRoot = path.join(os.tmpdir(), 'omp');
+  const roots = { antigravity: [antigravityRoot], cherrystudio: [cherryRoot], omp: [ompRoot], qodercn: [qoderRoot], zcode: [zcodeRoot] };
 
   // Each client keeps its own database basename: Qoder CN names it local.db,
   // ZCode names it db.sqlite, Antigravity names one per conversation, below its
@@ -3360,6 +3411,10 @@ test('self-watch db-shm events are ignored for every client whose scan recreates
     assert.equal(isSelfWatchSqliteSidecarEvent(path.join(root, base), roots), false,
       'the database itself must still trigger a scan');
   }
+  // OMP's stats database is read-only, but SQLite can still refresh its WAL index.
+  assert.equal(isSelfWatchSqliteSidecarEvent(path.join(ompRoot, 'stats.db-shm'), roots), true);
+  assert.equal(isSelfWatchSqliteSidecarEvent(path.join(ompRoot, 'stats.db-wal'), roots), false);
+  assert.equal(isSelfWatchSqliteSidecarEvent(path.join(ompRoot, 'stats.db'), roots), false);
   assert.equal(isSelfWatchSqliteSidecarEvent(path.join(os.tmpdir(), 'Other', 'db.sqlite-shm'), roots), false);
 
   // The wal-index suffix has to be recognised by its SQLite shape rather than
@@ -3400,6 +3455,11 @@ for (const client of ['zcode', 'cherrystudio', 'goose']) {
       || path.join(tmp, '.zcode', 'cli', 'db');
     fs.mkdirSync(dbDir, { recursive: true });
     const dbName = { zcode: 'db.sqlite', cherrystudio: 'cherrystudio.sqlite', goose: 'sessions.db' }[client];
+    // The database has to exist for the client to be scanned at all: a source
+    // tree without its file is filtered out before the scan, so a `-wal` event
+    // there would prove nothing about the sidecar filter. A WAL sidecar cannot
+    // outlive the database it belongs to, so creating it is the realistic shape.
+    fs.writeFileSync(path.join(dbDir, dbName), '');
 
     const chokidar = require('chokidar');
     const originalWatch = chokidar.watch;
@@ -4561,14 +4621,14 @@ test('hourly smart reconciliation starts watching a client directory created aft
     fs.mkdirSync(path.join(tmp, '.claude', 'projects'), { recursive: true });
     nowMs += 60 * 60 * 1000 + 1;
     await waitForCondition(() => updates.length === 2);
-    assert.equal(calls.length, 6, 'missed activity is recovered by a full scan');
+    assert.equal(calls.length, 3, 'only the newly detected source is scanned');
     assert.equal(updates[1].clientStatus.claude, 'waiting', 'new client directory is discovered');
     await waitForCondition(() => typeof watchHandler === 'function');
     assert.equal(watchCalls, 1, 'the successful full scan adds a watcher for the new directory');
 
     watchHandler('change', path.join(tmp, '.claude', 'projects', 'new.jsonl'));
     await waitForCondition(() => updates.length === 3);
-    assert.equal(calls.length, 7, 'later activity in the new directory uses the smart interval scan');
+    assert.equal(calls.length, 4, 'later activity scans today from the new directory');
   } finally {
     if (handle) handle.stop();
     childProcess.spawn = originalSpawn;

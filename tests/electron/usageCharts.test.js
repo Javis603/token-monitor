@@ -5,7 +5,7 @@ const test = require('node:test');
 
 const {
   weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, statsCards, sparklinePreview,
-  areaLineChart, areaLineSvg, heatmapSvg, rollingYearHeatmap
+  areaLineChart, areaLineSvg, heatmapSvg, rollingYearHeatmap, dailyModelBreakdown
 } = require('../../src/electron/renderer/usageCharts');
 
 test('computeHeatmapIntensities derives independent metrics from raw values', () => {
@@ -494,4 +494,53 @@ test('sparklineSvg embeds per-bar descriptions when supplied and escapes them', 
   const svg = sparklineSvg(model, { titles: ['6/7 · 1', 'a<b&c'] });
   assert.match(svg, /<desc>6\/7 · 1<\/desc>/);
   assert.match(svg, /<desc>a&lt;b&amp;c<\/desc>/);
+});
+
+test('dailyModelBreakdown ranks a day by its own tokens and reports shares', () => {
+  const day = {
+    date: '2026-10-07',
+    tokens: 100,
+    cost: 1.5,
+    perModel: {
+      'gpt-5': { tokens: 60, cost: 1.2 },
+      'claude-opus': { tokens: 30, cost: 0.3 },
+      'mimo': { tokens: 10, cost: 0 }
+    }
+  };
+  const breakdown = dailyModelBreakdown(day);
+
+  assert.deepEqual(breakdown.rows.map((row) => row.model), ['gpt-5', 'claude-opus', 'mimo']);
+  assert.deepEqual(breakdown.rows.map((row) => row.share), [0.6, 0.3, 0.1]);
+  assert.equal(breakdown.totalTokens, 100);
+  assert.ok(Math.abs(breakdown.totalCost - 1.5) < 1e-9);
+  assert.equal(breakdown.hidden, 0);
+});
+
+test('dailyModelBreakdown caps the listed models and counts the remainder', () => {
+  const day = {
+    perModel: {
+      a: { tokens: 40 }, b: { tokens: 30 }, c: { tokens: 20 }, d: { tokens: 5 }, e: { tokens: 5 }
+    }
+  };
+  const breakdown = dailyModelBreakdown(day, { limit: 2 });
+
+  assert.deepEqual(breakdown.rows.map((row) => row.model), ['a', 'b']);
+  assert.equal(breakdown.hidden, 3);
+  // Shares stay relative to the whole day, not to the listed rows.
+  assert.deepEqual(breakdown.rows.map((row) => row.share), [0.4, 0.3]);
+});
+
+test('dailyModelBreakdown drops empty buckets and tolerates days without perModel', () => {
+  const breakdown = dailyModelBreakdown({
+    perModel: { unpriced: { tokens: 0, cost: 0 }, priced: { tokens: 0, cost: 0.5 } }
+  });
+  assert.deepEqual(breakdown.rows.map((row) => row.model), ['priced']);
+  assert.equal(breakdown.rows[0].share, 0);
+  assert.deepEqual(dailyModelBreakdown(undefined), { totalTokens: 0, totalCost: 0, hidden: 0, rows: [] });
+  assert.deepEqual(dailyModelBreakdown({ perModel: null }), { totalTokens: 0, totalCost: 0, hidden: 0, rows: [] });
+});
+
+test('dailyModelBreakdown keeps unpriced tokens on a model row', () => {
+  const breakdown = dailyModelBreakdown({ perModel: { 'mystery-model': { tokens: 12, unpricedTokens: 12 } } });
+  assert.equal(breakdown.rows[0].unpricedTokens, 12);
 });
