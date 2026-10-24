@@ -333,7 +333,7 @@ If any requirements are unclear, please ask me first. When finished, test the pl
 My idea:</code></pre></figure>
         </article>
         <article class="doc-lang docs-article" lang="zh-TW">
-<h1>開發插件</h1>
+<h1>開發外掛</h1>
 <p class="docs-lede">從可運作的宣告檔出發，完成自訂介面、App 資料及可分享的 Desktop 套件。</p>
 <h2 data-anchor="manifest-basics">從宣告檔開始</h2>
 <h3 data-anchor="manifest">1. 建立宣告檔</h3>
@@ -378,7 +378,7 @@ My idea:</code></pre></figure>
   ]
 }</code></pre></figure>
 <h3 data-anchor="try">2. 匯入並啟用</h3>
-<p>在設定 → 插件 → 已安裝 → 更多插件操作匯入資料夾至受管理儲存。核對 <code>sys.cpu</code>，允許並啟用，再選擇首頁。開始取樣後會顯示百分比；初始缺少讀數並不代表零。</p><p>App 負責繪製及共享取樣，隱藏最後一個使用者介面後會釋放需求。其他位置可在插件設定啟用；Edge Dock 與 Notch 也需要 App 開關。</p>
+<p>在設定 → 外掛 → 已安裝 → 更多外掛操作匯入資料夾至受管理儲存。核對 <code>sys.cpu</code>，允許並啟用，再選擇首頁。開始取樣後會顯示百分比；初始缺少讀數並不代表零。</p><p>App 負責繪製及共享取樣，隱藏最後一個使用者介面後會釋放需求。其他位置可在外掛設定啟用；Edge Dock 與 Notch 也需要 App 開關。</p>
 <h3 data-anchor="package">3. 建立本地套件</h3>
 <p>將資料夾放在 Token Monitor 儲存庫根目錄，於根目錄執行：</p><figure class="code"><figcaption class="code-head"><span>終端機</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout.tmplugin</code></pre></figure><p>用「從檔案」預覽並安裝。此命令只打包本地檔案，不會發佈。開發時請使用可拋棄的 App 設定檔，避免使用個人資料。</p>
 <h3 data-anchor="code">4. 需要時計算自訂數值</h3>
@@ -542,7 +542,7 @@ const committed = await tm.settings.update({
   expectedRevision: draftBase.revision,
   patch: { period: 'month' }
 });</code></pre></figure><p><code>tm.settings.onChange</code> 提供已提交狀態，不應覆蓋未儲存草稿。保留開始編輯時的 revision，衝突時保留草稿並讓使用者明確重新載入。這些不是憑證、任意 App 設定或顯示位置。完整流程見 <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/business-studio">Business Studio</a>。</p>
-        <h3 data-anchor="data-data-decision">選資源，再說明其限制</h3><p>只申請畫面需要的資源。用量卡可從 <code>tm.data.usage</code> 開始；工作階段列表另需 <code>tm.data.sessions</code>，名稱或路徑需要 <code>tm.data.identities</code>。訂閱首頁一次，再用 cursor 讀取其他頁。單頁不等於總量；<code>aggregateCoverage</code> 描述獲授權的集合，<code>availability</code> 和費用完整度則說明可顯示的內容。遠端「全部」工作階段詳情可能局部或不可用；私隱或來源重設會使舊身分失效。未知費用不可當作 $0。</p><h3 data-anchor="data-settings-conflicts">偏好設定是已儲存狀態</h3><p>即使插件程式未執行，主程式表單仍可用。Rich 編輯器應保留開始編輯時的 revision、顯示儲存結果，並在另一編輯器先儲存時提供重新載入選項。衝突時保留未儲存草稿。設定 schema 是本機且有版本，與位置開關、憑證及私人 <code>tm.storage</code> 分開。DTO 與限制見 <a href="plugin-reference.html">資料及設定 API</a>。</p>
+        <h3 data-anchor="data-data-decision">選資源，再說明其限制</h3><p>只申請畫面需要的資源。用量卡可從 <code>tm.data.usage</code> 開始；工作階段列表另需 <code>tm.data.sessions</code>，名稱或路徑需要 <code>tm.data.identities</code>。訂閱首頁一次，再用 cursor 讀取其他頁。單頁不等於總量；<code>aggregateCoverage</code> 描述獲授權的集合，<code>availability</code> 和費用完整度則說明可顯示的內容。遠端「全部」工作階段詳情可能局部或不可用；私隱或來源重設會使舊身分失效。未知費用不可當作 $0。</p><h3 data-anchor="data-settings-conflicts">偏好設定是已儲存狀態</h3><p>即使外掛程式未執行，主程式表單仍可用。Rich 編輯器應保留開始編輯時的 revision、顯示儲存結果，並在另一編輯器先儲存時提供重新載入選項。衝突時保留未儲存草稿。設定 schema 是本機且有版本，與位置開關、憑證及私人 <code>tm.storage</code> 分開。DTO 與限制見 <a href="plugin-reference.html">資料及設定 API</a>。</p>
 <h2 data-anchor="test-distribute">測試與發佈</h2>
 <h3 data-anchor="share-test">測試實際提供的體驗</h3>
 <ul><li>匯入 → 預覽 → 授權 → 啟用 → 選擇位置 → 開啟。</li><li>冷啟動、快速重開、過期、縮放、減少動態效果與鍵盤操作。</li><li>缺少資料、拒絕權限、分頁重設與設定衝突。</li><li>隱藏全部介面後停止需求；開啟及快取時撤銷權限或停用。</li><li>更新 → 核准新權限 → 回復 → 保留資料移除。</li></ul><p>使用可拋棄設定檔，測試每個聲稱支援的平台與介面。本地 macOS 證據不能證明 Windows／Linux、打包版本或實體 Notch 行為。請見<a href="https://github.com/Javis603/token-monitor/blob/main/docs/plugins/validation.md">驗證指南</a>。</p>
@@ -572,9 +572,9 @@ const committed = await tm.settings.update({
 <h3 data-anchor="share-reference">維持簡單的發佈流程</h3>
 <p>此流程不包含公開提交後端、審核服務或自動登錄來源。網址、相容性、限制與復原見<a href="plugin-distribution-reference.html">目錄規格</a>。</p>
         <h3 data-anchor="share-release-check">實用的驗收流程</h3><p>用已封裝套件完成讀者會走的流程：匯入、檢查權限、允許、啟用、選位置及開啟。檢查首次空讀數、真實讀數與被拒權限；隱藏最後使用者、過保留期冷啟動、鍵盤焦點和減少動態效果。資料畫面須呈現局部覆蓋和未知費用；設定則要製造兩個編輯器競爭儲存，確認未儲存草稿仍在。每次改宣告檔或資產後重建，安裝新的確切位元組。記錄實際測試的 App 版本、平台、位置和檢查。</p><h3 data-anchor="share-catalog-trust">目錄能證明甚麼</h3><p>目錄指向 HTTPS 套件及 SHA-256。摘要可發現位元組變動，不能審查程式或證明作者身分。讀者自行選擇並核對來源，再確認每次安裝或更新。Community 仍標示為未審查。可選的來源金鑰釘選提供較強的身分確認；沒有公開提交或審核服務。確切目錄及復原規則見<a href="plugin-distribution-reference.html">發佈合約</a>。</p>
-<h2 data-anchor="create-prompt">請 AI 程式助手建立插件</h2><p>複製以下內容貼到程式助手，在最後補上你的想法。</p><figure class="code prompt-card"><figcaption class="code-head"><span>提示詞</span></figcaption><pre tabindex="0"><code>幫我製作一個 Token Monitor Desktop 插件。請閱讀官方指南：https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md（以及其中連結的參考文件）。
+<h2 data-anchor="create-prompt">請 AI 程式助手建立外掛</h2><p>複製以下內容貼到程式助手，在最後補上你的想法。</p><figure class="code prompt-card"><figcaption class="code-head"><span>提示詞</span></figcaption><pre tabindex="0"><code>幫我製作一個 Token Monitor Desktop 外掛。請閱讀官方指南：https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md（以及其中連結的參考文件）。
 
-如果需求有不清楚的地方，請先向我確認。完成後，請測試插件，並提供可匯入的資料夾或 .tmplugin 檔案，以及安裝與啟用步驟。
+如果需求有不清楚的地方，請先向我確認。完成後，請測試外掛，並提供可匯入的資料夾或 .tmplugin 檔案，以及安裝與啟用步驟。
 
 我的想法：</code></pre></figure>
         </article>

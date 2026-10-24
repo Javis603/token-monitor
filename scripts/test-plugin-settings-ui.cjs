@@ -229,6 +229,44 @@ async function main() {
   await key('Escape','Escape',27);
   await key('ArrowUp','ArrowUp',38);
   result.checks.push({name:'native-arrow-up-opens-menu-at-last-action',ok:await win.webContents.executeJavaScript(`Boolean(document.querySelector('.plugin-menu:popover-open'))&&document.activeElement===[...document.querySelectorAll('.plugin-menu button')].at(-1)`)});
+  // Use the actual settings DOM/wrappers inside the shell: an isolated plugin
+  // panel cannot catch positioned descendants extending the outer scroll range.
+  const appSource = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+  const wrappers = appSource.match(/function initSettingsAnimationWrappers\(\) \{[\s\S]*?\n\}/)[0];
+  const scrollChecks = await win.webContents.executeJavaScript(`(async () => {
+    const template = new DOMParser().parseFromString(${JSON.stringify(appHtml)}, 'text/html');
+    document.body.innerHTML = '<main class="shell settings-open"><header style="height:32px;flex-shrink:0">Σ</header></main>';
+    const shell = document.querySelector('.shell'), panel = template.getElementById('settingsPanel');
+    panel.classList.remove('hidden'); shell.append(panel);
+    const total = template.querySelector('.total-panel'); total.style.flexShrink = '0'; shell.append(total);
+    const footer = document.createElement('footer'); footer.style.cssText = 'height:32px;flex-shrink:0'; shell.append(footer);
+    ${wrappers}; initSettingsAnimationWrappers();
+    const sync = document.getElementById('syncSettingsDetails'), details = document.getElementById('pluginsSettingsDetails');
+    sync.firstElementChild.innerHTML = '<div style="height:700px">Devices</div>';
+    sync.classList.remove('hidden'); sync.parentElement.classList.add('expanded');
+    const box = document.getElementById('pluginSettingsList');
+    const scrollData = { enabled: true, plugins: [{ id: 'scroll-fixture', name: 'Monitor', version: '1.0.0', description: 'CPU and memory readings. Sample only while visible or while approved background checks need data.', source: 'builtin', status: 'disabled', enabled: false,
+      permissions: ['notify', 'sys.cpu', 'sys.memory', 'tm.pages', 'ui.web'], hosts: [], views: [] }] };
+    const host = TokenMonitorPluginSettings.createPluginSettingsPanel({ document, container: box, t: key => key,
+      api: { list: async () => scrollData } });
+    const wait = () => new Promise(resolve => setTimeout(resolve, 300));
+    const measure = () => {
+      panel.scrollTop = panel.scrollHeight;
+      return { height: panel.scrollHeight, gap: total.getBoundingClientRect().top - panel.lastElementChild.getBoundingClientRect().bottom };
+    };
+    await wait(); const baseline = measure();
+    await host.refresh(); await wait(); const hidden = measure();
+    sync.classList.add('hidden'); details.classList.remove('hidden'); await wait();
+    const open = box.getBoundingClientRect().height > 100 && details.getBoundingClientRect().height > 100;
+    await host.refresh(); details.classList.add('hidden'); sync.classList.remove('hidden'); await wait(); const closed = measure();
+    host.dispose();
+    return [
+      { name: 'hidden-last-plugin-refresh-adds-no-phantom-scroll-space', ok: Math.abs(hidden.height - baseline.height) <= 1 && Math.abs(hidden.gap - baseline.gap) <= 1, evidence: { baseline, hidden } },
+      { name: 'last-plugin-opening-keeps-content-visible', ok: open },
+      { name: 'plugin-close-at-bottom-restores-original-scroll-range', ok: Math.abs(closed.height - baseline.height) <= 1 && Math.abs(closed.gap - baseline.gap) <= 1, evidence: { baseline, closed } }
+    ];
+  })()`);
+  result.checks.push(...scrollChecks);
   for (const check of result.checks) console.log(`${check.ok ? 'PASS' : 'FAIL'} ${check.name}`, check.evidence || '');
   fs.writeFileSync(path.join(scratch, 'results.json'), JSON.stringify(result,null,2));
   console.log('Evidence:', path.join(scratch, 'results.json'));

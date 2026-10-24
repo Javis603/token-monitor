@@ -8,7 +8,7 @@ const vm = require('node:vm');
 
 const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
 
-function scrollAnchorHarness({ reducedMotion = false, settingsSections = {} } = {}) {
+function scrollAnchorHarness({ reducedMotion = false, settingsSections = {}, sectionIds = ['general', 'main', 'window', 'appearance'] } = {}) {
   const start = app.indexOf('const SETTINGS_SCROLL_ANCHOR_MS');
   const end = app.indexOf('\nfunction setupSettingsSections', start);
   assert.ok(start >= 0 && end > start, 'settings scroll anchor helpers should be present');
@@ -22,7 +22,7 @@ function scrollAnchorHarness({ reducedMotion = false, settingsSections = {} } = 
     getBoundingClientRect: () => ({ top: 20 })
   };
   const context = {
-    SETTINGS_SECTION_IDS: ['general', 'main', 'window', 'appearance'],
+    SETTINGS_SECTION_IDS: sectionIds,
     state: { settingsSections },
     els: { settingsPanel: panel },
     prefersReducedMotion: () => reducedMotion,
@@ -105,4 +105,15 @@ test('keyboard scroll and focus-navigation keys cancel an active settings scroll
   assert.deepEqual(cancelled, []);
   assert.deepEqual([...frames.keys()], [1]);
   assert.match(app, /settingsPanel\?\.addEventListener\('keydown', cancelSettingsScrollAnchorOnKeydown\)/);
+});
+
+test('scroll anchoring follows the visible section order with plugins after sync', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/index.html'), 'utf8');
+  const visibleOrder = [...html.matchAll(/data-settings-section="([^"]+)"/g)].map(match => match[1]);
+  const sectionIds = vm.runInNewContext(app.match(/const SETTINGS_SECTION_IDS = (\[[^;]+\]);/)[1]);
+  assert.deepEqual(Array.from(sectionIds), visibleOrder);
+  const { api } = scrollAnchorHarness({ sectionIds, settingsSections: { sync: true } });
+  assert.equal(api.shouldAnchorSettingsScroll('plugins', true), true);
+  const reverse = scrollAnchorHarness({ sectionIds, settingsSections: { plugins: true } });
+  assert.equal(reverse.api.shouldAnchorSettingsScroll('sync', true), false);
 });

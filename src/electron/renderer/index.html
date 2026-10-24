@@ -584,16 +584,6 @@
           </div>
         </div>
 
-        <div class="settings-group settings-collapsible-group settings-plugins-group">
-          <button class="settings-section-toggle" type="button" data-settings-section="plugins" aria-expanded="false" aria-controls="pluginsSettingsDetails">
-            <span class="settings-section-heading"><span class="settings-section-icon settings-section-icon-plugins" aria-hidden="true"></span><span data-i18n="settings.plugins.title">Plugins</span></span>
-            <span class="settings-section-meta"><span id="pluginsSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
-          </button>
-          <div id="pluginsSettingsDetails" class="settings-section-details hidden">
-            <div id="pluginSettingsList" class="plugin-settings-list"></div>
-          </div>
-        </div>
-
         <div class="settings-group settings-collapsible-group settings-tools-group">
           <button class="settings-section-toggle" type="button" data-settings-section="tools" aria-expanded="false" aria-controls="toolsSettingsDetails">
             <span class="settings-section-heading"><span class="settings-section-icon settings-section-icon-tools" aria-hidden="true"></span><span data-i18n="settings.sections.collection">Collection</span></span>
@@ -1645,6 +1635,16 @@
               <div id="syncDeviceList" class="sync-device-list"></div>
               <button id="syncPanelOpenDevices" type="button" class="sync-panel-link"><span data-i18n="settings.sync.panel.viewUsage">View usage by device</span><span class="sync-panel-link-arrow" aria-hidden="true"></span></button>
             </div>
+          </div>
+        </div>
+
+        <div class="settings-group settings-collapsible-group settings-plugins-group">
+          <button class="settings-section-toggle" type="button" data-settings-section="plugins" aria-expanded="false" aria-controls="pluginsSettingsDetails">
+            <span class="settings-section-heading"><span class="settings-section-icon settings-section-icon-plugins" aria-hidden="true"></span><span data-i18n="settings.plugins.title">Plugins</span><span class="plugin-section-experimental" data-i18n="settings.plugins.experimental">Experimental</span></span>
+            <span class="settings-section-meta"><span id="pluginsSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
+          </button>
+          <div id="pluginsSettingsDetails" class="settings-section-details hidden">
+            <div id="pluginSettingsList" class="plugin-settings-list"></div>
           </div>
         </div>
       </section>

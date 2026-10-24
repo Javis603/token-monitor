@@ -306,7 +306,7 @@ const TOKEN_MONITOR_ISSUES_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/issues/new/cho
 const TOKEN_MONITOR_WEBSITE_URL = 'https://javis-ai.com/token-monitor/';
 const TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/blob/main/docs/wsl-sqlite-setup.md`;
 const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProviderPreferences;
-const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'plugins', 'tools', 'limits', 'subscriptions', 'sync'];
+const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'sync', 'plugins'];
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
 const LIVE_TOKEN_RATE_ACTIVE_MS = 8000;
 const LIVE_TOKEN_RATE_CLEAR_MS = 3 * 60 * 1000;
@@ -12918,6 +12918,8 @@ pluginSettingsPanel = pluginApi && window.TokenMonitorPluginSettings
     container: document.getElementById('pluginSettingsList'),
     t,
     api: pluginApi,
+    getLocale: () => state.locale,
+    onOpenExternal: (url) => window.tokenMonitor.openExternal(url),
     setDetailTooltip: limitWindowsView.setDetailTooltip,
     onError: (error) => {
       const message = String(error?.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');

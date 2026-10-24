@@ -102,19 +102,19 @@
         <h2 id="trust-and-demand" data-anchor="trust-and-demand">What approval and placement change</h2><p>The permission list defines which app sources and capabilities plugin code may use. The source, version and requested grants deserve a new review on each install or access-expanding update. A placement only chooses where an already approved view appears; it does not expand its grants. A hidden view normally releases its visible sampling demand. Background checks require their own explicit enablement, and a cached Rich document does not keep collecting merely because it can reopen quickly.</p><h2 id="plugin-data-recovery" data-anchor="plugin-data-recovery">Where personal plugin data goes</h2><p>Managed packages, saved plugin data and placements are separate. Uninstall removes placements and normally keeps saved data so reinstall can recover preferences or notes. Rollback replaces one compatible code version; it does not reverse changes that code made to its data. Before sharing a package, test with a disposable profile and treat Community catalog text as the publisher’s claim. See <a href="plugin-distribution-reference.html">distribution and recovery details</a>.</p>
         </article>
         <article class="doc-lang docs-article" lang="zh-TW">
-<h1>使用插件</h1>
+<h1>使用外掛</h1>
 <p class="docs-lede">新增讀數或自訂檢視，然後決定它顯示在哪裡、可以讀取哪些資料。</p>
 
 
 <h2 data-anchor="install">先安裝，再允許執行</h2>
-<ol class="docs-steps"><li>開啟設定 → 插件 → 官方。System Monitor 隨 App 提供，也可預覽可安裝範例。</li><li>核對來源、版本與權限，再確認安裝。</li><li>另外允許並啟用插件。安裝本身不會執行程式碼；更新要求更多權限時，會暫停執行直到重新核准。</li></ol><p>使用「從檔案」安裝 <code>.tmplugin</code>。作者可在已安裝 → 更多插件操作匯入資料夾。在社群 → 管理來源加入信任的 HTTPS 目錄；社群項目仍標為未審核。</p>
+<ol class="docs-steps"><li>開啟設定 → 外掛 → 官方。System Monitor 隨 App 提供，也可預覽可安裝範例。</li><li>核對來源、版本與權限，再確認安裝。</li><li>另外允許並啟用外掛。安裝本身不會執行程式碼；更新要求更多權限時，會暫停執行直到重新核准。</li></ol><p>使用「從檔案」安裝 <code>.tmplugin</code>。作者可在已安裝 → 更多外掛操作匯入資料夾。在社群 → 管理來源加入信任的 HTTPS 目錄；社群項目仍標為未審核。</p>
 <h2 data-anchor="placements">選擇顯示位置</h2>
-<p>在插件設定啟用支援的首頁、系統匣、Edge Dock 或 Notch 位置；後兩者也需要 App 本身的開關。只有宣告頁面並啟用「主程式頁面」的插件才會出現在主檢視選單，獨立視窗則是頁面內的選用操作。</p><p>Rich UI 可以提供模型／工具／裝置內容的另一種設計，但選擇設計不會授予權限，App 也保留「App 預設」。宣告的偏好設定有標準表單，停用插件時仍可修改。</p>
+<p>在外掛設定啟用支援的首頁、系統匣、Edge Dock 或 Notch 位置；後兩者也需要 App 本身的開關。只有宣告頁面並啟用「主程式頁面」的外掛才會出現在主檢視選單，獨立視窗則是頁面內的選用操作。</p><p>Rich UI 可以提供模型／工具／裝置內容的另一種設計，但選擇設計不會授予權限，App 也保留「App 預設」。宣告的偏好設定有標準表單，停用外掛時仍可修改。</p>
 <h2 data-anchor="updates">更新、回復或移除</h2>
-<p>重新整理目錄以發現版本與變更記錄，每次更新都需要預覽並確認，不會自動安裝。回復可恢復一個相容的先前版本，但不能撤銷插件資料遷移。移除預設保留資料並移除顯示位置。</p><p>本地檔案未經驗證；SHA-256 只核對內容，不證明作者身分或程式安全。金鑰釘選是進階選項，一般使用者不需要公鑰。</p>
-<h2 data-anchor="recover">處理異常插件</h2>
-<p>停用個別插件，或在已安裝 → 更多插件操作關閉「啟用插件」，暫停全部插件而保留個別選擇。若啟動受阻，可使用 <code>--plugins-safe-mode</code> 或 <code>TOKEN_MONITOR_PLUGINS_SAFE_MODE=1</code>。修復套件後再啟用。</p><p>插件預設跟隨 App 外觀，仍支援外觀預設，沒有獨立的 My Style 編輯器。儲存及復原細節請見<a href="plugin-reference.html">管理參考文件</a>。</p>
-        <h2 data-anchor="trust-and-demand">授權與顯示位置的分別</h2><p>權限清單決定插件程式能使用哪些 App 資料與能力。每次安裝或更新要求更多存取時，都應重新核對來源、版本及權限。位置只決定已批准的畫面在哪裡顯示，不會擴大權限。隱藏畫面通常會釋放可見取樣需求。背景檢查須另外明確啟用；Rich 文件即使可快速重開，也不會因此持續收集。</p><h2 data-anchor="plugin-data-recovery">個人插件資料存放方式</h2><p>受管理套件、插件資料與顯示位置彼此分開。解除安裝會移除位置，預設保留資料，重新安裝後可找回偏好或筆記。回復版本只替換一個相容的程式版本，不會逆轉程式對資料的變更。分享套件前請用可拋棄設定檔測試；社群目錄的文字是發佈者的聲稱。詳見<a href="plugin-distribution-reference.html">發佈及復原說明</a>。</p>
+<p>重新整理目錄以發現版本與變更記錄，每次更新都需要預覽並確認，不會自動安裝。回復可恢復一個相容的先前版本，但不能撤銷外掛資料遷移。移除預設保留資料並移除顯示位置。</p><p>本地檔案未經驗證；SHA-256 只核對內容，不證明作者身分或程式安全。金鑰釘選是進階選項，一般使用者不需要公鑰。</p>
+<h2 data-anchor="recover">處理異常外掛</h2>
+<p>停用個別外掛，或在已安裝 → 更多外掛操作關閉「啟用外掛」，暫停全部外掛而保留個別選擇。若啟動受阻，可使用 <code>--plugins-safe-mode</code> 或 <code>TOKEN_MONITOR_PLUGINS_SAFE_MODE=1</code>。修復套件後再啟用。</p><p>外掛預設跟隨 App 外觀，仍支援外觀預設，沒有獨立的 My Style 編輯器。儲存及復原細節請見<a href="plugin-reference.html">管理參考文件</a>。</p>
+        <h2 data-anchor="trust-and-demand">授權與顯示位置的分別</h2><p>權限清單決定外掛程式能使用哪些 App 資料與能力。每次安裝或更新要求更多存取時，都應重新核對來源、版本及權限。位置只決定已批准的畫面在哪裡顯示，不會擴大權限。隱藏畫面通常會釋放可見取樣需求。背景檢查須另外明確啟用；Rich 文件即使可快速重開，也不會因此持續收集。</p><h2 data-anchor="plugin-data-recovery">個人外掛資料存放方式</h2><p>受管理套件、外掛資料與顯示位置彼此分開。解除安裝會移除位置，預設保留資料，重新安裝後可找回偏好或筆記。回復版本只替換一個相容的程式版本，不會逆轉程式對資料的變更。分享套件前請用可拋棄設定檔測試；社群目錄的文字是發佈者的聲稱。詳見<a href="plugin-distribution-reference.html">發佈及復原說明</a>。</p>
         </article>
         <article class="doc-lang docs-article" lang="zh-CN">
 <h1>使用插件</h1>

@@ -24,7 +24,7 @@
     return t(`settings.plugins.permission.${permission}`, { hosts: hosts.join(', ') });
   }
 
-  function createPluginSettingsPanel({ document, container, t, api, setDetailTooltip = null, onError = () => {}, onApplySkin = () => {}, onPlaced = () => {}, onSetEnabled = null, getEnabled = null }) {
+  function createPluginSettingsPanel({ document, container, t, api, setDetailTooltip = null, onError = () => {}, onApplySkin = () => {}, onPlaced = () => {}, onSetEnabled = null, getEnabled = null, getLocale = () => document.documentElement?.lang || 'en', onOpenExternal = () => {} }) {
     let list = null;
     let consentFor = '';
     let busy = false;
@@ -61,7 +61,8 @@
       settingsIdentities.clear();
       for (const [id, identity] of installed) settingsIdentities.set(id, identity);
     }
-    let tabs = null, content = null, renderedTab = 'installed';
+    let overview = null, navigation = null, tabs = null, content = null, renderedTab = 'installed';
+    const overviewLabels = new Map(), guideLinks = new Map();
     const tabControls = new Map();
 
     // Keep navigation alive. Async actions must not insert a loading row or
@@ -94,7 +95,7 @@
 
     function identifyContent() {
       const counts = new Map();
-      for (const node of content.querySelectorAll('button, input, select, textarea, summary')) {
+      for (const node of container.querySelectorAll('button, input, select, textarea, summary')) {
         const owner = node.closest('[data-plugin-id], [data-catalog-id]');
         const scope = owner?.dataset.pluginId || owner?.dataset.catalogId || activeTab;
         const identity = node.dataset.controlKey ? JSON.stringify([scope, node.dataset.controlKey]) : JSON.stringify([scope, node.tagName, node.type, node.dataset.styleKey, node.dataset.styleColor, node.getAttribute('aria-label'), node.dataset.controlKey || node.title, node.tagName === 'INPUT' || node.tagName === 'TEXTAREA' ? node.className : node.textContent]);
@@ -786,8 +787,7 @@
       return wrap;
     }
 
-    function replaceContent(nodes) {
-      const saved = rememberPosition();
+    function replaceContent(nodes, saved) {
       for (const detail of content.querySelectorAll('details')) {
         const key = detail.dataset.detailKey || `${renderedTab}/${detail.className}/${detail.querySelector('summary')?.textContent}`;
         detailState.set(key, detail.open);
@@ -807,6 +807,12 @@
       identifyContent();
       for (const [tab, control] of tabControls) {
         control.textContent = t(`plugins.catalog.${tab}`);
+        if (tab === 'installed') {
+          const count = el(document, 'span', 'plugin-tab-count', list.plugins.length);
+          count.classList.toggle('is-paused', !list.enabled);
+          control.append(count);
+          control.setAttribute('aria-label', `${t('plugins.catalog.installed')} · ${t('plugins.ui.count', { count: list.plugins.length })}${list.enabled ? '' : ` · ${t('plugins.ui.paused')}`}`);
+        }
         control.setAttribute('aria-selected', String(activeTab === tab));
         control.tabIndex = activeTab === tab ? 0 : -1;
       }
@@ -817,6 +823,7 @@
 
     function render() {
       if (!container) return;
+      const saved = rememberPosition();
       reconcileSettings();
       presentation?.suspend();
       const nodes = [];
@@ -825,6 +832,26 @@
         return;
       }
       if (!tabs) {
+        overview = el(document, 'section', 'plugin-overview');
+        const heading = el(document, 'div', 'plugin-overview-heading');
+        for (const [tag, className, key] of [
+          ['p', 'plugin-overview-summary', 'settings.plugins.overview']
+        ]) {
+          const node = el(document, tag, className); overviewLabels.set(key, node); heading.append(node);
+        }
+        const note = el(document, 'p', 'plugin-overview-note');
+        overviewLabels.set('settings.plugins.experimentalNote', note);
+        const guides = el(document, 'div', 'plugin-guide-links');
+        for (const [page, key] of [['plugins', 'settings.plugins.guide'], ['plugin-quickstart', 'settings.plugins.authorGuide']]) {
+          const link = el(document, 'a', 'plugin-guide-link');
+          link.rel = 'noopener noreferrer';
+          link.addEventListener('click', event => {
+            event.preventDefault();
+            void Promise.resolve().then(() => onOpenExternal(link.href)).catch(onError);
+          });
+          overviewLabels.set(key, link); guideLinks.set(page, link); guides.append(link);
+        }
+        overview.append(heading, note, guides);
         tabs = el(document, 'nav', 'plugin-catalog-tabs');
         tabs.setAttribute('aria-label', t('settings.plugins.title'));
         tabs.setAttribute('role', 'tablist');
@@ -854,26 +881,41 @@
         content = el(document, 'div', 'plugin-settings-content');
         content.id = `${container.id || 'plugin-settings'}-page`;
         content.setAttribute('role', 'tabpanel');
-        container.replaceChildren(tabs, content);
+        navigation = el(document, 'div', 'plugin-navigation');
+        navigation.append(tabs);
+        container.replaceChildren(overview, navigation, content);
+      }
+      for (const [key, node] of overviewLabels) {
+        const label = t(key); if (node.textContent !== label) node.textContent = label;
+      }
+      for (const [page, link] of guideLinks) link.href = `https://javis-ai.com/token-monitor/docs/${page}.html?lang=${encodeURIComponent(getLocale())}`;
+      overview.hidden = activeTab === 'installed' && Boolean(selectedPluginId || aboutOpen);
+      // Retain the action slot's geometry across tabs so a shorter catalog
+      // cannot clamp scroll and move the tab the user just selected.
+      const previousToolbar = navigation.querySelector('.plugin-toolbar');
+      if (previousToolbar) {
+        previousToolbar.classList.add('is-inactive');
+        previousToolbar.setAttribute('inert', '');
+        previousToolbar.setAttribute('aria-hidden', 'true');
       }
       if (activeTab !== 'installed') {
         if (sourcesOpen && activeTab === 'community') nodes.push(sourcesPanel());
         else if (catalogReview && catalogReview.origin.kind === activeTab) nodes.push(catalogReviewPanel());
         else nodes.push(catalogPanel());
-        replaceContent(nodes); return;
+        replaceContent(nodes, saved); return;
       }
       if (aboutOpen) {
         const about = el(document, 'section', 'plugin-about');
         about.append(button(t('plugins.ui.back'), () => {
-          aboutOpen = false; render(); content.querySelector('.plugin-toolbar .plugin-more')?.focus({ preventScroll: true });
+          aboutOpen = false; render(); container.querySelector('.plugin-toolbar .plugin-more')?.focus({ preventScroll: true });
         }, 'plugin-back'), el(document, 'h3', '', t('plugins.ui.about')), el(document, 'p', 'settings-note', t('settings.plugins.intro')));
-        nodes.push(about); replaceContent(nodes); return;
+        nodes.push(about); replaceContent(nodes, saved); return;
       }
       if (selectedPluginId) {
         const plugin = list.plugins.find(item => item.id === selectedPluginId);
         if (plugin) {
           if (packagePreview) nodes.push(packagePanel());
-          nodes.push(pluginDetail(plugin)); replaceContent(nodes); return;
+          nodes.push(pluginDetail(plugin)); replaceContent(nodes, saved); return;
         }
         selectedPluginId = ''; diagnostics = false;
       }
@@ -895,13 +937,14 @@
           [t('settings.plugins.reload'), () => void run(() => api.reload())],
           [t('plugins.ui.about'), () => { aboutOpen = true; render(); content.querySelector('.plugin-back')?.focus({ preventScroll: true }); }]
         ], globalSwitch()));
-      nodes.push(actions);
+      if (previousToolbar) previousToolbar.replaceWith(actions);
+      else navigation.append(actions);
       if (packagePreview) nodes.push(packagePanel());
       if (!list.plugins.length) nodes.push(el(document, 'p', 'settings-note', t('settings.plugins.empty')));
       for (const plugin of [...list.plugins].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))) {
         nodes.push(pluginCard(plugin));
       }
-      replaceContent(nodes);
+      replaceContent(nodes, saved);
     }
 
     return {
