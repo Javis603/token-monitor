@@ -26,6 +26,8 @@ Source health probes the database file itself. An attachments-only `Data` direct
 - Tokscale excludes `agent-session` and legacy aggregate rows from the ledger to avoid counting transcript calls twice. Legacy-aggregate-only migration history is not included.
 - The pinned parser does not read `total_tokens`. Total-only invocations without a positive authoritative USD cost are omitted; a positive authoritative USD cost preserves the invocation, but its token count remains zero.
 
+The widget and headless agent also read token totals from this database after native session retention. This [token-only recovery](../usage-ledgers.md) covers total-only invocations, Agent ledger records and migration history with no matching invocation. It leaves the scanner's prices, costs, session attribution and history unchanged. The native parser limitations above still apply to those other surfaces.
+
 ## Verification
 
 ```bash

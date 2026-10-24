@@ -152,6 +152,8 @@ test('headless projection consumes the full-scan hint without publishing it', t 
       const archive = captureSessionUsageArchive({}, summary(100), AT);
       store.capture(summary(100), AT);
       const context = { sessionUsageArchiveEnabled, dryRun, projectsEnabled: false,
+        clients: 'claude', allTimeSince: '2024-01-01', readTokenLedgers: () => [],
+        applyLocalTokenLedgers: require('../../src/shared/usage/localTokenLedgers').applyLocalTokenLedgers,
         sessionUsageArchive: archive, sessionUsageArchiveStore: store, cursorUsageEvents: undefined,
         sessionUsageArchiveDate, updateSessionUsageArchive, applySessionUsageArchive,
         readSessionUsageArchiveSnapshot: () => archive };
@@ -179,6 +181,8 @@ test('headless capture failure preserves committed usage and publication until r
   const start = source.indexOf('function summaryWithSessionUsageArchive(');
   const body = source.slice(start, source.indexOf('\n}\n', start) + 3);
   const context = { sessionUsageArchiveEnabled: true, dryRun: false, projectsEnabled: false,
+    clients: 'claude', allTimeSince: '2024-01-01', readTokenLedgers: () => [],
+    applyLocalTokenLedgers: require('../../src/shared/usage/localTokenLedgers').applyLocalTokenLedgers,
     sessionUsageArchiveStore: store, sessionUsageArchiveDate, applySessionUsageArchive,
     console: { error() {} } };
   vm.runInNewContext(body, context);
