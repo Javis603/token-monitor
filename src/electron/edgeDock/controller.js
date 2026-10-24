@@ -97,6 +97,12 @@ function createEdgeDockController(deps) {
   const windows = { peek: null, rail: null, bubble: null };
   const ready = { peek: false, rail: false, bubble: false };
   const visibleTargets = { peek: false, rail: false, bubble: false };
+  // A hidden macOS rail or card waits off every display. When the system brings
+  // an all-Spaces window onto a newly entered Space it can present it for a
+  // moment without its alpha, so a window resting at opacity 0 flashed in full
+  // after each Space switch. `placed` keeps the bounds the layout wants.
+  const parked = { rail: false, bubble: false };
+  const placed = { rail: null, bubble: null };
   const fades = new Map();
   const backdrops = new Map();
   const intent = createEdgeDockIntent();
@@ -382,8 +388,42 @@ function createEdgeDockController(deps) {
       && (surface === 'peek' || (surface === 'rail' && refreshVisible))) {
       windows.peek?.moveTop?.();
     }
-    fade(win, visible ? 1 : 0, duration);
+    if (visible) unpark(surface);
+    fade(win, visible ? 1 : 0, duration, visible ? undefined : () => park(surface));
     if (platform === 'win32') reorderBackdrops();
+  }
+
+  function parks(surface) {
+    return platform === 'darwin' && Object.hasOwn(parked, surface);
+  }
+
+  function parkedBounds(bounds) {
+    let right = -Infinity;
+    for (const { bounds: d } of screen.getAllDisplays?.() || [display()]) right = Math.max(right, d.x + d.width);
+    return { x: right + bounds.width, y: bounds.y, width: bounds.width, height: bounds.height };
+  }
+
+  // Runs when a fade out finishes; a reveal in the meantime cancels the fade.
+  function park(surface) {
+    const win = windows[surface];
+    if (!parks(surface) || !alive(win) || visibleTargets[surface]) return;
+    parked[surface] = true;
+    win.setBounds(parkedBounds(placed[surface] || win.getBounds()));
+  }
+
+  // A display added or moved past the parked spot would put a parked window on
+  // screen again; a hidden card has no cell left to place it, so move both here.
+  function repark() {
+    for (const surface of Object.keys(parked)) {
+      const win = windows[surface];
+      if (parked[surface] && alive(win)) win.setBounds(parkedBounds(placed[surface] || win.getBounds()));
+    }
+  }
+
+  function unpark(surface) {
+    if (!parked[surface]) return;
+    parked[surface] = false;
+    if (placed[surface]) placeSurface(surface, placed[surface]);
   }
 
   // The handle's own visibility, kept beside the fade it drives: the page plays the
@@ -621,6 +661,7 @@ function createEdgeDockController(deps) {
       if (windows[surface] === win) {
         windows[surface] = null;
         ready[surface] = false;
+        if (Object.hasOwn(parked, surface)) parked[surface] = false;
       }
     });
     win.loadFile(path.join(rendererDir, 'edgeDock', 'index.html'), { query: { surface, platform } })
@@ -727,6 +768,12 @@ function createEdgeDockController(deps) {
   function placeSurface(surface, bounds) {
     const win = windows[surface];
     if (!alive(win) || !bounds) return;
+    if (parks(surface)) placed[surface] = { ...bounds };
+    if (parked[surface]) {
+      // The shape follows on unpark, from the bounds kept here.
+      win.setBounds(parkedBounds(bounds));
+      return;
+    }
     const { x, y, width, height } = bounds;
     const previousBounds = win.getBounds();
     if (previousBounds.x !== x || previousBounds.y !== y || previousBounds.width !== width || previousBounds.height !== height) {
@@ -1250,6 +1297,7 @@ function createEdgeDockController(deps) {
 
   function onDisplayChange() {
     if (!running) return;
+    repark();
     if (bubbleCell !== null) invalidateBubblePlacement();
     positionRail();
     if (bubbleCell !== null) render('bubble');
