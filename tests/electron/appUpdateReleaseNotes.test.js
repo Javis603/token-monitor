@@ -41,20 +41,27 @@ test('footer update control is one icon button with a hover release-note card', 
   assert.match(html, /class="app-update-popover-header">[\s\S]*id="appUpdatePopoverDismiss"[^>]*data-i18n="settings\.appUpdate\.dismiss"/);
 });
 
-test('footer update pill yields its space while utility actions are disclosed', () => {
+test('footer update pill keeps its own slot right of the utility actions', () => {
+  const html = read('index.html');
   const css = read('styles.css');
-  const start = css.indexOf('.footer:has(.utility-actions:hover) .update-pill,');
-  const end = css.indexOf('}', start);
-  assert.notEqual(start, -1);
-  assert.notEqual(end, -1);
-  const hiddenDuringDisclosure = css.slice(start, end);
 
-  assert.match(hiddenDuringDisclosure, /\.footer:has\(\.utility-actions :focus-visible\) \.update-pill/);
-  assert.match(hiddenDuringDisclosure, /\.refresh-button:is\(\.is-refreshing, \.is-refreshed, \.is-refresh-error\)/);
-  assert.match(hiddenDuringDisclosure, /\.shell\.settings-open \.footer \.update-pill/);
-  assert.match(hiddenDuringDisclosure, /opacity:\s*0/);
-  assert.match(hiddenDuringDisclosure, /pointer-events:\s*none/);
-  assert.doesNotMatch(hiddenDuringDisclosure, /display:\s*none/, 'the pill keeps its layout width so hover causes no movement');
+  const footer = html.match(/<footer class="footer">[\s\S]*?<\/footer>/)?.[0] || '';
+  assert.ok(footer, 'footer markup exists');
+  assert.ok(
+    footer.indexOf('id="footerActionSlot"') < footer.indexOf('id="appUpdatePill"'),
+    'the pill sits after the utility slot, so the Refresh disclosure cannot land on it',
+  );
+
+  // Refresh discloses left of the utility group, into the auto margin the view
+  // switcher leaves free. An update awaiting install must not be what fills it.
+  assert.doesNotMatch(css, /\.footer:has\(\.utility-actions:hover\) \.update-pill/);
+  assert.doesNotMatch(css, /\.footer:has\(\.utility-actions :focus-visible\) \.update-pill/);
+  assert.doesNotMatch(css, /\.refresh-button:is\(\.is-refreshing, \.is-refreshed, \.is-refresh-error\)\) \.update-pill/);
+  assert.match(css, /\.view-switcher \{[\s\S]*?margin-right: auto;/, 'the disclosure relies on the switcher auto margin staying free');
+  assert.match(css, /\.utility-actions \.refresh-button \{[\s\S]*?right: calc\(100% \+ 6px\);/, 'Refresh still discloses to the left of Settings');
+
+  // Settings has its own App Updates section, so the pill still steps aside there.
+  assert.match(css, /\.shell\.settings-open \.footer \.update-pill \{\n {2}opacity: 0;\n {2}pointer-events: none;\n\}/);
 });
 
 test('release notes render as text nodes and auto-open once for a new version', () => {

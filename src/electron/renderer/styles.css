@@ -6158,17 +6158,18 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .mode-button { width: auto; max-width: 52%; min-width: 0; height: 30px; padding: 0 10px; overflow: hidden; color: var(--muted); text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .mode-button:hover { border-color: rgba(115, 189, 245, 0.62); color: var(--blue); }
 .error { color: var(--red); }
-/* The footer update control is one icon button, the size of the settings gear
-   beside it. Its state reads from the icon (download, progress ring, restart),
-   and the version and release notes live in the hover card above it. */
+/* The footer update control is one icon button in its own slot after the
+   Settings/Refresh group. Refresh discloses into the auto margin to the left of
+   that group, so an update awaiting install keeps that slot instead of being
+   covered or faded out while Refresh is disclosed (issue #1190). Its state reads
+   from the icon (download, progress ring, restart), and the version and release
+   notes live in the hover card above it. */
 .update-pill {
   display: inline-flex;
   flex: 0 0 auto;
   transition: opacity 120ms ease;
 }
-.footer:has(.utility-actions:hover) .update-pill,
-.footer:has(.utility-actions :focus-visible) .update-pill,
-.footer:has(.refresh-button:is(.is-refreshing, .is-refreshed, .is-refresh-error)) .update-pill,
+/* Settings has its own App Updates section, so the pill still steps aside there. */
 .shell.settings-open .footer .update-pill {
   opacity: 0;
   pointer-events: none;
