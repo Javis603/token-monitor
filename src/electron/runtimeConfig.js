@@ -36,6 +36,7 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'historyIntervalMs',
   'sessionUsageArchiveEnabled',
   'projectsEnabled',
+  'claudeRemoteMirrorsExcluded',
   'wslScanEnabled'
 ]);
 // Functions and identity fields deliberately stay out: this key answers only
@@ -56,6 +57,7 @@ const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
   'watchTriggersCollection',
   'intervalRequiresActivity',
   'watchDebounceMs',
+  'claudeRemoteMirrorsExcluded',
   'wslScanEnabled'
 ]);
 const LIMITS_RECONFIGURE_KEYS = Object.freeze([
@@ -119,7 +121,8 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     watchTriggersCollection: context.watchTriggersCollection !== false,
     intervalRequiresActivity: Boolean(context.intervalRequiresActivity),
     watchDebounceMs: Number(context.watchDebounceMs || 1500),
-    wslScanEnabled: settings.wslScanEnabled !== false,
+    claudeRemoteMirrorsExcluded: settings.claudeRemoteMirrorsExcluded === true,
+    wslScanEnabled: settings.wslScanEnabled !== false && settings.claudeRemoteMirrorsExcluded !== true,
     onError: context.onError,
     logger: context.logger
   };

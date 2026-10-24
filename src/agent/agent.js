@@ -100,6 +100,7 @@ const usageOptions = {
   watchEnabled,
   watchDebounceMs,
   wslScanEnabled,
+  claudeRemoteMirrorsExcluded: parseBoolean(args['exclude-claude-remote-mirrors'] ?? process.env.TOKEN_MONITOR_CLAUDE_REMOTE_MIRRORS_EXCLUDED, false),
   onError: (error, reason) => console.error(`[${new Date().toISOString()}] (${reason}) ${error.message}`),
   logger: (message) => (dryRun ? console.error(message) : console.log(message))
 };

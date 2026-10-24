@@ -690,6 +690,7 @@ function defaultSettings() {
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
     sessionUsageArchiveEnabled: parseBoolean(process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true),
     wslScanEnabled: parseBoolean(process.env.TOKEN_MONITOR_WSL_SCAN, true),
+    claudeRemoteMirrorsExcluded: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_REMOTE_MIRRORS_EXCLUDED, false),
     exportAutoEnabled: false,
     exportDir: '',
     exportIntervalMs: 60 * 1000,
@@ -2679,6 +2680,7 @@ function readSettings() {
     if (saved.sessionUsageArchiveEnabled !== undefined) {
       merged.sessionUsageArchiveEnabled = parseBoolean(saved.sessionUsageArchiveEnabled, true);
     }
+    merged.claudeRemoteMirrorsExcluded = parseBoolean(merged.claudeRemoteMirrorsExcluded, false);
     if (saved.wslScanEnabled !== undefined) {
       merged.wslScanEnabled = parseBoolean(saved.wslScanEnabled, true);
     }
@@ -5136,6 +5138,7 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
       projectsEnabled: usageOptions.projectsEnabled,
       customScanPaths: usageOptions.customScanPaths,
       wslScanEnabled: usageOptions.wslScanEnabled,
+      claudeRemoteMirrorsExcluded: usageOptions.claudeRemoteMirrorsExcluded,
       wslSupported: process.platform === 'win32',
       hostname: os.hostname(),
       platform: `${process.platform}-${process.arch}`
@@ -5455,6 +5458,7 @@ function settingsForRenderer() {
   for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
   return {
     ...rendererSettings,
+    claudeRemoteMirrorsSupported: require('../../scripts/vendor/tokscale.json').capabilities?.claudeSourceExclusions === true,
     syncContentStatus: getSyncContentRuntime().status(),
     locale: trayMenuLocale(),
     ...redactedCredentials,
@@ -8086,6 +8090,7 @@ app.whenReady().then(() => {
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
       sessionUsageArchiveEnabled: parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true),
       wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, true),
+      claudeRemoteMirrorsExcluded: parseBoolean(patch.claudeRemoteMirrorsExcluded ?? settings.claudeRemoteMirrorsExcluded, false),
       collectionMode: normalizeCollectionMode(patch.collectionMode ?? settings.collectionMode),
       collectionIntervalMs: normalizeCollectionIntervalMs(patch.collectionIntervalMs ?? settings.collectionIntervalMs),
       syncUploadIntervalMs: normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs ?? settings.syncUploadIntervalMs),
