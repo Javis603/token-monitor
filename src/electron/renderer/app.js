@@ -5776,13 +5776,22 @@ function resetSettingsListSearch() {
   if (els.limitProviderSearchInput) els.limitProviderSearchInput.value = '';
 }
 
-function openSettingsPanel() {
+function openSettingsPanel(section) {
   if (!els.settingsPanel) return;
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   syncSettingsForm();
   ensureServiceStatusTicker();
+  if (section === 'notch') {
+    setSettingsSectionExpanded('general', true);
+    setSettingsAccordionExpanded(els.advancedSettingsGroup, els.advancedSettingsToggle, els.advancedSettingsDetails, true);
+    setSettingsAccordionExpanded(els.notchMoreOptionsGroup, els.notchMoreOptionsToggle, els.notchMoreOptionsDetails, true);
+    requestAnimationFrame(() => {
+      els.notchFeature?.scrollIntoView({ block: 'start' });
+      els.notchInput?.focus({ preventScroll: true });
+    });
+  }
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
 }

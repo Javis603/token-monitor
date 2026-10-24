@@ -6240,12 +6240,25 @@ function setTrayContentFromMenu(value) {
 }
 
 function setEdgeDockFromMenu(patch = {}) {
-  if (patch.notchEnabled !== undefined) settings.notchEnabled = parseBoolean(patch.notchEnabled, false);
   if (patch.edgeDockEnabled !== undefined) settings.edgeDockEnabled = parseBoolean(patch.edgeDockEnabled, false);
   if (patch.edgeDockMode !== undefined) settings.edgeDockMode = normalizeEdgeDockMode(patch.edgeDockMode);
   if (patch.edgeDockSide !== undefined) settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
   saveSettings();
   // Also re-syncs the dock itself (pushSettingsToRenderer → syncEdgeDock).
+  pushSettingsToRenderer();
+}
+
+function setNotchFromMenu(patch = {}) {
+  const normalizers = {
+    notchEnabled: value => parseBoolean(value, false),
+    notchHoverAction: normalizeNotchHoverAction,
+    notchSummaryEnabled: value => parseBoolean(value, true),
+    notchHideSummaryInFullScreen: value => parseBoolean(value, true),
+  };
+  for (const [key, normalize] of Object.entries(normalizers)) {
+    if (patch[key] !== undefined) settings[key] = normalize(patch[key]);
+  }
+  saveSettings();
   pushSettingsToRenderer();
 }
 
@@ -6274,9 +6287,9 @@ function setWindowPresentationFromMenu(value) {
   pushSettingsToRenderer();
 }
 
-function openSettingsFromTray() {
+function openSettingsFromTray(section) {
   focusExistingWindow();
-  sendMainWindowEvent('settings:open');
+  sendMainWindowEvent('settings:open', section === 'notch' ? 'notch' : undefined);
 }
 
 function openViewFromTray(viewId) {
@@ -6399,6 +6412,9 @@ function ensureTray() {
         edgeDockSupported: edgeDockSupported(process.platform),
         notchSupported: process.platform === 'darwin',
         notchEnabled: settings?.notchEnabled === true,
+        notchHoverAction: settings?.notchHoverAction,
+        notchSummaryEnabled: settings?.notchSummaryEnabled,
+        notchHideSummaryInFullScreen: settings?.notchHideSummaryInFullScreen,
         edgeDockEnabled: settings?.edgeDockEnabled === true,
         edgeDockMode: settings?.edgeDockMode,
         edgeDockSide: settings?.edgeDockSide,
@@ -6425,6 +6441,7 @@ function ensureTray() {
     onSetTrayContent: setTrayContentFromMenu,
     onSetWindowPresentation: setWindowPresentationFromMenu,
     onSetEdgeDock: setEdgeDockFromMenu,
+    onSetNotch: setNotchFromMenu,
     onSwitchCodexAccount: (accountId) => { void switchCodexAccountFromTray(accountId); },
     onOpenSettings: openSettingsFromTray,
     onQuit: requestAppQuit,
