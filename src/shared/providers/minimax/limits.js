@@ -27,9 +27,9 @@ const MINIMAX_TOKEN_PLAN_REMAINS_URL_EN = 'https://api.minimax.io/v1/token_plan/
 const MINIMAX_BALANCE_URL_CN = 'https://api.minimaxi.com/account/query_balance';
 const MINIMAX_BALANCE_URL_EN = 'https://api.minimax.io/account/query_balance';
 
-// MiniMax Code OAuth lane (billingMode 'code'). Hosts verified live on
-// 2026-10-24 against the CN account; the intl membership host follows the
-// account/platform naming but is not live-verified (see docs/providers/minimax.md).
+// MiniMax Code OAuth lane (billingMode 'code'). The CN hosts are the verified
+// spellings; the intl membership host follows the account/platform naming and
+// is unverified (see docs/providers/minimax.md).
 const MINIMAX_CODE_OAUTH_URL_CN = 'https://account.minimaxi.com/oauth2/token';
 const MINIMAX_CODE_OAUTH_URL_INTL = 'https://account.minimax.io/oauth2/token';
 const MINIMAX_CODE_MEMBERSHIP_URL_CN = 'https://agent.minimaxi.com/matrix/api/v1/commerce/get_membership_info';
@@ -335,9 +335,8 @@ function shouldTryNextMinimaxRegion(error) {
 // The desktop app stores its OAuth lease in `<mcode data dir>/auth/prod/<region
 // dir>/<record dir>/auth.json` as a nested `records` map whose keys contain
 // spaces. The refresh token is strictly single-use: every accepted refresh
-// rotates it, so a rotation whose write-back is lost kills the lease. All
-// protocol facts here were measured live on 2026-10-24; see
-// docs/providers/minimax.md for the contract.
+// rotates it, so a rotation whose write-back is lost kills the lease.
+// docs/providers/minimax.md holds the full protocol contract.
 
 // The target record is the desktop app's own (`clientId` `mcode-public`, key
 // `com.minimax.mcode.oauth.<env>.<region> <hash>`). Record directory names and
@@ -419,7 +418,7 @@ function minimaxCodeClientRunning(deps = {}) {
 
 // scope and audience MUST ride along (from the record itself): a refresh
 // without them still returns 200, but every resource server then rejects the
-// minted token — the trap that derailed the first live experiment.
+// minted token, so the omission cannot be caught from the refresh call alone.
 async function refreshMinimaxCodeToken(session, record, deps = {}) {
   const url = session.regionDir === 'cn' ? MINIMAX_CODE_OAUTH_URL_CN : MINIMAX_CODE_OAUTH_URL_INTL;
   const form = new URLSearchParams({
