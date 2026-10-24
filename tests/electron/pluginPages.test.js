@@ -169,7 +169,7 @@ test('real manager detached Rich mounts, retains while hidden and destroys revok
   sync(); assert.deepEqual(webUi.cached(), [first], 'hidden sync preserves eligible retained ownership');
   win.show(); sync(); await first.lifecycle;
   assert.equal(webUi.presentations()[0], first, 'show reuses the retained document');
-  call(first, 'resumed', first.epoch); assert.deepEqual(sync(), { mounted: ['body'] });
+  call(first, 'resumed', first.epoch); call(first, 'refreshed', first.epoch); assert.deepEqual(sync(), { mounted: ['body'] });
   f.setMainPages(['demo/first']); webUi.refreshPresentations();
   f.setMainPages([]); webUi.refreshPresentations();
   assert.equal(webUi.presentations()[0], first, 'main-menu removal does not revoke an explicitly opened window');
@@ -198,7 +198,7 @@ function pagingRich(t, { count = 2000, settingsGet = () => ({ values: { count: 1
   const api = createPluginCapabilities({ businessData: { ...business, query(...args) { queries++; return query ? query(...args) : business.query(...args); } } });
   const webUi = richController(f, {
     call(item, op, args) { return api.call(item.owner, op, args, {
-      auth: () => ({ ...f.manager.webDataAuth(item.ref), revision: item.revision, active: !item.dead && !item.parked && !item.resuming && !item.awaitingResume }),
+      auth: () => ({ ...f.manager.webDataAuth(item.ref), revision: item.revision, active: !item.dead && !item.parked && !item.resuming && (!item.awaitingResume || item.authorityRestored === true) }),
       settings: { get: settingsGet }, send() {}
     }); }, release: owner => api.release(owner)
   });
@@ -333,12 +333,58 @@ for (const action of ['hide', 'minimize']) test(`host ${action} parks Rich immed
   assert.throws(() => call(item, 'context'), /revoked/);
   await item.lifecycle;
   win.restore(); win.show(); sync(); await item.lifecycle;
-  call(item, 'resumed', item.epoch); sync();
+  call(item, 'resumed', item.epoch); call(item, 'refreshed', item.epoch); sync();
   assert.equal(webUi.presentations()[0], item);
   assert.equal(item.view.visible, true);
   // A delivered native event still works without an explicit host action.
   win.silentVisibility = false; win.hide();
   assert.equal(webUi.presentations().length, 0);
+});
+
+test('resumed Rich regains authority hidden, reveals on refreshed, and tags park-interrupted calls as suspended', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = realFixture(t), held = [], states = [];
+  const webUi = richController(f, {
+    call(item, op) {
+      states.push(item.awaitingResume && !item.authorityRestored ? 'hidden-unrestored' : 'authorized');
+      return op === 'data.subscribe' && !held.length ? new Promise((_resolve, reject) => held.push(reject)) : true;
+    },
+    release() {}
+  });
+  t.after(() => webUi.dispose());
+  f.pages.open('demo/first'); const win = f.windows[0]; win.emit('ready-to-show');
+  const event = { sender: win.webContents, senderFrame: win.webContents.mainFrame };
+  const input = { surface: 'page', visible: true, entries: [{ instance: 'body', viewRef: 'demo/first', ref: 'demo/first-rich', rect: { x: 10, y: 10, width: 400, height: 300 } }] };
+  const sync = () => f.handlers.get('plugins:presentation:sync')(event, input);
+  const call = (item, op, args) => f.handlers.get('plugins:web:call')({ sender: item.view.webContents, senderFrame: item.view.webContents.mainFrame }, op, args);
+  sync(); const item = webUi.presentations()[0];
+  item.view.webContents.emit('did-finish-load'); call(item, 'present'); sync();
+  const subscribe = { id: 'q1', query: { version: 1, resource: 'usage' } };
+  const interrupted = call(item, 'data.subscribe', subscribe); await Promise.resolve();
+  win.hide(); await item.lifecycle;
+  assert.equal((await interrupted).error.code, 'capability-suspended', 'parking is a lifecycle interruption, not an author error');
+  assert.equal((await call(item, 'data.subscribe', subscribe)).error.code, 'capability-suspended', 'a frozen document is suspended, not revoked');
+  win.show(); sync(); await item.lifecycle;
+  assert.equal((await call(item, 'data.subscribe', subscribe)).error.code, 'capability-suspended', 'authority returns only with the resume epoch');
+  assert.equal(call(item, 'refreshed', item.epoch), false, 'refresh cannot skip the authority step');
+  assert.equal(call(item, 'resumed', item.epoch), true);
+  assert.equal((await call(item, 'data.subscribe', subscribe)).ok, true, 'replayed subscriptions run before reveal');
+  assert.equal(states.at(-1), 'authorized');
+  assert.deepEqual(sync(), { mounted: [] }); assert.equal(item.view.visible, false, 'retained DOM stays hidden until refreshed');
+  assert.equal(call(item, 'refreshed', item.epoch + 1), false);
+  assert.equal(call(item, 'refreshed', item.epoch), true);
+  sync(); assert.equal(item.view.visible, true);
+  // A refresh that misses the deadline discards the stale copy and asks the
+  // host to mount a fresh document rather than revealing retained DOM.
+  win.hide(); await item.lifecycle; win.show(); sync(); await item.lifecycle;
+  call(item, 'resumed', item.epoch);
+  const readies = () => f.messages.filter(message => message.channel === 'plugins:presentation:ready').length, before = readies();
+  t.mock.timers.tick(750);
+  assert.equal(item.dead, true); assert.deepEqual(webUi.cached(), []);
+  assert.equal(readies(), before + 1, 'the host is asked to resynchronize');
+  assert.equal(f.messages.some(message => message.channel === 'plugins:presentation:failed'), false, 'a stale cache is not a load failure');
+  sync(); const fresh = webUi.presentations()[0];
+  assert.ok(fresh && fresh !== item, 'the next host sync loads a fresh document');
 });
 
 for (const action of ['hide', 'minimize']) test(`host ${action} reconciles detached page worker demand without native events`, () => {
@@ -386,7 +432,8 @@ for (const action of ['hide', 'minimize']) test(`host ${action} also parks origi
   sync(); assert.equal(webUi.current(), null);
   await item.lifecycle;
   win.restore(); win.show(); sync(); await item.lifecycle;
-  f.handlers.get('plugins:web:call')(childEvent, 'resumed', item.epoch); sync();
+  f.handlers.get('plugins:web:call')(childEvent, 'resumed', item.epoch);
+  f.handlers.get('plugins:web:call')(childEvent, 'refreshed', item.epoch); sync();
   assert.equal(webUi.current(), item);
   assert.equal(item.view.visible, true);
 });

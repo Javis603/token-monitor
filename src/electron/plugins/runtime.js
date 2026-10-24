@@ -171,7 +171,7 @@ function createPluginRuntime({
     call(item, op, args) {
       return capabilities.call(item.owner, op, args, {
         auth: () => {
-          try { return { ...manager.webDataAuth(item.ref), revision: item.revision, active: !item.dead && !item.parked && !item.resuming && !item.awaitingResume }; }
+          try { return { ...manager.webDataAuth(item.ref), revision: item.revision, active: !item.dead && !item.parked && !item.resuming && (!item.awaitingResume || item.authorityRestored === true) }; }
           catch { return { pluginId: item.pluginId, active: false, permissions: [] }; }
         },
         settings: manager.webAuthorSettings(item.ref),

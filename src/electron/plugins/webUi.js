@@ -140,7 +140,7 @@ function createWebUi({ electron, manager, bus, isMainSender, surfaceContext = ()
   function resume(item) {
     parked.delete(item); clearTimeout(item.expiry); item.parked = false;
     item.capabilityLane = createCapabilityLane();
-    item.awaitingResume = true; mounted.set(item.key, item);
+    item.awaitingResume = true; item.authorityRestored = false; mounted.set(item.key, item);
     transition(item, 'active', epoch => {
       // Capability, placement and host ownership are rechecked at adoption;
       // changes during the async thaw also destroy the retained document.
@@ -162,18 +162,40 @@ function createWebUi({ electron, manager, bus, isMainSender, surfaceContext = ()
     if (charge && !item.limiter.take()) { stop('rate-limit', item.key); throw new Error('web UI rate limit'); }
     return item;
   }
+  // Lifecycle interruptions are not author errors: the bridge keeps the
+  // subscription intent and replays it once the document is restored.
+  const suspendedReply = () => ({ __tmCapability: 1, ok: false, error: capabilityError(Object.assign(new Error('capability suspended'), { code: 'capability-suspended' })) });
+  function suspended(event) {
+    const item = allItems().find(item => item.view.webContents === event.sender);
+    return !!item && !item.dead && event.senderFrame === event.sender.mainFrame && (item.parked || item.resuming || item.awaitingResume && !item.authorityRestored);
+  }
   function reading(item) {
     return Object.fromEntries(item.sources.map(source => [source, bus.read(manager.webSource(item.ref, source))]));
   }
   ipcMain.handle('plugins:web:call', (event, op, args) => {
     const request = isCapabilityRequest(op, args);
+    if (request && suspended(event)) return suspendedReply();
     const item = allowed(event, !request);
     if (op === 'resumed') {
-      if (!item.awaitingResume || args !== item.epoch) return false;
-      item.awaitingResume = false; clearTimeout(item.lifecycleDeadline);
+      // Authority returns first so the bridge can replay subscriptions; the
+      // retained DOM stays hidden until their initial snapshots have landed.
+      if (!item.awaitingResume || item.authorityRestored || args !== item.epoch) return false;
+      item.authorityRestored = true; clearTimeout(item.lifecycleDeadline);
       // Lifecycle control is held only while parked/thawing, so ordinary
       // developer tools remain available on an active document.
       if (item.ownsDebugger) { item.ownsDebugger = false; item.view.webContents.debugger.detach(); }
+      // A slow refresh must not reveal stale DOM: discard the cached copy and
+      // let the host load a fresh document instead.
+      item.lifecycleDeadline = setTimeout(() => {
+        if (item.dead || !item.awaitingResume) return;
+        destroy(item);
+        if (!item.host.isDestroyed()) item.host.send(channel(item, 'ready'));
+      }, LIFECYCLE_TIMEOUT_MS);
+      return true;
+    }
+    if (op === 'refreshed') {
+      if (!item.awaitingResume || !item.authorityRestored || args !== item.epoch) return false;
+      item.awaitingResume = false; item.authorityRestored = false; clearTimeout(item.lifecycleDeadline);
       item.host.send(channel(item, 'ready'));
       return true;
     }
@@ -202,7 +224,7 @@ function createWebUi({ electron, manager, bus, isMainSender, surfaceContext = ()
         if (item.dead || item.parked || item.epoch !== epoch || mounted.get(item.key) !== item) throw new Error('document capability revoked');
         authorized(item);
         return { __tmCapability: 1, ok: true, value };
-      }).catch(error => ({ __tmCapability: 1, ok: false, error: capabilityError(error) }));
+      }).catch(error => item.epoch !== epoch && !item.dead ? suspendedReply() : { __tmCapability: 1, ok: false, error: capabilityError(error) });
     }
     if (op === 'subscribe') {
       if (item.target === 'settings') throw new Error('settings documents use the business data API');
@@ -221,7 +243,7 @@ function createWebUi({ electron, manager, bus, isMainSender, surfaceContext = ()
   });
   const offSettings = manager.onAuthorSettings?.((pluginId, value) => {
     for (const item of mounted.values()) {
-      if (item.pluginId !== pluginId || item.dead || item.resuming || item.awaitingResume) continue;
+      if (item.pluginId !== pluginId || item.dead || item.resuming || item.awaitingResume && !item.authorityRestored) continue;
       try { authorized(item); item.view.webContents.send('plugins:web:settings', publicSettings(value)); } catch { destroy(item, 'unavailable'); }
     }
   });

@@ -31,26 +31,64 @@ test('Worker idle rejects pending calls, retains subscriptions, resumes with cur
   off();
 });
 
-test('Rich preload unwraps errors and waits for resumed acknowledgement before refreshing subscriptions/settings', async () => {
-  const listeners = new Map(), calls = []; let tm, resume;
+function richPreload(reply) {
+  const listeners = new Map(), calls = []; let tm;
   const ipcRenderer = {
     on(name, listener) { const entries = listeners.get(name) || []; entries.push(listener); listeners.set(name, entries); },
     removeListener() {},
-    invoke(channel, op) {
-      calls.push(op);
-      if (op === 'resumed') return new Promise(resolve => { resume = resolve; });
-      if (op === 'settings.update') return Promise.resolve({ __tmCapability: 1, ok: false, error: { message: 'invalid', code: 'invalid-settings-values', fields: { count: 'range' } } });
-      return Promise.resolve({ __tmCapability: 1, ok: true, value: op === 'settings.get' ? { revision: 7 } : true });
-    }
+    invoke(channel, op, args) { calls.push(op); return reply(op, args); }
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../src/electron/plugins/webPreload.js'), 'utf8'), {
     require: () => ({ ipcRenderer, contextBridge: { exposeInMainWorld(_name, value) { tm = value; } } }),
     window: { addEventListener() {} }, clearTimeout, setTimeout
   });
+  const emit = (name, value) => { for (const listener of listeners.get(name) || []) listener({}, value); };
+  return { tm: () => tm, calls, emit };
+}
+const ok = value => Promise.resolve({ __tmCapability: 1, ok: true, value });
+const failed = (code, message = code) => Promise.resolve({ __tmCapability: 1, ok: false, error: { message, code, fields: {} } });
+
+test('Rich preload unwraps errors and reveals a resumed document only after replayed subscriptions deliver', async () => {
+  let resume;
+  const bridge = richPreload(op => {
+    if (op === 'resumed') return new Promise(resolve => { resume = resolve; });
+    if (op === 'settings.update') return Promise.resolve({ __tmCapability: 1, ok: false, error: { message: 'invalid', code: 'invalid-settings-values', fields: { count: 'range' } } });
+    return ok(op === 'settings.get' ? { revision: 7 } : true);
+  });
+  const tm = bridge.tm(), { calls } = bridge;
   await assert.rejects(tm.settings.update({}), error => error.code === 'invalid-settings-values' && error.fields.count === 'range');
   const received = []; tm.settings.onChange(() => { throw new Error('observer'); }); tm.settings.onChange(value => received.push(value));
-  tm.data.subscribe({}, () => {}); await flush(); calls.length = 0;
-  for (const listener of listeners.get('plugins:web:resume')) listener({}, 3);
+  const snapshots = []; tm.data.subscribe({}, value => snapshots.push(value)); await flush(); calls.length = 0;
+  bridge.emit('plugins:web:resume', 3);
   assert.deepEqual(calls, ['resumed']); resume(true); await flush();
   assert.deepEqual(calls, ['resumed', 'data.subscribe', 'settings.get']); assert.equal(received[0].revision, 7);
+  // Registration alone is not fresh data: the reveal waits for the snapshot.
+  await flush(); assert.equal(calls.includes('refreshed'), false);
+  bridge.emit('plugins:web:business', { id: 'q1', value: { type: 'snapshot', value: 'fresh' } }); await flush();
+  assert.deepEqual(calls.slice(-1), ['refreshed']); assert.deepEqual(snapshots, [{ type: 'snapshot', value: 'fresh' }]);
+});
+
+test('Rich preload keeps a subscription interrupted by parking and replays it on resume', async () => {
+  let pending;
+  const bridge = richPreload(op => {
+    if (op === 'data.subscribe' && !pending) return new Promise(resolve => { pending = resolve; });
+    return ok(true);
+  });
+  const tm = bridge.tm(), { calls } = bridge;
+  const events = []; tm.data.subscribe({ version: 1, resource: 'sessions' }, value => events.push(value));
+  await flush(); pending({ __tmCapability: 1, ok: false, error: { message: 'capability suspended', code: 'capability-suspended', fields: {} } }); await flush();
+  assert.deepEqual(events, [], 'a lifecycle interruption is not an author-visible error');
+  calls.length = 0; bridge.emit('plugins:web:resume', 2); await flush();
+  assert.deepEqual(calls, ['resumed', 'data.subscribe']);
+  bridge.emit('plugins:web:business', { id: 'q1', value: { type: 'snapshot', value: 1 } }); await flush();
+  assert.deepEqual(events, [{ type: 'snapshot', value: 1 }]); assert.equal(calls.at(-1), 'refreshed');
+});
+
+test('Rich preload reports a real subscription failure once and does not wait on it during resume', async () => {
+  const bridge = richPreload(op => op === 'data.subscribe' ? failed('denied') : ok(true));
+  const tm = bridge.tm(), { calls } = bridge;
+  const events = []; tm.data.subscribe({}, value => events.push(value)); await flush();
+  assert.deepEqual(events.map(event => event.code), ['denied']);
+  calls.length = 0; bridge.emit('plugins:web:resume', 4); await flush();
+  assert.deepEqual(calls, ['resumed', 'refreshed']);
 });
