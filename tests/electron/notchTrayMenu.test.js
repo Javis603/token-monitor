@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { EventEmitter } = require('node:events');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
@@ -87,30 +88,49 @@ test('Notch quick settings translate every menu level in all supported locales',
   }
 });
 
-test('Notch Settings command opens and focuses the controls behind collapsed disclosures', () => {
-  let target;
-  notchMenu({}, { onOpenSettings: section => { target = section; } }).submenu.at(-1).click();
-  assert.equal(target, 'notch');
-  const sent = [];
-  const main = read('main.js');
-  const mainContext = { focusExistingWindow: () => sent.push('focus'), sendMainWindowEvent: (...args) => sent.push(args) };
-  vm.runInNewContext(functionSource(main, 'openSettingsFromTray', 'openViewFromTray'), mainContext);
-  mainContext.openSettingsFromTray(target);
-  assert.deepEqual(sent, ['focus', ['settings:open', 'notch']]);
+test('Notch Settings command reaches the renderer through the registered preload listener', () => {
+  const ipcRenderer = new EventEmitter();
+  const rendererWindow = {};
+  vm.runInNewContext(read('preload.js'), {
+    require: name => {
+      assert.equal(name, 'electron');
+      return {
+        ipcRenderer,
+        contextBridge: { exposeInMainWorld: (key, api) => { rendererWindow[key] = api; } }
+      };
+    }
+  });
 
   const events = [];
   const element = () => ({ classList: { remove() {}, add() {} }, style: {} });
   const context = {
+    window: rendererWindow,
     els: { settingsPanel: element(), shell: element(), notchFeature: { scrollIntoView: () => events.push('scroll') }, notchInput: { focus: () => events.push('focus') } },
     state: {}, syncSettingsForm: () => events.push('sync'), ensureServiceStatusTicker() {},
     setSettingsSectionExpanded: (...args) => events.push(args),
     setSettingsAccordionExpanded: (...args) => events.push(args.at(-1)),
     requestAnimationFrame: callback => callback()
   };
-  vm.runInNewContext(functionSource(read('renderer/app.js'), 'openSettingsPanel', 'openViewFromTray'), context);
-  context.openSettingsPanel(target);
+  const renderer = read('renderer/app.js');
+  const registration = renderer.split('\n').find(line => line.startsWith('window.tokenMonitor.onOpenSettings?.('));
+  assert.ok(registration, 'renderer must register its settings-open handler');
+  vm.runInNewContext(`${functionSource(renderer, 'openSettingsPanel', 'openViewFromTray')}\n${registration}`, context);
+  assert.equal(ipcRenderer.listenerCount('settings:open'), 1);
+
+  const sent = [];
+  const mainContext = {
+    focusExistingWindow: () => sent.push('focus'),
+    sendMainWindowEvent: (channel, section) => {
+      sent.push([channel, section]);
+      ipcRenderer.emit(channel, {}, section);
+    }
+  };
+  vm.runInNewContext(functionSource(read('main.js'), 'openSettingsFromTray', 'openViewFromTray'), mainContext);
+  notchMenu({}, { onOpenSettings: mainContext.openSettingsFromTray }).submenu.at(-1).click();
+  assert.deepEqual(sent, ['focus', ['settings:open', 'notch']]);
   assert.deepEqual(events, ['sync', ['general', true], true, true, 'scroll', 'focus']);
+
   events.length = 0;
-  context.openSettingsPanel();
+  mainContext.openSettingsFromTray();
   assert.deepEqual(events, ['sync']);
 });
