@@ -126,6 +126,7 @@ test('every usage structural setting maps to an effective fingerprint change', (
   const cases = {
     clients: { clients: 'claude,codex' },
     codexDotsEnabled: { codexDotsEnabled: true },
+    cursorBillingAccountIds: { cursorBillingAccountIds: ['work'] },
     customScanPaths: { customScanPaths: { claude: [path.resolve('tmp', 'claude-sessions')] } },
     allTimeSince: { allTimeSince: '2025-01-01' },
     collectionIntervalMs: {

@@ -398,10 +398,11 @@
     const stable = typeof options.stableColor === 'function' ? options.stableColor : stableColor;
     const palette = options.fallbackColors || fallbackColors;
     const client = textValue(session?.client) || 'reasonix';
+    const sessionTitle = client === 'cursor' ? sessionTitleForDisplay(session) : '';
     const { clientLabel, titleParts, modelLabel } = sessionTitleParts(
       { ...session, client },
       labels,
-      client === 'codex' ? 'Codex' : client === 'claude' ? 'Claude Code' : 'Reasonix',
+      client === 'codex' ? 'Codex' : client === 'claude' ? 'Claude Code' : client === 'cursor' ? 'Cursor' : 'Reasonix',
       session?.model
     );
     // Native Reasonix prompt totals include cache hits; explicit misses win,
@@ -410,7 +411,7 @@
     const cacheInput = session?.cacheMissTokens ?? Math.max(0, finiteNumber(session?.promptTokens) - cacheRead);
     // Positive explicit misses prove a cold-cache reading; prompt-only or
     // all-zero counters do not prove that cache telemetry is available.
-    const cacheLabel = cacheHitLabel({
+    const cacheLabel = cacheHitLabel(client === 'cursor' ? session : {
       inputTokens: cacheInput,
       cacheReadTokens: cacheRead,
       cacheWriteTokens: session?.cacheWriteTokens
@@ -443,12 +444,13 @@
     return {
       key: `session:${key}`,
       kind: 'session',
-      name: titleParts.join(' · '),
+      name: sessionTitle || titleParts.join(' · '),
       modelLabel,
       modelTooltipEntries: sessionModelTooltipEntries(session, {
         unattributedLabel: options.unattributedLabel
       }),
-      subtitle: subtitleParts.join(' · '),
+      subtitle: (sessionTitle ? titleParts : subtitleParts).join(' · '),
+      ...(sessionTitle ? { activity: subtitleParts.join(' · '), titled: true } : {}),
       activitySummary: subtitleParts.join(' · '),
       activityTime,
       usageMetrics,

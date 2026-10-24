@@ -5,6 +5,15 @@ const test = require('node:test');
 const { clientGradient, projectBreakdownIncomplete, projectRowsForPeriod } = require('../../src/electron/renderer/projectRows');
 const { projectModelAliasStats } = require('../../src/electron/modelAliasPresentation');
 
+test('Cursor native projects retain real identity when usage is unavailable', () => {
+  const projects = { exact: { label: 'Exact', tokens: 35, clients: { cursor: 35 } },
+    unknown: { label: 'Unknown', tokens: 0, clients: { cursor: 0 }, tokenDataUnavailable: true } };
+  const rows = projectRowsForPeriod({}, { nativeProjects: projects });
+  assert.equal(rows.find(row => row.name === 'Exact').value, 35);
+  assert.equal(rows.find(row => row.name === 'Unknown').tokenDataUnavailable, true);
+  assert.deepEqual(rows.find(row => row.name === 'Unknown').clients, ['cursor']);
+});
+
 test('projectBreakdownIncomplete only flags the all-time project breakdown', () => {
   const stats = { projectsIncomplete: true };
   assert.equal(projectBreakdownIncomplete(stats, 'allTime'), true);

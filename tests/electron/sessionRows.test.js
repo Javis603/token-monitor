@@ -18,6 +18,18 @@ const {
   sessionRowsForPeriod
 } = require('../../src/electron/renderer/sessionRows');
 
+test('Cursor native rows display the real title and retain unavailable usage', () => {
+  const session = { client: 'cursor', sessionId: 'cursor-local', title: 'Real conversation', model: 'grok-4.7-high',
+    tokenDataUnavailable: true, totalTokens: 0, lastUsedAt: '2026-10-21T01:00:00Z' };
+  const [row] = sessionRowsForPeriod({}, { clientLabels: { cursor: 'Cursor' }, nativeSessions: { 'cursor:cursor-local': session }, now: new Date('2026-10-21T02:00:00Z') });
+  assert.equal(row.name, 'Real conversation');
+  assert.equal(row.clientLabel, 'Cursor');
+  assert.equal(row.tokenDataUnavailable, true);
+  assert.match(row.subtitle, /Cursor/);
+  const [hidden] = sessionRowsForPeriod({}, { nativeSessions: { 'cursor:cursor-local': { ...session, title: '' } } });
+  assert.doesNotMatch(hidden.name, /Real conversation/);
+});
+
 test('archived usage joins only matching active native state while retaining its token and cost values', () => {
   const now = new Date('2026-10-10T00:00:00Z');
   const key = 'claude:resumed';

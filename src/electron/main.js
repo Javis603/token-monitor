@@ -25,6 +25,8 @@ const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
 const tokenNumberAnimationApi = require('./tokenNumberAnimation');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
+const { billingItemsPath, billingStatus, disconnectGrokBilling, openGrokDashboardWindow,
+  refreshGrokBillingItems, startGrokBillingRefresh } = require('./grokDashboardBilling');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
 const { createMimoExchangeFetch } = require('./providers/mimo/exchangeFetch');
@@ -717,6 +719,7 @@ function defaultSettings() {
     limitsRefreshMode: normalizeLimitsRefreshMode(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE),
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
     cursorManualAccountIds: [],
+    cursorBillingAccountIds: [],
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
@@ -838,6 +841,9 @@ function syncUploadIntervalMs() {
 
 function electronUsageConfig(errorPrefix) {
   return usageConfigFromSettings(settings, {
+    cursorBillingAccounts: selectedCursorBillingAccounts().map(account => ({
+      accountId: account.id, filePath: billingItemsPath(app.getPath('userData'), account.id)
+    })),
     agentVersion: appVersion(),
     agentRuntime: 'electron-widget',
     commandTimeoutMs: 120 * 1000,
@@ -2736,6 +2742,7 @@ function readSettings() {
     merged.vendorColors = migrateVendorColors(merged.vendorColors);
     merged.cursorDisabledAccountIds = normalizeCursorDisabledAccountIds(merged.cursorDisabledAccountIds);
     merged.cursorManualAccountIds = normalizeCursorAccountIds(merged.cursorManualAccountIds);
+    merged.cursorBillingAccountIds = normalizeCursorAccountIds(merged.cursorBillingAccountIds);
     merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
     delete merged.workbuddyEndpoint;
@@ -6813,6 +6820,13 @@ async function fetchStats(options = {}) {
     const refreshUsage = options?.forceUsage === true
       || options?.forceHistory === true
       || options?.forceSelfSync === true;
+    if (options.forceSelfSync && clientsCsvForSetting(settings.clients).split(',').includes('cursor')) {
+      try {
+        await refreshCursorBillingAccounts({ todayOnly: true });
+      } catch (error) {
+        console.log(`[grok-dashboard] manual refresh failed: ${error.message}`);
+      }
+    }
     await runManualDeviceRefresh(deviceRuntimeHandle, {
       refreshUsage,
       forceHistory: Boolean(options?.forceHistory),
@@ -7666,6 +7680,46 @@ let opencodeStatusCache = { value: null, at: 0 };
 const CURSOR_STATUS_TTL_MS = 30 * 1000;
 const CURSOR_EXTERNAL_AGENT_ERROR = 'Stop the headless agent before managing Cursor accounts.';
 
+function selectedCursorBillingAccounts() {
+  const selected = new Set(normalizeCursorAccountIds(settings?.cursorBillingAccountIds));
+  return cursorAuth.listAccounts().filter(account => selected.has(account.id));
+}
+
+async function resolveCursorBillingAccount(accountId) {
+  const account = cursorAuth.listAccounts().find(value => value.id === accountId);
+  if (!account) throw new Error('Cursor account not found');
+  const result = await cursorProbe.requestJson(cursorProbe.AUTH_ME_URL, account.sessionToken, {
+    signal: AbortSignal.timeout(15000)
+  });
+  const email = result.ok && cursorProbe.parseUserInfo(result.json).email;
+  if (!email) throw new Error('Sign in to Cursor again before connecting billing recovery');
+  return { accountId: account.id, expectedEmail: email,
+    isCurrent: () => selectedCursorBillingAccounts().some(value => value.id === account.id && value.sessionToken === account.sessionToken) };
+}
+
+function refreshCursorBillingUsage() {
+  return deviceRuntimeHandle?.tick('cursor-billing', { forceHistory: true, todayOnly: true });
+}
+
+function publishCursorBillingStatus(accountId, status) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('cursor:billingStatusChanged', { accountId, status });
+  }
+}
+
+async function refreshCursorBillingAccounts(options = {}) {
+  if (!ownsUsageRuntime()) return;
+  for (const account of selectedCursorBillingAccounts()) {
+    try {
+      const resolved = await resolveCursorBillingAccount(account.id);
+      await refreshGrokBillingItems({ session, userDataPath: app.getPath('userData'), ...resolved,
+        onStatusChanged: publishCursorBillingStatus, ...options });
+    } catch (error) {
+      console.log(`[grok-dashboard] refresh unavailable: ${error.message}`);
+    }
+  }
+}
+
 function normalizeManualCookie(input) {
   return cursorAuth.normalizeCursorSessionToken(input);
 }
@@ -7689,7 +7743,9 @@ async function cursorStatusValue({ discover = false } = {}) {
       label: account.label || '',
       membershipType: probeResult.ok ? probeResult.usage.membershipType || '' : '',
       expired: !probeResult.ok && probeResult.error?.kind === 'unauthorized',
-      error: probeResult.ok ? '' : probeResult.error?.message || ''
+      error: probeResult.ok ? '' : probeResult.error?.message || '',
+      billingEnabled: normalizeCursorAccountIds(settings?.cursorBillingAccountIds).includes(account.id),
+      billingStatus: billingStatus(account.id)
     };
   }));
   return {
@@ -7765,6 +7821,25 @@ app.whenReady().then(() => {
   });
   applyMacActivationPolicy();
   createWindow();
+  const grokDashboardLogger = (message) => console.log(`[grok-dashboard] ${message}`);
+  const stopGrokBillingRefresh = startGrokBillingRefresh({
+    BrowserWindow,
+    session,
+    userDataPath: app.getPath('userData'),
+    logger: grokDashboardLogger,
+    isEnabled: () => ownsUsageRuntime() && clientsCsvForSetting(settings.clients).split(',').includes('cursor'),
+    getAccounts: async () => {
+      const accounts = [];
+      for (const account of selectedCursorBillingAccounts()) {
+        try { accounts.push(await resolveCursorBillingAccount(account.id)); }
+        catch (error) { grokDashboardLogger(error.message); }
+      }
+      return accounts;
+    },
+    onRefresh: refreshCursorBillingUsage,
+    onStatusChanged: publishCursorBillingStatus
+  });
+  app.once('before-quit', stopGrokBillingRefresh);
   syncLoginItemSettingFromOs();
   configureWindowToggleShortcut();
   // The retired in-app npm updater kept upstream tokscale builds here; the
@@ -7948,6 +8023,8 @@ app.whenReady().then(() => {
     delete normalizedPatch.subscriptionsShared;
     delete normalizedPatch.subscriptionsHub;
     delete normalizedPatch.subscriptionsUpdatedAt;
+    // Billing sessions can only be enabled through the explicit account action.
+    delete normalizedPatch.cursorBillingAccountIds;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.customScanPaths !== undefined) {
       const limitError = customScanPathLimitError(patch.customScanPaths);
@@ -8612,10 +8689,45 @@ app.whenReady().then(() => {
       cursorStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'cursor' }, 'login', { clear: true });
       bestEffortTrackedUsageRefresh('cursor', { forceSync: true });
+      reconfigureUsageRuntimeForMode();
       return { ok: true, email: probeResult.user.email, status: await cursorStatusValue() };
     } catch (err) {
       return { ok: false, error: err.message };
     }
+  });
+  ipcMain.handle('cursor:connectBilling', async (_event, accountId) => {
+    if (!ownsUsageRuntime() || isExternalAgentActive()) {
+      return { ok: false, error: CURSOR_EXTERNAL_AGENT_ERROR };
+    }
+    try {
+      const resolved = await resolveCursorBillingAccount(String(accountId || ''));
+      if (!ownsUsageRuntime() || isExternalAgentActive()) throw new Error(CURSOR_EXTERNAL_AGENT_ERROR);
+      settings.cursorBillingAccountIds = normalizeCursorAccountIds([
+        ...normalizeCursorAccountIds(settings.cursorBillingAccountIds), resolved.accountId
+      ]);
+      saveSettings({ throwOnError: true });
+      openGrokDashboardWindow({ BrowserWindow, session, userDataPath: app.getPath('userData'), ...resolved,
+        onRefresh: refreshCursorBillingUsage, onStatusChanged: publishCursorBillingStatus });
+      reconfigureUsageRuntimeForMode();
+      cursorStatusCache = { value: null, at: 0 };
+      return { ok: true, status: await cursorStatusValue() };
+    } catch (error) { return { ok: false, error: error.message }; }
+  });
+  ipcMain.handle('cursor:disconnectBilling', async (_event, accountId) => {
+    if (!ownsUsageRuntime() || isExternalAgentActive()) {
+      return { ok: false, error: CURSOR_EXTERNAL_AGENT_ERROR };
+    }
+    try {
+      const id = String(accountId || '');
+      if (!cursorAuth.listAccounts().some(account => account.id === id)) throw new Error('Cursor account not found');
+      settings.cursorBillingAccountIds = normalizeCursorAccountIds(settings.cursorBillingAccountIds).filter(value => value !== id);
+      saveSettings({ throwOnError: true });
+      const disconnected = disconnectGrokBilling({ session, accountId: id });
+      reconfigureUsageRuntimeForMode();
+      await disconnected;
+      cursorStatusCache = { value: null, at: 0 };
+      return { ok: true, status: await cursorStatusValue() };
+    } catch (error) { return { ok: false, error: error.message }; }
   });
   ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
@@ -8684,12 +8796,16 @@ app.whenReady().then(() => {
         return { ok: false, error: 'Only manually added Cursor accounts can be removed' };
       }
       await cursorAuth.runCursorLogout({ accountId: removeId });
+      settings.cursorBillingAccountIds = normalizeCursorAccountIds(settings.cursorBillingAccountIds).filter(id => id !== removeId);
       const disabled = normalizeCursorDisabledAccountIds(settings.cursorDisabledAccountIds)
         .filter((id) => id !== removeId);
       const limitsChanged = disabled.length !== settings.cursorDisabledAccountIds.length;
       settings.cursorDisabledAccountIds = disabled;
       settings.cursorManualAccountIds = [...manual].filter((id) => id !== removeId);
       saveSettings({ throwOnError: true });
+      const disconnected = disconnectGrokBilling({ session, accountId: removeId });
+      reconfigureUsageRuntimeForMode();
+      await disconnected;
       if (limitsChanged) {
         deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
       }

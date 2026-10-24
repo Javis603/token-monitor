@@ -118,12 +118,13 @@
       project.name = deterministicProjectLabel(project.name, name);
       const tokens = Math.max(0, Number(entry.tokens || 0));
       project.value += tokens;
+      if (entry.tokenDataUnavailable === true) project.tokenDataUnavailable = true;
       // Reasonix native project telemetry is local reference data only. Its
       // reported session cost must never become generic project cost.
       addModelTokens(project.modelTokens, entry.models, tokens);
       for (const [client, value] of Object.entries(entry.clients || {})) {
         const tokens = Math.max(0, Number(value || 0));
-        if (tokens <= 0) continue;
+        if (tokens <= 0 && entry.tokenDataUnavailable !== true) continue;
         project.clients.add(client);
         project.clientTokens[client] = (project.clientTokens[client] || 0) + tokens;
       }
@@ -183,6 +184,7 @@
         .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
       return {
         ...project,
+        ...(project.tokenDataUnavailable ? { tokenDataUnavailable: project.value <= 0 } : {}),
         ...(shareBy === 'model' ? { modelTokens: boundedShares } : { clientTokens: boundedShares }),
         clients: Array.from(project.clients).sort(),
         subtitle: '',

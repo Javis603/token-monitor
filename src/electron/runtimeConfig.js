@@ -27,6 +27,7 @@ const MODE_STRUCTURAL_KEYS = Object.freeze([
 ]);
 const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'clients',
+  'cursorBillingAccountIds',
   'codexDotsEnabled',
   'customScanPaths',
   'allTimeSince',
@@ -43,6 +44,8 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
 // Values arrive from usageConfigFromSettings() after mode-specific normalization.
 const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
   'clients',
+  'cursorBillingAccountIds',
+  'cursorBillingAccounts',
   'codexDotsEnabled',
   'customScanPaths',
   'allTimeSince',
@@ -96,6 +99,7 @@ function normalizeAllTimeSince(value, fallback = DEFAULT_ALL_TIME_SINCE) {
 function usageConfigFromSettings(settings = {}, context = {}) {
   return {
     clients: clientsCsvForSetting(settings.clients),
+    cursorBillingAccountIds: normalizeCursorAccountIds(settings.cursorBillingAccountIds),
     codexDotsEnabled: settings.codexDotsEnabled === true,
     codexDotsVisible: settings.codexDotsVisible !== false,
     customScanPaths: normalizeCustomScanPaths(settings.customScanPaths),
@@ -121,7 +125,8 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     watchDebounceMs: Number(context.watchDebounceMs || 1500),
     wslScanEnabled: settings.wslScanEnabled !== false,
     onError: context.onError,
-    logger: context.logger
+    logger: context.logger,
+    cursorBillingAccounts: Array.isArray(context.cursorBillingAccounts) ? context.cursorBillingAccounts : []
   };
 }
 
