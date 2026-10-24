@@ -17,7 +17,7 @@ Token Monitor includes the built-in System Monitor, installable [Token Pulse](ex
 7. Refresh a source to discover versions/changelogs. Preview and confirm every update. Roll back restores one saved compatible version; uninstall defaults to retaining data and removing placements. Applied skin colours and personal style remain.
 8. Plugin content follows App appearance by default. Legacy `plugin-appearance.json` overrides are read-only and are not deleted or rewritten; author skin presets are supported.
 
-Authoring folders are `<Electron userData>/plugins`; plugin data is separate at `<userData>/plugin-data/<id>.json`. Managed metadata/previous packages live under `plugin-manager`, source settings/cache under `plugin-catalogs`, and personal style in `plugin-appearance.json`. Unmanaged developer folders still need manual removal and Reload. Removal of a managed package does not require its manifest/code to remain valid. Rescue rollback can discard an unreadable current version rather than save a broken reverse rollback; it does not reverse data migrations.
+Authoring folders are `<Electron userData>/plugins`; plugin data is separate at `<userData>/plugin-data/<id>.json`. Managed metadata/previous packages live under `plugin-manager`, source settings/cache under `plugin-catalogs`, and read-only legacy appearance overrides in `plugin-appearance.json`. Unmanaged developer folders still need manual removal and Reload. Removal of a managed package does not require its manifest/code to remain valid. Rescue rollback can discard an unreadable current version rather than save a broken reverse rollback; it does not reverse data migrations.
 
 Build a package without publishing it:
 
@@ -67,7 +67,7 @@ Bindings use `{ "$": "source", "field": "property", "fmt": "percent" }`. An `@me
 
 Free drawing uses `rect`, `circle`, `line`, `arc`, `poly`, `path` and `text` commands in a declared coordinate box. Colours are semantic tones or validated hex values. Scripts, URLs, images, external fonts and arbitrary SVG markup are not accepted. Supply ordinary text/stat components alongside a drawing so its information is also available without interpreting the chart.
 
-`skins` contains named `colors` (`accent`, `chart`, `bg`, `text`, `muted`) and optional `vendorColors`, all `#rrggbb`. A skin follows the existing theme settings contract and does not inject stylesheet rules. Optional `appearance` contains finite `font` (`inherit`, `system`, `mono`), `density` (`compact`, `standard`, `comfortable`), `corners` (`square`, `rounded`, `soft`), `panel` (`plain`, `outline`, `soft`) and `colors` (`accent`, `chart`, `text`, `muted`, `background`). These tokens style plugin content, including main-app pages and detached windows; they do not replace app navigation, window geometry or tray layout. A style-only preset may omit palette colours. User-selected personal styles remain after a plugin is removed.
+`skins` contains named `colors` (`accent`, `chart`, `bg`, `text`, `muted`) and optional `vendorColors`, all `#rrggbb`. A skin follows the existing theme settings contract and does not inject stylesheet rules. Optional `appearance` contains finite `font` (`inherit`, `system`, `mono`), `density` (`compact`, `standard`, `comfortable`), `corners` (`square`, `rounded`, `soft`), `panel` (`plain`, `outline`, `soft`) and `colors` (`accent`, `chart`, `text`, `muted`, `background`). These tokens style plugin content, including main-app pages and detached windows; they do not replace app navigation, window geometry or tray layout. A style-only preset may omit palette colours. Previously saved appearance overrides remain readable after a plugin is removed; there is no separate personal-style editor.
 
 ## Interactive content
 
@@ -86,7 +86,7 @@ Buttons send `press`; the other controls send `change` with a boolean, number or
 
 Main allows eight outstanding actions and a bounded event rate per plugin. A handler that remains unfinished for 30 seconds is stopped by the periodic supervisor and uses the existing restart/backoff policy. A successful send acknowledges dispatch, not completion or disk durability. Host actions do not expose arbitrary app commands. Plugin code remains responsible for its own behavior and saving state; ticks and actions can run concurrently, so authors should share an initialization promise when loading saved content.
 
-The ordinary user can customize the supplied note/drawing and style in the UI. Creating a new control layout or arbitrary plugin logic still requires editing a manifest and bundled JavaScript, importing/reloading it and consenting. There is no drag-and-drop page builder or access to the host DOM, CSS selectors or unrestricted desktop capabilities. Authored web documents use their own HTML/CSS/JS and package-local images/fonts inside a separately sandboxed renderer.
+Users can edit the supplied note/drawing controls and each plugin's declared settings in the UI. Creating a new control layout or arbitrary plugin logic still requires editing a manifest and bundled JavaScript, importing/reloading it and consenting. There is no drag-and-drop page builder or access to the host DOM, CSS selectors or unrestricted desktop capabilities. Authored web documents use their own HTML/CSS/JS and package-local images/fonts inside a separately sandboxed renderer.
 
 ## Sources and permission grants
 

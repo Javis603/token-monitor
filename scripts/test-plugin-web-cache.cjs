@@ -19,7 +19,29 @@ const { packageDirectory, unpackPackage } = require('../src/electron/plugins/pac
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-web-cache-'));
 app.setPath('userData', path.join(scratch, 'profile')); registerWebUiScheme(electron.protocol); app.on('window-all-closed', () => {});
 const delay = ms => new Promise(r => setTimeout(r, ms));
-async function until(fn, ms = 5000) { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return; await delay(10); } throw Error('condition timed out'); }
+async function until(fn, ms = 5000) { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return; await delay(10); } throw Error('condition timed out after ' + (checks.at(-1)?.name || 'startup')); }
+let nextLoadBarrier;
+function armLoadBarrier() {
+  let release, finish;
+  const gate = new Promise(resolve => { release = resolve; });
+  const settled = new Promise(resolve => { finish = resolve; });
+  return nextLoadBarrier = { gate, release, finish, settled, wc: null, navigated: false };
+}
+class BarrierView extends electron.WebContentsView {
+  constructor(options) {
+    super(options);
+    const wc = this.webContents, load = wc.loadURL.bind(wc);
+    wc.loadURL = async (...args) => {
+      const barrier = nextLoadBarrier;
+      if (!barrier) return load(...args);
+      nextLoadBarrier = null; barrier.wc = wc;
+      lifecycle.push({ id: wc.id, event: 'load-barrier-entered', at: Date.now() });
+      await barrier.gate;
+      try { if (!wc.isDestroyed()) { barrier.navigated = true; return await load(...args); } }
+      finally { barrier.finish(); }
+    };
+  }
+}
 const checks = [], timings = [], lifecycle = [], hosts = new Map(); let service, manager, bus, settings = { pluginsEnabled: true, pluginStates: {} }, sampleCalls = 0, memoryMode = 'real', placed = true;
 function check(name, ok) { checks.push({ name, ok: Boolean(ok) }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`); assert.ok(ok, name); }
 const itemFor = h => service.surfaces().find(i => i.host === h.win.webContents);
@@ -28,28 +50,90 @@ async function sync(h, visible = true) {
   return h.win.webContents.executeJavaScript(`bridge.sync(${JSON.stringify({ surface: 'notch', visible, entries: visible ? [{ ref: 'surface-studio/notch', rect: { x: 16, y: 40, width: 360, height: 260 } }] : [], theme: h.theme })})`);
 }
 async function open(h) {
-  h.win.showInactive(); const start = performance.now(); await sync(h);
-  await until(() => { const i = itemFor(h); return i?.ready && !i.resuming && !i.awaitingResume; });
-  await sync(h); return performance.now() - start;
+  let failure = null;
+  let pending = Promise.resolve();
+  const shown = () => {
+    pending = pending.then(() => sync(h)).catch(error => { failure ??= error; });
+  };
+  h.win.on('show', shown);
+  try {
+    h.win.showInactive(); h.win.moveTop();
+    const start = performance.now(); await sync(h);
+    await until(() => {
+      if (failure) throw failure;
+      const item = itemFor(h);
+      return item?.ready && !item.resuming && !item.awaitingResume;
+    });
+    await pending;
+    if (failure) throw failure;
+    await sync(h);
+    return performance.now() - start;
+  } catch (error) {
+    console.error('OPEN_FAILED', JSON.stringify({ host: h.win.webContents.id, visible: h.win.isVisible(), active: h.active, lifecycle: lifecycle.slice(-12) }));
+    throw error;
+  } finally {
+    h.win.removeListener('show', shown);
+  }
+}
+
+async function coldVisibilityRecovery(h) {
+  // Replay the observed owner event boundary at a pre-navigation barrier.
+  // This proves recovery, not why macOS emitted the spontaneous native hide.
+  const beforeListeners = h.win.listenerCount('show');
+  const barrier = armLoadBarrier(), opening = open(h);
+  opening.catch(() => {});
+  try {
+    await until(() => barrier.wc);
+    const old = itemFor(h), stale = barrier.wc, staleId = stale.id;
+    check('cold visibility: initial sync reaches the explicit pre-navigation barrier', old?.view.webContents === stale && !old.loaded && !old.ready);
+    h.win.emit('hide');
+    check('cold visibility: transient owner hide tears down even while native visible', h.win.isVisible() && old.dead);
+    check('cold visibility: hide immediately removes incomplete child and demand', old.dead && !itemFor(h) && service.cached().length === 0 && bus.effectiveInterval('sys.cpu') === 0);
+    h.win.emit('show');
+    await until(() => stale.isDestroyed());
+    barrier.release(); await barrier.settled;
+    check('cold visibility: released stale navigation never runs or resurrects', !barrier.navigated && stale.isDestroyed() && itemFor(h)?.view.webContents !== stale);
+    const elapsedMs = await opening;
+    const fresh = itemFor(h);
+    check('cold visibility: opening remounts a fresh ready child within existing deadline', elapsedMs < 5000 && fresh?.view.webContents !== stale && fresh?.ready && fresh.view.getVisible() && stale.isDestroyed());
+    check('cold visibility: open removes its owner-show listener', h.win.listenerCount('show') === beforeListeners);
+    timings.push({ coldVisibilityRecoveryMs: elapsedMs, staleId, freshId: fresh.view.webContents.id });
+  } finally { barrier.release(); }
 }
 async function hide(h) { await sync(h, false); service.refreshSurfaces(); }
 async function readFrozen(c, expression) { return (await c.debugger.sendCommand('Runtime.evaluate', { expression, returnByValue: true })).result.value; }
 async function host() {
   const preload = path.join(scratch, 'host-preload.cjs');
-  fs.writeFileSync(preload, "const {ipcRenderer,contextBridge}=require('electron');contextBridge.exposeInMainWorld('bridge',{sync:x=>ipcRenderer.invoke('plugins:surface:sync',x)});");
+  fs.writeFileSync(preload, "const {ipcRenderer,contextBridge}=require('electron');contextBridge.exposeInMainWorld('bridge',{sync:x=>ipcRenderer.invoke('plugins:surface:sync',x)});ipcRenderer.on('plugins:surface:failed',(_e,value)=>console.log('SURFACE_FAILED '+JSON.stringify(value)));");
   const win = new BrowserWindow({ width: 400, height: 330, show: false, webPreferences: { preload, sandbox: true, contextIsolation: true } });
+  for (const event of ['show', 'hide', 'resize', 'minimize', 'closed']) win.on(event, () => { lifecycle.push({id: win.isDestroyed() ? null : win.webContents.id, event: 'host-' + event, at: Date.now()}); console.log('HOST ' + event); });
   const h = { win, active: true, theme: { dark: true, colors: { text: '#eeeeee', accent: '#79cbb7' }, reducedMotion: false } }; hosts.set(win.webContents.id, h);
   await win.loadURL('data:text/html,<body style="background:%2317191c;color:%23eee;font:13px system-ui"><p>Production isolated surface · synthetic data</p>');
   return h;
 }
 async function main() {
-  app.on('web-contents-created', (_event, wc) => { const id=wc.id; for(const event of ['did-finish-load','destroyed','render-process-gone']) wc.on(event,()=>lifecycle.push({id,event,at:Date.now()})); });
+  app.on('web-contents-created', (_event, wc) => {
+    const id = wc.id, close = wc.close.bind(wc);
+    // Observe the production teardown call site without changing its behavior.
+    wc.close = (...args) => {
+      lifecycle.push({ id, event: 'close-request', stack: new Error().stack, at: Date.now() });
+      return close(...args);
+    };
+    wc.on('console-message', (_e, details, legacyMessage) => {
+      const message = typeof details === 'object' ? details.message : legacyMessage;
+      lifecycle.push({ id, event: 'console', message, at: Date.now() });
+      if (message?.startsWith('SURFACE_FAILED')) console.log('RENDERER ' + id + ' ' + message);
+    });
+    wc.on('did-fail-load', (_e, code, description) => lifecycle.push({ id, event: 'did-fail-load', code, description, at: Date.now() }));
+    for (const event of ['did-finish-load', 'destroyed', 'render-process-gone']) wc.on(event, () => lifecycle.push({ id, event, at: Date.now() }));
+  });
   const dir = path.join(scratch, 'plugins'); fs.mkdirSync(dir);
   unpackPackage(packageDirectory(path.join(root, 'docs/plugins/examples/surface-studio')), path.join(dir, 'surface-studio'));
   bus = createDataBus(); bus.defineSource('sys.cpu', { minIntervalMs: 1000, sample: () => { sampleCalls++; return { percent: 37 }; } });
   manager = createPluginManager({ builtinDir: path.join(scratch, 'none'), userDir: dir, dataDir: path.join(scratch, 'data'), bus, getSettings: () => settings, saveStates: states => { settings = { ...settings, pluginStates: states }; } }); manager.reload(); manager.setEnabled('surface-studio', true);
   const appFacade = { getAppMetrics: () => app.getAppMetrics().map(m => memoryMode === 'real' ? m : { ...m, memory: { workingSetSize: memoryMode === 'high' ? 300 * 1024 : 1024 } }) };
-  service = createWebUi({ electron: { ...electron, app: appFacade }, manager, bus, isMainSender: () => false, surfacePlaced: () => placed, surfaceContext: e => { const h = hosts.get(e.sender.id); return h ? { kind: 'notch', visible: h.active } : null; }, file: path.join(scratch, 'selected.json') });
+  service = createWebUi({ electron: { ...electron, app: appFacade, WebContentsView: BarrierView }, manager, bus, isMainSender: () => false, surfacePlaced: () => placed, surfaceContext: e => { const h = hosts.get(e.sender.id); return h ? { kind: 'notch', visible: h.active } : null; }, file: path.join(scratch, 'selected.json') });
+  if (process.argv.includes('--cold-visibility-only')) { await coldVisibilityRecovery(await host()); return; }
   const h = await host(); const coldMs = await open(h); const first = itemFor(h).view.webContents;
   await first.executeJavaScript("note.value='Keep my draft';window.ticks=0;window.frames=0;setInterval(()=>ticks++,10);requestAnimationFrame(function f(){frames++;requestAnimationFrame(f)});");
   await delay(100); await hide(h);
@@ -77,7 +161,14 @@ async function main() {
   check('current theme and reduced motion apply before warm reveal', await first.executeJavaScript("document.querySelector('.wave').getAnimations().length===0&&document.documentElement.style.getPropertyValue('--accent')==='#ffd080'"));
   check('resumption restores original sampling cadence', bus.effectiveInterval('sys.cpu') === 2000);
   await until(() => first.executeJavaScript(`ticks>${counters[0]}`), 1500); check('author timers resume after showing', await first.executeJavaScript(`ticks>${counters[0]}`));
-  fs.writeFileSync(path.join(scratch, 'reopened.png'), (await first.capturePage()).toPNG());
+  // Timer progress and IPC readiness do not establish a new compositor frame.
+  const resumedFrames = await first.executeJavaScript('frames');
+  await until(() => first.executeJavaScript(`frames>=${resumedFrames + 2}`), 1500);
+  check('resumed child animation callbacks advance before capture', await first.executeJavaScript(`frames>=${resumedFrames + 2}`));
+  const resumedImage = await first.capturePage();
+  check('resumed child capture is nonempty', !resumedImage.isEmpty());
+  fs.writeFileSync(path.join(scratch, 'reopened.png'), resumedImage.toPNG());
+  check('resumed child capture contains painted pixels', resumedImage.toBitmap().some((value, index) => index % 4 === 3 && value > 0));
   // Immediate direction reversal queues freeze then thaw, never a frozen visible page.
   await hide(h); await open(h); check('rapid hide/show preserves document and responsiveness', itemFor(h).view.webContents === first && await first.executeJavaScript('1') === 1);
   await hide(h); manager.setEnabled('surface-studio', false);
@@ -138,7 +229,8 @@ async function main() {
   const beforeExpiry = Date.now(); while (service.cached().length && Date.now() - beforeExpiry < 31000) { service.refreshSurfaces(); await delay(200); }
   await until(() => kept.every(w => w.isDestroyed()));
   check('idle expiry destroys all retained pages without sampling', service.cached().length === 0 && kept.every(w => w.isDestroyed()) && bus.effectiveInterval('sys.cpu') === 0);
-  memoryMode = 'real'; await open(h); c = itemFor(h).view.webContents; await hide(h); h.win.destroy(); await until(() => c.isDestroyed()); check('closing owner destroys its cached document', c.isDestroyed());
+  memoryMode = 'real'; await coldVisibilityRecovery(h); await hide(h);
+  await open(h); c = itemFor(h).view.webContents; await hide(h); h.win.destroy(); await until(() => c.isDestroyed()); check('closing owner destroys its cached document', c.isDestroyed());
   const endHost = await host(); await open(endHost); c = itemFor(endHost).view.webContents; await hide(endHost);
   fs.rmSync(path.join(dir, 'surface-studio'), { recursive: true, force: true }); manager.reload(); await until(() => c.isDestroyed()); check('uninstall revokes cached origins and subscriptions', c.isDestroyed() && service.cached().length === 0 && bus.effectiveInterval('sys.cpu') === 0);
 }

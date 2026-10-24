@@ -14,12 +14,28 @@ const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-surface-web-'));
 app.setPath('userData',path.join(scratch,'profile')); registerWebUiScheme(electron.protocol);app.on('window-all-closed',()=>{});
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 async function until(fn,ms=5000){const end=Date.now()+ms;while(Date.now()<end){if(await fn())return;await delay(40)}throw Error('condition timed out');}
-let delayFirstDocument = true, loadDelayMs = 3000;
+let delayFirstDocument = true, loadDelayMs = 3000, nextLoadBarrier;
+const recovery = [];
+function armLoadBarrier() {
+ let release, finish;
+ const gate = new Promise(resolve => { release = resolve; });
+ const settled = new Promise(resolve => { finish = resolve; });
+ return nextLoadBarrier = { gate, release, finish, settled, wc: null, navigated: false };
+}
 class DelayedView extends electron.WebContentsView {
  constructor(options) {
   super(options);
   const wc = this.webContents, load = wc.loadURL.bind(wc);
   wc.loadURL = async url => {
+   const barrier = nextLoadBarrier;
+   if (barrier) {
+    nextLoadBarrier = null; barrier.wc = wc;
+    recovery.push({event:'load-barrier-entered',id:wc.id,at:Date.now()});
+    await barrier.gate;
+    try { if (!wc.isDestroyed()) { barrier.navigated = true; return await load(url); } }
+    finally { barrier.finish(); }
+    return;
+   }
    if (delayFirstDocument) { delayFirstDocument = false; await delay(loadDelayMs); }
    if (!wc.isDestroyed()) return load(url);
   };
@@ -28,6 +44,37 @@ class DelayedView extends electron.WebContentsView {
 const checks=[];function check(name,ok){checks.push({name,ok:Boolean(ok)});console.log(`${ok?'PASS':'FAIL'} ${name}`);assert.ok(ok,name);}
 let service,manager,bus,settings={pluginsEnabled:true,pluginStates:{}},sampleCalls=0;const hosts=new Map();let placed=true;
 const child=kind=>service.surfaces().find(item=>item.floating.kind===kind)?.view.webContents;
+async function coldVisibilityRecovery(h) {
+ // Stop prior author work, then let the actual renderer adapter own every sync.
+ h.active=false; await h.win.webContents.executeJavaScript('live=false;adapter.refresh()'); service.refreshSurfaces();
+ await until(()=>h.win.webContents.executeJavaScript(`!document.getElementById('mount').classList.contains('pv-web-mounted')&&!document.getElementById('mount').classList.contains('pv-web-pending')`));
+ manager.setEnabled('surface-studio',false); manager.setEnabled('surface-studio',true);
+ delayFirstDocument=false;
+ const barrier=armLoadBarrier(), start=performance.now();
+ const record=event=>recovery.push({event,at:Date.now()});
+ const onHide=()=>record('owner-hide'),onShow=()=>record('owner-show');
+ h.win.on('hide',onHide);h.win.on('show',onShow);
+ try {
+  h.active=true;await h.win.webContents.executeJavaScript('live=true;adapter.refresh()');
+  await until(()=>barrier.wc);
+  const old=service.surfaces().find(i=>i.host===h.win.webContents),stale=barrier.wc,staleId=stale.id;
+  stale.once('destroyed',()=>record('stale-destroyed'));
+  check('cold visibility: production sync reaches pre-navigation barrier',old?.view.webContents===stale&&!old.loaded&&!old.ready);
+  // Inject the same native event boundary while isVisible() remains true.
+  h.win.emit('hide');
+  check('cold visibility: transient hide tears down even while native visible',h.win.isVisible()&&old.dead);
+  check('cold visibility: native hide destroys incomplete child and releases demand',old.dead&&!child(h.kind)&&bus.effectiveInterval('sys.cpu')===0&&service.cached().length===0);
+  h.win.emit('show');
+  await until(()=>stale.isDestroyed());barrier.release();await barrier.settled;
+  check('cold visibility: released stale load cannot navigate or resurrect',!barrier.navigated&&stale.isDestroyed()&&child(h.kind)!==stale);
+  // No adapter.refresh(), resize, payload update or direct sync after showing.
+  await until(()=>h.win.webContents.executeJavaScript(`document.getElementById('mount').classList.contains('pv-web-mounted')`),Math.max(1,5000-(performance.now()-start)));
+  const fresh=service.surfaces().find(i=>i.host===h.win.webContents),elapsedMs=performance.now()-start;
+  check('cold visibility: production adapter remounts a fresh ready child within existing deadline',elapsedMs<5000&&fresh?.ready&&fresh.view.getVisible()&&fresh.view.webContents!==stale&&stale.isDestroyed());
+  check('cold visibility: recovered child restores production source subscription',bus.effectiveInterval('sys.cpu')===2000&&await fresh.view.webContents.executeJavaScript(`document.getElementById('value').textContent==='37%'`));
+  recovery.push({event:'recovered',elapsedMs,staleId,freshId:fresh.view.webContents.id,at:Date.now()});
+ } finally {barrier.release();h.win.removeListener('hide',onHide);h.win.removeListener('show',onShow);fs.writeFileSync(path.join(scratch,'cold-visibility.json'),JSON.stringify(recovery,null,2));}
+}
 async function main(){
  const userDir=path.join(scratch,'plugins');fs.mkdirSync(userDir);unpackPackage(packageDirectory(path.join(root,'docs/plugins/examples/surface-studio')),path.join(userDir,'surface-studio'));
  bus=createDataBus();bus.defineSource('sys.cpu',{minIntervalMs:1000,sample:()=>{sampleCalls++;return 37}});
@@ -35,7 +82,7 @@ async function main(){
  const storage=manager.webStorage.bind(manager);manager.webStorage=async(...args)=>{if(args[1]==='get')await delay(250);return storage(...args)};
  const preload=path.join(scratch,'preload.cjs');fs.writeFileSync(preload,`const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('bridge',{syncWebSurface:x=>ipcRenderer.invoke('plugins:surface:sync',x),onWebSurfaceReady:cb=>ipcRenderer.on('plugins:surface:ready',()=>cb()),onWebSurfaceFailed:cb=>ipcRenderer.on('plugins:surface:failed',(_e,x)=>cb(x))});ipcRenderer.on('plugins:surface:escape',()=>window.dispatchEvent(new Event('escape')));`);
  service=createWebUi({electron:{...electron,WebContentsView:DelayedView},manager,bus,isMainSender:()=>false,surfaceContext:(event,surface)=>{const h=hosts.get(event.sender.id);return h&&h.surface===surface?{kind:h.kind,visible:h.active,preparing:h.preparing===true}:null},surfacePlaced:()=>placed,file:path.join(scratch,'selections.json')});
- for(const [kind,width,height] of [['notch',640,340],['bubble',320,350],['rail',96,300]]){
+ for(const [kind,width,height] of (process.argv.includes('--cold-visibility-only') ? [['notch',640,340]] : [['notch',640,340],['bubble',320,350],['rail',96,300]])){
   const surface=kind==='notch'?'notch':'edgeDock';
   const html=path.join(scratch,`${kind}.html`);fs.writeFileSync(html,`<!doctype html><html><head><link rel="stylesheet" href="file://${root}/src/electron/renderer/pluginViews.css"><style>html{--text:#eee;--muted:#aaa;--accent:#79cbb7}body{margin:0;background:transparent;color:#eee;font:13px system-ui}.shell{margin:8px;background:linear-gradient(#131313,#252525);border-radius:18px;padding:18px;height:calc(100vh - 16px);box-sizing:border-box}header{height:34px}#mount{min-height:70px}button{color:inherit;background:#333;border:0;border-radius:8px;padding:6px}.fixture{font-size:10px;color:#aaa}</style></head><body><main class="shell"><header><button id="nav">Home</button> <span class="fixture">${kind} · production adapter fixture</span></header><div id="mount"></div></main><script src="file://${root}/src/electron/renderer/pluginViews.js"></script><script src="file://${root}/src/electron/renderer/pluginSurfaceWeb.js"></script></body></html>`);
   const win=new BrowserWindow({width,height,show:false,frame:false,transparent:true,focusable:false,type:'panel',webPreferences:{preload,sandbox:true,contextIsolation:true,nodeIntegration:false}});preventAppActivation(win);hosts.set(win.webContents.id,{win,kind,surface,active:kind!=='notch',preparing:kind==='notch'});await win.loadFile(html);win.showInactive();
@@ -63,6 +110,7 @@ async function main(){
   check(`${kind}: transparent author body`,await child(kind).executeJavaScript(`getComputedStyle(document.body).backgroundColor==='rgba(0, 0, 0, 0)'`));
   fs.writeFileSync(path.join(scratch,`${kind}-content.png`),(await child(kind).capturePage()).toPNG());
  }
+ if(process.argv.includes('--cold-visibility-only')) {await coldVisibilityRecovery([...hosts.values()][0]);fs.writeFileSync(path.join(scratch,'results.json'),JSON.stringify({checks,recovery,scratch},null,2));console.log(JSON.stringify({checks:checks.length,pass:checks.filter(c=>c.ok).length,scratch}));return;}
  check('three independently mounted surfaces coexist',service.surfaces().length===3);
  check('concurrent author surfaces have separate renderer processes',new Set(service.surfaces().map(i=>i.view.webContents.getOSProcessId())).size===3);
  check('shared source uses one sampler',bus.effectiveInterval('sys.cpu')===2000&&sampleCalls<5);
@@ -121,6 +169,7 @@ async function main(){
  manager.setSurfaceDemand('notch',['surface-studio/system']);const next=manager.payload('notch');manager.setSurfaceDemand('notch',[]);await notch.win.webContents.executeJavaScript(`host.update(${JSON.stringify(next)});adapter.refresh()`);await until(()=>child('notch'));
  placed=false;service.refreshSurfaces();check('placement removal revokes mounted document',!child('notch'));placed=true;
  await notch.win.webContents.executeJavaScript(`window.dispatchEvent(new Event('resize'))`);await until(()=>child('notch'));
+ await coldVisibilityRecovery(notch);
  fs.rmSync(path.join(userDir,'surface-studio'),{recursive:true,force:true});manager.reload();check('uninstall revokes every origin and subscription',service.surfaces().length===0&&bus.effectiveInterval('sys.cpu')===0);
  fs.writeFileSync(path.join(scratch,'results.json'),JSON.stringify({checks,scratch,platform:process.platform,limits:['Synthetic host shell; no physical Notch geometry acceptance','CJK text insertion is not an IME composition test','Native screen composition not captured']},null,2));console.log(JSON.stringify({checks:checks.length,pass:checks.filter(c=>c.ok).length,scratch}));
 }
