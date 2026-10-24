@@ -1,75 +1,84 @@
 ---
-summary: "Qoder provider notes: separate credits and token planes, legacy SQLite versus current JSONL sources, source precedence, bounded reads, and first-party token gaps."
+summary: "Qoder CN token exposure, request credit-to-USD accounting, source discovery and model identities."
 ids: [qoder, qodercn]
 read_when:
-  - Changing or debugging Qoder or Qoder CN usage, limits, source discovery or storage migration
-  - Investigating Qoder CN usage that is missing, zero or stale in the widget
-  - Touching the fork's token_monitor/qodercn.rs, providers/qodercn/paths.js or Qoder roots in clientSources.js
+  - Changing or debugging Qoder CN usage, model names or collection roots
+  - Touching the fork's token_monitor/qodercn.rs or providers/qodercn/paths.js
 ---
 
-# Qoder provider
+# Qoder CN usage
 
-## Identity and ids
+Enable **Qoder CN** under **Settings → Collection**. Usage belongs in the existing Models, sessions and history views, in the same units as other clients: measured tokens and estimated USD cost. **AI Tool Limits → Qoder** remains a separately authenticated account-quota feature.
 
-Qoder has two deliberately separate ids:
+## Enable actual token counts
 
-| Id | Role | Unit |
-| --- | --- | --- |
-| `qodercn` | opt-in tracked client for local Qoder CN usage | tokens and estimated API cost |
-| `qoder` | AI Tool Limits provider for global or CN accounts | big-model credits |
+Qoder CN CLI 1.1.62 masks first-party token counts when serializing transcripts by default. Before starting a new CLI process, enable its native setting:
 
-Credits are quota units, not tokens. Never copy credit deltas into `qodercn` usage rows or token history.
+```bash
+export QODERCN_EXPOSE_TOKEN_USAGE=1
+qoderclicn
+```
 
-## Data sources
+The CLI also reads its global `~/.qoder-cn/.env` when no project dotenv takes precedence. Existing CLI processes must restart to load a new setting. A real persisted request with this switch reported 132 input and 18 output tokens, and the native parser returned those exact counts. Already masked historical counters cannot be reconstructed. BYOK/custom-model records containing measured token fields continue to work without this switch.
 
-| Data | Source |
-| --- | --- |
-| Current Qoder CN token usage | Claude-compatible JSONL transcripts under the configured `projects` directory |
-| Legacy Qoder CN token usage | `SharedClientCache/cache/db/local.db` under the platform QoderCN app-data root |
-| Credit quota and plan | Qoder's global or CN web API, authenticated with the separately configured `qoder` cookie |
+The token-exposure switch was verified with CLI 1.1.62, not the Desktop app. Desktop JSONL with measured token fields is supported, as is the legacy IDE SQLite source. Masked Desktop counters contribute no tokens; enabling the CLI switch is not a verified Desktop workaround.
 
-Token Monitor's tokscale fork parses Qoder CN (`crates/tokscale-core/src/token_monitor/qodercn.rs` in Javis603/tokscale); upstream tokscale has no `qodercn` client, so the catalog marks it `forkOnly`. The parser reads both usage layouts because an upgraded machine can retain historical SQLite data while new sessions are written to JSONL. JSONL token semantics differ from Anthropic's envelope: `input_tokens` already includes `cache_read_input_tokens`, so the parser subtracts the cached subset before emitting uncached input. Model display names and routing tiers (`auto`, `ultimate`, …) are normalized there too; routing tiers are never priced from the model catalog.
+JSONL `input_tokens` includes `cache_read_input_tokens`; the parser subtracts that cached subset before emitting uncached input. Credits and context-window occupancy are never converted to tokens.
 
-Only rows with reported token counts enter usage. Current first-party, plan-billed rows can contain `credits` and `context_usage_ratio` while every token field is zero. The active context-window denominator is not reliably present in the observed session data and can vary per session, so a model-wide window must not be used to reconstruct tokens. Those rows remain absent from token totals; their credits belong to AI Tool Limits. BYOK/custom-model rows that contain measured token fields are counted normally.
+## Convert request credits to the standard USD cost
 
-## Source precedence
+The native parser reads finite, nonnegative numeric `message.usage.credits` from assistant records in Qoder CN’s configured JSONL projects root. CLI, Desktop and records without an `entrypoint` use the same per-request field contract. It retains credit-bearing requests even when their token fields are masked, provided they have a stable request, message or envelope ID. `original_credits`, result/session cumulative totals and account-quota deltas are not substitutes for per-request usage.
 
-The JSONL projects directory resolves in this order:
+Desktop credit accounting is covered by synthetic JSONL tests. Real Desktop installation/transcript acceptance has not been performed, so this establishes parser support for that format rather than verified coverage of every Desktop version or mode.
+
+The reference resource-pack price is **¥40 / 1,000 credits**, or **¥0.04 per credit** ([official CN pricing](https://docs.qoder.cn/product-overview/billing-description)). Conversion is:
+
+```text
+costUsd = reportedCredits × 0.04 / CNY-per-USD
+```
+
+The desktop passes its effective CNY exchange rate (manual override, fetched rate, then built-in 6.8). Standalone collectors use the built-in rate unless `TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT` supplies a positive USD-per-credit rate. FX changes invalidate the pricing anchor and reprice all periods/history when Qoder CN is tracked or the client filter is unrestricted. Collectors that explicitly exclude Qoder CN retain their anchors and History schedule, and the desktop omits the unused credit rate from their runtime configuration. Session-detail pricing revisions are scoped to the requested client, so Qoder CN exchange rates do not invalidate Codex Dots price caches. The source cache retains raw credits, not a frozen USD amount.
+
+This is an estimated resource value, like other model-cost estimates, not the user's cash invoice: subscription discounts and free promotions can differ. `billable: false` does not change the resource unit. The CN price is different from global Qoder and Kiro pricing.
+
+Credit-derived USD enters the ordinary native cost field. It replaces token-catalog estimation for the same request, including explicit zero, so one request is not charged twice. Existing explicit custom pricing keeps its normal precedence. Stable request ids deduplicate copied/resumed transcripts and subagent files before aggregation. Session-scoped message/envelope aliases may link through multiple copies only when the connected group identifies at most one explicit request; conflicting request IDs remain distinct. The latest measured token observation survives newer masked copies, while the latest explicit credit value (including zero) remains authoritative. Missing-session fallbacks stay source-local. Legacy database records retain their existing accounting behavior.
+
+History does not treat equal token totals as proof of complete source coverage: a model can mix measured-token requests with masked, cost-only requests. A smaller same-model request count keeps the more complete archived cost; matching counts still allow explicit zero-credit corrections. A model absent from a later scan retains its observed usage and cost, including live-only history not yet captured by a graph. Absence is not an explicit zero-credit correction. Live single-model sessions provide exact model request counts, including sessions with measured tokens. When a session spans multiple models, its total cannot be assigned to each model: its per-model counts are unknown, not zero. Such live data can update tokens and cost when neither decreases; it cannot lower retained cost. A fresh native graph confirms exact counts and price corrections together. Graph capture, live capture and snapshots passed between collectors use the same model completeness check before selecting a day, so a stale snapshot cannot lower the saved cost while another client's usage grows. Sessions with positive cost remain visible with their known model names even when tokens are masked. Widget model rankings continue to require measured tokens.
+
+Cost-only sessions with positive cost appear in the session list for every tracked client, not only Qoder CN. Cost-only rows remain in snapshot CSV even when no token-map entry exists. macOS Widget model breakdowns continue to list only models with measured tokens; cost-only models are omitted from that token ranking while their USD remains included in the period overview cost. Live History takes model identities from cost maps as well as token maps. An observed native zero-cost request retains its session model key and message evidence, so an explicit zero credit correction survives archive persistence and restart. Empty scans carry no such evidence and retain prior history. Matching cost-only Qoder observations reconcile independently of larger archived usage from other clients; a later native graph scan owns the next source correction.
+
+No separate credits card, model-row style, device wire field or SQLite credit ledger is needed. Existing USD totals, model/client ranking, sessions, archives and DAY/MONTH/TOTAL selections consume the same report as other CLIs.
+
+## Model names
+
+The native display-name table maps `qfmodel` to `Qwen3.8-Flash`, verified against Qoder CN's own `get_models` catalog on 2026-10-15. Internal routing tiers name a tier, not its underlying model. Unknown/custom ids pass through; do not guess a family from an opaque id. Existing model aliases can override a display name if the account catalog changes.
+
+Token Monitor mirrors the same code table app-side in `normalizeTokscaleModelNameForClient` (scoped to the `qodercn` client), so `qfmodel` already shows as `Qwen3.8-Flash` with a vendored tokscale whose table lacks that row. Names the native parser has already mapped pass through unchanged. Stored periods are reconciled on load, including model throughput when client attribution is exclusive. Shared raw model buckets retain period totals but discard ambiguous component, throughput and unpriced-model attribution rather than guessing a split. Collector anchors carry `qoderCnModelVersion: 2`, forcing a full rescan of earlier model/session keys.
+
+Daily History uses the lowercase live model id after this alias mapping for Qoder CN graph rows, archived observations and component summaries. Loading an older archive canonicalizes its model keys too, so native `Qwen3.8-Flash` and live `qwen3.8-flash` refer to the same retained observation. Other clients keep their existing model identities and pricing rules.
+
+For JSONL with a real `sessionId`, the app canonicalizes the native `qodercn:jsonl:<source-hash>:<sessionId>` key to `qodercn:jsonl:session:<sessionId>`. Copying a transcript must not create a second archived conversation. Existing JSON/SQLite archive aliases replay one latest whole snapshot per period, including explicit zero; live report rows still aggregate by conversation. Missing/`unknown` session IDs and legacy database keys remain source-local.
+
+## Sources and recovery
+
+The pinned `Javis603/tokscale` fork parses Qoder CN; upstream tokscale does not yet provide this client. The JSONL projects root resolves in this order:
 
 1. `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`;
-2. Qoder's own `QODERCN_CONFIG_DIR/projects`;
+2. `QODERCN_CONFIG_DIR/projects`;
 3. `~/.qoder-cn/projects`.
 
-The legacy database uses `TOKEN_MONITOR_QODER_CN_DB_PATH` when set, then the platform default documented in the README. `src/shared/providers/qodercn/paths.js` resolves the same paths for watching, source health and the anchor fingerprint; it must stay in step with the fork's resolution.
+Legacy SQLite usage comes from `SharedClientCache/cache/db/local.db` under the platform's QoderCN application-data root, or `TOKEN_MONITOR_QODER_CN_DB_PATH`. The two storage generations have no verified cross-format request identity and remain separate sources. JSONL workspaces use `cwd`; legacy bare project names do not establish a filesystem project.
 
-A missing JSONL root is a valid empty source for a legacy-only install. Each source (the database and each transcript) is fingerprinted and its normalized rows are cached in `<tokscale cache dir>/token-monitor/qodercn.json`. Once traversal starts, directory, stat or stream failures, and the file, byte, row and line budgets, fail that whole source: the fork serves its last cached rows and logs a warning rather than publishing a partial read, and a database that is locked or unreadable is treated the same way. Do not skip an unreadable enumerated entry and publish the remaining rows as complete; a scan that returned less would feed a negative delta into the anchored watch tick.
+Source fingerprints and normalized rows are cached in `<tokscale cache dir>/token-monitor/qodercn.json`. Missing roots are valid empty sources; read/traversal failures and bounded-read exhaustion serve the last complete source snapshot and emit a warning, rather than silently publishing a partial scan. Changing either configured root invalidates the collector anchor. Records without a usable timestamp fall outside date-filtered windows. Qoder CN remains excluded from WSL scans to avoid recounting the host database.
 
-The database path and projects directory are both part of the persisted-anchor fingerprint. Moving either source invalidates the anchor instead of combining today's data from one location with older periods captured from another.
-
-## Credentials and transport
-
-Local token usage needs no credential and stays on disk. The `qoder` limits provider stores its cookie through the shared credential boundary and uses the injected transport for the selected global or CN origin. The local `qodercn` client and the remote `qoder` account do not authenticate or identify each other.
-
-## Invariants and known gaps
-
-- Token history and credit quota remain separate units and surfaces.
-- JSONL zero-token rows are not measured zero usage; they are uncountable with the currently persisted data.
-- JSONL reads are bounded and fail closed after source discovery begins.
-- The explicit Token Monitor projects override takes precedence over Qoder's config-root override.
-- Output tokens cannot be recovered from credits or context occupancy.
-- Legacy database sessions carry only `chat_session.project_name`, a bare name rather than a path, and project attribution needs a resolved workspace path, so those sessions have no project. JSONL sessions use the transcript `cwd`.
-- Rows without a timestamp are stored at the epoch and fall outside any `--since` window.
-- Qoder CN is excluded from WSL scans: under a Windows host the fork resolves the legacy database from the host's `APPDATA`, not from `--home`, so a WSL scan would recount host usage.
-- The two storage generations have no verified cross-format message key; do not invent one from path or timestamp similarity.
+Local collection needs no credential. The `qoder` limits cookie stays behind its separate credential/transport boundary. A credit ledger left by an earlier local preview is not read or deleted by this implementation.
 
 ## Verification
 
-Run:
-
 ```bash
-node --test tests/shared/collectorAnchorPersistence.test.js tests/shared/anchorSeed.test.js tests/shared/clientHealth.test.js tests/shared/wslUsage.test.js
+node --test tests/shared/collectorPricing.test.js tests/shared/collectorAnchorPersistence.test.js tests/shared/clientHealth.test.js
+# In Javis603/tokscale:
+cargo test --locked -p tokscale-core token_monitor::qodercn
 ```
 
-The parser's own tests live in the fork: `cargo test -p tokscale-core token_monitor::qodercn`.
-
-Real first-party Qoder CN installs are still needed to verify whether a future build begins persisting a trustworthy per-session active context window. Do not enable reconstruction from a model catalog or preference default alone.
+The vendor manifest pins the native Qoder CN credits parser build. Keep its published source and platform checksums aligned; a green JavaScript test suite alone does not verify bundled native credits support.

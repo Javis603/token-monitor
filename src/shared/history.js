@@ -27,10 +27,44 @@ function normalizeTokscaleClientName(value) {
   return TOKSCALE_CLIENT_ALIASES.get(raw) || raw;
 }
 
+// Qoder CN records its internal model codes (`qfmodel` is what its auto router
+// writes into every transcript). Tokscale maps most of them to Qoder CN's own
+// display names, but its table can lag the app: upstream 4.20.0 has no
+// `qfmodel`. Mirror the full table here so a lagging or older tokscale still
+// lands on the same model identity. Exact codes only, Qoder CN only; unknown
+// codes and custom models pass through unchanged.
+const QODER_CN_MODEL_DISPLAY_NAMES = new Map([
+  ['auto', 'Auto'],
+  ['dashscope_qmodel', 'Qwen3.7-Plus'],
+  ['dashscope_qwen3_coder', 'Qwen3-Coder-Plus'],
+  ['dashscope_qwen_max_latest', 'Qwen3-Max'],
+  ['dfmodel', 'DeepSeek-V4-Flash'],
+  ['dmodel', 'DeepSeek-V4-Pro'],
+  ['efficient', 'Efficient'],
+  ['gm51model', 'GLM-5.2'],
+  ['gmodel', 'GLM-5'],
+  ['kmodel', 'Kimi-K2.7-Code'],
+  ['lite', 'Lite'],
+  ['mmodel', 'MiniMax-M3'],
+  ['performance', 'Performance'],
+  ['q35model', 'Qwen3.5-Plus'],
+  ['q35model_preview', 'Qwen3.8-Max-Preview'],
+  ['q36fmodel', 'Qwen3.6-Flash'],
+  ['qfmodel', 'Qwen3.8-Flash'],
+  ['qmodel', 'Qwen3.7-Plus'],
+  ['qmodel_latest', 'Qwen3.7-Max'],
+  ['qmodel_preview', 'Qwen3.8-Max-Preview'],
+  ['ultimate', 'Ultimate']
+]);
+
 function normalizeTokscaleModelNameForClient(value, client) {
   const model = String(value ?? '').trim();
-  if (normalizeTokscaleClientName(client) === 'cursor' && /^(?:auto|default)$/i.test(model)) {
+  const clientId = normalizeTokscaleClientName(client);
+  if (clientId === 'cursor' && /^(?:auto|default)$/i.test(model)) {
     return 'cursor-auto';
+  }
+  if (clientId === 'qodercn') {
+    return QODER_CN_MODEL_DISPLAY_NAMES.get(model.toLowerCase()) || model;
   }
   return model;
 }
@@ -38,12 +72,12 @@ function normalizeTokscaleModelNameForClient(value, client) {
 // A graph/day component summary is keyed by the source model labels. Its
 // per-model buckets can follow a Cursor rename only if no other client shares
 // the old label; otherwise the aggregate has no client split to recover.
-function normalizeTokscaleModelComponentSummary(summary, rows) {
+function normalizeTokscaleModelComponentSummary(summary, rows, normalizeModel = normalizeTokscaleModelNameForClient) {
   if (!summary?.perModel) return summary;
   const renames = new Map();
   for (const row of rows || []) {
     const model = String(row?.modelId || row?.model || row?.model_id || 'unknown');
-    const canonical = normalizeTokscaleModelNameForClient(model, row?.client);
+    const canonical = normalizeModel(model, row?.client);
     if (renames.has(model) && renames.get(model) !== canonical) return null;
     renames.set(model, canonical);
   }
@@ -624,6 +658,7 @@ function deviceHistoryRevision(devices) {
 
 module.exports = {
   hasDisjointReasoning, num, normalizeTokscaleClientName, normalizeTokscaleModelNameForClient,
+  QODER_CN_MODEL_DISPLAY_NAMES,
   normalizeTokscaleModelComponentSummary, sumOutputTokens, sumTokens,
   parseGraphResult, computeIntensities, localDayKey, dayKeyAddDays,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,

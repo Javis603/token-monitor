@@ -1175,3 +1175,503 @@ test('a Cursor graph day kept on a tied aggregate cost still fills a price only 
   assert.equal(day.perModel['gpt-5.5'].cost, 3);
   assert.equal(day.cost, 4);
 });
+
+
+function qoderCostPeriod(cost, messageCount = 1) {
+  return require('../../src/shared/usage').extractUsageFromTokscale({ entries: [{
+    client: 'qodercn', sessionId: 'qodercn:jsonl:session:cost-only', model: 'qwen3.8-flash',
+    input: 0, output: 0, cacheRead: 0, cacheWrite: 0, messageCount, cost
+  }] });
+}
+
+for (const route of ['live', 'graph']) {
+  test(`partial cost-only ${route} scans retain the complete request count and cost`, () => {
+    const date = '2026-10-22';
+    for (const pricingRevision of [undefined, 'same', 'new']) {
+      for (const cost of [0, 0.25]) {
+        const options = { todayKey: date, pricingRevision: 'same' };
+        let archive = captureDailyHistoryArchive({}, graph(date, [client('qodercn', 'qwen3.8-flash', 0, 0.75, 2)]), options);
+        archive = captureLiveDailyHistory(archive, qoderCostPeriod(0.75, 2), options);
+        const nextOptions = { todayKey: date, pricingRevision, reprice: pricingRevision === 'new' };
+        const partial = graph(date, [client('qodercn', 'qwen3.8-flash', 0, cost, 1)]);
+        archive = route === 'graph'
+          ? captureDailyHistoryArchive(archive, partial, nextOptions)
+          : captureLiveDailyHistory(archive, qoderCostPeriod(cost, 1), nextOptions);
+        const restored = JSON.parse(JSON.stringify(archive));
+        for (const source of [partial, []]) {
+          const [row] = graphFromDailyHistoryArchive(source, restored, nextOptions).contributions[0].clients;
+          assert.equal(row.messages, 2);
+          assert.equal(row.cost, 0.75, `${route}, revision ${pricingRevision}, incoming cost ${cost}`);
+        }
+        assert.equal(Object.values(restored.liveDays[date].observations)[0].cost, 0.75);
+      }
+    }
+  });
+
+  test(`same-count cost-only ${route} corrections can still reduce credits to zero`, () => {
+    const date = '2026-10-22';
+    const options = { todayKey: date, pricingRevision: 'same' };
+    let archive = captureDailyHistoryArchive({}, graph(date, [client('qodercn', 'qwen3.8-flash', 0, 0.75, 2)]), options);
+    archive = captureLiveDailyHistory(archive, qoderCostPeriod(0.75, 2), options);
+    archive = route === 'graph'
+      ? captureDailyHistoryArchive(archive, graph(date, [client('qodercn', 'qwen3.8-flash', 0, 0, 2)]), options)
+      : captureLiveDailyHistory(archive, qoderCostPeriod(0, 2), options);
+    const [row] = graphFromDailyHistoryArchive([], JSON.parse(JSON.stringify(archive)), options).contributions[0].clients;
+    assert.equal(row.messages, 2);
+    assert.equal(row.cost, 0);
+  });
+}
+
+test('a first partial live snapshot cannot lower a more complete graph archive', () => {
+  const date = '2026-10-22';
+  const options = { todayKey: date, pricingRevision: 'same' };
+  const stored = captureDailyHistoryArchive({}, graph(date, [client('qodercn', 'qwen3.8-flash', 0, 0.75, 2)]), options);
+  const partialLive = captureLiveDailyHistory({}, qoderCostPeriod(0.25, 1), options);
+  const archive = { ...stored, liveDays: partialLive.liveDays };
+  const [row] = graphFromDailyHistoryArchive([], archive, options).contributions[0].clients;
+  assert.equal(row.messages, 2);
+  assert.equal(row.cost, 0.75);
+});
+
+test('retaining a partial Qoder cost does not discard growing usage from another client', () => {
+  const { mergePeriods } = require('../../src/shared/usage');
+  const options = { todayKey: '2026-10-22' };
+  const previous = captureLiveDailyHistory({}, mergePeriods(qoderCostPeriod(0.75, 2), livePeriod(100, 1)), options);
+  const next = captureLiveDailyHistory(previous, mergePeriods(qoderCostPeriod(0.25, 1), livePeriod(200, 2)), options);
+  const rows = Object.values(next.liveDays[options.todayKey].observations);
+  assert.equal(rows.find(row => row.client === 'qodercn').cost, 0.75);
+  assert.equal(rows.find(row => row.client === 'qodercn').messages, 2);
+  assert.equal(rows.find(row => row.client === 'claude').tokens, 200);
+  assert.equal(rows.find(row => row.client === 'claude').cost, 2);
+});
+
+test('ambiguous multi-model live counts cannot lower costs until a complete graph confirms them', () => {
+  const { extractUsageFromTokscale } = require('../../src/shared/usage');
+  const date = '2026-10-22';
+  const options = { todayKey: date, pricingRevision: 'same' };
+  const period = (cost, messages) => extractUsageFromTokscale({ entries: ['first', 'second'].map(model => ({
+    client: 'qodercn', sessionId: 'mixed-model-session', model, input: 0, output: 0,
+    messageCount: messages, cost
+  })) });
+  let archive = captureLiveDailyHistory({}, period(0.5, 2), options);
+  archive = captureLiveDailyHistory(archive, period(0.25, 1), options);
+  assert.ok(Object.values(archive.liveDays[date].observations).every(row => row.cost === 0.5));
+  const corrected = graph(date, ['first', 'second'].map(model => client('qodercn', model, 0, 0, 2)));
+  archive = captureDailyHistoryArchive(archive, corrected, options);
+  const rows = graphFromDailyHistoryArchive([], JSON.parse(JSON.stringify(archive)), options).contributions[0].clients;
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every(row => row.messages === 2 && row.cost === 0));
+});
+
+test('live cost-only history keeps its known model and explicit zero correction across restart', () => {
+  const date = '2026-10-22';
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-zero-history-'));
+  const options = { path: path.join(root, 'archive.json'), todayKey: date, pricingRevision: 'same' };
+  try {
+    const first = retainLiveDailyHistory(qoderCostPeriod(0.25), options);
+    const [observed] = Object.values(first.liveDays[date].observations);
+    assert.equal(observed.modelId, 'qwen3.8-flash');
+    assert.equal(observed.cost, 0.25);
+    const preview = retainLiveDailyHistory(qoderCostPeriod(0), { ...options, writeEnabled: false });
+    assert.equal(Object.values(preview.liveDays[date].observations)[0].cost, 0);
+    // A successful empty scan is absence, not an explicit source correction.
+    const empty = retainLiveDailyHistory({}, options);
+    assert.equal(Object.values(empty.liveDays[date].observations)[0].cost, 0.25);
+    const corrected = retainLiveDailyHistory(qoderCostPeriod(0), options);
+    const [zero] = Object.values(corrected.liveDays[date].observations);
+    assert.equal(zero.modelId, 'qwen3.8-flash');
+    assert.equal(zero.cost, 0);
+    assert.equal(zero.tokens, 0);
+    const graphZero = graph(date, [client('qodercn', 'qwen3.8-flash', 0, 0, 1)]);
+    const visible = retainDailyHistory(graphZero, options);
+    assert.equal(visible.contributions[0].clients[0].cost, 0);
+    const restarted = retainDailyHistory({ contributions: [] }, options);
+    assert.equal(restarted.contributions[0].clients[0].cost, 0);
+    assert.equal(restarted.contributions[0].clients[0].modelId, 'qwen3.8-flash');
+    assert.equal(historyFrom(restarted, date).summary.totalCost, 0);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test('a cost-only live correction survives beside retained usage from a missing provider', () => {
+  const date = '2026-10-22';
+  const options = { todayKey: date, pricingRevision: 'same' };
+  const native = graph(date, [client('qodercn', 'qwen3.8-flash', 0, 0.25, 1), client('claude', 'sonnet', 100, 2, 1)]);
+  let archive = captureDailyHistoryArchive({}, native, options);
+  archive = captureLiveDailyHistory(archive, qoderCostPeriod(0), options);
+  const rows = graphFromDailyHistoryArchive([], archive, options).contributions[0].clients;
+  assert.equal(rows.find(row => row.client === 'qodercn').cost, 0);
+  assert.equal(rows.find(row => row.client === 'claude').cost, 2);
+  assert.equal(rows.find(row => row.client === 'claude').tokens.input, 100);
+  // A later real graph observation must supersede that live correction too.
+  archive = captureDailyHistoryArchive(archive, native, options);
+  assert.equal(graphFromDailyHistoryArchive([], archive, options).contributions[0].clients
+    .find(row => row.client === 'qodercn').cost, 0.25);
+});
+
+
+test('zero credits remain identifiable beside measured models in the same Qoder session', () => {
+  const period = qoderCostPeriod(0);
+  const { mergePeriods, extractUsageFromTokscale } = require('../../src/shared/usage');
+  const mixed = mergePeriods(period, extractUsageFromTokscale({ entries: [{
+    client: 'qodercn', sessionId: 'qodercn:jsonl:session:cost-only', model: 'custom-model',
+    input: 100, output: 0, messageCount: 2, cost: 2
+  }] }));
+  const archive = captureLiveDailyHistory({}, mixed, { todayKey: '2026-10-22' });
+  const rows = Object.values(archive.liveDays['2026-10-22'].observations);
+  assert.equal(rows.find(row => row.modelId === 'qwen3.8-flash').cost, 0);
+  assert.equal(rows.find(row => row.modelId === 'qwen3.8-flash').messages, 1);
+  assert.equal(rows.find(row => row.modelId === 'custom-model').tokens, 100);
+  assert.equal(rows.reduce((sum, row) => sum + row.cost, 0), 2);
+});
+
+
+test('a partial live Qoder correction preserves the larger retained live day', () => {
+  const { mergePeriods } = require('../../src/shared/usage');
+  const options = { todayKey: '2026-10-22' };
+  const mixed = mergePeriods(qoderCostPeriod(0.25), livePeriod(100, 2));
+  const old = captureLiveDailyHistory({}, mixed, options);
+  const corrected = captureLiveDailyHistory(old, qoderCostPeriod(0), options);
+  const rows = Object.values(corrected.liveDays[options.todayKey].observations);
+  assert.equal(rows.find(row => row.client === 'qodercn').cost, 0);
+  assert.equal(rows.find(row => row.client === 'claude').cost, 2);
+  assert.equal(rows.find(row => row.client === 'claude').tokens, 100);
+  const empty = captureLiveDailyHistory(corrected, {}, options);
+  assert.deepEqual(empty, normalizeDailyHistoryArchive(corrected));
+});
+
+test('Qoder source reconciliation does not mutate other clients unversioned live prices', () => {
+  const date = '2026-10-22';
+  const options = { todayKey: date };
+  const archive = { liveDays: { [date]: { date, observations: [
+    { client: 'qodercn', modelId: 'qwen3.8-flash', tokens: 0, cost: 0.25, messages: 1 },
+    { client: 'cursor', modelId: 'sonnet', tokens: 100, cost: 2, messages: 1 },
+    { client: 'claude', modelId: 'opus', tokens: 100, cost: 3, messages: 1 }
+  ] } } };
+  const scanned = graph(date, [client('qodercn', 'qwen3.8-flash', 0, 0, 1),
+    client('cursor', 'sonnet', 100, 4, 1), client('claude', 'opus', 100, 5, 1)]);
+  const rows = Object.values(captureDailyHistoryArchive(archive, scanned, options).liveDays[date].observations);
+  assert.equal(rows.find(row => row.client === 'qodercn').cost, 0);
+  assert.equal(rows.find(row => row.client === 'cursor').cost, 2);
+  assert.equal(rows.find(row => row.client === 'claude').cost, 3);
+});
+
+// Native graphs keep Qoder CN display casing (`Qwen3.8-Flash`), while live
+// periods lowercase every model id. Both must address the same archive row.
+function qoderLivePeriod(rows) {
+  return require('../../src/shared/usage').extractUsageFromTokscale({ entries: rows.map(row => ({
+    client: 'qodercn', sessionId: `qodercn:jsonl:0123456789ab:${row.session || 'qsess'}`,
+    model: row.model || 'Qwen3.8-Flash', input: row.tokens || 0, output: 0, cacheRead: 0, cacheWrite: 0,
+    messageCount: row.messages, cost: row.cost
+  })) });
+}
+
+for (const route of ['live', 'graph']) {
+  test(`display-cased graph models cannot be lowered by a partial ${route} scan`, () => {
+    const date = '2026-10-22';
+    const options = { todayKey: date, pricingRevision: 'same' };
+    let archive = captureDailyHistoryArchive({}, graph(date, [client('qodercn', 'Qwen3.8-Flash', 0, 0.75, 2)]), options);
+    archive = captureLiveDailyHistory(archive, qoderLivePeriod([{ cost: 0.75, messages: 2 }]), options);
+    archive = route === 'graph'
+      ? captureDailyHistoryArchive(archive, graph(date, [client('qodercn', 'Qwen3.8-Flash', 0, 0.25, 1)]), options)
+      : captureLiveDailyHistory(archive, qoderLivePeriod([{ cost: 0.25, messages: 1 }]), options);
+    const rows = graphFromDailyHistoryArchive([], JSON.parse(JSON.stringify(archive)), options).contributions[0].clients;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].messages, 2);
+    assert.equal(rows[0].cost, 0.75);
+  });
+}
+
+test('a complete display-cased graph can correct a retained live Qoder cost to zero', () => {
+  const date = '2026-10-22';
+  const options = { todayKey: date, pricingRevision: 'same' };
+  let archive = captureDailyHistoryArchive({}, graph(date, [client('qodercn', 'Qwen3.8-Flash', 0, 0.75, 2)]), options);
+  archive = captureLiveDailyHistory(archive, qoderLivePeriod([{ cost: 0.75, messages: 2 }]), options);
+  archive = captureDailyHistoryArchive(archive, graph(date, [client('qodercn', 'Qwen3.8-Flash', 0, 0, 2)]), options);
+  const rows = graphFromDailyHistoryArchive([], JSON.parse(JSON.stringify(archive)), options).contributions[0].clients;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].messages, 2);
+  assert.equal(rows[0].cost, 0);
+});
+
+test('an archive saved with case-split model keys reads back as one model', () => {
+  const date = '2026-10-22';
+  const saved = {
+    version: 1,
+    days: { [date]: { date, activeTimeMs: 0, observations: {
+      '["qodercn","Qwen3.8-Flash"]': { client: 'qodercn', modelId: 'Qwen3.8-Flash', tokens: 0, cost: 0.75, messages: 2 }
+    } } },
+    liveDays: { [date]: { date, activeTimeMs: 0, observations: {
+      '["qodercn","qwen3.8-flash"]': { client: 'qodercn', modelId: 'qwen3.8-flash', tokens: 0, cost: 0.25, messages: 1 }
+    } } }
+  };
+  const rows = graphFromDailyHistoryArchive([], saved, { todayKey: date }).contributions[0].clients;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].messages, 2);
+  assert.equal(rows[0].cost, 0.75);
+});
+
+test('losing a cost-only request beside measured tokens keeps the complete model cost', () => {
+  const date = '2026-10-22';
+  const options = { todayKey: date, pricingRevision: 'same' };
+  // 150 tokens / $0.25 plus a masked 0 tokens / $0.50 request on one model.
+  let archive = captureDailyHistoryArchive({}, graph(date, [client('qodercn', 'Qwen3.8-Flash', 150, 0.75, 2)]), options);
+  archive = captureLiveDailyHistory(archive, qoderLivePeriod([
+    { session: 'measured', tokens: 150, cost: 0.25, messages: 1 },
+    { session: 'masked', cost: 0.50, messages: 1 }
+  ]), options);
+  archive = captureLiveDailyHistory(archive, qoderLivePeriod([{ tokens: 150, cost: 0.25, messages: 1 }]), options);
+  for (const source of [[], graph(date, [client('qodercn', 'Qwen3.8-Flash', 150, 0.25, 1)])]) {
+    const next = captureDailyHistoryArchive(archive, source, options);
+    const [row] = graphFromDailyHistoryArchive(source, JSON.parse(JSON.stringify(next)), options).contributions[0].clients;
+    assert.equal(row.tokens.input, 150);
+    assert.equal(row.messages, 2);
+    assert.equal(row.cost, 0.75);
+  }
+});
+
+test('a same-count correction still lowers a mixed token and cost-only model', () => {
+  const date = '2026-10-22';
+  const options = { todayKey: date, pricingRevision: 'same' };
+  for (const route of ['live', 'graph']) for (const cost of [0, 0.25]) {
+    let archive = captureDailyHistoryArchive({}, graph(date, [client('qodercn', 'Qwen3.8-Flash', 150, 0.75, 2)]), options);
+    archive = captureLiveDailyHistory(archive, qoderLivePeriod([{ tokens: 150, cost: 0.75, messages: 2 }]), options);
+    archive = route === 'graph'
+      ? captureDailyHistoryArchive(archive, graph(date, [client('qodercn', 'Qwen3.8-Flash', 150, cost, 2)]), options)
+      : captureLiveDailyHistory(archive, qoderLivePeriod([{ tokens: 150, cost, messages: 2 }]), options);
+    const [row] = graphFromDailyHistoryArchive([], JSON.parse(JSON.stringify(archive)), options).contributions[0].clients;
+    assert.equal(row.messages, 2, route);
+    assert.equal(row.cost, cost, route);
+  }
+});
+
+test('a stale live snapshot from another collector cannot lower the saved archive', () => {
+  const date = '2026-10-22';
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-stale-live-'));
+  const options = { path: path.join(root, 'archive.json'), todayKey: date, pricingRevision: 'same' };
+  try {
+    const original = captureLiveDailyHistory({}, qoderCostPeriod(0.75, 2), options);
+    const stale = captureLiveDailyHistory({}, qoderCostPeriod(0.25, 1), options).liveDays;
+    for (const retain of [
+      () => retainDailyHistory({ contributions: [] }, { ...options, liveDays: stale }),
+      () => retainLiveDailyHistory({}, { ...options, liveDays: stale })
+    ]) {
+      fs.writeFileSync(options.path, JSON.stringify(original));
+      retain();
+      const saved = JSON.parse(fs.readFileSync(options.path, 'utf8'));
+      const [row] = Object.values(saved.liveDays[date].observations);
+      assert.equal(row.messages, 2);
+      assert.equal(row.cost, 0.75);
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a stale Qoder snapshot keeps the saved cost while another client grows', () => {
+  const { mergePeriods } = require('../../src/shared/usage');
+  const date = '2026-10-22';
+  const options = { todayKey: date };
+  const saved = captureLiveDailyHistory({}, mergePeriods(qoderCostPeriod(0.75, 2), livePeriod(100, 1)), options);
+  const stale = captureLiveDailyHistory({}, mergePeriods(qoderCostPeriod(0.25, 1), livePeriod(200, 2)), options).liveDays;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-stale-grow-'));
+  const file = path.join(root, 'archive.json');
+  try {
+    fs.writeFileSync(file, JSON.stringify(saved));
+    const graphOut = retainDailyHistory({ contributions: [] }, { path: file, todayKey: date, liveDays: stale });
+    const rows = graphOut.contributions[0].clients;
+    assert.equal(rows.find(row => row.client === 'qodercn').cost, 0.75);
+    assert.equal(rows.find(row => row.client === 'qodercn').messages, 2);
+    assert.equal(rows.find(row => row.client === 'claude').tokens.input, 200);
+    assert.equal(rows.find(row => row.client === 'claude').cost, 2);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a complete live snapshot from another collector can still correct Qoder to zero', () => {
+  const date = '2026-10-22';
+  const options = { todayKey: date };
+  const saved = captureLiveDailyHistory({}, qoderCostPeriod(0.75, 2), options);
+  const corrected = captureLiveDailyHistory({}, qoderCostPeriod(0, 2), options).liveDays;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-stale-zero-'));
+  const file = path.join(root, 'archive.json');
+  try {
+    fs.writeFileSync(file, JSON.stringify(saved));
+    retainDailyHistory({ contributions: [] }, { path: file, todayKey: date, liveDays: corrected });
+    const [row] = Object.values(JSON.parse(fs.readFileSync(file, 'utf8')).liveDays[date].observations);
+    assert.equal(row.messages, 2);
+    assert.equal(row.cost, 0);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a first partial live snapshot cannot lower a display-cased graph archive', () => {
+  const date = '2026-10-22';
+  const options = { todayKey: date, pricingRevision: 'same' };
+  let archive = captureDailyHistoryArchive({}, graph(date, [client('qodercn', 'Qwen3.8-Flash', 0, 0.75, 2)]), options);
+  archive = captureLiveDailyHistory(archive, qoderLivePeriod([{ cost: 0.25, messages: 1 }]), options);
+  const rows = graphFromDailyHistoryArchive([], JSON.parse(JSON.stringify(archive)), options).contributions[0].clients;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].messages, 2);
+  assert.equal(rows[0].cost, 0.75);
+});
+
+test('old Qoder component summaries follow canonical model keys without renaming other clients', () => {
+  const date = '2026-10-22';
+  const stored = { liveDays: { [date]: {
+    observations: [
+      { client: 'qodercn', modelId: 'Qwen3.8-Flash', tokens: 150, cost: 0.75, messages: 2 },
+      { client: 'claude', modelId: 'Custom-Model', tokens: 20, cost: 1, messages: 1 }
+    ],
+    componentSummary: {
+      tokenComponentsAvailable: true,
+      outputTokens: 50,
+      perClient: { qodercn: { outputTokens: 40 }, claude: { outputTokens: 10 } },
+      perModel: { 'Qwen3.8-Flash': { outputTokens: 40 }, 'Custom-Model': { outputTokens: 10 } }
+    }
+  } } };
+  const normalized = normalizeDailyHistoryArchive(stored);
+  const summary = normalized.liveDays[date].componentSummary;
+  assert.equal(summary.tokenComponentsAvailable, true);
+  assert.equal(summary.perModel['qwen3.8-flash'].outputTokens, 40);
+  assert.equal(summary.perModel['Custom-Model'].outputTokens, 10);
+  const rows = graphFromDailyHistoryArchive([], normalized, { todayKey: date }).contributions[0].clients;
+  assert.deepEqual(rows.map(row => row.modelId).sort(), ['Custom-Model', 'qwen3.8-flash']);
+});
+
+test('a complete mixed-token Qoder correction keeps another clients retained live usage', () => {
+  const { mergePeriods } = require('../../src/shared/usage');
+  const options = { todayKey: '2026-10-22' };
+  const previous = captureLiveDailyHistory({}, mergePeriods(
+    qoderLivePeriod([{ tokens: 150, cost: 0.75, messages: 2 }]), livePeriod(300, 2)
+  ), options);
+  const corrected = captureLiveDailyHistory(previous, qoderLivePeriod([
+    { tokens: 150, cost: 0, messages: 2 }
+  ]), options);
+  const rows = Object.values(corrected.liveDays[options.todayKey].observations);
+  assert.equal(rows.find(row => row.client === 'qodercn').cost, 0);
+  assert.equal(rows.find(row => row.client === 'qodercn').messages, 2);
+  assert.equal(rows.find(row => row.client === 'claude').tokens, 300);
+  assert.equal(rows.find(row => row.client === 'claude').cost, 2);
+});
+
+test('repricing cannot treat a mixed-token graph with missing request counts as complete', () => {
+  const date = '2026-10-22';
+  const originalOptions = { todayKey: date, pricingRevision: 'old' };
+  let archive = captureDailyHistoryArchive({}, graph(date, [
+    client('qodercn', 'Qwen3.8-Flash', 150, 0.75, 2)
+  ]), originalOptions);
+  archive = captureLiveDailyHistory(archive, qoderLivePeriod([
+    { tokens: 150, cost: 0.75, messages: 2 }
+  ]), originalOptions);
+  const options = { todayKey: date, pricingRevision: 'new', reprice: true };
+  archive = captureDailyHistoryArchive(archive, graph(date, [
+    client('qodercn', 'Qwen3.8-Flash', 150, 0, 0)
+  ]), options);
+  const [row] = graphFromDailyHistoryArchive([], archive, options).contributions[0].clients;
+  assert.equal(row.messages, 2);
+  assert.equal(row.cost, 0.75);
+});
+
+test('retaining a partial model does not attach its smaller component summary to complete usage', () => {
+  const { extractUsageFromTokscale } = require('../../src/shared/usage');
+  const date = '2026-10-22';
+  const period = (output, messages, otherTokens) => extractUsageFromTokscale({ entries: [
+    { client: 'qodercn', sessionId: 'q', model: 'Qwen3.8-Flash', input: 0, output, messageCount: messages, cost: messages === 2 ? 0.75 : 0.25 },
+    { client: 'claude', sessionId: 'c', model: 'sonnet', input: otherTokens, output: 0, messageCount: 1, cost: 1 }
+  ] });
+  const original = captureLiveDailyHistory({}, period(150, 2, 100), { todayKey: date });
+  const next = captureLiveDailyHistory(original, period(100, 1, 200), { todayKey: date });
+  const day = normalizeDailyHistoryArchive(next).liveDays[date];
+  const rows = Object.values(day.observations);
+  assert.equal(rows.find(row => row.client === 'qodercn').tokens, 150);
+  assert.equal(rows.find(row => row.client === 'qodercn').cost, 0.75);
+  assert.equal(rows.find(row => row.client === 'claude').tokens, 200);
+  assert.equal(rows.find(row => row.client === 'claude').cost, 1);
+  assert.equal(day.componentSummary, undefined);
+});
+
+for (const route of ['live', 'collector-snapshot']) for (const tokens of [0, 150]) {
+  test(`an absent ${tokens > 0 ? 'measured' : 'masked'} Qoder model retains live-only history through ${route}`, () => {
+    const { mergePeriods } = require('../../src/shared/usage');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-absent-model-'));
+    const options = { path: path.join(root, 'archive.json'), todayKey: '2026-10-22' };
+    try {
+      retainLiveDailyHistory(mergePeriods(
+        qoderLivePeriod([{ tokens, cost: 0.75, messages: 1 }]), livePeriod(100, 1)
+      ), options);
+      const incoming = livePeriod(300, 2);
+      if (route === 'live') retainLiveDailyHistory(incoming, options);
+      else {
+        const liveDays = captureLiveDailyHistory({}, incoming, options).liveDays;
+        retainDailyHistory({ contributions: [] }, { ...options, liveDays });
+      }
+      const saved = JSON.parse(fs.readFileSync(options.path, 'utf8'));
+      const qoder = Object.values(saved.liveDays[options.todayKey].observations)
+        .find(row => row.client === 'qodercn');
+      assert.equal(qoder?.cost, 0.75);
+      assert.equal(qoder.tokens, tokens);
+      assert.equal(qoder.messages, 1);
+      const restored = retainDailyHistory({ contributions: [] }, options).contributions[0].clients;
+      assert.equal(restored.find(row => row.client === 'qodercn').cost, 0.75);
+      assert.equal(restored.find(row => row.client === 'claude').tokens.input, 300);
+      assert.equal(restored.find(row => row.client === 'claude').cost, 2);
+      // Absence is not a price correction, but an observed complete zero is.
+      const corrected = retainLiveDailyHistory(mergePeriods(
+        qoderLivePeriod([{ tokens, cost: 0, messages: 1 }]), livePeriod(350, 2.5)
+      ), options);
+      const rows = Object.values(corrected.liveDays[options.todayKey].observations);
+      assert.equal(rows.find(row => row.client === 'qodercn').cost, 0);
+      assert.equal(rows.find(row => row.client === 'claude').tokens, 350);
+      assert.equal(rows.find(row => row.client === 'claude').cost, 2.5);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+}
+
+for (const route of ['live', 'collector-snapshot']) for (const sample of [
+  { name: 'measured token and cost growth', initialTokens: 100, tokens: 200, cost: 0.50 },
+  { name: 'cost growth beside unchanged tokens', initialTokens: 100, tokens: 100, cost: 0.50 },
+  { name: 'token growth beside unchanged cost', initialTokens: 100, tokens: 200, cost: 0.25 },
+  { name: 'masked cost growth', initialTokens: 0, tokens: 0, cost: 0.50 },
+  { name: 'fewer tokens despite a larger cost', initialTokens: 100, tokens: 50, cost: 0.50, partial: true },
+  { name: 'lower cost despite more tokens', initialTokens: 100, tokens: 200, cost: 0.10, partial: true },
+  { name: 'lower cost beside unchanged tokens', initialTokens: 100, tokens: 100, cost: 0.10, partial: true }
+]) {
+  test(`single-model to multi-model ${route} handles ${sample.name} without guessing request counts`, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-model-growth-'));
+    const options = { path: path.join(root, 'archive.json'), todayKey: '2026-10-23' };
+    try {
+      retainLiveDailyHistory(qoderLivePeriod([
+        { model: 'model-a', tokens: sample.initialTokens, cost: 0.25, messages: 1 }
+      ]), options);
+      const incoming = qoderLivePeriod([
+        { model: 'model-a', tokens: sample.tokens, cost: sample.cost, messages: 2 },
+        { model: 'model-b', tokens: 100, cost: 0.25, messages: 1 }
+      ]);
+      if (route === 'live') retainLiveDailyHistory(incoming, options);
+      else {
+        const liveDays = captureLiveDailyHistory({}, incoming, options).liveDays;
+        retainDailyHistory({ contributions: [] }, { ...options, liveDays });
+      }
+      const expectedTokens = sample.partial ? sample.initialTokens : sample.tokens;
+      const expectedCost = sample.partial ? 0.25 : sample.cost;
+      // Reload the persisted archive through the public History entry point.
+      const rows = retainDailyHistory({ contributions: [] }, options).contributions[0].clients;
+      assert.equal(rows.length, 2);
+      const a = rows.find(row => row.modelId === 'model-a');
+      const b = rows.find(row => row.modelId === 'model-b');
+      assert.equal(a.tokens.input, expectedTokens);
+      assert.equal(a.cost, expectedCost);
+      assert.equal(b.tokens.input, 100);
+      assert.equal(b.cost, 0.25);
+      // A complete graph still owns an explicit correction to zero.
+      const corrected = retainDailyHistory(graph(options.todayKey, [
+        client('qodercn', 'model-a', expectedTokens, 0, 2),
+        client('qodercn', 'model-b', 100, 0, 1)
+      ]), options).contributions[0].clients;
+      assert.equal(corrected.find(row => row.modelId === 'model-a').cost, 0);
+      assert.equal(corrected.find(row => row.modelId === 'model-b').cost, 0);
+      assert.equal(corrected.find(row => row.modelId === 'model-a').messages, 2);
+      assert.equal(corrected.find(row => row.modelId === 'model-b').messages, 1);
+      const saved = JSON.parse(fs.readFileSync(options.path, 'utf8'));
+      assert.ok(Object.values(saved.liveDays[options.todayKey].observations)
+        .every(row => row.creditMessagesIncomplete !== true));
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+}

@@ -110,11 +110,15 @@ test('the cold-start seed accepts an anchor configured for Qoder CN', () => {
   const cnPaths = qoderCnDataPaths({ homeDir });
   const clients = 'claude,qodercn';
   const anchor = anchorFixture({
-    configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, cnPaths.dbPaths[0], cnPaths.projectsDir)
+    configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, cnPaths.dbPaths[0], cnPaths.projectsDir),
+    qoderCnModelVersion: 2
   });
 
   const record = deviceRecordFromAnchor(anchor, seedOptions({ clients, homeDir }));
   assert.equal(record.today.totalTokens, 1_000);
+  // An anchor written before Qoder CN codes were mapped still holds `qfmodel`.
+  const { qoderCnModelVersion: _omit, ...stale } = anchor;
+  assert.equal(deviceRecordFromAnchor(stale, seedOptions({ clients, homeDir })), null);
   assert.deepEqual(record.trackedClients, ['claude', 'qodercn']);
 });
 

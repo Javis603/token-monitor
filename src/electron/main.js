@@ -253,7 +253,7 @@ async function probeOpenCodeApiKey(apiKey) {
 const openrouterLimits = require('../shared/providers/openrouter/limits');
 const thirdPartyLimits = require('../shared/providers/thirdparty/limits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
-const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
+const { normalizeCurrency, resolveEffectiveRates, configureRates, convertUsd } = require('../shared/currency');
 const { normalizeCompactTokenUnits } = require('../shared/compactTokens');
 const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
 const {
@@ -840,6 +840,7 @@ function electronUsageConfig(errorPrefix) {
   return usageConfigFromSettings(settings, {
     agentVersion: appVersion(),
     agentRuntime: 'electron-widget',
+    qoderCnUsdPerCredit: 0.04 / convertUsd(1, 'CNY'),
     commandTimeoutMs: 120 * 1000,
     defaultDeviceId: defaultDeviceId(),
     intervalMs: collectorIntervalMs(),
@@ -5007,8 +5008,15 @@ function writeRateCache(data) {
 }
 
 function applyEffectiveRates() {
+  const previousCnyRate = effectiveRates?.CNY;
   effectiveRates = resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {});
   configureRates(effectiveRates);          // main process's own currency module
+  // Collection normally runs on a worker, with its own currency module.
+  // Send the effective scalar through the existing runtime config/reconciler.
+  if (deviceRuntimeHandle && previousCnyRate !== effectiveRates.CNY
+    && trackedClientSet(settings?.clients).has('qodercn')) {
+    reconfigureUsageRuntimeForMode();
+  }
   return effectiveRates;
 }
 
@@ -8448,7 +8456,7 @@ app.whenReady().then(() => {
   ipcMain.handle('session:getDetail', (_event, args) => {
     const { client, sessionId, period, sessionCost } = args || {};
     return readSessionDetailForPlatform({ client, sessionId, period, sessionCost }, {
-      lookupModelPricing, getPricingRevision: () => pricingFingerprint({ pricingPath: customPricingPath() })
+      lookupModelPricing, getPricingRevision: () => pricingFingerprint({ clients: client, pricingPath: customPricingPath() })
     });
   });
   ipcMain.handle('stream:status', () => ({ connected: streamConnected, mode, ...(streamFailure || {}) }));
