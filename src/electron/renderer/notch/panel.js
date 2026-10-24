@@ -161,6 +161,8 @@
         const current = [...track.children];
         if (current.length !== children.length || children.some((child, index) => current[index] !== child)) track.append(...children);
       }
+      // An empty trailing track would still paint its padded fill beside the camera.
+      trailTrack.hidden = trailChildren.length === 1;
       if (focused && tabButtons.get(focused.dataset?.page) === focused && !focused.hidden && document.activeElement !== focused) focused.focus({ preventScroll: true });
       const owned = trailPages.map((page) => tabButtons.get(page).id).filter(Boolean).join(' ');
       if (owned) leadTrack.setAttribute('aria-owns', owned); else leadTrack.removeAttribute('aria-owns');

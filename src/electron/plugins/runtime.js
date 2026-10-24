@@ -84,6 +84,42 @@ function createPluginRuntime({
   const businessData = createBusinessDataService(businessAdapters);
   let businessStatsSnapshot = null;
   let businessSource = businessAdapters.sourceId?.() || 'local';
+  // With no active plugin nothing reads host data, so pushes are only kept
+  // (a reference) and published once a plugin becomes active.
+  let parkedStats = null;
+  let businessResetSource = null;
+  let businessRefreshPending = false;
+  function observeBusinessSource() {
+    const source = businessAdapters.sourceId?.() || 'local';
+    if (source !== businessSource) {
+      businessSource = source;
+      businessStatsSnapshot = null;
+      parkedStats = null;
+      businessResetSource ??= source;
+    }
+    return source;
+  }
+  function resetPublishedSource() {
+    if (businessResetSource === null) return;
+    // Replay the first crossed source even after A -> B -> A while parked:
+    // existing cursors and in-flight loaders must cross a real source fence.
+    businessData.publish(null, { sourceId: businessResetSource });
+    if (businessResetSource !== businessSource) businessData.publish(null, { sourceId: businessSource });
+    appSources.publish({});
+    businessResetSource = null;
+  }
+  function publishHostData({ stats, businessStats, extras }) {
+    try {
+      resetPublishedSource();
+      appSources.publish(stats);
+      businessStatsSnapshot = businessStats;
+      businessData.publish(businessStats, { ...businessAdapters.extras?.(businessStats), ...extras, sourceId: businessSource });
+      businessRefreshPending = false;
+    } catch (error) {
+      // Plugin data must never stop the host's own dock, tray and window updates.
+      log(`[plugins] stats publish failed: ${error.message}`);
+    }
+  }
   const capabilities = createPluginCapabilities({ businessData });
   const authorSettings = createPluginSettingsStore({ directory: path.join(userDataDir, 'plugin-settings') });
   const userDir = path.join(userDataDir, 'plugins');
@@ -217,6 +253,12 @@ function createPluginRuntime({
   const listListeners = new Set();
   manager.onChanged(() => {
     if (disposed) return;
+    observeBusinessSource();
+    if (manager.hasActive()) {
+      resetPublishedSource();
+      if (parkedStats) { const push = parkedStats; parkedStats = null; publishHostData(push); }
+      else if (businessRefreshPending) refreshBusinessData();
+    }
     if (changedTimer) return;
     changedTimer = setTimeout(() => {
       changedTimer = null;
@@ -359,9 +401,11 @@ function createPluginRuntime({
 
   function refreshBusinessData() {
     if (disposed) return;
-    const source = businessAdapters.sourceId?.() || 'local';
-    if (source !== businessSource) { businessSource = source; businessStatsSnapshot = null; }
+    const source = observeBusinessSource();
+    if (!manager.hasActive()) { businessRefreshPending = businessStatsSnapshot !== null; return; }
+    resetPublishedSource();
     businessData.publish(businessStatsSnapshot, { ...businessAdapters.extras?.(businessStatsSnapshot), sourceId: source });
+    businessRefreshPending = false;
   }
 
   return {
@@ -397,10 +441,11 @@ function createPluginRuntime({
     },
     publishStats(stats, businessStats = stats, extras = {}) {
       if (disposed) return;
-      appSources.publish(stats);
-      businessSource = businessAdapters.sourceId?.() || 'local';
-      businessStatsSnapshot = businessStats;
-      businessData.publish(businessStats, { ...businessAdapters.extras?.(businessStats), ...extras, sourceId: businessSource });
+      observeBusinessSource();
+      const push = { stats, businessStats, extras };
+      if (!manager.hasActive()) { parkedStats = push; return; }
+      parkedStats = null;
+      publishHostData(push);
     },
     settingsChanged() {
       if (disposed) return;

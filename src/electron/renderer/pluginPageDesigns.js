@@ -91,6 +91,9 @@
         if (!input.visible) readyRef = '';
         latest = input; revision++;
         docs = (input.catalog?.plugins || []).filter(p => p.status === 'active').flatMap(p => (p.webDocuments || []).filter(d => d.target === input.snapshot.target).map(d => ({ ...d, name: `${p.name} · ${d.title}` })));
+        // Nothing offered before or now: leave the hidden chooser untouched, so
+        // a native render writes no text, options or select state.
+        if (!docs.length && key === '[]' && !panel.isConnected && container.hidden) return;
         container.hidden = !input.visible || !docs.length;
         label.textContent = t('plugins.web.design');
         const nextKey = JSON.stringify(docs);

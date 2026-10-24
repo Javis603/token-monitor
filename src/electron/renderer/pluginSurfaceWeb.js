@@ -9,6 +9,9 @@
     const mounts = new Map(), failed = new Map(), openings = new Map(), unknownExpired = new WeakSet();
     let disposed = false;
     let timer = null, pending = false, queued = false, last = '', retries = 0;
+    // Main already holds nothing for this host after one empty sync, so
+    // mutations, scrolls and dock renders cost nothing until a plugin mounts.
+    let idle = false;
     const resize = new window.ResizeObserver(() => refresh());
     function toggle(node, name, value) { if (node.classList.contains(name) !== value) node.classList.toggle(name, value); }
     function show(node, visible) {
@@ -57,7 +60,7 @@
       }
       pendingPaint(node, !node.classList.contains('pv-web-mounted'));
     }
-    function refresh() { if (!disposed && timer === null) timer = setTimeout(() => { timer = null; void sync(); }, 16); }
+    function refresh() { if (!disposed && timer === null && !(idle && !mounts.size)) timer = setTimeout(() => { timer = null; void sync(); }, 16); }
     function theme() {
       const css = window.getComputedStyle(document.documentElement);
       return { colors: { background: '#00000000', text: css.getPropertyValue('--text').trim() || '#eee', muted: css.getPropertyValue('--muted').trim() || '#999', accent: css.getPropertyValue('--accent').trim() || '#8aafff' }, font: window.getComputedStyle(document.body).fontFamily, dark: css.colorScheme !== 'light', reducedMotion: reducedMotion() };
@@ -126,11 +129,12 @@
       try {
         const result = await bridge.syncWebSurface(input);
         last = key;
+        idle = !entries.length && !mounts.size;
         for (const [node, mount] of mounts) { show(node, offered.has(node) && result.mounted.includes(offered.get(node))); if (visible) prepare(mount); }
         // Main may defer during native shell movement. A bounded retry stops
         // once the shell settles, the page hides, or a document fails.
         if (entries.length && result.mounted.length !== entries.length && retries++ < 20) { last = ''; setTimeout(refresh, 100); } else retries = 0;
-      } catch { last = ''; for (const [node, mount] of mounts) { const state = stateFor(mount.ref); for (const doc of state?.webDocuments || []) failed.set(doc.ref, state.revision); forget(node); show(node, false); pendingPaint(node, false); } }
+      } catch { last = ''; idle = false; for (const [node, mount] of mounts) { const state = stateFor(mount.ref); for (const doc of state?.webDocuments || []) failed.set(doc.ref, state.revision); forget(node); show(node, false); pendingPaint(node, false); } }
       finally { pending = false; if (queued) { queued = false; refresh(); } }
     }
     bridge.onWebSurfaceReady?.(() => { last = ''; retries = 0; refresh(); });
@@ -146,7 +150,7 @@
     const mutation = new window.MutationObserver(refresh);
     mutation.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
     window.addEventListener('pagehide', () => { disposed = true; clearTimeout(timer); for (const node of openings.keys()) forget(node); resize.disconnect(); mutation.disconnect(); void bridge.syncWebSurface({ surface, visible: false }); }, { once: true });
-    return { track(mount) { for (const doc of stateFor(mount.ref)?.webDocuments || []) failed.delete(doc.ref); const doc = stateFor(mount.ref)?.webDocuments?.find(doc => doc.variant === mount.variant); if (doc && mount.variant === 'full') mount.container.style.height = `${doc.height}px`; mounts.set(mount.container, mount); prepare(mount); resize.observe(mount.container); refresh(); }, prepare, refresh() { last = ''; refresh(); } };
+    return { track(mount) { idle = false; for (const doc of stateFor(mount.ref)?.webDocuments || []) failed.delete(doc.ref); const doc = stateFor(mount.ref)?.webDocuments?.find(doc => doc.variant === mount.variant); if (doc && mount.variant === 'full') mount.container.style.height = `${doc.height}px`; mounts.set(mount.container, mount); prepare(mount); resize.observe(mount.container); refresh(); }, prepare, refresh() { last = ''; refresh(); } };
   }
   root.TokenMonitorPluginSurfaceWeb = { create };
 })(window);

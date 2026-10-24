@@ -276,6 +276,17 @@ test('overflow pages continue in the trailing track bridged by aria-owns', t => 
   assert.equal(trailPill.classList.contains('is-off'), true);
 });
 
+test('the trailing track paints only while it holds pages', t => {
+  const { f, data, leadRail, trailRail, trailTrack } = pluginPageFixture(t, ['demo/a', 'demo/b', 'demo/c']);
+  leadRail.clientWidth = 183; trailRail.clientWidth = 112; // L=5, T=3
+  data.panel.pluginPages = []; f.panel.render(data); f.resize();
+  assert.equal(trailTrack.hidden, true, 'built-in pages alone leave no fill beside the camera');
+  data.panel.pluginPages = ['demo/a', 'demo/b', 'demo/c']; f.panel.render(data); f.resize();
+  assert.equal(trailTrack.hidden, false);
+  data.panel.pluginPages = []; f.panel.render(data); f.resize();
+  assert.equal(trailTrack.hidden, true);
+});
+
 test('mixed saved order controls runtime tabs and keyboard order without selecting hidden pages', t => {
   const { f, data, leadTrack, trailTrack, visibleIn } = pluginPageFixture(t, ['demo/a', 'demo/b', 'demo/c']);
   data.panel.builtinPages = ['home', 'limits'];

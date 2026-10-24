@@ -56,7 +56,7 @@ test('before-quit hands over without taking the quit away from the OS', () => {
   // a synchronous performQuit gives it nothing to buy.
   assert.doesNotMatch(handler, /preventDefault/);
   // electron-updater owns the restart, so that one route has to opt out.
-  assert.match(handler, /if \(skipForcedQuit\) \{ pluginRuntime\?\.dispose\(\); return; \}/);
+  assert.match(handler, /if \(skipForcedQuit\) \{ disposePluginRuntime\(\); return; \}/);
   assert.match(main, /skipForcedQuit = true;/);
 });
 
@@ -75,4 +75,15 @@ test('tray and signal quit flush plugin state before immediate exit', () => {
     + main.slice(main.indexOf('function performQuit()'), main.indexOf('// Write the export file set')), context);
   context.requestAppQuit();
   assert.deepEqual(events, ['flush', 'exit']);
+});
+
+test('a failing plugin teardown cannot skip the host shutdown that follows it', () => {
+  const stopAll = functionSource('function stopAll()');
+  assert.match(stopAll, /^function stopAll\(\) \{\s*disposePluginRuntime\(\);/);
+  assert.doesNotMatch(main, /pluginRuntime\?\.dispose\(\)(?!; \} catch)/, 'every dispose goes through the guard');
+  const warnings = [];
+  const dispose = new Function('pluginRuntime', 'console', `${main.match(/function disposePluginRuntime\(\) \{[\s\S]*?\n\}/)[0]}; return disposePluginRuntime;`)(
+    { dispose() { throw new Error('boom'); } }, { warn: message => warnings.push(message) });
+  assert.doesNotThrow(dispose);
+  assert.deepEqual(warnings, ['[plugins] dispose failed: boom']);
 });

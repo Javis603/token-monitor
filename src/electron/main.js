@@ -6687,7 +6687,7 @@ function reconfigureUsageRuntimeForMode() {
 // stopLocalCollector() / stopSyncCollector() behaviour so the old watcher is
 // really gone before a new one starts on the same paths.
 function stopAll() {
-  pluginRuntime?.dispose();
+  disposePluginRuntime();
   stopPersistBoundsTimer();
   stopLocalCollector({ skipCloseWatchers: true });
   stopStatsStream();
@@ -6715,6 +6715,11 @@ function stopAll() {
   }
   if (tray && !tray.isDestroyed()) tray.destroy();
   tray = null;
+}
+
+// Plugin teardown must never skip the host's own collector and stream shutdown.
+function disposePluginRuntime() {
+  try { pluginRuntime?.dispose(); } catch (error) { console.warn(`[plugins] dispose failed: ${error.message}`); }
 }
 
 let quitRequested = false;
@@ -9708,7 +9713,7 @@ app.on('before-quit', () => {
   notchController?.dispose();
   clearTimeout(notchRateTimer);
   electronWorkbuddyLocalAuth.dispose();
-  if (skipForcedQuit) { pluginRuntime?.dispose(); return; }
+  if (skipForcedQuit) { disposePluginRuntime(); return; }
   performQuit();
 });
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {

@@ -112,10 +112,18 @@
     }
     function listen(target, name, fn, options) { target.addEventListener(name, fn, options); removers.push(() => target.removeEventListener(name, fn, options)); }
     removers.push(bridge.onWebPresentationReady?.(retry), bridge.onWebPresentationFailed?.(({ instance }) => { for (const mount of mounts.values()) if (mount.instance === instance) mount.failed = true; invalidate(); }));
-    listen(document, 'scroll', suspend, true); listen(window, 'resize', suspend);
-    listen(document, 'visibilitychange', suspend); listen(document, 'toggle', suspend, true);
-    listen(document, 'transitionrun', suspend, true); listen(document, 'transitionend', invalidate, true);
-    listen(document, 'animationend', invalidate, true);
+    // Document-wide observation starts with the first mount: a window that
+    // never shows a plugin keeps no subtree observer or capture listeners.
+    let armed = false;
+    function arm() {
+      if (armed || disposed) return;
+      armed = true;
+      listen(document, 'scroll', suspend, true); listen(window, 'resize', suspend);
+      listen(document, 'visibilitychange', suspend); listen(document, 'toggle', suspend, true);
+      listen(document, 'transitionrun', suspend, true); listen(document, 'transitionend', invalidate, true);
+      listen(document, 'animationend', invalidate, true);
+      mutation.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open'] });
+    }
     const mutation = new window.MutationObserver(records => {
       if (!advertised && !eligible()) return;
       // Ignore our own class/height writes; they would create an idle loop.
@@ -130,7 +138,6 @@
       }
       invalidate();
     });
-    mutation.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open'] });
     function dispose() {
       if (disposed) return; disposed = true; generation++;
       clearTimeout(timer); clearTimeout(settle); resize.disconnect(); mutation.disconnect(); removers.forEach(off => off?.());
@@ -138,7 +145,7 @@
       mounts.clear(); hide();
     }
     listen(window, 'pagehide', dispose, { once: true });
-    return { track(mount) { mounts.set(mount.container, { ...mount, instance: `presentation-${++serial}` }); resize.observe(mount.container); refresh(); }, refresh, suspend, dispose };
+    return { track(mount) { arm(); mounts.set(mount.container, { ...mount, instance: `presentation-${++serial}` }); resize.observe(mount.container); refresh(); }, refresh, suspend, dispose };
   }
   return { create, rectangle };
 });

@@ -20,7 +20,7 @@ function fixture({ rich = false, businessAdapters = {} } = {}) {
   const manager = { list: () => ({ plugins: [{ id: 'demo', status: 'active', webDocuments: [{target:'settings'}], views: [
     {ref:'demo/home', surfaces:['home']},
     { ref: 'demo/native', surfaces: ['notch'] }, { ref: 'demo/page', surfaces: ['page'] }, { ref: 'demo/tray', surfaces: ['tray'] }, { ref: 'demo/optional', surfaces: ['page'] } ] }] }),
-  onViews: () => () => {}, onChanged: () => () => {}, reload() {}, settingsChanged() {}, dispose() {},
+  onViews: () => () => {}, onChanged: () => () => {}, reload() {}, settingsChanged() {}, dispose() {}, hasActive: () => true,
   interact: (...args) => calls.push(args), setSurfaceDemand: (surface, refs) => demands.set(surface, refs), payload: surface => ({ surface, views: Object.fromEntries((demands.get(surface) || []).map(ref => [ref, { ref, status: "ok" }])) }) };
   const mocks = {
     '../../shared/plugins/dataBus': { createDataBus: () => ({ defineSource() {}, defineAlias() {}, dispose() {} }) },

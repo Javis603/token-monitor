@@ -122,7 +122,12 @@ function createPluginManager({
     if (plugin.logs.length > LOG_LIMIT) plugin.logs.splice(0, plugin.logs.length - LOG_LIMIT);
   }
 
+  // What a settings patch can change for an idle catalog: availability and labels.
+  let changeSignature = '';
+  const currentChangeSignature = () => JSON.stringify([masterEnabled(), getLocale(), [...plugins.values()].map(plugin => [plugin.id, pluginStatus(plugin)])]);
+
   function emitChanged() {
+    changeSignature = currentChangeSignature();
     for (const listener of [...changeListeners]) {
       try { listener(); } catch (error) { log(`[plugins] change listener failed: ${error.message}`); }
     }
@@ -1030,8 +1035,11 @@ function createPluginManager({
     settingsChanged() {
       reconcile();
       pushAll();
-      emitChanged();
+      // With nothing active, an unrelated patch has no plugin output to repaint.
+      if ([...plugins.values()].some(isActive) || currentChangeSignature() !== changeSignature) emitChanged();
     },
+    // No active plugin means no consumer for host data; publishers stay idle.
+    hasActive() { return !disposed && !mutating && [...plugins.values()].some(isActive); },
     setSurfaceDemand(surface, refs) {
       if (!SURFACES.includes(surface)) return;
       const next = new Set(placements.normalizeRefList(refs, 32));
