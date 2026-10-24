@@ -63,3 +63,23 @@ test('numeric comparisons use metadata while localized text remains the final di
   const h = harness(); h.push([{ value: 842000, text: '84.2萬' }]); h.push([{ value: 841000, text: '84.1萬', motion: 'inherit' }]);
   assert.deepEqual(h.calls.map(c => [c.from, c.to, c.increasing]), [['84.2萬', '84.1萬', false]]);
 });
+
+test('rail plugin cells refresh their spoken label when a value repaints in place', () => {
+  const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const start = source.indexOf('function pluginCellLabel('), end = source.indexOf('function pluginCellNode(');
+  const views = new Map([['demo/cpu', { title: 'CPU', compact: { value: '12%' } }]]);
+  const node = { dataset: { pluginRef: 'demo/cpu' }, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
+  const empty = { dataset: { pluginRef: 'demo/gone' }, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
+  const rail = { querySelectorAll: selector => selector === '.edge-dock-cell-plugin[data-plugin-ref]' ? [node, empty] : [] };
+  const context = { pluginHost: { state: (_surface, ref) => views.get(ref) } };
+  vm.runInNewContext(source.slice(start, end), context);
+  context.refreshPluginCellLabels(rail);
+  assert.equal(node.attributes['aria-label'], 'CPU 12%');
+  views.set('demo/cpu', { title: 'CPU', compact: { value: '87%' } });
+  context.refreshPluginCellLabels(rail);
+  assert.equal(node.attributes['aria-label'], 'CPU 87%');
+  assert.equal(empty.attributes['aria-label'], 'demo/gone', 'a view without state falls back to its ref');
+  assert.doesNotThrow(() => context.refreshPluginCellLabels(null));
+  assert.match(source, /pluginHost\?\.update\(payload\);\n\s+surfaceWeb\?\.refresh\(\);\n\s+if \(surface === 'rail'\) \{ refreshPluginCellLabels\(railNode\);/);
+});

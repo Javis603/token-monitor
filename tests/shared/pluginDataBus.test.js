@@ -179,6 +179,30 @@ test('changing demand during an asynchronous sample cannot create overlapping re
 });
 
 
+test('one plugin filling its quota cannot block host sources or evict their history', () => {
+  const bus = createDataBus({ historyBytesLimit: 4000, currentBytesLimit: 6000, pluginHistoryBytesLimit: 1000, pluginCurrentBytesLimit: 3000 });
+  for (let i = 0; i < 5; i++) bus.publish('sys.cpu', { percent: i });
+  const hostHistory = bus.history('sys.cpu', 120, 'percent');
+  // A hostile plugin exhausts its own current-value quota...
+  bus.publish('plugin.flood.a', 'x'.repeat(900));
+  assert.throws(() => bus.publish('plugin.flood.b', 'x'.repeat(200)), /storage budget/);
+  // ...and floods history; only its own samples are evicted.
+  for (let i = 0; i < 200; i++) bus.publish(`plugin.flood.m${i % 8}`, { n: i });
+  assert.deepEqual(bus.history('sys.cpu', 120, 'percent'), hostHistory, 'host history survives plugin pressure');
+  bus.publish('sys.cpu', { percent: 9 });
+  bus.publish('tm.today', 'y'.repeat(1500));
+  assert.equal(bus.read('tm.today').value.length, 1500, 'host publishes keep their own budget');
+  bus.publish('plugin.calm.a', 'z'.repeat(500));
+  assert.equal(bus.read('plugin.calm.a').value.length, 500, 'another plugin keeps its quota');
+  // All plugins together still share one ceiling apart from the host.
+  bus.publish('plugin.third.a', 'w'.repeat(300));
+  assert.throws(() => bus.publish('plugin.fourth.a', 'v'.repeat(300)), /storage budget/);
+  bus.clearSourcesWithPrefix('plugin.');
+  bus.publish('plugin.flood.a', 'x'.repeat(900));
+  assert.equal(bus.read('plugin.flood.a').value.length, 900, 'clearing a namespace returns its quota');
+  bus.dispose();
+});
+
 test('retained histories and current readings obey aggregate byte budgets', () => {
   const bus = createDataBus({ historyBytesLimit: 200, currentBytesLimit: 2000 });
   for (let i = 0; i < 100; i++) bus.publish('one', { percent: i, drawing: Array(50).fill('x') });

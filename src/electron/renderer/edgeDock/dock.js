@@ -130,12 +130,25 @@ function updatePluginViews(payload) {
   const numbers = surface === 'rail' ? pluginRailNumbers.capture(railNode) : null;
   pluginHost?.update(payload);
   surfaceWeb?.refresh();
-  if (surface === 'rail') pluginRailNumbers.update(railNode, numbers);
+  if (surface === 'rail') { refreshPluginCellLabels(railNode); pluginRailNumbers.update(railNode, numbers); }
   // Re-measure the retained plugin card without replacing interactive nodes.
   if (surface === 'bubble' && state.payload?.cell?.kind === 'plugin') renderBubble(state.payload);
   if (surface === 'notch') notchRenderer?.pluginViewsChanged();
 }
 bridge.onPluginViews?.(updatePluginViews);
+
+function pluginCellLabel(ref) {
+  const view = pluginHost?.state('edgeDock', ref);
+  return [view?.title, view?.compact?.value].filter(Boolean).join(' ') || ref;
+}
+
+// Plugin values repaint in place between rail renders; keep the spoken label
+// in step with the painted value.
+function refreshPluginCellLabels(rail) {
+  for (const node of rail?.querySelectorAll('.edge-dock-cell-plugin[data-plugin-ref]') || []) {
+    node.setAttribute('aria-label', pluginCellLabel(node.dataset.pluginRef));
+  }
+}
 
 function pluginCellNode(cell) {
   const node = el('div', 'edge-dock-cell edge-dock-cell-plugin');
@@ -143,8 +156,7 @@ function pluginCellNode(cell) {
   const mount = el('div', 'edge-dock-plugin-cell');
   node.append(mount);
   pluginHost?.mount(mount, cell.ref, 'edgeDock', { variant: 'compact' });
-  const view = pluginHost?.state('edgeDock', cell.ref);
-  node.setAttribute('aria-label', [view?.title, view?.compact?.value].filter(Boolean).join(' ') || cell.ref);
+  node.setAttribute('aria-label', pluginCellLabel(cell.ref));
   return node;
 }
 

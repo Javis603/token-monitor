@@ -14,8 +14,18 @@ walk(manifest.views);
 const trees = [20, 80].map(value => createResolver({ read: id => ({ value: id === 'sys.cpu' ? value : { percent: value } }), history: () => [], pluginId: manifest.id }).resolveNode({ type: 'stack', dir: 'row', gap: 24, children: rings }));
 const dock = path.join(root, 'src/electron/renderer/edgeDock');
 const scripts = [...fs.readFileSync(path.join(dock, 'index.html'), 'utf8').matchAll(/<script src="([^"]+)"/g)].map(m => m[1]).filter(s => !['dock.js', '../notch/panel.js'].includes(s));
-const before = execFileSync('git', ['show', 'be3a88f3f:src/electron/renderer/notch/panel.js'], { cwd: root, encoding: 'utf8' }).replace('TokenMonitorNotchPanel = api', 'TokenMonitorNotchPanelBefore = api');
-fs.writeFileSync(path.join(scratch, 'panel-before.js'), before);
+// The before lane is a visual comparison only; no check reads it. A shallow
+// clone or squash merge loses the baseline commit, so fall back to the current
+// panel instead of failing before any check runs.
+const baselineRef = process.env.TM_NOTCH_BASELINE || 'be3a88f3f';
+let before;
+try {
+  before = execFileSync('git', ['show', `${baselineRef}:src/electron/renderer/notch/panel.js`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+} catch {
+  console.warn(`Baseline ${baselineRef} unavailable; the before lane renders the current panel.`);
+  before = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/panel.js'), 'utf8');
+}
+fs.writeFileSync(path.join(scratch, 'panel-before.js'), before.replace('TokenMonitorNotchPanel = api', 'TokenMonitorNotchPanelBefore = api'));
 app.setPath('userData', path.join(scratch, 'profile'));
 app.on('window-all-closed', () => {});
 app.whenReady().then(async () => {

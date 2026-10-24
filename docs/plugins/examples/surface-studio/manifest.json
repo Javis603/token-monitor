@@ -23,7 +23,7 @@
         "en": "System canvas",
         "zh-TW": "系統畫布"
       },
-      "icon": "activity",
+      "icon": "pulse",
       "surfaces": [
         "edgeDock",
         "notch"
