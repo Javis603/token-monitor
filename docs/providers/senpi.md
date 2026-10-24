@@ -8,7 +8,7 @@ read_when:
 
 # OmO Native provider
 
-`senpi` is the tracked-client id. Tokscale's display name is "Senpi (OmO Native)". Token Monitor labels the row OmO Native. It is not Oh My Pi (`omp`, `~/.omp`) and it was never folded into `pi`, so there is no identity split.
+`senpi` is the tracked-client id. Tokscale's display name is "Senpi (OmO Native)". Token Monitor labels the row OmO Native. It is not Oh My Pi (`omp`, `~/.omp`) and it was never folded into `pi`, so there is no identity split. A fresh install tracks it. An existing saved Tools selection does not gain `senpi` on upgrade; enable OmO Native in Settings → tools.
 
 | Data plane | Read by | Source |
 | --- | --- | --- |
