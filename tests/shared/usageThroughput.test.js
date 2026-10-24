@@ -19,6 +19,7 @@ const {
   emptyPeriod,
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,
+  mergeDeviceRecord,
   mergePeriods,
   normalizeDeviceRecord,
   normalizePeriod
@@ -533,6 +534,58 @@ test('model throughput survives extraction, normalization, merge, sync and exact
   const synced = normalizeDeviceRecord(JSON.parse(JSON.stringify(syncPayload(record))));
   assert.deepEqual(synced.periods.today.modelThroughput, fresh.modelThroughput);
   assert.equal(normalizePeriod({ totalTokens: 1 }).modelThroughput, undefined, 'legacy absence must not imply a zero baseline');
+});
+
+test('client throughput survives extraction, normalization, merge, sync and exact deltas', () => {
+  const first = extractUsageFromTokscale({ entries: [tokscaleEntry(), tokscaleEntry({ model: 'untimed', performance: undefined })] });
+  const [client] = Object.keys(first.clientThroughput);
+  assert.ok(client, 'the timed entry is attributed to its tool');
+  assert.deepEqual(first.clientThroughput[client], { timedTokens: 900, timedOutputTokens: 40, timedDurationMs: 1000 });
+  assert.deepEqual(normalizePeriod(first).clientThroughput, first.clientThroughput);
+  const fresh = extractUsageFromTokscale({ entries: [tokscaleEntry(), tokscaleEntry({ sessionId: 's2' })] });
+  const merged = mergePeriods(first, fresh);
+  assert.equal(merged.clientThroughput[client].timedOutputTokens, 120);
+  const updated = applyPeriodDelta(merged, fresh, first);
+  assert.equal(updated.clientThroughput[client].timedOutputTokens, 160);
+  const record = normalizeDeviceRecord({ deviceId: 'a', periods: { today: fresh } });
+  const synced = normalizeDeviceRecord(JSON.parse(JSON.stringify(syncPayload(record))));
+  assert.deepEqual(synced.periods.today.clientThroughput, fresh.clientThroughput);
+  assert.equal(normalizePeriod({ totalTokens: 1 }).clientThroughput, undefined, 'legacy absence must not imply a zero baseline');
+  const legacy = { ...first };
+  delete legacy.clientThroughput;
+  assert.equal(mergePeriods(legacy, first).clientThroughput, undefined);
+  assert.equal(applyPeriodDelta(merged, fresh, legacy).clientThroughput, undefined);
+});
+
+test('a retained untracked client keeps its throughput, or the map fails closed', () => {
+  const timing = (timedOutputTokens, timedDurationMs) => ({ timedTokens: timedOutputTokens * 10, timedOutputTokens, timedDurationMs });
+  const today = (clients, throughput) => ({
+    capabilities: { tokenComponents: true, throughput: true },
+    totalTokens: Object.values(clients).reduce((sum, value) => sum + value, 0),
+    outputTokens: 120,
+    timedTokens: 1200,
+    timedOutputTokens: 120,
+    timedDurationMs: 3000,
+    clients,
+    clientOutputs: Object.fromEntries(Object.keys(clients).map((client) => [client, 60])),
+    ...(throughput ? { clientThroughput: throughput } : {})
+  });
+  const existing = {
+    deviceId: 'mac', trackedClients: ['claude', 'codex'], updatedAt: '2026-05-30T12:00:00.000Z',
+    today: today({ claude: 1000, codex: 1000 }, { claude: timing(60, 2000), codex: timing(60, 1000) })
+  };
+  const incoming = {
+    deviceId: 'mac', trackedClients: ['codex'], updatedAt: '2026-05-30T12:01:00.000Z',
+    today: { ...today({ codex: 1000 }, { codex: timing(60, 1000) }), outputTokens: 60, timedTokens: 600, timedOutputTokens: 60, timedDurationMs: 1000 }
+  };
+  const merged = mergeDeviceRecord(existing, incoming).periods.today;
+  assert.deepEqual(merged.clientThroughput.claude, timing(60, 2000));
+  assert.deepEqual(merged.clientThroughput.codex, timing(60, 1000));
+  assert.equal(merged.timedDurationMs, 3000, 'period totals include the retained client');
+  assert.equal(merged.timedOutputTokens, 120);
+
+  const legacy = { ...existing, today: today({ claude: 1000, codex: 1000 }) };
+  assert.equal(mergeDeviceRecord(legacy, incoming).periods.today.clientThroughput, undefined);
 });
 
 test('unknown model attribution survives partition merges, aggregation and anchored deltas', () => {

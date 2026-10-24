@@ -681,3 +681,52 @@ test('recapturing Pi carries the merged snapshot residue forward', () => {
   const applied = applyArchivedClientUsage(liveSummary(now, {}), recaptured, { activeClients: '', now });
   assert.equal(applied.periods.allTime.totalTokens, 100);
 });
+
+test('a retained client carries its session timing and fails the tool rate closed', () => {
+  const record = deviceRecord();
+  Object.assign(record.today.sessions['hermes:h1'], {
+    outputTokens: 30,
+    timedOutputTokens: 20,
+    timedDurationMs: 2000
+  });
+  const archive = captureArchivedClientUsage({}, record, ['hermes'], new Date('2026-05-30T13:00:00.000Z'));
+
+  const live = liveSummaryWithoutHermes();
+  live.today.timedTokens = 50;
+  live.today.timedOutputTokens = 30;
+  live.today.timedDurationMs = 1500;
+  live.today.clientThroughput = { codex: { timedTokens: 50, timedOutputTokens: 30, timedDurationMs: 1500 } };
+  const summary = applyArchivedClientUsage(live, archive, {
+    activeClients: 'codex',
+    now: new Date('2026-05-30T13:00:00.000Z')
+  });
+
+  assert.equal(summary.today.timedTokens, 50, 'the archive replays no partial timing into the period counters');
+  assert.equal(summary.today.timedOutputTokens, 30);
+  assert.equal(summary.today.timedDurationMs, 1500);
+  assert.deepEqual(summary.today.clientThroughput.codex, {
+    timedTokens: 50,
+    timedOutputTokens: 30,
+    timedDurationMs: 1500
+  });
+  assert.equal(summary.today.clientThroughput.hermes, undefined,
+    'no per-tool rate without the token count the timing covered');
+});
+
+test('an untimed retained client keeps the attribution the live scan still owns', () => {
+  const archive = captureArchivedClientUsage({}, deviceRecord(), ['hermes'], new Date('2026-05-30T13:00:00.000Z'));
+
+  const live = liveSummaryWithoutHermes();
+  live.today.timedTokens = 50;
+  live.today.timedOutputTokens = 30;
+  live.today.timedDurationMs = 1500;
+  const hermes = { timedTokens: 20, timedOutputTokens: 10, timedDurationMs: 800 };
+  live.today.clientThroughput = { hermes };
+  const summary = applyArchivedClientUsage(live, archive, {
+    activeClients: 'codex',
+    now: new Date('2026-05-30T13:00:00.000Z')
+  });
+
+  assert.deepEqual(summary.today.clientThroughput.hermes, hermes,
+    'a retained client with no timed sample leaves the live attribution in place');
+});

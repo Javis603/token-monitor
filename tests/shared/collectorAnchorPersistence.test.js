@@ -410,7 +410,7 @@ function emptyWslBundle() {
 }
 
 function mkPeriod() {
-  return { totalTokens: 50, costUsd: 0, clients: { claude: 50 }, clientCosts: {}, models: {}, modelCosts: {}, clientModels: {}, clientModelCosts: {}, sessions: {} };
+  return { ...emptyPeriod(), totalTokens: 50, costUsd: 0, clients: { claude: 50 }, clientCosts: {}, models: {}, modelCosts: {}, clientModels: {}, clientModelCosts: {}, sessions: {} };
 }
 
 test('restart reuse: anchor file on disk enables todayOnly on first interval tick', async () => {
@@ -782,7 +782,7 @@ test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
   const now = new Date(2026, 7, 8, 10, 0, 0);
   const anchor = (overrides = {}) => ({
     dateKey: '2026-08-08',
-    today: {}, month: {}, allTime: {},
+    today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod(),
     configFingerprint: configFingerprint('claude', '2024-01-01', true),
     fullScanAt: new Date(now.getTime() - 60_000).toISOString(),
     ...overrides
@@ -797,6 +797,18 @@ test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
   assert.equal(collectorAnchorTrust(anchor({ allTime: null }), options), null);
   assert.equal(collectorAnchorTrust(anchor(), { ...options, clients: 'claude,codex' }), null);
   assert.equal(collectorAnchorTrust(anchor(), { ...options, projectsEnabled: false }), null);
+  // An anchor from before per-client throughput would drop that map from the
+  // broad periods on the first anchored delta, so it forces a full scan: no
+  // capability marker at all, or a throughput-capable period without the map.
+  const current = emptyPeriod();
+  const { clientThroughput: _omitted, ...withoutClientMap } = emptyPeriod();
+  assert.ok(collectorAnchorTrust(anchor({ today: current, month: current, allTime: current }), options));
+  assert.equal(collectorAnchorTrust(anchor({ month: withoutClientMap }), options), null);
+  assert.equal(collectorAnchorTrust(anchor({ month: { totalTokens: 1 } }), options), null);
+  // Aggregate-only output records throughput as unavailable; that is current, not legacy.
+  const aggregateOnly = { ...withoutClientMap, capabilities: { tokenComponents: false, throughput: false } };
+  delete aggregateOnly.modelThroughput;
+  assert.ok(collectorAnchorTrust(anchor({ allTime: aggregateOnly }), options));
 
   // A custom scan path added after the anchor was written invalidates it; an
   // anchor whose fingerprint already covers that path stays trusted.
@@ -820,7 +832,7 @@ test('Cursor anchors from before the Auto model rename require a full scan', () 
   const now = new Date(2026, 7, 8, 10, 0, 0);
   const options = { clients: 'cursor', allTimeSince: '2024-01-01', now };
   const anchor = {
-    dateKey: '2026-08-08', today: {}, month: {}, allTime: {},
+    dateKey: '2026-08-08', today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod(),
     configFingerprint: configFingerprint('cursor', '2024-01-01'),
     fullScanAt: new Date(now.getTime() - 60_000).toISOString()
   };
@@ -833,7 +845,7 @@ test('flat catalog project provenance requires a full scan instead of guessing p
   const now = new Date(2026, 7, 8, 10, 0, 0);
   const options = { clients: 'antigravity', allTimeSince: '2024-01-01', now };
   const anchor = {
-    dateKey: '2026-08-08', today: {}, month: {}, allTime: {},
+    dateKey: '2026-08-08', today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod(),
     configFingerprint: configFingerprint('antigravity', '2024-01-01'),
     fullScanAt: new Date(now.getTime() - 60000).toISOString(),
     catalogProjects: { 'antigravity:session': 'project-a' }

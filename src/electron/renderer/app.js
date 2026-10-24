@@ -6542,8 +6542,16 @@ function renderHomeModelModule(period) {
   return module;
 }
 
+// Clients picked for the Home Tools module; empty means every tool with usage.
+function homeToolClientSet() {
+  return new Set(clientDisplayPreferencesApi.normalizePinnedClients(state.settings?.homeToolClients, KNOWN_CLIENTS).split(',').filter(Boolean));
+}
+
 function homeToolSourceRows(period) {
-  return periodAttributionRows(period, period?.clients, period?.clientCosts, period?.clientUnpricedTokens).map(({ key: client, value }) => ({
+  const selected = homeToolClientSet();
+  return periodAttributionRows(period, period?.clients, period?.clientCosts, period?.clientUnpricedTokens)
+    .filter(({ key }) => selected.size === 0 || selected.has(key))
+    .map(({ key: client, value }) => ({
     key: client,
     name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client,
     value: Number(value || 0),
@@ -6576,9 +6584,114 @@ function renderHomeToolModule(period) {
     share.className = 'home-list-aux';
     share.textContent = formatPercent(row.share * 100);
     item.append(mark, name, value, share);
-    body.append(item);
+    const stats = state.settings?.homeToolDetails === false ? null : renderHomeToolStats(homeToolStats(period, row.key, row.value));
+    const card = document.createElement('div');
+    card.className = stats ? 'home-tool-card' : 'home-tool-card is-plain';
+    card.append(item);
+    if (stats) card.append(stats);
+    body.append(card);
   }
   return module;
+}
+
+// Per-tool detail shown under each Home tool row: the token split and, for tools whose
+// logs carry generation timing, the summed model time and the output speed it implies.
+// The split is decided per tool: a period can mix tools that report token components
+// with tools that do not, and only the latter should lose their breakdown.
+function homeToolStats(period, client, totalTokens) {
+  const parts = fixedPeriodRangesApi.tokenComponentBreakdown({
+    totalTokens,
+    cacheReadTokens: attributionComponent(period, 'clientCacheReads', client),
+    outputTokens: attributionComponent(period, 'clientOutputs', client),
+    unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client)
+  });
+  // Missing component maps read as zero, which would pass the whole total off as
+  // uncached input. That is exact only when the period says its components are;
+  // otherwise split a tool that reports at least one component of its own.
+  const hasComponents = period?.capabilities?.tokenComponents === true
+    || ['clientCacheReads', 'clientCacheWrites', 'clientOutputs', 'clientUnclassifiedTokens']
+      .some((field) => period?.[field] && Object.prototype.hasOwnProperty.call(period[field], client));
+  const throughput = period?.clientThroughput?.[client];
+  const durationMs = Math.max(0, Number(throughput?.timedDurationMs) || 0);
+  const timedOutput = Math.max(0, Number(throughput?.timedOutputTokens) || 0);
+  return {
+    parts: hasComponents && parts.unclassified < totalTokens ? parts : null,
+    durationMs,
+    tokensPerSecond: durationMs > 0 && timedOutput > 0 ? timedOutput / (durationMs / 1000) : null
+  };
+}
+
+function formatHomeToolDuration(ms) {
+  const totalSeconds = Math.round(Math.max(0, ms) / 1000);
+  if (totalSeconds < 60) return t('home.toolStats.seconds', { s: totalSeconds });
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  if (hours > 0) return t('home.toolStats.hoursMinutes', { h: hours, m: minutes });
+  return t('home.toolStats.minutesSeconds', { m: minutes, s: totalSeconds % 60 });
+}
+
+function homeToolStatCell(key, text, swatch) {
+  const cell = document.createElement('div');
+  cell.className = 'home-tool-stat';
+  const label = document.createElement('span');
+  label.className = 'home-tool-stat-label';
+  if (swatch) {
+    const dot = document.createElement('i');
+    dot.className = `home-tool-swatch home-tool-swatch-${swatch}`;
+    label.append(dot);
+  }
+  label.append(t(`home.toolStats.${key}`));
+  const value = document.createElement('span');
+  value.className = 'home-tool-stat-value';
+  value.textContent = text;
+  cell.append(label, value);
+  return cell;
+}
+
+function renderHomeToolStats({ parts, durationMs, tokensPerSecond }) {
+  const cells = [];
+  let bar = null;
+  if (parts) {
+    const input = parts.cacheRead + parts.cacheMiss;
+    // The bar spans the whole tool total, so a partial split keeps its remainder.
+    const classified = input + parts.output + parts.unclassified;
+    cells.push(
+      homeToolStatCell('cacheHit', input > 0 ? formatPercent(toolDetailsApi.tokenInputPercentages(parts).hit) : '--'),
+      homeToolStatCell('cacheRead', formatCompact(parts.cacheRead), 'read'),
+      homeToolStatCell('uncachedInput', formatCompact(parts.cacheMiss), 'miss'),
+      homeToolStatCell('output', formatCompact(parts.output), 'output')
+    );
+    if (parts.unclassified > 0) cells.push(homeToolStatCell('unclassified', formatCompact(parts.unclassified), 'unclassified'));
+    if (classified > 0) {
+      bar = document.createElement('div');
+      bar.className = 'home-tool-split';
+      bar.setAttribute('aria-hidden', 'true');
+      for (const [kind, amount] of [['read', parts.cacheRead], ['miss', parts.cacheMiss], ['output', parts.output], ['unclassified', parts.unclassified]]) {
+        if (amount <= 0) continue;
+        const segment = document.createElement('span');
+        segment.className = `home-tool-split-${kind}`;
+        segment.style.flexGrow = String(amount / classified);
+        bar.append(segment);
+      }
+    }
+  }
+  if (durationMs > 0) {
+    cells.push(
+      homeToolStatCell('modelTime', formatHomeToolDuration(durationMs)),
+      homeToolStatCell('speed', tokensPerSecond ? t('home.toolStats.tps', { value: formatNumber(tokensPerSecond) }) : '--')
+    );
+    // The rate is an estimate over timed generation, not pure decoding; say so.
+    cells[cells.length - 1].title = t('home.toolStats.speedHint');
+  }
+  if (!cells.length) return null;
+  const wrap = document.createElement('div');
+  wrap.className = 'home-tool-detail';
+  const grid = document.createElement('div');
+  grid.className = 'home-tool-stats';
+  grid.append(...cells);
+  if (bar) wrap.append(bar);
+  wrap.append(grid);
+  return wrap;
 }
 
 function homeSessionAgo(value) {
@@ -10222,6 +10335,69 @@ function renderHomeModuleCountSettings(id) {
   return wrap;
 }
 
+function renderHomeToolSettings() {
+  const frag = document.createDocumentFragment();
+  frag.append(renderHomeModuleCountSettings('tool'));
+
+  const detailsLabel = document.createElement('label');
+  detailsLabel.className = 'checkbox-label home-limit-status-setting';
+  const detailsInput = document.createElement('input');
+  detailsInput.type = 'checkbox';
+  detailsInput.checked = state.settings?.homeToolDetails !== false;
+  const detailsText = document.createElement('span');
+  detailsText.textContent = t('settings.home.toolDetails');
+  detailsInput.addEventListener('change', async () => {
+    try {
+      await saveSettings({ homeToolDetails: detailsInput.checked });
+    } catch (_) {
+      return;
+    }
+    renderHomeIfVisible();
+  });
+  detailsLabel.append(detailsInput, detailsText);
+  frag.append(detailsLabel);
+
+  // Offer the tools that have usage in any period, plus any already picked.
+  const selected = homeToolClientSet();
+  const used = new Set(selected);
+  for (const period of Object.values(state.stats?.periods || {})) {
+    for (const [client, tokens] of Object.entries(period?.clients || {})) {
+      if (Number(tokens) > 0 && KNOWN_CLIENTS.some((known) => known.id === client)) used.add(client);
+    }
+  }
+  const pickerTitle = document.createElement('p');
+  pickerTitle.className = 'settings-note home-tool-picker-note';
+  pickerTitle.textContent = t('settings.home.toolPickerNote');
+  frag.append(pickerTitle);
+  const picker = document.createElement('div');
+  picker.className = 'home-tool-picker';
+  const ordered = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients)
+    .filter((client) => used.has(client.id));
+  for (const client of ordered) {
+    const label = document.createElement('label');
+    label.className = 'checkbox-label home-tool-picker-option';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = client.id;
+    input.checked = selected.has(client.id);
+    const text = document.createElement('span');
+    text.textContent = clientLabels[client.id] || client.label || client.id;
+    input.addEventListener('change', async () => {
+      const next = [...picker.querySelectorAll('input:checked')].map((node) => node.value);
+      try {
+        await saveSettings({ homeToolClients: next.join(',') });
+      } catch (_) {
+        return;
+      }
+      renderHomeIfVisible();
+    });
+    label.append(input, text);
+    picker.append(label);
+  }
+  frag.append(picker);
+  return frag;
+}
+
 function renderHomeSettingsList() {
   const wrap = document.createElement('div');
   wrap.id = 'homeSettingsList';
@@ -10304,7 +10480,8 @@ function renderHomeSettingsList() {
       const inner = document.createElement('div');
       inner.className = 'accordion-animation-inner';
       inner.appendChild(id === 'limits' ? renderHomeLimitProviderList()
-        : id === 'trends' ? renderHomeActivitySettings() : renderHomeModuleCountSettings(id));
+        : id === 'trends' ? renderHomeActivitySettings()
+          : id === 'tool' ? renderHomeToolSettings() : renderHomeModuleCountSettings(id));
       listContainer.appendChild(inner);
       wrap.append(listContainer);
     }

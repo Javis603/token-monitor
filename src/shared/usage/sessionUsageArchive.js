@@ -372,6 +372,18 @@ function addArchivedSession(period, session, archiveKey = null) {
   if (tokens > 0) period.clients[archived.client] = (period.clients[archived.client] || 0) + tokens;
   if (cost > 0) period.clientCosts[archived.client] = (period.clientCosts[archived.client] || 0) + cost;
 
+  // The archive keeps a session's output and duration but never the token count
+  // that timing covered, so a replayed sample cannot be turned into a rate even
+  // when its duration is positive: with the numerator missing, the live counters
+  // would end up describing a different set of entries than the duration. All
+  // three period counters therefore stay with the live scan and this client's
+  // attribution is closed instead — a mixed tool reports no rate rather than one
+  // built from its live half, the same fail-closed rule the other
+  // incomplete-provenance fields follow in docs/API.md. An untimed session
+  // contributed no timed sample at all, so it leaves the live attribution alone.
+  const timedDurationMs = Math.max(0, Math.round(numberValue(archived.timedDurationMs)));
+  if (timedDurationMs > 0 && period.clientThroughput) delete period.clientThroughput[archived.client];
+
   for (const [model, modelTokens] of Object.entries(archived.models || {})) {
     const next = Math.max(0, Math.round(numberValue(modelTokens)));
     if (next <= 0) continue;

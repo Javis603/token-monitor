@@ -952,3 +952,54 @@ test('still preserves Cursor conversation sessions after the live source drops t
   assert.equal(visible.allTime.clients.cursor, 1000);
   assert.equal(visible.allTime.sessions[`cursor:${CURSOR_UUID}`].archived, true);
 });
+
+test('a replayed session carries its timing into the period and fails the tool rate closed', () => {
+  const source = liveSummary();
+  Object.assign(source.today.sessions['opencode:o1'], {
+    outputTokens: 30,
+    timedOutputTokens: 20,
+    timedDurationMs: 2000
+  });
+  const archive = captureSessionUsageArchive({}, source, new Date('2026-07-09T08:15:00.000Z'));
+
+  const live = summaryAfterOpenCodeDelete();
+  live.today.timedTokens = 50;
+  live.today.timedOutputTokens = 30;
+  live.today.timedDurationMs = 1500;
+  live.today.clientThroughput = { codex: { timedTokens: 50, timedOutputTokens: 30, timedDurationMs: 1500 } };
+  const visible = applySessionUsageArchive(live, archive, {
+    now: new Date('2026-07-09T08:20:00.000Z')
+  });
+
+  assert.equal(visible.today.timedTokens, 50, 'the archive replays no partial timing into the period counters');
+  assert.equal(visible.today.timedOutputTokens, 30);
+  assert.equal(visible.today.timedDurationMs, 1500);
+  assert.deepEqual(visible.today.clientThroughput.codex, {
+    timedTokens: 50,
+    timedOutputTokens: 30,
+    timedDurationMs: 1500
+  });
+  assert.equal(visible.today.clientThroughput.opencode, undefined,
+    'no per-tool rate without the token count the timing covered');
+});
+
+test('an untimed replay keeps the live attribution it cannot contradict', () => {
+  const source = liveSummary();
+  source.today.sessions['opencode:o1'].outputTokens = 30;
+  const archive = captureSessionUsageArchive({}, source, new Date('2026-07-09T08:15:00.000Z'));
+
+  const live = summaryAfterOpenCodeDelete();
+  live.today.timedTokens = 90;
+  live.today.timedOutputTokens = 55;
+  live.today.timedDurationMs = 2700;
+  const codex = { timedTokens: 50, timedOutputTokens: 30, timedDurationMs: 1500 };
+  const opencode = { timedTokens: 40, timedOutputTokens: 25, timedDurationMs: 1200 };
+  live.today.clientThroughput = { codex, opencode };
+  const visible = applySessionUsageArchive(live, archive, {
+    now: new Date('2026-07-09T08:20:00.000Z')
+  });
+
+  assert.deepEqual(visible.today.clientThroughput.opencode, opencode,
+    'a session with no timed sample leaves the live attribution in place');
+  assert.deepEqual(visible.today.clientThroughput.codex, codex);
+});
