@@ -4,6 +4,8 @@ const { hashKey } = require('../../hashKey');
 const { normalizeLimitProvider } = require('../../limits/core');
 const { cleanSecret, numberOrNull } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
+const { recordWorkbuddyUsage } = require('./usageHistory');
+const { WORKBUDDY_USAGE_PATH } = require('./usageRecords');
 
 const WORKBUDDY_FETCH_TIMEOUT_MS = 12_000;
 const WORKBUDDY_ACCOUNT_CONCURRENCY = 4;
@@ -444,7 +446,10 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
           { signal, deadlineMs });
       };
       let credential = managed ? await resolveCredential(false) : { accessToken: explicitToken, domain };
-      const requestQuota = async () => {
+      // The ledger read shares the quota request's credentials, host, realm
+      // paths and transport, so a Spend figure can never be fetched with a
+      // different account's token or from a different realm.
+      const billingPost = async (paths, requestBody) => {
         const token = cleanSecret(credential?.accessToken);
         const credentialDomain = cleanSecret(credential?.domain) || domain;
         if (managed && !token) throw Object.assign(new Error('WorkBuddy managed credential is missing'), { status: 'notConfigured' });
@@ -455,21 +460,28 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
           : requestHeaders(token, userId, enterpriseId, workbuddyLocale(env, options), credentialDomain, departmentInfo);
         const init = {
           method: 'POST', redirect: 'error', credentials: 'omit', headers,
-          body: enterpriseId ? '{}' : JSON.stringify({
-            PageNumber: 1, PageSize: 100, ProductCode: WORKBUDDY_PRODUCT_CODE, Status: [0, 3],
-            PackageEndTimeRangeBegin: formatWorkbuddyDateTime(now),
-            PackageEndTimeRangeEnd: formatWorkbuddyDateTime(now + WORKBUDDY_PERSONAL_RANGE_MS)
-          })
+          body: JSON.stringify(requestBody)
         };
         const endpoint = realm === 'ai' ? WORKBUDDY_AI_ENDPOINT : WORKBUDDY_DEFAULT_ENDPOINT;
-        const paths = workbuddyBillingPaths(realm, Boolean(enterpriseId));
-        for (let index = 0; index < paths.length; index += 1) {
+        const send = async (index) => {
           try { return await fetchJson(`${endpoint}${paths[index]}`, init, requestDeps); }
           catch (error) {
             if (error.httpStatus !== 404 || index === paths.length - 1) throw error;
+            return send(index + 1);
           }
-        }
+        };
+        return send(0);
       };
+      // The ledger read uses one fixed path per realm, which is NOT derived from
+      // the quota path: the server serves it unversioned and answers a `/v2`
+      // form with 404.
+      const spendPaths = [WORKBUDDY_USAGE_PATH];
+      const requestQuota = () => billingPost(workbuddyBillingPaths(realm, Boolean(enterpriseId)),
+        enterpriseId ? {} : {
+          PageNumber: 1, PageSize: 100, ProductCode: WORKBUDDY_PRODUCT_CODE, Status: [0, 3],
+          PackageEndTimeRangeBegin: formatWorkbuddyDateTime(now),
+          PackageEndTimeRangeEnd: formatWorkbuddyDateTime(now + WORKBUDDY_PERSONAL_RANGE_MS)
+        });
       let body;
       try { body = await requestQuota(); }
       catch (error) {
@@ -481,10 +493,25 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
         body = await requestQuota();
       }
       const usage = enterpriseId ? parseEnterpriseUsage(body) : parsePersonalUsage(body);
+      const resolvedAccountKey = managed || userId
+        ? accountKey
+        : workbuddyAccountKey(explicitToken, userId, enterpriseId, usage.accountId, realm);
+      // Today/Week/Month come from the per-request billing ledger, which carries
+      // its own timestamps. A probe is the user checking a credential they just
+      // saved, and the ledger read costs extra requests, so it is skipped there.
+      const tracked = usage.window && !deps.probe
+        ? await recordWorkbuddyUsage((requestBody) => billingPost(spendPaths, requestBody), now)
+        : null;
       return row('ok', {
-        accountKey: managed || userId ? accountKey : workbuddyAccountKey(explicitToken, userId, enterpriseId, usage.accountId, realm),
+        accountKey: resolvedAccountKey,
         windows: usage.window ? [usage.window] : [],
-        ...(usage.window ? { balance: { amount: usage.remaining, currency: 'CREDITS' } } : {})
+        ...(usage.window ? {
+          balance: {
+            amount: usage.remaining,
+            currency: 'CREDITS',
+            ...(tracked || {})
+          }
+        } : {})
       });
     }, { signal: deps.signal, deadlineMs: deps.workbuddyAccountTimeoutMs || WORKBUDDY_PROBE_BUDGET_MS });
   } catch (error) { return row(workbuddyStatus(error)); }
