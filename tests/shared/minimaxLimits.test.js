@@ -1649,3 +1649,69 @@ test('MiniMax Code lane probe path never mutates the lease', async () => {
   const auth = JSON.parse(fs.readFileSync(fixture.authPath, 'utf8'));
   assert.equal(auth.records[CODE_RECORD_KEY].refreshToken, REFRESH_ONFILE);
 });
+
+test('MiniMax Code lane skips corrupt sibling stores and string numerics parse', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-code-garbage-'));
+  const goodDir = path.join(base, 'auth', 'prod', 'cn', 'mcode-public');
+  const garbageDir = path.join(base, 'auth', 'prod', 'cn', 'zz-corrupt');
+  fs.mkdirSync(garbageDir, { recursive: true });
+  fs.writeFileSync(path.join(garbageDir, 'auth.json'), '{not json at all');
+  const recordsOnlyDir = path.join(base, 'auth', 'prod', 'cn', 'aa-empty');
+  fs.mkdirSync(recordsOnlyDir, { recursive: true });
+  fs.writeFileSync(path.join(recordsOnlyDir, 'auth.json'), JSON.stringify({ schemaVersion: 1, records: {} }));
+  fs.mkdirSync(goodDir, { recursive: true });
+  // Numeric fields arrive as strings in some responses; both must parse.
+  fs.writeFileSync(path.join(goodDir, 'auth.json'), JSON.stringify({
+    schemaVersion: 1,
+    records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: String(CODE_NOW + 55 * 60 * 1000) }) }
+  }, null, 2));
+  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'code' }, codeDeps({ base }, async (url) => {
+    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return { ok: true, json: async () => membershipBody({ op_group_id: '' }) };
+    throw new Error(`unexpected url ${url}`);
+  }));
+  assert.equal(result.status, 'ok', 'corrupt or record-less sibling stores are skipped, not fatal');
+});
+
+test('MiniMax Code lane stays unavailable on nonnumeric credits', async () => {
+  const fixture = writeCodeAuthFixture({
+    records: { [CODE_RECORD_KEY]: codeDesktopRecord() },
+    state: null
+  });
+  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'code' }, codeDeps(fixture, async (url) => {
+    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) {
+      return { ok: true, json: async () => membershipBody({ op_credit_summary: { total_remaining_amount: 'not-a-number' }, op_group_id: '' }) };
+    }
+    throw new Error(`unexpected url ${url}`);
+  }));
+  assert.equal(result.status, 'unavailable');
+  assert.deepEqual(result.windows, []);
+});
+
+test('MiniMax Code lane force-refreshes when the record disappears before the write-back', async () => {
+  const fixture = writeCodeAuthFixture({
+    records: { [CODE_RECORD_KEY]: codeDesktopRecord({ accessToken: '', expiresAtMs: CODE_NOW - 1000 }) },
+    state: null
+  });
+  const runtimeState = new Map();
+  // The write-back re-reads the file: dropping the record simulates another
+  // writer (or a logout) racing the rotation. Discovery's first read is real.
+  let reads = 0;
+  const readFileSync = (file, ...rest) => {
+    if (file === fixture.authPath && reads++ > 0) {
+      return JSON.stringify({ schemaVersion: 1, records: {} });
+    }
+    return fs.readFileSync(file, ...rest);
+  };
+  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'code' }, codeDeps(fixture, async (url, init) => {
+    if (url === MINIMAX_CODE_OAUTH_URL_CN) {
+      return { ok: true, json: async () => oauthOkBody(ACCESS_ROTATED, REFRESH_ROTATED) };
+    }
+    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) {
+      assert.equal(init.headers.authorization, `Bearer ${ACCESS_ROTATED}`);
+      return { ok: true, json: async () => membershipBody({ op_group_id: '' }) };
+    }
+    throw new Error(`unexpected url ${url}`);
+  }, { readFileSync, providerRuntimeState: runtimeState }));
+  assert.equal(result.status, 'ok', 'the tick still answers with the minted token');
+  assert.equal(runtimeState.get(MINIMAX_CODE_FORCE_REFRESH_STATE_KEY), true, 'a vanished record reads as a lost write-back');
+});
