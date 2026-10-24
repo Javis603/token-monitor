@@ -342,6 +342,23 @@ test('every source-root id the collector emits is in the allowlist', () => {
   }
 });
 
+test('senpi watches the OmO tree and the legacy senpi root, and the agent dir replaces only the latter', () => {
+  const homeDir = path.join(path.sep, 'tmp', 'source-home');
+  const options = { homeDir, platform: 'linux', env: {} };
+  assert.deepEqual(clientSourceRoots('senpi', options).senpi, [
+    { id: 'senpi-sessions', dir: path.join(homeDir, '.senpi', 'agent', 'sessions') },
+    { id: 'senpi-omo-sessions', dir: path.join(homeDir, '.omo', 'agent', 'sessions') },
+    { id: 'senpi-task-children', dir: path.join(homeDir, '.omo', 'senpi-task') }
+  ]);
+  const relocated = clientSourceRoots('senpi', {
+    ...options,
+    env: { SENPI_CODING_AGENT_DIR: '/custom/senpi-agent', SENPI_CODING_AGENT_SESSION_DIR: '/custom/sessions' }
+  }).senpi;
+  assert.equal(relocated[0].dir, path.join('/custom/senpi-agent', 'sessions'));
+  assert.equal(relocated[1].dir, path.join(homeDir, '.omo', 'agent', 'sessions'));
+  assert.equal(relocated[3].dir, '/custom/sessions');
+});
+
 test('shared home-relative directories retain exact source roots, checks and watch candidates', () => {
   const homeDir = path.join(path.sep, 'tmp', 'source-home');
   const clients = 'droid,qwen,pi,omp,commandcode';
