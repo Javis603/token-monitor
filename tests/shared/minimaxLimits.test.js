@@ -1442,7 +1442,8 @@ test('MiniMax Code lane refreshes an expiring lease, rotates and writes back ato
 test('MiniMax Code lane classifies OAuth refresh errors', async () => {
   for (const [error, expected] of [
     ['invalid_grant', 'unauthorized'],
-    ['unauthorized_client', 'unauthorized']
+    ['unauthorized_client', 'unauthorized'],
+    ['invalid_request', 'unavailable']
   ]) {
     const fixture = writeCodeAuthFixture({
       records: { [CODE_RECORD_KEY]: codeDesktopRecord({ accessToken: '', expiresAtMs: CODE_NOW - 1000 }) },
@@ -1457,8 +1458,22 @@ test('MiniMax Code lane classifies OAuth refresh errors', async () => {
       throw new Error(`unexpected url ${url}`);
     }));
     assert.equal(result.status, expected, error);
-    assert.equal(attempts.length, 1, `${error} is terminal and must not retry`);
+    assert.equal(attempts.length, 1, `${error} is deterministic and must not retry`);
   }
+});
+
+test('MiniMax Code lane consults the process detector only when a refresh is due', async () => {
+  const fixture = writeCodeAuthFixture({
+    records: { [CODE_RECORD_KEY]: codeDesktopRecord() },
+    state: null
+  });
+  let detections = 0;
+  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'code' }, codeDeps(fixture, async (url) => {
+    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return { ok: true, json: async () => membershipBody({ op_group_id: '' }) };
+    throw new Error(`unexpected url ${url}`);
+  }, { clientRunning: () => { detections += 1; return true; } }));
+  assert.equal(result.status, 'ok');
+  assert.equal(detections, 0, 'a healthy tick must not spawn a process detector');
 });
 
 test('MiniMax Code lane survives a transient refresh failure on the on-disk token', async () => {

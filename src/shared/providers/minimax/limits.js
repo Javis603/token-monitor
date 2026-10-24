@@ -11,7 +11,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFile } = require('node:child_process');
 
 const { normalizeLimitProvider } = require('../../limits/core');
 const { cleanSecret } = require('../../limits/providerHelpers');
@@ -392,23 +392,29 @@ function minimaxCodeAuthFiles(options = {}, deps = {}) {
 
 // Refresh only while the desktop app is quit: its in-memory lease goes stale
 // the moment we rotate, so the file protocol (and the red line) is "read-only
-// while it runs". Detection is best effort — pgrep/tasklist with a short
-// timeout; a missing tool reads as "not running" and the sync write-back keeps
-// the lost-lease window minimal either way.
+// while it runs". Detection is best effort, asynchronous (it runs in the main
+// process) and only consulted when a refresh decision actually needs it: a
+// missing tool or a failed lookup reads as "not running", and the synchronous
+// write-back keeps the lost-lease window minimal either way.
 function minimaxCodeClientRunning(deps = {}) {
-  if (typeof deps.clientRunning === 'function') return Boolean(deps.clientRunning());
+  if (typeof deps.clientRunning === 'function') return Promise.resolve().then(() => deps.clientRunning()).then(Boolean);
   const platform = deps.platform || process.platform;
-  try {
-    if (platform === 'win32') {
-      const out = execFileSync('tasklist', ['/FI', 'IMAGENAME eq MiniMax Code.exe', '/FO', 'CSV', 'NH'],
-        { timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).toString();
-      return out.includes('MiniMax Code');
+  return new Promise((resolve) => {
+    try {
+      if (platform === 'win32') {
+        execFile('tasklist', ['/FI', 'IMAGENAME eq MiniMax Code.exe', '/FO', 'CSV', 'NH'],
+          { timeout: 2000, windowsHide: true }, (error, stdout) => {
+            resolve(!error && String(stdout).includes('MiniMax Code'));
+          });
+        return;
+      }
+      execFile('pgrep', ['-f', 'MiniMax Code'], { timeout: 2000 }, (error) => {
+        resolve(!error); // pgrep exits 0 only when a match exists
+      });
+    } catch (_) {
+      resolve(false);
     }
-    execFileSync('pgrep', ['-f', 'MiniMax Code'], { timeout: 2000, stdio: ['ignore', 'ignore', 'ignore'] });
-    return true;
-  } catch (_) {
-    return false;
-  }
+  });
 }
 
 // scope and audience MUST ride along (from the record itself): a refresh
@@ -427,6 +433,8 @@ async function refreshMinimaxCodeToken(session, record, deps = {}) {
   const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
   let lastError = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    // A canceled runtime must not issue another refresh with a stale lease.
+    if (deps.signal?.aborted) break;
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
     try {
@@ -464,7 +472,8 @@ async function refreshMinimaxCodeToken(session, record, deps = {}) {
         status: response.status === 429 ? 'sourceRateLimited' : 'unavailable',
         statusCode: response.status
       });
-      if (response.status === 429 || (response.status < 500 && response.status !== 400)) throw lastError;
+      // Only a 5xx is worth another attempt; any other 4xx is deterministic.
+      if (response.status < 500) throw lastError;
     } catch (error) {
       if (error?.name === 'AbortError') {
         lastError = Object.assign(new Error('oauth2/token timed out'), { status: 'unavailable' });
@@ -575,16 +584,22 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
     if (value) runtimeState.set(MINIMAX_CODE_FORCE_REFRESH_STATE_KEY, true);
     else runtimeState.delete(MINIMAX_CODE_FORCE_REFRESH_STATE_KEY);
   };
-  // A credential probe must never mutate the lease (the registry's
-  // persistent-bookkeeping rule): it reads whatever is on disk, the same way
-  // the lane behaves while the desktop app is running.
-  const clientRunning = deps.probe === true ? true : minimaxCodeClientRunning(deps);
   let accessToken = typeof session.record.accessToken === 'string' ? session.record.accessToken : '';
   const expiresAtMs = Number(session.record.expiresAtMs);
+  // Refreshing means rotating the desktop app's lease, so the gate is consulted
+  // lazily (a healthy tick never spawns a process detector) and a credential
+  // probe never passes it at all — the registry's persistent-bookkeeping rule.
+  let refreshAllowed = null;
+  const canRefresh = async () => {
+    if (refreshAllowed === null) {
+      refreshAllowed = deps.probe !== true && !(await minimaxCodeClientRunning(deps));
+    }
+    return refreshAllowed;
+  };
   let refreshAttempted = false;
-  if (!clientRunning
-    && (runtimeState?.get(MINIMAX_CODE_FORCE_REFRESH_STATE_KEY) === true
-      || !accessToken || !Number.isFinite(expiresAtMs) || expiresAtMs - now < MINIMAX_CODE_REFRESH_LEEWAY_MS)) {
+  if ((runtimeState?.get(MINIMAX_CODE_FORCE_REFRESH_STATE_KEY) === true
+      || !accessToken || !Number.isFinite(expiresAtMs) || expiresAtMs - now < MINIMAX_CODE_REFRESH_LEEWAY_MS)
+    && await canRefresh()) {
     refreshAttempted = true;
     try {
       const refreshed = await refreshMinimaxCodeToken(session, session.record, deps);
@@ -607,9 +622,9 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
     membership = await minimaxCodeRequest(membershipUrl, { method: 'POST', headers: bearerHeaders(), body: '{}' }, deps);
   } catch (error) {
     if (minimaxCodeIsAuthError(error)) {
-      if (clientRunning || refreshAttempted) {
-        // While the app runs, its own rotation can outrun the file mid-tick;
-        // an unauthorized verdict here would be a false terminal.
+      if (!(await canRefresh()) || refreshAttempted) {
+        // While the app runs (or under a probe), its own rotation can outrun
+        // the file mid-tick; an unauthorized verdict here would be a false terminal.
         return codeRow('unavailable', { accountKey });
       }
       try {
