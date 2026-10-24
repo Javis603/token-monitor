@@ -90,7 +90,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     return () => ipcRenderer.removeListener('theme:systemUi', listener);
   },
   onOpenSettings: (callback) => {
-    const listener = () => { try { callback(); } catch (_) {} };
+    const listener = (_event, section) => { try { callback(section); } catch (_) {} };
     ipcRenderer.on('settings:open', listener);
     return () => ipcRenderer.removeListener('settings:open', listener);
   },

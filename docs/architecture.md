@@ -114,6 +114,14 @@ Sessions, Home and Edge Dock group the complete member set before applying displ
 
 `sessionTitlesEnabled` defaults on and affects Electron presentation only. `src/electron/sessionTitleDisplay.js` hides titles from snapshots, all-time pulls and detail headings without changing collection, metadata caches or local archives. Sync consent is independent, defaults off, and requires the [shared sync protocol](#shared-sync-content).
 
+## Windows Edge Dock material
+
+Windows 11 Edge Dock uses a single helper with HostBackdrop clipped to the renderer's curves; HWND-wide Acrylic/Accent cannot preserve the concave outline. Electron owns input. Native underlays stay disabled, nonactivating and directly below their content windows.
+
+Share renderer curves at physical display scale and position against `GetWindowRect`, not rounded Electron DIP bounds. Unchanged hover updates must not re-show underlays. Lower the tinted fallback only after native attachment succeeds; a failed generation retries only after all its surfaces are disposed. EOF, parent exit and content-window closure must remove native windows.
+
+Local Windows development requires `npm run build:windows-dock`. Packaging builds the helper with the OS .NET compiler/WinRT metadata and includes it outside ASAR, so Windows artifacts require a Windows build host. User-facing material settings are covered in [configuration](configuration.md#widget-gui).
+
 ## Native tooltips
 
 Electron surfaces and the system tray do not show OS-native tooltips on any platform. Use accessible labels for controls and descriptions for supplemental metadata rather than HTML `title` attributes; SVG chart descriptions use `<desc>`. Keep app-rendered detail tooltips for quota and chart information. Reduced-motion overflow text remains manually scrollable instead of falling back to a native tooltip. This also avoids native tooltip windows remaining over other apps when a floating surface hides or changes input handling.
@@ -122,7 +130,7 @@ Electron surfaces and the system tray do not show OS-native tooltips on any plat
 
 The experimental macOS Notch owns its fixed pages under `renderer/notch/` and shares data projection, formatting, account-title and plan semantics, and Home's compact window order (`homeOverview.compactWindowRank`) with the other surfaces. Stored `notchItems` now selects only limit providers, their order, hidden accounts and the Codex account policy; old usage items and pinned windows are ignored. `notchSummaryMode` defaults to `sessions` and deliberately does not convert the old follow-tray flag. The panel uses one shell renderer; details live in its fixed pages rather than a separate hover window. Attached glass uses the camera scrim as its only tint layer instead of adding the native tint again. Automatic quota alerts rank and display the tightest metered pool of the shared headline account; hidden or unselected accounts do not supply alerts.
 
-The resting Notch window passes the pointer through with moves forwarded, and takes input only while the pointer is on the visible entry, as the Edge Dock handle does. Do not bring back a system-wide mouse monitor: the click-through window let each observed click reach the app beneath as well. Page wheel events carry no gesture phase, so swipes tell momentum from a new swipe by reversal and by a rise after decay; a plain time gap blocks back-to-back swipes.
+The resting Notch window passes the pointer through with moves forwarded, and takes input only while the pointer is on the visible entry, as the Edge Dock handle does. Do not bring back a system-wide mouse monitor: the click-through window let each observed click reach the app beneath as well. Vertical page wheel events carry no gesture phase, so those swipes tell momentum from a new swipe by reversal and by a rise after decay; a plain time gap blocks back-to-back swipes. Horizontal swipes use an application-local AppKit monitor filtered to the open Notch window; other scrolling stays in Chromium. Native code owns tracking and callback lifetime, the controller gates delivery, and the renderer owns navigation and previews.
 
 Attached Liquid Glass updates the native camera scrim and outline together; a failed native update must immediately restore the SVG fallback. Hover geometry and summary content share the same animation progress; content scaling must preserve camera clearance even during spring overshoot. Visual transforms must not change measured summary widths.
 

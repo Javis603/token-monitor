@@ -34,6 +34,7 @@ const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const tokenNumberAnimationApi = window.TokenMonitorTokenNumberAnimation;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
+const windowsBackdropApi = window.TokenMonitorWindowsBackdropMode;
 const macBackdropApi = window.TokenMonitorMacBackdropMode;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const fontSettingsApi = window.TokenMonitorFontSettings;
@@ -447,6 +448,8 @@ Object.assign(els, {
   edgeDockRunningIndicatorInput: document.getElementById('edgeDockRunningIndicatorInput'),
   edgeDockMacBackdropRow: document.getElementById('edgeDockMacBackdropRow'),
   edgeDockMacBackdropInput: document.getElementById('edgeDockMacBackdropInput'),
+  edgeDockWindowsBackdropRow: document.getElementById('edgeDockWindowsBackdropRow'),
+  edgeDockWindowsBackdropInput: document.getElementById('edgeDockWindowsBackdropInput'),
   edgeDockComposer: document.getElementById('edgeDockComposer'),
   trayIconOptions: document.getElementById('trayIconOptions'),
   trayOptions: document.getElementById('trayOptions'),
@@ -5773,13 +5776,22 @@ function resetSettingsListSearch() {
   if (els.limitProviderSearchInput) els.limitProviderSearchInput.value = '';
 }
 
-function openSettingsPanel() {
+function openSettingsPanel(section) {
   if (!els.settingsPanel) return;
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   syncSettingsForm();
   ensureServiceStatusTicker();
+  if (section === 'notch') {
+    setSettingsSectionExpanded('general', true);
+    setSettingsAccordionExpanded(els.advancedSettingsGroup, els.advancedSettingsToggle, els.advancedSettingsDetails, true);
+    setSettingsAccordionExpanded(els.notchMoreOptionsGroup, els.notchMoreOptionsToggle, els.notchMoreOptionsDetails, true);
+    requestAnimationFrame(() => {
+      els.notchFeature?.scrollIntoView({ block: 'start' });
+      els.notchInput?.focus({ preventScroll: true });
+    });
+  }
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
 }
@@ -7738,6 +7750,7 @@ function applyAppearanceSettings(settings) {
   const depth = (glassRenderingApi.usesNativeMaterial(nativeMaterialState) ? 32 : clamp(settings?.glassBlur ?? 32, 0, 100)) / 100;
   const systemGlassDisabled = settings?.systemGlass === false;
   const isWindows = navigator.userAgent.toLowerCase().includes('windows');
+  const isMac = navigator.userAgent.includes('Macintosh');
   const windowsGlass = windowsGlassApi.appearanceState(settings, { isWindows });
   const macGlass = macBackdropApi.appearanceState(settings, {
     liquidGlassSupported: nativeMaterialState.liquidGlassSupported
@@ -7779,9 +7792,12 @@ function applyAppearanceSettings(settings) {
     els.windowsBackdropNote.classList.toggle('hidden', !windowsGlass.showAccentNote);
   }
   els.macBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
-  // Same terms as the widget's own selector; material pushes land here too.
-  els.edgeDockMacBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
+  // The dock's own style overrides System Glass either way, so its selectors
+  // stay available on every macOS and Windows; material pushes land here too.
+  els.edgeDockMacBackdropRow?.classList.toggle('hidden', !isMac);
+  syncEdgeDockMacBackdropInput(settings);
   syncNotchStyleInput(settings);
+  els.edgeDockWindowsBackdropRow?.classList.toggle('hidden', !isWindows);
   if (els.macBackdropInput) els.macBackdropInput.value = macGlass.backdropMode;
   applyReduceMotionPreference(settings?.reduceMotion);
   applyFontSettings(settings);
@@ -13408,17 +13424,11 @@ function syncDockSizeControls(surface) {
 // read from the saved settings underneath them.
 const NOTCH_HOVER_DELAY_DEFAULT_MS = 0;
 
-// Hover either grows the resting entry (a click opens it) or opens it after
-// the chosen duration; the duration only applies to the second, scroll
-// gestures only to the first.
+// Hover duration applies only to hover-to-open.
 function syncNotchHoverControls() {
   const action = state.settings?.notchHoverAction === 'open' ? 'open' : 'peek';
   for (const input of els.notchHoverActionInputs) input.checked = input.value === action;
   els.notchHoverDelayRow?.classList.toggle('hidden', action !== 'open');
-  if (els.notchSwipeGesturesInput) {
-    els.notchSwipeGesturesInput.closest('.settings-item')?.classList.toggle('hidden', action !== 'peek');
-    els.notchSwipeGesturesInput.checked = state.settings?.notchSwipeGestures !== false;
-  }
   if (els.notchHoverDelayInput && document.activeElement !== els.notchHoverDelayInput) {
     const delay = Number(state.settings?.notchHoverDelay);
     els.notchHoverDelayInput.value = String(Number.isFinite(delay) ? delay : NOTCH_HOVER_DELAY_DEFAULT_MS);
@@ -13434,15 +13444,25 @@ function syncNotchHoverDelayValue() {
 function syncNotchStyleInput(preview) {
   if (!els.notchStyleInput) return;
   const settings = Object.assign({}, state.settings, ...pendingSettingsPatches, preview);
-  const { showBackdropControl } = macBackdropApi.appearanceState(settings, {
-    liquidGlassSupported: nativeMaterialState.liquidGlassSupported
-  });
+  syncMacStyleSelect(els.notchStyleInput, settings?.notchStyle || 'inherit', nativeMaterialState.liquidGlassSupported === true);
+}
+
+// Liquid Glass options hide where it cannot be drawn, and a saved Liquid Glass
+// choice shows the Frosted Glass the surface falls back to.
+function syncMacStyleSelect(select, style, liquidGlassAvailable) {
   for (const value of ['liquid-glass', 'liquid-glass-clear']) {
-    const option = els.notchStyleInput.querySelector(`option[value="${value}"]`);
-    if (option) option.hidden = option.disabled = !showBackdropControl;
+    const option = select.querySelector(`option[value="${value}"]`);
+    if (option) option.hidden = option.disabled = !liquidGlassAvailable;
   }
-  const style = settings?.notchStyle || 'inherit';
-  els.notchStyleInput.value = macBackdropApi.isLiquidGlassBackdrop(style) && !showBackdropControl ? 'vibrancy' : style;
+  select.value = macBackdropApi.isLiquidGlassBackdrop(style) && !liquidGlassAvailable ? 'vibrancy' : style;
+}
+
+function syncEdgeDockMacBackdropInput(preview) {
+  if (!els.edgeDockMacBackdropInput) return;
+  const settings = Object.assign({}, state.settings, ...pendingSettingsPatches, preview);
+  syncMacStyleSelect(els.edgeDockMacBackdropInput,
+    macBackdropApi.normalizeEdgeDockBackdropMode(settings?.edgeDockMacBackdrop),
+    nativeMaterialState.liquidGlassSupported === true);
 }
 
 function syncNotchCapabilities() {
@@ -13467,8 +13487,9 @@ function syncDockControls() {
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
   if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
   if (els.edgeDockRunningIndicatorInput) els.edgeDockRunningIndicatorInput.checked = state.settings?.edgeDockRunningIndicatorEnabled !== false;
-  if (els.edgeDockMacBackdropInput) {
-    els.edgeDockMacBackdropInput.value = macBackdropApi.normalizeEdgeDockBackdropMode(state.settings?.edgeDockMacBackdrop);
+  syncEdgeDockMacBackdropInput();
+  if (els.edgeDockWindowsBackdropInput) {
+    els.edgeDockWindowsBackdropInput.value = windowsBackdropApi.normalizeWindowsDockBackdropMode(state.settings?.edgeDockWindowsBackdrop);
   }
   const notchAvailable = state.appInfo?.platform === 'darwin';
   const notchEnabled = notchAvailable && state.settings?.notchEnabled === true;
@@ -13485,6 +13506,7 @@ function syncDockControls() {
   syncNotchCapabilities();
   if (els.notchProgressiveBlurInput) els.notchProgressiveBlurInput.checked = state.settings?.notchProgressiveBlur !== false;
   if (els.notchHapticInput) els.notchHapticInput.checked = state.settings?.notchHaptic !== false;
+  if (els.notchSwipeGesturesInput) els.notchSwipeGesturesInput.checked = state.settings?.notchSwipeGestures !== false;
   syncNotchHoverControls();
   if (els.notchHideSummaryInFullScreenInput) els.notchHideSummaryInFullScreenInput.checked = state.settings?.notchHideSummaryInFullScreen !== false;
   els.edgeDockComposerRow?.classList.toggle('hidden', !enabled);
@@ -13622,6 +13644,9 @@ els.edgeDockRunningIndicatorInput?.addEventListener('change', () => {
 });
 els.edgeDockMacBackdropInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockMacBackdrop: macBackdropApi.normalizeEdgeDockBackdropMode(els.edgeDockMacBackdropInput.value) });
+});
+els.edgeDockWindowsBackdropInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockWindowsBackdrop: windowsBackdropApi.normalizeWindowsDockBackdropMode(els.edgeDockWindowsBackdropInput.value) });
 });
 els.notchHapticInput?.addEventListener('change', () => {
   void saveSettings({ notchHaptic: els.notchHapticInput.checked });
