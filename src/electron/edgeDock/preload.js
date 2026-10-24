@@ -11,7 +11,11 @@ contextBridge.exposeInMainWorld('tokenMonitorEdgeDock', {
   pointer: () => ipcRenderer.send('edgeDock:pointer'),
   dragStart: (grabOffsetY) => ipcRenderer.send('edgeDock:dragStart', { grabOffsetY }),
   dragEnd: () => ipcRenderer.send('edgeDock:dragEnd'),
-  reportBubbleSize: (cellId, height) => ipcRenderer.send('edgeDock:bubbleSize', { cellId, height }),
+  // `holdTop` keeps the window's top edge fixed while the card grows for a
+  // tooltip, so the card does not jump out from under the pointer.
+  reportBubbleSize: (cellId, height, holdTop) => ipcRenderer.send('edgeDock:bubbleSize', {
+    cellId, height, holdTop: holdTop === true
+  }),
   dismiss: () => ipcRenderer.send('edgeDock:dismiss'),
   toggleRateMode: () => ipcRenderer.send('edgeDock:toggleRateMode'),
   refreshLimits: () => ipcRenderer.invoke('edgeDock:refreshLimits'),
