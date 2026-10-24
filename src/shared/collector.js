@@ -35,7 +35,7 @@ const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: pro
 const { createWatcherHost } = require('./watcherHost');
 const { createSessionActivityScheduler } = require('./sessionActivityScheduler');
 const { activityWatchSources, activityClientsForPath, activityWatchIgnored } = require('./sessionActivityWatch');
-const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories } = require('./history');
+const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories, utcOffsetMinutes } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const {
   createSubprocessTermination,
@@ -838,6 +838,7 @@ async function collectHistoryOnce(options) {
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
+        utcOffsetMinutes: utcOffsetMinutes(options.now ? new Date(options.now) : new Date()),
         ...(options.dailyHistoryArchiveOptions || {}),
         liveDays: options.dailyHistoryLiveDays,
         pricingRevision: options.pricingRevision,
@@ -1337,6 +1338,7 @@ async function collectUsageOnce(options) {
   } else if (options.includeHistory) {
     throwIfAborted(options.signal);
     const history = await collectHistoryOnce({
+      now: collectedAt,
       clients: normalizedClients,
       codexLocalGraph: codexLocalView?.graph || null,
       historyEnabled: options.historyEnabled,
@@ -2272,6 +2274,7 @@ function collectorAnchorTrust(saved, options = {}) {
   const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
+  if (Number.isFinite(saved.utcOffsetMinutes) && saved.utcOffsetMinutes !== utcOffsetMinutes(now)) return null;
   // A flat provenance ledger cannot prove each period's project source.
   if (Object.keys(saved.catalogProjects || {}).length && !saved.catalogProjects.today) return null;
   // Old Cursor anchors preserve `default` in their broad-period model maps;
@@ -2735,6 +2738,7 @@ function startCollector(options) {
       if (trust) {
         anchor = {
           dateKey: saved.dateKey,
+          utcOffsetMinutes: saved.utcOffsetMinutes,
           sessionIdentityVersion: saved.sessionIdentityVersion,
           today: saved.today,
           month: saved.month,
@@ -2768,6 +2772,7 @@ function startCollector(options) {
       fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
       fs.writeFileSync(anchorPath, JSON.stringify({
         dateKey: anchor.dateKey,
+        ...(Number.isFinite(anchor.utcOffsetMinutes) ? { utcOffsetMinutes: anchor.utcOffsetMinutes } : {}),
         sessionIdentityVersion: anchor.sessionIdentityVersion,
         cursorAutoModelVersion: 1,
         today: anchor.today,
@@ -2845,12 +2850,25 @@ function startCollector(options) {
     // it before publishing the new day, even when the normal History interval
     // is not due yet, so fixed ranges never wait for the next scheduled graph.
     const localDayRolledOver = Boolean(anchor?.dateKey && anchor.dateKey !== todayKey);
+    const timezoneChanged = Boolean(
+      anchor
+      && Number.isFinite(anchor.utcOffsetMinutes)
+      && anchor.utcOffsetMinutes !== utcOffsetMinutes(collectedAt)
+    );
+    if (timezoneChanged) {
+      anchor = null;
+      wslAnchor = null;
+      wslStatusAnchor = null;
+      liveDailyHistoryDays = {};
+      lastFullScanAt = 0;
+      lastHistoryAt = 0;
+    }
     if (localDayRolledOver && historyEnabled) rolloverHistoryPending = true;
     const includeHistory = shouldIncludeHistory(
       collectedAt.getTime(),
       lastHistoryAt,
       historyIntervalMs,
-      Boolean(tickOptions.forceHistory) || localDayRolledOver || pricingChanged || catpawSourcesChanged,
+      Boolean(tickOptions.forceHistory) || localDayRolledOver || timezoneChanged || pricingChanged || catpawSourcesChanged,
       historyEnabled
     );
     if (includeHistory) {
@@ -3018,6 +3036,7 @@ function startCollector(options) {
       if (!anchored && captured) {
         anchor = {
           dateKey: todayKey,
+          utcOffsetMinutes: utcOffsetMinutes(collectedAt),
           sessionIdentityVersion: captured.sessionIdentityVersion,
           today: captured.windowsPeriods.today,
           month: captured.windowsPeriods.month,
@@ -3124,6 +3143,7 @@ function startCollector(options) {
             ? applyPeriodDelta(visibleSummary.today, emptyPeriod(), tickLocalView.today)
             : visibleSummary.today;
           const retainedLive = retainLiveDailyHistory(retainedToday, {
+            utcOffsetMinutes: utcOffsetMinutes(collectedAt),
             ...(options.dailyHistoryArchiveOptions || {}),
             liveDays: liveDailyHistoryDays,
             todayKey: visibleDateKey,
