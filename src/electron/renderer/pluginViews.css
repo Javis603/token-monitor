@@ -1,0 +1,154 @@
+/* Plugin view components. Shared by the widget, Edge Dock and Notch; colours
+   come only from theme variables so skins and light themes apply to plugin
+   content exactly as they do to built-in panels. */
+:root {
+  --plugin-default: var(--text);
+  --plugin-muted: var(--muted);
+  --plugin-accent: var(--accent);
+  --plugin-chart: var(--chart-color);
+  --plugin-ok: var(--success);
+  --plugin-warn: var(--orange);
+  --plugin-bad: var(--red);
+  --plugin-info: var(--blue);
+}
+
+.pv-mount { min-width: 0; }
+.pv-root { min-width: 0; color: var(--plugin-default); font-variant-numeric: tabular-nums; }
+.pv-stack { display: flex; min-width: 0; }
+.pv-dir-col { flex-direction: column; }
+.pv-dir-row { flex-direction: row; }
+
+.pv-tone-default { --pv-tone: var(--plugin-default); }
+.pv-tone-muted { --pv-tone: var(--plugin-muted); }
+.pv-tone-accent { --pv-tone: var(--plugin-accent); }
+.pv-tone-chart { --pv-tone: var(--plugin-chart); }
+.pv-tone-ok { --pv-tone: var(--plugin-ok); }
+.pv-tone-warn { --pv-tone: var(--plugin-warn); }
+.pv-tone-bad { --pv-tone: var(--plugin-bad); }
+.pv-tone-info { --pv-tone: var(--plugin-info); }
+
+.pv-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pv-stat-label { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--plugin-muted); }
+.pv-stat-value { display: flex; align-items: baseline; gap: 4px; color: var(--pv-tone, var(--plugin-default)); }
+.pv-stat-number { font-family: var(--display-font, inherit); font-weight: 600; white-space: nowrap; }
+.pv-size-s .pv-stat-number { font-size: 14px; }
+.pv-size-m .pv-stat-number { font-size: 18px; }
+.pv-size-l .pv-stat-number { font-size: 24px; letter-spacing: -.01em; }
+.pv-stat-unit, .pv-stat-caption { font-size: 10.5px; color: var(--plugin-muted); }
+
+.pv-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pv-tone, inherit); }
+.pv-text-xs { font-size: 10.5px; }
+.pv-text-s { font-size: 12px; }
+.pv-text-m { font-size: 13.5px; }
+.pv-text-l { font-size: 16px; }
+.pv-text-xl { font-size: 20px; }
+.pv-weight-medium { font-weight: 600; }
+.pv-weight-bold { font-weight: 700; }
+.pv-mono { font-family: var(--ui-font, ui-monospace, SFMono-Regular, Menlo, monospace); }
+
+.pv-badge { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 9px; font-size: 10.5px; font-weight: 600;
+  color: var(--pv-tone, var(--plugin-muted)); background: color-mix(in srgb, var(--pv-tone, var(--plugin-muted)) 16%, transparent); white-space: nowrap; }
+
+.pv-icon-wrap { display: inline-grid; place-items: center; color: var(--pv-tone, currentColor); }
+.pv-icon { display: block; flex: 0 0 auto; }
+
+.pv-meter { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pv-meter-head { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; color: var(--plugin-muted); }
+.pv-meter-track { height: 5px; border-radius: 3px; background: rgba(var(--overlay-rgb), .1); overflow: hidden; }
+.pv-meter-fill { height: 100%; border-radius: inherit; background: var(--pv-tone, var(--plugin-accent));  }
+
+.pv-ring { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 0 0 auto; }
+.pv-ring-box { position: relative; display: grid; place-items: center; }
+.pv-ring-box svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+.pv-ring-track { fill: none; stroke: rgba(var(--overlay-rgb), .1); stroke-width: 3.2; }
+.pv-ring-arc { fill: none; stroke: var(--pv-tone, var(--plugin-accent)); stroke-width: 3.2; stroke-linecap: round; transition: stroke-dashoffset .45s cubic-bezier(.2, .8, .2, 1); }
+.pv-ring-caption { font-family: var(--display-font, inherit); position: relative; font-size: 10.5px; font-weight: 600; white-space: nowrap; }
+.pv-ring-label { font-size: 10px; color: var(--plugin-muted); }
+
+.pv-sparkline, .pv-bars { display: block; width: 100%; overflow: visible; }
+.pv-sparkline-line { fill: none; stroke: var(--pv-tone, var(--plugin-chart)); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.pv-sparkline-area { fill: color-mix(in srgb, var(--pv-tone, var(--plugin-chart)) 18%, transparent); stroke: none; }
+.pv-bars rect { fill: var(--pv-tone, var(--plugin-chart)); }
+
+.pv-rows { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.pv-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 3px; font-size: 11.5px; }
+.pv-row-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--plugin-muted); }
+.pv-row-value { color: var(--pv-tone, var(--plugin-default)); font-variant-numeric: tabular-nums; }
+.pv-row-bar { grid-column: 1 / -1; height: 3px; border-radius: 2px; background: rgba(var(--overlay-rgb), .08); overflow: hidden; }
+.pv-row-bar-fill { display: block; height: 100%; background: var(--pv-tone, var(--plugin-accent)); }
+
+.pv-draw-box { min-width: 0; }
+.pv-draw { display: block; width: 100%; height: auto; overflow: hidden; }
+.pv-draw text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.pv-draw .pv-draw-mono { font-family: var(--ui-font, ui-monospace, SFMono-Regular, Menlo, monospace); }
+
+.pv-spacer { flex: 1 1 auto; }
+.pv-divider { height: 1px; align-self: stretch; background: rgba(var(--overlay-rgb), .085); }
+
+.pv-placeholder { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--plugin-muted); min-height: 24px; }
+.pv-placeholder .pv-icon { opacity: .7; }
+
+.pv-compact { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; }
+.pv-compact-label { font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--plugin-muted); white-space: nowrap; }
+.pv-compact-value { font-size: 12.5px; font-weight: 600; color: var(--pv-tone, var(--plugin-default)); white-space: nowrap; }
+.pv-compact-caption { font-size: 9px; color: var(--plugin-muted); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pv-meter-fill, .pv-ring-arc { transition: none; }
+}
+
+/* Native controls retain DOM identity across live metric updates. */
+.pv-control { font: inherit; color: var(--plugin-default); min-width: 0; }
+.pv-control:not(button) { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+.pv-control-label { flex: 1 1 100px; }
+.pv-control-input, .pv-control-select { align-items: stretch; }
+.pv-field { min-width: 0; font: inherit; accent-color: var(--plugin-accent); }
+.pv-control-input .pv-field, .pv-control-select .pv-field { flex: 2 1 140px; width: 100%; padding: 8px 10px; color: var(--plugin-default); background: var(--bg); border: 1px solid var(--line, #555); border-radius: 6px; }
+button.pv-control { padding: 8px 12px; border: 1px solid var(--line, #555); border-radius: 6px; background: rgba(var(--overlay-rgb), .07); cursor: pointer; text-align: center; }
+button.pv-control:hover { background: rgba(var(--overlay-rgb), .13); }
+.pv-control :disabled, button.pv-control:disabled { opacity: .5; cursor: default; }
+.pv-control :focus-visible, button.pv-control:focus-visible, .pv-draw-interactive:focus-visible { outline: 2px solid var(--plugin-accent); outline-offset: 3px; }
+.pv-control-slider .pv-field { flex: 3 1 100px; }
+.pv-control output { min-width: 3em; text-align: right; font-variant-numeric: tabular-nums; }
+.pv-draw-interactive { touch-action: none; cursor: crosshair; border-radius: 6px; border: 1px solid var(--line, #555); }
+.pv-action-error { font-size: 12px; color: var(--plugin-bad); }
+
+/* Personal style is scoped to plugin content; app navigation stays native. */
+.pv-mount[data-pv-font="system"] { --pv-font: system-ui, -apple-system, sans-serif; }
+.pv-mount[data-pv-font="mono"] { --pv-font: ui-monospace, Menlo, Consolas, monospace; }
+.pv-mount .pv-root { font-family: var(--pv-font, inherit); border-radius: var(--pv-radius, 8px); }
+.pv-mount[data-pv-density="compact"] { --pv-spacing: .75; --pv-padding: 6px; }
+.pv-mount[data-pv-density="comfortable"] { --pv-spacing: 1.4; --pv-padding: 16px; }
+.pv-mount[data-pv-corners="square"] { --pv-radius: 0px; }
+.pv-mount[data-pv-corners="rounded"] { --pv-radius: 8px; }
+.pv-mount[data-pv-corners="soft"] { --pv-radius: 16px; }
+.pv-mount[data-pv-panel="outline"] > .pv-root { padding: var(--pv-padding, 12px); border: 1px solid var(--line, #666); }
+.pv-mount[data-pv-panel="soft"] > .pv-root { padding: var(--pv-padding, 12px); background: var(--pv-background, rgba(var(--overlay-rgb), .06)); }
+.pv-mount .pv-field, .pv-mount button.pv-control, .pv-mount .pv-draw-interactive { border-radius: var(--pv-radius, 6px); }
+.pv-mount .pv-control-input .pv-field, .pv-mount .pv-control-select .pv-field { background: var(--pv-background, var(--bg)); }
+.plugin-style-form { display: grid; gap: 12px; min-width: 0; }
+.plugin-style-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+/* Editor rows use the host settings controls, independently of the preview skin. */
+.plugin-style-fields .settings-item > select { width: 58%; }
+.plugin-style-colors { margin-top: 8px; }
+.settings-panel .plugin-style-colors .color-picker-row { grid-template-columns: minmax(0, 1fr) auto; }
+.plugin-style-field:has(textarea) { display: flex; flex-direction: column; align-items: stretch; }
+.plugin-style-field select:focus-visible, .plugin-style-field input:focus-visible, .plugin-style-field textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.plugin-style-preview { margin: 4px 0; min-width: 0; }
+.plugin-style-form textarea { box-sizing: border-box; width: 100%; min-height: 120px; resize: vertical; }
+
+
+/* Author intent can suppress motion; it never overrides the user's preference. */
+.pv-mount [data-pv-motion="none"], .pv-mount [data-pv-motion="none"] *,
+[data-reduce-motion="on"] .pv-mount *, .edge-dock-reduced-motion .pv-mount * {
+  animation: none !important; transition: none !important;
+}
+
+/* The native authored surface occupies this rectangle. Keep its lightweight
+   fallback laid out, but hide paint and input while the isolated child lives. */
+.pv-web-mounted > *, .pv-web-pending > * { visibility: hidden; pointer-events: none; }
+/* Reserve the authored rectangle from the first authoritative payload. Do not
+   display a different layout while its document starts. Slow starts use the
+   existing loading label; quick starts have no transient status text. */
+.pv-web-pending { position: relative; overflow: hidden; }
+.pv-web-pending.pv-web-waiting::after { content: attr(data-web-loading); position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 12px; }

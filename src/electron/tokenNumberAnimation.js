@@ -6,6 +6,7 @@
   if (root) root.TokenMonitorTokenNumberAnimation = api;
 })(typeof window !== 'undefined' ? window : null, () => {
   const active = new WeakMap();
+  const counts = new WeakMap();
   // Every glyph runs a 650ms sampled envelope (iOS 26.5 capture resolves
   // around 700ms); the caller settles once the latest-starting glyph is done.
   const glyphDuration = 650;
@@ -155,6 +156,39 @@
     }).filter((glyph) => glyph.opacity > 0.001);
   }
 
+  // The existing Notch Count transition, shared with plugin readouts. Keep
+  // numeric state separately: formatted text may contain units or locale digits.
+  function currentCountValue(el) { return counts.get(el)?.value; }
+  function beginCount(el, from, to, format, { toText = format(to), milliseconds = duration } = {}) {
+    counts.get(el)?.settle();
+    active.get(el)?.settle();
+    const view = el.ownerDocument.defaultView;
+    const started = view.performance.now();
+    const record = { value: from, frame: 0, settle: null };
+    let settled = false;
+    function settle() {
+      if (settled) return;
+      settled = true;
+      view.cancelAnimationFrame(record.frame);
+      if (counts.get(el) !== record) return;
+      counts.delete(el);
+      el.textContent = toText;
+    }
+    record.settle = settle;
+    counts.set(el, record);
+    el.textContent = format(from);
+    function step(now) {
+      if (settled || counts.get(el) !== record) return;
+      const progress = Math.max(0, Math.min(1, (now - started) / milliseconds));
+      record.value = from + (to - from) * (1 - (1 - progress) ** 4);
+      el.textContent = format(record.value);
+      if (progress < 1) record.frame = view.requestAnimationFrame(step);
+      else settle();
+    }
+    record.frame = view.requestAnimationFrame(step);
+    return settle;
+  }
+
   // Native numericText never slides a changing glyph sideways: outgoing glyphs
   // roll away where they stood, incoming glyphs roll in where they land, and
   // one left-to-right wave keyed by x crosses both readings, so the old tail
@@ -163,6 +197,7 @@
   // every visible layer in place with its own clock.
   function beginRoll(el, fromText, toText, increasing, prepare = null, snapshot = null,
     { period = false, whole = false } = {}) {
+    counts.get(el)?.settle();
     // A whole reading rolls as one unit: two layers instead of one per glyph
     // and place. Breakdown rows take it on a period switch, where every glyph
     // changes at once and per-glyph layers made the switch heavy.
@@ -336,5 +371,5 @@
     return settle;
   }
 
-  return { normalize, beginRoll, capture, duration, layoutDuration };
+  return { normalize, beginRoll, beginCount, currentCountValue, capture, duration, layoutDuration };
 });

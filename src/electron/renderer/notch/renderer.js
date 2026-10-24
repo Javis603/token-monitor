@@ -26,7 +26,7 @@
     const {
       el, t, appearance, prefersReducedMotion, providerLabel, limitProviderColor, readableColor, limitAccountTitle,
       markNode, hasMask, providerCellNode, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate, overflowText, limitWindowsView,
-      captureRingResetMotion, animateRingResets, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit
+      captureRingResetMotion, animateRingResets, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit, pluginHost
     } = shared;
     const presentation = window.TokenMonitorEdgeDockPresentation;
     const numberAnimation = window.TokenMonitorTokenNumberAnimation;
@@ -41,7 +41,7 @@
     const panelApi = window.TokenMonitorNotchPanel;
     const panel = panelApi.createNotchPanel({ document, window, el, t, state, bridge, shared: {
       markNode, hasMask, providerLabel, limitProviderColor, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate,
-      appearance, prefersReducedMotion, ensureRefreshButton, readableColor, limitAccountTitle, overflowText, limitWindowsView
+      appearance, prefersReducedMotion, ensureRefreshButton, readableColor, limitAccountTitle, overflowText, limitWindowsView, pluginHost
     } });
 
     // ---- Top notch ------------------------------------------------------------
@@ -644,7 +644,8 @@
         return Boolean(state.payload?.summary?.needsClock
           || state.payload?.expanded);
       },
-      repaint() { notchClock++; renderNotch(state.payload); }
+      repaint() { notchClock++; renderNotch(state.payload); },
+      pluginViewsChanged() { panel.pluginViewsChanged(); }
     };
   }
   return { createNotchRenderer, notchGlassGeometry };

@@ -1,0 +1,132 @@
+{
+  "id": "business-studio",
+  "name": {
+    "en": "Business Studio",
+    "zh-TW": "業務資料工作室"
+  },
+  "version": "0.2.0",
+  "tmApi": 1,
+  "author": "Token Monitor examples",
+  "description": {
+    "en": "Shared business data on original pages, Home and a plugin page, with saved preferences."
+  },
+  "permissions": [
+    "ui.web",
+    "tm.pages",
+    "tm.data.usage",
+    "tm.data.devices",
+    "tm.data.sessions",
+    "tm.data.subscriptions",
+    "tm.data.limits",
+    "tm.data.identities"
+  ],
+  "webUi": {
+    "version": 1,
+    "assets": [
+      "index.html",
+      "page.css",
+      "page.js",
+      "mark.svg"
+    ],
+    "documents": [
+      {
+        "id": "model",
+        "title": "Model canvas",
+        "entry": "index.html",
+        "target": "model",
+        "slot": "replace",
+        "height": 460
+      },
+      {
+        "id": "tool",
+        "title": "Tool canvas",
+        "entry": "index.html",
+        "target": "tool",
+        "slot": "replace",
+        "height": 460
+      },
+      {
+        "id": "device",
+        "title": "Device canvas",
+        "entry": "index.html",
+        "target": "device",
+        "slot": "replace",
+        "height": 460
+      },
+      {
+        "id": "home",
+        "title": "Home explorer",
+        "entry": "index.html",
+        "target": "home",
+        "slot": "replace",
+        "height": 460,
+        "view": "overview"
+      },
+      {
+        "id": "page",
+        "title": "Page explorer",
+        "entry": "index.html",
+        "target": "page",
+        "slot": "replace",
+        "height": 460,
+        "view": "overview"
+      },
+      {
+        "id": "settings",
+        "title": "Settings explorer",
+        "entry": "index.html",
+        "target": "settings",
+        "slot": "replace",
+        "height": 460
+      }
+    ]
+  },
+  "settings": {
+    "version": 1,
+    "fields": [
+      {
+        "id": "period",
+        "type": "select",
+        "label": "Usage period",
+        "default": "today",
+        "options": [
+          {
+            "value": "today",
+            "label": "Today"
+          },
+          {
+            "value": "month",
+            "label": "Month"
+          },
+          {
+            "value": "allTime",
+            "label": "All time"
+          }
+        ]
+      },
+      {
+        "id": "pageSize",
+        "type": "number",
+        "label": "Rows per page",
+        "default": 10,
+        "min": 1,
+        "max": 50,
+        "integer": true
+      }
+    ]
+  },
+  "views": [
+    {
+      "id": "overview",
+      "title": "Usage explorer",
+      "surfaces": [
+        "home",
+        "page"
+      ],
+      "layout": {
+        "type": "text",
+        "text": "Usage explorer: enable the rich interface to browse tools and models. Preferences remain available in Plugin settings."
+      }
+    }
+  ]
+}

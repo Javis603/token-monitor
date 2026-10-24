@@ -2,6 +2,15 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+async function pluginSettingsResult(promise) {
+  const result = await promise;
+  if (result?.ok === true) return result.value;
+  // contextBridge strips custom properties from Error instances. A plain
+  // rejection record preserves validation fields in the isolated main world.
+  return Promise.reject({ message: result?.error?.code || 'settings-unavailable',
+    code: result?.error?.code || 'settings-unavailable', fields: result?.error?.fields || {} });
+}
+
 contextBridge.exposeInMainWorld('tokenMonitor', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => {
@@ -237,6 +246,68 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
       const handler = (_event, status) => callback(status);
       ipcRenderer.on('copilot:loginStatus', handler);
       return () => ipcRenderer.removeListener('copilot:loginStatus', handler);
+    }
+  },
+  // Plugin management and the views this window draws (Home, tray bitmap).
+  // Consent and placement run in main; the renderer never sees manifests,
+  // plugin code or file paths beyond the plugins folder location.
+  plugins: {
+    syncWebPresentation: input => ipcRenderer.invoke('plugins:presentation:sync', input),
+    onWebPresentationReady: callback => {
+      const listener = () => callback(); ipcRenderer.on('plugins:presentation:ready', listener);
+      return () => ipcRenderer.removeListener('plugins:presentation:ready', listener);
+    },
+    onWebPresentationFailed: callback => {
+      const listener = (_event, reason) => callback(reason); ipcRenderer.on('plugins:presentation:failed', listener);
+      return () => ipcRenderer.removeListener('plugins:presentation:failed', listener);
+    },
+    webSync: input => ipcRenderer.invoke('plugins:web:sync', input),
+    webSelect: (target, ref) => ipcRenderer.invoke('plugins:web:select', target, ref),
+    onWebRestore: callback => {
+      const listener = () => callback(); ipcRenderer.on('plugins:web:restore', listener);
+      return () => ipcRenderer.removeListener('plugins:web:restore', listener);
+    },
+    onWebReady: callback => {
+      const listener = () => callback(); ipcRenderer.on('plugins:web:ready', listener);
+      return () => ipcRenderer.removeListener('plugins:web:ready', listener);
+    },
+    onWebFailed: callback => {
+      const listener = (_event, reason) => callback(reason); ipcRenderer.on('plugins:web:failed', listener);
+      return () => ipcRenderer.removeListener('plugins:web:failed', listener);
+    },
+    getSettings: id => pluginSettingsResult(ipcRenderer.invoke('plugins:getSettings', id)),
+    updateSettings: (id, input) => pluginSettingsResult(ipcRenderer.invoke('plugins:updateSettings', id, input)),
+    list: () => ipcRenderer.invoke('plugins:list'),
+    setEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', { id, enabled }),
+    setBackground: (id, enabled) => ipcRenderer.invoke('plugins:setBackground', { id, enabled }),
+    restart: (id) => ipcRenderer.invoke('plugins:restart', { id }),
+    reload: () => ipcRenderer.invoke('plugins:reload'),
+    openFolder: () => ipcRenderer.invoke('plugins:openFolder'),
+    openPage: ref => ipcRenderer.invoke('plugins:openPage', ref),
+    catalog: () => ipcRenderer.invoke('plugins:catalog'),
+    catalogPreview: (source, id, version) => ipcRenderer.invoke('plugins:catalogPreview', source, id, version),
+    addSource: input => ipcRenderer.invoke('plugins:addSource', input),
+    refreshSource: id => ipcRenderer.invoke('plugins:refreshSource', id),
+    removeSource: id => ipcRenderer.invoke('plugins:removeSource', id),
+    importPackage: kind => ipcRenderer.invoke('plugins:import', kind),
+    install: token => ipcRenderer.invoke('plugins:install', token),
+    cancelInstall: token => ipcRenderer.invoke('plugins:cancelInstall', token),
+    rollback: id => ipcRenderer.invoke('plugins:rollback', id),
+    uninstall: (id, options) => ipcRenderer.invoke('plugins:uninstall', id, options),
+    place: (ref, surface, placed) => ipcRenderer.invoke('plugins:place', { ref, surface, placed }),
+    interact: (surface, ref, input, revision) => ipcRenderer.invoke('plugins:interact', { surface, ref, input, revision }),
+    skins: () => ipcRenderer.invoke('plugins:skins'),
+    views: (surface) => ipcRenderer.invoke('plugins:views', { surface }),
+    setDemand: (surface, refs) => ipcRenderer.send('plugins:demand', { surface, refs }),
+    onViews: (callback) => {
+      const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
+      ipcRenderer.on('plugins:views', listener);
+      return () => ipcRenderer.removeListener('plugins:views', listener);
+    },
+    onChanged: (callback) => {
+      const listener = () => { try { callback(); } catch (_) {} };
+      ipcRenderer.on('plugins:changed', listener);
+      return () => ipcRenderer.removeListener('plugins:changed', listener);
     }
   },
   minimize: () => ipcRenderer.send('window:minimize'),

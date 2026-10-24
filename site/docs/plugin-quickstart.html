@@ -1,0 +1,1589 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Develop plugins · Token Monitor Docs</title>
+    <meta name="description" content="Build a Token Monitor Desktop plugin: manifest, interface, App data, settings and distribution.">
+    <meta property="og:title" content="Develop plugins · Token Monitor Docs">
+    <meta property="og:description" content="Build a working Token Monitor plugin from one manifest, then add code.">
+    <meta property="og:type" content="article">
+    <meta property="og:image" content="../assets/icon.png">
+    <meta name="theme-color" content="#14171c">
+    <link rel="icon" href="../assets/icon.png">
+    <link rel="stylesheet" href="../styles/tokens.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/base.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/components.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/edgedock.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/sections.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/docs.css?v=20260929-v063">
+  </head>
+  <body>
+    <a class="skip-link" href="#main" data-i18n="nav.skip">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav shell" aria-label="Primary" data-i18n-attr="aria-label:nav.primary">
+        <a class="brand" href="../" aria-label="Token Monitor home" data-i18n-attr="aria-label:nav.home">
+          <img class="brand-mark" src="../assets/icon.png" alt="" width="36" height="36">
+          <span>Token Monitor</span>
+        </a>
+        <div class="nav-actions">
+          <a class="nav-docs-link" href="./" aria-current="page" data-i18n="nav.docs">Docs</a>
+          <details class="lang-menu" data-lang-menu>
+            <summary class="nav-icon-btn lang-btn" aria-label="Language" aria-haspopup="menu" aria-expanded="false" data-i18n-attr="aria-label:nav.language">
+              <svg class="lang-symbol" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 8 11 14"></path>
+                <path d="m4 14 6-6 2-3"></path>
+                <path d="M2 5h12"></path>
+                <path d="M7 2h1"></path>
+                <path d="m22 22-5-10-5 10"></path>
+                <path d="M14 18h6"></path>
+              </svg>
+              <span class="lang-chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="lang-pop" role="menu" aria-label="Language" data-i18n-attr="aria-label:nav.language">
+              <button type="button" role="menuitemradio" data-lang="zh-TW" aria-checked="false">繁體中文</button>
+              <button type="button" role="menuitemradio" data-lang="zh-CN" aria-checked="false">简体中文</button>
+              <button type="button" role="menuitemradio" data-lang="en" aria-checked="true">English</button>
+              <button type="button" role="menuitemradio" data-lang="ko" aria-checked="false">한국어</button>
+              <button type="button" role="menuitemradio" data-lang="ja" aria-checked="false">日本語</button>
+              <button type="button" role="menuitemradio" data-lang="pt-BR" aria-checked="false">Português (Brasil)</button>
+            </div>
+          </details>
+          <a class="nav-github-link" href="https://github.com/Javis603/token-monitor" aria-label="Star Token Monitor on GitHub" data-i18n-attr="aria-label:nav.githubStar">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.18-3.37-1.18-.45-1.15-1.1-1.45-1.1-1.45-.9-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03A9.55 9.55 0 0 1 12 6.99c.85 0 1.7.11 2.5.34 1.9-1.3 2.74-1.03 2.74-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.86v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/>
+            </svg>
+            <span class="nav-github-label" data-i18n="nav.star">Star</span>
+            <span class="nav-github-count" data-github-stars>1000</span>
+          </a>
+        </div>
+      </nav>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar">
+        <button class="docs-menu-btn" type="button" aria-expanded="false" aria-controls="docs-nav"><span data-i18n="docs.menu">Docs menu</span></button>
+        <nav class="docs-nav" id="docs-nav" aria-label="Documentation" data-i18n-attr="aria-label:docs.nav">
+          <div class="docs-nav-group">
+            <h2 data-i18n="docs.group.start">Get started</h2>
+            <ul>
+              <li><a href="./" data-i18n="docs.page.home">Overview</a></li>
+              <li><a href="app.html" data-i18n="docs.page.app">Using the App</a></li>
+              <li><a href="plugins.html" data-i18n="docs.page.plugins">Using plugins</a></li>
+              <li><a href="plugin-quickstart.html" aria-current="page" data-i18n="docs.page.quickstart">Develop plugins</a></li>
+            </ul>
+          </div>
+          <div class="docs-nav-group">
+            <h2 data-i18n="docs.group.reference">API references</h2>
+            <ul>
+              <li><a href="plugin-reference.html" data-i18n="docs.page.reference">Plugin API reference</a></li>
+              <li><a href="plugin-rich-reference.html" data-i18n="docs.page.richReference">Rich UI reference</a></li>
+              <li><a href="plugin-distribution-reference.html" data-i18n="docs.page.distributionReference">Distribution reference</a></li>
+            </ul>
+          </div>
+        </nav>
+      </aside>
+      <main class="docs-main" id="main">
+        <ol class="docs-crumbs"><li><a href="./" data-i18n="docs.crumb">Docs</a></li><li aria-current="page" data-i18n="docs.page.quickstart">Develop plugins</li></ol>
+        <article class="doc-lang docs-article" lang="en">
+<h1>Develop plugins</h1>
+<p class="docs-lede">Build a complete Desktop plugin, from a working manifest to custom UI, App data and a shareable package.</p>
+<h2 id="manifest-basics" data-anchor="manifest-basics">Start with a manifest</h2>
+<h3 id="manifest" data-anchor="manifest">1. Create the manifest</h3>
+<p>Create a folder named <code>cpu-readout</code> and save this as <code>manifest.json</code>. It requests only the shared CPU percentage and declares four possible placements.</p><figure class="code"><figcaption class="code-head"><span>cpu-readout/manifest.json</span></figcaption><pre><code>{
+  "id": "cpu-readout",
+  "version": "1.0.0",
+  "tmApi": "^1",
+  "name": {
+    "en": "CPU readout",
+    "zh-TW": "CPU 負載"
+  },
+  "permissions": [
+    "sys.cpu"
+  ],
+  "views": [
+    {
+      "id": "load",
+      "title": "CPU",
+      "icon": "cpu",
+      "surfaces": [
+        "home",
+        "edgeDock",
+        "tray",
+        "notch"
+      ],
+      "compact": {
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      },
+      "layout": {
+        "type": "stat",
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      }
+    }
+  ]
+}</code></pre></figure>
+<h3 id="try" data-anchor="try">2. Import and enable it</h3>
+<p>In Settings → Plugins → Installed → More plugin actions, import the folder into managed storage. Review <code>sys.cpu</code>, allow and enable the plugin, then select Home. Expect a CPU percentage after sampling begins; an initial missing reading is not zero.</p><p>The App renders the layout and shares source sampling. Hiding the last consumer releases demand. Try additional declared placements in plugin settings; Notch and Edge Dock also require their App switches.</p>
+<h3 id="package" data-anchor="package">3. Build a local package</h3>
+<p>From the Token Monitor checkout, with the folder in its root, run:</p><figure class="code"><figcaption class="code-head"><span>Terminal</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout.tmplugin</code></pre></figure><p>Choose From file to inspect and install that package. This command packages local files; it does not publish anything. Develop with a disposable App profile rather than your personal data.</p>
+<h3 id="code" data-anchor="code">4. Add JavaScript when you need it</h3>
+<p>For computed values, add the following fields to the manifest, create <code>main.js</code>, and change a binding from <code>sys.cpu</code> to <code>@load</code>.</p><figure class="code"><figcaption class="code-head"><span>manifest.json · add to the CPU manifest</span></figcaption><pre><code>"main": "main.js",
+"metrics": [
+  {
+    "id": "load",
+    "kind": "number"
+  }
+]</code></pre></figure><figure class="code"><figcaption class="code-head"><span>main.js</span></figcaption><pre><code>tm.subscribe('sys.cpu');
+tm.onTick(({ mode }) =&gt; {
+  const cpu = tm.read('sys.cpu');
+  if (mode === 'visible' &amp;&amp; typeof cpu === 'number') {
+    tm.publish('load', cpu);
+  }
+});</code></pre></figure><p>The isolated Worker has no DOM, Node or ambient network. Use <a href="#interface">Rich UI</a> for packaged HTML/CSS/JS; use <a href="#data-settings">App data</a> for business queries. Full schema: <a href="plugin-reference.html">manifest reference</a>.</p>
+        <h3 id="next-decisions" data-anchor="next-decisions">Where to go after the readout</h3><p>Keep the one-file layout if a number or small chart is enough. For a custom web document, <a href="#interface">choose a Rich UI target</a> and package only local assets. For usage, devices or sessions, <a href="#data-settings">request the matching App data grant</a> and handle unavailable coverage. For a user preference, declare a settings schema; do not turn <code>tm.storage</code> into a credential store. The <a href="plugin-reference.html">API reference</a> lists validated fields and bounds.</p>
+<h2 id="interface" data-anchor="interface">Choose the interface</h2>
+<h3 id="ui-choose" data-anchor="ui-choose">Choose by the job</h3>
+<div class="table-wrap"><table><thead><tr><th>Need</th><th>Choose</th></tr></thead><tbody><tr><td>Stats, meters, rows, controls or sparklines</td><td>Declarative layout; the host handles theme and rendering</td></tr><tr><td>Custom HTML, CSS, canvas, animation or packaged images</td><td>Rich UI with <code>ui.web</code> and local assets</td></tr><tr><td>Tray readout</td><td>Lightweight host bitmap; no embedded web document</td></tr></tbody></table></div><p>Rich UI can target Home, main/detached pages, model/tool/device slots, Notch, Edge Dock and an optional settings editor. Only original model/tool/device snapshots require <code>tm.pages</code>. Keep a useful declarative fallback and let the user choose placements.</p>
+<h3 id="ui-example" data-anchor="ui-example">A complete Home document</h3>
+<p>Replace the quickstart manifest with this one and add the three files beside it. Import/update the folder, approve the new <code>ui.web</code> grant and enable Home. Rich readings wrap the numeric <code>sys.cpu</code> payload in <code>{ value, at }</code>; read <code>.value</code>.</p><figure class="code"><figcaption class="code-head"><span>cpu-readout/manifest.json · complete replacement</span></figcaption><pre><code>{
+  "id": "cpu-readout",
+  "version": "1.1.0",
+  "tmApi": "^1",
+  "name": "CPU readout",
+  "permissions": [
+    "sys.cpu",
+    "ui.web"
+  ],
+  "views": [
+    {
+      "id": "load",
+      "title": "CPU",
+      "surfaces": [
+        "home"
+      ],
+      "layout": {
+        "type": "stat",
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      }
+    }
+  ],
+  "webUi": {
+    "version": 1,
+    "assets": [
+      "index.html",
+      "page.css",
+      "page.js"
+    ],
+    "documents": [
+      {
+        "id": "cpu-home",
+        "title": "CPU",
+        "entry": "index.html",
+        "target": "home",
+        "view": "load",
+        "slot": "replace",
+        "height": 160
+      }
+    ]
+  }
+}</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/index.html</span></figcaption><pre><code>&lt;!doctype html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+  &lt;meta charset="utf-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+  &lt;link rel="stylesheet" href="page.css"&gt;
+  &lt;script src="page.js" defer&gt;&lt;/script&gt;
+&lt;/head&gt;
+&lt;body&gt;&lt;main&gt;&lt;h1&gt;CPU&lt;/h1&gt;&lt;output id="cpu" aria-live="polite"&gt;—&lt;/output&gt;&lt;/main&gt;&lt;/body&gt;
+&lt;/html&gt;</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/page.css</span></figcaption><pre><code>body { margin: 0; background: transparent; color: inherit; font-family: system-ui, sans-serif; }
+main { padding: 16px; }
+h1 { font-size: 14px; font-weight: 600; }
+output { font-size: 36px; font-variant-numeric: tabular-nums; }</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/page.js</span></figcaption><pre><code>function render(values) {
+  // Rich readings are { value, at } or null.
+  const cpu = values['sys.cpu']?.value;
+  document.getElementById('cpu').textContent =
+    typeof cpu === 'number'
+      ? `${Math.round(cpu)}%`
+      : '—';
+}
+function applyContext(context) {
+  const text = context.theme?.colors?.text;
+  if (text) document.body.style.color = text;
+}
+tm.onContext(applyContext);
+tm.context().then(applyContext);
+tm.onData(render);
+tm.subscribe(['sys.cpu']).then(render);</code></pre></figure>
+<h3 id="ui-lifecycle" data-anchor="ui-lifecycle">Design for hiding and reopening</h3>
+<p>Hidden Rich documents release subscriptions and may be frozen for quick reuse. Default idle retention is 30 seconds. Per-document <code>retainMs</code> accepts a nonnegative safe integer or <code>"until-evicted"</code>; global count/memory limits may evict earlier. Retention never grants background web work.</p><p>Persist important state with <code>tm.storage</code> and handle cold launch. Respect host theme/reduced motion, keyboard focus, allocated viewport and missing readings. Main, detached and surface documents have separate owners.</p>
+<h3 id="ui-reference" data-anchor="ui-reference">Build on the named slots</h3>
+<p>There is no host DOM, arbitrary IPC or Node access. Rich assets are package-local; use the fixed <code>tm</code> bridge. Follow the <a href="plugin-rich-reference.html">authored UI reference</a> for target fields, theme context and lifecycle bounds. <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/page-studio">Page Studio</a> demonstrates original pages; <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/business-studio">Business Studio</a> demonstrates shared App data and settings.</p>
+        <h3 id="ui-render-choice" data-anchor="ui-render-choice">A practical rendering choice</h3><p>Start with a declarative stat, meter, rows or sparkline when host controls can express the idea. The App validates the component tree, draws it in its own theme, and can share one source sample across placements. Use Rich UI for layout, animation, canvas or local images that need HTML/CSS/JS. A Rich target names a packaged entry and assets; it still needs a declarative fallback. The tray remains a host bitmap. Enable each supported placement in the App after installation.</p><h3 id="ui-rich-failures" data-anchor="ui-rich-failures">Treat Rich UI as a lifecycle, not a permanent page</h3><p>On first open, wait for the bridge and a first snapshot. For the CPU example, the Rich <code>sys.cpu</code> payload is an envelope and its number is <code>reading.value</code>; the Worker’s <code>tm.read('sys.cpu')</code> is the raw number. On hide, unsubscribe and release visible demand. A retained document may resume quickly, but expiry, memory pressure, update, disabled plugin or revoked permission can remount it cold. Save meaningful drafts in <code>tm.storage</code>, clear stale content on privacy/source resets, and keep the declarative fallback useful if the document fails. See the <a href="plugin-rich-reference.html">Rich UI contract</a> for targets and bridge details.</p>
+<h2 id="data-settings" data-anchor="data-settings">Use App data and settings</h2>
+<h3 id="data-permissions" data-anchor="data-permissions">Ask for the data you use</h3>
+<p>Use <code>tm.data.usage</code> for usage/tools/models, or the matching <code>tm.data.devices</code>, <code>sessions</code>, <code>projects</code>, <code>history</code>, <code>limits</code>, <code>subscriptions</code> or <code>status</code> grant. The full identifiers all start with <code>tm.data.</code>. Legacy <code>tm.usage</code> and <code>tm.pages</code> do not authorize these queries.</p><p><code>tm.data.identities</code> additionally permits available names/titles/paths and display identities. Host hidden-title preferences and source scope still apply. Credentials, transcripts and internal IPC are not exposed. The host remains authoritative; do not rescan tools, poll providers or request consent for each query.</p>
+<h3 id="data-paging" data-anchor="data-paging">Query and page a snapshot</h3>
+<p>Declare <code>tm.data.usage</code> to try this in Worker or Rich code. Inspect availability before displaying rows; use coverage for collection scope and cost completeness for unknown prices.</p><figure class="code"><figcaption class="code-head"><span>Worker / Rich UI · tm.data.usage</span></figcaption><pre><code>const query = {
+  version: 1,
+  resource: 'tools',
+  period: 'today',
+  page: {
+    limit: 25
+  }
+};
+const first = await tm.data.query(query);
+console.log(
+  first.availability,
+  first.rows,
+  first.aggregateCoverage
+);
+if (first.pageInfo?.hasMore) {
+  const cursor =
+    first.pageInfo.nextCursor;
+  const next = await tm.data.query({
+    ...query,
+    page: {
+      ...query.page,
+      cursor
+    }
+  });
+  console.log(
+    next.availability,
+    next.rows
+  );
+}</code></pre></figure><p><code>tm.data.subscribe(query, callback)</code> returns an unsubscribe function and delivers page one in a <code>snapshot</code> event. Do not add a second initial query. On <code>invalidate</code> with <code>reset:true</code>, clear rows/cursors immediately and refetch; ordinary invalidation can preserve the active traversal. Restart on <code>snapshotExpired</code> or <code>invalidCursor</code>.</p><p>Session queries build an index in chunks and convert only the requested page, so collections above 5,000 sessions can be traversed with the same cursor API. The host owns consistency and resource protection; authors can choose incremental loading or a virtual list. Memory, work and snapshot lifetime remain bounded; other resources retain their collection limits. Handle <code>budgetExceeded</code>, <code>rateLimited</code>, <code>scopeUnavailable</code> and unavailable/denied results explicitly. See the <a href="plugin-reference.html">data reference</a>.</p>
+<h3 id="data-relations" data-anchor="data-relations">Preserve what the data means</h3>
+<p>Session <code>parentId</code>/<code>parentClient</code> link opaque session identities. A parent can be outside the page or retained dataset; do not invent its row. All-time remote session detail can be unavailable or partial.</p><p>Subscription derivations use the host’s captured reporting date and FX map for renewal dates, recorded payments and monthly equivalent. Top-up depletion forecasts additionally require <code>tm.data.limits</code>, unambiguous authorized account matching and usable balance data. Unknown/stale/denied forecasts remain unavailable. Recorded amounts are not proof of bank transactions; an estimate is not a promised renewal date.</p>
+<h3 id="data-plugin-settings" data-anchor="data-plugin-settings">Declare and save preferences</h3>
+<p>Add a settings schema to the manifest. The standard host form works even when execution is off; a Rich settings editor is optional.</p><figure class="code"><figcaption class="code-head"><span>manifest.json · settings field</span></figcaption><pre><code>"settings": {
+  "version": 1,
+  "fields": [
+    {
+      "id": "period",
+      "type": "select",
+      "label": "Usage period",
+      "default": "today",
+      "options": [
+        {
+          "value": "today",
+          "label": "Today"
+        },
+        {
+          "value": "month",
+          "label": "Month"
+        }
+      ]
+    }
+  ]
+}</code></pre></figure><figure class="code"><figcaption class="code-head"><span>Worker / Rich UI · explicit save</span></figcaption><pre><code>const draftBase = await tm.settings.get();
+// Keep the revision while the user edits.
+// On conflict, keep the draft and offer reload.
+const committed = await tm.settings.update({
+  schemaVersion: draftBase.schemaVersion,
+  expectedRevision: draftBase.revision,
+  patch: { period: 'month' }
+});</code></pre></figure><p>Use <code>tm.settings.onChange</code> for committed updates, without overwriting dirty drafts. Preserve the original revision until save; a conflict needs an explicit reload choice. Settings are plugin preferences, not credentials, arbitrary App settings or display placements. See <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/business-studio">Business Studio</a> for a complete subscription, pagination and settings flow.</p>
+        <h3 id="data-data-decision" data-anchor="data-data-decision">Choose a resource, then present its limits</h3><p>Ask for only the resources the view needs. A usage card can start with <code>tm.data.usage</code>; a session list additionally needs <code>tm.data.sessions</code>, and names or paths require <code>tm.data.identities</code>. Use one subscribed first page and follow its cursor for more rows. A page is not a total; <code>aggregateCoverage</code> describes the authorized collection, while <code>availability</code> and cost completeness describe what can be shown. Remote all-time session detail can be partial or unavailable, and a privacy/source reset invalidates old identities. Never turn unknown cost into $0.</p><h3 id="data-settings-conflicts" data-anchor="data-settings-conflicts">Preferences are saved state</h3><p>The host form works without running plugin code. A Rich editor should keep the revision from the moment editing began, show a save result, and offer reload if another editor saved first. Keep the unsaved draft on conflict. The settings schema is local and versioned; it is distinct from placement switches, credentials and private <code>tm.storage</code>. See the <a href="plugin-reference.html">data and settings API</a> for exact DTOs and bounds.</p>
+<h2 id="test-distribute" data-anchor="test-distribute">Test and distribute</h2>
+<h3 id="share-test" data-anchor="share-test">Test the experience you ship</h3>
+<ul><li>Import → preview → allow → enable → place → open.</li><li>Cold open, quick reopen, expiry, resize, reduced motion and keyboard interaction.</li><li>Missing data, denied grants, paging resets and settings conflicts.</li><li>Hide all consumers: demand should stop. Revoke/disable while open and while cached.</li><li>Update → approve new access → rollback → uninstall with data retention.</li></ul><p>Use a disposable profile. Test each claimed platform/surface; local macOS evidence does not prove Windows/Linux, packaged delivery or physical Notch behavior. See <a href="https://github.com/Javis603/token-monitor/blob/main/docs/plugins/validation.md">validation guidance</a>.</p>
+<h3 id="share-package" data-anchor="share-package">Build and inspect the exact package</h3>
+<p>From the checkout root:</p><figure class="code"><figcaption class="code-head"><span>Terminal</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout-v1.1.0.tmplugin
+# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>Keep a stable plugin id, increment the version, and declare compatible App versions when known. Install the exact output through From file. The builder includes declared Rich assets; the package total is bounded at 2 MiB. See the <a href="plugin-reference.html">package reference</a> for individual limits.</p>
+<h3 id="share-catalog" data-anchor="share-catalog">Offer an HTTPS catalog</h3>
+<p>Host your package and a JSON catalog on an HTTPS static host. This is a schema example: replace the URL, author and digest with your actual values. Paste the builder’s SHA-256 without changing package bytes.</p><figure class="code"><figcaption class="code-head"><span>catalog.json · schema example, not an enrolled source</span></figcaption><pre><code>{
+  "format": 1,
+  "title": "Example community catalog",
+  "plugins": [
+    {
+      "id": "cpu-readout",
+      "name": "CPU readout",
+      "author": "Your name",
+      "versions": [
+        {
+          "version": "1.1.0",
+          "url": "https://example.com/cpu-readout-v1.1.0.tmplugin",
+          "sha256": "REPLACE_WITH_THE_BUILDERS_64_CHARACTER_SHA256",
+          "changelog": "Adds the optional Home interface"
+        }
+      ]
+    }
+  ]
+}</code></pre></figure><p>Readers add the catalog in Community → Manage sources, refresh it, preview the exact source/version and confirm installation. Updates also need confirmation. SHA-256 checks integrity, not authorship or safety. Community remains Unreviewed; optional Ed25519 pinning is an advanced source identity feature.</p>
+<h3 id="share-reference" data-anchor="share-reference">Keep distribution simple</h3>
+<p>No public submission backend, review service or automatic source enrollment is implied. Follow the <a href="plugin-distribution-reference.html">catalog contract</a> for URL rules, compatibility, limits and recovery. </p>
+        <h3 id="share-release-check" data-anchor="share-release-check">A useful acceptance pass</h3><p>Run the installed package through the journey a reader will take: import, inspect requested grants, allow, enable, place and open. Check an empty first reading, a real reading and a denied grant. Test hiding the last consumer, cold reopening after retention, keyboard focus and reduced motion. For data views, show partial coverage and unknown cost; for settings, create a genuine competing save and confirm the unsaved draft survives. Rebuild after every manifest or asset change, then install the exact new bytes. Record the App build, platform, surfaces and checks that actually ran.</p><h3 id="share-catalog-trust" data-anchor="share-catalog-trust">What the catalog does and does not prove</h3><p>A catalog points to HTTPS package bytes and their SHA-256. The digest catches changed bytes; it does not review code or establish the author’s identity. Readers choose and review a source, then confirm each installation or update. Community remains Unreviewed. Optional source key pinning serves people who need stronger source identity; there is no public submission or moderation service. See the <a href="plugin-distribution-reference.html">distribution contract</a> for exact catalog and recovery rules.</p>
+<h2 id="create-prompt" data-anchor="create-prompt">Create with an AI coding agent</h2><p>Copy this into a coding agent and add your idea at the end.</p><figure class="code prompt-card"><figcaption class="code-head"><span>Prompt</span></figcaption><pre tabindex="0"><code>Help me build a Token Monitor Desktop plugin. Read the official guide: https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md (and the reference it links to).
+
+If any requirements are unclear, please ask me first. When finished, test the plugin and provide a folder or .tmplugin file I can import, along with installation and activation steps.
+
+My idea:</code></pre></figure>
+        </article>
+        <article class="doc-lang docs-article" lang="zh-TW">
+<h1>開發插件</h1>
+<p class="docs-lede">從可運作的宣告檔出發，完成自訂介面、App 資料及可分享的 Desktop 套件。</p>
+<h2 data-anchor="manifest-basics">從宣告檔開始</h2>
+<h3 data-anchor="manifest">1. 建立宣告檔</h3>
+<p>建立 <code>cpu-readout</code> 資料夾，把以下內容儲存為 <code>manifest.json</code>。它只要求共享 CPU 百分比，並宣告四種可選位置。</p><figure class="code"><figcaption class="code-head"><span>cpu-readout/manifest.json</span></figcaption><pre><code>{
+  "id": "cpu-readout",
+  "version": "1.0.0",
+  "tmApi": "^1",
+  "name": {
+    "en": "CPU readout",
+    "zh-TW": "CPU 負載"
+  },
+  "permissions": [
+    "sys.cpu"
+  ],
+  "views": [
+    {
+      "id": "load",
+      "title": "CPU",
+      "icon": "cpu",
+      "surfaces": [
+        "home",
+        "edgeDock",
+        "tray",
+        "notch"
+      ],
+      "compact": {
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      },
+      "layout": {
+        "type": "stat",
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      }
+    }
+  ]
+}</code></pre></figure>
+<h3 data-anchor="try">2. 匯入並啟用</h3>
+<p>在設定 → 插件 → 已安裝 → 更多插件操作匯入資料夾至受管理儲存。核對 <code>sys.cpu</code>，允許並啟用，再選擇首頁。開始取樣後會顯示百分比；初始缺少讀數並不代表零。</p><p>App 負責繪製及共享取樣，隱藏最後一個使用者介面後會釋放需求。其他位置可在插件設定啟用；Edge Dock 與 Notch 也需要 App 開關。</p>
+<h3 data-anchor="package">3. 建立本地套件</h3>
+<p>將資料夾放在 Token Monitor 儲存庫根目錄，於根目錄執行：</p><figure class="code"><figcaption class="code-head"><span>終端機</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout.tmplugin</code></pre></figure><p>用「從檔案」預覽並安裝。此命令只打包本地檔案，不會發佈。開發時請使用可拋棄的 App 設定檔，避免使用個人資料。</p>
+<h3 data-anchor="code">4. 需要時計算自訂數值</h3>
+<p>在宣告檔加入以下欄位，建立 <code>main.js</code>，並將一個繫結來源由 <code>sys.cpu</code> 改為 <code>@load</code>。</p><figure class="code"><figcaption class="code-head"><span>manifest.json · 加入 CPU 宣告檔</span></figcaption><pre><code>"main": "main.js",
+"metrics": [
+  {
+    "id": "load",
+    "kind": "number"
+  }
+]</code></pre></figure><figure class="code"><figcaption class="code-head"><span>main.js</span></figcaption><pre><code>tm.subscribe('sys.cpu');
+tm.onTick(({ mode }) =&gt; {
+  const cpu = tm.read('sys.cpu');
+  if (mode === 'visible' &amp;&amp; typeof cpu === 'number') {
+    tm.publish('load', cpu);
+  }
+});</code></pre></figure><p>隔離 Worker 沒有 DOM、Node 或預設網路存取。自訂 HTML/CSS/JS 請看 <a href="#interface">Rich UI</a>，業務查詢請看<a href="#data-settings">資料指南</a>。完整欄位見<a href="plugin-reference.html">宣告檔參考</a>。</p>
+        <h3 data-anchor="next-decisions">讀數完成後的選擇</h3><p>若只需數字或小圖，保留單一檔案佈局即可。若要自訂網頁文件，先<a href="#interface">選 Rich UI 目標</a>，只封裝本地資產。若需用量、裝置或工作階段，<a href="#data-settings">申請對應的 App 資料權限</a>，並處理資料不可用的情況。使用者偏好應宣告設定 schema；不要把 <code>tm.storage</code> 當成憑證庫。<a href="plugin-reference.html">API 參考</a>列出驗證欄位與限制。</p>
+<h2 data-anchor="interface">選擇介面</h2>
+<h3 data-anchor="ui-choose">按需求選擇</h3>
+<div class="table-wrap"><table><thead><tr><th>需求</th><th>方式</th></tr></thead><tbody><tr><td>數值、儀表、列、控制項與走勢線</td><td>宣告式配置，由 App 處理外觀與繪製</td></tr><tr><td>HTML、CSS、Canvas、動畫與圖片</td><td>Rich UI，要求 <code>ui.web</code> 及套件內資產</td></tr><tr><td>系統匣讀數</td><td>輕量點陣圖，不嵌入網頁文件</td></tr></tbody></table></div><p>Rich UI 可用於首頁、主程式／獨立頁面、模型／工具／裝置插槽、Notch、Edge Dock 及選用設定編輯器。只有原有模型／工具／裝置快照需要 <code>tm.pages</code>。保留有用的宣告式備援，由使用者決定顯示位置。</p>
+<h3 data-anchor="ui-example">完整首頁文件</h3>
+<p>用以下內容取代入門宣告檔，並在同一資料夾新增三個檔案。匯入或更新後，核准新增的 <code>ui.web</code> 並啟用首頁。Rich 讀數以 <code>{ value, at }</code> 包裝數值型 <code>sys.cpu</code>，請讀取 <code>.value</code>。</p><figure class="code"><figcaption class="code-head"><span>cpu-readout/manifest.json · 完整替換</span></figcaption><pre><code>{
+  "id": "cpu-readout",
+  "version": "1.1.0",
+  "tmApi": "^1",
+  "name": "CPU readout",
+  "permissions": [
+    "sys.cpu",
+    "ui.web"
+  ],
+  "views": [
+    {
+      "id": "load",
+      "title": "CPU",
+      "surfaces": [
+        "home"
+      ],
+      "layout": {
+        "type": "stat",
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      }
+    }
+  ],
+  "webUi": {
+    "version": 1,
+    "assets": [
+      "index.html",
+      "page.css",
+      "page.js"
+    ],
+    "documents": [
+      {
+        "id": "cpu-home",
+        "title": "CPU",
+        "entry": "index.html",
+        "target": "home",
+        "view": "load",
+        "slot": "replace",
+        "height": 160
+      }
+    ]
+  }
+}</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/index.html</span></figcaption><pre><code>&lt;!doctype html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+  &lt;meta charset="utf-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+  &lt;link rel="stylesheet" href="page.css"&gt;
+  &lt;script src="page.js" defer&gt;&lt;/script&gt;
+&lt;/head&gt;
+&lt;body&gt;&lt;main&gt;&lt;h1&gt;CPU&lt;/h1&gt;&lt;output id="cpu" aria-live="polite"&gt;—&lt;/output&gt;&lt;/main&gt;&lt;/body&gt;
+&lt;/html&gt;</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/page.css</span></figcaption><pre><code>body { margin: 0; background: transparent; color: inherit; font-family: system-ui, sans-serif; }
+main { padding: 16px; }
+h1 { font-size: 14px; font-weight: 600; }
+output { font-size: 36px; font-variant-numeric: tabular-nums; }</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/page.js</span></figcaption><pre><code>function render(values) {
+  // Rich readings are { value, at } or null.
+  const cpu = values['sys.cpu']?.value;
+  document.getElementById('cpu').textContent =
+    typeof cpu === 'number'
+      ? `${Math.round(cpu)}%`
+      : '—';
+}
+function applyContext(context) {
+  const text = context.theme?.colors?.text;
+  if (text) document.body.style.color = text;
+}
+tm.onContext(applyContext);
+tm.context().then(applyContext);
+tm.onData(render);
+tm.subscribe(['sys.cpu']).then(render);</code></pre></figure>
+<h3 data-anchor="ui-lifecycle">處理隱藏與重新開啟</h3>
+<p>隱藏的 Rich 文件會釋放訂閱，可暫時凍結以便重用。預設閒置保留 30 秒；每份文件的 <code>retainMs</code> 可為非負安全整數或 <code>"until-evicted"</code>，但全域數量／記憶體限制可提早移除。保留不授予背景網頁工作能力。</p><p>重要狀態請用 <code>tm.storage</code> 儲存，並處理冷啟動。尊重 App 主題、減少動態效果、鍵盤焦點、分配尺寸及缺少讀數。不同視窗與介面有獨立擁有者。</p>
+<h3 data-anchor="ui-reference">使用公開插槽與橋接</h3>
+<p>無法存取 App DOM、任意 IPC 或 Node。資產位於套件內，透過固定 <code>tm</code> 橋接互動。目標欄位、主題與生命週期見 <a href="plugin-rich-reference.html">UI 參考</a>。<a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/page-studio">Page Studio</a> 展示原有頁面，<a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/business-studio">Business Studio</a> 展示共享資料與設定。</p>
+        <h3 data-anchor="ui-render-choice">實際選擇繪製方式</h3><p>若主程式控制項已能表達構想，先用宣告式數字、儀表、列表或折線。App 驗證元件樹、套用自身主題，並可在多個位置共享同一來源取樣。需要 HTML/CSS/JS 的版面、動畫、canvas 或本地圖片時，才用 Rich UI。Rich 目標指定封裝入口與資產，仍須提供宣告式後備畫面。系統匣維持由主程式繪製的點陣圖。安裝後仍要在 App 開啟每個支援位置。</p><h3 data-anchor="ui-rich-failures">把 Rich UI 視為會重啟的畫面</h3><p>首次開啟先等 bridge 與第一份資料。CPU 範例的 Rich <code>sys.cpu</code> 是封套，數值在 <code>reading.value</code>；Worker 的 <code>tm.read('sys.cpu')</code> 則直接傳回數字。隱藏時取消訂閱並釋放可見需求。保留的文件可能快速恢復，但過期、記憶體壓力、更新、停用或撤銷權限可使它冷啟動。重要草稿要存入 <code>tm.storage</code>，來源或私隱重設時清除舊內容；文件失效時，宣告式後備仍應可用。目標與 bridge 細節見 <a href="plugin-rich-reference.html">Rich UI 合約</a>。</p>
+<h2 data-anchor="data-settings">使用 App 資料與設定</h2>
+<h3 data-anchor="data-permissions">只要求需要的資料</h3>
+<p>用量／工具／模型要求 <code>tm.data.usage</code>；其他資源分別要求 <code>tm.data.devices</code>、<code>tm.data.sessions</code>、<code>tm.data.projects</code>、<code>tm.data.history</code>、<code>tm.data.limits</code>、<code>tm.data.subscriptions</code> 或 <code>tm.data.status</code>。舊有 <code>tm.usage</code> 與 <code>tm.pages</code> 不授權這些查詢。</p><p><code>tm.data.identities</code> 另外允許可用的名稱、標題、路徑與顯示身分；仍受來源範圍及隱藏標題偏好限制。不公開憑證、對話內容或內部 IPC。App 是資料權威，不要重掃工具、輪詢提供者或每次查詢都要求同意。</p>
+<h3 data-anchor="data-paging">查詢並逐頁讀取快照</h3>
+<p>宣告 <code>tm.data.usage</code> 後，可在 Worker 或 Rich 程式碼試用。顯示前先檢查 availability、coverage 與費用完整性。</p><figure class="code"><figcaption class="code-head"><span>Worker / Rich UI · tm.data.usage</span></figcaption><pre><code>const query = {
+  version: 1,
+  resource: 'tools',
+  period: 'today',
+  page: {
+    limit: 25
+  }
+};
+const first = await tm.data.query(query);
+console.log(
+  first.availability,
+  first.rows,
+  first.aggregateCoverage
+);
+if (first.pageInfo?.hasMore) {
+  const cursor =
+    first.pageInfo.nextCursor;
+  const next = await tm.data.query({
+    ...query,
+    page: {
+      ...query.page,
+      cursor
+    }
+  });
+  console.log(
+    next.availability,
+    next.rows
+  );
+}</code></pre></figure><p><code>tm.data.subscribe(query, callback)</code> 回傳取消訂閱函式，首個 <code>snapshot</code> 已含第一頁，不要再發初始查詢。<code>invalidate</code> 的 <code>reset:true</code> 要立即清除列與游標再讀取；一般失效可保留進行中的遍歷。遇到 <code>snapshotExpired</code>／<code>invalidCursor</code> 時重新開始。</p><p>會話查詢分段建立索引，只轉換當頁資料；超過 5,000 筆會話也可沿用相同 cursor API 完整遍歷。宿主負責一致性及資源保護，作者可選擇按需載入或虛擬列表。記憶體、工作量及快照期限仍有上限，其他資源保留原有集合限制。請處理 <code>budgetExceeded</code>、<code>rateLimited</code>、<code>scopeUnavailable</code> 及不可用／拒絕狀態，詳見<a href="plugin-reference.html">資料參考</a>。</p>
+<h3 data-anchor="data-relations">保留資料語意</h3>
+<p>工作階段 <code>parentId</code>／<code>parentClient</code> 使用不透明身分；父階段可在頁面或保留資料之外，不要虛構其資料列。遠端全期間細節可能不可用或只涵蓋部分資料。</p><p>訂閱衍生值採用 App 擷取的報表日期及匯率，提供續期、已記錄付款及每月等值。儲值耗盡預測另需 <code>tm.data.limits</code>、明確授權的帳戶匹配及可用餘額。未知、過期或拒絕的預測保持不可用；記錄金額不是銀行交易證明，預測也不是保證續期日期。</p>
+<h3 data-anchor="data-plugin-settings">宣告與儲存偏好設定</h3>
+<p>在宣告檔加入 schema。標準表單在停用時仍可使用，Rich 編輯器只是選項。</p><figure class="code"><figcaption class="code-head"><span>manifest.json · settings 欄位</span></figcaption><pre><code>"settings": {
+  "version": 1,
+  "fields": [
+    {
+      "id": "period",
+      "type": "select",
+      "label": "Usage period",
+      "default": "today",
+      "options": [
+        {
+          "value": "today",
+          "label": "Today"
+        },
+        {
+          "value": "month",
+          "label": "Month"
+        }
+      ]
+    }
+  ]
+}</code></pre></figure><figure class="code"><figcaption class="code-head"><span>Worker / Rich UI · 明確儲存</span></figcaption><pre><code>const draftBase = await tm.settings.get();
+// Keep the revision while the user edits.
+// On conflict, keep the draft and offer reload.
+const committed = await tm.settings.update({
+  schemaVersion: draftBase.schemaVersion,
+  expectedRevision: draftBase.revision,
+  patch: { period: 'month' }
+});</code></pre></figure><p><code>tm.settings.onChange</code> 提供已提交狀態，不應覆蓋未儲存草稿。保留開始編輯時的 revision，衝突時保留草稿並讓使用者明確重新載入。這些不是憑證、任意 App 設定或顯示位置。完整流程見 <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/business-studio">Business Studio</a>。</p>
+        <h3 data-anchor="data-data-decision">選資源，再說明其限制</h3><p>只申請畫面需要的資源。用量卡可從 <code>tm.data.usage</code> 開始；工作階段列表另需 <code>tm.data.sessions</code>，名稱或路徑需要 <code>tm.data.identities</code>。訂閱首頁一次，再用 cursor 讀取其他頁。單頁不等於總量；<code>aggregateCoverage</code> 描述獲授權的集合，<code>availability</code> 和費用完整度則說明可顯示的內容。遠端「全部」工作階段詳情可能局部或不可用；私隱或來源重設會使舊身分失效。未知費用不可當作 $0。</p><h3 data-anchor="data-settings-conflicts">偏好設定是已儲存狀態</h3><p>即使插件程式未執行，主程式表單仍可用。Rich 編輯器應保留開始編輯時的 revision、顯示儲存結果，並在另一編輯器先儲存時提供重新載入選項。衝突時保留未儲存草稿。設定 schema 是本機且有版本，與位置開關、憑證及私人 <code>tm.storage</code> 分開。DTO 與限制見 <a href="plugin-reference.html">資料及設定 API</a>。</p>
+<h2 data-anchor="test-distribute">測試與發佈</h2>
+<h3 data-anchor="share-test">測試實際提供的體驗</h3>
+<ul><li>匯入 → 預覽 → 授權 → 啟用 → 選擇位置 → 開啟。</li><li>冷啟動、快速重開、過期、縮放、減少動態效果與鍵盤操作。</li><li>缺少資料、拒絕權限、分頁重設與設定衝突。</li><li>隱藏全部介面後停止需求；開啟及快取時撤銷權限或停用。</li><li>更新 → 核准新權限 → 回復 → 保留資料移除。</li></ul><p>使用可拋棄設定檔，測試每個聲稱支援的平台與介面。本地 macOS 證據不能證明 Windows／Linux、打包版本或實體 Notch 行為。請見<a href="https://github.com/Javis603/token-monitor/blob/main/docs/plugins/validation.md">驗證指南</a>。</p>
+<h3 data-anchor="share-package">打包並檢查實際產物</h3>
+<p>從儲存庫根目錄執行：</p><figure class="code"><figcaption class="code-head"><span>終端機</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout-v1.1.0.tmplugin
+# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>保留固定 id、增加版本，並在已知時宣告相容 App 版本。透過「從檔案」安裝實際產物。建置器會包含宣告的 Rich 資產，套件總大小上限 2 MiB。個別限制見<a href="plugin-reference.html">套件參考</a>。</p>
+<h3 data-anchor="share-catalog">提供 HTTPS 目錄</h3>
+<p>將套件與 JSON 目錄放在 HTTPS 靜態主機。以下只是規格範例，請換成實際網址、作者與建置器輸出的 SHA-256，之後不要修改套件位元組。</p><figure class="code"><figcaption class="code-head"><span>catalog.json · 規格範例，並非已登錄來源</span></figcaption><pre><code>{
+  "format": 1,
+  "title": "Example community catalog",
+  "plugins": [
+    {
+      "id": "cpu-readout",
+      "name": "CPU readout",
+      "author": "Your name",
+      "versions": [
+        {
+          "version": "1.1.0",
+          "url": "https://example.com/cpu-readout-v1.1.0.tmplugin",
+          "sha256": "REPLACE_WITH_THE_BUILDERS_64_CHARACTER_SHA256",
+          "changelog": "Adds the optional Home interface"
+        }
+      ]
+    }
+  ]
+}</code></pre></figure><p>讀者在社群 → 管理來源加入目錄、重新整理、預覽並確認版本與來源；更新也需要確認。SHA-256 核對完整性，不證明身分或安全。社群仍屬未審核，Ed25519 釘選是進階來源身分功能。</p>
+<h3 data-anchor="share-reference">維持簡單的發佈流程</h3>
+<p>此流程不包含公開提交後端、審核服務或自動登錄來源。網址、相容性、限制與復原見<a href="plugin-distribution-reference.html">目錄規格</a>。</p>
+        <h3 data-anchor="share-release-check">實用的驗收流程</h3><p>用已封裝套件完成讀者會走的流程：匯入、檢查權限、允許、啟用、選位置及開啟。檢查首次空讀數、真實讀數與被拒權限；隱藏最後使用者、過保留期冷啟動、鍵盤焦點和減少動態效果。資料畫面須呈現局部覆蓋和未知費用；設定則要製造兩個編輯器競爭儲存，確認未儲存草稿仍在。每次改宣告檔或資產後重建，安裝新的確切位元組。記錄實際測試的 App 版本、平台、位置和檢查。</p><h3 data-anchor="share-catalog-trust">目錄能證明甚麼</h3><p>目錄指向 HTTPS 套件及 SHA-256。摘要可發現位元組變動，不能審查程式或證明作者身分。讀者自行選擇並核對來源，再確認每次安裝或更新。Community 仍標示為未審查。可選的來源金鑰釘選提供較強的身分確認；沒有公開提交或審核服務。確切目錄及復原規則見<a href="plugin-distribution-reference.html">發佈合約</a>。</p>
+<h2 data-anchor="create-prompt">請 AI 程式助手建立插件</h2><p>複製以下內容貼到程式助手，在最後補上你的想法。</p><figure class="code prompt-card"><figcaption class="code-head"><span>提示詞</span></figcaption><pre tabindex="0"><code>幫我製作一個 Token Monitor Desktop 插件。請閱讀官方指南：https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md（以及其中連結的參考文件）。
+
+如果需求有不清楚的地方，請先向我確認。完成後，請測試插件，並提供可匯入的資料夾或 .tmplugin 檔案，以及安裝與啟用步驟。
+
+我的想法：</code></pre></figure>
+        </article>
+        <article class="doc-lang docs-article" lang="zh-CN">
+<h1>开发插件</h1>
+<p class="docs-lede">从可运行的清单开始，完成自定义界面、App 数据和可分享的 Desktop 安装包。</p>
+<h2 data-anchor="manifest-basics">从清单开始</h2>
+<h3 data-anchor="manifest">1. 建立声明文件</h3>
+<p>建立 <code>cpu-readout</code> 文件夹，把以下内容存储为 <code>manifest.json</code>。它只要求共享 CPU 百分比，并声明四种可选位置。</p><figure class="code"><figcaption class="code-head"><span>cpu-readout/manifest.json</span></figcaption><pre><code>{
+  "id": "cpu-readout",
+  "version": "1.0.0",
+  "tmApi": "^1",
+  "name": {
+    "en": "CPU readout",
+    "zh-TW": "CPU 負載"
+  },
+  "permissions": [
+    "sys.cpu"
+  ],
+  "views": [
+    {
+      "id": "load",
+      "title": "CPU",
+      "icon": "cpu",
+      "surfaces": [
+        "home",
+        "edgeDock",
+        "tray",
+        "notch"
+      ],
+      "compact": {
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      },
+      "layout": {
+        "type": "stat",
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      }
+    }
+  ]
+}</code></pre></figure>
+<h3 data-anchor="try">2. 导入并启用</h3>
+<p>在设置 → 插件 → 已安装 → 更多插件操作导入文件夹至受管理存储。核对 <code>sys.cpu</code>，允许并启用，再选择首页。开始取样后会显示百分比；初始缺少读数并不代表零。</p><p>App 负责绘制及共享取样，隐藏最后一个用户界面后会释放需求。其他位置可在插件设置启用；Edge Dock 与 Notch 也需要 App 开关。</p>
+<h3 data-anchor="package">3. 建立本地包</h3>
+<p>将文件夹放在 Token Monitor 仓库根目录，于根目录执行：</p><figure class="code"><figcaption class="code-head"><span>终端</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout.tmplugin</code></pre></figure><p>用「从文件」预览并安装。此命令只打包本地文件，不会发布。开发时请使用可丢弃的 App 配置文件，避免使用个人数据。</p>
+<h3 data-anchor="code">4. 需要时计算自定义数值</h3>
+<p>在声明文件加入以下字段，建立 <code>main.js</code>，并将一个绑定来源由 <code>sys.cpu</code> 改为 <code>@load</code>。</p><figure class="code"><figcaption class="code-head"><span>manifest.json · 加入 CPU 声明文件</span></figcaption><pre><code>"main": "main.js",
+"metrics": [
+  {
+    "id": "load",
+    "kind": "number"
+  }
+]</code></pre></figure><figure class="code"><figcaption class="code-head"><span>main.js</span></figcaption><pre><code>tm.subscribe('sys.cpu');
+tm.onTick(({ mode }) =&gt; {
+  const cpu = tm.read('sys.cpu');
+  if (mode === 'visible' &amp;&amp; typeof cpu === 'number') {
+    tm.publish('load', cpu);
+  }
+});</code></pre></figure><p>隔离 Worker 没有 DOM、Node 或默认网络访问。自定义 HTML/CSS/JS 请看 <a href="#interface">Rich UI</a>，业务查询请看<a href="#data-settings">数据指南</a>。完整字段见<a href="plugin-reference.html">声明文件参考</a>。</p>
+        <h3 data-anchor="next-decisions">读数完成后的选择</h3><p>若只需要数字或小图，保留单文件布局即可。若要自定义网页文档，先<a href="#interface">选择 Rich UI 目标</a>，仅打包本地资源。若需要用量、设备或会话，<a href="#data-settings">申请对应的 App 数据权限</a>，并处理数据不可用的情况。用户偏好应声明设置 schema；不要将 <code>tm.storage</code> 用作凭证库。<a href="plugin-reference.html">API 参考</a>列出验证字段和限制。</p>
+<h2 data-anchor="interface">选择界面</h2>
+<h3 data-anchor="ui-choose">按需求选择</h3>
+<div class="table-wrap"><table><thead><tr><th>需求</th><th>方式</th></tr></thead><tbody><tr><td>数值、仪表、列、控制项与走势线</td><td>声明式配置，由 App 处理外观与绘制</td></tr><tr><td>HTML、CSS、Canvas、动画与图片</td><td>Rich UI，要求 <code>ui.web</code> 及包内资产</td></tr><tr><td>系统托盘读数</td><td>轻量点阵图，不嵌入网页文件</td></tr></tbody></table></div><p>Rich UI 可用于首页、主程序／独立页面、模型／工具／设备插槽、Notch、Edge Dock 及选用设置编辑器。只有原有模型／工具／设备快照需要 <code>tm.pages</code>。保留有用的声明式备援，由用户决定显示位置。</p>
+<h3 data-anchor="ui-example">完整首页文件</h3>
+<p>用以下内容取代入门声明文件，并在同一文件夹新增三个文件。导入或更新后，批准新增的 <code>ui.web</code> 并启用首页。Rich 读数以 <code>{ value, at }</code> 包装数值型 <code>sys.cpu</code>，请读取 <code>.value</code>。</p><figure class="code"><figcaption class="code-head"><span>cpu-readout/manifest.json · 完整替换</span></figcaption><pre><code>{
+  "id": "cpu-readout",
+  "version": "1.1.0",
+  "tmApi": "^1",
+  "name": "CPU readout",
+  "permissions": [
+    "sys.cpu",
+    "ui.web"
+  ],
+  "views": [
+    {
+      "id": "load",
+      "title": "CPU",
+      "surfaces": [
+        "home"
+      ],
+      "layout": {
+        "type": "stat",
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      }
+    }
+  ],
+  "webUi": {
+    "version": 1,
+    "assets": [
+      "index.html",
+      "page.css",
+      "page.js"
+    ],
+    "documents": [
+      {
+        "id": "cpu-home",
+        "title": "CPU",
+        "entry": "index.html",
+        "target": "home",
+        "view": "load",
+        "slot": "replace",
+        "height": 160
+      }
+    ]
+  }
+}</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/index.html</span></figcaption><pre><code>&lt;!doctype html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+  &lt;meta charset="utf-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+  &lt;link rel="stylesheet" href="page.css"&gt;
+  &lt;script src="page.js" defer&gt;&lt;/script&gt;
+&lt;/head&gt;
+&lt;body&gt;&lt;main&gt;&lt;h1&gt;CPU&lt;/h1&gt;&lt;output id="cpu" aria-live="polite"&gt;—&lt;/output&gt;&lt;/main&gt;&lt;/body&gt;
+&lt;/html&gt;</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/page.css</span></figcaption><pre><code>body { margin: 0; background: transparent; color: inherit; font-family: system-ui, sans-serif; }
+main { padding: 16px; }
+h1 { font-size: 14px; font-weight: 600; }
+output { font-size: 36px; font-variant-numeric: tabular-nums; }</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/page.js</span></figcaption><pre><code>function render(values) {
+  // Rich readings are { value, at } or null.
+  const cpu = values['sys.cpu']?.value;
+  document.getElementById('cpu').textContent =
+    typeof cpu === 'number'
+      ? `${Math.round(cpu)}%`
+      : '—';
+}
+function applyContext(context) {
+  const text = context.theme?.colors?.text;
+  if (text) document.body.style.color = text;
+}
+tm.onContext(applyContext);
+tm.context().then(applyContext);
+tm.onData(render);
+tm.subscribe(['sys.cpu']).then(render);</code></pre></figure>
+<h3 data-anchor="ui-lifecycle">处理隐藏与重新开启</h3>
+<p>隐藏的 Rich 文件会释放订阅，可暂时冻结以便重用。默认闲置保留 30 秒；每份文件的 <code>retainMs</code> 可为非负安全整数或 <code>"until-evicted"</code>，但全域数量／内存限制可提早移除。保留不授予背景网页工作能力。</p><p>重要状态请用 <code>tm.storage</code> 存储，并处理冷启动。尊重 App 主题、减少动态效果、键盘焦点、分配尺寸及缺少读数。不同窗口与界面有独立拥有者。</p>
+<h3 data-anchor="ui-reference">使用公开插槽与桥接</h3>
+<p>无法访问 App DOM、任意 IPC 或 Node。资产位于包内，透过固定 <code>tm</code> 桥接互动。目标字段、主题与生命周期见 <a href="plugin-rich-reference.html">UI 参考</a>。<a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/page-studio">Page Studio</a> 展示原有页面，<a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/business-studio">Business Studio</a> 展示共享数据与设置。</p>
+        <h3 data-anchor="ui-render-choice">实际选择渲染方式</h3><p>如果宿主控件足以表达需求，先使用声明式数值、仪表、列表或折线。App 验证组件树、使用自己的主题，并在多个位置共享同一来源采样。需要 HTML/CSS/JS 的布局、动画、canvas 或本地图片时再使用 Rich UI。Rich 目标指定打包入口和资源，同时仍需声明式后备视图。系统托盘仍由宿主绘制位图。安装后还需在 App 中开启每个支持的位置。</p><h3 data-anchor="ui-rich-failures">把 Rich UI 当作会重启的视图</h3><p>首次打开先等待 bridge 和首份数据。CPU 示例中的 Rich <code>sys.cpu</code> 是封套，数值在 <code>reading.value</code>；Worker 中 <code>tm.read('sys.cpu')</code> 直接返回数字。隐藏时取消订阅并释放可见需求。保留的文档可能快速恢复，但到期、内存压力、更新、停用或撤销权限会使其冷启动。重要草稿存入 <code>tm.storage</code>，来源或隐私重置时清除旧内容；文档失效时声明式后备仍应有用。详见 <a href="plugin-rich-reference.html">Rich UI 合约</a>。</p>
+<h2 data-anchor="data-settings">使用 App 数据与设置</h2>
+<h3 data-anchor="data-permissions">只要求需要的数据</h3>
+<p>用量／工具／模型要求 <code>tm.data.usage</code>；其他资源分别要求 <code>tm.data.devices</code>、<code>tm.data.sessions</code>、<code>tm.data.projects</code>、<code>tm.data.history</code>、<code>tm.data.limits</code>、<code>tm.data.subscriptions</code> 或 <code>tm.data.status</code>。旧有 <code>tm.usage</code> 与 <code>tm.pages</code> 不授权这些查询。</p><p><code>tm.data.identities</code> 另外允许可用的名称、标题、路径与显示身份；仍受来源范围及隐藏标题偏好限制。不公开凭据、对话内容或内部 IPC。App 是数据权威，不要重扫工具、轮询提供者或每次查询都要求同意。</p>
+<h3 data-anchor="data-paging">查询并逐页读取快照</h3>
+<p>声明 <code>tm.data.usage</code> 后，可在 Worker 或 Rich 代码试用。显示前先检查 availability、coverage 与费用完整性。</p><figure class="code"><figcaption class="code-head"><span>Worker / Rich UI · tm.data.usage</span></figcaption><pre><code>const query = {
+  version: 1,
+  resource: 'tools',
+  period: 'today',
+  page: {
+    limit: 25
+  }
+};
+const first = await tm.data.query(query);
+console.log(
+  first.availability,
+  first.rows,
+  first.aggregateCoverage
+);
+if (first.pageInfo?.hasMore) {
+  const cursor =
+    first.pageInfo.nextCursor;
+  const next = await tm.data.query({
+    ...query,
+    page: {
+      ...query.page,
+      cursor
+    }
+  });
+  console.log(
+    next.availability,
+    next.rows
+  );
+}</code></pre></figure><p><code>tm.data.subscribe(query, callback)</code> 回传取消订阅函式，首个 <code>snapshot</code> 已含第一页，不要再发初始查询。<code>invalidate</code> 的 <code>reset:true</code> 要立即清除列与游标再读取；一般失效可保留进行中的遍历。遇到 <code>snapshotExpired</code>／<code>invalidCursor</code> 时重新开始。</p><p>会话查询分段建立索引，只转换当前页数据；超过 5,000 条会话也可沿用相同 cursor API 完整遍历。宿主负责一致性及资源保护，作者可选择按需加载或虚拟列表。内存、工作量及快照期限仍有上限，其他资源保留原有集合限制。请处理 <code>budgetExceeded</code>、<code>rateLimited</code>、<code>scopeUnavailable</code> 及不可用／拒绝状态，详见<a href="plugin-reference.html">数据参考</a>。</p>
+<h3 data-anchor="data-relations">保留数据语意</h3>
+<p>会话 <code>parentId</code>／<code>parentClient</code> 使用不透明身份；父阶段可在页面或保留数据之外，不要虚构其数据列。远端全期间细节可能不可用或只涵盖部分数据。</p><p>订阅衍生值采用 App 撷取的报表日期及汇率，提供续期、已记录付款及每月等值。储值耗尽预测另需 <code>tm.data.limits</code>、明确授权的账户匹配及可用余额。未知、过期或拒绝的预测保持不可用；记录金额不是银行交易证明，预测也不是保证续期日期。</p>
+<h3 data-anchor="data-plugin-settings">声明与存储偏好设置</h3>
+<p>在声明文件加入 schema。标准表单在停用时仍可使用，Rich 编辑器只是选项。</p><figure class="code"><figcaption class="code-head"><span>manifest.json · settings 字段</span></figcaption><pre><code>"settings": {
+  "version": 1,
+  "fields": [
+    {
+      "id": "period",
+      "type": "select",
+      "label": "Usage period",
+      "default": "today",
+      "options": [
+        {
+          "value": "today",
+          "label": "Today"
+        },
+        {
+          "value": "month",
+          "label": "Month"
+        }
+      ]
+    }
+  ]
+}</code></pre></figure><figure class="code"><figcaption class="code-head"><span>Worker / Rich UI · 显式保存</span></figcaption><pre><code>const draftBase = await tm.settings.get();
+// Keep the revision while the user edits.
+// On conflict, keep the draft and offer reload.
+const committed = await tm.settings.update({
+  schemaVersion: draftBase.schemaVersion,
+  expectedRevision: draftBase.revision,
+  patch: { period: 'month' }
+});</code></pre></figure><p><code>tm.settings.onChange</code> 提供已提交状态，不应覆盖未存储草稿。保留开始编辑时的 revision，冲突时保留草稿并让用户明确重新加载。这些不是凭据、任意 App 设置或显示位置。完整流程见 <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/business-studio">Business Studio</a>。</p>
+        <h3 data-anchor="data-data-decision">选择资源，再说明限制</h3><p>只申请视图所需的资源。用量卡可从 <code>tm.data.usage</code> 开始；会话列表还需要 <code>tm.data.sessions</code>，名称或路径需要 <code>tm.data.identities</code>。只订阅一次首页，再用 cursor 读取后续页面。单页不等于总量；<code>aggregateCoverage</code> 描述获授权的集合，<code>availability</code> 和费用完整度说明能显示什么。远程“全部”会话详情可能部分或不可用；隐私或来源重置会使旧身份失效。未知费用不可当作 $0。</p><h3 data-anchor="data-settings-conflicts">偏好设置是已保存的状态</h3><p>插件代码不运行时，宿主表单仍可用。Rich 编辑器应保留开始编辑时的 revision、显示保存结果，并在另一编辑器先保存时提供重新加载选项。冲突时保留未保存草稿。设置 schema 保存在本地且有版本，与位置开关、凭证和私有 <code>tm.storage</code> 分开。DTO 和限制见 <a href="plugin-reference.html">数据与设置 API</a>。</p>
+<h2 data-anchor="test-distribute">测试与发布</h2>
+<h3 data-anchor="share-test">测试实际提供的体验</h3>
+<ul><li>导入 → 预览 → 授权 → 启用 → 选择位置 → 开启。</li><li>冷启动、快速重开、过期、缩放、减少动态效果与键盘操作。</li><li>缺少数据、拒绝权限、分页重设与设置冲突。</li><li>隐藏全部界面后停止需求；开启及缓存时撤销权限或停用。</li><li>更新 → 批准新权限 → 回退 → 保留数据移除。</li></ul><p>使用可丢弃配置文件，测试每个声称支持的平台与界面。本地 macOS 证据不能证明 Windows／Linux、打包版本或实体 Notch 行为。请见<a href="https://github.com/Javis603/token-monitor/blob/main/docs/plugins/validation.md">验证指南</a>。</p>
+<h3 data-anchor="share-package">打包并检查实际产物</h3>
+<p>从仓库根目录执行：</p><figure class="code"><figcaption class="code-head"><span>终端</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout-v1.1.0.tmplugin
+# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>保留固定 id、增加版本，并在已知时声明兼容 App 版本。透过「从文件」安装实际产物。建置器会包含声明的 Rich 资产，包总大小上限 2 MiB。个别限制见<a href="plugin-reference.html">包参考</a>。</p>
+<h3 data-anchor="share-catalog">提供 HTTPS 目录</h3>
+<p>将包与 JSON 目录放在 HTTPS 静态主机。以下只是规格示例，请换成实际网址、作者与建置器输出的 SHA-256，之后不要修改包位元组。</p><figure class="code"><figcaption class="code-head"><span>catalog.json · 规范示例，并非已登记来源</span></figcaption><pre><code>{
+  "format": 1,
+  "title": "Example community catalog",
+  "plugins": [
+    {
+      "id": "cpu-readout",
+      "name": "CPU readout",
+      "author": "Your name",
+      "versions": [
+        {
+          "version": "1.1.0",
+          "url": "https://example.com/cpu-readout-v1.1.0.tmplugin",
+          "sha256": "REPLACE_WITH_THE_BUILDERS_64_CHARACTER_SHA256",
+          "changelog": "Adds the optional Home interface"
+        }
+      ]
+    }
+  ]
+}</code></pre></figure><p>读者在社区 → 管理来源加入目录、刷新、预览并确认版本与来源；更新也需要确认。SHA-256 核对完整性，不证明身份或安全。社区仍属未审核，Ed25519 固定是高级来源身份功能。</p>
+<h3 data-anchor="share-reference">维持简单的发布流程</h3>
+<p>此流程不包含公开提交后端、审核服务或自动登录来源。网址、兼容性、限制与复原见<a href="plugin-distribution-reference.html">目录规格</a>。</p>
+        <h3 data-anchor="share-release-check">实用的验收流程</h3><p>用打包后的文件完成读者的流程：导入、检查权限、允许、启用、选位置、打开。检查初次空读数、真实读数和权限被拒；隐藏最后一个消费者、保留期后冷启动、键盘焦点和减少动态效果。数据视图要呈现部分覆盖与未知费用；设置则制造两个编辑器竞争保存，确认未保存草稿仍在。每次修改清单或资源后重新构建，并安装确切的新文件。记录实际测试的 App 版本、平台、位置和检查。</p><h3 data-anchor="share-catalog-trust">目录能证明什么</h3><p>目录指向 HTTPS 安装包及其 SHA-256。摘要能发现文件变化，但不审查代码或证明作者身份。读者自行选择和检查来源，再确认每次安装或更新。Community 仍标为“未经审核”。可选的来源密钥固定提供更强身份确认；没有公开提交或审核服务。确切目录及恢复规则见<a href="plugin-distribution-reference.html">发布合约</a>。</p>
+<h2 data-anchor="create-prompt">请 AI 编程助手创建插件</h2><p>复制以下内容粘贴到编程助手，在最后补上你的想法。</p><figure class="code prompt-card"><figcaption class="code-head"><span>提示词</span></figcaption><pre tabindex="0"><code>帮我制作一个 Token Monitor Desktop 插件。请阅读官方指南：https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md（以及其中链接的参考文档）。
+
+如果需求有不清楚的地方，请先向我确认。完成后，请测试插件，并提供可导入的文件夹或 .tmplugin 文件，以及安装与启用步骤。
+
+我的想法：</code></pre></figure>
+        </article>
+        <article class="doc-lang docs-article" lang="ko">
+<h1>플러그인 개발</h1>
+<p class="docs-lede">작동하는 매니페스트부터 사용자 화면, 앱 데이터, 공유할 수 있는 Desktop 패키지까지 만드세요.</p>
+<h2 data-anchor="manifest-basics">매니페스트로 시작</h2>
+<h3 data-anchor="manifest">1. 매니페스트 만들기</h3>
+<p><code>cpu-readout</code> 폴더를 만들고 아래를 <code>manifest.json</code>으로 저장합니다. 공유 CPU 수치 권한과 네 가지 배치 위치를 선언합니다.</p><figure class="code"><figcaption class="code-head"><span>cpu-readout/manifest.json</span></figcaption><pre><code>{
+  "id": "cpu-readout",
+  "version": "1.0.0",
+  "tmApi": "^1",
+  "name": {
+    "en": "CPU readout",
+    "zh-TW": "CPU 負載"
+  },
+  "permissions": [
+    "sys.cpu"
+  ],
+  "views": [
+    {
+      "id": "load",
+      "title": "CPU",
+      "icon": "cpu",
+      "surfaces": [
+        "home",
+        "edgeDock",
+        "tray",
+        "notch"
+      ],
+      "compact": {
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      },
+      "layout": {
+        "type": "stat",
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      }
+    }
+  ]
+}</code></pre></figure>
+<h3 data-anchor="try">2. 가져오고 활성화</h3>
+<p>설정 → 플러그인 → 설치됨 → 추가 작업에서 폴더를 가져옵니다. <code>sys.cpu</code>를 확인하고 승인, 활성화한 뒤 홈을 선택합니다. 첫 샘플 전의 누락은 0이 아닙니다.</p><p>호스트가 렌더링과 공유 수집을 담당합니다. 마지막 표시가 숨겨지면 수요를 해제합니다. Dock/Notch에는 앱 스위치도 필요합니다.</p>
+<h3 data-anchor="package">3. 로컬 패키지 만들기</h3>
+<p>폴더를 저장소 루트에 놓고 루트에서 실행합니다.</p><figure class="code"><figcaption class="code-head"><span>터미널</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout.tmplugin</code></pre></figure><p>파일에서 결과를 미리 보고 설치합니다. 이 명령은 게시하지 않습니다. 개발에는 개인 데이터 대신 버려도 되는 앱 프로필을 사용하세요.</p>
+<h3 data-anchor="code">4. 필요할 때 코드 추가</h3>
+<p>아래 필드를 추가하고 <code>main.js</code>를 만든 뒤 바인딩의 <code>sys.cpu</code>를 <code>@load</code>로 바꿉니다.</p><figure class="code"><figcaption class="code-head"><span>manifest.json · CPU 매니페스트에 추가</span></figcaption><pre><code>"main": "main.js",
+"metrics": [
+  {
+    "id": "load",
+    "kind": "number"
+  }
+]</code></pre></figure><figure class="code"><figcaption class="code-head"><span>main.js</span></figcaption><pre><code>tm.subscribe('sys.cpu');
+tm.onTick(({ mode }) =&gt; {
+  const cpu = tm.read('sys.cpu');
+  if (mode === 'visible' &amp;&amp; typeof cpu === 'number') {
+    tm.publish('load', cpu);
+  }
+});</code></pre></figure><p>Worker에는 DOM, Node, 암묵적 네트워크가 없습니다. <a href="#interface">Rich UI</a>, <a href="#data-settings">데이터 가이드</a>와 <a href="plugin-reference.html">매니페스트 참조</a>를 이어서 보세요.</p>
+        <h3 data-anchor="next-decisions">첫 표시 다음 단계</h3><p>숫자나 작은 차트로 충분하면 파일 하나의 레이아웃을 유지하세요. 사용자 정의 웹 문서가 필요하면 <a href="#interface">Rich UI 대상을 선택</a>하고 로컬 자산만 묶으세요. 사용량, 기기, 세션에는 <a href="#data-settings">해당 앱 데이터 권한을 요청</a>하고 사용 불가 범위를 처리하세요. 사용자 설정은 스키마로 선언하고 <code>tm.storage</code>를 자격 증명 저장소로 쓰지 마세요. <a href="plugin-reference.html">API 참조</a>에 검증 필드와 제한이 있습니다.</p>
+<h2 data-anchor="interface">화면 방식 선택</h2>
+<h3 data-anchor="ui-choose">작업에 맞게 선택</h3>
+<p>수치, 미터, 행, 제어와 스파크라인에는 선언형 레이아웃을 사용합니다. HTML, CSS, Canvas, 애니메이션과 이미지는 <code>ui.web</code>과 패키지 내부 자산을 사용하는 Rich UI로 만듭니다. 트레이는 가벼운 비트맵이며 웹 문서를 넣지 않습니다.</p><p>홈, 메인/별도 페이지, 모델/도구/기기 슬롯, Notch, Edge Dock과 선택적 설정 편집기를 지원합니다. 원래 모델/도구/기기 스냅샷에만 <code>tm.pages</code>가 필요합니다. 선언형 대체 화면을 유지하고 배치는 사용자에게 맡깁니다.</p>
+<h3 data-anchor="ui-example">완전한 홈 문서</h3>
+<p>빠른 시작 매니페스트를 아래로 교체하고 파일 세 개를 추가합니다. 업데이트 후 <code>ui.web</code>을 승인하고 홈을 켭니다. Rich 읽기 값은 숫자 <code>sys.cpu</code>를 <code>{ value, at }</code>로 감싸므로 <code>.value</code>를 읽습니다.</p><figure class="code"><figcaption class="code-head"><span>cpu-readout/manifest.json · 전체 교체</span></figcaption><pre><code>{
+  "id": "cpu-readout",
+  "version": "1.1.0",
+  "tmApi": "^1",
+  "name": "CPU readout",
+  "permissions": [
+    "sys.cpu",
+    "ui.web"
+  ],
+  "views": [
+    {
+      "id": "load",
+      "title": "CPU",
+      "surfaces": [
+        "home"
+      ],
+      "layout": {
+        "type": "stat",
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      }
+    }
+  ],
+  "webUi": {
+    "version": 1,
+    "assets": [
+      "index.html",
+      "page.css",
+      "page.js"
+    ],
+    "documents": [
+      {
+        "id": "cpu-home",
+        "title": "CPU",
+        "entry": "index.html",
+        "target": "home",
+        "view": "load",
+        "slot": "replace",
+        "height": 160
+      }
+    ]
+  }
+}</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/index.html</span></figcaption><pre><code>&lt;!doctype html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+  &lt;meta charset="utf-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+  &lt;link rel="stylesheet" href="page.css"&gt;
+  &lt;script src="page.js" defer&gt;&lt;/script&gt;
+&lt;/head&gt;
+&lt;body&gt;&lt;main&gt;&lt;h1&gt;CPU&lt;/h1&gt;&lt;output id="cpu" aria-live="polite"&gt;—&lt;/output&gt;&lt;/main&gt;&lt;/body&gt;
+&lt;/html&gt;</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/page.css</span></figcaption><pre><code>body { margin: 0; background: transparent; color: inherit; font-family: system-ui, sans-serif; }
+main { padding: 16px; }
+h1 { font-size: 14px; font-weight: 600; }
+output { font-size: 36px; font-variant-numeric: tabular-nums; }</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/page.js</span></figcaption><pre><code>function render(values) {
+  // Rich readings are { value, at } or null.
+  const cpu = values['sys.cpu']?.value;
+  document.getElementById('cpu').textContent =
+    typeof cpu === 'number'
+      ? `${Math.round(cpu)}%`
+      : '—';
+}
+function applyContext(context) {
+  const text = context.theme?.colors?.text;
+  if (text) document.body.style.color = text;
+}
+tm.onContext(applyContext);
+tm.context().then(applyContext);
+tm.onData(render);
+tm.subscribe(['sys.cpu']).then(render);</code></pre></figure>
+<h3 data-anchor="ui-lifecycle">숨김과 다시 열기</h3>
+<p>숨긴 문서는 구독을 해제하고 잠시 동결될 수 있습니다. 기본 유휴 보관은 30초입니다. <code>retainMs</code>에 음이 아닌 안전한 정수 또는 <code>"until-evicted"</code>를 넣어도 전체 수/메모리 제한으로 먼저 제거될 수 있습니다. 백그라운드 웹 작업을 허용하지 않습니다.</p><p>중요한 상태는 <code>tm.storage</code>에 저장하고 콜드 시작을 처리하세요. 테마, 동작 줄이기, 키보드, 크기와 누락 값을 존중합니다. 문서마다 소유자는 별개입니다.</p>
+<h3 data-anchor="ui-reference">공개 슬롯 사용</h3>
+<p>호스트 DOM, 임의 IPC나 Node에 접근할 수 없습니다. 고정된 <code>tm</code> 브리지와 패키지 자산을 사용합니다. <a href="plugin-rich-reference.html">UI 참조</a>, 원래 페이지용 <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/page-studio">Page Studio</a>, 데이터/설정용 <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/business-studio">Business Studio</a>를 보세요.</p>
+        <h3 data-anchor="ui-render-choice">실용적인 렌더링 선택</h3><p>호스트 컨트롤로 표현할 수 있다면 선언형 수치, 미터, 행 또는 스파크라인부터 시작하세요. 앱이 컴포넌트 트리를 검증하고 테마로 그리며 여러 위치에 한 번의 원본 샘플을 공유합니다. HTML/CSS/JS 레이아웃, 애니메이션, 캔버스, 로컬 이미지가 필요하면 Rich UI를 사용하세요. Rich 대상에는 패키지 내 진입점과 자산을 지정하고 선언형 대체 화면도 둡니다. 트레이는 호스트 비트맵으로 남습니다. 설치 후 각 위치를 앱에서 켜야 합니다.</p><h3 data-anchor="ui-rich-failures">Rich UI는 다시 시작될 수 있습니다</h3><p>처음 열 때 브리지와 첫 스냅샷을 기다리세요. CPU 예제의 Rich <code>sys.cpu</code> 값은 봉투이며 숫자는 <code>reading.value</code>에 있습니다. Worker의 <code>tm.read('sys.cpu')</code>는 원시 숫자입니다. 숨길 때 구독을 해제하고 화면 수요를 놓으세요. 보존 문서는 빨리 재개될 수 있지만 만료, 메모리 압박, 업데이트, 비활성화, 권한 철회로 다시 시작될 수 있습니다. 중요한 초안은 <code>tm.storage</code>에 저장하고 개인정보/출처 재설정 때 오래된 내용을 지우세요. 문서 실패 시 선언형 대체 화면을 유용하게 유지하세요. <a href="plugin-rich-reference.html">Rich UI 계약</a>을 참고하세요.</p>
+<h2 data-anchor="data-settings">앱 데이터와 설정 사용</h2>
+<h3 data-anchor="data-permissions">필요한 데이터만 요청</h3>
+<p>사용량/도구/모델은 <code>tm.data.usage</code>, 나머지는 같은 <code>tm.data.</code> 접두사의 <code>devices</code>, <code>sessions</code>, <code>projects</code>, <code>history</code>, <code>limits</code>, <code>subscriptions</code>, <code>status</code> 권한을 사용합니다. 기존 <code>tm.usage</code>나 <code>tm.pages</code>는 이 쿼리를 허용하지 않습니다.</p><p><code>tm.data.identities</code>는 가능한 이름/제목/경로 등을 추가 허용하지만 숨긴 제목 설정과 소스 범위는 유지됩니다. 자격 증명, 대화 내용과 내부 IPC는 공개되지 않습니다. 호스트를 기준으로 삼고 재수집, 제공자 폴링이나 매 쿼리 동의 요청을 하지 마세요.</p>
+<h3 data-anchor="data-paging">스냅샷 페이지 읽기</h3>
+<p><code>tm.data.usage</code>를 선언해 시험합니다. 표시 전에 availability, coverage와 비용 완전성을 확인합니다.</p><figure class="code"><figcaption class="code-head"><span>Worker / Rich UI · tm.data.usage</span></figcaption><pre><code>const query = {
+  version: 1,
+  resource: 'tools',
+  period: 'today',
+  page: {
+    limit: 25
+  }
+};
+const first = await tm.data.query(query);
+console.log(
+  first.availability,
+  first.rows,
+  first.aggregateCoverage
+);
+if (first.pageInfo?.hasMore) {
+  const cursor =
+    first.pageInfo.nextCursor;
+  const next = await tm.data.query({
+    ...query,
+    page: {
+      ...query.page,
+      cursor
+    }
+  });
+  console.log(
+    next.availability,
+    next.rows
+  );
+}</code></pre></figure><p><code>tm.data.subscribe(query, callback)</code>는 해제 함수를 반환하며 첫 <code>snapshot</code>에 첫 페이지를 포함합니다. 초기 query를 중복 호출하지 않습니다. <code>reset:true</code> 무효화 시 행과 커서를 즉시 지우고 다시 읽습니다. 일반 무효화는 탐색을 유지할 수 있습니다. <code>snapshotExpired</code>/<code>invalidCursor</code>는 처음부터 다시 시작합니다.</p><p>세션 쿼리는 인덱스를 나누어 만들고 요청한 페이지만 변환하므로 5,000개를 넘는 세션도 같은 cursor API로 순회할 수 있습니다. 일관성과 자원 보호는 호스트가 담당하며 작성자는 점진적 로딩이나 가상 목록을 선택할 수 있습니다. 메모리, 작업량, 스냅샷 수명에는 한도가 있고 다른 리소스의 컬렉션 한도는 유지됩니다. <code>budgetExceeded</code>, <code>rateLimited</code>, <code>scopeUnavailable</code> 및 거부/불가 상태를 처리하세요. <a href="plugin-reference.html">데이터 참조</a>를 확인하세요.</p>
+<h3 data-anchor="data-relations">데이터 의미 보존</h3>
+<p>세션 <code>parentId</code>/<code>parentClient</code>는 불투명한 식별자를 연결합니다. 부모가 페이지나 보관 데이터에 없으면 행을 만들지 마세요. 원격 전체 기간 세션은 일부만 있거나 불가할 수 있습니다.</p><p>구독 갱신일, 기록된 결제와 월 환산액은 호스트가 캡처한 날짜/환율을 씁니다. 충전 잔액 소진 예측에는 <code>tm.data.limits</code>, 유일한 승인 계정 매칭과 쓸 수 있는 잔액이 더 필요합니다. 오래됨/불명/거부는 불가로 남깁니다. 기록은 은행 거래 증명이 아니며 예측은 갱신일 보장이 아닙니다.</p>
+<h3 data-anchor="data-plugin-settings">설정 선언과 저장</h3>
+<p>매니페스트에 schema를 추가합니다. 표준 폼은 실행이 꺼져도 작동하며 Rich 편집기는 선택 사항입니다.</p><figure class="code"><figcaption class="code-head"><span>manifest.json · settings 필드</span></figcaption><pre><code>"settings": {
+  "version": 1,
+  "fields": [
+    {
+      "id": "period",
+      "type": "select",
+      "label": "Usage period",
+      "default": "today",
+      "options": [
+        {
+          "value": "today",
+          "label": "Today"
+        },
+        {
+          "value": "month",
+          "label": "Month"
+        }
+      ]
+    }
+  ]
+}</code></pre></figure><figure class="code"><figcaption class="code-head"><span>Worker / Rich UI · 명시적 저장</span></figcaption><pre><code>const draftBase = await tm.settings.get();
+// Keep the revision while the user edits.
+// On conflict, keep the draft and offer reload.
+const committed = await tm.settings.update({
+  schemaVersion: draftBase.schemaVersion,
+  expectedRevision: draftBase.revision,
+  patch: { period: 'month' }
+});</code></pre></figure><p><code>tm.settings.onChange</code>는 저장 상태를 알립니다. 미저장 초안을 덮어쓰지 말고 편집 시작 revision을 유지하세요. 충돌 시 초안을 보존하고 명시적으로 다시 불러옵니다. 자격 증명, 임의 앱 설정이나 배치 저장소가 아닙니다. 전체 예제는 <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/business-studio">Business Studio</a>에 있습니다.</p>
+        <h3 data-anchor="data-data-decision">리소스를 고르고 한계를 보여주기</h3><p>화면에 필요한 리소스만 요청하세요. 사용량 카드에는 <code>tm.data.usage</code>를, 세션 목록에는 추가로 <code>tm.data.sessions</code>를, 이름이나 경로에는 <code>tm.data.identities</code>를 사용합니다. 첫 페이지는 한 번만 구독하고 커서로 다음 페이지를 읽으세요. 한 페이지는 전체가 아닙니다. <code>aggregateCoverage</code>는 허용된 컬렉션을, <code>availability</code>와 비용 완전성은 표시 가능한 내용을 설명합니다. 원격 전체 기간 세션 상세는 일부 또는 사용 불가일 수 있고, 개인 정보/출처 재설정 후 기존 ID는 유효하지 않습니다. 알 수 없는 비용을 $0으로 표시하지 마세요.</p><h3 data-anchor="data-settings-conflicts">환경 설정은 저장된 상태</h3><p>플러그인 코드가 멈춰도 호스트 양식은 동작합니다. Rich 편집기는 편집 시작 때의 revision을 유지하고 저장 결과를 보여주며, 다른 편집기가 먼저 저장한 경우 새로 불러오기를 제안해야 합니다. 충돌 때 저장하지 않은 초안을 보존하세요. 설정 스키마는 로컬이며 버전이 있고, 배치 스위치, 자격 증명, 개인 <code>tm.storage</code>와 별개입니다. 정확한 DTO와 제한은 <a href="plugin-reference.html">데이터 및 설정 API</a>에 있습니다.</p>
+<h2 data-anchor="test-distribute">테스트와 배포</h2>
+<h3 data-anchor="share-test">배포할 경험 테스트</h3>
+<ul><li>가져오기, 미리보기, 승인, 활성화, 배치와 열기.</li><li>콜드 시작, 재열기, 만료, 크기 변경, 동작 줄이기와 키보드.</li><li>누락 데이터, 거부, 페이지 리셋과 설정 충돌.</li><li>모두 숨긴 후 수요 중지, 열린/캐시 상태에서 비활성화.</li><li>업데이트, 새 권한 승인, 롤백, 데이터 보존 제거.</li></ul><p>버려도 되는 프로필에서 지원한다고 주장할 각 환경을 시험하세요. macOS 증거는 Windows/Linux, 패키지 앱이나 실제 Notch를 증명하지 않습니다. <a href="https://github.com/Javis603/token-monitor/blob/main/docs/plugins/validation.md">검증 안내</a>를 참조하세요.</p>
+<h3 data-anchor="share-package">실제 패키지 검사</h3>
+<p>저장소 루트에서 실행합니다.</p><figure class="code"><figcaption class="code-head"><span>터미널</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout-v1.1.0.tmplugin
+# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>id를 유지하고 버전을 올리며 필요하면 호환 앱 버전을 선언합니다. 실제 결과를 파일에서 설치합니다. Rich 자산을 포함한 총 상한은 2 MiB입니다. <a href="plugin-reference.html">패키지 참조</a>도 확인하세요.</p>
+<h3 data-anchor="share-catalog">HTTPS 카탈로그 제공</h3>
+<p>정적 HTTPS 호스트에 패키지와 JSON을 올립니다. 아래 URL, 작성자와 해시를 실제 값으로 바꾸고, 해시 이후 패키지 바이트를 바꾸지 않습니다.</p><figure class="code"><figcaption class="code-head"><span>catalog.json · 스키마 예제, 등록된 소스 아님</span></figcaption><pre><code>{
+  "format": 1,
+  "title": "Example community catalog",
+  "plugins": [
+    {
+      "id": "cpu-readout",
+      "name": "CPU readout",
+      "author": "Your name",
+      "versions": [
+        {
+          "version": "1.1.0",
+          "url": "https://example.com/cpu-readout-v1.1.0.tmplugin",
+          "sha256": "REPLACE_WITH_THE_BUILDERS_64_CHARACTER_SHA256",
+          "changelog": "Adds the optional Home interface"
+        }
+      ]
+    }
+  ]
+}</code></pre></figure><p>커뮤니티 → 소스 관리에서 추가, 새로 고침, 확인 후 설치합니다. 업데이트도 확인해야 합니다. SHA-256은 무결성만 검사합니다. 커뮤니티는 미검토이며 Ed25519 고정은 선택적인 고급 기능입니다.</p>
+<h3 data-anchor="share-reference">간단한 배포 유지</h3>
+<p>제출 서버, 심사 서비스나 자동 소스 등록은 포함하지 않습니다. <a href="plugin-distribution-reference.html">카탈로그 계약</a>을 따르세요. </p>
+        <h3 data-anchor="share-release-check">실용적인 인수 검사</h3><p>독자가 실제로 거칠 흐름으로 패키지를 검사하세요. 가져오기, 요청 권한 확인, 허용, 활성화, 위치 선택, 열기 순서입니다. 첫 빈 값, 실제 값, 권한 거부, 마지막 소비자 숨김, 보존 시간 뒤 새 시작, 키보드 포커스, 동작 줄이기를 확인합니다. 데이터 화면에는 부분 범위와 알 수 없는 비용을 표시하고, 설정은 두 편집기의 저장 충돌을 만들어 저장 전 초안이 남는지 확인하세요. 매니페스트나 자산 수정 뒤 다시 빌드하고 정확히 그 새 파일을 설치하세요. 실제 검사한 앱 빌드, 플랫폼, 화면, 검사를 기록하세요.</p><h3 data-anchor="share-catalog-trust">카탈로그가 증명하는 것</h3><p>카탈로그는 HTTPS 패키지와 SHA-256을 가리킵니다. 해시는 바이트 변경을 찾지만 코드 검토나 작성자 신원 증명은 아닙니다. 독자가 출처를 선택하고 검토한 뒤 설치/업데이트마다 승인합니다. Community는 미검토 상태입니다. 선택적인 출처 키 고정은 더 강한 출처 확인용이며 공개 제출이나 심사 서비스는 없습니다. <a href="plugin-distribution-reference.html">배포 계약</a>을 참고하세요.</p>
+<h2 data-anchor="create-prompt">AI 코딩 에이전트로 플러그인 만들기</h2><p>아래 내용을 코딩 에이전트에 붙여 넣고 마지막에 원하는 기능을 적으세요.</p><figure class="code prompt-card"><figcaption class="code-head"><span>프롬프트</span></figcaption><pre tabindex="0"><code>Token Monitor Desktop 플러그인 만들기를 도와주세요. 공식 가이드를 읽어 주세요: https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md (및 거기서 링크된 레퍼런스).
+
+요구사항이 불분명하면 먼저 저에게 확인해 주세요. 완성되면 플러그인을 테스트하고, 가져올 수 있는 폴더나 .tmplugin 파일과 설치 및 활성화 방법을 제공해 주세요.
+
+원하는 기능:</code></pre></figure>
+        </article>
+        <article class="doc-lang docs-article" lang="ja">
+<h1>プラグイン開発</h1>
+<p class="docs-lede">動くマニフェストから独自画面、アプリデータ、共有できる Desktop パッケージまで作ります。</p>
+<h2 data-anchor="manifest-basics">マニフェストから始める</h2>
+<h3 data-anchor="manifest">1. マニフェストを作る</h3>
+<p><code>cpu-readout</code> フォルダーを作り、以下を <code>manifest.json</code> として保存します。共有 CPU 使用率の権限と四つの配置候補を宣言します。</p><figure class="code"><figcaption class="code-head"><span>cpu-readout/manifest.json</span></figcaption><pre><code>{
+  "id": "cpu-readout",
+  "version": "1.0.0",
+  "tmApi": "^1",
+  "name": {
+    "en": "CPU readout",
+    "zh-TW": "CPU 負載"
+  },
+  "permissions": [
+    "sys.cpu"
+  ],
+  "views": [
+    {
+      "id": "load",
+      "title": "CPU",
+      "icon": "cpu",
+      "surfaces": [
+        "home",
+        "edgeDock",
+        "tray",
+        "notch"
+      ],
+      "compact": {
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      },
+      "layout": {
+        "type": "stat",
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      }
+    }
+  ]
+}</code></pre></figure>
+<h3 data-anchor="try">2. 取り込んで有効化する</h3>
+<p>設定 → プラグイン → インストール済み → その他の操作からフォルダーを取り込みます。<code>sys.cpu</code> を確認して許可し、有効化してホームに配置します。初回サンプル前の欠測はゼロではありません。</p><p>描画と共有サンプリングはホストが担当し、最後の表示が隠れると需要を解放します。Dock／Notch はアプリ側のスイッチも必要です。</p>
+<h3 data-anchor="package">3. パッケージを作る</h3>
+<p>フォルダーをリポジトリのルートに置き、ルートから実行します。</p><figure class="code"><figcaption class="code-head"><span>ターミナル</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout.tmplugin</code></pre></figure><p>「ファイルから」で成果物を確認してインストールします。このコマンドは公開しません。開発には使い捨てのアプリプロファイルを使ってください。</p>
+<h3 data-anchor="code">4. 必要ならコードを追加する</h3>
+<p>次のフィールドを追加し、<code>main.js</code> を作り、バインドの <code>sys.cpu</code> を <code>@load</code> に変更します。</p><figure class="code"><figcaption class="code-head"><span>manifest.json · CPU マニフェストに追加</span></figcaption><pre><code>"main": "main.js",
+"metrics": [
+  {
+    "id": "load",
+    "kind": "number"
+  }
+]</code></pre></figure><figure class="code"><figcaption class="code-head"><span>main.js</span></figcaption><pre><code>tm.subscribe('sys.cpu');
+tm.onTick(({ mode }) =&gt; {
+  const cpu = tm.read('sys.cpu');
+  if (mode === 'visible' &amp;&amp; typeof cpu === 'number') {
+    tm.publish('load', cpu);
+  }
+});</code></pre></figure><p>Worker に DOM、Node、暗黙のネットワークはありません。<a href="#interface">Rich UI</a> と<a href="#data-settings">データ</a>のガイド、<a href="plugin-reference.html">マニフェスト仕様</a>へ進めます。</p>
+        <h3 data-anchor="next-decisions">最初の表示の次に</h3><p>数値や小さなグラフで足りるなら一ファイルのレイアウトを維持します。独自のウェブ文書が必要なら<a href="#interface">Rich UI の対象を選び</a>、ローカル資産だけを同梱します。使用量、端末、セッションには<a href="#data-settings">対応するアプリデータ権限を要求し</a>、取得不能を扱ってください。利用者設定はスキーマで宣言し、<code>tm.storage</code> を認証情報の保存先にしないでください。<a href="plugin-reference.html">API リファレンス</a>に検証済みの項目と制限があります。</p>
+<h2 data-anchor="interface">表示方式を選ぶ</h2>
+<h3 data-anchor="ui-choose">目的に合う方式を選ぶ</h3>
+<p>数値、メーター、行、操作、スパークラインには宣言的レイアウトが適しています。独自の HTML、CSS、Canvas、アニメーション、画像には <code>ui.web</code> と同梱アセットを使う Rich UI を選びます。トレイは軽量ビットマップのままで、ウェブ文書は入りません。</p><p>ホーム、メイン／別ウィンドウ、モデル／ツール／端末スロット、Notch、Edge Dock、任意の設定エディターが対象です。元のモデル／ツール／端末スナップショットだけが <code>tm.pages</code> を要求します。宣言的フォールバックを残し、配置はユーザーが選びます。</p>
+<h3 data-anchor="ui-example">動くホーム文書</h3>
+<p>入門マニフェストを以下に置き換え、三つのファイルを追加します。更新後に <code>ui.web</code> を許可し、ホームを有効にします。Rich の読取値は数値の <code>sys.cpu</code> を <code>{ value, at }</code> で包むため、<code>.value</code> を読みます。</p><figure class="code"><figcaption class="code-head"><span>cpu-readout/manifest.json · 全体を置き換え</span></figcaption><pre><code>{
+  "id": "cpu-readout",
+  "version": "1.1.0",
+  "tmApi": "^1",
+  "name": "CPU readout",
+  "permissions": [
+    "sys.cpu",
+    "ui.web"
+  ],
+  "views": [
+    {
+      "id": "load",
+      "title": "CPU",
+      "surfaces": [
+        "home"
+      ],
+      "layout": {
+        "type": "stat",
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      }
+    }
+  ],
+  "webUi": {
+    "version": 1,
+    "assets": [
+      "index.html",
+      "page.css",
+      "page.js"
+    ],
+    "documents": [
+      {
+        "id": "cpu-home",
+        "title": "CPU",
+        "entry": "index.html",
+        "target": "home",
+        "view": "load",
+        "slot": "replace",
+        "height": 160
+      }
+    ]
+  }
+}</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/index.html</span></figcaption><pre><code>&lt;!doctype html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+  &lt;meta charset="utf-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+  &lt;link rel="stylesheet" href="page.css"&gt;
+  &lt;script src="page.js" defer&gt;&lt;/script&gt;
+&lt;/head&gt;
+&lt;body&gt;&lt;main&gt;&lt;h1&gt;CPU&lt;/h1&gt;&lt;output id="cpu" aria-live="polite"&gt;—&lt;/output&gt;&lt;/main&gt;&lt;/body&gt;
+&lt;/html&gt;</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/page.css</span></figcaption><pre><code>body { margin: 0; background: transparent; color: inherit; font-family: system-ui, sans-serif; }
+main { padding: 16px; }
+h1 { font-size: 14px; font-weight: 600; }
+output { font-size: 36px; font-variant-numeric: tabular-nums; }</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/page.js</span></figcaption><pre><code>function render(values) {
+  // Rich readings are { value, at } or null.
+  const cpu = values['sys.cpu']?.value;
+  document.getElementById('cpu').textContent =
+    typeof cpu === 'number'
+      ? `${Math.round(cpu)}%`
+      : '—';
+}
+function applyContext(context) {
+  const text = context.theme?.colors?.text;
+  if (text) document.body.style.color = text;
+}
+tm.onContext(applyContext);
+tm.context().then(applyContext);
+tm.onData(render);
+tm.subscribe(['sys.cpu']).then(render);</code></pre></figure>
+<h3 data-anchor="ui-lifecycle">非表示と再表示に対応する</h3>
+<p>非表示の文書は購読を解放し、一時的に凍結されます。既定は 30 秒。<code>retainMs</code> に非負の安全整数または <code>"until-evicted"</code> を指定できますが、全体の数／メモリー制限が優先されます。バックグラウンド実行の許可にはなりません。</p><p>重要な状態は <code>tm.storage</code> に保存し、コールド起動を処理します。ホストのテーマ、動きを減らす設定、キーボード、サイズと欠測に対応してください。各文書の所有者は独立しています。</p>
+<h3 data-anchor="ui-reference">公開スロットを使う</h3>
+<p>ホスト DOM、任意 IPC、Node にはアクセスできません。固定の <code>tm</code> ブリッジとパッケージ内アセットを使います。仕様は <a href="plugin-rich-reference.html">UI リファレンス</a>、元のページは <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/page-studio">Page Studio</a>、データと設定は <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/business-studio">Business Studio</a> を参照してください。</p>
+        <h3 data-anchor="ui-render-choice">表示方式の選び方</h3><p>ホストの部品で足りるなら、宣言型の数値、メーター、行、スパークラインから始めます。アプリが部品ツリーを検証し、テーマに沿って描画し、複数の表示先で一つの取得値を共有できます。HTML/CSS/JS の配置、アニメーション、canvas、ローカル画像が必要なら Rich UI を使います。Rich の対象には同梱入口と資産を指定し、宣言型の代替表示も用意します。トレイはホスト描画のビットマップのままです。インストール後に各表示先をアプリで有効化してください。</p><h3 data-anchor="ui-rich-failures">Rich UI は再起動を前提にする</h3><p>初回表示時はブリッジと最初のスナップショットを待ちます。CPU 例の Rich <code>sys.cpu</code> は包みで、数値は <code>reading.value</code> にあります。Worker の <code>tm.read('sys.cpu')</code> は数値そのものです。非表示時には購読を解除し、表示用の要求を解放します。保持文書は素早く戻ることがありますが、期限、メモリ、更新、無効化、権限取消で冷起動になります。重要な下書きは <code>tm.storage</code> に保存し、プライバシーや出典のリセット時には古い内容を消してください。文書が失敗しても宣言型の代替表示を役立てます。<a href="plugin-rich-reference.html">Rich UI 契約</a>を参照してください。</p>
+<h2 data-anchor="data-settings">アプリデータと設定を使う</h2>
+<h3 data-anchor="data-permissions">必要なデータだけ要求する</h3>
+<p>使用量／ツール／モデルには <code>tm.data.usage</code> を使います。ほかに同じ <code>tm.data.</code> 接頭辞の <code>devices</code>、<code>sessions</code>、<code>projects</code>、<code>history</code>、<code>limits</code>、<code>subscriptions</code>、<code>status</code> があります。従来の <code>tm.usage</code> や <code>tm.pages</code> では許可されません。</p><p><code>tm.data.identities</code> は取得可能な名前、タイトル、パスなどを追加で許可しますが、非表示設定とソース範囲は維持されます。認証情報、会話本文、内部 IPC は公開されません。ホストを正とし、再スキャン、プロバイダーのポーリング、クエリごとの同意要求をしないでください。</p>
+<h3 data-anchor="data-paging">スナップショットをページングする</h3>
+<p><code>tm.data.usage</code> を宣言して試せます。表示前に availability、coverage と費用の完全性を確認します。</p><figure class="code"><figcaption class="code-head"><span>Worker / Rich UI · tm.data.usage</span></figcaption><pre><code>const query = {
+  version: 1,
+  resource: 'tools',
+  period: 'today',
+  page: {
+    limit: 25
+  }
+};
+const first = await tm.data.query(query);
+console.log(
+  first.availability,
+  first.rows,
+  first.aggregateCoverage
+);
+if (first.pageInfo?.hasMore) {
+  const cursor =
+    first.pageInfo.nextCursor;
+  const next = await tm.data.query({
+    ...query,
+    page: {
+      ...query.page,
+      cursor
+    }
+  });
+  console.log(
+    next.availability,
+    next.rows
+  );
+}</code></pre></figure><p><code>tm.data.subscribe(query, callback)</code> は解除関数を返し、最初の <code>snapshot</code> に一ページ目を含みます。初回 query を重複させません。<code>reset:true</code> の無効化では行とカーソルを直ちに消し、再取得します。通常の無効化は走査を維持できます。<code>snapshotExpired</code>／<code>invalidCursor</code> では最初からやり直します。</p><p>セッションクエリは段階的にインデックスを作り、要求されたページだけを変換します。5,000 件を超えるセッションも同じ cursor API で走査できます。一貫性とリソース保護はホストが担い、作者は必要に応じた読み込みや仮想リストを選べます。メモリ、処理量、スナップショットの有効期間には上限があり、他のリソースの集合上限は変わりません。<code>budgetExceeded</code>、<code>rateLimited</code>、<code>scopeUnavailable</code>、拒否／利用不可を処理してください。詳細は<a href="plugin-reference.html">データ仕様</a>へ。</p>
+<h3 data-anchor="data-relations">意味を保って表示する</h3>
+<p>セッションの <code>parentId</code>／<code>parentClient</code> は不透明な識別子です。親が現在のページや保持データにない場合、行を捏造しません。リモートの全期間セッション詳細は不完全な場合があります。</p><p>サブスクリプションの更新日、記録済み支払い、月額換算はホストの報告日と為替マップを使います。チャージ残高の枯渇予測には <code>tm.data.limits</code>、一意の許可済みアカウントと有効な残高が必要です。不明／古い／拒否の予測を数値にしません。記録は銀行決済の証明ではなく、予測は更新日の保証ではありません。</p>
+<h3 data-anchor="data-plugin-settings">設定を宣言して保存する</h3>
+<p>マニフェストに schema を追加します。標準フォームは無効化中も使え、Rich エディターは任意です。</p><figure class="code"><figcaption class="code-head"><span>manifest.json · settings フィールド</span></figcaption><pre><code>"settings": {
+  "version": 1,
+  "fields": [
+    {
+      "id": "period",
+      "type": "select",
+      "label": "Usage period",
+      "default": "today",
+      "options": [
+        {
+          "value": "today",
+          "label": "Today"
+        },
+        {
+          "value": "month",
+          "label": "Month"
+        }
+      ]
+    }
+  ]
+}</code></pre></figure><figure class="code"><figcaption class="code-head"><span>Worker / Rich UI · 明示的に保存</span></figcaption><pre><code>const draftBase = await tm.settings.get();
+// Keep the revision while the user edits.
+// On conflict, keep the draft and offer reload.
+const committed = await tm.settings.update({
+  schemaVersion: draftBase.schemaVersion,
+  expectedRevision: draftBase.revision,
+  patch: { period: 'month' }
+});</code></pre></figure><p><code>tm.settings.onChange</code> は保存済み状態を通知します。未保存の入力を上書きせず、編集開始時の revision を保持し、競合は明示的な再読み込みで解決します。認証情報や任意のアプリ設定、配置のストアではありません。完全な実装は <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/business-studio">Business Studio</a> にあります。</p>
+        <h3 data-anchor="data-data-decision">資料を選び、その限界を示す</h3><p>画面に必要な資料だけを要求します。使用量カードは <code>tm.data.usage</code>、セッション一覧には追加で <code>tm.data.sessions</code>、名前やパスには <code>tm.data.identities</code> が必要です。最初のページを一度購読し、後続はカーソルで読みます。一ページは総量ではありません。<code>aggregateCoverage</code> は許可された集合、<code>availability</code> と費用の完全性は表示できる範囲を示します。遠隔の全期間セッション詳細は部分的または利用不能になり得ます。プライバシーや出典のリセットで古い ID は無効です。不明な費用を $0 にしないでください。</p><h3 data-anchor="data-settings-conflicts">設定は保存済みの状態</h3><p>プラグインコードが止まっていてもホストのフォームは使えます。Rich 編集画面は編集開始時の revision を保持し、保存結果を示し、別の編集画面が先に保存したら再読込を選べるようにします。競合時には未保存の下書きを残してください。設定スキーマはローカルで版を持ち、配置スイッチ、認証情報、個人用 <code>tm.storage</code> と別です。正確な DTO と制限は<a href="plugin-reference.html">データと設定 API</a>を参照してください。</p>
+<h2 data-anchor="test-distribute">テストと配布</h2>
+<h3 data-anchor="share-test">提供する体験をテストする</h3>
+<ul><li>取り込み、確認、許可、有効化、配置、表示。</li><li>コールド起動、再表示、期限切れ、サイズ変更、動きを減らす設定とキーボード。</li><li>欠測、権限拒否、ページングのリセットと設定競合。</li><li>全表示を隠したときの需要停止、表示中／キャッシュ中の無効化。</li><li>更新、新権限の承認、ロールバック、データを残した削除。</li></ul><p>使い捨てプロファイルで対象環境ごとに試します。macOS のローカル検証は Windows／Linux、パッケージ版や実機 Notch の証明ではありません。<a href="https://github.com/Javis603/token-monitor/blob/main/docs/plugins/validation.md">検証ガイド</a>も参照してください。</p>
+<h3 data-anchor="share-package">実際のパッケージを検査する</h3>
+<p>リポジトリのルートから実行します。</p><figure class="code"><figcaption class="code-head"><span>ターミナル</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout-v1.1.0.tmplugin
+# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>id は固定し、バージョンを上げ、必要に応じて互換アプリ版を宣言します。生成物を「ファイルから」で試します。宣言した Rich アセットを含む総上限は 2 MiB です。<a href="plugin-reference.html">パッケージ仕様</a>も確認します。</p>
+<h3 data-anchor="share-catalog">HTTPS カタログを用意する</h3>
+<p>静的 HTTPS ホストにパッケージと JSON を置きます。以下の URL、作者、SHA-256 を実値に置き換えてください。ハッシュ取得後にバイト列を変えません。</p><figure class="code"><figcaption class="code-head"><span>catalog.json · スキーマ例、登録済みソースではありません</span></figcaption><pre><code>{
+  "format": 1,
+  "title": "Example community catalog",
+  "plugins": [
+    {
+      "id": "cpu-readout",
+      "name": "CPU readout",
+      "author": "Your name",
+      "versions": [
+        {
+          "version": "1.1.0",
+          "url": "https://example.com/cpu-readout-v1.1.0.tmplugin",
+          "sha256": "REPLACE_WITH_THE_BUILDERS_64_CHARACTER_SHA256",
+          "changelog": "Adds the optional Home interface"
+        }
+      ]
+    }
+  ]
+}</code></pre></figure><p>コミュニティ → ソース管理で追加し、更新、確認してインストールします。更新にも確認が必要です。SHA-256 は完全性の確認で、安全性や作者の保証ではありません。コミュニティは未レビュー、Ed25519 固定は任意の上級機能です。</p>
+<h3 data-anchor="share-reference">配布をシンプルに保つ</h3>
+<p>投稿サーバーや審査サービス、ソースの自動登録は含みません。<a href="plugin-distribution-reference.html">カタログ仕様</a>に従ってください。</p>
+        <h3 data-anchor="share-release-check">役立つ受入確認</h3><p>読者の手順で完成パッケージを試します。取り込み、要求権限の確認、許可、有効化、配置、表示です。最初の空値、実値、拒否された権限、最後の利用画面を隠す操作、保持期限後の冷起動、キーボード焦点、動きを減らす設定を確認します。データ画面には部分的な範囲と不明な費用を示し、設定では二つの編集画面で保存競合を起こして下書きが残ることを確認します。マニフェストや資産を変えるたび再ビルドし、その出力をインストールします。実際に試したアプリ版、OS、表示先、検査を記録してください。</p><h3 data-anchor="share-catalog-trust">カタログが証明できること</h3><p>カタログは HTTPS のパッケージと SHA-256 を指します。ダイジェストはバイトの変更を検出しますが、コードの審査や作者の証明ではありません。読者が配布元を選んで確認し、各インストールや更新を承認します。Community は未審査です。任意の鍵固定は強い配布元識別が必要な人向けで、この候補に公開投稿・審査サービスはありません。<a href="plugin-distribution-reference.html">配布契約</a>を参照してください。</p>
+<h2 data-anchor="create-prompt">AI コーディングエージェントで作る</h2><p>次の文をコーディングエージェントに貼り付け、最後に作りたいものを書き足してください。</p><figure class="code prompt-card"><figcaption class="code-head"><span>プロンプト</span></figcaption><pre tabindex="0"><code>Token Monitor Desktop のプラグイン作成を手伝ってください。公式ガイドを読んでください：https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md（およびそこからリンクされたリファレンス）。
+
+要件に不明な点があれば、まず私に確認してください。完成したらプラグインをテストし、インポートできるフォルダーまたは .tmplugin ファイルと、インストール・有効化の手順を提供してください。
+
+作りたいもの：</code></pre></figure>
+        </article>
+        <article class="doc-lang docs-article" lang="pt-BR">
+<h1>Criar plugins</h1>
+<p class="docs-lede">Crie um plugin Desktop completo, do manifesto funcional à interface, dados do app e pacote compartilhável.</p>
+<h2 data-anchor="manifest-basics">Comece pelo manifesto</h2>
+<h3 data-anchor="manifest">1. Crie o manifesto</h3>
+<p>Crie a pasta <code>cpu-readout</code> e salve o conteúdo como <code>manifest.json</code>. Ele pede apenas o percentual compartilhado de CPU e declara quatro posicionamentos possíveis.</p><figure class="code"><figcaption class="code-head"><span>cpu-readout/manifest.json</span></figcaption><pre><code>{
+  "id": "cpu-readout",
+  "version": "1.0.0",
+  "tmApi": "^1",
+  "name": {
+    "en": "CPU readout",
+    "zh-TW": "CPU 負載"
+  },
+  "permissions": [
+    "sys.cpu"
+  ],
+  "views": [
+    {
+      "id": "load",
+      "title": "CPU",
+      "icon": "cpu",
+      "surfaces": [
+        "home",
+        "edgeDock",
+        "tray",
+        "notch"
+      ],
+      "compact": {
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      },
+      "layout": {
+        "type": "stat",
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      }
+    }
+  ]
+}</code></pre></figure>
+<h3 data-anchor="try">2. Importe e ative</h3>
+<p>Em Configurações → Plugins → Instalados → Ações adicionais, importe a pasta. Confira <code>sys.cpu</code>, autorize, ative e escolha Início. A primeira ausência de leitura não é zero.</p><p>O host renderiza e compartilha a amostragem; ocultar o último consumidor libera a demanda. Dock/Notch também exigem o controle do app.</p>
+<h3 data-anchor="package">3. Gere um pacote local</h3>
+<p>Coloque a pasta na raiz do repositório e execute de lá:</p><figure class="code"><figcaption class="code-head"><span>Terminal</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout.tmplugin</code></pre></figure><p>Use De arquivo para inspecionar e instalar o resultado. O comando não publica nada. Desenvolva em um perfil descartável do app, sem dados pessoais.</p>
+<h3 data-anchor="code">4. Adicione código quando precisar</h3>
+<p>Adicione os campos abaixo, crie <code>main.js</code> e troque um vínculo de <code>sys.cpu</code> por <code>@load</code>.</p><figure class="code"><figcaption class="code-head"><span>manifest.json · adicionar ao manifesto de CPU</span></figcaption><pre><code>"main": "main.js",
+"metrics": [
+  {
+    "id": "load",
+    "kind": "number"
+  }
+]</code></pre></figure><figure class="code"><figcaption class="code-head"><span>main.js</span></figcaption><pre><code>tm.subscribe('sys.cpu');
+tm.onTick(({ mode }) =&gt; {
+  const cpu = tm.read('sys.cpu');
+  if (mode === 'visible' &amp;&amp; typeof cpu === 'number') {
+    tm.publish('load', cpu);
+  }
+});</code></pre></figure><p>O Worker isolado não tem DOM, Node ou rede implícita. Continue em <a href="#interface">Rich UI</a>, <a href="#data-settings">dados</a> ou na <a href="plugin-reference.html">referência do manifesto</a>.</p>
+        <h3 data-anchor="next-decisions">Próximos passos após a leitura</h3><p>Mantenha o layout de um arquivo se um número ou gráfico pequeno bastar. Para um documento web próprio, <a href="#interface">escolha o destino Rich UI</a> e empacote só recursos locais. Para uso, dispositivos ou sessões, <a href="#data-settings">solicite a permissão correspondente</a> e trate cobertura indisponível. Declare um esquema para preferências; não use <code>tm.storage</code> como cofre de credenciais. A <a href="plugin-reference.html">referência da API</a> lista campos e limites validados.</p>
+<h2 data-anchor="interface">Escolha a interface</h2>
+<h3 data-anchor="ui-choose">Escolha pela necessidade</h3>
+<p>Use layouts declarativos para números, medidores, linhas, controles e sparklines. Para HTML, CSS, canvas, animação e imagens, use Rich UI com <code>ui.web</code> e assets locais. A bandeja continua sendo um bitmap leve, sem documento web.</p><p>Há alvos para Início, páginas principais/separadas, espaços de modelos/ferramentas/dispositivos, Notch, Edge Dock e um editor de preferências opcional. Só snapshots das páginas originais exigem <code>tm.pages</code>. Preserve um layout declarativo de fallback e deixe o usuário escolher os locais.</p>
+<h3 data-anchor="ui-example">Um documento completo para Início</h3>
+<p>Substitua o manifesto inicial e adicione os três arquivos abaixo. Atualize a pasta, aprove <code>ui.web</code> e ative Início. A leitura Rich envolve o valor numérico de <code>sys.cpu</code> em <code>{ value, at }</code>; leia <code>.value</code>.</p><figure class="code"><figcaption class="code-head"><span>cpu-readout/manifest.json · substituição completa</span></figcaption><pre><code>{
+  "id": "cpu-readout",
+  "version": "1.1.0",
+  "tmApi": "^1",
+  "name": "CPU readout",
+  "permissions": [
+    "sys.cpu",
+    "ui.web"
+  ],
+  "views": [
+    {
+      "id": "load",
+      "title": "CPU",
+      "surfaces": [
+        "home"
+      ],
+      "layout": {
+        "type": "stat",
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      }
+    }
+  ],
+  "webUi": {
+    "version": 1,
+    "assets": [
+      "index.html",
+      "page.css",
+      "page.js"
+    ],
+    "documents": [
+      {
+        "id": "cpu-home",
+        "title": "CPU",
+        "entry": "index.html",
+        "target": "home",
+        "view": "load",
+        "slot": "replace",
+        "height": 160
+      }
+    ]
+  }
+}</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/index.html</span></figcaption><pre><code>&lt;!doctype html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+  &lt;meta charset="utf-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+  &lt;link rel="stylesheet" href="page.css"&gt;
+  &lt;script src="page.js" defer&gt;&lt;/script&gt;
+&lt;/head&gt;
+&lt;body&gt;&lt;main&gt;&lt;h1&gt;CPU&lt;/h1&gt;&lt;output id="cpu" aria-live="polite"&gt;—&lt;/output&gt;&lt;/main&gt;&lt;/body&gt;
+&lt;/html&gt;</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/page.css</span></figcaption><pre><code>body { margin: 0; background: transparent; color: inherit; font-family: system-ui, sans-serif; }
+main { padding: 16px; }
+h1 { font-size: 14px; font-weight: 600; }
+output { font-size: 36px; font-variant-numeric: tabular-nums; }</code></pre></figure><figure class="code"><figcaption class="code-head"><span>cpu-readout/page.js</span></figcaption><pre><code>function render(values) {
+  // Rich readings are { value, at } or null.
+  const cpu = values['sys.cpu']?.value;
+  document.getElementById('cpu').textContent =
+    typeof cpu === 'number'
+      ? `${Math.round(cpu)}%`
+      : '—';
+}
+function applyContext(context) {
+  const text = context.theme?.colors?.text;
+  if (text) document.body.style.color = text;
+}
+tm.onContext(applyContext);
+tm.context().then(applyContext);
+tm.onData(render);
+tm.subscribe(['sys.cpu']).then(render);</code></pre></figure>
+<h3 data-anchor="ui-lifecycle">Prepare ocultação e reabertura</h3>
+<p>Documentos ocultos liberam assinaturas e podem ser congelados. A retenção ociosa padrão é 30 segundos. <code>retainMs</code> aceita inteiro seguro não negativo ou <code>"until-evicted"</code>, sempre sujeito aos limites globais de quantidade/memória. Não autoriza trabalho web em segundo plano.</p><p>Salve estado importante com <code>tm.storage</code> e trate inicializações frias. Respeite tema, movimento reduzido, teclado, tamanho e leituras ausentes. Cada documento tem seu próprio proprietário.</p>
+<h3 data-anchor="ui-reference">Use os espaços públicos</h3>
+<p>Não há acesso ao DOM do host, IPC arbitrário ou Node. Use a ponte fixa <code>tm</code> e assets do pacote. Consulte a <a href="plugin-rich-reference.html">referência de UI</a>, <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/page-studio">Page Studio</a> para páginas originais e <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/business-studio">Business Studio</a> para dados e configurações.</p>
+        <h3 data-anchor="ui-render-choice">Escolha prática da renderização</h3><p>Comece com número, medidor, linhas ou sparkline declarativos quando os controles do host expressarem a ideia. O app valida a árvore, aplica seu tema e compartilha uma leitura entre locais. Use Rich UI para layout, animação, canvas ou imagens locais que precisem de HTML/CSS/JS. Um destino Rich nomeia entrada e recursos empacotados; ainda precisa de uma visualização declarativa de reserva. A bandeja continua como bitmap do host. Ative cada local no app após instalar.</p><h3 data-anchor="ui-rich-failures">Trate Rich UI como uma tela que pode reiniciar</h3><p>Na primeira abertura, aguarde a ponte e o primeiro snapshot. No exemplo de CPU, o payload Rich de <code>sys.cpu</code> é um envelope e o número está em <code>reading.value</code>; no Worker, <code>tm.read('sys.cpu')</code> devolve o número bruto. Ao ocultar, cancele a assinatura e libere a demanda visível. Um documento retido pode voltar rápido, mas expiração, pressão de memória, atualização, desativação ou revogação podem iniciá-lo do zero. Salve rascunhos importantes em <code>tm.storage</code>, limpe dados antigos em resets de privacidade/fonte e mantenha a reserva declarativa útil. Consulte o <a href="plugin-rich-reference.html">contrato Rich UI</a>.</p>
+<h2 data-anchor="data-settings">Use dados e configurações do app</h2>
+<h3 data-anchor="data-permissions">Peça apenas os dados necessários</h3>
+<p>Uso/ferramentas/modelos exigem <code>tm.data.usage</code>. Os demais recursos usam o mesmo prefixo <code>tm.data.</code> com <code>devices</code>, <code>sessions</code>, <code>projects</code>, <code>history</code>, <code>limits</code>, <code>subscriptions</code> ou <code>status</code>. <code>tm.usage</code> e <code>tm.pages</code> não autorizam essas consultas.</p><p><code>tm.data.identities</code> permite nomes, títulos, caminhos e identidades disponíveis, respeitando títulos ocultos e escopo da fonte. Credenciais, transcrições e IPC interno não são expostos. O host é a autoridade: não faça novas varreduras, polling de provedores ou consentimento por consulta.</p>
+<h3 data-anchor="data-paging">Consulte e percorra um snapshot</h3>
+<p>Declare <code>tm.data.usage</code> e confira availability, coverage e completude do custo antes de mostrar dados.</p><figure class="code"><figcaption class="code-head"><span>Worker / Rich UI · tm.data.usage</span></figcaption><pre><code>const query = {
+  version: 1,
+  resource: 'tools',
+  period: 'today',
+  page: {
+    limit: 25
+  }
+};
+const first = await tm.data.query(query);
+console.log(
+  first.availability,
+  first.rows,
+  first.aggregateCoverage
+);
+if (first.pageInfo?.hasMore) {
+  const cursor =
+    first.pageInfo.nextCursor;
+  const next = await tm.data.query({
+    ...query,
+    page: {
+      ...query.page,
+      cursor
+    }
+  });
+  console.log(
+    next.availability,
+    next.rows
+  );
+}</code></pre></figure><p><code>tm.data.subscribe(query, callback)</code> retorna uma função de cancelamento e entrega a primeira página no evento <code>snapshot</code>. Não duplique a consulta inicial. Em invalidação com <code>reset:true</code>, limpe linhas e cursores imediatamente e consulte de novo. Invalidações comuns podem preservar a navegação. Reinicie em <code>snapshotExpired</code>/<code>invalidCursor</code>.</p><p>Consultas de sessões criam o índice em blocos e convertem apenas a página solicitada; coleções acima de 5.000 sessões usam a mesma API de cursor. O host garante consistência e proteção de recursos; autores escolhem carregamento incremental ou listas virtuais. Memória, trabalho e duração do snapshot continuam limitados; outros recursos mantêm seus limites de coleção. Trate <code>budgetExceeded</code>, <code>rateLimited</code>, <code>scopeUnavailable</code> e indisponibilidade/negação. Veja a <a href="plugin-reference.html">referência de dados</a>.</p>
+<h3 data-anchor="data-relations">Preserve o significado</h3>
+<p><code>parentId</code>/<code>parentClient</code> conectam identidades opacas de sessões. O pai pode estar fora da página ou dos dados retidos; não invente sua linha. Detalhes remotos de todo o período podem ser parciais ou indisponíveis.</p><p>Renovação, pagamentos registrados e equivalente mensal usam a data e o mapa de câmbio capturados pelo host. Previsões de esgotamento de recargas também exigem <code>tm.data.limits</code>, correspondência única de conta autorizada e saldo utilizável. Valores desconhecidos, antigos ou negados continuam indisponíveis. Registros não comprovam transações bancárias; estimativas não garantem datas de renovação.</p>
+<h3 data-anchor="data-plugin-settings">Declare e salve preferências</h3>
+<p>Adicione um schema ao manifesto. O formulário padrão funciona com execução desativada; um editor Rich é opcional.</p><figure class="code"><figcaption class="code-head"><span>manifest.json · campo settings</span></figcaption><pre><code>"settings": {
+  "version": 1,
+  "fields": [
+    {
+      "id": "period",
+      "type": "select",
+      "label": "Usage period",
+      "default": "today",
+      "options": [
+        {
+          "value": "today",
+          "label": "Today"
+        },
+        {
+          "value": "month",
+          "label": "Month"
+        }
+      ]
+    }
+  ]
+}</code></pre></figure><figure class="code"><figcaption class="code-head"><span>Worker / Rich UI · salvar explicitamente</span></figcaption><pre><code>const draftBase = await tm.settings.get();
+// Keep the revision while the user edits.
+// On conflict, keep the draft and offer reload.
+const committed = await tm.settings.update({
+  schemaVersion: draftBase.schemaVersion,
+  expectedRevision: draftBase.revision,
+  patch: { period: 'month' }
+});</code></pre></figure><p><code>tm.settings.onChange</code> notifica valores salvos. Não sobrescreva rascunhos: preserve a revisão inicial e ofereça recarga explícita em conflitos. Não é um armazenamento de credenciais, configurações arbitrárias do app ou posições. Veja o fluxo completo em <a href="https://github.com/Javis603/token-monitor/tree/main/docs/plugins/examples/business-studio">Business Studio</a>.</p>
+        <h3 data-anchor="data-data-decision">Escolha o recurso e mostre seus limites</h3><p>Peça só os recursos necessários. Um cartão de uso começa com <code>tm.data.usage</code>; lista de sessões também requer <code>tm.data.sessions</code>, e nomes ou caminhos requerem <code>tm.data.identities</code>. Assine uma primeira página e siga seu cursor. Uma página não é o total: <code>aggregateCoverage</code> descreve a coleção autorizada, enquanto <code>availability</code> e completude do custo descrevem o que pode ser mostrado. Detalhe remoto de sessões de todo o período pode ser parcial ou indisponível; reset de privacidade/fonte invalida identidades antigas. Nunca converta custo desconhecido em US$ 0.</p><h3 data-anchor="data-settings-conflicts">Preferências são estado salvo</h3><p>O formulário do host funciona sem executar o código. Um editor Rich deve manter a revision do início da edição, mostrar o resultado do salvamento e oferecer recarga se outro editor salvou antes. Preserve o rascunho no conflito. O esquema é local e versionado, separado de locais de exibição, credenciais e <code>tm.storage</code> privado. Veja <a href="plugin-reference.html">API de dados e configurações</a> para DTOs e limites.</p>
+<h2 data-anchor="test-distribute">Teste e distribua</h2>
+<h3 data-anchor="share-test">Teste a experiência oferecida</h3>
+<ul><li>Importar, inspecionar, autorizar, ativar, posicionar e abrir.</li><li>Inicialização fria, reabertura, expiração, redimensionamento, movimento reduzido e teclado.</li><li>Dados ausentes, negação, reinício da paginação e conflitos de preferências.</li><li>Ocultar todos libera demanda; desative/revogue com a interface aberta e em cache.</li><li>Atualização, aprovação de acesso extra, rollback e remoção preservando dados.</li></ul><p>Use um perfil descartável e teste cada plataforma anunciada. Evidência local no macOS não comprova Windows/Linux, pacote distribuído ou Notch físico. Consulte a <a href="https://github.com/Javis603/token-monitor/blob/main/docs/plugins/validation.md">validação</a>.</p>
+<h3 data-anchor="share-package">Inspecione o pacote exato</h3>
+<p>Execute na raiz do repositório:</p><figure class="code"><figcaption class="code-head"><span>Terminal</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout-v1.1.0.tmplugin
+# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>Mantenha o id, aumente a versão e declare compatibilidade quando conhecida. Instale o resultado por De arquivo. O total com assets Rich é limitado a 2 MiB. Confira a <a href="plugin-reference.html">referência do pacote</a>.</p>
+<h3 data-anchor="share-catalog">Ofereça um catálogo HTTPS</h3>
+<p>Hospede pacote e JSON em um serviço estático HTTPS. Substitua URL, autor e hash pelos valores reais. Não altere os bytes após copiar o SHA-256 do gerador.</p><figure class="code"><figcaption class="code-head"><span>catalog.json · exemplo de schema, não é uma fonte cadastrada</span></figcaption><pre><code>{
+  "format": 1,
+  "title": "Example community catalog",
+  "plugins": [
+    {
+      "id": "cpu-readout",
+      "name": "CPU readout",
+      "author": "Your name",
+      "versions": [
+        {
+          "version": "1.1.0",
+          "url": "https://example.com/cpu-readout-v1.1.0.tmplugin",
+          "sha256": "REPLACE_WITH_THE_BUILDERS_64_CHARACTER_SHA256",
+          "changelog": "Adds the optional Home interface"
+        }
+      ]
+    }
+  ]
+}</code></pre></figure><p>Leitores adicionam em Comunidade → Gerenciar fontes, atualizam e confirmam fonte/versão. Atualizações também precisam de confirmação. SHA-256 verifica integridade, não autoria ou segurança. Comunidade permanece Não revisado; fixação Ed25519 é opcional e avançada.</p>
+<h3 data-anchor="share-reference">Mantenha a distribuição simples</h3>
+<p>Não há backend de submissão, serviço de revisão ou cadastro automático de fontes. Siga o <a href="plugin-distribution-reference.html">contrato do catálogo</a>. </p>
+        <h3 data-anchor="share-release-check">Uma verificação de aceitação útil</h3><p>Teste o pacote instalado pelo caminho do leitor: importar, examinar permissões, permitir, ativar, escolher local e abrir. Confira primeira leitura vazia, leitura real, permissão negada, ocultação do último consumidor, reabertura fria após retenção, foco de teclado e movimento reduzido. Em dados, mostre cobertura parcial e custo desconhecido; em configurações, provoque um salvamento concorrente e confirme que o rascunho permanece. Reconstrua após cada alteração de manifesto ou recurso e instale exatamente os novos bytes. Registre versão do app, plataforma, locais e verificações realmente executadas.</p><h3 data-anchor="share-catalog-trust">O que um catálogo comprova</h3><p>Um catálogo aponta para pacotes HTTPS e seus SHA-256. O resumo detecta bytes alterados; não analisa o código nem comprova autoria. Leitores escolhem e avaliam a origem e confirmam cada instalação ou atualização. Community permanece Unreviewed. A fixação opcional de chave serve a quem precisa de identidade mais forte; não há serviço público de envio ou moderação no produto. Veja o <a href="plugin-distribution-reference.html">contrato de distribuição</a>.</p>
+<h2 data-anchor="create-prompt">Crie com um agente de programação de IA</h2><p>Cole isto em um agente de programação e acrescente sua ideia no final.</p><figure class="code prompt-card"><figcaption class="code-head"><span>Prompt</span></figcaption><pre tabindex="0"><code>Me ajude a criar um plugin para o Token Monitor Desktop. Leia o guia oficial: https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md (e a referência que ele indica).
+
+Se algum requisito não estiver claro, confirme comigo primeiro. Ao terminar, teste o plugin e forneça uma pasta ou um arquivo .tmplugin que eu possa importar, junto com as instruções de instalação e ativação.
+
+Minha ideia:</code></pre></figure>
+        </article>
+
+      </main>
+    </div>
+
+    <footer class="footer section shell">
+      <span class="footer-copy">© 2026 Token Monitor</span>
+      <div class="footer-links">
+        <a href="https://github.com/Javis603/token-monitor">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.18-3.37-1.18-.45-1.15-1.1-1.45-1.1-1.45-.9-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03A9.55 9.55 0 0 1 12 6.99c.85 0 1.7.11 2.5.34 1.9-1.3 2.74-1.03 2.74-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.86v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/>
+          </svg>
+          <span data-i18n="nav.github">GitHub</span>
+        </a>
+        <a href="./" data-i18n="footer.docs">Guides</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/docs/API.md" data-i18n="footer.api">API docs</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/worker/README.md" data-i18n="footer.worker">Worker docs</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/LICENSE" data-i18n="footer.license">License</a>
+      </div>
+    </footer>
+
+    <script src="../scripts/i18n.js?v=20260929-v063" defer></script>
+    <script src="../scripts/main.js?v=20260929-v063" defer></script>
+    <script src="../scripts/docs.js?v=20260929-v063" defer></script>
+  </body>
+</html>

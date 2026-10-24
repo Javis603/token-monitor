@@ -34,6 +34,24 @@ module.exports = [
   },
 
   {
+    // The plugin host page and the Worker prelude run in the plugin sandbox.
+    files: ['src/electron/plugins/host/runtime.js', 'src/electron/plugins/host/prelude.js', 'src/electron/plugins/host/message.js'],
+    languageOptions: {
+      sourceType: 'script',
+      globals: { ...globals.browser, ...globals.worker },
+    },
+  },
+
+  {
+    // Plugin code runs inside a Worker with the host's `tm` API as its only global.
+    files: ['src/electron/plugins/builtin/**/*.js', 'docs/plugins/examples/**/*.js', 'tests/fixtures/plugins/**/*.js'],
+    languageOptions: {
+      sourceType: 'script',
+      globals: { ...globals.worker, tm: 'readonly' },
+    },
+  },
+
+  {
     // Cloudflare Worker is ESM with service-worker runtime globals
     files: ['worker/**/*.js'],
     languageOptions: {

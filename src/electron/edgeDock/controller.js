@@ -80,6 +80,7 @@ function createEdgeDockController(deps) {
     windowsBackdrop,
     prefersReducedMotion = () => false,
     onPlacementChange,
+    onWebSurfaceChanged = () => {},
     applyShapeMask,
     installNonActivatingInput = () => {},
     primaryButtonDown = () => null,
@@ -203,7 +204,8 @@ function createEdgeDockController(deps) {
   }
 
   function cellKinds() {
-    return cells.map((cell) => (cell.kind === 'stat' ? 'stat' : 'provider'));
+    // Plugin cells take a stat-sized slot: a label over one compact reading.
+    return cells.map((cell) => (cell.kind === 'stat' || cell.kind === 'plugin' ? 'stat' : 'provider'));
   }
 
   function placement() {
@@ -355,6 +357,7 @@ function createEdgeDockController(deps) {
     if (!alive(win)) return;
     const revealing = visible && !visibleTargets[surface];
     visibleTargets[surface] = visible;
+    onWebSurfaceChanged();
     const ignore = !(visible && (surface !== 'peek' || peekTakesPointer()));
     if (surface === 'peek') setPeekIgnoresMouse(win, ignore, visible);
     else win.setIgnoreMouseEvents(ignore);
@@ -525,6 +528,7 @@ function createEdgeDockController(deps) {
     if (serialized === lastSent[surface]) return;
     lastSent[surface] = serialized;
     send(surface, 'edgeDock:render', payload);
+    onWebSurfaceChanged();
   }
 
   function createSurface(surface, materialKey) {
@@ -621,6 +625,7 @@ function createEdgeDockController(deps) {
       if (windows[surface] === win) {
         windows[surface] = null;
         ready[surface] = false;
+        onWebSurfaceChanged();
       }
     });
     win.loadFile(path.join(rendererDir, 'edgeDock', 'index.html'), { query: { surface, platform } })
@@ -691,6 +696,7 @@ function createEdgeDockController(deps) {
       shapes[surface] = null;
       nativeMaterial[surface] = false;
     }
+    onWebSurfaceChanged();
   }
 
   function commandsFor(surface, bounds, side) {
@@ -1427,6 +1433,10 @@ function createEdgeDockController(deps) {
       for (const surface of SURFACES) render(surface);
     },
     isRunning: () => running,
+    webSurface: (host) => {
+      const kind = ['rail', 'bubble'].find(key => windows[key]?.webContents === host);
+      return kind ? { kind, visible: running && !drag && visibleTargets[kind] === true && (kind === 'rail' ? railVisible : bubbleVisible) } : null;
+    },
     owns: (win) => Boolean(win) && SURFACES.some((surface) => windows[surface] === win),
     stop
   };

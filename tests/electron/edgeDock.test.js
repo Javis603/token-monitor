@@ -116,7 +116,9 @@ test('a long detail total shrinks beside its compact reading instead of wrapping
   assert.equal(number.style.fontSize, undefined);
   assert.match(css, /\.edge-dock-total-row \{[^}]*white-space: nowrap/);
   const bubble = dock.slice(dock.indexOf('function renderBubble('));
-  assert.ok(bubble.indexOf('fitCardTotal(card);') < bubble.indexOf('const height = '));
+  const freshCard = bubble.slice(bubble.indexOf('const card = cell.kind'));
+  assert.ok(freshCard.indexOf('fitCardTotal(card);') >= 0);
+  assert.ok(freshCard.indexOf('fitCardTotal(card);') < freshCard.indexOf('const height = '));
 });
 
 test('a card commits after its reported height is clamped to the work area', () => {

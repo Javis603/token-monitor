@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Using plugins · Token Monitor Docs</title>
+    <meta name="description" content="Install, allow, place and manage Token Monitor plugins.">
+    <meta property="og:title" content="Using plugins · Token Monitor Docs">
+    <meta property="og:description" content="Install, allow, place and manage Token Monitor plugins.">
+    <meta property="og:type" content="article">
+    <meta property="og:image" content="../assets/icon.png">
+    <meta name="theme-color" content="#14171c">
+    <link rel="icon" href="../assets/icon.png">
+    <link rel="stylesheet" href="../styles/tokens.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/base.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/components.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/edgedock.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/sections.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/docs.css?v=20260929-v063">
+  </head>
+  <body>
+    <a class="skip-link" href="#main" data-i18n="nav.skip">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav shell" aria-label="Primary" data-i18n-attr="aria-label:nav.primary">
+        <a class="brand" href="../" aria-label="Token Monitor home" data-i18n-attr="aria-label:nav.home">
+          <img class="brand-mark" src="../assets/icon.png" alt="" width="36" height="36">
+          <span>Token Monitor</span>
+        </a>
+        <div class="nav-actions">
+          <a class="nav-docs-link" href="./" aria-current="page" data-i18n="nav.docs">Docs</a>
+          <details class="lang-menu" data-lang-menu>
+            <summary class="nav-icon-btn lang-btn" aria-label="Language" aria-haspopup="menu" aria-expanded="false" data-i18n-attr="aria-label:nav.language">
+              <svg class="lang-symbol" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 8 11 14"></path>
+                <path d="m4 14 6-6 2-3"></path>
+                <path d="M2 5h12"></path>
+                <path d="M7 2h1"></path>
+                <path d="m22 22-5-10-5 10"></path>
+                <path d="M14 18h6"></path>
+              </svg>
+              <span class="lang-chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="lang-pop" role="menu" aria-label="Language" data-i18n-attr="aria-label:nav.language">
+              <button type="button" role="menuitemradio" data-lang="zh-TW" aria-checked="false">繁體中文</button>
+              <button type="button" role="menuitemradio" data-lang="zh-CN" aria-checked="false">简体中文</button>
+              <button type="button" role="menuitemradio" data-lang="en" aria-checked="true">English</button>
+              <button type="button" role="menuitemradio" data-lang="ko" aria-checked="false">한국어</button>
+              <button type="button" role="menuitemradio" data-lang="ja" aria-checked="false">日本語</button>
+              <button type="button" role="menuitemradio" data-lang="pt-BR" aria-checked="false">Português (Brasil)</button>
+            </div>
+          </details>
+          <a class="nav-github-link" href="https://github.com/Javis603/token-monitor" aria-label="Star Token Monitor on GitHub" data-i18n-attr="aria-label:nav.githubStar">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.18-3.37-1.18-.45-1.15-1.1-1.45-1.1-1.45-.9-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03A9.55 9.55 0 0 1 12 6.99c.85 0 1.7.11 2.5.34 1.9-1.3 2.74-1.03 2.74-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.86v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/>
+            </svg>
+            <span class="nav-github-label" data-i18n="nav.star">Star</span>
+            <span class="nav-github-count" data-github-stars>1000</span>
+          </a>
+        </div>
+      </nav>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar">
+        <button class="docs-menu-btn" type="button" aria-expanded="false" aria-controls="docs-nav"><span data-i18n="docs.menu">Docs menu</span></button>
+        <nav class="docs-nav" id="docs-nav" aria-label="Documentation" data-i18n-attr="aria-label:docs.nav">
+          <div class="docs-nav-group">
+            <h2 data-i18n="docs.group.start">Get started</h2>
+            <ul>
+              <li><a href="./" data-i18n="docs.page.home">Overview</a></li>
+              <li><a href="app.html" data-i18n="docs.page.app">Using the App</a></li>
+              <li><a href="plugins.html" aria-current="page" data-i18n="docs.page.plugins">Using plugins</a></li>
+              <li><a href="plugin-quickstart.html" data-i18n="docs.page.quickstart">Develop plugins</a></li>
+            </ul>
+          </div>
+          <div class="docs-nav-group">
+            <h2 data-i18n="docs.group.reference">API references</h2>
+            <ul>
+              <li><a href="plugin-reference.html" data-i18n="docs.page.reference">Plugin API reference</a></li>
+              <li><a href="plugin-rich-reference.html" data-i18n="docs.page.richReference">Rich UI reference</a></li>
+              <li><a href="plugin-distribution-reference.html" data-i18n="docs.page.distributionReference">Distribution reference</a></li>
+            </ul>
+          </div>
+        </nav>
+      </aside>
+      <main class="docs-main" id="main">
+        <ol class="docs-crumbs"><li><a href="./" data-i18n="docs.crumb">Docs</a></li><li aria-current="page" data-i18n="docs.page.plugins">Using plugins</li></ol>
+        <article class="doc-lang docs-article" lang="en">
+<h1>Using plugins</h1>
+<p class="docs-lede">Add a readout or a custom view, then decide where it appears and what it can read.</p>
+
+
+<h2 id="install" data-anchor="install">Install, then allow</h2>
+<ol class="docs-steps"><li>Open Settings → Plugins → Official. System Monitor ships with the App; preview installable examples there.</li><li>Review the exact source, version and requested permissions. Confirm installation.</li><li>Allow and enable the plugin separately. Installation alone does not run its code. Extra permissions in an update pause execution until you approve them.</li></ol><p>Use <strong>From file</strong> for a <code>.tmplugin</code> package. Author options under Installed → More plugin actions can import a folder. In Community → Manage sources, add an HTTPS catalog you trust; community entries remain Unreviewed.</p>
+<h2 id="placements" data-anchor="placements">Choose a placement</h2>
+<p>Open the plugin’s settings and enable its supported Home, tray, Edge Dock or Notch placements. Edge Dock/Notch also need their App switch enabled. A plugin appears in the main view menu only if it declares a page and you enable <strong>Main app page</strong>. A detached window is an optional action within that page.</p><p>Rich interfaces may offer another design for model/tool/device content. Choosing a design does not grant permissions. The host keeps an <strong>App default</strong> choice. Declared plugin preferences have a standard form that also works while the plugin is disabled.</p>
+<h2 id="updates" data-anchor="updates">Update, roll back or remove</h2>
+<p>Refresh a catalog to find versions and changelogs. Preview and confirm each update; it is not installed automatically. Rollback restores one saved compatible version, but does not undo plugin data migrations. Uninstall defaults to retaining data while removing placements.</p><p>Local files are unverified. SHA-256 checks bytes, not publisher identity or code safety. Optional key pinning is advanced; ordinary users do not need a public key.</p>
+<h2 id="recover" data-anchor="recover">Recover from a faulty plugin</h2>
+<p>Turn off that plugin, or use <strong>Enable plugins</strong> in Installed → More plugin actions to pause all plugins without losing individual selections. If startup is blocked, launch with <code>--plugins-safe-mode</code> or <code>TOKEN_MONITOR_PLUGINS_SAFE_MODE=1</code>. Repair the package before re-enabling it.</p><p>Plugin content follows App appearance. Skin presets remain supported; there is no separate My Style editor. See the <a href="plugin-reference.html">management reference</a> for storage and recovery details.</p>
+        <h2 id="trust-and-demand" data-anchor="trust-and-demand">What approval and placement change</h2><p>The permission list defines which app sources and capabilities plugin code may use. The source, version and requested grants deserve a new review on each install or access-expanding update. A placement only chooses where an already approved view appears; it does not expand its grants. A hidden view normally releases its visible sampling demand. Background checks require their own explicit enablement, and a cached Rich document does not keep collecting merely because it can reopen quickly.</p><h2 id="plugin-data-recovery" data-anchor="plugin-data-recovery">Where personal plugin data goes</h2><p>Managed packages, saved plugin data and placements are separate. Uninstall removes placements and normally keeps saved data so reinstall can recover preferences or notes. Rollback replaces one compatible code version; it does not reverse changes that code made to its data. Before sharing a package, test with a disposable profile and treat Community catalog text as the publisher’s claim. See <a href="plugin-distribution-reference.html">distribution and recovery details</a>.</p>
+        </article>
+        <article class="doc-lang docs-article" lang="zh-TW">
+<h1>使用插件</h1>
+<p class="docs-lede">新增讀數或自訂檢視，然後決定它顯示在哪裡、可以讀取哪些資料。</p>
+
+
+<h2 data-anchor="install">先安裝，再允許執行</h2>
+<ol class="docs-steps"><li>開啟設定 → 插件 → 官方。System Monitor 隨 App 提供，也可預覽可安裝範例。</li><li>核對來源、版本與權限，再確認安裝。</li><li>另外允許並啟用插件。安裝本身不會執行程式碼；更新要求更多權限時，會暫停執行直到重新核准。</li></ol><p>使用「從檔案」安裝 <code>.tmplugin</code>。作者可在已安裝 → 更多插件操作匯入資料夾。在社群 → 管理來源加入信任的 HTTPS 目錄；社群項目仍標為未審核。</p>
+<h2 data-anchor="placements">選擇顯示位置</h2>
+<p>在插件設定啟用支援的首頁、系統匣、Edge Dock 或 Notch 位置；後兩者也需要 App 本身的開關。只有宣告頁面並啟用「主程式頁面」的插件才會出現在主檢視選單，獨立視窗則是頁面內的選用操作。</p><p>Rich UI 可以提供模型／工具／裝置內容的另一種設計，但選擇設計不會授予權限，App 也保留「App 預設」。宣告的偏好設定有標準表單，停用插件時仍可修改。</p>
+<h2 data-anchor="updates">更新、回復或移除</h2>
+<p>重新整理目錄以發現版本與變更記錄，每次更新都需要預覽並確認，不會自動安裝。回復可恢復一個相容的先前版本，但不能撤銷插件資料遷移。移除預設保留資料並移除顯示位置。</p><p>本地檔案未經驗證；SHA-256 只核對內容，不證明作者身分或程式安全。金鑰釘選是進階選項，一般使用者不需要公鑰。</p>
+<h2 data-anchor="recover">處理異常插件</h2>
+<p>停用個別插件，或在已安裝 → 更多插件操作關閉「啟用插件」，暫停全部插件而保留個別選擇。若啟動受阻，可使用 <code>--plugins-safe-mode</code> 或 <code>TOKEN_MONITOR_PLUGINS_SAFE_MODE=1</code>。修復套件後再啟用。</p><p>插件預設跟隨 App 外觀，仍支援外觀預設，沒有獨立的 My Style 編輯器。儲存及復原細節請見<a href="plugin-reference.html">管理參考文件</a>。</p>
+        <h2 data-anchor="trust-and-demand">授權與顯示位置的分別</h2><p>權限清單決定插件程式能使用哪些 App 資料與能力。每次安裝或更新要求更多存取時，都應重新核對來源、版本及權限。位置只決定已批准的畫面在哪裡顯示，不會擴大權限。隱藏畫面通常會釋放可見取樣需求。背景檢查須另外明確啟用；Rich 文件即使可快速重開，也不會因此持續收集。</p><h2 data-anchor="plugin-data-recovery">個人插件資料存放方式</h2><p>受管理套件、插件資料與顯示位置彼此分開。解除安裝會移除位置，預設保留資料，重新安裝後可找回偏好或筆記。回復版本只替換一個相容的程式版本，不會逆轉程式對資料的變更。分享套件前請用可拋棄設定檔測試；社群目錄的文字是發佈者的聲稱。詳見<a href="plugin-distribution-reference.html">發佈及復原說明</a>。</p>
+        </article>
+        <article class="doc-lang docs-article" lang="zh-CN">
+<h1>使用插件</h1>
+<p class="docs-lede">新增读数或自定义视图，然后决定它显示在哪里、可以读取哪些数据。</p>
+
+
+<h2 data-anchor="install">先安装，再允许执行</h2>
+<ol class="docs-steps"><li>开启设置 → 插件 → 官方。System Monitor 随 App 提供，也可预览可安装示例。</li><li>核对来源、版本与权限，再确认安装。</li><li>另外允许并启用插件。安装本身不会执行代码；更新要求更多权限时，会暂停执行直到重新批准。</li></ol><p>使用「从文件」安装 <code>.tmplugin</code>。作者可在已安装 → 更多插件操作导入文件夹。在社区 → 管理来源加入信任的 HTTPS 目录；社区项目仍标为未审核。</p>
+<h2 data-anchor="placements">选择显示位置</h2>
+<p>在插件设置启用支持的首页、系统托盘、Edge Dock 或 Notch 位置；后两者也需要 App 本身的开关。只有声明页面并启用「主程序页面」的插件才会出现在主视图菜单，独立窗口则是页面内的选用操作。</p><p>Rich UI 可以提供模型／工具／设备内容的另一种设计，但选择设计不会授予权限，App 也保留「App 默认」。声明的偏好设置有标准表单，停用插件时仍可修改。</p>
+<h2 data-anchor="updates">更新、回退或移除</h2>
+<p>刷新目录以发现版本与变更记录，每次更新都需要预览并确认，不会自动安装。回退可恢复一个兼容的先前版本，但不能撤销插件数据迁移。移除默认保留数据并移除显示位置。</p><p>本地文件未经验证；SHA-256 只核对内容，不证明作者身份或程序安全。密钥固定是高级选项，一般用户不需要公钥。</p>
+<h2 data-anchor="recover">处理异常插件</h2>
+<p>停用个别插件，或在已安装 → 更多插件操作关闭「启用插件」，暂停全部插件而保留个别选择。若启动受阻，可使用 <code>--plugins-safe-mode</code> 或 <code>TOKEN_MONITOR_PLUGINS_SAFE_MODE=1</code>。修复包后再启用。</p><p>插件默认跟随 App 外观，仍支持外观预设，没有独立的 My Style 编辑器。存储及复原细节请见<a href="plugin-reference.html">管理参考文件</a>。</p>
+        <h2 data-anchor="trust-and-demand">授权与显示位置的区别</h2><p>权限列表决定插件代码能使用哪些 App 数据和能力。每次安装或更新请求更多访问时，都应重新核对来源、版本和权限。位置只决定已批准的视图在哪里显示，不会扩大授权。隐藏视图通常会释放可见采样需求。后台检查需要单独明确启用；Rich 文档即使可以快速重新打开，也不会因此持续采集。</p><h2 data-anchor="plugin-data-recovery">个人插件数据存放方式</h2><p>托管安装包、插件数据和显示位置分别保存。卸载会移除位置，默认保留数据，以便重装后恢复偏好或笔记。回滚只替换一个兼容的代码版本，不会逆转代码对数据的更改。分享安装包前请使用一次性配置测试；社区目录的描述属于发布者的声明。详见<a href="plugin-distribution-reference.html">发布及恢复说明</a>。</p>
+        </article>
+        <article class="doc-lang docs-article" lang="ko">
+<h1>플러그인 사용하기</h1>
+<p class="docs-lede">읽기 값이나 화면을 추가하고 표시 위치와 데이터 접근을 직접 선택하세요.</p>
+
+
+<h2 data-anchor="install">설치 후 실행 승인</h2>
+<ol class="docs-steps"><li>설정 → 플러그인 → 공식에서 시작합니다. System Monitor는 앱에 포함됩니다.</li><li>정확한 소스, 버전과 권한을 확인하고 설치합니다.</li><li>별도로 승인하고 활성화합니다. 설치만으로 코드가 실행되지 않으며, 권한이 늘어나는 업데이트는 재승인까지 멈춥니다.</li></ol><p>파일에서 <code>.tmplugin</code>을 설치하거나, 설치됨 → 추가 작업에서 폴더를 가져올 수 있습니다. 커뮤니티 → 소스 관리에서 신뢰하는 HTTPS 카탈로그를 추가해도 미검토 표시는 유지됩니다.</p>
+<h2 data-anchor="placements">표시 위치 선택</h2>
+<p>플러그인 설정에서 지원하는 홈, 트레이, Edge Dock, Notch를 켭니다. Dock/Notch는 앱 설정에서도 켜야 합니다. 페이지를 선언한 플러그인은 메인 앱 페이지 배치를 켠 후 보기 메뉴에 나타나며, 별도 창은 그 페이지에서 엽니다.</p><p>모델/도구/기기의 Rich 디자인을 골라도 권한은 부여되지 않습니다. 앱 기본값으로 돌아갈 수 있습니다. 표준 설정 폼은 플러그인이 꺼져 있어도 사용할 수 있습니다.</p>
+<h2 data-anchor="updates">업데이트, 롤백과 제거</h2>
+<p>카탈로그를 새로 고쳐 버전을 찾고 매번 확인 후 업데이트합니다. 자동 설치하지 않습니다. 호환되는 이전 한 버전으로 돌아갈 수 있지만 데이터 마이그레이션은 되돌리지 못합니다. 제거는 기본적으로 데이터를 남기고 배치를 지웁니다.</p><p>로컬 파일은 미검증입니다. SHA-256은 내용만 확인하며 작성자나 안전성을 증명하지 않습니다. 키 고정은 선택 가능한 고급 기능입니다.</p>
+<h2 data-anchor="recover">문제가 생겼을 때</h2>
+<p>개별 플러그인을 끄거나 설치됨 → 추가 작업의 플러그인 활성화를 꺼서 선택을 유지한 채 전체를 멈춥니다. 시작이 막히면 <code>--plugins-safe-mode</code> 또는 <code>TOKEN_MONITOR_PLUGINS_SAFE_MODE=1</code>을 사용하고 복구 후 다시 켭니다.</p><p>모양은 앱을 따릅니다. 스킨은 지원하지만 별도 My Style 편집기는 없습니다. 자세한 내용은 <a href="plugin-reference.html">관리 참조</a>를 보세요.</p>
+        <h2 data-anchor="trust-and-demand">승인과 표시 위치의 역할</h2><p>권한 목록은 플러그인 코드가 사용할 앱 데이터와 기능을 정합니다. 설치나 접근 권한이 늘어나는 업데이트마다 출처, 버전, 요청 권한을 다시 확인하세요. 위치 설정은 이미 승인한 화면을 어디에 표시할지만 결정하며 권한을 넓히지 않습니다. 숨긴 화면은 보통 화면용 샘플링 수요를 해제합니다. 백그라운드 검사는 별도로 켜야 하며, 빠르게 다시 여는 Rich 문서가 그것만으로 계속 수집하지는 않습니다.</p><h2 data-anchor="plugin-data-recovery">개인 플러그인 데이터</h2><p>관리형 패키지, 저장 데이터, 표시 위치는 별개입니다. 제거하면 위치는 사라지지만 기본적으로 저장 데이터는 남아 재설치 후 설정이나 메모를 복구할 수 있습니다. 롤백은 호환되는 코드 버전 하나를 되돌리며 데이터 변경을 되돌리지는 않습니다. 공유 전 일회용 프로필로 검사하고 Community 카탈로그 설명은 게시자의 주장으로 읽으세요. <a href="plugin-distribution-reference.html">배포 및 복구 설명</a>을 참고하세요.</p>
+        </article>
+        <article class="doc-lang docs-article" lang="ja">
+<h1>プラグインの使い方</h1>
+<p class="docs-lede">読み取り値や独自の画面を追加し、表示場所とアクセス権を選びます。</p>
+
+
+<h2 data-anchor="install">インストール後に実行を許可する</h2>
+<ol class="docs-steps"><li>設定 → プラグイン → 公式を開きます。System Monitor は同梱されています。</li><li>ソース、バージョン、要求権限を確認してインストールします。</li><li>別途許可して有効化します。インストールだけではコードは実行されません。更新で権限が増えると、再承認まで停止します。</li></ol><p>「ファイルから」で <code>.tmplugin</code> を選べます。インストール済み → その他の操作でフォルダーを取り込めます。コミュニティ → ソース管理で信頼する HTTPS カタログを追加できますが、未レビューの表示は変わりません。</p>
+<h2 data-anchor="placements">表示場所を選ぶ</h2>
+<p>プラグイン設定で対応するホーム、トレイ、Edge Dock、Notch を選びます。Dock／Notch はアプリ側でも有効化します。ページを宣言したプラグインだけが「メインアプリのページ」を有効にした後、表示メニューに現れます。別ウィンドウはそのページから開きます。</p><p>モデル／ツール／端末の Rich デザイン選択は権限を付与しません。「アプリの既定表示」に戻せます。標準の設定フォームはプラグインが無効でも使えます。</p>
+<h2 data-anchor="updates">更新、ロールバック、削除</h2>
+<p>カタログを更新してバージョンを探し、毎回確認して更新します。自動インストールはしません。互換性のある直前のバージョンへ戻せますが、データ移行は元に戻りません。削除は既定でデータを残し、配置を解除します。</p><p>ローカルファイルは未検証です。SHA-256 はバイト列を確認するだけで、作者や安全性は保証しません。鍵の固定は上級者向けの任意機能です。</p>
+<h2 data-anchor="recover">問題が起きたら</h2>
+<p>個別に無効化するか、インストール済み → その他の操作の「プラグインを有効化」をオフにして、選択を残したまま全体を停止します。起動できない場合は <code>--plugins-safe-mode</code> または <code>TOKEN_MONITOR_PLUGINS_SAFE_MODE=1</code> を使います。</p><p>外観はアプリに従います。スキンは利用できますが、独立した My Style エディターはありません。詳細は<a href="plugin-reference.html">管理リファレンス</a>へ。</p>
+        <h2 data-anchor="trust-and-demand">承認と表示場所の役割</h2><p>権限一覧はプラグインコードが使えるアプリのデータと機能を定めます。インストールやアクセスが増える更新ごとに、配布元、バージョン、要求権限を再確認してください。配置は承認済みの表示先を決めるだけで、権限を広げません。隠した画面は通常、表示用のサンプリング要求を解放します。背景チェックは別途有効化が必要です。Rich 文書が素早く再表示できても、それだけで収集を続けません。</p><h2 data-anchor="plugin-data-recovery">個人のプラグインデータ</h2><p>管理パッケージ、保存データ、配置は別です。アンインストールは配置を消し、通常はデータを残すため、再インストール後に設定やメモを戻せます。ロールバックは互換コードの一版を戻しますが、コードが行ったデータ変更は巻き戻しません。共有前に使い捨てプロファイルで試し、Community カタログの説明は発行者の主張として扱ってください。<a href="plugin-distribution-reference.html">配布と復旧の詳細</a>を参照してください。</p>
+        </article>
+        <article class="doc-lang docs-article" lang="pt-BR">
+<h1>Usando plugins</h1>
+<p class="docs-lede">Adicione um indicador ou uma visualização e escolha onde aparece e quais dados pode ler.</p>
+
+
+<h2 data-anchor="install">Instale e depois autorize</h2>
+<ol class="docs-steps"><li>Abra Configurações → Plugins → Oficial. System Monitor acompanha o app.</li><li>Confira a fonte exata, versão e permissões antes de confirmar a instalação.</li><li>Autorize e ative separadamente. Instalar não executa código. Novas permissões em uma atualização pausam a execução até aprovação.</li></ol><p>Use De arquivo para <code>.tmplugin</code>, ou as ações adicionais em Instalados para importar uma pasta. Em Comunidade → Gerenciar fontes, adicione um catálogo HTTPS de confiança; os itens continuam Não revisados.</p>
+<h2 data-anchor="placements">Escolha onde exibir</h2>
+<p>Nas configurações do plugin, ative Início, bandeja, Edge Dock ou Notch compatíveis. Dock/Notch também precisam do controle do app. Apenas plugins que declaram uma página aparecem no menu após ativar Página no app principal. Uma janela separada pode ser aberta pela página.</p><p>Selecionar um design Rich para modelos/ferramentas/dispositivos não concede permissões. A opção padrão do app continua disponível. O formulário padrão de preferências funciona mesmo com o plugin desativado.</p>
+<h2 data-anchor="updates">Atualize, reverta ou remova</h2>
+<p>Atualize o catálogo para encontrar versões e notas. Confirme cada atualização; não há instalação automática. É possível restaurar uma versão anterior compatível, sem desfazer migrações de dados. A remoção mantém dados por padrão e remove os posicionamentos.</p><p>Arquivos locais não são verificados. SHA-256 confere bytes, não autoria ou segurança. Fixar uma chave é uma opção avançada, dispensável para uso comum.</p>
+<h2 data-anchor="recover">Recupere um plugin com falha</h2>
+<p>Desative o plugin ou o controle Ativar plugins nas ações adicionais de Instalados para pausar todos sem perder escolhas individuais. Se a inicialização falhar, use <code>--plugins-safe-mode</code> ou <code>TOKEN_MONITOR_PLUGINS_SAFE_MODE=1</code>. Corrija antes de reativar.</p><p>A aparência segue o app. Presets de skin continuam disponíveis, mas não há editor My Style separado. Consulte a <a href="plugin-reference.html">referência de gerenciamento</a>.</p>
+        <h2 data-anchor="trust-and-demand">O que aprovação e local de exibição mudam</h2><p>A lista de permissões define quais dados e capacidades do app o código pode usar. Revise origem, versão e autorizações em cada instalação ou atualização que amplie o acesso. O local só determina onde uma visualização já aprovada aparece; não amplia permissões. Uma visualização oculta normalmente libera sua demanda de coleta visível. Verificações em segundo plano exigem ativação própria, e um documento Rich retido para reabertura rápida não continua coletando por isso.</p><h2 data-anchor="plugin-data-recovery">Onde ficam seus dados de plugin</h2><p>Pacotes gerenciados, dados salvos e locais de exibição são separados. Desinstalar remove os locais e normalmente preserva dados para recuperar preferências ou notas após reinstalar. Reverter restaura uma versão de código compatível, mas não desfaz alterações feitas aos dados. Teste em um perfil descartável antes de compartilhar; textos de catálogos Community são alegações do publicador. Veja <a href="plugin-distribution-reference.html">distribuição e recuperação</a>.</p>
+        </article>
+
+      </main>
+    </div>
+
+    <footer class="footer section shell">
+      <span class="footer-copy">© 2026 Token Monitor</span>
+      <div class="footer-links">
+        <a href="https://github.com/Javis603/token-monitor">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.18-3.37-1.18-.45-1.15-1.1-1.45-1.1-1.45-.9-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03A9.55 9.55 0 0 1 12 6.99c.85 0 1.7.11 2.5.34 1.9-1.3 2.74-1.03 2.74-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.86v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/>
+          </svg>
+          <span data-i18n="nav.github">GitHub</span>
+        </a>
+        <a href="./" data-i18n="footer.docs">Guides</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/docs/API.md" data-i18n="footer.api">API docs</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/worker/README.md" data-i18n="footer.worker">Worker docs</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/LICENSE" data-i18n="footer.license">License</a>
+      </div>
+    </footer>
+
+    <script src="../scripts/i18n.js?v=20260929-v063" defer></script>
+    <script src="../scripts/main.js?v=20260929-v063" defer></script>
+    <script src="../scripts/docs.js?v=20260929-v063" defer></script>
+  </body>
+</html>

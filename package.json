@@ -33,7 +33,8 @@
     "verify:release-artifact-names": "node scripts/verify-updater-artifact-names.js dist",
     "benchmark:hub-bandwidth": "node scripts/benchmark-hub-bandwidth.js",
     "lint": "eslint .",
-    "verify": "npm run lint && npm test"
+    "verify": "npm run lint && npm test",
+    "verify:plugins": "electron scripts/verify-plugin-sandbox.js"
   },
   "build": {
     "beforePack": "scripts/build-windows-dock.js",

@@ -1,0 +1,14 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: transparent; color: var(--text, #eee); }
+body { font: 12px system-ui; }
+main { display: flex; gap: 28px; height: 100%; }
+.metric { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+header { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; min-height: 44px; }
+h2 { margin: 0 0 4px; font-size: 11px; font-weight: 500; color: var(--muted, #aaa); }
+.value { font-size: 24px; line-height: 1; font-variant-numeric: tabular-nums; }
+.detail { font-size: 10px; color: var(--muted, #aaa); white-space: nowrap; }
+svg { display: block; width: 100%; flex: 1; min-height: 30px; overflow: hidden; margin-top: 10px; }
+.line { fill: none; stroke: var(--accent, #8aafff); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.area { fill: var(--accent, #8aafff); opacity: .12; }
+footer { color: var(--muted, #aaa); font-size: 10px; min-height: 16px; padding-top: 4px; }
+@media (max-width: 380px) { main { gap: 16px; } .detail { font-size: 9px; } }

@@ -1,0 +1,85 @@
+{
+  "id": "surface-studio",
+  "version": "0.1.0",
+  "tmApi": 1,
+  "name": {
+    "en": "Surface Studio",
+    "zh-TW": "動態面板"
+  },
+  "author": "Token Monitor examples",
+  "description": {
+    "en": "Local animated system canvas for Notch and Edge Dock, with a lightweight fallback.",
+    "zh-TW": "在瀏海與側邊欄顯示本機動態系統面板，並保留輕量顯示。"
+  },
+  "permissions": [
+    "ui.web",
+    "tm.pages",
+    "sys.cpu"
+  ],
+  "views": [
+    {
+      "id": "system",
+      "title": {
+        "en": "System canvas",
+        "zh-TW": "系統畫布"
+      },
+      "icon": "activity",
+      "surfaces": [
+        "edgeDock",
+        "notch"
+      ],
+      "layout": {
+        "type": "stat",
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      },
+      "compact": {
+        "label": "CPU",
+        "value": {
+          "$": "sys.cpu",
+          "fmt": "percent"
+        }
+      }
+    }
+  ],
+  "webUi": {
+    "version": 1,
+    "assets": [
+      "index.html",
+      "surface.css",
+      "surface.js"
+    ],
+    "documents": [
+      {
+        "id": "notch",
+        "target": "notch",
+        "view": "system",
+        "variant": "full",
+        "entry": "index.html",
+        "slot": "replace",
+        "height": 180
+      },
+      {
+        "id": "dock",
+        "target": "edgeDock",
+        "view": "system",
+        "variant": "full",
+        "entry": "index.html",
+        "slot": "replace",
+        "height": 220
+      },
+      {
+        "id": "rail",
+        "target": "edgeDock",
+        "view": "system",
+        "variant": "compact",
+        "entry": "index.html",
+        "slot": "replace",
+        "height": 70
+      }
+    ]
+  }
+}

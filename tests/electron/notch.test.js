@@ -255,7 +255,7 @@ test('top-only real provider projection updates while the side controller is abs
   const code = main.slice(start, main.indexOf('\n// Hand cells', start))
     + main.slice(main.indexOf('function pushNotchCells('), main.indexOf('// The soonest moment any sessions cell'));
   const update = vm.runInNewContext(`${code}; updateEdgeDockCells`, {
-    edgeDockController: null, notchController: controller,
+    edgeDockController: null, notchController: controller, pluginRuntime: null,
     notchPanelItems, notchWeek, notchHistory: { read: () => null }, hubModeGeneration: 0,
     settings: {}, scheduleSessionExpiry() {}, notchLastCells: [],
     edgeDockCellsFor: (value) => buildEdgeDockCells(value, { limitProviders: 'codex' }),
@@ -683,7 +683,7 @@ test('top and side reuse projection with independent ordered selections', () => 
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const fn = source.slice(source.indexOf('function edgeDockCellsFor('), source.indexOf('function updateEdgeDockCells('));
   const settings = { edgeDockItems: [{ type: 'stat', metric: 'today' }], notchItems: [{ type: 'stat', metric: 'sessions', groupBy: 'client' }] };
-  const context = { settings, buildEdgeDockCells, refreshEdgeDockDerivedPeriods() {}, refreshEdgeDockForecast() {}, syncCodexPresentationActiveAccount() {}, edgeDockDerivedPeriods: {}, edgeDockForecastWanted: () => false, edgeDockForecast: null, syncProvenanceActive: () => false, codexAccountsForRenderer: () => [], codexPresentationPendingAccountId: null, codexPresentationActiveAccountId: null, edgeDockLiveRateSample: () => null };
+  const context = { settings, pluginRuntime: null, buildEdgeDockCells, refreshEdgeDockDerivedPeriods() {}, refreshEdgeDockForecast() {}, syncCodexPresentationActiveAccount() {}, edgeDockDerivedPeriods: {}, edgeDockForecastWanted: () => false, edgeDockForecast: null, syncProvenanceActive: () => false, codexAccountsForRenderer: () => [], codexPresentationPendingAccountId: null, codexPresentationActiveAccountId: null, edgeDockLiveRateSample: () => null };
   vm.createContext(context);vm.runInContext(fn, context);
   assert.equal(context.edgeDockCellsFor(stats())[0].id, 'stat:today');
   assert.equal(context.edgeDockCellsFor(stats(), settings.notchItems)[0].id, 'stat:sessions');
@@ -2792,7 +2792,7 @@ test('the swipe switch stays visible and follows its saved value in both hover m
   const context = vm.createContext({
     state, els: { edgeDockInput: {}, notchShapeInputs: [], notchHoverActionInputs: [], notchSwipeGesturesInput: input },
     NOTCH_HOVER_DELAY_DEFAULT_MS: 0, edgeDockAvailable: () => false,
-    syncDockSizeControls() {}, syncNotchSummaryMode() {}, notchItemsComposer: null
+    renderNotchPageChoices() {}, syncDockSizeControls() {}, syncNotchSummaryMode() {}, notchItemsComposer: null
   });
   for (const mode of ['peek', 'open']) {
     for (const enabled of [true, false]) {
@@ -3181,6 +3181,23 @@ test('attached glass stays dark with a light widget while capsules retain their 
   assert.equal(f.preferences.macClearGlassTint, 64, 'the saved preference is never rewritten');
 });
 
+
+test('rich document preparation is allowed only during an explicit opening, never collapse', t => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
+  const f = fixture(t, {}, { reducedMotion: false });
+  const host = notchWindow(f).webContents;
+  assert.equal(f.controller.webSurface(host).preparing, false);
+  f.screen.point = { x: 735, y: 10 }; f.controller.poll(Date.now());
+  press(f);
+  assert.equal(f.controller.webSurface(host).preparing, true);
+  assert.equal(f.controller.webSurface(host).visible, false);
+  const animation = notchWindow(f).messages.filter(message => message.channel === 'topNotch:animate').at(-1).payload;
+  f.ipcMain.emit('topNotch:frame', { sender: host }, { id: animation.id, elapsed: animation.duration });
+  assert.equal(f.controller.webSurface(host).visible, true);
+  f.ipcMain.emit('topNotch:dismiss', { sender: host });
+  assert.equal(f.controller.webSurface(host).preparing, false);
+  assert.equal(f.controller.webSurface(host).visible, false);
+});
 
 test('horizontal input belongs to the live open window and follows its lifecycle', t => {
   const bindings = [];

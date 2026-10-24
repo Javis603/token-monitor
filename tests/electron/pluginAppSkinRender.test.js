@@ -1,0 +1,95 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { spawnSync } = require('node:child_process');
+const themePresetsApi = require('../../src/electron/renderer/themePresets');
+const root = path.resolve(__dirname, '../..');
+const source = fs.readFileSync(process.env.TM_APP_SOURCE || path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+function extract(name) {
+  const match = source.match(new RegExp(`(?:async )?function ${name}\\([^]*?\\n}`));
+  assert.ok(match, name);
+  return match[0];
+}
+function catalogHarness() {
+  const calls = [];
+  const context = { state: {}, pluginPageDesigns: {}, isSettingsSurfaceVisible: () => true,
+    preserveSettingsPanelScroll: fn => fn() };
+  for (const name of ['render', 'renderViewSwitcher', 'renderThemePresetChips', 'renderNotchPageChoices', 'renderViewPreferences']) context[name] = () => calls.push(name);
+  vm.createContext(context);
+  vm.runInContext(`let pluginCatalogKey = ''; ${extract('applyPluginCatalog')}`, context);
+  return { calls, context, apply: context.applyPluginCatalog };
+}
+const catalog = () => ({ enabled: true, plugins: [{ id: 'test', name: 'Design', status: 'active', webRevision: 1,
+  views: [{ ref: 'test/card', title: 'Card', surfaces: ['home', 'page'], placements: { page: true } }],
+  skins: [{ id: 'blue', name: 'Blue', colors: { accent: '#123456' } }],
+  webDocuments: [{ ref: 'test/models', title: 'Models', target: 'models', slot: 'replace', height: 240 }],
+  runtime: { cpuPercent: 1, memoryMB: 12 }, logs: [] }] });
+test('identical and metric-only catalogs update state without any app redraw', () => {
+  const h = catalogHarness(); h.apply(catalog()); h.calls.length = 0;
+  h.apply(catalog());
+  const next = catalog(); next.plugins[0].runtime.cpuPercent = 90; next.plugins[0].logs.push('tick');
+  h.apply(next);
+  assert.equal(h.context.state.pluginCatalog, next);
+  assert.deepEqual(h.calls, []);
+});
+for (const [label, mutate] of [
+  ['document revision', p => p.webRevision++],
+  ['document geometry', p => p.webDocuments[0].height++],
+  ['document removal', p => p.webDocuments = []],
+  ['plugin name', p => p.name = 'New name'],
+  ['skin palette', p => p.skins[0].colors.accent = '#abcdef'],
+  ['skin title', p => p.skins[0].name = 'New title'],
+  ['skin tokens', p => p.skins[0].appearance = { font: 'mono' }],
+  ['view placement', p => p.views[0].placements.page = false],
+  ['plugin status', p => p.status = 'disabled']
+]) test(`${label} refreshes the app once, then settles`, () => {
+  const h = catalogHarness(); h.apply(catalog()); h.calls.length = 0;
+  const next = catalog(); mutate(next.plugins[0]); h.apply(next);
+  assert.equal(h.calls.filter(name => name === 'render').length, 1);
+  h.calls.length = 0; h.apply(structuredClone(next)); assert.deepEqual(h.calls, []);
+});
+function preloadBridge() {
+  let exposed;
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'src/electron/preload.js'), 'utf8'), {
+    require: id => { assert.equal(id, 'electron'); return { contextBridge: { exposeInMainWorld: (_name, api) => { exposed = api; } }, ipcRenderer: { on() {}, invoke() {} } }; },
+    process: { platform: 'darwin', versions: {} }
+  });
+  return exposed.plugins;
+}
+function skinHarness(fail = false) {
+  const saved = [], errors = [];
+  const state = { settings: { themeColors: { chart: '#112233' }, vendorColors: { existing: '#445566' } } };
+  const context = { state, themePresetsApi, pluginBridge: preloadBridge(),
+    applyThemeColors() {}, applyVendorColorOverrides() {}, buildAppearanceColorControls() {}, renderSettingsSummaries() {},
+    t: (_key, values) => values?.error || _key, setStatus: (...args) => errors.push(args),
+    saveSettings: async patch => { if (fail) throw new Error('disk full'); saved.push(JSON.parse(JSON.stringify(patch))); Object.assign(state.settings, patch); } };
+  assert.equal(context.pluginBridge.setAppearance, undefined);
+  vm.createContext(context); vm.runInContext(extract('currentThemeOverrides') + '\n' + extract('applyPluginSkin'), context);
+  return { context, saved, errors };
+}
+test('skin sends only canonical identity, never renderer-supplied palette or tokens', async () => {
+  const h = skinHarness();
+  await h.context.applyPluginSkin({ ref: 'author/mono', colors: { accent: '#abcdef' }, vendorColors: { custom: '#778899' }, appearance: { font: 'mono', density: 'compact' } });
+  assert.deepEqual(h.saved, [{ pluginSkinRef: 'author/mono' }]);
+});
+test('both real fire-and-forget skin entrypoints surface persistence errors without unhandled rejection', () => {
+  // A subprocess makes Node strict unhandled-rejection behavior observable without
+  // suppressing it through the test runner or a process rejection listener.
+  const entrypoints = [source.match(/chip\.addEventListener\('click', ([^\n]*applyPluginSkin[^\n]*)\);/)[1],
+    source.match(/onApplySkin: ([^\n]*applyPluginSkin[^\n]*),/)[1]];
+  for (const entrypoint of entrypoints) {
+    const script = `const vm = require('node:vm'); const errors = []; const ctx = {
+      themePresetsApi: require(${JSON.stringify(path.join(root, 'src/electron/renderer/themePresets'))}),
+      state: { settings: {} }, pluginBridge: {}, skin: { colors: { accent: '#123456' } },
+      applyThemeColors() {}, applyVendorColorOverrides() {}, buildAppearanceColorControls() {}, renderSettingsSummaries() {},
+      saveSettings: async () => { throw new Error('disk full'); },
+      t: (_key, values) => values?.error || _key, setStatus: (message, error) => errors.push([message, error])
+    }; vm.createContext(ctx); vm.runInContext(${JSON.stringify(extract('currentThemeOverrides') + '\n' + extract('applyPluginSkin') + '\n(')} + ${JSON.stringify(entrypoint)} + ')(skin)', ctx);
+    setImmediate(() => { require('node:assert/strict').deepEqual(errors, [['disk full', true]]); });`;
+    const result = spawnSync(process.execPath, ['--unhandled-rejections=strict', '-e', script], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  }
+});

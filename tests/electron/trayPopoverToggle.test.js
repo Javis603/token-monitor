@@ -8,6 +8,7 @@ const vm = require('node:vm');
 
 const ROOT = path.join(__dirname, '../..');
 const { createTray } = require(path.join(ROOT, 'src/electron/tray'));
+const { createWindowVisibilityActions } = require(path.join(ROOT, 'src/electron/plugins/windowVisibility'));
 const { popoverBlurMatchesPress, popoverToggleAction, trayToggleAction } = require(path.join(ROOT, 'src/electron/trayModeSettings'));
 const { windowToggleShortcutAction } = require(path.join(ROOT, 'src/electron/windowShortcut'));
 const source = fs.readFileSync(path.join(ROOT, 'src/electron/main.js'), 'utf8');
@@ -49,6 +50,7 @@ function fixture({ visible = true, focused = visible, platform = 'darwin' } = {}
   const screen = { getCursorScreenPoint: () => point };
   const context = vm.createContext({
     mainWindow: win, win, tray: null, recentPopoverBlur: null,
+    pluginWindowActions: createWindowVisibilityActions(hidden => assert.equal(hidden, win)),
     settings: { trayMode: true, showTrayIcon: true },
     process: { platform }, performance: { now: () => now }, screen,
     popoverBlurMatchesPress, popoverToggleAction, trayToggleAction, windowToggleShortcutAction,

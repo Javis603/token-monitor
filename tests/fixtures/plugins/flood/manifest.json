@@ -1,0 +1,9 @@
+{
+  "id": "flood",
+  "version": "1.0.0",
+  "tmApi": "^1",
+  "name": "Message-flood fixture",
+  "main": "main.js",
+  "metrics": [{ "id": "sent", "kind": "number" }],
+  "views": [{ "id": "sent", "title": "Sent", "surfaces": ["home"], "layout": { "type": "stat", "value": { "$": "@sent" } } }]
+}

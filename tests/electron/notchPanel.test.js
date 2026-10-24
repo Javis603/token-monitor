@@ -233,6 +233,117 @@ test('tabs expose one active panel and support arrows, Home and End without focu
   assert.equal(f.panel.view.page, 'home');
 });
 
+const pluginPageFixture = (t, refs) => {
+  const states = Object.fromEntries(refs.map((ref, index) => [ref, { title: `Plugin ${index + 1}`, icon: 'cpu' }]));
+  const pluginHost = { state: (_surface, ref) => states[ref], mount() {}, refreshDemand() {} };
+  const pluginViews = require('../../src/electron/renderer/pluginViews');
+  const f = panelFixture(t, {}, { pluginHost, pluginViews });
+  const data = payload();
+  data.panel.pluginPages = refs;
+  data.panel.pluginCatalog = states;
+  f.panel.render(data);
+  const [leadRail, trailRail] = f.all('notch-tab-rail');
+  const [leadTrack, trailTrack] = f.all('notch-tabs');
+  const [leadPill, trailPill] = f.all('notch-tab-pill');
+  const visibleIn = track => track.querySelectorAll('.notch-tab').filter(button => !button.hidden).map(button => button.dataset.page);
+  return { f, data, leadRail, trailRail, leadTrack, trailTrack, leadPill, trailPill, visibleIn };
+};
+
+test('an unmeasured rail shows every page in the leading track with no step buttons', t => {
+  const { f, leadTrack, trailTrack, visibleIn } = pluginPageFixture(t, ['demo/a', 'demo/b', 'demo/c']);
+  assert.deepEqual(visibleIn(leadTrack), ['home', 'limits', 'sessions', 'breakdown', 'plugin:demo/a', 'plugin:demo/b', 'plugin:demo/c']);
+  assert.deepEqual(visibleIn(trailTrack), []);
+  assert.equal(f.all('notch-tab-step').filter(step => !step.hidden).length, 0, 'no visible step buttons');
+});
+
+test('overflow pages continue in the trailing track bridged by aria-owns', t => {
+  const { f, leadRail, trailRail, leadTrack, trailTrack, leadPill, trailPill, visibleIn } = pluginPageFixture(t, ['demo/a', 'demo/b', 'demo/c']);
+  leadRail.clientWidth = 183; trailRail.clientWidth = 112; // L=5, T=3
+  f.resize();
+  assert.deepEqual(visibleIn(leadTrack), ['home', 'limits', 'sessions', 'breakdown', 'plugin:demo/a']);
+  assert.deepEqual(visibleIn(trailTrack), ['plugin:demo/b', 'plugin:demo/c']);
+  assert.equal(f.all('notch-tab-step').filter(step => !step.hidden).length, 0, 'both lanes fit, so no pager');
+  assert.equal(leadTrack.attributes['aria-owns'], 'notch-tab-plugin-demo-b notch-tab-plugin-demo-c');
+  // Selecting a trailing page activates its local indicator across the camera.
+  f.panel.selectPage('plugin:demo/c');
+  assert.equal(leadPill.classList.contains('is-off'), true);
+  assert.equal(trailPill.classList.contains('is-off'), false);
+  assert.equal(trailPill.style.transform, 'translateX(36px)');
+  // Back to a leading page: position the hidden local indicator before fading it in.
+  f.panel.selectPage('home');
+  assert.equal(leadPill.classList.contains('is-off'), false);
+  assert.equal(leadPill.style.transform, 'translateX(0px)');
+  assert.equal(trailPill.classList.contains('is-off'), true);
+});
+
+test('the trailing track paints only while it holds pages', t => {
+  const { f, data, leadRail, trailRail, trailTrack } = pluginPageFixture(t, ['demo/a', 'demo/b', 'demo/c']);
+  leadRail.clientWidth = 183; trailRail.clientWidth = 112; // L=5, T=3
+  data.panel.pluginPages = []; f.panel.render(data); f.resize();
+  assert.equal(trailTrack.hidden, true, 'built-in pages alone leave no fill beside the camera');
+  data.panel.pluginPages = ['demo/a', 'demo/b', 'demo/c']; f.panel.render(data); f.resize();
+  assert.equal(trailTrack.hidden, false);
+  data.panel.pluginPages = []; f.panel.render(data); f.resize();
+  assert.equal(trailTrack.hidden, true);
+});
+
+test('mixed saved order controls runtime tabs and keyboard order without selecting hidden pages', t => {
+  const { f, data, leadTrack, trailTrack, visibleIn } = pluginPageFixture(t, ['demo/a', 'demo/b', 'demo/c']);
+  data.panel.builtinPages = ['home', 'limits'];
+  data.panel.pageOrder = ['plugin:demo/c', 'limits', 'plugin:demo/a', 'home'];
+  f.panel.render(data);
+  assert.deepEqual([...visibleIn(leadTrack), ...visibleIn(trailTrack)], ['plugin:demo/c', 'limits', 'plugin:demo/a', 'home', 'plugin:demo/b']);
+  f.panel.selectPage('home');
+  leadTrack.fire('keydown', { key: 'ArrowRight', preventDefault() {} });
+  assert.equal(f.panel.view.page, 'plugin:demo/b');
+  f.panel.selectPage('plugin:demo/c');
+  data.panel.pageOrder = ['limits', 'plugin:demo/c', 'home']; f.panel.render(data);
+  assert.equal(f.panel.view.page, 'plugin:demo/c', 'ordering preserves the selected page');
+  data.panel.pluginPages = ['demo/a', 'demo/b']; f.panel.render(data);
+  assert.equal(f.panel.view.page, 'limits', 'removal falls back to the first remaining ordered page');
+});
+
+test('a full trailing lane becomes a pager that keeps its window across pushes', t => {
+  const { f, data, leadRail, trailRail, leadTrack, trailTrack, visibleIn } = pluginPageFixture(t, ['demo/a', 'demo/b', 'demo/c', 'demo/d', 'demo/e', 'demo/f']);
+  leadRail.clientWidth = 183; trailRail.clientWidth = 112; // L=5, T=3 -> trail pager k=2
+  f.resize();
+  const back = f.find('is-back'), forward = f.find('is-forward');
+  assert.equal(trailTrack.contains(back), true, 'the trailing track is the pager');
+  assert.equal(back.disabled, true);
+  assert.equal(forward.disabled, false);
+  assert.deepEqual(visibleIn(leadTrack), ['home', 'limits', 'sessions', 'breakdown', 'plugin:demo/a']);
+  assert.deepEqual(visibleIn(trailTrack), ['plugin:demo/b', 'plugin:demo/c']);
+  // A step shifts the window one slot without changing selection or focus.
+  forward.fire('click', { detail: 0 });
+  assert.deepEqual(visibleIn(trailTrack), ['plugin:demo/c', 'plugin:demo/d']);
+  assert.equal(f.panel.view.page, 'home');
+  assert.equal(back.disabled, false);
+  // A normal data push keeps the window where the user left it.
+  f.panel.render(data);
+  assert.deepEqual(visibleIn(trailTrack), ['plugin:demo/c', 'plugin:demo/d']);
+  // End reaches the last page: the window follows and the button takes focus.
+  leadTrack.fire('keydown', { key: 'End', preventDefault() {} });
+  assert.equal(f.panel.view.page, 'plugin:demo/f');
+  assert.deepEqual(visibleIn(trailTrack), ['plugin:demo/e', 'plugin:demo/f']);
+  const last = f.all('notch-tab').find(button => button.dataset.page === 'plugin:demo/f');
+  assert.equal(f.document.activeElement, last);
+  assert.equal(f.all('notch-tab').filter(button => button.tabIndex === 0).length, 1);
+  assert.equal(forward.disabled, true);
+});
+
+test('a trailing lane too thin for a pager moves the pager into the leading track', t => {
+  const { f, leadRail, trailRail, leadTrack, trailTrack, visibleIn } = pluginPageFixture(t, ['demo/a', 'demo/b', 'demo/c']);
+  leadRail.clientWidth = 183; trailRail.clientWidth = 40; // L=5, T=1 -> lead pager k=4
+  f.resize();
+  const back = f.find('is-back'), forward = f.find('is-forward');
+  assert.equal(leadTrack.contains(back), true, 'the leading track is the pager');
+  assert.deepEqual(visibleIn(leadTrack), ['home', 'limits', 'sessions', 'breakdown']);
+  assert.deepEqual(visibleIn(trailTrack), []);
+  forward.fire('click', { detail: 0 });
+  assert.deepEqual(visibleIn(leadTrack), ['limits', 'sessions', 'breakdown', 'plugin:demo/a']);
+  assert.equal(back.disabled, false);
+});
+
 test('tabs reuse the app menu icons and breakdown uses the model icon', t => {
   const f = panelFixture(t); f.panel.render(payload());
   assert.deepEqual(f.all('notch-tab').map(button => button.children[0].className),
@@ -1113,4 +1224,50 @@ test('history keeps the previous week across revisions, throttles reloads and ne
   assert.equal(fresh.daily[0].date, '2026-10-16');
   assert.equal(fresh.complete, true);
   assert.equal(cache.read(at('b'), { generation: 2, now: DAY }), null, 'a backend switch drops the answer');
+});
+
+test('Notch can hide built-ins, switch to the first selected page, and hide all pages', t => {
+  const f = panelFixture(t);
+  const data = payload();
+  data.panel.builtinPages = ['limits', 'breakdown'];
+  f.panel.render(data);
+  assert.equal(f.panel.view.page, 'limits');
+  assert.equal(f.all('notch-tab').filter(button => !button.hidden).length, 2);
+  f.panel.selectPage('home');
+  assert.equal(f.panel.view.page, 'limits', 'hidden pages cannot be selected');
+  data.panel.builtinPages = ['breakdown']; f.panel.render(data);
+  assert.equal(f.panel.view.page, 'breakdown');
+  data.panel.builtinPages = []; f.panel.render(data);
+  assert.equal(f.panel.view.page, '');
+  assert.equal(f.all('notch-page').filter(page => page.classList.contains('is-selected')).length, 0);
+  data.panel.builtinPages = ['home']; f.panel.render(data);
+  assert.equal(f.panel.view.page, 'home');
+});
+
+
+test('native swipes follow mixed selected order and release cancelled plugin previews', t => {
+  let mounts = 0, releases = 0;
+  const pluginHost = { state: () => ({ title: 'Plugin' }), mount() { mounts++; }, refreshDemand() { releases++; } };
+  const f = panelFixture(t, {}, { pluginHost });
+  const data = payload();
+  data.panel.builtinPages = ['home', 'breakdown'];
+  data.panel.pluginPages = ['demo/chart'];
+  data.panel.pageOrder = ['home', 'plugin:demo/chart', 'breakdown'];
+  f.panel.render(data);
+  swipe(f, 1, 'began', 0.4);
+  assert.ok(mounts > 0);
+  swipe(f, 1, 'cancelled', 0.4);
+  swipe(f, 1, 'none', 0, true);
+  assert.equal(f.panel.view.page, 'home');
+  assert.equal(f.all('notch-page-plugin')[0].children.length, 0);
+  assert.ok(releases > 0);
+  swipe(f, 2, 'began', 0.4);
+  swipe(f, 2, 'ended', 0.4);
+  swipe(f, 2, 'none', 1, true);
+  assert.equal(f.panel.view.page, 'plugin:demo/chart');
+  swipe(f, 3, 'began', 0.4);
+  data.panel.pluginPages = [];
+  f.panel.render(data);
+  swipe(f, 3, 'none', 1, true);
+  assert.equal(f.panel.view.page, 'home', 'removing a page cancels the old gesture');
 });

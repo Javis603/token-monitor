@@ -1,0 +1,264 @@
+{
+  "id": "sketch-pad",
+  "version": "0.1.0",
+  "tmApi": "^1",
+  "name": {
+    "en": "Sketch Pad",
+    "zh-TW": "隨手畫"
+  },
+  "description": {
+    "en": "A personal note and drawing canvas. Change ink, pen width and grid; undo strokes. Saved locally, with no network access.",
+    "zh-TW": "可自訂筆記及繪圖區。調整筆色、筆寬、格線，復原筆劃；只在本機儲存，不存取網絡。"
+  },
+  "author": "Token Monitor examples",
+  "main": "main.js",
+  "permissions": [],
+  "visible": {
+    "intervalSeconds": 2
+  },
+  "metrics": [
+    {
+      "id": "state",
+      "kind": "object"
+    },
+    {
+      "id": "drawing",
+      "kind": "draw"
+    }
+  ],
+  "views": [
+    {
+      "id": "canvas",
+      "title": {
+        "en": "My sketch",
+        "zh-TW": "我的畫布"
+      },
+      "icon": "chart",
+      "surfaces": [
+        "home",
+        "page",
+        "edgeDock",
+        "notch"
+      ],
+      "layout": {
+        "type": "stack",
+        "dir": "col",
+        "gap": 14,
+        "children": [
+          {
+            "type": "input",
+            "action": "note",
+            "label": {
+              "en": "Your note",
+              "zh-TW": "你的筆記"
+            },
+            "placeholder": {
+              "en": "What are you working on?",
+              "zh-TW": "正在做甚麼？"
+            },
+            "value": {
+              "$": "@state",
+              "field": "note"
+            },
+            "maxLength": 160
+          },
+          {
+            "type": "stack",
+            "dir": "row",
+            "gap": 12,
+            "wrap": true,
+            "children": [
+              {
+                "type": "select",
+                "action": "color",
+                "label": {
+                  "en": "Ink",
+                  "zh-TW": "筆色"
+                },
+                "value": {
+                  "$": "@state",
+                  "field": "color"
+                },
+                "options": [
+                  {
+                    "value": "accent",
+                    "label": {
+                      "en": "Accent",
+                      "zh-TW": "強調色"
+                    }
+                  },
+                  {
+                    "value": "chart",
+                    "label": {
+                      "en": "Chart",
+                      "zh-TW": "圖表色"
+                    }
+                  },
+                  {
+                    "value": "warn",
+                    "label": {
+                      "en": "Amber",
+                      "zh-TW": "琥珀"
+                    }
+                  },
+                  {
+                    "value": "default",
+                    "label": {
+                      "en": "Text",
+                      "zh-TW": "文字色"
+                    }
+                  }
+                ],
+                "flex": 1
+              },
+              {
+                "type": "slider",
+                "action": "width",
+                "label": {
+                  "en": "Pen width",
+                  "zh-TW": "筆寬"
+                },
+                "value": {
+                  "$": "@state",
+                  "field": "width"
+                },
+                "min": 1,
+                "max": 12,
+                "step": 1,
+                "flex": 2
+              },
+              {
+                "type": "toggle",
+                "action": "grid",
+                "label": {
+                  "en": "Grid",
+                  "zh-TW": "格線"
+                },
+                "value": {
+                  "$": "@state",
+                  "field": "grid"
+                }
+              }
+            ]
+          },
+          {
+            "type": "draw",
+            "action": "canvas",
+            "label": {
+              "en": "Sketch canvas. Arrow keys move; Enter starts or ends a stroke.",
+              "zh-TW": "繪圖區。方向鍵移動，Enter 開始或結束筆劃。"
+            },
+            "width": 480,
+            "height": 240,
+            "list": {
+              "$": "@drawing"
+            }
+          },
+          {
+            "type": "stack",
+            "dir": "row",
+            "gap": 12,
+            "children": [
+              {
+                "type": "button",
+                "action": "undo",
+                "label": {
+                  "en": "Undo stroke",
+                  "zh-TW": "復原筆劃"
+                },
+                "disabled": {
+                  "$": "@state",
+                  "field": "empty"
+                }
+              },
+              {
+                "type": "button",
+                "action": "clear",
+                "label": {
+                  "en": "Clear drawing",
+                  "zh-TW": "清除繪圖"
+                },
+                "disabled": {
+                  "$": "@state",
+                  "field": "empty"
+                }
+              },
+              {
+                "type": "text",
+                "text": {
+                  "$": "@state",
+                  "field": "status"
+                },
+                "tone": "muted",
+                "flex": 1
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": {
+              "en": "Drag to draw · arrows + Enter for keyboard drawing · saved on this device",
+              "zh-TW": "拖曳繪圖 · 方向鍵及 Enter 鍵盤繪圖 · 儲存於此裝置"
+            },
+            "size": "xs",
+            "tone": "muted"
+          }
+        ]
+      },
+      "compact": {
+        "label": {
+          "en": "Sketch Pad",
+          "zh-TW": "隨手畫"
+        },
+        "value": {
+          "$": "@state",
+          "field": "note"
+        }
+      },
+      "layouts": {
+        "notch": {
+          "type": "stack",
+          "dir": "col",
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "text": {
+                "$": "@state",
+                "field": "note"
+              }
+            },
+            {
+              "type": "draw",
+              "width": 480,
+              "height": 240,
+              "list": {
+                "$": "@drawing"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "skins": [
+    {
+      "id": "paper",
+      "name": {
+        "en": "Drawing paper",
+        "zh-TW": "畫紙"
+      },
+      "colors": {
+        "accent": "#4967ca",
+        "chart": "#6d56ad"
+      },
+      "appearance": {
+        "font": "system",
+        "density": "comfortable",
+        "corners": "rounded",
+        "panel": "soft"
+      }
+    }
+  ],
+  "identityIcon": "data:image/png;base64,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"
+}

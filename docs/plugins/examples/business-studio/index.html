@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Usage explorer</title><link rel="stylesheet" href="page.css"></head>
+<body><header><img src="mark.svg" width="28" height="28" alt=""><h1>Usage explorer</h1><button id="restore" type="button" hidden>App default</button></header>
+<p>Read the App’s collected usage; no additional scans or provider requests.</p>
+<section aria-label="Saved preferences"><label>Period <select id="period"><option value="today">Today</option><option value="month">Month</option><option value="allTime">All time</option></select></label> <label>Rows per page <input id="pageSize" type="number" min="1" max="50" step="1"></label><button id="save" type="button" disabled>Save preferences</button> <button id="reload" type="button">Reload saved</button><p id="settingsStatus" role="status"></p></section>
+<p><label>Explore <select id="resource"><option value="tools">Tools</option><option value="models">Models</option><option value="devices">Devices</option><option value="sessions">Sessions</option><option value="subscriptions">Subscriptions</option></select></label> <button id="refresh" type="button">Refresh snapshot</button></p>
+<p id="summary" role="status">Loading…</p><main id="rows" aria-label="Business data"></main><button id="next" type="button" disabled>Next page</button>
+<script src="page.js"></script></body></html>

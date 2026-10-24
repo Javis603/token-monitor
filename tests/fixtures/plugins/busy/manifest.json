@@ -1,0 +1,9 @@
+{
+  "id": "busy",
+  "version": "1.0.0",
+  "tmApi": "^1",
+  "name": "Busy-loop fixture",
+  "main": "main.js",
+  "metrics": [{ "id": "alive", "kind": "number" }],
+  "views": [{ "id": "alive", "title": "Alive", "surfaces": ["home"], "layout": { "type": "stat", "value": { "$": "@alive" } } }]
+}

@@ -4509,6 +4509,7 @@ test('a record added on another device turns up without pushing settings at the 
   // this exercises the real rollback path rather than a stand-in.
   const run = (previous, incoming, { saveOk = true } = {}) => {
     const context = vm.createContext({
+    pluginRuntime: null,
       hubSubscriptions: previous,
       hubSubscriptionsHub: previous ? 'https://hub.example' : '',
       settings: {
@@ -5572,6 +5573,7 @@ test('a form opened on a hub is not written into this device own list instead', 
   ].join('\n');
 
   const context = vm.createContext({
+    pluginRuntime: null,
     // Switched to local mode with the hub still configured, which is the state
     // the mode switch leaves behind. Only the mode says which list is in front of
     // the user, so only the mode can say which one an edit belongs to.
