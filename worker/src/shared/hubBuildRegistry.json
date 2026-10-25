@@ -368,7 +368,15 @@
       },
       {
         "revision": 92,
+<<<<<<< HEAD
         "buildId": "sha256:8a2d1e81bfc79dad874f6467bbb6a240ac58922e83133de75f1bcb18825143fd"
+=======
+        "buildId": "sha256:446abb274bb8bbf0e9d7bda2b5750d5017b8a9903ad84ac90a70948a7ba9986c"
+      },
+      {
+        "revision": 93,
+        "buildId": "sha256:492423ce78aa0763a9607a4fc620174c0610c3c07e8b3230677d77dd208a21f3"
+>>>>>>> 626a18fb (chore(worker): vendor credits/summary into the worker closure)
       }
     ],
     "node-hub": [
