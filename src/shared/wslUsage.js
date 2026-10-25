@@ -147,7 +147,9 @@ function discoverWslClaudeSources(previous = [], deps = {}) {
       home.toLowerCase().startsWith(`\\\\wsl$\\${distro}\\`.toLowerCase()))) continue;
     try {
       // A readable running home can have lost every data marker. Its old roots
-      // must still be scanned so the scanner prunes confirmed missing sessions.
+      // must still be attempted so the scanner can prune confirmed deletions.
+      // Child read failures must use the scanner's cached fallback; a readable
+      // home is not proof that a transcript root can be scanned successfully.
       // Never probe a stopped distro; an unreadable home stays cached-only.
       readdirSync(home);
       homes.push(home);

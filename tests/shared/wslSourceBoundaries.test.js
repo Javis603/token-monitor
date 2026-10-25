@@ -88,16 +88,16 @@ function fixture(t) {
       return fs.readdirSync(nativePath(p));
     }
   };
-  const writeClaude = (owner, id, input, model = 'claude-sonnet-4-6') => {
+  const writeClaude = (owner, id, input, model = 'claude-sonnet-4-6', timestamp = new Date().toISOString(), sessionId = id) => {
     const dir = path.join(owner, '.claude', 'projects', 'project');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, `${id}.jsonl`), JSON.stringify({ type: 'assistant', sessionId: id,
-      timestamp: new Date().toISOString(), requestId: `req-${id}`,
+    fs.writeFileSync(path.join(dir, `${sessionId}.jsonl`), JSON.stringify({ type: 'assistant', sessionId,
+      timestamp, requestId: `req-${id}`,
       message: { id: `msg-${id}`, model, usage: { input_tokens: input, output_tokens: 0 } }
     }) + '\n');
   };
   let captured;
-  const run = input => {
+  const run = (input, graph = false) => {
     // Only the OS path/WSL discovery boundary is adapted on macOS. The scanner,
     // source plan, cache, period extraction, WSL merge and watch delta are real.
     const mapped = { ...input, claudeWslScan: input.claudeWslScan && { ...input.claudeWslScan,
@@ -110,14 +110,17 @@ function fixture(t) {
       XDG_CONFIG_HOME: path.join(host, '.config'), TOKSCALE_CONFIG_DIR: path.join(root, 'config'),
       TOKSCALE_PRICING_CACHE_ONLY: '1',
       TOKSCALE_EXTRA_DIRS: (mapped.claudeWslScan?.activeRoots || []).map(p => `claude:${p}`).join(',') };
-    return JSON.parse(execFileSync(binary, ['--json', '--no-spinner', '--client', input.clients,
-      '--group-by', 'client,workspace,session,model', ...input.flags.map(nativePath)],
+    const args = graph ? ['graph', '--no-spinner', '--client', input.clients]
+      : ['--json', '--no-spinner', '--client', input.clients,
+        '--group-by', 'client,workspace,session,model', ...input.flags.map(nativePath)];
+    return JSON.parse(execFileSync(binary, args,
     { env, encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }));
   };
   const options = {
     ...base, homeDir: host,
     discoverWslClaudeSources: previous => discoverWslClaudeSources(previous, deps),
     runTokscale: async input => run(input),
+    runGraph: async input => run(input, true),
     collectWslUsage: options => collectWslUsage({ ...options, decoratePeriods: undefined }, deps),
     onAnchorComputed: value => { captured = value; }
   };
@@ -174,4 +177,62 @@ test('native discovery prunes an entire deleted source only when running and rea
   }), 20);
   f.writeClaude(f.remote, 'new', 40);
   check(await collectUsageOnce({ ...options, claudeWslSources: previous }), 60);
+});
+
+
+test('native failed child reads preserve yesterday in joint periods, Graph and the next watch', {
+  ...native, skip: native.skip || process.platform === 'win32' && 'POSIX permissions regression'
+}, async t => {
+  const f = fixture(t);
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  yesterday.setHours(12, 0, 0, 0);
+  f.writeClaude(f.host, 'today', 125, 'claude-sonnet-4-6', new Date().toISOString(), 'session');
+  f.writeClaude(f.remote, 'yesterday', 70, 'claude-sonnet-4-6', yesterday.toISOString(), 'session');
+  const blocked = path.join(f.remote, '.claude');
+  const mode = fs.statSync(blocked).mode;
+  let denyAfterDiscovery = false;
+  const options = { ...f.options, clients: 'claude', historyEnabled: true, includeHistory: true,
+    discoverWslClaudeSources: previous => {
+      const plan = f.options.discoverWslClaudeSources(previous);
+      // Permissions change after App discovery: an App preflight alone cannot
+      // protect this snapshot. The scanner must handle its own failed walk.
+      if (denyAfterDiscovery) fs.chmodSync(blocked, 0);
+      return plan;
+    }
+  };
+  const assertPeriods = (summary, remote) => {
+    assert.equal(summary.today.totalTokens, 125);
+    assert.deepEqual(Object.keys(summary.allTime.sessions), ['claude:session']);
+    assert.equal(summary.allTime.sessions['claude:session'].totalTokens, 125 + remote);
+    assert.equal(summary.month.totalTokens, 125 + (yesterday.getMonth() === new Date().getMonth() ? remote : 0));
+    assert.equal(summary.allTime.totalTokens, 125 + remote);
+    assert.equal(summary.history.daily.reduce((sum, day) => sum + day.tokens, 0), 125 + remote);
+  };
+  try {
+    assertPeriods(await collectUsageOnce(options), 70);
+    const previous = f.captured().claudeWslSources;
+    fs.chmodSync(blocked, 0);
+    let denied = false;
+    try { fs.readdirSync(path.join(blocked, 'projects')); } catch (error) { denied = error.code === 'EACCES'; }
+    fs.chmodSync(blocked, mode);
+    if (!denied) { t.skip('current user bypasses POSIX permission denial'); return; }
+    denyAfterDiscovery = true;
+    assertPeriods(await collectUsageOnce({ ...options, claudeWslSources: previous }), 70);
+    // Home is readable but children remain inaccessible on the next discovery.
+    assertPeriods(await collectUsageOnce({ ...options, claudeWslSources: previous }), 70);
+    const captured = f.captured();
+    assertPeriods(await collectUsageOnce({ ...options,
+      todayOnlyAnchor: { dateKey: localTodayKey(), ...captured.windowsPeriods, claudeWslSources: captured.claudeWslSources },
+      wslAnchor: captured.wslBundle,
+      discoverWslClaudeSources: () => assert.fail('watch must not discover WSL')
+    }), 70);
+    denyAfterDiscovery = false;
+    fs.chmodSync(blocked, mode);
+    assertPeriods(await collectUsageOnce({ ...options, claudeWslSources: previous }), 70);
+    fs.rmSync(blocked, { recursive: true });
+    assertPeriods(await collectUsageOnce({ ...options, claudeWslSources: previous }), 0);
+  } finally {
+    if (fs.existsSync(blocked)) fs.chmodSync(blocked, mode);
+  }
 });
