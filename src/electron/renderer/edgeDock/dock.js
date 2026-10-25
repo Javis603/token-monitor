@@ -1409,6 +1409,7 @@ function sessionsContainer(sessions, options = {}) {
     // for the same session. The label is the tooltip trigger there too: one
     // row per model with its tokens and share.
     const modelLabel = sessionRowsApi.sessionModelLabel(session);
+    const effort = sessionRowsApi.sessionReasoningEffortForRow(session);
     const age = relativeAgo(session.lastUsedAt || session.startedAt);
     const modelEntries = sessionRowsApi.sessionModelTooltipEntries(session, {
       unattributedLabel: t('dashboard.tooltip.unclassified'),
@@ -1421,11 +1422,19 @@ function sessionsContainer(sessions, options = {}) {
         description.append(models);
       } else description.append(document.createTextNode(modelLabel));
     }
-    if (memberLabel) {
+    if (effort) {
       if (modelLabel) description.append(document.createTextNode(' · '));
+      const effortNode = el('span', 'edge-dock-session-effort', effort);
+      const effortLabel = t('session.reasoningEffortTooltip', { effort });
+      effortNode.setAttribute('aria-label', effortLabel);
+      limitWindowsView.setDetailTooltip(effortNode, [{ full: effortLabel }]);
+      description.append(effortNode);
+    }
+    if (memberLabel) {
+      if (modelLabel || effort) description.append(document.createTextNode(' · '));
       description.append(el('span', 'edge-dock-session-member-count', memberLabel));
     }
-    if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
+    if (age) description.append(document.createTextNode(`${memberLabel || modelLabel || effort ? ' · ' : ''}${age}`));
     meta.append(description);
     const status = sessionRowsApi.sessionStatusNode(document, session, { prefix: 'edge-dock-session', translate: t,
       view: limitWindowsView, showUsed: appearance().sessionContextMetric !== 'remaining' });

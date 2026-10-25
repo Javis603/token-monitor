@@ -736,6 +736,7 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       if (Object.prototype.hasOwnProperty.call(session, 'promptCache')) {
         target.promptCache = session.promptCache;
       }
+      if (session.client === 'codex') target.reasoningEffort = session.reasoningEffort || null;
       // The turn boundary is copied in all three states, matching what the
       // fresh scan said: `true` finished, `false` open, absent unknown. Copying
       // only `true` left a stale `true` in a derived period after its session

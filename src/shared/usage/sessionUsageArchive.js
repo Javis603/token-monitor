@@ -96,6 +96,7 @@ function normalizeSessionUsageArchive(value) {
         || !hasSessionUsage(session) && rawPeriods?.[periodName]?.totalTokens !== 0) continue;
       delete session.liveActivity;
       delete session.waitingForInput;
+      delete session.reasoningEffort;
       const key = sessionKey(session.client, session.sessionId);
       if (!key) continue;
       entry.client = session.client;
@@ -255,6 +256,7 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
       const nextSession = cloneJson(session);
       delete nextSession.liveActivity;
       delete nextSession.waitingForInput;
+      delete nextSession.reasoningEffort;
       if (sameWindow && sameJson(entry.periods[periodName], nextSession)) continue;
       entry.client = session.client;
       entry.sessionId = session.sessionId;

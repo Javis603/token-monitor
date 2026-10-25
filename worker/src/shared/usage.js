@@ -6,7 +6,7 @@
 const { isSessionActivityClient } = require('./sessionActivityProviders');
 
 const PERIODS = ['today', 'month', 'allTime'];
-const { normalizeLiveActivity, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
+const { normalizeLiveActivity, normalizeReasoningEffort, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
@@ -687,6 +687,16 @@ function mergeSession(target, source) {
   if (hasOwn(source, 'promptCache') && sourceLastUsed >= targetLastUsed) {
     target.promptCache = normalizePromptCache(source.promptCache);
   }
+  if (source.client === 'codex' && sourceLastUsed >= targetLastUsed) {
+    if (sourceLastUsed > targetLastUsed || !hasOwn(target, 'reasoningEffort')) {
+      if (hasOwn(source, 'reasoningEffort') || hasOwn(target, 'reasoningEffort')) {
+        target.reasoningEffort = normalizeReasoningEffort(source.reasoningEffort);
+      }
+    } else if (hasOwn(source, 'reasoningEffort') && target.reasoningEffort !== source.reasoningEffort) {
+      // Conflicting or missing configuration at the same timestamp is unknown.
+      target.reasoningEffort = null;
+    }
+  }
   const sourceProjectId = String(source.projectId || '');
   if (!target.projectId && sourceProjectId) {
     target.projectId = sourceProjectId;
@@ -842,6 +852,7 @@ function normalizeSession(input, fallbackKey) {
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
   if (hasOwn(input, 'promptCache')) session.promptCache = normalizePromptCache(input.promptCache);
+  if (client === 'codex' && hasOwn(input, 'reasoningEffort')) session.reasoningEffort = normalizeReasoningEffort(input.reasoningEffort);
   session.contextTokens = Math.max(0, Math.round(asNumber(input.contextTokens ?? input.context_tokens ?? 0)));
   session.contextWindow = Math.max(0, Math.round(asNumber(input.contextWindow ?? input.context_window ?? 0)));
   // Carried rather than summed, and only when the source actually states it:
@@ -1951,6 +1962,7 @@ function deltaValue(base, fresh, anchor, key) {
   // Cache observations are snapshots, never additive accounting. Missing
   // metadata retains the base; only an explicit null clears an observation.
   if (key === 'promptCache') return fresh === undefined ? base : normalizePromptCache(fresh);
+  if (key === 'reasoningEffort') return fresh === undefined ? base : normalizeReasoningEffort(fresh);
   if (key === 'tokenComponents') {
     // A warm tick may introduce aggregate-only fallback data. Boolean
     // provenance is not arithmetically subtractable, so retain exactness only

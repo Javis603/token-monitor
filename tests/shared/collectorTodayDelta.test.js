@@ -501,3 +501,23 @@ test('anchored watch updates carry cache observations and cold clears into broad
     }
   }
 });
+
+test('anchored watch updates replace and clear Codex effort in all displayed periods', async () => {
+  const { collectUsageOnce, localTodayKey } = freshCollector();
+  const { emptyPeriod } = require('../../src/shared/usage');
+  const observedAt = new Date().toISOString();
+  const makePeriod = () => ({ ...emptyPeriod(), totalTokens: 50, clients: { codex: 50 }, sessions: {
+    'codex:s1': { client: 'codex', sessionId: 's1', totalTokens: 50, lastUsedAt: observedAt, reasoningEffort: 'high' }
+  } });
+  for (const reasoningEffort of ['low', null]) {
+    const anchor = { dateKey: localTodayKey(), today: makePeriod(), month: makePeriod(), allTime: makePeriod() };
+    const summary = await collectUsageOnce({
+      ...baseOptions, clients: 'codex', todayOnlyAnchor: anchor,
+      runTokscale: async () => ({ entries: [{ client: 'codex', sessionId: 's1', model: 'fixture', input: 60 }] }),
+      sessionMetadataDeps: { sessionMetadataResolvers: new Map([['codex', () => new Map([['s1', { lastUsedAt: observedAt, reasoningEffort }]])]]) }
+    });
+    for (const name of ['today', 'month', 'allTime']) {
+      assert.equal(summary[name].sessions['codex:s1'].reasoningEffort, reasoningEffort, name);
+    }
+  }
+});

@@ -251,8 +251,10 @@ function resolveSessionMetadata(sessionIds, context) {
     const meta = context.fileSessionMetadata(sessionId, filePath, result.get(sessionId));
     const nativeSessionId = nativeIdForFile(filePath);
     if (nativeSessionId) meta.nativeSessionId = nativeSessionId;
+    meta.reasoningEffort = null;
     if (!shouldReadSessionContext(meta.lastUsedAt, context.now)) return meta;
     const state = readCodexSessionState(filePath, deps.codexDeps);
+    meta.reasoningEffort = state.reasoningEffort || null;
     if (state.promptCacheState?.observation !== undefined) meta.promptCache = state.promptCacheState.observation;
     const sessionContext = deps.readCodexSessionContext ? readContext(filePath) : state.context;
     // The turn boundary rides the same tail and answers the other half of the

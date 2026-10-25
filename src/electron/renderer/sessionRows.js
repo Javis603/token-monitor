@@ -20,14 +20,30 @@
   const isGrokBotSession = sessionLive.isGrokBotSession;
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
 
-  function setSessionTooltip(node, context, promptCache, translate, view) {
+  function setSessionTooltip(node, context, promptCache, translate, view, effort) {
     const entries = [];
     if (context?.contextTokens > 0 && context?.contextWindow > 0) {
       const compact = (value) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
       entries.push({ full: `${compact(context.contextTokens)} / ${compact(context.contextWindow)}` });
     }
     if (promptCache) entries.push({ full: translate('session.cacheEstimateTooltip', { minutes: promptCache.minutes }) });
+    if (effort) entries.push({ full: translate('session.reasoningEffortTooltip', { effort }) });
     view.setDetailTooltip(node, entries);
+  }
+
+  function sessionStatusForRow(row, now) {
+    const statusRow = row?.groupRows?.[0] || row;
+    if (!statusRow) return null;
+    const context = sessionActivityState(statusRow, now) !== 'idle'
+      ? statusRow.context || sessionContextForRow(statusRow, now) || null : null;
+    const promptCache = sessionLive.sessionPromptCacheForRow(statusRow, now);
+    if (!context && !promptCache) return null;
+    const effort = statusRow.client === 'codex' ? sessionLive.normalizeReasoningEffort(statusRow.reasoningEffort) : null;
+    return { statusRow, context, promptCache, effort };
+  }
+
+  function sessionReasoningEffortForRow(row, now = Date.now()) {
+    return sessionStatusForRow(row, now)?.effort || null;
   }
 
   // The compact status every glanceable session row shows (Home list, Edge Dock
@@ -35,11 +51,9 @@
   // prompt-cache estimate. The cache badge's tooltip still names the context
   // size when the transcript reported one. Surfaces differ only in class names.
   function sessionStatusNode(document, row, { prefix, translate, view, showUsed = true, now = Date.now() }) {
-    const statusRow = row?.groupRows?.[0] || row;
-    if (!statusRow) return null;
-    const context = sessionActivityState(statusRow, now) !== 'idle'
-      ? statusRow.context || sessionContextForRow(statusRow, now) || null : null;
-    const promptCache = sessionLive.sessionPromptCacheForRow(statusRow, now);
+    const reading = sessionStatusForRow(row, now);
+    if (!reading) return null;
+    const { statusRow, context, promptCache, effort } = reading;
     const span = (className, text) => {
       const node = document.createElement('span');
       node.className = className;
@@ -47,9 +61,8 @@
       return node;
     };
     if (!context) {
-      if (!promptCache) return null;
       const badge = span(`${prefix}-cache`, translate('session.cacheEstimate', { minutes: promptCache.minutes }));
-      setSessionTooltip(badge, statusRow, promptCache, translate, view);
+      setSessionTooltip(badge, statusRow, promptCache, translate, view, effort);
       return badge;
     }
     const percent = showUsed ? context.percentUsed : context.percentLeft;
@@ -66,7 +79,7 @@
     fill.style.setProperty('--bar-scale', String(percent / 100));
     meter.append(fill);
     node.append(meter, span(`${prefix}-context-value`, `${percent}%`));
-    setSessionTooltip(node, context, promptCache, translate, view);
+    setSessionTooltip(node, context, promptCache, translate, view, effort);
     return node;
   }
 
@@ -458,6 +471,7 @@
       // window so the reading survives the turn ending, and the dock's card
       // calls the same function so the two cannot disagree.
       context: sessionContextForRow(session, now),
+      reasoningEffort: session.reasoningEffort,
       detail: sessionIdLabel(session?.sessionId || key),
       value,
       tokenDataUnavailable,
@@ -563,6 +577,7 @@
           running: running || undefined,
           activityState,
           context: sessionContextForRow(session, now),
+          reasoningEffort: session.reasoningEffort,
           contextSnapshot: !archived ? sessionLive.sessionContextRow(session) : undefined,
           promptCache: sessionLive.sessionPromptCacheForRow(session, now),
           client,
@@ -853,6 +868,7 @@
   return {
     setSessionTooltip,
     sessionStatusNode,
+    sessionReasoningEffortForRow,
     applyBreakdownRowSemantics,
     archivedSessionCount,
     compactSessionTime,
