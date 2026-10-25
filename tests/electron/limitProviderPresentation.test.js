@@ -438,6 +438,7 @@ function runHomeLimitModule(rows, boundaryLabels = {}) {
     formatHomeLimitWindowValue: () => '',
     formatLimitBoundary: (window) => boundaryLabels[window.resetsAt] || '',
     limitProviderPresentationApi: { limitProviderCompactWindowPeriodLabel: () => '' },
+    limitWindowsView: createLimitWindowsView({}),
     state: { settings: {} },
     t: (key, values) => key === 'home.reset' ? `Reset ${values.value}` : key
   };
@@ -1603,7 +1604,6 @@ test('The detail tooltip widens its grid and pads short rows for three-column en
   assert.match(infoNode, /columns > 2 \? 'limit-detail-tooltip-triple' : ''/);
   assert.match(infoNode, /for \(let column = 0; column < columns; column \+= 1\)/);
   assert.match(infoNode, /cell\.textContent = entry\[column\] \?\? '';/);
-  assert.match(infoNode, /entries\s*\.filter\(Array\.isArray\)\s*\.map\(\(\[entryLabel, \.\.\.rest\]\) => `\$\{entryLabel\}: \$\{rest\.filter\(Boolean\)\.join\(' '\)\}`\)/);
   assert.match(balanceNode, /const grants = claudePrepaidGrantRows\(tranches, currency\);/);
   assert.match(balanceNode, /\.\.\.grants\.map\(\(grant\) => grant\.aria\)/);
   // The wording belongs to the spoken label now, never to a rendered cell.
@@ -1948,7 +1948,7 @@ test('a saved credential folds its panel only once a fresh record confirms the a
   // The refresh after a save can return before the collector publishes the
   // checked account, so the panel stays open and folds when that record lands.
   assert.match(renderExternalStatus, /if \(wasPending && !pending && linked\) setExternalAccountExpanded\(providerName, false\);/);
-  assert.match(save, /markExternalProviderCheckPending\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);\n\s*setExternalAccountExpanded\(id, !externalProviderAccountLinked\(id\)\);/);
+  assert.match(save, /markExternalProviderCheckPending\(id, result\.checkedSince\);[\s\S]*await refreshStats\(\);\n\s*setExternalAccountExpanded\(id, !externalProviderAccountLinked\(id\)\);/);
   // Ollama answers its first poll from the save-time check instead of fetching
   // the settings page twice in a row.
   const { limitProviderEntry } = require('../../src/shared/limits/registry');
@@ -3092,7 +3092,7 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
   assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Auto', 'Desktop app', 'Web']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'Web']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'API/Web']);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'factory', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zai', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'api' }), 'API');
@@ -3101,6 +3101,7 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'trae', source: 'api' }), 'Web');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'workbuddy', source: 'local' }), 'Local');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'ollama', source: 'web' }), 'Web');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'ollama', source: 'api' }), 'API');
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'factory', status: 'notConfigured' }),
     { label: 'Add API key', tone: 'setup' }
@@ -3143,11 +3144,15 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'ollama', status: 'notConfigured' }),
-    { label: 'Sign in', tone: 'setup' }
+    { label: 'Add credential', tone: 'setup' }
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'ollama', status: 'unauthorized' }),
     { label: 'Sign in again', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'ollama', status: 'unauthorized', source: 'api' }),
+    { label: 'Update API key', tone: 'setup' }
   );
 });
 

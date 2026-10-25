@@ -1,7 +1,10 @@
 'use strict';
 
-function settingsLimitInvalidationPlan(runtimeChange = {}) {
-  const scopes = Array.isArray(runtimeChange.limitScopes) ? runtimeChange.limitScopes : [];
+function settingsLimitInvalidationPlan(runtimeChange = {}, ensureProvider = '') {
+  const scopes = Array.isArray(runtimeChange.limitScopes) ? [...runtimeChange.limitScopes] : [];
+  if (ensureProvider && !scopes.some((scope) => scope.provider === ensureProvider)) {
+    scopes.push({ provider: ensureProvider });
+  }
   return scopes.map((scope) => ({
     scope,
     reason: 'settings-change',

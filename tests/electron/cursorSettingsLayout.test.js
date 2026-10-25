@@ -987,10 +987,15 @@ test('Z.ai, Qoder, Trae and Ollama panels are generated from their declared form
   assert.doesNotMatch(JSON.stringify(forms.trae), /settings\.trae\.note/);
   assert.match(readRendererFile('i18n.js'), /'settings\.trae\.deviceIdNote': '[^']*ide_user_ent_usage[^']*X-Device-Id/);
 
-  // Ollama: numbered steps, the cookie textarea, and a validated save.
-  assert.equal(forms.ollama.manual[0].steps.length, 4);
-  assert.deepEqual(forms.ollama.fields.map(({ key, input }) => [key, input]), [['ollamaCookie', 'textarea']]);
+  // Ollama chooses one draft lane; API key is the fresh-install default.
+  assert.deepEqual(forms.ollama.credentialChoice.fields, ['ollamaApiKey', 'ollamaCookie']);
+  assert.deepEqual(forms.ollama.manual[0], { note: 'settings.ollama.apiKeyNote', whenCredential: 'ollamaApiKey' });
+  assert.equal(forms.ollama.manual.find((block) => block.steps).whenCredential, 'ollamaCookie');
+  assert.deepEqual(forms.ollama.fields.map(({ key, input }) => [key, input]), [['ollamaApiKey', 'password'], ['ollamaCookie', 'textarea']]);
+  assert.equal(forms.ollama.fields[0].required, false);
+  assert.equal(forms.ollama.fields[1].required, false);
   assert.equal(forms.ollama.messages.rejected, 'settings.ollama.validationInvalid');
+  assert.equal(forms.ollama.messages.required, 'settings.ollama.required');
   assert.match(readRendererFile('i18n.js'), /'settings\.ollama\.cookiePlaceholder': 'wos-session=\.\.\.'/);
 
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
@@ -1111,6 +1116,8 @@ test('Kimi account panel makes the Code API primary and keeps Web access as a fa
   }
   for (const host of ['ollama.com', 'www.ollama.com']) {
     assert.equal(limitProviderUrlAllowed(host, '/settings'), true);
+    assert.equal(limitProviderUrlAllowed(host, '/settings/keys'), true);
+    assert.equal(limitProviderUrlAllowed(host, '/settings/keys/untrusted'), false);
     assert.equal(limitProviderUrlAllowed(host, '/'), false);
   }
 });
@@ -1237,7 +1244,7 @@ test('DeepSeek and MiniMax key changes invalidate stale provider status before r
   assert.match(app, /minimaxPendingCheckSince: 0/);
 
   const saveBody = functionBody(app, 'saveAccountCredential', 'submitAccountCredential');
-  assert.match(saveBody, /saveCredential\(id, values\)[\s\S]*markExternalProviderCheckPending\(id\);[\s\S]*renderExternalProviderStatus\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
+  assert.match(saveBody, /saveCredential\(id, values\)[\s\S]*markExternalProviderCheckPending\(id, result\.checkedSince\);[\s\S]*renderExternalProviderStatus\(id\);[\s\S]*await refreshStats\(\);/);
   const clearBody = functionBody(app, 'clearAccountCredential', 'commitAccountCredential');
   assert.match(clearBody, /clearCredential\(id\)\);[\s\S]*clearExternalProviderCheckPending\(id\);[\s\S]*clearExternalProviderPendingStatus\(id\);[\s\S]*renderExternalProviderStatus\(id\);/);
   assert.match(functionBody(app, 'setupLimitAccountPanels', 'limitProviderAccountGroup'), /onClear: \(\{ id \}\) => clearAccountCredential\(id\)/);
@@ -1245,7 +1252,7 @@ test('DeepSeek and MiniMax key changes invalidate stale provider status before r
   const configLookup = /const config = externalLimitAccountConfig\[providerName\] \|\| limitAccountForm\(providerName\)\?\.status;/;
   const pendingBody = functionBody(app, 'markExternalProviderCheckPending', 'clearExternalProviderCheckPending');
   assert.match(pendingBody, configLookup);
-  assert.match(pendingBody, /state\[config\.pendingKey\] = Date\.now\(\);/);
+  assert.match(pendingBody, /state\[config\.pendingKey\] = checkedSince;/);
   assert.match(pendingBody, /clearExternalProviderPendingStatus\(providerName\);/);
 
   const providerBody = functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked');
@@ -1254,6 +1261,13 @@ test('DeepSeek and MiniMax key changes invalidate stale provider status before r
   assert.match(providerBody, /updatedAt < pendingSince/);
   assert.match(providerBody, /state\[config\.pendingKey\] = 0;/);
 
+  const settleBody = functionBody(app, 'scheduleExternalProviderCheckSettle', 'markExternalProviderCheckPending');
+  assert.match(settleBody, /externalProviderCheckSettled\.add\(providerName\)/);
+  assert.doesNotMatch(settleBody, /clearExternalProviderCheckPending\(providerName\)/, 'the save cutoff must survive the settle timeout');
+  const renderBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
+  assert.match(renderBody, /const settled = externalProviderCheckSettled\.has\(providerName\)/);
+  assert.match(renderBody, /pending = enabled &&[^;]*!settled/);
+  assert.match(renderBody, /settled && configured && enabled \? \{ status: 'noSyncedData' \}/);
   const linkedBody = functionBody(app, 'externalProviderAccountLinked', 'markExternalProviderCheckPending');
   assert.match(linkedBody, /state\.settings\?\.\[config\.configuredKey\]/);
   assert.match(linkedBody, /provider\?\.status === 'ok'/);
@@ -1277,7 +1291,7 @@ test('disabled credential providers settle account status instead of checking fo
   assert.match(clearBody, /clearExternalProviderCheckPending\(providerName\)/);
   assert.match(externalRenderBody, /const enabled = limitProviderEnabled\(providerName\);/);
   assert.match(externalRenderBody, /const pending = enabled &&/);
-  assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, provider, configured, source, enabled\)/);
+  assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, statusProvider, configured, source, enabled\)/);
   assert.match(copilotRenderBody, /copilotAccountStatusText\(provider, configured, source, enabled\)/);
 });
 
@@ -1634,6 +1648,7 @@ test('Factory keeps a saved-key Clear action available after validation fails', 
       document: { getElementById: id => elements.get(id) || null },
       externalProviderForAccount: () => ({ provider: 'factory', status }),
       externalProviderAccountLinked: () => false,
+      externalProviderCheckSettled: new Set(),
       limitProviderEnabled: () => true,
       setCursorStatusText: () => {},
       apiKeyAccountStatusText: () => '',
@@ -1685,6 +1700,7 @@ test('an account message survives the stats re-renders until its own condition r
     document: { getElementById: id => elements.get(id) || null },
     externalProviderForAccount: () => provider,
     externalProviderAccountLinked: () => false,
+    externalProviderCheckSettled: new Set(),
     limitProviderEnabled: () => true,
     setCursorStatusText: () => {},
     apiKeyAccountStatusText: () => '',
@@ -1722,7 +1738,11 @@ test('account credentials persist through the settings:update body, not a second
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), patchStart);
   assert.match(updateHandler, /applySettingsPatch\(patch, \(refresh\) => \{ dotsVisibilityApplied = refresh; \}\)/);
   assert.match(updateHandler, /await dotsVisibilityApplied;/);
-  assert.match(main, /createCredentialCommands\(\{\s*getSettings: \(\) => settings,\s*applySettingsPatch,\s*probeDeps: credentialProbeDeps\s*\}\)/);
+  assert.match(main, /createCredentialCommands\(\{\s*getSettings: \(\) => settings,\s*applySettingsPatch: applyCredentialSettingsPatch,\s*probeDeps: credentialProbeDeps\s*\}\)/);
+  const credentialPatch = functionBody(main, 'applyCredentialSettingsPatch', 'applySettingsPatch');
+  assert.match(credentialPatch, /applySettingsPatch\(patch, undefined, \{/);
+  assert.match(credentialPatch, /ensureLimitProvider: provider/);
+  assert.match(credentialPatch, /await Promise\.all\(refreshes\)/);
   const body = main.slice(patchStart, main.indexOf("ipcMain.handle('appearance:preview'"));
   assert.match(body, /credentialCommands\.noteSettingsPatch\(patch\);/);
   assert.match(body, /normalizeAccountPatch\(patch, normalizedPatch\)/);

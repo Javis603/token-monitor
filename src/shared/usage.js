@@ -299,6 +299,10 @@ function normalizeClientName(value) {
   if (raw.includes('grok')) return 'grok';
   if (raw === 'droid') return 'droid';
   if (raw.includes('copilot')) return 'copilot';
+  // Senpi before Oh My Pi and the generic Pi test. Tokscale's id is `senpi`;
+  // "Senpi (OmO Native)" must not fall through to a hyphenated label, and the
+  // Pi word test must not capture a future spelling that contains "pi".
+  if (raw === 'senpi' || /^omo[\s_-]*native$/.test(raw) || /^senpi(?:[\s_-]*\([^)]*\))?$/.test(raw)) return 'senpi';
   // Oh My Pi before the generic Pi test: its display name contains "Pi" as a
   // word, so the Pi heuristic would otherwise capture it. Tokscale reports the
   // id `omp`; these spellings only appear when a caller passes a display name.
