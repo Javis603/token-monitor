@@ -1,6 +1,6 @@
-<!-- OmO mark: https://github.com/code-yeongyu/oh-my-openagent/blob/6f37e91be0ec39a6fa997fcdc7286d3346e010e0/packages/web/public/brand/omo-mark.svg
-     Background removed and ink changed to currentColor for app masks/tray recoloring. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<!-- OmO mark: https://github.com/code-yeongyu/oh-my-openagent/blob/6f37e91be0ec39a6fa997fcdc7286d3346e010e0/.github/assets/omo-icon-light.svg
+     Background removed, viewBox trimmed to the mark, and ink changed to currentColor for app masks/tray recoloring. -->
+<svg xmlns="http://www.w3.org/2000/svg" height="1em" width="1em" viewBox="189.57269 219.30119 644.85474 576.19881">
   <g transform="scale(0.5)">
     <g transform="translate(0.000000,2048.000000) scale(0.050000,-0.050000)">
       <path fill="currentColor" fill-rule="evenodd" d="M9270 32167 c-309 -64 -456 -152 -621 -373 -562 -748 -776 -2689

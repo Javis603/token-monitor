@@ -7719,6 +7719,32 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value)));
 }
 
+function initFooterActionDisclosure() {
+  const actions = els.utilityActions?.closest('.footer-update-actions');
+  if (!actions) return;
+  // The footer group's width changes on every frame of the update's margin
+  // transition. Observe it so an open card follows both motion and instant
+  // reduced-motion changes without a permanent animation-frame loop.
+  const anchorObserver = new ResizeObserver(() => {
+    if (els.appUpdatePopover.matches(':popover-open')) positionAppUpdatePopover();
+  });
+  anchorObserver.observe(actions);
+  window.addEventListener('unload', () => anchorObserver.disconnect(), { once: true });
+  const reveal = () => actions.classList.add('is-disclosed');
+  const hide = () => actions.classList.remove('is-disclosed');
+  els.utilityActions.addEventListener('pointerenter', reveal);
+  actions.addEventListener('pointerleave', () => {
+    if (!actions.querySelector(':focus-visible')) hide();
+  });
+  actions.addEventListener('focusin', (event) => {
+    if (event.target.matches(':focus-visible') && els.utilityActions.contains(event.target)) reveal();
+  });
+  actions.addEventListener('focusout', (event) => {
+    if (!actions.contains(event.relatedTarget) && !actions.matches(':hover')) hide();
+  });
+  window.addEventListener('blur', () => hide());
+}
+
 function applyControlLayout(swapSettingsAndRefresh) {
   const footerSlot = document.getElementById('footerActionSlot');
   if (!footerSlot || !els.utilityActions) return;
@@ -12925,6 +12951,7 @@ els.pinButton.addEventListener('click', (event) => {
   if (event.detail > 0) els.pinButton.blur();
   saveSettings({ windowBehavior: nextWindowBehavior(currentWindowBehavior()) });
 });
+initFooterActionDisclosure();
 els.settingsButton.addEventListener('click', (event) => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.toggle('hidden');
@@ -17971,7 +17998,7 @@ function setupCursorAccountUI() {
     addToggle?.addEventListener('click', () => setOpenCodeAddExpanded(addDetails?.classList.contains('hidden')));
 
     document.getElementById('opencodeOpenBrowser')?.addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://opencode.ai/auth');
+      window.tokenMonitor.openExternal('https://opencode.ai/console');
     });
 
     // API key is the default: it needs no browser round trip. The cookie stays

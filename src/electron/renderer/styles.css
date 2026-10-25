@@ -464,28 +464,28 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   width: 34px;
   isolation: isolate;
 }
-.utility-actions::before {
-  content: "";
-  position: absolute;
-  inset: 0 100% 0 auto;
-  width: 6px;
-}
+/* The shared footer container retains disclosure across gaps after entry.
+   Clip the secondary action instead of hiding its visibility so Tab can reach
+   it. The delayed clip transition also excludes it from pointer hit-testing. */
 .utility-actions .settings-icon-button {
+  clip-path: inset(-8px);
   position: relative;
   z-index: 2;
   flex: 0 0 34px;
-  transition: opacity 160ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease, background 160ms ease;
+  transition: clip-path 0s var(--footer-secondary-reveal-delay, 0ms), opacity 160ms ease var(--footer-secondary-reveal-delay, 0ms), transform 180ms cubic-bezier(0.22, 1, 0.36, 1) var(--footer-secondary-reveal-delay, 0ms), border-color 160ms ease, background 160ms ease;
 }
 .utility-actions .refresh-button {
+  clip-path: inset(50%);
   position: absolute;
   right: calc(100% + 6px);
   z-index: 1;
   opacity: 0;
   pointer-events: none;
   transform: translateX(8px) scale(0.96);
-  transition: opacity 160ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.25, 1, 0.5, 1), background 160ms cubic-bezier(0.25, 1, 0.5, 1), color 160ms cubic-bezier(0.25, 1, 0.5, 1), box-shadow 160ms cubic-bezier(0.25, 1, 0.5, 1);
+  transition: clip-path 0s var(--footer-secondary-reveal-delay, 0ms), opacity 160ms ease var(--footer-secondary-reveal-delay, 0ms), transform 180ms cubic-bezier(0.22, 1, 0.36, 1) var(--footer-secondary-reveal-delay, 0ms), border-color 160ms cubic-bezier(0.25, 1, 0.5, 1), background 160ms cubic-bezier(0.25, 1, 0.5, 1), color 160ms cubic-bezier(0.25, 1, 0.5, 1), box-shadow 160ms cubic-bezier(0.25, 1, 0.5, 1);
 }
 .utility-actions.is-swapped .settings-icon-button {
+  clip-path: inset(50%);
   position: absolute;
   right: calc(100% + 6px);
   opacity: 0;
@@ -493,6 +493,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   transform: translateX(8px) scale(0.96);
 }
 .utility-actions.is-swapped .refresh-button {
+  clip-path: inset(-8px);
   position: relative;
   right: auto;
   opacity: 1;
@@ -503,6 +504,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .utility-actions:not(.is-swapped):has(:focus-visible) .refresh-button,
 .shell.settings-open .utility-actions:not(.is-swapped) .refresh-button,
 .utility-actions .refresh-button:is(.is-refreshing, .is-refreshed, .is-refresh-error) {
+  clip-path: inset(-8px);
   opacity: 1;
   pointer-events: auto;
   transform: none;
@@ -510,6 +512,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .utility-actions.is-swapped:hover .settings-icon-button,
 .utility-actions.is-swapped:has(:focus-visible) .settings-icon-button,
 .shell.settings-open .utility-actions.is-swapped .settings-icon-button {
+  clip-path: inset(-8px);
   opacity: 1;
   pointer-events: auto;
   transform: none;
@@ -5777,8 +5780,17 @@ html.is-windows .limit-live-badge {
   background: rgba(var(--overlay-rgb), var(--control-alpha));
 }
 .shell.settings-open .tool-detail-footer { display: none; }
+/* At the 240px minimum window width, the detail options must yield space to
+   the update and disclosed action instead of pushing the primary offscreen. */
+.footer:has(.footer-update-actions .update-pill:not(.hidden)) .tool-detail-footer {
+  min-width: 0;
+  flex-shrink: 1;
+}
 .tool-detail-footer-option {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 0 7px;
   border: 0;
   background: transparent;
@@ -6158,20 +6170,69 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .mode-button { width: auto; max-width: 52%; min-width: 0; height: 30px; padding: 0 10px; overflow: hidden; color: var(--muted); text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .mode-button:hover { border-color: rgba(115, 189, 245, 0.62); color: var(--blue); }
 .error { color: var(--red); }
-/* The footer update control is one icon button, the size of the settings gear
-   beside it. Its state reads from the icon (download, progress ring, restart),
-   and the version and release notes live in the hover card above it. */
+/* Keep the primary utility action at the right edge, with or without an update.
+   A disclosed secondary action needs 34px + its 6px gap. Reserve that space by
+   moving the update left; never hide it under Refresh (issue #1190). */
+.footer-update-actions {
+  --footer-disclosure-width: 0px;
+  --footer-secondary-reveal-delay: 0ms;
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+/* Without an update, the group is only as wide as the primary button.
+   Bridge its gap only after disclosure so direct gap entry stays inert. */
+.footer-update-actions.is-disclosed:has(.update-pill.hidden)::before {
+  content: "";
+  position: absolute;
+  inset: 0 100% 0 auto;
+  width: 6px;
+}
+.footer-update-actions.is-disclosed,
+.footer-update-actions:has(.utility-actions:hover),
+.footer-update-actions:has(.utility-actions :focus-visible),
+.footer-update-actions:has(.utility-actions:not(.is-swapped) .refresh-button:is(.is-refreshing, .is-refreshed, .is-refresh-error)),
+.shell.settings-open .footer-update-actions {
+  --footer-disclosure-width: 40px;
+  /* The secondary must not intercept the update's old hit area while it moves.
+     The resting 0ms delay disables it immediately when the controls collapse. */
+  --footer-secondary-reveal-delay: 180ms;
+}
+.footer-update-actions:has(.update-pill.hidden) .utility-actions {
+  --footer-secondary-reveal-delay: 0ms;
+}
+/* Pointer disclosure stays open across the update button and the gaps, so
+   reaching the moved update does not collapse the controls under the pointer. */
+.footer-update-actions.is-disclosed .utility-actions:not(.is-swapped) .refresh-button,
+.footer-update-actions.is-disclosed .utility-actions.is-swapped .settings-icon-button {
+  clip-path: inset(-8px);
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
 .update-pill {
   display: inline-flex;
   flex: 0 0 auto;
-  transition: opacity 120ms ease;
+  margin-right: var(--footer-disclosure-width, 0px);
+  transition: opacity 120ms ease, margin-right 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.footer:has(.utility-actions:hover) .update-pill,
-.footer:has(.utility-actions :focus-visible) .update-pill,
-.footer:has(.refresh-button:is(.is-refreshing, .is-refreshed, .is-refresh-error)) .update-pill,
-.shell.settings-open .footer .update-pill {
-  opacity: 0;
-  pointer-events: none;
+/* Keyboard focus reveals the action and clears its space immediately. Keep
+   the focused control visible instead of waiting for the pointer animation. */
+.footer-update-actions:has(.utility-actions :focus-visible) .update-pill,
+.footer-update-actions:has(.utility-actions :focus-visible) .utility-actions > button {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .update-pill { transition: none; }
+  :root:not([data-reduce-motion="off"]) .footer-update-actions .utility-actions {
+    --footer-secondary-reveal-delay: 0ms;
+  }
+}
+:root[data-reduce-motion="on"] .update-pill { transition: none; }
+:root[data-reduce-motion="on"] .footer-update-actions .utility-actions {
+  --footer-secondary-reveal-delay: 0ms;
 }
 .update-pill-action {
   position: relative;
