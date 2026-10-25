@@ -1578,8 +1578,13 @@
         windows.append(node);
       }
       if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
-      // New Ollama plans have no 5-hour or weekly limits: their balance is a
-      // monthly included allowance, so it renders as a money row.
+      for (const monthly of windowsForKind(provider, 'billing').filter((window) => !window.metric)) {
+        const node = limitWindowNode(providerWindowLabel(provider, monthly), monthly, color, 0.95);
+        node.classList.add('limit-window-wide');
+        windows.append(node);
+      }
+      // Included credits have a real denominator. Wallet balances do not;
+      // their showMeter:false survives both local and synced presentation.
       for (const creditsWindow of (provider.windows || []).filter(isCreditsWindow)) {
         const amount = creditsAmount(provider, creditsWindow);
         if (amount === null) continue;
@@ -1592,6 +1597,12 @@
         );
         node.classList.add('limit-window-wide');
         if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) node.classList.add('limit-window-no-reset');
+        windows.append(node);
+      }
+      const spent = spendWindow(provider);
+      if (spent && Number.isFinite(spent.used)) {
+        const node = limitWindowNode(spent.label || 'Monthly credits used', { ...spent, showMeter: false }, color, 0.68, formatMoney(spent.used, spent.currency));
+        node.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(node);
       }
     } else if (provider.provider === 'claude') {

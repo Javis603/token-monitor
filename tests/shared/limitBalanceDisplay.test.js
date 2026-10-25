@@ -38,6 +38,12 @@ test('creditsMeterPercent uses the window percent when the provider reports one'
   assert.equal(creditsMeterPercent({}, { remainingPercent: 99 }), 99);
 });
 
+test('creditsMeterPercent never invents a quota for an explicitly meterless wallet', () => {
+  for (const remaining of [0, 18.25]) {
+    assert.equal(creditsMeterPercent({ balance: { monthSpend: 4.5 } }, { remaining, showMeter: false }), null);
+  }
+});
+
 test('creditsMeterPercent derives the percent from month spend when no percent exists', () => {
   // 4 / (4 + 6) = 40%
   assert.equal(creditsMeterPercent({ balance: { amount: 4, monthSpend: 6 } }, {}), 40);

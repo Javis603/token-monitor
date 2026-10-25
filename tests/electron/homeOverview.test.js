@@ -34,6 +34,22 @@ const limitProviderOrderApi = require('../../src/electron/renderer/limits/provid
 const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], monthly: [], summary: {} };
 const emptyHistory = { daily: [], monthly: [], summary: {} };
 
+test('Home carries Ollama wallet and spending amounts without inferred quota percentages', () => {
+  const { parseOllamaUsageHtml } = require('../../src/shared/providers/ollama/limits');
+  const { wallet } = require('../fixtures/ollamaCookieUsage.cjs');
+  for (const html of [wallet, wallet.replace('<span>$18.25</span>', '')]) {
+    const parsed = parseOllamaUsageHtml(html);
+    const [row] = homeLimitAccounts([{ providerId: 'ollama', windows: parsed.windows }]);
+    assert.ok(row);
+    for (const window of row.windows) {
+      assert.equal(window.remainingPercent, null);
+      assert.equal(window.showMeter, false);
+    }
+    assert.equal(row.windows.find((w) => w.metric === 'spend').value, '$4.50');
+    if (html === wallet) assert.equal(row.windows.find((w) => w.metric === 'credits').remaining, 18.25);
+  }
+});
+
 test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
   assert.deepEqual(homeActivityHeatmapLayout(), { cell: 9, gap: 3, radius: 2 });
 

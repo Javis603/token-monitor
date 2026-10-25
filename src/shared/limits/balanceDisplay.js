@@ -63,6 +63,7 @@
   // inferred starting funds: current / (current + observed month spend).
   // Display-only — this number is deliberately never written to the wire.
   function creditsMeterPercent(provider, window) {
+    if (window?.showMeter === false) return null;
     const used = finiteNumber(window?.usedPercent);
     if (used !== null) return clampPercent(100 - used);
     const remaining = finiteNumber(window?.remainingPercent);

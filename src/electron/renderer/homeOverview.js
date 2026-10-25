@@ -118,7 +118,8 @@
               resetsAt: window.resetsAt,
               ...(window.boundaryKind ? { boundaryKind: window.boundaryKind } : {}),
               resetDescription: window.resetDescription || '',
-              value: window.value || '',
+              value: window.value || (window.metric === 'spend' && window.showMeter === false && finiteNumber(window.used) !== null
+                ? balanceDisplay.formatMoney(window.used, window.currency) : ''),
               planStatus: window.planStatus || '',
               showMeter: window.showMeter !== false,
               detail: window.detail || '',

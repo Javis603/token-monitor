@@ -89,6 +89,7 @@ function toIso(value) {
 }
 
 function clampPercent(value) {
+  if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   if (!Number.isFinite(number)) return null;
   return Math.max(0, Math.min(100, number));
@@ -132,43 +133,84 @@ function consumeOllamaValidation(cookieHeader, nowMs = Date.now()) {
   return cached.provider;
 }
 
+const DOLLAR_AMOUNT = '(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]+)?';
+
+function dollarAmount(text) {
+  const value = Number(text.replace(/,/g, ''));
+  return Number.isFinite(value) ? value : null;
+}
+
+function monthlyDollars(block) {
+  const match = block.match(new RegExp(`>\\s*\\$(${DOLLAR_AMOUNT})\\s+of\\s+\\$(${DOLLAR_AMOUNT})\\s+used\\s*</`, 'i'));
+  if (!match) return null;
+  const used = dollarAmount(match[1]);
+  const limit = dollarAmount(match[2]);
+  if (used === null || limit === null || limit <= 0 || !Number.isFinite(used / limit * 100)) return null;
+  return { metric: 'credits', label: 'Included credits', used, limit, remaining: Math.max(0, limit - used), currency: 'USD' };
+}
+
+function creditWalletWindows(text) {
+  // Match complete elements within the wallet, never adjacent spend or prose.
+  const heading = /<h[1-6]\b[^>]*>\s*Usage credits(?:\s*<span[^>]*>[^<]*<\/span\s*>)?\s*<\/h[1-6]\s*>/i.exec(text);
+  if (!heading) return [];
+  const tail = text.slice(heading.index + heading[0].length);
+  const wallet = tail.split(/<\/section\s*>|<h[1-6]\b/i)[0];
+  const balance = wallet.match(new RegExp(`^\\s*(?:<div[^>]*>\\s*)*<span[^>]*>\\s*\\$(${DOLLAR_AMOUNT})\\s*</span\\s*>`, 'i'));
+  const spent = wallet.match(new RegExp(`<span[^>]*>\\s*Monthly credits used\\s*</span\\s*>\\s*<span[^>]*>\\s*\\$(${DOLLAR_AMOUNT})\\s*</span\\s*>`, 'i'));
+  const refill = firstCapture(wallet, /<p[^>]*>\s*(Refills\s+to\s+\$[0-9,.]+\s+in\s+[^<]{1,160}?)\s*<\/p\s*>/i).trim();
+  const windows = [];
+  const remaining = balance ? dollarAmount(balance[1]) : null;
+  const used = spent ? dollarAmount(spent[1]) : null;
+  if (remaining !== null) windows.push({ kind: 'billing', metric: 'credits', label: 'Credit balance', remaining, currency: 'USD', showMeter: false, resetDescription: refill });
+  if (used !== null) windows.push({ kind: 'billing', metric: 'spend', label: 'Monthly credits used', used, currency: 'USD', showMeter: false });
+  return windows;
+}
+
 function parseOllamaUsageHtml(html) {
-  const text = String(html || '');
-  const labelPattern = /(Session usage|Hourly usage|Weekly usage)/gi;
+  const text = String(html || '')
+    .replace(/<!--[^]*?-->/g, '')
+    .replace(/<(script|style)\b[^>]*>[^]*?<\/\1\s*>/gi, '')
+    .replace(/&nbsp;|&#160;/gi, ' ');
+  // Monthly labels must be complete element text: "Free usage credits..."
+  // and repeated aria descriptions are not separate usage blocks.
+  const labelPattern = /(Session usage|Hourly usage|Weekly usage)|>\s*(Monthly usage|Free usage)\s*</gi;
   const labels = [];
   let match;
   while ((match = labelPattern.exec(text)) !== null) {
-    labels.push({ index: match.index, label: match[1] });
+    labels.push({ index: match.index, label: match[1] || match[2] });
   }
 
   const windows = [];
   const seenKinds = new Set();
+  const kindFor = (label) => /^weekly/i.test(label) ? 'weekly' : /^(monthly|free)/i.test(label) ? 'billing' : 'session';
   for (let index = 0; index < labels.length; index += 1) {
     const current = labels[index];
-    const kind = /^weekly/i.test(current.label) ? 'weekly' : 'session';
+    const kind = kindFor(current.label);
     if (seenKinds.has(kind)) continue;
-    const nextOtherKind = labels.slice(index + 1).find((candidate) => {
-      const candidateKind = /^weekly/i.test(candidate.label) ? 'weekly' : 'session';
-      return candidateKind !== kind;
-    });
-    const end = nextOtherKind?.index ?? Math.min(text.length, current.index + 4000);
-    const block = text.slice(current.index, Math.min(end, current.index + 4000));
+    const nextLabel = labels.slice(index + 1).find((candidate) => candidate.label.toLowerCase() !== current.label.toLowerCase());
+    const end = nextLabel?.index ?? Math.min(text.length, current.index + 4000);
+    const block = text.slice(current.index, Math.min(end, current.index + 4000))
+      .split(/<h[1-6]\b[^>]*>\s*Usage credits/i)[0];
+    const dollars = kind === 'billing' ? monthlyDollars(block) : null;
     const percentText = firstCapture(block, /([0-9]+(?:\.[0-9]+)?)\s*%\s*used/i)
       || firstCapture(block, /width\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*%/i);
-    const usedPercent = clampPercent(percentText);
+    const usedPercent = dollars ? clampPercent(dollars.used / dollars.limit * 100) : clampPercent(percentText);
     if (usedPercent === null) continue;
     windows.push({
       kind,
+      ...(dollars || (kind === 'billing' ? { label: 'Monthly' } : {})),
       usedPercent,
       resetsAt: toIso(firstCapture(block, /data-time=["']([^"']+)["']/i)),
-      windowMinutes: kind === 'weekly' ? 7 * 24 * 60 : /^hourly/i.test(current.label) ? 60 : 5 * 60,
+      ...(kind !== 'billing' ? { windowMinutes: kind === 'weekly' ? 7 * 24 * 60 : /^hourly/i.test(current.label) ? 60 : 5 * 60 } : {}),
       showMeter: true
     });
     seenKinds.add(kind);
   }
 
   windows.sort((a, b) => ({ session: 0, weekly: 1 }[a.kind] ?? 2) - ({ session: 0, weekly: 1 }[b.kind] ?? 2));
-  const planName = firstCapture(text, /Cloud Usage\s*<\/span\s*>\s*<span[^>]*>([^<]+)<\/span\s*>/i).trim();
+  windows.push(...creditWalletWindows(text));
+  const planName = (firstCapture(text, /(?:Included usage|Cloud Usage)\s*<\/span\s*>\s*<span[^>]*>([^<]+)<\/span\s*>/i)
+    || firstCapture(text, /<h[1-6][^>]*>\s*Usage credits\s*<span[^>]*>([^<]+)<\/span\s*>/i)).trim();
   const accountEmail = firstCapture(text, /id=["']header-email["'][^>]*>([^<]+)</i).trim();
   return {
     windows,
@@ -240,7 +282,7 @@ async function requestSettings(fetchFn, cookieHeader, controller) {
 }
 
 function finiteNumber(value) {
-  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'number' && (typeof value !== 'string' || !/^-?\d+(?:\.\d+)?$/.test(value.trim()))) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -259,7 +301,7 @@ function usagePercentFromRemaining(value) {
  * no 5-hour/weekly windows. `remaining_percent` is what is left, so the meter
  * value is its complement.
  */
-function parseOllamaBalance(json) {
+function parseOllamaIncludedBalance(json) {
   const included = json && typeof json === 'object' && json.included && typeof json.included === 'object'
     ? json.included
     : null;
@@ -310,6 +352,20 @@ function parseOllamaBalance(json) {
       showMeter: true
     }]
   };
+}
+
+function parseOllamaBalance(json) {
+  const included = parseOllamaIncludedBalance(json);
+  const windows = included?.windows || [];
+  // JSON money accepts numbers and decimal strings, not coercible booleans,
+  // arrays, whitespace or hexadecimal strings.
+  const balance = finiteNumber(json?.purchased?.balance_usd);
+  if (balance !== null) windows.push({ kind: 'billing', metric: 'credits', label: 'Credit balance', remaining: balance, currency: 'USD', showMeter: false });
+  const allowance = finiteNumber(json?.included?.allowance_usd);
+  const includedBalance = finiteNumber(json?.included?.balance_usd);
+  const spent = allowance !== null && allowance >= 0 && includedBalance !== null ? Math.max(0, allowance - includedBalance) : null;
+  if (spent !== null && Number.isFinite(spent)) windows.push({ kind: 'billing', metric: 'spend', label: 'Monthly credits used', used: spent, currency: 'USD', showMeter: false });
+  return windows.length ? { windows } : null;
 }
 
 async function requestOllamaJson(url, init, deps = {}) {

@@ -698,6 +698,40 @@ test('an Ollama new-plan card draws the monthly included credits', () => {
   assert.match(node.text, /Included credits/);
 });
 
+test('Ollama Cookie monthly and wallet cards render real measurements with no wallet meter', async () => {
+  const { fetchOllamaLimits } = require('../../src/shared/providers/ollama/limits');
+  const { monthly, free, wallet } = require('../fixtures/ollamaCookieUsage.cjs');
+  for (const [html, meters, amounts] of [
+    [monthly, 1, ['$52.50']],
+    [free, 1, ['31% left']],
+    [wallet, 0, ['$18.25', '$4.50', 'Refills to $30 in 3 weeks.']],
+    [monthly + wallet, 1, ['$52.50', '$18.25', '$4.50']]
+  ]) {
+    const row = await fetchOllamaLimits({ ollamaCookie: 'wos-session=fixture-card' }, {
+      env: {}, bypassValidationCache: true,
+      fetch: async () => ({ ok: true, status: 200, text: async () => html })
+    });
+    assert.equal(row.status, 'ok');
+    const card = dockView().renderProviderWindows(row, '#888888');
+    assert.equal(card.textOf('limit-meter').length, meters);
+    for (const amount of amounts) assert.ok(card.text.includes(amount), card.text);
+  }
+});
+
+test('an Ollama API card keeps purchased balance separate from included monthly credits', async () => {
+  const { fetchOllamaLimits } = require('../../src/shared/providers/ollama/limits');
+  const row = await fetchOllamaLimits({ ollamaApiKey: 'fixture-purchased-card' }, {
+    env: {}, probe: true,
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({
+      included: { balance_usd: 52.5, allowance_usd: 60 }, purchased: { balance_usd: 18.25 }
+    }) })
+  });
+  const card = dockView().renderProviderWindows(row, '#888888');
+  assert.equal(card.textOf('limit-meter').length, 1);
+  for (const amount of ['$52.50', '$18.25', '$7.50']) assert.ok(card.text.includes(amount), card.text);
+  assert.equal(card.text.includes('$70.75'), false, 'wallet and allowance must not be added');
+});
+
 test('a TypeSafe card omits expiry when the billing response has no valid grants', () => {
   const card = dockView().renderProviderWindows({
     provider: 'typesafe',

@@ -98,7 +98,7 @@ Under Chromium, never set `Host`, keep `credentials: 'omit'` so browser cookies 
 
 ### Balance quotas
 
-`windows[].metric === 'credits'` identifies a money quota with `remaining` and `currency`. `src/shared/limits/balanceDisplay.js` owns display across Home, tray and limits views; use the marker, never a provider whitelist. Derived top-up percentages remain display-only, outside the wire shape.
+`windows[].metric === 'credits'` identifies a money quota with `remaining` and `currency`. `src/shared/limits/balanceDisplay.js` owns display across Home, tray and limits views; use the marker, never a provider whitelist. Derived top-up percentages remain display-only, outside the wire shape. An explicit `showMeter: false` forbids inferred percentages for wallet balances without a quota denominator.
 
 ## Session relationships
 
