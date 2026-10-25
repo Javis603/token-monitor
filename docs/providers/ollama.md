@@ -1,5 +1,5 @@
 ---
-summary: "Ollama Cloud limits from an API key or session cookie, covering legacy usage windows, monthly included credits, and account identity."
+summary: "Ollama Cloud API and Cookie limits: legacy windows, monthly included credits, credit wallets, and account identity."
 ids: [ollama]
 read_when:
   - Changing Ollama limits collection, credential lanes, or account identity
@@ -24,7 +24,19 @@ Both HTTP 401 and 403 from the JSON API are authentication failures. A save prob
 
 ### New plans
 
-`included.balance_usd`, `included.allowance_usd`, and `included.period` describe monthly included credits. They map to one `billing` window with `metric: "credits"` and `currency: "USD"`, using `period.until` as the reset; new plans report no 5-hour or weekly windows. Only the included allowance is displayed: `purchased.balance_usd` is not shown.
+`included.balance_usd`, `included.allowance_usd`, and `included.period` describe monthly included credits. They map to one `billing` window with `metric: "credits"` and `currency: "USD"`, using `period.until` as the reset; new plans report no 5-hour or weekly windows. Monthly credits used is the nonnegative difference between allowance and balance, reported separately as a meterless `spend` window.
+
+`purchased.balance_usd` maps to a separate **Credit balance** window, including on legacy plans and purchased-only accounts. Never add it to the included allowance. It has no quota denominator or reset timestamp: Ollama renderers keep `showMeter: false` and explicitly disable balance inference for these wallets. A reported zero remains a real zero; absent or malformed money stays absent. See the [official balance contract](https://docs.ollama.com/api/balance).
+
+### Cookie settings pages
+
+The Cookie path retains Session/Hourly/Weekly meters and also accepts **Monthly usage** and **Free usage**. Monthly dollar text such as `$7.50 of $60 used` supplies the included credit amounts and utilization; percentage-only or CSS meters supply only a monthly percentage. `data-time` supplies the reset when present. Neither an allowance nor a fixed month duration is inferred from a percentage or reset alone. Complete monthly labels avoid matching explanatory prose or repeated aria descriptions.
+
+The **Usage credits** wallet layout supplies **Credit balance**, **Monthly credits used**, and refill text. These remain independent measurements: monthly spending never substitutes for a missing balance, and a refill target is neither a quota denominator nor an exact reset date. Wallet amounts use meterless `credits`/`spend` windows and may coexist with genuine quota meters. Parse complete elements within the wallet section so adjacent sections cannot provide missing values.
+
+Included credits precedes Credit balance on the card and Home display. Monthly credits used appears in its existing-style info tooltip, alongside refill text on the card; included usage keeps its own separate quota row. Home uses full-width Ollama readings so a wallet amount never shares a grid row with a quota bar. If no wallet balance is displayed, monthly spending remains a standalone reading, including after two legacy quotas or when the wallet is hidden. The wire retains the independent `credits`/`spend` measurements; this grouping is presentation only.
+
+Cookie markup follows the sanitized shapes in CodexBar's [parser tests](https://github.com/steipete/CodexBar/blob/d34fbb47afe73f81dd591bae28a60f72c39a9fe4/Tests/CodexBarTests/OllamaUsageParserTests.swift) and [wallet tests](https://github.com/steipete/CodexBar/blob/d34fbb47afe73f81dd591bae28a60f72c39a9fe4/Tests/CodexBarTests/OllamaCreditWalletTests.swift). Local fixtures are bounded parser/transport/display evidence, not live-account acceptance.
 
 ## Account identity
 
@@ -36,4 +48,4 @@ Both HTTP 401 and 403 from the JSON API are authentication failures. A save prob
 
 ## Verification
 
-Run `node --test tests/shared/ollamaLimits.test.js`.
+Run `node --test tests/shared/ollamaLimits.test.js tests/shared/ollamaCookieCredits.test.js tests/shared/limitBalanceDisplay.test.js tests/electron/edgeDockLimitCard.test.js tests/electron/homeOverview.test.js`.

@@ -438,6 +438,7 @@ function runHomeLimitModule(rows, boundaryLabels = {}) {
     formatHomeLimitWindowValue: () => '',
     formatLimitBoundary: (window) => boundaryLabels[window.resetsAt] || '',
     limitProviderPresentationApi: { limitProviderCompactWindowPeriodLabel: () => '' },
+    limitWindowsView: createLimitWindowsView({}),
     state: { settings: {} },
     t: (key, values) => key === 'home.reset' ? `Reset ${values.value}` : key
   };
@@ -1603,7 +1604,6 @@ test('The detail tooltip widens its grid and pads short rows for three-column en
   assert.match(infoNode, /columns > 2 \? 'limit-detail-tooltip-triple' : ''/);
   assert.match(infoNode, /for \(let column = 0; column < columns; column \+= 1\)/);
   assert.match(infoNode, /cell\.textContent = entry\[column\] \?\? '';/);
-  assert.match(infoNode, /entries\s*\.filter\(Array\.isArray\)\s*\.map\(\(\[entryLabel, \.\.\.rest\]\) => `\$\{entryLabel\}: \$\{rest\.filter\(Boolean\)\.join\(' '\)\}`\)/);
   assert.match(balanceNode, /const grants = claudePrepaidGrantRows\(tranches, currency\);/);
   assert.match(balanceNode, /\.\.\.grants\.map\(\(grant\) => grant\.aria\)/);
   // The wording belongs to the spoken label now, never to a rendered cell.

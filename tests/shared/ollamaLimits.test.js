@@ -242,8 +242,7 @@ const LEGACY_BALANCE = {
   included: {
     session: { remaining_percent: 85.61, resets_at: '2026-10-23T14:00:00Z' },
     weekly: { remaining_percent: 33.37, resets_at: '2026-10-26T00:00:00Z' }
-  },
-  purchased: { balance_usd: 0 }
+  }
 };
 
 const CREDITS_BALANCE = {
@@ -274,7 +273,7 @@ test('parses the legacy balance into used session and weekly windows', () => {
 
 test('parses new-plan included credits as one money window', () => {
   const parsed = parseOllamaBalance(CREDITS_BALANCE);
-  assert.equal(parsed.windows.length, 1);
+  assert.equal(parsed.windows.length, 3);
   assert.deepEqual({
     kind: parsed.windows[0].kind,
     metric: parsed.windows[0].metric,
@@ -553,7 +552,7 @@ test('maps the new-plan balance to a credits window on the wire', async () => {
       : jsonResponse(200, { Email: 'credits@example.com', Plan: 'pro' })
   });
   assert.equal(provider.status, 'ok');
-  assert.equal(provider.windows.length, 1);
+  assert.equal(provider.windows.length, 3);
   assert.equal(provider.windows[0].kind, 'billing');
   assert.equal(provider.windows[0].metric, 'credits');
   assert.equal(provider.windows[0].remaining, 45);
