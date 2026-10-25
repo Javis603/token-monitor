@@ -957,6 +957,13 @@ function formatCompact(value, unitSystem, locale) {
     locale === undefined ? currentLocale() : locale
   );
 }
+// TokenLedger: credit spend stays a plain decimal — compounding 1.2K credits
+// would hide the small per-request amounts the ledger is about.
+function formatCredits(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  return n >= 100 ? String(Math.round(n)) : String(Math.round(n * 10) / 10);
+}
 function updateTotalCompact(value) {
   if (!els.totalTokensCompact) return;
   const num = Math.round(Number(value || 0));
@@ -6783,6 +6790,12 @@ function renderHomeDeviceModule() {
     value.className = 'home-list-value';
     value.textContent = formatCompact(row.value);
     item.append(mark, label, value);
+    if (row.creditsToday != null) {
+      const credits = document.createElement('span');
+      credits.className = 'home-device-credits';
+      credits.textContent = t('home.creditsToday', { value: formatCredits(row.creditsToday) });
+      item.append(credits);
+    }
     body.append(item);
   }
   return module;

@@ -18,6 +18,7 @@ const { createCursorUsageEventIndex } = require('../providers/cursor/usageEvents
 const { createSessionUsageArchiveStore } = require('./sessionUsageArchiveStore');
 const { trackLiveSubprocesses } = require('../subprocessTermination');
 const { createUsageTransform } = require('./usageTransform');
+const { createCreditsAttacher } = require('../credits/attach');
 
 const config = workerData || {};
 // Lists this thread's subprocesses where the owner can signal them if the
@@ -42,6 +43,7 @@ const transform = createUsageTransform({
   store,
   getSettings: () => config.transformSettings || {},
   isExternalAgentActive,
+  attachCredits: createCreditsAttacher(),
   onCaptureFailure: () => post({
     type: 'diagnostic',
     event: { subsystem: 'storage', code: 'storage-archive-update-failed' }

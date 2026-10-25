@@ -1876,6 +1876,9 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
       // diagnostics on the unauthenticated surface.
       ...(hasOwn(normalized, 'clientHealth') ? { clientHealth: normalized.clientHealth } : {}),
       ...(hasOwn(normalized, 'wslStatus') ? { wslStatus: normalized.wslStatus } : {}),
+      // TokenLedger: same per-device-only policy as the diagnostics fields
+      // above — the credit ledger never rolls up to the public aggregate.
+      ...(hasOwn(normalized, 'credits') ? { credits: normalized.credits } : {}),
       ...(hasOwn(normalized, 'projectsEnabled') ? { projectsEnabled: normalized.projectsEnabled } : {}),
       ...(hasOwn(normalized, 'allTimeProjectsOmitted') ? { allTimeProjectsOmitted: normalized.allTimeProjectsOmitted } : {}),
       ...(hasOwn(normalized, 'allTimeProjectsIncomplete') ? { allTimeProjectsIncomplete: normalized.allTimeProjectsIncomplete } : {}),

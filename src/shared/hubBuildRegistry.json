@@ -376,7 +376,14 @@
       {
         "revision": 93,
         "buildId": "sha256:492423ce78aa0763a9607a4fc620174c0610c3c07e8b3230677d77dd208a21f3"
+<<<<<<< HEAD
 >>>>>>> 626a18fb (chore(worker): vendor credits/summary into the worker closure)
+=======
+      },
+      {
+        "revision": 94,
+        "buildId": "sha256:2dbc8fe40e25e006424545097788f806d90dad47d5b1c3207fb489075961c1d1"
+>>>>>>> 13418bdb (feat(home): show today's WorkBuddy credit spend on device rows)
       }
     ],
     "node-hub": [

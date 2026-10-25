@@ -3709,6 +3709,16 @@ html.is-windows .settings-panel select option {
 .home-device-row .home-list-value {
   text-align: right;
 }
+/* TokenLedger: device-row credit spend keeps its own class so the device row
+   stays free of aux/status text (guarded by a homeOverview source test). */
+.home-device-credits {
+  color: var(--readable-muted);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+  text-align: right;
+}
 .home-model-row {
   grid-template-columns: 10px minmax(0, 1fr) minmax(42px, auto) minmax(31px, auto);
   column-gap: 8px;
@@ -3718,7 +3728,7 @@ html.is-windows .settings-panel select option {
   column-gap: 8px;
 }
 .home-device-row {
-  grid-template-columns: 10px minmax(0, 1fr) minmax(42px, auto);
+  grid-template-columns: 10px minmax(0, 1fr) minmax(42px, auto) auto;
   column-gap: 8px;
 }
 .home-session-row {

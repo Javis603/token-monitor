@@ -211,7 +211,27 @@
     }));
   }
 
-  function homeDeviceRows(devices, { localDeviceId = '', period = 'today', limit = 4 } = {}) {
+  // TokenLedger: today's credit spend for the device's WorkBuddy ledger, from
+  // the bounded recentEvents window. Null when the device reports no ledger —
+  // most machines — so callers render nothing instead of a zero.
+  function creditsSpentToday(credits, now = Date.now()) {
+    if (!credits || credits.available !== true || !Array.isArray(credits.recentEvents)) return null;
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
+    const startMs = startOfDay.getTime();
+    let spend = 0;
+    let seen = false;
+    for (const event of credits.recentEvents) {
+      const at = Number(event?.updatedAt);
+      const amount = Number(event?.credits);
+      if (!Number.isFinite(at) || at < startMs || !Number.isFinite(amount) || amount >= 0) continue;
+      spend += -amount;
+      seen = true;
+    }
+    return seen ? spend : null;
+  }
+
+  function homeDeviceRows(devices, { localDeviceId = '', period = 'today', limit = 4, now = Date.now() } = {}) {
     const localKey = String(localDeviceId || '').trim();
     return (devices || [])
       .map((device, index) => {
@@ -224,6 +244,7 @@
           platform: device?.platform || '',
           isLocal: Boolean(localKey && key === localKey),
           isStale: Boolean(device?.stale),
+          creditsToday: creditsSpentToday(device?.credits, now),
           index
         };
       })
@@ -508,6 +529,7 @@
 
   return {
     compactWindowRank,
+    creditsSpentToday,
     homeLimitAccounts,
     homeLimitAccountsForProviders,
     homeLimitsAwaitingFirstData,

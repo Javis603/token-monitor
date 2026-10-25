@@ -37,6 +37,9 @@ function createUsageTransform(options = {}) {
   const readSnapshot = options.readSnapshot || store?.snapshot || readSessionUsageArchiveSnapshot;
   const onCaptureFailure = options.onCaptureFailure || (() => {});
   const log = options.log || ((message) => console.log(message));
+  // TokenLedger: optional summary extra attached after projection so worker
+  // and in-process paths enrich identically. Must be fail-soft by contract.
+  const attachCredits = options.attachCredits || null;
   let sessionArchive = null;
   let lastUpdate = {
     at: null,
@@ -103,7 +106,8 @@ function createUsageTransform(options = {}) {
           mutate: true
         });
     delete visibleSummary.sessionUsageArchiveFullScan;
-    return settings.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
+    const projected = settings.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
+    return attachCredits ? attachCredits(projected) : projected;
   }
 
   function transform(summary, _reason, meta = {}) {

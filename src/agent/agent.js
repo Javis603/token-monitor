@@ -1,7 +1,6 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const {
   defaultDeviceId, loadDotEnv, parseArgs, pidFilePath
@@ -31,8 +30,7 @@ const {
   readSessionUsageArchiveSnapshot
 } = require('../shared/usage/sessionUsageArchiveStore');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
-const { collectCredits } = require('../shared/providers/workbuddy/credits');
-const { buildCreditsSummary } = require('../shared/credits/summary');
+const { createCreditsAttacher } = require('../shared/credits/attach');
 
 loadDotEnv();
 const args = parseArgs(process.argv.slice(2));
@@ -148,18 +146,9 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
 }
 
-// The credit ledger rides on every full summary. WorkBuddy absent or its DB
-// unreadable is a normal state on most machines, not an error: the block just
-// says unavailable and the next scan restates it.
-function withWorkBuddyCredits(summary) {
-  let credits;
-  try {
-    credits = buildCreditsSummary(collectCredits({ home: os.homedir() }));
-  } catch (error) {
-    credits = { available: false, reason: `collect failed: ${error.message}` };
-  }
-  return { ...summary, credits };
-}
+// The credit ledger rides on every full summary via the shared attacher;
+// WorkBuddy absent is a normal state (available:false), not an error.
+const withWorkBuddyCredits = createCreditsAttacher();
 
 const titleSyncNegotiator = createAgentTitleSync({ dataDir: path.dirname(pidFilePath()), fetchFn: fetch });
 
