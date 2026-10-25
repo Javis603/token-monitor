@@ -57,7 +57,7 @@ test('Senpi reuses unchanged headers but discovers appended and rewritten header
   const other = path.join(root, 'another'); // same length as "project"
   const previous = fs.statSync(file);
   const dirTime = fs.statSync(path.dirname(file));
-  const text = fs.readFileSync(file, 'utf8').replace(project, other);
+  const text = fs.readFileSync(file, 'utf8').replace(JSON.stringify(project), JSON.stringify(other));
   fs.writeFileSync(file, text);
   fs.utimesSync(file, previous.atime, new Date(previous.mtimeMs + 2000));
   fs.utimesSync(path.dirname(file), dirTime.atime, dirTime.mtime);
