@@ -11,8 +11,23 @@ const { publicSettings } = require('./settings');
 const WARM_TTL_MS = 30_000, WARM_LIMIT = 3, WARM_MEMORY_KB = 256 * 1024, LIFECYCLE_TIMEOUT_MS = 750;
 const SCHEME = 'tm-plugin-ui';
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; worker-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts";
+const CONNECTION_ALLOWLIST = '(response-origin);webrtc=block';
+const NETWORK_FEATURES = ['ConnectionAllowlists', 'OverrideConnectionAllowlistOriginTrial'];
 const WEB_UI_SCHEME = Object.freeze({ scheme: SCHEME, privileges: Object.freeze({ standard: true, secure: true }) });
-function registerWebUiScheme(protocol) {
+// Chromium 150 requires the origin-trial override for this native policy.
+// CSP connect-src, browser permissions and WebRequest do not cover WebRTC.
+// Activate support before ready; only responses carrying our header opt in.
+function configureWebUiNetworkIsolation(commandLine) {
+  const names = value => value.split(',').map(entry => entry.trim()).filter(Boolean);
+  const featureName = entry => entry.split(/[<:]/, 1)[0];
+  const disabled = names(commandLine.getSwitchValue('disable-features')).map(featureName);
+  if (NETWORK_FEATURES.some(name => disabled.includes(name))) throw new Error('Rich UI network isolation cannot be disabled');
+  const enabled = names(commandLine.getSwitchValue('enable-features'));
+  for (const name of NETWORK_FEATURES) if (!enabled.some(entry => featureName(entry) === name)) enabled.push(name);
+  commandLine.appendSwitch('enable-features', enabled.join(','));
+}
+function registerWebUiScheme(protocol, commandLine = require('electron').app.commandLine) {
+  configureWebUiNetworkIsolation(commandLine);
   protocol.registerSchemesAsPrivileged([WEB_UI_SCHEME]);
 }
 function boundsFor(raw, size, zoom = 1, minimum = 40) {
@@ -289,7 +304,7 @@ function createWebUi({ electron, manager, bus, isMainSender, surfaceContext = ()
           if (!item || item.session !== ses || request.method !== 'GET' || !request.url.startsWith(`${item.origin}/`)) return new Response('', { status: 403 });
           const name = request.url.slice(item.origin.length + 1);
           if (!Object.hasOwn(item.assets, name)) return new Response('', { status: 404 });
-          return new Response(item.assets[name], { headers: { 'Content-Type': TYPES[name.split('.').at(-1)], 'Content-Security-Policy': CSP, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' } });
+          return new Response(item.assets[name], { headers: { 'Content-Type': TYPES[name.split('.').at(-1)], 'Content-Security-Policy': CSP, 'Connection-Allowlist': CONNECTION_ALLOWLIST, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' } });
         });
       }
       const view = new WebContentsView({ webPreferences: { session: ses, preload: path.join(__dirname, 'webPreload.js'), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, webviewTag: false, navigateOnDragDrop: false, backgroundThrottling: true, spellcheck: false } });
@@ -494,4 +509,4 @@ function createWebUi({ electron, manager, bus, isMainSender, surfaceContext = ()
     dispose() { disposed = true; for (const item of allItems()) destroy(item); changed(); offSettings?.(); for (const channel of ['plugins:web:call', 'plugins:web:select', 'plugins:web:sync', 'plugins:surface:sync', 'plugins:presentation:sync']) ipcMain.removeHandler(channel); for (const ses of sessions.values()) { ses.protocol.unhandle(SCHEME); void ses.clearStorageData(); } }
   };
 }
-module.exports = { SCHEME, CSP, WEB_UI_SCHEME, registerWebUiScheme, boundsFor, themeContext, createWebUi };
+module.exports = { SCHEME, CSP, WEB_UI_SCHEME, configureWebUiNetworkIsolation, registerWebUiScheme, boundsFor, themeContext, createWebUi };

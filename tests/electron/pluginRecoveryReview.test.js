@@ -9,7 +9,11 @@ const { createPluginRuntime, registerPluginScheme } = require('../../src/electro
 
 test('runtime declares both isolated schemes in one Electron registration', () => {
   const calls = [];
-  registerPluginScheme({ registerSchemesAsPrivileged: schemes => calls.push(schemes) });
+  const switches = new Map();
+  registerPluginScheme({ registerSchemesAsPrivileged: schemes => calls.push(schemes) }, {
+    getSwitchValue: name => switches.get(name) || '', appendSwitch: (name, value) => switches.set(name, value)
+  });
+  assert.equal(switches.get('enable-features'), 'ConnectionAllowlists,OverrideConnectionAllowlistOriginTrial');
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].map(s => s.scheme).sort(), ['tm-plugin', 'tm-plugin-ui']);
   for (const { privileges } of calls[0]) {

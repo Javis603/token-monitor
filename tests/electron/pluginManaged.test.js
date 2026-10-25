@@ -24,6 +24,211 @@ function fixture(t, fault) {
   const install = (version, extra) => api.install(api.preview(parsePackage(bytes(version, extra))).token);
   return { dir, args, api, install, get settings() { return settings; }, get stopped() { return stopped; } };
 }
+function historyFixture(t, fault) {
+  const f = fixture(t, fault); f.install('1.0.0'); f.install('2.0.0');
+  f.settings.pluginStates['test-plugin'] = { enabled: true, background: false, grant: { permissions: [], hosts: [] } };
+  // Include every placement key in the rollback baseline.
+  f.settings.trayCustomLayout = { version: 1, items: [] };
+  f.settings.pluginMainPages = ['test-plugin/page', 'other/page'];
+  for (const dir of [f.args.dataDir, f.args.settingsDir]) {
+    fs.mkdirSync(dir); fs.writeFileSync(path.join(dir, 'test-plugin.json'), '{"keep":7}');
+  }
+  return f;
+}
+function snapshot(f) {
+  const files = {};
+  function visit(dir) {
+    for (const name of fs.readdirSync(dir).sort()) {
+      const file = path.join(dir, name), relative = path.relative(f.dir, file), stat = fs.lstatSync(file);
+      if (stat.isSymbolicLink()) files[relative] = { link: fs.readlinkSync(file) };
+      else if (stat.isDirectory()) { files[relative] = null; visit(file); }
+      else files[relative] = fs.readFileSync(file).toString('base64');
+    }
+  }
+  visit(f.dir);
+  return { files, settings: structuredClone(f.settings) };
+}
+function operation(api, name, token) {
+  if (name === 'preview') return api.preview(parsePackage(bytes('3.0.0', { permissions: ['sys.cpu'] })));
+  if (name === 'update') return api.install(token);
+  if (name === 'rollback') return api.rollback('test-plugin');
+  return api.uninstall('test-plugin', { keepData: false });
+}
+
+for (const restart of [false, true]) for (const name of ['preview', 'update', 'rollback', 'uninstall']) {
+  test(`missing target permits ${name}${restart ? ' after restart' : ''}`, t => {
+    const f = historyFixture(t), target = path.join(f.args.userDir, 'test-plugin');
+    if (name !== 'update') fs.rmSync(target, { recursive: true });
+    const api = restart ? createManagedPlugins(f.args) : f.api;
+    if (restart) api.recover();
+    // Confirmation must also tolerate deletion after a successful preview.
+    const token = name === 'update' ? api.preview(parsePackage(bytes('3.0.0', { permissions: ['sys.cpu'] }))).token : null;
+    if (name === 'update') fs.rmSync(target, { recursive: true });
+    const before = snapshot(f), consent = structuredClone(f.settings.pluginStates['test-plugin']);
+    const result = operation(api, name, token);
+    if (name === 'preview') {
+      assert.equal(result.operation, 'update'); assert.equal(result.installedVersion, '2.0.0');
+      assert.deepEqual(snapshot(f), before);
+      api.install(result.token);
+    }
+    if (name === 'uninstall') {
+      assert.equal(api.describe('test-plugin'), null);
+      assert.equal(fs.existsSync(target), false);
+      assert.equal(f.settings.pluginStates['test-plugin'], undefined);
+    } else {
+      assert.equal(packageDirectory(target).manifest.version, name === 'rollback' ? '1.0.0' : '3.0.0');
+      assert.equal(api.describe('test-plugin').previousVersion, null);
+      assert.equal(api.describe('test-plugin').previousSha256, null);
+      assert.deepEqual(f.settings.pluginStates['test-plugin'], consent);
+      assert.equal(api.describe('test-plugin').origin.id, 'local');
+    }
+    assert.equal(fs.existsSync(path.join(f.args.root, 'previous/test-plugin.tmplugin')), false);
+    assert.equal(fs.existsSync(path.join(f.args.root, 'transaction.json')), false);
+    const recovered = createManagedPlugins(f.args); recovered.recover();
+    assert.deepEqual(recovered.describe('test-plugin'), api.describe('test-plugin'));
+  });
+}
+for (const keepData of [false, true]) for (const keepPlacements of [false, true]) {
+  test(`missing target uninstall respects keepData=${keepData}, keepPlacements=${keepPlacements}`, t => {
+    const f = historyFixture(t);
+    fs.rmSync(path.join(f.args.userDir, 'test-plugin'), { recursive: true });
+    const before = structuredClone(f.settings);
+    f.api.uninstall('test-plugin', { keepData, keepPlacements });
+    assert.equal(f.api.describe('test-plugin'), null);
+    for (const dir of [f.args.dataDir, f.args.settingsDir]) {
+      const file = path.join(dir, 'test-plugin.json');
+      assert.equal(fs.existsSync(file), keepData);
+      if (keepData) assert.equal(fs.readFileSync(file, 'utf8'), '{"keep":7}');
+    }
+    assert.equal(f.settings.homeModuleOrder, keepPlacements ? before.homeModuleOrder : 'summary,plugin:other/page');
+    assert.deepEqual(f.settings.notchPluginPages, keepPlacements ? before.notchPluginPages : ['other/page']);
+    assert.equal(f.settings.pluginStates['test-plugin'], undefined);
+  });
+}
+for (const restart of [false, true]) for (const state of ['symlink', 'dangling-symlink', 'file']) {
+  for (const name of ['preview', 'update', 'rollback', 'uninstall']) {
+    test(`${state} replacement rejects ${name}${restart ? ' after restart' : ''} without mutation`, t => {
+      const f = historyFixture(t), target = path.join(f.args.userDir, 'test-plugin');
+      const api = restart ? createManagedPlugins(f.args) : f.api;
+      if (restart) api.recover();
+      const token = name === 'update' ? api.preview(parsePackage(bytes('3.0.0'))).token : null;
+      fs.rmSync(target, { recursive: true });
+      const external = path.join(f.dir, 'external');
+      if (state === 'symlink') { fs.mkdirSync(external); fs.writeFileSync(path.join(external, 'sentinel'), 'untouched'); }
+      if (state === 'file') fs.writeFileSync(target, 'replacement');
+      else fs.symlinkSync(external, target, process.platform === 'win32' ? 'junction' : 'dir');
+      if (restart && name !== 'update') api.recover();
+      const before = snapshot(f), stopped = f.stopped;
+      assert.throws(() => operation(api, name, token), /managed plugin directory is missing or replaced/);
+      assert.deepEqual(snapshot(f), before);
+      assert.equal(f.stopped, stopped);
+    });
+  }
+}
+for (const name of ['update', 'rollback', 'uninstall']) {
+  for (const point of ['prepared', 'old-moved', 'new-moved', 'registry-written', 'settings-written', 'reloaded']) {
+    test(`missing target ${name} restores absence and all state after ${point}`, t => {
+      let armed = false;
+      const f = historyFixture(t, step => { if (armed && step === point) throw new Error('injected interruption'); });
+      const target = path.join(f.args.userDir, 'test-plugin');
+      fs.rmSync(target, { recursive: true });
+      const before = snapshot(f), record = f.api.describe('test-plugin');
+      armed = true;
+      assert.throws(() => operation(f.api, name, name === 'update' ? f.api.preview(parsePackage(bytes('3.0.0'))).token : null), /injected interruption/);
+      assert.deepEqual(snapshot(f), before);
+      assert.throws(() => fs.lstatSync(target), { code: 'ENOENT' });
+      assert.deepEqual(f.api.describe('test-plugin'), record);
+      const recovered = createManagedPlugins(f.args); recovered.recover();
+      assert.deepEqual(snapshot(f), before);
+      assert.deepEqual(recovered.describe('test-plugin'), record);
+    });
+  }
+  test(`missing target ${name} recovers after actual process termination`, t => {
+    const f = historyFixture(t), target = path.join(f.args.userDir, 'test-plugin');
+    fs.rmSync(target, { recursive: true });
+    const before = snapshot(f);
+    const child = spawnSync(process.execPath, ['-e', `
+      const fs = require('node:fs');
+      const { createManagedPlugins } = require(process.argv[1]);
+      const { parsePackage } = require(process.argv[2]);
+      const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+      const api = createManagedPlugins({ ...input.args,
+        manager: { list: () => ({ plugins: [] }), beginMutation() {}, endMutation() {}, reload() {} },
+        getSettings: () => input.settings, saveSettings: patch => fs.writeSync(1, JSON.stringify(patch)),
+        fault: step => { if (step === 'settings-written') process.exit(87); }
+      });
+      api.recover();
+      if (input.name === 'update') api.install(api.preview(parsePackage(input.package)).token);
+      else if (input.name === 'rollback') api.rollback('test-plugin');
+      else api.uninstall('test-plugin', { keepData: false });
+    `, require.resolve('../../src/electron/plugins/managed'), require.resolve('../../src/electron/plugins/package')], {
+      input: JSON.stringify({ args: f.args, settings: f.settings, name, package: bytes('3.0.0').toString() })
+    });
+    assert.equal(child.status, 87, child.stderr.toString());
+    f.args.saveSettings(JSON.parse(child.stdout.toString()));
+    const journal = JSON.parse(fs.readFileSync(path.join(f.args.root, 'transaction.json')));
+    assert.equal(journal.hadTarget, false); assert.equal(journal.phase, 'prepared');
+    const recovered = createManagedPlugins(f.args); recovered.recover();
+    assert.deepEqual(snapshot(f), before);
+    assert.equal(recovered.describe('test-plugin').version, '2.0.0');
+    assert.throws(() => fs.lstatSync(target), { code: 'ENOENT' });
+  });
+}
+test('missing target preserves source, version and stale-confirmation checks', t => {
+  const f = historyFixture(t); fs.rmSync(path.join(f.args.userDir, 'test-plugin'), { recursive: true });
+  const before = snapshot(f);
+  assert.throws(() => f.api.preview(parsePackage(bytes('3.0.0')), { id: 'other' }), /source differs/);
+  for (const version of ['1.0.0', '2.0.0']) assert.throws(() => f.api.preview(parsePackage(bytes(version))), /newer version/);
+  assert.deepEqual(snapshot(f), before);
+  const stale = f.api.preview(parsePackage(bytes('4.0.0'))).token;
+  f.install('3.0.0');
+  assert.throws(() => f.api.install(stale), /version changed/);
+});
+for (const corruption of ['manifest', 'missing-manifest', 'version', 'id']) {
+  test(`existing target update still rejects ${corruption} corruption`, t => {
+    const f = historyFixture(t), manifest = path.join(f.args.userDir, 'test-plugin/manifest.json');
+    if (corruption === 'manifest') fs.writeFileSync(manifest, '{broken');
+    else if (corruption === 'missing-manifest') fs.rmSync(manifest);
+    else {
+      const data = JSON.parse(fs.readFileSync(manifest)); data[corruption] = corruption === 'id' ? 'other-plugin' : '9.0.0';
+      fs.writeFileSync(manifest, JSON.stringify(data));
+    }
+    const registry = fs.readFileSync(path.join(f.args.root, 'installed.json'));
+    const backup = fs.readFileSync(path.join(f.args.root, 'previous/test-plugin.tmplugin'));
+    const settings = structuredClone(f.settings), stopped = f.stopped;
+    assert.throws(() => f.install('3.0.0'), corruption === 'manifest' ? SyntaxError : corruption === 'missing-manifest' ? { code: 'ENOENT' } : /changed outside/);
+    assert.deepEqual(fs.readFileSync(path.join(f.args.root, 'installed.json')), registry);
+    assert.deepEqual(fs.readFileSync(path.join(f.args.root, 'previous/test-plugin.tmplugin')), backup);
+    assert.deepEqual(f.settings, settings); assert.equal(f.stopped, stopped);
+  });
+}
+for (const code of ['EACCES', 'ENOTDIR']) {
+  test(`target lstat ${code} is propagated without mutation`, t => {
+    const f = historyFixture(t), target = path.join(f.args.userDir, 'test-plugin');
+    const token = f.api.preview(parsePackage(bytes('3.0.0'))).token;
+    const before = snapshot(f), stopped = f.stopped, lstat = fs.lstatSync;
+    const error = Object.assign(new Error('cannot inspect target'), { code });
+    const mock = t.mock.method(fs, 'lstatSync', function (file, ...args) {
+      if (file === target) throw error;
+      return lstat.call(this, file, ...args);
+    });
+    for (const name of ['preview', 'update', 'rollback', 'uninstall']) assert.throws(() => operation(f.api, name, token), e => e === error);
+    mock.mock.restore();
+    assert.deepEqual(snapshot(f), before); assert.equal(f.stopped, stopped);
+  });
+}
+for (const corruption of ['id', 'version', 'hash', 'compatibility']) {
+  test(`missing target rollback still rejects backup ${corruption} mismatch`, t => {
+    const f = historyFixture(t); fs.rmSync(path.join(f.args.userDir, 'test-plugin'), { recursive: true });
+    const extra = corruption === 'id' ? { id: 'other-plugin' } : corruption === 'compatibility' ? { tmApi: '^99' } : {};
+    let backup = bytes(corruption === 'version' ? '9.0.0' : '1.0.0', extra);
+    if (corruption === 'hash') backup = Buffer.concat([backup, Buffer.from(' ')]);
+    fs.writeFileSync(path.join(f.args.root, 'previous/test-plugin.tmplugin'), backup);
+    const before = snapshot(f), stopped = f.stopped;
+    assert.throws(() => f.api.rollback('test-plugin'), corruption === 'compatibility' ? /not supported/ : /identity mismatch/);
+    assert.deepEqual(snapshot(f), before); assert.equal(f.stopped, stopped);
+  });
+}
 test('package preview is data-only and rejects traversal, oversized code and incompatible manifests', () => {
   assert.equal(parsePackage(bytes()).manifest.id, 'test-plugin');
   for (const main of ['../escape.js', '/escape.js', 'CON.js', 'dir/../escape.js', 'dir//escape.js']) assert.throws(() => parsePackage(bytes('1.0.0', { main })));

@@ -14,7 +14,7 @@ const { createBusinessDataService } = require('./businessData');
 const { createPluginCapabilities } = require('./capabilities');
 const { createPluginSettingsStore } = require('./settings');
 const { createPluginSandbox, PLUGIN_SCHEME } = require('./sandbox');
-const { createWebUi, WEB_UI_SCHEME } = require('./webUi');
+const { createWebUi, WEB_UI_SCHEME, configureWebUiNetworkIsolation } = require('./webUi');
 const { createPluginPages } = require('./pages');
 const { createManagedPlugins } = require('./managed');
 const { createPluginAppearance } = require('./appearance');
@@ -483,7 +483,8 @@ function createPluginRuntime({
 }
 
 // Electron accepts privilege declarations only once, before app ready.
-function registerPluginScheme(protocol) {
+function registerPluginScheme(protocol, commandLine = require('electron').app.commandLine) {
+  configureWebUiNetworkIsolation(commandLine);
   protocol.registerSchemesAsPrivileged([PLUGIN_SCHEME, WEB_UI_SCHEME]);
 }
 

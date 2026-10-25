@@ -10,6 +10,7 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-mot
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-corrections-ui.cjs
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-notch-page-order-ui.cjs
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-web-ui.cjs
+env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-web-network.cjs
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-surface-web.cjs
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-web-cache.cjs
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-send.cjs
@@ -21,6 +22,8 @@ env -u ELECTRON_RUN_AS_NODE npm run verify:plugins -- --out /tmp/plugin-report.j
 The sandbox verifier deliberately creates flooding, busy and memory-consuming Workers; run it separately from `npm test`. Test reports, screenshots and frozen review manifests belong in local/CI artifacts and PR evidence, not the permanent author documentation.
 
 The send fixture uses the production runtime, Worker and isolated Rich bridge. It checks settings-only action wakeup without ticks, idle process reclamation while settings remain open, handler results/errors and wire-limit rejection, metric updates, presentation during a pending send, and disable during an action. Captures show synthetic settings/search content, not packaged-app or external-network acceptance.
+
+The network fixture uses the production Rich controller/preload and only loopback HTTP/UDP/TCP endpoints with synthetic TURN usernames. An unprotected positive control must reach both TURN endpoints; the protected document must send no packets while local CSS/SVG and its bridge still work. It covers both PeerConnection names and attempts through initial blank/detached frames. Re-run on Electron upgrades: neither CSP `connect-src`, browser permission denial, offline emulation, nor `disable_non_proxied_udp` alone is a complete WebRTC boundary. `TM_NETWORK_BASELINE` may point to a saved old `webUi.js` to demonstrate the regression without replacing source files.
 
 ## Business/settings integration checks
 
@@ -37,7 +40,7 @@ Focused DTO/store tests do not establish Worker/Rich transport, native multi-win
 
 ## Required behavior
 
-- Installation verifies the exact source/version/hash and permissions. Updates cannot silently widen grants. Rollback and removal must recover from invalid installed code without deleting retained user data.
+- Installation verifies the exact source/version/hash and permissions. Updates cannot silently widen grants. Updates, verified rollback and removal must recover from a wholly missing managed directory without deleting retained user data. Existing-but-invalid packages retain their separate update policy; symlinks (including dangling links) and other replacement file types remain rejected. Missing-target interruption recovery must restore absence and the prior registry, backup and settings.
 - Disabled plugins disappear from runtime surfaces without erasing saved placement/order preferences. Notch ordering and reset use shared drag behavior, maintain keyboard focus and avoid camera overlap at supported sizes/zoom.
 - Multiple visible consumers share sampling. Hiding, disabling or removing the last consumer clears demand; only explicitly enabled background features retain their own demand. Rate-limit recovery must not leave a healthy-heartbeat worker permanently stuck in a tick.
 - Authored pages cannot access host DOM, credentials, arbitrary IPC or unauthorized sources. Selection/save failure preserves the prior document and persisted selection. Owner close, reload and capability loss revoke active and cached documents.

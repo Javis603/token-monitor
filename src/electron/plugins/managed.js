@@ -98,11 +98,19 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     }
     cleanup(); registry = readRegistry();
   }
+  function hasTarget(target) {
+    let stat;
+    try { stat = fs.lstatSync(target); }
+    catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+    // lstat distinguishes genuine absence from a dangling symlink. Neither
+    // links nor other replacement file types may become transaction targets.
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('managed plugin directory is missing or replaced');
+    return true;
+  }
   function managed(id) {
     assertAvailable();
     if (typeof id !== 'string' || !ID_RE.test(id) || !registry[id]) throw new Error('plugin is not a managed installation');
-    const target = path.join(userDir, id);
-    if (!fs.existsSync(target) || fs.lstatSync(target).isSymbolicLink()) throw new Error('managed plugin directory is missing or replaced');
+    hasTarget(path.join(userDir, id));
     return registry[id];
   }
   function describe(id) { const item = registry[id]; return item ? { ...item, previousVersion: item.previousVersion || null } : null; }
@@ -134,13 +142,16 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     busy = true;
     let prepared = false, began = false, committed = false, recovered = true;
     try {
-      fs.rmSync(txDir, { recursive: true, force: true }); fs.mkdirSync(txDir, { mode: 0o700 });
       const target = path.join(userDir, id), stage = path.join(txDir, 'stage');
+      const hadTarget = hasTarget(target);
+      fs.rmSync(txDir, { recursive: true, force: true }); fs.mkdirSync(txDir, { mode: 0o700 });
       if (pkg) unpackPackage(pkg, stage);
       const previous = path.join(historyDir, `${id}.tmplugin`), hadPrevious = fs.existsSync(previous);
       if (hadPrevious) fs.copyFileSync(previous, path.join(txDir, 'previous.tmplugin'));
       let current = null;
-      if (operation === 'update' || operation === 'rollback') {
+      // A missing directory has no current package to retain. Errors within an
+      // existing package still follow the normal update/rollback policy.
+      if (hadTarget && (operation === 'update' || operation === 'rollback')) {
         try {
           current = packageDirectory(target, { checkCompatibility: false });
           if (current.manifest.id !== id || current.manifest.version !== registry[id].version) throw new Error('installed package was changed outside the manager');
@@ -157,7 +168,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       boundedJson(next, MAX_REGISTRY_BYTES);
       manager.beginMutation(); began = true;
       const before = settingsSnapshot();
-      const j = { id, operation, phase: 'prepared', hadTarget: fs.existsSync(target), hadPrevious, registry, settings: before };
+      const j = { id, operation, phase: 'prepared', hadTarget, hadPrevious, registry, settings: before };
       boundedJson({ ...j, phase: 'committed' }, MAX_JOURNAL_BYTES);
       atomicJson(journalFile, j, MAX_JOURNAL_BYTES); prepared = true; fault('prepared');
       if (j.hadTarget) fs.renameSync(target, path.join(txDir, 'old'));

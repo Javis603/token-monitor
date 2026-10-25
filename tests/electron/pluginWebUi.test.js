@@ -4,7 +4,22 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
 const { normalizeManifest } = require('../../src/shared/plugins/manifest');
 const { pageSnapshot, assetPath } = require('../../src/shared/plugins/webUi');
 const { packageDirectory, unpackPackage, parsePackage } = require('../../src/electron/plugins/package');
-const { boundsFor, themeContext, CSP } = require('../../src/electron/plugins/webUi');
+const { boundsFor, themeContext, CSP, configureWebUiNetworkIsolation, registerWebUiScheme } = require('../../src/electron/plugins/webUi');
+test('Rich network policy preserves unrelated feature switches and rejects a disabled security boundary', () => {
+  const switches = new Map([['enable-features', 'OtherFeature:param/value,ConnectionAllowlists<Trial'], ['disable-features', 'UnrelatedFeature']]);
+  const commandLine = { getSwitchValue: name => switches.get(name) || '', appendSwitch: (name, value) => switches.set(name, value) };
+  let registered = 0;
+  registerWebUiScheme({ registerSchemesAsPrivileged: () => registered++ }, commandLine);
+  configureWebUiNetworkIsolation(commandLine);
+  assert.equal(registered, 1);
+  assert.equal(switches.get('enable-features'), 'OtherFeature:param/value,ConnectionAllowlists<Trial,OverrideConnectionAllowlistOriginTrial');
+  assert.equal(switches.get('disable-features'), 'UnrelatedFeature');
+  for (const name of ['ConnectionAllowlists', 'OverrideConnectionAllowlistOriginTrial']) {
+    switches.set('disable-features', `UnrelatedFeature,${name}`);
+    assert.throws(() => registerWebUiScheme({ registerSchemesAsPrivileged: () => registered++ }, commandLine), /network isolation cannot be disabled/);
+    assert.equal(registered, 1);
+  }
+});
 const manifest = () => ({ id: 'web-demo', name: 'Demo', version: '1.0.0', tmApi: 1, permissions: ['ui.web', 'tm.pages'], webUi: { version: 1, assets: ['ui/index.html', 'ui/page.js'], documents: [{ id: 'models', entry: 'ui/index.html', target: 'model', slot: 'replace' }] } });
 test('web interface is explicit permissioned and named, not a DOM selector', () => {
   assert.deepEqual(normalizeManifest(manifest()).errors, []);

@@ -29,6 +29,10 @@ A single optional `target: "settings"`, `slot: "replace"` document has no `view`
 
 Each host/window/surface/instance/document has independent identity and shares the existing frozen controller cache. Home/page/settings children are admitted only inside fully visible, unobstructed host content rectangles. Clipping, scrolling, motion and overlays temporarily return to the lightweight view and release subscriptions. At most four presentation children are admitted per surface batch and eight across windows, with a sampled 512 MiB aggregate active working-set budget in addition to per-child and frozen-cache limits. These are host supervision policies, not hard OS quotas. Home cards outside admission remain lightweight. Escape restores keyboard focus to the host; normal document input never changes the main window's focusability policy.
 
+## Network isolation
+
+Rich documents have no direct network capability, including WebRTC. Before Electron is ready, the shared scheme registration enables Chromium’s native Connection Allowlist support; each Rich asset response carries `(response-origin);webrtc=block`. This permits package-local assets and blocks PeerConnection independently of `connect-src`, browser media permissions and HTTP request hooks. The pinned Chromium 150 requires `OverrideConnectionAllowlistOriginTrial`; preserve the activation and real UDP/TCP regression when updating Electron. Only responses carrying this policy opt in; brokered Worker requests use their separate permission-checked transport. Do not replace this with the unsupported CSP `webrtc` directive or a UDP-only IP policy.
+
 ## Fixed bridge
 
 The isolated preload exposes `window.tm` version 1, never an IPC channel argument or Electron objects:
