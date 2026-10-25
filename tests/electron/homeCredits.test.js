@@ -124,13 +124,32 @@ test('homeDeviceRows carries the calibration block for tooltip rendering', () =>
       periods: { today: { totalTokens: 5 } },
       credits: {
         available: true,
-        totals: { credits: 1, requests: 1 },
+        totals: { credits: 6348.06, requests: 192 },
         recentEvents: [{ credits: -3, updatedAt: atHour(9) }],
         calibration
       }
     }
   ], { now: NOON });
   assert.deepEqual(rows[0].creditsCalibration, calibration);
+  assert.equal(rows[0].creditsAvailable, true);
+  assert.equal(rows[0].creditsTotal, 6348.06);
+});
+
+test('a connected ledger with no spend today still surfaces availability', () => {
+  const rows = homeDeviceRows([
+    {
+      deviceId: 'local',
+      periods: { today: { totalTokens: 5 } },
+      credits: {
+        available: true,
+        totals: { credits: 12.5, requests: 3 },
+        recentEvents: [{ credits: -2, updatedAt: atHour(9) - 7 * 24 * 3600 * 1000 }]
+      }
+    }
+  ], { now: NOON });
+  assert.equal(rows[0].creditsToday, null);
+  assert.equal(rows[0].creditsAvailable, true);
+  assert.equal(rows[0].creditsTotal, 12.5);
 });
 
 test('normalizeCreditsSummary keeps a bounded calibration block, drops junk', () => {

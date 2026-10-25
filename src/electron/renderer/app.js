@@ -6811,10 +6811,14 @@ function renderHomeDeviceModule() {
     value.className = 'home-list-value';
     value.textContent = formatCompact(row.value);
     item.append(mark, label, value);
-    if (row.creditsToday != null) {
+    if (row.creditsAvailable) {
       const credits = document.createElement('span');
       credits.className = 'home-device-credits';
-      credits.textContent = t('home.creditsToday', { value: formatCredits(row.creditsToday) });
+      // A day with no WorkBuddy spend still proves the ledger is connected;
+      // only the label switches to the running total.
+      credits.textContent = row.creditsToday != null
+        ? t('home.creditsToday', { value: formatCredits(row.creditsToday) })
+        : t('home.creditsTotal', { value: formatCredits(row.creditsTotal) });
       credits.title = creditsTooltip(row.creditsCalibration);
       item.append(credits);
     }

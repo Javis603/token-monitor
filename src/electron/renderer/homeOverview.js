@@ -259,6 +259,8 @@
           isLocal: Boolean(localKey && key === localKey),
           isStale: Boolean(device?.stale),
           creditsToday: creditsSpentToday(device?.credits, now),
+          creditsAvailable: device?.credits?.available === true,
+          creditsTotal: Number(device?.credits?.totals?.credits) || 0,
           creditsCalibration: device?.credits?.calibration || null,
           index
         };
