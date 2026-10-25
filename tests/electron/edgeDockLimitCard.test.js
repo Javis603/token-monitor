@@ -730,7 +730,7 @@ test('an Ollama API card keeps purchased balance separate from included monthly 
   assert.equal(card.textOf('limit-meter').length, 1);
   for (const amount of ['$52.50', '$18.25', '$7.50']) assert.ok(card.text.includes(amount), card.text);
   assert.equal(card.text.includes('$70.75'), false, 'wallet and allowance must not be added');
-  assert.deepEqual([...card.walk()].filter((node) => node.classNames.has('limit-window-text')).map((node) => node.children[0].textContent), ['Credit balance', 'Included credits']);
+  assert.deepEqual([...card.walk()].filter((node) => node.classNames.has('limit-window-text')).map((node) => node.children[0].textContent), ['Included credits', 'Credit balance']);
   assert.match(card.find('limit-spend-summary').textContent, /\$18\.25/);
   const tooltip = card.find('limit-detail-tooltip');
   assert.equal(tooltip.text, 'Monthly credits used $7.50');
@@ -770,7 +770,7 @@ test('Ollama hides spending details when that usage item is disabled and keeps s
   assert.doesNotMatch(spendOnly.text, /Credit balance/);
 });
 
-test('Home renders Ollama balance and included quota on separate full-width rows with the shared tooltip', () => {
+test('Home renders Ollama included quota before balance on separate full-width rows with the shared tooltip', () => {
   const { parseOllamaBalance } = require('../../src/shared/providers/ollama/limits');
   const { homeLimitAccounts } = require('../../src/electron/renderer/homeOverview');
   const parsed = parseOllamaBalance({ included: { balance_usd: 52.5, allowance_usd: 60 }, purchased: { balance_usd: 18.25 } });
@@ -794,13 +794,13 @@ test('Home renders Ollama balance and included quota on separate full-width rows
   const readings = [...context.result.walk()].filter((node) => node.classNames.has('home-limit-window'));
   assert.equal(readings.length, 2);
   assert.ok(readings.every((node) => node.classNames.has('home-limit-window-wide')));
-  assert.equal(readings[0].find('home-limit-window-label').textContent, 'Credit balance');
-  assert.equal(readings[0].find('home-list-value').textContent, '$18.25');
-  assert.equal(readings[0].find('limit-meter'), null);
-  assert.equal(readings[0].find('limit-detail-tooltip').text, 'Monthly credits used $7.50');
-  assert.equal(readings[0].find('limit-detail-tooltip-trigger').tabIndex, 0);
-  assert.equal(readings[1].find('home-list-value').textContent, '$52.50');
-  assert.ok(readings[1].find('limit-meter'));
+  assert.equal(readings[1].find('home-limit-window-label').textContent, 'Credit balance');
+  assert.equal(readings[1].find('home-list-value').textContent, '$18.25');
+  assert.equal(readings[1].find('limit-meter'), null);
+  assert.equal(readings[1].find('limit-detail-tooltip').text, 'Monthly credits used $7.50');
+  assert.equal(readings[1].find('limit-detail-tooltip-trigger').tabIndex, 0);
+  assert.equal(readings[0].find('home-list-value').textContent, '$52.50');
+  assert.ok(readings[0].find('limit-meter'));
 });
 
 test('a TypeSafe card omits expiry when the billing response has no valid grants', () => {

@@ -56,18 +56,18 @@ test('Home carries Ollama wallet and spending amounts without inferred quota per
   }
 });
 
-test('Home leads with Ollama balance, folds monthly spend into its tooltip, and keeps quota on a separate row', () => {
+test('Home keeps Ollama included quota before balance and folds monthly spend into the balance tooltip', () => {
   const { parseOllamaBalance } = require('../../src/shared/providers/ollama/limits');
   const parsed = parseOllamaBalance({ included: { balance_usd: 52.5, allowance_usd: 60 }, purchased: { balance_usd: 18.25 } });
   const [row] = homeLimitAccounts([{ providerId: 'ollama', windows: parsed.windows }]);
-  assert.deepEqual(row.windows.map((w) => w.label), ['Credit balance', 'Included credits']);
-  assert.deepEqual(row.windows[0].detailEntries, [['Monthly credits used', '$7.50']]);
-  assert.equal(row.windows[0].remainingPercent, null);
+  assert.deepEqual(row.windows.map((w) => w.label), ['Included credits', 'Credit balance']);
+  assert.deepEqual(row.windows[1].detailEntries, [['Monthly credits used', '$7.50']]);
+  assert.equal(row.windows[1].remainingPercent, null);
   assert.ok(row.windows.every((w) => w.fullWidth));
   assert.equal(homeLimitAccounts([{ providerId: 'thirdparty', windows: parsed.windows }])[0].windows.length, 2);
   const [hiddenSpend] = homeLimitAccounts([{ providerId: 'ollama', windows: parsed.windows }], 3, { isWindowHidden: (_, w) => w.metric === 'spend' });
   assert.equal(hiddenSpend.windows.length, 2);
-  assert.deepEqual(hiddenSpend.windows[0].detailEntries, []);
+  assert.deepEqual(hiddenSpend.windows[1].detailEntries, []);
 });
 
 test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
