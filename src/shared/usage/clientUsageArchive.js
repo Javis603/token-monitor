@@ -2,6 +2,7 @@
 
 const { PERIODS, normalizeClientName, normalizePeriod } = require('../usage');
 const { normalizeTokscaleModelNameForClient } = require('../history');
+const { claudeArchivePolicy } = require('./claudeArchivePolicy');
 const {
   CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry
 } = require('../clientIdentitySplits');
@@ -26,7 +27,7 @@ function clientSet(value) {
   return new Set(String(value || '').split(',').map(normalizeClientId).filter(Boolean));
 }
 
-function archivedPeriod(input, client, ledgerKeys = new Set()) {
+function archivedPeriod(input, client, ledgerKeys = new Set(), excludeSession = () => false) {
   const normalized = normalizePeriod({ sessions: input?.sessions });
   const period = {
     totalTokens: Math.max(0, Math.round(numberValue(input?.totalTokens))),
@@ -38,8 +39,11 @@ function archivedPeriod(input, client, ledgerKeys = new Set()) {
   // The Dots ledger already retains these requests. A frozen client snapshot
   // would bypass visibility and native-rollout precedence on later replay.
   // Also scrub older snapshots, using their explicit session provenance only.
+  // On replay, the caller can exclude known Claude mirrors by the same exact
+  // subtraction; unmatched aggregate residue has no source identity to infer.
   for (const [key, session] of Object.entries(period.sessions)) {
-    if (session.usageSource !== 'codex-dots-local' && !ledgerKeys.has(key)) continue;
+    if (session.usageSource !== 'codex-dots-local' && !ledgerKeys.has(key)
+      && !excludeSession(key, session, client)) continue;
     period.totalTokens = Math.max(0, period.totalTokens - numberValue(session.totalTokens));
     period.costUsd = Math.max(0, period.costUsd - numberValue(session.costUsd));
     for (const [field, sessionField] of [['models', 'models'], ['modelCosts', 'modelCosts']]) {
@@ -474,6 +478,7 @@ function applyArchivedClientUsage(summary, archive, options = {}) {
   const activeClients = clientSet(options.activeClients);
   const now = toDate(options.now);
   const next = cloneJson(summary);
+  const excludeSession = claudeArchivePolicy(summary);
 
   // Merged snapshots replay after every ordinary entry. An archived split-id
   // entry and a merged snapshot can hold the same session under two ids, and
@@ -483,6 +488,10 @@ function applyArchivedClientUsage(summary, archive, options = {}) {
     .map(([client, entry]) => [client, entry, mergedSnapshotFor(client, entry)])
     .sort((left, right) => Number(Boolean(left[2])) - Number(Boolean(right[2])));
   for (const [client, entry, splitDef] of orderedEntries) {
+    // A corrupt selection cannot classify aggregate-only snapshots either.
+    // Retain the data on disk, but suspend all Claude archive replay until the
+    // policy is restored. Live summary usage is already independently selected.
+    if (client === 'claude' && summary.claudeMirrorArchiveRecovery === true) continue;
     // An ordinary entry is skipped once its client is tracked: the live scan now
     // reports it, so adding the archived copy back would double count. A merged
     // snapshot cannot be skipped that way, because becoming tracked covers only
@@ -494,7 +503,9 @@ function applyArchivedClientUsage(summary, archive, options = {}) {
     // than a special case.
     if (activeClients.has(client) && !splitDef) continue;
     for (const periodName of PERIODS) {
-      const usage = entry.periods?.[periodName];
+      const usage = client === 'claude' && summary.excludedSessionKeys?.length
+        ? archivedPeriod(entry.periods?.[periodName], client, new Set(), excludeSession)
+        : entry.periods?.[periodName];
       if (!hasUsage(usage) || !shouldApplyPeriod(periodName, entry, now)) continue;
       if (!hasSummaryPeriod(next, periodName)) continue;
       const effective = splitDef

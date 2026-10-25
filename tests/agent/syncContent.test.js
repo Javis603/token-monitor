@@ -298,6 +298,8 @@ test('actual agent startup reconciles the previous device before a failed scan, 
         if (id === '../shared/providers/cursor/usageEvents') return { createCursorUsageEventIndex: () => ({}) };
         if (id === './runtime') return { async runAgentOnce(options) {
           assert.equal(options.dryRun, dryRun);
+          assert.equal(options.usageOptions.anchorPersistenceEnabled, false);
+          assert.equal(options.usageOptions.mirrorStatePersistenceEnabled, !dryRun);
           if (dryRun) assert.equal(backend.requests.length, 0);
           else {
             assert.equal(backend.requests[0].url, 'https://hub.example/api/sync/titles/a%2Fb');

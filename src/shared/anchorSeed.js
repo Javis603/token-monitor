@@ -1,6 +1,7 @@
 'use strict';
 
 const { collectorAnchorTrust, computePeriodWindows, qoderCnSourcesForClients } = require('./collector');
+const { claudeRemoteMirrors } = require('./claudeRemoteMirrors');
 const { mergePeriods } = require('./usage');
 const { filterReasonixSyntheticSessions } = require('./providers/reasonix/sessionGuard');
 
@@ -40,13 +41,20 @@ function deviceRecordFromAnchor(saved, options = {}) {
   const qoderCnProjectsDir = qoderCnProjectsDirOption === undefined ? qoderCnSources.projectsDir : qoderCnProjectsDirOption;
   const trust = collectorAnchorTrust(saved, { ...options, platform: sourcePlatform || process.platform, clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, now });
   if (!trust) return null;
+  if (options.claudeRemoteMirrorsExcluded) {
+    try {
+      const mirrors = claudeRemoteMirrors({ ...options, mirrorStatePersistenceEnabled: false });
+      if ((mirrors.recoveryRequired === true) !== (saved.claudeMirrorArchiveRecovery === true)
+        || JSON.stringify(mirrors.sessionKeys) !== JSON.stringify(saved.excludedSessionKeys || [])) return null;
+    } catch (_) { return null; }
+  }
   // The seed's own rule, and the one place it is stricter than the collector.
   // A capture time the collector cannot trust only costs it a full scan, but
   // here that timestamp becomes the record's updatedAt and the instant the
   // archive projection is evaluated at, so a snapshot of unknown age must not
   // be presented as one taken now.
   if (trust.capturedAtMs === null) return null;
-  // The anchor keeps host periods and the WSL bundle apart, the way
+  // The anchor keeps primary periods and the additive WSL bundle apart, the way
   // collectUsageOnce does before summing them. Same local day is established
   // above, so all three windows are safe to merge.
   const wsl = wslScanEnabled !== false ? saved.wslBundle : null;
@@ -78,6 +86,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
     // attribution panel. Leaving them off makes the seed a record that looks
     // subtly unlike the one replacing it.
     projectsEnabled,
+    ...(options.claudeRemoteMirrorsExcluded ? { excludedSessionKeys: saved.excludedSessionKeys || [], claudeMirrorArchiveRecovery: saved.claudeMirrorArchiveRecovery === true } : {}),
     ...(wslStatus ? { wslStatus } : {}),
     // Required, not decorative. Without them aggregateDevices falls back to
     // comparing UTC days, and anywhere ahead of UTC a local day that has not

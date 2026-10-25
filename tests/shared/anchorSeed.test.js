@@ -220,3 +220,29 @@ test('the seeded totals survive aggregation once the UTC day has rolled over', (
   const bare = aggregateDevices([withoutWindows], 0, NOW.getTime());
   assert.equal(bare.periods.today.totalTokens, 0, 'guards the fallback this test exists for');
 });
+
+test('mirror recovery invalidates an old seed and survives a matching recovered seed without disk writes', (t) => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-mirror-seed-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const options = seedOptions({ homeDir: root, env: {}, pricingRevision: '', claudeRemoteMirrorsExcluded: true,
+    mirrorStatePath: path.join(root, 'selection.json') });
+  const saved = anchorFixture({ configFingerprint: configFingerprint(CLIENTS, ALL_TIME_SINCE, true, '', '', null, '', options),
+    excludedSessionKeys: [] });
+  assert.ok(deviceRecordFromAnchor(saved, options));
+  const id = '11111111-2222-4333-8444-555555555555';
+  const mirror = path.join(root, '.claude', 'projects', `ssh-${id}`);
+  fs.mkdirSync(mirror, { recursive: true });
+  assert.ok(deviceRecordFromAnchor({ ...saved, excludedSessionKeys: [`claude:${id}`] },
+    { ...options, mirrorStatePersistenceEnabled: true }));
+  assert.equal(fs.existsSync(options.mirrorStatePath), false, 'seed inspection overrides write permission');
+  fs.rmSync(mirror, { recursive: true });
+  fs.writeFileSync(options.mirrorStatePath, '{broken');
+  assert.equal(deviceRecordFromAnchor(saved, options), null);
+  const recovered = deviceRecordFromAnchor({ ...saved, claudeMirrorArchiveRecovery: true }, options);
+  assert.equal(recovered.claudeMirrorArchiveRecovery, true);
+  assert.equal(fs.readFileSync(options.mirrorStatePath, 'utf8'), '{broken');
+  assert.equal(fs.readdirSync(root).some(name => name.endsWith('.corrupt')), false);
+});

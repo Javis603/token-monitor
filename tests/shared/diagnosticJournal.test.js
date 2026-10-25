@@ -81,3 +81,11 @@ test('diagnostic journal rejects event codes without current emitters', () => {
     assert.equal(normalizeDiagnosticEvent({ subsystem, code }), null);
   }
 });
+
+test('mirror recovery remains visible as a bounded storage diagnostic without paths', () => {
+  const event = normalizeDiagnosticEvent({ subsystem: 'storage', code: 'storage-claude-mirror-state-recovered',
+    path: '/private/selection.json', bytes: 'private corrupt data' });
+  assert.equal(event.code, 'storage-claude-mirror-state-recovered');
+  assert.equal(event.path, undefined);
+  assert.equal(event.bytes, undefined);
+});

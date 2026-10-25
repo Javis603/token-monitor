@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 const { PERIODS, normalizePeriod } = require('../usage');
+const { claudeArchivePolicy } = require('./claudeArchivePolicy');
 const {
   cloneJson,
   hasSummaryPeriod,
@@ -435,6 +436,7 @@ function applySessionUsageArchive(summary, archive, options = {}) {
   // SQLite may still hold a released literal alias beside its canonical peer.
   // Pick one whole latest observation per period; never add the same ID twice.
   // Select zeros too, so a newer zero cannot resurrect an older alias's usage.
+  const excludeSession = claudeArchivePolicy(summary);
   const retainedRows = new Map();
   for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
     for (const periodName of PERIODS) {
@@ -447,6 +449,7 @@ function applySessionUsageArchive(summary, archive, options = {}) {
       if (!hasSummaryPeriod(next, periodName)) continue;
       const period = targetFor(periodName);
       const key = sessionKey(session.client || entry.client, session.sessionId || entry.sessionId) || archiveKey;
+      if (excludeSession(key, session, session.client || entry.client)) continue;
       if (period.sessions[key]) continue;
       const selectionKey = `${periodName}:${key}`;
       const observedAt = Date.parse(entry.periodWindows?.[periodName]?.capturedAt || entry.capturedAt || '') || 0;

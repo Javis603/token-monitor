@@ -31,11 +31,12 @@ const {
   normalizeClientName,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('./usage');
-const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
+const { collectWslUsage: collectWslUsageImpl, discoverWslClaudeSources, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { createWatcherHost } = require('./watcherHost');
 const { createSessionActivityScheduler } = require('./sessionActivityScheduler');
 const { activityWatchSources, activityClientsForPath, activityWatchIgnored } = require('./sessionActivityWatch');
 const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories } = require('./history');
+const { claudeRemoteMirrors, claudeRemoteMirrorRoot } = require('./claudeRemoteMirrors');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const {
   createSubprocessTermination,
@@ -216,9 +217,19 @@ function tokscaleCommand(options = {}) {
     process.env.TOKSCALE_EXTRA_DIRS,
     { platform: options.platform || process.platform, home: options.homeDir }
   );
-  const extraDirsEnv = customExtraDirs
-    ? { ...process.env, TOKSCALE_EXTRA_DIRS: customExtraDirs }
-    : process.env;
+  const sharedRoots = options.claudeWslScan?.activeRoots || [];
+  const extraDirs = [customExtraDirs, ...sharedRoots.map((root) => `claude:${root}`)].filter(Boolean).join(',');
+  const extraDirsEnv = { ...process.env };
+  if (extraDirs) extraDirsEnv.TOKSCALE_EXTRA_DIRS = extraDirs;
+  // This opt-in is scoped to our joint scan, never inherited by an isolated
+  // --home scan or an unrelated command such as pricing/capability discovery.
+  for (const key of Object.keys(extraDirsEnv)) {
+    if (['TOKSCALE_CACHED_CLAUDE_DIRS', 'TOKSCALE_EXCLUDED_CLAUDE_DIRS', 'TOKSCALE_CLAUDE_REMOTE_MIRROR_ROOT'].includes(key.toUpperCase())) delete extraDirsEnv[key];
+  }
+  if (options.claudeRemoteMirrorRoot) extraDirsEnv.TOKSCALE_CLAUDE_REMOTE_MIRROR_ROOT = options.claudeRemoteMirrorRoot;
+  if (options.claudeWslScan?.sources?.length) {
+    extraDirsEnv.TOKSCALE_CACHED_CLAUDE_DIRS = JSON.stringify(options.claudeWslScan.sources.flatMap((source) => source.roots));
+  }
   const env = tokscaleEnvWithBlanksDropped(extraDirsEnv, options.platform || process.platform);
   const command = useDirect
     ? { bin: resolved.path, prefixArgs: [], env }
@@ -543,6 +554,14 @@ function runCursorAwareTokscale(clientFilter, operation, signal) {
   return includesCursor ? withCursorLifecycle(operation, { signal }) : operation();
 }
 
+// Only results synthesized here can bypass binary capability acknowledgements.
+// Empty JSON from an actual subprocess still has to advertise its contract.
+const syntheticTokscaleResults = new WeakSet();
+function syntheticTokscaleResult(value) {
+  syntheticTokscaleResults.add(value);
+  return value;
+}
+
 function runTokscale({
   clients,
   flags,
@@ -551,15 +570,17 @@ function runTokscale({
   terminationOptions,
   onTerminationUnconfirmed,
   customScanPaths,
+  claudeWslScan,
+  claudeRemoteMirrorRoot,
   homeDir,
   workspaces = true
 }) {
   throwIfAborted(signal);
-  const command = tokscaleCommand({ customScanPaths, homeDir });
+  const command = tokscaleCommand({ customScanPaths, homeDir, claudeWslScan, claudeRemoteMirrorRoot });
   const requested = tokscaleClientFilter(clients);
-  if (!requested) return Promise.resolve({ entries: [] });
+  if (!requested) return Promise.resolve(syntheticTokscaleResult({ entries: [] }));
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
-  if (!clientFilter) return Promise.resolve({ entries: [] });
+  if (!clientFilter) return Promise.resolve(syntheticTokscaleResult({ entries: [] }));
   // Asking for the join is what makes the scan resolve and label workspaces, so
   // the Projects opt-out has to be applied here rather than on the way out: a
   // scan that still resolved them and had its answer discarded would keep
@@ -597,7 +618,7 @@ function runTokscale({
   });
   return runCursorAwareTokscale(clientFilter, () => (
     scan(clientFilter).catch((error) => (
-      retryWithKnownCapabilities(error, requested, command, { entries: [] }, (filtered) => (
+      retryWithKnownCapabilities(error, requested, command, syntheticTokscaleResult({ entries: [] }), (filtered) => (
         scan(filtered)
       ), signal, {
         terminationOptions,
@@ -607,13 +628,13 @@ function runTokscale({
   ), signal);
 }
 
-function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir }) {
+function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir, claudeWslScan, claudeRemoteMirrorRoot }) {
   throwIfAborted(signal);
-  const command = tokscaleCommand({ customScanPaths, homeDir });
+  const command = tokscaleCommand({ customScanPaths, homeDir, claudeWslScan, claudeRemoteMirrorRoot });
   const requested = tokscaleClientFilter(clients);
-  if (!requested) return Promise.resolve({ contributions: [] });
+  if (!requested) return Promise.resolve(syntheticTokscaleResult({ contributions: [] }));
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
-  if (!clientFilter) return Promise.resolve({ contributions: [] });
+  if (!clientFilter) return Promise.resolve(syntheticTokscaleResult({ contributions: [] }));
   const runArgs = (filter) => ['graph', '--client', filter, '--no-spinner'];
   const subprocessOptions = {
     operation: 'tokscale graph',
@@ -622,7 +643,7 @@ function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOption
   };
   return runCursorAwareTokscale(clientFilter, () => (
     spawnTokscaleJson(runArgs(clientFilter), commandTimeoutMs, command, signal, subprocessOptions).catch((error) => (
-      retryWithKnownCapabilities(error, requested, command, { contributions: [] }, (filtered) => (
+      retryWithKnownCapabilities(error, requested, command, syntheticTokscaleResult({ contributions: [] }), (filtered) => (
         spawnTokscaleJson(runArgs(filtered), commandTimeoutMs, command, signal, subprocessOptions)
       ), signal, {
         terminationOptions,
@@ -869,8 +890,26 @@ function shouldIncludeHistory(nowMs, lastHistoryAtMs, historyIntervalMs, force, 
   if (force) return true;
   return nowMs - (lastHistoryAtMs || 0) >= historyIntervalMs;
 }
+
+function sharedClaudeWslEnabled(options = {}) {
+  if ((options.platform || process.platform) !== 'win32' || options.wslScanEnabled === false) return false;
+  // Do not enable this source policy with a scanner that silently ignores its
+  // cache-only input. Publication of a tested vendor build enables the feature.
+  return options.wslClaudeSharedScan ?? (readJson(path.join(__dirname, '../../scripts/vendor/tokscale.json'), null)
+    ?.capabilities?.claudeCachedRoots === true);
+}
+
 async function collectUsageOnce(options) {
   throwIfAborted(options.signal);
+  // Remote Agents own these sessions; never also collect WSL as this device.
+  if (options.claudeRemoteMirrorsExcluded === true) options = { ...options, wslScanEnabled: false };
+  const mirrors = claudeRemoteMirrors(options);
+  if (mirrors.recoveryRequired && options.todayOnlyAnchor?.claudeMirrorArchiveRecovery !== true) {
+    try {
+      options.onDiagnosticEvent?.({ subsystem: 'storage', code: 'storage-claude-mirror-state-recovered' });
+      if (typeof options.logger === 'function') options.logger('[collector] Claude mirror selection state needs recovery; live collection continues, Claude archive-only replay is suspended. Restore the selection file from a trusted backup or disable mirror exclusion.');
+    } catch (_) { /* Diagnostics must not block collection. */ }
+  }
   const { clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion = appVersion(), agentRuntime = '' } = options;
   // One snapshot, one instant: capture the clock before any tokscale scan and
   // reuse it for the today-window key and updatedAt, so a collection that
@@ -889,6 +928,7 @@ async function collectUsageOnce(options) {
     }
   };
   const projectsEnabled = options.projectsEnabled !== false;
+  let claudeWslScan = null;
   const runTokscaleScan = options.runTokscale || ((input) => runTokscale({
     ...input,
     workspaces: projectsEnabled,
@@ -898,21 +938,36 @@ async function collectUsageOnce(options) {
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
   const runTokscaleFn = async (input) => {
-    const json = await runTokscaleScan(input);
+    const json = await runTokscaleScan({
+      ...input,
+      ...(!input.flags?.includes('--home') ? { claudeWslScan, claudeRemoteMirrorRoot: mirrors.root } : {})
+    });
+    if (!syntheticTokscaleResults.has(json) && claudeWslScan?.sources.length && !input.flags?.includes('--home') && json?.claudeCachedRoots !== true) {
+      throw new Error('Tokscale does not support shared Claude WSL sources; install the pinned vendor build.');
+    }
+    if (!syntheticTokscaleResults.has(json) && mirrors.root && !input.flags?.includes('--home') && json?.claudeSourceExclusions !== true) throw new Error('Tokscale lacks Claude source exclusions');
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
     return json;
   };
-  const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
+  const runGraphScan = options.runGraph || ((input) => runTokscaleGraph({
     ...input,
     customScanPaths: options.customScanPaths,
     homeDir: options.homeDir,
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-graph')
   }));
+  const runGraphFn = async (input) => {
+    const json = await runGraphScan({ ...input, claudeWslScan, claudeRemoteMirrorRoot: mirrors.root });
+    if (!syntheticTokscaleResults.has(json) && mirrors.root && json?.claudeSourceExclusions !== true) throw new Error('Tokscale graph lacks Claude source exclusions');
+    if (!syntheticTokscaleResults.has(json) && claudeWslScan?.sources.length && json?.claudeCachedRoots !== true) {
+      throw new Error('Tokscale graph does not support shared Claude WSL sources.');
+    }
+    return json;
+  };
   const collectWsl = options.collectWslUsage || collectWslUsageImpl;
   const probeWslStateFn = options.probeWslState || probeWslStateImpl;
-  // Injectable only for the WSL-status gate, so tests can exercise the win32
-  // build path on a non-Windows CI box (the real process.platform stays for
+  // Injectable for WSL collection/status gates, so tests can exercise the win32
+  // path on a non-Windows CI box (the real process.platform stays for
   // tokscale binary resolution, which is genuinely platform-bound).
   const platformValue = options.platform || process.platform;
   const osInfo = options.osInfo === undefined
@@ -956,11 +1011,25 @@ async function collectUsageOnce(options) {
   let dailyHistoryLiveDays = options.dailyHistoryLiveDays;
   let todayPartitions = null;
   const anchor = options.todayOnlyAnchor;
-  const anchorUsed = Boolean(
+  const jointClaude = trackedClientSet.has('claude') && sharedClaudeWslEnabled(options);
+  let anchorUsed = Boolean(
     anchor
     && anchor.dateKey === localTodayKey(collectedAt)
     && canTargetTodayPartitions(anchor, targetClients)
   );
+  if (options.claudeRemoteMirrorsExcluded === true && JSON.stringify(anchor?.excludedSessionKeys || []) !== JSON.stringify(mirrors.sessionKeys)) anchorUsed = false;
+  if ((anchor?.claudeMirrorArchiveRecovery === true) !== (mirrors.recoveryRequired === true)) anchorUsed = false;
+  if (jointClaude) {
+    // A source-policy transition (including a legacy persisted anchor) must
+    // rebuild all periods. A periodic WSL refresh also refreshes old days.
+    if (anchorUsed && anchor.claudeWslSources && !options.refreshWsl) {
+      claudeWslScan = { sources: anchor.claudeWslSources, activeRoots: [], sharedClaudeHomes: [] };
+    } else {
+      const discover = options.discoverWslClaudeSources || discoverWslClaudeSources;
+      claudeWslScan = discover(options.claudeWslSources || anchor?.claudeWslSources || []);
+      if (claudeWslScan.sources.length || anchor?.claudeWslSources?.length) anchorUsed = false;
+    }
+  }
   // Full-scan rows are native, even when their title matches an old override.
   // Retain their fallback through the progressive metadata passes this tick.
   if (!anchorUsed) localSessionMetadataDeps.scanTitleFallbacks = new WeakMap();
@@ -978,7 +1047,7 @@ async function collectUsageOnce(options) {
   }
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
-    try { options.onProgress({ ...periods, updatedAt: new Date().toISOString() }); } catch (_) {}
+    try { options.onProgress({ ...periods, excludedSessionKeys: mirrors.sessionKeys, claudeMirrorArchiveRecovery: mirrors.recoveryRequired === true, updatedAt: new Date().toISOString() }); } catch (_) {}
   };
   if (normalizedClients) {
     const syncClients = targetRequested ? targetClientsCsv : normalizedClients;
@@ -1114,9 +1183,10 @@ async function collectUsageOnce(options) {
     propagateTodayProjects(today, Object.values(todayPartitions), { ...localSessionMetadataDeps, projectsFromToday: true });
   }
 
-  // WSL contribution (Windows only; no-op elsewhere). Full tick scans running WSL
-  // homes; watch tick reuses the frozen snapshot so the Windows-only delta anchor
-  // above stays exact (issue #15). Merged before deriveClientStatus so a client
+  // Independent WSL contribution (Windows only; no-op elsewhere). Joint Claude
+  // accounting is already in the primary periods. Watch ticks reuse the frozen
+  // additive bundle so the primary delta anchor stays exact. Merge before
+  // deriveClientStatus so a client
   // that only exists inside WSL still reports as active.
   //
   // Three WSL refresh modes:
@@ -1128,9 +1198,11 @@ async function collectUsageOnce(options) {
   const windowsPeriods = { today, month, allTime };
   let wslBundle = emptyWslBundle();
   let wslDetected = [];
+  let wslSharedWithData = [];
   if (normalizedClients && options.wslScanEnabled !== false) {
     if (options.refreshWsl) {
       const wslResult = await collectWsl({
+        ...(claudeWslScan ? { homes: claudeWslScan.homes, sharedClaudeHomes: claudeWslScan.sharedClaudeHomes, sharedClaudePeriods: windowsPeriods } : {}),
         clients: normalizedClients,
         trackedClients: normalizedClients,
         allTimeSince,
@@ -1142,10 +1214,12 @@ async function collectUsageOnce(options) {
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
-    } else if (options.wslAnchor) {
+      wslSharedWithData = wslResult.sharedWithData || [];
+    } else if (options.wslAnchor && (anchorUsed || !jointClaude)) {
       wslBundle = options.wslAnchor;
     } else if (!anchorUsed) {
       const wslResult = await collectWsl({
+        ...(claudeWslScan ? { homes: claudeWslScan.homes, sharedClaudeHomes: claudeWslScan.sharedClaudeHomes, sharedClaudePeriods: windowsPeriods } : {}),
         clients: normalizedClients,
         trackedClients: normalizedClients,
         allTimeSince,
@@ -1157,6 +1231,7 @@ async function collectUsageOnce(options) {
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
+      wslSharedWithData = wslResult.sharedWithData || [];
     }
   }
   today = mergePeriods(windowsPeriods.today, wslBundle.today);
@@ -1197,7 +1272,7 @@ async function collectUsageOnce(options) {
   // and stall the fast refresh path (issue #15's load concern).
   let wslStatus = null;
   if (platformValue === 'win32' && normalizedClients) {
-    const reuseFrozen = !options.refreshWsl && options.wslAnchor && options.wslStatus;
+    const reuseFrozen = (anchorUsed || !jointClaude) && !options.refreshWsl && options.wslAnchor && options.wslStatus;
     if (options.wslScanEnabled === false) {
       wslStatus = { state: 'disabled', detected: [], withData: [] };
     } else if (reuseFrozen) {
@@ -1207,7 +1282,7 @@ async function collectUsageOnce(options) {
       if (probe !== 'ok') {
         wslStatus = { state: probe, detected: [], withData: [] };
       } else {
-        const withData = Object.keys(wslBundle.allTime.clients || {});
+        const withData = [...new Set([...Object.keys(wslBundle.allTime.clients || {}), ...wslSharedWithData])];
         const state = withData.length > 0 ? 'active' : 'no-data';
         wslStatus = { state, detected: wslDetected, withData };
       }
@@ -1274,6 +1349,8 @@ async function collectUsageOnce(options) {
     historyAvailable: options.historyEnabled !== false,
     // Private archive hint: these three report requests finished this tick.
     sessionUsageArchiveFullScan: !anchorUsed,
+    excludedSessionKeys: mirrors.sessionKeys,
+    claudeMirrorArchiveRecovery: mirrors.recoveryRequired === true,
     today,
     month,
     allTime
@@ -1320,12 +1397,16 @@ async function collectUsageOnce(options) {
       }
     }
     options.onAnchorComputed({
+      fullScan: !anchorUsed,
+      excludedSessionKeys: mirrors.sessionKeys,
+      claudeMirrorArchiveRecovery: mirrors.recoveryRequired === true,
       sessionIdentityVersion: sessionIdentitiesComplete ? SESSION_IDENTITY_VERSION : (anchor?.sessionIdentityVersion || 1),
       windowsPeriods,
       todayPartitions,
       t3Titles,
       catalogTitleSources,
       catalogProjects,
+      ...(claudeWslScan ? { claudeWslSources: claudeWslScan.sources } : {}),
       wslBundle,
       wslStatus,
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
@@ -2238,7 +2319,11 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qod
   const scanKey = customScanPathsFingerprint(customScanPaths);
   const scanPart = scanKey ? `|scan:${scanKey}` : '';
   const catpawPart = catpawRevision ? `|catpaw:${catpawRevision}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}${catpawPart}|pricing:${pricingRevision}`;
+  const mirrorPart = sourceOptions.claudeRemoteMirrorsExcluded === true
+    ? `|claude-ssh:excluded-v1:${JSON.stringify(claudeRemoteMirrorRoot(sourceOptions))}` : '';
+  const wslPart = sharedClaudeWslEnabled(sourceOptions) && normalizeClientsCsv(clientsCsv).split(',').includes('claude')
+    ? '|claude-wsl:shared-v1' : '';
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}${catpawPart}${wslPart}${mirrorPart}|pricing:${pricingRevision}`;
 }
 
 function qoderCnSourcesForClients(clientsCsv, options = {}) {
@@ -2512,6 +2597,7 @@ function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
 }
 
 function startCollector(options) {
+  if (options.claudeRemoteMirrorsExcluded === true) options = { ...options, wslScanEnabled: false };
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
     historyIntervalMs = 15 * 60 * 1000, historyEnabled = true, watchEnabled,
@@ -2559,7 +2645,10 @@ function startCollector(options) {
     customScanPaths: options.customScanPaths,
     env: options.env || options.sessionMetadataDeps?.env,
     homeDir: options.homeDir,
-    platform: options.platform
+    platform: options.platform,
+    wslScanEnabled: options.wslScanEnabled,
+    claudeRemoteMirrorsExcluded: options.claudeRemoteMirrorsExcluded,
+    wslClaudeSharedScan: options.wslClaudeSharedScan
   };
   const qoderCnSources = qoderCnSourcesForClients(normalizedClients, {
     homeDir: options.homeDir,
@@ -2594,10 +2683,12 @@ function startCollector(options) {
   let rolloverHistoryRetryTimer = null;
   // Last full-scan snapshot; lets watch ticks scan only --today and derive
   // month/allTime exactly (applyPeriodDelta). Reset by every full tick.
-  // anchor holds Windows-only periods; wslAnchor is the WSL contribution frozen
+  // anchor holds primary scan periods (host plus joint Claude sources);
+  // wslAnchor is the independent WSL contribution frozen
   // between full ticks (WSL is not scanned on watch ticks).
   let anchor = null;
   let wslAnchor = null;
+  let claudeWslSources = [];
   let wslStatusAnchor = null;
   // The last-activity days a history refresh produced, carried across the ticks
   // that skip history. Read back out of the record this collector just published
@@ -2732,10 +2823,18 @@ function startCollector(options) {
         pricingRevision,
         ...sourceOptions
       });
+      if (sharedClaudeWslEnabled(options) && Array.isArray(saved?.claudeWslSources)
+        && saved.claudeWslConfigFingerprint === configFingerprint(clients, allTimeSince, options.projectsEnabled,
+          qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, '', sourceOptions)) {
+        claudeWslSources = saved.claudeWslSources;
+      }
       if (trust) {
         anchor = {
           dateKey: saved.dateKey,
           sessionIdentityVersion: saved.sessionIdentityVersion,
+          claudeWslSources,
+          excludedSessionKeys: saved.excludedSessionKeys || [],
+          claudeMirrorArchiveRecovery: saved.claudeMirrorArchiveRecovery === true,
           today: saved.today,
           month: saved.month,
           allTime: saved.allTime,
@@ -2748,10 +2847,9 @@ function startCollector(options) {
           // could be stale for clients that changed while the app was down.
           todayPartitions: null
         };
-        // Don't restore a persisted WSL snapshot when WSL scanning is now off —
-        // the configFingerprint intentionally ignores the toggle (host periods
-        // stay valid), so without this gate a warm-scan preview would briefly
-        // re-merge the old WSL totals before the first full tick clears them.
+        // Legacy isolated host periods remain valid across the WSL toggle.
+        // Their separate WSL snapshot must still be gated here. Joint-source
+        // anchors are invalidated by the source-policy fingerprint above.
         wslAnchor = options.wslScanEnabled !== false ? (saved.wslBundle || null) : null;
         wslStatusAnchor = options.wslScanEnabled !== false ? (saved.wslStatus || null) : null;
         // An untrustworthy capture time leaves lastFullScanAt at 0, which forces
@@ -2777,7 +2875,14 @@ function startCollector(options) {
         todayT3Titles: anchor.todayT3Titles,
         catalogTitleSources: anchor.catalogTitleSources,
         catalogProjects: anchor.catalogProjects,
+        ...(anchor.claudeWslSources ? {
+          claudeWslSources: anchor.claudeWslSources,
+          claudeWslConfigFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled,
+            qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, '', sourceOptions)
+        } : {}),
         wslBundle: wslAnchor,
+        excludedSessionKeys: anchor.excludedSessionKeys || [],
+        claudeMirrorArchiveRecovery: anchor.claudeMirrorArchiveRecovery === true,
         wslStatus: wslStatusAnchor,
         ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
         ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
@@ -2919,6 +3024,7 @@ function startCollector(options) {
         targetClients: anchored && targetAnchorReady ? requestedTargetClients : [],
         sessionMetadataFallback,
         todayOnlyAnchor: anchored ? anchor : null,
+        claudeWslSources,
         wslAnchor: anchored ? wslAnchor : null,
         wslStatus: anchored ? wslStatusAnchor : null,
         lastActivityDays: activityDaysAnchor,
@@ -2942,6 +3048,8 @@ function startCollector(options) {
                 ...(deviceOsInfo.name ? { osName: deviceOsInfo.name } : {}),
                 ...(deviceOsInfo.version ? { osVersion: deviceOsInfo.version } : {}),
                 updatedAt: partial.updatedAt,
+                excludedSessionKeys: partial.excludedSessionKeys,
+                claudeMirrorArchiveRecovery: partial.claudeMirrorArchiveRecovery === true,
                 agentVersion, agentRuntime,
                 trackedClients: (clients || '').split(',').filter(Boolean),
                 // Merge the frozen WSL snapshot into today (as month/allTime do
@@ -3015,10 +3123,14 @@ function startCollector(options) {
       for (const [client, entry] of Object.entries(summary.clientHealth?.clients || {})) {
         if (entry.data?.lastActivityDay) activityDaysAnchor[client] = entry.data.lastActivityDay;
       }
-      if (!anchored && captured) {
+      if (captured?.claudeWslSources) claudeWslSources = captured.claudeWslSources;
+      if (captured && (!anchored || captured.fullScan)) {
         anchor = {
           dateKey: todayKey,
           sessionIdentityVersion: captured.sessionIdentityVersion,
+          claudeWslSources: captured.claudeWslSources,
+          excludedSessionKeys: captured.excludedSessionKeys,
+          claudeMirrorArchiveRecovery: captured.claudeMirrorArchiveRecovery === true,
           today: captured.windowsPeriods.today,
           month: captured.windowsPeriods.month,
           allTime: captured.windowsPeriods.allTime,
@@ -3035,6 +3147,7 @@ function startCollector(options) {
         lastFullScanAt = Date.now();
         persistAnchor(tickPricingRevision, tickSourceRevision);
       } else if (anchored && captured) {
+        if (captured.claudeWslSources) anchor.claudeWslSources = captured.claudeWslSources;
         const identitiesUpgraded = anchor.sessionIdentityVersion !== captured.sessionIdentityVersion;
         if (identitiesUpgraded) {
           for (const period of ['today', 'month', 'allTime']) {

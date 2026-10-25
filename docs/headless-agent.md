@@ -86,6 +86,8 @@ On a Windows desktop, the widget is usually the better choice.
 
 Where a long-running process is not an option, run `npm run agent:once` from a scheduler such as cron instead. Each run does a full scan, so updates arrive only as often as the schedule fires.
 
+When Claude mirror exclusion is enabled, normal `--once` runs retain mirror identities in `claude-remote-mirrors.json` under the shared state directory, even though they do not save a collector anchor. Keep that state across scheduled runs: it prevents deleted mirrors from returning through the session archive. `--dry-run` reads the selection without creating, updating or repairing it.
+
 ## Update
 
 Stop the agent or its service first: `npm ci` replaces `node_modules`, including the tokscale binary the agent runs.
@@ -110,5 +112,5 @@ Stop and remove the service, delete the checkout, and delete the agent's state d
 - **`No such built-in module: node:sqlite`:** Node is older than the required version. Upgrade it, then open a new terminal so `node --version` reports the new version.
 - **Requests go through a proxy:** add the hub host to `NO_PROXY` and `no_proxy`, or unset the proxy variables for the agent.
 - **Two devices replace each other:** give each machine its own `TOKEN_MONITOR_DEVICE_ID`.
-- **Totals are doubled:** two collectors are reading the same tool data, for example the Windows widget's WSL scan and an agent inside WSL. Narrow `TOKEN_MONITOR_CLIENTS` on one of them; the hub adds device totals and does not deduplicate sessions across devices.
+- **Totals are doubled:** the Hub adds device totals and does not deduplicate sessions across devices. When an Agent collects all WSL tools, disable the Windows widget's built-in WSL scan. Claude SSH mirrors on Windows can still repeat that Agent's sessions. Builds with the scanner exclusion capability offer “Remote Agents collect Claude SSH sessions”; enable it only if Agents on every relevant SSH/WSL host report to the same Hub. It excludes standard Claude mirror directories and also disables built-in WSL collection, while preserving native Windows sessions. A host-side headless collector accepts `--exclude-claude-remote-mirrors true` or `TOKEN_MONITOR_CLAUDE_REMOTE_MIRRORS_EXCLUDED=true` for the same policy. Leave this option off inside the WSL Agent itself. Other tools and nonstandard mirror layouts need their own source configuration; existing inflated History is not automatically repaired.
 - **A tool reports no usage:** run `npm run agent:once -- --dry-run` and check whether the tool appears in the summary; if not, make sure it is listed in `TOKEN_MONITOR_CLIENTS` (or that the variable is unset) and that its data lives under this user's home directory.

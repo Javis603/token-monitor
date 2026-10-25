@@ -392,3 +392,50 @@ test('CatPaw probing preserves the existing fork-client batch acceptance rule', 
   const calls = await collectWithFallback('claude,amp,proma,qodercn', false, ['catpaw', 'qodercn']);
   assert.deepEqual(calls, ['claude,amp,proma,qodercn', 'claude', 'claude', 'claude']);
 });
+
+for (const graphFirst of [false, true]) test(`synthetic empty source-policy reports skip ack checks (graph first: ${graphFirst})`, async (t) => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-empty-policy-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  let realEmpty = false;
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    if (realEmpty) return jsonChild(graphFirst ? { contributions: [] } : { entries: [] });
+    if (args.includes('--help')) return helpChild(['codex']);
+    return exitChild(2, "error: invalid value 'claude' for --client");
+  };
+  try {
+    const { collectUsageOnce, resetTokscaleCapabilityCache } = freshCollector();
+    resetTokscaleCapabilityCache();
+    const statuses = [];
+    const options = { clients: 'claude', allTimeSince: '2024-01-01', commandTimeoutMs: 1000,
+      onHistoryStatus: value => statuses.push(value),
+      homeDir: root, env: {}, mirrorStatePath: path.join(root, 'mirrors.json'), claudeRemoteMirrorsExcluded: true,
+      historyEnabled: true, includeHistory: true, dailyHistoryArchiveEnabled: false, projectsEnabled: false };
+    if (graphFirst) options.runTokscale = async () => ({ entries: [], claudeSourceExclusions: true });
+    const result = await collectUsageOnce(options);
+    assert.equal(result.allTime.totalTokens, 0);
+    assert.equal(statuses.at(-1)?.failureCode, null, 'synthetic graph result completes without a capability failure');
+    assert.ok(calls.some(args => args.includes('--help')));
+    const before = calls.length;
+    await collectUsageOnce(options);
+    assert.equal(calls.length, before, 'known-empty model/graph filters do not spawn');
+    resetTokscaleCapabilityCache();
+    realEmpty = true;
+    if (graphFirst) {
+      const rejected = await collectUsageOnce(options);
+      assert.equal(rejected.history, undefined, 'real graph JSON still needs its ack');
+      assert.equal(statuses.at(-1)?.failureCode, 'history-graph-failed');
+    } else {
+      await assert.rejects(collectUsageOnce(options), /lacks Claude source exclusions/, 'real binary JSON still needs its ack');
+    }
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});

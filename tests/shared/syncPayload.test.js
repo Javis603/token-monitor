@@ -622,3 +622,12 @@ test('discarded allTime sessions are never accessed or cloned before text saniti
     assert.strictEqual(summary.periods.allTime.sessions.a, session);
   }
 });
+
+test('mirror source identities and recovery policy remain private', () => {
+  const summary = { deviceId: 'host', excludedSessionKeys: ['claude:private'], claudeMirrorArchiveRecovery: true,
+    allTime: { totalTokens: 10 } };
+  const { payload } = serializeSyncPayload(summary);
+  assert.equal(payload.excludedSessionKeys, undefined);
+  assert.equal(payload.claudeMirrorArchiveRecovery, undefined);
+  assert.equal(summary.claudeMirrorArchiveRecovery, true);
+});

@@ -18,6 +18,7 @@ const VALID_CODES = new Set([
   'collector-tick-failed',
   'limits-retry-scheduled',
   'storage-archive-update-failed',
+  'storage-claude-mirror-state-recovered',
   'stream-disconnected',
   'stream-reconnected',
   'watcher-interval-fallback',

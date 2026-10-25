@@ -638,6 +638,11 @@
                 <input id="wslScanInput" type="checkbox" />
                 <span class="settings-note settings-item-desc" data-i18n="settings.collection.wslScanDesc">When off, Windows no longer scans WSL tools over \\wsl$.</span>
               </label>
+              <label id="claudeRemoteMirrorsRow" class="checkbox-label wsl-scan-toggle settings-item hidden">
+                <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.collection.claudeRemoteMirrors">Remote Agents collect Claude SSH sessions</span></span>
+                <input id="claudeRemoteMirrorsInput" type="checkbox" />
+                <span class="settings-note settings-item-desc" data-i18n="settings.collection.claudeRemoteMirrorsDesc">Exclude Claude SSH mirrors on this computer and disable built-in WSL scanning. Enable only when Agents on all relevant remote hosts report to the same Hub. Native Windows sessions remain included.</span>
+              </label>
               <div id="wslPanel" class="wsl-panel"></div>
             </div>
             <div class="settings-subgroup settings-export-block">
