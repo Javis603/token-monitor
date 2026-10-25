@@ -8781,7 +8781,7 @@ app.whenReady().then(() => {
           }];
         }
         const [[go, zen], apiProbe] = await Promise.all([
-          opencodeWeb.fetchWeb(profile.cookie, electronProviderDeps()),
+          opencodeWeb.fetchWeb(profile.cookie, electronProviderDeps(), { isolateErrors: true }),
           apiKey ? probeOpenCodeApiKey(apiKey) : null
         ]);
         const summary = { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd };
@@ -8805,7 +8805,7 @@ app.whenReady().then(() => {
     // dedupes away (otherwise it shows 2/2 while only one account is tracked).
     const envCookie = process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '';
     if (envCookie && !entries.some(([, p]) => p.cookie === envCookie)) {
-      const [go, zen] = await opencodeWeb.fetchWeb(envCookie, electronProviderDeps());
+      const [go, zen] = await opencodeWeb.fetchWeb(envCookie, electronProviderDeps(), { isolateErrors: true });
       let envKey = 'env';
       for (let i = 1; Object.prototype.hasOwnProperty.call(profiles, envKey); i += 1) {
         envKey = `env:${i}`;

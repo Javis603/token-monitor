@@ -193,8 +193,8 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
         signal: deps.signal,
         apiKey: primaryApiKey
       }),
-      cookie ? fetchGoWeb(cookie, webDeps) : null,
-      cookie ? fetchZen(cookie, webDeps) : null
+      cookie ? opencodeWeb.probeWebSource(fetchGoWeb, cookie, webDeps) : null,
+      cookie ? opencodeWeb.probeWebSource(fetchZen, cookie, webDeps) : null
     ]);
     const webIdentity = openCodeWebIdentity(goWeb, zen, cookie);
     const webAccountKey = webIdentity.accountKey;
@@ -338,8 +338,8 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
       (async () => {
         const webDeps = opencodeWeb.createProbeDeps({ now: () => nowMs, fetch: api.deps?.fetch, signal: api.deps?.signal, env: api.deps?.env });
         const [goWeb, zen, goApi] = await Promise.all([
-          cookie ? fetchGoWeb(cookie, webDeps) : null,
-          cookie ? fetchZen(cookie, webDeps) : null,
+          cookie ? opencodeWeb.probeWebSource(fetchGoWeb, cookie, webDeps) : null,
+          cookie ? opencodeWeb.probeWebSource(fetchZen, cookie, webDeps) : null,
           api.apiKey
             ? api.collectGoApi({
               env: api.deps?.env || process.env,
@@ -389,22 +389,12 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
     }
 
     if (status !== 'ok') {
-      // `notConfigured` from the API means "this account has no Go subscription",
-      // which is a fallback condition rather than a failure. Letting it win here
-      // would hide the cookie's own `unauthorized` and tell the user nothing is
-      // configured when what actually happened is that their cookie expired.
-      // The API's own `notConfigured` is ranked last rather than dropped: it
-      // must not outrank an expired cookie, but on an account with no cookie at
-      // all it is the true answer, and falling through to the literal would
-      // report "sign in again" for a workspace that simply has no Go plan.
-      //
-      // Provenance travels with the status, as it does on the single-account
-      // path and in the timeout branch below. Left behind, the `web` default
-      // stood while the status came from the key, so one expired API key read
-      // as an `API` failure on a machine with a single account and as a `Web`
-      // failure the moment a second account existed. How many accounts are
-      // configured cannot change which credential failed.
+      // Real remote failures outrank missing subscriptions across all sources,
+      // just as in single-account mode. Keep provenance with the chosen status;
+      // an API-only account with no plan still falls through to notConfigured.
       const failure = (OPENCODE_REMOTE_FAIL_STATUSES.includes(goApi?.status) && { status: goApi.status, source: 'api' })
+        || (OPENCODE_REMOTE_FAIL_STATUSES.includes(goWeb?.status) && { status: goWeb.status, source: 'web' })
+        || (OPENCODE_REMOTE_FAIL_STATUSES.includes(zen?.status) && { status: zen.status, source: 'web' })
         || (goWeb && { status: goWeb.status, source: 'web' })
         || (zen && { status: zen.status, source: 'web' })
         || (goApi && { status: goApi.status, source: 'api' })

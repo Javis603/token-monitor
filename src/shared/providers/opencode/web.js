@@ -368,21 +368,42 @@ async function fetchWithConsole(kind, cookieRaw, deps) {
     const usable = fallback.status === 'ok' && (fallback.windows.length > 0 || Number.isFinite(fallback.balanceUsd));
     if (usable) return fallback;
     // Console permission/scope failures must not become expired auth or an empty success.
-    return failure.status === 'unauthorized' ? fallback : failure;
+    return failure.status === 'unauthorized' && fallback.status !== 'ok' ? fallback : failure;
   }
 }
 
 function fetchGoWeb(cookie, deps = {}) { return fetchWithConsole('go', cookie, deps); }
 function fetchZen(cookie, deps = {}) { return fetchWithConsole('zen', cookie, deps); }
 
-async function fetchWeb(cookie, deps = {}) {
+// A terminal transport failure must not retry legacy authentication, but it
+// also must not discard independent API quotas, sibling sources or accounts.
+async function probeWebSource(probe, cookie, deps = {}) {
+  try {
+    deps.signal?.throwIfAborted();
+    const result = await probe(cookie, deps);
+    deps.signal?.throwIfAborted();
+    return result;
+  } catch (error) {
+    deps.signal?.throwIfAborted();
+    if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR') throw error;
+    return { status: 'unavailable', windows: [], balanceUsd: null,
+      workspaceId: deps.opencodeWebContext?.workspaceId || '' };
+  }
+}
+
+async function fetchWeb(cookie, deps = {}, { isolateErrors = false } = {}) {
   const scoped = consoleApi.createProbeDeps(deps);
-  return Promise.all([fetchGoWeb(cookie, scoped), fetchZen(cookie, scoped)]);
+  // Credential saves retain strict transport errors; status observations can
+  // opt into partial results without weakening credential validation.
+  if (!isolateErrors) return Promise.all([fetchGoWeb(cookie, scoped), fetchZen(cookie, scoped)]);
+  return Promise.all([
+    probeWebSource(fetchGoWeb, cookie, scoped),
+    probeWebSource(fetchZen, cookie, scoped)
+  ]);
 }
 
 // Summarizes what a single opencode.ai cookie unlocks, from the two probe
-// results. The cookie is always "linked" (this is only called when one is set);
-// `expired` means BOTH sources rejected it as unauthorized. `go`/`zen` flag
+// results. `expired` means BOTH sources rejected it as unauthorized. `go`/`zen` flag
 // whether real usage / Zen data was actually returned (not just reachable).
 function summarizeLink(go = {}, zen = {}) {
   const goOk = go.status === 'ok';
@@ -400,7 +421,9 @@ function summarizeLink(go = {}, zen = {}) {
   if (go.status === 'unauthorized' && zen.status === 'unauthorized') {
     return { linked: true, expired: true, go: false, zen: false, hasBalance: false };
   }
-  return { linked: true, expired: false, go: false, zen: false, hasBalance: false, error: go.status || zen.status || 'unavailable' };
+  const error = [go.status, zen.status].find(status => status && status !== 'notConfigured')
+    || go.status || zen.status || 'unavailable';
+  return { linked: false, expired: false, go: false, zen: false, hasBalance: false, error };
 }
 
 module.exports = {
@@ -408,5 +431,5 @@ module.exports = {
   sanitizeCookieHeader, serverRequestUrl, buildHeaders,
   parseWorkspaceIds, parseSubscription, fetchZen, normalizeWorkspaceId,
   resolveWorkspaceId, fetchGoWeb, fetchWeb, parseGoUsage, summarizeLink,
-  createProbeDeps: consoleApi.createProbeDeps
+  createProbeDeps: consoleApi.createProbeDeps, probeWebSource
 };

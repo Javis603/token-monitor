@@ -272,3 +272,127 @@ test('explicit Console no-subscription prevents stale local Go rows from inventi
   assert.equal(result.balanceUsd, 27.86781005);
   assert.ok(result.windows.every(w => w.metric === 'credits'));
 });
+
+test('Console 401 cannot become a successful Zen account through an empty legacy null', async () => {
+  const deps = fixture(path => {
+    if (path.endsWith('/go/status') || path.endsWith('/billing/status')) return response({}, 401);
+    if (path === '/_server') return response('null');
+    return undefined;
+  });
+  const [go, zen] = await web.fetchWeb(bothCookies, deps);
+  assert.equal(zen.status, 'unauthorized');
+  assert.equal(web.summarizeLink(go, zen).expired, true);
+  const result = await fetchOpenCodeLimits({ opencodeCookie: bothCookies }, { ...deps, opencodeReadGoApiKey: () => '' });
+  assert.equal(result.status, 'unauthorized');
+  assert.equal(result.balanceUsd, null);
+  assert.deepEqual(result.windows, []);
+});
+
+test('no Go subscription never masks a Zen billing permission failure in multi-account mode', async () => {
+  const deps = fixture(path => {
+    if (path.endsWith('/go/status')) return response({ access: null });
+    if (path.endsWith('/billing/status')) return response({}, 403);
+    return undefined;
+  });
+  const options = { opencodeProfiles: { first: { enabled: true, cookie: consoleCookie } } };
+  const single = await fetchOpenCodeLimits(options, { ...deps, opencodeReadGoApiKey: () => '' });
+  const multiple = await fetchOpenCodeLimits({ opencodeProfiles: { ...options.opencodeProfiles,
+    second: { enabled: true, cookie: '__Host-console_session=second-fixture' }
+  } }, { ...deps, opencodeReadGoApiKey: () => '' });
+  assert.equal(single.status, 'unavailable');
+  assert.ok(multiple.every(p => p.status === single.status));
+});
+
+for (const stage of ['billing/status', 'orgs']) for (const multi of [false, true]) test(`TLS ${stage} failure preserves successful Go API quota (multi=${multi})`, async () => {
+  const deps = fixture(path => {
+    if (path.endsWith(`/${stage}`)) throw Object.assign(new Error('synthetic certificate failure'), { code: 'CERT_HAS_EXPIRED' });
+    return undefined;
+  });
+  const profile = { enabled: true, cookie: consoleCookie, apiKey: 'fixture-api-key' };
+  const providers = await fetchOpenCodeLimits({ opencodeProfiles: { first: profile,
+    ...(multi ? { second: { enabled: true, apiKey: 'second-fixture-key' } } : {})
+  } }, { ...deps, opencodeReadGoApiKey: () => '',
+    opencodeCollectGoApi: async () => ({ status: 'ok', identity: 'fixture-api', windows: [
+      { kind: 'session', usedPercent: 77, windowMinutes: 300 }, { kind: 'weekly', usedPercent: 88, windowMinutes: 10080 }
+    ] }) });
+  const result = multi ? providers.find(p => p.accountName === 'first') : providers;
+  assert.equal(result.status, 'ok');
+  assert.equal(result.source, 'api');
+  assert.equal(result.windows.find(w => w.kind === 'session').usedPercent, 77);
+  assert.equal(result.balanceUsd, null);
+  assert.ok(result.accountKey);
+  assert.ok(!deps.calls.some(c => c.path === '/_server'));
+});
+
+test('Go TLS failure still permits an independent zero Zen balance', async () => {
+  const deps = fixture(path => {
+    if (path.endsWith('/go/status')) throw new Error('net::ERR_CERT_AUTHORITY_INVALID');
+    if (path.endsWith('/billing/status')) return response({ ...billing, balanceMicroCents: '0' });
+    return undefined;
+  });
+  const result = await fetchOpenCodeLimits({ opencodeCookie: bothCookies }, { ...deps, opencodeReadGoApiKey: () => '' });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.balanceUsd, 0);
+  assert.deepEqual(result.windows.map(w => w.metric), ['credits']);
+  assert.ok(!deps.calls.some(c => c.path === '/_server'));
+});
+
+test('Console 401 still accepts a real zero balance from independent legacy auth', async () => {
+  const deps = fixture(path => {
+    if (path.endsWith('/billing/status')) return response({}, 401);
+    if (path === '/_server') return response({ balanceUSD: 0 });
+    return undefined;
+  });
+  const result = await web.fetchZen(bothCookies, deps);
+  assert.equal(result.status, 'ok');
+  assert.equal(result.balanceUsd, 0);
+});
+
+for (const multi of [false, true]) test(`cancelled Web collection cannot publish successful sibling API data (multi=${multi})`, async () => {
+  const controller = new AbortController();
+  const reason = new Error('superseded');
+  const deps = fixture(path => {
+    assert.equal(path, '/console/api/orgs');
+    controller.abort(reason);
+    return response([{ id: 'org_FIXTURE' }]);
+  });
+  const profile = { enabled: true, cookie: bothCookies, apiKey: 'fixture-key' };
+  await assert.rejects(fetchOpenCodeLimits({ opencodeProfiles: {
+    first: profile, ...(multi ? { second: profile } : {})
+  } }, { ...deps, signal: controller.signal, opencodeReadGoApiKey: () => '',
+    opencodeCollectGoApi: async () => ({ status: 'ok', windows: [{ kind: 'session', usedPercent: 77 }] })
+  }), error => error === reason);
+  assert.ok(deps.calls.every(c => c.path === '/console/api/orgs'));
+});
+
+for (const code of ['AbortError', 'ABORT_ERR']) test(`injected Web ${code} still cancels collection`, async () => {
+  const reason = Object.assign(new Error('cancelled'), code === 'AbortError' ? { name: code } : { code });
+  await assert.rejects(fetchOpenCodeLimits({ opencodeCookie: bothCookies }, {
+    env: {}, opencodeReadGoApiKey: () => '',
+    opencodeCollectGoApi: async () => ({ status: 'notConfigured', windows: [] }),
+    opencodeFetchGoWeb: async () => { throw reason; },
+    opencodeFetchZen: async () => ({ status: 'ok', windows: [], balanceUsd: 0 })
+  }), error => error === reason);
+});
+
+test('TLS failure in one settings cookie source leaves its healthy sibling available', async () => {
+  const deps = fixture(path => {
+    if (path.endsWith('/billing/status')) throw new Error('net::ERR_CERT_AUTHORITY_INVALID');
+    return undefined;
+  });
+  const [go, zen] = await web.fetchWeb(bothCookies, deps, { isolateErrors: true });
+  assert.equal(go.status, 'ok');
+  assert.equal(zen.status, 'unavailable');
+  assert.equal(web.summarizeLink(go, zen).go, true);
+  assert.ok(!deps.calls.some(c => c.path === '/_server'));
+});
+
+test('credential validation retains strict TLS failures', async () => {
+  const error = new Error('net::ERR_CERT_AUTHORITY_INVALID');
+  const deps = fixture(path => {
+    if (path.endsWith('/billing/status')) throw error;
+    return undefined;
+  });
+  await assert.rejects(web.fetchWeb(bothCookies, deps), reason => reason === error);
+  assert.ok(!deps.calls.some(c => c.path === '/_server'));
+});
