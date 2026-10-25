@@ -43,7 +43,7 @@ test('existing composer refresh updates bitmap previews even when stats identity
 test('display preference changes invalidate sample preview cache', () => {
   const h = harness(), stage = h.stage();
   h.preview.show('notch', stage, 'open');
-  for (const [key, value] of Object.entries({ currencyRatesEffective: { TWD: 40 }, showCompactTotalTokens: true, sessionContextMetric: 'remaining', tokenNumberAnimation: 'count', showCodexAdditionalLimits: true, limitProviderHiddenItems: { codex: ['weekly'] } })) {
+  for (const [key, value] of Object.entries({ interfaceFontFamily: 'Georgia, serif', displayFontFamily: 'Menlo, monospace', currencyRatesEffective: { TWD: 40 }, showCompactTotalTokens: true, sessionContextMetric: 'remaining', tokenNumberAnimation: 'count', showCodexAdditionalLimits: true, limitProviderHiddenItems: { codex: ['weekly'] } })) {
     const before = h.calls.length;
     h.settings[key] = value;
     h.preview.show('notch', stage, 'open');

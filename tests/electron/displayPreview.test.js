@@ -110,3 +110,15 @@ test('sample appearance carries effective rates and display preferences without 
     assert.equal(appearance.secret, undefined);
   }
 });
+
+
+test('preview resolves custom and inherited fonts exactly like the live renderer', () => {
+  const { resolveEffectiveFontSettings } = require('../../src/shared/fontSettings');
+  for (const surface of ['edgeDock', 'notch']) {
+    for (const displayFontFamily of ['Menlo, monospace', '']) {
+      const settings = { interfaceFontFamily: 'Georgia, serif', displayFontFamily };
+      const { appearance } = buildDisplayPreview(settings, surface, 'open').payload;
+      assert.deepEqual(resolveEffectiveFontSettings(appearance), resolveEffectiveFontSettings(settings));
+    }
+  }
+});

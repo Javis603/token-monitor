@@ -3,7 +3,7 @@
 (function expose(root) {
   function create({ bridge, settings, stats, bitmap, t, window, document }) {
     const stages = new Map(), bitmaps = new WeakMap();
-    const appearanceKeys = ['language', 'theme', 'themePreset', 'themeColors', 'vendorColors', 'interfaceFont', 'displayFont', 'interfaceFontPreset', 'displayFontPreset', 'textSize', 'glassOpacity', 'glassBlur', 'systemGlass', 'currency', 'currencyRate', 'currencyRateOverride', 'currencyRatesEffective', 'showCompactTotalTokens', 'sessionContextMetric', 'tokenNumberAnimation', 'compactTokenUnits', 'showLimitUsed', 'limitsEnabled', 'limitProviders', 'limitProviderOrder', 'showCodexAdditionalLimits', 'limitProviderHiddenItems', 'showTrayProviderBadge', 'maskLimitAccountEmails', 'tokenRateMode', 'contextDisplayMode'];
+    const appearanceKeys = ['language', 'theme', 'themePreset', 'themeColors', 'vendorColors', 'interfaceFontFamily', 'displayFontFamily', 'textSize', 'glassOpacity', 'glassBlur', 'systemGlass', 'currency', 'currencyRate', 'currencyRateOverride', 'currencyRatesEffective', 'showCompactTotalTokens', 'sessionContextMetric', 'tokenNumberAnimation', 'compactTokenUnits', 'showLimitUsed', 'limitsEnabled', 'limitProviders', 'limitProviderOrder', 'showCodexAdditionalLimits', 'limitProviderHiddenItems', 'showTrayProviderBadge', 'maskLimitAccountEmails', 'tokenRateMode', 'contextDisplayMode'];
     function keyFor(surface, phase) {
       const preferences = settings();
       const keys = Object.keys(preferences).filter(key => key.startsWith(surface) || appearanceKeys.includes(key) || surface === 'notch' && key.startsWith('tray'));
