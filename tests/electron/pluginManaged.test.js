@@ -70,6 +70,25 @@ function changeInstalled(f, kind) {
     manifest.name = 'Changed'; fs.writeFileSync(file, JSON.stringify(manifest));
   }
 }
+for (const prefix of ['', '\uFEFF', '\uFEFF\uFEFF']) {
+  test(`content integrity preserves ${prefix.length} leading BOMs across restart, update and rollback`, t => {
+    const f = fixture(t), raw = JSON.parse(bytes()); raw.code = prefix + raw.code;
+    const original = parsePackage(JSON.stringify(raw));
+    f.api.install(f.api.preview(original).token);
+    const target = path.join(f.args.userDir, 'test-plugin');
+    const restarted = createManagedPlugins(f.args); restarted.recover();
+    assert.equal(packageDirectory(target).code, original.code);
+    restarted.install(restarted.preview(parsePackage(bytes('2.0.0'))).token);
+    restarted.rollback('test-plugin');
+    assert.equal(fs.readFileSync(path.join(target, 'main.js'), 'utf8'), original.code);
+    const token = restarted.preview(parsePackage(bytes('3.0.0'))).token;
+    fs.appendFileSync(path.join(target, 'main.js'), '/* changed */');
+    const before = snapshot(f);
+    assert.throws(() => restarted.install(token), { code: 'installed-package-invalid' });
+    assert.deepEqual(snapshot(f), before);
+  });
+}
+
 for (const kind of ['code', 'asset', 'manifest']) for (const timing of ['before preview', 'after preview']) {
   test(`content integrity rejects changed ${kind} ${timing} without replacing installed state or backup`, t => {
     const f = fixture(t);

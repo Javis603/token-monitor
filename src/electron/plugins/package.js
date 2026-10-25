@@ -66,7 +66,9 @@ function packageDirectory(dir, options) {
   };
   const manifest = JSON.parse(readBounded(inside('manifest.json'), MAX_MANIFEST_BYTES).toString('utf8'));
   if (manifest.main && !entryName(manifest.main)) throw new Error('invalid entry path');
-  const code = manifest.main ? new TextDecoder('utf-8', { fatal: true }).decode(readBounded(inside(manifest.main), MAX_CODE_BYTES)) : null;
+  // Keep the code bytes represented by the archive, including a leading BOM,
+  // so installed-content fingerprints and rollback packages remain identical.
+  const code = manifest.main ? new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(readBounded(inside(manifest.main), MAX_CODE_BYTES)) : null;
   const validated = normalizeManifest(manifest);
   if (!validated.ok || validated.errors.length) throw new Error('invalid plugin manifest');
   let assetBytes = 0;

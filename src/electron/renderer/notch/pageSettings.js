@@ -29,6 +29,7 @@
   const contexts = new WeakMap(), controllers = new WeakMap(), resetButtons = new WeakSet();
   function clearError(container) {
     errors.delete(container);
+    contexts.get(container)?.resetButton?.removeAttribute('aria-describedby');
     container.querySelector('.plugin-action-error')?.remove();
     for (const chip of container.querySelectorAll('button')) chip.removeAttribute('aria-describedby');
   }
@@ -46,12 +47,17 @@
     for (const control of container.querySelectorAll('button')) control.disabled = true;
     if (options.resetButton) options.resetButton.disabled = true;
     try { await options.save({ notchPageOrder: reset ? [] : placements.mergeNotchPageOrder(options.settings.notchPageOrder, order) }); }
-    catch (error) { errors.set(container, { error, id }); }
+    catch (error) { errors.set(container, { error, id, reset }); }
     finally {
       delete container.dataset.saving; container.setAttribute('aria-busy', 'false');
-      const canRestore = restoreFocus && (document.activeElement === document.body || container.contains(document.activeElement));
+      const canRestore = restoreFocus && (document.activeElement === document.body || document.activeElement === options.resetButton || container.contains(document.activeElement));
       render(contexts.get(container));
-      if (canRestore) [...container.querySelectorAll('button')].find(node => node.dataset.page === id)?.focus({ preventScroll: true });
+      if (canRestore) {
+        const resetTarget = errors.get(container)?.reset && contexts.get(container).resetButton;
+        const target = resetTarget && !resetTarget.hidden && !resetTarget.disabled ? resetTarget
+          : [...container.querySelectorAll('button')].find(node => node.dataset.page === id);
+        target?.focus({ preventScroll: true });
+      }
     }
   }
   function render(options) {
@@ -143,7 +149,8 @@
       return chip;
     });
     const failure = errors.get(container);
-    const affected = failure && chips.find(chip => chip.dataset.page === failure.id);
+    options.resetButton?.removeAttribute('aria-describedby');
+    const affected = failure && (failure.reset ? options.resetButton : chips.find(chip => chip.dataset.page === failure.id));
     const notice = affected ? document.createElement('p') : null;
     if (notice) {
       notice.className = 'plugin-action-error'; notice.id = `${container.id || 'notch-pages'}-action-error`;

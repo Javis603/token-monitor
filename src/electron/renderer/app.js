@@ -8138,6 +8138,7 @@ function renderThemePresetChips() {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'theme-preset-chip theme-preset-chip-plugin';
+      chip.dataset.pluginSkin = JSON.stringify(skin);
       chip.classList.toggle('active', !activeId && themePresetsApi.INTERFACE_COLOR_KEYS.every((key) => resolved[key] === colors[key]));
       chip.setAttribute('aria-description', t('settings.plugins.skinFrom', { name: plugin.name }));
       const dot = document.createElement('span');
@@ -13029,16 +13030,23 @@ async function applyAppearancePluginSkin(skin, chip) {
   if (container.getAttribute('aria-busy') === 'true') return;
   container.querySelector('.plugin-action-error')?.remove();
   for (const control of container.querySelectorAll('button')) control.removeAttribute('aria-describedby');
+  const skinKey = JSON.stringify(skin), settingsRevision = state.settingsPushRevision;
+  const restoreFocus = document.activeElement === chip;
   container.setAttribute('aria-busy', 'true');
   try { await applyPluginSkin(skin); }
   catch (error) {
-    // A rebuilt preset list belongs to newer state, not this failed action.
-    if (!container.contains(chip)) return;
+    // saveSettings refreshes the form before rethrowing. Reattach to the same
+    // skin after that refresh, but discard failures from superseded settings.
+    if (state.settingsPushRevision !== settingsRevision) return;
+    const target = container.contains(chip) ? chip
+      : [...container.querySelectorAll('button')].find(control => control.dataset.pluginSkin === skinKey);
+    if (!target) return;
     const notice = document.createElement('p'); notice.className = 'plugin-action-error';
     notice.id = 'theme-plugin-skin-error';
     notice.setAttribute('role', 'alert'); notice.setAttribute('aria-atomic', 'true');
     notice.textContent = window.TokenMonitorPluginSettings.actionErrorMessage(error, t);
-    chip.setAttribute('aria-describedby', notice.id); container.append(notice);
+    target.setAttribute('aria-describedby', notice.id); container.append(notice);
+    if (restoreFocus && (document.activeElement === document.body || document.activeElement === chip)) target.focus({ preventScroll: true });
   } finally { container.setAttribute('aria-busy', 'false'); }
 }
 

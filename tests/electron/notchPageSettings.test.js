@@ -175,18 +175,38 @@ test('reset order preserves visibility and recovers from failed saves without du
   render(options); render(options);
   assert.equal(resetButton.disabled, false);
   assert.equal(resetButton.hidden, false, 'custom order exposes the text reset action');
-  resetButton.fire('click'); resetButton.fire('click');
+  resetButton.focus(); resetButton.fire('click'); resetButton.fire('click');
+  document.activeElement = document.body; // Native disabled buttons lose focus.
   assert.equal(patches.length, 1, 'one reset stays in flight across repeated clicks and renders');
   assert.equal(resetButton.disabled, true);
   pending.reject(Error('disk')); await flush(); await flush();
   assert.match(container.querySelector('.plugin-action-error')?.textContent, /disk/); assert.equal(resetButton.disabled, false);
   assert.equal(container.querySelectorAll('button')[0].dataset.page, 'plugin:pulse/main');
-  resetButton.fire('click'); pending.resolve(); await flush(); await flush();
+  assert.equal(resetButton.getAttribute('aria-describedby'), container.querySelector('.plugin-action-error').id);
+  assert.equal(document.activeElement, resetButton);
+  assert.ok(container.querySelectorAll('button').every(chip => !chip.getAttribute('aria-describedby')));
+  resetButton.fire('click');
+  assert.ok(!resetButton.getAttribute('aria-describedby'), 'retry clears reset error association');
+  document.activeElement = document.body;
+  pending.resolve(); await flush(); await flush();
   assert.equal(container.querySelector('.plugin-action-error'), null);
   assert.deepEqual(patches.at(-1), { notchPageOrder: [] });
+  assert.equal(document.activeElement?.dataset.page, 'home', 'successful reset focuses first page because Reset disappears');
   assert.deepEqual(container.querySelectorAll('button').slice(0, 4).map(n => n.dataset.page), ['home', 'limits', 'sessions', 'breakdown']);
   assert.deepEqual(settings.notchBuiltinPages, ['home']);
   assert.equal(JSON.stringify(fixtureCatalog), beforePlacements);
   assert.equal(resetButton.disabled, true, 'default order has nothing to reset');
   assert.equal(resetButton.hidden, true, 'default order hides reset like the existing Dock/Notch composer');
+});
+
+test('failed reset does not steal focus after the user leaves the controls', async () => {
+  const document = documentStub(), container = new Element('div', document), resetButton = new Element('button', document), other = new Element('button', document);
+  document.body.append(resetButton, container, other);
+  let rejectSave;
+  const options = { document, container, resetButton, settings: { notchPageOrder: ['limits', 'home'] }, catalog, t,
+    save: () => new Promise((_resolve, reject) => { rejectSave = reject; }), place: async () => {} };
+  render(options); resetButton.focus(); resetButton.fire('click'); other.focus();
+  rejectSave(Error('disk')); await flush();
+  assert.equal(document.activeElement, other);
+  assert.equal(resetButton.getAttribute('aria-describedby'), container.querySelector('.plugin-action-error').id);
 });

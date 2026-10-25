@@ -88,7 +88,7 @@ test('real Appearance skin click handles rejection locally without an unhandled 
     const {Element} = require(${JSON.stringify(path.join(root, 'tests/helpers/notchPanel'))});
     const document = {createElement: tag => new Element(tag, document)};
     const container = document.createElement('div'), chip = document.createElement('button'); container.append(chip);
-    const errors = [], ctx = {document, chip, els:{themePresetChips:container}, skin:{ref:'author/mono'},
+    const errors = [], ctx = {document, state:{settingsPushRevision:0}, chip, els:{themePresetChips:container}, skin:{ref:'author/mono'},
       window:{TokenMonitorPluginSettings:require(${JSON.stringify(path.join(root, 'src/electron/renderer/pluginSettings'))})},
       buildAppearanceColorControls() {}, renderSettingsSummaries() {},
       saveSettings: async () => { throw Error('disk full'); },
@@ -105,3 +105,53 @@ test('real Appearance skin click handles rejection locally without an unhandled 
   const result = spawnSync(process.execPath, ['--unhandled-rejections=strict', '-e', script], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
 });
+
+for (const scenario of ['rollback rebuild', 'removed skin', 'changed skin', 'new settings', 'focus moved']) {
+  test(`Appearance saveSettings failure with ${scenario}`, async () => {
+    const { Element } = require('../helpers/notchPanel');
+    const document = { createElement: tag => new Element(tag, document) };
+    document.body = document.createElement('body'); document.activeElement = document.body;
+    const container = document.createElement('div'); document.body.append(container);
+    // Supply the small DOM operations used by the real preset renderer.
+    container.appendChild = node => container.append(node);
+    Object.defineProperty(container, 'innerHTML', { set() { container.replaceChildren(); document.activeElement = document.body; } });
+    const skin = { ref: 'author/mono', name: 'Mono', colors: { accent: '#123456' } };
+    const other = document.createElement('button'); document.body.append(other);
+    const state = { settings: {}, settingsPushRevision: 0, pluginCatalog: { plugins: [{ status: 'active', name: 'Author', skins: [skin] }] } };
+    let rebuilds = 0;
+    const ctx = { document, state, els: { themePresetChips: container }, themePresetsApi,
+      pendingSettingsPatches: new Set(), appearancePreview: {}, syncContentForm: null,
+      setSyncContentEditError() {}, console: { error() {} }, applyEffectiveCurrencyRates() {},
+      preserveSettingsPanelScroll: fn => fn(), isSettingsSurfaceVisible: () => true,
+      render() {}, restartTimer() {}, maybeUpdateBarsIcon() {}, renderSettingsSummaries() {},
+      t: (_key, values) => values?.error || _key,
+      window: { TokenMonitorPluginSettings: require('../../src/electron/renderer/pluginSettings'), tokenMonitor: {
+        updateSettings: async () => { throw Error('disk full'); }, getSettings: async () => ({})
+      } },
+      syncSettingsForm() {
+        rebuilds++;
+        if (scenario === 'removed skin') state.pluginCatalog.plugins = [];
+        if (scenario === 'changed skin') state.pluginCatalog.plugins[0].skins = [{ ...skin, colors: { accent: '#abcdef' } }];
+        if (scenario === 'new settings') state.settingsPushRevision++;
+        ctx.renderThemePresetChips();
+        if (scenario === 'focus moved') other.focus();
+      }
+    };
+    vm.createContext(ctx);
+    vm.runInContext(['matchingThemePresetId', 'renderThemePresetChips', 'saveSettings', 'applyPluginSkin', 'applyAppearancePluginSkin'].map(extract).join('\n'), ctx);
+    ctx.renderThemePresetChips();
+    const original = container.querySelector('.theme-preset-chip-plugin'); original.focus();
+    await ctx.applyAppearancePluginSkin(skin, original);
+    assert.equal(rebuilds, 1); assert.equal(container.contains(original), false);
+    const notice = container.querySelector('.plugin-action-error');
+    const expected = ['rollback rebuild', 'focus moved'].includes(scenario);
+    assert.equal(!!notice, expected);
+    if (expected) {
+      const replacement = container.querySelector('.theme-preset-chip-plugin');
+      assert.equal(notice.textContent, 'disk full'); assert.equal(notice.getAttribute('role'), 'alert');
+      assert.equal(replacement.getAttribute('aria-describedby'), notice.id);
+      assert.equal(document.activeElement, scenario === 'focus moved' ? other : replacement);
+    }
+    assert.equal(container.getAttribute('aria-busy'), 'false');
+  });
+}
