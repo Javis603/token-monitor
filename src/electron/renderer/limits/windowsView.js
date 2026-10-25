@@ -503,8 +503,10 @@
     info.setAttribute(
       'aria-label',
       ariaLabel || entries
-        .filter(Array.isArray)
-        .map(([entryLabel, ...rest]) => `${entryLabel}: ${rest.filter(Boolean).join(' ')}`)
+        .map((entry) => Array.isArray(entry)
+          ? `${entry[0]}: ${entry.slice(1).filter(Boolean).join(' ')}`
+          : entry?.full)
+        .filter(Boolean)
         .join(', ')
     );
     const tooltip = detailTooltipNode(entries, columns);

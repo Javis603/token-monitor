@@ -613,13 +613,14 @@ test('a DeepSeek card shows the spend row the projection used to drop', () => {
   const card = dockView().renderProviderWindows({
     provider: 'deepseek',
     windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 4.2, currency: 'USD', showMeter: false }],
-    balance: { amount: 4.2, currency: 'USD', todaySpend: 0.12, monthSpend: 1.4 }
+    balance: { amount: 4.2, currency: 'USD', todaySpend: 0.12, weekSpend: 0.5, monthSpend: 1.4 }
   }, '#4D6BFE');
 
   assert.ok(card.find('limit-spend'), 'the card should carry the spend row');
   assert.match(card.text, /Today/);
   assert.match(card.text, /Month/);
   assert.match(card.text, /\$4\.20/);
+  assert.match(card.find('limit-detail-tooltip-trigger').getAttribute('aria-label'), /Month: \$1\.40/);
 });
 
 test('a TypeSafe card shows the next credit expiry without calling it a reset', () => {
@@ -770,11 +771,7 @@ test('Ollama hides spending details when that usage item is disabled and keeps s
   assert.doesNotMatch(spendOnly.text, /Credit balance/);
 });
 
-test('Home renders Ollama included quota before balance on separate full-width rows with the shared tooltip', () => {
-  const { parseOllamaBalance } = require('../../src/shared/providers/ollama/limits');
-  const { homeLimitAccounts } = require('../../src/electron/renderer/homeOverview');
-  const parsed = parseOllamaBalance({ included: { balance_usd: 52.5, allowance_usd: 60 }, purchased: { balance_usd: 18.25 } });
-  const rows = homeLimitAccounts([{ providerId: 'ollama', name: 'Ollama', windows: parsed.windows }]);
+function renderHomeLimitFixture(rows) {
   const source = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
   const functions = ['homeModuleShell', 'homeLimitWindowLabel', 'formatHomeLimitWindowValue', 'renderHomeLimitModule'].map((name) => {
     const start = source.indexOf(`function ${name}(`);
@@ -791,7 +788,16 @@ test('Home renders Ollama included quota before balance on separate full-width r
     formatLimitBoundary: () => '', optionalFiniteNumber: (n) => n == null ? null : Number(n)
   };
   vm.runInNewContext(`${functions}\nthis.result = renderHomeLimitModule();`, context);
-  const readings = [...context.result.walk()].filter((node) => node.classNames.has('home-limit-window'));
+  return context.result;
+}
+
+test('Home renders Ollama included quota before balance on separate full-width rows with the shared tooltip', () => {
+  const { parseOllamaBalance } = require('../../src/shared/providers/ollama/limits');
+  const { homeLimitAccounts } = require('../../src/electron/renderer/homeOverview');
+  const parsed = parseOllamaBalance({ included: { balance_usd: 52.5, allowance_usd: 60 }, purchased: { balance_usd: 18.25 } });
+  const rows = homeLimitAccounts([{ providerId: 'ollama', name: 'Ollama', windows: parsed.windows }]);
+  const result = renderHomeLimitFixture(rows);
+  const readings = [...result.walk()].filter((node) => node.classNames.has('home-limit-window'));
   assert.equal(readings.length, 2);
   assert.ok(readings.every((node) => node.classNames.has('home-limit-window-wide')));
   assert.equal(readings[1].find('home-limit-window-label').textContent, 'Credit balance');
@@ -801,6 +807,73 @@ test('Home renders Ollama included quota before balance on separate full-width r
   assert.equal(readings[1].find('limit-detail-tooltip-trigger').tabIndex, 0);
   assert.equal(readings[0].find('home-list-value').textContent, '$52.50');
   assert.ok(readings[0].find('limit-meter'));
+});
+
+test('Ollama refill tooltips expose complete accessible names on cards and Home', () => {
+  const { parseOllamaUsageHtml } = require('../../src/shared/providers/ollama/limits');
+  const { homeLimitAccounts } = require('../../src/electron/renderer/homeOverview');
+  const { wallet } = require('../fixtures/ollamaCookieUsage.cjs');
+  const refill = 'Refills to $30 in 3 weeks.';
+  for (const withSpend of [false, true]) {
+    const html = withSpend ? wallet : wallet.replace('<div><span>Monthly credits used</span><span>$4.50</span></div>', '');
+    const parsed = parseOllamaUsageHtml(html);
+    const row = normalizeLimitProvider({ provider: 'ollama', status: 'ok', windows: parsed.windows });
+    const surfaces = [
+      dockView().renderProviderWindows(row, '#888888'),
+      renderHomeLimitFixture(homeLimitAccounts([{ providerId: 'ollama', windows: row.windows }]))
+    ];
+    for (const surface of surfaces) {
+      const trigger = surface.find('limit-detail-tooltip-trigger');
+      assert.equal(trigger.tabIndex, 0);
+      assert.equal(trigger.getAttribute('aria-label'), withSpend ? `Monthly credits used: $4.50, ${refill}` : refill);
+      const wrap = surface.find('limit-detail-tooltip-wrap');
+      const tooltip = surface.find('limit-detail-tooltip');
+      assert.ok(tooltip.text.includes(refill));
+      wrap.isConnected = true;
+      wrap.getBoundingClientRect = () => ({ top: 200 });
+      tooltip.childElementCount = tooltip.children.length;
+      tooltip.offsetHeight = 40;
+      tooltip.showPopover = () => { tooltip.opened = true; };
+      tooltip.hidePopover = () => { tooltip.opened = false; };
+      wrap.listeners.focusin();
+      assert.equal(tooltip.opened, true);
+      wrap.listeners.keydown({ key: 'Escape' });
+      assert.equal(tooltip.opened, false);
+    }
+  }
+  const custom = dockView().limitDetailInfoNode([{ full: refill }], '', 'Custom accessible label');
+  assert.equal(custom.find('limit-detail-tooltip-trigger').getAttribute('aria-label'), 'Custom accessible label');
+  const mixed = dockView().limitDetailInfoNode([['Grant', '$1', '7/1'], { full: refill }, null, {}]);
+  assert.equal(mixed.find('limit-detail-tooltip-trigger').getAttribute('aria-label'), `Grant: $1 7/1, ${refill}`);
+});
+
+test('Home retains standalone Ollama spending after legacy quotas when balance is absent or hidden', () => {
+  const { parseOllamaUsageHtml } = require('../../src/shared/providers/ollama/limits');
+  const { homeLimitAccountsForProviders } = require('../../src/electron/renderer/homeOverview');
+  const { wallet } = require('../fixtures/ollamaCookieUsage.cjs');
+  const legacy = '<section><span>Session usage</span><span>25% used</span><span>Weekly usage</span><span>40% used</span></section>';
+  for (const hiddenWallet of [false, true]) {
+    const html = legacy + (hiddenWallet ? wallet : wallet.replace('<span>$18.25</span>', ''));
+    const parsed = parseOllamaUsageHtml(html);
+    const row = normalizeLimitProvider({ provider: 'ollama', status: 'ok', windows: parsed.windows });
+    for (const hiddenSpend of [false, true]) {
+      const isWindowHidden = (_, window) => (hiddenWallet && window.metric === 'credits') || (hiddenSpend && window.metric === 'spend');
+      const windows = limitPresentationApi.limitProviderCompactWindows(row, row.windows.filter((window) => !isWindowHidden('ollama', window)));
+      const rows = homeLimitAccountsForProviders({
+        providers: [{ ...row, windows }], providerOptions: [{ id: 'ollama', label: 'Ollama' }],
+        enabledProviderIds: ['ollama'], isWindowHidden
+      });
+      const result = renderHomeLimitFixture(rows);
+      const readings = [...result.walk()].filter((node) => node.classNames.has('home-limit-window'));
+      assert.equal(readings.length, hiddenSpend ? 2 : 3);
+      assert.equal(result.text.includes('$4.50'), !hiddenSpend);
+      assert.ok(readings.every((node) => node.classNames.has('home-limit-window-wide')));
+      if (!hiddenSpend) {
+        assert.equal(readings.at(-1).find('home-limit-window-label').textContent, 'Monthly credits used');
+        assert.equal(readings.at(-1).find('limit-meter'), null);
+      }
+    }
+  }
 });
 
 test('a TypeSafe card omits expiry when the billing response has no valid grants', () => {

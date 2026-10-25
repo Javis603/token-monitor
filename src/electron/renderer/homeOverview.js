@@ -95,7 +95,11 @@
     if (providerId !== 'ollama') return windows.slice(0, 2);
     const wallet = windows.find((window) => window.metric === 'credits' && window.showMeter === false);
     const spend = windows.find((window) => window.metric === 'spend' && window.showMeter === false);
-    if (!wallet) return windows.slice(0, 2).map((window) => ({ ...window, fullWidth: true }));
+    if (!wallet) {
+      const selected = windows.filter((window) => window !== spend).slice(0, 2);
+      if (spend) selected.push(spend);
+      return selected.map((window) => ({ ...window, fullWidth: true }));
+    }
     return [
       ...windows.filter((window) => window !== wallet && window !== spend).slice(0, 2),
       { ...wallet, resetDescription: '', detailEntries: [
