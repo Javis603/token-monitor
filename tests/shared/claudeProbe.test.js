@@ -384,6 +384,9 @@ def quiet_until(deadline, pause=False):
     if pause:
         # Model descheduling after computing the timeout but before select.
         time.sleep(0.5)
+        # Leave input queued so the guarded select must observe readiness.
+        if not select.select([0], [], [], 12)[0]:
+            sys.exit(8)
     # Readiness can be delivered after the deadline if the process is paused
     # around select. A queued key has no timestamp, so only reject input while
     # the guard is still active when we actually observe it.
