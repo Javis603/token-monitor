@@ -1010,6 +1010,9 @@ function createPluginManager({
         writeState(pluginId, { enabled: false });
         stopWorker(plugin, { immediate: true });
         plugin.alertStates.clear();
+        // Only the owner reads its metrics, so a disabled plugin's readings and
+        // history are released now rather than at the next reload.
+        bus.clearSourcesWithPrefix(`plugin.${pluginId}.`);
       }
       reconcile();
       pushAll();

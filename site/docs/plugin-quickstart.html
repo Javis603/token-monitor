@@ -302,7 +302,7 @@ const committed = await tm.settings.update({
 <ul><li>Import → preview → allow → enable → place → open.</li><li>Cold open, quick reopen, expiry, resize, reduced motion and keyboard interaction.</li><li>Missing data, denied grants, paging resets and settings conflicts.</li><li>Hide all consumers: demand should stop. Revoke/disable while open and while cached.</li><li>Update → approve new access → rollback → uninstall with data retention.</li></ul><p>Use a disposable profile. Test each claimed platform/surface; local macOS evidence does not prove Windows/Linux, packaged delivery or physical Notch behavior. See <a href="https://github.com/Javis603/token-monitor/blob/main/docs/plugins/validation.md">validation guidance</a>.</p>
 <h3 id="share-package" data-anchor="share-package">Build and inspect the exact package</h3>
 <p>From the checkout root:</p><figure class="code"><figcaption class="code-head"><span>Terminal</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout-v1.1.0.tmplugin
-# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>Keep a stable plugin id, increment the version, and declare compatible App versions when known. Install the exact output through From file. The builder includes declared Rich assets; the package total is bounded at 2 MiB. See the <a href="plugin-reference.html">package reference</a> for individual limits.</p>
+# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>Keep a stable plugin id, increment the version, and declare compatible App versions when known. Install the exact output through From file. The builder includes declared Rich assets; the package total is bounded at 4 MiB. See the <a href="plugin-reference.html">package reference</a> for individual limits.</p>
 <h3 id="share-catalog" data-anchor="share-catalog">Offer an HTTPS catalog</h3>
 <p>Host your package and a JSON catalog on an HTTPS static host. This is a schema example: replace the URL, author and digest with your actual values. Paste the builder’s SHA-256 without changing package bytes.</p><figure class="code"><figcaption class="code-head"><span>catalog.json · schema example, not an enrolled source</span></figcaption><pre><code>{
   "format": 1,
@@ -548,7 +548,7 @@ const committed = await tm.settings.update({
 <ul><li>匯入 → 預覽 → 授權 → 啟用 → 選擇位置 → 開啟。</li><li>冷啟動、快速重開、過期、縮放、減少動態效果與鍵盤操作。</li><li>缺少資料、拒絕權限、分頁重設與設定衝突。</li><li>隱藏全部介面後停止需求；開啟及快取時撤銷權限或停用。</li><li>更新 → 核准新權限 → 回復 → 保留資料移除。</li></ul><p>使用可拋棄設定檔，測試每個聲稱支援的平台與介面。本地 macOS 證據不能證明 Windows／Linux、打包版本或實體 Notch 行為。請見<a href="https://github.com/Javis603/token-monitor/blob/main/docs/plugins/validation.md">驗證指南</a>。</p>
 <h3 data-anchor="share-package">打包並檢查實際產物</h3>
 <p>從儲存庫根目錄執行：</p><figure class="code"><figcaption class="code-head"><span>終端機</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout-v1.1.0.tmplugin
-# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>保留固定 id、增加版本，並在已知時宣告相容 App 版本。透過「從檔案」安裝實際產物。建置器會包含宣告的 Rich 資產，套件總大小上限 2 MiB。個別限制見<a href="plugin-reference.html">套件參考</a>。</p>
+# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>保留固定 id、增加版本，並在已知時宣告相容 App 版本。透過「從檔案」安裝實際產物。建置器會包含宣告的 Rich 資產，套件總大小上限 4 MiB。個別限制見<a href="plugin-reference.html">套件參考</a>。</p>
 <h3 data-anchor="share-catalog">提供 HTTPS 目錄</h3>
 <p>將套件與 JSON 目錄放在 HTTPS 靜態主機。以下只是規格範例，請換成實際網址、作者與建置器輸出的 SHA-256，之後不要修改套件位元組。</p><figure class="code"><figcaption class="code-head"><span>catalog.json · 規格範例，並非已登錄來源</span></figcaption><pre><code>{
   "format": 1,
@@ -794,7 +794,7 @@ const committed = await tm.settings.update({
 <ul><li>导入 → 预览 → 授权 → 启用 → 选择位置 → 开启。</li><li>冷启动、快速重开、过期、缩放、减少动态效果与键盘操作。</li><li>缺少数据、拒绝权限、分页重设与设置冲突。</li><li>隐藏全部界面后停止需求；开启及缓存时撤销权限或停用。</li><li>更新 → 批准新权限 → 回退 → 保留数据移除。</li></ul><p>使用可丢弃配置文件，测试每个声称支持的平台与界面。本地 macOS 证据不能证明 Windows／Linux、打包版本或实体 Notch 行为。请见<a href="https://github.com/Javis603/token-monitor/blob/main/docs/plugins/validation.md">验证指南</a>。</p>
 <h3 data-anchor="share-package">打包并检查实际产物</h3>
 <p>从仓库根目录执行：</p><figure class="code"><figcaption class="code-head"><span>终端</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout-v1.1.0.tmplugin
-# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>保留固定 id、增加版本，并在已知时声明兼容 App 版本。透过「从文件」安装实际产物。建置器会包含声明的 Rich 资产，包总大小上限 2 MiB。个别限制见<a href="plugin-reference.html">包参考</a>。</p>
+# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>保留固定 id、增加版本，并在已知时声明兼容 App 版本。透过「从文件」安装实际产物。建置器会包含声明的 Rich 资产，包总大小上限 4 MiB。个别限制见<a href="plugin-reference.html">包参考</a>。</p>
 <h3 data-anchor="share-catalog">提供 HTTPS 目录</h3>
 <p>将包与 JSON 目录放在 HTTPS 静态主机。以下只是规格示例，请换成实际网址、作者与建置器输出的 SHA-256，之后不要修改包位元组。</p><figure class="code"><figcaption class="code-head"><span>catalog.json · 规范示例，并非已登记来源</span></figcaption><pre><code>{
   "format": 1,
@@ -1040,7 +1040,7 @@ const committed = await tm.settings.update({
 <ul><li>가져오기, 미리보기, 승인, 활성화, 배치와 열기.</li><li>콜드 시작, 재열기, 만료, 크기 변경, 동작 줄이기와 키보드.</li><li>누락 데이터, 거부, 페이지 리셋과 설정 충돌.</li><li>모두 숨긴 후 수요 중지, 열린/캐시 상태에서 비활성화.</li><li>업데이트, 새 권한 승인, 롤백, 데이터 보존 제거.</li></ul><p>버려도 되는 프로필에서 지원한다고 주장할 각 환경을 시험하세요. macOS 증거는 Windows/Linux, 패키지 앱이나 실제 Notch를 증명하지 않습니다. <a href="https://github.com/Javis603/token-monitor/blob/main/docs/plugins/validation.md">검증 안내</a>를 참조하세요.</p>
 <h3 data-anchor="share-package">실제 패키지 검사</h3>
 <p>저장소 루트에서 실행합니다.</p><figure class="code"><figcaption class="code-head"><span>터미널</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout-v1.1.0.tmplugin
-# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>id를 유지하고 버전을 올리며 필요하면 호환 앱 버전을 선언합니다. 실제 결과를 파일에서 설치합니다. Rich 자산을 포함한 총 상한은 2 MiB입니다. <a href="plugin-reference.html">패키지 참조</a>도 확인하세요.</p>
+# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>id를 유지하고 버전을 올리며 필요하면 호환 앱 버전을 선언합니다. 실제 결과를 파일에서 설치합니다. Rich 자산을 포함한 총 상한은 4 MiB입니다. <a href="plugin-reference.html">패키지 참조</a>도 확인하세요.</p>
 <h3 data-anchor="share-catalog">HTTPS 카탈로그 제공</h3>
 <p>정적 HTTPS 호스트에 패키지와 JSON을 올립니다. 아래 URL, 작성자와 해시를 실제 값으로 바꾸고, 해시 이후 패키지 바이트를 바꾸지 않습니다.</p><figure class="code"><figcaption class="code-head"><span>catalog.json · 스키마 예제, 등록된 소스 아님</span></figcaption><pre><code>{
   "format": 1,
@@ -1286,7 +1286,7 @@ const committed = await tm.settings.update({
 <ul><li>取り込み、確認、許可、有効化、配置、表示。</li><li>コールド起動、再表示、期限切れ、サイズ変更、動きを減らす設定とキーボード。</li><li>欠測、権限拒否、ページングのリセットと設定競合。</li><li>全表示を隠したときの需要停止、表示中／キャッシュ中の無効化。</li><li>更新、新権限の承認、ロールバック、データを残した削除。</li></ul><p>使い捨てプロファイルで対象環境ごとに試します。macOS のローカル検証は Windows／Linux、パッケージ版や実機 Notch の証明ではありません。<a href="https://github.com/Javis603/token-monitor/blob/main/docs/plugins/validation.md">検証ガイド</a>も参照してください。</p>
 <h3 data-anchor="share-package">実際のパッケージを検査する</h3>
 <p>リポジトリのルートから実行します。</p><figure class="code"><figcaption class="code-head"><span>ターミナル</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout-v1.1.0.tmplugin
-# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>id は固定し、バージョンを上げ、必要に応じて互換アプリ版を宣言します。生成物を「ファイルから」で試します。宣言した Rich アセットを含む総上限は 2 MiB です。<a href="plugin-reference.html">パッケージ仕様</a>も確認します。</p>
+# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>id は固定し、バージョンを上げ、必要に応じて互換アプリ版を宣言します。生成物を「ファイルから」で試します。宣言した Rich アセットを含む総上限は 4 MiB です。<a href="plugin-reference.html">パッケージ仕様</a>も確認します。</p>
 <h3 data-anchor="share-catalog">HTTPS カタログを用意する</h3>
 <p>静的 HTTPS ホストにパッケージと JSON を置きます。以下の URL、作者、SHA-256 を実値に置き換えてください。ハッシュ取得後にバイト列を変えません。</p><figure class="code"><figcaption class="code-head"><span>catalog.json · スキーマ例、登録済みソースではありません</span></figcaption><pre><code>{
   "format": 1,
@@ -1532,7 +1532,7 @@ const committed = await tm.settings.update({
 <ul><li>Importar, inspecionar, autorizar, ativar, posicionar e abrir.</li><li>Inicialização fria, reabertura, expiração, redimensionamento, movimento reduzido e teclado.</li><li>Dados ausentes, negação, reinício da paginação e conflitos de preferências.</li><li>Ocultar todos libera demanda; desative/revogue com a interface aberta e em cache.</li><li>Atualização, aprovação de acesso extra, rollback e remoção preservando dados.</li></ul><p>Use um perfil descartável e teste cada plataforma anunciada. Evidência local no macOS não comprova Windows/Linux, pacote distribuído ou Notch físico. Consulte a <a href="https://github.com/Javis603/token-monitor/blob/main/docs/plugins/validation.md">validação</a>.</p>
 <h3 data-anchor="share-package">Inspecione o pacote exato</h3>
 <p>Execute na raiz do repositório:</p><figure class="code"><figcaption class="code-head"><span>Terminal</span></figcaption><pre><code>node scripts/build-plugin-package.js ./cpu-readout /tmp/cpu-readout-v1.1.0.tmplugin
-# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>Mantenha o id, aumente a versão e declare compatibilidade quando conhecida. Instale o resultado por De arquivo. O total com assets Rich é limitado a 2 MiB. Confira a <a href="plugin-reference.html">referência do pacote</a>.</p>
+# The builder prints the SHA-256 of these exact package bytes.</code></pre></figure><p>Mantenha o id, aumente a versão e declare compatibilidade quando conhecida. Instale o resultado por De arquivo. O total com assets Rich é limitado a 4 MiB. Confira a <a href="plugin-reference.html">referência do pacote</a>.</p>
 <h3 data-anchor="share-catalog">Ofereça um catálogo HTTPS</h3>
 <p>Hospede pacote e JSON em um serviço estático HTTPS. Substitua URL, autor e hash pelos valores reais. Não altere os bytes após copiar o SHA-256 do gerador.</p><figure class="code"><figcaption class="code-head"><span>catalog.json · exemplo de schema, não é uma fonte cadastrada</span></figcaption><pre><code>{
   "format": 1,

@@ -51,7 +51,7 @@ Create `cpu-readout/manifest.json`:
 }
 ```
 
-No process is created for a declarative plugin. The data bus samples each source once at the fastest cadence requested by its current consumers. Views request samples only while visible; background rules are separate, explicitly enabled consumers. New installations default background activity off; hiding, disabling or removing the last consumer releases the shared sampler. Byte budgets for current values and numeric history cover host sources only. A plugin's publishes are bounded by its declared metrics, a per-value size cap and a per-metric history cap, so they never fail or evict host sources or another plugin's data.
+No process is created for a declarative plugin. The data bus samples each source once at the fastest cadence requested by its current consumers. Views request samples only while visible; background rules are separate, explicitly enabled consumers. New installations default background activity off; hiding, disabling or removing the last consumer releases the shared sampler. Byte budgets for current values and numeric history cover host sources only. A plugin's publishes are bounded by its declared metrics, a per-value size cap and a per-metric history cap; they can be rejected by those caps, but never consume host budgets or evict host or other plugins' data.
 
 ## Manifest and views
 

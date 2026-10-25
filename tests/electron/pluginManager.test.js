@@ -224,6 +224,20 @@ test('crashes restart with backoff and open the circuit after repeated failures'
   assert.equal(env.running.has('pulse'), true);
 });
 
+test('disabling a plugin releases its published readings and history', () => {
+  const env = setup();
+  env.manager.setEnabled('pulse', true);
+  env.manager.setBackground('pulse', true);
+  env.manager.handleMessage('pulse', { type: 'ready' });
+  for (const value of [1, 2, 3]) env.manager.handleMessage('pulse', { type: 'publish', metric: 'tpm', value });
+  env.bus.publish('sys.cpu', 37);
+  assert.equal(env.bus.history('plugin.pulse.tpm').length, 3);
+  env.manager.setEnabled('pulse', false);
+  assert.equal(env.bus.read('plugin.pulse.tpm'), null);
+  assert.deepEqual(env.bus.history('plugin.pulse.tpm'), []);
+  assert.equal(env.bus.read('sys.cpu').value, 37, 'host readings are untouched');
+});
+
 test('messages are validated by sender: undeclared metrics, unpermitted reads and floods', () => {
   const env = setup();
   env.manager.setEnabled('pulse', true);

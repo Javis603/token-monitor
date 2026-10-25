@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
 
 const { LIMITS, createPluginStorage, performNetRequest, validateMetricValue } = require('../../src/electron/plugins/broker');
@@ -50,8 +51,9 @@ test('plugin storage holds megabytes and charges each key once', () => {
   assert.equal(storage.set('extra', chunk), true, 'deleting returns capacity');
   assert.equal(storage.set('__proto__', { kept: true }), true);
   storage.flush();
-  const saved = JSON.parse(fsImpl.files.get('/data/notes.json'));
-  assert.ok(Buffer.byteLength(fsImpl.files.get('/data/notes.json')) <= LIMITS.storageBytes);
+  const file = fsImpl.files.get(path.join('/data', 'notes.json'));
+  const saved = JSON.parse(file);
+  assert.ok(Buffer.byteLength(file) <= LIMITS.storageBytes);
   assert.deepEqual(Object.getOwnPropertyDescriptor(saved, '__proto__').value, { kept: true });
   const reopened = createPluginStorage({ dir: '/data', pluginId: 'notes', fsImpl });
   assert.deepEqual(reopened.get('__proto__'), { kept: true });
