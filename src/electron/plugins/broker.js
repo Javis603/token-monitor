@@ -69,7 +69,7 @@ function validateMetricValue(kind, value) {
     case 'object': {
       if (!plainObject(value)) return { ok: false, error: 'expected a plain JSON object' };
       const json = JSON.stringify(value);
-      return json.length <= LIMITS.objectBytes ? { ok: true, value: JSON.parse(json) } : { ok: false, error: 'object too large' };
+      return Buffer.byteLength(json, 'utf8') <= LIMITS.objectBytes ? { ok: true, value: JSON.parse(json) } : { ok: false, error: 'object too large' };
     }
     default:
       return { ok: false, error: 'unknown metric kind' };

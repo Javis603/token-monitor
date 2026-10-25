@@ -180,8 +180,6 @@ async function detachedAcceptance(settings) {
 }
 
 async function detachedFallbackAcceptance(userDataDir) {
-  // A package that becomes unreadable after discovery reproduces mount failure
-  // without mocking runtime authority, the production renderer or its adapter.
   const dir = path.join(userDataDir, 'plugins/fallback-probe');
   fs.mkdirSync(dir);
   const manifest = { id: 'fallback-probe', name: 'Fallback scroll probe', version: '1.0.0', tmApi: 1, permissions: ['ui.web'],
@@ -189,30 +187,64 @@ async function detachedFallbackAcceptance(userDataDir) {
       children: Array.from({ length: 24 }, (_, i) => ({ type: 'text', text: `Fallback row ${i + 1}: content must remain reachable if the authored document cannot initialize.` })) } }],
     webUi: { version: 1, assets: ['index.html'], documents: [{ id: 'page-rich', view: 'page', target: 'page', slot: 'replace', entry: 'index.html', height: 460 }] } };
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest));
-  fs.writeFileSync(path.join(dir, 'index.html'), '<!doctype html><p>Not loaded</p>');
+  fs.writeFileSync(path.join(dir, 'index.html'), '<!doctype html><p>Revision snapshot loaded</p>');
   runtime.manager.reload(); runtime.manager.setEnabled('fallback-probe', true);
+  // Discovery snapshots assets. Removing the source is a successful-load
+  // control, not a way to inject a navigation failure into this revision.
   fs.unlinkSync(path.join(dir, 'index.html'));
-  await host("tokenMonitor.plugins.openPage('fallback-probe/page')");
-  await until(() => BrowserWindow.getAllWindows().some(candidate => candidate.webContents.getURL().endsWith('/renderer/plugins/page.html')));
-  const detached = BrowserWindow.getAllWindows().find(candidate => candidate !== win && candidate.webContents.getURL().endsWith('/renderer/plugins/page.html'));
+  let detached;
+  const open = async () => {
+    await host("tokenMonitor.plugins.openPage('fallback-probe/page')");
+    await until(() => BrowserWindow.getAllWindows().some(candidate => candidate !== win && candidate.webContents.getURL().endsWith('/renderer/plugins/page.html')));
+    detached = BrowserWindow.getAllWindows().find(candidate => candidate !== win && candidate.webContents.getURL().endsWith('/renderer/plugins/page.html'));
+  };
   const run = script => execute(detached.webContents, script);
-  await until(() => run("document.querySelector('.page-rich-viewport')?.innerText.includes('Fallback row 24')"));
-  await delay(700);
-  const state = await run(`(() => {
-    const mount = document.querySelector('.page-rich-viewport');
-    mount.scrollTop = mount.scrollHeight;
-    const last = [...mount.querySelectorAll('*')].find(node => !node.childElementCount && node.textContent.startsWith('Fallback row 24:'));
-    return { overflow: getComputedStyle(mount).overflowY, scrollTop: mount.scrollTop,
-      clientHeight: mount.clientHeight, scrollHeight: mount.scrollHeight,
-      mounted: mount.classList.contains('pv-web-mounted'), text: mount.innerText,
-      bounds: mount.getBoundingClientRect().toJSON(), last: last?.getBoundingClientRect().toJSON() };
-  })()`);
-  check('failed Rich initialization preserves scrollable tall lightweight fallback', !state.mounted && state.overflow === 'auto' && state.scrollTop > 0 && state.scrollHeight > state.clientHeight);
-  check('failed Rich fallback last row remains reachable', state.text.includes('Fallback row 24') && state.last?.bottom <= state.bounds.bottom + 1);
-  check('failed Rich package never mounts a native child', !child());
-  fs.writeFileSync(path.join(scratch, 'detached-fallback.json'), JSON.stringify(state, null, 2));
-  fs.writeFileSync(path.join(scratch, 'detached-fallback-host.png'), (await detached.capturePage()).toPNG());
-  detached.close(); runtime.manager.setEnabled('fallback-probe', false);
+  const probeSession = electron.session.fromPartition('tm-web-fallback-probe', { cache: false });
+  const intercepted = new Map(), failed = [];
+  const failLoad = (_event, wc) => {
+    if (wc.session !== probeSession) return;
+    const original = wc.loadURL;
+    intercepted.set(wc, original);
+    wc.loadURL = function (url, ...args) {
+      if (!url.startsWith('tm-plugin-ui:')) return original.call(this, url, ...args);
+      failed.push({ wc, url });
+      return Promise.reject(new Error('fixture: authored navigation failed'));
+    };
+  };
+  try {
+    await open();
+    await until(() => run("document.querySelector('.page-rich-viewport')?.classList.contains('pv-web-mounted')"));
+    const control = webContents.getAllWebContents().find(wc => wc.session === probeSession && wc.getURL().startsWith('tm-plugin-ui:'));
+    check('discovered Rich asset snapshot loads after its source file is removed', control && (await execute(control, 'document.body.textContent')).includes('Revision snapshot loaded'));
+    detached.close(); await until(() => control.isDestroyed() && detached.isDestroyed());
+
+    // Only this plugin's real WebContents gets a rejected navigation. The
+    // production controller still owns mounting, failure handling and teardown.
+    app.on('web-contents-created', failLoad);
+    await open();
+    await until(async () => failed.length > 0 && failed.every(({ wc }) => wc.isDestroyed())
+      && await run("!document.querySelector('.page-rich-viewport')?.classList.contains('pv-web-mounted') && document.querySelector('.page-rich-viewport')?.innerText.includes('Fallback row 24')"));
+    check('fallback probe reaches a controlled Rich navigation failure', failed.length > 0 && failed.every(({ url }) => url.endsWith('/index.html')));
+    const state = await run(`(() => {
+      const mount = document.querySelector('.page-rich-viewport');
+      mount.scrollTop = mount.scrollHeight;
+      const last = [...mount.querySelectorAll('*')].find(node => !node.childElementCount && node.textContent.startsWith('Fallback row 24:'));
+      return { overflow: getComputedStyle(mount).overflowY, scrollTop: mount.scrollTop,
+        clientHeight: mount.clientHeight, scrollHeight: mount.scrollHeight,
+        mounted: mount.classList.contains('pv-web-mounted'), text: mount.innerText,
+        bounds: mount.getBoundingClientRect().toJSON(), last: last?.getBoundingClientRect().toJSON() };
+    })()`);
+    check('failed Rich initialization preserves scrollable tall lightweight fallback', !state.mounted && state.overflow === 'auto' && state.scrollTop > 0 && state.scrollHeight > state.clientHeight);
+    check('failed Rich fallback last row remains reachable', state.text.includes('Fallback row 24') && state.last?.bottom <= state.bounds.bottom + 1);
+    check('failed Rich initialization destroys its native child', failed.every(({ wc }) => wc.isDestroyed()) && !webContents.getAllWebContents().some(wc => wc.session === probeSession));
+    fs.writeFileSync(path.join(scratch, 'detached-fallback.json'), JSON.stringify({ ...state, injectedFailures: failed.length, destroyedChildren: failed.map(({ wc }) => wc.id) }, null, 2));
+    fs.writeFileSync(path.join(scratch, 'detached-fallback-host.png'), (await detached.capturePage()).toPNG());
+  } finally {
+    app.removeListener('web-contents-created', failLoad);
+    for (const [wc, original] of intercepted) if (!wc.isDestroyed()) wc.loadURL = original;
+    if (detached && !detached.isDestroyed()) detached.close();
+    runtime.manager.setEnabled('fallback-probe', false);
+  }
 }
 
 async function main() {

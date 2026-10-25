@@ -155,7 +155,7 @@ The complete public settings DTO is transport-budgeted before commit; oversized 
 
 ## Code API
 
-Add `"main": "main.js"` and declare `metrics` with kinds `number`, `text`, `series`, `draw`, `rows` or `object`. An `object` value is plain JSON up to 56 KiB, eight levels deep and 1024 entries per object or array, so it can carry structured lists to a Rich page; one Worker message, including a storage write, stays within 64 KiB. Chart history keeps numeric fields from the first 32 keys of the first four levels. The entry is one local JavaScript file; bundle dependencies into it if needed. There is no Node, DOM, dynamic import or ambient network access.
+Add `"main": "main.js"` and declare `metrics` with kinds `number`, `text`, `series`, `draw`, `rows` or `object`. An `object` value is plain JSON up to 56 KiB measured as serialized UTF-8 bytes, eight levels deep and 1024 entries per object or array, so it can carry structured lists to a Rich page; one Worker message, including a storage write, stays within 64 KiB. Chart history keeps numeric fields from the first 32 keys of the first four levels. The entry is one local JavaScript file; bundle dependencies into it if needed. There is no Node, DOM, dynamic import or ambient network access.
 
 ```js
 tm.subscribe('sys.cpu');

@@ -38,6 +38,23 @@ test('object metrics carry structured lists up to the IPC envelope', () => {
   assert.equal(validateMetricValue('object', { blob: 'x'.repeat(LIMITS.objectBytes) }).ok, false, 'larger objects are rejected');
 });
 
+for (const [label, character] of [['ASCII', 'x'], ['Chinese', '中'], ['emoji', '😀']]) {
+  test(`object metric quota counts UTF-8 bytes at the ${label} boundary`, () => {
+    const overhead = Buffer.byteLength(JSON.stringify({ text: '' }), 'utf8');
+    for (const delta of [-1, 0, 1]) {
+      const payloadBytes = LIMITS.objectBytes + delta - overhead;
+      const width = Buffer.byteLength(character, 'utf8');
+      const value = { text: character.repeat(Math.floor(payloadBytes / width)) + 'x'.repeat(payloadBytes % width) };
+      assert.equal(Buffer.byteLength(JSON.stringify(value), 'utf8'), LIMITS.objectBytes + delta);
+      assert.equal(validMessage({ type: 'publish', metric: 'payload', value }), true, 'the outer wire budget must not mask the metric quota');
+      const result = validateMetricValue('object', value);
+      assert.equal(result.ok, delta <= 0, `${delta} bytes from the quota`);
+      if (result.ok) assert.deepEqual(result.value, value);
+      else assert.equal(result.error, 'object too large');
+    }
+  });
+}
+
 test('plugin storage holds megabytes and charges each key once', () => {
   const fsImpl = memoryFs();
   const storage = createPluginStorage({ dir: '/data', pluginId: 'notes', fsImpl, flushDelayMs: 60_000 });
