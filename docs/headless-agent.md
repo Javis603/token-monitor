@@ -86,6 +86,8 @@ On a Windows desktop, the widget is usually the better choice.
 
 Where a long-running process is not an option, run `npm run agent:once` from a scheduler such as cron instead. Each run does a full scan, so updates arrive only as often as the schedule fires.
 
+When Claude mirror exclusion is enabled, normal `--once` runs retain mirror identities in `claude-remote-mirrors.json` under the shared state directory, even though they do not save a collector anchor. Keep that state across scheduled runs: it prevents deleted mirrors from returning through the session archive. `--dry-run` reads the selection without creating, updating or repairing it.
+
 ## Update
 
 Stop the agent or its service first: `npm ci` replaces `node_modules`, including the tokscale binary the agent runs.

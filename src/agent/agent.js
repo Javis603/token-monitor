@@ -96,6 +96,7 @@ const usageOptions = {
   dailyHistoryArchiveEnabled: sessionUsageArchiveEnabled,
   dailyHistoryArchiveWriteEnabled: !dryRun,
   anchorPersistenceEnabled: !once && !dryRun,
+  mirrorStatePersistenceEnabled: !dryRun,
   intervalMs,
   watchEnabled,
   watchDebounceMs,

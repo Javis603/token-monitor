@@ -43,7 +43,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
   if (!trust) return null;
   if (options.claudeRemoteMirrorsExcluded) {
     try {
-      const mirrors = claudeRemoteMirrors({ ...options, anchorPersistenceEnabled: false });
+      const mirrors = claudeRemoteMirrors({ ...options, mirrorStatePersistenceEnabled: false });
       if ((mirrors.recoveryRequired === true) !== (saved.claudeMirrorArchiveRecovery === true)
         || JSON.stringify(mirrors.sessionKeys) !== JSON.stringify(saved.excludedSessionKeys || [])) return null;
     } catch (_) { return null; }

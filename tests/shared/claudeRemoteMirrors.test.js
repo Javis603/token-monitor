@@ -36,6 +36,13 @@ test('explicit mirror selection is narrow, durable, reversible, and respects the
   assert.equal(tokscaleCommand().env.TOKSCALE_EXCLUDED_CLAUDE_DIRS, undefined);
 });
 
+test('mirror selection persists independently of disabled collector anchors', (t) => {
+  const { mirror, options } = fixture(t);
+  const selected = claudeRemoteMirrors({ ...options, anchorPersistenceEnabled: false });
+  fs.rmSync(mirror, { recursive: true });
+  assert.deepEqual(claudeRemoteMirrors({ ...options, anchorPersistenceEnabled: false }), selected);
+});
+
 test('remote ownership disables built-in WSL, protects session archive projection and refuses an unsupported binary', async (t) => {
   const { options } = fixture(t);
   const common = {
@@ -179,7 +186,7 @@ for (const content of ['{broken', '{"roots":null}', '{"roots":[]}', '{"roots":{"
 test('mirror recovery is read-only during seed inspection and does not swallow filesystem errors', (t) => {
   const { options } = fixture(t);
   fs.writeFileSync(options.mirrorStatePath, '{broken');
-  assert.equal(claudeRemoteMirrors({ ...options, anchorPersistenceEnabled: false }).recoveryRequired, true);
+  assert.equal(claudeRemoteMirrors({ ...options, mirrorStatePersistenceEnabled: false }).recoveryRequired, true);
   assert.equal(fs.readFileSync(options.mirrorStatePath, 'utf8'), '{broken');
   assert.equal(fs.readdirSync(path.dirname(options.mirrorStatePath)).some(name => name.includes('.corrupt')), false);
   fs.unlinkSync(options.mirrorStatePath);

@@ -52,7 +52,9 @@ function claudeRemoteMirrors(options = {}) {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
-  if ((corrupt || names.size !== previous.length) && options.anchorPersistenceEnabled !== false) {
+  // Source ownership must survive one-shot collectors too. Anchor snapshots
+  // are only a scan optimization and have a separate persistence lifecycle.
+  if ((corrupt || names.size !== previous.length) && options.mirrorStatePersistenceEnabled !== false) {
     // Copy before replacement: a crash between these operations leaves the
     // corrupt original detectable, never a missing file mistaken for new state.
     if (corrupt) fs.writeFileSync(`${file}.${randomUUID()}.corrupt`, bytes, { flag: 'wx', mode: 0o600 });
