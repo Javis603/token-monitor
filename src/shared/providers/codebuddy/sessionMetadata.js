@@ -31,6 +31,7 @@ function emptyState() {
     title: '',
     status: '',
     userSinceStop: false,
+    openWork: false,
     trailing: Buffer.alloc(0),
     droppingLongLine: false
   };
@@ -62,6 +63,17 @@ function applyLine(state, line) {
     // The response answered, so any prompt the user sent before it belongs to
     // the turn this record closes.
     state.userSinceStop = false;
+    state.openWork = false;
+    return;
+  }
+  // A tool call after the last completed response is the turn still running:
+  // the client writes `function_call` as the model asks for a tool and writes
+  // nothing for the assistant until the tool answers. Non-interactive runs
+  // (`-p`) never record a fresh user prompt for that turn, so without this the
+  // finished status above latched and a working session read as ended for its
+  // whole run.
+  if (entry?.type === 'function_call' || entry?.type === 'function_call_result') {
+    state.openWork = true;
     return;
   }
   if (isUserPromptRecord(entry)) {
@@ -132,7 +144,7 @@ function scanRange(fd, size, state, fsApi) {
 // are: only the last may leave an earlier reading in place.
 function turnEndedOf(state) {
   if (!state.status) return undefined;
-  if (state.userSinceStop) return false;
+  if (state.userSinceStop || state.openWork) return false;
   return state.status === 'completed';
 }
 
