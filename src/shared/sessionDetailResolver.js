@@ -36,7 +36,7 @@ async function resolveSessionDetailForPlatform(args = {}, deps = {}) {
     : (detailArgs, scoped) => (deps.readSessionDetail || readSessionDetail)({
       ...detailArgs,
       ...(scoped
-        ? { env: {}, useEnvRoots: false, customScanPaths: {} }
+        ? { env: {}, useEnvRoots: false }
         : (deps.env === undefined ? {} : { env: deps.env }))
     });
   const nativeDetail = await readDetail({ ...args, home: nativeHome }, false);

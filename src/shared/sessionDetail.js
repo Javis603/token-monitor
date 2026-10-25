@@ -673,10 +673,10 @@ function readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, h
   return { found: true, client: 'codebuddy', sessionId, period, exchanges: grouped, totals: totalsOf(grouped, sessionCost) };
 }
 
-function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, env, useEnvRoots, customScanPaths, deps = {} }) {
+function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, env, useEnvRoots, deps = {} }) {
   if (client === 'opencode') return readOpenCodeSessionDetail({ sessionId, period, deps });
   if (client === 'reasonix') return readReasonixSessionDetail({ sessionId, period, home, deps });
-  const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots, customScanPaths, fs: deps.fs });
+  const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots, fs: deps.fs });
   if (!filePath && client === 'codebuddy') {
     return readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, home, env, deps });
   }

@@ -2,13 +2,10 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { createHash } = require('node:crypto');
 const { tokscaleHomeDir } = require('../../tokscaleConfig');
 const { normalizeCustomScanPaths } = require('../../customScanPaths');
 
 const HEADER_CACHE_LIMIT = 4096;
-const CUSTOM_DISCOVERY_ENTRY_LIMIT = 20000;
-const CUSTOM_DISCOVERY_DEPTH_LIMIT = 32;
 const headerCache = new Map();
 
 function nonBlank(value) {
@@ -41,34 +38,18 @@ function readTaskState(project) {
   return undefined;
 }
 
-function* directoryEntries(dir) {
-  let handle;
-  try {
-    handle = fs.opendirSync(dir);
-    let entry;
-    while ((entry = handle.readSync())) yield entry;
-  } catch (_) { /* Missing or unreadable sources are retried on the next discovery. */ }
-  finally { if (handle) handle.closeSync(); }
-}
-
-function projectCwds(sessions, seenHeaders, budget = null) {
+function projectCwds(sessions, seenHeaders) {
   const projects = new Set();
-  const visited = new Set();
-  function walk(dir, depth) {
-    if (budget && budget.remaining <= 0) return;
-    let real;
-    try { real = fs.realpathSync.native(dir); } catch (_) { return; }
-    if (visited.has(real)) return;
-    visited.add(real);
-    for (const file of directoryEntries(dir)) {
-      if (budget && budget.remaining-- <= 0) break;
-      const filePath = path.join(dir, file.name);
-      if (file.isDirectory() || (file.isSymbolicLink() && isDirectory(filePath))) {
-        if (depth < (budget ? CUSTOM_DISCOVERY_DEPTH_LIMIT : 1)) walk(filePath, depth + 1);
-        continue;
-      }
-      if (!budget && depth === 0) continue;
+  let entries;
+  try { entries = fs.readdirSync(sessions, { withFileTypes: true }); } catch (_) { return projects; }
+  for (const entry of entries) {
+    const dir = path.join(sessions, entry.name);
+    if (!entry.isDirectory() && !(entry.isSymbolicLink() && isDirectory(dir))) continue;
+    let files;
+    try { files = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { continue; }
+    for (const file of files) {
       if (!file.name.endsWith('.jsonl') || (!file.isFile() && !file.isSymbolicLink())) continue;
+      const filePath = path.join(dir, file.name);
       let fd;
       try {
         const stat = fs.statSync(filePath);
@@ -100,15 +81,7 @@ function projectCwds(sessions, seenHeaders, budget = null) {
       finally { if (fd !== undefined) fs.closeSync(fd); }
     }
   }
-  walk(sessions, 0);
   return projects;
-}
-
-function centralProjectKey(project) {
-  let canonical = path.resolve(project);
-  try { canonical = fs.realpathSync.native(canonical); } catch (_) {}
-  const name = path.basename(canonical).replace(/[^\p{L}\p{N}._-]/gu, '_') || 'root';
-  return `${name}-${createHash('sha256').update(canonical).digest('hex').slice(0, 12)}`;
 }
 
 function senpiTopology(home, env, options) {
@@ -121,42 +94,23 @@ function senpiTopology(home, env, options) {
     ['senpi-omo-sessions', path.join(home, '.omo', 'agent', 'sessions')]
   ];
   const extra = nonBlank(env.SENPI_CODING_AGENT_SESSION_DIR);
-  const omoAgent = nonBlank(env.OMO_CODING_AGENT_DIR) || agentDir || nonBlank(env.PI_CODING_AGENT_DIR);
-  const agents = new Set([path.join(home, '.omo', 'agent'), ...(omoAgent ? [path.resolve(omoAgent)] : [])]);
-  const omoSessions = omoAgent && path.join(path.resolve(omoAgent), 'sessions');
-  if (omoSessions && !roots.some(([, dir]) => dir === omoSessions)) roots.push(['senpi-omo-sessions', omoSessions]);
   const projects = new Set([home]);
-  const custom = options.useEnvRoots === false ? [] : normalizeCustomScanPaths(options.customScanPaths, options).senpi || [];
   if (options.useEnvRoots !== false) {
     projects.add(options.cwdDir || process.cwd());
+    const custom = normalizeCustomScanPaths(options.customScanPaths, options).senpi || [];
     const seenHeaders = new Set();
-    for (const dir of new Set([...roots.map(([, dir]) => dir), ...(extra ? [extra] : [])])) {
+    for (const dir of new Set([sessions, roots[1][1], ...(extra ? [extra] : []), ...custom.flatMap(dir => [dir, path.join(dir, 'sessions')])])) {
       for (const project of projectCwds(dir, seenHeaders)) projects.add(project);
-    }
-    const budget = { remaining: CUSTOM_DISCOVERY_ENTRY_LIMIT };
-    for (const dir of custom) {
-      for (const project of projectCwds(dir, seenHeaders, budget)) projects.add(project);
-      if (path.basename(dir) === 'sessions') agents.add(path.dirname(dir));
-      else if (isDirectory(path.join(dir, 'sessions')) || isDirectory(path.join(dir, 'projects'))) agents.add(dir);
     }
     for (const file of headerCache.keys()) if (!seenHeaders.has(file)) headerCache.delete(file);
   }
   const userState = readTaskState(home);
   const taskDirs = new Set();
   const configFiles = [];
-  for (const agent of agents) {
-    const central = path.join(agent, 'projects');
-    for (const entry of directoryEntries(central)) {
-      if (entry.isDirectory() || (entry.isSymbolicLink() && isDirectory(path.join(central, entry.name)))) {
-        taskDirs.add(path.join(central, entry.name, 'senpi-task', 'children'));
-      }
-    }
-  }
   for (const project of [...projects].sort()) {
     const state = readTaskState(project);
     const taskDir = state === undefined ? userState : state;
     taskDirs.add(path.join(taskDir || path.join(project, '.omo/senpi-task'), 'children'));
-    for (const agent of agents) taskDirs.add(path.join(agent, 'projects', centralProjectKey(project), 'senpi-task', 'children'));
     configFiles.push(...['omo.jsonc', 'omo.json'].map(name => path.join(project, '.omo', name)));
   }
   // Stable ordering avoids rebuilding the host when directory enumeration order changes.
@@ -193,24 +147,9 @@ function senpiWatchSources(options = {}) {
   return { roots, targets, dirs: [...dirs].sort() };
 }
 
-function senpiExtraScanDirs(options = {}) {
-  const env = options.env || process.env;
-  const home = tokscaleHomeDir({ ...options, env });
-  // The pinned binary's TOKSCALE_EXTRA_DIRS lane does not discover OmO children.
-  // Supply the same narrow roots used by watching; let tokscale own parsing,
-  // pricing and physical-file deduplication. Match the custom-path transport's
-  // delimiter restriction without imposing its user-selection count limit.
-  return [...new Set(senpiSourceRoots(home, env, options).map(([, dir]) => dir))]
-    .filter(dir => isDirectory(dir) && !/[,\0\r\n]/.test(dir));
-}
-
-function resolveSenpiSessionsDirs({ homeDir = '', env = process.env, useEnvRoots = true, customScanPaths } = {}) {
+function resolveSenpiSessionsDirs({ homeDir = '', env = process.env, useEnvRoots = true } = {}) {
   const home = useEnvRoots === false ? homeDir : tokscaleHomeDir({ homeDir, env });
-  const options = { useEnvRoots, customScanPaths: useEnvRoots === false ? {} : customScanPaths };
-  return [...new Set([
-    ...senpiSourceRoots(home, useEnvRoots === false ? {} : env, options).map(([, dir]) => dir),
-    ...(normalizeCustomScanPaths(options.customScanPaths).senpi || [])
-  ])];
+  return [...new Set(senpiSourceRoots(home, useEnvRoots === false ? {} : env, { useEnvRoots }).map(([, dir]) => dir))];
 }
 
-module.exports = { senpiSourceRoots, senpiWatchSources, senpiExtraScanDirs, resolveSenpiSessionsDirs };
+module.exports = { senpiSourceRoots, senpiWatchSources, resolveSenpiSessionsDirs };

@@ -4,13 +4,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createHash } = require('node:crypto');
 const test = require('node:test');
 const { clientSourceRoots, clientSourceChecks, watchPathsForClients,
-  clientsForWatchPath, watchIgnoreMatcher, watchAttributionRootsForClients, startCollector, tokscaleCommand, configFingerprint } = require('../../src/shared/collector');
+  clientsForWatchPath, watchIgnoreMatcher, watchAttributionRootsForClients, startCollector } = require('../../src/shared/collector');
 const { resolveSessionDetailForPlatform } = require('../../src/shared/sessionDetailResolver');
 const { senpiSourceRoots } = require('../../src/shared/providers/senpi/paths');
-const { CLIENT_SOURCE_CHECK_IDS } = require('../../src/shared/clientHealth');
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
 
@@ -38,89 +36,6 @@ function header(home, project, name = 'parent', tree = '.omo/agent/sessions') {
 }
 
 function children(project) { return path.join(project, '.omo', 'senpi-task', 'children'); }
-
-function centralChildren(agent, project) {
-  const real = fs.realpathSync.native(project);
-  const name = path.basename(real).replace(/[^\p{L}\p{N}._-]/gu, '_');
-  const key = `${name}-${createHash('sha256').update(real).digest('hex').slice(0, 12)}`;
-  return path.join(agent, 'projects', key, 'senpi-task', 'children');
-}
-
-test('Senpi discovers direct and deeply nested custom headers without following cycles forever', t => {
-  const { home, project, root, options } = fixture(t);
-  for (const relative of ['', 'one/two/project']) {
-    const custom = path.join(root, `custom-${relative ? 'deep' : 'direct'}`);
-    const dir = path.join(custom, relative);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'parent.jsonl'), JSON.stringify({ type: 'session', cwd: project }) + '\n');
-    fs.symlinkSync(custom, path.join(dir, 'cycle'), process.platform === 'win32' ? 'junction' : 'dir');
-    fs.mkdirSync(children(project), { recursive: true });
-    const scoped = { ...options, customScanPaths: { senpi: [custom] } };
-    const roots = watchAttributionRootsForClients('senpi', null, scoped);
-    assert.deepEqual(clientsForWatchPath(path.join(children(project), 'child.jsonl'), roots), ['senpi']);
-    assert.equal(watchIgnoreMatcher('senpi', scoped)(path.join(children(project), 'child.jsonl')), false);
-    assert.equal(clientSourceRoots('senpi', { ...scoped, homeDir: home }).senpi.some(r => r.dir === children(project)), true);
-  }
-});
-
-test('Senpi central task roots cover existing stores and children created after startup', t => {
-  const { home, project, options } = fixture(t);
-  const agent = path.join(home, '.omo', 'agent');
-  const central = centralChildren(agent, project);
-  header(home, project);
-  let roots = watchAttributionRootsForClients('senpi', null, options);
-  assert.deepEqual(clientsForWatchPath(path.join(central, 'task/sessions/child.jsonl'), roots), ['senpi']);
-  const ignored = watchIgnoreMatcher('senpi', options);
-  assert.equal(ignored(central), false, 'future central children stay discoverable');
-  assert.equal(ignored(path.join(agent, 'projects', 'unrelated', 'thread-tools')), true);
-  fs.mkdirSync(central, { recursive: true });
-  const orphan = path.join(agent, 'projects', 'orphan-123', 'senpi-task', 'children');
-  fs.mkdirSync(orphan, { recursive: true });
-  roots = watchAttributionRootsForClients('senpi', null, options);
-  assert.deepEqual(clientsForWatchPath(path.join(orphan, 'child.jsonl'), roots), ['senpi'], 'retained stores do not depend on a surviving parent header');
-});
-
-test('Senpi custom project discovery stops at its depth and entry budgets', t => {
-  const { project, root, options } = fixture(t);
-  const custom = path.join(root, 'custom');
-  const deep = path.join(custom, ...Array(33).fill('d'));
-  fs.mkdirSync(deep, { recursive: true });
-  fs.writeFileSync(path.join(deep, 'parent.jsonl'), JSON.stringify({ type: 'session', cwd: project }) + '\n');
-  let roots = clientSourceRoots('senpi', { ...options, customScanPaths: { senpi: [custom] } }).senpi;
-  assert.ok(!roots.some(r => r.dir === children(project)), 'headers beyond the depth budget do not add external roots');
-  const opendir = fs.opendirSync;
-  let reads = 0;
-  let closed = false;
-  t.mock.method(fs, 'opendirSync', dir => dir === custom ? {
-    readSync: () => { reads++; return { name: 'foreign.txt', isDirectory: () => false, isFile: () => true, isSymbolicLink: () => false }; },
-    closeSync: () => { closed = true; }
-  } : opendir(dir));
-  roots = clientSourceRoots('senpi', { ...options, customScanPaths: { senpi: [custom] } }).senpi;
-  assert.ok(!roots.some(r => r.dir === children(project)));
-  assert.ok(reads <= 20001, 'an unbounded directory enumeration stops at the entry budget');
-  assert.equal(closed, true);
-});
-
-test('Senpi command supplies central and custom-discovered child roots only to Senpi scans', t => {
-  const { home, project, root, options } = fixture(t);
-  const agent = path.join(root, 'relocated-agent');
-  const central = centralChildren(agent, project);
-  fs.mkdirSync(central, { recursive: true });
-  const custom = path.join(root, 'direct');
-  fs.mkdirSync(custom);
-  fs.writeFileSync(path.join(custom, 'parent.jsonl'), JSON.stringify({ type: 'session', cwd: project }) + '\n');
-  fs.mkdirSync(children(project), { recursive: true });
-  const scoped = { ...options, env: { OMO_CODING_AGENT_DIR: agent, TOKSCALE_EXTRA_DIRS: 'claude:/inherited' }, customScanPaths: { senpi: [custom] } };
-  const env = tokscaleCommand({ ...scoped, clients: 'senpi' }).env;
-  for (const check of clientSourceChecks('senpi', scoped).senpi) assert.ok(CLIENT_SOURCE_CHECK_IDS.includes(check.id), check.id);
-  const entries = env.TOKSCALE_EXTRA_DIRS.split(',');
-  for (const dir of [custom, central, children(project)]) assert.ok(entries.includes(`senpi:${dir}`), dir);
-  assert.ok(entries.includes('claude:/inherited'));
-  assert.equal(tokscaleCommand({ ...scoped, clients: 'codex', customScanPaths: {} }).env.TOKSCALE_EXTRA_DIRS, 'claude:/inherited');
-  assert.ok(configFingerprint('senpi', '2020-01-01').includes('|senpi-sources:'));
-  assert.ok(!configFingerprint('codex', '2020-01-01').includes('|senpi-sources:'));
-  assert.ok(!watchPathsForClients('senpi', { ...scoped, homeDir: home }).includes(home));
-});
 
 test('Senpi reuses unchanged headers but discovers appended and rewritten headers', t => {
   const { home, project, root, options } = fixture(t);

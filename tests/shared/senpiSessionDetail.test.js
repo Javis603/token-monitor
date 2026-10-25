@@ -8,10 +8,6 @@ const test = require('node:test');
 
 const { readSessionDetail } = require('../../src/shared/sessionDetail');
 const { senpiSourceRoots } = require('../../src/shared/providers/senpi/paths');
-const { readSessionDetailForPlatform, resolveSessionDetailForPlatform } = require('../../src/shared/sessionDetailResolver');
-const { installSourceEnvGuard } = require('../helpers/sourceEnv');
-
-installSourceEnvGuard(test);
 
 function tmpHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'tm-senpi-home-'));
@@ -62,53 +58,8 @@ test('OmO Native detail reads ~/.omo/agent/sessions and does not add reasoning t
 test('SENPI_CODING_AGENT_DIR replaces only the legacy senpi root', () => {
   const home = path.join(path.sep, 'tmp', 'senpi-home');
   const roots = senpiSourceRoots(home, { SENPI_CODING_AGENT_DIR: '/custom/senpi-agent' }, { cwdDir: home });
+  assert.deepEqual(roots.map(([id]) => id), ['senpi-sessions', 'senpi-omo-sessions', 'senpi-task-children']);
   assert.equal(roots[0][1], path.join('/custom/senpi-agent', 'sessions'));
   assert.equal(roots[1][1], path.join(home, '.omo', 'agent', 'sessions'));
-  assert.ok(roots.some(([, dir]) => dir === path.join(home, '.omo', 'senpi-task', 'children')));
-  assert.ok(!roots.some(([, dir]) => dir === path.join(home, '.senpi', 'agent', 'sessions')));
-});
-
-test('Senpi Session Detail opens custom agent, sessions and direct transcript roots', t => {
-  const home = tmpHome();
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  for (const relative of ['agent/sessions/project', 'sessions/project', 'direct', 'deep/one/two']) {
-    const custom = path.join(home, 'custom', relative.split('/')[0]);
-    const sessionId = `custom-${relative.replaceAll('/', '-')}`;
-    writeSession(path.join(home, 'custom', relative), sessionId, { input: 12, output: 3, cost: { total: 0.01 } });
-    const args = { client: 'senpi', sessionId, home, env: {}, customScanPaths: { senpi: [custom] } };
-    assert.equal(readSessionDetail(args).found, true, relative);
-    assert.equal(readSessionDetail({ ...args, useEnvRoots: false }).found, false, 'scoped lookup must ignore host custom roots');
-  }
-});
-
-test('Senpi custom roots cross the production worker boundary', async t => {
-  const root = tmpHome();
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const home = path.join(root, 'home');
-  fs.mkdirSync(home);
-  const custom = path.join(root, 'custom');
-  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
-  t.after(() => {
-    for (const [key, value] of Object.entries(saved)) {
-      if (value === undefined) delete process.env[key]; else process.env[key] = value;
-    }
-  });
-  process.env.HOME = home;
-  process.env.USERPROFILE = home;
-  const sessionId = 'custom-worker-session';
-  writeSession(custom, sessionId, { input: 12, output: 3, cost: { total: 0.01 } });
-  const detail = await readSessionDetailForPlatform({ client: 'senpi', sessionId, customScanPaths: { senpi: [custom] } });
-  assert.equal(detail.found, true);
-  assert.equal(detail.totals.totalTokens, 15);
-});
-
-test('Senpi WSL fallback clears host custom paths as well as environment roots', async () => {
-  const calls = [];
-  await resolveSessionDetailForPlatform({ client: 'senpi', sessionId: 'missing', customScanPaths: { senpi: ['/host/custom'] } }, {
-    platform: 'win32', homedir: () => '/native', env: {}, wslUsageHomes: () => ['/wsl'],
-    readSessionDetail: args => { calls.push(args); return { found: false }; }
-  });
-  assert.deepEqual(calls[0].customScanPaths, { senpi: ['/host/custom'] });
-  assert.deepEqual(calls[1].customScanPaths, {});
-  assert.equal(calls[1].useEnvRoots, false);
+  assert.equal(roots[2][1], path.join(home, '.omo', 'senpi-task', 'children'));
 });

@@ -206,7 +206,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`, `~/.copilot/` (`otel/`, `data.db`, `session-store.db`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | ✅ |
-| <img src=".github/assets/tools-icon/senpi.png" width="28" alt="OmO Native" /> | OmO Native | `~/.omo/agent/sessions/`, `~/.senpi/agent/sessions/`, `~/.omo/agent/projects/*/senpi-task/children/`, `<project>/.omo/senpi-task/children/` | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/senpi.png" width="28" alt="OmO Native" /> | OmO Native | `~/.omo/agent/sessions/`, `~/.senpi/agent/sessions/`, `~/.omo/senpi-task/children/`, `<project>/.omo/senpi-task/children/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `~/.local/share/goose/sessions/sessions.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`, VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) | ✅ | — | — |
