@@ -6765,6 +6765,27 @@ function renderHomeDeviceModule() {
     body.append(empty);
     return module;
   }
+  // TokenLedger: the credits badge is exact local-ledger data; its tooltip
+  // states the confidence and how far the per-model calibration has come.
+  function creditsTooltip(calibration) {
+    const lines = [t('home.creditsSource')];
+    if (calibration) {
+      const { profiles, pending } = homeOverviewApi.creditsCalibrationLines(calibration);
+      lines.push(t('home.creditsCalibration', { profiles: profiles.length, pending: pending.length }));
+      for (const entry of profiles) {
+        lines.push(t('home.creditsFittedModel', {
+          model: entry.model,
+          value: formatCredits(entry.creditsPerMTok),
+          r2: entry.r2,
+          samples: entry.samples
+        }));
+      }
+      for (const entry of pending) {
+        lines.push(t('home.creditsPendingModel', { model: entry.model, samples: entry.samples }));
+      }
+    }
+    return lines.join('\n');
+  }
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-list-row home-device-row';
@@ -6794,6 +6815,7 @@ function renderHomeDeviceModule() {
       const credits = document.createElement('span');
       credits.className = 'home-device-credits';
       credits.textContent = t('home.creditsToday', { value: formatCredits(row.creditsToday) });
+      credits.title = creditsTooltip(row.creditsCalibration);
       item.append(credits);
     }
     body.append(item);

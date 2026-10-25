@@ -6,10 +6,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { creditsSpentToday, homeDeviceRows } = require('../../src/electron/renderer/homeOverview');
+const { creditsSpentToday, creditsCalibrationLines, homeDeviceRows } = require('../../src/electron/renderer/homeOverview');
 const { createCreditsAttacher } = require('../../src/shared/credits/attach');
 const { createUsageTransform } = require('../../src/shared/usage/usageTransform');
 const { aggregateDevices } = require('../../src/shared/usage');
+const { normalizeCreditsSummary } = require('../../src/shared/credits/summary');
 
 const NOON = new Date('2026-10-25T12:00:00').getTime();
 function atHour(hour) {
@@ -98,4 +99,84 @@ test('aggregateDevices passes the ledger through per device only', () => {
   assert.deepEqual(deviceA.credits, credits);
   assert.equal(deviceB.credits, undefined);
   assert.equal('credits' in stats, false);
+});
+
+test('creditsCalibrationLines bounds and sanitizes tooltip entries', () => {
+  const lines = creditsCalibrationLines({
+    profiles: [{ model: 'hy4-preview', creditsPerMTok: 5884.1, r2: 0.97, samples: 52 }],
+    pending: [
+      { model: 'space-bunny', r2: 0.99, samples: 4 },
+      { model: 'zero', samples: 0 },
+      ...Array.from({ length: 5 }, (_, i) => ({ model: 'm' + i, samples: 3 }))
+    ]
+  }, { pendingLimit: 3 });
+  assert.equal(lines.profiles.length, 1);
+  assert.equal(lines.profiles[0].creditsPerMTok, 5884.1);
+  assert.equal(lines.pending.length, 3);
+  assert.deepEqual(creditsCalibrationLines(null), { profiles: [], pending: [] });
+});
+
+test('homeDeviceRows carries the calibration block for tooltip rendering', () => {
+  const calibration = { profiles: [], pending: [{ model: 'm', samples: 2, r2: null }] };
+  const rows = homeDeviceRows([
+    {
+      deviceId: 'local',
+      periods: { today: { totalTokens: 5 } },
+      credits: {
+        available: true,
+        totals: { credits: 1, requests: 1 },
+        recentEvents: [{ credits: -3, updatedAt: atHour(9) }],
+        calibration
+      }
+    }
+  ], { now: NOON });
+  assert.deepEqual(rows[0].creditsCalibration, calibration);
+});
+
+test('normalizeCreditsSummary keeps a bounded calibration block, drops junk', () => {
+  const normalized = normalizeCreditsSummary({
+    available: true,
+    totals: { credits: 1, requests: 1 },
+    calibration: {
+      profiles: [{ model: 'ok', creditsPerMTok: 1.2, r2: 0.95, samples: 60 }],
+      pending: [{ junk: true }, { model: 'p', samples: 'x' }, { model: 'good', samples: 3, reason: 'insufficient_samples' }]
+    }
+  });
+  assert.equal(normalized.calibration.profiles.length, 1);
+  assert.equal(normalized.calibration.pending.length, 1);
+  assert.equal(normalized.calibration.pending[0].model, 'good');
+  assert.equal(normalizeCreditsSummary({ available: true, totals: { credits: 1 }, calibration: { profiles: [], pending: [] } }).calibration, undefined);
+});
+
+test('the attacher produces a fitted calibration end to end', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tl-attach-cal-'));
+  try {
+    const sqlite = require('node:sqlite');
+    const dir = path.join(home, '.workbuddy');
+    fs.mkdirSync(dir, { recursive: true });
+    const db = new sqlite.DatabaseSync(path.join(dir, 'workbuddy.db'));
+    db.exec('CREATE TABLE session_usage (session_id TEXT, used INTEGER, size INTEGER, updated_at INTEGER, credit_json TEXT);');
+    db.exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, cwd TEXT, model TEXT, created_at INTEGER, updated_at INTEGER);');
+    const ins = db.prepare('INSERT INTO sessions (id, model) VALUES (?, ?)');
+    const usage = db.prepare('INSERT INTO session_usage VALUES (?, ?, ?, ?, ?)');
+    // 55 exact-linear sessions on one model: 1.25 credits per Mtok.
+    for (let i = 0; i < 55; i++) {
+      const tokens = 100_000 + i * 20_000;
+      ins.run('s' + i, 'hy4-preview');
+      usage.run('s' + i, tokens, 1_000_000, NOON, JSON.stringify({ r: tokens * 0.00000125 }));
+    }
+    db.close();
+    const attach = createCreditsAttacher({ home, now: new Date(NOON) });
+    const out = attach({ deviceId: 'd', today: { totalTokens: 1 } });
+    assert.equal(out.credits.available, true);
+    assert.equal(out.credits.calibration.profiles.length, 1);
+    assert.equal(out.credits.calibration.profiles[0].model, 'hy4-preview');
+    assert.equal(out.credits.calibration.profiles[0].creditsPerMTok, 1.25);
+    assert.equal(out.credits.calibration.profiles[0].r2, 1);
+    // The wire normalization round-trips what the attacher produced.
+    const round = normalizeCreditsSummary(out.credits);
+    assert.equal(round.calibration.profiles[0].creditsPerMTok, 1.25);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });

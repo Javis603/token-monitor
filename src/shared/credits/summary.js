@@ -7,6 +7,7 @@
 
 const MAX_RECENT_EVENTS = 200;
 const MAX_MODEL_ENTRIES = 50;
+const MAX_CALIBRATION_ENTRIES = 20;
 const MAX_REASON_LENGTH = 200;
 
 function clampNumber(value) {
@@ -47,6 +48,40 @@ function normalizeTotals(raw) {
   return totals;
 }
 
+// Regression calibration rides the credits block (summary.js must stay
+// self-contained: it is vendored into the Cloudflare worker closure, so it
+// cannot import calibration.js). Unknown/malformed entries drop out rather
+// than failing the whole block.
+function normalizeCalibrationEntry(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const samples = Math.trunc(Number(raw.samples));
+  if (!Number.isFinite(samples) || samples < 0) return null;
+  const entry = {
+    model: String(raw.model || 'unknown').slice(0, 128),
+    samples
+  };
+  const creditsPerMTok = clampNumber(raw.creditsPerMTok);
+  if (creditsPerMTok !== null && creditsPerMTok > 0) entry.creditsPerMTok = creditsPerMTok;
+  const r2 = clampNumber(raw.r2);
+  if (r2 !== null) entry.r2 = r2;
+  if (raw.reason) entry.reason = String(raw.reason).slice(0, 64);
+  return entry;
+}
+
+function normalizeCalibration(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const out = { profiles: [], pending: [] };
+  for (const list of ['profiles', 'pending']) {
+    if (!Array.isArray(raw[list])) continue;
+    for (const candidate of raw[list].slice(0, MAX_CALIBRATION_ENTRIES)) {
+      const entry = normalizeCalibrationEntry(candidate);
+      if (entry) out[list].push(entry);
+    }
+  }
+  if (out.profiles.length === 0 && out.pending.length === 0) return null;
+  return out;
+}
+
 function normalizeCreditsSummary(raw) {
   if (!raw || typeof raw !== 'object') return null;
   if (raw.available !== true) {
@@ -72,6 +107,8 @@ function normalizeCreditsSummary(raw) {
   if (Number.isFinite(Number(raw.warnings))) {
     summary.warnings = Math.max(0, Math.trunc(Number(raw.warnings)));
   }
+  const calibration = normalizeCalibration(raw.calibration);
+  if (calibration) summary.calibration = calibration;
   return summary;
 }
 
