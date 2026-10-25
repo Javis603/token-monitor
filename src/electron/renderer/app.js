@@ -12979,6 +12979,7 @@ pluginSettingsPanel = pluginApi && window.TokenMonitorPluginSettings
     api: pluginApi,
     getLocale: currentLocale,
     onOpenExternal: (url) => window.tokenMonitor.openExternal(url),
+    onCopyText: (text) => window.tokenMonitor.copyText(text),
     setDetailTooltip: limitWindowsView.setDetailTooltip,
     onApplySkin: (skin) => applyPluginSkin(skin),
     onPlaced: () => renderSettingsSummaries(),

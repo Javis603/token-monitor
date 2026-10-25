@@ -32,7 +32,7 @@
     return known ? t(known) : t('settings.plugins.actionFailed', { error: message });
   }
 
-  function createPluginSettingsPanel({ document, container, t, api, setDetailTooltip = null, onApplySkin = () => {}, onPlaced = () => {}, onSetEnabled = null, getEnabled = null, getLocale = () => document.documentElement?.lang || 'en', onOpenExternal = () => {} }) {
+  function createPluginSettingsPanel({ document, container, t, api, setDetailTooltip = null, onApplySkin = () => {}, onPlaced = () => {}, onSetEnabled = null, getEnabled = null, getLocale = () => document.documentElement?.lang || 'en', onOpenExternal = () => {}, onCopyText = text => window.navigator.clipboard.writeText(text) }) {
     let list = null;
     let consentFor = '';
     let busy = false;
@@ -290,13 +290,31 @@
       return wrap;
     }
 
+    function typeLabels(plugin) {
+      const labels = el(document, 'span', 'plugin-types');
+      for (const type of ['widget', 'page', 'appearance']) {
+        if (!plugin.types?.includes(type)) continue;
+        labels.append(el(document, 'span', `plugin-type plugin-type-${type}`, t(`plugins.type.${type}`)));
+      }
+      return labels;
+    }
+
+    function importPackage(kind) {
+      void run(async () => {
+        const preview = await api.importPackage(kind);
+        if (preview) { packagePreview = preview; catalogReview = null; sourcesOpen = false; activeTab = 'installed'; selectedPluginId = ''; aboutOpen = false; }
+        return null;
+      });
+    }
+
     function packagePanel() {
       const p = packagePreview;
       const panel = el(document, 'section', 'plugin-consent plugin-package-preview');
       panel.dataset.errorTarget = 'package';
       panel.setAttribute('aria-label', t('plugins.package.review'));
       panel.append(identity(p.name, p.author || p.id, t(`plugins.origin.${p.origin.kind}`), p.icon, p.identityIcon, p.origin.kind));
-      panel.append(el(document, 'span', 'plugin-version', `${p.installedVersion ? `${p.installedVersion} → ` : ''}${p.version}`));
+      const meta = el(document, 'div', 'plugin-card-meta');
+      meta.append(el(document, 'span', 'plugin-version', `${p.installedVersion ? `${p.installedVersion} → ` : ''}${p.version}`), typeLabels(p)); panel.append(meta);
       panel.append(el(document, 'p', 'plugin-description', p.description));
       if (p.origin.kind !== 'local') panel.append(el(document, 'p', 'plugin-description', p.origin.label));
       if (p.origin.url) panel.append(el(document, 'code', 'plugin-log', p.origin.url));
@@ -343,6 +361,30 @@
       panel.append(actions); return panel;
     }
 
+    function authoringPanel() {
+      const panel = el(document, 'section', 'plugin-about');
+      panel.append(button(t('plugins.ui.back'), () => {
+        aboutOpen = false; render(); container.querySelector('.plugin-toolbar .plugin-more')?.focus({ preventScroll: true });
+      }, 'plugin-back'), el(document, 'h3', '', t('plugins.ui.about')),
+      el(document, 'p', 'settings-note', t('plugins.authoring.intro')));
+      const prompt = el(document, 'textarea', 'plugin-author-prompt');
+      prompt.value = t('plugins.authoring.prompt'); prompt.readOnly = true; prompt.rows = 12; prompt.spellcheck = false;
+      prompt.setAttribute('aria-label', t('plugins.authoring.label'));
+      const status = el(document, 'p', 'settings-note plugin-copy-status'); status.setAttribute('role', 'status');
+      const actions = el(document, 'div', 'settings-actions');
+      const copy = button(t('plugins.authoring.copy'), async () => {
+        copy.disabled = true; copy.setAttribute('aria-busy', 'true'); status.textContent = '';
+        try { await onCopyText(prompt.value); status.textContent = t('plugins.authoring.copied'); }
+        catch (_) { prompt.focus({ preventScroll: true }); prompt.select(); status.textContent = t('plugins.authoring.copyFallback'); }
+        finally { copy.disabled = busy; copy.removeAttribute('aria-busy'); }
+      }, 'plugin-copy-prompt');
+      const guide = el(document, 'a', 'plugin-guide-link', t('plugins.authoring.guide'));
+      guide.href = `https://javis-ai.com/token-monitor/docs/plugin-quickstart.html?lang=${encodeURIComponent(getLocale())}`;
+      guide.rel = 'noopener noreferrer';
+      guide.addEventListener('click', event => { event.preventDefault(); void run(async () => { await onOpenExternal(guide.href); return null; }); });
+      actions.append(copy, guide); panel.append(actions, prompt, status); return panel;
+    }
+
     function catalogPanel() {
       const wrap = el(document, 'div', 'plugin-catalog');
       if (!catalogData) { wrap.append(el(document, 'p', 'settings-note', t('plugins.view.loading'))); return wrap; }
@@ -352,14 +394,14 @@
       search.placeholder = t('plugins.catalog.search'); search.setAttribute('aria-label', t('plugins.catalog.search'));
       const results = el(document, 'div', 'plugin-catalog-results');
       function renderResults() {
-        const entries = catalogData.entries.filter(p => p.origin.kind === activeTab && `${p.name} ${p.description} ${p.author} ${p.id}`.toLowerCase().includes(query.toLowerCase()));
+        const entries = catalogData.entries.filter(p => `${p.name} ${p.description} ${p.author} ${p.id}`.toLowerCase().includes(query.toLowerCase()));
         const cards = entries.map(entry => {
           const card = el(document, 'article', 'plugin-card'); card.dataset.catalogId = entry.id;
           const head = el(document, 'div', 'plugin-card-head');
           head.append(identity(entry.name, entry.author || entry.id, t(`plugins.origin.${entry.origin.kind}`), entry.icon, entry.identityIcon, entry.origin.kind));
           card.append(head, el(document, 'p', 'plugin-description', entry.description));
           const meta = el(document, 'div', 'plugin-card-meta');
-          meta.append(el(document, 'span', 'plugin-version', `v${entry.version}`));
+          meta.append(el(document, 'span', 'plugin-version', `v${entry.version}`), typeLabels(entry));
           if (entry.origin.kind === 'community') meta.append(el(document, 'span', 'plugin-origin-note', entry.origin.label));
           card.append(meta);
           const key = `${entry.origin.id}/${entry.id}`;
@@ -373,21 +415,20 @@
           if (!entry.installedVersion && !available) actions.append(el(document, 'span', 'settings-note', t('plugins.catalog.incompatible')));
           head.append(actions); return card;
         });
-        if (!cards.length) cards.push(el(document, 'p', 'settings-note', t(activeTab === 'community' && !catalogData.communityConfigured ? 'plugins.catalog.noCommunity' : 'plugins.catalog.noResults')));
+        if (!cards.length) cards.push(el(document, 'p', 'settings-note', t('plugins.catalog.noResults')));
         results.replaceChildren(...cards);
         if (content?.contains(results)) identifyContent();
       }
       search.addEventListener('input', () => { query = search.value; renderResults(); });
       wrap.append(search, results); renderResults();
-      if (activeTab === 'official') wrap.prepend(el(document, 'p', 'settings-note', t('plugins.catalog.offlineOfficial')));
-      if (activeTab === 'community') wrap.prepend(button(t('plugins.catalog.sources'), () => { sourcesOpen = true; render(); content.querySelector('.plugin-back')?.focus({ preventScroll: true }); }, 'plugin-manage plugin-source-route'));
+
       return wrap;
     }
 
     function sourcesPanel() {
       const details = el(document, 'section', 'plugin-detail plugin-sources');
-      details.append(button(t('plugins.ui.backCatalog'), () => { sourcesOpen = false; render(); content.querySelector('.plugin-source-route')?.focus({ preventScroll: true }); }, 'plugin-back'));
-        details.append(el(document, 'p', 'settings-note', t('plugins.catalog.sourceNote')));
+      details.append(button(t('plugins.ui.backCatalog'), () => { sourcesOpen = false; render(); navigation.querySelector('.plugin-more')?.focus({ preventScroll: true }); }, 'plugin-back'));
+        details.append(el(document, 'h3', '', t('plugins.catalog.sources')), el(document, 'p', 'settings-note', t('plugins.catalog.sourceNote')));
         for (const source of catalogData.sources.filter(s => s.kind === 'community')) {
           const row = el(document, 'section', 'plugin-source-row'); row.append(el(document, 'strong', 'plugin-consent-title', source.label), el(document, 'code', 'plugin-log', source.url));
           row.dataset.errorTarget = `source:${source.id}`;
@@ -548,13 +589,16 @@
       card.dataset.pluginId = plugin.id;
       card.append(pluginIdentity(plugin));
       if (plugin.description) card.append(el(document, 'p', 'plugin-description', plugin.description));
+      if (plugin.version) {
+        const meta = el(document, 'div', 'plugin-card-meta');
+        meta.append(el(document, 'span', 'plugin-version', `v${plugin.version}`), typeLabels(plugin)); card.append(meta);
+      }
       const footer = el(document, 'div', 'plugin-card-footer');
       const surfaces = SURFACE_ORDER.filter(surface => plugin.views?.some(view => view.placements?.[surface]));
       const exceptional = !['active', 'disabled'].includes(plugin.status);
       if (exceptional) footer.append(statusChip(plugin));
       else {
         const summary = el(document, 'span', 'plugin-placement-summary');
-        if (plugin.version) summary.append(el(document, 'span', 'plugin-version', `v${plugin.version} · `));
         const count = button(t('plugins.ui.locationCount', { count: surfaces.length }), () => openPlugin(plugin.id, true), 'plugin-location-count');
         count.dataset.controlKey = 'placements';
         const details = surfaces.length
@@ -742,7 +786,10 @@
       const toolbar = el(document, 'div', 'plugin-detail-toolbar');
       const back = button(t('plugins.ui.back'), closePlugin, 'plugin-back');
       toolbar.append(back); wrap.append(toolbar, pluginIdentity(plugin));
-      if (plugin.version) wrap.append(el(document, 'span', 'plugin-version', `v${plugin.version}`));
+      if (plugin.version) {
+        const meta = el(document, 'div', 'plugin-card-meta');
+        meta.append(el(document, 'span', 'plugin-version', `v${plugin.version}`), typeLabels(plugin)); wrap.append(meta);
+      }
       if (!['active', 'disabled'].includes(plugin.status)) wrap.append(statusChip(plugin));
       if (plugin.description) wrap.append(el(document, 'p', 'plugin-description', plugin.description));
       if (plugin.author) wrap.append(el(document, 'p', 'settings-note', plugin.author));
@@ -908,14 +955,14 @@
         tabs = el(document, 'nav', 'plugin-catalog-tabs');
         tabs.setAttribute('aria-label', t('settings.plugins.title'));
         tabs.setAttribute('role', 'tablist');
-        for (const tab of ['installed', 'official', 'community']) {
+        for (const tab of ['installed', 'discover']) {
           const control = button(t(`plugins.catalog.${tab}`), () => {
             if (tab === activeTab) { if (tab === 'installed' && selectedPluginId) closePlugin(); return; }
             void run(async () => {
               // Only switch after the new page is ready; failed loads leave
               // the current page and its drafts intact.
               if (tab !== 'installed') catalogData = await api.catalog();
-              activeTab = tab; query = ''; if (tab === 'installed') { selectedPluginId = ''; diagnostics = false; } return null;
+              activeTab = tab; query = ''; sourcesOpen = false; if (tab === 'installed') { selectedPluginId = ''; diagnostics = false; } return null;
             });
           });
           control.dataset.tab = tab;
@@ -952,17 +999,20 @@
         previousToolbar.setAttribute('aria-hidden', 'true');
       }
       if (activeTab !== 'installed') {
-        if (sourcesOpen && activeTab === 'community') nodes.push(sourcesPanel());
-        else if (catalogReview && catalogReview.origin.kind === activeTab) nodes.push(catalogReviewPanel());
+        const actions = el(document, 'div', 'plugin-toolbar');
+        actions.append(button(t('plugins.package.import'), () => importPackage('file'), 'plugin-inline-action'),
+          actionMenu(t('plugins.catalog.advanced'), [[t('plugins.catalog.sources'), () => {
+            sourcesOpen = true; render(); content.querySelector('.plugin-back')?.focus({ preventScroll: true });
+          }]]));
+        if (sourcesOpen || catalogReview) { actions.classList.add('is-inactive'); actions.setAttribute('inert', ''); actions.setAttribute('aria-hidden', 'true'); }
+        if (previousToolbar) previousToolbar.replaceWith(actions); else navigation.append(actions);
+        if (sourcesOpen) nodes.push(sourcesPanel());
+        else if (catalogReview) nodes.push(catalogReviewPanel());
         else nodes.push(catalogPanel());
         replaceContent(nodes, saved); return;
       }
       if (aboutOpen) {
-        const about = el(document, 'section', 'plugin-about');
-        about.append(button(t('plugins.ui.back'), () => {
-          aboutOpen = false; render(); container.querySelector('.plugin-toolbar .plugin-more')?.focus({ preventScroll: true });
-        }, 'plugin-back'), el(document, 'h3', '', t('plugins.ui.about')), el(document, 'p', 'settings-note', t('settings.plugins.intro')));
-        nodes.push(about); replaceContent(nodes, saved); return;
+        nodes.push(authoringPanel()); replaceContent(nodes, saved); return;
       }
       if (selectedPluginId) {
         const plugin = list.plugins.find(item => item.id === selectedPluginId);
@@ -974,7 +1024,6 @@
       }
       if (list.safeMode) nodes.push(el(document, 'p', 'plugin-banner', t('settings.plugins.safeMode')));
       const actions = el(document, 'div', 'plugin-toolbar');
-      const importPackage = kind => void run(async () => { packagePreview = await api.importPackage(kind); return null; });
       const countText = t('plugins.ui.count', { count: list.plugins.length });
       const count = el(document, 'span', 'plugin-toolbar-count', countText);
       count.setAttribute('role', 'status'); count.setAttribute('aria-atomic', 'true');

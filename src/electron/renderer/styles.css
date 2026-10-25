@@ -8562,6 +8562,12 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-identity .plugin-card-title { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
 .plugin-identity .plugin-source { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 6px; padding: 0; border: 0; line-height: 1.4; overflow-wrap: anywhere; }
 .plugin-card-head > .settings-actions { margin: 0; gap: 6px; }
+.plugin-types { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; }
+.plugin-types:empty { display: none; }
+/* Feature labels use text-only hues; color-scheme follows the App theme. */
+.plugin-type-widget { color: light-dark(#34627f, #94bdd8); }
+.plugin-type-page { color: light-dark(#735687, #bca5d8); }
+.plugin-type-appearance { color: light-dark(#85601f, #d6b77d); }
 .plugin-card-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; font-size: .625rem; color: var(--muted); }
 .plugin-origin-note { overflow-wrap: anywhere; }
 .plugin-catalog-results .plugin-description { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -8700,3 +8706,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 
 .display-settings-page-flat > .display-settings-fields:not([hidden]) { margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--line); }
 .display-settings-page-flat > .display-settings-fields > :first-child { margin-top: 0; }
+
+.plugin-about { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.plugin-about h3, .plugin-about .settings-note { margin: 0; }
+.settings-panel .plugin-author-prompt { height: auto; min-height: 220px; width: 100%; box-sizing: border-box; font: inherit; font-size: .6875rem; line-height: 1.6; overflow-wrap: anywhere; resize: vertical; user-select: text; }
+.plugin-copy-status { min-height: 1.6em; }

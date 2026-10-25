@@ -1,4 +1,5 @@
 'use strict';
+const { normalizeTypes } = require('./types');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -47,7 +48,7 @@ function parseIndex(bytes, publicKey) {
       if (typeof v.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(v.sha256)) throw new Error(`${entry.id}: SHA-256 is required`);
       const range = v.engines?.tokenMonitor;
       if (range !== undefined && (typeof range !== 'string' || !semver.validRange(range))) throw new Error(`${entry.id}: invalid compatibility range`);
-      return { version: v.version, sha256: v.sha256, url: httpsUrl(v.url), compatible: !range || semver.satisfies(HOST_VERSION, range),
+      return { types: normalizeTypes(v.types), version: v.version, sha256: v.sha256, url: httpsUrl(v.url), compatible: !range || semver.satisfies(HOST_VERSION, range),
         changelog: normalizeLocalized(v.changelog, 2000), engines: range || '*' };
     }).sort((a, b) => semver.rcompare(a.version, b.version));
     return { id: entry.id, name, description: normalizeLocalized(entry.description, 500), author: cleanText(entry.author, 100), identityIcon: normalizeIdentityIcon(entry.identityIcon), versions };

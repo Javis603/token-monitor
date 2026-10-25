@@ -28,12 +28,12 @@ async function main() {
     const check = (name, ok, evidence) => { checks.push({name, ok: Boolean(ok), evidence}); };
     const box = document.getElementById('settings'), scroll = document.getElementById('scroll');
     const tick = () => new Promise(r => setTimeout(r, 20));
-    const data = {enabled:true, plugins:[{id:'alpha',name:'Alpha',description:'Plugin description',version:'1.0.0',source:'builtin',status:'active',enabled:true,permissions:[],hosts:[],views:[{ref:'alpha/view',title:'View',surfaces:['home','page'],placements:{home:false}}],background:{supported:true,enabled:false},logs:[{at:0,level:'info',text:'Fixture ready'}],runtime:{state:'idle',cpuPercent:null,memoryMB:null}},{id:'beta',name:'Beta',source:'builtin',status:'disabled',enabled:false,permissions:[],hosts:[],views:[]}]};
-    let pending, reject, previewPending, catalogCalls = 0;
+    const data = {enabled:true, plugins:[{id:'alpha',types:['widget','page'],name:'Alpha',description:'Plugin description',version:'1.0.0',source:'builtin',status:'active',enabled:true,permissions:[],hosts:[],views:[{ref:'alpha/view',title:'View',surfaces:['home','page'],placements:{home:false}}],background:{supported:true,enabled:false},logs:[{at:0,level:'info',text:'Fixture ready'}],runtime:{state:'idle',cpuPercent:null,memoryMB:null}},{id:'beta',name:'Beta',source:'builtin',status:'disabled',enabled:false,permissions:[],hosts:[],views:[]}]};
+    let pending, reject, previewPending, catalogCalls = 0, importResult = null, copyFailure = false;
     let catalogMode = 'deferred', previewMode = 'success', globalMode = 'success', savedMasterEnabled = true;
-    const catalog = {entries:[{id:'demo',name:'Demo',description:'Example',author:'Author',version:'1.0.0',origin:{id:'official',kind:'official'},versions:[{version:'1.0.0',compatible:true,installable:true},{version:'2.0.0',compatible:true,installable:true}],status:'available'}],sources:[]};
+    const catalog = {entries:[{id:'demo',types:['page'],name:'Demo',description:'Example',author:'Author',version:'1.0.0',origin:{id:'official',kind:'official'},versions:[{version:'1.0.0',compatible:true,installable:true},{version:'2.0.0',compatible:true,installable:true}],status:'available'}],sources:[]};
     const tooltips = TokenMonitorLimitWindowsView.createLimitWindowsView({document,tooltip:{hasOpened:()=>false,markOpened:()=>{},release:()=>{}}});
-    const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:box,setDetailTooltip:tooltips.setDetailTooltip,getEnabled:()=>savedMasterEnabled,onSetEnabled:async enabled=>{calls.push(['global',enabled]);if(globalMode==='error')throw Error('settings write failed');savedMasterEnabled=enabled;data.enabled=enabled&&!data.safeMode;return structuredClone(data)},t:(key,args)=>key==='plugins.ui.locationCount'?String(args.count)+' locations':key==='settings.plugins.actionFailed'?args.error:key,api:{
+    const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:box,setDetailTooltip:tooltips.setDetailTooltip,getEnabled:()=>savedMasterEnabled,onCopyText:async text=>{if(copyFailure)throw Error('clipboard unavailable');calls.push(['copy',text])},onOpenExternal:async url=>{calls.push(['guide',url])},onSetEnabled:async enabled=>{calls.push(['global',enabled]);if(globalMode==='error')throw Error('settings write failed');savedMasterEnabled=enabled;data.enabled=enabled&&!data.safeMode;return structuredClone(data)},t:(key,args)=>key==='plugins.authoring.prompt'?'Fixture prompt with exact punctuation:':key==='plugins.ui.locationCount'?String(args.count)+' locations':key==='settings.plugins.actionFailed'?args.error:key,api:{
       list:async()=>structuredClone(data),
       catalog:()=>{catalogCalls++;return catalogMode==='deferred'?new Promise((yes,no)=>{pending=yes;reject=no}):Promise.resolve(catalog)},
       place:async(ref,surface,on)=>{calls.push(['place',ref,surface,on]);data.plugins[0].views[0].placements.home=on;return structuredClone(data)},
@@ -41,9 +41,12 @@ async function main() {
       catalogPreview:async(source,id,version)=>{calls.push(['preview',version]);if(previewMode==='error')throw Error('preview rejected');if(previewMode==='deferred')await new Promise(resolve=>{previewPending=resolve});return {token:'token-'+version,id,name:'Demo',description:'Example',version,author:'Author',origin:{id:source,kind:'official'},permissions:[],hosts:[],risk:{},operation:'install',sha256:'abc'}},
       cancelInstall:async token=>{calls.push(['cancel',token])},
       install:async token=>{calls.push(['install',token]);return structuredClone(data)},
+      importPackage:async kind=>{calls.push(['import',kind]);return importResult},
       openFolder:async()=>{calls.push(['folder'])},reload:async()=>structuredClone(data)
     }});
     await panel.refresh();
+    check('installed-version-shares-metadata-with-capability-labels',box.querySelector('.plugin-card-meta .plugin-version')?.textContent==='v1.0.0'&&box.querySelector('.plugin-card-meta .plugin-types')?.textContent==='plugins.type.widgetplugins.type.page');
+    check('legacy-entry-does-not-invent-types',!box.querySelector('[data-plugin-id="beta"] .plugin-type'));
     data.plugins[0].author='Token Monitor · Official';await panel.refresh();
     const sourceIdentity=box.querySelector('.plugin-identity');
     check('host-source-label-is-separate-from-author-controlled-text',sourceIdentity.querySelector('.plugin-author').textContent==='Token Monitor · Official'&&sourceIdentity.querySelector('.plugin-origin-label').textContent==='settings.plugins.source.builtin'&&!sourceIdentity.querySelector('.plugin-author').contains(sourceIdentity.querySelector('.plugin-origin-label')));
@@ -82,16 +85,17 @@ async function main() {
     const tab = id=>box.querySelector('[data-tab="'+id+'"]');
     const click = text=>[...box.querySelectorAll('button')].find(n=>n.textContent===text).click();
     scroll.scrollTop=60;
-    const official=tab('official');official.focus({preventScroll:true});const y=official.getBoundingClientRect().y;
+    const official=tab('discover');official.focus({preventScroll:true});const y=official.getBoundingClientRect().y;
     official.click();const during={y:official.getBoundingClientRect().y,focus:document.activeElement===official,connected:official.isConnected};
-    official.click();tab('community').click();
+    official.click();tab('installed').click();
     check('pending-navigation-keeps-node-position-focus-and-one-request',during.y===y&&during.focus&&during.connected&&catalogCalls===1,{during,y,catalogCalls});
     scroll.scrollTop=70;pending(catalog);await tick();
-    check('completion-retains-navigation-and-current-scroll',official===tab('official')&&document.activeElement===official&&scroll.scrollTop===70&&official.getAttribute('aria-selected')==='true',{scroll:scroll.scrollTop});
-    const community=tab('community');community.focus({preventScroll:true});community.click();reject(Error('offline'));await tick();
-    check('failed-tab-load-keeps-current-page-and-focus',official.getAttribute('aria-selected')==='true'&&document.activeElement===community&&box.querySelector('.plugin-action-error')?.textContent==='offline');
+    check('completion-retains-navigation-and-current-scroll',official===tab('discover')&&document.activeElement===official&&scroll.scrollTop===70&&official.getAttribute('aria-selected')==='true',{scroll:scroll.scrollTop});
+    tab('installed').click();await tick();
+    const community=tab('discover');community.focus({preventScroll:true});community.click();reject(Error('offline'));await tick();
+    check('failed-tab-load-keeps-current-page-and-focus',tab('installed').getAttribute('aria-selected')==='true'&&document.activeElement===community&&box.querySelector('.plugin-action-error')?.textContent==='offline');
     community.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
-    check('keyboard-navigation-with-labelled-panel',document.activeElement===tab('installed')&&tab('installed').tabIndex===0&&[...box.querySelectorAll('[role="tab"]')].filter(n=>n.tabIndex===0).length===1&&box.querySelector('[role="tabpanel"]').getAttribute('aria-labelledby')===official.id&&box.querySelector('[role="tablist"]')!==null);
+    check('keyboard-navigation-with-labelled-panel',document.activeElement===tab('installed')&&tab('installed').tabIndex===0&&[...box.querySelectorAll('[role="tab"]')].filter(n=>n.tabIndex===0).length===1&&box.querySelector('[role="tabpanel"]').getAttribute('aria-labelledby')===tab('installed').id&&box.querySelector('[role="tablist"]')!==null);
     catalogMode='success';tab('installed').click();await tick();
     check('installed-cards-have-no-folds-pages-or-redundant-normal-status',!box.querySelector('.plugin-installed-card details, .plugin-installed-card .plugin-page-actions, .plugin-installed-card .plugin-status')&&box.querySelectorAll('.plugin-manage').length===2);
     let manage=box.querySelector('.plugin-manage');manage.focus({preventScroll:true});scroll.scrollTop=60;manage.click();await tick();
@@ -107,13 +111,26 @@ async function main() {
     check('back-restores-list-position-and-logical-focus',document.activeElement===box.querySelector('.plugin-manage')&&scroll.scrollTop===60&&!box.querySelector('.plugin-detail'));
     const toggle=box.querySelector('.plugin-enable');toggle.focus({preventScroll:true});toggle.click();await tick();
     check('disable-does-not-reorder-plugin-or-lose-focus',[...box.querySelectorAll('[data-plugin-id]')].map(n=>n.dataset.pluginId).join(',')==='alpha,beta'&&document.activeElement===box.querySelector('.plugin-enable'));
-    tab('official').click();await tick();
+    tab('discover').click();await tick();
     check('catalog-shares-identity-layout-with-no-inline-version-folds',Boolean(box.querySelector('.plugin-catalog .plugin-identity-art'))&&!box.querySelector('.plugin-catalog details'));
+    box.querySelector('.plugin-toolbar > .plugin-inline-action').click();await tick();
+    check('cancel-file-import-keeps-discover',tab('discover').getAttribute('aria-selected')==='true'&&!box.querySelector('.plugin-package-preview')&&calls.at(-1)?.[1]==='file');
+    importResult={token:'local-file',id:'local-demo',name:'Local demo',description:'Private package',version:'1.0.0',types:['widget','page'],origin:{id:'local',kind:'local'},permissions:[],hosts:[],risk:{},operation:'install',sha256:'abc'};
+    box.querySelector('.plugin-toolbar > .plugin-inline-action').click();await tick();
+    check('file-import-from-discover-opens-local-preview-in-installed',tab('installed').getAttribute('aria-selected')==='true'&&box.querySelector('.plugin-package-preview .plugin-types')?.textContent==='plugins.type.widgetplugins.type.page'&&box.querySelector('.plugin-package-preview .plugin-description')?.textContent==='Private package');
+    click('settings.plugins.cancel');await tick();importResult=null;tab('discover').click();await tick();
+
     catalog.entries[0].installedVersion='1.0.0';catalog.entries[0].status='installed';await panel.refresh();
+    check('discover-shows-bundled-without-custom-sources',box.querySelectorAll('[data-catalog-id]').length===1&&box.querySelector('.plugin-type')?.textContent==='plugins.type.page'&&!box.querySelector('.plugin-source-route'));
+    catalog.entries.push({id:'third-party',name:'Third party',description:'Custom listing',version:'1.0.0',types:['appearance'],origin:{id:'custom',kind:'community',label:'Example source'},status:'incompatible'});await panel.refresh();
+    check('discover-combines-origins-with-distinct-attribution',box.querySelectorAll('[data-catalog-id]').length===2&&box.querySelector('[data-catalog-id="third-party"] .plugin-origin-note')?.textContent==='Example source'&&!box.querySelector('[data-catalog-id="third-party"] .plugin-shield'));
+    const search=box.querySelector('.plugin-catalog-search');search.value='third party';search.dispatchEvent(new Event('input'));
+    check('discover-search-spans-all-origins',box.querySelectorAll('[data-catalog-id]').length===1&&box.querySelector('[data-catalog-id="third-party"]'));
+    search.value='';search.dispatchEvent(new Event('input'));catalog.entries.pop();await panel.refresh();
     const installedLink=box.querySelector('.plugin-installed-check');
     check('catalog-installed-check-uses-success-color-and-retains-navigation',Boolean(installedLink)&&installedLink.textContent==='plugins.catalog.installed'&&getComputedStyle(installedLink).color===getComputedStyle(box.querySelector('.plugin-origin-official')).color);
     installedLink.click();await tick();check('installed-check-navigates-to-installed-list',Boolean(box.querySelector('.plugin-installed-card')));
-    delete catalog.entries[0].installedVersion;catalog.entries[0].status='available';tab('official').click();await tick();
+    delete catalog.entries[0].installedVersion;catalog.entries[0].status='available';tab('discover').click();await tick();
 
     click('plugins.package.install');await tick();
     check('catalog-install-opens-version-and-consent-review',Boolean(box.querySelector('.plugin-catalog-review .plugin-package-preview'))&&box.querySelectorAll('.plugin-catalog-review details').length===1);
@@ -122,9 +139,11 @@ async function main() {
     previewMode='error';select=box.querySelector('.plugin-version-picker select');select.value='1.0.0';select.dispatchEvent(new Event('change'));await tick();
     check('failed-version-preview-removes-stale-install-consent',!box.querySelector('.plugin-package-preview')&&box.querySelector('.plugin-catalog-review .plugin-action-error')?.textContent==='preview rejected'&&calls.some(c=>c[0]==='cancel'&&c[1]==='token-2.0.0'));
     click('plugins.ui.backCatalog');await tick();previewMode='success';
-    tab('community').click();await tick();click('plugins.catalog.sources');await tick();
+    box.querySelector('.plugin-toolbar .plugin-more').click();await tick();click('plugins.catalog.sources');await tick();
     check('sources-open-as-route-without-nested-disclosures',Boolean(box.querySelector('.plugin-sources .plugin-source-form'))&&!box.querySelector('.plugin-sources details')&&document.activeElement===box.querySelector('.plugin-back'));
-    const sourceUrl=box.querySelector('.plugin-source-form input');sourceUrl.value='https://example.test/catalog.json';sourceUrl.dispatchEvent(new Event('input'));click('plugins.ui.backCatalog');await tick();click('plugins.catalog.sources');await tick();
+    const sourceUrl=box.querySelector('.plugin-source-form input');sourceUrl.value='https://example.test/catalog.json';sourceUrl.dispatchEvent(new Event('input'));click('plugins.ui.backCatalog');await tick();
+    check('sources-back-restores-advanced-trigger-focus',document.activeElement===box.querySelector('.plugin-toolbar .plugin-more'));
+    box.querySelector('.plugin-toolbar .plugin-more').click();await tick();click('plugins.catalog.sources');await tick();
     check('source-route-retains-unsaved-input',box.querySelector('.plugin-source-form input').value==='https://example.test/catalog.json');
     tab('installed').click();await tick();
     box.querySelector('.plugin-toolbar .plugin-more').click();await tick();
@@ -170,14 +189,22 @@ async function main() {
     data.safeMode=true;await panel.refresh();global=await openGlobal();global.click();await tick();global=await openGlobal();
     check('safe-mode-still-blocks-runtime-when-master-on',global.checked&&savedMasterEnabled&&!data.enabled&&Boolean(box.querySelector('.plugin-paused'))&&box.querySelector('[data-plugin-id="alpha"] input').disabled);
     data.safeMode=false;data.enabled=savedMasterEnabled;await panel.refresh();await openGlobal();click('plugins.ui.about');await tick();
-    check('plugin-explanation-is-secondary-route-with-focused-back',Boolean(box.querySelector('.plugin-about'))&&box.querySelector('.plugin-about p').textContent==='settings.plugins.intro'&&document.activeElement===box.querySelector('.plugin-back'));
+    check('authoring-is-secondary-route-with-focused-back',Boolean(box.querySelector('.plugin-about'))&&box.querySelector('.plugin-about p').textContent==='plugins.authoring.intro'&&document.activeElement===box.querySelector('.plugin-back'));
+    const prompt=box.querySelector('.plugin-author-prompt');
+    check('authoring-prompt-is-labelled-selectable-and-readonly',prompt.readOnly&&prompt.value==='Fixture prompt with exact punctuation:'&&prompt.getAttribute('aria-label')==='plugins.authoring.label'&&prompt.getBoundingClientRect().height>=220);
+    box.querySelector('.plugin-copy-prompt').click();await tick();
+    check('copy-uses-exact-visible-prompt-and-local-success-status',calls.at(-1)?.[0]==='copy'&&calls.at(-1)?.[1]===prompt.value&&box.querySelector('.plugin-copy-status[role="status"]').textContent==='plugins.authoring.copied');
+    copyFailure=true;box.querySelector('.plugin-copy-prompt').click();await tick();
+    check('clipboard-failure-selects-prompt-for-manual-copy',document.activeElement===prompt&&prompt.selectionStart===0&&prompt.selectionEnd===prompt.value.length&&box.querySelector('.plugin-copy-status').textContent==='plugins.authoring.copyFallback'&&!box.querySelector('.plugin-action-error'));copyFailure=false;
+    box.querySelector('.plugin-about .plugin-guide-link').click();await tick();
+    check('author-guide-uses-host-external-route',calls.at(-1)?.[0]==='guide'&&calls.at(-1)?.[1]==='https://javis-ai.com/token-monitor/docs/plugin-quickstart.html?lang=en');
     box.querySelector('.plugin-back').click();await tick();check('about-back-restores-more-trigger-focus',document.activeElement===box.querySelector('.plugin-toolbar .plugin-more'));
-    check('removed-style-editor-has-no-tab-or-controls',!tab('style')&&!box.querySelector('.plugin-style-form')&&box.querySelectorAll('[role=tab]').length===3);
-    tab('installed').click();await tick();catalogMode='deferred';tab('official').focus();tab('official').click();document.getElementById('outside').focus();pending(catalog);await tick();
+    check('removed-style-editor-has-no-tab-or-controls',!tab('style')&&!box.querySelector('.plugin-style-form')&&box.querySelectorAll('[role=tab]').length===2);
+    tab('installed').click();await tick();catalogMode='deferred';tab('discover').focus();tab('discover').click();document.getElementById('outside').focus();pending(catalog);await tick();
     check('completion-does-not-steal-external-focus',document.activeElement.id==='outside');
     catalogMode='success';document.getElementById('after').style.display='none';scroll.style.height='400px';
     tab('installed').click();await tick();scroll.scrollTop=120;
-    const shortTab=tab('official');shortTab.focus({preventScroll:true});const shortTabY=shortTab.getBoundingClientRect().y, shortScroll=scroll.scrollTop;
+    const shortTab=tab('discover');shortTab.focus({preventScroll:true});const shortTabY=shortTab.getBoundingClientRect().y, shortScroll=scroll.scrollTop;
     shortTab.click();await tick();
     check('short-tab-keeps-rail-position-without-downstream-spacer',scroll.scrollTop===shortScroll&&shortTab.getBoundingClientRect().y===shortTabY,{before:shortScroll,after:scroll.scrollTop,beforeY:shortTabY,afterY:shortTab.getBoundingClientRect().y});
     catalog.entries[0].versions.push({version:'3.0.0',compatible:true,installable:true,changelog:'Version three'});

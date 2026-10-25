@@ -77,7 +77,9 @@ test('discover → verify → install → approve → update pauses new access �
     fetchImpl: async url => new Response(url.endsWith('.tmplugin') ? (mismatch ? packageBytes('3.0.0') : pkg) : JSON.stringify(index(pkg))) });
   t.after(() => catalog.dispose()); await catalog.addSource({ url: URL });
   let entry = catalog.list().entries.find(p => p.id === 'community-demo'); assert.equal(entry.origin.kind, 'community');
-  let preview = await catalog.preview(entry.origin.id, entry.id, entry.version); managed.install(preview.token);
+  assert.deepEqual(entry.types, []); // Old catalogs need no new metadata.
+  let preview = await catalog.preview(entry.origin.id, entry.id, entry.version); assert.deepEqual(preview.types, ['page']); managed.install(preview.token);
+  assert.deepEqual(manager.list().plugins[0].types, ['page']);
   assert.equal(manager.list().plugins[0].status, 'disabled'); manager.setEnabled(entry.id, true);
   assert.equal(manager.list().plugins[0].status, 'active');
   pkg = packageBytes('2.0.0', ['sys.cpu']); await catalog.refreshSource(entry.origin.id);

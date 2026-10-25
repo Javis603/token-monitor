@@ -1,4 +1,5 @@
 'use strict';
+const { pluginTypes } = require('./types');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -121,7 +122,7 @@ function unpackPackage(pkg, dir) {
 function describePackage(pkg, { locale = 'en', grant } = {}) {
   const m = pkg.manifest;
   return { id: m.id, version: m.version, name: localize(m.name, locale), description: localize(m.description, locale), author: m.author,
-    identityIcon: m.identityIcon, icon: m.views[0]?.icon || 'dot',
+    types: pluginTypes(m), identityIcon: m.identityIcon, icon: m.views[0]?.icon || 'dot',
     permissions: [...m.permissions], hosts: [...m.network.hosts], missing: missingGrant(m, grant), risk: riskSummary(m), hasCode: Boolean(m.main), sha256: pkg.hash };
 }
 module.exports = { MAX_PACKAGE_BYTES, ID_RE, digest, contentDigest, readBounded, parsePackage, packageDirectory, unpackPackage, describePackage };

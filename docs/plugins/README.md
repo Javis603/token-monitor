@@ -8,12 +8,12 @@ Token Monitor includes the built-in System Monitor, installable [Token Pulse](ex
 
 ## Try it
 
-1. Open Settings → Plugins → Official. System Monitor ships with the app; Token Pulse and Sketch Pad can be previewed and installed from the offline catalog. Sketch Pad has a personal note, drawing canvas, pen controls, Undo and Clear; content persists in its private local store.
+1. Open Settings → Plugins → Discover. System Monitor ships with the app; Token Pulse and Sketch Pad can be previewed and installed from the offline catalog. Sketch Pad has a personal note, drawing canvas, pen controls, Undo and Clear; content persists in its private local store.
 2. Review the exact source, version and permissions. Installation leaves code disabled; choose Allow and enable separately. Updates preserve grants and pause execution if they request more access.
 3. Select placement buttons for Home, tray, Edge Dock and Notch. Their existing ordering controls still apply. Enable Edge Dock/Notch separately; choose built-in and plugin pages together in Notch settings. Pages beyond the left lane continue to the right of the camera; in-track arrows appear only when both sides are full.
 4. Enable Main app page placement only for views that declare it, then choose the page in the main app’s bottom-left view menu. Open a detached window from that page when useful. Both share visibility demand; switching pages preserves session-local drafts and scroll.
 5. Import a `.tmplugin` file with From file. Developer options also import a folder into managed storage or open the unmanaged authoring folder for explicit Reload.
-6. Community → Manage sources accepts a user-added HTTPS catalog. Ordinary users do not need a public key. Optional Ed25519 pinning is advanced; Community remains Unreviewed. No external source is enrolled by the app.
+6. Discover → Advanced options (⋯) → Custom catalog sources accepts a user-added HTTPS catalog. Ordinary users do not need a public key. Optional Ed25519 pinning is advanced; Community remains Unreviewed. No external source is enrolled by the app. Discover combines app-shipped entries with any sources you add. Version metadata shows Widgets, Pages and Appearance when available; these describe features, not trust or permissions.
 7. Refresh a source to discover versions/changelogs. Preview and confirm every update. Roll back restores one saved compatible version; uninstall defaults to retaining data and removing placements. Applied skin colours and the selected author appearance snapshot remain.
 8. Plugin content follows App appearance by default. Legacy `plugin-appearance.json` overrides are read-only and are not deleted or rewritten; author skin presets are supported.
 

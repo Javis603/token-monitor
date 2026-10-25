@@ -29,7 +29,7 @@ function createPluginCatalog({ manager, managed, getLocale = () => 'en', root, f
     }
     const entries = plugins.filter(plugin => plugin.source === 'builtin').map(plugin => ({
       id: plugin.id, name: plugin.name, description: plugin.description, version: plugin.version, author: plugin.author, identityIcon: plugin.identityIcon, icon: plugin.views?.[0]?.icon,
-      origin: OFFICIAL, status: 'builtin', installedVersion: plugin.version
+      types: plugin.types || [], origin: OFFICIAL, status: 'builtin', installedVersion: plugin.version
     }));
     for (const pkg of packages.values()) {
       const installed = installation(pkg.manifest.id);
@@ -42,7 +42,7 @@ function createPluginCatalog({ manager, managed, getLocale = () => 'en', root, f
       const compatible = entry.versions.filter(v => v.compatible);
       const chosen = compatible.find(v => !semver.prerelease(v.version)) || compatible[0] || entry.versions[0];
       entries.push({ id: entry.id, name: localize(entry.name, getLocale()), description: localize(entry.description, getLocale()), author: entry.author, identityIcon: entry.identityIcon,
-        origin: entry.origin, version: chosen.version, installedVersion: installed.version,
+        types: chosen.types, origin: entry.origin, version: chosen.version, installedVersion: installed.version,
         status: !chosen.compatible ? 'incompatible' : !installed.exists ? 'available' : installed.version && installed.record?.origin.id === entry.origin.id && semver.gt(chosen.version, installed.version) ? 'update' : 'installed',
         versions: entry.versions.map(v => ({ ...v, installable: v.compatible && (!installed.exists || Boolean(installed.version && installed.record?.origin.id === entry.origin.id && semver.gt(v.version, installed.version))), changelog: localize(v.changelog, getLocale()) })) });
     }

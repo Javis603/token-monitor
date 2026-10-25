@@ -1,4 +1,5 @@
 'use strict';
+const { pluginTypes } = require('./types');
 
 // Owns every plugin from discovery to teardown: manifests and consent, which
 // Data Bus sources run and at what cadence, when a plugin's sandboxed process
@@ -929,6 +930,7 @@ function createPluginManager({
     const runtime = plugin.runtime;
     return {
       ...base,
+      types: pluginTypes(manifest),
       name: localize(manifest.name, locale),
       version: manifest.version,
       description: localize(manifest.description, locale),

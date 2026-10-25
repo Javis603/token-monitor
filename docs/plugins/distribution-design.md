@@ -7,7 +7,7 @@ Token Monitor supports main-App plugin pages, optional detached windows and mana
 1. The host validates the manifest, declared permissions and supported display locations.
 2. A plugin may declare `surfaces: ["page"]` and optional `layouts.page`. Only explicitly enabled page placements appear in the main app’s view menu. A detached window is an optional action within that page. Main and detached page visibility share demand; neither grants arbitrary DOM or Node access.
 3. Installation previews the exact package and requires confirmation. Installed code is disabled until approved; updates are confirmed even if their permissions do not change. A previous version is retained for rollback. Uninstall provides explicit data/placement retention choices. Directory import is available for authors.
-4. Official and Community catalog views provide search, source management, refresh/update checks, compatibility and integrity errors, install/update actions and offline cache status. Refresh is explicit; there is no default scheduled updater.
+4. Installed and Discover are the two primary tabs. Discover combines official and configured community entries with search and distinct source attribution. Install from file remains directly available; Advanced options (⋯) opens Custom catalog sources for source management, refresh/update checks and offline cache status. Refresh is explicit; there is no default scheduled updater.
 
 ## Package format
 
@@ -25,7 +25,7 @@ The user flow is browse → inspect source and permissions → install. A public
 - An advanced source manager accepts HTTPS catalog URLs, clearly labelled Community / Unreviewed. Optional pinned signatures can strengthen source identity without becoming a mandatory installation step. Community sources are added explicitly by the user.
 - Every manual install/update confirms the exact source and version. Existing permission grants survive updates; additional permissions or destinations require renewed consent before execution. No automatic update policy is enabled implicitly.
 - Local packages are unverified. SHA-256 detects content mismatch; it does not establish publisher identity or prove safe code. Labels come from host-owned source records, never package claims.
-- The app ships an offline browsable official catalog containing real bundled examples. The Community catalog is empty until a source is added.
+- The app ships an offline browsable official catalog containing real bundled examples. Discover includes configured community entries alongside the bundled catalog; adding a source is optional.
 - Authors choose where to host packages and catalogs. The App does not provide a submission backend, ratings or moderation service.
 
 ## Persistence and recovery bounds
@@ -50,6 +50,7 @@ Source and package URLs are bounded after URL normalization, before persistence.
     "author": "Example author",
     "versions": [{
       "version": "1.0.0",
+      "types": ["page"],
       "url": "https://example.com/example.tmplugin",
       "sha256": "replace-with-the-64-character-sha256-of-the-exact-package",
       "engines": { "tokenMonitor": ">=0.76.0" },
@@ -58,5 +59,7 @@ Source and package URLs are bounded after URL normalization, before persistence.
   }]
 }
 ```
+
+Each version may advertise optional `types`: `widget`, `page`, `appearance`. Unknown values are ignored; omitted metadata has no label. These are unreviewed display hints, not capabilities or trust markers. Package previews and installed entries derive labels from the validated manifest: Home/tray/Edge Dock/Notch views are Widgets; page views and model/tool/device page extensions are Pages; skins are Appearance. Settings documents and background code alone imply none of these labels. Multiple labels are allowed.
 
 This is schema documentation, not an enrolled source. The digest placeholder must be replaced by the builder's digest. Limits are 16 sources, 128 plugin entries per index, 32 versions per plugin, 1 MB downloaded index and 2 MB package. For an optional pinned source, serve `{ "payload": "base64 of exact catalog JSON bytes", "signature": "base64 Ed25519 signature over those bytes" }`; the user-provided PEM key verifies identity, not safety or review status.

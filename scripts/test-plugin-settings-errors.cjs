@@ -98,7 +98,7 @@ app.whenReady().then(async () => {
     document.querySelector('.plugin-toolbar > .plugin-inline-action').click();await wait();document.querySelector('.plugin-package-preview .plugin-allow').click();await wait();
     check('install error belongs to package confirmation',!!document.querySelector('.plugin-package-preview > .plugin-action-error'));
     clickText('.plugin-package-preview button','settings.plugins.cancel');check('cancel removes package error',!notice());
-    document.querySelector('[data-tab="community"]').click();await wait();document.querySelector('.plugin-source-route').click();
+    document.querySelector('[data-tab="discover"]').click();await wait();document.querySelector('.plugin-toolbar .plugin-more').click();await wait();[...document.querySelectorAll('.plugin-menu button')].find(b=>b.textContent===t('plugins.catalog.sources')).click();
     const url=document.querySelector('.plugin-source-form input');url.value='https://fixture.invalid/catalog.json';url.dispatchEvent(new Event('input'));
     document.querySelector('.plugin-source-form').dispatchEvent(new Event('submit',{cancelable:true}));await wait();
     check('source error belongs to source form',!!document.querySelector('.plugin-source-form > .plugin-action-error'));
