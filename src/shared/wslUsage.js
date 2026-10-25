@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const { throwIfAborted } = require('./abortSignal');
-const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
+const { emptyPeriod, extractUsageFromTokscale, extractUsageBundleFromTokscale, mergePeriods } = require('./usage');
 const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 const { WSL_DATA_MARKERS, MARKER_CLIENTS } = require('./clientSourceRegistration');
 const { isMcodeProfileDir } = require('./providers/mcode/paths');
@@ -107,11 +107,11 @@ function homeHasData(home, existsSync, readdirSync = fs.readdirSync) {
   return [...ids];
 }
 
-function wslUsageHomes(deps = {}) {
+function wslUsageHomes(deps = {}, runningDistros = listRunningWslDistros(deps)) {
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const existsSync = deps.existsSync || fs.existsSync;
   const homes = [];
-  for (const distro of listRunningWslDistros(deps)) {
+  for (const distro of runningDistros) {
     const candidates = [];
     const homeRoot = `\\\\wsl$\\${distro}\\home`;
     try {
@@ -139,7 +139,20 @@ function probeWslState(deps = {}) {
 // events with these sources' cached messages without opening their UNC paths.
 function discoverWslClaudeSources(previous = [], deps = {}) {
   const existsSync = deps.existsSync || fs.existsSync;
-  const homes = wslUsageHomes(deps);
+  const readdirSync = deps.readdirSync || fs.readdirSync;
+  const runningDistros = listRunningWslDistros(deps);
+  const homes = wslUsageHomes(deps, runningDistros);
+  for (const { home } of previous) {
+    if (homes.includes(home) || !runningDistros.some((distro) =>
+      home.toLowerCase().startsWith(`\\\\wsl$\\${distro}\\`.toLowerCase()))) continue;
+    try {
+      // A readable running home can have lost every data marker. Its old roots
+      // must still be scanned so the scanner prunes confirmed missing sessions.
+      // Never probe a stopped distro; an unreadable home stays cached-only.
+      readdirSync(home);
+      homes.push(home);
+    } catch (_) { /* unreachable is not evidence of deletion */ }
+  }
   const sources = new Map(previous.map((source) => [source.home, source]));
   const activeRoots = [];
   const sharedClaudeHomes = [];
@@ -226,7 +239,16 @@ async function collectWslUsage(options = {}, deps = {}) {
       const allTimeJson = await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal, 'WSL usage scan aborted');
       const rawPeriods = { today: todayJson, month: monthJson, allTime: allTimeJson };
-      const periods = Object.fromEntries(Object.entries(rawPeriods).map(([name, json]) => [name, extractUsageFromTokscale(json)]));
+      const periods = Object.fromEntries(Object.entries(rawPeriods).map(([name, json]) => {
+        if (!sharedClaudeHomes.has(home)) return [name, extractUsageFromTokscale(json)];
+        // Synthetic selects gateway traffic across clients, including Claude
+        // even when omitted from --client. The joint scan already owns those
+        // rows; retain every other source using the scanner's client identity.
+        const { byClient } = extractUsageBundleFromTokscale(json);
+        const period = Object.entries(byClient).reduce((sum, [client, usage]) =>
+          client === 'claude' ? sum : mergePeriods(sum, usage), emptyPeriod());
+        return [name, period];
+      }));
       if (typeof decoratePeriods === 'function') decoratePeriods(periods, home);
       bundle.today = mergePeriods(bundle.today, periods.today);
       bundle.month = mergePeriods(bundle.month, periods.month);
