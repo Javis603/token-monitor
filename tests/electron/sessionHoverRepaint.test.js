@@ -138,7 +138,7 @@ test('Home holds a real overflowing title and only flushes deferred stats on lea
     els: { homePanel: {
       replaceChildren(module) { painted.push(module.revision); }, querySelector: () => null
     } },
-    hideHomeActivityTooltip() {}, homeModuleIds: () => ['session'], sessionPresentationOptions: () => ({}),
+    hideHomeActivityTooltip() {}, hideTrendTooltip() {}, homeModuleIds: () => ['session'], sessionPresentationOptions: () => ({}),
     renderHomeSessionModule: () => ({ revision: state.stats.revision }), scheduleHomeSessionRepaint() {}
   };
   const setup = app.slice(app.indexOf('const overflowText ='), app.indexOf('function bindHoverMarquee('));

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
+const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, screen, session, shell, systemPreferences } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
@@ -420,6 +421,7 @@ const {
 const { applyWindowsChrome } = require('./windowsChrome');
 const { installWindowsNonActivatingInput } = require('./windowsNonActivatingInput');
 const { canUseEdgeDock, createEdgeDockController, edgeDockSupported } = require('./edgeDock/controller');
+const { createWindowsDockBackdrop } = require('./edgeDock/windowsBackdrop');
 const { createNotchController, normalizeNotchStyle, normalizeNotchShape, normalizeNotchHoverAction, normalizeNotchHoverDelay } = require('./notch/controller');
 const { buildNotchData, notchSummaryMode, summaryLayout: notchSummaryLayout } = require('./notch/data');
 const { NOTCH_PANEL_STAT_ITEMS, notchLimitItems, notchPanelItems, notchWeek } = require('./notch/panel');
@@ -443,13 +445,15 @@ const { toPolygons } = require('./renderer/edgeDock/shapes');
 const { rasterizeMask } = require('./edgeDock/mask');
 const { NOTCH_BLUR_ALPHA, NOTCH_BLUR_RADIUS, NOTCH_BLUR_STRENGTH, notchBlurMask } = require('./notch/blur');
 const { applyProgressiveBlur } = require('./notch/macProgressiveBlur');
+const { monitorMacScrollGesture } = require('./notch/macScrollGesture');
 const { applyVibrancyMask } = require('./edgeDock/macVibrancyMask');
 const { performMacHaptic } = require('./edgeDock/macHaptics');
 const { primaryButtonDown } = require('./edgeDock/pointerButtons');
 const { preventAppActivation, setMoveToActiveSpace } = require('./macosSpaceBehavior');
 const {
   WINDOWS_BACKDROP_ACCENT,
-  normalizeWindowsBackdropMode
+  normalizeWindowsBackdropMode,
+  normalizeWindowsDockBackdropMode
 } = require('./windowsBackdropMode');
 const { applyWindowsAccentBlur } = require('./windowsBackdrop');
 const {
@@ -493,18 +497,6 @@ function appWindowIcon() {
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
-const CSP_HEADER = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "img-src 'self' data: blob:",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "form-action 'none'",
-  "frame-ancestors 'none'"
-].join('; ');
 const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
@@ -654,6 +646,7 @@ function defaultSettings() {
     edgeDockHaptic: true,
     edgeDockWarnColors: false,
     edgeDockMacBackdrop: 'inherit',
+    edgeDockWindowsBackdrop: 'inherit',
     edgeDockSize: 'medium',
     edgeDockCustomScale: 1,
     edgeDockSide: 'right',
@@ -2774,6 +2767,7 @@ function readSettings() {
     merged.edgeDockHaptic = parseBoolean(merged.edgeDockHaptic, true);
     merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
     merged.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode(merged.edgeDockMacBackdrop);
+    merged.edgeDockWindowsBackdrop = normalizeWindowsDockBackdropMode(merged.edgeDockWindowsBackdrop);
     merged.edgeDockSize = normalizeEdgeDockSize(merged.edgeDockSize);
     merged.edgeDockCustomScale = normalizeEdgeDockCustomScale(merged.edgeDockCustomScale);
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
@@ -5066,9 +5060,7 @@ function updateTrayDisplay() {
   const customImageMode = mode === 'custom' && providerTrayIcons.custom;
   const text = trayImageMode || customImageMode ? '' : limitText;
   if (trayShowsTitle(process.platform)) tray.setTitle(text);
-  // Tooltip always shows a useful summary, even in icon-only mode where setTitle is blank.
-  const tip = formatTrayText(visibleStats, 'both', currency, compactOptions);
-  tray.setToolTip(`Token Monitor - ${tip}`);
+  tray.setToolTip('');
   // Icon: rendered bars image in bar modes, otherwise the app icon.
   let icon = null;
   if (barsImageMode || trayImageMode || customImageMode) {
@@ -5659,7 +5651,7 @@ function ensureNotchController() {
     nativeGlass: () => nativeBlurEnabled(),
     liquidGlass: () => {
       const options = nativeMaterialOptions();
-      return options.enabled && !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25
+      return !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25
         ? { dark: options.dark } : null;
     },
     createGlass: (win) => createMacLiquidGlass(win, { shaped: true }),
@@ -5688,6 +5680,7 @@ function ensureNotchController() {
         width: mask.width, height: mask.height, radius: NOTCH_BLUR_RADIUS });
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
+    monitorScrollGesture: (onEvent, options) => monitorMacScrollGesture(onEvent, { ...options, logger: (message) => console.log(message) }),
     // An absent key is the system default, natural scrolling on.
     naturalScrolling: () => systemPreferences.getUserDefault?.('com.apple.swipescrolldirection', 'string') !== '0',
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
@@ -6046,6 +6039,8 @@ function scheduleSessionExpiry() {
 function ensureEdgeDockController() {
   if (edgeDockController) return edgeDockController;
   edgeDockController = createEdgeDockController({
+    windowsBackdrop: process.platform === 'win32'
+      ? createWindowsDockBackdrop({ app, screen, logger: (message) => console.log(message) }) : null,
     BrowserWindow,
     ipcMain,
     powerMonitor,
@@ -6055,13 +6050,13 @@ function ensureEdgeDockController() {
     preloadPath: path.join(__dirname, 'edgeDock', 'preload.js'),
     getSettings: () => settings,
     nativeGlass: () => nativeBlurEnabled(),
-    // The dock follows the widget's glass style unless it has its own, on the
-    // same terms as the main window: Reduce Transparency hands the surface back
-    // to the HUD material.
+    // The dock follows the widget's glass style unless it has its own; the
+    // controller decides whether there is material at all. Reduce Transparency
+    // still hands the surface back to the HUD material.
     liquidGlass: () => {
       const source = dockAppearanceSettings();
       const options = nativeMaterialOptions(source);
-      const wanted = process.platform === 'darwin' && options.enabled
+      const wanted = process.platform === 'darwin'
         && isLiquidGlassBackdrop(edgeDockBackdropMode(source))
         && !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25;
       const mode = edgeDockBackdropMode(source);
@@ -6238,12 +6233,25 @@ function setTrayContentFromMenu(value) {
 }
 
 function setEdgeDockFromMenu(patch = {}) {
-  if (patch.notchEnabled !== undefined) settings.notchEnabled = parseBoolean(patch.notchEnabled, false);
   if (patch.edgeDockEnabled !== undefined) settings.edgeDockEnabled = parseBoolean(patch.edgeDockEnabled, false);
   if (patch.edgeDockMode !== undefined) settings.edgeDockMode = normalizeEdgeDockMode(patch.edgeDockMode);
   if (patch.edgeDockSide !== undefined) settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
   saveSettings();
   // Also re-syncs the dock itself (pushSettingsToRenderer → syncEdgeDock).
+  pushSettingsToRenderer();
+}
+
+function setNotchFromMenu(patch = {}) {
+  const normalizers = {
+    notchEnabled: value => parseBoolean(value, false),
+    notchHoverAction: normalizeNotchHoverAction,
+    notchSummaryEnabled: value => parseBoolean(value, true),
+    notchHideSummaryInFullScreen: value => parseBoolean(value, true),
+  };
+  for (const [key, normalize] of Object.entries(normalizers)) {
+    if (patch[key] !== undefined) settings[key] = normalize(patch[key]);
+  }
+  saveSettings();
   pushSettingsToRenderer();
 }
 
@@ -6272,9 +6280,9 @@ function setWindowPresentationFromMenu(value) {
   pushSettingsToRenderer();
 }
 
-function openSettingsFromTray() {
+function openSettingsFromTray(section) {
   focusExistingWindow();
-  sendMainWindowEvent('settings:open');
+  sendMainWindowEvent('settings:open', section === 'notch' ? 'notch' : undefined);
 }
 
 function openViewFromTray(viewId) {
@@ -6397,6 +6405,9 @@ function ensureTray() {
         edgeDockSupported: edgeDockSupported(process.platform),
         notchSupported: process.platform === 'darwin',
         notchEnabled: settings?.notchEnabled === true,
+        notchHoverAction: settings?.notchHoverAction,
+        notchSummaryEnabled: settings?.notchSummaryEnabled,
+        notchHideSummaryInFullScreen: settings?.notchHideSummaryInFullScreen,
         edgeDockEnabled: settings?.edgeDockEnabled === true,
         edgeDockMode: settings?.edgeDockMode,
         edgeDockSide: settings?.edgeDockSide,
@@ -6423,6 +6434,7 @@ function ensureTray() {
     onSetTrayContent: setTrayContentFromMenu,
     onSetWindowPresentation: setWindowPresentationFromMenu,
     onSetEdgeDock: setEdgeDockFromMenu,
+    onSetNotch: setNotchFromMenu,
     onSwitchCodexAccount: (accountId) => { void switchCodexAccountFromTray(accountId); },
     onOpenSettings: openSettingsFromTray,
     onQuit: requestAppQuit,
@@ -7740,7 +7752,7 @@ app.whenReady().then(() => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
-        'Content-Security-Policy': [CSP_HEADER]
+        'Content-Security-Policy': [contentSecurityPolicyForRequest(details)]
       }
     });
   });
@@ -8015,6 +8027,7 @@ app.whenReady().then(() => {
       edgeDockHaptic: parseBoolean(patch.edgeDockHaptic ?? settings.edgeDockHaptic, true),
       edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
       edgeDockMacBackdrop: normalizeEdgeDockBackdropMode(patch.edgeDockMacBackdrop ?? settings.edgeDockMacBackdrop),
+      edgeDockWindowsBackdrop: normalizeWindowsDockBackdropMode(patch.edgeDockWindowsBackdrop ?? settings.edgeDockWindowsBackdrop),
       edgeDockSize: normalizeEdgeDockSize(patch.edgeDockSize ?? settings.edgeDockSize),
       edgeDockCustomScale: normalizeEdgeDockCustomScale(patch.edgeDockCustomScale ?? settings.edgeDockCustomScale),
       // `null` is a real value here (back to the automatic default), so the
@@ -8274,6 +8287,10 @@ app.whenReady().then(() => {
       notchController.previewScale(patch.notchCustomScale);
     }
     return true;
+  });
+  ipcMain.handle('settings:displayPreview', (event, surface, phase, slots) => {
+    if (event.sender !== mainWindow?.webContents) return null;
+    return require('./displayPreview').buildDisplayPreview(settingsForRenderer(), surface, phase, process.platform, Date.now(), slots);
   });
   ipcMain.on('window:viewState', (_event, patch) => {
     updateRendererViewState(patch);
@@ -8603,7 +8620,7 @@ app.whenReady().then(() => {
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
-    const cookie = opencodeWeb.sanitizeCookieHeader(raw);
+    const cookie = opencodeWeb.sanitizeCookieHeader(raw, '__Host-console_session');
     if (!cookie) {
       settings.opencodeProfiles = {};
       settings.opencodeCookie = '';
@@ -8617,10 +8634,7 @@ app.whenReady().then(() => {
       return { ok: true, cleared: true };
     }
     try {
-      const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(cookie, electronProviderDeps()),
-        opencodeWeb.fetchZen(cookie, electronProviderDeps())
-      ]);
+      const [go, zen] = await opencodeWeb.fetchWeb(cookie, electronProviderDeps());
       if (opencodeWeb.summarizeLink(go, zen).expired) {
         return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
       }
@@ -8765,9 +8779,8 @@ app.whenReady().then(() => {
             error: probe.status
           }];
         }
-        const [go, zen, apiProbe] = await Promise.all([
-          opencodeWeb.fetchGoWeb(profile.cookie, electronProviderDeps()),
-          opencodeWeb.fetchZen(profile.cookie, electronProviderDeps()),
+        const [[go, zen], apiProbe] = await Promise.all([
+          opencodeWeb.fetchWeb(profile.cookie, electronProviderDeps(), { isolateErrors: true }),
           apiKey ? probeOpenCodeApiKey(apiKey) : null
         ]);
         const summary = { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd };
@@ -8791,10 +8804,7 @@ app.whenReady().then(() => {
     // dedupes away (otherwise it shows 2/2 while only one account is tracked).
     const envCookie = process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '';
     if (envCookie && !entries.some(([, p]) => p.cookie === envCookie)) {
-      const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(envCookie, electronProviderDeps()),
-        opencodeWeb.fetchZen(envCookie, electronProviderDeps())
-      ]);
+      const [go, zen] = await opencodeWeb.fetchWeb(envCookie, electronProviderDeps(), { isolateErrors: true });
       let envKey = 'env';
       for (let i = 1; Object.prototype.hasOwnProperty.call(profiles, envKey); i += 1) {
         envKey = `env:${i}`;
@@ -8919,12 +8929,9 @@ app.whenReady().then(() => {
         }
         credential = { apiKey };
       } else {
-        const cookie = opencodeWeb.sanitizeCookieHeader(raw);
+        const cookie = opencodeWeb.sanitizeCookieHeader(raw, '__Host-console_session');
         if (!cookie) return { ok: false, error: 'Empty cookie' };
-        const [go, zen] = await Promise.all([
-          opencodeWeb.fetchGoWeb(cookie, electronProviderDeps()),
-          opencodeWeb.fetchZen(cookie, electronProviderDeps())
-        ]);
+        const [go, zen] = await opencodeWeb.fetchWeb(cookie, electronProviderDeps());
         if (opencodeWeb.summarizeLink(go, zen).expired) {
           return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
         }

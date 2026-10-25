@@ -176,6 +176,7 @@ function createFixture(options = {}) {
     nativeGlass: () => options.nativeGlass === true,
     liquidGlass: () => (typeof options.liquidGlass === 'function' ? options.liquidGlass() : options.liquidGlass || null),
     createGlass: options.createGlass,
+    windowsBackdrop: options.windowsBackdrop,
     canRefreshLimits: options.canRefreshLimits,
     onRefreshLimits: options.onRefreshLimits,
     prefersReducedMotion: options.prefersReducedMotion || (() => true),
@@ -413,6 +414,93 @@ for (const platform of ['win32', 'darwin']) {
     open();
     assert.equal(bubble.zOrderCalls.length, revealedCount + (platform === 'win32' ? 1 : 0));
     if (platform === 'win32') assert.equal(FakeBrowserWindow.zOrder.at(-1), bubble);
+  });
+}
+
+for (const mode of ['always', 'alwaysExceptFullScreen']) {
+  test(`Windows card reveal restores the already-visible ${mode} rail as well`, (t) => {
+    const fixture = createFixture({ settings: { edgeDockMode: mode, edgeDockRefreshEnabled: false } });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const bubble = fixture.windowFor('bubble');
+    const peek = fixture.windowFor('peek');
+    const ordinary = new FakeBrowserWindow({ width: 1200, height: 900 });
+    ordinary.showInactive();
+    const peekCount = peek.zOrderCalls.length;
+    assert.equal(rail.opacity, 1);
+    assert.equal(rail.alwaysOnTop, true);
+
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 180 });
+
+    assert.equal(bubble.opacity, 1);
+    assert.ok(FakeBrowserWindow.zOrder.indexOf(bubble) > FakeBrowserWindow.zOrder.indexOf(ordinary));
+    assert.ok(FakeBrowserWindow.zOrder.indexOf(rail) > FakeBrowserWindow.zOrder.indexOf(ordinary), 'opening a card also restores its rail');
+    assert.ok(FakeBrowserWindow.zOrder.indexOf(bubble) > FakeBrowserWindow.zOrder.indexOf(rail), 'the card stays above the rail');
+    assert.equal(peek.zOrderCalls.length, peekCount, 'the concealed handle is not raised');
+    assert.equal(peek.opacity, 0);
+  });
+}
+
+test('Windows group recovery keeps the painted refresh action above the rail and card', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+  const fixture = createFixture({ canRefreshLimits: () => true });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const bubble = fixture.windowFor('bubble');
+  const peek = fixture.windowFor('peek');
+  fixture.screen.point = { x: rail.bounds.x + 30, y: rail.bounds.y + 45 };
+  t.mock.timers.tick(100);
+  fixture.paintPeek();
+  const ordinary = new FakeBrowserWindow({ width: 1200, height: 900 });
+  ordinary.showInactive();
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'claude', height: 180 });
+  const above = (front, back) => FakeBrowserWindow.zOrder.indexOf(front) > FakeBrowserWindow.zOrder.indexOf(back);
+  assert.ok(above(rail, ordinary));
+  assert.ok(above(bubble, rail));
+  assert.ok(above(peek, bubble));
+  assert.equal(FakeBrowserWindow.atPoint({ x: peek.bounds.x + 16, y: peek.bounds.y + 3 }), peek);
+});
+
+for (const platform of ['win32', 'darwin']) {
+  test(`${platform} entering a visible rail recovers ordering once without a power event`, (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+    const fixture = createFixture({ platform, settings: { edgeDockMode: 'alwaysExceptFullScreen', edgeDockRefreshEnabled: false } });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const bubble = fixture.windowFor('bubble');
+    const ordinary = new FakeBrowserWindow({ width: 1200, height: 900 });
+    const point = { x: rail.bounds.x + 30, y: rail.bounds.y + 45 };
+    const open = () => {
+      fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
+      fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'claude', height: 180 });
+    };
+    open();
+    fixture.screen.point = { x: 600, y: 400 };
+    t.mock.timers.tick(100);
+    ordinary.showInactive();
+    bubble.moveTop();
+    const counts = [rail, bubble].map((win) => win.zOrderCalls.length);
+    fixture.screen.point = point;
+    t.mock.timers.tick(100);
+    if (platform === 'win32') {
+      assert.ok(FakeBrowserWindow.zOrder.indexOf(rail) > FakeBrowserWindow.zOrder.indexOf(ordinary));
+      assert.ok(FakeBrowserWindow.zOrder.indexOf(bubble) > FakeBrowserWindow.zOrder.indexOf(rail));
+    }
+    const after = [rail, bubble].map((win) => win.zOrderCalls.length);
+    assert.deepEqual(after, counts.map((count) => count + (platform === 'win32' ? 1 : 0)));
+    t.mock.timers.tick(1000);
+    assert.deepEqual([rail, bubble].map((win) => win.zOrderCalls.length), after, 'steady hover does not keep raising windows');
+
+    fixture.screen.point = { x: bubble.bounds.x + 30, y: bubble.bounds.y + 30 };
+    t.mock.timers.tick(100);
+    ordinary.moveTop();
+    bubble.moveTop();
+    const beforeReturn = rail.zOrderCalls.length;
+    fixture.screen.point = point;
+    t.mock.timers.tick(100);
+    assert.equal(rail.zOrderCalls.length, beforeReturn + (platform === 'win32' ? 1 : 0), 'returning from the card repairs the rail again');
   });
 }
 
@@ -710,7 +798,7 @@ test('a drag on a larger dock keeps the grab point under the pointer', async (t)
   assert.equal(fixture.placements.at(-1).offset, expected.offset);
 });
 
-test('Windows Edge Dock keeps every glass setting on the shaped renderer surface', (t) => {
+test('Windows Edge Dock falls back to the shaped renderer when native hosting is unavailable', (t) => {
   const fixture = createFixture({ nativeGlass: true });
   t.after(() => fixture.controller.stop());
   const acrylicWindows = FakeBrowserWindow.instances.slice();
@@ -727,6 +815,91 @@ test('Windows Edge Dock keeps every glass setting on the shaped renderer surface
   assert.deepEqual(accentWindows, acrylicWindows);
   assert.ok(accentWindows.every((win) => win.options.transparent === true));
   assert.ok(accentWindows.every((win) => win.options.backgroundMaterial === undefined));
+});
+
+test('Windows HostBackdrop follows shape, fade, resume and cleanup without using HWND-wide materials', (t) => {
+  const adapters = [];
+  const options = { nativeGlass: true, windowsBackdrop: {
+    attach(win, onMaterial) {
+      const adapter = { win, onMaterial, shapes: [], opacities: [], raises: 0,
+        update(shape) { this.shapes.push(shape); },
+        setOpacity(value) { this.opacities.push(value); },
+        reorder() { this.raises++; },
+        dispose() { this.disposed = true; }
+      };
+      adapters.push(adapter); return adapter;
+    }
+  } };
+  const fixture = createFixture(options);
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const native = adapters.find((entry) => entry.win === rail);
+  assert.equal(adapters.length, 3);
+  assert.ok(native.shapes.at(-1).commands.some(([op]) => op === 'C'));
+  assert.equal(sentPayload(rail, 'rail').glass, false);
+  native.onMaterial(true);
+  assert.equal(sentPayload(rail, 'rail').glass, true);
+  assert.equal(sentPayload(rail, 'rail').liquidGlass, false);
+  assert.equal(native.opacities.at(-1), rail.opacity);
+  const before = native.shapes.at(-1).key;
+  fixture.settings.edgeDockSide = 'left'; fixture.controller.sync();
+  assert.notEqual(native.shapes.at(-1).key, before);
+  const raises = native.raises;
+  fixture.powerMonitor.emit('resume');
+  assert.ok(native.raises > raises);
+  fixture.settings.windowsBackdrop = 'accent'; fixture.controller.sync();
+  assert.equal(adapters.length, 3, 'main-window material choice does not rebuild HostBackdrop');
+  native.onMaterial(false);
+  assert.equal(sentPayload(rail, 'rail').glass, false);
+  assert.equal(rail.backgroundMaterials.length, 0);
+  options.nativeGlass = false; fixture.controller.sync();
+  assert.ok(adapters.every((entry) => entry.disposed));
+  fixture.windowFor('rail').webContents.emit('did-finish-load');
+  native.onMaterial(true);
+  assert.equal(sentPayload(fixture.windowFor('rail'), 'rail').glass, false, 'ignore obsolete helper callbacks');
+});
+
+test('Windows dock material switches independently and rebuilds native underlays only when needed', (t) => {
+  const adapters = [];
+  const options = { nativeGlass: true, windowsBackdrop: {
+    attach(win, onMaterial) {
+      const adapter = { win, onMaterial, update() {}, setOpacity() {}, reorder() {},
+        dispose() { this.disposed = true; } };
+      adapters.push(adapter);
+      return adapter;
+    }
+  } };
+  const fixture = createFixture(options);
+  t.after(() => fixture.controller.stop());
+  assert.equal(adapters.length, 3, 'existing settings keep native glass');
+  const inheritedRail = fixture.windowFor('rail');
+  fixture.settings.edgeDockWindowsBackdrop = 'inherit';
+  fixture.controller.sync();
+  assert.equal(fixture.windowFor('rail'), inheritedRail, 'explicit inherit preserves the default material');
+  fixture.settings.edgeDockWindowsBackdrop = 'transparent';
+  fixture.controller.sync();
+  assert.ok(adapters.every((adapter) => adapter.disposed));
+  const plain = fixture.windowFor('rail');
+  plain.webContents.emit('did-finish-load');
+  assert.equal(sentPayload(plain, 'rail').glass, false);
+  assert.ok(plain.shapeCalls.at(-1).length > 0, 'transparent mode keeps curved hit regions');
+  fixture.controller.sync();
+  assert.equal(fixture.windowFor('rail'), plain, 'unchanged settings keep the same window');
+  assert.equal(fixture.settings.windowsBackdrop, 'acrylic', 'main-window choice is independent');
+  fixture.settings.edgeDockWindowsBackdrop = 'host-backdrop';
+  fixture.controller.sync();
+  assert.equal(adapters.length, 6, 'native glass can be restored without restarting the app');
+  const rail = fixture.windowFor('rail');
+  const native = adapters.find((adapter) => adapter.win === rail);
+  rail.webContents.emit('did-finish-load');
+  native.onMaterial(true);
+  assert.equal(sentPayload(rail, 'rail').glass, true);
+  options.nativeGlass = false;
+  fixture.controller.sync();
+  assert.equal(fixture.windowFor('rail'), rail, 'an explicit dock style overrides System Glass');
+  fixture.settings.edgeDockWindowsBackdrop = 'inherit';
+  fixture.controller.sync();
+  assert.ok(adapters.every((adapter) => adapter.disposed), 'inherit follows System Glass off');
 });
 
 test('Windows keeps shaped click-through regions without native glass', (t) => {
@@ -821,6 +994,47 @@ test('switching the glass style rebuilds the dock and releases its Liquid Glass'
   assert.equal(rebuilt.options.vibrancy, 'hud');
   assert.equal(factory.glasses.length, 2);
   assert.ok(factory.glasses.every((glass) => glass.disposed?.windowClosed !== true));
+  assert.ok(factory.glasses.every((glass) => glass.disposed !== null));
+});
+
+test('macOS Transparent drops the dock material while the widget keeps its glass', (t) => {
+  const factory = fakeGlassFactory();
+  const fixture = createFixture({ platform: 'darwin', nativeGlass: true, liquidGlass: { dark: true }, createGlass: factory.create });
+  t.after(() => fixture.controller.stop());
+  const glassy = fixture.windowFor('rail');
+  assert.equal(factory.glasses.length, 2);
+
+  fixture.settings.edgeDockMacBackdrop = 'transparent';
+  fixture.controller.sync();
+  const plain = fixture.windowFor('rail');
+  assert.notEqual(plain, glassy);
+  assert.ok(factory.glasses.every((glass) => glass.disposed !== null));
+  assert.equal(factory.glasses.length, 2, 'no Liquid Glass is built for a transparent dock');
+  assert.ok(['peek', 'rail', 'bubble'].every((surface) => fixture.windowFor(surface).options.vibrancy === undefined));
+  plain.webContents.emit('did-finish-load');
+  assert.equal(sentPayload(plain, 'rail').glass, false);
+
+  fixture.settings.edgeDockMacBackdrop = 'inherit';
+  fixture.controller.sync();
+  assert.equal(factory.glasses.length, 4, 'glass returns without restarting the app');
+});
+
+test('macOS dock styles override System Glass while inherit follows it', (t) => {
+  const factory = fakeGlassFactory();
+  const options = { platform: 'darwin', nativeGlass: false, liquidGlass: { dark: true }, createGlass: factory.create };
+  const fixture = createFixture(options);
+  t.after(() => fixture.controller.stop());
+  assert.equal(factory.glasses.length, 0, 'inherit follows System Glass off');
+
+  fixture.settings.edgeDockMacBackdrop = 'liquid-glass';
+  fixture.controller.sync();
+  assert.equal(factory.glasses.length, 2, 'an explicit style brings its own glass');
+  const rail = fixture.windowFor('rail');
+  rail.webContents.emit('did-finish-load');
+  assert.equal(sentPayload(rail, 'rail').glass, true);
+
+  fixture.settings.edgeDockMacBackdrop = 'inherit';
+  fixture.controller.sync();
   assert.ok(factory.glasses.every((glass) => glass.disposed !== null));
 });
 

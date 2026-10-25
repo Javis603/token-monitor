@@ -261,8 +261,10 @@ test('enabled and remove controls use ids, require remove confirmation, and reco
   await row.children[0].fire('change');
   assert.deepEqual(calls, [['enabled', account.id, false]]);
   const remove = h.nodes.workbuddyAccountList.children[0].children[2].children[1];
+  assert.equal(remove.attributes['aria-label'], MESSAGES.en['settings.workbuddy.remove']);
   await remove.fire('click');
   assert.equal(calls.length, 1);
+  assert.equal(remove.attributes['aria-label'], h.context.t('settings.workbuddy.removeConfirm', { account: account.accountEmail }));
   await remove.fire('click');
   assert.deepEqual(calls.at(-1), ['remove', account.id]);
   assert.equal(h.state.workbuddyMutationBusy, false);

@@ -12,7 +12,7 @@
     <main class="shell">
       <header class="titlebar">
         <div>
-          <div class="app-title"><span class="app-title-text">Token Monitor</span><span class="app-title-mark" aria-hidden="true">Σ</span><span id="liveDot" class="live-dot" title="Stream offline"></span><span id="tokenRateReveal" class="token-rate-reveal" aria-hidden="true"></span><span class="app-title-measure" aria-hidden="true">Token Monitor</span></div>
+          <div class="app-title"><span class="app-title-text">Token Monitor</span><span class="app-title-mark" aria-hidden="true">Σ</span><span id="liveDot" class="live-dot" aria-label="Stream offline"></span><span id="tokenRateReveal" class="token-rate-reveal" aria-hidden="true"></span><span class="app-title-measure" aria-hidden="true">Token Monitor</span></div>
           <div id="status" class="status">Starting</div>
         </div>
         <div class="title-controls">
@@ -28,11 +28,11 @@
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last7"><span class="view-switcher-menu-label" data-i18n="periodRange.last7">Last 7 days</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last30"><span class="view-switcher-menu-label" data-i18n="periodRange.last30">Last 30 days</span></button>
           </div>
-          <div class="actions-hotspot" title="Window controls"></div>
+          <div class="actions-hotspot" aria-label="Window controls"></div>
           <div class="window-actions">
-            <button id="pinButton" class="icon-button" title="Cycle window behavior">⇧</button>
-            <button id="minButton" class="icon-button" title="Minimize">−</button>
-            <button id="closeButton" class="icon-button" title="Close">×</button>
+            <button id="pinButton" class="icon-button" aria-label="Cycle window behavior">⇧</button>
+            <button id="minButton" class="icon-button" aria-label="Minimize">−</button>
+            <button id="closeButton" class="icon-button" aria-label="Close">×</button>
           </div>
         </div>
       </header>
@@ -117,66 +117,6 @@
               </button>
               <div id="advancedSettingsDetails" class="advanced-settings-details hidden" inert>
                 <div class="advanced-settings-body">
-                  <div id="experimentalFeaturesGroup" class="settings-group advanced-settings-block hidden">
-                    <div class="settings-group-header"><span data-i18n="settings.advanced.experimental">Experimental features</span></div>
-                    <div id="notchFeature" class="presence-feature hidden">
-                      <label class="checkbox-label settings-item">
-                        <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.experimentalTitle">Notch Panel (Experimental)</span></span>
-                        <input id="notchInput" type="checkbox" aria-describedby="notchExperimentalNote" />
-                        <span id="notchExperimentalNote" class="settings-item-desc" data-i18n="settings.notch.experimentalNote">Still in development. Appearance, behavior and settings may change with updates.</span>
-                      </label>
-                      <div id="notchOptions" class="presence-feature-body hidden">
-                        <p class="settings-note" data-i18n="settings.notch.note">Click to open. What shows while closed follows Collapsed content.</p>
-                        <div class="settings-item">
-                          <span id="notchHoverActionLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.hoverAction">On hover</span></span>
-                          <div class="inline-options" role="radiogroup" aria-labelledby="notchHoverActionLabel">
-                            <label class="inline-option"><input type="radio" name="notchHoverAction" value="peek" /><span data-i18n="settings.notch.hoverAction.peek">Grow</span></label>
-                            <label class="inline-option"><input type="radio" name="notchHoverAction" value="open" /><span data-i18n="settings.notch.hoverAction.open">Open</span></label>
-                          </div>
-                        </div>
-                        <div id="notchHoverDelayRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="notchHoverDelayLabel" class="settings-item-title" data-i18n="settings.notch.hoverDelay">Hover duration</span><button id="resetNotchHoverDelayButton" type="button" class="reset-appearance-button reset-inline" title="Reset hover duration" data-i18n-title="settings.notch.resetHoverDelay">↺</button></span></span><input id="notchHoverDelayInput" type="range" min="0" max="600" step="100" aria-labelledby="notchHoverDelayLabel" /><span class="slider-value" aria-hidden="true"></span></div>
-                        <div class="settings-item">
-                          <span id="notchShapeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.shape">Entry shape</span></span>
-                          <div class="inline-options" role="radiogroup" aria-labelledby="notchShapeLabel">
-                            <label class="inline-option"><input type="radio" name="notchShape" value="auto" /><span data-i18n="settings.notch.shape.auto">Auto</span></label>
-                            <label class="inline-option"><input type="radio" name="notchShape" value="notch" /><span data-i18n="settings.notch.shape.notch">Notch</span></label>
-                            <label class="inline-option"><input type="radio" name="notchShape" value="pill" /><span data-i18n="settings.notch.shape.pill">Pill</span></label>
-                          </div>
-                        </div>
-                        <div class="settings-item">
-                          <span id="notchSizeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.size">Size</span></span>
-                          <div class="inline-options is-wrapping" role="radiogroup" aria-labelledby="notchSizeLabel">
-                            <label class="inline-option"><input type="radio" name="notchSize" value="small" /><span data-i18n="settings.edgeDock.size.small">Small</span></label>
-                            <label class="inline-option"><input type="radio" name="notchSize" value="medium" /><span data-i18n="settings.edgeDock.size.medium">Medium</span></label>
-                            <label class="inline-option"><input type="radio" name="notchSize" value="large" /><span data-i18n="settings.edgeDock.size.large">Large</span></label>
-                            <label class="inline-option"><input type="radio" name="notchSize" value="custom" /><span data-i18n="settings.edgeDock.size.custom">Custom</span></label>
-                          </div>
-                        </div>
-                        <div id="notchCustomScaleRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="notchCustomScaleLabel" class="settings-item-title" data-i18n="settings.edgeDock.customScale">Custom size</span></span></span><input id="notchCustomScaleInput" type="range" min="75" max="150" step="5" aria-labelledby="notchCustomScaleLabel" /><span class="slider-value" aria-hidden="true"></span></div>
-                        <div id="notchMoreOptionsGroup" class="settings-group cursor-account-group">
-                          <button id="notchMoreOptionsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="notchMoreOptionsDetails">
-                            <span data-i18n="settings.edgeDock.moreOptions">More options</span>
-                            <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
-                          </button>
-                          <div id="notchMoreOptionsDetails" class="cursor-settings-details hidden" inert>
-                            <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="notchStyleInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="black" data-i18n="settings.notch.black">Pure black</option><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option></select></label>
-                            <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.progressiveBlur">Blur behind the panel</span></span><input id="notchProgressiveBlurInput" type="checkbox" /></label>
-                            <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.showSummary">Show collapsed summary</span></span><input id="notchSummaryInput" type="checkbox" /><span class="settings-item-desc" data-i18n="settings.notch.showSummaryNote">Off: hide the summary while closed.</span></label>
-                            <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.hideSummaryInFullScreen">Hide summary in full screen</span></span><input id="notchHideSummaryInFullScreenInput" type="checkbox" /><span class="settings-item-desc" data-i18n="settings.notch.hideSummaryInFullScreenNote">Other apps only.</span></label>
-                            <label id="notchRunningIndicatorRow" class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.iconRings">Quota &amp; activity status</span></span><input id="notchRunningIndicatorInput" type="checkbox" /></label>
-                            <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.warnColors">Highlight low limits in colour</span></span><input id="notchWarnColorsInput" type="checkbox" /></label>
-                            <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.haptic">Trackpad haptic feedback</span></span><input id="notchHapticInput" type="checkbox" /></label>
-                            <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.swipeGestures">Swipe gestures</span></span><input id="notchSwipeGesturesInput" type="checkbox" aria-describedby="notchSwipeGesturesNote" /><span id="notchSwipeGesturesNote" class="settings-item-desc" data-i18n="settings.notch.swipeGesturesNote">Swipe down on the notch to open, up on its top row to close. Swipe up again to hide the summary; swipe down to bring it back.</span></label>
-                            <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.summaryMode">Collapsed content</span></span><select id="notchSummaryModeInput" aria-describedby="notchSummaryModeNote"><option value="sessions" data-i18n="settings.notch.summaryMode.sessions">Session activity only</option><option value="auto" data-i18n="settings.notch.summaryMode.auto">Automatic</option><option value="tray" data-i18n="settings.notch.summaryMode.tray">Same as tray</option><option value="custom" data-i18n="settings.notch.summaryMode.custom">Custom</option></select><span id="notchSummaryModeNote" class="settings-item-desc" data-i18n="settings.notch.summaryMode.sessionsNote">Show running or waiting sessions. Hide the summary when there is no activity.</span></label>
-                            <div id="notchComposerDetails" class="cursor-settings-details hidden" inert>
-                              <div id="notchComposer" class="tray-composer" data-surface="notch"></div>
-                            </div>
-                          </div>
-                        </div>
-                        <div id="notchItemsComposer" class="edge-dock-composer notch-limits-composer"></div>
-                      </div>
-                    </div>
-                  </div>
                   <div id="tokscaleGroup" class="settings-group advanced-settings-block maintenance-panel">
                     <div class="settings-group-header maintenance-header"><span>Tokscale</span><span data-i18n="settings.tokscale.source">Bundled CLI dependency</span></div>
                     <div class="maintenance-version-grid tokscale-version-grid">
@@ -249,8 +189,8 @@
               <div class="settings-note-row">
                 <p class="settings-note" data-i18n="settings.views.note">Choose which main views appear and the order of the mode button.</p>
                 <div class="tool-header-actions">
-                  <button id="resetViewDisplayOrderButton" class="tool-header-action" type="button" title="Reset order" aria-label="Reset order" data-i18n-title="settings.views.resetOrder" data-i18n-aria-label="settings.views.resetOrder"><span aria-hidden="true">↺</span></button>
-                  <button id="showAllViewsButton" class="tool-header-action" type="button" title="Show all" aria-label="Show all" data-i18n-title="settings.views.showAll" data-i18n-aria-label="settings.views.showAll"><span class="tool-header-eye" aria-hidden="true"></span></button>
+                  <button id="resetViewDisplayOrderButton" class="tool-header-action" type="button" aria-label="Reset order" data-i18n-aria-label="settings.views.resetOrder"><span aria-hidden="true">↺</span></button>
+                  <button id="showAllViewsButton" class="tool-header-action" type="button" aria-label="Show all" data-i18n-aria-label="settings.views.showAll"><span class="tool-header-eye" aria-hidden="true"></span></button>
                 </div>
               </div>
               <div id="viewDisplayList" class="tool-preference-list"></div>
@@ -315,7 +255,7 @@
               <div class="settings-item settings-shortcut-item">
                 <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.windowShortcut">Shortcut</span></span>
                 <div class="shortcut-recorder">
-                  <button id="windowToggleShortcutValue" class="shortcut-value" type="button" aria-live="polite" title="Record" data-i18n-title="settings.shortcut.record">Off</button>
+                  <button id="windowToggleShortcutValue" class="shortcut-value" type="button" aria-live="polite">Off</button>
                   <button id="windowToggleShortcutClearButton" type="button" data-i18n="settings.shortcut.clear">Clear</button>
                 </div>
                 <p id="windowToggleShortcutNote" class="settings-note settings-item-desc" data-i18n="settings.display.windowShortcutNote">Record a global shortcut to show or hide the window.</p>
@@ -358,7 +298,8 @@
                       <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
                     </button>
                     <div id="edgeDockMoreOptionsDetails" class="cursor-settings-details hidden" inert>
-                      <label id="edgeDockMacBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="edgeDockMacBackdropInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option></select></label>
+                      <label id="edgeDockWindowsBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="edgeDockWindowsBackdropInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="host-backdrop" data-i18n="settings.appearance.glassEffectSystem">System</option><option value="transparent" data-i18n="settings.appearance.glassEffectTransparent">Transparent</option></select></label>
+                      <label id="edgeDockMacBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="edgeDockMacBackdropInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option><option value="transparent" data-i18n="settings.appearance.glassEffectTransparent">Transparent</option></select></label>
                       <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.warnColors">Highlight low limits in colour</span></span><input id="edgeDockWarnColorsInput" type="checkbox" /></label>
                       <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.runningIndicator">Show running indicator</span></span><input id="edgeDockRunningIndicatorInput" type="checkbox" /></label>
                       <label id="edgeDockHapticRow" class="checkbox-label settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.haptic">Trackpad haptic feedback</span></span><input id="edgeDockHapticInput" type="checkbox" /></label>
@@ -368,6 +309,62 @@
                 </div>
                 <div id="edgeDockComposerRow" class="presence-feature-body hidden">
                   <div id="edgeDockComposer" class="edge-dock-composer"></div>
+                </div>
+              </div>
+              <div id="notchFeature" class="presence-feature hidden">
+                <label class="checkbox-label settings-item">
+                  <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.title">Notch Panel</span></span>
+                  <input id="notchInput" type="checkbox" />
+                </label>
+                <div id="notchOptions" class="presence-feature-body hidden">
+                  <p class="settings-note" data-i18n="settings.notch.note">Click to open. What shows while closed follows Collapsed content.</p>
+                  <div class="settings-item">
+                    <span id="notchHoverActionLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.hoverAction">On hover</span></span>
+                    <div class="inline-options" role="radiogroup" aria-labelledby="notchHoverActionLabel">
+                      <label class="inline-option"><input type="radio" name="notchHoverAction" value="peek" /><span data-i18n="settings.notch.hoverAction.peek">Grow</span></label>
+                      <label class="inline-option"><input type="radio" name="notchHoverAction" value="open" /><span data-i18n="settings.notch.hoverAction.open">Open</span></label>
+                    </div>
+                  </div>
+                  <div id="notchHoverDelayRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="notchHoverDelayLabel" class="settings-item-title" data-i18n="settings.notch.hoverDelay">Hover duration</span><button id="resetNotchHoverDelayButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset hover duration" data-i18n-aria-label="settings.notch.resetHoverDelay">↺</button></span></span><input id="notchHoverDelayInput" type="range" min="0" max="600" step="100" aria-labelledby="notchHoverDelayLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+                  <div class="settings-item">
+                    <span id="notchShapeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.shape">Entry shape</span></span>
+                    <div class="inline-options" role="radiogroup" aria-labelledby="notchShapeLabel">
+                      <label class="inline-option"><input type="radio" name="notchShape" value="auto" /><span data-i18n="settings.notch.shape.auto">Auto</span></label>
+                      <label class="inline-option"><input type="radio" name="notchShape" value="notch" /><span data-i18n="settings.notch.shape.notch">Notch</span></label>
+                      <label class="inline-option"><input type="radio" name="notchShape" value="pill" /><span data-i18n="settings.notch.shape.pill">Pill</span></label>
+                    </div>
+                  </div>
+                  <div class="settings-item">
+                    <span id="notchSizeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.size">Size</span></span>
+                    <div class="inline-options is-wrapping" role="radiogroup" aria-labelledby="notchSizeLabel">
+                      <label class="inline-option"><input type="radio" name="notchSize" value="small" /><span data-i18n="settings.edgeDock.size.small">Small</span></label>
+                      <label class="inline-option"><input type="radio" name="notchSize" value="medium" /><span data-i18n="settings.edgeDock.size.medium">Medium</span></label>
+                      <label class="inline-option"><input type="radio" name="notchSize" value="large" /><span data-i18n="settings.edgeDock.size.large">Large</span></label>
+                      <label class="inline-option"><input type="radio" name="notchSize" value="custom" /><span data-i18n="settings.edgeDock.size.custom">Custom</span></label>
+                    </div>
+                  </div>
+                  <div id="notchCustomScaleRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="notchCustomScaleLabel" class="settings-item-title" data-i18n="settings.edgeDock.customScale">Custom size</span></span></span><input id="notchCustomScaleInput" type="range" min="75" max="150" step="5" aria-labelledby="notchCustomScaleLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+                  <div id="notchMoreOptionsGroup" class="settings-group cursor-account-group">
+                    <button id="notchMoreOptionsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="notchMoreOptionsDetails">
+                      <span data-i18n="settings.edgeDock.moreOptions">More options</span>
+                      <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
+                    </button>
+                    <div id="notchMoreOptionsDetails" class="cursor-settings-details hidden" inert>
+                      <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="notchStyleInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="black" data-i18n="settings.notch.black">Pure black</option><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option></select></label>
+                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.progressiveBlur">Blur behind the panel</span></span><input id="notchProgressiveBlurInput" type="checkbox" /></label>
+                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.showSummary">Show collapsed summary</span></span><input id="notchSummaryInput" type="checkbox" /><span class="settings-item-desc" data-i18n="settings.notch.showSummaryNote">Off: hide the summary while closed.</span></label>
+                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.hideSummaryInFullScreen">Hide summary in full screen</span></span><input id="notchHideSummaryInFullScreenInput" type="checkbox" /><span class="settings-item-desc" data-i18n="settings.notch.hideSummaryInFullScreenNote">Other apps only.</span></label>
+                      <label id="notchRunningIndicatorRow" class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.iconRings">Quota &amp; activity status</span></span><input id="notchRunningIndicatorInput" type="checkbox" /></label>
+                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.warnColors">Highlight low limits in colour</span></span><input id="notchWarnColorsInput" type="checkbox" /></label>
+                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.haptic">Trackpad haptic feedback</span></span><input id="notchHapticInput" type="checkbox" /></label>
+                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.swipeGestures">Swipe gestures</span></span><input id="notchSwipeGesturesInput" type="checkbox" aria-describedby="notchSwipeGesturesNote" /><span id="notchSwipeGesturesNote" class="settings-item-desc" data-i18n="settings.notch.swipeGesturesNote">Swipe sideways to change pages. Grow mode: down on the entry opens, up on the top row closes; up again hides the summary, down restores it.</span></label>
+                      <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.summaryMode">Collapsed content</span></span><select id="notchSummaryModeInput" aria-describedby="notchSummaryModeNote"><option value="sessions" data-i18n="settings.notch.summaryMode.sessions">Session activity only</option><option value="auto" data-i18n="settings.notch.summaryMode.auto">Automatic</option><option value="tray" data-i18n="settings.notch.summaryMode.tray">Same as tray</option><option value="custom" data-i18n="settings.notch.summaryMode.custom">Custom</option></select><span id="notchSummaryModeNote" class="settings-item-desc" data-i18n="settings.notch.summaryMode.sessionsNote">Show running or waiting sessions. Hide the summary when there is no activity.</span></label>
+                      <div id="notchComposerDetails" class="cursor-settings-details hidden" inert>
+                        <div id="notchComposer" class="tray-composer" data-surface="notch"></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div id="notchItemsComposer" class="edge-dock-composer notch-limits-composer"></div>
                 </div>
               </div>
               <div class="presence-feature">
@@ -455,11 +452,11 @@
               <label id="liveTokenRateScopeRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveTokenRateScope">Live rate scope</span></span><select id="liveTokenRateScopeInput"><option value="all" data-i18n="settings.appearance.liveTokenRateScopeAll">All devices</option><option value="device" data-i18n="settings.appearance.liveTokenRateScopeDevice">This device</option></select></label>
               <label id="compactTokenUnitsRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTokenUnits">Compact token units</span></span><select id="compactTokenUnitsInput"><option value="western" data-i18n="settings.appearance.compactTokenUnitsWestern">International (K/M/B)</option><option value="localized" data-i18n="settings.appearance.compactTokenUnitsLocalized">East Asian (萬/億)</option></select></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.swapSettingsRefresh">Swap Settings and Refresh buttons</span></span><input id="swapSettingsRefreshInput" type="checkbox" /></label>
-              <div id="glassOpacityRow" class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="glassSliderLabel" class="settings-item-title" data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" title="Reset glass" data-i18n-title="settings.appearance.resetGlass">↺</button></span><span id="glassInputNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.nativeManaged">Managed by macOS</span></span><input id="glassInput" type="range" min="0" max="100" step="1" aria-labelledby="glassSliderLabel" aria-describedby="glassInputNote" /><span class="slider-value" aria-hidden="true"></span></div>
-              <div id="macGlassTintRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="macGlassTintLabel" class="settings-item-title" data-i18n="settings.appearance.nativeTint">Backdrop tint</span><button id="macGlassTintReset" type="button" class="reset-appearance-button reset-inline" title="Reset tint" data-i18n-title="settings.appearance.resetTint" aria-label="Reset tint" data-i18n-aria-label="settings.appearance.resetTint">↺</button></span><span id="macGlassTintNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.nativeTintNote">Saved separately for each glass style</span></span><input id="macGlassTintInput" type="range" min="0" max="100" step="1" aria-labelledby="macGlassTintLabel" aria-describedby="macGlassTintNote" /><span class="slider-value" aria-hidden="true"></span></div>
-              <div id="macClearGlassTintRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="macClearGlassTintLabel" class="settings-item-title" data-i18n="settings.appearance.nativeTint">Backdrop tint</span><button id="macClearGlassTintReset" type="button" class="reset-appearance-button reset-inline" title="Reset tint" data-i18n-title="settings.appearance.resetTint" aria-label="Reset tint" data-i18n-aria-label="settings.appearance.resetTint">↺</button></span><span id="macClearGlassTintNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.nativeTintNote">Saved separately for each glass style</span></span><input id="macClearGlassTintInput" type="range" min="0" max="100" step="1" aria-labelledby="macClearGlassTintLabel" aria-describedby="macClearGlassTintNote" /><span class="slider-value" aria-hidden="true"></span></div>
-              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="depthSliderLabel" class="settings-item-title" data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="reset-appearance-button reset-inline" title="Reset depth" data-i18n-title="settings.appearance.resetDepth">↺</button></span><span id="blurInputNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.nativeBlurManaged">Blur is managed by macOS</span></span><input id="blurInput" type="range" min="0" max="100" step="1" aria-labelledby="depthSliderLabel" aria-describedby="blurInputNote" /><span class="slider-value" aria-hidden="true"></span></div>
-              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="zoomSliderLabel" class="settings-item-title" data-i18n="settings.appearance.zoom">Zoom</span><button id="resetZoomButton" type="button" class="reset-appearance-button reset-inline" title="Reset zoom" data-i18n-title="settings.appearance.resetZoom">↺</button></span></span><input id="zoomInput" type="range" min="70" max="160" step="5" aria-labelledby="zoomSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div id="glassOpacityRow" class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="glassSliderLabel" class="settings-item-title" data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset glass" data-i18n-aria-label="settings.appearance.resetGlass">↺</button></span><span id="glassInputNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.nativeManaged">Managed by macOS</span></span><input id="glassInput" type="range" min="0" max="100" step="1" aria-labelledby="glassSliderLabel" aria-describedby="glassInputNote" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div id="macGlassTintRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="macGlassTintLabel" class="settings-item-title" data-i18n="settings.appearance.nativeTint">Backdrop tint</span><button id="macGlassTintReset" type="button" class="reset-appearance-button reset-inline" aria-label="Reset tint" data-i18n-aria-label="settings.appearance.resetTint">↺</button></span><span id="macGlassTintNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.nativeTintNote">Saved separately for each glass style</span></span><input id="macGlassTintInput" type="range" min="0" max="100" step="1" aria-labelledby="macGlassTintLabel" aria-describedby="macGlassTintNote" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div id="macClearGlassTintRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="macClearGlassTintLabel" class="settings-item-title" data-i18n="settings.appearance.nativeTint">Backdrop tint</span><button id="macClearGlassTintReset" type="button" class="reset-appearance-button reset-inline" aria-label="Reset tint" data-i18n-aria-label="settings.appearance.resetTint">↺</button></span><span id="macClearGlassTintNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.nativeTintNote">Saved separately for each glass style</span></span><input id="macClearGlassTintInput" type="range" min="0" max="100" step="1" aria-labelledby="macClearGlassTintLabel" aria-describedby="macClearGlassTintNote" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="depthSliderLabel" class="settings-item-title" data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset depth" data-i18n-aria-label="settings.appearance.resetDepth">↺</button></span><span id="blurInputNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.nativeBlurManaged">Blur is managed by macOS</span></span><input id="blurInput" type="range" min="0" max="100" step="1" aria-labelledby="depthSliderLabel" aria-describedby="blurInputNote" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="zoomSliderLabel" class="settings-item-title" data-i18n="settings.appearance.zoom">Zoom</span><button id="resetZoomButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset zoom" data-i18n-aria-label="settings.appearance.resetZoom">↺</button></span></span><input id="zoomInput" type="range" min="70" max="160" step="5" aria-labelledby="zoomSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-item background-image-setting">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.appearance.backgroundImage">Background image</span>
@@ -470,7 +467,7 @@
                   <button id="clearBackgroundImageButton" type="button" class="hidden" data-i18n="settings.appearance.backgroundImageClear">Remove</button>
                 </div>
               </div>
-              <div id="backgroundImageOpacityRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="backgroundImageOpacityLabel" class="settings-item-title" data-i18n="settings.appearance.backgroundImageOpacity">Image opacity</span><button id="resetBackgroundImageOpacityButton" type="button" class="reset-appearance-button reset-inline" title="Reset image opacity" data-i18n-title="settings.appearance.resetBackgroundImageOpacity">↺</button></span></span><input id="backgroundImageOpacityInput" type="range" min="0" max="100" step="1" aria-labelledby="backgroundImageOpacityLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div id="backgroundImageOpacityRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="backgroundImageOpacityLabel" class="settings-item-title" data-i18n="settings.appearance.backgroundImageOpacity">Image opacity</span><button id="resetBackgroundImageOpacityButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset image opacity" data-i18n-aria-label="settings.appearance.resetBackgroundImageOpacity">↺</button></span></span><input id="backgroundImageOpacityInput" type="range" min="0" max="100" step="1" aria-labelledby="backgroundImageOpacityLabel" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-item">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.appearance.reduceMotion">Reduce Motion</span>
@@ -487,7 +484,7 @@
               <div class="settings-note-row">
                 <div class="settings-group-header"><span data-i18n="settings.appearance.themeTitle">Interface Theme</span></div>
                 <div class="tool-header-actions">
-                  <button id="resetThemeColorsButton" class="tool-header-action" type="button" title="Reset all" aria-label="Reset all" data-i18n-title="settings.appearance.resetAll" data-i18n-aria-label="settings.appearance.resetAll"><span aria-hidden="true">↺</span></button>
+                  <button id="resetThemeColorsButton" class="tool-header-action" type="button" aria-label="Reset all" data-i18n-aria-label="settings.appearance.resetAll"><span aria-hidden="true">↺</span></button>
                 </div>
               </div>
               <div id="themePresetChips" class="theme-preset-chips"></div>
@@ -495,8 +492,8 @@
                 <label for="themeCodeInput" data-i18n="settings.appearance.themeCodeLabel">Theme Code</label>
                 <div class="hub-secret-row">
                   <input id="themeCodeInput" class="theme-code-input" type="text" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="TM1-..." data-i18n-placeholder="settings.appearance.themeCodePlaceholder" />
-                  <button id="copyThemeCodeButton" class="icon-button" type="button" title="Copy theme code" data-i18n-title="settings.appearance.themeCodeCopy" aria-label="Copy theme code" data-i18n-aria-label="settings.appearance.themeCodeCopy">⧉</button>
-                  <button id="applyThemeCodeButton" class="icon-button" type="button" title="Paste and apply" data-i18n-title="settings.appearance.themeCodeApply" aria-label="Paste and apply" data-i18n-aria-label="settings.appearance.themeCodeApply">⎘</button>
+                  <button id="copyThemeCodeButton" class="icon-button" type="button" aria-label="Copy theme code" data-i18n-aria-label="settings.appearance.themeCodeCopy">⧉</button>
+                  <button id="applyThemeCodeButton" class="icon-button" type="button" aria-label="Paste and apply" data-i18n-aria-label="settings.appearance.themeCodeApply">⎘</button>
                 </div>
                 <p class="settings-note" data-i18n="settings.appearance.themeCodeNote">Shares interface colours only. Vendor colours and appearance preferences stay local.</p>
                 <p id="themeCodeStatus" class="theme-code-status" aria-live="polite"></p>
@@ -521,7 +518,7 @@
                           <option value="mono" data-i18n="settings.appearance.fontPresetMono">Monospace</option>
                           <option value="custom" data-i18n="settings.appearance.fontPresetCustom">Custom…</option>
                         </select>
-                        <button id="resetInterfaceFontButton" class="reset-appearance-button reset-inline" type="button" title="Reset font" data-i18n-title="settings.appearance.resetFont" aria-label="Reset interface font" data-i18n-aria-label="settings.appearance.resetInterfaceFont">↺</button>
+                        <button id="resetInterfaceFontButton" class="reset-appearance-button reset-inline" type="button" aria-label="Reset interface font" data-i18n-aria-label="settings.appearance.resetInterfaceFont">↺</button>
                       </span>
                       <div id="interfaceFontCustomRow" class="settings-font-custom-row hidden">
                         <label for="interfaceFontInput" data-i18n="settings.appearance.fontCustomLabel">Custom font family</label>
@@ -542,7 +539,7 @@
                           <option value="mono" data-i18n="settings.appearance.fontPresetMono">Monospace</option>
                           <option value="custom" data-i18n="settings.appearance.fontPresetCustom">Custom…</option>
                         </select>
-                        <button id="resetDisplayFontButton" class="reset-appearance-button reset-inline" type="button" title="Reset font" data-i18n-title="settings.appearance.resetFont" aria-label="Reset display font" data-i18n-aria-label="settings.appearance.resetDisplayFont">↺</button>
+                        <button id="resetDisplayFontButton" class="reset-appearance-button reset-inline" type="button" aria-label="Reset display font" data-i18n-aria-label="settings.appearance.resetDisplayFont">↺</button>
                       </span>
                       <div id="displayFontCustomRow" class="settings-font-custom-row hidden">
                         <label for="displayFontInput" data-i18n="settings.appearance.fontCustomLabel">Custom font family</label>
@@ -569,7 +566,7 @@
                     </span>
                   </button>
                   <div class="tool-header-actions">
-                    <button id="resetVendorColorsButton" class="tool-header-action" type="button" title="Reset to brand" aria-label="Reset to brand" data-i18n-title="settings.appearance.resetBrand" data-i18n-aria-label="settings.appearance.resetBrand"><span aria-hidden="true">↺</span></button>
+                    <button id="resetVendorColorsButton" class="tool-header-action" type="button" aria-label="Reset to brand" data-i18n-aria-label="settings.appearance.resetBrand"><span aria-hidden="true">↺</span></button>
                   </div>
                 </div>
                 <div id="themeVendorDetails" class="cursor-settings-details hidden" inert>
@@ -591,8 +588,8 @@
               <div class="settings-note-row">
                 <p class="settings-note" data-i18n="settings.tools.note">Track controls collection. Show controls the main Tools list. Drag a row to reorder.</p>
                 <div class="tool-header-actions">
-                  <button id="resetClientDisplayOrderButton" class="tool-header-action" type="button" title="Reset order" aria-label="Reset order" data-i18n-title="settings.tools.resetOrder" data-i18n-aria-label="settings.tools.resetOrder"><span aria-hidden="true">↺</span></button>
-                  <button id="showAllClientsButton" class="tool-header-action" type="button" title="Show all" aria-label="Show all" data-i18n-title="settings.tools.showAll" data-i18n-aria-label="settings.tools.showAll"><span class="tool-header-eye" aria-hidden="true"></span></button>
+                  <button id="resetClientDisplayOrderButton" class="tool-header-action" type="button" aria-label="Reset order" data-i18n-aria-label="settings.tools.resetOrder"><span aria-hidden="true">↺</span></button>
+                  <button id="showAllClientsButton" class="tool-header-action" type="button" aria-label="Show all" data-i18n-aria-label="settings.tools.showAll"><span class="tool-header-eye" aria-hidden="true"></span></button>
                 </div>
               </div>
               <div class="settings-list-search">
@@ -935,12 +932,12 @@
                       </div>
                       <div id="opencodeCookieFields" class="opencode-credential-fields hidden">
                         <p class="settings-note">
-                          <strong>1.</strong> <span data-i18n="settings.opencode.step1Before">Open</span> <code>opencode.ai/auth</code> <span data-i18n="settings.opencode.step1After">in your browser and sign in.</span><br>
+                          <strong>1.</strong> <span data-i18n="settings.opencode.step1Before">Open</span> <code>opencode.ai/console</code> <span data-i18n="settings.opencode.step1After">in your browser and sign in.</span><br>
                           <strong>2.</strong> <span data-i18n="settings.opencode.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -> opencode.ai.</span><br>
-                          <strong>3.</strong> <span data-i18n="settings.opencode.step3Before">Copy the</span> <code>auth</code> <span data-i18n="settings.opencode.step3After">value.</span><br>
+                          <strong>3.</strong> <span data-i18n="settings.opencode.step3Before">Copy the</span> <code>__Host-console_session</code> <span data-i18n="settings.opencode.step3After">value.</span><br>
                           <strong>4.</strong> <span data-i18n="settings.opencode.step4">Paste it below and click Save.</span>
                         </p>
-                        <textarea id="opencodeCookieInput" rows="3" spellcheck="false" placeholder="auth=..." data-i18n-placeholder="settings.opencode.cookiePlaceholder" aria-label="Cookie" data-i18n-aria-label="settings.opencode.kindCookie"></textarea>
+                        <textarea id="opencodeCookieInput" rows="3" spellcheck="false" placeholder="__Host-console_session=..." data-i18n-placeholder="settings.opencode.cookiePlaceholder" aria-label="Cookie" data-i18n-aria-label="settings.opencode.kindCookie"></textarea>
                       </div>
                       <div class="settings-actions">
                         <button id="opencodeCookieSubmit" data-i18n="settings.opencode.saveProfile">保存</button>
@@ -1552,7 +1549,7 @@
                     <label for="secretInput" data-i18n="settings.sync.secret">Secret</label>
                     <div class="hub-secret-row">
                       <input id="secretInput" type="password" spellcheck="false" placeholder="optional shared secret" data-i18n-placeholder="settings.sync.secretPlaceholder" />
-                      <button id="secretPasteButton" type="button" class="icon-button" title="Paste secret" data-i18n-title="settings.sync.pasteSecret" aria-label="Paste secret" data-i18n-aria-label="settings.sync.pasteSecret">⎘</button>
+                      <button id="secretPasteButton" type="button" class="icon-button" aria-label="Paste secret" data-i18n-aria-label="settings.sync.pasteSecret">⎘</button>
                     </div>
                   </div>
                 </div>
@@ -1563,8 +1560,8 @@
                 <label><span data-i18n="settings.sync.sharedSecret">Shared Secret</span>
                   <div class="hub-secret-row">
                     <input id="hubSecretInput" type="text" spellcheck="false" readonly />
-                    <button id="hubSecretCopyButton" type="button" class="icon-button" title="Copy secret" data-i18n-title="settings.sync.copySecret">⧉</button>
-                    <button id="hubSecretRegenButton" type="button" class="icon-button" title="Regenerate" data-i18n-title="settings.sync.regenerateSecret">↺</button>
+                    <button id="hubSecretCopyButton" type="button" class="icon-button" aria-label="Copy secret" data-i18n-aria-label="settings.sync.copySecret">⧉</button>
+                    <button id="hubSecretRegenButton" type="button" class="icon-button" aria-label="Regenerate" data-i18n-aria-label="settings.sync.regenerateSecret">↺</button>
                   </div>
                 </label>
                 <div id="hubStatusRow" class="hub-status"></div>
@@ -1643,7 +1640,7 @@
       </section>
 
       <div id="viewBackRow" class="view-back-row hidden">
-        <button id="backHomeButton" type="button" class="back-home-button" title="Back to Home" aria-label="Back to Home" data-i18n-title="views.backHome" data-i18n-aria-label="views.backHome">
+        <button id="backHomeButton" type="button" class="back-home-button" aria-label="Back to Home" data-i18n-aria-label="views.backHome">
           <span class="back-home-icon" aria-hidden="true"></span>
           <span data-i18n="views.backHome">Back to Home</span>
         </button>
@@ -1669,25 +1666,27 @@
           <button id="projectBreakdownFooterTools" class="tool-detail-footer-option" type="button">Tools</button>
           <button id="projectBreakdownFooterModels" class="tool-detail-footer-option" type="button">Models</button>
         </div>
-        <button id="liveTokenRate" class="live-token-rate hidden is-idle" type="button" title="Live token rate" aria-label="Live token rate">
+        <button id="liveTokenRate" class="live-token-rate hidden is-idle" type="button" aria-label="Live token rate">
           <span class="live-token-rate-icon" aria-hidden="true"></span>
           <span id="liveTokenRateValue" class="live-token-rate-value">— tok/s</span>
         </button>
-        <div id="appUpdatePill" class="update-pill hidden">
-          <button id="appUpdatePillAction" type="button" class="update-pill-action" data-status="available">
-            <svg class="update-pill-progress" viewBox="0 0 34 30" aria-hidden="true">
-              <path id="appUpdatePillProgress" class="update-pill-progress-bar" pathLength="100" d="M17 .5H27A6.5 6.5 0 0 1 33.5 7V23A6.5 6.5 0 0 1 27 29.5H7A6.5 6.5 0 0 1 .5 23V7A6.5 6.5 0 0 1 7 .5Z" />
-            </svg>
-            <span class="update-pill-icon" aria-hidden="true"></span>
-            <span class="update-pill-badge" aria-hidden="true"></span>
-          </button>
-        </div>
-        <span id="footerActionSlot">
-          <span id="utilityActions" class="utility-actions">
-            <button id="refreshButton" class="refresh-button" title="Refresh" aria-label="Refresh"><span class="refresh-button-icon" aria-hidden="true"></span><span class="refresh-button-spinner" aria-hidden="true"></span></button>
-            <button id="settingsButton" class="icon-button settings-icon-button" title="Settings" aria-label="Settings"></button>
+        <div class="footer-update-actions">
+          <div id="appUpdatePill" class="update-pill hidden">
+            <button id="appUpdatePillAction" type="button" class="update-pill-action" data-status="available">
+              <svg class="update-pill-progress" viewBox="0 0 34 30" aria-hidden="true">
+                <path id="appUpdatePillProgress" class="update-pill-progress-bar" pathLength="100" d="M17 .5H27A6.5 6.5 0 0 1 33.5 7V23A6.5 6.5 0 0 1 27 29.5H7A6.5 6.5 0 0 1 .5 23V7A6.5 6.5 0 0 1 7 .5Z" />
+              </svg>
+              <span class="update-pill-icon" aria-hidden="true"></span>
+              <span class="update-pill-badge" aria-hidden="true"></span>
+            </button>
+          </div>
+          <span id="footerActionSlot">
+            <span id="utilityActions" class="utility-actions">
+              <button id="refreshButton" class="refresh-button" aria-label="Refresh"><span class="refresh-button-icon" aria-hidden="true"></span><span class="refresh-button-spinner" aria-hidden="true"></span></button>
+              <button id="settingsButton" class="icon-button settings-icon-button" aria-label="Settings"></button>
+            </span>
           </span>
-        </span>
+        </div>
       </footer>
       <div id="appUpdatePopover" class="app-update-popover" popover="manual" role="dialog" aria-labelledby="appUpdatePopoverTitle">
         <div class="app-update-popover-header">
@@ -1726,7 +1725,7 @@
         <button id="syncContentConfirm" class="sync-content-primary" type="button" data-i18n="settings.sync.content.enableTitles">Enable title sync</button>
       </div>
     </dialog>
-    <button id="floatingBubbleTab" class="floating-bubble-tab" type="button" title="Show Token Monitor" aria-label="Show Token Monitor" data-i18n-title="floatingBubble.expand" data-i18n-aria-label="floatingBubble.expand">
+    <button id="floatingBubbleTab" class="floating-bubble-tab" type="button" aria-label="Show Token Monitor" data-i18n-aria-label="floatingBubble.expand">
       <span id="floatingBubbleContent" aria-hidden="true">Σ</span>
     </button>
     <script src="../../shared/clientCatalog.js"></script>
@@ -1815,6 +1814,8 @@
     <script src="trayTypography.js"></script>
     <script src="trayComposer.js"></script>
     <script src="diagnosticsPanel.js"></script>
+    <script src="displaySettings.js"></script>
+    <script src="displaySettingsPreview.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

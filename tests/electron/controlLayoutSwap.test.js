@@ -68,6 +68,78 @@ test('applyControlLayout keeps both controls in the footer and swaps their roles
   assert.doesNotMatch(body, /titlebarSlot\.appendChild/);
 });
 
+test('footer disclosure stays open from utility actions to the update and releases outside the group', () => {
+  const app = readRendererFile('app.js');
+  const source = functionBody(app, 'initFooterActionDisclosure', 'applyControlLayout');
+  const handlers = new Map();
+  const classes = new Set();
+  const keyboardButton = { matches: () => true };
+  const pointerButton = { matches: () => false };
+  const updateButton = { matches: () => true };
+  let hovered = false;
+  let keyboardFocus = false;
+  let popoverOpen = false;
+  let positions = 0;
+  let anchorObserver;
+  class ResizeObserver {
+    constructor(callback) { this.callback = callback; anchorObserver = this; }
+    observe(target) { this.target = target; }
+    disconnect() { this.disconnected = true; }
+  }
+  const actions = {
+    classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name) },
+    addEventListener: (name, handler) => handlers.set(name, handler),
+    querySelector: () => keyboardFocus ? updateButton : null,
+    matches: () => hovered,
+    contains: (node) => [keyboardButton, pointerButton, updateButton].includes(node)
+  };
+  const utilityActions = {
+    closest: () => actions,
+    addEventListener: (name, handler) => handlers.set(`utility:${name}`, handler),
+    contains: (node) => [keyboardButton, pointerButton].includes(node)
+  };
+  const window = { addEventListener: (name, handler) => handlers.set(`window:${name}`, handler) };
+  require('node:vm').runInNewContext(`${source}\ninitFooterActionDisclosure();`, {
+    els: { utilityActions, appUpdatePopover: { matches: () => popoverOpen } },
+    window, ResizeObserver, positionAppUpdatePopover: () => { positions++; }
+  });
+  assert.match(app, /^initFooterActionDisclosure\(\);$/m, 'the renderer installs the production event handlers');
+
+  handlers.get('focusin')({ target: updateButton });
+  assert.equal(classes.has('is-disclosed'), false, 'approaching the resting update does not move it');
+  handlers.get('utility:pointerenter')();
+  handlers.get('focusout')({ relatedTarget: updateButton });
+  assert.equal(classes.has('is-disclosed'), true, 'moving from Refresh into the update keeps it reachable');
+  handlers.get('pointerleave')();
+  assert.equal(classes.has('is-disclosed'), false, 'leaving the shared boundary collapses pointer disclosure');
+
+  handlers.get('focusin')({ target: pointerButton });
+  assert.equal(classes.has('is-disclosed'), false, 'ordinary pointer focus does not pin disclosure');
+  handlers.get('focusin')({ target: keyboardButton });
+  keyboardFocus = true;
+  handlers.get('pointerleave')();
+  assert.equal(classes.has('is-disclosed'), true, 'keyboard focus holds disclosure even after the pointer leaves');
+  keyboardFocus = false;
+  hovered = true;
+  handlers.get('focusout')({ relatedTarget: null });
+  assert.equal(classes.has('is-disclosed'), true, 'pointer hover holds disclosure when keyboard focus leaves');
+  hovered = false;
+  handlers.get('focusout')({ relatedTarget: null });
+  assert.equal(classes.has('is-disclosed'), false, 'leaving both keyboard and pointer boundaries releases disclosure');
+  handlers.get('utility:pointerenter')();
+  handlers.get('window:blur')();
+  assert.equal(classes.has('is-disclosed'), false, 'switching away from the window clears pointer disclosure');
+  assert.equal(anchorObserver.target, actions, 'observe the moving footer group, not the fixed-size update button');
+  anchorObserver.callback();
+  assert.equal(positions, 0, 'a closed card does not need positioning');
+  popoverOpen = true;
+  anchorObserver.callback();
+  anchorObserver.callback();
+  assert.equal(positions, 2, 'an open card follows intermediate and final footer sizes');
+  handlers.get('window:unload')();
+  assert.equal(anchorObserver.disconnected, true, 'release the observer with the renderer');
+});
+
 test('window-actions and tabs fade out after a short leave grace delay, in instantly', () => {
   const css = readRendererFile('styles.css');
 
@@ -153,9 +225,20 @@ test('Refresh discloses to the left of Settings on hover and keyboard focus', ()
   const reveal = cssRule(css, '.utility-actions:not(.is-swapped):hover .refresh-button,\n.utility-actions:not(.is-swapped):has(:focus-visible) .refresh-button,\n.shell.settings-open .utility-actions:not(.is-swapped) .refresh-button,\n.utility-actions .refresh-button:is(.is-refreshing, .is-refreshed, .is-refresh-error)');
 
   assert.equal(declaration(group, 'width'), '34px', 'settings remains anchored at its original width');
+  assert.doesNotMatch(css, /\.utility-actions::before\s*\{/, 'no invisible bridge may expand the hover trigger beyond the primary button');
+  const bridge = cssRule(css, '.footer-update-actions.is-disclosed:has(.update-pill.hidden)::before');
+  assert.equal(declaration(bridge, 'width'), '6px', 'only an already-disclosed group without an update bridges the gap');
+  assert.equal(declaration(bridge, 'inset'), '0 100% 0 auto', 'the bridge ends at the primary button without moving it');
   assert.match(declaration(refresh, 'right'), /100% \+ 6px/, 'refresh sits to the left of settings');
   assert.equal(declaration(refresh, 'opacity'), '0', 'refresh is hidden at rest');
   assert.equal(declaration(refresh, 'pointer-events'), 'none', 'hidden refresh cannot intercept clicks');
+  assert.equal(declaration(refresh, 'clip-path'), 'inset(50%)', 'clipping keeps the resting secondary outside pointer hit-testing');
+  assert.doesNotMatch(refresh, /visibility:\s*hidden/, 'the resting secondary must remain in the keyboard Tab order');
+  const swappedSecondary = cssRule(css, '.utility-actions.is-swapped .settings-icon-button');
+  assert.equal(declaration(swappedSecondary, 'clip-path'), 'inset(50%)');
+  assert.doesNotMatch(swappedSecondary, /visibility:\s*hidden/, 'swapped Settings must also remain in the keyboard Tab order');
+  const keyboard = cssRule(css, '.footer-update-actions:has(.utility-actions :focus-visible) .update-pill,\n.footer-update-actions:has(.utility-actions :focus-visible) .utility-actions > button');
+  assert.equal(declaration(keyboard, 'transition'), 'none', 'keyboard focus clears space and reveals controls immediately');
   assert.equal(declaration(reveal, 'opacity'), '1', 'hover/focus reveals refresh');
   assert.equal(declaration(reveal, 'pointer-events'), 'auto', 'revealed refresh is interactive');
   assert.match(css, /\.shell\.settings-open \.utility-actions:not\(\.is-swapped\) \.refresh-button/, 'opening Settings pins refresh open');

@@ -17,7 +17,7 @@ const {
   applyWindowsAccentBlur,
   createAccentApi
 } = require('../../src/electron/windowsBackdrop');
-const { normalizeWindowsBackdropMode } = require('../../src/electron/windowsBackdropMode');
+const { normalizeWindowsBackdropMode, normalizeWindowsDockBackdropMode } = require('../../src/electron/windowsBackdropMode');
 const {
   appearanceState,
   normalizeWindowsBackdropMode: normalizeRendererMode
@@ -31,6 +31,14 @@ test('Windows backdrop modes fail closed to documented Acrylic', () => {
   }
   assert.equal(normalizeWindowsBackdropMode('accent'), 'accent');
   assert.equal(normalizeRendererMode('accent'), 'accent');
+});
+
+test('Windows dock material preserves native glass by default and only accepts its own supported modes', () => {
+  for (const value of [undefined, null, '', 'acrylic', 'accent', 'inherit']) {
+    assert.equal(normalizeWindowsDockBackdropMode(value), 'inherit');
+  }
+  assert.equal(normalizeWindowsDockBackdropMode('host-backdrop'), 'host-backdrop');
+  assert.equal(normalizeWindowsDockBackdropMode('transparent'), 'transparent');
 });
 
 test('Windows glass appearance state covers platform and system-glass boundaries', () => {

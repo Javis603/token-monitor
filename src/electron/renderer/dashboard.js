@@ -530,8 +530,7 @@ function renderActivity() {
   if (costValue && missing > 0) {
     const info = document.createElement('span');
     info.className = 'usage-cost-info';
-    info.title = t('usage.excludedFromCost', { tokens: Math.round(missing).toLocaleString('en-US') });
-    info.setAttribute('aria-label', info.title);
+    info.setAttribute('aria-label', t('usage.excludedFromCost', { tokens: Math.round(missing).toLocaleString('en-US') }));
     info.tabIndex = 0;
     costValue.append(info);
   }
