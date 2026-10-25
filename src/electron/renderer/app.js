@@ -401,7 +401,6 @@ Object.assign(els, {
   backHomeButton: document.getElementById('backHomeButton'),
   systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
-  experimentalFeaturesGroup: document.getElementById('experimentalFeaturesGroup'),
   notchFeature: document.getElementById('notchFeature'),
   notchInput: document.getElementById('notchInput'),
   notchOptions: document.getElementById('notchOptions'),
@@ -5784,8 +5783,7 @@ function openSettingsPanel(section) {
   syncSettingsForm();
   ensureServiceStatusTicker();
   if (section === 'notch') {
-    setSettingsSectionExpanded('general', true);
-    setSettingsAccordionExpanded(els.advancedSettingsGroup, els.advancedSettingsToggle, els.advancedSettingsDetails, true);
+    setSettingsSectionExpanded('window', true);
     setSettingsAccordionExpanded(els.notchMoreOptionsGroup, els.notchMoreOptionsToggle, els.notchMoreOptionsDetails, true);
     requestAnimationFrame(() => {
       els.notchFeature?.scrollIntoView({ block: 'start' });
@@ -13520,7 +13518,6 @@ function syncDockControls() {
   }
   const notchAvailable = state.appInfo?.platform === 'darwin';
   const notchEnabled = notchAvailable && state.settings?.notchEnabled === true;
-  els.experimentalFeaturesGroup?.classList.toggle('hidden', !notchAvailable);
   els.notchFeature?.classList.toggle('hidden', !notchAvailable);
   if (els.notchInput) els.notchInput.checked = notchEnabled;
   els.notchOptions?.classList.toggle('hidden', !notchEnabled);

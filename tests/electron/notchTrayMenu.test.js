@@ -128,7 +128,7 @@ test('Notch Settings command reaches the renderer through the registered preload
   vm.runInNewContext(functionSource(read('main.js'), 'openSettingsFromTray', 'openViewFromTray'), mainContext);
   notchMenu({}, { onOpenSettings: mainContext.openSettingsFromTray }).submenu.at(-1).click();
   assert.deepEqual(sent, ['focus', ['settings:open', 'notch']]);
-  assert.deepEqual(events, ['sync', ['general', true], true, true, 'scroll', 'focus']);
+  assert.deepEqual(events, ['sync', ['window', true], true, 'scroll', 'focus']);
 
   events.length = 0;
   mainContext.openSettingsFromTray();
